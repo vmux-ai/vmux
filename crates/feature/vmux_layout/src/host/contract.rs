@@ -11,7 +11,6 @@ use crate::bookmark::{
     UnpinRequest,
 };
 use crate::pane::OpenBesideRequest;
-use crate::settings::EffectiveStartupUrl;
 use crate::stack::CloseStackRequest;
 use crate::worktree::TabDirectoryObserved;
 use crate::{
@@ -23,8 +22,7 @@ pub struct LayoutContractPlugin;
 
 impl Plugin for LayoutContractPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<EffectiveStartupUrl>()
-            .add_message::<LauncherDismissRequest>()
+        app.add_message::<LauncherDismissRequest>()
             .add_message::<ActivatePane>()
             .add_message::<AddRequest>()
             .add_message::<BrowserGoBackRequest>()

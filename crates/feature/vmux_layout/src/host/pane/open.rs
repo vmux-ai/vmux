@@ -868,7 +868,7 @@ fn handle_open_in_pane(
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
     tab_filter: Query<Entity, With<Stack>>,
-    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
+    focused_space: crate::space::FocusedSpace,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
 ) {
@@ -895,9 +895,7 @@ fn handle_open_in_pane(
         let resolved = url
             .clone()
             .filter(|url| !url.is_empty())
-            .unwrap_or_else(|| {
-                vmux_core::EffectiveStartupUrl::resolve(effective_startup_url.as_deref())
-            });
+            .unwrap_or_else(|| focused_space.resolved_startup_url());
 
         let split_dir = direction_to_split(direction);
 

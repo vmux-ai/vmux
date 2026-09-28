@@ -178,7 +178,7 @@ pub enum TransitionType {
     Other,
 }
 
-#[derive(bevy::prelude::Resource, Clone, Debug, Default)]
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct EffectiveStartupUrl(pub String);
 
 impl EffectiveStartupUrl {

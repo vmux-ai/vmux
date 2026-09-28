@@ -10,7 +10,7 @@ impl Plugin for SpaceProjectPlugin {
             .add_systems(
                 Update,
                 (
-                    remember_space_project.before(vmux_layout::space::EffectiveStartupDirSet),
+                    remember_space_project.before(vmux_layout::space::EffectiveStartupSet),
                     publish_project_roots
                         .in_set(vmux_command::snapshot::WriteCommandBarSnapshots)
                         .after(remember_space_project),

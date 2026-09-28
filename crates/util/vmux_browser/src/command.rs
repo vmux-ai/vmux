@@ -253,7 +253,7 @@ fn handle_open_requests(
     active_stack: ActiveStack,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
-    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
+    focused_space: vmux_layout::space::FocusedSpace,
     native_pages: Query<&NativelyHosted>,
     host_spawn_routes: Query<&HostSpawnRoute>,
     mut meta_q: Query<&mut PageMetadata, With<Browser>>,
@@ -272,11 +272,7 @@ fn handle_open_requests(
             continue;
         };
         let (is_terminal, _) = kind_q.get(webview).unwrap_or((false, false));
-        let resolved = request.resolved_url(
-            effective_startup_url
-                .as_ref()
-                .map(|startup| startup.0.as_str()),
-        );
+        let resolved = request.resolved_url(focused_space.startup_url());
         if resolved.is_empty() {
             continue;
         }

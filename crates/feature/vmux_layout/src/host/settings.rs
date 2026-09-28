@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 pub use vmux_command::settings::ResolvedLocale;
-pub use vmux_core::EffectiveStartupUrl;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Resource)]
 pub struct LayoutSettings {

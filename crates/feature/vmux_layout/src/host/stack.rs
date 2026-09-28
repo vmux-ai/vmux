@@ -207,7 +207,7 @@ struct StackCloser<'w, 's> {
     stacks: Query<'w, 's, Entity, With<Stack>>,
     child_of: Query<'w, 's, &'static ChildOf>,
     splits: Query<'w, 's, &'static PaneSplit>,
-    startup_url: Option<Res<'w, vmux_core::EffectiveStartupUrl>>,
+    focused_space: crate::space::FocusedSpace<'w, 's>,
     close_tab_requests: MessageWriter<'w, CloseTabRequest>,
     page_open_requests: MessageWriter<'w, PageOpenRequest>,
 }
@@ -272,7 +272,7 @@ fn close_last_stack_in_pane(
             .id();
         closer.page_open_requests.write(PageOpenRequest {
             target: PageOpenTarget::Stack(replacement),
-            url: vmux_core::EffectiveStartupUrl::resolve(closer.startup_url.as_deref()),
+            url: closer.focused_space.resolved_startup_url(),
             request_id: None,
         });
         return;
@@ -522,7 +522,7 @@ fn handle_open_requests(
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
+    focused_space: crate::space::FocusedSpace,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
@@ -542,9 +542,7 @@ fn handle_open_requests(
             .url
             .clone()
             .filter(|url| !url.is_empty())
-            .unwrap_or_else(|| {
-                vmux_core::EffectiveStartupUrl::resolve(effective_startup_url.as_deref())
-            });
+            .unwrap_or_else(|| focused_space.resolved_startup_url());
         let stack = commands
             .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
@@ -714,7 +712,7 @@ pub fn open_startup_url_if_no_stacks(
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
     closing_primary: Query<(), (With<PrimaryWindow>, With<ClosingWindow>)>,
-    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
+    focused_space: crate::space::FocusedSpace,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
@@ -740,7 +738,7 @@ pub fn open_startup_url_if_no_stacks(
         .id();
     page_open_requests.write(PageOpenRequest {
         target: PageOpenTarget::Stack(stack),
-        url: vmux_core::EffectiveStartupUrl::resolve(effective_startup_url.as_deref()),
+        url: focused_space.resolved_startup_url(),
         request_id: None,
     });
 }
@@ -1352,9 +1350,6 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
             .insert_resource(test_settings())
-            .insert_resource(vmux_core::EffectiveStartupUrl(
-                "vmux://sessions/vibe/".to_string(),
-            ))
             .add_systems(
                 Update,
                 (handle_close_requests, handle_close_stack_requests).chain(),
@@ -1588,10 +1583,19 @@ mod tests {
         app
     }
 
-    fn build_hierarchy(app: &mut App) -> (Entity, Entity, Entity) {
+    fn build_hierarchy(app: &mut App, startup_url: &str) -> (Entity, Entity, Entity) {
+        let space = app
+            .world_mut()
+            .spawn((
+                crate::space::Space,
+                crate::space::CurrentSpace,
+                vmux_core::Active,
+                vmux_core::EffectiveStartupUrl(startup_url.to_string()),
+            ))
+            .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
@@ -1606,10 +1610,7 @@ mod tests {
     #[test]
     fn closing_last_stack_requests_tab_replacement() {
         let mut app = build_app_with_collector();
-        app.insert_resource(vmux_core::EffectiveStartupUrl(
-            "https://startup.test".into(),
-        ));
-        let (tab, pane, original_stack) = build_hierarchy(&mut app);
+        let (tab, pane, original_stack) = build_hierarchy(&mut app, "");
 
         app.world_mut()
             .resource_mut::<Messages<CloseRequest>>()
@@ -1640,7 +1641,7 @@ mod tests {
     #[test]
     fn open_in_new_stack_with_explicit_url() {
         let mut app = build_app_with_collector();
-        let (_tab, pane, _stack) = build_hierarchy(&mut app);
+        let (_tab, pane, _stack) = build_hierarchy(&mut app, "");
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
@@ -1671,7 +1672,7 @@ mod tests {
     #[test]
     fn open_in_new_stack_none_url_opens_the_start_page() {
         let mut app = build_app_with_collector();
-        let (_tab, pane, _stack) = build_hierarchy(&mut app);
+        let (_tab, pane, _stack) = build_hierarchy(&mut app, "");
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
@@ -1702,10 +1703,7 @@ mod tests {
     #[test]
     fn in_new_stack_with_no_url_uses_startup_url() {
         let mut app = build_app_with_collector();
-        app.insert_resource(vmux_core::EffectiveStartupUrl(
-            "https://startup.test".into(),
-        ));
-        let (_tab, _pane, _stack) = build_hierarchy(&mut app);
+        let (_tab, _pane, _stack) = build_hierarchy(&mut app, "https://startup.test");
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()

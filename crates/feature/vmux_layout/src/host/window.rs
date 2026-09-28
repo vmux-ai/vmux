@@ -261,7 +261,7 @@ fn setup_window_shells(
     windows: Query<(Entity, &Window, Has<NewWindowWorkspace>)>,
     roots: Query<&HostWindow, With<VmuxWindow>>,
     spaces: Query<&crate::space::SpaceId, With<crate::space::Space>>,
-    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
+    focused_space: crate::space::FocusedSpace,
     mut requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
     settings: Res<LayoutSettings>,
@@ -289,7 +289,7 @@ fn setup_window_shells(
                 main,
                 id,
                 name,
-                effective_startup_url.as_deref(),
+                focused_space.startup_url().map(str::to_string),
             );
         }
     }
@@ -439,7 +439,7 @@ fn spawn_new_window_workspace(
     main: Entity,
     id: String,
     name: String,
-    effective_startup_url: Option<&vmux_core::EffectiveStartupUrl>,
+    startup_url: Option<String>,
 ) {
     let space = commands
         .spawn((
@@ -448,6 +448,7 @@ fn spawn_new_window_workspace(
             Name::new(name),
             vmux_core::Order(0),
             vmux_core::Active,
+            vmux_core::EffectiveStartupUrl(startup_url.clone().unwrap_or_default()),
             LastActivatedAt::now(),
             crate::space::space_view_bundle(),
             ChildOf(main),
@@ -458,11 +459,10 @@ fn spawn_new_window_workspace(
         primary_window: window,
         name: None,
         startup_dir: None,
-        content: effective_startup_url
-            .map(|url| url.0.as_str())
+        content: startup_url
             .filter(|url| !url.is_empty())
             .map(|url| TabLayoutSpawnContent::Url {
-                url: url.to_string(),
+                url,
                 pending_prompt: None,
             })
             .unwrap_or(TabLayoutSpawnContent::StartupUrlOrPrompt),
@@ -565,15 +565,14 @@ pub fn spawn_tab_scaffold_in_space(
 pub fn spawn_requested_tab_layouts(
     mut reader: MessageReader<TabLayoutSpawnRequest>,
     settings: Res<LayoutSettings>,
-    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    spaces: Query<(), With<crate::space::Space>>,
+    spaces: Query<&vmux_core::EffectiveStartupUrl, With<crate::space::Space>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        if spaces.get(request.space).is_err() {
+        let Ok(startup_url) = spaces.get(request.space) else {
             continue;
-        }
+        };
         let startup_dir = request
             .startup_dir
             .as_ref()
@@ -603,7 +602,7 @@ pub fn spawn_requested_tab_layouts(
             TabLayoutSpawnContent::StartupUrlOrPrompt => {
                 page_open_requests.write(PageOpenRequest {
                     target: PageOpenTarget::Stack(stack),
-                    url: vmux_core::EffectiveStartupUrl::resolve(effective_startup_url.as_deref()),
+                    url: vmux_core::EffectiveStartupUrl::resolve(Some(startup_url)),
                     request_id: None,
                 });
             }
@@ -1185,9 +1184,6 @@ mod tests {
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
-            .insert_resource(vmux_core::EffectiveStartupUrl(
-                "vmux://sessions/vibe/".to_string(),
-            ))
             .add_systems(Startup, request_default_layout)
             .add_systems(Update, spawn_requested_tab_layouts);
 
@@ -1197,11 +1193,10 @@ mod tests {
             .world_mut()
             .spawn((crate::space::Space, ChildOf(main)))
             .id();
-        app.world_mut()
-            .entity_mut(space)
-            .insert(crate::space::EffectiveStartupDir(Some(
-                startup_dir.path().to_path_buf(),
-            )));
+        app.world_mut().entity_mut(space).insert((
+            crate::space::EffectiveStartupDir(Some(startup_dir.path().to_path_buf())),
+            vmux_core::EffectiveStartupUrl("vmux://sessions/vibe/".to_string()),
+        ));
 
         app.update();
 
@@ -1231,9 +1226,6 @@ mod tests {
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
-            .insert_resource(vmux_core::EffectiveStartupUrl(
-                "vmux://sessions/vibe/".to_string(),
-            ))
             .add_systems(
                 Startup,
                 (request_default_layout, spawn_requested_tab_layouts).chain(),
@@ -1242,11 +1234,10 @@ mod tests {
         app.world_mut().spawn(Main);
         app.world_mut().spawn(PrimaryWindow);
         let space = app.world_mut().spawn(crate::space::Space).id();
-        app.world_mut()
-            .entity_mut(space)
-            .insert(crate::space::EffectiveStartupDir(Some(
-                startup_dir.path().to_path_buf(),
-            )));
+        app.world_mut().entity_mut(space).insert((
+            crate::space::EffectiveStartupDir(Some(startup_dir.path().to_path_buf())),
+            vmux_core::EffectiveStartupUrl("vmux://sessions/vibe/".to_string()),
+        ));
 
         app.update();
 

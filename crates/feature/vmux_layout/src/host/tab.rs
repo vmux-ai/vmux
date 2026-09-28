@@ -62,7 +62,7 @@ impl Plugin for TabPlugin {
                 .chain()
                 .in_set(LayoutRequestSet::Handle)
                 .in_set(TabCommandSet)
-                .after(crate::space::EffectiveStartupDirSet),
+                .after(crate::space::EffectiveStartupSet),
         )
         .add_systems(
             Update,
@@ -310,7 +310,6 @@ fn handle_open_requests(
     tabs: Query<Entity, With<Tab>>,
     focused_window: crate::window::FocusedWindow,
     focused_space: crate::space::FocusedSpace,
-    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
     for request in requests.read() {
@@ -324,12 +323,7 @@ fn handle_open_requests(
             .url
             .as_deref()
             .filter(|url| !url.is_empty())
-            .or_else(|| {
-                effective_startup_url
-                    .as_deref()
-                    .map(|startup| startup.0.as_str())
-                    .filter(|startup| !startup.is_empty())
-            });
+            .or_else(|| focused_space.startup_url());
         let content = match requested {
             Some(url) => TabLayoutSpawnContent::Url {
                 url: url.to_string(),
@@ -969,7 +963,7 @@ mod tests {
         app
     }
 
-    fn build_main_and_tab(app: &mut App) -> Entity {
+    fn build_main_and_tab(app: &mut App, startup_url: &str) -> Entity {
         app.world_mut()
             .spawn((Window::default(), PrimaryWindow, vmux_core::Active));
         let main = app.world_mut().spawn(MainNode).id();
@@ -977,11 +971,10 @@ mod tests {
             .world_mut()
             .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
             .id();
-        app.world_mut()
-            .entity_mut(space)
-            .insert(crate::space::EffectiveStartupDir(Some(
-                std::env::current_dir().unwrap(),
-            )));
+        app.world_mut().entity_mut(space).insert((
+            crate::space::EffectiveStartupDir(Some(std::env::current_dir().unwrap())),
+            vmux_core::EffectiveStartupUrl(startup_url.to_string()),
+        ));
         app.world_mut().spawn((
             Tab {
                 name: "Tab 1".into(),
@@ -996,7 +989,7 @@ mod tests {
     #[test]
     fn open_in_new_tab_explicit_url_spawns_new_tab_with_url() {
         let mut app = build_app();
-        build_main_and_tab(&mut app);
+        build_main_and_tab(&mut app, "");
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
@@ -1017,7 +1010,7 @@ mod tests {
     #[test]
     fn a_new_tab_carries_its_pending_prompt_onto_the_stack() {
         let mut app = build_app();
-        build_main_and_tab(&mut app);
+        build_main_and_tab(&mut app, "");
 
         app.world_mut()
             .resource_mut::<Messages<crate::NewTabRequest>>()
@@ -1044,10 +1037,7 @@ mod tests {
     #[test]
     fn open_in_new_tab_none_url_falls_back_to_startup() {
         let mut app = build_app();
-        app.insert_resource(vmux_core::EffectiveStartupUrl(
-            "https://startup.test".into(),
-        ));
-        build_main_and_tab(&mut app);
+        build_main_and_tab(&mut app, "https://startup.test");
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
@@ -1063,7 +1053,7 @@ mod tests {
     #[test]
     fn open_in_new_tab_none_url_opens_the_start_page() {
         let mut app = build_app();
-        build_main_and_tab(&mut app);
+        build_main_and_tab(&mut app, "");
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
@@ -1085,7 +1075,7 @@ mod tests {
     #[test]
     fn new_tab_without_configured_startup_dir_does_not_inherit_active_tab_workspace() {
         let mut app = build_app();
-        let main = build_main_and_tab(&mut app);
+        let main = build_main_and_tab(&mut app, "");
         let space = app
             .world()
             .get::<Children>(main)
@@ -1132,7 +1122,7 @@ mod tests {
     #[test]
     fn new_tab_uses_only_configured_startup_dir() {
         let mut app = build_app();
-        let main = build_main_and_tab(&mut app);
+        let main = build_main_and_tab(&mut app, "");
         let space = app
             .world()
             .get::<Children>(main)
@@ -1170,7 +1160,7 @@ mod tests {
     fn new_tab_becomes_active_in_single_update() {
         let mut app = build_app();
         app.add_plugins((crate::space::SpaceLayoutPlugin, crate::stack::StackPlugin));
-        build_main_and_tab(&mut app);
+        build_main_and_tab(&mut app, "");
         let old_tab = app
             .world_mut()
             .query_filtered::<Entity, With<Tab>>()

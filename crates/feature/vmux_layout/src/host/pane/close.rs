@@ -131,7 +131,7 @@ fn close_panes(
     child_of: Query<&ChildOf>,
     splits: Query<&PaneSplit>,
     stacks: Query<Entity, With<Stack>>,
-    startup: Option<Res<vmux_core::EffectiveStartupUrl>>,
+    focused_space: crate::space::FocusedSpace,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
@@ -151,7 +151,7 @@ fn close_panes(
             commands.entity(leaf).insert(LastActivatedAt::now());
             page_open_requests.write(PageOpenRequest {
                 target: PageOpenTarget::Stack(stack),
-                url: vmux_core::EffectiveStartupUrl::resolve(startup.as_deref()),
+                url: focused_space.resolved_startup_url(),
                 request_id: None,
             });
             continue;

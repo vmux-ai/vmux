@@ -1128,14 +1128,22 @@ mod open_in_place_flow {
         captured.0.extend(reader.read().cloned());
     }
 
-    fn build_focused_stack(app: &mut App) {
+    fn build_focused_stack(app: &mut App) -> Entity {
         let space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
+            .spawn((
+                vmux_layout::space::Space,
+                vmux_layout::space::CurrentSpace,
+                vmux_core::Active,
+            ))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(space)))
+            .spawn((Pane, LastActivatedAt(1), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
@@ -1143,16 +1151,25 @@ mod open_in_place_flow {
             .insert((ChildOf(pane), LastActivatedAt(1)))
             .id();
         app.world_mut().spawn(Browser).insert(ChildOf(stack));
+        space
     }
 
-    fn build_focused_terminal_stack(app: &mut App) {
+    fn build_focused_terminal_stack(app: &mut App) -> Entity {
         let space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
+            .spawn((
+                vmux_layout::space::Space,
+                vmux_layout::space::CurrentSpace,
+                vmux_core::Active,
+            ))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(space)))
+            .spawn((Pane, LastActivatedAt(1), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
@@ -1162,16 +1179,25 @@ mod open_in_place_flow {
         app.world_mut()
             .spawn((Browser, Terminal))
             .insert(ChildOf(stack));
+        space
     }
 
-    fn build_focused_native_stack(app: &mut App, native_url: &str) {
+    fn build_focused_native_stack(app: &mut App, native_url: &str) -> Entity {
         let space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
+            .spawn((
+                vmux_layout::space::Space,
+                vmux_layout::space::CurrentSpace,
+                vmux_core::Active,
+            ))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(space)))
+            .spawn((Pane, LastActivatedAt(1), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
@@ -1189,6 +1215,7 @@ mod open_in_place_flow {
                 },
             ))
             .insert(ChildOf(stack));
+        space
     }
 
     #[test]
@@ -1396,10 +1423,12 @@ mod open_in_place_flow {
     #[test]
     fn in_place_with_none_url_uses_startup_setting() {
         let mut app = build_app();
-        app.insert_resource(vmux_core::EffectiveStartupUrl(
-            "https://startup.example".into(),
-        ));
-        build_focused_stack(&mut app);
+        let space = build_focused_stack(&mut app);
+        app.world_mut()
+            .entity_mut(space)
+            .insert(vmux_core::EffectiveStartupUrl(
+                "https://startup.example".into(),
+            ));
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()

@@ -44,7 +44,7 @@ pub struct CurrentSpaceSet;
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::space"]
-#[require(Save, EffectiveStartupDir)]
+#[require(Save, EffectiveStartupDir, vmux_core::EffectiveStartupUrl)]
 pub struct Space;
 
 #[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
@@ -60,7 +60,7 @@ pub struct CurrentSpace;
 pub struct EffectiveStartupDir(pub Option<std::path::PathBuf>);
 
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct EffectiveStartupDirSet;
+pub struct EffectiveStartupSet;
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct FocusedSpace<'w, 's> {
@@ -70,6 +70,7 @@ pub struct FocusedSpace<'w, 's> {
         (
             Entity,
             &'static EffectiveStartupDir,
+            &'static vmux_core::EffectiveStartupUrl,
             Has<CurrentSpace>,
             Has<vmux_core::Active>,
         ),
@@ -78,23 +79,41 @@ pub struct FocusedSpace<'w, 's> {
 }
 
 impl FocusedSpace<'_, '_> {
-    fn selected(&self) -> Option<(Entity, &EffectiveStartupDir)> {
+    fn selected(
+        &self,
+    ) -> Option<(
+        Entity,
+        &EffectiveStartupDir,
+        &vmux_core::EffectiveStartupUrl,
+    )> {
         self.spaces
             .iter()
-            .find(|(_, _, current, _)| *current)
-            .or_else(|| self.spaces.iter().find(|(_, _, _, active)| *active))
+            .find(|(_, _, _, current, _)| *current)
+            .or_else(|| self.spaces.iter().find(|(_, _, _, _, active)| *active))
             .or_else(|| self.spaces.iter().next())
-            .map(|(entity, startup_dir, _, _)| (entity, startup_dir))
+            .map(|(entity, startup_dir, startup_url, _, _)| (entity, startup_dir, startup_url))
     }
 
     pub fn get(&self) -> Option<(Entity, Option<std::path::PathBuf>)> {
         self.selected()
-            .map(|(entity, startup_dir)| (entity, startup_dir.0.clone()))
+            .map(|(entity, startup_dir, _)| (entity, startup_dir.0.clone()))
     }
 
     pub fn startup_dir(&self) -> Option<&std::path::Path> {
         self.selected()
-            .and_then(|(_, startup_dir)| startup_dir.0.as_deref())
+            .and_then(|(_, startup_dir, _)| startup_dir.0.as_deref())
+    }
+
+    pub fn startup_url(&self) -> Option<&str> {
+        self.selected()
+            .map(|(_, _, startup_url)| startup_url.0.as_str())
+            .filter(|url| !url.is_empty())
+    }
+
+    pub fn resolved_startup_url(&self) -> String {
+        self.startup_url()
+            .unwrap_or(vmux_core::EffectiveStartupUrl::START_PAGE)
+            .to_string()
     }
 }
 

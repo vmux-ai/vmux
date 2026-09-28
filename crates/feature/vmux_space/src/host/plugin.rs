@@ -51,24 +51,15 @@ impl Plugin for SpacePlugin {
             )
             .add_systems(
                 Update,
-                update_effective_startup_url.after(vmux_layout::space::CurrentSpaceSet),
-            )
-            .add_systems(
-                Update,
-                update_effective_startup_dir
-                    .in_set(vmux_layout::space::EffectiveStartupDirSet)
+                update_effective_startup
+                    .in_set(vmux_layout::space::EffectiveStartupSet)
+                    .after(vmux_layout::space::CurrentSpaceSet)
                     .before(vmux_command::ReadCommandRequests),
             )
             .add_systems(Update, sync_space_name_to_id)
             .add_systems(
                 Startup,
-                update_effective_startup_url
-                    .after(vmux_setting::SettingsLoadSet)
-                    .before(vmux_layout::LayoutStartupSet::Post),
-            )
-            .add_systems(
-                Startup,
-                update_effective_startup_dir
+                update_effective_startup
                     .after(vmux_setting::SettingsLoadSet)
                     .after(vmux_layout::LayoutStartupSet::Persistence)
                     .before(vmux_layout::LayoutStartupSet::DefaultTab),
@@ -139,26 +130,12 @@ impl TryFrom<&vmux_command::CommandInvocation> for OpenRequest {
     }
 }
 
-fn update_effective_startup_url(
-    settings: Option<Res<vmux_setting::AppSettings>>,
-    active: ActiveSpace,
-    mut effective: ResMut<vmux_core::EffectiveStartupUrl>,
-) {
-    let Some(settings) = settings else {
-        return;
-    };
-    let space_id = active.id().unwrap_or(crate::model::BOOTSTRAP_SPACE_ID);
-    let next = settings.startup_url(space_id);
-    if effective.0 != next {
-        effective.0 = next;
-    }
-}
-
-fn update_effective_startup_dir(
+fn update_effective_startup(
     settings: Option<Res<vmux_setting::AppSettings>>,
     mut spaces: Query<
         (
             Ref<vmux_layout::space::SpaceId>,
+            &mut vmux_core::EffectiveStartupUrl,
             &mut vmux_layout::space::EffectiveStartupDir,
         ),
         With<vmux_layout::space::Space>,
@@ -167,19 +144,26 @@ fn update_effective_startup_dir(
     let settings_changed = settings
         .as_ref()
         .is_some_and(|settings| settings.is_changed());
-    for (id, mut effective) in &mut spaces {
+    for (id, mut effective_url, mut effective_dir) in &mut spaces {
+        let next_url = settings
+            .as_deref()
+            .map(|settings| settings.startup_url(&id.0))
+            .unwrap_or_default();
+        if effective_url.0 != next_url {
+            effective_url.0 = next_url;
+        }
         if !settings_changed
             && !id.is_changed()
-            && !effective.is_added()
-            && effective.0.as_ref().is_none_or(|path| path.is_dir())
+            && !effective_dir.is_added()
+            && effective_dir.0.as_ref().is_none_or(|path| path.is_dir())
         {
             continue;
         }
         let next = settings
             .as_deref()
             .and_then(|settings| settings.startup_dir(&id.0));
-        if effective.0 != next {
-            effective.0 = next;
+        if effective_dir.0 != next {
+            effective_dir.0 = next;
         }
     }
 }
@@ -815,7 +799,6 @@ fn handle_open_in_new_space(
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     focused_window: vmux_layout::window::FocusedWindow,
-    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     settings: Option<Res<vmux_setting::AppSettings>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
@@ -861,6 +844,14 @@ fn handle_open_in_new_space(
         let startup_dir = settings
             .as_deref()
             .and_then(|settings| settings.startup_dir(&id));
+        let startup_url = settings
+            .as_deref()
+            .map(|settings| settings.startup_url(&id))
+            .unwrap_or_default();
+        commands.entity(space).insert((
+            vmux_layout::space::EffectiveStartupDir(startup_dir.clone()),
+            vmux_core::EffectiveStartupUrl(startup_url.clone()),
+        ));
         let content = request
             .url
             .as_deref()
@@ -870,14 +861,10 @@ fn handle_open_in_new_space(
                 pending_prompt: None,
             })
             .or_else(|| {
-                effective_startup_url
-                    .as_deref()
-                    .map(|startup| startup.0.as_str())
-                    .filter(|startup| !startup.is_empty())
-                    .map(|startup| TabLayoutSpawnContent::Url {
-                        url: startup.to_string(),
-                        pending_prompt: None,
-                    })
+                (!startup_url.is_empty()).then(|| TabLayoutSpawnContent::Url {
+                    url: startup_url.clone(),
+                    pending_prompt: None,
+                })
             })
             .unwrap_or(TabLayoutSpawnContent::StartupUrlOrPrompt);
         layout_requests.write(TabLayoutSpawnRequest {
@@ -1028,16 +1015,22 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .insert_resource(settings)
-            .add_systems(Update, update_effective_startup_url);
-        app.world_mut().spawn((
-            space_profile_bundle(&work_space_record()),
-            vmux_layout::space::CurrentSpace,
-        ));
+            .add_systems(Update, update_effective_startup);
+        let space = app
+            .world_mut()
+            .spawn((
+                space_profile_bundle(&work_space_record()),
+                vmux_layout::space::CurrentSpace,
+            ))
+            .id();
 
         app.update();
 
         assert_eq!(
-            app.world().resource::<vmux_core::EffectiveStartupUrl>().0,
+            app.world()
+                .get::<vmux_core::EffectiveStartupUrl>(space)
+                .unwrap()
+                .0,
             "https://work.example"
         );
     }
@@ -1284,7 +1277,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .insert_resource(settings)
-            .add_systems(Update, update_effective_startup_dir);
+            .add_systems(Update, update_effective_startup);
         let inactive = app
             .world_mut()
             .spawn((
@@ -1469,7 +1462,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .add_systems(Update, update_effective_startup_dir);
+            .add_systems(Update, update_effective_startup);
         let space = app
             .world_mut()
             .spawn((
@@ -1514,8 +1507,8 @@ mod tests {
             .add_systems(
                 Update,
                 (
-                    update_effective_startup_dir,
-                    count_changes.after(update_effective_startup_dir),
+                    update_effective_startup,
+                    count_changes.after(update_effective_startup),
                 ),
             );
         app.world_mut().spawn((
@@ -1564,8 +1557,8 @@ mod tests {
             .add_systems(
                 Update,
                 (
-                    update_effective_startup_dir,
-                    count_changes.after(update_effective_startup_dir),
+                    update_effective_startup,
+                    count_changes.after(update_effective_startup),
                 ),
             );
         app.world_mut().spawn((
@@ -1601,7 +1594,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .insert_resource(settings)
-            .add_systems(Update, update_effective_startup_dir);
+            .add_systems(Update, update_effective_startup);
         let space = app
             .world_mut()
             .spawn((
