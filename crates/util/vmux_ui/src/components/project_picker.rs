@@ -203,7 +203,7 @@ fn ProjectBranchRow(
     on_hover: EventHandler<()>,
     on_pick: EventHandler<ProjectPick>,
 ) -> Element {
-    let held = branch.held();
+    let held = !branch.checkout.is_empty();
     let title = match held {
         true => translate("agent-project-open-worktree"),
         false => translate("agent-project-create-worktree"),

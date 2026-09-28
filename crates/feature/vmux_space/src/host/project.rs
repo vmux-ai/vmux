@@ -116,7 +116,17 @@ impl ExpandedProjectDirs {
             });
         }
         rows.sort_by(|a, b| {
-            let folder_first = b.kind.opens_a_tree().cmp(&a.kind.opens_a_tree());
+            let b_opens = matches!(
+                b.kind,
+                vmux_core::event::ProjectRowKind::Project
+                    | vmux_core::event::ProjectRowKind::Directory
+            );
+            let a_opens = matches!(
+                a.kind,
+                vmux_core::event::ProjectRowKind::Project
+                    | vmux_core::event::ProjectRowKind::Directory
+            );
+            let folder_first = b_opens.cmp(&a_opens);
             folder_first.then_with(|| a.label.to_lowercase().cmp(&b.label.to_lowercase()))
         });
         let mut out = Vec::new();

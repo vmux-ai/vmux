@@ -94,16 +94,6 @@ pub enum ProjectRowKind {
     File,
 }
 
-impl ProjectRowKind {
-    pub fn opens_a_tree(self) -> bool {
-        matches!(self, Self::Project | Self::Directory)
-    }
-
-    pub fn carries_a_branch(self) -> bool {
-        matches!(self, Self::Project)
-    }
-}
-
 #[vmux_api::ui_event(Default, Eq)]
 pub struct ProjectTreeToggle {
     pub path: String,
@@ -118,16 +108,6 @@ pub struct ProjectBranch {
     pub label: String,
     pub insertions: u32,
     pub deletions: u32,
-}
-
-impl ProjectBranch {
-    pub fn held(&self) -> bool {
-        !self.checkout.is_empty()
-    }
-
-    pub fn changed(&self) -> bool {
-        self.insertions > 0 || self.deletions > 0
-    }
 }
 
 #[cfg(test)]

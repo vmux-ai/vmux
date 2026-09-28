@@ -289,7 +289,10 @@ fn ActiveWorkspaceChoice(project: ProjectRow, pane_id: u64, on_pick: EventHandle
 #[component]
 fn ActiveWorkspaceProjectRow(project: ProjectRow, pane_id: u64) -> Element {
     let path = project.path.clone();
-    let opens_tree = project.kind.opens_a_tree();
+    let opens_tree = matches!(
+        project.kind,
+        vmux_api::space::ProjectRowKind::Project | vmux_api::space::ProjectRowKind::Directory
+    );
     rsx! {
         SidebarTreeRowGroup {
             SidebarTreeRow {

@@ -775,7 +775,7 @@ fn push_projects_host_emit(
     if let Some(cache) = repo_info.as_mut() {
         let cache = cache.bypass_change_detection();
         for row in &mut projects {
-            if row.missing || !row.kind.carries_a_branch() {
+            if row.missing || row.kind != vmux_api::space::ProjectRowKind::Project {
                 continue;
             }
             if let Some(info) = cache.get(std::path::Path::new(&row.path)) {

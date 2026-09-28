@@ -1,5 +1,8 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
-use vmux_api::{VmuxRoute, error::ErrorPageData};
+use vmux_api::{
+    VmuxRoute,
+    error::{ErrorPageData, FAILED_TO_LOAD, NOT_FOUND},
+};
 
 use vmux_command::ReadCommandRequests;
 use vmux_core::{
@@ -85,6 +88,30 @@ impl From<&CefPageAttachRequest> for CefPageAttachment {
 struct ErrorPageAttachment {
     stack: Entity,
     failure: ErrorPageData,
+}
+
+impl ErrorPageAttachment {
+    fn failed(stack: Entity, url: &str, message: &str) -> Self {
+        Self {
+            stack,
+            failure: ErrorPageData {
+                title: FAILED_TO_LOAD.to_string(),
+                message: message.to_string(),
+                url: url.to_string(),
+            },
+        }
+    }
+
+    fn not_found(stack: Entity, url: &str) -> Self {
+        Self {
+            stack,
+            failure: ErrorPageData {
+                title: NOT_FOUND.to_string(),
+                message: String::new(),
+                url: url.to_string(),
+            },
+        }
+    }
 }
 
 fn handle_page_open_requests(
@@ -237,25 +264,22 @@ fn classify_unclaimed_page_open_tasks(
 ) {
     for (entity, task, error, deferred_once) in &tasks {
         if let Some(error) = error {
-            commands.entity(entity).insert(ErrorPageAttachment {
-                stack: task.stack,
-                failure: ErrorPageData::failed_to_load(&task.url, &error.message),
-            });
+            commands.entity(entity).insert(ErrorPageAttachment::failed(
+                task.stack,
+                &task.url,
+                &error.message,
+            ));
         } else if VmuxRoute::parse(&task.url).is_some_and(|route| route.is_host("error")) {
-            commands.entity(entity).insert(ErrorPageAttachment {
-                stack: task.stack,
-                failure: ErrorPageData::failed_to_load(&task.url, &task.url),
-            });
+            commands.entity(entity).insert(ErrorPageAttachment::failed(
+                task.stack, &task.url, &task.url,
+            ));
         } else if VmuxRoute::parse(&task.url).is_some() {
             if deferred_once.is_none() {
                 commands.entity(entity).insert(PageOpenFallbackDeferred);
                 continue;
             }
             commands.entity(entity).insert((
-                ErrorPageAttachment {
-                    stack: task.stack,
-                    failure: ErrorPageData::not_found(&task.url),
-                },
+                ErrorPageAttachment::not_found(task.stack, &task.url),
                 PageOpenError {
                     message: format!("unknown vmux URL '{}'", task.url),
                 },
