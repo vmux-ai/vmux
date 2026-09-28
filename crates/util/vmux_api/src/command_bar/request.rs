@@ -97,19 +97,6 @@ pub struct CommandPaletteActivateRequest {
 }
 
 #[vmux_api::ui_event(Default, Eq)]
-pub struct CommandPalettePromptHistoryRequest {
-    pub open_id: super::OpenId,
-    pub agent: String,
-    pub cwd: String,
-}
-
-#[vmux_api::ui_event(Default, Eq)]
-pub struct CommandPaletteBranchesRequest {
-    pub open_id: super::OpenId,
-    pub project: String,
-}
-
-#[vmux_api::ui_event(Default, Eq)]
 pub struct CommandPaletteRemoveAttachmentRequest {
     pub open_id: super::OpenId,
     pub path: String,

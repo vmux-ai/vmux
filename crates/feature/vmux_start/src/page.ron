@@ -29,8 +29,6 @@
         "CommandPaletteDraftRequest",
         "CommandPaletteSubmitRequest",
         "CommandPaletteActivateRequest",
-        "CommandPalettePromptHistoryRequest",
-        "CommandPaletteBranchesRequest",
         "CommandPaletteRemoveAttachmentRequest",
         "CommandBarUiState",
         "CommandPaletteState",

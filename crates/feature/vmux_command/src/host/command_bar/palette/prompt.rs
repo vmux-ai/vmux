@@ -1,21 +1,22 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
-use vmux_api::command_bar::{
-    CommandBarUiState, CommandBarUiStatePatch, CommandPalettePromptHistoryRequest,
-};
+use vmux_api::command_bar::{CommandBarUiState, CommandBarUiStatePatch};
 use vmux_core::host::UiStateWrite;
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
 
-use super::{OpenVersion, PaletteSnapshot};
+use super::{OpenVersion, PaletteContext, PaletteProjectionSet, PaletteSnapshot};
 
 pub(super) struct PalettePromptPlugin;
 
 impl Plugin for PalettePromptPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(request_palette_prompt_history)
-            .add_observer(receive_palette_prompt_history)
-            .add_systems(PreUpdate, attach_palette_prompt);
+        app.add_observer(receive_palette_prompt_history)
+            .add_systems(PreUpdate, attach_palette_prompt)
+            .add_systems(
+                PostUpdate,
+                update_palette_prompt.in_set(PaletteProjectionSet::Context),
+            );
     }
 }
 
@@ -42,32 +43,36 @@ fn attach_palette_prompt(
     }
 }
 
-fn request_palette_prompt_history(
-    trigger: On<UiInput<CommandPalettePromptHistoryRequest>>,
-    mut palettes: Query<(&mut PalettePrompt, &mut PaletteSnapshot)>,
+fn update_palette_prompt(
+    mut palettes: Query<
+        (
+            Entity,
+            &PaletteContext,
+            &mut PalettePrompt,
+            &mut PaletteSnapshot,
+        ),
+        Changed<PaletteContext>,
+    >,
     mut commands: Commands,
 ) {
-    let target = trigger.event().webview;
-    let request = &trigger.event().payload;
-    let Ok((mut prompt, mut snapshot)) = palettes.get_mut(target) else {
-        return;
-    };
-    let Some(opened) = prompt.open.accept(request.open_id) else {
-        return;
-    };
-    if opened {
-        prompt.desired = None;
-        prompt.loaded = None;
-        snapshot.0.open_id = request.open_id;
-        snapshot.0.prompt_history.clear();
+    for (target, context, mut prompt, mut snapshot) in &mut palettes {
+        let Some(opened) = prompt.open.accept(context.open_id) else {
+            continue;
+        };
+        if opened {
+            prompt.desired = None;
+            prompt.loaded = None;
+            snapshot.0.open_id = context.open_id;
+            snapshot.0.prompt_history.clear();
+        }
+        let desired = PromptContext::new(&context.agent, &context.cwd);
+        if prompt.desired != desired {
+            prompt.desired = desired;
+            prompt.loaded = None;
+            snapshot.0.prompt_history.clear();
+        }
+        request_history(target, &mut prompt, &mut commands);
     }
-    let desired = PromptContext::new(&request.agent, &request.cwd);
-    if prompt.desired != desired {
-        prompt.desired = desired;
-        prompt.loaded = None;
-        snapshot.0.prompt_history.clear();
-    }
-    request_history(target, &mut prompt, &mut commands);
 }
 
 fn receive_palette_prompt_history(

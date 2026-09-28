@@ -8,9 +8,8 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch, CommandPaletteActivateRequest,
-    CommandPaletteBranchesRequest, CommandPaletteDraftRequest, CommandPalettePromptHistoryRequest,
-    CommandPaletteRemoveAttachmentRequest, CommandPaletteState, CommandPaletteSubmitRequest,
-    OpenId,
+    CommandPaletteDraftRequest, CommandPaletteRemoveAttachmentRequest, CommandPaletteState,
+    CommandPaletteSubmitRequest, OpenId,
 };
 use vmux_api::mcp::{McpServerRequest, McpServers};
 use vmux_core::host::{UiState, UiStateWrite};
@@ -41,8 +40,6 @@ impl Plugin for PalettePlugin {
                 CommandPaletteDraftRequest,
                 CommandPaletteSubmitRequest,
                 CommandPaletteActivateRequest,
-                CommandPalettePromptHistoryRequest,
-                CommandPaletteBranchesRequest,
                 CommandPaletteRemoveAttachmentRequest,
             )>::default(),
             vmux_core::host::UiStatePlugin::<CommandPaletteState>::default(),
@@ -67,9 +64,22 @@ impl Plugin for PalettePlugin {
             PreUpdate,
             (attach_palette_snapshot, detach_palette_snapshot),
         )
+        .configure_sets(
+            PostUpdate,
+            (
+                PaletteProjectionSet::Project,
+                PaletteProjectionSet::Context,
+                PaletteProjectionSet::Publish,
+            )
+                .chain(),
+        )
         .add_systems(
             PostUpdate,
-            (project_palette, publish_palette_snapshot).chain(),
+            project_palette.in_set(PaletteProjectionSet::Project),
+        )
+        .add_systems(
+            PostUpdate,
+            publish_palette_snapshot.in_set(PaletteProjectionSet::Publish),
         )
         .add_systems(Last, keep_palette_frames_coming);
     }
@@ -80,6 +90,14 @@ struct PaletteSnapshot(CommandPaletteState);
 
 #[derive(Component, Default)]
 struct PaletteOpen(CommandBarOpenEvent);
+
+#[derive(Component, Clone, Default, PartialEq, Eq)]
+struct PaletteContext {
+    open_id: OpenId,
+    agent: String,
+    cwd: String,
+    project: String,
+}
 
 #[derive(Component, Default)]
 struct PaletteDraftInput {
@@ -98,6 +116,13 @@ struct PaletteMcp(McpServers);
 
 #[derive(Component)]
 struct PaletteMcpActive;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum PaletteProjectionSet {
+    Project,
+    Context,
+    Publish,
+}
 
 #[derive(Clone, Copy)]
 enum PaletteKey {
@@ -152,6 +177,7 @@ fn attach_palette_snapshot(
         commands.entity(page).insert((
             PaletteSnapshot::default(),
             PaletteOpen::default(),
+            PaletteContext::default(),
             PaletteDraftInput::default(),
             PaletteMcp::default(),
             UiState::<CommandPaletteState>::default(),
@@ -479,10 +505,11 @@ fn project_palette(
         &PaletteOpen,
         &PaletteDraftInput,
         &PaletteMcp,
+        &mut PaletteContext,
         &mut PaletteSnapshot,
     )>,
 ) {
-    for (opened, input, mcp, mut snapshot) in &mut palettes {
+    for (opened, input, mcp, mut context, mut snapshot) in &mut palettes {
         if input.open_id != opened.0.open_id || snapshot.0.open_id != opened.0.open_id {
             continue;
         }
@@ -527,6 +554,17 @@ fn project_palette(
         projection.navigating = input.navigating;
         projection.input_revision = input.input_revision;
         projection.close_revision = input.close_revision;
+        let palette = PaletteState::from_rows(&rows, &opened.0, &draft, surface);
+        let next_context = PaletteContext {
+            open_id: opened.0.open_id,
+            agent: crate::palette::AgentSegment::in_url(&palette.composer.agent_url)
+                .unwrap_or_default(),
+            cwd: palette.composer.cwd,
+            project: palette.composer.project,
+        };
+        if *context != next_context {
+            *context = next_context;
+        }
         if snapshot.0.projection == projection {
             continue;
         }
@@ -561,6 +599,7 @@ fn detach_palette_snapshot(
         commands.entity(page).remove::<(
             PaletteSnapshot,
             PaletteOpen,
+            PaletteContext,
             PaletteDraftInput,
             PaletteMcp,
             UiState<CommandPaletteState>,

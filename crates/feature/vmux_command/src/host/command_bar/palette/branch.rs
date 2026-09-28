@@ -1,21 +1,23 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_api::command_bar::{
-    CommandBarUiState, CommandBarUiStatePatch, CommandPaletteBranchesRequest, StartBranchesRequest,
-    StartProjectBranches,
+    CommandBarUiState, CommandBarUiStatePatch, StartBranchesRequest, StartProjectBranches,
 };
 use vmux_core::host::UiStateWrite;
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
 
-use super::{OpenVersion, PaletteSnapshot};
+use super::{OpenVersion, PaletteContext, PaletteProjectionSet, PaletteSnapshot};
 
 pub(super) struct PaletteBranchPlugin;
 
 impl Plugin for PaletteBranchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(request_palette_branches)
-            .add_observer(receive_palette_branches)
-            .add_systems(PreUpdate, attach_palette_branch);
+        app.add_observer(receive_palette_branches)
+            .add_systems(PreUpdate, attach_palette_branch)
+            .add_systems(
+                PostUpdate,
+                update_palette_branch.in_set(PaletteProjectionSet::Context),
+            );
     }
 }
 
@@ -23,6 +25,7 @@ impl Plugin for PaletteBranchPlugin {
 pub(super) struct PaletteBranch {
     open: OpenVersion,
     desired: String,
+    loaded: String,
     inflight: Option<BranchFlight>,
 }
 
@@ -41,32 +44,37 @@ fn attach_palette_branch(
     }
 }
 
-fn request_palette_branches(
-    trigger: On<UiInput<CommandPaletteBranchesRequest>>,
-    mut palettes: Query<(&mut PaletteBranch, &mut PaletteSnapshot)>,
+fn update_palette_branch(
+    mut palettes: Query<
+        (
+            Entity,
+            &PaletteContext,
+            &mut PaletteBranch,
+            &mut PaletteSnapshot,
+        ),
+        Changed<PaletteContext>,
+    >,
     mut commands: Commands,
 ) {
-    let target = trigger.event().webview;
-    let request = &trigger.event().payload;
-    let Ok((mut branch, mut snapshot)) = palettes.get_mut(target) else {
-        return;
-    };
-    let Some(opened) = branch.open.accept(request.open_id) else {
-        return;
-    };
-    if opened {
-        branch.desired.clear();
-        snapshot.0.open_id = request.open_id;
-        snapshot.0.branch_project.clear();
-        snapshot.0.branches.clear();
+    for (target, context, mut branch, mut snapshot) in &mut palettes {
+        let Some(opened) = branch.open.accept(context.open_id) else {
+            continue;
+        };
+        if opened {
+            branch.desired.clear();
+            branch.loaded.clear();
+            snapshot.0.open_id = context.open_id;
+            snapshot.0.branch_project.clear();
+            snapshot.0.branches.clear();
+        }
+        if branch.desired != context.project {
+            branch.desired.clone_from(&context.project);
+            branch.loaded.clear();
+            snapshot.0.branch_project.clear();
+            snapshot.0.branches.clear();
+        }
+        request_branches(target, &mut branch, &mut commands);
     }
-    if branch.desired == request.project {
-        return;
-    }
-    branch.desired.clone_from(&request.project);
-    snapshot.0.branch_project.clear();
-    snapshot.0.branches.clear();
-    request_branches(target, &mut branch, &mut commands);
 }
 
 fn receive_palette_branches(
@@ -94,12 +102,16 @@ fn receive_palette_branches(
     {
         snapshot.0.branch_project.clone_from(&response.project);
         snapshot.0.branches.clone_from(&response.branches);
+        branch.loaded = flight.project;
     }
     request_branches(target, &mut branch, &mut commands);
 }
 
 fn request_branches(target: Entity, branch: &mut PaletteBranch, commands: &mut Commands) {
-    if branch.inflight.is_some() || branch.desired.trim().is_empty() {
+    if branch.inflight.is_some()
+        || branch.desired.trim().is_empty()
+        || branch.desired == branch.loaded
+    {
         return;
     }
     let project = branch.desired.clone();

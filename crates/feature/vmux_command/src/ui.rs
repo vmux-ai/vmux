@@ -1,7 +1,7 @@
 use crate::event::{
     CommandBarFocusEffect, CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch,
-    CommandPaletteActivateRequest, CommandPaletteBranchesRequest, CommandPaletteDraftRequest,
-    CommandPalettePromptHistoryRequest, CommandPaletteState, CommandPaletteSubmitRequest,
+    CommandPaletteActivateRequest, CommandPaletteDraftRequest, CommandPaletteState,
+    CommandPaletteSubmitRequest,
 };
 use crate::palette::row::ResultRow;
 use crate::palette::style::{
@@ -222,36 +222,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     let composer = palette.composer.clone();
-    {
-        let agent = crate::palette::AgentSegment::in_url(&composer.agent_url).unwrap_or_default();
-        let cwd = composer.cwd.clone();
-        let open_id = state_val.open_id;
-        use_effect(move || {
-            let _ = state();
-            let _ = (signals.target_url)();
-            let _ = (signals.selected)();
-            let _ = (signals.nav_mode)();
-            let _ = send(&CommandPalettePromptHistoryRequest {
-                open_id,
-                agent: agent.clone(),
-                cwd: cwd.clone(),
-            });
-        });
-    }
-    {
-        let project = composer.project.clone();
-        let open_id = state_val.open_id;
-        use_effect(move || {
-            let _ = state();
-            let _ = (signals.target_url)();
-            let _ = (signals.selected)();
-            let _ = (signals.nav_mode)();
-            let _ = send(&CommandPaletteBranchesRequest {
-                open_id,
-                project: project.clone(),
-            });
-        });
-    }
     let accent = palette.accent_agent.as_deref().map(agent_accent);
     let start_accent = accent.unwrap_or_else(|| agent_accent("vibe"));
     let start_prompt_attachments = PromptMedia::composer_attachments(attachments.as_ref());
