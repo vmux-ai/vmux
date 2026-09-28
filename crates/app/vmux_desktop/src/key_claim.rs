@@ -43,11 +43,11 @@ fn receive_page_context(
 }
 
 fn push_key_claims(
-    keymap: Option<Res<Keymap>>,
+    keymaps: Query<Ref<Keymap>>,
     contexts: Query<(Entity, Ref<KeyContext>), Or<(With<WebviewSource>, With<HostsPage>)>>,
     mut commands: Commands,
 ) {
-    let Some(keymap) = keymap else {
+    let Ok(keymap) = keymaps.single() else {
         return;
     };
     for (entity, context) in contexts.iter() {
@@ -144,10 +144,10 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_plugins(KeyClaimPlugin)
-                .insert_resource(keymap)
                 .init_resource::<Pushed>()
                 .init_resource::<Rejected>()
                 .add_observer(Pushed::record);
+            app.world_mut().spawn(keymap);
             app.insert_non_send(Browsers::default());
             app
         }

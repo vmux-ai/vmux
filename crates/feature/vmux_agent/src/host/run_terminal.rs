@@ -1291,7 +1291,7 @@ mod tests {
     pub(crate) fn touch_reused_run_pane_spawn_seq_test_system(
         input: Res<ReusedRunPaneTouchInput>,
         mut commands: Commands,
-        mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
+        mut spawn_counter: Single<&mut vmux_layout::pane::SpawnCounter>,
         seq_q: Query<&vmux_layout::pane::SpawnSeq>,
     ) {
         let sequence = NextPaneSpawnSequence::take(&mut spawn_counter, &seq_q);
@@ -1308,6 +1308,8 @@ mod tests {
             .world_mut()
             .spawn((Pane, vmux_layout::pane::SpawnSeq(2)))
             .id();
+        app.world_mut()
+            .spawn(vmux_layout::pane::SpawnCounter::default());
         app.world_mut()
             .spawn((Pane, vmux_layout::pane::SpawnSeq(10)));
         app.insert_resource(ReusedRunPaneTouchInput { pane: reused });
@@ -1334,7 +1336,7 @@ mod tests {
         input: Res<SplitRunPaneInput>,
         mut out: ResMut<SplitRunPaneOutput>,
         mut commands: Commands,
-        mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
+        mut spawn_counter: Single<&mut vmux_layout::pane::SpawnCounter>,
         pane_children: Query<&Children, With<Pane>>,
         tab_filter: Query<Entity, With<vmux_layout::stack::Stack>>,
         split_dir_q: Query<&PaneSplit>,
@@ -1377,6 +1379,8 @@ mod tests {
             .world_mut()
             .spawn((Pane, vmux_layout::pane::SpawnSeq(10), ChildOf(tab)))
             .id();
+        app.world_mut()
+            .spawn(vmux_layout::pane::SpawnCounter::default());
         let browser_stack = app
             .world_mut()
             .spawn((vmux_layout::stack::stack_bundle(), ChildOf(browser_pane)))

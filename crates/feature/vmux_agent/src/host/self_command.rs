@@ -261,7 +261,7 @@ fn handle_agent_self_commands(
     mut service_requests: MessageWriter<ServiceRequest>,
     active_space: ActiveSpace,
     settings: Res<AppSettings>,
-    mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
+    mut spawn_counter: Single<&mut vmux_layout::pane::SpawnCounter>,
     mut tab_worktree: AgentTabWorktreeContext,
     mut workspace_picker: WorkspacePickerContext,
 ) {

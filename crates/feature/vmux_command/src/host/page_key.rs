@@ -15,13 +15,13 @@ impl Plugin for KeyPlugin {
 
 fn resolve_page_key(
     trigger: On<UiInput<KeyStroke>>,
-    keymap: Option<Res<Keymap>>,
+    keymaps: Query<&Keymap>,
     contexts: Query<&KeyContext>,
     mut invocations: MessageWriter<CommandInvocation>,
 ) {
     let page = trigger.event_target();
-    let (Some(keymap), Ok(context), Some(pressed)) = (
-        keymap.as_deref(),
+    let (Ok(keymap), Ok(context), Some(pressed)) = (
+        keymaps.single(),
         contexts.get(page),
         KeyCombo::from_stroke(&trigger.payload),
     ) else {
@@ -80,8 +80,8 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_plugins(KeyPlugin)
-                .add_message::<CommandInvocation>()
-                .insert_resource(keymap);
+                .add_message::<CommandInvocation>();
+            app.world_mut().spawn(keymap);
             app
         }
 
@@ -137,7 +137,7 @@ mod tests {
     impl Answered {
         fn record(
             trigger: On<UiInput<KeyStroke>>,
-            keymap: Res<Keymap>,
+            keymap: Single<&Keymap>,
             contexts: Query<&KeyContext>,
             mut answered: ResMut<Self>,
         ) {

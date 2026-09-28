@@ -519,10 +519,10 @@ fn on_editor_code_action(
 fn on_wiki_completion_request(
     trigger: On<WikiCompletionRequest>,
     views: Query<&Editor>,
-    index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
+    indexes: Query<&vmux_core::knowledge::KnowledgeIndex>,
     mut commands: Commands,
 ) {
-    let Some(index) = index.as_deref() else {
+    let Ok(index) = indexes.single() else {
         return;
     };
     let entity = trigger.event_target();
@@ -767,7 +767,7 @@ fn on_file_references_request(
 fn on_file_completion_request(
     trigger: On<UiInput<FileCompletionRequest>>,
     views: Query<&Editor>,
-    index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
+    indexes: Query<&vmux_core::knowledge::KnowledgeIndex>,
     mut commands: Commands,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
 ) {
@@ -776,7 +776,7 @@ fn on_file_completion_request(
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    if let Some(index) = index.as_deref()
+    if let Ok(index) = indexes.single()
         && let Some(completion) = WikiCompletion::for_edit(edit, index)
     {
         commands.trigger(completion.result(entity, index));

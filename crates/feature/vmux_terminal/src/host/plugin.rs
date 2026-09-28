@@ -1661,7 +1661,7 @@ fn on_term_key(
     >,
     agents: Query<&vmux_core::agent::AgentSession>,
     launches: Query<&crate::launch::TerminalLaunch>,
-    keymap: Res<Keymap>,
+    keymap: Single<&Keymap>,
     mut command_invocations: MessageWriter<vmux_command::CommandInvocation>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,

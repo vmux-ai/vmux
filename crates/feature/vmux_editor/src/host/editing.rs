@@ -480,15 +480,15 @@ fn apply_edit_request(
 fn on_file_key(
     trigger: On<UiInput<KeyStroke>>,
     mut q: Query<(&Editor, &mut EditorKeymap)>,
-    app_keymap: Option<Res<Keymap>>,
+    app_keymaps: Query<&Keymap>,
     app_contexts: Query<&KeyContext>,
     view_mode: Single<&SharedFileViewMode>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let evt = &trigger.event().payload;
-    if let (Some(keymap), Ok(context), Some(pressed)) = (
-        app_keymap.as_deref(),
+    if let (Ok(keymap), Ok(context), Some(pressed)) = (
+        app_keymaps.single(),
         app_contexts.get(entity),
         KeyCombo::from_stroke(evt),
     ) && keymap.in_context(context).scoped(&pressed).is_some()

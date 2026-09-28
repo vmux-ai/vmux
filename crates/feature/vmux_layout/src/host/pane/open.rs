@@ -77,7 +77,7 @@ fn handle_open_beside_requests(
     rc: ResolverCtx,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut spawn_counter: ResMut<SpawnCounter>,
+    mut spawn_counter: Single<&mut SpawnCounter>,
 ) {
     let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     let mut spawn_seq_overrides: std::collections::HashMap<Entity, u64> =

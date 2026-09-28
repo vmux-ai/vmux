@@ -61,7 +61,7 @@ pub struct KnowledgeBrokenLink {
     pub line: u32,
 }
 
-#[derive(bevy::prelude::Resource, Clone, Debug, Default)]
+#[derive(bevy::prelude::Component, Clone, Debug, Default)]
 pub struct KnowledgeIndex {
     root: PathBuf,
     notes: Vec<KnowledgeNote>,

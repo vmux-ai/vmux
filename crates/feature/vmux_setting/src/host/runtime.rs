@@ -16,18 +16,13 @@ pub struct SettingsRuntimePlugin;
 
 impl Plugin for SettingsRuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Name::new("Search engine setting"),
-            SearchEngineSetting::default(),
-        ));
-        app.init_resource::<LastSelfWriteHash>()
-            .init_resource::<SettingsSaveDebounce>()
-            .add_message::<SettingsWriteRequest>()
+        app.add_message::<SettingsWriteRequest>()
             .add_message::<SettingsSaveRequest>()
             .configure_sets(
                 Startup,
                 SettingsLoadSet.before(vmux_layout::LayoutStartupSet::Window),
             )
+            .add_systems(Startup, spawn_settings_runtime.before(SettingsLoadSet))
             .add_systems(Startup, load_settings.in_set(SettingsLoadSet))
             .add_systems(
                 Update,
@@ -41,6 +36,15 @@ impl Plugin for SettingsRuntimePlugin {
             )
             .add_systems(Update, sync_search_engine);
     }
+}
+
+fn spawn_settings_runtime(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Settings runtime"),
+        SearchEngineSetting::default(),
+        LastSelfWriteHash::default(),
+        SettingsSaveDebounce::default(),
+    ));
 }
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1149,7 +1153,7 @@ fn reload_settings_on_change(
     mut layout_settings: ResMut<LayoutSettings>,
     mut confirm_close: ResMut<ConfirmCloseSettings>,
     mut resolved_locale: ResMut<ResolvedLocale>,
-    last_hash: Res<LastSelfWriteHash>,
+    last_hash: Single<&LastSelfWriteHash>,
 ) {
     let Some(watcher) = watcher else { return };
 
@@ -1565,7 +1569,7 @@ fn set_leaf(
     }
 }
 
-#[derive(Resource, Default, Debug)]
+#[derive(Component, Default, Debug)]
 pub struct LastSelfWriteHash(pub Option<u64>);
 
 #[derive(Message, Debug, Clone)]
@@ -1585,14 +1589,14 @@ const SETTINGS_SAVE_DEBOUNCE: Duration = Duration::from_millis(400);
 #[derive(Message, Debug, Clone)]
 pub struct SettingsSaveRequest;
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub(crate) struct SettingsSaveDebounce {
     pub due: Option<Instant>,
 }
 
 fn request_settings_save(
     mut reader: MessageReader<SettingsSaveRequest>,
-    mut debounce: ResMut<SettingsSaveDebounce>,
+    mut debounce: Single<&mut SettingsSaveDebounce>,
 ) {
     if reader.read().count() > 0 {
         debounce.due = Some(Instant::now() + SETTINGS_SAVE_DEBOUNCE);
@@ -1600,7 +1604,7 @@ fn request_settings_save(
 }
 
 fn flush_settings_save(
-    mut debounce: ResMut<SettingsSaveDebounce>,
+    mut debounce: Single<&mut SettingsSaveDebounce>,
     settings: Res<AppSettings>,
     mut writes: MessageWriter<SettingsWriteRequest>,
 ) {
@@ -1622,7 +1626,7 @@ fn flush_settings_save(
 fn persist_settings_to_disk(
     mut reader: MessageReader<SettingsWriteRequest>,
     watcher: Option<Res<SettingsWatcher>>,
-    mut last_hash: ResMut<LastSelfWriteHash>,
+    mut last_hash: Single<&mut LastSelfWriteHash>,
 ) {
     for request in reader.read() {
         let Some(watcher) = watcher.as_deref() else {
@@ -2485,14 +2489,20 @@ mod tests {
         use bevy::ecs::message::Messages;
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<SettingsSaveDebounce>()
             .add_message::<SettingsSaveRequest>()
             .add_systems(Update, request_settings_save);
+        app.world_mut().spawn(SettingsSaveDebounce::default());
         app.world_mut()
             .resource_mut::<Messages<SettingsSaveRequest>>()
             .write(SettingsSaveRequest);
         app.update();
-        assert!(app.world().resource::<SettingsSaveDebounce>().due.is_some());
+        let due = app
+            .world_mut()
+            .query::<&SettingsSaveDebounce>()
+            .single(app.world())
+            .unwrap()
+            .due;
+        assert!(due.is_some());
     }
 
     #[test]
@@ -2501,11 +2511,11 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(base_settings())
-            .insert_resource(SettingsSaveDebounce {
-                due: Some(Instant::now() - Duration::from_secs(1)),
-            })
             .add_message::<SettingsWriteRequest>()
             .add_systems(Update, flush_settings_save);
+        app.world_mut().spawn(SettingsSaveDebounce {
+            due: Some(Instant::now() - Duration::from_secs(1)),
+        });
         app.update();
         let writes = app
             .world_mut()
@@ -2513,7 +2523,13 @@ mod tests {
             .drain()
             .count();
         assert_eq!(writes, 1);
-        assert!(app.world().resource::<SettingsSaveDebounce>().due.is_none());
+        let due = app
+            .world_mut()
+            .query::<&SettingsSaveDebounce>()
+            .single(app.world())
+            .unwrap()
+            .due;
+        assert!(due.is_none());
     }
 
     #[test]
@@ -2522,11 +2538,11 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(base_settings())
-            .insert_resource(SettingsSaveDebounce {
-                due: Some(Instant::now() + Duration::from_secs(60)),
-            })
             .add_message::<SettingsWriteRequest>()
             .add_systems(Update, flush_settings_save);
+        app.world_mut().spawn(SettingsSaveDebounce {
+            due: Some(Instant::now() + Duration::from_secs(60)),
+        });
         app.update();
         let writes = app
             .world_mut()
@@ -2534,7 +2550,13 @@ mod tests {
             .drain()
             .count();
         assert_eq!(writes, 0);
-        assert!(app.world().resource::<SettingsSaveDebounce>().due.is_some());
+        let due = app
+            .world_mut()
+            .query::<&SettingsSaveDebounce>()
+            .single(app.world())
+            .unwrap()
+            .due;
+        assert!(due.is_some());
     }
 
     #[test]

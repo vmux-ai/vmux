@@ -31,9 +31,10 @@ impl AgentPaneQuery<'_, '_> {
 fn search_knowledge(
     mut requests: MessageReader<AgentRequestInput>,
     agents: AgentPaneQuery,
-    index: Option<Res<KnowledgeIndex>>,
+    indexes: Query<&KnowledgeIndex>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
+    let index = indexes.single().ok();
     for request in requests.read() {
         let Ok(Some(command)) = request.decode::<AgentSearchKnowledge>() else {
             continue;
@@ -41,7 +42,7 @@ fn search_knowledge(
         let result = if agents.find(command.anchor).is_none() {
             AgentCommandResult::Error("agent pane not found".to_string())
         } else {
-            match index.as_deref() {
+            match index {
                 Some(index) if index.loaded() => {
                     let matches = index.search(&command.query, usize::from(command.limit));
                     if matches.is_empty() {
@@ -85,9 +86,10 @@ fn search_knowledge(
 fn read_knowledge(
     mut requests: MessageReader<AgentRequestInput>,
     agents: AgentPaneQuery,
-    index: Option<Res<KnowledgeIndex>>,
+    indexes: Query<&KnowledgeIndex>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
+    let index = indexes.single().ok();
     for request in requests.read() {
         let Ok(Some(command)) = request.decode::<AgentReadKnowledge>() else {
             continue;
@@ -95,7 +97,7 @@ fn read_knowledge(
         let result = if agents.find(command.anchor).is_none() {
             AgentCommandResult::Error("agent pane not found".to_string())
         } else {
-            match index.as_deref() {
+            match index {
                 Some(index) if index.loaded() => match index.note_by_query(&command.path) {
                     Some((note_path, title, text)) => {
                         let lines = text.lines().collect::<Vec<_>>();

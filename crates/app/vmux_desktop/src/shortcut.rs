@@ -33,7 +33,7 @@ impl Plugin for ShortcutPlugin {
 fn sync_keymap(
     settings: Option<Res<AppSettings>>,
     definitions: Query<Ref<vmux_command::CommandDefinition>>,
-    mut keymap: ResMut<Keymap>,
+    mut keymap: Single<&mut Keymap>,
 ) {
     let definitions_changed = definitions
         .iter()
@@ -73,12 +73,12 @@ fn sync_keymap(
         next.extend(Source::Settings, configured);
     }
 
-    *keymap = next;
+    **keymap = next;
 }
 
 fn process_key_input(
     keyboard: Res<ButtonInput<KeyCode>>,
-    bindings: Res<Keymap>,
+    bindings: Single<&Keymap>,
     mut pending_prefix: Local<Option<(KeyCombo, Instant)>>,
     mut invocations: MessageWriter<vmux_command::CommandInvocation>,
     user: Query<Entity, With<vmux_core::team::User>>,

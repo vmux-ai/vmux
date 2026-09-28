@@ -1,9 +1,8 @@
 use bevy::ecs::component::Component;
-use bevy::ecs::resource::Resource;
 use bevy::input::keyboard::KeyCode;
 use vmux_core::input::{ClaimedKey, KeyClaims, KeyModifiers};
 
-#[derive(Resource, Debug, Clone, Default)]
+#[derive(Component, Debug, Clone, Default)]
 pub struct Keymap {
     bindings: Vec<(Source, Binding)>,
     registered: std::collections::BTreeSet<String>,

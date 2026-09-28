@@ -343,8 +343,8 @@ mod tests {
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
-            .init_resource::<SpawnCounter>()
             .add_plugins(BesideOpenPlugin);
+        app.world_mut().spawn(SpawnCounter::default());
 
         let split = app
             .world_mut()
@@ -406,8 +406,8 @@ mod tests {
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
-            .init_resource::<SpawnCounter>()
             .add_plugins(BesideOpenPlugin);
+        app.world_mut().spawn(SpawnCounter::default());
 
         let pane = app.world_mut().spawn((Pane, LastActivatedAt::now())).id();
         app.world_mut()
@@ -500,8 +500,8 @@ mod tests {
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
-            .init_resource::<SpawnCounter>()
             .add_plugins(BesideOpenPlugin);
+        app.world_mut().spawn(SpawnCounter::default());
         app
     }
 
@@ -2720,8 +2720,8 @@ mod tests {
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
-            .init_resource::<SpawnCounter>()
             .add_plugins(BesideOpenPlugin);
+        app.world_mut().spawn(SpawnCounter::default());
         let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
         let anchor_pane = app
             .world_mut()
@@ -2754,8 +2754,8 @@ mod tests {
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
-            .init_resource::<SpawnCounter>()
             .add_plugins(BesideOpenPlugin);
+        app.world_mut().spawn(SpawnCounter::default());
         let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
         let anchor_pane = app
             .world_mut()
@@ -2791,8 +2791,8 @@ mod tests {
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
-            .init_resource::<SpawnCounter>()
             .add_plugins(BesideOpenPlugin);
+        app.world_mut().spawn(SpawnCounter::default());
         let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
         let anchor_pane = app
             .world_mut()

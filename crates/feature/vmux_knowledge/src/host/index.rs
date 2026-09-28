@@ -14,7 +14,6 @@ pub(super) struct KnowledgeIndexPlugin;
 impl Plugin for KnowledgeIndexPlugin {
     fn build(&self, app: &mut App) {
         app.insert_non_send(KnowledgeWatch::default())
-            .init_resource::<KnowledgeIndex>()
             .add_systems(Startup, initialize_knowledge_index)
             .add_systems(
                 Update,
@@ -33,7 +32,11 @@ fn initialize_knowledge_index(
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut watch: NonSendMut<KnowledgeWatch>,
 ) {
-    commands.spawn(KnowledgeIndexRuntime::default());
+    commands.spawn((
+        Name::new("Knowledge index"),
+        KnowledgeIndexRuntime::default(),
+        KnowledgeIndex::default(),
+    ));
     let vault = vault_dir();
     if let Err(error) = ensure_vault(&vault) {
         warn!("knowledge vault initialization failed: {error}");
@@ -147,7 +150,7 @@ struct KnowledgeIndexTask {
 fn finish_knowledge_index(
     mut tasks: Query<(Entity, &mut KnowledgeIndexTask)>,
     mut runtime: Single<&mut KnowledgeIndexRuntime>,
-    mut index: ResMut<KnowledgeIndex>,
+    mut index: Single<&mut KnowledgeIndex>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
@@ -160,7 +163,7 @@ fn finish_knowledge_index(
             continue;
         }
         match result {
-            Ok(next) => *index = next,
+            Ok(next) => **index = next,
             Err(error) => warn!("knowledge index refresh failed: {error}"),
         }
     }

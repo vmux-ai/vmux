@@ -11,13 +11,14 @@ impl Plugin for IdentityPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<PaneId>()
             .register_type::<SpawnSeq>()
-            .init_resource::<SpawnCounter>()
             .add_systems(Update, repair_stacks_parented_to_splits)
             .add_systems(Update, stamp_spawn_seq)
             .add_systems(Update, assign_pane_ids)
             .add_systems(
                 Startup,
-                reseed_spawn_counter.in_set(crate::LayoutStartupSet::Post),
+                (spawn_spawn_counter, reseed_spawn_counter)
+                    .chain()
+                    .in_set(crate::LayoutStartupSet::Post),
             );
     }
 }
@@ -34,8 +35,12 @@ pub struct PaneId(pub String);
 #[require(Save)]
 pub struct SpawnSeq(pub u64);
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub struct SpawnCounter(pub u64);
+
+fn spawn_spawn_counter(mut commands: Commands) {
+    commands.spawn((Name::new("Pane spawn counter"), SpawnCounter::default()));
+}
 
 fn assign_pane_ids(panes: Query<Entity, (With<Pane>, Without<PaneId>)>, mut commands: Commands) {
     for entity in &panes {
@@ -46,7 +51,7 @@ fn assign_pane_ids(panes: Query<Entity, (With<Pane>, Without<PaneId>)>, mut comm
 }
 
 fn stamp_spawn_seq(
-    mut counter: ResMut<SpawnCounter>,
+    mut counter: Single<&mut SpawnCounter>,
     new_panes: Query<Entity, (With<Pane>, Without<SpawnSeq>)>,
     mut commands: Commands,
 ) {
@@ -56,7 +61,7 @@ fn stamp_spawn_seq(
     }
 }
 
-fn reseed_spawn_counter(seqs: Query<&SpawnSeq>, mut counter: ResMut<SpawnCounter>) {
+fn reseed_spawn_counter(seqs: Query<&SpawnSeq>, mut counter: Single<&mut SpawnCounter>) {
     let max = seqs.iter().map(|seq| seq.0).max().unwrap_or(0);
     if counter.0 <= max {
         counter.0 = max + 1;
@@ -141,8 +146,8 @@ mod tests {
     fn stamp_spawn_seq_assigns_increasing_values_to_new_panes() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<SpawnCounter>()
             .add_systems(Update, stamp_spawn_seq);
+        app.world_mut().spawn(SpawnCounter::default());
 
         let a = app.world_mut().spawn(Pane).id();
         app.update();
@@ -158,14 +163,19 @@ mod tests {
     fn reseed_spawn_counter_exceeds_max_existing() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<SpawnCounter>()
             .add_systems(Update, reseed_spawn_counter);
 
+        app.world_mut().spawn(SpawnCounter::default());
         app.world_mut().spawn((Pane, SpawnSeq(7)));
         app.world_mut().spawn((Pane, SpawnSeq(3)));
         app.update();
 
-        assert_eq!(app.world().resource::<SpawnCounter>().0, 8);
+        let counter = app
+            .world_mut()
+            .query::<&SpawnCounter>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(counter.0, 8);
     }
 
     #[test]

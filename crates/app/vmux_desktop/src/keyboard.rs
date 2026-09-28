@@ -484,13 +484,13 @@ fn key_code_from_vk(vk: u16) -> Option<KeyCode> {
 
 fn install_monitor(
     keyboard: Single<&KeyboardBridge>,
-    keymap: Res<Keymap>,
+    keymap: Single<&Keymap>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
     let Some(proxy) = proxy else {
         return;
     };
-    keyboard.context.lock().keymap = Some(keymap.clone());
+    keyboard.context.lock().keymap = Some((*keymap).clone());
     let proxy = (**proxy).clone();
     keyboard.install(move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
@@ -499,7 +499,7 @@ fn install_monitor(
 
 fn sync_keyboard_context(
     keyboard: Single<&KeyboardBridge>,
-    keymap: Res<Keymap>,
+    keymap: Single<Ref<Keymap>>,
     browser: Query<&vmux_browser::KeyboardContext>,
     capture: Query<(), With<NativeKeyCapture>>,
     claims: Query<
@@ -514,7 +514,7 @@ fn sync_keyboard_context(
 ) {
     let mut context = keyboard.context.lock();
     if keymap.is_changed() || context.keymap.is_none() {
-        context.keymap = Some(keymap.clone());
+        context.keymap = Some((**keymap).clone());
     }
     context.capture_active = !capture.is_empty();
     context.consumed.clear();

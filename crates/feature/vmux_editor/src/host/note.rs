@@ -42,7 +42,7 @@ fn active_note_block(blocks: &[NoteBlock], line: u32) -> Option<u32> {
 
 fn send_note(
     mode: Single<&SharedFileViewMode>,
-    index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
+    indexes: Query<&vmux_core::knowledge::KnowledgeIndex>,
     notes: Query<(Entity, &FileView, &Editor, Option<&NoteRevealLine>), ReadyNote>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -50,6 +50,7 @@ fn send_note(
     if mode.0 != FileViewMode::Note {
         return;
     }
+    let index = indexes.single().ok();
     for (entity, file, edit, reveal) in &notes {
         if !crate::markdown::is_markdown_path(&file.path) {
             commands.entity(entity).insert(NoteSent);
@@ -101,11 +102,14 @@ fn send_note(
 }
 
 fn mark_notes_on_knowledge_change(
-    index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
+    indexes: Query<Ref<vmux_core::knowledge::KnowledgeIndex>>,
     files: Query<Entity, With<FileView>>,
     mut commands: Commands,
 ) {
-    if index.is_none_or(|index| !index.is_changed()) {
+    let Ok(index) = indexes.single() else {
+        return;
+    };
+    if !index.is_changed() {
         return;
     }
     for entity in &files {

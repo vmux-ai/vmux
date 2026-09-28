@@ -619,8 +619,8 @@ pub struct CommandRuntimePlugin;
 
 impl Plugin for CommandRuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::shortcut::Keymap>()
-            .add_message::<CommandInvocation>()
+        app.add_message::<CommandInvocation>()
+            .add_systems(Startup, spawn_keymap.before(RegisterCommandDefinitions))
             .configure_sets(
                 Update,
                 (
@@ -642,6 +642,13 @@ impl Plugin for CommandRuntimePlugin {
                     .in_set(DispatchCommandInvocations),
             );
     }
+}
+
+fn spawn_keymap(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Command keymap"),
+        crate::shortcut::Keymap::default(),
+    ));
 }
 
 fn validate_command_definitions(

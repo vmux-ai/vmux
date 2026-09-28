@@ -10,7 +10,7 @@ use crate::bookmark::{
     ReorderPinRequest, ShowBookmarkMenuRequest, ToggleFolderRequest, ToggleForUrlRequest,
     UnpinRequest,
 };
-use crate::pane::{OpenBesideRequest, SpawnCounter};
+use crate::pane::OpenBesideRequest;
 use crate::settings::{EffectiveStartupDir, EffectiveStartupUrl};
 use crate::stack::{CloseStackRequest, FocusedStack};
 use crate::worktree::TabDirectoryObserved;
@@ -27,7 +27,6 @@ impl Plugin for LayoutContractPlugin {
             .init_resource::<EffectiveStartupUrl>()
             .init_resource::<FocusedStack>()
             .add_message::<LauncherDismissRequest>()
-            .init_resource::<SpawnCounter>()
             .add_message::<ActivatePane>()
             .add_message::<AddRequest>()
             .add_message::<BrowserGoBackRequest>()

@@ -331,7 +331,7 @@ impl HostedPage for Shortcuts {
 fn send_shortcuts(
     trigger: On<UiInput<PageReady>>,
     mut views: Query<(&mut Shortcuts, Option<&KeyContext>)>,
-    keymap: Res<Keymap>,
+    keymap: Single<&Keymap>,
     definitions: Query<&CommandDefinition>,
     locale: Option<Res<ResolvedLocale>>,
 ) {
