@@ -148,7 +148,7 @@ const UNLISTED_DIRS: &[&str] = &[
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct SpaceProjects<'w, 's> {
     settings: Option<Res<'w, vmux_setting::AppSettings>>,
-    active_space: super::spaces::ActiveSpace<'w, 's>,
+    active_space: vmux_layout::space::FocusedSpace<'w, 's>,
     child_of: Query<'w, 's, &'static ChildOf>,
     spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
     space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,

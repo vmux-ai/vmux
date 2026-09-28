@@ -116,8 +116,7 @@ pub struct ToolOperationFinished;
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ToolOperationSucceeded(pub String);
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ToolStoreTarget(pub Entity);
+pub type ToolStoreTarget = vmux_core::EntityTarget<ToolStore>;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ToolOperationFailed(pub String);
@@ -318,7 +317,7 @@ brew "ripgrep"
                     provider: vmux_core::tool::ToolProvider::Npm,
                     value: package_json.to_string_lossy().into_owned(),
                 }),
-                ToolStoreTarget(store_entity),
+                ToolStoreTarget::new(store_entity),
             ))
             .id();
 
@@ -376,7 +375,7 @@ brew "ripgrep"
                     provider: vmux_core::tool::ToolProvider::Mcp,
                     value: String::new(),
                 }),
-                ToolStoreTarget(store_entity),
+                ToolStoreTarget::new(store_entity),
             ))
             .id();
 

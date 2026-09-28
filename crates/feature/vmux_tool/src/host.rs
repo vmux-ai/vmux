@@ -334,7 +334,7 @@ fn start_tool_operation(
     commands
         .entity(entity)
         .remove::<PendingToolOperation>()
-        .insert(ToolStoreTarget(store));
+        .insert(ToolStoreTarget::new(store));
 }
 
 fn request_tool_scan(
@@ -426,7 +426,7 @@ fn start_external_tool_operations(
                 .unwrap_or_default(),
             _ => String::new(),
         };
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),

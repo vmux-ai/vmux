@@ -12,7 +12,7 @@ type SpacesUiStateUpdates = vmux_core::host::UiState<vmux_api::space::SpacesUiSt
 
 pub use plugin::{SaveSpaceRequest, SpacePlugin};
 pub use project::{ExpandedProjectDirs, SpaceProjects};
-pub use spaces::{ActiveSpace, Spaces};
+pub use spaces::Spaces;
 pub use tool::SpaceToolPlugin;
 pub use vmux_api::space::{
     SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest, SpaceOpenPageRequest,

@@ -240,7 +240,7 @@ fn import_npm_manifest_system(
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),

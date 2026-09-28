@@ -187,7 +187,7 @@ fn parse_tool<T>(
     T: Component + serde::de::DeserializeOwned,
 {
     for (request, name, arguments, target) in &calls {
-        if !tools.contains(target.0) {
+        if !tools.contains(target.entity()) {
             continue;
         }
         match arguments.parse::<T>(name.as_str()) {
@@ -343,7 +343,7 @@ fn resolve_tool_invocations(
             commands.entity(request_entity).insert((
                 Name::new(name.as_str().to_string()),
                 ToolCall,
-                ToolTarget(tool_entity),
+                ToolTarget::new(tool_entity),
             ));
             matched = Some(());
             break;
@@ -453,8 +453,7 @@ pub struct ToolCall;
 
 pub type AddedTool<T> = (With<ToolCall>, Added<T>);
 
-#[derive(Clone, Copy, Component)]
-pub struct ToolTarget(pub Entity);
+type ToolTarget = vmux_core::EntityTarget<RegisteredTool>;
 
 type PendingCommandCalls<'w, 's> = Query<
     'w,

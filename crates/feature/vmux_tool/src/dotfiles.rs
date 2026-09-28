@@ -376,7 +376,7 @@ fn discover_dotfile_packages_system(
     mut commands: Commands,
 ) {
     for (entity, target) in &operations {
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),
@@ -420,7 +420,7 @@ fn plan_dotfile_package_system(
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),
@@ -466,7 +466,7 @@ fn import_dotfiles_system(
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),
@@ -508,7 +508,7 @@ fn import_available_dotfiles_system(
     mut commands: Commands,
 ) {
     for (entity, target) in &operations {
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),
@@ -563,7 +563,7 @@ fn link_dotfile_package_system(
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),
@@ -615,7 +615,7 @@ fn disable_dotfile_package_system(
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),
@@ -669,7 +669,7 @@ fn unlink_dotfile_package_system(
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),
@@ -710,7 +710,7 @@ fn apply_enabled_dotfiles_system(
     mut commands: Commands,
 ) {
     for (entity, target) in &operations {
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),
@@ -761,7 +761,7 @@ fn adopt_dotfile_system(
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),

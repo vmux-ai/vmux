@@ -4,61 +4,6 @@ use vmux_layout::native_open::HostedPage;
 use crate::event::SPACES_PAGE_URL;
 use crate::model::SpaceRecord;
 
-#[derive(bevy::ecs::system::SystemParam)]
-pub struct ActiveSpace<'w, 's> {
-    spaces: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static vmux_layout::space::SpaceId,
-            &'static Name,
-            &'static vmux_layout::profile::Profile,
-            Has<vmux_layout::space::CurrentSpace>,
-            Has<vmux_core::Active>,
-        ),
-        With<vmux_layout::space::Space>,
-    >,
-}
-
-impl ActiveSpace<'_, '_> {
-    fn selected(
-        &self,
-    ) -> Option<(
-        Entity,
-        &vmux_layout::space::SpaceId,
-        &Name,
-        &vmux_layout::profile::Profile,
-    )> {
-        self.spaces
-            .iter()
-            .find(|(_, _, _, _, current, _)| *current)
-            .or_else(|| self.spaces.iter().find(|(_, _, _, _, _, active)| *active))
-            .map(|(entity, id, name, profile, _, _)| (entity, id, name, profile))
-    }
-
-    pub fn entity(&self) -> Option<Entity> {
-        self.selected().map(|(entity, _, _, _)| entity)
-    }
-
-    pub fn id(&self) -> Option<&str> {
-        self.selected().map(|(_, id, _, _)| id.0.as_str())
-    }
-
-    pub fn profile(&self) -> Option<&str> {
-        self.selected()
-            .map(|(_, _, _, profile)| profile.name.as_str())
-    }
-
-    pub fn record(&self) -> Option<SpaceRecord> {
-        self.selected().map(|(_, id, name, profile)| SpaceRecord {
-            id: id.0.clone(),
-            name: name.to_string(),
-            profile: profile.name.clone(),
-        })
-    }
-}
-
 pub fn space_profile_bundle(record: &SpaceRecord) -> impl Bundle {
     (
         vmux_layout::space::Space,

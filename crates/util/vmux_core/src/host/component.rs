@@ -37,6 +37,33 @@ impl TryFrom<&vmux_api::json::JsonValue> for JsonArguments {
     }
 }
 
+#[derive(Component, Debug, PartialEq, Eq)]
+pub struct EntityTarget<T: Send + Sync + 'static> {
+    entity: Entity,
+    marker: std::marker::PhantomData<fn() -> T>,
+}
+
+impl<T: Send + Sync + 'static> EntityTarget<T> {
+    pub fn new(entity: Entity) -> Self {
+        Self {
+            entity,
+            marker: std::marker::PhantomData,
+        }
+    }
+
+    pub const fn entity(&self) -> Entity {
+        self.entity
+    }
+}
+
+impl<T: Send + Sync + 'static> Clone for EntityTarget<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: Send + Sync + 'static> Copy for EntityTarget<T> {}
+
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProcessAnchor(pub crate::ProcessId);
 

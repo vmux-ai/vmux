@@ -15,7 +15,7 @@ use crate::event::{
     SpaceCreateRequest, SpaceDeleteRequest, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow,
     SpacesListEvent, SpacesUiState,
 };
-use crate::spaces::{ActiveSpace, SpaceSelection, Spaces, SpacesPageSnapshot};
+use crate::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 
 #[vmux_native::page]
 pub struct SpacePlugin;
@@ -324,7 +324,7 @@ fn broadcast_spaces_to_views(
 
 fn on_project_activate(
     trigger: On<UiInput<ProjectActivateRequest>>,
-    active: ActiveSpace,
+    active: vmux_layout::space::FocusedSpace,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
 ) {
@@ -342,7 +342,7 @@ fn on_project_activate(
 
 fn on_project_forget(
     trigger: On<UiInput<ProjectForgetRequest>>,
-    active: ActiveSpace,
+    active: vmux_layout::space::FocusedSpace,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
 ) {

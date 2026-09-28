@@ -278,7 +278,7 @@ fn locate_mcp_configs(
     mut commands: Commands,
 ) {
     for (entity, target) in &operations {
-        let Ok(store) = stores.get(target.0) else {
+        let Ok(store) = stores.get(target.entity()) else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),
@@ -340,7 +340,7 @@ fn import_mcp_config_system(
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),
@@ -371,7 +371,7 @@ fn import_default_mcp_configs_system(
     mut commands: Commands,
 ) {
     for (entity, discovered, target) in &operations {
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),
@@ -416,7 +416,7 @@ fn import_mcp_server_system(
     mut commands: Commands,
 ) {
     for (entity, operation, discovered, target) in &operations {
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),
@@ -457,7 +457,7 @@ fn forget_mcp_server_system(
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.0).cloned() else {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert((
                 ToolOperationFinished,
                 ToolOperationFailed("tool store entity is unavailable".to_string()),
