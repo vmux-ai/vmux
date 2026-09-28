@@ -119,7 +119,7 @@ fn sync_keyboard_target(
     side_sheet_q: Query<(), With<SideSheet>>,
     modal_q: Query<(Entity, &Node, Has<KeyboardOwner>), With<WindowOverlay>>,
     layout_keyboard_q: Query<(Entity, &HostWindow), LayoutKeyboardHost>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     content_q: Query<(Entity, Has<KeyboardOwner>), With<Browser>>,
     mut commands: Commands,
 ) {
@@ -136,7 +136,7 @@ fn sync_keyboard_target(
 
     if layout_keyboard_q
         .iter()
-        .any(|(_, host)| Some(host.0) == focused_window.0)
+        .any(|(_, host)| Some(host.0) == focused_window.entity())
     {
         for (browser_e, has_kb) in &content_q {
             if has_kb {
@@ -452,7 +452,7 @@ pub(crate) fn sync_windowed_frames(
     queries: WindowFrameQueries,
     mut memory: Local<FrameSyncMemory>,
     mut last_windowed_pages: Local<Vec<Entity>>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     capturing: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     mut commands: Commands,
 ) {
@@ -609,7 +609,7 @@ pub(crate) fn sync_windowed_frames(
             [cover_rgb.red, cover_rgb.green, cover_rgb.blue],
         );
         if browser_ready {
-            if host_window == focused_window.0 {
+            if host_window == focused_window.entity() {
                 memory.visible_frames.push(frame);
             }
             let key = (
@@ -808,11 +808,11 @@ fn sync_windowed_layout(
     browsers: NonSend<Browsers>,
     layout_q: Query<(Entity, Option<&HostWindow>), (With<LayoutCef>, With<WebviewWindowed>)>,
     windows: Query<&Window>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
 ) {
     for (entity, host_window) in &layout_q {
-        let window_entity = host_window.map(|h| h.0).or(focused_window.0);
+        let window_entity = host_window.map(|h| h.0).or(focused_window.entity());
         let Some(window_entity) = window_entity else {
             continue;
         };
@@ -946,7 +946,7 @@ pub(crate) fn sync_windowed_command_bar(
     >,
     native_size_changed: Query<(), Changed<CommandBarNativeSize>>,
     windows: Query<&Window>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     mut was_open: Local<bool>,
 ) {
     let matched = modal_q.single();
@@ -982,7 +982,7 @@ pub(crate) fn sync_windowed_command_bar(
         publish_native_command_bar_route(owns_input, None, 1.0);
         return;
     }
-    let window_entity = host_window.map(|h| h.0).or(focused_window.0);
+    let window_entity = host_window.map(|h| h.0).or(focused_window.entity());
     let Some(window_entity) = window_entity else {
         publish_native_command_bar_route(owns_input, None, 1.0);
         if is_windowed {
@@ -1098,7 +1098,7 @@ pub(crate) fn sync_windowed_extension_popups(
         ),
     >,
     windows: Query<&Window>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     mut resized: MessageReader<WindowResized>,
     mut commands: Commands,
 ) {
@@ -1110,7 +1110,7 @@ pub(crate) fn sync_windowed_extension_popups(
         return;
     }
     for (entity, bounds, host_window, presented) in &popups {
-        let window_entity = host_window.map(|host| host.0).or(focused_window.0);
+        let window_entity = host_window.map(|host| host.0).or(focused_window.entity());
         let Some(window_entity) = window_entity else {
             continue;
         };
@@ -1188,7 +1188,7 @@ fn sync_cef_webview_resize_after_ui(
     webviews: Query<(Entity, &WebviewSize), (With<Browser>, Without<WindowOverlay>)>,
     host_window: Query<&HostWindow>,
     windows: Query<&Window>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut last_entries: Local<Vec<(u64, Vec2, f32)>>,
     mut window_resized: MessageReader<WindowResized>,
@@ -1210,7 +1210,7 @@ fn sync_cef_webview_resize_after_ui(
             .get(entity)
             .ok()
             .map(|h| h.0)
-            .or(focused_window.0);
+            .or(focused_window.entity());
         let device_scale_factor = window_entity
             .and_then(|e| windows.get(e).ok())
             .map(|w| w.resolution.scale_factor())
@@ -1271,7 +1271,7 @@ fn sync_osr_webview_focus(
     >,
     windows: Query<&Window>,
     host_windows: Query<&HostWindow>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     focus: vmux_layout::stack::FocusedStack,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children_q: Query<&Children, With<Pane>>,
@@ -1287,7 +1287,8 @@ fn sync_osr_webview_focus(
     let mut layout_shells = Vec::new();
     let mut modal_keyboard_target = None;
     let mut layout_keyboard_target = None;
-    let window = focused_window.0.and_then(|window| windows.get(window).ok());
+    let focused_window = focused_window.entity();
+    let window = focused_window.and_then(|window| windows.get(window).ok());
     let window_visible = window.is_some_and(|window| window.visible);
     let window_focused = window.is_some_and(|window| window.focused);
     for (
@@ -1308,10 +1309,10 @@ fn sync_osr_webview_focus(
         if !browsers.has_browser(entity) {
             continue;
         }
-        if focused_window.0.is_some()
+        if focused_window.is_some()
             && host_windows
                 .get(entity)
-                .is_ok_and(|host| Some(host.0) != focused_window.0)
+                .is_ok_and(|host| Some(host.0) != focused_window)
         {
             browsers.set_osr_hidden(&entity);
             continue;
@@ -1759,7 +1760,6 @@ mod tests {
     fn open_command_bar_is_exclusive_cef_keyboard_target() {
         let mut app = App::new();
         app.add_plugins(vmux_layout::LayoutContractPlugin)
-            .init_resource::<vmux_layout::window::FocusedWindow>()
             .add_systems(Update, sync_keyboard_target);
         let page = app.world_mut().spawn((Browser, KeyboardOwner)).id();
         let modal = app

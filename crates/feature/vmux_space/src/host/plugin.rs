@@ -33,7 +33,6 @@ impl Plugin for SpacePlugin {
             .add_plugins(super::SpaceToolPlugin)
             .add_plugins(vmux_layout::LayoutContractPlugin)
             .add_plugins(vmux_core::host::UiStatePlugin::<SpacesUiState>::default())
-            .init_resource::<vmux_layout::window::FocusedWindow>()
             .add_message::<SaveSpaceRequest>()
             .add_message::<SpaceAttachRequest>()
             .add_message::<SpaceCreateRequest>()
@@ -599,7 +598,7 @@ fn on_space_open_page(
     trigger: On<UiInput<SpaceOpenPageRequest>>,
     mains: Query<Entity, With<vmux_layout::window::Main>>,
     host_windows: Query<&HostWindow>,
-    focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
+    focused_window: vmux_layout::window::FocusedWindow,
     focus: vmux_layout::stack::FocusedStack,
     mut spawn_requests: Option<MessageWriter<PageOpenRequest>>,
     stacks: Query<(Entity, &PageMetadata), With<Stack>>,
@@ -610,7 +609,7 @@ fn on_space_open_page(
         .get(trigger.event().webview)
         .ok()
         .map(|host| host.0)
-        .or_else(|| focused_window.as_deref().and_then(|focused| focused.0));
+        .or_else(|| focused_window.entity());
     let Some(window) = window else { return };
     let Some(_) = main_for_window(window, &mains, &child_of, &host_windows) else {
         return;
@@ -650,7 +649,7 @@ fn on_space_delete(
     tabs: SpaceTabQuery,
     mains: Query<Entity, With<vmux_layout::window::Main>>,
     host_windows: Query<&HostWindow>,
-    focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
+    focused_window: vmux_layout::window::FocusedWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     child_of: Query<&ChildOf>,
     settings: Option<Res<vmux_setting::AppSettings>>,
@@ -660,7 +659,7 @@ fn on_space_delete(
         .get(trigger.event().webview)
         .ok()
         .map(|host| host.0)
-        .or_else(|| focused_window.as_deref().and_then(|focused| focused.0));
+        .or_else(|| focused_window.entity());
     let Some(window) = window else { return };
     let Some(_) = main_for_window(window, &mains, &child_of, &host_windows) else {
         return;
@@ -722,7 +721,7 @@ fn on_space_attach(
     tabs: SpaceTabQuery,
     mains: Query<Entity, With<vmux_layout::window::Main>>,
     host_windows: Query<&HostWindow>,
-    focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
+    focused_window: vmux_layout::window::FocusedWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     child_of: Query<&ChildOf>,
     settings: Option<Res<vmux_setting::AppSettings>>,
@@ -732,7 +731,7 @@ fn on_space_attach(
         .get(trigger.event().webview)
         .ok()
         .map(|host| host.0)
-        .or_else(|| focused_window.as_deref().and_then(|focused| focused.0));
+        .or_else(|| focused_window.entity());
     let Some(window) = window else { return };
     let Some(main) = main_for_window(window, &mains, &child_of, &host_windows) else {
         return;
@@ -766,7 +765,7 @@ fn on_space_create(
     spaces: SpaceQuery,
     mains: Query<Entity, With<vmux_layout::window::Main>>,
     host_windows: Query<&HostWindow>,
-    focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
+    focused_window: vmux_layout::window::FocusedWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     child_of: Query<&ChildOf>,
     settings: Option<Res<vmux_setting::AppSettings>>,
@@ -776,7 +775,7 @@ fn on_space_create(
         .get(trigger.event().webview)
         .ok()
         .map(|host| host.0)
-        .or_else(|| focused_window.as_deref().and_then(|focused| focused.0));
+        .or_else(|| focused_window.entity());
     let Some(window) = window else { return };
     let Some(main) = main_for_window(window, &mains, &child_of, &host_windows) else {
         return;
@@ -838,14 +837,14 @@ fn handle_open_in_new_space(
     mains: Query<Entity, With<vmux_layout::window::Main>>,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     settings: Option<Res<vmux_setting::AppSettings>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        let Some(window) = focused_window.0 else {
+        let Some(window) = focused_window.entity() else {
             continue;
         };
         let Some(main) = main_for_window(window, &mains, &child_of, &host_windows) else {
@@ -1074,7 +1073,9 @@ mod tests {
             .add_observer(on_space_attach);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
-        app.insert_resource(vmux_layout::window::FocusedWindow(Some(second_window)));
+        app.world_mut()
+            .entity_mut(second_window)
+            .insert(vmux_core::Active);
         let first_root = app.world_mut().spawn(HostWindow(first_window)).id();
         let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
         let first_column = app.world_mut().spawn(ChildOf(first_root)).id();
@@ -1154,7 +1155,9 @@ mod tests {
             .add_observer(on_space_delete);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
-        app.insert_resource(vmux_layout::window::FocusedWindow(Some(second_window)));
+        app.world_mut()
+            .entity_mut(second_window)
+            .insert(vmux_core::Active);
         let first_root = app.world_mut().spawn(HostWindow(first_window)).id();
         let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
         let first_main = app

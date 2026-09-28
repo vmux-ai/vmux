@@ -526,7 +526,7 @@ fn handle_reopen_closed_page(
     any_space: Query<Entity, With<Space>>,
     layout: ReopenLayout,
     current_space: Query<Entity, With<CurrentSpace>>,
-    focused_window: Option<Res<crate::window::FocusedWindow>>,
+    focused_window: crate::window::FocusedWindow,
     settings: Res<LayoutSettings>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     mut commands: Commands,
@@ -547,7 +547,7 @@ fn handle_reopen_closed_page(
         return;
     };
 
-    let focused_window = focused_window.as_deref().and_then(|focused| focused.0);
+    let focused_window = focused_window.entity();
     let origin_space = spaces
         .iter()
         .filter(|(_, id)| id.0 == page.space_id)
@@ -2093,7 +2093,9 @@ mod tests {
             .single(app.world())
             .unwrap();
         let secondary_window = app.world_mut().spawn(Window::default()).id();
-        app.insert_resource(crate::window::FocusedWindow(Some(secondary_window)));
+        app.world_mut()
+            .entity_mut(secondary_window)
+            .insert(vmux_core::Active);
         let primary_root = app.world_mut().spawn(HostWindow(primary_window)).id();
         let secondary_root = app.world_mut().spawn(HostWindow(secondary_window)).id();
         let primary_space = app

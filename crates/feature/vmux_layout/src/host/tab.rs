@@ -36,7 +36,6 @@ impl Plugin for TabPlugin {
         .register_type::<TabWorkspace>()
         .register_type::<TabWorktree>()
         .register_type::<TabDirDecided>()
-        .init_resource::<crate::window::FocusedWindow>()
         .add_message::<CloseTabRequest>()
         .add_message::<crate::NewTabRequest>()
         .add_message::<vmux_core::launcher::LauncherDismissRequest>()
@@ -309,13 +308,13 @@ pub fn tab_bundle() -> impl Bundle {
 fn handle_open_requests(
     mut requests: MessageReader<OpenRequest>,
     tabs: Query<Entity, With<Tab>>,
-    focused_window: Res<crate::window::FocusedWindow>,
+    focused_window: crate::window::FocusedWindow,
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
     for request in requests.read() {
-        let Some(window) = focused_window.0 else {
+        let Some(window) = focused_window.entity() else {
             continue;
         };
         let Some((space, startup_dir)) = effective_startup_dir
@@ -356,12 +355,12 @@ fn handle_open_requests(
 fn handle_create_requests(
     mut requests: MessageReader<CreateRequest>,
     tabs: Query<Entity, With<Tab>>,
-    focused_window: Res<crate::window::FocusedWindow>,
+    focused_window: crate::window::FocusedWindow,
     effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
     for _ in requests.read() {
-        let Some(window) = focused_window.0 else {
+        let Some(window) = focused_window.entity() else {
             continue;
         };
         let Some((space, startup_dir)) = effective_startup_dir
@@ -480,12 +479,12 @@ fn handle_move_requests(
 fn handle_new_tab_requests(
     mut requests: MessageReader<crate::NewTabRequest>,
     tabs: Query<Entity, With<Tab>>,
-    focused_window: Res<crate::window::FocusedWindow>,
+    focused_window: crate::window::FocusedWindow,
     effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
     for request in requests.read() {
-        let Some(window) = focused_window.0 else {
+        let Some(window) = focused_window.entity() else {
             continue;
         };
         let Some((space, startup_dir)) = effective_startup_dir
@@ -960,7 +959,6 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<crate::LauncherDismissRequest>()
-            .init_resource::<crate::window::FocusedWindow>()
             .insert_resource(test_settings())
             .init_resource::<CollectedSpawns>()
             .add_systems(
@@ -981,8 +979,8 @@ mod tests {
     }
 
     fn build_main_and_tab(app: &mut App) -> Entity {
-        let window = app.world_mut().spawn(PrimaryWindow).id();
-        app.insert_resource(crate::window::FocusedWindow(Some(window)));
+        app.world_mut()
+            .spawn((Window::default(), PrimaryWindow, vmux_core::Active));
         let main = app.world_mut().spawn(MainNode).id();
         let space = app
             .world_mut()
@@ -1000,7 +998,6 @@ mod tests {
             LastActivatedAt::now(),
             ChildOf(space),
         ));
-        let _ = window;
         main
     }
 
@@ -1388,8 +1385,8 @@ mod tests {
                     .chain(),
             );
 
-        let window = app.world_mut().spawn(PrimaryWindow).id();
-        app.insert_resource(crate::window::FocusedWindow(Some(window)));
+        app.world_mut()
+            .spawn((Window::default(), PrimaryWindow, vmux_core::Active));
         let main = app.world_mut().spawn(MainNode).id();
         let space = app
             .world_mut()
@@ -1445,8 +1442,8 @@ mod tests {
             .add_observer(on_tab_close_request);
 
         let webview = app.world_mut().spawn_empty().id();
-        let window = app.world_mut().spawn(PrimaryWindow).id();
-        app.insert_resource(crate::window::FocusedWindow(Some(window)));
+        app.world_mut()
+            .spawn((Window::default(), PrimaryWindow, vmux_core::Active));
         let main = app.world_mut().spawn(MainNode).id();
         let space = app
             .world_mut()
@@ -1506,8 +1503,8 @@ mod tests {
         .add_message::<crate::TabLayoutSpawnRequest>()
         .add_message::<PageOpenRequest>();
 
-        let window = app.world_mut().spawn(PrimaryWindow).id();
-        app.insert_resource(crate::window::FocusedWindow(Some(window)));
+        app.world_mut()
+            .spawn((Window::default(), PrimaryWindow, vmux_core::Active));
         let main = app.world_mut().spawn(MainNode).id();
         let space = app
             .world_mut()

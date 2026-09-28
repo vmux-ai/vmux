@@ -35,7 +35,7 @@ use vmux_flex::prelude::*;
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct FocusedLayout<'w, 's> {
-    focused: Res<'w, vmux_layout::window::FocusedWindow>,
+    focused: vmux_layout::window::FocusedWindow<'w, 's>,
     layouts: Query<'w, 's, (Entity, Ref<'static, PageReady>), With<LayoutCef>>,
     host_windows: Query<'w, 's, &'static HostWindow>,
 }
@@ -44,7 +44,7 @@ impl FocusedLayout<'_, '_> {
     fn get(&self) -> Option<(Entity, bool)> {
         let entity = self
             .focused
-            .0
+            .entity()
             .and_then(|window| {
                 self.layouts.iter().find_map(|(entity, _)| {
                     self.host_windows
@@ -360,7 +360,7 @@ impl PageStateRemovals<'_, '_> {
 fn mark_page_state_dirty(
     changes: StateChanges,
     mut removals: PageStateRemovals,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     focused_stack: vmux_layout::stack::FocusedStack,
     settings: Res<AppSettings>,
     repo_info: Option<Single<Ref<vmux_git::RepoInfoCache>>>,

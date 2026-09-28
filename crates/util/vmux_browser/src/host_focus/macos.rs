@@ -13,7 +13,7 @@ impl Plugin for HostFocusPlatformPlugin {
 fn apply_winit_host_focus(
     _non_send: NonSendMarker,
     intent: Single<&HostFocusIntent>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut pending_key_window: Local<bool>,
 ) {
@@ -21,7 +21,7 @@ fn apply_winit_host_focus(
         *pending_key_window = false;
         return;
     }
-    let Some(window_entity) = focused_window.0 else {
+    let Some(window_entity) = focused_window.entity() else {
         return;
     };
     if should_release_keys(

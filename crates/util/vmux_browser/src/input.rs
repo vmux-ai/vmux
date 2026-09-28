@@ -54,12 +54,12 @@ fn log_command_bar_keyboard_input(
 
 fn publish_layout_pointer_inside(
     windows: Query<&Window>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     layout_q: Query<(Entity, &HostWindow), With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
 ) {
-    let Some(window_entity) = focused_window.0 else {
+    let Some(window_entity) = focused_window.entity() else {
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         return;
     };

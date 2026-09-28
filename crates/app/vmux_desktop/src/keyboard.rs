@@ -108,7 +108,7 @@ fn spawn_application_key_bindings(mut commands: Commands) {
 
 fn sync_application_key_bindings(
     browser: Query<&vmux_browser::KeyboardContext>,
-    focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
+    focused_window: vmux_layout::window::FocusedWindow,
     fullscreen: Query<&crate::window_state::WindowFullscreen>,
     bindings: Query<(Entity, Has<vmux_core::Active>), With<ExitFullscreenKey>>,
     mut commands: Commands,
@@ -118,8 +118,7 @@ fn sync_application_key_bindings(
         .ok()
         .is_some_and(|context| context.page_owns_escape);
     let enabled = focused_window
-        .as_deref()
-        .and_then(|focused_window| focused_window.0)
+        .entity()
         .and_then(|window| fullscreen.get(window).ok())
         .is_some_and(|fullscreen| fullscreen.0)
         && !page_owns_escape;
@@ -671,7 +670,7 @@ mod tests {
             .world_mut()
             .spawn(crate::window_state::WindowFullscreen(true))
             .id();
-        app.insert_resource(vmux_layout::window::FocusedWindow(Some(window)));
+        app.world_mut().entity_mut(window).insert(vmux_core::Active);
         app.update();
         let mut claims = app.world_mut().query_filtered::<
             (Entity, &NativeKey),

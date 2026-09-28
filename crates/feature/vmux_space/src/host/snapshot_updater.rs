@@ -28,7 +28,7 @@ fn update_spaces_snapshot(
         ),
         With<Space>,
     >,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     mut state: Single<&mut CommandBarProjection>,
@@ -39,7 +39,7 @@ fn update_spaces_snapshot(
     let mut active_space_name = String::new();
     for (entity, id, name, is_active, order) in &spaces {
         let local = vmux_layout::window::host_window_of(entity, &child_of, &host_windows)
-            == focused_window.0;
+            == focused_window.entity();
         if local && is_active {
             active_space_id.clone_from(&id.0);
             active_space_name = name.to_string();
@@ -85,8 +85,10 @@ mod tests {
             let mut app = App::new();
             app.add_systems(Update, update_spaces_snapshot);
             app.world_mut().spawn(CommandBarProjection::default());
-            let window = app.world_mut().spawn_empty().id();
-            app.insert_resource(vmux_layout::window::FocusedWindow(Some(window)));
+            let window = app
+                .world_mut()
+                .spawn((Window::default(), vmux_core::Active))
+                .id();
             let root = app.world_mut().spawn(HostWindow(window)).id();
             let main = app.world_mut().spawn(ChildOf(root)).id();
             app.world_mut().spawn((
@@ -169,9 +171,11 @@ mod tests {
         let mut app = App::new();
         app.add_systems(Update, update_spaces_snapshot);
         app.world_mut().spawn(CommandBarProjection::default());
-        let first_window = app.world_mut().spawn_empty().id();
-        let second_window = app.world_mut().spawn_empty().id();
-        app.insert_resource(vmux_layout::window::FocusedWindow(Some(first_window)));
+        let first_window = app
+            .world_mut()
+            .spawn((Window::default(), vmux_core::Active))
+            .id();
+        let second_window = app.world_mut().spawn(Window::default()).id();
         for (window, id) in [(first_window, "first"), (second_window, "second")] {
             let root = app.world_mut().spawn(HostWindow(window)).id();
             let main = app.world_mut().spawn(ChildOf(root)).id();
@@ -198,8 +202,11 @@ mod tests {
         assert_eq!(snapshot.spaces[1].id, "second");
 
         app.world_mut()
-            .resource_mut::<vmux_layout::window::FocusedWindow>()
-            .0 = Some(second_window);
+            .entity_mut(first_window)
+            .remove::<vmux_core::Active>();
+        app.world_mut()
+            .entity_mut(second_window)
+            .insert(vmux_core::Active);
         app.update();
 
         let snapshot = app

@@ -67,24 +67,28 @@ impl TryFrom<&vmux_command::CommandInvocation> for CloseFocusedWindowRequest {
 
 fn open_windows(
     mut reader: MessageReader<NewWindowRequest>,
-    mut focused: ResMut<FocusedWindow>,
+    focused: FocusedWindow,
     mut commands: Commands,
 ) {
     for _ in reader.read() {
-        let window = commands
-            .spawn((crate::window_config(true), NewWindowWorkspace))
-            .id();
-        focused.0 = Some(window);
+        if let Some(window) = focused.entity() {
+            commands.entity(window).remove::<vmux_core::Active>();
+        }
+        commands.spawn((
+            crate::window_config(true),
+            NewWindowWorkspace,
+            vmux_core::Active,
+        ));
     }
 }
 
 fn close_focused_windows(
     mut reader: MessageReader<CloseFocusedWindowRequest>,
-    focused: Res<FocusedWindow>,
+    focused: FocusedWindow,
     mut close: MessageWriter<CloseVmuxWindow>,
 ) {
     for _ in reader.read() {
-        if let Some(window) = focused.0 {
+        if let Some(window) = focused.entity() {
             close.write(CloseVmuxWindow(window));
         }
     }
@@ -134,7 +138,6 @@ mod tests {
         let mut app = App::new();
         app.add_message::<NewWindowRequest>()
             .add_message::<CloseVmuxWindow>()
-            .init_resource::<FocusedWindow>()
             .add_systems(Update, open_windows);
         app.world_mut()
             .resource_mut::<Messages<NewWindowRequest>>()
@@ -148,7 +151,11 @@ mod tests {
             .iter(app.world())
             .collect();
         assert_eq!(windows.len(), 1);
-        assert_eq!(app.world().resource::<FocusedWindow>().0, Some(windows[0]));
+        assert!(
+            app.world()
+                .entity(windows[0])
+                .contains::<vmux_core::Active>()
+        );
     }
 
     #[test]

@@ -62,7 +62,7 @@ fn keep_asset_replies_moving(
 #[cfg(target_os = "macos")]
 fn refresh_layout_cef_hover(
     windows: Query<&Window>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     suppress: Res<CefSuppressPointerInput>,
     layout_q: Query<(Entity, &HostWindow), With<LayoutCef>>,
 ) {
@@ -70,7 +70,7 @@ fn refresh_layout_cef_hover(
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         return;
     }
-    let Some(window_entity) = focused_window.0 else {
+    let Some(window_entity) = focused_window.entity() else {
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         return;
     };
@@ -93,14 +93,14 @@ fn refresh_layout_cef_hover(
     browsers: NonSend<Browsers>,
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     suppress: Res<CefSuppressPointerInput>,
     layout_q: Query<(Entity, &HostWindow), With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
     mut state: Local<LayoutHoverRefreshState>,
 ) {
-    let Some(window_entity) = focused_window.0 else {
+    let Some(window_entity) = focused_window.entity() else {
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         *state = LayoutHoverRefreshState::default();
         return;
@@ -159,7 +159,7 @@ fn refresh_active_windowed_hover(
     browsers: NonSend<Browsers>,
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     overlay_q: OverlayStateQuery,
     active_q: Query<
         (Entity, &Transform, &ComputedNode, Option<&HostWindow>),
@@ -191,7 +191,7 @@ fn refresh_active_windowed_hover(
         *state = WindowedHoverRefreshState::default();
         return;
     }
-    let Some(window_entity) = host_window.map(|host| host.0).or(focused_window.0) else {
+    let Some(window_entity) = host_window.map(|host| host.0).or(focused_window.entity()) else {
         *state = WindowedHoverRefreshState::default();
         return;
     };
@@ -305,7 +305,7 @@ fn sync_layout_cef_frame_rate(
         ),
         With<LayoutCef>,
     >,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
 ) {
     let inside = NativeLayout::pointer_is_inside();
     let pointer = vmux_layout::native_pointer::snapshot();
@@ -319,7 +319,7 @@ fn sync_layout_cef_frame_rate(
     });
     let any_pressed = native_dragging || buttons.get_pressed().next().is_some();
     for (host, mut cap, mut state, owns_keyboard) in &mut layout_q {
-        let focused = Some(host.0) == focused_window.0;
+        let focused = Some(host.0) == focused_window.entity();
         let native_changed = focused
             && pointer.is_some_and(|pointer| {
                 if pointer.sequence == state.native_sequence {

@@ -35,7 +35,6 @@ mod macos {
 
     pub(super) fn build(app: &mut App) {
         app.add_plugins(vmux_layout::LayoutContractPlugin)
-            .init_resource::<vmux_layout::window::FocusedWindow>()
             .add_message::<NewFolderInputRequest>()
             .add_message::<RenameInputRequest>()
             .add_systems(Startup, spawn_bookmark_menu_input_revision)
@@ -93,7 +92,7 @@ mod macos {
     fn show_bookmark_menu(
         _non_send: NonSendMarker,
         mut reader: MessageReader<ShowBookmarkMenuRequest>,
-        focused: Res<vmux_layout::window::FocusedWindow>,
+        focused: vmux_layout::window::FocusedWindow,
         entries: Query<(
             Entity,
             &Uuid,
@@ -116,7 +115,7 @@ mod macos {
             return;
         };
 
-        let Some(window_entity) = focused.0 else {
+        let Some(window_entity) = focused.entity() else {
             return;
         };
         let view_ptr = WINIT_WINDOWS.with_borrow(|windows| {

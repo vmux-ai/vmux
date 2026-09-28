@@ -79,7 +79,7 @@ fn start_screenshots(
     mut reader: MessageReader<ScreenshotRequest>,
     bridge: Query<&ScreenshotBridge>,
     settings: Res<AppSettings>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     window_q: Query<(Entity, &Window)>,
     host_windows: Query<&HostWindow>,
     node_q: Query<&ComputedNode>,
@@ -95,7 +95,7 @@ fn start_screenshots(
             let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
             vmux_layout::window::host_window_of(Entity::from_bits(bits), &child_of_q, &host_windows)
         });
-        let Some(window_entity) = pane_window.or(focused_window.0) else {
+        let Some(window_entity) = pane_window.or(focused_window.entity()) else {
             let _ = bridge
                 .tx
                 .send(err_response(req.request_id, "no focused vmux window"));

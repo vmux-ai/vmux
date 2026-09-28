@@ -265,7 +265,7 @@ fn resized_pair(pane_grow: f32, sibling_grow: f32, delta: f32, parent_length: f3
 
 fn resize_from_pointer(
     windows: Query<&Window>,
-    focused_window: Res<crate::window::FocusedWindow>,
+    focused_window: crate::window::FocusedWindow,
     splits: Query<(Entity, &PaneSplit, &Children), Without<PaneDrag>>,
     active_drags: Query<(Entity, &PaneDrag, &PaneSplit)>,
     child_layouts: Query<&ComputedNode>,
@@ -275,7 +275,7 @@ fn resize_from_pointer(
     mouse: Res<ButtonInput<MouseButton>>,
     mut commands: Commands,
 ) {
-    let Some(window_entity) = focused_window.0 else {
+    let Some(window_entity) = focused_window.entity() else {
         return;
     };
     let Ok(window) = windows.get(window_entity) else {

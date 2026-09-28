@@ -313,13 +313,13 @@ fn render_native_pages(hosted: Option<NonSend<HostedPages>>) {
 fn focus_native_page(
     hosted: Option<NonSend<HostedPages>>,
     intent: Single<&crate::host_focus::HostFocusIntent>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
 ) {
     let Some(hosted) = hosted else {
         return;
     };
     let wanted = match **intent {
-        crate::host_focus::HostFocusIntent::LayoutView => hosted.layout(focused_window.0),
+        crate::host_focus::HostFocusIntent::LayoutView => hosted.layout(focused_window.entity()),
         crate::host_focus::HostFocusIntent::NativePane(page) => Some(page),
         _ => return,
     };

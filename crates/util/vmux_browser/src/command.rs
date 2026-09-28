@@ -457,10 +457,10 @@ fn on_reload_notify_header(
         (Entity, &HostWindow, &mut ReloadRevision),
         (With<LayoutCef>, With<PageReady>),
     >,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     mut commands: Commands,
 ) {
-    let Some((cef_e, mut revision)) = focused_window.0.and_then(|window| {
+    let Some((cef_e, mut revision)) = focused_window.entity().and_then(|window| {
         layouts
             .iter_mut()
             .find_map(|(entity, host, revision)| (host.0 == window).then_some((entity, revision)))
@@ -477,10 +477,10 @@ fn on_hard_reload_notify_header(
         (Entity, &HostWindow, &mut ReloadRevision),
         (With<LayoutCef>, With<PageReady>),
     >,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     mut commands: Commands,
 ) {
-    let Some((cef_e, mut revision)) = focused_window.0.and_then(|window| {
+    let Some((cef_e, mut revision)) = focused_window.entity().and_then(|window| {
         layouts
             .iter_mut()
             .find_map(|(entity, host, revision)| (host.0 == window).then_some((entity, revision)))

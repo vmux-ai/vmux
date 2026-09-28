@@ -308,13 +308,13 @@ fn ensure_window_active_after_reveal(
 
 fn handle_toggle_fullscreen_command(
     state: NonSend<GlassState>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     mut reader: MessageReader<ToggleFullscreenRequest>,
 ) {
     let toggle = reader.read().next().is_some();
     if toggle
         && let Some(parent_window) = focused_window
-            .0
+            .entity()
             .and_then(|window| state.0.get(&window))
             .and_then(|glass| glass._parent_window.as_ref())
     {
@@ -330,7 +330,7 @@ fn sync_window_glass_visibility(
         &mut bevy::window::Window,
         &mut crate::window_state::WindowFullscreen,
     )>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     mut exit_fullscreen: MessageReader<crate::keyboard::ExitFullscreenRequest>,
 ) {
     use objc2::ClassType;
@@ -353,7 +353,7 @@ fn sync_window_glass_visibility(
             .as_ref()
             .is_some_and(|window| window.styleMask().contains(NSWindowStyleMask::FullScreen));
         let fullscreen = bevy_fullscreen || native_fullscreen;
-        if focused_window.0 == Some(entity) {
+        if focused_window.entity() == Some(entity) {
             focused_fullscreen = fullscreen;
             if exit_fullscreen {
                 if native_fullscreen {
@@ -375,8 +375,11 @@ fn sync_window_glass_visibility(
         {
             let backdrop_window: &objc2_app_kit::NSWindow = backdrop_window.as_super();
             backdrop_window.setFrame_display(parent_window.frame(), false);
-            let shadowed =
-                focus_shadow_visible(focused_window.0 == Some(entity), window.visible, fullscreen);
+            let shadowed = focus_shadow_visible(
+                focused_window.entity() == Some(entity),
+                window.visible,
+                fullscreen,
+            );
             if glass.shadowed != shadowed {
                 backdrop_window.setHasShadow(shadowed);
                 backdrop_window.invalidateShadow();

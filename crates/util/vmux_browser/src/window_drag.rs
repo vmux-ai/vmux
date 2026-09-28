@@ -138,7 +138,7 @@ fn publish_window_drag_region(
     window_q: Query<(Entity, &ComputedNode), With<VmuxWindow>>,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     overlay_q: OverlayStateQuery,
     pointer_capture_q: Query<(Entity, &HostWindow), (With<LayoutCef>, LayoutPointerCapture)>,
     mut last: Local<(Vec<WindowDragRegion>, Vec<WindowDragRegion>)>,
@@ -146,18 +146,18 @@ fn publish_window_drag_region(
     let overlay_owns_input = OverlayState::from_query(&overlay_q).owns_input()
         || pointer_capture_q
             .iter()
-            .any(|(_, host)| Some(host.0) == focused_window.0);
+            .any(|(_, host)| Some(host.0) == focused_window.entity());
     let mut regions = PublishedWindowDragRegions::default();
     if !overlay_owns_input {
         for (entity, viewport) in window_q.iter() {
             if vmux_layout::window::host_window_of(entity, &child_of, &host_windows)
-                != focused_window.0
+                != focused_window.entity()
             {
                 continue;
             }
             for (webview, reported) in &reported {
                 if vmux_layout::window::host_window_of(webview, &child_of, &host_windows)
-                    != focused_window.0
+                    != focused_window.entity()
                 {
                     continue;
                 }

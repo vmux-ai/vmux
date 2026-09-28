@@ -8,7 +8,9 @@ use crate::{
     tab::{Tab, tab_bundle},
     unit::WindowExt,
 };
-use bevy::{asset::Asset, prelude::*, window::PrimaryWindow, winit::WINIT_WINDOWS};
+use bevy::{
+    asset::Asset, ecs::system::SystemParam, prelude::*, window::PrimaryWindow, winit::WINIT_WINDOWS,
+};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_core::page::PageEmbedSet;
@@ -26,7 +28,6 @@ impl Plugin for WindowLayoutPlugin {
             .register_type::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
-            .init_resource::<FocusedWindow>()
             .add_systems(
                 Startup,
                 setup_window_shells
@@ -56,8 +57,13 @@ impl Plugin for WindowLayoutPlugin {
             )
             .add_systems(
                 Update,
+                (sync_focused_window, bevy::ecs::schedule::ApplyDeferred)
+                    .chain()
+                    .in_set(WindowFocusSet),
+            )
+            .add_systems(
+                Update,
                 (
-                    sync_focused_window.in_set(WindowFocusSet),
                     setup_window_shells,
                     bevy::ecs::schedule::ApplyDeferred,
                     crate::stack::open_startup_url_if_no_stacks.before(PageOpenSet::ResolveTarget),
@@ -65,7 +71,8 @@ impl Plugin for WindowLayoutPlugin {
                         .after(LayoutRequestSet::Handle)
                         .before(PageOpenSet::ResolveTarget),
                 )
-                    .chain(),
+                    .chain()
+                    .after(WindowFocusSet),
             )
             .add_systems(
                 Update,
@@ -77,8 +84,20 @@ impl Plugin for WindowLayoutPlugin {
     }
 }
 
-#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FocusedWindow(pub Option<Entity>);
+#[derive(SystemParam)]
+pub struct FocusedWindow<'w, 's> {
+    windows: Query<'w, 's, (Entity, Ref<'static, vmux_core::Active>), With<Window>>,
+}
+
+impl FocusedWindow<'_, '_> {
+    pub fn entity(&self) -> Option<Entity> {
+        self.windows.iter().next().map(|(entity, _)| entity)
+    }
+
+    pub fn is_changed(&self) -> bool {
+        self.windows.iter().any(|(_, active)| active.is_changed())
+    }
+}
 
 #[derive(Message)]
 struct MinimizeWindowRequest;
@@ -146,10 +165,10 @@ impl Default for WindowBackground {
 
 fn minimize_focused_window(
     mut reader: MessageReader<MinimizeWindowRequest>,
-    focused_window: Res<FocusedWindow>,
+    focused_window: FocusedWindow,
 ) {
     for _ in reader.read() {
-        let Some(entity) = focused_window.0 else {
+        let Some(entity) = focused_window.entity() else {
             continue;
         };
         WINIT_WINDOWS.with_borrow(|winit_windows| {
@@ -193,32 +212,34 @@ pub struct WindowGeometry {
 }
 
 fn sync_focused_window(
-    windows: Query<(Entity, &Window, Has<PrimaryWindow>)>,
-    mut focused: ResMut<FocusedWindow>,
+    windows: Query<(Entity, &Window, Has<PrimaryWindow>, Has<vmux_core::Active>)>,
+    mut commands: Commands,
 ) {
     let next = windows
         .iter()
-        .find_map(|(entity, window, _)| (window.visible && window.focused).then_some(entity))
+        .find_map(|(entity, window, _, _)| (window.visible && window.focused).then_some(entity))
         .or_else(|| {
-            focused.0.filter(|entity| {
-                windows
-                    .get(*entity)
-                    .is_ok_and(|(_, window, _)| window.visible)
+            windows.iter().find_map(|(entity, window, _, active)| {
+                (active && window.visible).then_some(entity)
+            })
+        })
+        .or_else(|| {
+            windows.iter().find_map(|(entity, window, primary, _)| {
+                (primary && window.visible).then_some(entity)
             })
         })
         .or_else(|| {
             windows
                 .iter()
-                .find_map(|(entity, window, primary)| (primary && window.visible).then_some(entity))
+                .find_map(|(entity, window, _, _)| window.visible.then_some(entity))
         })
-        .or_else(|| {
-            windows
-                .iter()
-                .find_map(|(entity, window, _)| window.visible.then_some(entity))
-        })
-        .or_else(|| windows.iter().next().map(|(entity, _, _)| entity));
-    if focused.0 != next {
-        focused.0 = next;
+        .or_else(|| windows.iter().next().map(|(entity, _, _, _)| entity));
+    for (entity, _, _, active) in &windows {
+        if next == Some(entity) && !active {
+            commands.entity(entity).insert(vmux_core::Active);
+        } else if next != Some(entity) && active {
+            commands.entity(entity).remove::<vmux_core::Active>();
+        }
     }
 }
 

@@ -150,7 +150,7 @@ fn collect_tab_leaf_panes(
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 fn poll_cursor_pane_focus(
     windows: Query<(Entity, &Window)>,
-    focused_window: Res<crate::window::FocusedWindow>,
+    focused_window: crate::window::FocusedWindow,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
@@ -168,7 +168,7 @@ fn poll_cursor_pane_focus(
     if !active_drags.is_empty() {
         return;
     }
-    let Some(window_entity) = focused_window.0 else {
+    let Some(window_entity) = focused_window.entity() else {
         return;
     };
     let Ok((_, window)) = windows.get(window_entity) else {
@@ -273,7 +273,7 @@ fn native_window_cursor_position(window_entity: Entity, window: &Window) -> Opti
 
 #[cfg(target_os = "macos")]
 fn apply_pending_hover(
-    focused_window: Res<crate::window::FocusedWindow>,
+    focused_window: crate::window::FocusedWindow,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
@@ -291,7 +291,7 @@ fn apply_pending_hover(
         return;
     }
     *last_motion_sequence = pointer.motion_sequence;
-    let Some(window_entity) = focused_window.0 else {
+    let Some(window_entity) = focused_window.entity() else {
         return;
     };
     let mut target = None;
@@ -592,7 +592,9 @@ mod tests {
             .id();
         fixture
             .app
-            .insert_resource(crate::window::FocusedWindow(Some(window)));
+            .world_mut()
+            .entity_mut(window)
+            .insert(vmux_core::Active);
         let root = fixture.app.world_mut().spawn(HostWindow(window)).id();
         fixture
             .app

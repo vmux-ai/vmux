@@ -105,7 +105,7 @@ pub(crate) fn compute_host_focus_intent(
         With<WindowOverlay>,
     >,
     layout_keyboard_q: Query<(Entity, Option<&HostWindow>), crate::present::LayoutKeyboardHost>,
-    focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
+    focused_window: vmux_layout::window::FocusedWindow,
     native_q: Query<(), With<vmux_core::host::page::HostsPage>>,
     mut intent: Single<&mut HostFocusIntent>,
 ) {
@@ -130,8 +130,8 @@ pub(crate) fn compute_host_focus_intent(
         }
     } else if layout_keyboard_q.iter().any(|(_, host)| match host {
         Some(host) => focused_window
-            .as_deref()
-            .is_none_or(|focused| focused.0 == Some(host.0)),
+            .entity()
+            .is_none_or(|focused| focused == host.0),
         None => true,
     }) {
         HostFocusIntent::LayoutView

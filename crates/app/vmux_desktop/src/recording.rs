@@ -237,7 +237,7 @@ fn start_recording(
     mut start_responses: MessageWriter<RecordStartResponse>,
     mut runtime: Query<(&RecordingBridge, &mut RecordingStatus)>,
     settings: Res<AppSettings>,
-    focused_window: Res<vmux_layout::window::FocusedWindow>,
+    focused_window: vmux_layout::window::FocusedWindow,
     window_q: Query<(Entity, &Window)>,
     host_windows: Query<&HostWindow>,
     node_q: Query<&ComputedNode>,
@@ -253,7 +253,7 @@ fn start_recording(
             let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
             vmux_layout::window::host_window_of(Entity::from_bits(bits), &child_of_q, &host_windows)
         });
-        let Some(window_entity) = pane_window.or(focused_window.0) else {
+        let Some(window_entity) = pane_window.or(focused_window.entity()) else {
             start_responses.write(start_err(req.request_id, "no focused vmux window"));
             continue;
         };

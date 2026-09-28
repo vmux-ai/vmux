@@ -326,18 +326,15 @@ impl AgentSpaceCatalog {
             ),
             With<vmux_layout::space::Space>,
         >,
-        focused_window: Option<&vmux_layout::window::FocusedWindow>,
+        focused_window: Option<Entity>,
         child_of: &Query<&ChildOf>,
         host_windows: &Query<&HostWindow>,
     ) -> Self {
         let mut rows: Vec<(u32, AgentSpace)> = Vec::new();
         for (entity, id, name, is_active, order) in spaces {
-            let local = focused_window
-                .and_then(|focused| focused.0)
-                .is_some_and(|focused| {
-                    vmux_layout::window::host_window_of(entity, child_of, host_windows)
-                        == Some(focused)
-                });
+            let local = focused_window.is_some_and(|focused| {
+                vmux_layout::window::host_window_of(entity, child_of, host_windows) == Some(focused)
+            });
             let order = order.map(|order| order.0).unwrap_or(u32::MAX);
             if let Some((existing_order, row)) =
                 rows.iter_mut().find(|(_, existing)| existing.id == id.0)
@@ -416,18 +413,14 @@ fn answer_space_queries(
         ),
         With<vmux_layout::space::Space>,
     >,
-    focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
+    focused_window: vmux_layout::window::FocusedWindow,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
-        let rows = AgentSpaceCatalog::collect(
-            &spaces,
-            focused_window.as_deref(),
-            &child_of,
-            &host_windows,
-        );
+        let rows =
+            AgentSpaceCatalog::collect(&spaces, focused_window.entity(), &child_of, &host_windows);
         service_requests.write(ServiceRequest(ClientMessage::AgentSpacesResult {
             request_id: request.request_id,
             result: Ok(rows.0),
@@ -855,19 +848,21 @@ mod tests {
             ),
             With<vmux_layout::space::Space>,
         >,
-        focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
+        focused_window: vmux_layout::window::FocusedWindow,
         child_of: Query<&ChildOf>,
         host_windows: Query<&HostWindow>,
     ) -> Vec<AgentSpace> {
-        AgentSpaceCatalog::collect(&spaces, focused_window.as_deref(), &child_of, &host_windows).0
+        AgentSpaceCatalog::collect(&spaces, focused_window.entity(), &child_of, &host_windows).0
     }
 
     #[test]
     fn listed_spaces_are_global_but_active_state_is_window_local() {
         let mut app = App::new();
-        let first_window = app.world_mut().spawn_empty().id();
-        let second_window = app.world_mut().spawn_empty().id();
-        app.insert_resource(vmux_layout::window::FocusedWindow(Some(second_window)));
+        let first_window = app.world_mut().spawn(Window::default()).id();
+        let second_window = app
+            .world_mut()
+            .spawn((Window::default(), vmux_core::Active))
+            .id();
         let first_root = app.world_mut().spawn(HostWindow(first_window)).id();
         let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
         app.world_mut().spawn((

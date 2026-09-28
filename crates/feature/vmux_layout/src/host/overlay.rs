@@ -49,10 +49,10 @@ fn on_layout_overlay_emit(
 fn adopt_window_overlays(
     overlays: Query<(Entity, Option<&HostWindow>, Option<&ChildOf>), With<WindowOverlay>>,
     roots: Query<(Entity, &HostWindow), With<VmuxWindow>>,
-    focused_window: Res<crate::window::FocusedWindow>,
+    focused_window: crate::window::FocusedWindow,
     mut commands: Commands,
 ) {
-    let Some(window) = focused_window.0 else {
+    let Some(window) = focused_window.entity() else {
         return;
     };
     let Some(root) = roots
@@ -80,7 +80,6 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(crate::window::FocusedWindow::default())
             .add_systems(PreUpdate, adopt_window_overlays);
         app
     }
@@ -88,10 +87,10 @@ mod tests {
     #[test]
     fn an_unparented_overlay_is_placed_in_the_window_root() {
         let mut app = app();
-        let window = app.world_mut().spawn(Window::default()).id();
-        app.world_mut()
-            .resource_mut::<crate::window::FocusedWindow>()
-            .0 = Some(window);
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), vmux_core::Active))
+            .id();
         let root = app.world_mut().spawn((VmuxWindow, HostWindow(window))).id();
         let overlay = app.world_mut().spawn(WindowOverlay).id();
 
@@ -109,10 +108,10 @@ mod tests {
     fn overlay_moves_to_the_focused_window() {
         let mut app = app();
         let old_window = app.world_mut().spawn(Window::default()).id();
-        let focused_window = app.world_mut().spawn(Window::default()).id();
-        app.world_mut()
-            .resource_mut::<crate::window::FocusedWindow>()
-            .0 = Some(focused_window);
+        let focused_window = app
+            .world_mut()
+            .spawn((Window::default(), vmux_core::Active))
+            .id();
         let elsewhere = app.world_mut().spawn_empty().id();
         let root = app
             .world_mut()

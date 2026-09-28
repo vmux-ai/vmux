@@ -84,7 +84,7 @@ fn maintain_registered_page_pools(
     pages: Query<&PrewarmPage>,
     pool_nodes: Query<(Entity, &WarmPagePoolNode)>,
     vmux_windows: Query<(Entity, &HostWindow), With<VmuxWindow>>,
-    focused_window: Res<crate::window::FocusedWindow>,
+    focused_window: crate::window::FocusedWindow,
     layout_ready: Query<(), (With<LayoutCef>, With<PageReady>)>,
     spares: Query<&WarmPageSpare>,
     mut commands: Commands,
@@ -93,7 +93,7 @@ fn maintain_registered_page_pools(
         return;
     }
     let Some(window) = focused_window
-        .0
+        .entity()
         .and_then(|focused| {
             vmux_windows
                 .iter()
@@ -239,7 +239,6 @@ mod tests {
     fn registered_pools_fill_for_every_page() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<crate::window::FocusedWindow>()
             .add_systems(Update, maintain_registered_page_pools);
         let window = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((VmuxWindow, HostWindow(window)));

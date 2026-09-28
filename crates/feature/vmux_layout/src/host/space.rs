@@ -58,13 +58,13 @@ pub struct CurrentSpace;
 
 fn sync_current_space(
     spaces: Query<(Entity, Has<vmux_core::Active>, Has<CurrentSpace>), With<Space>>,
-    focused_window: Res<crate::window::FocusedWindow>,
+    focused_window: crate::window::FocusedWindow,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     mut commands: Commands,
 ) {
     let current = focused_window
-        .0
+        .entity()
         .and_then(|focused| {
             spaces
                 .iter()
@@ -178,8 +178,7 @@ mod tests {
     #[test]
     fn current_space_tracks_active_space() {
         let mut app = App::new();
-        app.init_resource::<crate::window::FocusedWindow>()
-            .add_systems(Update, sync_current_space);
+        app.add_systems(Update, sync_current_space);
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("default".to_string()), vmux_core::Active))
@@ -191,8 +190,7 @@ mod tests {
     #[test]
     fn current_space_clears_when_no_space_is_active() {
         let mut app = App::new();
-        app.init_resource::<crate::window::FocusedWindow>()
-            .add_systems(Update, sync_current_space);
+        app.add_systems(Update, sync_current_space);
         let space = app.world_mut().spawn((Space, CurrentSpace)).id();
         app.update();
         assert!(app.world().get::<CurrentSpace>(space).is_none());
@@ -201,8 +199,7 @@ mod tests {
     #[test]
     fn current_space_retains_its_typed_id() {
         let mut app = App::new();
-        app.init_resource::<crate::window::FocusedWindow>()
-            .add_systems(Update, sync_current_space);
+        app.add_systems(Update, sync_current_space);
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("work".to_string()), vmux_core::Active))

@@ -209,9 +209,7 @@ mod tests {
             if let Some(settings) = settings {
                 app.insert_resource(settings);
             }
-            for definition in Self::definitions() {
-                app.world_mut().spawn(definition);
-            }
+            app.world_mut().spawn_batch(Self::definitions());
             app.update();
             app
         }

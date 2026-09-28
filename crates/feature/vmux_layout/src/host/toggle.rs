@@ -68,7 +68,7 @@ fn sync_window_padding_to_layout_hidden(
 
 fn handle_visibility_requests(
     mut reader: MessageReader<ToggleLayoutRequest>,
-    focused_window: Res<crate::window::FocusedWindow>,
+    focused_window: crate::window::FocusedWindow,
     hidden_windows: Query<(), With<LayoutHidden>>,
     header_q: Query<Entity, With<Header>>,
     sidesheet_q: Query<Entity, With<SideSheet>>,
@@ -77,7 +77,7 @@ fn handle_visibility_requests(
     mut commands: Commands,
 ) {
     for _ in reader.read() {
-        let Some(window) = focused_window.0 else {
+        let Some(window) = focused_window.entity() else {
             continue;
         };
         let is_hidden = !hidden_windows.contains(window);
@@ -234,7 +234,9 @@ mod tests {
             .add_systems(Update, handle_visibility_requests);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
-        app.insert_resource(crate::window::FocusedWindow(Some(first_window)));
+        app.world_mut()
+            .entity_mut(first_window)
+            .insert(vmux_core::Active);
         let first_root = app.world_mut().spawn(HostWindow(first_window)).id();
         let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
         let first_header = app
