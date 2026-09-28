@@ -961,7 +961,8 @@ mod tests {
     #[test]
     fn registers_spaces_host_before_cef_embedded_hosts_are_read() {
         let mut app = App::new();
-        app.add_plugins(SpacePlugin);
+        app.add_plugins((MinimalPlugins, SpacePlugin));
+        app.update();
         let mut query = app.world_mut().query::<&vmux_core::page::PageManifest>();
         let hosts = bevy_cef_core::prelude::CefEmbeddedHosts(
             query
