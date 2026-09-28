@@ -78,7 +78,7 @@ impl Plugin for StatePlugin {
             .add_systems(
                 Update,
                 mark_page_state_dirty
-                    .after(vmux_layout::apply_cef_state_from_webview)
+                    .after(vmux_layout::LayoutCefStateSet::Apply)
                     .after(vmux_layout::stack::ComputeFocusSet),
             )
             .add_systems(

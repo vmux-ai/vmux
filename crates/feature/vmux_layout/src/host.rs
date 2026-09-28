@@ -42,8 +42,8 @@ mod webview_reveal;
 mod zoom;
 
 pub use cef::{
-    Browser, LayoutCef, Loading, NavigationState, ReloadRevision, apply_cef_state_from_webview,
-    mirror_metadata_to_url,
+    Browser, LayoutCef, LayoutCefPlugin, LayoutCefStateSet, Loading, NavigationState,
+    ReloadRevision,
 };
 pub use contract::LayoutContractPlugin;
 pub use header::Header;
@@ -53,7 +53,6 @@ pub use stack::{CloseStackReason, CloseStackRequest};
 pub use vmux_core::ContributedCommandChosen;
 pub use vmux_core::launcher::LauncherDismissRequest;
 pub use webview_reveal::PendingWebviewReveal;
-pub use window::fit_window_to_screen;
 
 pub type LayoutUiStateUpdates = vmux_core::host::UiState<crate::state::LayoutUiState>;
 

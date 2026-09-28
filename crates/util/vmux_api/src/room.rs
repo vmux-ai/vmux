@@ -363,18 +363,6 @@ pub enum RemoteEvent {
     },
 }
 
-impl RemoteEvent {
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Self::Session { .. } => "session",
-            Self::Snapshot { .. } => "snapshot",
-            Self::Delta { .. } => "delta",
-            Self::Status { .. } => "status",
-            Self::Approval { .. } => "approval",
-        }
-    }
-}
-
 #[vmux_api::contract(Default)]
 pub struct ModelOptionEntry {
     pub id: String,

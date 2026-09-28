@@ -236,7 +236,7 @@ pub fn space_view_bundle() -> impl Bundle {
     )
 }
 
-pub fn sync_space_container_visibility(
+fn sync_space_container_visibility(
     mut spaces: Query<(&mut Node, &mut Visibility, Has<vmux_core::Active>), With<Space>>,
 ) {
     for (mut node, mut vis, active) in &mut spaces {

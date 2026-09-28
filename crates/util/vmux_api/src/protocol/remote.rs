@@ -1,6 +1,6 @@
 use super::{
-    AgentAttachment, AgentBookmarks, AgentCommandExit, AgentCommandResult, AgentCommandTool,
-    AgentImage, AgentRecording, AgentRequest, AgentRequestId, AgentRunCompletion, AgentSpace,
+    AgentBookmarks, AgentCommandExit, AgentCommandResult, AgentCommandTool, AgentImage,
+    AgentRecording, AgentRequest, AgentRequestId, AgentRunCompletion, AgentSpace,
     CommandLifecycleKind, CopyModeKey, JsonValue, ManagedMcpServer, ProcessInfo, SharedEvent,
     SharedMessage,
 };
@@ -224,41 +224,6 @@ pub enum ClientMessage {
         cwd: String,
     },
     Shared(SharedMessage),
-}
-
-impl ClientMessage {
-    pub fn agent_input(
-        sid: String,
-        text: String,
-        context: Option<String>,
-        attachments: Vec<AgentAttachment>,
-    ) -> Self {
-        SharedMessage::AgentInput {
-            sid,
-            text,
-            context,
-            attachments,
-            preferred_mode: None,
-        }
-        .into()
-    }
-
-    pub fn agent_input_with_mode(
-        sid: String,
-        text: String,
-        context: Option<String>,
-        attachments: Vec<AgentAttachment>,
-        preferred_mode: Option<String>,
-    ) -> Self {
-        SharedMessage::AgentInput {
-            sid,
-            text,
-            context,
-            attachments,
-            preferred_mode,
-        }
-        .into()
-    }
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

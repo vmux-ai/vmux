@@ -263,7 +263,7 @@ pub struct ServiceMessageSet;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TerminalStackSpawnSet;
 
-pub fn format_terminal_url(
+fn format_terminal_url(
     mut q: Query<
         (Option<&Pid>, &mut PageMetadata),
         (

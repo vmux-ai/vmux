@@ -576,9 +576,15 @@ mod tests {
     }
 
     #[test]
-    fn the_prompt_builder_addresses_the_session_and_keeps_attachments() {
+    fn agent_input_envelope_addresses_the_session_and_keeps_attachments() {
         assert!(matches!(
-            ClientMessage::agent_input("s".into(), "hi".into(), None, Vec::new()),
+            ClientMessage::from(SharedMessage::AgentInput {
+                sid: "s".into(),
+                text: "hi".into(),
+                context: None,
+                attachments: Vec::new(),
+                preferred_mode: None,
+            }),
             ClientMessage::Shared(SharedMessage::AgentInput {
                 sid,
                 text,
@@ -588,17 +594,18 @@ mod tests {
             }) if sid == "s" && text == "hi" && context.is_none() && attachments.is_empty() && preferred_mode.is_none()
         ));
         assert!(matches!(
-            ClientMessage::agent_input(
-                "s".into(),
-                "inspect".into(),
-                None,
-                vec![AgentAttachment {
+            ClientMessage::from(SharedMessage::AgentInput {
+                sid: "s".into(),
+                text: "inspect".into(),
+                context: None,
+                attachments: vec![AgentAttachment {
                     path: "/tmp/image.png".into(),
                     name: "image.png".into(),
                     mime_type: "image/png".into(),
                     size: 42,
                 }],
-            ),
+                preferred_mode: None,
+            }),
             ClientMessage::Shared(SharedMessage::AgentInput { attachments, .. }) if attachments.len() == 1
         ));
     }

@@ -716,7 +716,7 @@ fn sync_main_column_gap_to_pane_count(
     }
 }
 
-pub fn fit_window_to_screen(
+fn fit_window_to_screen(
     windows: Query<&bevy::window::Window>,
     mut last_sizes: Local<std::collections::HashMap<Entity, Vec2>>,
     mut roots: Query<(&HostWindow, &mut Transform), With<VmuxWindow>>,

@@ -604,13 +604,16 @@ fn send_acp_input(
             .as_ref()
             .map(|modes| modes.selected_for(&session.agent_id).to_string())
             .filter(|mode| !mode.is_empty());
-        service_requests.write(ServiceRequest(ClientMessage::agent_input_with_mode(
-            session.sid.clone(),
-            text,
-            context,
-            prompt.attachments,
-            preferred_mode,
-        )));
+        service_requests.write(ServiceRequest(
+            vmux_api::protocol::SharedMessage::AgentInput {
+                sid: session.sid.clone(),
+                text,
+                context,
+                attachments: prompt.attachments,
+                preferred_mode,
+            }
+            .into(),
+        ));
         *state = AgentRunState::Streaming;
     }
 }

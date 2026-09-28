@@ -29,7 +29,32 @@ pub struct NavigationState {
     pub can_go_forward: bool,
 }
 
-pub fn mirror_metadata_to_url(
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LayoutCefStateSet {
+    Apply,
+    Mirror,
+}
+
+pub struct LayoutCefPlugin;
+
+impl Plugin for LayoutCefPlugin {
+    fn build(&self, app: &mut App) {
+        app.configure_sets(
+            Update,
+            (LayoutCefStateSet::Apply, LayoutCefStateSet::Mirror).chain(),
+        )
+        .add_systems(
+            Update,
+            apply_cef_state_from_webview.in_set(LayoutCefStateSet::Apply),
+        )
+        .add_systems(
+            Update,
+            mirror_metadata_to_url.in_set(LayoutCefStateSet::Mirror),
+        );
+    }
+}
+
+fn mirror_metadata_to_url(
     cef_q: Query<
         &vmux_core::PageMetadata,
         (Without<vmux_core::Url>, Changed<vmux_core::PageMetadata>),
@@ -57,7 +82,7 @@ pub fn mirror_metadata_to_url(
     }
 }
 
-pub fn apply_cef_state_from_webview(
+fn apply_cef_state_from_webview(
     cef_rx: Res<WebviewCefStateReceiver>,
     mut browser_meta: Query<&mut vmux_core::PageMetadata>,
 ) {

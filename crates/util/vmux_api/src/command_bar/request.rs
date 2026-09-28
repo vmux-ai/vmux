@@ -7,37 +7,10 @@ pub struct PromptRequest {
     pub attachments: Vec<crate::prompt_media::ChatSubmitAttachment>,
 }
 
-impl PromptRequest {
-    pub fn new(
-        text: &str,
-        target_url: &str,
-        attachments: &[crate::prompt_media::ChatAttachment],
-    ) -> Self {
-        let mut submitted = Vec::with_capacity(attachments.len());
-        for attachment in attachments {
-            submitted.push(crate::prompt_media::ChatSubmitAttachment::from(attachment));
-        }
-        Self {
-            text: text.to_string(),
-            target_url: (!target_url.is_empty()).then(|| target_url.to_string()),
-            attachments: submitted,
-        }
-    }
-}
-
 #[vmux_api::ui_event(Eq)]
 pub struct OpenRequest {
     pub value: String,
     pub open: Option<crate::open_target::OpenTarget>,
-}
-
-impl OpenRequest {
-    pub fn new(value: &str, open: Option<crate::open_target::OpenTarget>) -> Self {
-        Self {
-            value: value.to_string(),
-            open,
-        }
-    }
 }
 
 #[vmux_api::ui_event(Eq)]

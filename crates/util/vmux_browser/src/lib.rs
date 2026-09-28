@@ -151,13 +151,8 @@ impl Plugin for BrowserPlugin {
                     RemoteCopyEvent,
                     RemoteRevokeRequest,
                 )>::default(),
+                vmux_layout::LayoutCefPlugin,
             ))
-            .add_systems(Update, (vmux_layout::apply_cef_state_from_webview,))
-            .add_systems(
-                Update,
-                vmux_layout::mirror_metadata_to_url
-                    .after(vmux_layout::apply_cef_state_from_webview),
-            )
             .add_plugins((
                 host_focus::HostFocusPlugin,
                 appearance::AppearancePlugin,

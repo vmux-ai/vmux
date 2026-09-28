@@ -51,7 +51,7 @@ impl Plugin for NavigationPlugin {
                 Update,
                 (sync_page_metadata_to_tab, spawn_visit_on_navigation)
                     .chain()
-                    .after(vmux_layout::apply_cef_state_from_webview),
+                    .after(vmux_layout::LayoutCefStateSet::Apply),
             );
     }
 }

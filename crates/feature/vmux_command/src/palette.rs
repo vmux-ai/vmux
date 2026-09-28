@@ -5,7 +5,7 @@ use vmux_api::command_bar::{
     TerminalRequest,
 };
 use vmux_api::open_target::OpenTarget;
-use vmux_api::prompt_media::ChatAttachment;
+use vmux_api::prompt_media::{ChatAttachment, ChatSubmitAttachment};
 use vmux_api::protocol::AcpModeOption;
 use vmux_api::room::ModelOptionEntry;
 use vmux_api::space::ProjectRow;
@@ -635,16 +635,27 @@ impl PaletteDecision {
     }
 
     fn prompt(close: bool, text: &str, target_url: &str, attachments: &[ChatAttachment]) -> Self {
+        let mut submitted = Vec::with_capacity(attachments.len());
+        for attachment in attachments {
+            submitted.push(ChatSubmitAttachment::from(attachment));
+        }
         Self::Prompt {
             close,
-            request: PromptRequest::new(text, target_url, attachments),
+            request: PromptRequest {
+                text: text.to_string(),
+                target_url: (!target_url.is_empty()).then(|| target_url.to_string()),
+                attachments: submitted,
+            },
         }
     }
 
     fn open(close: bool, value: &str, open: Option<OpenTarget>) -> Self {
         Self::Open {
             close,
-            request: OpenRequest::new(value, open),
+            request: OpenRequest {
+                value: value.to_string(),
+                open,
+            },
         }
     }
 
@@ -2177,7 +2188,11 @@ mod tests {
             submitted,
             PaletteDecision::Prompt {
                 close: true,
-                request: PromptRequest::new("fix the failing test", "vmux://sessions/vibe/", &[]),
+                request: PromptRequest {
+                    text: "fix the failing test".to_string(),
+                    target_url: Some("vmux://sessions/vibe/".to_string()),
+                    attachments: Vec::new(),
+                },
             }
         );
     }
@@ -2196,11 +2211,11 @@ mod tests {
             submitted,
             PaletteDecision::Prompt {
                 close: true,
-                request: PromptRequest::new(
-                    "fix the failing test",
-                    "vmux://sessions/codex/cli",
-                    &[]
-                ),
+                request: PromptRequest {
+                    text: "fix the failing test".to_string(),
+                    target_url: Some("vmux://sessions/codex/cli".to_string()),
+                    attachments: Vec::new(),
+                },
             }
         );
     }
@@ -2216,7 +2231,10 @@ mod tests {
             submitted,
             PaletteDecision::Open {
                 close: true,
-                request: OpenRequest::new("vmux://sessions/vibe/", palette.open_target),
+                request: OpenRequest {
+                    value: "vmux://sessions/vibe/".to_string(),
+                    open: palette.open_target,
+                },
             }
         );
     }
@@ -2239,7 +2257,11 @@ mod tests {
             submitted,
             PaletteDecision::Prompt {
                 close: true,
-                request: PromptRequest::new("", "vmux://sessions/vibe/", &attached),
+                request: PromptRequest {
+                    text: String::new(),
+                    target_url: Some("vmux://sessions/vibe/".to_string()),
+                    attachments: vec![ChatSubmitAttachment::from(&attached[0])],
+                },
             }
         );
     }
@@ -2262,7 +2284,11 @@ mod tests {
             submitted,
             PaletteDecision::Prompt {
                 close: false,
-                request: PromptRequest::new("", "", &attached),
+                request: PromptRequest {
+                    text: String::new(),
+                    target_url: None,
+                    attachments: vec![ChatSubmitAttachment::from(&attached[0])],
+                },
             },
             "the composer keeps its draft on screen"
         );
@@ -2278,7 +2304,10 @@ mod tests {
             typed.submit_modal(&[]),
             PaletteDecision::Open {
                 close: true,
-                request: OpenRequest::new("https://example.com", Some(OpenTarget::InPlace)),
+                request: OpenRequest {
+                    value: "https://example.com".to_string(),
+                    open: Some(OpenTarget::InPlace),
+                },
             }
         );
 
@@ -2288,7 +2317,10 @@ mod tests {
             opened,
             PaletteDecision::Open {
                 close: true,
-                request: OpenRequest::new("vmux://settings/", Some(OpenTarget::InPlace)),
+                request: OpenRequest {
+                    value: "vmux://settings/".to_string(),
+                    open: Some(OpenTarget::InPlace),
+                },
             },
             "the page row wins over the raw text: {:?}",
             page.rows
@@ -2338,7 +2370,10 @@ mod tests {
             opened,
             PaletteDecision::Open {
                 close: true,
-                request: OpenRequest::new("file:///work/main.rs", palette.open_target),
+                request: OpenRequest {
+                    value: "file:///work/main.rs".to_string(),
+                    open: palette.open_target,
+                },
             }
         );
     }
@@ -2366,11 +2401,11 @@ mod tests {
             palette.submit_start(&[]),
             PaletteDecision::Prompt {
                 close: true,
-                request: PromptRequest::new(
-                    "fix the failing test",
-                    "vmux://sessions/codex/cli",
-                    &[]
-                ),
+                request: PromptRequest {
+                    text: "fix the failing test".to_string(),
+                    target_url: Some("vmux://sessions/codex/cli".to_string()),
+                    attachments: Vec::new(),
+                },
             }
         );
     }

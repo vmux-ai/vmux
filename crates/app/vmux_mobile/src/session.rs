@@ -159,7 +159,14 @@ impl SessionStream {
                                 tracing::warn!("room event not understood");
                                 continue;
                             };
-                            tracing::info!(kind = event.kind(), "room event");
+                            let kind = match &event {
+                                RemoteEvent::Session { .. } => "session",
+                                RemoteEvent::Snapshot { .. } => "snapshot",
+                                RemoteEvent::Delta { .. } => "delta",
+                                RemoteEvent::Status { .. } => "status",
+                                RemoteEvent::Approval { .. } => "approval",
+                            };
+                            tracing::info!(kind, "room event");
                             if sender.send(SessionStreamOutput::Event(event)).is_err() {
                                 return;
                             }

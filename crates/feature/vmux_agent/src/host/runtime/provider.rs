@@ -157,12 +157,16 @@ fn send_provider_agent_input(
         let Some(prompt) = queue.take_next() else {
             continue;
         };
-        service_requests.write(ServiceRequest(ClientMessage::agent_input(
-            session.sid.clone(),
-            prompt.text,
-            None,
-            prompt.attachments,
-        )));
+        service_requests.write(ServiceRequest(
+            vmux_api::protocol::SharedMessage::AgentInput {
+                sid: session.sid.clone(),
+                text: prompt.text,
+                context: None,
+                attachments: prompt.attachments,
+                preferred_mode: None,
+            }
+            .into(),
+        ));
         *state = AgentRunState::Streaming;
     }
 }

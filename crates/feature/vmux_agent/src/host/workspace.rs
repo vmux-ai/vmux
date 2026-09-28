@@ -234,12 +234,14 @@ fn failed_workspace_continuation(message: &str) -> String {
 }
 
 fn chat_agent_continuation_message(sid: &str, context: &str) -> ClientMessage {
-    ClientMessage::agent_input(
-        sid.to_string(),
-        String::new(),
-        Some(context.to_string()),
-        Vec::new(),
-    )
+    vmux_api::protocol::SharedMessage::AgentInput {
+        sid: sid.to_string(),
+        text: String::new(),
+        context: Some(context.to_string()),
+        attachments: Vec::new(),
+        preferred_mode: None,
+    }
+    .into()
 }
 
 #[derive(bevy::ecs::system::SystemParam)]

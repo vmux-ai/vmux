@@ -17,7 +17,7 @@ impl Plugin for PageLifePlugin {
         app.add_systems(
             Update,
             (
-                apply_fallback_page_icons.after(vmux_layout::apply_cef_state_from_webview),
+                apply_fallback_page_icons.after(vmux_layout::LayoutCefStateSet::Apply),
                 drain_loading_state,
                 spawn_popup_stacks,
             ),

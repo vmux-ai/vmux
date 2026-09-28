@@ -29,7 +29,7 @@ impl Plugin for ExtensionProjectPlugin {
                 Update,
                 rebuild_extension_model
                     .in_set(ExtensionProjectionSet)
-                    .after(vmux_layout::apply_cef_state_from_webview)
+                    .after(vmux_layout::LayoutCefStateSet::Apply)
                     .after(vmux_layout::stack::ComputeFocusSet),
             );
     }
