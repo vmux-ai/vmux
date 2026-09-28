@@ -462,6 +462,7 @@ pub enum FileViewMode {
 #[vmux_api::contract(Copy, Eq)]
 pub struct FileViewModeEvent {
     pub mode: FileViewMode,
+    pub revision: u64,
 }
 
 #[vmux_api::ui_event(Copy, Eq)]

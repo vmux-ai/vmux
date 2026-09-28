@@ -682,6 +682,7 @@ mod tests {
                 .plugin()
                 .hosted(NativelyHosted::page(manifest.url, manifest.title)),
         );
+        app.update();
         let mut query = app.world_mut().query::<&PageManifest>();
 
         let hosts = bevy_cef_core::prelude::CefEmbeddedHosts(

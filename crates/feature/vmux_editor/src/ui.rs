@@ -150,6 +150,7 @@ pub fn Page() -> Element {
             .unwrap_or_default()
     });
     let mut file_view_mode = use_signal(|| FileViewMode::Note);
+    let mut view_mode_revision = use_signal(|| 0u64);
     let mut note_blocks = use_signal(Vec::<NoteBlock>::new);
     let mut note_properties = use_signal(Vec::<KnowledgeProperty>::new);
     let mut note_references = use_signal(Vec::<KnowledgeReference>::new);
@@ -429,6 +430,10 @@ pub fn Page() -> Element {
     let view_mode_event = use_file_ui::<FileViewModeEvent>();
     use_effect(move || {
         view_mode_event.for_each(|event| {
+            if event.revision <= *view_mode_revision.peek() {
+                return;
+            }
+            view_mode_revision.set(event.revision);
             if file_view_mode() != event.mode && event.mode != FileViewMode::Note {
                 note_cursor.set_editing(false);
             }
@@ -439,11 +444,17 @@ pub fn Page() -> Element {
                     if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
                         note_cursor.activate_centered(index, line);
                     }
+                    if note_cursor.editing() {
+                        focus_file_input();
+                    } else {
+                        focus_container();
+                    }
                 }
                 FileViewMode::Editor => {
                     dom.center_row(cursor().row, cell_dims().height);
+                    focus_file_input();
                 }
-                _ => {}
+                FileViewMode::Note | FileViewMode::Diff => focus_container(),
             }
         })
     });
@@ -732,18 +743,6 @@ pub fn Page() -> Element {
     use_effect(move || {
         explorer.sync();
         dom.announce(cell_dims(), total_lines(), last_resize);
-    });
-
-    use_effect(move || match mode() {
-        Mode::Text if file_view_mode() == FileViewMode::Note && is_markdown() => {
-            if note_cursor.editing() {
-                focus_file_input();
-            } else {
-                focus_container();
-            }
-        }
-        Mode::Text => focus_file_input(),
-        Mode::Dir | Mode::Media(_) => focus_container(),
     });
 
     let gw = gutter_width(total_lines());

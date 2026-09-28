@@ -148,6 +148,13 @@ impl Chat {
         if let Some(effect) = &patch.composer_effect {
             self.apply_composer_effect(effect);
         }
+        if let Some(effect) = patch.prompt_focus
+            && effect.revision > *self.composer.focus_revision.peek()
+        {
+            let mut focus_revision = self.composer.focus_revision;
+            focus_revision.set(effect.revision);
+            focus_prompt_end(PROMPT_INPUT_ID);
+        }
         if let Some(ChatListMoveEffect { revision, next }) = patch.list_move
             && self.accepts_input_effect(revision)
         {
@@ -196,17 +203,7 @@ impl Chat {
     }
 
     fn apply_attachments(&self, selected: &ChatAttachments) {
-        let attachments = self.composer.attachments;
-        let selection_changed = attachments.peek().len() != selected.attachments.len()
-            || attachments
-                .peek()
-                .iter()
-                .zip(&selected.attachments)
-                .any(|(current, incoming)| current.path != incoming.path);
-        set_if_changed(attachments, selected.attachments.clone());
-        if selection_changed {
-            focus_prompt_end(PROMPT_INPUT_ID);
-        }
+        set_if_changed(self.composer.attachments, selected.attachments.clone());
     }
 
     fn apply_media(&self, state: &ChatMediaState) {
@@ -940,6 +937,7 @@ pub fn use_handoff() -> Handoff {
 pub struct ComposerDraft {
     pub draft: Signal<String>,
     pub effect_revision: Signal<u64>,
+    pub focus_revision: Signal<u64>,
     pub attachments: Signal<Vec<ChatAttachment>>,
     pub history_cursor: Signal<Option<usize>>,
     pub history_scratch: Signal<String>,
@@ -951,6 +949,7 @@ pub fn use_composer_draft() -> ComposerDraft {
     ComposerDraft {
         draft: use_signal(String::new),
         effect_revision: use_signal(|| 0),
+        focus_revision: use_signal(|| 0),
         attachments: use_signal(Vec::new),
         history_cursor: use_signal(|| None),
         history_scratch: use_signal(String::new),

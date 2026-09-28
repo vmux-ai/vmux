@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use vmux_api::prompt_media::{ChatAttachment, ChatAttachments, ChatMediaEntry};
 use vmux_api::room::RemoteMediaEntry;
 
-use crate::event::ChatMediaState;
+use crate::event::{ChatMediaState, ChatPromptFocusEffect};
 use crate::room::Submitted;
 use crate::state::{ChatRuntime, ChatUiStatePlugin, ChatUiStateProjection, RepublishChatUiState};
 
@@ -42,6 +42,16 @@ pub struct Attach(pub Vec<ChatAttachment>);
 
 #[derive(Message)]
 pub struct RemoveAttachment(pub String);
+
+#[derive(Component, Default)]
+pub(crate) struct ChatPromptFocusRevision(pub(crate) u64);
+
+impl ChatPromptFocusRevision {
+    pub(crate) fn next(&mut self) -> ChatPromptFocusEffect {
+        self.0 = self.0.wrapping_add(1).max(1);
+        ChatPromptFocusEffect { revision: self.0 }
+    }
+}
 
 #[derive(Component, Default, PartialEq)]
 pub struct Attachments(pub Vec<ChatAttachment>);
@@ -137,41 +147,41 @@ fn emit_media(
 
 fn emit_attachments(
     mut refreshes: MessageReader<RepublishChatUiState>,
-    mut runtimes: Query<(Ref<Attachments>, &mut ChatUiStateProjection), With<ChatRuntime>>,
+    attachments: Single<Ref<Attachments>, With<ChatRuntime>>,
+    focus: Single<Ref<ChatPromptFocusRevision>, With<ChatRuntime>>,
+    mut projection: Single<&mut ChatUiStateProjection, With<ChatRuntime>>,
 ) {
     let refresh = refreshes.read().next().is_some();
-    let Ok((attachments, mut projection)) = runtimes.single_mut() else {
-        return;
-    };
-    if !refresh && !attachments.is_changed() {
-        return;
+    if refresh || attachments.is_changed() {
+        let payload = ChatAttachments {
+            attachments: attachments.0.clone(),
+        };
+        projection.write(&payload);
     }
-    let payload = ChatAttachments {
-        attachments: attachments.0.clone(),
-    };
-    projection.write(&payload);
+    if focus.0 > 0 && focus.is_changed() {
+        projection.write(&ChatPromptFocusEffect { revision: focus.0 });
+    }
 }
 
 fn spend_attachments(
     mut submitted: MessageReader<Submitted>,
-    mut runtimes: Query<&mut Attachments, With<ChatRuntime>>,
+    mut attachments: Single<&mut Attachments, With<ChatRuntime>>,
+    mut focus: Single<&mut ChatPromptFocusRevision, With<ChatRuntime>>,
 ) {
-    let Ok(mut attachments) = runtimes.single_mut() else {
-        return;
-    };
     if submitted.read().count() == 0 || attachments.0.is_empty() {
         return;
     }
     attachments.0.clear();
+    focus.next();
 }
 
 fn fold_attachments(
     mut asked: MessageReader<Attach>,
-    mut runtimes: Query<(&mut Attachments, &mut AttachmentPreviews), With<ChatRuntime>>,
+    mut attachments: Single<&mut Attachments, With<ChatRuntime>>,
+    mut previews: Single<&mut AttachmentPreviews, With<ChatRuntime>>,
+    mut focus: Single<&mut ChatPromptFocusRevision, With<ChatRuntime>>,
 ) {
-    let Ok((mut attachments, mut previews)) = runtimes.single_mut() else {
-        return;
-    };
+    let mut changed = false;
     for Attach(added) in asked.read() {
         for attachment in added {
             if attachment.preview_data_url.is_empty() {
@@ -181,22 +191,29 @@ fn fold_attachments(
                 .0
                 .insert(attachment.path.clone(), attachment.clone());
         }
-        ChatAttachments {
+        changed |= ChatAttachments {
             attachments: added.clone(),
         }
         .merge_into(&mut attachments.0);
+    }
+    if changed {
+        focus.next();
     }
 }
 
 fn remove_attachments(
     mut removed: MessageReader<RemoveAttachment>,
-    mut runtimes: Query<&mut Attachments, With<ChatRuntime>>,
+    mut attachments: Single<&mut Attachments, With<ChatRuntime>>,
+    mut focus: Single<&mut ChatPromptFocusRevision, With<ChatRuntime>>,
 ) {
-    let Ok(mut attachments) = runtimes.single_mut() else {
-        return;
-    };
+    let mut changed = false;
     for RemoveAttachment(path) in removed.read() {
+        let previous = attachments.0.len();
         attachments.0.retain(|attachment| attachment.path != *path);
+        changed |= attachments.0.len() != previous;
+    }
+    if changed {
+        focus.next();
     }
 }
 
@@ -254,6 +271,11 @@ mod tests {
             }
             paths
         }
+
+        fn focus_revision(&mut self) -> u64 {
+            let mut revisions = self.0.world_mut().query::<&ChatPromptFocusRevision>();
+            revisions.single(self.0.world()).unwrap().0
+        }
     }
 
     #[test]
@@ -281,5 +303,21 @@ mod tests {
         started.remove("a.png");
 
         assert!(started.paths().is_empty());
+    }
+
+    #[test]
+    fn attachment_selection_changes_advance_focus_revision() {
+        let mut started = Started::empty();
+        started.attach(&["a.png"]);
+        assert_eq!(started.focus_revision(), 1);
+
+        started.attach(&["a.png"]);
+        assert_eq!(started.focus_revision(), 1);
+
+        started.remove("a.png");
+        assert_eq!(started.focus_revision(), 2);
+
+        started.remove("a.png");
+        assert_eq!(started.focus_revision(), 2);
     }
 }

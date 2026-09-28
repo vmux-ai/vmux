@@ -238,6 +238,11 @@ pub struct ChatComposerEffect {
 }
 
 #[vmux_api::contract(Copy, Eq)]
+pub struct ChatPromptFocusEffect {
+    pub revision: u64,
+}
+
+#[vmux_api::contract(Copy, Eq)]
 pub struct ChatListMoveEffect {
     pub revision: u64,
     pub next: bool,

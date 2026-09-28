@@ -316,6 +316,7 @@ mod tests {
     fn file_view_mode_event_roundtrips() {
         let event = FileViewModeEvent {
             mode: FileViewMode::Diff,
+            revision: 7,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
         let back = rkyv::from_bytes::<FileViewModeEvent, rkyv::rancor::Error>(&bytes).unwrap();

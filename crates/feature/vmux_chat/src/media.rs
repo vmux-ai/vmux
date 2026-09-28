@@ -13,6 +13,7 @@ use crate::host::{
     ChatAttachmentProjection, ChatMediaProjection, ChatSnapshotProjection,
     ChatTranscriptProjection, ChatView,
 };
+use crate::prompt::ChatPromptFocusRevision;
 
 pub struct ChatMediaPlugin;
 
@@ -665,11 +666,14 @@ fn on_chat_attachment_hydration_request(
 
 fn on_chat_remove_attachment(
     trigger: On<UiInput<ChatRemoveAttachment>>,
-    mut projections: Query<&mut ChatAttachmentProjection, With<ChatView>>,
+    mut projections: Query<
+        (&mut ChatAttachmentProjection, &mut ChatPromptFocusRevision),
+        With<ChatView>,
+    >,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let Ok(mut projection) = projections.get_mut(webview) else {
+    let Ok((mut projection, mut focus)) = projections.get_mut(webview) else {
         return;
     };
     if !projection.remove_selected(&trigger.event().payload.path) {
@@ -679,6 +683,12 @@ fn on_chat_remove_attachment(
         vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
             webview,
             &projection.state(),
+        ),
+    );
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            webview,
+            &focus.next(),
         ),
     );
 }
@@ -745,6 +755,7 @@ fn drain_chat_attachment_tasks(
     mut projections: Query<
         (
             &mut ChatAttachmentProjection,
+            &mut ChatPromptFocusRevision,
             &mut ChatTranscriptProjection,
             &mut ChatSnapshotProjection,
         ),
@@ -757,7 +768,7 @@ fn drain_chat_attachment_tasks(
         let Some(attachments) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
-        if let Ok((mut projection, mut transcript, mut snapshot)) =
+        if let Ok((mut projection, mut focus, mut transcript, mut snapshot)) =
             projections.get_mut(pending.webview)
         {
             match pending.delivery {
@@ -767,6 +778,9 @@ fn drain_chat_attachment_tasks(
                         commands.trigger(vmux_core::host::UiStateWrite::<
                             vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &projection.state()));
+                        commands.trigger(vmux_core::host::UiStateWrite::<
+                            vmux_chat::state::ChatUiState,
+                        >::from_event(pending.webview, &focus.next()));
                     }
                 }
                 ChatAttachmentDelivery::Hydrated => {

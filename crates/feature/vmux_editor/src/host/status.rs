@@ -37,6 +37,7 @@ fn spawn_shared_file_view_mode(mut commands: Commands) {
     commands.spawn((
         Name::new("Shared file view mode"),
         SharedFileViewMode::default(),
+        FileViewModeRevision::default(),
     ));
 }
 
@@ -52,6 +53,15 @@ pub(crate) struct SharedFileViewMode(pub(crate) FileViewMode);
 impl Default for SharedFileViewMode {
     fn default() -> Self {
         Self(FileViewMode::Note)
+    }
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FileViewModeRevision(pub(crate) u64);
+
+impl Default for FileViewModeRevision {
+    fn default() -> Self {
+        Self(1)
     }
 }
 
@@ -205,13 +215,17 @@ fn send_file_theme(
 }
 
 fn send_file_view_mode(
-    mode: Single<Ref<SharedFileViewMode>>,
+    state: Single<(Ref<SharedFileViewMode>, Ref<FileViewModeRevision>)>,
     pending: Query<Entity, ReadyUnsentViewMode>,
     sent: Query<Entity, ReadySentViewMode>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    let event = FileViewModeEvent { mode: mode.0 };
+    let (mode, revision) = state.into_inner();
+    let event = FileViewModeEvent {
+        mode: mode.0,
+        revision: revision.0,
+    };
     for entity in &pending {
         if !browsers.can_emit_to(&entity) {
             continue;
@@ -221,7 +235,7 @@ fn send_file_view_mode(
         ));
         commands.entity(entity).insert(FileViewModeSent);
     }
-    if mode.is_changed() {
+    if mode.is_changed() || revision.is_changed() {
         for entity in &sent {
             if !browsers.can_emit_to(&entity) {
                 continue;
@@ -269,24 +283,28 @@ fn send_file_keymap(
 
 fn apply_file_view_mode_requests(
     mut requests: MessageReader<FileViewModeRequest>,
-    mut mode: Single<&mut SharedFileViewMode>,
+    state: Single<(&mut SharedFileViewMode, &mut FileViewModeRevision)>,
 ) {
     if let Some(request) = requests.read().last() {
+        let (mut mode, mut revision) = state.into_inner();
         mode.0 = request.0;
+        revision.0 = revision.0.wrapping_add(1).max(1);
     }
 }
 
 fn on_file_view_mode_set(
     trigger: On<UiInput<FileViewModeSet>>,
     files: Query<(&FileView, Option<&Editor>)>,
-    mut mode: Single<&mut SharedFileViewMode>,
+    state: Single<(&mut SharedFileViewMode, &mut FileViewModeRevision)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let Ok((file, edit)) = files.get(entity) else {
         return;
     };
+    let (mut mode, mut revision) = state.into_inner();
     mode.0 = trigger.event().payload.mode;
+    revision.0 = revision.0.wrapping_add(1).max(1);
     if mode.0 != FileViewMode::Note || !crate::markdown::is_markdown_path(&file.path) {
         return;
     }
@@ -335,7 +353,10 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_observer(on_file_view_mode_set);
-        app.world_mut().spawn(SharedFileViewMode::default());
+        app.world_mut().spawn((
+            SharedFileViewMode::default(),
+            FileViewModeRevision::default(),
+        ));
         let first = app
             .world_mut()
             .spawn(FileView {
@@ -359,6 +380,18 @@ mod tests {
         let mut modes = app.world_mut().query::<&SharedFileViewMode>();
         assert_eq!(modes.single(app.world()).unwrap().0, FileViewMode::Diff);
         assert!(app.world().get::<FileView>(second).is_some());
+        let mut revisions = app.world_mut().query::<&FileViewModeRevision>();
+        assert_eq!(revisions.single(app.world()).unwrap().0, 2);
+
+        app.world_mut().trigger(UiInput {
+            webview: first,
+            payload: FileViewModeSet {
+                mode: FileViewMode::Diff,
+            },
+        });
+
+        let mut revisions = app.world_mut().query::<&FileViewModeRevision>();
+        assert_eq!(revisions.single(app.world()).unwrap().0, 3);
     }
 
     #[test]
@@ -366,8 +399,10 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_observer(on_file_view_mode_set);
-        app.world_mut()
-            .spawn(SharedFileViewMode(FileViewMode::Editor));
+        app.world_mut().spawn((
+            SharedFileViewMode(FileViewMode::Editor),
+            FileViewModeRevision::default(),
+        ));
 
         let path = PathBuf::from("/note.md");
         let mut core = EditCore::new(
@@ -409,7 +444,10 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<FileViewModeRequest>()
             .add_systems(Update, apply_file_view_mode_requests);
-        app.world_mut().spawn(SharedFileViewMode::default());
+        app.world_mut().spawn((
+            SharedFileViewMode::default(),
+            FileViewModeRevision::default(),
+        ));
 
         app.world_mut()
             .resource_mut::<Messages<FileViewModeRequest>>()
@@ -418,6 +456,16 @@ mod tests {
 
         let mut modes = app.world_mut().query::<&SharedFileViewMode>();
         assert_eq!(modes.single(app.world()).unwrap().0, FileViewMode::Diff);
+        let mut revisions = app.world_mut().query::<&FileViewModeRevision>();
+        assert_eq!(revisions.single(app.world()).unwrap().0, 2);
+
+        app.world_mut()
+            .resource_mut::<Messages<FileViewModeRequest>>()
+            .write(FileViewModeRequest(FileViewMode::Diff));
+        app.update();
+
+        let mut revisions = app.world_mut().query::<&FileViewModeRevision>();
+        assert_eq!(revisions.single(app.world()).unwrap().0, 3);
     }
 
     #[test]
@@ -425,7 +473,10 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_observer(on_file_view_mode_set);
-        app.world_mut().spawn(SharedFileViewMode::default());
+        app.world_mut().spawn((
+            SharedFileViewMode::default(),
+            FileViewModeRevision::default(),
+        ));
         let other = app.world_mut().spawn_empty().id();
 
         app.world_mut().trigger(UiInput {

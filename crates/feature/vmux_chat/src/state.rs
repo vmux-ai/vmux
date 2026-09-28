@@ -1,8 +1,8 @@
 use crate::event::{
     ChatAttachments, ChatBranchesState, ChatComposerEffect, ChatHistoryMoveEffect,
-    ChatListChooseEffect, ChatListMoveEffect, ChatMediaState, ChatResumeState,
-    ChatSelectorDismissEffect, ChatSnapshot, ChatTranscriptState, ComposerContext, ModeState,
-    ModelState, SlashCommands,
+    ChatListChooseEffect, ChatListMoveEffect, ChatMediaState, ChatPromptFocusEffect,
+    ChatResumeState, ChatSelectorDismissEffect, ChatSnapshot, ChatTranscriptState, ComposerContext,
+    ModeState, ModelState, SlashCommands,
 };
 use crate::model::{Models, Picker};
 use crate::prompt::{AttachmentPreviews, Attachments, Browsed, Media};
@@ -50,6 +50,7 @@ pub struct ChatUiStatePatch {
     pub branches: Option<Box<ChatBranchesState>>,
     pub resume: Option<Box<ChatResumeState>>,
     pub composer_effect: Option<ChatComposerEffect>,
+    pub prompt_focus: Option<ChatPromptFocusEffect>,
 }
 
 #[vmux_api::ui_state(Default)]
@@ -80,6 +81,7 @@ fn spawn_chat_runtime(mut commands: Commands) {
         Models::default(),
         Picker::default(),
         Attachments::default(),
+        crate::prompt::ChatPromptFocusRevision::default(),
         AttachmentPreviews::default(),
         Browsed::default(),
         Media::default(),
