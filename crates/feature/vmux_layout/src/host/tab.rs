@@ -24,59 +24,67 @@ pub struct TabPlugin;
 
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(TabCommandPlugin)
+            .register_type::<Tab>()
+            .register_type::<Option<String>>()
+            .register_type::<TabWorkspace>()
+            .register_type::<TabWorktree>()
+            .register_type::<TabDirDecided>()
+            .add_message::<CloseTabRequest>()
+            .add_message::<crate::NewTabRequest>()
+            .add_message::<vmux_core::launcher::LauncherDismissRequest>()
+            .add_plugins(UiEventPlugin::<(
+                TabCreateRequest,
+                TabCloseRequest,
+                TabActivateRequest,
+                TabReorderRequest,
+            )>::default())
+            .add_observer(on_tab_create_request)
+            .add_observer(on_tab_close_request)
+            .add_observer(on_tab_activate_request)
+            .add_observer(on_tab_reorder_request)
+            .add_systems(
+                Update,
+                (
+                    handle_open_requests,
+                    handle_create_requests,
+                    handle_close_requests,
+                    handle_focus_requests,
+                    handle_move_requests,
+                    handle_new_tab_requests,
+                )
+                    .chain()
+                    .in_set(LayoutRequestSet::Handle)
+                    .in_set(TabCommandSet)
+                    .after(crate::space::EffectiveStartupSet),
+            )
+            .add_systems(
+                Update,
+                crate::archive::handle_close_tab_requests
+                    .in_set(LayoutRequestSet::Handle)
+                    .after(TabCommandSet)
+                    .after(crate::stack::StackCommandSet),
+            )
+            .add_systems(
+                PostUpdate,
+                sync_tab_visibility.before(LayoutSystems::Layout),
+            )
+            .add_systems(PostUpdate, sync_tab_order)
+            .add_systems(Update, dismiss_launcher_over_new_surfaces);
+    }
+}
+
+pub struct TabCommandPlugin;
+
+impl Plugin for TabCommandPlugin {
+    fn build(&self, app: &mut App) {
         app.add_plugins((
             CommandTypePlugin::<OpenRequest>::default(),
             CommandTypePlugin::<CreateRequest>::default(),
             CommandTypePlugin::<CloseRequest>::default(),
             CommandTypePlugin::<FocusRequest>::default(),
             CommandTypePlugin::<MoveRequest>::default(),
-        ))
-        .register_type::<Tab>()
-        .register_type::<Option<String>>()
-        .register_type::<TabWorkspace>()
-        .register_type::<TabWorktree>()
-        .register_type::<TabDirDecided>()
-        .add_message::<CloseTabRequest>()
-        .add_message::<crate::NewTabRequest>()
-        .add_message::<vmux_core::launcher::LauncherDismissRequest>()
-        .add_plugins(UiEventPlugin::<(
-            TabCreateRequest,
-            TabCloseRequest,
-            TabActivateRequest,
-            TabReorderRequest,
-        )>::default())
-        .add_observer(on_tab_create_request)
-        .add_observer(on_tab_close_request)
-        .add_observer(on_tab_activate_request)
-        .add_observer(on_tab_reorder_request)
-        .add_systems(
-            Update,
-            (
-                handle_open_requests,
-                handle_create_requests,
-                handle_close_requests,
-                handle_focus_requests,
-                handle_move_requests,
-                handle_new_tab_requests,
-            )
-                .chain()
-                .in_set(LayoutRequestSet::Handle)
-                .in_set(TabCommandSet)
-                .after(crate::space::EffectiveStartupSet),
-        )
-        .add_systems(
-            Update,
-            crate::archive::handle_close_tab_requests
-                .in_set(LayoutRequestSet::Handle)
-                .after(TabCommandSet)
-                .after(crate::stack::StackCommandSet),
-        )
-        .add_systems(
-            PostUpdate,
-            sync_tab_visibility.before(LayoutSystems::Layout),
-        )
-        .add_systems(PostUpdate, sync_tab_order)
-        .add_systems(Update, dismiss_launcher_over_new_surfaces);
+        ));
     }
 }
 

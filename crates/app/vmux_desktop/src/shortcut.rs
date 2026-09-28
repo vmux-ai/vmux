@@ -186,18 +186,13 @@ mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
     use vmux_command::{
-        CommandDefinition, CommandInvocation, CommandPlugin, CommandTypePlugin,
-        RegisterCommandDefinitions,
+        CommandDefinition, CommandInvocation, CommandPlugin, RegisterCommandDefinitions,
     };
-    use vmux_layout::pane::{
-        ArrangeRequest as PaneArrangeRequest, CloseRequest as PaneCloseRequest,
-        FocusRequest as PaneFocusRequest, OpenRequest as PaneOpenRequest,
-        ResizeRequest as PaneResizeRequest, ToggleZoomRequest,
-    };
+    use vmux_layout::pane::PaneCommandPlugin;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_layout::tab::{FocusRequest as TabFocusRequest, OpenRequest as TabOpenRequest};
+    use vmux_layout::tab::TabCommandPlugin;
     use vmux_setting::{
         AppSettings, BrowserSettings, KeyComboDef, ShortcutDef, ShortcutEntry, ShortcutSettings,
     };
@@ -210,14 +205,8 @@ mod tests {
             app.add_plugins((
                 MinimalPlugins,
                 CommandPlugin,
-                CommandTypePlugin::<PaneOpenRequest>::default(),
-                CommandTypePlugin::<PaneCloseRequest>::default(),
-                CommandTypePlugin::<PaneFocusRequest>::default(),
-                CommandTypePlugin::<PaneArrangeRequest>::default(),
-                CommandTypePlugin::<PaneResizeRequest>::default(),
-                CommandTypePlugin::<ToggleZoomRequest>::default(),
-                CommandTypePlugin::<TabFocusRequest>::default(),
-                CommandTypePlugin::<TabOpenRequest>::default(),
+                PaneCommandPlugin,
+                TabCommandPlugin,
                 ShortcutPlugin,
             ))
             .add_systems(

@@ -277,6 +277,25 @@ pub struct PanePlugin;
 
 impl Plugin for PanePlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(PaneCommandPlugin)
+            .register_type::<SideSheetCardCollapsed>()
+            .add_plugins((
+                TreePlugin,
+                IdentityPlugin,
+                ArrangementPlugin,
+                OpenPlugin,
+                PaneZoomPlugin,
+                FocusPlugin,
+                ResizePlugin,
+                ClosePlugin,
+            ));
+    }
+}
+
+pub struct PaneCommandPlugin;
+
+impl Plugin for PaneCommandPlugin {
+    fn build(&self, app: &mut App) {
         app.add_plugins((
             CommandTypePlugin::<OpenRequest>::default(),
             CommandTypePlugin::<CloseRequest>::default(),
@@ -284,17 +303,6 @@ impl Plugin for PanePlugin {
             CommandTypePlugin::<ArrangeRequest>::default(),
             CommandTypePlugin::<ResizeRequest>::default(),
             CommandTypePlugin::<ToggleZoomRequest>::default(),
-        ))
-        .register_type::<SideSheetCardCollapsed>()
-        .add_plugins((
-            TreePlugin,
-            IdentityPlugin,
-            ArrangementPlugin,
-            OpenPlugin,
-            PaneZoomPlugin,
-            FocusPlugin,
-            ResizePlugin,
-            ClosePlugin,
         ));
     }
 }
