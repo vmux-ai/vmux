@@ -1,6 +1,4 @@
 use crate::event::ModelOptionEntry;
-#[cfg(test)]
-use crate::event::ResumableSessionEntry;
 pub(crate) use crate::selector::{SelectorMode, selector_mode};
 use unicode_segmentation::UnicodeSegmentation;
 #[cfg(ui)]
@@ -191,15 +189,6 @@ fn utf16_to_byte(value: &str, offset: u32) -> usize {
 mod tests {
     use super::*;
 
-    fn session(sid: &str, title: &str, cwd: &str) -> ResumableSessionEntry {
-        ResumableSessionEntry {
-            sid: sid.into(),
-            title: title.into(),
-            cwd: cwd.into(),
-            ..Default::default()
-        }
-    }
-
     #[test]
     fn selector_mode_distinguishes_mcp_and_other_selector_arguments() {
         assert_eq!(selector_mode("hello"), SelectorMode::None);
@@ -234,18 +223,6 @@ mod tests {
         assert_eq!(filter_models(&models, "son")[0].id, "claude-sonnet");
         assert_eq!(filter_models(&models, "capable")[0].id, "claude-opus");
         assert_eq!(filter_models(&models, "claude-opus")[0].name, "Opus");
-    }
-
-    #[test]
-    fn resumable_session_matches_sid_title_and_cwd_case_insensitively() {
-        let sessions = [
-            session("SID-ABC", "Fix auth", "/work/api"),
-            session("sid-def", "Docs", "/work/site"),
-        ];
-        assert!(sessions[0].matches("abc"));
-        assert!(sessions[0].matches("AUTH"));
-        assert!(sessions[1].matches("SITE"));
-        assert!(!sessions[0].matches("missing"));
     }
 
     #[test]

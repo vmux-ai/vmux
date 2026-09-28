@@ -33,7 +33,7 @@ fn on_slash_command(
     let Ok(mut composer) = composers.get_mut(webview) else {
         return;
     };
-    let (effect, changes) = composer.effect(command.draft(), true);
+    let (effect, changes) = composer.slash_effect(command);
     commands.trigger(
         vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
             webview, &effect,

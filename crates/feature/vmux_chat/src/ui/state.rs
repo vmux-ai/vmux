@@ -387,7 +387,7 @@ impl Chat {
         let query = query.to_lowercase();
         let mut matching = Vec::new();
         for command in self.slash.commands.read().iter() {
-            if command.name().starts_with(&query) {
+            if command.command.name().starts_with(&query) {
                 matching.push(command.clone());
             }
         }

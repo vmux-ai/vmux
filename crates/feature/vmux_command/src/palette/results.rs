@@ -31,13 +31,15 @@ impl SlashRows {
         let lowered = name.to_lowercase();
         let mut matching = Vec::new();
         for command in commands {
-            if command.name().starts_with(&lowered) {
+            if command.command.name().starts_with(&lowered) {
                 matching.push(command);
             }
         }
         let settled = match matching.as_slice() {
             [only] => Some(*only),
-            _ => commands.iter().find(|command| command.name() == lowered),
+            _ => commands
+                .iter()
+                .find(|command| command.command.name() == lowered),
         };
         if let Some(command) = settled
             && command.command == SlashCommand::Resume
@@ -50,7 +52,7 @@ impl SlashRows {
         let mut rows = Vec::new();
         for command in matching {
             rows.push(CommandBarResultItem::Slash {
-                name: command.name().to_string(),
+                name: command.command.name().to_string(),
                 hint: if command.command == SlashCommand::Mcp {
                     translate("mcp-command-description")
                 } else {

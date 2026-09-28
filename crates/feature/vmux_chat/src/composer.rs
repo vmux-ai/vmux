@@ -1,4 +1,5 @@
 use bevy_ecs::prelude::*;
+use vmux_api::chat::SlashCommand;
 use vmux_api::prompt_media::inline_media_query;
 
 #[cfg(host)]
@@ -70,6 +71,19 @@ impl ComposerState {
             },
             changes,
         )
+    }
+
+    pub fn slash_effect(
+        &mut self,
+        command: SlashCommand,
+    ) -> (ChatComposerEffect, ComposerQueryChanges) {
+        let draft = match command {
+            SlashCommand::Resume => "/resume ",
+            SlashCommand::Mcp => "/mcp ",
+            SlashCommand::Model => "/model ",
+            SlashCommand::Upload | SlashCommand::Cli => "",
+        };
+        self.effect(draft, true)
     }
 
     pub fn draft(&self) -> &str {
@@ -175,13 +189,12 @@ fn on_queries_changed(trigger: On<ComposerQueriesChanged>, mut commands: Command
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::chat::SlashCommand;
 
     #[test]
     fn effects_are_revisioned() {
         let mut state = ComposerState::default();
-        let (resume, resume_queries) = state.effect(SlashCommand::Resume.draft(), true);
-        let (upload, upload_queries) = state.effect(SlashCommand::Upload.draft(), true);
+        let (resume, resume_queries) = state.slash_effect(SlashCommand::Resume);
+        let (upload, upload_queries) = state.slash_effect(SlashCommand::Upload);
         assert_eq!(resume.revision, 1);
         assert_eq!(resume.draft, "/resume ");
         assert_eq!(

@@ -55,6 +55,18 @@ struct ResumeListAnswer {
     labels: RepoLabels,
 }
 
+impl ResumeListAnswer {
+    const PAGE_SIZE: usize = 50;
+
+    fn matches(session: &ResumableSessionEntry, query: &str) -> bool {
+        let query = query.trim().to_lowercase();
+        query.is_empty()
+            || session.sid.to_lowercase().contains(&query)
+            || session.title.to_lowercase().contains(&query)
+            || session.cwd.to_lowercase().contains(&query)
+    }
+}
+
 #[derive(EntityEvent)]
 pub(super) struct ChatResumeQuery {
     #[event_target]
@@ -340,12 +352,12 @@ fn on_resume_list_request(
             }
         };
         let mut built = resume_entries(ranked, kind, &agent_name, &mut labels, &strategies);
-        built.retain(|session| session.matches(&query));
+        built.retain(|session| ResumeListAnswer::matches(session, &query));
         let total = built.len() as u32;
         let sessions = built
             .into_iter()
             .skip(offset as usize)
-            .take(ResumableSessions::PAGE as usize)
+            .take(ResumeListAnswer::PAGE_SIZE)
             .collect();
         ResumeListAnswer {
             sessions: ResumableSessions {
@@ -530,6 +542,28 @@ fn on_resume_session(
 mod tests {
     use super::*;
     use crate::strategy::kind_supports_cross_runtime;
+
+    #[test]
+    fn resume_query_matches_sid_title_and_cwd_case_insensitively() {
+        let sessions = [
+            ResumableSessionEntry {
+                sid: "SID-ABC".into(),
+                title: "Fix auth".into(),
+                cwd: "/work/api".into(),
+                ..Default::default()
+            },
+            ResumableSessionEntry {
+                sid: "sid-def".into(),
+                title: "Docs".into(),
+                cwd: "/work/site".into(),
+                ..Default::default()
+            },
+        ];
+        assert!(ResumeListAnswer::matches(&sessions[0], "abc"));
+        assert!(ResumeListAnswer::matches(&sessions[0], "AUTH"));
+        assert!(ResumeListAnswer::matches(&sessions[1], "SITE"));
+        assert!(!ResumeListAnswer::matches(&sessions[0], "missing"));
+    }
 
     #[test]
     fn resume_projection_rejects_stale_results() {

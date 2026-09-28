@@ -9,7 +9,8 @@ use vmux_api::protocol::{
 };
 use vmux_api::room::RemoteModelState;
 use vmux_chat::event::{
-    ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort, SlashCommands,
+    ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort, SlashCommand,
+    SlashCommandEntry, SlashCommands,
 };
 use vmux_command::event::{StartSelectMode, StartSelectModel};
 use vmux_service::client::ServiceRequest;
@@ -412,8 +413,38 @@ impl ModelProjection {
             .collect();
         Self {
             state,
-            slash_commands: SlashCommands::for_agent(cross_runtime, model.is_some()),
+            slash_commands: Self::slash_commands(cross_runtime, model.is_some()),
         }
+    }
+
+    fn slash_commands(cross_runtime: bool, has_models: bool) -> SlashCommands {
+        let mut commands = vec![
+            SlashCommandEntry {
+                command: SlashCommand::Upload,
+                description: "Attach files".to_string(),
+            },
+            SlashCommandEntry {
+                command: SlashCommand::Resume,
+                description: "Resume a past session".to_string(),
+            },
+            SlashCommandEntry {
+                command: SlashCommand::Mcp,
+                description: String::new(),
+            },
+        ];
+        if has_models {
+            commands.push(SlashCommandEntry {
+                command: SlashCommand::Model,
+                description: "Select model".to_string(),
+            });
+        }
+        if cross_runtime {
+            commands.push(SlashCommandEntry {
+                command: SlashCommand::Cli,
+                description: "Continue this session in the CLI".to_string(),
+            });
+        }
+        SlashCommands { commands }
     }
 
     fn options(model: &AcpModelState) -> Vec<ModelOptionEntry> {
@@ -1010,10 +1041,10 @@ mod tests {
     #[test]
     fn slash_commands_include_mcp_and_gate_cli_by_runtime() {
         let names = |cross, models| {
-            SlashCommands::for_agent(cross, models)
+            ModelProjection::slash_commands(cross, models)
                 .commands
                 .iter()
-                .map(|command| command.name())
+                .map(|command| command.command.name())
                 .collect::<Vec<_>>()
         };
         assert_eq!(names(false, false), ["upload", "resume", "mcp"]);

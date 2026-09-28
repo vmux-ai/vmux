@@ -241,7 +241,7 @@ impl PaletteRows {
         let lowered = name.to_lowercase();
         slash_commands
             .iter()
-            .any(|command| command.name().starts_with(&lowered))
+            .any(|command| command.command.name().starts_with(&lowered))
     }
 
     fn with_completions(
@@ -1886,7 +1886,20 @@ mod tests {
     #[test]
     fn slash_commands_open_from_the_prefix_and_complete_mcp() {
         let mut state = Launcher::state();
-        state.prompt_context = CommandBarPromptContext::unrooted();
+        state.prompt_context.slash_commands = vec![
+            vmux_api::chat::SlashCommandEntry {
+                command: vmux_api::chat::SlashCommand::Upload,
+                description: "Attach files".to_string(),
+            },
+            vmux_api::chat::SlashCommandEntry {
+                command: vmux_api::chat::SlashCommand::Resume,
+                description: "Resume a past session".to_string(),
+            },
+            vmux_api::chat::SlashCommandEntry {
+                command: vmux_api::chat::SlashCommand::Mcp,
+                description: String::new(),
+            },
+        ];
 
         let palette = PaletteState::start(&state, PaletteDraft::typed("/"));
         let names = palette

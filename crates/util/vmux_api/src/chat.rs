@@ -397,16 +397,6 @@ pub struct ResumableSessionEntry {
     pub branch: String,
     pub cross_runtime: bool,
 }
-
-impl ResumableSessionEntry {
-    pub fn matches(&self, query: &str) -> bool {
-        let query = query.trim().to_lowercase();
-        query.is_empty()
-            || self.sid.to_lowercase().contains(&query)
-            || self.title.to_lowercase().contains(&query)
-            || self.cwd.to_lowercase().contains(&query)
-    }
-}
 #[vmux_api::contract(Default)]
 pub struct ResumableSessions {
     pub request_id: u64,
@@ -414,18 +404,6 @@ pub struct ResumableSessions {
     pub sessions: Vec<ResumableSessionEntry>,
     pub offset: u32,
     pub total: u32,
-}
-
-impl ResumableSessions {
-    pub const PAGE: u32 = 50;
-
-    pub fn reaches(&self) -> u32 {
-        self.offset + self.sessions.len() as u32
-    }
-
-    pub fn has_more(&self) -> bool {
-        self.reaches() < self.total
-    }
 }
 #[vmux_api::contract(Copy, Default, Eq)]
 pub enum SlashCommand {
@@ -447,34 +425,12 @@ impl SlashCommand {
             Self::Cli => "cli",
         }
     }
-
-    pub const fn draft(self) -> &'static str {
-        match self {
-            Self::Resume => "/resume ",
-            Self::Mcp => "/mcp ",
-            Self::Model => "/model ",
-            Self::Upload | Self::Cli => "",
-        }
-    }
 }
 
 #[vmux_api::contract(Default, Eq)]
 pub struct SlashCommandEntry {
     pub command: SlashCommand,
     pub description: String,
-}
-
-impl SlashCommandEntry {
-    pub const fn name(&self) -> &'static str {
-        self.command.name()
-    }
-
-    fn new(command: SlashCommand, description: &str) -> Self {
-        Self {
-            command,
-            description: description.to_string(),
-        }
-    }
 }
 #[vmux_api::contract(Default)]
 pub struct SlashCommands {
@@ -491,39 +447,4 @@ pub struct ResumeSession {
     pub kind: String,
     pub sid: String,
     pub cwd: String,
-}
-
-impl SlashCommands {
-    pub fn for_start() -> Self {
-        let commands = vec![
-            SlashCommandEntry::new(SlashCommand::Upload, "Attach files"),
-            SlashCommandEntry::new(SlashCommand::Resume, "Resume a past session"),
-        ];
-        #[cfg(host)]
-        let commands = {
-            let mut commands = commands;
-            commands.push(SlashCommandEntry::new(SlashCommand::Mcp, ""));
-            commands
-        };
-        Self { commands }
-    }
-
-    pub fn for_agent(cross_runtime: bool, has_models: bool) -> Self {
-        let mut commands = vec![
-            SlashCommandEntry::new(SlashCommand::Upload, "Attach files"),
-            SlashCommandEntry::new(SlashCommand::Resume, "Resume a past session"),
-        ];
-        #[cfg(host)]
-        commands.push(SlashCommandEntry::new(SlashCommand::Mcp, ""));
-        if has_models {
-            commands.push(SlashCommandEntry::new(SlashCommand::Model, "Select model"));
-        }
-        if cross_runtime {
-            commands.push(SlashCommandEntry::new(
-                SlashCommand::Cli,
-                "Continue this session in the CLI",
-            ));
-        }
-        Self { commands }
-    }
 }

@@ -2,6 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
+use vmux_api::chat::{SlashCommand, SlashCommandEntry};
 use vmux_api::space::ProjectBranch;
 use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
@@ -101,6 +102,26 @@ struct StartPromptContextParams<'w, 's> {
 }
 
 impl StartPromptContextParams<'_, '_> {
+    fn unrooted() -> CommandBarPromptContext {
+        CommandBarPromptContext {
+            slash_commands: vec![
+                SlashCommandEntry {
+                    command: SlashCommand::Upload,
+                    description: "Attach files".to_string(),
+                },
+                SlashCommandEntry {
+                    command: SlashCommand::Resume,
+                    description: "Resume a past session".to_string(),
+                },
+                SlashCommandEntry {
+                    command: SlashCommand::Mcp,
+                    description: String::new(),
+                },
+            ],
+            ..Default::default()
+        }
+    }
+
     fn changed(&self, tab: Option<Entity>) -> bool {
         if self.command_bar.is_changed() {
             return true;
@@ -138,14 +159,14 @@ impl StartPromptContextParams<'_, '_> {
         info: Option<&vmux_git::worktree::RepoInfo>,
     ) -> CommandBarPromptContext {
         let Some(tab) = tab else {
-            return CommandBarPromptContext::unrooted();
+            return Self::unrooted();
         };
         let Ok((_, _, worktree)) = self.tabs.get(tab) else {
-            return CommandBarPromptContext::unrooted();
+            return Self::unrooted();
         };
         let cwd = self.cwd(Some(tab));
         if cwd.is_empty() {
-            return CommandBarPromptContext::unrooted();
+            return Self::unrooted();
         }
         let path = std::path::Path::new(&cwd);
         let named = match info {
@@ -169,7 +190,7 @@ impl StartPromptContextParams<'_, '_> {
             uncommitted: info.map(|info| info.uncommitted).unwrap_or(0),
             ahead: info.map(|info| info.ahead).unwrap_or(0),
             projects: Vec::new(),
-            ..CommandBarPromptContext::unrooted()
+            ..Self::unrooted()
         }
     }
 }
