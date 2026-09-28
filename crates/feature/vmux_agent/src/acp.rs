@@ -3,6 +3,7 @@ mod projector;
 
 pub use driver::AcpInput;
 use driver::AcpShared;
+use projector::{AcpProjector, ApprovalDetailsQuery, Intent};
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -17,9 +18,27 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use vmux_core::agent::SessionId;
 use vmux_core::{CreatedAt, ProcessId};
 
-use vmux_api::protocol::{ManagedMcpServer, ManagedMcpTransport, ServiceMessage};
+use vmux_api::protocol::{
+    AgentAttachment, AgentFileTouched, AgentRequest, AgentRequestId, ManagedMcpServer,
+    ManagedMcpTransport, ServiceMessage, SharedEvent,
+};
 use vmux_api::room::{Message, RemoteSession};
 use vmux_process::ProcessRuntime;
+
+enum AcpProjectionInput {
+    BeginHistoryReplay,
+    Update(agent_client_protocol::schema::v1::SessionUpdate),
+    FinishHistoryReplay(bool),
+    PushUser {
+        text: String,
+        attachments: Vec<AgentAttachment>,
+    },
+    Snapshot,
+    ApprovalDetails {
+        query: ApprovalDetailsQuery,
+        response: oneshot::Sender<Option<(String, String)>>,
+    },
+}
 
 pub struct AcpSessionPlugin;
 
@@ -31,6 +50,7 @@ impl Plugin for AcpSessionPlugin {
                 receive_acp_session_requests,
                 ApplyDeferred,
                 spawn_acp_sessions,
+                project_acp_sessions,
                 route_acp_session_inputs,
                 subscribe_acp_sessions,
                 read_acp_session_state,
@@ -154,10 +174,11 @@ impl AcpSessions {
                 lookups,
                 rebinds,
                 closes,
-                wake,
+                wake: wake.clone(),
             },
             (
                 AcpSessionRuntime(runtime),
+                AcpSessionWake(wake),
                 AcpSessionInbox(AcpSessionReceivers {
                     spawns: spawn_inbox,
                     inputs: input_inbox,
@@ -390,6 +411,9 @@ struct AcpSessionInbox(AcpSessionReceivers);
 struct AcpSessionRuntime(Handle);
 
 #[derive(Component)]
+struct AcpSessionWake(mpsc::UnboundedSender<()>);
+
+#[derive(Component)]
 struct SpawnAcpSession {
     sid: String,
     agent_id: String,
@@ -479,6 +503,15 @@ struct AcpSessionInput(mpsc::UnboundedSender<AcpInput>);
 struct AcpSessionShared(Arc<AcpShared>);
 
 #[derive(Component)]
+struct AcpProjectionInbox(mpsc::UnboundedReceiver<AcpProjectionInput>);
+
+#[derive(Component, Default)]
+struct AcpHistoryReplay {
+    active: bool,
+    updates: usize,
+}
+
+#[derive(Component)]
 struct AcpSessionAgent(String);
 
 #[derive(Component)]
@@ -528,6 +561,7 @@ fn receive_acp_session_requests(mut inbox: Single<&mut AcpSessionInbox>, mut com
 
 fn spawn_acp_sessions(
     runtime: Single<&AcpSessionRuntime>,
+    wake: Single<&AcpSessionWake>,
     sessions: Query<&SessionId>,
     mut requests: Query<(Entity, &mut SpawnAcpSession)>,
     mut commands: Commands,
@@ -539,13 +573,16 @@ fn spawn_acp_sessions(
     for (request_entity, mut request) in &mut requests {
         if !session_ids.contains(&request.sid) {
             let (input_tx, input_rx) = mpsc::unbounded_channel();
+            let (projection_tx, projection_rx) = mpsc::unbounded_channel();
             let (stream_tx, _) = broadcast::channel(256);
-            let shared = Arc::new(AcpShared::new(
+            let shared = Arc::new(AcpShared::with_projection(
                 request.sid.clone(),
                 std::mem::take(&mut request.cwd),
                 request.anchor,
                 stream_tx,
                 request.processes.clone(),
+                projection_tx,
+                wake.0.clone(),
             ));
             let task = runtime.0.spawn(driver::run(
                 std::mem::take(&mut request.command),
@@ -563,6 +600,9 @@ fn spawn_acp_sessions(
                 SessionId(request.sid.clone()),
                 AcpSessionInput(input_tx),
                 AcpSessionShared(shared),
+                AcpProjectionInbox(projection_rx),
+                AcpProjector::default(),
+                AcpHistoryReplay::default(),
                 AcpSessionAgent(request.agent_id.clone()),
                 CreatedAt::now(),
                 AcpSessionTask(task),
@@ -573,6 +613,124 @@ fn spawn_acp_sessions(
             let _ = response.send(());
         }
         commands.entity(request_entity).despawn();
+    }
+}
+
+fn project_acp_sessions(
+    mut sessions: Query<(
+        &SessionId,
+        &AcpSessionShared,
+        &mut AcpProjectionInbox,
+        &mut AcpProjector,
+        &mut AcpHistoryReplay,
+    )>,
+) {
+    for (sid, shared, mut inbox, mut projector, mut replay) in &mut sessions {
+        while let Ok(input) = inbox.0.try_recv() {
+            match input {
+                AcpProjectionInput::BeginHistoryReplay => {
+                    *projector = AcpProjector::default();
+                    replay.active = true;
+                    replay.updates = 0;
+                }
+                AcpProjectionInput::Update(update) => {
+                    let intents = projector.apply(update);
+                    shared
+                        .0
+                        .projector_updates
+                        .send_modify(|revision| *revision += 1);
+                    if replay.active {
+                        for intent in &intents {
+                            if let Intent::WorkspaceChanged(workspace) = intent {
+                                shared.0.publish_workspace_change(workspace);
+                            }
+                        }
+                        replay.updates += 1;
+                        if replay.updates == 1
+                            || replay
+                                .updates
+                                .is_multiple_of(driver::HISTORY_REPLAY_SNAPSHOT_INTERVAL)
+                        {
+                            shared
+                                .0
+                                .emit(shared.0.snapshot_message(projector.messages()));
+                        }
+                        continue;
+                    }
+                    for intent in intents {
+                        match intent {
+                            Intent::Delta(text) => {
+                                shared
+                                    .0
+                                    .emit(ServiceMessage::Shared(SharedEvent::AgentDelta {
+                                        sid: sid.0.clone(),
+                                        text,
+                                    }))
+                            }
+                            Intent::Snapshot => shared
+                                .0
+                                .emit(shared.0.snapshot_message(projector.messages())),
+                            Intent::ProposedDiff {
+                                call_id,
+                                path,
+                                old_text,
+                                new_text,
+                            } => shared.0.emit(ServiceMessage::AcpProposedDiff {
+                                sid: sid.0.clone(),
+                                call_id,
+                                path,
+                                old_text,
+                                new_text,
+                            }),
+                            Intent::FileTouched { path, line, kind } => {
+                                let Ok(request) = AgentRequest::encode(&AgentFileTouched {
+                                    anchor: shared.0.anchor,
+                                    path,
+                                    line,
+                                    col: None,
+                                    end_col: None,
+                                    kind,
+                                }) else {
+                                    continue;
+                                };
+                                shared.0.emit(ServiceMessage::AgentRequest {
+                                    request_id: AgentRequestId::new(),
+                                    anchor: Some(shared.0.anchor),
+                                    request,
+                                });
+                            }
+                            Intent::WorkspaceChanged(workspace) => {
+                                shared.0.publish_workspace_change(&workspace)
+                            }
+                        }
+                    }
+                }
+                AcpProjectionInput::FinishHistoryReplay(loaded) => {
+                    if !loaded {
+                        *projector = AcpProjector::default();
+                    }
+                    replay.active = false;
+                    replay.updates = 0;
+                    shared
+                        .0
+                        .emit(shared.0.snapshot_message(projector.messages()));
+                }
+                AcpProjectionInput::PushUser { text, attachments } => {
+                    projector.push_user(text, attachments);
+                    shared
+                        .0
+                        .emit(shared.0.snapshot_message(projector.messages()));
+                }
+                AcpProjectionInput::Snapshot => {
+                    shared
+                        .0
+                        .emit(shared.0.snapshot_message(projector.messages()));
+                }
+                AcpProjectionInput::ApprovalDetails { query, response } => {
+                    let _ = response.send(projector.approval_details(&query));
+                }
+            }
+        }
     }
 }
 
@@ -623,7 +781,7 @@ fn subscribe_acp_sessions(
 }
 
 fn read_acp_session_state(
-    sessions: Query<(&SessionId, &AcpSessionShared)>,
+    sessions: Query<(&SessionId, &AcpSessionShared, &AcpProjector)>,
     mut snapshots: Query<(Entity, &mut SnapshotAcpSession)>,
     mut agent_infos: Query<(Entity, &mut AcpSessionAgentInfo)>,
     mut model_infos: Query<(Entity, &mut AcpSessionModelInfo)>,
@@ -633,9 +791,9 @@ fn read_acp_session_state(
 ) {
     for (request_entity, mut request) in &mut snapshots {
         let mut result = None;
-        for (sid, shared) in &sessions {
+        for (sid, shared, projector) in &sessions {
             if sid.0 == request.sid {
-                result = Some(shared.0.snapshot_message());
+                result = Some(shared.0.snapshot_message(projector.messages()));
                 break;
             }
         }
@@ -646,7 +804,7 @@ fn read_acp_session_state(
     }
     for (request_entity, mut request) in &mut agent_infos {
         let mut result = None;
-        for (sid, shared) in &sessions {
+        for (sid, shared, _) in &sessions {
             if sid.0 == request.sid {
                 result = shared.0.agent_info_message();
                 break;
@@ -659,7 +817,7 @@ fn read_acp_session_state(
     }
     for (request_entity, mut request) in &mut model_infos {
         let mut result = None;
-        for (sid, shared) in &sessions {
+        for (sid, shared, _) in &sessions {
             if sid.0 == request.sid {
                 result = shared.0.model_info_message();
                 break;
@@ -672,7 +830,7 @@ fn read_acp_session_state(
     }
     for (request_entity, mut request) in &mut mode_infos {
         let mut result = None;
-        for (sid, shared) in &sessions {
+        for (sid, shared, _) in &sessions {
             if sid.0 == request.sid {
                 result = shared.0.mode_info_message();
                 break;
@@ -685,9 +843,9 @@ fn read_acp_session_state(
     }
     for (request_entity, mut request) in &mut messages {
         let mut result = None;
-        for (sid, shared) in &sessions {
+        for (sid, _, projector) in &sessions {
             if sid.0 == request.sid {
-                result = Some(shared.0.remote_messages());
+                result = Some(projector.messages().to_vec());
                 break;
             }
         }
@@ -699,19 +857,25 @@ fn read_acp_session_state(
 }
 
 fn list_acp_sessions(
-    sessions: Query<(&SessionId, &AcpSessionShared, &AcpSessionAgent, &CreatedAt)>,
+    sessions: Query<(
+        &SessionId,
+        &AcpSessionShared,
+        &AcpSessionAgent,
+        &CreatedAt,
+        &AcpProjector,
+    )>,
     mut lists: Query<(Entity, &mut ListAcpSessions)>,
     mut lookups: Query<(Entity, &mut FindAcpSession)>,
     mut commands: Commands,
 ) {
     for (request_entity, mut request) in &mut lists {
         let mut result = Vec::new();
-        for (_, shared, agent, created_at) in &sessions {
-            result.push(
-                shared
-                    .0
-                    .remote_session(&agent.0, created_at.0.max(0) as u64),
-            );
+        for (_, shared, agent, created_at, projector) in &sessions {
+            result.push(shared.0.remote_session(
+                &agent.0,
+                created_at.0.max(0) as u64,
+                projector.messages(),
+            ));
         }
         if let Some(response) = request.response.take() {
             let _ = response.send(result);
@@ -720,13 +884,13 @@ fn list_acp_sessions(
     }
     for (request_entity, mut request) in &mut lookups {
         let mut result = None;
-        for (sid, shared, agent, created_at) in &sessions {
+        for (sid, shared, agent, created_at, projector) in &sessions {
             if sid.0 == request.sid {
-                result = Some(
-                    shared
-                        .0
-                        .remote_session(&agent.0, created_at.0.max(0) as u64),
-                );
+                result = Some(shared.0.remote_session(
+                    &agent.0,
+                    created_at.0.max(0) as u64,
+                    projector.messages(),
+                ));
                 break;
             }
         }

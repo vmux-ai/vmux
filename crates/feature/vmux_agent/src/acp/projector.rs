@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use agent_client_protocol::schema::v1::{
-    ContentBlock, Plan, PlanEntryStatus, SessionUpdate, ToolCall, ToolCallContent,
-    ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolKind,
+    ContentBlock, Plan, PlanEntryStatus, RequestPermissionRequest, SessionUpdate, ToolCall,
+    ToolCallContent, ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
+use bevy::prelude::Component;
 use vmux_api::protocol::AgentAttachment;
 use vmux_api::room::{AssistantBlock, Message, PlanStep, SubagentBlock};
 use vmux_core::host::workspace::WorkspaceLocation;
@@ -152,7 +153,58 @@ fn project_file_touches(
     }
 }
 
-#[derive(Default)]
+#[derive(Clone)]
+pub(super) struct ApprovalDetailsQuery {
+    call_id: String,
+    name: Option<String>,
+    args: Option<String>,
+    kind: Option<ToolKind>,
+}
+
+impl ApprovalDetailsQuery {
+    pub(super) fn from_request(request: &RequestPermissionRequest) -> Self {
+        Self {
+            call_id: request.tool_call.tool_call_id.to_string(),
+            name: request
+                .tool_call
+                .fields
+                .title
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_string),
+            args: request
+                .tool_call
+                .fields
+                .raw_input
+                .as_ref()
+                .or_else(|| request.meta.as_ref()?.get("codex")?.get("params"))
+                .map(serde_json::Value::to_string),
+            kind: request.tool_call.fields.kind,
+        }
+    }
+
+    pub(super) fn fallback(&self) -> (String, String) {
+        (
+            match self.kind {
+                Some(ToolKind::Read) => "Read data",
+                Some(ToolKind::Edit) => "Edit files",
+                Some(ToolKind::Delete) => "Delete files",
+                Some(ToolKind::Move) => "Move files",
+                Some(ToolKind::Search) => "Search",
+                Some(ToolKind::Execute) => "Execute command",
+                Some(ToolKind::Think) => "Think",
+                Some(ToolKind::Fetch) => "Fetch data",
+                Some(ToolKind::SwitchMode) => "Switch mode",
+                _ => "Use tool",
+            }
+            .to_string(),
+            self.args.clone().unwrap_or_else(|| "{}".to_string()),
+        )
+    }
+}
+
+#[derive(Component, Default)]
 pub struct AcpProjector {
     messages: Vec<Message>,
     hidden_tool_calls: HashSet<String>,
@@ -164,6 +216,7 @@ pub struct AcpProjector {
 }
 
 impl AcpProjector {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -197,6 +250,24 @@ impl AcpProjector {
                 (existing == call_id).then(|| (name.clone(), args.clone()))
             })
         })
+    }
+
+    pub(super) fn approval_details(
+        &self,
+        query: &ApprovalDetailsQuery,
+    ) -> Option<(String, String)> {
+        let (projected_name, projected_args) =
+            self.tool_call_details(&query.call_id).unwrap_or_default();
+        let name = query
+            .name
+            .clone()
+            .or_else(|| (!projected_name.is_empty()).then_some(projected_name))?;
+        let args = query
+            .args
+            .clone()
+            .or_else(|| (!projected_args.is_empty()).then_some(projected_args))
+            .unwrap_or_else(|| "{}".to_string());
+        Some((name, args))
     }
 
     pub fn push_user(&mut self, text: String, attachments: Vec<AgentAttachment>) {

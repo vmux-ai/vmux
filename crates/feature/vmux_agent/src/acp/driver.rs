@@ -3,7 +3,7 @@ use std::future::Future;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
@@ -17,9 +17,8 @@ use agent_client_protocol::schema::v1::{
     SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigSelectOptions, SessionId, SessionModeState, SessionNotification, SessionUpdate,
     SetSessionConfigOptionRequest, SetSessionModeRequest, TerminalExitStatus, TerminalId,
-    TerminalOutputRequest, TerminalOutputResponse, TextContent, ToolKind,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+    TerminalOutputRequest, TerminalOutputResponse, TextContent, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use agent_client_protocol::{Client, Responder};
 use base64::Engine;
@@ -29,10 +28,13 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use vmux_core::ProcessId;
 use vmux_core::host::workspace::WorkspaceLocation;
 
-use super::projector::{AcpProjector, Intent, is_conversation_title_tool};
+use super::AcpProjectionInput;
+#[cfg(test)]
+use super::projector::AcpProjector;
+use super::projector::{ApprovalDetailsQuery, is_conversation_title_tool};
 use vmux_api::protocol::{
-    AgentAttachment, AgentFileTouched, AgentRequest, AgentRequestId, AgentRunStatus,
-    ApprovalDecision, ServiceMessage, SharedEvent, compose_agent_prompt,
+    AgentAttachment, AgentRunStatus, ApprovalDecision, ServiceMessage, SharedEvent,
+    compose_agent_prompt,
 };
 #[cfg(test)]
 use vmux_api::room::AssistantBlock;
@@ -41,7 +43,7 @@ use vmux_api::room::{Message, RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_process::{Process, ProcessManager};
 use vmux_process::{ProcessCreated, ProcessLaunch, ProcessRuntime, ProcessUpdate};
 
-const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
+pub(super) const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
 const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
 const PROMPT_MEDIA_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
 const APPROVAL_DETAILS_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
@@ -259,8 +261,9 @@ pub(super) struct AcpShared {
     cwd: Mutex<PathBuf>,
     pub anchor: ProcessId,
     pub stream_tx: broadcast::Sender<ServiceMessage>,
-    pub projector: Mutex<AcpProjector>,
-    projector_updates: watch::Sender<u64>,
+    projection: mpsc::UnboundedSender<AcpProjectionInput>,
+    wake: mpsc::UnboundedSender<()>,
+    pub(super) projector_updates: watch::Sender<u64>,
     pub pending_perms: Mutex<HashMap<String, oneshot::Sender<ApprovalDecision>>>,
     pub terminals: Mutex<HashMap<String, AcpTerminal>>,
     processes: AcpProcesses,
@@ -269,14 +272,13 @@ pub(super) struct AcpShared {
     mode_info: Mutex<Option<AcpModeInfoState>>,
     status: Mutex<AgentRunStatus>,
     approval: Mutex<Option<RemoteApproval>>,
-    history_replay: AtomicBool,
-    history_replay_updates: AtomicUsize,
     pub cancel_requested: AtomicBool,
     stderr_tail: Mutex<VecDeque<String>>,
     startup_ready: AtomicBool,
 }
 
 impl AcpShared {
+    #[cfg(test)]
     pub(super) fn new(
         sid: String,
         cwd: PathBuf,
@@ -284,12 +286,27 @@ impl AcpShared {
         stream_tx: broadcast::Sender<ServiceMessage>,
         processes: impl Into<AcpProcesses>,
     ) -> Self {
+        let (projection, _) = mpsc::unbounded_channel();
+        let (wake, _) = mpsc::unbounded_channel();
+        Self::with_projection(sid, cwd, anchor, stream_tx, processes, projection, wake)
+    }
+
+    pub(super) fn with_projection(
+        sid: String,
+        cwd: PathBuf,
+        anchor: ProcessId,
+        stream_tx: broadcast::Sender<ServiceMessage>,
+        processes: impl Into<AcpProcesses>,
+        projection: mpsc::UnboundedSender<AcpProjectionInput>,
+        wake: mpsc::UnboundedSender<()>,
+    ) -> Self {
         Self {
             sid,
             cwd: Mutex::new(cwd),
             anchor,
             stream_tx,
-            projector: Mutex::new(AcpProjector::new()),
+            projection,
+            wake,
             projector_updates: watch::channel(0).0,
             pending_perms: Mutex::new(HashMap::new()),
             terminals: Mutex::new(HashMap::new()),
@@ -299,8 +316,6 @@ impl AcpShared {
             mode_info: Mutex::new(None),
             status: Mutex::new(AgentRunStatus::Idle),
             approval: Mutex::new(None),
-            history_replay: AtomicBool::new(false),
-            history_replay_updates: AtomicUsize::new(0),
             cancel_requested: AtomicBool::new(false),
             stderr_tail: Mutex::new(VecDeque::new()),
             startup_ready: AtomicBool::new(false),
@@ -316,11 +331,10 @@ impl AcpShared {
         self.startup_ready.load(Ordering::SeqCst)
     }
 
-    pub fn snapshot_message(&self) -> ServiceMessage {
-        let projector = self.projector.lock().unwrap();
+    pub(super) fn snapshot_message(&self, messages: &[Message]) -> ServiceMessage {
         ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
             sid: self.sid.clone(),
-            messages: projector.messages().to_vec(),
+            messages: messages.to_vec(),
         })
     }
 
@@ -339,7 +353,7 @@ impl AcpShared {
         Ok(())
     }
 
-    fn publish_workspace_change(&self, workspace: &WorkspaceLocation) {
+    pub(super) fn publish_workspace_change(&self, workspace: &WorkspaceLocation) {
         *self.cwd.lock().unwrap() = workspace.working_directory.clone();
         self.emit(ServiceMessage::Shared(SharedEvent::AcpWorkspaceChanged {
             sid: self.sid.clone(),
@@ -375,11 +389,12 @@ impl AcpShared {
             .map(|state| state.message(&self.sid))
     }
 
-    pub fn remote_messages(&self) -> Vec<Message> {
-        self.projector.lock().unwrap().messages().to_vec()
-    }
-
-    pub fn remote_session(&self, agent_id: &str, created_at_ms: u64) -> RemoteSession {
+    pub fn remote_session(
+        &self,
+        agent_id: &str,
+        created_at_ms: u64,
+        messages: &[Message],
+    ) -> RemoteSession {
         let name = self
             .agent_name
             .lock()
@@ -396,7 +411,7 @@ impl AcpShared {
         RemoteSession {
             sid: self.sid.clone(),
             room_id: vmux_api::room::RoomId::for_session(&self.sid),
-            title: vmux_api::room::Message::conversation_title(&self.remote_messages(), &name),
+            title: vmux_api::room::Message::conversation_title(messages, &name),
             name,
             runtime: "acp".to_string(),
             model,
@@ -550,26 +565,20 @@ impl AcpShared {
     }
 
     fn begin_history_replay(&self) {
-        let mut projector = self.projector.lock().unwrap();
-        self.history_replay_updates.store(0, Ordering::SeqCst);
-        self.history_replay.store(true, Ordering::SeqCst);
-        *projector = AcpProjector::new();
+        self.project(AcpProjectionInput::BeginHistoryReplay);
     }
 
     fn finish_history_replay(&self, loaded: bool) {
-        let mut projector = self.projector.lock().unwrap();
-        if !loaded {
-            *projector = AcpProjector::new();
-        }
-        self.history_replay_updates.store(0, Ordering::SeqCst);
-        self.history_replay.store(false, Ordering::SeqCst);
-        self.emit(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
-            sid: self.sid.clone(),
-            messages: projector.messages().to_vec(),
-        }));
+        self.project(AcpProjectionInput::FinishHistoryReplay(loaded));
     }
 
-    fn emit(&self, msg: ServiceMessage) {
+    fn project(&self, input: AcpProjectionInput) {
+        if self.projection.send(input).is_ok() {
+            let _ = self.wake.send(());
+        }
+    }
+
+    pub(super) fn emit(&self, msg: ServiceMessage) {
         let _ = self.stream_tx.send(msg);
     }
 
@@ -621,66 +630,7 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
     if let SessionUpdate::CurrentModeUpdate(mode) = &update {
         shared.publish_selected_mode(&mode.current_mode_id.to_string());
     }
-    let mut projector = shared.projector.lock().unwrap();
-    let intents = projector.apply(update);
-    shared
-        .projector_updates
-        .send_modify(|revision| *revision += 1);
-    if shared.history_replay.load(Ordering::SeqCst) {
-        for intent in &intents {
-            if let Intent::WorkspaceChanged(workspace) = intent {
-                shared.publish_workspace_change(workspace);
-            }
-        }
-        let update_count = shared.history_replay_updates.fetch_add(1, Ordering::SeqCst) + 1;
-        if update_count == 1 || update_count.is_multiple_of(HISTORY_REPLAY_SNAPSHOT_INTERVAL) {
-            shared.emit(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
-                sid: shared.sid.clone(),
-                messages: projector.messages().to_vec(),
-            }));
-        }
-        return;
-    }
-    drop(projector);
-    for intent in intents {
-        match intent {
-            Intent::Delta(text) => shared.emit(ServiceMessage::Shared(SharedEvent::AgentDelta {
-                sid: shared.sid.clone(),
-                text,
-            })),
-            Intent::Snapshot => shared.emit(shared.snapshot_message()),
-            Intent::ProposedDiff {
-                call_id,
-                path,
-                old_text,
-                new_text,
-            } => shared.emit(ServiceMessage::AcpProposedDiff {
-                sid: shared.sid.clone(),
-                call_id,
-                path,
-                old_text,
-                new_text,
-            }),
-            Intent::FileTouched { path, line, kind } => {
-                let Ok(request) = AgentRequest::encode(&AgentFileTouched {
-                    anchor: shared.anchor,
-                    path,
-                    line,
-                    col: None,
-                    end_col: None,
-                    kind,
-                }) else {
-                    continue;
-                };
-                shared.emit(ServiceMessage::AgentRequest {
-                    request_id: AgentRequestId::new(),
-                    anchor: Some(shared.anchor),
-                    request,
-                });
-            }
-            Intent::WorkspaceChanged(workspace) => shared.publish_workspace_change(&workspace),
-        }
-    }
+    shared.project(AcpProjectionInput::Update(update));
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -827,80 +777,30 @@ fn mode_info(
     })
 }
 
-fn approval_details(
-    request: &RequestPermissionRequest,
-    projector: &AcpProjector,
-) -> Option<(String, String)> {
-    let call_id = request.tool_call.tool_call_id.to_string();
-    let (projected_name, projected_args) =
-        projector.tool_call_details(&call_id).unwrap_or_default();
-    let name = request
-        .tool_call
-        .fields
-        .title
-        .as_deref()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(str::to_string)
-        .or_else(|| (!projected_name.is_empty()).then_some(projected_name))?;
-    let args_json = request_approval_args(request)
-        .or_else(|| (!projected_args.is_empty()).then_some(projected_args))
-        .unwrap_or_else(|| "{}".to_string());
-    Some((name, args_json))
-}
-
-fn request_approval_args(request: &RequestPermissionRequest) -> Option<String> {
-    request
-        .tool_call
-        .fields
-        .raw_input
-        .as_ref()
-        .or_else(|| request.meta.as_ref()?.get("codex")?.get("params"))
-        .map(serde_json::Value::to_string)
-}
-
-fn tool_kind_approval_name(kind: Option<ToolKind>) -> Option<&'static str> {
-    match kind? {
-        ToolKind::Read => Some("Read data"),
-        ToolKind::Edit => Some("Edit files"),
-        ToolKind::Delete => Some("Delete files"),
-        ToolKind::Move => Some("Move files"),
-        ToolKind::Search => Some("Search"),
-        ToolKind::Execute => Some("Execute command"),
-        ToolKind::Think => Some("Think"),
-        ToolKind::Fetch => Some("Fetch data"),
-        ToolKind::SwitchMode => Some("Switch mode"),
-        _ => None,
-    }
-}
-
-fn approval_details_from_kind(request: &RequestPermissionRequest) -> (String, String) {
-    (
-        tool_kind_approval_name(request.tool_call.fields.kind)
-            .unwrap_or("Use tool")
-            .to_string(),
-        request_approval_args(request).unwrap_or_else(|| "{}".to_string()),
-    )
-}
-
 async fn resolve_approval_details(
     request: &RequestPermissionRequest,
     shared: &AcpShared,
 ) -> Option<(String, String)> {
     let deadline = tokio::time::Instant::now() + APPROVAL_DETAILS_WAIT;
     let mut updates = shared.projector_updates.subscribe();
+    let query = ApprovalDetailsQuery::from_request(request);
+    let fallback = query.fallback();
     loop {
-        if let Some(details) = {
-            let projector = shared.projector.lock().unwrap();
-            approval_details(request, &projector)
-        } {
-            return Some(details);
+        let (response, receiver) = oneshot::channel();
+        shared.project(AcpProjectionInput::ApprovalDetails {
+            query: query.clone(),
+            response,
+        });
+        match tokio::time::timeout_at(deadline, receiver).await {
+            Ok(Ok(Some(details))) => return Some(details),
+            Ok(Ok(None)) => {}
+            _ => return Some(fallback),
         }
         if tokio::time::timeout_at(deadline, updates.changed())
             .await
             .is_err()
         {
-            return Some(approval_details_from_kind(request));
+            return Some(fallback);
         }
     }
 }
@@ -1338,12 +1238,10 @@ pub async fn run(
                         preferred_mode,
                     } => {
                         main_shared.cancel_requested.store(false, Ordering::SeqCst);
-                        main_shared
-                            .projector
-                            .lock()
-                            .unwrap()
-                            .push_user(text.clone(), attachments.clone());
-                        main_shared.emit(main_shared.snapshot_message());
+                        main_shared.project(AcpProjectionInput::PushUser {
+                            text: text.clone(),
+                            attachments: attachments.clone(),
+                        });
                         main_shared.emit_status(AgentRunStatus::Streaming);
                         let ensured = ensure_session(&mut session_id, || {
                             let mut new_session = NewSessionRequest::new(main_shared.cwd());
@@ -1440,7 +1338,7 @@ pub async fn run(
                                 Err(err) => Some(err.to_string()),
                             };
                             let cancelled = shared.cancel_requested.swap(false, Ordering::SeqCst);
-                            shared.emit(shared.snapshot_message());
+                            shared.project(AcpProjectionInput::Snapshot);
                             shared.emit_status(status_after_prompt(cancelled, errored));
                             Ok(())
                         })?;
@@ -2262,8 +2160,55 @@ mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{
         ContentChunk, Implementation, PermissionOptionKind, SessionConfigSelectGroup,
-        SessionConfigSelectOption, SessionMode, ToolCall, ToolCallUpdateFields,
+        SessionConfigSelectOption, SessionMode, ToolCall, ToolCallUpdateFields, ToolKind,
     };
+    use bevy::prelude::{App, Entity, Update};
+
+    struct ProjectionHarness {
+        app: App,
+        entity: Entity,
+        shared: Arc<AcpShared>,
+        stream: broadcast::Receiver<ServiceMessage>,
+    }
+
+    impl ProjectionHarness {
+        fn new(capacity: usize) -> Self {
+            let (stream_tx, stream) = broadcast::channel(capacity);
+            let (projection_tx, projection_rx) = mpsc::unbounded_channel();
+            let (wake, _) = mpsc::unbounded_channel();
+            let shared = Arc::new(AcpShared::with_projection(
+                "s1".into(),
+                PathBuf::from("/tmp"),
+                ProcessId::new(),
+                stream_tx,
+                Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+                projection_tx,
+                wake,
+            ));
+            let mut app = App::new();
+            app.add_systems(Update, super::super::project_acp_sessions);
+            let entity = app
+                .world_mut()
+                .spawn((
+                    vmux_core::agent::SessionId("s1".into()),
+                    super::super::AcpSessionShared(Arc::clone(&shared)),
+                    super::super::AcpProjectionInbox(projection_rx),
+                    AcpProjector::default(),
+                    super::super::AcpHistoryReplay::default(),
+                ))
+                .id();
+            Self {
+                app,
+                entity,
+                shared,
+                stream,
+            }
+        }
+
+        fn update(&mut self) {
+            self.app.update();
+        }
+    }
 
     #[test]
     fn stderr_detail_from_shows_last_lines_and_skips_blanks() {
@@ -2793,45 +2738,44 @@ mod tests {
 
     #[test]
     fn history_replay_emits_progressive_and_final_snapshots() {
-        let (stream_tx, mut stream_rx) = broadcast::channel(64);
-        let shared = Arc::new(AcpShared::new(
-            "s1".into(),
-            PathBuf::from("/tmp"),
-            ProcessId::new(),
-            stream_tx,
-            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-        ));
-        shared.begin_history_replay();
+        let mut harness = ProjectionHarness::new(64);
+        harness.shared.begin_history_replay();
+        harness.update();
 
         project_session_update(
-            &shared,
+            &harness.shared,
             SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(
                 TextContent::new("hello"),
             ))),
         );
-        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
-            stream_rx.try_recv().expect("first progressive snapshot")
+        harness.update();
+        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) = harness
+            .stream
+            .try_recv()
+            .expect("first progressive snapshot")
         else {
             panic!("expected snapshot");
         };
         assert_eq!(messages.len(), 1);
         for _ in 0..300 {
             project_session_update(
-                &shared,
+                &harness.shared,
                 SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
                     TextContent::new("x"),
                 ))),
             );
         }
+        harness.update();
 
         let snapshots: Vec<ServiceMessage> =
-            std::iter::from_fn(|| stream_rx.try_recv().ok()).collect();
+            std::iter::from_fn(|| harness.stream.try_recv().ok()).collect();
         assert!(snapshots.len() > 1);
         assert!(snapshots.len() < 64);
-        shared.finish_history_replay(true);
+        harness.shared.finish_history_replay(true);
+        harness.update();
 
         let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
-            stream_rx.try_recv().expect("final snapshot")
+            harness.stream.try_recv().expect("final snapshot")
         else {
             panic!("expected snapshot");
         };
@@ -2842,47 +2786,51 @@ mod tests {
                 if matches!(blocks.as_slice(), [AssistantBlock::Text(text)] if text.len() == 300)
         ));
         assert!(matches!(
-            stream_rx.try_recv(),
+            harness.stream.try_recv(),
             Err(broadcast::error::TryRecvError::Empty)
         ));
     }
 
     #[test]
     fn failed_history_replay_discards_partial_transcript() {
-        let (stream_tx, mut stream_rx) = broadcast::channel(64);
-        let shared = Arc::new(AcpShared::new(
-            "s1".into(),
-            PathBuf::from("/tmp"),
-            ProcessId::new(),
-            stream_tx,
-            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-        ));
-        shared.begin_history_replay();
+        let mut harness = ProjectionHarness::new(64);
+        harness.shared.begin_history_replay();
+        harness.update();
         project_session_update(
-            &shared,
+            &harness.shared,
             SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(
                 TextContent::new("partial"),
             ))),
         );
+        harness.update();
 
         let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
-            stream_rx.try_recv().expect("progressive snapshot")
+            harness.stream.try_recv().expect("progressive snapshot")
         else {
             panic!("expected snapshot");
         };
         assert_eq!(messages.len(), 1);
 
-        shared.finish_history_replay(false);
+        harness.shared.finish_history_replay(false);
+        harness.update();
 
-        assert!(shared.projector.lock().unwrap().messages().is_empty());
+        assert!(
+            harness
+                .app
+                .world()
+                .get::<AcpProjector>(harness.entity)
+                .unwrap()
+                .messages()
+                .is_empty()
+        );
         let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
-            stream_rx.try_recv().expect("clearing snapshot")
+            harness.stream.try_recv().expect("clearing snapshot")
         else {
             panic!("expected snapshot");
         };
         assert!(messages.is_empty());
         assert!(matches!(
-            stream_rx.try_recv(),
+            harness.stream.try_recv(),
             Err(broadcast::error::TryRecvError::Empty)
         ));
     }
@@ -2904,7 +2852,7 @@ mod tests {
         );
 
         assert_eq!(
-            approval_details(&request, &projector),
+            projector.approval_details(&ApprovalDetailsQuery::from_request(&request)),
             Some((
                 "vmux.run".to_string(),
                 r#"{"command":"echo hi","focus":true}"#.to_string(),
@@ -2930,7 +2878,7 @@ mod tests {
         );
 
         assert_eq!(
-            approval_details(&request, &projector),
+            projector.approval_details(&ApprovalDetailsQuery::from_request(&request)),
             Some(("new".to_string(), r#"{"command":"new"}"#.to_string(),))
         );
     }
@@ -2946,11 +2894,9 @@ mod tests {
             Vec::new(),
         );
 
-        assert_eq!(approval_details(&request, &AcpProjector::new()), None);
-        assert_eq!(
-            approval_details_from_kind(&request),
-            ("Use tool".to_string(), "{}".to_string())
-        );
+        let query = ApprovalDetailsQuery::from_request(&request);
+        assert_eq!(AcpProjector::new().approval_details(&query), None);
+        assert_eq!(query.fallback(), ("Use tool".to_string(), "{}".to_string()));
     }
 
     #[test]
@@ -2967,7 +2913,7 @@ mod tests {
         );
 
         assert_eq!(
-            approval_details_from_kind(&request),
+            ApprovalDetailsQuery::from_request(&request).fallback(),
             (
                 "Execute command".to_string(),
                 r#"{"command":"echo hi"}"#.to_string(),
@@ -2977,14 +2923,7 @@ mod tests {
 
     #[tokio::test]
     async fn approval_details_wait_for_preceding_tool_call_projection() {
-        let (stream_tx, _) = broadcast::channel(2);
-        let shared = Arc::new(AcpShared::new(
-            "s1".into(),
-            PathBuf::from("/tmp"),
-            ProcessId::new(),
-            stream_tx,
-            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-        ));
+        let mut harness = ProjectionHarness::new(2);
         let request = RequestPermissionRequest::new(
             "session-1",
             agent_client_protocol::schema::v1::ToolCallUpdate::new(
@@ -2996,18 +2935,22 @@ mod tests {
             Vec::new(),
         );
         let waiting = {
-            let shared = Arc::clone(&shared);
+            let shared = Arc::clone(&harness.shared);
             tokio::spawn(async move { resolve_approval_details(&request, &shared).await })
         };
 
         tokio::task::yield_now().await;
+        harness.update();
         project_session_update(
-            &shared,
+            &harness.shared,
             SessionUpdate::ToolCall(
                 ToolCall::new("call-1", "vmux.run")
                     .raw_input(serde_json::json!({"command": "echo hi"})),
             ),
         );
+        harness.update();
+        tokio::task::yield_now().await;
+        harness.update();
 
         assert_eq!(
             waiting.await.unwrap(),
@@ -3020,21 +2963,15 @@ mod tests {
 
     #[tokio::test]
     async fn conversation_title_permission_resolves_as_host_owned_tool() {
-        let (stream_tx, _) = broadcast::channel(2);
-        let shared = AcpShared::new(
-            "s1".into(),
-            PathBuf::from("/tmp"),
-            ProcessId::new(),
-            stream_tx,
-            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-        );
+        let mut harness = ProjectionHarness::new(2);
         project_session_update(
-            &shared,
+            &harness.shared,
             SessionUpdate::ToolCall(
                 ToolCall::new("title-1", "mcp__vmux__set_conversation_title")
                     .raw_input(serde_json::json!({"title": "Paris Izakaya Website"})),
             ),
         );
+        harness.update();
         let request = RequestPermissionRequest::new(
             "session-1",
             agent_client_protocol::schema::v1::ToolCallUpdate::new(
@@ -3046,7 +2983,13 @@ mod tests {
             Vec::new(),
         );
 
-        let (name, _) = resolve_approval_details(&request, &shared).await.unwrap();
+        let waiting = {
+            let shared = Arc::clone(&harness.shared);
+            tokio::spawn(async move { resolve_approval_details(&request, &shared).await })
+        };
+        tokio::task::yield_now().await;
+        harness.update();
+        let (name, _) = waiting.await.unwrap().unwrap();
         assert!(is_conversation_title_tool(&name));
     }
 
