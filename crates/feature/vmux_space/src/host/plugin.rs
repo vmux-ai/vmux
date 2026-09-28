@@ -1,13 +1,12 @@
 use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
+use vmux_core::host::persistence::WorkspaceRestore;
 use vmux_core::page::PageReady;
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_layout::native_open::HostedPagePlugin;
 use vmux_layout::space::Space;
 use vmux_layout::stack::Stack;
-use vmux_layout::{
-    LayoutUiStateUpdates, SpaceFilePresent, TabLayoutSpawnContent, TabLayoutSpawnRequest,
-};
+use vmux_layout::{LayoutUiStateUpdates, TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
 use super::SpacesUiStateUpdates;
 use super::agent::SpaceAgentPlugin;
@@ -29,7 +28,11 @@ impl Plugin for SpacePlugin {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
         app.add_plugins(Self::MANIFEST.plugin())
-            .add_plugins((SpaceAgentPlugin, super::composer::SpaceComposerPlugin))
+            .add_plugins((
+                SpaceAgentPlugin,
+                super::composer::SpaceComposerPlugin,
+                super::persistence::WorkspacePersistencePlugin,
+            ))
             .add_plugins(super::SpaceToolPlugin)
             .add_plugins(vmux_layout::LayoutContractPlugin)
             .add_plugins(vmux_core::host::UiStatePlugin::<SpacesUiState>::default())
@@ -112,10 +115,10 @@ impl Plugin for SpacePlugin {
 
 fn ensure_bootstrap_space(
     spaces: Query<(), With<Space>>,
-    space_file: Query<&SpaceFilePresent>,
+    restore: Query<&WorkspaceRestore>,
     mut commands: Commands,
 ) {
-    if !spaces.is_empty() || space_file.single().is_ok_and(|space_file| space_file.0) {
+    if !spaces.is_empty() || restore.single().is_ok_and(|restore| restore.store_present) {
         return;
     }
     commands.spawn(crate::spaces::space_profile_bundle(

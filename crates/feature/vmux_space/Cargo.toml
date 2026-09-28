@@ -24,6 +24,7 @@ bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
+bevy_world_serialization = { workspace = true }
 moonshine-save = { workspace = true }
 ron = { workspace = true }
 vmux_command = { path = "../vmux_command" }

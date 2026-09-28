@@ -1,5 +1,5 @@
 use crate::{
-    Header, LayoutStartupSet, SpaceFilePresent, TabLayoutSpawnContent, TabLayoutSpawnRequest,
+    Header, LayoutStartupSet, TabLayoutSpawnContent, TabLayoutSpawnRequest,
     cef::layout_cef_bundle,
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
     settings::LayoutSettings,
@@ -488,11 +488,10 @@ fn request_default_layout(
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
-    space_file: Query<&SpaceFilePresent>,
     focused_space: crate::space::FocusedSpace,
     mut requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
-    if !tab_q.is_empty() || space_file.single().is_ok_and(|space_file| space_file.0) {
+    if !tab_q.is_empty() {
         return;
     }
 

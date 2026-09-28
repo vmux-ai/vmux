@@ -26,7 +26,6 @@ mod notify;
 mod os_menu;
 pub mod panic_hook;
 mod permission;
-mod persistence;
 mod plugin;
 #[cfg(feature = "recording")]
 mod recording;
@@ -51,7 +50,7 @@ use bevy::window::{
     WindowPosition, WindowResolution,
 };
 
-use crate::{persistence::PersistencePlugin, plugin::DesktopPluginGroup};
+use crate::plugin::DesktopPluginGroup;
 
 pub struct VmuxPlugin;
 
@@ -66,7 +65,6 @@ impl Plugin for VmuxPlugin {
                     custom_layer: crate::log_forward::file_log_layer,
                     ..default()
                 }),
-            PersistencePlugin,
             vmux_app::VmuxPlugin::builder().desktop().build(),
             DesktopPluginGroup,
         ));

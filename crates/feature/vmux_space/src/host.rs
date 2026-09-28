@@ -2,6 +2,7 @@ mod agent;
 mod composer;
 pub mod cwd;
 mod key;
+mod persistence;
 pub mod plugin;
 pub mod project;
 pub mod snapshot_updater;

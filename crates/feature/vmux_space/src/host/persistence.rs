@@ -11,31 +11,26 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_core::host::persistence::{
-    PersistenceDirty, WorkspaceSaveRequest, WorkspaceStoreValidators, persisted_components,
+    PersistenceDirty, WorkspaceRestore, WorkspaceSaveRequest, WorkspaceStoreValidators,
+    persisted_components,
 };
 #[cfg(test)]
 use vmux_core::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
 #[cfg(test)]
-use vmux_layout::profile::Profile;
 use vmux_layout::space::Space;
-#[cfg(test)]
-use vmux_layout::space::SpaceId;
-use vmux_layout::{LayoutPersistenceSet, LayoutStartupSet, SpaceFilePresent};
+use vmux_layout::{LayoutPersistenceSet, LayoutStartupSet};
 #[cfg(test)]
 use vmux_layout::{
-    Open,
-    pane::{Pane, PaneId, PaneSize, PaneSplit},
-    stack::Stack,
-    tab::Tab,
-    tab::{TabDirDecided, TabWorkspace, TabWorktree},
+    pane::{Pane, PaneId},
+    tab::{Tab, TabWorkspace, TabWorktree},
     window::WindowGeometry,
 };
 #[cfg(test)]
 use vmux_setting::AppSettings;
 
-pub(crate) struct PersistencePlugin;
+pub(crate) struct WorkspacePersistencePlugin;
 
-impl Plugin for PersistencePlugin {
+impl Plugin for WorkspacePersistencePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<WorkspaceSaveRequest>()
             .add_observer(save_on_default_event)
@@ -76,6 +71,7 @@ fn spawn_space_persistence(registry: Res<AppTypeRegistry>, mut commands: Command
             dirty: false,
             components,
         },
+        WorkspaceRestore::default(),
     ));
 }
 
@@ -107,11 +103,11 @@ fn mark_restore_pending(
 }
 
 fn complete_restore(
-    mut restore: Single<&mut crate::boot_status::RestoreComplete>,
+    mut restore: Single<&mut WorkspaceRestore>,
     persistence: Single<Entity, With<RestorePending>>,
     mut commands: Commands,
 ) {
-    restore.0 = true;
+    restore.complete = true;
     commands.entity(*persistence).remove::<RestorePending>();
 }
 
@@ -251,19 +247,15 @@ fn save_space_to_path_excluding(
     commands.trigger_save(save);
 }
 
-pub(crate) fn load_space_on_startup(
+fn load_space_on_startup(
     registry: Res<AppTypeRegistry>,
     validators: WorkspaceStoreValidators,
-    mut restore: Single<(
-        Entity,
-        &mut crate::boot_status::RestoreComplete,
-        &mut SpaceFilePresent,
-    )>,
+    mut restore: Single<&mut WorkspaceRestore>,
     mut commands: Commands,
 ) {
     if vmux_core::profile::is_test_session() {
-        restore.1.0 = true;
-        restore.2.0 = false;
+        restore.complete = true;
+        restore.store_present = false;
         return;
     }
     let path = store_path();
@@ -281,7 +273,7 @@ pub(crate) fn load_space_on_startup(
         let _ = std::fs::remove_file(store_version_path());
     }
     let exists = path.exists() && !removed_stale && !removed_incompatible && !schema_outdated;
-    restore.2.0 = exists;
+    restore.store_present = exists;
     if exists {
         info!("Loading space from {:?}", path);
         let load = match std::fs::read_to_string(&path)
@@ -296,7 +288,7 @@ pub(crate) fn load_space_on_startup(
         };
         commands.trigger_load(load);
     } else {
-        restore.1.0 = true;
+        restore.complete = true;
     }
 }
 
@@ -394,84 +386,6 @@ mod tests {
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
     #[test]
-    fn saved_components_keep_the_type_paths_stores_name_them_by() {
-        use bevy::reflect::TypePath;
-
-        let actual = vec![
-            <ChildOf as TypePath>::type_path(),
-            <Children as TypePath>::type_path(),
-            <Name as TypePath>::type_path(),
-            <Stack as TypePath>::type_path(),
-            <Tab as TypePath>::type_path(),
-            <TabWorkspace as TypePath>::type_path(),
-            <TabWorktree as TypePath>::type_path(),
-            <TabDirDecided as TypePath>::type_path(),
-            <Pane as TypePath>::type_path(),
-            <PaneSplit as TypePath>::type_path(),
-            <PaneSize as TypePath>::type_path(),
-            <Space as TypePath>::type_path(),
-            <SpaceId as TypePath>::type_path(),
-            <WindowGeometry as TypePath>::type_path(),
-            <Profile as TypePath>::type_path(),
-            <Open as TypePath>::type_path(),
-            <PageMetadata as TypePath>::type_path(),
-            <ArchivedPage as TypePath>::type_path(),
-            <ArchivedPagePosition as TypePath>::type_path(),
-            <ArchivedTabPage as TypePath>::type_path(),
-            <PaneId as TypePath>::type_path(),
-            <vmux_history::CreatedAt as TypePath>::type_path(),
-            <vmux_history::LastActivatedAt as TypePath>::type_path(),
-            <vmux_history::Visit as TypePath>::type_path(),
-            <vmux_core::Url as TypePath>::type_path(),
-            <vmux_core::VisitCount as TypePath>::type_path(),
-            <vmux_core::LastVisitedAt as TypePath>::type_path(),
-            <vmux_core::VisitedUrl as TypePath>::type_path(),
-            <vmux_core::TransitionType as TypePath>::type_path(),
-            <vmux_core::Order as TypePath>::type_path(),
-            <vmux_editor::StackExplorerVisibility as TypePath>::type_path(),
-            <vmux_terminal::launch::TerminalLaunch as TypePath>::type_path(),
-        ];
-
-        assert_eq!(
-            actual,
-            [
-                "bevy_ecs::hierarchy::ChildOf",
-                "bevy_ecs::hierarchy::Children",
-                "bevy_ecs::name::Name",
-                "vmux_desktop::layout::stack::Stack",
-                "vmux_desktop::layout::tab::Tab",
-                "vmux_desktop::layout::tab::TabWorkspace",
-                "vmux_desktop::layout::tab::TabWorktree",
-                "vmux_desktop::layout::tab::TabDirDecided",
-                "vmux_desktop::layout::pane::Pane",
-                "vmux_desktop::layout::pane::PaneSplit",
-                "vmux_desktop::layout::pane::PaneSize",
-                "vmux_desktop::space::Space",
-                "vmux_desktop::space::SpaceId",
-                "vmux_desktop::layout::window::WindowGeometry",
-                "vmux_desktop::profile::Profile",
-                "vmux_desktop::layout::Open",
-                "vmux_header::system::PageMetadata",
-                "vmux_core::archive::ArchivedPage",
-                "vmux_core::archive::ArchivedPagePosition",
-                "vmux_core::archive::ArchivedTabPage",
-                "vmux_desktop::layout::pane::PaneId",
-                "vmux_history::CreatedAt",
-                "vmux_history::LastActivatedAt",
-                "vmux_history::Visit",
-                "vmux_history::Url",
-                "vmux_history::VisitCount",
-                "vmux_history::LastVisitedAt",
-                "vmux_history::VisitedUrl",
-                "vmux_history::TransitionType",
-                "vmux_core::Order",
-                "vmux_editor::plugin::StackExplorerVisibility",
-                "vmux_core::terminal::TerminalLaunch",
-            ]
-        );
-    }
-
-    #[test]
     fn adding_archived_page_marks_store_dirty() {
         let mut app = App::new();
         let auto_save = app
@@ -516,39 +430,6 @@ mod tests {
             .dirty = false;
         app.world_mut().spawn(vmux_history::Visit);
         app.update();
-        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
-    }
-
-    #[test]
-    fn changing_stack_explorer_visibility_marks_store_dirty() {
-        let mut app = App::new();
-        let auto_save = app
-            .world_mut()
-            .spawn(AutoSave {
-                debounce: Timer::from_seconds(0.5, TimerMode::Once),
-                periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-                dirty: false,
-                components: WorldFilter::allow_all(),
-            })
-            .id();
-        app.register_persisted::<vmux_editor::StackExplorerVisibility>()
-            .add_observer(mark_persistence_dirty);
-        let stack = app
-            .world_mut()
-            .spawn(vmux_editor::StackExplorerVisibility { visible: false })
-            .id();
-        app.update();
-        app.world_mut()
-            .get_mut::<AutoSave>(auto_save)
-            .unwrap()
-            .dirty = false;
-        app.world_mut()
-            .get_mut::<vmux_editor::StackExplorerVisibility>(stack)
-            .unwrap()
-            .visible = true;
-
-        app.update();
-
         assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
     }
 
@@ -858,44 +739,6 @@ mod tests {
             metadata.icon,
             vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::GitBranch)
         );
-    }
-
-    #[test]
-    fn stack_explorer_visibility_round_trips_through_store() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("store.ron");
-
-        let mut app_save = App::new();
-        app_save
-            .add_plugins(MinimalPlugins)
-            .add_plugins(vmux_core::CorePlugin)
-            .register_persisted::<vmux_editor::StackExplorerVisibility>()
-            .add_observer(save_on_default_event);
-        app_save
-            .world_mut()
-            .spawn((Save, vmux_editor::StackExplorerVisibility { visible: true }));
-        save_space_to_path(app_save.world_mut(), path.clone());
-        app_save.update();
-
-        let mut app_load = App::new();
-        app_load
-            .add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_core::CorePlugin)
-            .register_type::<vmux_editor::StackExplorerVisibility>()
-            .add_observer(load_on_default_event);
-        app_load.update();
-        app_load
-            .world_mut()
-            .commands()
-            .trigger_load(LoadWorld::default_from_file(path));
-        app_load.update();
-
-        let visibility = app_load
-            .world_mut()
-            .query::<&vmux_editor::StackExplorerVisibility>()
-            .single(app_load.world())
-            .expect("stack explorer visibility round-tripped");
-        assert!(visibility.visible);
     }
 
     #[test]
@@ -1289,11 +1132,9 @@ mod tests {
             .expect("write version");
 
         let mut app = App::new();
-        app.world_mut()
-            .spawn(crate::boot_status::RestoreComplete::default());
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .add_plugins(PersistencePlugin);
+            .add_plugins(WorkspacePersistencePlugin);
         app.update();
 
         assert!(

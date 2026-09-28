@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowPosition};
 use bevy_cef::prelude::HostWindow;
+use vmux_core::host::persistence::WorkspaceRestore;
 use vmux_layout::window::{FocusedWindow, NewWindowWorkspace, VmuxWindow, WindowGeometry};
 
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
@@ -177,11 +178,11 @@ fn ensure_window_state(
 }
 
 fn ensure_geometry_singleton(
-    restore: Single<&crate::boot_status::RestoreComplete>,
+    restore: Single<&WorkspaceRestore>,
     existing: Query<(), With<WindowGeometry>>,
     mut commands: Commands,
 ) {
-    if !restore.0 || !existing.is_empty() {
+    if !restore.complete || !existing.is_empty() {
         return;
     }
     commands.spawn(WindowGeometry::default());

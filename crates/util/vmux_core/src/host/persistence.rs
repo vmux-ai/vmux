@@ -18,6 +18,12 @@ pub struct PersistenceDirty;
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct PageRestore;
 
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct WorkspaceRestore {
+    pub store_present: bool,
+    pub complete: bool,
+}
+
 #[derive(Message, Clone)]
 pub struct WorkspaceSaveRequest {
     pub path: PathBuf,

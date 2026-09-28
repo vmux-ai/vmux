@@ -1,7 +1,7 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
+use vmux_core::host::persistence::WorkspaceRestore;
 use vmux_core::page::PageReady;
-use vmux_layout::SpaceFilePresent;
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::space::Space;
 use vmux_layout::stack::Stack;
@@ -18,12 +18,7 @@ impl Plugin for BootStatusPlugin {
 }
 
 fn spawn_boot_status(mut commands: Commands) {
-    commands.spawn((
-        Name::new("Boot status"),
-        SplashStatus::default(),
-        RestoreComplete::default(),
-        SpaceFilePresent::default(),
-    ));
+    commands.spawn((Name::new("Boot status"), SplashStatus::default()));
 }
 
 fn stack_in_active_space(
@@ -79,10 +74,6 @@ impl Default for SplashStatus {
     }
 }
 
-#[derive(Component, Default)]
-#[require(SpaceFilePresent)]
-pub struct RestoreComplete(pub bool);
-
 pub struct BootInputs {
     pub space_present: bool,
     pub restore_complete: bool,
@@ -111,14 +102,14 @@ pub fn compute(i: BootInputs) -> (BootPhase, bool) {
 }
 
 fn compute_boot_status(
-    mut status: Single<(&mut SplashStatus, &SpaceFilePresent, &RestoreComplete)>,
+    mut status: Single<&mut SplashStatus>,
+    restore: Single<&WorkspaceRestore>,
     layout_q: Query<(), (With<LayoutCef>, With<PageReady>)>,
     stacks_q: Query<(Entity, Option<&Children>), With<Stack>>,
     ready_q: Query<(), With<PageReady>>,
     child_of_q: Query<&ChildOf>,
     space_active_q: Query<Has<vmux_core::Active>, With<Space>>,
 ) {
-    let (status, space_present, restore) = &mut *status;
     let layout_ready = !layout_q.is_empty();
 
     let mut total_pages = 0usize;
@@ -136,8 +127,8 @@ fn compute_boot_status(
     }
 
     let (phase, reveal_ready) = compute(BootInputs {
-        space_present: space_present.0,
-        restore_complete: restore.0,
+        space_present: restore.store_present,
+        restore_complete: restore.complete,
         layout_ready,
         total_pages,
         ready_pages,
@@ -256,14 +247,11 @@ mod tests {
     #[test]
     fn system_reports_loading_pages_and_reveals_on_layout_ready() {
         let mut app = App::new();
-        let status = app
-            .world_mut()
-            .spawn((
-                SplashStatus::default(),
-                RestoreComplete::default(),
-                SpaceFilePresent(true),
-            ))
-            .id();
+        let status = app.world_mut().spawn(SplashStatus::default()).id();
+        app.world_mut().spawn(WorkspaceRestore {
+            store_present: true,
+            complete: false,
+        });
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, compute_boot_status);
 
@@ -281,14 +269,11 @@ mod tests {
     #[test]
     fn system_reports_restoring_space_before_layout_ready() {
         let mut app = App::new();
-        let status = app
-            .world_mut()
-            .spawn((
-                SplashStatus::default(),
-                RestoreComplete::default(),
-                SpaceFilePresent(true),
-            ))
-            .id();
+        let status = app.world_mut().spawn(SplashStatus::default()).id();
+        app.world_mut().spawn(WorkspaceRestore {
+            store_present: true,
+            complete: false,
+        });
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, compute_boot_status);
 
