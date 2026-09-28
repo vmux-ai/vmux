@@ -11,9 +11,9 @@ use vmux_core::agent::SessionId;
 use vmux_core::{AgentWorkingDir, CreatedAt};
 
 use super::request::PendingRequests;
-use crate::providers::{anthropic, mistral, openai};
 use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
-use crate::stream::{BuildRequest, ParseSse, StreamEvent, ToolDef};
+use vmux_agent::providers::{anthropic, mistral, openai};
+use vmux_agent::stream::{BuildRequest, ParseSse, StreamEvent, ToolDef};
 use vmux_api::BinEvent;
 use vmux_api::protocol::{
     AGENT_QUERY_TIMEOUT, AGENT_REQUEST_TIMEOUT, AGENT_TOOL_TIMEOUT, AgentAttachment,
@@ -867,7 +867,7 @@ fn spawn_sse(
         }
     });
     let http = tokio::spawn(async move {
-        crate::http::drive_sse(request, parse, cb_tx).await;
+        vmux_agent::http::drive_sse(request, parse, cb_tx).await;
     });
     (ev_rx, http)
 }

@@ -48,7 +48,6 @@ vmux_start = { path = "../vmux_start" }
 vmux_mcp = { path = "../../util/vmux_mcp" }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_transport = { path = "../../util/vmux_transport" }
-vmux_service = { path = "../vmux_service" }
 vmux_session = { path = "../../util/vmux_session" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_simulator = { path = "../vmux_simulator" }

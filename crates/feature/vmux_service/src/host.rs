@@ -11,14 +11,12 @@ pub mod cleanup;
 pub mod cli;
 pub use cli::ServiceCliPlugin;
 pub mod client;
-pub mod http;
 mod launch_agent;
 #[cfg(target_os = "macos")]
 pub mod launchd;
 mod osc133;
 pub mod plugin;
 pub mod process;
-pub mod providers;
 pub mod query;
 pub mod registry;
 mod request;
@@ -28,7 +26,6 @@ pub mod server;
 mod shell_integration;
 #[cfg(target_os = "macos")]
 pub mod sm_app_service;
-pub mod stream;
 pub mod supervisor;
 
 mod daemon;

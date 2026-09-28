@@ -21,6 +21,7 @@ pub mod event;
 pub mod exec;
 pub mod follow;
 pub mod handoff;
+pub mod http;
 mod ingress;
 pub mod launch;
 pub mod managed_mcp;
@@ -41,6 +42,7 @@ pub mod session;
 pub mod snapshot_updater;
 pub mod spawn;
 pub mod strategy;
+pub mod stream;
 pub mod toast;
 mod tool;
 mod transcript;
@@ -64,7 +66,6 @@ pub(crate) use self::workspace::{
 };
 
 pub use vmux_api::room as message;
-pub use vmux_service::{http, stream};
 
 pub use cli::CliAgentStrategy;
 pub use event::{

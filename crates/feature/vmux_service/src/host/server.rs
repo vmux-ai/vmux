@@ -1082,7 +1082,7 @@ async fn handle_client(
                 auto_tools,
                 tools_json,
             } => {
-                let tools: Vec<crate::stream::ToolDef> =
+                let tools: Vec<vmux_agent::stream::ToolDef> =
                     serde_json::from_str(&tools_json).unwrap_or_default();
                 let auto: std::collections::HashSet<String> = auto_tools.into_iter().collect();
                 let result = agent_sessions
