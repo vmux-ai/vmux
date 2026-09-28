@@ -1,3 +1,4 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_world_serialization::WorldFilter;
 use moonshine_save::prelude::*;
@@ -189,30 +190,55 @@ impl<'a> BookmarkDefaults<'a> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[derive(SystemParam)]
+struct BookmarkSeed<'w, 's> {
+    pins: Query<'w, 's, &'static PageMetadata, With<Pin>>,
+    bookmarks: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static PageMetadata,
+            Has<Pin>,
+            Option<&'static ChildOf>,
+        ),
+        With<Bookmark>,
+    >,
+    folders: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Name,
+            Option<&'static vmux_core::SmartBookmarkFolder>,
+        ),
+        With<Folder>,
+    >,
+    orders: Query<'w, 's, &'static BookmarkOrder, BookmarkFilter>,
+    offered: ResMut<'w, OfferedBookmarkDefaults>,
+    auto: Single<'w, 's, &'static mut BookmarkAutoSave>,
+    commands: Commands<'w, 's>,
+}
+
 fn seed_bookmark_defaults(
     _trigger: On<SeedBookmarkDefaults>,
     settings: Res<vmux_setting::AppSettings>,
-    pins: Query<&PageMetadata, With<Pin>>,
-    bookmarks: Query<(Entity, &PageMetadata, Has<Pin>, Option<&ChildOf>), With<Bookmark>>,
-    folders: Query<(Entity, &Name, Option<&vmux_core::SmartBookmarkFolder>), With<Folder>>,
-    orders: Query<&BookmarkOrder, BookmarkFilter>,
-    mut offered: ResMut<OfferedBookmarkDefaults>,
-    mut auto: Single<&mut BookmarkAutoSave>,
-    mut commands: Commands,
+    mut seed: BookmarkSeed,
 ) {
     let defaults = BookmarkDefaults::new(
         &settings.browser.bookmarks,
         &settings.browser.bookmark_folders,
     );
-    let claimed_urls = offered.claim_new_urls(defaults.urls);
-    let claimed_folders = offered.claim_new_folders(defaults.folders);
+    let claimed_urls = seed.offered.claim_new_urls(defaults.urls);
+    let claimed_folders = seed.offered.claim_new_folders(defaults.folders);
     let mut changed = !claimed_urls.is_empty() || !claimed_folders.is_empty();
-    let mut pinned = pins
+    let mut pinned = seed
+        .pins
         .iter()
         .map(|metadata| BookmarkDefaults::key(&metadata.url))
         .collect::<HashSet<_>>();
-    let mut next_order = orders
+    let mut next_order = seed
+        .orders
         .iter()
         .map(|order| order.0)
         .max()
@@ -221,7 +247,7 @@ fn seed_bookmark_defaults(
         if !pinned.insert(BookmarkDefaults::key(&url)) {
             continue;
         }
-        commands.spawn((
+        seed.commands.spawn((
             Pin,
             Uuid(uuid::Uuid::new_v4().to_string()),
             PageMetadata {
@@ -234,7 +260,8 @@ fn seed_bookmark_defaults(
         ));
         next_order = next_order.saturating_add(1);
     }
-    let mut existing_folders = folders
+    let mut existing_folders = seed
+        .folders
         .iter()
         .map(|(entity, name, smart)| {
             (
@@ -252,7 +279,7 @@ fn seed_bookmark_defaults(
             .folders
             .iter()
             .find(|folder| BookmarkDefaults::key(&folder.name) == key);
-        let mut entity = commands.spawn((
+        let mut entity = seed.commands.spawn((
             Folder,
             Uuid(uuid::Uuid::new_v4().to_string()),
             Name::new(name),
@@ -274,12 +301,12 @@ fn seed_bookmark_defaults(
             continue;
         };
         if *current != Some(smart) {
-            commands.entity(*entity).insert(smart);
+            seed.commands.entity(*entity).insert(smart);
             changed = true;
         }
     }
-    if !offered.folder_bookmarks.is_empty() {
-        let legacy = std::mem::take(&mut offered.folder_bookmarks);
+    if !seed.offered.folder_bookmarks.is_empty() {
+        let legacy = std::mem::take(&mut seed.offered.folder_bookmarks);
         for encoded in legacy {
             let Some((folder_key, url_key)) = encoded.split_once('\n') else {
                 continue;
@@ -288,33 +315,33 @@ fn seed_bookmark_defaults(
                 folder.smart.is_some() && BookmarkDefaults::key(&folder.name) == folder_key
             });
             if !is_smart {
-                offered.folder_bookmarks.push(encoded);
+                seed.offered.folder_bookmarks.push(encoded);
                 continue;
             }
             let Some((folder, _)) = existing_folders.get(folder_key) else {
                 changed = true;
                 continue;
             };
-            for (entity, metadata, pinned, parent) in bookmarks.iter() {
+            for (entity, metadata, pinned, parent) in seed.bookmarks.iter() {
                 if BookmarkDefaults::key(&metadata.url) != url_key
                     || parent.is_none_or(|parent| parent.parent() != *folder)
                 {
                     continue;
                 }
                 if pinned {
-                    commands
+                    seed.commands
                         .entity(entity)
                         .remove::<Bookmark>()
                         .remove::<ChildOf>();
                 } else {
-                    commands.entity(entity).despawn();
+                    seed.commands.entity(entity).despawn();
                 }
             }
             changed = true;
         }
     }
     if changed {
-        auto.dirty = true;
+        seed.auto.dirty = true;
     }
 }
 

@@ -14,7 +14,7 @@ impl Plugin for BookmarkPlugin {
 #[cfg(target_os = "macos")]
 mod macos {
     use bevy::ecs::relationship::Relationship;
-    use bevy::ecs::system::NonSendMarker;
+    use bevy::ecs::system::{NonSendMarker, SystemParam};
     use bevy::prelude::*;
     use std::collections::HashSet;
     use vmux_api::bookmark::{
@@ -76,6 +76,31 @@ mod macos {
         parent: Option<Entity>,
     }
 
+    type BookmarkMenuEntries<'w, 's> = Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Uuid,
+            Option<&'static Name>,
+            Option<&'static PageMetadata>,
+            Has<Pin>,
+            Has<Bookmark>,
+            Has<Folder>,
+            Has<Collapsed>,
+            Option<&'static ChildOf>,
+        ),
+    >;
+
+    #[derive(SystemParam)]
+    struct BookmarkMenuBuilder<'w, 's> {
+        focused: vmux_layout::window::FocusedWindow<'w, 's>,
+        entries: BookmarkMenuEntries<'w, 's>,
+        settings: Res<'w, vmux_setting::AppSettings>,
+        context_menus: Query<'w, 's, Entity, With<OsContextMenu>>,
+        commands: Commands<'w, 's>,
+    }
+
     #[derive(Message, Clone)]
     struct NewFolderInputRequest {
         webview: Entity,
@@ -88,25 +113,10 @@ mod macos {
         uuid: String,
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn show_bookmark_menu(
         _non_send: NonSendMarker,
         mut reader: MessageReader<ShowBookmarkMenuRequest>,
-        focused: vmux_layout::window::FocusedWindow,
-        entries: Query<(
-            Entity,
-            &Uuid,
-            Option<&Name>,
-            Option<&PageMetadata>,
-            Has<Pin>,
-            Has<Bookmark>,
-            Has<Folder>,
-            Has<Collapsed>,
-            Option<&ChildOf>,
-        )>,
-        settings: Res<vmux_setting::AppSettings>,
-        context_menus: Query<Entity, With<OsContextMenu>>,
-        mut commands: Commands,
+        mut builder: BookmarkMenuBuilder,
     ) {
         use bevy::winit::WINIT_WINDOWS;
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -115,7 +125,7 @@ mod macos {
             return;
         };
 
-        let Some(window_entity) = focused.entity() else {
+        let Some(window_entity) = builder.focused.entity() else {
             return;
         };
         let view_ptr = WINIT_WINDOWS.with_borrow(|windows| {
@@ -131,31 +141,37 @@ mod macos {
             return;
         };
 
-        for entity in &context_menus {
-            commands.entity(entity).despawn();
+        for entity in &builder.context_menus {
+            builder.commands.entity(entity).despawn();
         }
-        let locale = Locale::requested(Some(&settings.appearance.locale));
-        let folders = FolderMenuRow::collect(&entries);
-        let menu = commands.spawn(OsContextMenu::new(view_ptr)).id();
+        let locale = Locale::requested(Some(&builder.settings.appearance.locale));
+        let folders = FolderMenuRow::collect(&builder.entries);
+        let menu = builder.commands.spawn(OsContextMenu::new(view_ptr)).id();
         match request.target {
-            BookmarkMenuTarget::Root => root_menu(menu, &mut commands, &locale, request.webview),
-            BookmarkMenuTarget::Pin { uuid } => {
-                pin_menu(menu, &mut commands, &locale, &entries, &uuid)
+            BookmarkMenuTarget::Root => {
+                root_menu(menu, &mut builder.commands, &locale, request.webview)
             }
+            BookmarkMenuTarget::Pin { uuid } => pin_menu(
+                menu,
+                &mut builder.commands,
+                &locale,
+                &builder.entries,
+                &uuid,
+            ),
             BookmarkMenuTarget::Entry { uuid } => bookmark_menu(
                 menu,
-                &mut commands,
+                &mut builder.commands,
                 &locale,
-                &entries,
+                &builder.entries,
                 &folders,
                 &uuid,
                 request.webview,
             ),
             BookmarkMenuTarget::Folder { uuid, active_page } => folder_menu(
                 menu,
-                &mut commands,
+                &mut builder.commands,
                 &locale,
-                &entries,
+                &builder.entries,
                 &folders,
                 &uuid,
                 active_page,
@@ -179,17 +195,7 @@ mod macos {
         menu: Entity,
         commands: &mut Commands,
         locale: &Locale,
-        entries: &Query<(
-            Entity,
-            &Uuid,
-            Option<&Name>,
-            Option<&PageMetadata>,
-            Has<Pin>,
-            Has<Bookmark>,
-            Has<Folder>,
-            Has<Collapsed>,
-            Option<&ChildOf>,
-        )>,
+        entries: &BookmarkMenuEntries<'_, '_>,
         uuid: &str,
     ) {
         let Some((_, _, _, Some(metadata), true, bookmarked, _, _, _)) =
@@ -227,17 +233,7 @@ mod macos {
         menu: Entity,
         commands: &mut Commands,
         locale: &Locale,
-        entries: &Query<(
-            Entity,
-            &Uuid,
-            Option<&Name>,
-            Option<&PageMetadata>,
-            Has<Pin>,
-            Has<Bookmark>,
-            Has<Folder>,
-            Has<Collapsed>,
-            Option<&ChildOf>,
-        )>,
+        entries: &BookmarkMenuEntries<'_, '_>,
         folders: &[FolderMenuRow],
         uuid: &str,
         webview: Entity,
@@ -323,17 +319,7 @@ mod macos {
         menu: Entity,
         commands: &mut Commands,
         locale: &Locale,
-        entries: &Query<(
-            Entity,
-            &Uuid,
-            Option<&Name>,
-            Option<&PageMetadata>,
-            Has<Pin>,
-            Has<Bookmark>,
-            Has<Folder>,
-            Has<Collapsed>,
-            Option<&ChildOf>,
-        )>,
+        entries: &BookmarkMenuEntries<'_, '_>,
         folders: &[FolderMenuRow],
         uuid: &str,
         active_page: Option<PageMetadata>,
@@ -443,19 +429,7 @@ mod macos {
     }
 
     impl FolderMenuRow {
-        fn collect(
-            entries: &Query<(
-                Entity,
-                &Uuid,
-                Option<&Name>,
-                Option<&PageMetadata>,
-                Has<Pin>,
-                Has<Bookmark>,
-                Has<Folder>,
-                Has<Collapsed>,
-                Option<&ChildOf>,
-            )>,
-        ) -> Vec<Self> {
+        fn collect(entries: &BookmarkMenuEntries<'_, '_>) -> Vec<Self> {
             let mut folders = Vec::new();
             for (entity, uuid, name, _, _, _, folder, _, parent) in entries {
                 if !folder {

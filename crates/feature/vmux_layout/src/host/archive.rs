@@ -86,20 +86,9 @@ impl Plugin for ArchivePlugin {
 const MAX_ARCHIVE_ENTRIES: usize = 25;
 const ARCHIVE_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
-#[allow(clippy::too_many_arguments)]
 fn archive_on_stack_close(
     mut reader: MessageReader<CloseStackRequest>,
-    stack_pages: Query<(&PageMetadata, Option<&TerminalLaunch>), With<Stack>>,
-    child_of: Query<&ChildOf>,
-    children_q: Query<&Children>,
-    spaces: Query<(), With<Space>>,
-    space_ids: Query<&SpaceId>,
-    tabs: Query<(), With<Tab>>,
-    stacks: Query<(), With<Stack>>,
-    pane_ids: Query<&PaneId>,
-    splits: Query<&PaneSplit>,
-    pane_sizes: Query<&PaneSize>,
-    panes: Query<(), With<Pane>>,
+    layout: TabArchiveLayout,
     mut writer: MessageWriter<PageArchiveRequest>,
 ) {
     for request in reader.read() {
@@ -107,30 +96,19 @@ fn archive_on_stack_close(
             continue;
         }
         let stack = request.stack;
-        let Ok((meta, launch)) = stack_pages.get(stack) else {
+        let Ok((_, meta, launch, _)) = layout.stack_pages.get(stack) else {
             continue;
         };
         if meta.url.is_empty() {
             continue;
         }
-        let space = space_of(stack, &child_of, &spaces);
+        let space = space_of(stack, &layout.child_of, &layout.spaces);
         let space_id = space
-            .and_then(|s| space_ids.get(s).ok())
+            .and_then(|space| layout.space_ids.get(space).ok())
             .map(|id| id.0.clone())
             .unwrap_or_default();
-        let tab_index = space.and_then(|s| tab_index_of(stack, s, &child_of, &children_q, &tabs));
-        let (leaf_pane_id, stack_index, pane_path) = pane_path_of(
-            stack,
-            &child_of,
-            &children_q,
-            &pane_ids,
-            &splits,
-            &pane_sizes,
-            &panes,
-            &stacks,
-            &tabs,
-        )
-        .unwrap_or_default();
+        let tab_index = space.and_then(|space| layout.tab_index(stack, space));
+        let (leaf_pane_id, stack_index, pane_path) = layout.pane_path(stack).unwrap_or_default();
         writer.write(PageArchiveRequest {
             url: meta.url.clone(),
             title: meta.title.clone(),
@@ -142,86 +120,6 @@ fn archive_on_stack_close(
             pane_path,
         });
     }
-}
-
-fn tab_index_of(
-    stack: Entity,
-    space: Entity,
-    child_of: &Query<&ChildOf>,
-    children_q: &Query<&Children>,
-    tabs: &Query<(), With<Tab>>,
-) -> Option<usize> {
-    let mut cur = stack;
-    let tab = loop {
-        if tabs.get(cur).is_ok() {
-            break cur;
-        }
-        cur = child_of.get(cur).ok()?.parent();
-    };
-    children_q
-        .get(space)
-        .ok()?
-        .iter()
-        .filter(|e| tabs.get(*e).is_ok())
-        .position(|e| e == tab)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn pane_path_of(
-    stack: Entity,
-    child_of: &Query<&ChildOf>,
-    children_q: &Query<&Children>,
-    pane_ids: &Query<&PaneId>,
-    splits: &Query<&PaneSplit>,
-    pane_sizes: &Query<&PaneSize>,
-    panes: &Query<(), With<Pane>>,
-    stacks: &Query<(), With<Stack>>,
-    tabs: &Query<(), With<Tab>>,
-) -> Option<(String, usize, Vec<PaneStep>)> {
-    let leaf = child_of.get(stack).ok()?.parent();
-    if !panes.contains(leaf) {
-        return None;
-    }
-    let leaf_pane_id = pane_ids.get(leaf).ok()?.0.clone();
-    let stack_index = children_q
-        .get(leaf)
-        .ok()?
-        .iter()
-        .filter(|&e| stacks.contains(e))
-        .position(|e| e == stack)?;
-
-    let mut steps_rev: Vec<PaneStep> = Vec::new();
-    let mut cur = leaf;
-    loop {
-        let parent = child_of.get(cur).ok()?.parent();
-        if tabs.contains(parent) {
-            break;
-        }
-        let Ok(split) = splits.get(parent) else {
-            return None;
-        };
-        let pane_children: Vec<Entity> = children_q
-            .get(parent)
-            .map(|c| c.iter().filter(|&e| panes.contains(e)).collect())
-            .unwrap_or_default();
-        let child_index = pane_children.iter().position(|&e| e == cur)?;
-        let flex_weights = pane_children
-            .iter()
-            .map(|&e| pane_sizes.get(e).map(|s| s.flex_grow).unwrap_or(1.0))
-            .collect();
-        steps_rev.push(PaneStep {
-            split_id: pane_ids.get(parent).ok()?.0.clone(),
-            axis: match split.direction {
-                PaneSplitDirection::Row => SplitAxis::Row,
-                PaneSplitDirection::Column => SplitAxis::Column,
-            },
-            child_index,
-            flex_weights,
-        });
-        cur = parent;
-    }
-    steps_rev.reverse();
-    Some((leaf_pane_id, stack_index, steps_rev))
 }
 
 fn capture_archived_pages(mut reader: MessageReader<PageArchiveRequest>, mut commands: Commands) {
@@ -325,6 +223,81 @@ pub(crate) struct TabArchiveLayout<'w, 's> {
     pane_sizes: Query<'w, 's, &'static PaneSize>,
     panes: Query<'w, 's, (), With<Pane>>,
     host_windows: Query<'w, 's, &'static HostWindow>,
+}
+
+impl TabArchiveLayout<'_, '_> {
+    fn tab_index(&self, stack: Entity, space: Entity) -> Option<usize> {
+        let mut current = stack;
+        let tab = loop {
+            if self.tabs.contains(current) {
+                break current;
+            }
+            current = self.child_of.get(current).ok()?.parent();
+        };
+        self.children_q
+            .get(space)
+            .ok()?
+            .iter()
+            .filter(|entity| self.tabs.contains(*entity))
+            .position(|entity| entity == tab)
+    }
+
+    fn pane_path(&self, stack: Entity) -> Option<(String, usize, Vec<PaneStep>)> {
+        let leaf = self.child_of.get(stack).ok()?.parent();
+        if !self.panes.contains(leaf) {
+            return None;
+        }
+        let leaf_pane_id = self.pane_ids.get(leaf).ok()?.0.clone();
+        let stack_index = self
+            .children_q
+            .get(leaf)
+            .ok()?
+            .iter()
+            .filter(|entity| self.stacks.contains(*entity))
+            .position(|entity| entity == stack)?;
+
+        let mut steps = Vec::new();
+        let mut current = leaf;
+        loop {
+            let parent = self.child_of.get(current).ok()?.parent();
+            if self.tabs.contains(parent) {
+                break;
+            }
+            let split = self.splits.get(parent).ok()?;
+            let pane_children = self
+                .children_q
+                .get(parent)
+                .map(|children| {
+                    children
+                        .iter()
+                        .filter(|entity| self.panes.contains(*entity))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let child_index = pane_children.iter().position(|entity| *entity == current)?;
+            let flex_weights = pane_children
+                .iter()
+                .map(|entity| {
+                    self.pane_sizes
+                        .get(*entity)
+                        .map(|size| size.flex_grow)
+                        .unwrap_or(1.0)
+                })
+                .collect();
+            steps.push(PaneStep {
+                split_id: self.pane_ids.get(parent).ok()?.0.clone(),
+                axis: match split.direction {
+                    PaneSplitDirection::Row => SplitAxis::Row,
+                    PaneSplitDirection::Column => SplitAxis::Column,
+                },
+                child_index,
+                flex_weights,
+            });
+            current = parent;
+        }
+        steps.reverse();
+        Some((leaf_pane_id, stack_index, steps))
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -444,18 +417,7 @@ fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, command
         let Ok((_, metadata, launch, _)) = layout.stack_pages.get(stack) else {
             continue;
         };
-        let (leaf_pane_id, stack_index, pane_path) = pane_path_of(
-            stack,
-            &layout.child_of,
-            &layout.children_q,
-            &layout.pane_ids,
-            &layout.splits,
-            &layout.pane_sizes,
-            &layout.panes,
-            &layout.stacks,
-            &layout.tabs,
-        )
-        .unwrap_or_default();
+        let (leaf_pane_id, stack_index, pane_path) = layout.pane_path(stack).unwrap_or_default();
         let request = PageArchiveRequest {
             url: metadata.url.clone(),
             title: metadata.title.clone(),
