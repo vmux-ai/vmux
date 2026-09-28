@@ -1,13 +1,15 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
+use vmux_api::BinEvent;
+#[cfg(test)]
+use vmux_api::protocol::AgentRequest;
 use vmux_api::protocol::{
     AgentBookmark, AgentBookmarkList, AgentBookmarkNode, AgentBookmarks, AgentBrowserScroll,
     AgentBrowserSnapshot, AgentCommandResult, AgentGetSettings, AgentImage, AgentListCommands,
     AgentListSpaces, AgentReadLayout, AgentRecordStart, AgentRecordStop, AgentRecording,
-    AgentRequest, AgentRequestId, AgentScreenshot, AgentSimulatorButtonPress,
-    AgentSimulatorKeyPress, AgentSimulatorScreenshot, AgentSimulatorSwipe, AgentSimulatorTap,
-    AgentSimulatorTypeText, AgentSpace, AgentVaultStatus, AgentWorkingDirectory, ClientMessage,
-    JsonValue, ProcessId,
+    AgentRequestId, AgentScreenshot, AgentSimulatorButtonPress, AgentSimulatorKeyPress,
+    AgentSimulatorScreenshot, AgentSimulatorSwipe, AgentSimulatorTap, AgentSimulatorTypeText,
+    AgentSpace, AgentVaultStatus, AgentWorkingDirectory, ClientMessage, JsonValue, ProcessId,
 };
 use vmux_command::WriteCommandRequests;
 use vmux_service::client::ServiceRequest;
@@ -102,161 +104,214 @@ struct AgentQueryWriters<'w> {
     simulator_button_press: MessageWriter<'w, vmux_simulator::SimulatorButtonPressRequest>,
 }
 
-impl AgentQueryWriters<'_> {
-    fn route(&mut self, request_id: AgentRequestId, query: &AgentRequest) -> Result<bool, String> {
-        if let Some(query) = query.decode::<AgentReadLayout>()? {
-            self.layout
-                .write(vmux_layout::apply::LayoutSnapshotRequest {
-                    request_id: request_id.0,
-                    anchor: query.anchor,
-                });
-            return Ok(true);
-        }
-        if query.decode::<AgentGetSettings>()?.is_some() {
-            self.settings.write(SettingsReadRequest { request_id });
-            return Ok(true);
-        }
-        if query.decode::<AgentListSpaces>()?.is_some() {
-            self.spaces.write(SpaceListRequest { request_id });
-            return Ok(true);
-        }
-        if let Some(query) = query.decode::<AgentScreenshot>()? {
-            self.screenshot.write(ScreenshotRequest {
-                request_id: request_id.0,
-                pane: query.pane,
-            });
-            return Ok(true);
-        }
-        if let Some(query) = query.decode::<AgentBrowserSnapshot>()? {
-            self.browser_snapshot.write(BrowserSnapshotResolveRequest {
-                request_id,
-                pane: query.pane,
-                anchor: query.anchor,
-            });
-            return Ok(true);
-        }
-        if let Some(query) = query.decode::<AgentBrowserScroll>()? {
-            self.browser_scroll.write(BrowserScrollResolveRequest {
-                request_id,
-                pane: query.pane,
-                to: query.to,
-                delta: query.delta,
-                anchor: query.anchor,
-            });
-            return Ok(true);
-        }
-        if let Some(query) = query.decode::<AgentRecordStart>()? {
-            self.record_start.write(RecordStartRequest {
-                request_id: request_id.0,
-                gif: query.gif,
-                max_secs: query.max_secs,
-                pane: query.pane,
-            });
-            return Ok(true);
-        }
-        if let Some(query) = query.decode::<AgentRecordStop>()? {
-            self.record_stop.write(RecordStopRequest {
-                request_id: request_id.0,
-                dir: query.dir,
-                name: query.name,
-            });
-            return Ok(true);
-        }
-        if query.decode::<AgentBookmarkList>()?.is_some() {
-            self.bookmarks.write(BookmarkListRequest { request_id });
-            return Ok(true);
-        }
-        if query.decode::<AgentSimulatorScreenshot>()?.is_some() {
-            self.simulator_screenshot
-                .write(vmux_simulator::SimulatorScreenshotRequest {
-                    request_id: request_id.0,
-                });
-            return Ok(true);
-        }
-        if let Some(query) = query.decode::<AgentSimulatorTap>()? {
-            self.simulator_tap
-                .write(vmux_simulator::SimulatorTapRequest {
-                    request_id: request_id.0,
-                    x: query.x,
-                    y: query.y,
-                });
-            return Ok(true);
-        }
-        if let Some(query) = query.decode::<AgentSimulatorSwipe>()? {
-            self.simulator_swipe
-                .write(vmux_simulator::SimulatorSwipeRequest {
-                    request_id: request_id.0,
-                    start_x: query.start_x,
-                    start_y: query.start_y,
-                    end_x: query.end_x,
-                    end_y: query.end_y,
-                    duration_ms: query.duration_ms,
-                });
-            return Ok(true);
-        }
-        if let Some(query) = query.decode::<AgentSimulatorTypeText>()? {
-            self.simulator_type_text
-                .write(vmux_simulator::SimulatorTypeTextRequest {
-                    request_id: request_id.0,
-                    text: query.text,
-                });
-            return Ok(true);
-        }
-        if let Some(query) = query.decode::<AgentSimulatorKeyPress>()? {
-            self.simulator_key_press
-                .write(vmux_simulator::SimulatorKeyPressRequest {
-                    request_id: request_id.0,
-                    keycode: query.keycode,
-                });
-            return Ok(true);
-        }
-        if let Some(query) = query.decode::<AgentSimulatorButtonPress>()? {
-            self.simulator_button_press
-                .write(vmux_simulator::SimulatorButtonPressRequest {
-                    request_id: request_id.0,
-                    button: query.button,
-                });
-            return Ok(true);
-        }
-        if let Some(query) = query.decode::<AgentWorkingDirectory>()? {
-            self.working_directory.write(WorkingDirectoryRequest {
-                request_id,
-                anchor: query.anchor,
-            });
-            return Ok(true);
-        }
-        if query.decode::<AgentVaultStatus>()?.is_some() {
-            self.vault.write(VaultStatusRequest { request_id });
-            return Ok(true);
-        }
-        if query.decode::<AgentListCommands>()?.is_some() {
-            self.commands.write(CommandListRequest { request_id });
-            return Ok(true);
-        }
-        Ok(false)
-    }
-}
-
 fn route_agent_queries(
     mut requests: MessageReader<AgentQueryRequest>,
     mut writers: AgentQueryWriters,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in requests.read() {
-        match writers.route(request.request_id, &request.query) {
-            Ok(true) => {}
-            Ok(false) => {
+        let result = match request.query.id.as_str() {
+            AgentReadLayout::ID => serde_json::from_slice::<AgentReadLayout>(&request.query.body)
+                .map_err(|error| error.to_string())
+                .map(|query| {
+                    writers
+                        .layout
+                        .write(vmux_layout::apply::LayoutSnapshotRequest {
+                            request_id: request.request_id.0,
+                            anchor: query.anchor,
+                        });
+                }),
+            AgentGetSettings::ID => serde_json::from_slice::<AgentGetSettings>(&request.query.body)
+                .map_err(|error| error.to_string())
+                .map(|_| {
+                    writers.settings.write(SettingsReadRequest {
+                        request_id: request.request_id,
+                    });
+                }),
+            AgentListSpaces::ID => serde_json::from_slice::<AgentListSpaces>(&request.query.body)
+                .map_err(|error| error.to_string())
+                .map(|_| {
+                    writers.spaces.write(SpaceListRequest {
+                        request_id: request.request_id,
+                    });
+                }),
+            AgentScreenshot::ID => serde_json::from_slice::<AgentScreenshot>(&request.query.body)
+                .map_err(|error| error.to_string())
+                .map(|query| {
+                    writers.screenshot.write(ScreenshotRequest {
+                        request_id: request.request_id.0,
+                        pane: query.pane,
+                    });
+                }),
+            AgentBrowserSnapshot::ID => {
+                serde_json::from_slice::<AgentBrowserSnapshot>(&request.query.body)
+                    .map_err(|error| error.to_string())
+                    .map(|query| {
+                        writers
+                            .browser_snapshot
+                            .write(BrowserSnapshotResolveRequest {
+                                request_id: request.request_id,
+                                pane: query.pane,
+                                anchor: query.anchor,
+                            });
+                    })
+            }
+            AgentBrowserScroll::ID => {
+                serde_json::from_slice::<AgentBrowserScroll>(&request.query.body)
+                    .map_err(|error| error.to_string())
+                    .map(|query| {
+                        writers.browser_scroll.write(BrowserScrollResolveRequest {
+                            request_id: request.request_id,
+                            pane: query.pane,
+                            to: query.to,
+                            delta: query.delta,
+                            anchor: query.anchor,
+                        });
+                    })
+            }
+            AgentRecordStart::ID => serde_json::from_slice::<AgentRecordStart>(&request.query.body)
+                .map_err(|error| error.to_string())
+                .map(|query| {
+                    writers.record_start.write(RecordStartRequest {
+                        request_id: request.request_id.0,
+                        gif: query.gif,
+                        max_secs: query.max_secs,
+                        pane: query.pane,
+                    });
+                }),
+            AgentRecordStop::ID => serde_json::from_slice::<AgentRecordStop>(&request.query.body)
+                .map_err(|error| error.to_string())
+                .map(|query| {
+                    writers.record_stop.write(RecordStopRequest {
+                        request_id: request.request_id.0,
+                        dir: query.dir,
+                        name: query.name,
+                    });
+                }),
+            AgentBookmarkList::ID => {
+                serde_json::from_slice::<AgentBookmarkList>(&request.query.body)
+                    .map_err(|error| error.to_string())
+                    .map(|_| {
+                        writers.bookmarks.write(BookmarkListRequest {
+                            request_id: request.request_id,
+                        });
+                    })
+            }
+            AgentSimulatorScreenshot::ID => {
+                serde_json::from_slice::<AgentSimulatorScreenshot>(&request.query.body)
+                    .map_err(|error| error.to_string())
+                    .map(|_| {
+                        writers.simulator_screenshot.write(
+                            vmux_simulator::SimulatorScreenshotRequest {
+                                request_id: request.request_id.0,
+                            },
+                        );
+                    })
+            }
+            AgentSimulatorTap::ID => {
+                serde_json::from_slice::<AgentSimulatorTap>(&request.query.body)
+                    .map_err(|error| error.to_string())
+                    .map(|query| {
+                        writers
+                            .simulator_tap
+                            .write(vmux_simulator::SimulatorTapRequest {
+                                request_id: request.request_id.0,
+                                x: query.x,
+                                y: query.y,
+                            });
+                    })
+            }
+            AgentSimulatorSwipe::ID => {
+                serde_json::from_slice::<AgentSimulatorSwipe>(&request.query.body)
+                    .map_err(|error| error.to_string())
+                    .map(|query| {
+                        writers
+                            .simulator_swipe
+                            .write(vmux_simulator::SimulatorSwipeRequest {
+                                request_id: request.request_id.0,
+                                start_x: query.start_x,
+                                start_y: query.start_y,
+                                end_x: query.end_x,
+                                end_y: query.end_y,
+                                duration_ms: query.duration_ms,
+                            });
+                    })
+            }
+            AgentSimulatorTypeText::ID => {
+                serde_json::from_slice::<AgentSimulatorTypeText>(&request.query.body)
+                    .map_err(|error| error.to_string())
+                    .map(|query| {
+                        writers.simulator_type_text.write(
+                            vmux_simulator::SimulatorTypeTextRequest {
+                                request_id: request.request_id.0,
+                                text: query.text,
+                            },
+                        );
+                    })
+            }
+            AgentSimulatorKeyPress::ID => {
+                serde_json::from_slice::<AgentSimulatorKeyPress>(&request.query.body)
+                    .map_err(|error| error.to_string())
+                    .map(|query| {
+                        writers.simulator_key_press.write(
+                            vmux_simulator::SimulatorKeyPressRequest {
+                                request_id: request.request_id.0,
+                                keycode: query.keycode,
+                            },
+                        );
+                    })
+            }
+            AgentSimulatorButtonPress::ID => {
+                serde_json::from_slice::<AgentSimulatorButtonPress>(&request.query.body)
+                    .map_err(|error| error.to_string())
+                    .map(|query| {
+                        writers.simulator_button_press.write(
+                            vmux_simulator::SimulatorButtonPressRequest {
+                                request_id: request.request_id.0,
+                                button: query.button,
+                            },
+                        );
+                    })
+            }
+            AgentWorkingDirectory::ID => {
+                serde_json::from_slice::<AgentWorkingDirectory>(&request.query.body)
+                    .map_err(|error| error.to_string())
+                    .map(|query| {
+                        writers.working_directory.write(WorkingDirectoryRequest {
+                            request_id: request.request_id,
+                            anchor: query.anchor,
+                        });
+                    })
+            }
+            AgentVaultStatus::ID => serde_json::from_slice::<AgentVaultStatus>(&request.query.body)
+                .map_err(|error| error.to_string())
+                .map(|_| {
+                    writers.vault.write(VaultStatusRequest {
+                        request_id: request.request_id,
+                    });
+                }),
+            AgentListCommands::ID => {
+                serde_json::from_slice::<AgentListCommands>(&request.query.body)
+                    .map_err(|error| error.to_string())
+                    .map(|_| {
+                        writers.commands.write(CommandListRequest {
+                            request_id: request.request_id,
+                        });
+                    })
+            }
+            _ => {
                 service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
                     request_id: request.request_id,
                     message: format!("unknown agent query: {}", request.query.id),
                 }));
+                continue;
             }
-            Err(message) => {
-                service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
-                    request_id: request.request_id,
-                    message,
-                }));
-            }
+        };
+        if let Err(message) = result {
+            service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
+                request_id: request.request_id,
+                message,
+            }));
         }
     }
 }

@@ -109,22 +109,7 @@ impl Plugin for VaultPlugin {
             )
                 .chain(),
         )
-        .add_systems(
-            Update,
-            (
-                launch_vault_create,
-                launch_vault_connect,
-                launch_vault_sync,
-                launch_vault_connect_github,
-                launch_vault_connect_folder,
-                launch_vault_generate_recovery_key,
-                launch_vault_create_recovery_key,
-                launch_vault_unlock_recovery_key,
-                launch_vault_connect_cloud,
-                launch_vault_create_cloud_folder,
-                launch_vault_choose_cloud_folder,
-            ),
-        )
+        .add_systems(Update, launch_vault_operations)
         .add_systems(Update, drain_vault_operations);
 
         if let Some(watch) = VaultWatch::new(app) {
@@ -1565,201 +1550,232 @@ fn start_vault_operation(
         .insert(ReadyVaultOperation);
 }
 
-type VaultOperationExecutor<R> = fn(
-    R,
-    VaultRecovery,
-    Option<GeneratedRecoveryKey>,
-    VaultProgress,
-    VaultCancellation,
-) -> VaultOperationFuture;
+type ReadyVaultOperations<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static VaultOperationContext,
+        Option<&'static VaultOperationRequest<VaultCreateRequest>>,
+        Option<&'static VaultOperationRequest<VaultConnectRequest>>,
+        Option<&'static VaultOperationRequest<VaultSyncRequest>>,
+        Option<&'static VaultOperationRequest<VaultConnectGithubRequest>>,
+        Option<&'static VaultOperationRequest<VaultConnectFolderRequest>>,
+        Option<&'static VaultOperationRequest<VaultGenerateRecoveryKeyRequest>>,
+        Option<&'static VaultOperationRequest<VaultCreateRecoveryKeyRequest>>,
+        Option<&'static VaultOperationRequest<VaultUnlockRecoveryKeyRequest>>,
+        Option<&'static VaultOperationRequest<VaultConnectCloudRequest>>,
+        Option<&'static VaultOperationRequest<VaultCreateCloudFolderRequest>>,
+        Option<&'static VaultOperationRequest<VaultChooseCloudFolderRequest>>,
+    ),
+    Added<ReadyVaultOperation>,
+>;
 
-#[derive(SystemParam)]
-struct VaultOperationLauncher<'w, 's> {
-    recoveries: Query<'w, 's, &'static mut VaultRecoveryState, With<VaultRegistry>>,
-    proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
-    commands: Commands<'w, 's>,
-}
-
-impl VaultOperationLauncher<'_, '_> {
-    fn launch<R: Clone + Send + Sync + 'static>(
-        &mut self,
-        operations: &Query<(Entity, &VaultOperationRequest<R>), Added<ReadyVaultOperation>>,
-        execute: VaultOperationExecutor<R>,
-        take_pending_key: bool,
-    ) {
-        let Ok(mut recovery) = self.recoveries.single_mut() else {
-            return;
+fn launch_vault_operations(
+    operations: ReadyVaultOperations,
+    mut recoveries: Query<&mut VaultRecoveryState, With<VaultRegistry>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let Ok(mut recovery) = recoveries.single_mut() else {
+        return;
+    };
+    for (
+        entity,
+        context,
+        create,
+        connect,
+        sync,
+        connect_github,
+        connect_folder,
+        generate_recovery_key,
+        create_recovery_key,
+        unlock_recovery_key,
+        connect_cloud,
+        create_cloud_folder,
+        choose_cloud_folder,
+    ) in &operations
+    {
+        let service = recovery.service();
+        let generated_recovery_key = if context.kind == VaultOperationKind::CreateRecoveryKey {
+            recovery.take_pending_key()
+        } else {
+            None
         };
-        for (entity, operation) in operations {
-            let request = operation.0.clone();
-            let service = recovery.service();
-            let generated_recovery_key = if take_pending_key {
-                recovery.take_pending_key()
-            } else {
-                None
-            };
-            let completion_wake = self.proxy.as_deref().map(|proxy| (**proxy).clone());
-            let progress_wake = completion_wake.clone();
-            let (progress_sender, progress_receiver) = mpsc::channel();
-            let canceled = Arc::new(AtomicBool::new(false));
-            let task_canceled = canceled.clone();
-            let progress = Box::new(move |authorization| {
-                if progress_sender.send(authorization).is_ok()
-                    && let Some(wake) = &progress_wake
-                {
-                    let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-                }
+        let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let progress_wake = completion_wake.clone();
+        let (progress_sender, progress_receiver) = mpsc::channel();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let task_canceled = canceled.clone();
+        let progress = Box::new(move |authorization| {
+            if progress_sender.send(authorization).is_ok()
+                && let Some(wake) = &progress_wake
+            {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+        });
+        let cancellation = Box::new(move || task_canceled.load(Ordering::Relaxed));
+        let operation = match context.kind {
+            VaultOperationKind::Create => {
+                let Some(request) = create else {
+                    commands.entity(entity).despawn();
+                    continue;
+                };
+                create_vault(
+                    request.0.clone(),
+                    service,
+                    generated_recovery_key,
+                    progress,
+                    cancellation,
+                )
+            }
+            VaultOperationKind::Connect => {
+                let Some(request) = connect else {
+                    commands.entity(entity).despawn();
+                    continue;
+                };
+                connect_vault(
+                    request.0.clone(),
+                    service,
+                    generated_recovery_key,
+                    progress,
+                    cancellation,
+                )
+            }
+            VaultOperationKind::Sync => {
+                let Some(request) = sync else {
+                    commands.entity(entity).despawn();
+                    continue;
+                };
+                sync_vault(
+                    request.0,
+                    service,
+                    generated_recovery_key,
+                    progress,
+                    cancellation,
+                )
+            }
+            VaultOperationKind::ConnectGithub => {
+                let Some(request) = connect_github else {
+                    commands.entity(entity).despawn();
+                    continue;
+                };
+                connect_vault_github(
+                    request.0,
+                    service,
+                    generated_recovery_key,
+                    progress,
+                    cancellation,
+                )
+            }
+            VaultOperationKind::ConnectFolder => {
+                let Some(request) = connect_folder else {
+                    commands.entity(entity).despawn();
+                    continue;
+                };
+                connect_vault_folder(
+                    request.0,
+                    service,
+                    generated_recovery_key,
+                    progress,
+                    cancellation,
+                )
+            }
+            VaultOperationKind::GenerateRecoveryKey => {
+                let Some(request) = generate_recovery_key else {
+                    commands.entity(entity).despawn();
+                    continue;
+                };
+                generate_vault_recovery_key(
+                    request.0,
+                    service,
+                    generated_recovery_key,
+                    progress,
+                    cancellation,
+                )
+            }
+            VaultOperationKind::CreateRecoveryKey => {
+                let Some(request) = create_recovery_key else {
+                    commands.entity(entity).despawn();
+                    continue;
+                };
+                create_vault_recovery_key(
+                    request.0,
+                    service,
+                    generated_recovery_key,
+                    progress,
+                    cancellation,
+                )
+            }
+            VaultOperationKind::UnlockRecoveryKey => {
+                let Some(request) = unlock_recovery_key else {
+                    commands.entity(entity).despawn();
+                    continue;
+                };
+                unlock_vault_recovery_key(
+                    request.0.clone(),
+                    service,
+                    generated_recovery_key,
+                    progress,
+                    cancellation,
+                )
+            }
+            VaultOperationKind::ConnectCloud => {
+                let Some(request) = connect_cloud else {
+                    commands.entity(entity).despawn();
+                    continue;
+                };
+                connect_vault_cloud(
+                    request.0.clone(),
+                    service,
+                    generated_recovery_key,
+                    progress,
+                    cancellation,
+                )
+            }
+            VaultOperationKind::CreateCloudFolder => {
+                let Some(request) = create_cloud_folder else {
+                    commands.entity(entity).despawn();
+                    continue;
+                };
+                create_vault_cloud_folder(
+                    request.0.clone(),
+                    service,
+                    generated_recovery_key,
+                    progress,
+                    cancellation,
+                )
+            }
+            VaultOperationKind::ChooseCloudFolder => {
+                let Some(request) = choose_cloud_folder else {
+                    commands.entity(entity).despawn();
+                    continue;
+                };
+                choose_vault_cloud_folder(
+                    request.0.clone(),
+                    service,
+                    generated_recovery_key,
+                    progress,
+                    cancellation,
+                )
+            }
+        };
+        let task = IoTaskPool::get().spawn(async move {
+            let result = operation.await;
+            if let Some(wake) = completion_wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(entity)
+            .remove::<ReadyVaultOperation>()
+            .insert(VaultOperationTask {
+                task,
+                progress: Mutex::new(progress_receiver),
+                canceled,
             });
-            let cancellation = Box::new(move || task_canceled.load(Ordering::Relaxed));
-            let operation = execute(
-                request,
-                service,
-                generated_recovery_key,
-                progress,
-                cancellation,
-            );
-            let task = IoTaskPool::get().spawn(async move {
-                let result = operation.await;
-                if let Some(wake) = completion_wake {
-                    let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-                }
-                result
-            });
-            self.commands
-                .entity(entity)
-                .remove::<ReadyVaultOperation>()
-                .insert(VaultOperationTask {
-                    task,
-                    progress: Mutex::new(progress_receiver),
-                    canceled,
-                });
-        }
     }
-}
-
-fn launch_vault_create(
-    operations: Query<
-        (Entity, &VaultOperationRequest<VaultCreateRequest>),
-        Added<ReadyVaultOperation>,
-    >,
-    mut launcher: VaultOperationLauncher,
-) {
-    launcher.launch(&operations, create_vault, false);
-}
-
-fn launch_vault_connect(
-    operations: Query<
-        (Entity, &VaultOperationRequest<VaultConnectRequest>),
-        Added<ReadyVaultOperation>,
-    >,
-    mut launcher: VaultOperationLauncher,
-) {
-    launcher.launch(&operations, connect_vault, false);
-}
-
-fn launch_vault_sync(
-    operations: Query<
-        (Entity, &VaultOperationRequest<VaultSyncRequest>),
-        Added<ReadyVaultOperation>,
-    >,
-    mut launcher: VaultOperationLauncher,
-) {
-    launcher.launch(&operations, sync_vault, false);
-}
-
-fn launch_vault_connect_github(
-    operations: Query<
-        (Entity, &VaultOperationRequest<VaultConnectGithubRequest>),
-        Added<ReadyVaultOperation>,
-    >,
-    mut launcher: VaultOperationLauncher,
-) {
-    launcher.launch(&operations, connect_vault_github, false);
-}
-
-fn launch_vault_connect_folder(
-    operations: Query<
-        (Entity, &VaultOperationRequest<VaultConnectFolderRequest>),
-        Added<ReadyVaultOperation>,
-    >,
-    mut launcher: VaultOperationLauncher,
-) {
-    launcher.launch(&operations, connect_vault_folder, false);
-}
-
-fn launch_vault_generate_recovery_key(
-    operations: Query<
-        (
-            Entity,
-            &VaultOperationRequest<VaultGenerateRecoveryKeyRequest>,
-        ),
-        Added<ReadyVaultOperation>,
-    >,
-    mut launcher: VaultOperationLauncher,
-) {
-    launcher.launch(&operations, generate_vault_recovery_key, false);
-}
-
-fn launch_vault_create_recovery_key(
-    operations: Query<
-        (
-            Entity,
-            &VaultOperationRequest<VaultCreateRecoveryKeyRequest>,
-        ),
-        Added<ReadyVaultOperation>,
-    >,
-    mut launcher: VaultOperationLauncher,
-) {
-    launcher.launch(&operations, create_vault_recovery_key, true);
-}
-
-fn launch_vault_unlock_recovery_key(
-    operations: Query<
-        (
-            Entity,
-            &VaultOperationRequest<VaultUnlockRecoveryKeyRequest>,
-        ),
-        Added<ReadyVaultOperation>,
-    >,
-    mut launcher: VaultOperationLauncher,
-) {
-    launcher.launch(&operations, unlock_vault_recovery_key, false);
-}
-
-fn launch_vault_connect_cloud(
-    operations: Query<
-        (Entity, &VaultOperationRequest<VaultConnectCloudRequest>),
-        Added<ReadyVaultOperation>,
-    >,
-    mut launcher: VaultOperationLauncher,
-) {
-    launcher.launch(&operations, connect_vault_cloud, false);
-}
-
-fn launch_vault_create_cloud_folder(
-    operations: Query<
-        (
-            Entity,
-            &VaultOperationRequest<VaultCreateCloudFolderRequest>,
-        ),
-        Added<ReadyVaultOperation>,
-    >,
-    mut launcher: VaultOperationLauncher,
-) {
-    launcher.launch(&operations, create_vault_cloud_folder, false);
-}
-
-fn launch_vault_choose_cloud_folder(
-    operations: Query<
-        (
-            Entity,
-            &VaultOperationRequest<VaultChooseCloudFolderRequest>,
-        ),
-        Added<ReadyVaultOperation>,
-    >,
-    mut launcher: VaultOperationLauncher,
-) {
-    launcher.launch(&operations, choose_vault_cloud_folder, false);
 }
 
 fn drain_vault_operations(
