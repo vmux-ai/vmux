@@ -36,6 +36,11 @@ pub fn use_chat_keys(chat: Chat) -> ChatKeys {
 impl ChatKeys {
     pub fn on_prompt_keydown(&self, event: KeyboardEvent) {
         event.stop_propagation();
+        if self.claim.resolves() {
+            self.claim
+                .on_keydown(&event, |stroke| self.handler.wanted_locally(stroke));
+            return;
+        }
         if self.handler.answered_by_number(&event) {
             return;
         }
@@ -45,28 +50,28 @@ impl ChatKeys {
         if self.handler.submits_prompt(&event) {
             return;
         }
-        self.hand_over(&event);
+        self.handler.recall_alone(&event);
     }
 
     pub fn on_root_keydown(&self, event: KeyboardEvent) {
+        if self.claim.resolves() {
+            self.claim
+                .on_keydown(&event, |stroke| self.handler.wanted_locally(stroke));
+            if event.default_action_enabled() {
+                self.handler.type_into_draft(&event);
+            }
+            return;
+        }
         if self.handler.answered_by_number(&event) {
             return;
         }
         if self.handler.moves_list_locally(&event) {
             return;
         }
-        self.hand_over(&event);
+        self.handler.recall_alone(&event);
         if event.default_action_enabled() {
             self.handler.type_into_draft(&event);
         }
-    }
-
-    fn hand_over(&self, event: &KeyboardEvent) {
-        if !self.claim.resolves() {
-            return self.handler.recall_alone(event);
-        }
-        self.claim
-            .on_keydown(event, |stroke| self.handler.wanted_locally(stroke));
     }
 }
 
@@ -167,6 +172,13 @@ impl Chat {
             return;
         };
         let index = *list.selection(self).peek();
+        list.choose(self, index);
+    }
+
+    pub(super) fn choose_active_list_at(self, index: usize) {
+        let Some(list @ (ChatList::Approval | ChatList::Choice)) = ChatList::current(self) else {
+            return;
+        };
         list.choose(self, index);
     }
 
@@ -382,6 +394,9 @@ impl Chat {
             return keys;
         };
         keys.push("chat.list".to_string());
+        if matches!(list, ChatList::Approval | ChatList::Choice) {
+            keys.push("chat.choice".to_string());
+        }
         if list.is_selector() {
             keys.push("chat.selector".to_string());
         }

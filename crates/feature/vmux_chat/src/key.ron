@@ -31,6 +31,27 @@
     ],
   ),
   (
+    id: "chat_choice_1",
+    label: "Choose First Option",
+    group: "Chat",
+    hidden: true,
+    shortcuts: [(shortcut: Direct("1"), when: Some("chat.choice"))],
+  ),
+  (
+    id: "chat_choice_2",
+    label: "Choose Second Option",
+    group: "Chat",
+    hidden: true,
+    shortcuts: [(shortcut: Direct("2"), when: Some("chat.choice"))],
+  ),
+  (
+    id: "chat_choice_3",
+    label: "Choose Third Option",
+    group: "Chat",
+    hidden: true,
+    shortcuts: [(shortcut: Direct("3"), when: Some("chat.choice"))],
+  ),
+  (
     id: "chat_history_older",
     label: "Previous Prompt",
     group: "Chat",

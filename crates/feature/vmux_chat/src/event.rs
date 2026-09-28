@@ -254,6 +254,12 @@ pub struct ChatListChooseEffect {
 }
 
 #[vmux_api::contract(Copy, Eq)]
+pub struct ChatChoiceNumberEffect {
+    pub revision: u64,
+    pub index: u32,
+}
+
+#[vmux_api::contract(Copy, Eq)]
 pub struct ChatHistoryMoveEffect {
     pub revision: u64,
     pub older: bool,

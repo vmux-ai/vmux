@@ -2,8 +2,8 @@ use super::scroll;
 use crate::event::ChatResumeState;
 use crate::event::{
     ApprovalDecision, ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachments, ChatBranch,
-    ChatBranchesRequest, ChatBranchesState, ChatChoiceSelected, ChatComposerEffect,
-    ChatDraftChanged, ChatHistoryMoreRequest, ChatHistoryMoveEffect, ChatItem,
+    ChatBranchesRequest, ChatBranchesState, ChatChoiceNumberEffect, ChatChoiceSelected,
+    ChatComposerEffect, ChatDraftChanged, ChatHistoryMoreRequest, ChatHistoryMoveEffect, ChatItem,
     ChatListChooseEffect, ChatListMoveEffect, ChatMediaEntry, ChatMediaState, ChatRemoveAttachment,
     ChatSelectorDismissEffect, ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit,
     ChatTranscriptState, ComposerContext, ModelOptionEntry, QueuedPromptSnapshot,
@@ -167,6 +167,11 @@ impl Chat {
             && self.accepts_input_effect(revision)
         {
             self.choose_active_list();
+        }
+        if let Some(ChatChoiceNumberEffect { revision, index }) = patch.choice_number
+            && self.accepts_input_effect(revision)
+        {
+            self.choose_active_list_at(index as usize);
         }
         if let Some(ChatHistoryMoveEffect { revision, older }) = patch.history_move
             && self.accepts_input_effect(revision)
