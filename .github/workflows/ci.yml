@@ -619,17 +619,8 @@ jobs:
       - name: Install binaryen
         run: ./scripts/install-dioxus-binaryen.sh
 
-      - name: Install bevy_cef bundle tool
-        run: |
-          if ! bevy_cef_bundle_app --version 2>/dev/null | grep -q "$BEVY_CEF_BUNDLE_APP_VERSION"; then
-            cargo install bevy_cef_bundle_app --locked --version "$BEVY_CEF_BUNDLE_APP_VERSION"
-          fi
-
-      - name: Install cargo-packager (patched for macOS Tahoe)
-        run: |
-          if ! cargo-packager --version 2>/dev/null | grep -q "$CARGO_PACKAGER_VERSION"; then
-            cargo install --path patches/cargo-packager-0.11.8 --locked --force
-          fi
+      - name: Install package tools
+        run: ./scripts/install-package-tools.sh
 
       - name: Install tailwindcss
         run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh

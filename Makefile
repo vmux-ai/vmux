@@ -291,16 +291,10 @@ ensure-mobile-android-deps: ensure-dioxus-deps
 
 ensure-package-deps:
 	@echo "Checking packaging dependencies..."
-	@cp_version="$$( ("$(CARGO_PACKAGER_BIN)" --version 2>/dev/null || true) | awk '{print $$2}' )"; \
-	if [ "$$cp_version" != "$(CARGO_PACKAGER_VERSION)" ]; then \
-		echo "Installing cargo-packager $(CARGO_PACKAGER_VERSION) (found: $${cp_version:-missing})..."; \
-		"$(CARGO_BIN)" install --path patches/cargo-packager-0.11.8 --locked --force; \
-	fi
-	@bcb_version="$$( ("$(BEVY_CEF_BUNDLE_APP_BIN)" --version 2>/dev/null || true) | awk '{print $$2}' )"; \
-	if [ "$$bcb_version" != "$(BEVY_CEF_BUNDLE_APP_VERSION)" ]; then \
-		echo "Installing bevy_cef_bundle_app $(BEVY_CEF_BUNDLE_APP_VERSION) (found: $${bcb_version:-missing})..."; \
-		"$(CARGO_BIN)" install bevy_cef_bundle_app --locked --version "$(BEVY_CEF_BUNDLE_APP_VERSION)"; \
-	fi
+	@CARGO_BIN="$(CARGO_BIN)" \
+	  CARGO_PACKAGER_BIN="$(CARGO_PACKAGER_BIN)" \
+	  BEVY_CEF_BUNDLE_APP_BIN="$(BEVY_CEF_BUNDLE_APP_BIN)" \
+	  ./scripts/install-package-tools.sh
 
 ensure-ios-release-deps: ensure-mobile-ios-deps ensure-codesign-deps
 	@echo "Checking iOS release dependencies..."
