@@ -19,7 +19,7 @@ use vmux_core::{CreatedAt, ProcessId};
 
 use vmux_api::protocol::{ManagedMcpServer, ManagedMcpTransport, ServiceMessage};
 use vmux_api::room::{Message, RemoteSession};
-use vmux_process::ProcessManager;
+use vmux_process::ProcessRuntime;
 
 pub struct AcpSessionPlugin;
 
@@ -185,7 +185,7 @@ impl AcpSessions {
         env: Vec<(String, String)>,
         cwd: PathBuf,
         anchor: ProcessId,
-        manager: Arc<tokio::sync::Mutex<ProcessManager>>,
+        processes: ProcessRuntime,
         mcp_command: Option<String>,
         mcp_args: Vec<String>,
         managed_mcp_servers: Vec<ManagedMcpServer>,
@@ -203,7 +203,7 @@ impl AcpSessions {
                 env,
                 cwd,
                 anchor,
-                manager,
+                processes,
                 mcp_servers: mcp_servers.0,
                 resume,
                 effort,
@@ -398,7 +398,7 @@ struct SpawnAcpSession {
     env: Vec<(String, String)>,
     cwd: PathBuf,
     anchor: ProcessId,
-    manager: Arc<tokio::sync::Mutex<ProcessManager>>,
+    processes: ProcessRuntime,
     mcp_servers: Vec<agent_client_protocol::schema::v1::McpServer>,
     resume: Option<String>,
     effort: Option<String>,
@@ -545,7 +545,7 @@ fn spawn_acp_sessions(
                 std::mem::take(&mut request.cwd),
                 request.anchor,
                 stream_tx,
-                Arc::clone(&request.manager),
+                request.processes.clone(),
             ));
             let task = runtime.0.spawn(driver::run(
                 std::mem::take(&mut request.command),

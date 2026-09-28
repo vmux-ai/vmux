@@ -24,7 +24,7 @@ fn main() {
 
     let mut app = App::new();
     app.add_plugins((
-        vmux_service::query::ProcessQueryPlugin,
+        vmux_process::ProcessPlugin,
         vmux_service::remote::client_operation::ClientOperationPlugin,
         vmux_service::remote::authorization::RemoteAuthorizationPlugin,
         vmux_agent::service::AgentSessionPlugin,

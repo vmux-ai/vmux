@@ -37,7 +37,9 @@ use vmux_api::protocol::{
 #[cfg(test)]
 use vmux_api::room::AssistantBlock;
 use vmux_api::room::{Message, RemoteApproval, RemoteSession, RemoteStatus};
-use vmux_process::{Process, ProcessManager, ProcessUpdate};
+#[cfg(test)]
+use vmux_process::{Process, ProcessManager};
+use vmux_process::{ProcessCreated, ProcessLaunch, ProcessRuntime, ProcessUpdate};
 
 const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
 const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
@@ -150,7 +152,109 @@ impl VibeTempRoot {
     }
 }
 
-pub struct AcpShared {
+#[derive(Clone)]
+pub(super) enum AcpProcesses {
+    Runtime(ProcessRuntime),
+    #[cfg(test)]
+    Direct(Arc<tokio::sync::Mutex<ProcessManager>>),
+}
+
+impl From<ProcessRuntime> for AcpProcesses {
+    fn from(runtime: ProcessRuntime) -> Self {
+        Self::Runtime(runtime)
+    }
+}
+
+#[cfg(test)]
+impl From<Arc<tokio::sync::Mutex<ProcessManager>>> for AcpProcesses {
+    fn from(manager: Arc<tokio::sync::Mutex<ProcessManager>>) -> Self {
+        Self::Direct(manager)
+    }
+}
+
+impl AcpProcesses {
+    async fn create(&self, launch: ProcessLaunch) -> Result<ProcessCreated, String> {
+        match self {
+            Self::Runtime(runtime) => runtime.create(launch).await,
+            #[cfg(test)]
+            Self::Direct(manager) => {
+                let mut manager = manager.lock().await;
+                let (id, pid) = manager.create_process_keep_alive(
+                    launch.id,
+                    launch.command,
+                    launch.args,
+                    launch.cwd,
+                    launch.env,
+                    launch.cols,
+                    launch.rows,
+                )?;
+                let updates = manager
+                    .processes
+                    .get(&id)
+                    .map(Process::subscribe)
+                    .ok_or_else(|| format!("process not found after creation: {id}"))?;
+                Ok(ProcessCreated { id, pid, updates })
+            }
+        }
+    }
+
+    async fn exit_code(&self, process_id: ProcessId) -> Result<Option<i32>, String> {
+        match self {
+            Self::Runtime(runtime) => runtime.exit_code(process_id).await,
+            #[cfg(test)]
+            Self::Direct(manager) => manager
+                .lock()
+                .await
+                .processes
+                .get(&process_id)
+                .map(Process::process_exit)
+                .ok_or_else(|| format!("process not found: {process_id}")),
+        }
+    }
+
+    async fn transcript(&self, process_id: ProcessId) -> Result<String, String> {
+        match self {
+            Self::Runtime(runtime) => runtime.transcript(process_id).await,
+            #[cfg(test)]
+            Self::Direct(manager) => manager
+                .lock()
+                .await
+                .processes
+                .get(&process_id)
+                .map(Process::full_text)
+                .ok_or_else(|| format!("process not found: {process_id}")),
+        }
+    }
+
+    async fn kill(&self, process_id: ProcessId) -> Result<(), String> {
+        match self {
+            Self::Runtime(runtime) => runtime.kill(process_id).await,
+            #[cfg(test)]
+            Self::Direct(manager) => {
+                let mut manager = manager.lock().await;
+                let process = manager
+                    .processes
+                    .get_mut(&process_id)
+                    .ok_or_else(|| format!("process not found: {process_id}"))?;
+                process.kill();
+                Ok(())
+            }
+        }
+    }
+
+    async fn remove(&self, process_id: ProcessId) -> Result<(), String> {
+        match self {
+            Self::Runtime(runtime) => runtime.remove(process_id).await,
+            #[cfg(test)]
+            Self::Direct(manager) => {
+                manager.lock().await.remove_process(&process_id);
+                Ok(())
+            }
+        }
+    }
+}
+
+pub(super) struct AcpShared {
     pub sid: String,
     cwd: Mutex<PathBuf>,
     pub anchor: ProcessId,
@@ -159,7 +263,7 @@ pub struct AcpShared {
     projector_updates: watch::Sender<u64>,
     pub pending_perms: Mutex<HashMap<String, oneshot::Sender<ApprovalDecision>>>,
     pub terminals: Mutex<HashMap<String, AcpTerminal>>,
-    pub manager: Arc<tokio::sync::Mutex<ProcessManager>>,
+    processes: AcpProcesses,
     agent_name: Mutex<Option<String>>,
     model_info: Mutex<Option<AcpModelInfoState>>,
     mode_info: Mutex<Option<AcpModeInfoState>>,
@@ -173,12 +277,12 @@ pub struct AcpShared {
 }
 
 impl AcpShared {
-    pub fn new(
+    pub(super) fn new(
         sid: String,
         cwd: PathBuf,
         anchor: ProcessId,
         stream_tx: broadcast::Sender<ServiceMessage>,
-        manager: Arc<tokio::sync::Mutex<ProcessManager>>,
+        processes: impl Into<AcpProcesses>,
     ) -> Self {
         Self {
             sid,
@@ -189,7 +293,7 @@ impl AcpShared {
             projector_updates: watch::channel(0).0,
             pending_perms: Mutex::new(HashMap::new()),
             terminals: Mutex::new(HashMap::new()),
-            manager,
+            processes: processes.into(),
             agent_name: Mutex::new(None),
             model_info: Mutex::new(None),
             mode_info: Mutex::new(None),
@@ -1816,53 +1920,46 @@ async fn create_terminal(
         )
     })?;
     let cwd = cwd.to_string_lossy().into_owned();
-    let id = ProcessId::new();
-
-    let exit_stream = {
-        let mut mgr = shared.manager.lock().await;
-        mgr.create_process_keep_alive(
-            id,
-            command.clone(),
-            args.clone(),
-            cwd.clone(),
+    let created = shared
+        .processes
+        .create(ProcessLaunch {
+            id: ProcessId::new(),
+            command: command.clone(),
+            args: args.clone(),
+            cwd: cwd.clone(),
             env,
-            ACP_TERMINAL_COLS,
-            ACP_TERMINAL_ROWS,
-        )?;
-        mgr.processes.get(&id).map(|process| process.subscribe())
-    };
+            cols: ACP_TERMINAL_COLS,
+            rows: ACP_TERMINAL_ROWS,
+            keep_after_exit: true,
+        })
+        .await?;
+    let id = created.id;
+    let mut exit_stream = created.updates;
 
     let (exit_tx, exit_rx) = watch::channel(AcpTerminalExit::Pending);
-    if let Some(mut exit_stream) = exit_stream {
-        let manager = shared.manager.clone();
-        tokio::spawn(async move {
-            loop {
-                match exit_stream.recv().await {
-                    Ok(ProcessUpdate::Exited { exit_code }) => {
-                        let _ = exit_tx.send(AcpTerminalExit::Exited(exit_code));
-                        break;
-                    }
-                    Ok(_) => {}
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
-                        let recorded = manager
-                            .lock()
-                            .await
-                            .processes
-                            .get(&id)
-                            .map(Process::process_exit);
-                        if let Some(exit) = exit_after_lag(recorded) {
-                            let _ = exit_tx.send(exit);
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        let _ = exit_tx.send(AcpTerminalExit::Removed);
+    let processes = shared.processes.clone();
+    tokio::spawn(async move {
+        loop {
+            match exit_stream.recv().await {
+                Ok(ProcessUpdate::Exited { exit_code }) => {
+                    let _ = exit_tx.send(AcpTerminalExit::Exited(exit_code));
+                    break;
+                }
+                Ok(_) => {}
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    let recorded = processes.exit_code(id).await.ok();
+                    if let Some(exit) = exit_after_lag(recorded) {
+                        let _ = exit_tx.send(exit);
                         break;
                     }
                 }
+                Err(broadcast::error::RecvError::Closed) => {
+                    let _ = exit_tx.send(AcpTerminalExit::Removed);
+                    break;
+                }
             }
-        });
-    }
+        }
+    });
 
     let terminal_id = id.to_string();
     shared.terminals.lock().unwrap().insert(
@@ -1913,18 +2010,12 @@ async fn terminal_output(
     req: TerminalOutputRequest,
 ) -> Result<TerminalOutputResponse, String> {
     let (process_id, exit, output_byte_limit) = lookup_terminal(shared, &req.terminal_id)?;
-    let output = {
-        let mgr = shared.manager.lock().await;
-        mgr.processes
-            .get(&process_id)
-            .map(|process| process.full_text())
-            .ok_or_else(|| {
-                format!(
-                    "acp: terminal {} process no longer exists",
-                    req.terminal_id.0
-                )
-            })?
-    };
+    let output = shared.processes.transcript(process_id).await.map_err(|_| {
+        format!(
+            "acp: terminal {} process no longer exists",
+            req.terminal_id.0
+        )
+    })?;
     let (output, truncated) = truncate_terminal_output(output, output_byte_limit);
     let mut resp = TerminalOutputResponse::new(output, truncated);
     if let AcpTerminalExit::Exited(code) = exit {
@@ -1973,7 +2064,7 @@ async fn kill_terminal(
     req: KillTerminalRequest,
 ) -> Result<KillTerminalResponse, String> {
     let (process_id, _, _) = lookup_terminal(shared, &req.terminal_id)?;
-    shared.manager.lock().await.kill_process(&process_id);
+    shared.processes.kill(process_id).await?;
     Ok(KillTerminalResponse::new())
 }
 
@@ -2002,11 +2093,7 @@ async fn release_terminal(
         .unwrap()
         .remove(&req.terminal_id.0.to_string())
         .ok_or_else(|| format!("acp: unknown terminal {}", req.terminal_id.0))?;
-    shared
-        .manager
-        .lock()
-        .await
-        .remove_process(&terminal.process_id);
+    shared.processes.remove(terminal.process_id).await?;
     Ok(ReleaseTerminalResponse::new())
 }
 

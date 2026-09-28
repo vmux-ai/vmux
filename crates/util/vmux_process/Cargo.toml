@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 alacritty_terminal = { workspace = true }
+bevy = { workspace = true }
 portable-pty = { workspace = true }
 tokio = { workspace = true }
 vmux_api = { path = "../vmux_api" }

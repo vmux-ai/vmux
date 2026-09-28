@@ -13,7 +13,6 @@ mod launch_agent;
 #[cfg(target_os = "macos")]
 pub mod launchd;
 pub mod plugin;
-pub mod query;
 pub mod registry;
 pub mod runner;
 pub mod server;

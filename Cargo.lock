@@ -10838,6 +10838,7 @@ name = "vmux_process"
 version = "0.0.34"
 dependencies = [
  "alacritty_terminal",
+ "bevy",
  "libc",
  "portable-pty",
  "tokio",

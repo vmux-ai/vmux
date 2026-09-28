@@ -4,13 +4,12 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::BufReader;
 use tokio::net::UnixListener;
-use tokio::sync::{Mutex, broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc};
 use vmux_api::protocol::{
     AgentAttachment, ClientMessage, ProcessId, ServiceMessage, SharedMessage, compose_agent_prompt,
 };
-use vmux_process::{Process, ProcessManager};
+use vmux_process::{ProcessLaunch, ProcessRuntime};
 
-use super::query::ProcessQueries;
 use crate::remote::authorization::RemoteAuthorizations;
 use crate::remote::client_operation::ClientOperations;
 use vmux_agent::acp::AcpSessions;
@@ -27,8 +26,7 @@ impl ServiceDaemonPlugin {
         runtime: tokio::runtime::Handle,
         exit: mpsc::Sender<()>,
     ) -> impl Bundle {
-        let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
-        let (queries, process_runtime) = ProcessQueries::new(Arc::clone(&manager), wake.clone());
+        let (processes, process_runtime) = ProcessRuntime::new(wake.clone());
         let (client_operations, client_operation_runtime) = ClientOperations::new(wake.clone());
         let (authorizations, authorization_runtime) = RemoteAuthorizations::new(wake.clone());
         let (agent_sessions, agent_session_runtime) =
@@ -38,8 +36,7 @@ impl ServiceDaemonPlugin {
             Name::new("vmux service runtime"),
             ServiceDaemonStartup(Some(ServiceDaemonStart {
                 listener,
-                manager,
-                process_queries: queries,
+                processes,
                 client_operations,
                 authorizations,
                 agent_sessions,
@@ -67,8 +64,7 @@ struct ServiceDaemonStartup(Option<ServiceDaemonStart>);
 
 struct ServiceDaemonStart {
     listener: UnixListener,
-    manager: Arc<Mutex<ProcessManager>>,
-    process_queries: ProcessQueries,
+    processes: ProcessRuntime,
     client_operations: ClientOperations,
     authorizations: RemoteAuthorizations,
     agent_sessions: AgentSessions,
@@ -104,8 +100,7 @@ fn start_service_daemon(
         let task = start.runtime.spawn(async move {
             ServiceServer {
                 listener: start.listener,
-                manager: start.manager,
-                process_queries: start.process_queries,
+                processes: start.processes,
                 client_operations: start.client_operations,
                 authorizations: start.authorizations,
                 agent_sessions: start.agent_sessions,
@@ -175,22 +170,9 @@ async fn route_agent_input(
         .await;
 }
 
-async fn with_process_mut<F, R>(
-    manager: &Arc<Mutex<ProcessManager>>,
-    id: ProcessId,
-    f: F,
-) -> Option<R>
-where
-    F: FnOnce(&mut Process) -> R,
-{
-    let mut mgr = manager.lock().await;
-    mgr.processes.get_mut(&id).map(f)
-}
-
 struct ServiceServer {
     listener: UnixListener,
-    manager: Arc<Mutex<ProcessManager>>,
-    process_queries: ProcessQueries,
+    processes: ProcessRuntime,
     client_operations: ClientOperations,
     authorizations: RemoteAuthorizations,
     agent_sessions: AgentSessions,
@@ -202,8 +184,7 @@ impl ServiceServer {
     async fn run(self) {
         let Self {
             listener,
-            manager,
-            process_queries,
+            processes,
             client_operations,
             authorizations,
             agent_sessions,
@@ -239,26 +220,24 @@ impl ServiceServer {
                             continue;
                         }
                     };
-                    let mgr = Arc::clone(&manager);
+                    let processes = processes.clone();
                     let agent_tx = agent_tx.clone();
                     let pending_queries = pending_queries.clone();
                     let pending_commands = pending_commands.clone();
                     let pending_tool_calls = pending_tool_calls.clone();
                     let agent_sessions = agent_sessions.clone();
                     let acp_sessions = acp_sessions.clone();
-                    let process_queries = process_queries.clone();
                     let shutdown_tx = shutdown_tx.clone();
                     tokio::spawn(async move {
                         if let Err(e) = handle_client(
                             stream,
-                            mgr,
+                            processes,
                             agent_tx,
                             pending_queries,
                             pending_commands,
                             pending_tool_calls,
                             agent_sessions,
                             acp_sessions,
-                            process_queries,
                             shutdown_tx,
                             started_at,
                         )
@@ -416,14 +395,13 @@ async fn route_agent_query_response(
 #[allow(clippy::too_many_arguments)]
 async fn handle_client(
     stream: tokio::net::UnixStream,
-    manager: Arc<Mutex<ProcessManager>>,
+    processes: ProcessRuntime,
     agent_tx: broadcast::Sender<ServiceMessage>,
     pending_queries: PendingQueries,
     pending_commands: PendingCommands,
     pending_tool_calls: vmux_agent::service::AgentToolResponses,
     agent_sessions: AgentSessions,
     acp_sessions: AcpSessions,
-    process_queries: ProcessQueries,
     shutdown_tx: mpsc::Sender<()>,
     started_at: ServiceStartedAt,
 ) -> std::io::Result<()> {
@@ -467,16 +445,24 @@ async fn handle_client(
                 cols,
                 rows,
             } => {
-                let created = {
-                    let mut mgr = manager.lock().await;
-                    mgr.create_process(process_id, command, args, cwd, env, cols, rows)
-                };
+                let created = processes
+                    .create(ProcessLaunch {
+                        id: process_id,
+                        command,
+                        args,
+                        cwd,
+                        env,
+                        cols,
+                        rows,
+                        keep_after_exit: false,
+                    })
+                    .await;
                 match created {
-                    Ok((id, pid)) => {
-                        created_processes.push(id);
+                    Ok(created) => {
+                        created_processes.push(created.id);
                         let resp = ServiceMessage::ProcessCreated {
-                            process_id: id,
-                            pid,
+                            process_id: created.id,
+                            pid: created.pid,
                         };
                         let w = writer.clone();
                         let mut w = w.lock().await;
@@ -492,9 +478,7 @@ async fn handle_client(
             }
 
             ClientMessage::AttachProcess { process_id } => {
-                let mgr = manager.lock().await;
-                if let Some(process) = mgr.processes.get(&process_id) {
-                    let mut rx = process.subscribe();
+                if let Ok(mut rx) = processes.subscribe(process_id).await {
                     let w = writer.clone();
                     let handle = tokio::spawn(async move {
                         loop {
@@ -541,16 +525,7 @@ async fn handle_client(
             }
 
             ClientMessage::ProcessInput { process_id, data } => {
-                let writer = {
-                    let mgr = manager.lock().await;
-                    mgr.processes
-                        .get(&process_id)
-                        .filter(|process| !process.is_copy_mode())
-                        .map(Process::input_writer)
-                };
-                if let Some(writer) = writer {
-                    Process::write_input_to_writer(&writer, &data);
-                }
+                let _ = processes.input(process_id, data).await;
             }
 
             ClientMessage::MouseWheel {
@@ -560,10 +535,9 @@ async fn handle_client(
                 row,
                 modifiers,
             } => {
-                with_process_mut(&manager, process_id, |process| {
-                    process.handle_mouse_wheel(up, col, row, modifiers)
-                })
-                .await;
+                let _ = processes
+                    .mouse_wheel(process_id, up, col, row, modifiers)
+                    .await;
             }
 
             ClientMessage::ScrollWindow {
@@ -571,10 +545,7 @@ async fn handle_client(
                 top_row,
                 follow,
             } => {
-                with_process_mut(&manager, process_id, |process| {
-                    process.handle_scroll_window(top_row, follow)
-                })
-                .await;
+                let _ = processes.scroll_window(process_id, top_row, follow).await;
             }
 
             ClientMessage::ResizeProcess {
@@ -582,32 +553,28 @@ async fn handle_client(
                 cols,
                 rows,
             } => {
-                let mut mgr = manager.lock().await;
-                if let Some(process) = mgr.processes.get_mut(&process_id) {
-                    process.resize(cols, rows);
-                }
+                let _ = processes.resize(process_id, cols, rows).await;
             }
 
             ClientMessage::ListProcesses => {
-                let mgr = manager.lock().await;
-                let processes = mgr.processes.values().map(|p| p.info()).collect::<Vec<_>>();
-                let resp = ServiceMessage::ProcessList { processes };
+                let process_list = processes.list().await.unwrap_or_default();
+                let resp = ServiceMessage::ProcessList {
+                    processes: process_list,
+                };
                 let mut w = writer.lock().await;
                 vmux_core::service::write_service_message(&mut *w, &resp).await?;
             }
 
             ClientMessage::KillProcess { process_id } => {
-                let mut mgr = manager.lock().await;
-                mgr.remove_process(&process_id);
+                let _ = processes.remove(process_id).await;
                 if let Some(handle) = attached.lock().await.remove(&process_id) {
                     handle.abort();
                 }
             }
 
             ClientMessage::RequestSnapshot { process_id } => {
-                let mgr = manager.lock().await;
-                if let Some(process) = mgr.processes.get(&process_id) {
-                    let snap = process.snapshot().into_service_message(process_id);
+                if let Ok(snapshot) = processes.snapshot(process_id).await {
+                    let snap = snapshot.into_service_message(process_id);
                     let mut w = writer.lock().await;
                     vmux_core::service::write_service_message(&mut *w, &snap).await?;
                 } else {
@@ -620,8 +587,7 @@ async fn handle_client(
             }
 
             ClientMessage::SetSelection { process_id, range } => {
-                with_process_mut(&manager, process_id, |process| process.set_selection(range))
-                    .await;
+                let _ = processes.set_selection(process_id, range).await;
             }
 
             ClientMessage::ExtendSelectionTo {
@@ -629,10 +595,7 @@ async fn handle_client(
                 col,
                 row,
             } => {
-                with_process_mut(&manager, process_id, |process| {
-                    process.extend_selection_to(col, row)
-                })
-                .await;
+                let _ = processes.extend_selection(process_id, col, row).await;
             }
 
             ClientMessage::SelectWordAt {
@@ -640,40 +603,33 @@ async fn handle_client(
                 col,
                 row,
             } => {
-                with_process_mut(&manager, process_id, |process| {
-                    process.select_word_at(col, row)
-                })
-                .await;
+                let _ = processes.select_word(process_id, col, row).await;
             }
 
             ClientMessage::SelectLineAt { process_id, row } => {
-                with_process_mut(&manager, process_id, |process| process.select_line_at(row)).await;
+                let _ = processes.select_line(process_id, row).await;
             }
 
             ClientMessage::GetSelectionText { process_id } => {
-                let text =
-                    with_process_mut(&manager, process_id, |process| process.selection_text())
-                        .await
-                        .flatten()
-                        .unwrap_or_default();
+                let text = processes
+                    .selection_text(process_id)
+                    .await
+                    .unwrap_or_default();
                 let resp = ServiceMessage::SelectionText { process_id, text };
                 let mut w = writer.lock().await;
                 vmux_core::service::write_service_message(&mut *w, &resp).await?;
             }
 
             ClientMessage::EnterCopyMode { process_id } => {
-                with_process_mut(&manager, process_id, |process| process.enter_copy_mode()).await;
+                let _ = processes.enter_copy_mode(process_id).await;
             }
 
             ClientMessage::ExitCopyMode { process_id } => {
-                with_process_mut(&manager, process_id, |process| process.exit_copy_mode()).await;
+                let _ = processes.exit_copy_mode(process_id).await;
             }
 
             ClientMessage::CopyModeKey { process_id, key } => {
-                if let Some(Some(text)) =
-                    with_process_mut(&manager, process_id, |process| process.copy_mode_key(key))
-                        .await
-                {
+                if let Ok(Some(text)) = processes.copy_mode_key(process_id, key).await {
                     let resp = ServiceMessage::SelectionText { process_id, text };
                     let mut w = writer.lock().await;
                     vmux_core::service::write_service_message(&mut *w, &resp).await?;
@@ -735,10 +691,7 @@ async fn handle_client(
 
             ClientMessage::Shutdown => {
                 tracing::info!("shutdown requested by client; draining");
-                {
-                    let mut mgr = manager.lock().await;
-                    mgr.shutdown();
-                }
+                let _ = processes.shutdown().await;
                 let resp = ServiceMessage::ProcessList {
                     processes: Vec::new(),
                 };
@@ -750,10 +703,7 @@ async fn handle_client(
 
             ClientMessage::Status => {
                 let uptime_secs = started_at.0.elapsed().as_secs();
-                let process_count = {
-                    let mgr = manager.lock().await;
-                    mgr.processes.len() as u32
-                };
+                let process_count = processes.count().await.unwrap_or_default();
                 let resp = ServiceMessage::StatusResponse {
                     uptime_secs,
                     process_count,
@@ -763,7 +713,7 @@ async fn handle_client(
             }
 
             ClientMessage::AgentQuery { request_id, query } => {
-                let response = match process_queries.response(request_id, &query).await {
+                let response = match processes.response(request_id, &query).await {
                     Ok(Some(response)) => response,
                     Ok(None) => {
                         let broker = broker.clone();
@@ -1197,7 +1147,7 @@ async fn handle_client(
                         env,
                         std::path::PathBuf::from(cwd),
                         anchor,
-                        Arc::clone(&manager),
+                        processes.clone(),
                         mcp_command,
                         mcp_args,
                         managed_mcp_servers,
@@ -1277,9 +1227,8 @@ async fn handle_client(
     }
 
     if !created_processes.is_empty() {
-        let mut mgr = manager.lock().await;
         for id in &created_processes {
-            mgr.remove_process(id);
+            let _ = processes.remove(*id).await;
         }
     }
 
@@ -1290,10 +1239,51 @@ async fn handle_client(
 mod tests {
     use super::*;
 
+    struct ProcessAppThread {
+        stop: Option<std::sync::mpsc::Sender<()>>,
+        handle: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl ProcessAppThread {
+        fn start(wake: mpsc::UnboundedSender<()>) -> (Self, ProcessRuntime) {
+            let (processes, runtime) = ProcessRuntime::new(wake);
+            let (stop, stopped) = std::sync::mpsc::channel();
+            let handle = std::thread::spawn(move || {
+                let mut app = App::new();
+                app.add_plugins((MinimalPlugins, vmux_process::ProcessPlugin));
+                app.world_mut()
+                    .spawn((Name::new("vmux process runtime"), runtime));
+                loop {
+                    app.update();
+                    match stopped.recv_timeout(std::time::Duration::from_millis(1)) {
+                        Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    }
+                }
+            });
+            (
+                Self {
+                    stop: Some(stop),
+                    handle: Some(handle),
+                },
+                processes,
+            )
+        }
+    }
+
+    impl Drop for ProcessAppThread {
+        fn drop(&mut self) {
+            if let Some(stop) = self.stop.take() {
+                let _ = stop.send(());
+            }
+            if let Some(handle) = self.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+
     async fn run_test_server(listener: UnixListener, wake: mpsc::UnboundedSender<()>) {
-        let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
-        let (process_queries, _process_runtime) =
-            ProcessQueries::new(Arc::clone(&manager), wake.clone());
+        let (_process_app, processes) = ProcessAppThread::start(wake.clone());
         let (agent_sessions, _agent_runtime) = vmux_agent::service::AgentSessions::new(
             tokio::runtime::Handle::current(),
             wake.clone(),
@@ -1301,27 +1291,17 @@ mod tests {
         let (acp_sessions, acp_runtime) =
             vmux_agent::acp::AcpSessions::new(tokio::runtime::Handle::current(), wake);
         drop(acp_runtime);
-        let mut server = Box::pin(
-            super::ServiceServer {
-                listener,
-                manager: Arc::clone(&manager),
-                process_queries,
-                client_operations: ClientOperations::closed(),
-                authorizations: RemoteAuthorizations::closed(),
-                agent_sessions,
-                acp_sessions,
-                started_at: ServiceStartedAt(Instant::now()),
-            }
-            .run(),
-        );
-        let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            tokio::select! {
-                _ = &mut server => return,
-                _ = interval.tick() => manager.lock().await.reap_exited(),
-            }
+        super::ServiceServer {
+            listener,
+            processes,
+            client_operations: ClientOperations::closed(),
+            authorizations: RemoteAuthorizations::closed(),
+            agent_sessions,
+            acp_sessions,
+            started_at: ServiceStartedAt(Instant::now()),
         }
+        .run()
+        .await;
     }
 
     #[test]
