@@ -20,7 +20,7 @@ CEF_FRAMEWORK_DIR := $(HOME)/.local/share/Chromium Embedded Framework.framework
 CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 
 dev: ensure-native-deps ensure-codesign-deps install-debug-render-process
-	$(CARGO_WITH_CEF_CACHE) build -p vmux_daemon -p vmux_cli
+	$(CARGO_WITH_CEF_CACHE) build -p vmux_service -p vmux_cli
 	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop $(VMUX_DESKTOP_FEATURES)
 	@identity="$$(./scripts/ensure-local-codesign-identity.sh)" && \
 	APPLE_SIGNING_IDENTITY="$$identity" \
@@ -50,7 +50,7 @@ test-app:
 	$(MAKE) dev VMUX_PROFILE=gregor VMUX_TEST=1
 
 build: ensure-mac-deps
-	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop -p vmux_cli -p vmux_daemon --release --features vmux_desktop/package
+	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop -p vmux_cli -p vmux_service --release --features vmux_desktop/package
 
 ios: mobile-ios-run
 

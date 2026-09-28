@@ -10455,19 +10455,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vmux_daemon"
-version = "0.0.34"
-dependencies = [
- "bevy_app",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "vmux_core",
- "vmux_service",
-]
-
-[[package]]
 name = "vmux_desktop"
 version = "0.0.35"
 dependencies = [

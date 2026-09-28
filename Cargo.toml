@@ -111,9 +111,6 @@ opt-level = 3
 [profile.dev.package.vmux_service]
 codegen-units = 1
 
-[profile.dev.package.vmux_daemon]
-codegen-units = 1
-
 [profile.release]
 strip = true
 lto = "thin"
@@ -143,10 +140,6 @@ opt-level = "z"
 codegen-units = 1
 
 [profile.release.package.vmux_service]
-opt-level = "z"
-codegen-units = 1
-
-[profile.release.package.vmux_daemon]
 opt-level = "z"
 codegen-units = 1
 

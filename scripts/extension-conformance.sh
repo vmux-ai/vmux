@@ -24,7 +24,7 @@ BUILD_PROFILE="${VMUX_CONFORMANCE_BUILD_PROFILE:-${VMUX_BUILD_PROFILE:-dev}}"
 case "$VMUX_BIN" in
   "$DEFAULT_VMUX_BIN")
     env -u CEF_PATH cargo build \
-      -p vmux_browser -p vmux_desktop -p vmux_daemon \
+      -p vmux_browser -p vmux_desktop -p vmux_service \
       --features vmux_desktop/conformance
     ;;
   *)

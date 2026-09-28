@@ -13,6 +13,10 @@ default = []
 name = "vmux_service"
 path = "src/lib.rs"
 
+[[bin]]
+name = "vmux_service"
+path = "src/main.rs"
+
 [dependencies]
 rkyv = { workspace = true }
 serde = { workspace = true }
