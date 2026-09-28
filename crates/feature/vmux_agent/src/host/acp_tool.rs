@@ -226,14 +226,14 @@ fn start_acp_installs(
     mut commands: Commands,
     sessions: Query<(Entity, &AcpSession), Without<AcpLaunchStarted>>,
     jobs: Query<(Entity, &AcpInstallKey)>,
-    focused: Option<Res<vmux_layout::stack::FocusedStack>>,
+    focused: vmux_layout::stack::FocusedStack,
     settings: Option<Res<AppSettings>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
 ) {
     let Some(settings) = settings else {
         return;
     };
-    let Some(focused) = focused else {
+    let Some(focused) = focused.as_ref() else {
         return;
     };
     let shell = crate::host::agent_terminal_shell(&settings);

@@ -26,6 +26,7 @@ cli = [
 ]
 desktop = [
     "agent",
+    "bookmark",
     "browser",
     "editor",
     "extension",
@@ -45,6 +46,7 @@ desktop = [
 ]
 mobile = ["dep:vmux_chat", "dep:vmux_start", "dep:vmux_team"]
 tool = ["dep:vmux_tool"]
+bookmark = ["layout", "dep:vmux_bookmark"]
 core = [
     "dep:vmux_command",
     "dep:vmux_core",
@@ -80,6 +82,7 @@ vault = ["layout", "dep:vmux_vault"]
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true, optional = true }
 vmux_agent = { path = "../../feature/vmux_agent", optional = true }
+vmux_bookmark = { path = "../../feature/vmux_bookmark", optional = true }
 vmux_browser = { path = "../vmux_browser", optional = true }
 vmux_chat = { path = "../../feature/vmux_chat", optional = true }
 vmux_command = { path = "../../feature/vmux_command", optional = true }

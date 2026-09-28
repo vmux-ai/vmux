@@ -1212,7 +1212,14 @@ mod tests {
             .single(app.world())
             .expect("one active tab");
         assert_ne!(new_tab, old_tab);
-        let focused = app.world().resource::<crate::stack::FocusedStack>();
+        let focused = {
+            let world = app.world_mut();
+            let mut query = world.query_filtered::<
+                &crate::active_pane::ActiveStack,
+                With<crate::active_pane::ProfileId>,
+            >();
+            *query.single(world).unwrap()
+        };
         assert_eq!(focused.tab, Some(new_tab));
         assert!(focused.pane.is_some_and(|pane| pane != old_pane));
         assert!(focused.stack.is_some_and(|stack| stack != old_stack));

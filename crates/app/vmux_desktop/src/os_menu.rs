@@ -18,73 +18,67 @@ use vmux_browser::HostFocusIntent;
 use vmux_command::ReadCommandRequests;
 use vmux_command::{CommandDefinition, CommandInvocation, WriteCommandRequests};
 use vmux_layout::stack::CloseRequest;
+use vmux_native::menu::{
+    OsContextMenu, OsMenuEntry, OsMenuSelection, OsMenuSeparator, OsMenuSet, TransientOsMenuEntry,
+};
 use vmux_ui::i18n::{DEFAULT_LOCALE, Locale};
 
 pub struct OsMenuPlugin;
 
 impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::bookmark::BookmarkMenuPlugin)
-            .insert_non_send(OsMenuResource {
-                menu: Menu::new(),
-                #[cfg(target_os = "macos")]
-                context_menu: None,
-                locale: Locale::preferred(),
-                close_window: None,
-                #[cfg(target_os = "macos")]
-                edit_items: Vec::new(),
-            })
-            .add_message::<OsMenuSelection>()
-            .add_message::<crate::window_manager::CloseVmuxWindow>()
-            .add_message::<CloseRequest>()
-            .add_message::<vmux_browser::OpenRequest>()
-            .add_observer(remember_tab_close)
-            .configure_sets(
-                Update,
-                (OsMenuSet::Forward, OsMenuSet::Dispatch, OsMenuSet::Cleanup)
-                    .chain()
-                    .in_set(WriteCommandRequests),
-            )
-            .add_systems(
-                Startup,
-                (spawn_runtime, setup)
-                    .chain()
-                    .after(vmux_setting::SettingsLoadSet)
-                    .after(vmux_command::RegisterCommandDefinitions),
-            )
-            .add_systems(
-                Update,
-                (
-                    sync_menu_locale,
-                    remember_stack_close_commands.after(vmux_command::DispatchCommandInvocations),
-                    remember_native_page_open_requests
-                        .after(vmux_command::DispatchCommandInvocations),
-                    hide_window_on_close_request
-                        .after(remember_stack_close_commands)
-                        .after(remember_native_page_open_requests),
-                    sync_close_menu_item.after(hide_window_on_close_request),
-                ),
-            )
-            .add_systems(
-                Update,
-                (
-                    forward_menu_events.in_set(OsMenuSet::Forward),
-                    (dispatch_command_menu_selection, hide_windows_from_menu)
-                        .in_set(OsMenuSet::Dispatch),
-                    cleanup_transient_menu_entries.in_set(OsMenuSet::Cleanup),
-                ),
-            );
+        app.insert_non_send(OsMenuResource {
+            menu: Menu::new(),
+            #[cfg(target_os = "macos")]
+            context_menu: None,
+            locale: Locale::preferred(),
+            close_window: None,
+            #[cfg(target_os = "macos")]
+            edit_items: Vec::new(),
+        })
+        .add_message::<OsMenuSelection>()
+        .add_message::<crate::window_manager::CloseVmuxWindow>()
+        .add_message::<CloseRequest>()
+        .add_message::<vmux_browser::OpenRequest>()
+        .add_observer(remember_tab_close)
+        .configure_sets(
+            Update,
+            (OsMenuSet::Forward, OsMenuSet::Dispatch, OsMenuSet::Cleanup)
+                .chain()
+                .in_set(WriteCommandRequests),
+        )
+        .add_systems(
+            Startup,
+            (spawn_runtime, setup)
+                .chain()
+                .after(vmux_setting::SettingsLoadSet)
+                .after(vmux_command::RegisterCommandDefinitions),
+        )
+        .add_systems(
+            Update,
+            (
+                sync_menu_locale,
+                remember_stack_close_commands.after(vmux_command::DispatchCommandInvocations),
+                remember_native_page_open_requests.after(vmux_command::DispatchCommandInvocations),
+                hide_window_on_close_request
+                    .after(remember_stack_close_commands)
+                    .after(remember_native_page_open_requests),
+                sync_close_menu_item.after(hide_window_on_close_request),
+            ),
+        )
+        .add_systems(
+            Update,
+            (
+                forward_menu_events.in_set(OsMenuSet::Forward),
+                (dispatch_command_menu_selection, hide_windows_from_menu)
+                    .in_set(OsMenuSet::Dispatch),
+                cleanup_transient_menu_entries.in_set(OsMenuSet::Cleanup),
+            ),
+        );
         #[cfg(target_os = "macos")]
         app.add_systems(Update, sync_edit_menu_items.after(ReadCommandRequests))
             .add_systems(PostUpdate, present_context_menus);
     }
-}
-
-#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum OsMenuSet {
-    Forward,
-    Dispatch,
-    Cleanup,
 }
 
 #[derive(Component)]
@@ -109,76 +103,7 @@ impl Default for OsMenuState {
 }
 
 #[derive(Component)]
-pub(crate) struct OsMenuEntry {
-    id: Option<String>,
-    #[cfg(target_os = "macos")]
-    label: String,
-    #[cfg(target_os = "macos")]
-    enabled: bool,
-}
-
-impl OsMenuEntry {
-    #[cfg(target_os = "macos")]
-    pub(crate) fn new(label: String, enabled: bool) -> Self {
-        Self {
-            id: None,
-            label,
-            enabled,
-        }
-    }
-
-    pub(crate) fn identified(id: String) -> Self {
-        Self {
-            id: Some(id),
-            #[cfg(target_os = "macos")]
-            label: String::new(),
-            #[cfg(target_os = "macos")]
-            enabled: true,
-        }
-    }
-
-    fn matches(&self, event_id: &str) -> bool {
-        self.id.as_deref() == Some(event_id)
-    }
-}
-
-#[cfg(target_os = "macos")]
-#[derive(Component)]
-pub(crate) struct OsContextMenu {
-    view: usize,
-}
-
-#[cfg(target_os = "macos")]
-impl OsContextMenu {
-    pub(crate) fn new(view: *mut std::ffi::c_void) -> Self {
-        Self {
-            view: view as usize,
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-#[derive(Component)]
-pub(crate) struct OsMenuSeparator;
-
-#[derive(Component)]
-pub(crate) struct TransientOsMenuEntry;
-
-#[derive(Component)]
 struct HideWindowsMenuEntry;
-
-#[derive(Message, Clone, Copy)]
-pub(crate) struct OsMenuSelection(Entity);
-
-impl OsMenuSelection {
-    pub(crate) fn new(entity: Entity) -> Self {
-        Self(entity)
-    }
-
-    pub(crate) fn target(&self) -> Entity {
-        self.0
-    }
-}
 
 #[derive(Component, Clone)]
 struct OsMenuInbox(Receiver<String>);
@@ -283,9 +208,9 @@ fn present_context_menus(
         for child in children.iter() {
             if let Ok(mut entry) = entries.get_mut(child) {
                 let id = format!("os_context_menu_{}", child.to_bits());
-                let item = MenuItem::with_id(id.clone(), &entry.label, entry.enabled, None);
+                let item = MenuItem::with_id(id.clone(), entry.label(), entry.enabled(), None);
                 let _ = menu.append(&item);
-                entry.id = Some(id);
+                entry.mark_presented(id);
                 commands.entity(child).insert(TransientOsMenuEntry);
                 continue;
             }
@@ -298,7 +223,7 @@ fn present_context_menus(
             continue;
         };
         unsafe {
-            menu.show_context_menu_for_nsview(context.view as _, None);
+            menu.show_context_menu_for_nsview(context.view(), None);
         }
     }
 }

@@ -146,7 +146,7 @@ fn on_check_for_updates(
 
 fn handle_open_settings_command(
     mut reader: MessageReader<OpenSettingsRequest>,
-    focus: Option<Res<FocusedStack>>,
+    focus: FocusedStack,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut page_open: MessageWriter<PageOpenRequest>,
 ) {

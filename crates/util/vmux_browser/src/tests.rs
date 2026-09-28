@@ -271,11 +271,11 @@ mod browser_navigate_flow {
         LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
         PageOpenId, PageOpenSet, PageOpenTask,
     };
+    use vmux_layout::active_pane::ActiveStack;
     use vmux_layout::pane::Pane;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_layout::stack::FocusedStack;
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
     use vmux_terminal::Terminal;
 
@@ -302,6 +302,21 @@ mod browser_navigate_flow {
             recording: Default::default(),
             editor: Default::default(),
             appearance: Default::default(),
+        }
+    }
+
+    fn set_focus(app: &mut App, pane: Option<Entity>, stack: Option<Entity>) {
+        let focus = ActiveStack {
+            pane,
+            stack,
+            ..default()
+        };
+        let world = app.world_mut();
+        let mut query = world.query::<&mut ActiveStack>();
+        if let Ok(mut current) = query.single_mut(world) {
+            *current = focus;
+        } else {
+            world.spawn(focus.local_bundle());
         }
     }
 
@@ -366,8 +381,7 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.insert_resource(FocusedStack::default())
-            .insert_resource(test_settings())
+        app.insert_resource(test_settings())
             .init_resource::<CapturedNavigateUrls>();
 
         let pane = app.world_mut().spawn(Pane).id();
@@ -378,8 +392,7 @@ mod browser_navigate_flow {
             .id();
         app.world_mut().spawn(Browser).insert(ChildOf(stack));
 
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
-        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
+        set_focus(&mut app, Some(pane), Some(stack));
 
         app.add_observer(
             |trigger: On<RequestNavigate>, mut captured: ResMut<CapturedNavigateUrls>| {
@@ -417,13 +430,11 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.insert_resource(FocusedStack::default())
-            .insert_resource(test_settings());
+        app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
 
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
-        app.world_mut().resource_mut::<FocusedStack>().stack = None;
+        set_focus(&mut app, Some(pane), None);
 
         app.world_mut()
             .resource_mut::<Messages<AgentRequestInput>>()
@@ -471,8 +482,7 @@ mod browser_navigate_flow {
     fn agent_browser_navigate_stacks_new_page_and_waits_for_snapshot() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, ConsumerPlugin));
-        app.insert_resource(FocusedStack::default())
-            .insert_resource(test_settings());
+        app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
         let first_stack = app
@@ -520,8 +530,7 @@ mod browser_navigate_flow {
     fn agent_browser_navigate_does_not_raise_new_stack_during_user_interaction() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, ConsumerPlugin));
-        app.insert_resource(FocusedStack::default())
-            .insert_resource(test_settings());
+        app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
         let first_stack = app
@@ -569,13 +578,12 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.insert_resource(FocusedStack::default())
-            .insert_resource(test_settings());
+        app.insert_resource(test_settings());
 
         let pane_a = app.world_mut().spawn(Pane).id();
         let pane_b = app.world_mut().spawn(Pane).id();
 
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane_a);
+        set_focus(&mut app, Some(pane_a), None);
 
         app.world_mut()
             .resource_mut::<Messages<AgentRequestInput>>()
@@ -615,11 +623,10 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.insert_resource(FocusedStack::default())
-            .insert_resource(test_settings());
+        app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+        set_focus(&mut app, Some(pane), None);
         let request_id = AgentRequestId::new();
 
         app.world_mut()
@@ -656,8 +663,7 @@ mod browser_navigate_flow {
     fn browser_navigate_replaces_the_start_page_stack() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, ConsumerPlugin));
-        app.insert_resource(FocusedStack::default())
-            .insert_resource(test_settings());
+        app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
         let stack = app
@@ -674,8 +680,7 @@ mod browser_navigate_flow {
             })
             .id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
-        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
+        set_focus(&mut app, Some(pane), Some(stack));
         app.world_mut()
             .resource_mut::<Messages<vmux_layout::BrowserNavigateRequest>>()
             .write(vmux_layout::BrowserNavigateRequest {
@@ -709,8 +714,7 @@ mod browser_navigate_flow {
     fn browser_navigate_replaces_the_start_page_stack_with_a_web_page() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, ConsumerPlugin));
-        app.insert_resource(FocusedStack::default())
-            .insert_resource(test_settings())
+        app.insert_resource(test_settings())
             .init_resource::<CapturedNavigateUrls>()
             .add_observer(
                 |trigger: On<bevy_cef::prelude::RequestNavigate>,
@@ -734,8 +738,7 @@ mod browser_navigate_flow {
             })
             .id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
-        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
+        set_focus(&mut app, Some(pane), Some(stack));
         app.world_mut()
             .resource_mut::<Messages<vmux_layout::BrowserNavigateRequest>>()
             .write(vmux_layout::BrowserNavigateRequest {
@@ -764,8 +767,7 @@ mod browser_navigate_flow {
     fn browser_navigate_keeps_the_start_page_for_an_explicit_new_stack() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, ConsumerPlugin));
-        app.insert_resource(FocusedStack::default())
-            .insert_resource(test_settings());
+        app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
         let stack = app
@@ -782,8 +784,7 @@ mod browser_navigate_flow {
             })
             .id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
-        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
+        set_focus(&mut app, Some(pane), Some(stack));
         app.world_mut()
             .resource_mut::<Messages<vmux_layout::BrowserNavigateRequest>>()
             .write(vmux_layout::BrowserNavigateRequest {
@@ -816,12 +817,11 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.insert_resource(FocusedStack::default())
-            .insert_resource(test_settings());
+        app.insert_resource(test_settings());
 
         let pane_a = app.world_mut().spawn(Pane).id();
         let pane_b = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane_a);
+        set_focus(&mut app, Some(pane_a), None);
 
         app.world_mut()
             .resource_mut::<Messages<AgentRequestInput>>()
@@ -867,11 +867,10 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.insert_resource(FocusedStack::default())
-            .insert_resource(test_settings());
+        app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+        set_focus(&mut app, Some(pane), None);
 
         app.world_mut()
             .resource_mut::<Messages<AgentRequestInput>>()
@@ -911,8 +910,7 @@ mod browser_navigate_flow {
     fn deferred_page_open_is_not_claimed_by_fallback() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(crate::page::PagePlugin)
-            .insert_resource(FocusedStack::default());
+            .add_plugins(crate::page::PagePlugin);
         let stack = app.world_mut().spawn_empty().id();
         let task = app
             .world_mut()
@@ -940,8 +938,7 @@ mod browser_navigate_flow {
 
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
-        app.insert_resource(FocusedStack::default())
-            .insert_resource(test_settings());
+        app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
         let stack = app
@@ -992,11 +989,10 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.insert_resource(FocusedStack::default())
-            .insert_resource(test_settings());
+        app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+        set_focus(&mut app, Some(pane), None);
 
         app.world_mut()
             .resource_mut::<Messages<AgentRequestInput>>()
@@ -1035,11 +1031,10 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.insert_resource(FocusedStack::default())
-            .insert_resource(test_settings());
+        app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+        set_focus(&mut app, Some(pane), None);
 
         app.world_mut()
             .resource_mut::<Messages<AgentRequestInput>>()

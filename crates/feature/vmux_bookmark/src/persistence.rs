@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use vmux_core::{Bookmark, BookmarkOrder, Collapsed, Folder, Order, PageMetadata, Pin, Uuid};
 use vmux_layout::LayoutStartupSet;
 
-pub(crate) struct BookmarkPersistencePlugin;
+pub(super) struct BookmarkPersistencePlugin;
 
 impl Plugin for BookmarkPersistencePlugin {
     fn build(&self, app: &mut App) {

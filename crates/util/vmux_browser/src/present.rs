@@ -113,7 +113,7 @@ pub(crate) struct WindowFrameQueries<'w, 's> {
 }
 
 fn sync_keyboard_target(
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
@@ -381,7 +381,7 @@ fn active_tab_is_visible(
 
 fn windowed_ring_for(
     stack: Entity,
-    focus: &vmux_layout::stack::FocusedStack,
+    focus: &vmux_layout::active_pane::ActiveStack,
     visible_pane_count: usize,
     agent: Option<(&str, vmux_layout::active_pane::ActiveStack)>,
     settings: &AppSettings,
@@ -431,7 +431,7 @@ pub(crate) fn sync_windowed_frames(
     hidden_windows: Query<(), With<vmux_layout::toggle::LayoutHidden>>,
     added_hidden_windows: Query<(), Added<vmux_layout::toggle::LayoutHidden>>,
     mut removed_hidden_windows: RemovedComponents<vmux_layout::toggle::LayoutHidden>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     active_panes: vmux_layout::active_pane::ActivePaneQuery,
     clear_color: Res<vmux_layout::window::WindowBackground>,
     browser_q: Query<
@@ -1272,7 +1272,7 @@ fn sync_osr_webview_focus(
     windows: Query<&Window>,
     host_windows: Query<&HostWindow>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children_q: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
@@ -1500,7 +1500,6 @@ mod tests {
     #[test]
     fn the_user_ring_outranks_an_agent_ring_on_the_same_pane() {
         use vmux_layout::active_pane::ActiveStack;
-        use vmux_layout::stack::FocusedStack;
 
         let mut world = World::new();
         let stack = world.spawn_empty().id();
@@ -1516,7 +1515,7 @@ mod tests {
                 kind: Some(vmux_core::agent::AgentKind::Claude),
             },
         );
-        let unfocused = FocusedStack::default();
+        let unfocused = ActiveStack::default();
 
         let (width, rgb, kind) =
             windowed_ring_for(stack, &unfocused, 2, Some(agent), &settings, 1.0);
@@ -1528,7 +1527,7 @@ mod tests {
             "and it is not the user's colour"
         );
 
-        let focused = FocusedStack {
+        let focused = ActiveStack {
             stack: Some(stack),
             ..Default::default()
         };

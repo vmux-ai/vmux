@@ -169,7 +169,7 @@ pub(crate) fn sync_page_metadata_to_tab(
 
 fn handle_browser_go_back_requests(
     mut reader: MessageReader<vmux_layout::BrowserGoBackRequest>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
@@ -211,7 +211,7 @@ fn handle_browser_go_back_requests(
 
 fn handle_browser_go_forward_requests(
     mut reader: MessageReader<vmux_layout::BrowserGoForwardRequest>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
@@ -253,7 +253,7 @@ fn handle_browser_go_forward_requests(
 
 fn handle_browser_open_history(
     mut reader: MessageReader<OpenHistoryRequest>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     mut writer: MessageWriter<PageOpenRequest>,
 ) {
     for _ in reader.read() {
@@ -270,7 +270,7 @@ fn handle_browser_open_history(
 
 fn handle_open_in_new_stack_requests(
     mut reader: MessageReader<vmux_layout::OpenInNewStackRequest>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut page_open_writer: MessageWriter<PageOpenRequest>,
 ) {
@@ -288,7 +288,7 @@ fn handle_open_in_new_stack_requests(
 
 pub(crate) fn handle_browser_navigate_requests(
     mut reader: MessageReader<vmux_layout::BrowserNavigateRequest>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,

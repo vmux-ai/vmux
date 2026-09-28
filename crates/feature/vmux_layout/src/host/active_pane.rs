@@ -1,7 +1,8 @@
 use crate::pane::{Pane, PaneSplit};
-use crate::stack::{ComputeFocusSet, FocusedStack};
+use crate::stack::ComputeFocusSet;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use std::ops::Deref;
 
 pub struct ActivePanePlugin;
 
@@ -11,11 +12,7 @@ impl Plugin for ActivePanePlugin {
             .add_systems(Startup, spawn_local_active_pane)
             .add_systems(
                 Update,
-                (
-                    mirror_local_active_pane,
-                    apply_active_pane_requests,
-                    prune_active_pane_entities,
-                )
+                (apply_active_pane_requests, prune_active_pane_entities)
                     .chain()
                     .after(ComputeFocusSet),
             );
@@ -34,6 +31,53 @@ pub struct ActiveStack {
     pub pane: Option<Entity>,
     pub stack: Option<Entity>,
     pub kind: Option<vmux_core::agent::AgentKind>,
+}
+
+impl ActiveStack {
+    pub fn local_bundle(self) -> impl Bundle {
+        (Name::new("Local active pane"), ProfileId::Local, self)
+    }
+}
+
+const EMPTY_ACTIVE_STACK: ActiveStack = ActiveStack {
+    tab: None,
+    pane: None,
+    stack: None,
+    kind: None,
+};
+
+#[derive(SystemParam)]
+pub struct FocusedStack<'w, 's> {
+    profiles: Query<'w, 's, (&'static ProfileId, Ref<'static, ActiveStack>)>,
+}
+
+impl FocusedStack<'_, '_> {
+    pub fn as_ref(&self) -> Option<&ActiveStack> {
+        self.profiles.iter().find_map(|(profile, active)| {
+            (*profile == ProfileId::Local).then_some(active.into_inner())
+        })
+    }
+
+    pub fn as_deref(&self) -> Option<&ActiveStack> {
+        self.as_ref()
+    }
+
+    pub fn is_changed(&self) -> bool {
+        self.profiles
+            .iter()
+            .find_map(|(profile, active)| {
+                (*profile == ProfileId::Local).then_some(active.is_changed())
+            })
+            .unwrap_or(false)
+    }
+}
+
+impl Deref for FocusedStack<'_, '_> {
+    type Target = ActiveStack;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_ref().unwrap_or(&EMPTY_ACTIVE_STACK)
+    }
 }
 
 #[derive(SystemParam)]
@@ -69,31 +113,7 @@ pub struct ActivatePane {
 }
 
 fn spawn_local_active_pane(mut commands: Commands) {
-    commands.spawn((
-        Name::new("Local active pane"),
-        ProfileId::Local,
-        ActiveStack::default(),
-    ));
-}
-
-fn mirror_local_active_pane(
-    focus: Res<FocusedStack>,
-    mut profiles: Query<(&ProfileId, &mut ActiveStack)>,
-    mut commands: Commands,
-) {
-    let next = ActiveStack {
-        tab: focus.tab,
-        pane: focus.pane,
-        stack: focus.stack,
-        kind: None,
-    };
-    for (profile, mut active) in &mut profiles {
-        if *profile == ProfileId::Local {
-            *active = next;
-            return;
-        }
-    }
-    commands.spawn((Name::new("Local active pane"), ProfileId::Local, next));
+    commands.spawn(ActiveStack::default().local_bundle());
 }
 
 fn apply_active_pane_requests(
@@ -163,8 +183,7 @@ mod tests {
     #[test]
     fn apply_sets_per_profile_without_cross_contamination() {
         let mut app = App::new();
-        app.init_resource::<FocusedStack>()
-            .add_plugins(ActivePanePlugin);
+        app.add_plugins(ActivePanePlugin);
 
         let (user_pane, agent_pane) = {
             let world = app.world_mut();
@@ -208,8 +227,7 @@ mod tests {
     #[test]
     fn agent_activation_does_not_touch_local() {
         let mut app = App::new();
-        app.init_resource::<FocusedStack>()
-            .add_plugins(ActivePanePlugin);
+        app.add_plugins(ActivePanePlugin);
         app.update();
 
         let agent_pane = app.world_mut().spawn(Pane).id();
@@ -242,8 +260,7 @@ mod tests {
     #[test]
     fn activation_without_kind_preserves_profile_kind() {
         let mut app = App::new();
-        app.init_resource::<FocusedStack>()
-            .add_plugins(ActivePanePlugin);
+        app.add_plugins(ActivePanePlugin);
         app.update();
 
         let profile = ProfileId::Agent("a1".to_string());

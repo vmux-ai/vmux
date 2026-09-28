@@ -42,7 +42,7 @@ pub struct RunShellRequest {
 
 fn handle_terminal_send_requests(
     mut reader: MessageReader<TerminalSendRequest>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     process_index: Single<&TerminalProcessIndex>,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     mut terminal_inputs: MessageWriter<QueueTerminalInput>,
@@ -83,7 +83,7 @@ fn handle_terminal_send_requests(
 
 fn handle_run_shell_requests(
     mut reader: MessageReader<RunShellRequest>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     panes: Query<
         Entity,
         (

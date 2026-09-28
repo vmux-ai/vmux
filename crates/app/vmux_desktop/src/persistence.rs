@@ -31,8 +31,7 @@ pub(crate) struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::bookmark::BookmarkPersistencePlugin)
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<vmux_space::SaveSpaceRequest>()
             .add_observer(save_on_default_event)
             .add_observer(load_on_default_event)

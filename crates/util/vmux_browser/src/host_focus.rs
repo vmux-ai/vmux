@@ -90,7 +90,7 @@ pub(crate) fn host_focus_intent(
 }
 
 pub(crate) fn compute_host_focus_intent(
-    focus: Res<FocusedStack>,
+    focus: FocusedStack,
     child_of_q: Query<&ChildOf>,
     content_q: Query<Entity, (With<Browser>, Without<Header>, Without<SideSheet>)>,
     modal_q: Query<
@@ -210,17 +210,24 @@ pub(crate) fn apply_windowed_host_focus(
 mod tests {
     use super::*;
     use vmux_command::command_bar::panel::CommandBarPanelActive;
+    use vmux_layout::active_pane::ActiveStack;
     use vmux_layout::bookmark::{BookmarkContextMenuActive, BookmarkTextInputActive};
     use vmux_layout::cef::LayoutCef;
 
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(FocusedStack::default())
             .add_systems(Update, (sync_keyboard_context, compute_host_focus_intent));
         app.world_mut()
             .spawn((HostFocusIntent::default(), KeyboardContext::default()));
+        app.world_mut().spawn(ActiveStack::default().local_bundle());
         app
+    }
+
+    fn set_focus(app: &mut App, stack: Entity) {
+        let world = app.world_mut();
+        let mut query = world.query::<&mut ActiveStack>();
+        query.single_mut(world).unwrap().stack = Some(stack);
     }
 
     fn intent(app: &App) -> HostFocusIntent {
@@ -242,10 +249,7 @@ mod tests {
         let mut app = app();
         let stack = app.world_mut().spawn_empty().id();
         let page = app.world_mut().spawn((Browser, ChildOf(stack))).id();
-        app.insert_resource(FocusedStack {
-            stack: Some(stack),
-            ..default()
-        });
+        set_focus(&mut app, stack);
         app.update();
         assert_eq!(intent(&app), HostFocusIntent::Windowed(page));
     }
@@ -263,10 +267,7 @@ mod tests {
                 ChildOf(stack),
             ))
             .id();
-        app.insert_resource(FocusedStack {
-            stack: Some(stack),
-            ..default()
-        });
+        set_focus(&mut app, stack);
         app.update();
         assert_eq!(intent(&app), HostFocusIntent::NativePane(terminal));
     }
@@ -330,10 +331,7 @@ mod tests {
             },
             KeyboardOwner,
         ));
-        app.insert_resource(FocusedStack {
-            stack: Some(stack),
-            ..default()
-        });
+        set_focus(&mut app, stack);
         app.update();
         assert_eq!(intent(&app), HostFocusIntent::WinitHost);
     }
@@ -355,10 +353,7 @@ mod tests {
                 WebviewWindowed,
             ))
             .id();
-        app.insert_resource(FocusedStack {
-            stack: Some(stack),
-            ..default()
-        });
+        set_focus(&mut app, stack);
 
         app.update();
 
@@ -383,10 +378,7 @@ mod tests {
                 WebviewWindowed,
             ))
             .id();
-        app.insert_resource(FocusedStack {
-            stack: Some(stack),
-            ..default()
-        });
+        set_focus(&mut app, stack);
 
         app.update();
 
@@ -407,10 +399,7 @@ mod tests {
             Visibility::Hidden,
             KeyboardOwner,
         ));
-        app.insert_resource(FocusedStack {
-            stack: Some(stack),
-            ..default()
-        });
+        set_focus(&mut app, stack);
 
         app.update();
 
@@ -423,10 +412,7 @@ mod tests {
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
         app.world_mut().spawn((LayoutCef, BookmarkTextInputActive));
-        app.insert_resource(FocusedStack {
-            stack: Some(stack),
-            ..default()
-        });
+        set_focus(&mut app, stack);
         app.update();
         assert_eq!(intent(&app), HostFocusIntent::LayoutView);
     }
@@ -438,10 +424,7 @@ mod tests {
         app.world_mut().spawn((Browser, ChildOf(stack)));
         app.world_mut()
             .spawn((LayoutCef, BookmarkContextMenuActive));
-        app.insert_resource(FocusedStack {
-            stack: Some(stack),
-            ..default()
-        });
+        set_focus(&mut app, stack);
         app.update();
         assert_eq!(intent(&app), HostFocusIntent::LayoutView);
     }
@@ -459,10 +442,7 @@ mod tests {
             WebviewWindowed,
             vmux_core::overlay::OverlayShownInline,
         ));
-        app.insert_resource(FocusedStack {
-            stack: Some(stack),
-            ..default()
-        });
+        set_focus(&mut app, stack);
         app.update();
 
         assert_eq!(

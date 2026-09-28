@@ -159,9 +159,10 @@ mod tests {
     use bevy::window::{PrimaryWindow, WindowPosition};
     use vmux_core::{Order, PageMetadata};
     use vmux_history::LastActivatedAt;
+    use vmux_layout::active_pane::ActiveStack;
     use vmux_layout::pane::Pane;
     use vmux_layout::space::Space;
-    use vmux_layout::stack::{FocusedStack, Stack};
+    use vmux_layout::stack::Stack;
     use vmux_layout::tab::Tab;
 
     fn spawn_page(
@@ -185,11 +186,26 @@ mod tests {
             .id()
     }
 
+    fn set_focus(app: &mut App, stack: Entity) {
+        let world = app.world_mut();
+        let mut query = world.query::<&mut ActiveStack>();
+        if let Ok(mut focus) = query.single_mut(world) {
+            focus.stack = Some(stack);
+        } else {
+            world.spawn(
+                ActiveStack {
+                    stack: Some(stack),
+                    ..default()
+                }
+                .local_bundle(),
+            );
+        }
+    }
+
     #[test]
     fn projects_ordered_visible_pages_with_stable_ids_and_removals() {
         let mut app = App::new();
-        app.insert_resource(FocusedStack::default())
-            .add_plugins(crate::extension::project::ExtensionProjectPlugin);
+        app.add_plugins(crate::extension::project::ExtensionProjectPlugin);
         app.world_mut().spawn((
             Window {
                 resolution: (1200, 800).into(),
@@ -228,7 +244,7 @@ mod tests {
             "Internal",
             3,
         );
-        app.world_mut().resource_mut::<FocusedStack>().stack = Some(second);
+        set_focus(&mut app, second);
 
         app.update();
 
@@ -259,7 +275,7 @@ mod tests {
         let first_id = model.tabs[0].id;
         let active_id = model.tabs.iter().find(|tab| tab.active).unwrap().id;
 
-        app.world_mut().resource_mut::<FocusedStack>().stack = Some(terminal);
+        set_focus(&mut app, terminal);
         app.update();
         assert_eq!(
             app.world()

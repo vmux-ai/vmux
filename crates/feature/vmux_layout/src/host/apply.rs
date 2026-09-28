@@ -86,7 +86,7 @@ fn serve_snapshot_requests(
     stacks_q: Query<(Entity, Option<&Children>, Option<&vmux_core::PageMetadata>), With<Stack>>,
     pane_sizes_q: Query<&PaneSize>,
     zoomed_q: Query<&crate::pane::Zoomed>,
-    focused: Res<crate::stack::FocusedStack>,
+    focused: crate::stack::FocusedStack,
     process_ids: Query<(&vmux_core::ProcessId, &ChildOf)>,
     child_of_q: Query<&ChildOf>,
     space_q: Query<(), With<crate::space::Space>>,
@@ -202,7 +202,10 @@ fn apply_layout_plans(
     mut splits: Query<(Entity, &mut PaneSplit, Option<&mut Node>)>,
     mut pane_sizes: Query<&mut PaneSize>,
     mut metadata: Query<&mut PageMetadata>,
-    mut focused: ResMut<crate::stack::FocusedStack>,
+    mut profiles: Query<(
+        &crate::active_pane::ProfileId,
+        &mut crate::active_pane::ActiveStack,
+    )>,
     mut terminal_spawn: MessageWriter<TerminalLayoutSpawnRequest>,
     mut page_open: MessageWriter<PageOpenRequest>,
     mut results: MessageWriter<LayoutApplyResult>,
@@ -219,7 +222,7 @@ fn apply_layout_plans(
             &mut splits,
             &mut pane_sizes,
             &mut metadata,
-            &mut focused,
+            &mut profiles,
             &mut terminal_spawn,
             &mut page_open,
             &mut commands,
@@ -239,7 +242,7 @@ fn respond_to_layout_apply(
     stacks_q: Query<(Entity, Option<&Children>, Option<&vmux_core::PageMetadata>), With<Stack>>,
     pane_sizes_q: Query<&PaneSize>,
     zoomed_q: Query<&crate::pane::Zoomed>,
-    focused: Res<crate::stack::FocusedStack>,
+    focused: crate::stack::FocusedStack,
     mut writer: MessageWriter<LayoutApplyResponse>,
 ) {
     for result in reader.read() {
@@ -273,7 +276,10 @@ fn apply_layout_plan(
     splits: &mut Query<(Entity, &mut PaneSplit, Option<&mut Node>)>,
     pane_sizes: &mut Query<&mut PaneSize>,
     metadata: &mut Query<&mut PageMetadata>,
-    focused: &mut crate::stack::FocusedStack,
+    profiles: &mut Query<(
+        &crate::active_pane::ProfileId,
+        &mut crate::active_pane::ActiveStack,
+    )>,
     terminal_spawn: &mut MessageWriter<TerminalLayoutSpawnRequest>,
     page_open: &mut MessageWriter<PageOpenRequest>,
     commands: &mut Commands,
@@ -363,7 +369,7 @@ fn apply_layout_plan(
         }
         apply_close(id, commands);
     }
-    apply_focus(focused, &snapshot.focused);
+    apply_focus(profiles, &snapshot.focused);
 }
 
 fn materialize_descendants(
@@ -692,15 +698,27 @@ fn apply_node(
     }
 }
 
-fn apply_focus(focused: &mut crate::stack::FocusedStack, focus: &proto::Focus) {
-    if let Some(id) = focus.tab.as_deref() {
-        focused.tab = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
-    }
-    if let Some(id) = focus.pane.as_deref() {
-        focused.pane = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
-    }
-    if let Some(id) = focus.stack.as_deref() {
-        focused.stack = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
+fn apply_focus(
+    profiles: &mut Query<(
+        &crate::active_pane::ProfileId,
+        &mut crate::active_pane::ActiveStack,
+    )>,
+    focus: &proto::Focus,
+) {
+    for (profile, mut active) in profiles.iter_mut() {
+        if *profile != crate::active_pane::ProfileId::Local {
+            continue;
+        }
+        if let Some(id) = focus.tab.as_deref() {
+            active.tab = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
+        }
+        if let Some(id) = focus.pane.as_deref() {
+            active.pane = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
+        }
+        if let Some(id) = focus.stack.as_deref() {
+            active.stack = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
+        }
+        return;
     }
 }
 
@@ -728,8 +746,9 @@ mod tests {
                 .add_message::<LayoutSnapshotResponse>()
                 .add_message::<crate::TerminalLayoutSpawnRequest>()
                 .add_message::<PageOpenRequest>()
-                .init_resource::<crate::stack::FocusedStack>()
                 .add_plugins(LayoutApplyPlugin);
+            app.world_mut()
+                .spawn(crate::active_pane::ActiveStack::default().local_bundle());
         }
 
         fn apply(app: &mut App, snapshot: LayoutSnapshot) -> Result<LayoutSnapshot, String> {
@@ -1782,8 +1801,7 @@ mod tests {
     #[test]
     fn focus_change_writes_focused_stack() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(crate::stack::FocusedStack::default());
+        app.add_plugins(MinimalPlugins);
 
         let tab = app
             .world_mut()
@@ -1820,7 +1838,14 @@ mod tests {
         };
 
         ApplyHarness::apply(&mut app, snap).unwrap();
-        let focused = app.world().resource::<crate::stack::FocusedStack>();
+        let focused = {
+            let world = app.world_mut();
+            let mut query = world.query_filtered::<
+                &crate::active_pane::ActiveStack,
+                With<crate::active_pane::ProfileId>,
+            >();
+            *query.single(world).unwrap()
+        };
         assert_eq!(focused.tab, Some(tab));
         assert_eq!(focused.pane, Some(pane_e));
         assert_eq!(focused.stack, Some(stack));
@@ -1829,10 +1854,8 @@ mod tests {
     #[test]
     fn apply_focus_preserves_existing_when_dto_fields_omitted() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<crate::TerminalLayoutSpawnRequest>()
-            .add_message::<PageOpenRequest>()
-            .insert_resource(crate::stack::FocusedStack::default());
+        app.add_plugins(MinimalPlugins);
+        ApplyHarness::install(&mut app);
 
         let tab = app
             .world_mut()
@@ -1848,10 +1871,15 @@ mod tests {
             .id();
 
         {
-            let mut f = app.world_mut().resource_mut::<crate::stack::FocusedStack>();
-            f.tab = Some(tab);
-            f.pane = Some(pane_e);
-            f.stack = Some(stack);
+            let world = app.world_mut();
+            let mut query = world.query_filtered::<
+                &mut crate::active_pane::ActiveStack,
+                With<crate::active_pane::ProfileId>,
+            >();
+            let mut active = query.single_mut(world).unwrap();
+            active.tab = Some(tab);
+            active.pane = Some(pane_e);
+            active.stack = Some(stack);
         }
 
         let snap = LayoutSnapshot {
@@ -1872,7 +1900,14 @@ mod tests {
         };
 
         ApplyHarness::apply(&mut app, snap).unwrap();
-        let f = app.world().resource::<crate::stack::FocusedStack>();
+        let f = {
+            let world = app.world_mut();
+            let mut query = world.query_filtered::<
+                &crate::active_pane::ActiveStack,
+                With<crate::active_pane::ProfileId>,
+            >();
+            *query.single(world).unwrap()
+        };
         assert_eq!(f.tab, Some(tab), "focused.tab must be preserved");
         assert_eq!(f.pane, Some(pane_e), "focused.pane must be preserved");
         assert_eq!(f.stack, Some(stack), "focused.stack must be preserved");

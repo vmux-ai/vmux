@@ -1,4 +1,5 @@
 use crate::{
+    active_pane::{ActiveStack, ProfileId},
     host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
     tab::{CloseTabRequest, Tab},
@@ -19,6 +20,8 @@ use vmux_history::LastActivatedAt;
 
 use super::{command::LayoutRequestSet, target::SiblingDirection};
 
+pub use crate::active_pane::FocusedStack;
+
 pub struct StackPlugin;
 
 impl Plugin for StackPlugin {
@@ -30,7 +33,6 @@ impl Plugin for StackPlugin {
             CommandTypePlugin::<MoveRequest>::default(),
         ))
         .register_type::<Stack>()
-        .init_resource::<FocusedStack>()
         .add_message::<CloseStackRequest>()
         .add_systems(
             Update,
@@ -148,13 +150,6 @@ impl TryFrom<&CommandInvocation> for MoveRequest {
             _ => Err(()),
         }
     }
-}
-
-#[derive(Resource, Default)]
-pub struct FocusedStack {
-    pub tab: Option<Entity>,
-    pub pane: Option<Entity>,
-    pub stack: Option<Entity>,
 }
 
 #[derive(Component)]
@@ -474,22 +469,33 @@ pub fn focused_stack(
 }
 
 fn compute_focused_stack(
-    mut cached: ResMut<FocusedStack>,
+    mut profiles: Query<(&ProfileId, &mut ActiveStack)>,
     active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    mut commands: Commands,
 ) {
     let tab = active_tab_param.get();
     let pane = tab.and_then(|t| active_pane_in_tab(t, &all_children, &leaf_panes, &pane_ts));
     let stack = pane.and_then(|p| active_stack_in_pane(p, &pane_children, &stack_ts));
-    if cached.tab != tab || cached.pane != pane || cached.stack != stack {
-        cached.tab = tab;
-        cached.pane = pane;
-        cached.stack = stack;
+    let next = ActiveStack {
+        tab,
+        pane,
+        stack,
+        kind: None,
+    };
+    for (profile, mut active) in &mut profiles {
+        if *profile == ProfileId::Local {
+            if *active != next {
+                *active = next;
+            }
+            return;
+        }
     }
+    commands.spawn(next.local_bundle());
 }
 
 pub fn stack_bundle() -> impl Bundle {
@@ -806,6 +812,12 @@ mod tests {
         app
     }
 
+    fn focused(app: &mut App) -> ActiveStack {
+        let world = app.world_mut();
+        let mut query = world.query::<&ActiveStack>();
+        *query.single(world).unwrap()
+    }
+
     #[test]
     fn every_stack_has_an_activation_timestamp() {
         let mut world = World::new();
@@ -967,15 +979,15 @@ mod tests {
         #[derive(Resource, Default)]
         struct ChangeLog(Vec<bool>);
 
-        fn probe(focused: Res<FocusedStack>, mut log: ResMut<ChangeLog>) {
+        fn probe(focused: FocusedStack, mut log: ResMut<ChangeLog>) {
             log.0.push(focused.is_changed());
         }
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<FocusedStack>()
             .init_resource::<ChangeLog>()
             .add_systems(Update, (compute_focused_stack, probe).chain());
+        app.world_mut().spawn(ActiveStack::default().local_bundle());
 
         let tab = app
             .world_mut()
@@ -995,7 +1007,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().resource::<FocusedStack>().stack,
+            focused(&mut app).stack,
             Some(stack),
             "focus should resolve to the only stack"
         );
@@ -1017,7 +1029,6 @@ mod tests {
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
-            .init_resource::<FocusedStack>()
             .insert_resource(test_settings())
             .add_systems(
                 Update,
@@ -1026,9 +1037,11 @@ mod tests {
                     handle_close_stack_requests,
                     crate::archive::handle_close_tab_requests,
                     crate::window::spawn_requested_tab_layouts,
+                    compute_focused_stack,
                 )
                     .chain(),
             );
+        app.world_mut().spawn(ActiveStack::default().local_bundle());
 
         app.world_mut()
             .spawn((bevy::window::Window::default(), PrimaryWindow));
@@ -1092,10 +1105,7 @@ mod tests {
             .single(app.world())
             .unwrap();
         assert_ne!(replacement_tab, tab_e);
-        assert_eq!(
-            app.world().resource::<FocusedStack>().tab,
-            Some(replacement_tab)
-        );
+        assert_eq!(focused(&mut app).tab, Some(replacement_tab));
         assert!(
             app.world()
                 .get::<crate::tab::TabWorkspace>(replacement_tab)

@@ -216,7 +216,7 @@ fn track_browser_interaction(
     mut mouse_buttons: MessageReader<MouseButtonInput>,
     mut mouse_wheels: MessageReader<MouseWheel>,
     mut keyboard: MessageReader<KeyboardInput>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     browsers: Query<&ChildOf, With<Browser>>,
     mut commands: Commands,
 ) {

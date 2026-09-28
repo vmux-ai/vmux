@@ -2,10 +2,10 @@ use bevy::prelude::*;
 use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 
-use crate::os_menu::{OsMenuEntry, OsMenuSelection, OsMenuSet};
 #[cfg(feature = "recording")]
 use crate::recording::{RecordingControl, RecordingStatus};
 use crate::runtime::{HideAllWindowsRequest, QuitRequest, ShowAllWindowsRequest};
+use vmux_native::menu::{OsMenuEntry, OsMenuSelection, OsMenuSet};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
 

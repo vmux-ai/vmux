@@ -185,69 +185,60 @@ fn is_modifier_key(key: KeyCode) -> bool {
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
-    use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
-    use vmux_command::{CommandInvocation, CommandPlugin};
+    use vmux_command::{CommandDefinition, CommandInvocation, CommandPlugin, CommandRequest};
     use vmux_layout::pane::{
         ArrangeRequest as PaneArrangeRequest, CloseRequest as PaneCloseRequest,
-        FocusRequest as PaneFocusRequest, OpenRequest as PaneOpenRequest, PaneArrangement,
-        PaneFocus, ResizeRequest as PaneResizeRequest, ToggleZoomRequest,
+        FocusRequest as PaneFocusRequest, OpenRequest as PaneOpenRequest,
+        ResizeRequest as PaneResizeRequest, ToggleZoomRequest,
     };
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_layout::tab::{
-        FocusRequest as TabFocusRequest, OpenRequest as TabOpenRequest, TabFocus,
-    };
-    use vmux_layout::target::SiblingDirection;
+    use vmux_layout::tab::{FocusRequest as TabFocusRequest, OpenRequest as TabOpenRequest};
     use vmux_setting::{
         AppSettings, BrowserSettings, KeyComboDef, ShortcutDef, ShortcutEntry, ShortcutSettings,
     };
 
-    fn test_app() -> App {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(ShortcutPlugin)
-            .add_plugins((
-                vmux_command::CommandTypePlugin::<PaneOpenRequest>::default(),
-                vmux_command::CommandTypePlugin::<PaneCloseRequest>::default(),
-                vmux_command::CommandTypePlugin::<PaneFocusRequest>::default(),
-                vmux_command::CommandTypePlugin::<PaneArrangeRequest>::default(),
-                vmux_command::CommandTypePlugin::<PaneResizeRequest>::default(),
-                vmux_command::CommandTypePlugin::<ToggleZoomRequest>::default(),
-                vmux_command::CommandTypePlugin::<TabFocusRequest>::default(),
-                vmux_command::CommandTypePlugin::<TabOpenRequest>::default(),
-            ))
-            .insert_resource(ButtonInput::<KeyCode>::default());
-        app.world_mut().spawn(
-            vmux_command::CommandDefinition::new("space_open", "Spaces", "Layout > Space")
-                .chord("Ctrl+b, s"),
-        );
-        app.update();
-        app
-    }
+    struct ShortcutFixture;
 
-    fn test_app_with_settings(settings: AppSettings) -> App {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(ShortcutPlugin)
-            .add_plugins((
-                vmux_command::CommandTypePlugin::<PaneOpenRequest>::default(),
-                vmux_command::CommandTypePlugin::<PaneCloseRequest>::default(),
-                vmux_command::CommandTypePlugin::<PaneFocusRequest>::default(),
-                vmux_command::CommandTypePlugin::<PaneArrangeRequest>::default(),
-                vmux_command::CommandTypePlugin::<PaneResizeRequest>::default(),
-                vmux_command::CommandTypePlugin::<ToggleZoomRequest>::default(),
-                vmux_command::CommandTypePlugin::<TabFocusRequest>::default(),
-                vmux_command::CommandTypePlugin::<TabOpenRequest>::default(),
-            ))
-            .insert_resource(settings)
-            .insert_resource(ButtonInput::<KeyCode>::default());
-        app.world_mut().spawn(
-            vmux_command::CommandDefinition::new("space_open", "Spaces", "Layout > Space")
-                .chord("Ctrl+b, s"),
-        );
-        app.update();
-        app
+    impl ShortcutFixture {
+        fn app(settings: Option<AppSettings>) -> App {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, CommandPlugin, ShortcutPlugin))
+                .insert_resource(ButtonInput::<KeyCode>::default());
+            if let Some(settings) = settings {
+                app.insert_resource(settings);
+            }
+            for definition in Self::definitions() {
+                app.world_mut().spawn(definition);
+            }
+            app.update();
+            app
+        }
+
+        fn definitions() -> Vec<CommandDefinition> {
+            let mut definitions = Vec::new();
+            definitions.extend(PaneOpenRequest::definitions());
+            definitions.extend(PaneCloseRequest::definitions());
+            definitions.extend(PaneFocusRequest::definitions());
+            definitions.extend(PaneArrangeRequest::definitions());
+            definitions.extend(PaneResizeRequest::definitions());
+            definitions.extend(ToggleZoomRequest::definitions());
+            definitions.extend(TabFocusRequest::definitions());
+            definitions.extend(TabOpenRequest::definitions());
+            definitions.push(
+                CommandDefinition::new("space_open", "Spaces", "Layout > Space").chord("Ctrl+b, s"),
+            );
+            definitions
+        }
+
+        fn invocations(app: &mut App) -> Vec<String> {
+            app.world_mut()
+                .resource_mut::<Messages<CommandInvocation>>()
+                .drain()
+                .map(|invocation| invocation.id)
+                .collect()
+        }
     }
 
     fn test_settings_with_leader(key: &str) -> AppSettings {
@@ -381,7 +372,7 @@ mod tests {
 
     #[test]
     fn leader_h_emits_select_pane_left() {
-        let mut app = test_app();
+        let mut app = ShortcutFixture::app(None);
 
         press(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyB);
@@ -393,21 +384,12 @@ mod tests {
         press(&mut app, KeyCode::KeyH);
         app.update();
 
-        let requests: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<PaneFocusRequest>>()
-            .drain()
-            .collect();
-
-        assert_eq!(
-            requests,
-            vec![PaneFocusRequest(PaneFocus::Direction(PaneDirection::Left))]
-        );
+        assert_eq!(ShortcutFixture::invocations(&mut app), ["select_pane_left"]);
     }
 
     #[test]
     fn leader_l_emits_select_pane_right() {
-        let mut app = test_app();
+        let mut app = ShortcutFixture::app(None);
 
         press(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyB);
@@ -419,21 +401,15 @@ mod tests {
         press(&mut app, KeyCode::KeyL);
         app.update();
 
-        let requests: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<PaneFocusRequest>>()
-            .drain()
-            .collect();
-
         assert_eq!(
-            requests,
-            vec![PaneFocusRequest(PaneFocus::Direction(PaneDirection::Right))]
+            ShortcutFixture::invocations(&mut app),
+            ["select_pane_right"]
         );
     }
 
     #[test]
     fn leader_j_emits_select_pane_down() {
-        let mut app = test_app();
+        let mut app = ShortcutFixture::app(None);
 
         press(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyB);
@@ -445,23 +421,12 @@ mod tests {
         press(&mut app, KeyCode::KeyJ);
         app.update();
 
-        let requests: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<PaneFocusRequest>>()
-            .drain()
-            .collect();
-
-        assert_eq!(
-            requests,
-            vec![PaneFocusRequest(PaneFocus::Direction(
-                PaneDirection::Bottom
-            ))]
-        );
+        assert_eq!(ShortcutFixture::invocations(&mut app), ["select_pane_down"]);
     }
 
     #[test]
     fn leader_k_emits_select_pane_up() {
-        let mut app = test_app();
+        let mut app = ShortcutFixture::app(None);
 
         press(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyB);
@@ -473,21 +438,12 @@ mod tests {
         press(&mut app, KeyCode::KeyK);
         app.update();
 
-        let requests: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<PaneFocusRequest>>()
-            .drain()
-            .collect();
-
-        assert_eq!(
-            requests,
-            vec![PaneFocusRequest(PaneFocus::Direction(PaneDirection::Top))]
-        );
+        assert_eq!(ShortcutFixture::invocations(&mut app), ["select_pane_up"]);
     }
 
     #[test]
     fn leader_s_emits_space_open_command() {
-        let mut app = test_app();
+        let mut app = ShortcutFixture::app(None);
 
         press(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyB);
@@ -499,36 +455,24 @@ mod tests {
         press(&mut app, KeyCode::KeyS);
         app.update();
 
-        let invocations: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<CommandInvocation>>()
-            .drain()
-            .collect();
-
-        assert_eq!(invocations[0].id, "space_open");
+        assert_eq!(ShortcutFixture::invocations(&mut app), ["space_open"]);
     }
 
     #[test]
     fn leader_chord_emits_when_prefix_and_key_arrive_in_same_frame() {
-        let mut app = test_app();
+        let mut app = ShortcutFixture::app(None);
 
         press(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyB);
         press(&mut app, KeyCode::KeyS);
         app.update();
 
-        let invocations: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<CommandInvocation>>()
-            .drain()
-            .collect();
-
-        assert_eq!(invocations[0].id, "space_open");
+        assert_eq!(ShortcutFixture::invocations(&mut app), ["space_open"]);
     }
 
     #[test]
     fn leader_chord_emits_when_prefix_is_released_before_same_frame_update() {
-        let mut app = test_app();
+        let mut app = ShortcutFixture::app(None);
 
         press(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyB);
@@ -537,28 +481,16 @@ mod tests {
         press(&mut app, KeyCode::KeyS);
         app.update();
 
-        let invocations: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<CommandInvocation>>()
-            .drain()
-            .collect();
-
-        assert_eq!(invocations[0].id, "space_open");
+        assert_eq!(ShortcutFixture::invocations(&mut app), ["space_open"]);
     }
 
     #[test]
     fn default_tmux_rotate_and_mirror_chords_emit_commands() {
         for (key, expected) in [
-            (
-                KeyCode::KeyR,
-                PaneArrangeRequest(PaneArrangement::Rotate(SiblingDirection::Next)),
-            ),
-            (
-                KeyCode::KeyM,
-                PaneArrangeRequest(PaneArrangement::Mirror(None)),
-            ),
+            (KeyCode::KeyR, "rotate_forward"),
+            (KeyCode::KeyM, "mirror_panes"),
         ] {
-            let mut app = test_app();
+            let mut app = ShortcutFixture::app(None);
             press(&mut app, KeyCode::ControlLeft);
             press(&mut app, KeyCode::KeyB);
             app.update();
@@ -569,19 +501,13 @@ mod tests {
             press(&mut app, key);
             app.update();
 
-            let requests: Vec<_> = app
-                .world_mut()
-                .resource_mut::<Messages<PaneArrangeRequest>>()
-                .drain()
-                .collect();
-
-            assert_eq!(requests, vec![expected]);
+            assert_eq!(ShortcutFixture::invocations(&mut app), [expected]);
         }
     }
 
     #[test]
     fn configured_leader_s_survives_prefix_release_frame() {
-        let mut app = test_app_with_settings(test_settings_with_leader("b"));
+        let mut app = ShortcutFixture::app(Some(test_settings_with_leader("b")));
 
         press(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyB);
@@ -596,18 +522,12 @@ mod tests {
         press(&mut app, KeyCode::KeyS);
         app.update();
 
-        let invocations: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<CommandInvocation>>()
-            .drain()
-            .collect();
-
-        assert_eq!(invocations[0].id, "space_open");
+        assert_eq!(ShortcutFixture::invocations(&mut app), ["space_open"]);
     }
 
     #[test]
     fn configured_split_v_legacy_binding_emits_right_split() {
-        let mut app = test_app_with_settings(split_settings_with_leader("b"));
+        let mut app = ShortcutFixture::app(Some(split_settings_with_leader("b")));
 
         press(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyB);
@@ -623,26 +543,12 @@ mod tests {
         press(&mut app, KeyCode::Digit5);
         app.update();
 
-        let requests: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<PaneOpenRequest>>()
-            .drain()
-            .collect();
-
-        assert_eq!(
-            requests,
-            vec![PaneOpenRequest {
-                direction: PaneDirection::Right,
-                target: PaneTarget::NewSplit,
-                mode: PaneOpenMode::NewStack,
-                url: None,
-            }]
-        );
+        assert_eq!(ShortcutFixture::invocations(&mut app), ["split_v"]);
     }
 
     #[test]
     fn configured_leader_x_overrides_the_default_stack_close() {
-        let mut app = test_app_with_settings(current_settings_with_leader("b"));
+        let mut app = ShortcutFixture::app(Some(current_settings_with_leader("b")));
 
         press(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyB);
@@ -657,18 +563,12 @@ mod tests {
         press(&mut app, KeyCode::KeyX);
         app.update();
 
-        let requests: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<PaneCloseRequest>>()
-            .drain()
-            .collect();
-
-        assert_eq!(requests, vec![PaneCloseRequest]);
+        assert_eq!(ShortcutFixture::invocations(&mut app), ["close_pane"]);
     }
 
     #[test]
     fn configured_split_h_legacy_binding_emits_bottom_split() {
-        let mut app = test_app_with_settings(split_settings_with_leader("b"));
+        let mut app = ShortcutFixture::app(Some(split_settings_with_leader("b")));
 
         press(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyB);
@@ -684,26 +584,12 @@ mod tests {
         press(&mut app, KeyCode::Quote);
         app.update();
 
-        let requests: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<PaneOpenRequest>>()
-            .drain()
-            .collect();
-
-        assert_eq!(
-            requests,
-            vec![PaneOpenRequest {
-                direction: PaneDirection::Bottom,
-                target: PaneTarget::NewSplit,
-                mode: PaneOpenMode::NewStack,
-                url: None,
-            }]
-        );
+        assert_eq!(ShortcutFixture::invocations(&mut app), ["split_h"]);
     }
 
     #[test]
     fn leader_n_emits_tab_next() {
-        let mut app = test_app_with_settings(tab_settings_with_leader("b"));
+        let mut app = ShortcutFixture::app(Some(tab_settings_with_leader("b")));
 
         press(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyB);
@@ -718,21 +604,12 @@ mod tests {
         press(&mut app, KeyCode::KeyN);
         app.update();
 
-        let requests: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<TabFocusRequest>>()
-            .drain()
-            .collect();
-
-        assert_eq!(
-            requests,
-            vec![TabFocusRequest(TabFocus::Sibling(SiblingDirection::Next))]
-        );
+        assert_eq!(ShortcutFixture::invocations(&mut app), ["next_tab"]);
     }
 
     #[test]
     fn leader_p_emits_tab_previous() {
-        let mut app = test_app_with_settings(tab_settings_with_leader("b"));
+        let mut app = ShortcutFixture::app(Some(tab_settings_with_leader("b")));
 
         press(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyB);
@@ -747,23 +624,12 @@ mod tests {
         press(&mut app, KeyCode::KeyP);
         app.update();
 
-        let requests: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<TabFocusRequest>>()
-            .drain()
-            .collect();
-
-        assert_eq!(
-            requests,
-            vec![TabFocusRequest(TabFocus::Sibling(
-                SiblingDirection::Previous
-            ))]
-        );
+        assert_eq!(ShortcutFixture::invocations(&mut app), ["prev_tab"]);
     }
 
     #[test]
     fn leader_c_emits_open_in_new_tab() {
-        let mut app = test_app_with_settings(tab_settings_with_leader("b"));
+        let mut app = ShortcutFixture::app(Some(tab_settings_with_leader("b")));
 
         press(&mut app, KeyCode::ControlLeft);
         press(&mut app, KeyCode::KeyB);
@@ -778,12 +644,6 @@ mod tests {
         press(&mut app, KeyCode::KeyC);
         app.update();
 
-        let requests: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<TabOpenRequest>>()
-            .drain()
-            .collect();
-
-        assert_eq!(requests, vec![TabOpenRequest { url: None }]);
+        assert_eq!(ShortcutFixture::invocations(&mut app), ["open_in_new_tab"]);
     }
 }

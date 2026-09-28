@@ -12,7 +12,7 @@ use crate::bookmark::{
 };
 use crate::pane::OpenBesideRequest;
 use crate::settings::{EffectiveStartupDir, EffectiveStartupUrl};
-use crate::stack::{CloseStackRequest, FocusedStack};
+use crate::stack::CloseStackRequest;
 use crate::worktree::TabDirectoryObserved;
 use crate::{
     BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest,
@@ -25,7 +25,6 @@ impl Plugin for LayoutContractPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EffectiveStartupDir>()
             .init_resource::<EffectiveStartupUrl>()
-            .init_resource::<FocusedStack>()
             .add_message::<LauncherDismissRequest>()
             .add_message::<ActivatePane>()
             .add_message::<AddRequest>()

@@ -89,7 +89,7 @@ struct ErrorPageAttachment {
 
 fn handle_page_open_requests(
     mut reader: MessageReader<PageOpenRequest>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     parents: Query<&ChildOf>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
@@ -138,7 +138,7 @@ fn handle_page_open_requests(
 
 fn resolve_page_open_target(
     target: &PageOpenTarget,
-    focus: &vmux_layout::stack::FocusedStack,
+    focus: &vmux_layout::active_pane::ActiveStack,
     parents: &Query<&ChildOf>,
     panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: &Query<&Children, With<Pane>>,

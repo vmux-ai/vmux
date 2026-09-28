@@ -600,7 +600,7 @@ fn on_space_open_page(
     mains: Query<Entity, With<vmux_layout::window::Main>>,
     host_windows: Query<&HostWindow>,
     focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
-    focus: Option<Res<vmux_layout::stack::FocusedStack>>,
+    focus: vmux_layout::stack::FocusedStack,
     mut spawn_requests: Option<MessageWriter<PageOpenRequest>>,
     stacks: Query<(Entity, &PageMetadata), With<Stack>>,
     child_of: Query<&ChildOf>,

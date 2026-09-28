@@ -226,7 +226,7 @@ struct AttachedDevice {
 }
 
 fn sync_active_simulator_view(
-    focus: Option<Res<FocusedStack>>,
+    focus: FocusedStack,
     children: Query<&Children>,
     pages: Query<&PageMetadata, With<PageReady>>,
     active: Query<Entity, With<ActiveSimulatorView>>,

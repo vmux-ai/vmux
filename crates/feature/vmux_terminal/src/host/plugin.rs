@@ -761,7 +761,7 @@ fn sync_agent_focus(
         With<vmux_core::agent::AgentSession>,
     >,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -1846,7 +1846,7 @@ fn handle_terminal_copy_mode_command(
     >,
     keyboard_targets: Query<(), With<KeyboardOwner>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     process_index: Single<&TerminalProcessIndex>,
     mut copy_modes: Query<&mut TerminalCopyMode, With<Terminal>>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -1878,7 +1878,7 @@ fn handle_terminal_navigation_commands(
     mut close_requests: MessageReader<super::command::TerminalCloseRequest>,
     mut next_requests: MessageReader<super::command::TerminalNextRequest>,
     mut previous_requests: MessageReader<super::command::TerminalPrevRequest>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     terminals: Query<&ChildOf, With<Terminal>>,
     mut stack_close_requests: MessageWriter<StackCloseRequest>,
     mut stack_focus_requests: MessageWriter<FocusRequest>,
@@ -1907,7 +1907,7 @@ fn handle_terminal_navigation_commands(
 
 fn handle_terminal_clear_command(
     mut requests: MessageReader<super::command::TerminalClearRequest>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
+    focus: vmux_layout::stack::FocusedStack,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     mut terminal_inputs: MessageWriter<QueueTerminalInput>,
 ) {
@@ -2140,8 +2140,9 @@ mod tests {
     #[test]
     fn terminal_send_resolves_target_by_process_id_uuid() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, crate::host::request::TerminalRequestPlugin))
-            .insert_resource(vmux_layout::stack::FocusedStack::default());
+        app.add_plugins((MinimalPlugins, crate::host::request::TerminalRequestPlugin));
+        app.world_mut()
+            .spawn(vmux_layout::active_pane::ActiveStack::default().local_bundle());
 
         let parent = app.world_mut().spawn_empty().id();
         let pid = process_id(7);

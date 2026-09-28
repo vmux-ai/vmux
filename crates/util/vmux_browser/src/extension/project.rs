@@ -88,13 +88,13 @@ fn rebuild_extension_model(
     space_query: Query<(Entity, Option<&Order>), With<Space>>,
     hierarchy: Query<HierarchyData>,
     page_query: Query<PageData>,
-    focused_stack: Option<Res<FocusedStack>>,
+    focused_stack: FocusedStack,
     runtime: Single<(&mut ExtensionModel, &mut ExtensionStableIds)>,
     mut events: MessageWriter<ExtensionModelEvent>,
 ) {
     let (mut current, mut stable_ids) = runtime.into_inner();
     let previous = current.clone();
-    let focused_stack = focused_stack.and_then(|focused| focused.stack);
+    let focused_stack = focused_stack.as_ref().and_then(|focused| focused.stack);
     let windows = WindowCandidate::collect(&window_query);
     let primary_window = windows
         .iter()

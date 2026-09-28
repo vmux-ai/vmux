@@ -473,7 +473,7 @@ fn sync_live_start_pages(
         RemovedComponents<ClaimedUrl>,
     ),
     locale: Option<Res<ResolvedLocale>>,
-    focused: Res<vmux_layout::stack::FocusedStack>,
+    focused: vmux_layout::stack::FocusedStack,
     starts: Query<
         (
             Entity,

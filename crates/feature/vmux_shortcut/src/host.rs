@@ -83,7 +83,7 @@ struct ShortcutCaptureFocus<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
     host_windows: Query<'w, 's, &'static HostWindow>,
     windows: Query<'w, 's, &'static Window>,
-    focus: Option<Res<'w, FocusedStack>>,
+    focus: FocusedStack<'w, 's>,
 }
 
 impl ShortcutCaptureFocus<'_, '_> {
@@ -91,7 +91,7 @@ impl ShortcutCaptureFocus<'_, '_> {
         let Ok((_, parent)) = self.views.get(webview) else {
             return false;
         };
-        if self.focus.as_deref().and_then(|focus| focus.stack) != Some(parent.parent()) {
+        if self.focus.stack != Some(parent.parent()) {
             return false;
         }
         let Some(window) = host_window_of(webview, &self.child_of, &self.host_windows) else {
@@ -914,10 +914,13 @@ mod tests {
             .world_mut()
             .spawn((Shortcuts::default(), ChildOf(stack)))
             .id();
-        app.insert_resource(FocusedStack {
-            stack: Some(stack),
-            ..default()
-        });
+        app.world_mut().spawn(
+            vmux_layout::active_pane::ActiveStack {
+                stack: Some(stack),
+                ..default()
+            }
+            .local_bundle(),
+        );
 
         app.update();
         assert!(app.world().entity(page).contains::<NativeKeyCapture>());

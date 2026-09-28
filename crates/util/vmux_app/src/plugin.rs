@@ -8,6 +8,8 @@ pub enum VmuxPlugin {
     Core(VmuxCorePlugin),
     #[plugin(feature = "layout", desktop, requires(core))]
     Layout(vmux_layout::LayoutPlugin),
+    #[plugin(feature = "bookmark", desktop, requires(layout))]
+    Bookmark(vmux_bookmark::BookmarkPlugin),
     #[plugin(feature = "vault", desktop, requires(layout))]
     Vault(vmux_vault::VaultPlugin),
     #[plugin(feature = "core", option = core, desktop)]

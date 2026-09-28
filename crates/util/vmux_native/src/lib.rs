@@ -1,5 +1,6 @@
 mod event_request;
 mod instance;
+pub mod menu;
 mod page;
 mod page_dom;
 mod page_dom_converter;

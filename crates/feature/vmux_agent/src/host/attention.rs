@@ -61,7 +61,7 @@ fn window_foreground(windows: &Query<&Window, With<bevy::window::PrimaryWindow>>
 fn agent_is_viewed(
     entity: Entity,
     foreground: bool,
-    focused: &vmux_layout::stack::FocusedStack,
+    focused: &vmux_layout::active_pane::ActiveStack,
     stacks: &Query<(), With<vmux_layout::stack::Stack>>,
     child_of: &Query<&ChildOf>,
 ) -> bool {
@@ -84,7 +84,7 @@ fn mark_agent_done(
     mut reader: MessageReader<vmux_core::notify::AgentAttention>,
     mut notify: MessageWriter<vmux_core::notify::OsNotify>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    focused: Res<vmux_layout::stack::FocusedStack>,
+    focused: vmux_layout::stack::FocusedStack,
     stacks: Query<(), With<vmux_layout::stack::Stack>>,
     child_of: Query<&ChildOf>,
     meta: Query<(
@@ -154,7 +154,7 @@ fn mark_agent_done(
 fn clear_agent_done(
     done: Query<Entity, With<vmux_core::notify::AgentDoneUnseen>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    focused: Res<vmux_layout::stack::FocusedStack>,
+    focused: vmux_layout::stack::FocusedStack,
     stacks: Query<(), With<vmux_layout::stack::Stack>>,
     child_of: Query<&ChildOf>,
     mut prev_focused: Local<Option<Entity>>,
@@ -309,6 +309,8 @@ mod tests {
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
             .add_systems(Update, (mark_agent_done, clear_agent_done));
+        app.world_mut()
+            .spawn(vmux_layout::active_pane::ActiveStack::default().local_bundle());
         app
     }
 
@@ -356,6 +358,12 @@ mod tests {
             });
     }
 
+    fn focus_stack(app: &mut App, stack: Entity) {
+        let world = app.world_mut();
+        let mut query = world.query::<&mut vmux_layout::active_pane::ActiveStack>();
+        query.single_mut(world).unwrap().stack = Some(stack);
+    }
+
     #[test]
     pub(crate) fn done_notifies_and_marks_when_backgrounded() {
         let mut app = done_test_app();
@@ -376,9 +384,7 @@ mod tests {
         let mut app = done_test_app();
         let (agent, stack) = spawn_agent_in_stack(&mut app);
         set_window(&mut app, true);
-        app.world_mut()
-            .resource_mut::<vmux_layout::stack::FocusedStack>()
-            .stack = Some(stack);
+        focus_stack(&mut app, stack);
         app.update();
         send_attention(&mut app, agent);
         app.update();
@@ -402,9 +408,7 @@ mod tests {
             ))
             .id();
         set_window(&mut app, true);
-        app.world_mut()
-            .resource_mut::<vmux_layout::stack::FocusedStack>()
-            .stack = Some(stack);
+        focus_stack(&mut app, stack);
         app.update();
         send_attention(&mut app, stack);
         app.update();
@@ -434,9 +438,7 @@ mod tests {
                 .get::<vmux_core::notify::AgentDoneUnseen>(stack)
                 .is_some()
         );
-        app.world_mut()
-            .resource_mut::<vmux_layout::stack::FocusedStack>()
-            .stack = Some(stack);
+        focus_stack(&mut app, stack);
         app.update();
         assert!(
             app.world()

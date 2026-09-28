@@ -113,7 +113,7 @@ struct CurrentFocus {
 }
 
 impl CurrentFocus {
-    fn of(focus: &FocusedStack) -> Self {
+    fn of(focus: &crate::active_pane::ActiveStack) -> Self {
         Self {
             tab: focus.tab,
             pane: focus.pane,
@@ -220,7 +220,7 @@ fn focus_pane(mut requests: MessageReader<FocusPaneRequest>, mut commands: Comma
 
 fn update_layout(
     mut requests: MessageReader<AgentUpdateLayoutRequest>,
-    focus: Res<FocusedStack>,
+    focus: FocusedStack,
     mut apply: MessageWriter<crate::apply::LayoutApplyRequest>,
 ) {
     for request in requests.read() {

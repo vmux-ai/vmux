@@ -1,15 +1,15 @@
-#[cfg(not(target_os = "macos"))]
 use bevy::prelude::*;
 
-#[cfg(not(target_os = "macos"))]
-impl Plugin for BookmarkMenuPlugin {
+pub struct BookmarkPlugin;
+
+impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_layout::LayoutContractPlugin)
-            .init_resource::<vmux_layout::window::FocusedWindow>();
+        app.add_plugins(crate::persistence::BookmarkPersistencePlugin);
+
+        #[cfg(target_os = "macos")]
+        macos::build(app);
     }
 }
-
-pub(crate) struct BookmarkMenuPlugin;
 
 #[cfg(target_os = "macos")]
 mod macos {
@@ -28,40 +28,39 @@ mod macos {
     };
     use vmux_layout::stack::OpenRequest;
     use vmux_layout::state::LayoutUiState;
+    use vmux_native::menu::{
+        OsContextMenu, OsMenuEntry, OsMenuSelection, OsMenuSeparator, OsMenuSet,
+    };
     use vmux_ui::i18n::{Locale, TranslationValue};
 
-    use crate::os_menu::{OsContextMenu, OsMenuEntry, OsMenuSelection, OsMenuSeparator, OsMenuSet};
-
-    impl Plugin for super::BookmarkMenuPlugin {
-        fn build(&self, app: &mut App) {
-            app.add_plugins(vmux_layout::LayoutContractPlugin)
-                .init_resource::<vmux_layout::window::FocusedWindow>()
-                .add_message::<NewFolderInputRequest>()
-                .add_message::<RenameInputRequest>()
-                .add_systems(Startup, spawn_bookmark_menu_input_revision)
-                .add_systems(
-                    Update,
-                    (
-                        forward_message::<OpenRequest>,
-                        forward_message::<AddRequest>,
-                        forward_message::<MoveRequest>,
-                        forward_message::<MoveFolderRequest>,
-                        forward_message::<PinRequest>,
-                        forward_message::<RemoveRequest>,
-                        forward_message::<RemoveFolderRequest>,
-                        forward_message::<ToggleFolderRequest>,
-                        forward_message::<UnpinRequest>,
-                        forward_message::<NewFolderInputRequest>,
-                        forward_message::<RenameInputRequest>,
-                    )
-                        .in_set(OsMenuSet::Dispatch),
+    pub(super) fn build(app: &mut App) {
+        app.add_plugins(vmux_layout::LayoutContractPlugin)
+            .init_resource::<vmux_layout::window::FocusedWindow>()
+            .add_message::<NewFolderInputRequest>()
+            .add_message::<RenameInputRequest>()
+            .add_systems(Startup, spawn_bookmark_menu_input_revision)
+            .add_systems(
+                Update,
+                (
+                    forward_message::<OpenRequest>,
+                    forward_message::<AddRequest>,
+                    forward_message::<MoveRequest>,
+                    forward_message::<MoveFolderRequest>,
+                    forward_message::<PinRequest>,
+                    forward_message::<RemoveRequest>,
+                    forward_message::<RemoveFolderRequest>,
+                    forward_message::<ToggleFolderRequest>,
+                    forward_message::<UnpinRequest>,
+                    forward_message::<NewFolderInputRequest>,
+                    forward_message::<RenameInputRequest>,
                 )
-                .add_systems(Update, show_bookmark_menu)
-                .add_systems(
-                    Update,
-                    begin_bookmark_menu_input.after(vmux_layout::bookmark::BookmarkRequestSet),
-                );
-        }
+                    .in_set(OsMenuSet::Dispatch),
+            )
+            .add_systems(Update, show_bookmark_menu)
+            .add_systems(
+                Update,
+                begin_bookmark_menu_input.after(vmux_layout::bookmark::BookmarkRequestSet),
+            );
     }
 
     #[derive(Component, Default)]
@@ -596,11 +595,17 @@ mod macos {
         #[test]
         fn selected_menu_entity_forwards_each_typed_message() {
             let mut app = App::new();
-            app.add_plugins((
-                MinimalPlugins,
-                vmux_command::CommandPlugin,
-                crate::os_menu::OsMenuPlugin,
-            ));
+            app.add_plugins(MinimalPlugins)
+                .add_message::<OsMenuSelection>()
+                .add_message::<PinRequest>()
+                .add_message::<RemoveRequest>()
+                .add_systems(
+                    Update,
+                    (
+                        forward_message::<PinRequest>,
+                        forward_message::<RemoveRequest>,
+                    ),
+                );
 
             let selected = app
                 .world_mut()
@@ -612,7 +617,6 @@ mod macos {
                     BookmarkMenuMessage(RemoveRequest {
                         uuid: "remove".to_string(),
                     }),
-                    crate::os_menu::TransientOsMenuEntry,
                 ))
                 .id();
             let disabled = app
@@ -646,7 +650,7 @@ mod macos {
                     uuid: "remove".into()
                 }]
             );
-            assert!(app.world().get_entity(selected).is_err());
+            assert!(app.world().get_entity(selected).is_ok());
             assert!(app.world().get_entity(disabled).is_ok());
         }
     }

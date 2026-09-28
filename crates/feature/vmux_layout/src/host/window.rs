@@ -549,7 +549,6 @@ pub fn spawn_requested_tab_layouts(
     settings: Res<LayoutSettings>,
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut focus: Option<ResMut<crate::stack::FocusedStack>>,
     spaces: Query<(), With<crate::space::Space>>,
     mut commands: Commands,
 ) {
@@ -605,14 +604,6 @@ pub fn spawn_requested_tab_layouts(
                     request_id: None,
                 });
             }
-        }
-
-        if request.focus
-            && let Some(focus) = focus.as_deref_mut()
-        {
-            focus.tab = Some(tab_e);
-            focus.pane = Some(leaf);
-            focus.stack = Some(stack);
         }
     }
 }
@@ -679,7 +670,7 @@ fn sync_window_layout_to_settings(
 }
 
 fn sync_main_column_gap_to_pane_count(
-    focus: Res<crate::stack::FocusedStack>,
+    focus: crate::stack::FocusedStack,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut main_column_q: Query<&mut Node, With<MainColumn>>,

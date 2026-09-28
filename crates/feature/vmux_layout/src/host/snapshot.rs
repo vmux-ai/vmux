@@ -1,12 +1,13 @@
 use bevy::prelude::*;
 use vmux_core::PageMetadata;
 
+use crate::active_pane::ActiveStack;
 use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, Zoomed};
 use crate::protocol::format_id;
 use crate::protocol::{
     Focus, LayoutNode, LayoutSnapshot, NodeKind, SplitDirection, Stack as StackDto, Tab as TabDto,
 };
-use crate::stack::{FocusedStack, Stack};
+use crate::stack::Stack;
 use crate::tab::Tab as LayoutTab;
 
 pub fn build_layout_snapshot(
@@ -16,7 +17,7 @@ pub fn build_layout_snapshot(
     stacks_q: &Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
     pane_sizes_q: &Query<&PaneSize>,
     zoomed_q: &Query<&Zoomed>,
-    focused: &FocusedStack,
+    focused: &ActiveStack,
     self_stack: Option<Entity>,
 ) -> LayoutSnapshot {
     let active_tab = focused.tab;
@@ -169,8 +170,8 @@ mod tests {
 
     fn make_app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(FocusedStack::default());
+        app.add_plugins(MinimalPlugins);
+        app.world_mut().spawn(ActiveStack::default().local_bundle());
         app
     }
 
@@ -215,7 +216,7 @@ mod tests {
             Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
             Query<&PaneSize>,
             Query<&Zoomed>,
-            Res<FocusedStack>,
+            Single<&ActiveStack, With<crate::active_pane::ProfileId>>,
         )> = SystemState::new(world);
         let (tabs_q, splits_q, leaves_q, stacks_q, pane_sizes_q, zoomed_q, focused) =
             state.get(world).unwrap();
@@ -273,7 +274,7 @@ mod tests {
                 >,
                  pane_sizes_q: Query<&PaneSize>,
                  zoomed_q: Query<&Zoomed>,
-                 focused: Res<FocusedStack>| {
+                 focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
                     build_layout_snapshot(
                         &tabs_q,
                         &splits_q,
@@ -332,7 +333,7 @@ mod tests {
                 >,
                  pane_sizes_q: Query<&PaneSize>,
                  zoomed_q: Query<&Zoomed>,
-                 focused: Res<FocusedStack>| {
+                 focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
                     build_layout_snapshot(
                         &tabs_q,
                         &splits_q,
@@ -366,7 +367,7 @@ mod tests {
                  stacks: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
                  pane_sizes: Query<&PaneSize>,
                  zoomed_q: Query<&Zoomed>,
-                 focused: Res<FocusedStack>| {
+                 focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
                     build_layout_snapshot(
                         &tabs,
                         &splits,
@@ -414,8 +415,10 @@ mod tests {
             .id();
 
         {
-            let mut f = app.world_mut().resource_mut::<FocusedStack>();
-            f.tab = Some(tab);
+            let world = app.world_mut();
+            let mut query =
+                world.query_filtered::<&mut ActiveStack, With<crate::active_pane::ProfileId>>();
+            query.single_mut(world).unwrap().tab = Some(tab);
         }
 
         let snapshot = app
@@ -427,7 +430,7 @@ mod tests {
                  stacks: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
                  pane_sizes: Query<&PaneSize>,
                  zoomed_q: Query<&Zoomed>,
-                 focused: Res<FocusedStack>| {
+                 focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
                     build_layout_snapshot(
                         &tabs,
                         &splits,
@@ -487,8 +490,10 @@ mod tests {
         });
 
         {
-            let mut f = app.world_mut().resource_mut::<FocusedStack>();
-            f.tab = Some(tab);
+            let world = app.world_mut();
+            let mut query =
+                world.query_filtered::<&mut ActiveStack, With<crate::active_pane::ProfileId>>();
+            query.single_mut(world).unwrap().tab = Some(tab);
         }
 
         let snapshot = app
@@ -500,7 +505,7 @@ mod tests {
                  stacks: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
                  pane_sizes: Query<&PaneSize>,
                  zoomed_q: Query<&Zoomed>,
-                 focused: Res<FocusedStack>| {
+                 focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
                     build_layout_snapshot(
                         &tabs,
                         &splits,
@@ -583,7 +588,7 @@ mod tests {
                 >,
                  pane_sizes_q: Query<&PaneSize>,
                  zoomed_q: Query<&Zoomed>,
-                 focused: Res<FocusedStack>| {
+                 focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
                     build_layout_snapshot(
                         &tabs_q,
                         &splits_q,

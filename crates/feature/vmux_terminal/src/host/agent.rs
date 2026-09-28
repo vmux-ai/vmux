@@ -86,7 +86,7 @@ fn route_terminal_commands(
 
 fn open_terminal_tab(
     mut requests: MessageReader<AgentNewTerminalTabRequest>,
-    focus: Res<FocusedStack>,
+    focus: FocusedStack,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     active_space: ActiveSpace,
     settings: Res<AppSettings>,

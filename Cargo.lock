@@ -10220,6 +10220,7 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "vmux_agent",
+ "vmux_bookmark",
  "vmux_browser",
  "vmux_chat",
  "vmux_command",
@@ -10243,6 +10244,25 @@ dependencies = [
  "vmux_terminal",
  "vmux_tool",
  "vmux_vault",
+]
+
+[[package]]
+name = "vmux_bookmark"
+version = "0.0.34"
+dependencies = [
+ "bevy",
+ "bevy_world_serialization",
+ "moonshine-save",
+ "raw-window-handle 0.6.2",
+ "tempfile",
+ "uuid",
+ "vmux_api",
+ "vmux_core",
+ "vmux_layout",
+ "vmux_native",
+ "vmux_setting",
+ "vmux_shortcut",
+ "vmux_ui",
 ]
 
 [[package]]
@@ -10494,6 +10514,7 @@ dependencies = [
  "vmux_history",
  "vmux_knowledge",
  "vmux_layout",
+ "vmux_native",
  "vmux_service",
  "vmux_setting",
  "vmux_shortcut",
