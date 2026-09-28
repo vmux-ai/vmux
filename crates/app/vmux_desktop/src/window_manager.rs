@@ -17,8 +17,6 @@ impl Plugin for WindowManagerPlugin {
                 Startup,
                 spawn_window_commands.in_set(vmux_command::RegisterCommandDefinitions),
             )
-            .add_observer(request_new_window)
-            .add_observer(request_close_focused_window)
             .add_systems(
                 Update,
                 (open_windows, close_focused_windows)
@@ -36,41 +34,35 @@ pub(crate) struct CloseVmuxWindow(pub Entity);
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct NewWindowRequest;
 
-#[derive(Component)]
-struct NewWindowBinding;
+impl TryFrom<&vmux_command::CommandInvocation> for NewWindowRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "new_window").then_some(Self).ok_or(())
+    }
+}
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct CloseFocusedWindowRequest;
 
-#[derive(Component)]
-struct CloseFocusedWindowBinding;
+impl TryFrom<&vmux_command::CommandInvocation> for CloseFocusedWindowRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "close_window").then_some(Self).ok_or(())
+    }
+}
 
 fn spawn_window_commands(mut commands: Commands) {
     let mut definitions =
         vmux_command::CommandDefinitions::from_ron(include_str!("window_manager.ron"));
-    commands.spawn((definitions.take("new_window"), NewWindowBinding));
-    commands.spawn((definitions.take("close_window"), CloseFocusedWindowBinding));
+    commands.spawn(definitions.take("new_window").message::<NewWindowRequest>());
+    commands.spawn(
+        definitions
+            .take("close_window")
+            .message::<CloseFocusedWindowRequest>(),
+    );
     definitions.assert_all_registered();
-}
-
-fn request_new_window(
-    trigger: On<vmux_command::CommandDispatch>,
-    bindings: Query<(), With<NewWindowBinding>>,
-    mut requests: MessageWriter<NewWindowRequest>,
-) {
-    if bindings.contains(trigger.event().command()) {
-        requests.write(NewWindowRequest);
-    }
-}
-
-fn request_close_focused_window(
-    trigger: On<vmux_command::CommandDispatch>,
-    bindings: Query<(), With<CloseFocusedWindowBinding>>,
-    mut requests: MessageWriter<CloseFocusedWindowRequest>,
-) {
-    if bindings.contains(trigger.event().command()) {
-        requests.write(CloseFocusedWindowRequest);
-    }
 }
 
 fn open_windows(

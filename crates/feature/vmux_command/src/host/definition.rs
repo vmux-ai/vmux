@@ -253,6 +253,13 @@ impl CommandDefinition {
         self
     }
 
+    pub fn message<T>(self) -> (Self, CommandMessage)
+    where
+        T: Message + for<'a> TryFrom<&'a CommandInvocation>,
+    {
+        (self, CommandMessage::of::<T>())
+    }
+
     pub fn agent_tool(&self) -> Option<vmux_api::protocol::AgentCommandTool> {
         let mcp = self.mcp.as_ref()?;
         Some(vmux_api::protocol::AgentCommandTool {
@@ -560,6 +567,33 @@ pub struct CommandInvocation {
     pub arguments: vmux_core::JsonArguments,
 }
 
+#[derive(Component, Clone, Copy)]
+pub struct CommandMessage(fn(&CommandInvocation, &mut Commands));
+
+impl CommandMessage {
+    fn of<T>() -> Self
+    where
+        T: Message + for<'a> TryFrom<&'a CommandInvocation>,
+    {
+        Self(write_command_message::<T>)
+    }
+
+    fn write(&self, invocation: &CommandInvocation, commands: &mut Commands) {
+        (self.0)(invocation, commands);
+    }
+}
+
+fn write_command_message<T>(invocation: &CommandInvocation, commands: &mut Commands)
+where
+    T: Message + for<'a> TryFrom<&'a CommandInvocation>,
+{
+    let Ok(message) = T::try_from(invocation) else {
+        warn!(command = %invocation.id, "command message rejected its registered definition");
+        return;
+    };
+    commands.write_message(message);
+}
+
 impl CommandInvocation {
     pub fn new(caller: Entity, id: impl Into<String>) -> Self {
         Self {
@@ -695,13 +729,13 @@ impl CommandDispatch {
 
 fn dispatch_command_invocations(
     mut invocations: MessageReader<CommandInvocation>,
-    definitions: Query<(Entity, &CommandDefinition)>,
+    definitions: Query<(Entity, &CommandDefinition, Option<&CommandMessage>)>,
     mut commands: Commands,
 ) {
     for invocation in invocations.read() {
-        let Some((command, definition)) = definitions
+        let Some((command, definition, message)) = definitions
             .iter()
-            .find(|(_, definition)| definition.matches(&invocation.id))
+            .find(|(_, definition, _)| definition.matches(&invocation.id))
         else {
             continue;
         };
@@ -712,6 +746,9 @@ fn dispatch_command_invocations(
         {
             warn!(command = %definition.id, %error, "invalid command arguments");
             continue;
+        }
+        if let Some(message) = message {
+            message.write(&invocation, &mut commands);
         }
         commands.trigger(CommandDispatch {
             command,
