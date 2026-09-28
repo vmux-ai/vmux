@@ -214,7 +214,7 @@ fn on_page_ready(
     };
     let extension = metadata.is_some_and(|metadata| {
         extension_pages.iter().any(|(page, manifest)| {
-            manifest.url == crate::ui::ExtensionPage::URL && page.answers_for(&metadata.url)
+            manifest.url == crate::ExtensionPlugin::MANIFEST.url && page.answers_for(&metadata.url)
         })
     });
     if layout || extension {
@@ -383,7 +383,7 @@ mod tests {
         let mut app = App::new();
         app.add_observer(on_page_ready);
         app.world_mut().spawn((
-            crate::ui::ExtensionPage::MANIFEST,
+            crate::ExtensionPlugin::MANIFEST,
             NativelyHosted::page("vmux://extensions/", "Extensions"),
         ));
         let extension = app

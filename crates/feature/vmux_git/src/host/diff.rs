@@ -120,16 +120,19 @@ pub(super) struct FileDiffRefresh {
     pub(super) entity: Entity,
 }
 
-fn sync_page_diff_targets(
-    pages: Query<(
+type GitDiffPages<'w, 's> = Query<
+    'w,
+    's,
+    (
         Entity,
-        Ref<super::state::GitState>,
-        Ref<super::controller::GitController>,
-        Option<&PendingGitDiff>,
-        Option<&GitDiffQuery>,
-    )>,
-    mut commands: Commands,
-) {
+        Ref<'static, super::state::GitState>,
+        Ref<'static, super::controller::GitController>,
+        Option<&'static PendingGitDiff>,
+        Option<&'static GitDiffQuery>,
+    ),
+>;
+
+fn sync_page_diff_targets(pages: GitDiffPages, mut commands: Commands) {
     for (entity, state, controller, pending, current) in &pages {
         if !state.is_changed() && !controller.is_changed() {
             continue;

@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+#[vmux_native::page]
 pub struct ExtensionPlugin;
 
 impl Plugin for ExtensionPlugin {
