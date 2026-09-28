@@ -43,10 +43,13 @@ impl Plugin for RemotePlugin {
 }
 
 fn spawn_remote_runtime(mut commands: Commands) {
+    let authorizations = RemoteAuthorizationStore::current();
+    let devices = authorizations.devices().unwrap_or_default();
     commands.spawn((
         Name::new("Remote runtime"),
-        RemoteState::default(),
+        RemoteState::new(devices),
         PairingVisibility::default(),
+        authorizations,
     ));
 }
 
@@ -64,13 +67,13 @@ fn on_remote_copy(
 
 fn on_remote_revoke(
     trigger: On<UiInput<RemoteRevokeRequest>>,
-    mut states: Query<&mut RemoteState>,
+    mut states: Query<(&mut RemoteState, &RemoteAuthorizationStore)>,
 ) {
-    let Ok(mut state) = states.single_mut() else {
+    let Ok((mut state, authorizations)) = states.single_mut() else {
         return;
     };
     let client_id = vmux_service::DeviceId::new(&trigger.event().payload.client_id);
-    match RemoteAuthorizationStore::current().revoke(&client_id) {
+    match authorizations.revoke(&client_id) {
         Ok(true) => {
             state.devices.retain(|device| device.id != client_id);
             state.paired = !state.devices.is_empty();
@@ -134,12 +137,15 @@ struct RemoteState {
 
 impl Default for RemoteState {
     fn default() -> Self {
+        Self::new(Vec::new())
+    }
+}
+
+impl RemoteState {
+    fn new(devices: Vec<vmux_service::AuthorizedDevice>) -> Self {
         let persisted = std::fs::read_to_string(RemotePaths::current().state()).ok();
         let enabled = persisted.as_deref().map(str::trim) == Some("enabled");
         let reconcile_on_startup = persisted.is_some();
-        let devices = RemoteAuthorizationStore::current()
-            .devices()
-            .unwrap_or_default();
         Self {
             enabled,
             phase: if reconcile_on_startup {
@@ -231,13 +237,18 @@ fn dismiss_remote_pairing(
 
 fn begin_remote_operations(
     mut requests: MessageReader<RemoteOperationRequest>,
+    authorizations: Query<&RemoteAuthorizationStore>,
     mut commands: Commands,
 ) {
     for request in requests.read() {
+        let Ok(authorizations) = authorizations.get(request.target) else {
+            continue;
+        };
         let enabled = request.enabled;
+        let authorizations = authorizations.clone();
         let task = IoTaskPool::get().spawn(async move {
             if enabled {
-                prepare_remote_pairing().map(Some)
+                prepare_remote_pairing(&authorizations).map(Some)
             } else {
                 Ok(None)
             }
@@ -370,24 +381,25 @@ fn poll_remote_authorizations(
     mut states: Query<(
         Entity,
         &mut RemoteState,
+        &RemoteAuthorizationStore,
         Option<&RemotePairingInfo>,
         &mut PairingVisibility,
     )>,
     mut commands: Commands,
 ) {
-    let Ok((entity, mut state, pairing, mut visibility)) = states.single_mut() else {
+    let Ok((entity, mut state, authorizations, pairing, mut visibility)) = states.single_mut()
+    else {
         return;
     };
     if state.authorization_checked_at.elapsed() < Duration::from_secs(1) {
         return;
     }
     state.authorization_checked_at = Instant::now();
-    let store = RemoteAuthorizationStore::current();
-    let Ok(devices) = store.devices() else {
+    let Ok(devices) = authorizations.devices() else {
         return;
     };
     let paired = !devices.is_empty();
-    let Ok(pairing_token) = store.pairing_token() else {
+    let Ok(pairing_token) = authorizations.pairing_token() else {
         return;
     };
     let became_paired = !state.paired && paired;
@@ -473,10 +485,12 @@ fn push_remote_state_emit(
     }
 }
 
-fn prepare_remote_pairing() -> Result<RemotePairingRegistration, String> {
+fn prepare_remote_pairing(
+    authorizations: &RemoteAuthorizationStore,
+) -> Result<RemotePairingRegistration, String> {
     let relay_token =
         RelayToken::wait(Duration::from_secs(5)).map_err(|error| error.to_string())?;
-    let pairing_token = RemoteAuthorizationStore::current()
+    let pairing_token = authorizations
         .pairing_token()
         .map_err(|error| error.to_string())?;
     let relay = configured_relay()?;

@@ -2,6 +2,7 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use bevy::prelude::Component;
 use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use vmux_transport::{ClientCredential, DeviceId};
@@ -64,7 +65,7 @@ pub enum AuthorizationOutcome {
     Paired { device_token: String },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Component, Debug)]
 pub struct RemoteAuthorizationStore {
     path: PathBuf,
 }
