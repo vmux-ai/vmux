@@ -9,10 +9,6 @@ build = "../../build_cfg_git.rs"
 [features]
 default = []
 
-[[bin]]
-name = "vmux_service"
-path = "src/main.rs"
-
 [lib]
 name = "vmux_service"
 path = "src/lib.rs"

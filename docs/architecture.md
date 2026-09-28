@@ -30,6 +30,10 @@ flowchart LR
 Close the window and the shell keeps reading, the build keeps building, the agent keeps
 streaming. Reopen and the app reconnects, re-subscribes, and replays a snapshot.
 
+The packaged process remains `vmux_service`. Its executable bootstrap lives in
+`crates/app/vmux_daemon`, above the feature libraries it composes, so daemon-side feature
+ownership does not create dependencies back into `vmux_service`.
+
 launchd relaunches the daemon **on crash, not on exit**, and `RunAtLoad` is false — it is
 not a login item. The app starts it on demand.
 

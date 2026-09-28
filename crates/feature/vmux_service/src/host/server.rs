@@ -79,10 +79,10 @@ impl ProcessSnapshot {
     }
 }
 
-pub(crate) struct ServiceDaemonPlugin;
+pub struct ServiceDaemonPlugin;
 
 impl ServiceDaemonPlugin {
-    pub(crate) fn runtime(
+    pub fn runtime(
         listener: UnixListener,
         wake: mpsc::UnboundedSender<()>,
         runtime: tokio::runtime::Handle,

@@ -25,7 +25,6 @@ mod request;
 pub mod run_marker;
 pub mod runner;
 pub mod server;
-pub mod service;
 mod shell_integration;
 #[cfg(target_os = "macos")]
 pub mod sm_app_service;
