@@ -31,9 +31,6 @@ bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 libc = "0.2"
 tokio = { workspace = true, features = ["process", "io-util"] }
-alacritty_terminal = { workspace = true }
-vte = "0.15"
-portable-pty = { workspace = true }
 quinn = { workspace = true }
 rustls-pemfile = { workspace = true }
 tracing = "0.1"
@@ -49,8 +46,7 @@ vmux_core = { path = "../../util/vmux_core" }
 vmux_agent = { path = "../vmux_agent", default-features = false, features = ["service"] }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_profile = { path = "../../util/vmux_profile" }
-agent-client-protocol = "1.0.1"
-tokio-util = { version = "0.7", features = ["compat"] }
+vmux_process = { path = "../../util/vmux_process" }
 tempfile = "3.27.0"
 uuid = { workspace = true }
 url = { workspace = true }

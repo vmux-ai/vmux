@@ -5,7 +5,7 @@ use vmux_api::protocol::{
 use vmux_api::room::{ClientOpId, RemoteSession};
 
 use super::super::server::{MAX_PROMPT_BYTES, RemoteState};
-use crate::acp::AcpInput;
+use vmux_agent::acp::AcpInput;
 use vmux_agent::service::SessionInput;
 
 pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> SharedResponse {
@@ -211,11 +211,16 @@ mod tests {
         let (agents, runtime) =
             vmux_agent::service::AgentSessions::new(tokio::runtime::Handle::current(), wake);
         drop(runtime);
+        let (acp_wake, acp_wake_inbox) = tokio::sync::mpsc::unbounded_channel();
+        drop(acp_wake_inbox);
+        let (acp, acp_runtime) =
+            vmux_agent::acp::AcpSessions::new(tokio::runtime::Handle::current(), acp_wake);
+        drop(acp_runtime);
         RemoteState {
             relay_token: Arc::from("token"),
             authorizations: crate::remote::authorization::RemoteAuthorizations::closed(),
             agents,
-            acp: crate::acp::AcpSessions::closed(),
+            acp,
             broker: vmux_agent::service::AgentBroker::new(
                 agent_tx,
                 Default::default(),

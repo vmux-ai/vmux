@@ -30,15 +30,14 @@ use vmux_core::ProcessId;
 use vmux_core::host::workspace::WorkspaceLocation;
 
 use super::projector::{AcpProjector, Intent, is_conversation_title_tool};
-use crate::process::{ProcessManager, ProcessUpdate};
-use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_api::protocol::{
     AgentAttachment, AgentFileTouched, AgentRequest, AgentRequestId, AgentRunStatus,
     ApprovalDecision, ServiceMessage, SharedEvent, compose_agent_prompt,
 };
 #[cfg(test)]
 use vmux_api::room::AssistantBlock;
-use vmux_api::room::Message;
+use vmux_api::room::{Message, RemoteApproval, RemoteSession, RemoteStatus};
+use vmux_process::{Process, ProcessManager, ProcessUpdate};
 
 const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
 const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
@@ -1850,7 +1849,7 @@ async fn create_terminal(
                             .await
                             .processes
                             .get(&id)
-                            .map(crate::process::Process::process_exit);
+                            .map(Process::process_exit);
                         if let Some(exit) = exit_after_lag(recorded) {
                             let _ = exit_tx.send(exit);
                             break;

@@ -1,6 +1,3 @@
-use crate::process::{
-    Process, ProcessCommandLifecycle, ProcessManager, ProcessSnapshot, ProcessUpdate,
-};
 use bevy::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -9,75 +6,17 @@ use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tokio::sync::{Mutex, broadcast, mpsc};
 use vmux_api::protocol::{
-    AgentAttachment, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
-    ServiceMessage, SharedMessage, compose_agent_prompt,
+    AgentAttachment, ClientMessage, ProcessId, ServiceMessage, SharedMessage, compose_agent_prompt,
 };
+use vmux_process::{Process, ProcessManager};
 
 use super::query::ProcessQueries;
-use crate::acp::AcpSessions;
 use crate::remote::authorization::RemoteAuthorizations;
 use crate::remote::client_operation::ClientOperations;
+use vmux_agent::acp::AcpSessions;
 use vmux_agent::service::AgentSessions;
 
 type PendingQueries = vmux_agent::service::AgentQueryResponses;
-
-impl ProcessUpdate {
-    fn into_service_message(self, process_id: ProcessId) -> ServiceMessage {
-        match self {
-            Self::Viewport(patch) => ServiceMessage::ViewportPatch {
-                process_id,
-                changed_lines: patch.changed_lines,
-                cursor: patch.cursor,
-                cols: patch.cols,
-                rows: patch.rows,
-                selection: patch.selection,
-                copy_mode: patch.copy_mode,
-                full: patch.full,
-                first_row: patch.first_row,
-                total_rows: patch.total_rows,
-                alt: patch.alt,
-                mouse: patch.mouse,
-                evicted_total: patch.evicted_total,
-            },
-            Self::Exited { exit_code } => ServiceMessage::ProcessExited {
-                process_id,
-                exit_code,
-            },
-            Self::Title(title) => ServiceMessage::ProcessTitle { process_id, title },
-            Self::Bell => ServiceMessage::Bell { process_id },
-            Self::CommandLifecycle(lifecycle) => ServiceMessage::CommandLifecycle {
-                process_id,
-                kind: match lifecycle {
-                    ProcessCommandLifecycle::Started => {
-                        vmux_api::protocol::CommandLifecycleKind::Started
-                    }
-                    ProcessCommandLifecycle::Ended { exit_code } => {
-                        vmux_api::protocol::CommandLifecycleKind::Ended { exit_code }
-                    }
-                },
-            },
-            Self::Mode(mode) => ServiceMessage::TerminalMode {
-                process_id,
-                mouse_capture: mode.mouse_capture,
-                copy_mode: mode.copy_mode,
-                alt_screen: mode.alt_screen,
-                focus_reporting: mode.focus_reporting,
-            },
-        }
-    }
-}
-
-impl ProcessSnapshot {
-    fn into_service_message(self, process_id: ProcessId) -> ServiceMessage {
-        ServiceMessage::Snapshot {
-            process_id,
-            lines: self.lines,
-            cursor: self.cursor,
-            cols: self.cols,
-            rows: self.rows,
-        }
-    }
-}
 
 pub struct ServiceDaemonPlugin;
 
@@ -186,48 +125,6 @@ fn start_service_daemon(
 
 type PendingCommands = vmux_agent::service::AgentCommandResponses;
 
-fn to_acp_mcp_server(
-    server: ManagedMcpServer,
-) -> Option<agent_client_protocol::schema::v1::McpServer> {
-    use agent_client_protocol::schema::v1::{
-        EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
-    };
-
-    if server.transport == ManagedMcpTransport::Stdio && server.cwd.is_some() {
-        tracing::warn!(
-            "managed MCP server {} skipped for ACP because ACP v1 does not support stdio cwd",
-            server.name
-        );
-        return None;
-    }
-    let headers = server
-        .headers
-        .into_iter()
-        .map(|(name, value)| HttpHeader::new(name, value))
-        .collect();
-    match server.transport {
-        ManagedMcpTransport::Stdio => server.command.map(|command| {
-            McpServer::Stdio(
-                McpServerStdio::new(server.name, command)
-                    .args(server.args)
-                    .env(
-                        server
-                            .env
-                            .into_iter()
-                            .map(|(name, value)| EnvVariable::new(name, value))
-                            .collect(),
-                    ),
-            )
-        }),
-        ManagedMcpTransport::Http => server
-            .url
-            .map(|url| McpServer::Http(McpServerHttp::new(server.name, url).headers(headers))),
-        ManagedMcpTransport::Sse => server
-            .url
-            .map(|url| McpServer::Sse(McpServerSse::new(server.name, url).headers(headers))),
-    }
-}
-
 fn page_agent_prompt(text: String, attachments: &[AgentAttachment]) -> String {
     if attachments.is_empty() {
         return text;
@@ -258,7 +155,7 @@ async fn route_agent_input(
     if acp_sessions
         .input(
             sid.clone(),
-            crate::acp::AcpInput::User {
+            vmux_agent::acp::AcpInput::User {
                 text: text.clone(),
                 context: context.clone(),
                 attachments: attachments.clone(),
@@ -1198,7 +1095,7 @@ async fn handle_client(
                 acp_sessions
                     .input(
                         sid,
-                        crate::acp::AcpInput::SetModel {
+                        vmux_agent::acp::AcpInput::SetModel {
                             request_id,
                             config_id,
                             model_id,
@@ -1216,7 +1113,7 @@ async fn handle_client(
                 acp_sessions
                     .input(
                         sid,
-                        crate::acp::AcpInput::SetMode {
+                        vmux_agent::acp::AcpInput::SetMode {
                             request_id,
                             config_id,
                             mode_id,
@@ -1227,7 +1124,7 @@ async fn handle_client(
 
             ClientMessage::Shared(SharedMessage::AgentCancel { sid }) => {
                 if !acp_sessions
-                    .input(sid.clone(), crate::acp::AcpInput::Cancel)
+                    .input(sid.clone(), vmux_agent::acp::AcpInput::Cancel)
                     .await
                 {
                     agent_sessions
@@ -1244,7 +1141,7 @@ async fn handle_client(
                 if !acp_sessions
                     .input(
                         sid.clone(),
-                        crate::acp::AcpInput::Approve {
+                        vmux_agent::acp::AcpInput::Approve {
                             call_id: call_id.clone(),
                             decision,
                         },
@@ -1291,22 +1188,6 @@ async fn handle_client(
                 managed_mcp_servers,
                 effort,
             } => {
-                let mut mcp_servers = mcp_command
-                    .map(|cmd| {
-                        vec![agent_client_protocol::schema::v1::McpServer::Stdio(
-                            agent_client_protocol::schema::v1::McpServerStdio::new(
-                                "vmux",
-                                std::path::PathBuf::from(cmd),
-                            )
-                            .args(mcp_args),
-                        )]
-                    })
-                    .unwrap_or_default();
-                mcp_servers.extend(
-                    managed_mcp_servers
-                        .into_iter()
-                        .filter_map(to_acp_mcp_server),
-                );
                 if let Err(message) = acp_sessions
                     .spawn(
                         sid.clone(),
@@ -1317,7 +1198,9 @@ async fn handle_client(
                         std::path::PathBuf::from(cwd),
                         anchor,
                         Arc::clone(&manager),
-                        mcp_servers,
+                        mcp_command,
+                        mcp_args,
+                        managed_mcp_servers,
                         resume_acp_session_id,
                         effort,
                     )
@@ -1411,9 +1294,13 @@ mod tests {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
         let (process_queries, _process_runtime) =
             ProcessQueries::new(Arc::clone(&manager), wake.clone());
-        let (agent_sessions, _agent_runtime) =
-            vmux_agent::service::AgentSessions::new(tokio::runtime::Handle::current(), wake);
-        let acp_sessions = crate::acp::AcpSessions::closed();
+        let (agent_sessions, _agent_runtime) = vmux_agent::service::AgentSessions::new(
+            tokio::runtime::Handle::current(),
+            wake.clone(),
+        );
+        let (acp_sessions, acp_runtime) =
+            vmux_agent::acp::AcpSessions::new(tokio::runtime::Handle::current(), wake);
+        drop(acp_runtime);
         let mut server = Box::pin(
             super::ServiceServer {
                 listener,
@@ -1459,23 +1346,6 @@ mod tests {
         assert_eq!(
             vmux_api::protocol::extract_display_prompt(&prompt),
             Some("")
-        );
-    }
-
-    #[test]
-    fn acp_rejects_stdio_mcp_server_with_working_directory() {
-        assert!(
-            to_acp_mcp_server(ManagedMcpServer {
-                name: "local".into(),
-                transport: ManagedMcpTransport::Stdio,
-                command: Some("server".into()),
-                args: Vec::new(),
-                env: Vec::new(),
-                cwd: Some("/tmp/project".into()),
-                url: None,
-                headers: Vec::new(),
-            })
-            .is_none()
         );
     }
 

@@ -10149,6 +10149,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vmux_agent"
 version = "0.0.35"
 dependencies = [
+ "agent-client-protocol",
  "base64 0.22.1",
  "bevy",
  "bevy_cef",
@@ -10170,7 +10171,9 @@ dependencies = [
  "serial_test",
  "tempfile",
  "tokio",
+ "tokio-util",
  "toml",
+ "tracing",
  "url",
  "uuid",
  "vmux_api",
@@ -10186,6 +10189,7 @@ dependencies = [
  "vmux_layout",
  "vmux_mcp",
  "vmux_path",
+ "vmux_process",
  "vmux_session",
  "vmux_setting",
  "vmux_simulator",
@@ -10830,6 +10834,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_process"
+version = "0.0.34"
+dependencies = [
+ "alacritty_terminal",
+ "libc",
+ "portable-pty",
+ "tokio",
+ "vmux_api",
+ "vmux_core",
+ "vte",
+]
+
+[[package]]
 name = "vmux_profile"
 version = "0.0.35"
 dependencies = [
@@ -10870,8 +10887,6 @@ dependencies = [
 name = "vmux_service"
 version = "0.0.35"
 dependencies = [
- "agent-client-protocol",
- "alacritty_terminal",
  "base64 0.22.1",
  "bevy",
  "bevy_app",
@@ -10884,7 +10899,6 @@ dependencies = [
  "mockito",
  "objc2-foundation 0.3.2",
  "objc2-service-management",
- "portable-pty",
  "quinn",
  "reqwest",
  "ring",
@@ -10895,7 +10909,6 @@ dependencies = [
  "serial_test",
  "tempfile",
  "tokio",
- "tokio-util",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -10905,9 +10918,9 @@ dependencies = [
  "vmux_api",
  "vmux_core",
  "vmux_path",
+ "vmux_process",
  "vmux_profile",
  "vmux_transport",
- "vte",
 ]
 
 [[package]]

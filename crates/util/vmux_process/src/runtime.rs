@@ -20,6 +20,7 @@ use std::{os::unix::ffi::OsStrExt, path::Component};
 use tokio::sync::{broadcast, mpsc};
 use vmux_api::protocol::{ProcessId, ProcessInfo};
 use vmux_core::event::*;
+use vmux_core::service::ServicePaths;
 
 const MAX_PTY_CHUNKS_PER_POLL: usize = 64;
 const _: () = assert!(MAX_PTY_CHUNKS_PER_POLL <= 256);
@@ -33,6 +34,52 @@ pub enum ProcessUpdate {
     Bell,
     CommandLifecycle(ProcessCommandLifecycle),
     Mode(ProcessMode),
+}
+
+impl ProcessUpdate {
+    pub fn into_service_message(self, process_id: ProcessId) -> vmux_api::protocol::ServiceMessage {
+        use vmux_api::protocol::{CommandLifecycleKind, ServiceMessage};
+
+        match self {
+            Self::Viewport(patch) => ServiceMessage::ViewportPatch {
+                process_id,
+                changed_lines: patch.changed_lines,
+                cursor: patch.cursor,
+                cols: patch.cols,
+                rows: patch.rows,
+                selection: patch.selection,
+                copy_mode: patch.copy_mode,
+                full: patch.full,
+                first_row: patch.first_row,
+                total_rows: patch.total_rows,
+                alt: patch.alt,
+                mouse: patch.mouse,
+                evicted_total: patch.evicted_total,
+            },
+            Self::Exited { exit_code } => ServiceMessage::ProcessExited {
+                process_id,
+                exit_code,
+            },
+            Self::Title(title) => ServiceMessage::ProcessTitle { process_id, title },
+            Self::Bell => ServiceMessage::Bell { process_id },
+            Self::CommandLifecycle(lifecycle) => ServiceMessage::CommandLifecycle {
+                process_id,
+                kind: match lifecycle {
+                    ProcessCommandLifecycle::Started => CommandLifecycleKind::Started,
+                    ProcessCommandLifecycle::Ended { exit_code } => {
+                        CommandLifecycleKind::Ended { exit_code }
+                    }
+                },
+            },
+            Self::Mode(mode) => ServiceMessage::TerminalMode {
+                process_id,
+                mouse_capture: mode.mouse_capture,
+                copy_mode: mode.copy_mode,
+                alt_screen: mode.alt_screen,
+                focus_reporting: mode.focus_reporting,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,6 +102,18 @@ pub struct ProcessSnapshot {
     pub cursor: TermCursor,
     pub cols: u16,
     pub rows: u16,
+}
+
+impl ProcessSnapshot {
+    pub fn into_service_message(self, process_id: ProcessId) -> vmux_api::protocol::ServiceMessage {
+        vmux_api::protocol::ServiceMessage::Snapshot {
+            process_id,
+            lines: self.lines,
+            cursor: self.cursor,
+            cols: self.cols,
+            rows: self.rows,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -260,7 +319,7 @@ pub struct Process {
     pub created_at: Instant,
     term: Term<ServiceEventProxy>,
     processor: Processor,
-    osc133: crate::host::osc133::Osc133Scanner,
+    osc133: crate::osc133::Osc133Scanner,
     command_ended_seq: u64,
     last_command_exit: Option<i32>,
     run_marker: crate::run_marker::RunMarkerScanner,
@@ -446,11 +505,11 @@ impl Process {
         wake_tx: mpsc::UnboundedSender<()>,
         reader_send_delay: Duration,
     ) -> Result<Self, String> {
-        crate::host::shell_integration::inject(
+        crate::shell_integration::inject(
             &command,
             &mut args,
             &mut env,
-            &crate::ServicePaths::shell_integration_dir(),
+            &ServicePaths::shell_integration_dir(),
         );
         let pty_system = NativePtySystem::default();
         let pair = pty_system
@@ -598,7 +657,7 @@ impl Process {
             created_at: Instant::now(),
             term,
             processor: Processor::new(),
-            osc133: crate::host::osc133::Osc133Scanner::new(),
+            osc133: crate::osc133::Osc133Scanner::new(),
             command_ended_seq: 0,
             last_command_exit: None,
             run_marker: crate::run_marker::RunMarkerScanner::new(),
@@ -1523,10 +1582,8 @@ impl Process {
             self.processor.advance(&mut self.term, &data);
             for event in self.osc133.feed(&data) {
                 let kind = match event {
-                    crate::host::osc133::Osc133Event::CommandStart => {
-                        ProcessCommandLifecycle::Started
-                    }
-                    crate::host::osc133::Osc133Event::CommandEnd(exit_code) => {
+                    crate::osc133::Osc133Event::CommandStart => ProcessCommandLifecycle::Started,
+                    crate::osc133::Osc133Event::CommandEnd(exit_code) => {
                         self.command_ended_seq = self.command_ended_seq.wrapping_add(1);
                         self.last_command_exit = exit_code;
                         ProcessCommandLifecycle::Ended { exit_code }

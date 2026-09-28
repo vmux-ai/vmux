@@ -1,7 +1,8 @@
 mod driver;
 mod projector;
 
-pub use driver::{AcpInput, AcpShared};
+pub use driver::AcpInput;
+use driver::AcpShared;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -16,10 +17,9 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use vmux_core::agent::SessionId;
 use vmux_core::{CreatedAt, ProcessId};
 
-use crate::process::ProcessManager;
-use crate::remote::RemoteSession;
-use vmux_api::protocol::ServiceMessage;
-use vmux_api::room::Message;
+use vmux_api::protocol::{ManagedMcpServer, ManagedMcpTransport, ServiceMessage};
+use vmux_api::room::{Message, RemoteSession};
+use vmux_process::ProcessManager;
 
 pub struct AcpSessionPlugin;
 
@@ -44,8 +44,73 @@ impl Plugin for AcpSessionPlugin {
     }
 }
 
+struct AcpMcpServers(Vec<agent_client_protocol::schema::v1::McpServer>);
+
+impl AcpMcpServers {
+    fn from_sources(
+        mcp_command: Option<String>,
+        mcp_args: Vec<String>,
+        managed: Vec<ManagedMcpServer>,
+    ) -> Self {
+        use agent_client_protocol::schema::v1::{McpServer, McpServerStdio};
+
+        let mut servers = Vec::new();
+        if let Some(command) = mcp_command {
+            servers.push(McpServer::Stdio(
+                McpServerStdio::new("vmux", PathBuf::from(command)).args(mcp_args),
+            ));
+        }
+        for server in managed {
+            if let Some(server) = Self::from_managed(server) {
+                servers.push(server);
+            }
+        }
+        Self(servers)
+    }
+
+    fn from_managed(
+        server: ManagedMcpServer,
+    ) -> Option<agent_client_protocol::schema::v1::McpServer> {
+        use agent_client_protocol::schema::v1::{
+            EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
+        };
+
+        if server.transport == ManagedMcpTransport::Stdio && server.cwd.is_some() {
+            tracing::warn!(
+                "managed MCP server {} skipped for ACP because ACP v1 does not support stdio cwd",
+                server.name
+            );
+            return None;
+        }
+        let mut headers = Vec::new();
+        for (name, value) in server.headers {
+            headers.push(HttpHeader::new(name, value));
+        }
+        match server.transport {
+            ManagedMcpTransport::Stdio => {
+                let command = server.command?;
+                let mut env = Vec::new();
+                for (name, value) in server.env {
+                    env.push(EnvVariable::new(name, value));
+                }
+                Some(McpServer::Stdio(
+                    McpServerStdio::new(server.name, command)
+                        .args(server.args)
+                        .env(env),
+                ))
+            }
+            ManagedMcpTransport::Http => server
+                .url
+                .map(|url| McpServer::Http(McpServerHttp::new(server.name, url).headers(headers))),
+            ManagedMcpTransport::Sse => server
+                .url
+                .map(|url| McpServer::Sse(McpServerSse::new(server.name, url).headers(headers))),
+        }
+    }
+}
+
 #[derive(Clone)]
-pub(crate) struct AcpSessions {
+pub struct AcpSessions {
     spawns: mpsc::UnboundedSender<SpawnAcpSession>,
     inputs: mpsc::UnboundedSender<AcpSessionInputRequest>,
     subscriptions: mpsc::UnboundedSender<SubscribeAcpSession>,
@@ -62,7 +127,7 @@ pub(crate) struct AcpSessions {
 }
 
 impl AcpSessions {
-    pub(crate) fn new(runtime: Handle, wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
+    pub fn new(runtime: Handle, wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
         let (spawns, spawn_inbox) = mpsc::unbounded_channel();
         let (inputs, input_inbox) = mpsc::unbounded_channel();
         let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
@@ -111,7 +176,7 @@ impl AcpSessions {
         )
     }
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn spawn(
+    pub async fn spawn(
         &self,
         sid: String,
         agent_id: String,
@@ -121,10 +186,13 @@ impl AcpSessions {
         cwd: PathBuf,
         anchor: ProcessId,
         manager: Arc<tokio::sync::Mutex<ProcessManager>>,
-        mcp_servers: Vec<agent_client_protocol::schema::v1::McpServer>,
+        mcp_command: Option<String>,
+        mcp_args: Vec<String>,
+        managed_mcp_servers: Vec<ManagedMcpServer>,
         resume: Option<String>,
         effort: Option<String>,
     ) -> Result<(), String> {
+        let mcp_servers = AcpMcpServers::from_sources(mcp_command, mcp_args, managed_mcp_servers);
         let (response, receiver) = oneshot::channel();
         self.spawns
             .send(SpawnAcpSession {
@@ -136,7 +204,7 @@ impl AcpSessions {
                 cwd,
                 anchor,
                 manager,
-                mcp_servers,
+                mcp_servers: mcp_servers.0,
                 resume,
                 effort,
                 response: Some(response),
@@ -150,7 +218,7 @@ impl AcpSessions {
             .map_err(|_| "ACP session spawn was cancelled".to_string())
     }
 
-    pub(crate) async fn input(&self, sid: String, input: AcpInput) -> bool {
+    pub async fn input(&self, sid: String, input: AcpInput) -> bool {
         let (response, receiver) = oneshot::channel();
         if self
             .inputs
@@ -167,10 +235,7 @@ impl AcpSessions {
         receiver.await.unwrap_or(false)
     }
 
-    pub(crate) async fn subscribe(
-        &self,
-        sid: String,
-    ) -> Option<broadcast::Receiver<ServiceMessage>> {
+    pub async fn subscribe(&self, sid: String) -> Option<broadcast::Receiver<ServiceMessage>> {
         let (response, receiver) = oneshot::channel();
         self.subscriptions
             .send(SubscribeAcpSession {
@@ -182,7 +247,7 @@ impl AcpSessions {
         receiver.await.ok().flatten()
     }
 
-    pub(crate) async fn snapshot(&self, sid: String) -> Option<ServiceMessage> {
+    pub async fn snapshot(&self, sid: String) -> Option<ServiceMessage> {
         let (response, receiver) = oneshot::channel();
         self.snapshots
             .send(SnapshotAcpSession {
@@ -194,7 +259,7 @@ impl AcpSessions {
         receiver.await.ok().flatten()
     }
 
-    pub(crate) async fn agent_info(&self, sid: String) -> Option<ServiceMessage> {
+    pub async fn agent_info(&self, sid: String) -> Option<ServiceMessage> {
         let (response, receiver) = oneshot::channel();
         self.agent_infos
             .send(AcpSessionAgentInfo {
@@ -206,7 +271,7 @@ impl AcpSessions {
         receiver.await.ok().flatten()
     }
 
-    pub(crate) async fn model_info(&self, sid: String) -> Option<ServiceMessage> {
+    pub async fn model_info(&self, sid: String) -> Option<ServiceMessage> {
         let (response, receiver) = oneshot::channel();
         self.model_infos
             .send(AcpSessionModelInfo {
@@ -218,7 +283,7 @@ impl AcpSessions {
         receiver.await.ok().flatten()
     }
 
-    pub(crate) async fn mode_info(&self, sid: String) -> Option<ServiceMessage> {
+    pub async fn mode_info(&self, sid: String) -> Option<ServiceMessage> {
         let (response, receiver) = oneshot::channel();
         self.mode_infos
             .send(AcpSessionModeInfo {
@@ -230,7 +295,7 @@ impl AcpSessions {
         receiver.await.ok().flatten()
     }
 
-    pub(crate) async fn remote_messages(&self, sid: String) -> Option<Vec<Message>> {
+    pub async fn remote_messages(&self, sid: String) -> Option<Vec<Message>> {
         let (response, receiver) = oneshot::channel();
         self.messages
             .send(AcpSessionMessages {
@@ -242,7 +307,7 @@ impl AcpSessions {
         receiver.await.ok().flatten()
     }
 
-    pub(crate) async fn remote_sessions(&self) -> Vec<RemoteSession> {
+    pub async fn remote_sessions(&self) -> Vec<RemoteSession> {
         let (response, receiver) = oneshot::channel();
         if self
             .lists
@@ -257,7 +322,7 @@ impl AcpSessions {
         receiver.await.unwrap_or_default()
     }
 
-    pub(crate) async fn remote_session(&self, sid: String) -> Option<RemoteSession> {
+    pub async fn remote_session(&self, sid: String) -> Option<RemoteSession> {
         let (response, receiver) = oneshot::channel();
         self.lookups
             .send(FindAcpSession {
@@ -269,7 +334,7 @@ impl AcpSessions {
         receiver.await.ok().flatten()
     }
 
-    pub(crate) async fn rebind_cwd(&self, sid: String, cwd: PathBuf) -> Result<(), String> {
+    pub async fn rebind_cwd(&self, sid: String, cwd: PathBuf) -> Result<(), String> {
         let (response, receiver) = oneshot::channel();
         self.rebinds
             .send(RebindAcpSession {
@@ -286,7 +351,7 @@ impl AcpSessions {
             .map_err(|_| "ACP workspace rebind was cancelled".to_string())?
     }
 
-    pub(crate) async fn close(&self, sid: String) -> bool {
+    pub async fn close(&self, sid: String) -> bool {
         let (response, receiver) = oneshot::channel();
         if self
             .closes
@@ -300,53 +365,6 @@ impl AcpSessions {
             return false;
         }
         receiver.await.unwrap_or(false)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn closed() -> Self {
-        let (wake, wake_inbox) = mpsc::unbounded_channel();
-        let (spawns, spawn_inbox) = mpsc::unbounded_channel();
-        let (inputs, input_inbox) = mpsc::unbounded_channel();
-        let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
-        let (snapshots, snapshot_inbox) = mpsc::unbounded_channel();
-        let (agent_infos, agent_info_inbox) = mpsc::unbounded_channel();
-        let (model_infos, model_info_inbox) = mpsc::unbounded_channel();
-        let (mode_infos, mode_info_inbox) = mpsc::unbounded_channel();
-        let (messages, message_inbox) = mpsc::unbounded_channel();
-        let (lists, list_inbox) = mpsc::unbounded_channel();
-        let (lookups, lookup_inbox) = mpsc::unbounded_channel();
-        let (rebinds, rebind_inbox) = mpsc::unbounded_channel();
-        let (closes, close_inbox) = mpsc::unbounded_channel();
-        drop((
-            wake_inbox,
-            spawn_inbox,
-            input_inbox,
-            subscription_inbox,
-            snapshot_inbox,
-            agent_info_inbox,
-            model_info_inbox,
-            mode_info_inbox,
-            message_inbox,
-            list_inbox,
-            lookup_inbox,
-            rebind_inbox,
-            close_inbox,
-        ));
-        Self {
-            spawns,
-            inputs,
-            subscriptions,
-            snapshots,
-            agent_infos,
-            model_infos,
-            mode_infos,
-            messages,
-            lists,
-            lookups,
-            rebinds,
-            closes,
-            wake,
-        }
     }
 }
 
@@ -773,5 +791,27 @@ fn reap_closed_acp_sessions(
         if task.0.is_finished() {
             commands.entity(entity).despawn();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stdio_mcp_server_with_working_directory_is_rejected() {
+        assert!(
+            AcpMcpServers::from_managed(ManagedMcpServer {
+                name: "local".into(),
+                transport: ManagedMcpTransport::Stdio,
+                command: Some("server".into()),
+                args: Vec::new(),
+                env: Vec::new(),
+                cwd: Some("/tmp/project".into()),
+                url: None,
+                headers: Vec::new(),
+            })
+            .is_none()
+        );
     }
 }

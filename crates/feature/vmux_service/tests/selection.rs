@@ -1,6 +1,6 @@
 use vmux_api::protocol::{CopyModeKey, ProcessId};
 use vmux_core::event::TermSelectionRange;
-use vmux_service::process::{Process, ProcessUpdate};
+use vmux_process::{Process, ProcessUpdate};
 
 static PTY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

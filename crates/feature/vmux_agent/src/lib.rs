@@ -2,6 +2,8 @@
 
 pub mod setup;
 
+#[cfg(all(host, feature = "service"))]
+pub mod acp;
 #[cfg(all(host, feature = "provider"))]
 pub mod http;
 #[cfg(all(host, feature = "provider"))]

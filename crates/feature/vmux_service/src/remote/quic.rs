@@ -539,11 +539,16 @@ mod live {
                 agent_wake,
             );
             drop(agent_runtime);
+            let (acp_wake, acp_wake_inbox) = mpsc::unbounded_channel();
+            drop(acp_wake_inbox);
+            let (acp, acp_runtime) =
+                vmux_agent::acp::AcpSessions::new(tokio::runtime::Handle::current(), acp_wake);
+            drop(acp_runtime);
             let state = super::super::server::RemoteState {
                 relay_token: Arc::from("relay-token"),
                 authorizations: authorizations.clone(),
                 agents,
-                acp: crate::acp::AcpSessions::closed(),
+                acp,
                 broker: vmux_agent::service::AgentBroker::new(
                     agent_tx,
                     Default::default(),

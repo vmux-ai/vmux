@@ -4,10 +4,10 @@ use crate::RelayToken;
 use base64::Engine;
 
 use crate::RemotePaths;
-use crate::acp::AcpSessions;
 use crate::remote::authorization::RemoteAuthorizations;
 use crate::remote::client_operation::ClientOperations;
 use crate::remote::{ClientOpId, RemoteMediaEntry, RemoteSession};
+use vmux_agent::acp::AcpSessions;
 use vmux_agent::service::{AgentBroker, AgentSessions};
 use vmux_api::protocol::AgentAttachment;
 use vmux_api::room::Message;

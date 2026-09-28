@@ -1,0 +1,20 @@
+[package]
+name = "vmux_process"
+description = "Shared terminal process runtime"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+alacritty_terminal = { workspace = true }
+portable-pty = { workspace = true }
+tokio = { workspace = true }
+vmux_api = { path = "../vmux_api" }
+vmux_core = { path = "../vmux_core" }
+vte = "0.15"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[lints]
+workspace = true

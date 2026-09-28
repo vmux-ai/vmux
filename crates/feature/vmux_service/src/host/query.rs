@@ -3,12 +3,12 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 
-use crate::process::ProcessManager;
 use vmux_api::protocol::{
     AgentCommandExit, AgentProcessCommandExit, AgentProcessRunCompletion, AgentReadProcessOutput,
     AgentReadProcessTranscript, AgentRequest, AgentRequestId, AgentRunCompletion, ProcessId,
     ServiceMessage,
 };
+use vmux_process::ProcessManager;
 
 #[derive(Component)]
 struct ProcessOutputQuery {
