@@ -557,7 +557,7 @@ impl CommandDefinition {
 pub struct CommandInvocation {
     pub caller: Entity,
     pub id: String,
-    pub arguments: serde_json::Value,
+    pub arguments: vmux_core::JsonArguments,
 }
 
 impl CommandInvocation {
@@ -565,17 +565,17 @@ impl CommandInvocation {
         Self {
             caller,
             id: id.into(),
-            arguments: serde_json::json!({}),
+            arguments: vmux_core::JsonArguments(serde_json::json!({})),
         }
     }
 
     pub fn with_arguments(mut self, arguments: serde_json::Value) -> Self {
-        self.arguments = arguments;
+        self.arguments = vmux_core::JsonArguments(arguments);
         self
     }
 
     pub fn argument<T: serde::de::DeserializeOwned>(&self, name: &str) -> Option<T> {
-        serde_json::from_value(self.arguments.get(name)?.clone()).ok()
+        serde_json::from_value(self.arguments.0.get(name)?.clone()).ok()
     }
 }
 
@@ -708,7 +708,7 @@ fn dispatch_command_invocations(
         let mut invocation = invocation.clone();
         invocation.id.clone_from(&definition.id);
         if let Some(mcp) = &definition.mcp
-            && let Err(error) = mcp.input_schema.validate_value(&invocation.arguments)
+            && let Err(error) = mcp.input_schema.validate_value(&invocation.arguments.0)
         {
             warn!(command = %definition.id, %error, "invalid command arguments");
             continue;

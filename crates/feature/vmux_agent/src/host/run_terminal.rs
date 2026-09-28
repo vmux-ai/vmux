@@ -761,7 +761,7 @@ mod tests {
                 font_size: 14.0,
                 line_height: 1.2,
                 padding: 4.0,
-                cursor_style: "block".to_string(),
+                cursor_style: vmux_api::terminal::CursorStyle::Block,
                 cursor_blink: true,
                 shell: "/opt/homebrew/bin/nu".to_string(),
             }],

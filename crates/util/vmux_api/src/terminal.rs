@@ -28,6 +28,38 @@ impl From<[[u8; 3]; 16]> for AnsiPalette {
     }
 }
 
+#[vmux_api::contract(Copy, Default, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum CursorStyle {
+    #[default]
+    Block,
+    Bar,
+    Underline,
+}
+
+impl CursorStyle {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Block => "block",
+            Self::Bar => "bar",
+            Self::Underline => "underline",
+        }
+    }
+}
+
+impl std::str::FromStr for CursorStyle {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "block" => Ok(Self::Block),
+            "bar" | "beam" => Ok(Self::Bar),
+            "underline" => Ok(Self::Underline),
+            _ => Err(format!("unknown terminal cursor style: {value}")),
+        }
+    }
+}
+
 #[vmux_api::contract(Default)]
 pub enum TermColor {
     #[default]

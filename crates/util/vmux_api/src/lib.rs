@@ -41,9 +41,9 @@ pub use page_metadata::{PageIdentity, PageMetadata};
 pub use process_id::ProcessId;
 pub use route::{InvalidVmuxRoute, VmuxRoute};
 pub use terminal::{
-    AnsiPalette, CursorShape, FLAG_BOLD, FLAG_DIM, FLAG_INVERSE, FLAG_ITALIC, FLAG_STRIKETHROUGH,
-    FLAG_UNDERLINE, LinkRange, RgbColor, TermColor, TermCursor, TermLine, TermSelectionRange,
-    TermSpan,
+    AnsiPalette, CursorShape, CursorStyle, FLAG_BOLD, FLAG_DIM, FLAG_INVERSE, FLAG_ITALIC,
+    FLAG_STRIKETHROUGH, FLAG_UNDERLINE, LinkRange, RgbColor, TermColor, TermCursor, TermLine,
+    TermSelectionRange, TermSpan,
 };
 pub use ui_state::{BatchedUiState, UiState, UiStatePatch};
 pub use vmux_macro::{

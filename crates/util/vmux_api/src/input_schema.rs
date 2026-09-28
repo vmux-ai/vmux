@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -44,6 +44,15 @@ pub struct InputSchema {
     reference: Option<String>,
     #[serde(default)]
     constant: Option<String>,
+}
+
+impl Serialize for InputSchema {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.to_json().serialize(serializer)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -559,5 +568,20 @@ mod tests {
                 .is_err()
         );
         assert!(schema.validate_value(&Value::Null).is_err());
+    }
+
+    #[test]
+    fn typed_schema_serializes_as_json_schema() {
+        let schema = InputSchema::object().required("url", InputSchema::string());
+
+        assert_eq!(
+            serde_json::to_value(schema).unwrap(),
+            serde_json::json!({
+                "type": "object",
+                "required": ["url"],
+                "properties": {"url": {"type": "string"}},
+                "additionalProperties": false,
+            })
+        );
     }
 }

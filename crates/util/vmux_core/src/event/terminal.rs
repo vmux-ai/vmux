@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{AnsiPalette, RgbColor, TermCursor, TermLine, TermSelectionRange};
+use super::{AnsiPalette, CursorStyle, RgbColor, TermCursor, TermLine, TermSelectionRange};
 
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 
@@ -24,7 +24,7 @@ pub struct TermThemeEvent {
     #[serde(default)]
     pub padding: f32,
     #[serde(default)]
-    pub cursor_style: String,
+    pub cursor_style: CursorStyle,
     #[serde(default)]
     pub cursor_blink: bool,
 }

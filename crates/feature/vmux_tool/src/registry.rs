@@ -230,7 +230,7 @@ pub struct ToolDispatchFlush;
 pub struct ToolDefinition {
     pub name: String,
     pub description: String,
-    pub input_schema: Value,
+    pub input_schema: InputSchema,
 }
 
 type ToolEntity<'w> = (
@@ -292,7 +292,7 @@ fn resolve_tool_catalogs(
                 ToolDefinition {
                     name: name.as_str().to_string(),
                     description,
-                    input_schema: schema.0.to_json(),
+                    input_schema: schema.0.clone(),
                 },
             ));
         }
@@ -372,6 +372,8 @@ impl ToolDefinition {
     ) -> Result<Vec<Self>, String> {
         for command in commands {
             let input_schema = Value::try_from(&command.input_schema)
+                .map_err(|error| format!("invalid command input schema: {error}"))?;
+            let input_schema = InputSchema::try_from(input_schema)
                 .map_err(|error| format!("invalid command input schema: {error}"))?;
             definitions.push(Self {
                 name: command.name,

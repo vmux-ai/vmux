@@ -1,9 +1,9 @@
 pub use vmux_api::space;
 pub use vmux_api::team;
 pub use vmux_api::{
-    AnsiPalette, CursorShape, FLAG_BOLD, FLAG_DIM, FLAG_INVERSE, FLAG_ITALIC, FLAG_STRIKETHROUGH,
-    FLAG_UNDERLINE, LinkRange, RgbColor, TermColor, TermCursor, TermLine, TermSelectionRange,
-    TermSpan, command_bar::CommandBarPicker,
+    AnsiPalette, CursorShape, CursorStyle, FLAG_BOLD, FLAG_DIM, FLAG_INVERSE, FLAG_ITALIC,
+    FLAG_STRIKETHROUGH, FLAG_UNDERLINE, LinkRange, RgbColor, TermColor, TermCursor, TermLine,
+    TermSelectionRange, TermSpan, command_bar::CommandBarPicker,
 };
 
 mod editor;

@@ -535,7 +535,7 @@ fn TerminalRow(
                     span: span.clone(),
                     span_idx,
                     cursor: state.cursor.clone(),
-                    cursor_style: "block",
+                    cursor_style: vmux_api::terminal::CursorStyle::Block,
                 }
             }
             if let Some((sel_start, sel_end)) = selected_cols {
@@ -626,11 +626,10 @@ fn TermSpanView(
     span: TermSpan,
     span_idx: usize,
     cursor: Option<TermCursor>,
-    cursor_style: String,
+    cursor_style: vmux_api::terminal::CursorStyle,
 ) -> Element {
     let span = &span;
     let cursor = cursor.as_ref();
-    let cursor_style = cursor_style.as_str();
     let classes = span_classes(span);
     let style = span_inline_style(span);
 

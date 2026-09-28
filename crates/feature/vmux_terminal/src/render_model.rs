@@ -103,23 +103,27 @@ pub fn span_looks_like_suggestion(span: &TermSpan) -> bool {
 pub fn cursor_cell_style(
     span_classes: &str,
     span_style: &str,
-    cursor_style: &str,
+    cursor_style: vmux_api::terminal::CursorStyle,
     suggestion: bool,
 ) -> (String, String) {
     if suggestion {
         let cursor_class = match cursor_style {
-            "underline" => "border-b-2 border-term-cursor",
-            "bar" => "border-l-2 border-term-cursor",
-            _ => "bg-term-cursor",
+            vmux_api::terminal::CursorStyle::Underline => "border-b-2 border-term-cursor",
+            vmux_api::terminal::CursorStyle::Bar => "border-l-2 border-term-cursor",
+            vmux_api::terminal::CursorStyle::Block => "bg-term-cursor",
         };
         let classes = cn([span_classes, cursor_class]);
         return (classes, span_style.to_string());
     }
 
     let (classes, style) = match cursor_style {
-        "underline" => ("border-b-2 border-term-cursor".to_string(), ""),
-        "bar" => ("border-l-2 border-term-cursor".to_string(), ""),
-        _ => ("bg-term-cursor".to_string(), "color:var(--term-bg);"),
+        vmux_api::terminal::CursorStyle::Underline => {
+            ("border-b-2 border-term-cursor".to_string(), "")
+        }
+        vmux_api::terminal::CursorStyle::Bar => ("border-l-2 border-term-cursor".to_string(), ""),
+        vmux_api::terminal::CursorStyle::Block => {
+            ("bg-term-cursor".to_string(), "color:var(--term-bg);")
+        }
     };
     (classes, style.to_string())
 }
@@ -139,7 +143,12 @@ mod tests {
         let classes = span_classes(&span);
         let style = span_inline_style(&span);
 
-        let (cursor_classes, cursor_style) = cursor_cell_style(&classes, &style, "block", true);
+        let (cursor_classes, cursor_style) = cursor_cell_style(
+            &classes,
+            &style,
+            vmux_api::terminal::CursorStyle::Block,
+            true,
+        );
 
         assert!(cursor_classes.contains("text-ansi-8"));
         assert!(cursor_classes.contains("bg-term-cursor"));
@@ -158,7 +167,8 @@ mod tests {
         };
         let classes = span_classes(&span);
 
-        let (cursor_classes, cursor_style) = cursor_cell_style(&classes, "", "block", true);
+        let (cursor_classes, cursor_style) =
+            cursor_cell_style(&classes, "", vmux_api::terminal::CursorStyle::Block, true);
 
         assert!(cursor_classes.contains("opacity-50"));
         assert!(!cursor_style.contains("animation:"));
@@ -166,7 +176,8 @@ mod tests {
 
     #[test]
     fn block_cursor_has_static_inverse_colors() {
-        let (cursor_classes, cursor_style) = cursor_cell_style("", "", "block", false);
+        let (cursor_classes, cursor_style) =
+            cursor_cell_style("", "", vmux_api::terminal::CursorStyle::Block, false);
 
         assert_eq!(cursor_classes, "bg-term-cursor");
         assert_eq!(cursor_style, "color:var(--term-bg);");

@@ -934,8 +934,12 @@ pub struct TerminalTheme {
     pub line_height: f32,
     #[serde(default = "default_padding")]
     pub padding: f32,
-    #[serde(default = "default_cursor_style")]
-    pub cursor_style: String,
+    #[serde(
+        default = "default_cursor_style",
+        deserialize_with = "deserialize_cursor_style",
+        serialize_with = "serialize_cursor_style"
+    )]
+    pub cursor_style: vmux_api::terminal::CursorStyle,
     #[serde(default = "default_cursor_blink")]
     pub cursor_blink: bool,
     #[serde(default = "default_shell")]
@@ -958,8 +962,30 @@ fn default_padding() -> f32 {
     4.0
 }
 
-fn default_cursor_style() -> String {
-    "block".to_string()
+fn default_cursor_style() -> vmux_api::terminal::CursorStyle {
+    vmux_api::terminal::CursorStyle::Block
+}
+
+fn deserialize_cursor_style<'de, D>(
+    deserializer: D,
+) -> Result<vmux_api::terminal::CursorStyle, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use std::str::FromStr;
+
+    let value = String::deserialize(deserializer)?;
+    vmux_api::terminal::CursorStyle::from_str(&value).map_err(serde::de::Error::custom)
+}
+
+fn serialize_cursor_style<S>(
+    style: &vmux_api::terminal::CursorStyle,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(style.as_str())
 }
 
 fn default_cursor_blink() -> bool {
@@ -1426,7 +1452,7 @@ fn sparse_theme_ron(theme: &TerminalTheme, base: Option<&TerminalTheme>) -> Resu
     }
     if theme.cursor_style
         != base
-            .map(|b| b.cursor_style.clone())
+            .map(|b| b.cursor_style)
             .unwrap_or_else(default_cursor_style)
     {
         fields.push(format!("cursor_style: {}", leaf_ron(&theme.cursor_style)?));

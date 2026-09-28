@@ -119,15 +119,15 @@ fn sync_terminal_theme(
     *last_theme_hash = hash;
 
     let event = TermThemeEvent {
-        foreground: colors.foreground.into(),
-        background: colors.background.into(),
-        cursor: colors.cursor.into(),
-        ansi: colors.ansi.into(),
+        foreground: colors.foreground,
+        background: colors.background,
+        cursor: colors.cursor,
+        ansi: colors.ansi,
         font_family: theme.font_family.clone(),
         font_size: theme.font_size,
         line_height: theme.line_height,
         padding: theme.padding,
-        cursor_style: theme.cursor_style.clone(),
+        cursor_style: theme.cursor_style,
         cursor_blink: theme.cursor_blink,
     };
     let targets: Vec<Entity> = if theme_changed {
@@ -157,7 +157,7 @@ mod tests {
             font_size,
             line_height: 1.2,
             padding: 4.0,
-            cursor_style: "block".to_string(),
+            cursor_style: vmux_api::terminal::CursorStyle::Block,
             cursor_blink: true,
             shell: "/bin/sh".to_string(),
         }

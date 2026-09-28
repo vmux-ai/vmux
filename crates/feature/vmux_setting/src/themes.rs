@@ -1,22 +1,23 @@
 use serde::{Deserialize, Serialize};
+use vmux_api::terminal::{AnsiPalette, RgbColor};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TerminalColorScheme {
     pub name: String,
-    pub foreground: [u8; 3],
-    pub background: [u8; 3],
-    pub cursor: [u8; 3],
-    pub ansi: [[u8; 3]; 16],
+    pub foreground: RgbColor,
+    pub background: RgbColor,
+    pub cursor: RgbColor,
+    pub ansi: AnsiPalette,
 }
 
 pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
     vec![
         TerminalColorScheme {
             name: "github-dark".into(),
-            foreground: [230, 237, 243],
-            background: [13, 17, 23],
-            cursor: [47, 129, 247],
-            ansi: [
+            foreground: RgbColor::from([230, 237, 243]),
+            background: RgbColor::from([13, 17, 23]),
+            cursor: RgbColor::from([47, 129, 247]),
+            ansi: AnsiPalette::from([
                 [72, 79, 88],
                 [255, 123, 114],
                 [63, 185, 80],
@@ -33,14 +34,14 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [210, 168, 255],
                 [86, 212, 221],
                 [255, 255, 255],
-            ],
+            ]),
         },
         TerminalColorScheme {
             name: "github-light".into(),
-            foreground: [31, 35, 40],
-            background: [255, 255, 255],
-            cursor: [9, 105, 218],
-            ansi: [
+            foreground: RgbColor::from([31, 35, 40]),
+            background: RgbColor::from([255, 255, 255]),
+            cursor: RgbColor::from([9, 105, 218]),
+            ansi: AnsiPalette::from([
                 [36, 41, 47],
                 [207, 34, 46],
                 [17, 99, 41],
@@ -57,14 +58,14 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [164, 117, 249],
                 [49, 146, 170],
                 [140, 149, 159],
-            ],
+            ]),
         },
         TerminalColorScheme {
             name: "catppuccin-mocha".into(),
-            foreground: [205, 214, 244],
-            background: [30, 30, 46],
-            cursor: [245, 224, 220],
-            ansi: [
+            foreground: RgbColor::from([205, 214, 244]),
+            background: RgbColor::from([30, 30, 46]),
+            cursor: RgbColor::from([245, 224, 220]),
+            ansi: AnsiPalette::from([
                 [69, 71, 90],
                 [243, 139, 168],
                 [166, 227, 161],
@@ -81,14 +82,14 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [245, 194, 231],
                 [148, 226, 213],
                 [166, 173, 200],
-            ],
+            ]),
         },
         TerminalColorScheme {
             name: "catppuccin-latte".into(),
-            foreground: [76, 79, 105],
-            background: [239, 241, 245],
-            cursor: [220, 138, 120],
-            ansi: [
+            foreground: RgbColor::from([76, 79, 105]),
+            background: RgbColor::from([239, 241, 245]),
+            cursor: RgbColor::from([220, 138, 120]),
+            ansi: AnsiPalette::from([
                 [172, 176, 190],
                 [210, 15, 57],
                 [64, 160, 43],
@@ -105,14 +106,14 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [234, 118, 203],
                 [4, 165, 229],
                 [92, 95, 119],
-            ],
+            ]),
         },
         TerminalColorScheme {
             name: "catppuccin-frappe".into(),
-            foreground: [198, 208, 245],
-            background: [48, 52, 70],
-            cursor: [242, 213, 207],
-            ansi: [
+            foreground: RgbColor::from([198, 208, 245]),
+            background: RgbColor::from([48, 52, 70]),
+            cursor: RgbColor::from([242, 213, 207]),
+            ansi: AnsiPalette::from([
                 [81, 87, 109],
                 [231, 130, 132],
                 [166, 209, 137],
@@ -129,14 +130,14 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [244, 184, 228],
                 [129, 200, 190],
                 [165, 173, 206],
-            ],
+            ]),
         },
         TerminalColorScheme {
             name: "catppuccin-macchiato".into(),
-            foreground: [202, 211, 245],
-            background: [36, 39, 58],
-            cursor: [244, 219, 214],
-            ansi: [
+            foreground: RgbColor::from([202, 211, 245]),
+            background: RgbColor::from([36, 39, 58]),
+            cursor: RgbColor::from([244, 219, 214]),
+            ansi: AnsiPalette::from([
                 [73, 77, 100],
                 [237, 135, 150],
                 [166, 218, 149],
@@ -153,14 +154,14 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [245, 189, 230],
                 [139, 213, 202],
                 [165, 173, 203],
-            ],
+            ]),
         },
         TerminalColorScheme {
             name: "dracula".into(),
-            foreground: [248, 248, 242],
-            background: [40, 42, 54],
-            cursor: [248, 248, 242],
-            ansi: [
+            foreground: RgbColor::from([248, 248, 242]),
+            background: RgbColor::from([40, 42, 54]),
+            cursor: RgbColor::from([248, 248, 242]),
+            ansi: AnsiPalette::from([
                 [33, 34, 44],
                 [255, 85, 85],
                 [80, 250, 123],
@@ -177,14 +178,14 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [255, 146, 223],
                 [164, 255, 255],
                 [255, 255, 255],
-            ],
+            ]),
         },
         TerminalColorScheme {
             name: "tokyo-night".into(),
-            foreground: [192, 202, 245],
-            background: [26, 27, 38],
-            cursor: [192, 202, 245],
-            ansi: [
+            foreground: RgbColor::from([192, 202, 245]),
+            background: RgbColor::from([26, 27, 38]),
+            cursor: RgbColor::from([192, 202, 245]),
+            ansi: AnsiPalette::from([
                 [65, 72, 104],
                 [247, 118, 142],
                 [158, 206, 106],
@@ -201,14 +202,14 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [187, 154, 247],
                 [125, 207, 255],
                 [192, 202, 245],
-            ],
+            ]),
         },
         TerminalColorScheme {
             name: "nord".into(),
-            foreground: [216, 222, 233],
-            background: [46, 52, 64],
-            cursor: [216, 222, 233],
-            ansi: [
+            foreground: RgbColor::from([216, 222, 233]),
+            background: RgbColor::from([46, 52, 64]),
+            cursor: RgbColor::from([216, 222, 233]),
+            ansi: AnsiPalette::from([
                 [59, 66, 82],
                 [191, 97, 106],
                 [163, 190, 140],
@@ -225,14 +226,14 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [180, 142, 173],
                 [143, 188, 187],
                 [236, 239, 244],
-            ],
+            ]),
         },
         TerminalColorScheme {
             name: "solarized-dark".into(),
-            foreground: [131, 148, 150],
-            background: [0, 43, 54],
-            cursor: [131, 148, 150],
-            ansi: [
+            foreground: RgbColor::from([131, 148, 150]),
+            background: RgbColor::from([0, 43, 54]),
+            cursor: RgbColor::from([131, 148, 150]),
+            ansi: AnsiPalette::from([
                 [7, 54, 66],
                 [220, 50, 47],
                 [133, 153, 0],
@@ -249,14 +250,14 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [108, 113, 196],
                 [147, 161, 161],
                 [253, 246, 227],
-            ],
+            ]),
         },
         TerminalColorScheme {
             name: "solarized-light".into(),
-            foreground: [101, 123, 131],
-            background: [253, 246, 227],
-            cursor: [101, 123, 131],
-            ansi: [
+            foreground: RgbColor::from([101, 123, 131]),
+            background: RgbColor::from([253, 246, 227]),
+            cursor: RgbColor::from([101, 123, 131]),
+            ansi: AnsiPalette::from([
                 [238, 232, 213],
                 [220, 50, 47],
                 [133, 153, 0],
@@ -273,14 +274,14 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [108, 113, 196],
                 [147, 161, 161],
                 [0, 43, 54],
-            ],
+            ]),
         },
         TerminalColorScheme {
             name: "gruvbox-dark".into(),
-            foreground: [235, 219, 178],
-            background: [40, 40, 40],
-            cursor: [235, 219, 178],
-            ansi: [
+            foreground: RgbColor::from([235, 219, 178]),
+            background: RgbColor::from([40, 40, 40]),
+            cursor: RgbColor::from([235, 219, 178]),
+            ansi: AnsiPalette::from([
                 [40, 40, 40],
                 [204, 36, 29],
                 [152, 151, 26],
@@ -297,14 +298,14 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [211, 134, 155],
                 [142, 192, 124],
                 [235, 219, 178],
-            ],
+            ]),
         },
         TerminalColorScheme {
             name: "one-dark".into(),
-            foreground: [171, 178, 191],
-            background: [40, 44, 52],
-            cursor: [171, 178, 191],
-            ansi: [
+            foreground: RgbColor::from([171, 178, 191]),
+            background: RgbColor::from([40, 44, 52]),
+            cursor: RgbColor::from([171, 178, 191]),
+            ansi: AnsiPalette::from([
                 [40, 44, 52],
                 [224, 108, 117],
                 [152, 195, 121],
@@ -321,14 +322,14 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [198, 120, 221],
                 [86, 182, 194],
                 [255, 255, 255],
-            ],
+            ]),
         },
         TerminalColorScheme {
             name: "rose-pine".into(),
-            foreground: [224, 222, 244],
-            background: [25, 23, 36],
-            cursor: [224, 222, 244],
-            ansi: [
+            foreground: RgbColor::from([224, 222, 244]),
+            background: RgbColor::from([25, 23, 36]),
+            cursor: RgbColor::from([224, 222, 244]),
+            ansi: AnsiPalette::from([
                 [38, 35, 53],
                 [235, 111, 146],
                 [49, 116, 143],
@@ -345,14 +346,14 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [196, 167, 231],
                 [234, 154, 151],
                 [224, 222, 244],
-            ],
+            ]),
         },
         TerminalColorScheme {
             name: "kanagawa".into(),
-            foreground: [220, 215, 186],
-            background: [31, 31, 40],
-            cursor: [195, 176, 135],
-            ansi: [
+            foreground: RgbColor::from([220, 215, 186]),
+            background: RgbColor::from([31, 31, 40]),
+            cursor: RgbColor::from([195, 176, 135]),
+            ansi: AnsiPalette::from([
                 [22, 22, 29],
                 [195, 64, 67],
                 [118, 148, 106],
@@ -369,7 +370,7 @@ pub fn get_builtin_themes() -> Vec<TerminalColorScheme> {
                 [148, 130, 196],
                 [127, 180, 169],
                 [220, 215, 186],
-            ],
+            ]),
         },
     ]
 }

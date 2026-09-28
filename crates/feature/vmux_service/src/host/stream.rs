@@ -29,7 +29,7 @@ pub enum StopReason {
 pub struct ToolDef {
     pub name: String,
     pub description: String,
-    pub input_schema: serde_json::Value,
+    pub input_schema: vmux_api::InputSchema,
     pub read_only: bool,
 }
 

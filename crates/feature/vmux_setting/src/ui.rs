@@ -9,7 +9,6 @@ use crate::state::{
     SettingsUiState,
 };
 use dioxus::prelude::*;
-use serde_json::Value;
 use vmux_ui::components::button::{Button, ButtonVariant};
 use vmux_ui::components::card::{Card, CardContent, CardDescription, CardHeader, CardTitle};
 use vmux_ui::components::input::Input;
@@ -276,7 +275,10 @@ fn Toggle(path: String, value: bool) -> Element {
         Switch {
             checked: value,
             on_checked_change: move |checked| {
-                SettingsWriteIntent::send(&path, serde_json::json!(checked));
+                let _ = send(&SettingsRequest {
+                    path: path.clone(),
+                    value: serde_json::json!(checked).into(),
+                });
             },
             SwitchThumb { attributes: vec![] }
         }
@@ -304,7 +306,10 @@ fn IntInput(path: String, value: u64) -> Element {
                 let value = event.value();
                 draft.set(value.clone());
                 if let Ok(value) = value.parse::<u64>() {
-                    SettingsWriteIntent::send(&path, serde_json::json!(value));
+                    let _ = send(&SettingsRequest {
+                        path: path.clone(),
+                        value: serde_json::json!(value).into(),
+                    });
                 }
             },
             placeholder: None::<String>,
@@ -334,7 +339,10 @@ fn NumberInput(path: String, value: f64, step: f64) -> Element {
                 let value = event.value();
                 draft.set(value.clone());
                 if let Ok(value) = value.parse::<f64>() {
-                    SettingsWriteIntent::send(&path, serde_json::json!(value));
+                    let _ = send(&SettingsRequest {
+                        path: path.clone(),
+                        value: serde_json::json!(value).into(),
+                    });
                 }
             },
             placeholder: None::<String>,
@@ -364,7 +372,10 @@ fn TextInput(path: String, value: String, placeholder: Option<String>) -> Elemen
             oninput: move |event: FormEvent| {
                 let value = event.value();
                 draft.set(value.clone());
-                SettingsWriteIntent::send(&path, serde_json::json!(value));
+                let _ = send(&SettingsRequest {
+                    path: path.clone(),
+                    value: serde_json::json!(value).into(),
+                });
             },
             placeholder: None::<String>,
             children: rsx! {},
@@ -382,7 +393,10 @@ fn SelectInput(path: String, value: String, options: Vec<SettingsSelectOption>) 
             placeholder: Into::<ReadSignal<String>>::into(Signal::new(String::new())),
             on_value_change: Callback::new(move |value: Option<String>| {
                 if let Some(value) = value {
-                    SettingsWriteIntent::send(&path, serde_json::json!(value));
+                    let _ = send(&SettingsRequest {
+                        path: path.clone(),
+                        value: serde_json::json!(value).into(),
+                    });
                 }
             }),
             attributes: vec![],
@@ -547,16 +561,17 @@ fn ChordEditor(path: String, text: String) -> Element {
                         key => key.to_string(),
                     };
                     let modifiers = event.modifiers();
-                    SettingsWriteIntent::send(
-                        &path,
-                        serde_json::json!({
+                    let _ = send(&SettingsRequest {
+                        path: path.clone(),
+                        value: serde_json::json!({
                             "key": key,
                             "ctrl": modifiers.contains(Modifiers::CONTROL),
                             "shift": modifiers.contains(Modifiers::SHIFT),
                             "alt": modifiers.contains(Modifiers::ALT),
                             "super_key": modifiers.contains(Modifiers::META),
-                        }),
-                    );
+                        })
+                        .into(),
+                    });
                     feedback.set(Some(translate("settings-saved")));
                     recording.set(false);
                 },
@@ -589,16 +604,5 @@ fn Kbd(text: String) -> Element {
         span { class: "inline-flex items-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-[11px] text-foreground",
             "{text}"
         }
-    }
-}
-
-struct SettingsWriteIntent;
-
-impl SettingsWriteIntent {
-    fn send(path: &str, value: Value) {
-        let _ = send(&SettingsRequest {
-            path: path.to_string(),
-            value: value.into(),
-        });
     }
 }

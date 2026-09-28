@@ -233,7 +233,7 @@ mod tests {
         let tools = vec![ToolDef {
             name: "list_spaces".into(),
             description: "desc".into(),
-            input_schema: json!({"type":"object"}),
+            input_schema: vmux_api::InputSchema::object(),
             read_only: true,
         }];
         let out = tools_to_function_specs(&tools);
