@@ -2,11 +2,11 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use super::{CliAgentStrategy, CliModelCatalog, ResumableSession, lines_skipping_invalid_utf8};
-use crate::strategy::AgentStrategy;
-use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
-
-pub struct VibeStrategy;
+use super::{
+    CliModelCatalog, CliStrategy, ResumableSession, empty_args, empty_prompt_history,
+    lines_skipping_invalid_utf8,
+};
+use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
 
 fn vibe_home() -> PathBuf {
     std::env::var("VIBE_HOME")
@@ -17,115 +17,112 @@ fn vibe_home() -> PathBuf {
         })
 }
 
-impl AgentStrategy for VibeStrategy {
-    fn kind(&self) -> AgentKind {
-        AgentKind::Vibe
-    }
+pub(super) const CLI: CliStrategy = CliStrategy {
+    kind: AgentKind::Vibe,
+    sessions_root,
+    build_args,
+    model_catalog: VibeModels::load,
+    model_args: empty_args,
+    model_env,
+    effort_args: empty_args,
+    build_env,
+    prepare_launch,
+    discover_session,
+    detect_end_time,
+    list_sessions,
+    latest_message: vibe_latest_message,
+    prompt_history: empty_prompt_history,
+    load_transcript,
+};
 
-    fn variant(&self) -> AgentVariant {
-        AgentVariant::Cli
-    }
+fn sessions_root() -> PathBuf {
+    vibe_home().join("logs").join("session")
 }
 
-impl CliAgentStrategy for VibeStrategy {
-    fn sessions_root(&self) -> PathBuf {
-        vibe_home().join("logs").join("session")
+fn build_args(_mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
+    let mut args = vec!["--trust".to_string()];
+    for tool in VIBE_WEB_TOOLS {
+        args.push("--disabled-tools".to_string());
+        args.push(tool.to_string());
     }
-
-    fn build_args(&self, _mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
-        let mut args = vec!["--trust".to_string()];
-        for tool in VIBE_WEB_TOOLS {
-            args.push("--disabled-tools".to_string());
-            args.push(tool.to_string());
-        }
-        if vmux_core::profile::is_test_session() {
-            args.push("--auto-approve".to_string());
-        }
-        if let Some(sid) = session_id {
-            args.push("--resume".to_string());
-            args.push(sid.to_string());
-        }
-        args
+    if vmux_core::profile::is_test_session() {
+        args.push("--auto-approve".to_string());
     }
-
-    fn model_catalog(&self) -> CliModelCatalog {
-        VibeModels::load()
+    if let Some(sid) = session_id {
+        args.push("--resume".to_string());
+        args.push(sid.to_string());
     }
+    args
+}
 
-    fn model_env(&self, model: &str) -> Vec<(String, String)> {
-        vec![("VIBE_ACTIVE_MODEL".to_string(), model.to_string())]
-    }
+fn model_env(model: &str) -> Vec<(String, String)> {
+    vec![("VIBE_ACTIVE_MODEL".to_string(), model.to_string())]
+}
 
-    fn build_env(&self, mcp: &McpServerConfig) -> Vec<(String, String)> {
-        let mcp_json = serialize_vibe_mcp_env(mcp);
-        let mut env = vec![
-            ("VIBE_MCP_SERVERS".to_string(), mcp_json),
-            (
-                "VIBE_ENABLE_EXPERIMENTAL_HOOKS".to_string(),
-                "true".to_string(),
+fn build_env(mcp: &McpServerConfig) -> Vec<(String, String)> {
+    let mcp_json = serialize_vibe_mcp_env(mcp);
+    let mut env = vec![
+        ("VIBE_MCP_SERVERS".to_string(), mcp_json),
+        (
+            "VIBE_ENABLE_EXPERIMENTAL_HOOKS".to_string(),
+            "true".to_string(),
+        ),
+        (
+            "VIBE_SKILL_PATHS".to_string(),
+            merged_skill_paths(
+                std::env::var("VIBE_SKILL_PATHS").ok().as_deref(),
+                &vmux_core::knowledge::KnowledgeVault::user()
+                    .skills()
+                    .into_path(),
             ),
-            (
-                "VIBE_SKILL_PATHS".to_string(),
-                merged_skill_paths(
-                    std::env::var("VIBE_SKILL_PATHS").ok().as_deref(),
-                    &vmux_core::knowledge::KnowledgeVault::user()
-                        .skills()
-                        .into_path(),
-                ),
-            ),
-        ];
-        env.extend(crate::managed_mcp::McpAuthorization::environment());
-        env
-    }
+        ),
+    ];
+    env.extend(crate::managed_mcp::McpAuthorization::environment());
+    env
+}
 
-    fn prepare_launch(&self, mcp: &McpServerConfig) {
-        ensure_vibe_hooks(&mcp.command);
-    }
+fn prepare_launch(mcp: &McpServerConfig) {
+    ensure_vibe_hooks(&mcp.command);
+}
 
-    fn discover_session(
-        &self,
-        cwd: &Path,
-        spawn_time: SystemTime,
-        claimed: &HashSet<String>,
-    ) -> Option<String> {
-        discover_vibe_session_id(&self.sessions_root(), cwd, spawn_time, claimed)
-    }
+fn discover_session(
+    cwd: &Path,
+    spawn_time: SystemTime,
+    claimed: &HashSet<String>,
+) -> Option<String> {
+    discover_vibe_session_id(&sessions_root(), cwd, spawn_time, claimed)
+}
 
-    fn detect_end_time(&self, session_id: &str) -> bool {
-        let root = self.sessions_root();
-        let Ok(entries) = std::fs::read_dir(&root) else {
-            return false;
+fn detect_end_time(session_id: &str) -> bool {
+    let root = sessions_root();
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let meta_path = entry.path().join("meta.json");
+        let Ok(text) = std::fs::read_to_string(&meta_path) else {
+            continue;
         };
-        for entry in entries.flatten() {
-            let meta_path = entry.path().join("meta.json");
-            let Ok(text) = std::fs::read_to_string(&meta_path) else {
-                continue;
-            };
-            let Ok(head) = serde_json::from_str::<MetaJsonHead>(&text) else {
-                continue;
-            };
-            if head.session_id != session_id {
-                continue;
-            }
-            let Ok(exit) = serde_json::from_str::<MetaJsonExit>(&text) else {
-                continue;
-            };
-            return exit.end_time.is_some();
+        let Ok(head) = serde_json::from_str::<MetaJsonHead>(&text) else {
+            continue;
+        };
+        if head.session_id != session_id {
+            continue;
         }
-        false
+        let Ok(exit) = serde_json::from_str::<MetaJsonExit>(&text) else {
+            continue;
+        };
+        return exit.end_time.is_some();
     }
+    false
+}
 
-    fn list_sessions(&self) -> Vec<ResumableSession> {
-        list_vibe_sessions(&self.sessions_root())
-    }
+fn list_sessions() -> Vec<ResumableSession> {
+    list_vibe_sessions(&sessions_root())
+}
 
-    fn latest_message(&self, transcript: &Path) -> String {
-        vibe_latest_message(transcript)
-    }
-
-    fn load_transcript(&self, session_id: &str) -> Result<Vec<Message>, String> {
-        load_vibe_transcript(&self.sessions_root(), session_id)
-    }
+fn load_transcript(session_id: &str) -> Result<Vec<Message>, String> {
+    load_vibe_transcript(&sessions_root(), session_id)
 }
 
 #[derive(Default, serde::Deserialize)]
@@ -562,7 +559,7 @@ mod tests {
         assert_eq!(models.models[0].id, "opus");
         assert_eq!(models.models[0].description, "anthropic");
         assert_eq!(
-            VibeStrategy.model_env("opus"),
+            (CLI.model_env)("opus"),
             [("VIBE_ACTIVE_MODEL".to_string(), "opus".to_string())]
         );
         let _ = std::fs::remove_dir_all(&tmp);
@@ -578,7 +575,7 @@ mod tests {
         let prev = std::env::var("VMUX_TEST").ok();
         unsafe { std::env::remove_var("VMUX_TEST") };
         assert_eq!(
-            VibeStrategy.build_args(&mcp, None),
+            (CLI.build_args)(&mcp, None),
             vec![
                 "--trust",
                 "--disabled-tools",
@@ -588,7 +585,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            VibeStrategy.build_args(&mcp, Some("sid-1")),
+            (CLI.build_args)(&mcp, Some("sid-1")),
             vec![
                 "--trust",
                 "--disabled-tools",
@@ -601,8 +598,7 @@ mod tests {
         );
         unsafe { std::env::set_var("VMUX_TEST", "1") };
         assert!(
-            VibeStrategy
-                .build_args(&mcp, None)
+            (CLI.build_args)(&mcp, None)
                 .iter()
                 .any(|a| a == "--auto-approve")
         );
@@ -619,7 +615,7 @@ mod tests {
             args: vec![],
             cwd: None,
         };
-        let env = VibeStrategy.build_env(&mcp);
+        let env = (CLI.build_env)(&mcp);
         assert!(env.iter().all(|(key, _)| key != "VIBE_DISABLED_TOOLS"));
     }
 
@@ -630,7 +626,7 @@ mod tests {
             args: vec![],
             cwd: None,
         };
-        let env = VibeStrategy.build_env(&mcp);
+        let env = (CLI.build_env)(&mcp);
         assert!(
             env.iter()
                 .any(|(k, v)| k == "VIBE_ENABLE_EXPERIMENTAL_HOOKS" && v == "true")

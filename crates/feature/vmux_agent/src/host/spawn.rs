@@ -176,7 +176,7 @@ type RestartedAgentLaunch = (
 fn handle_spawn_agent_requests(
     mut reader: MessageReader<SpawnAgentInStackRequest>,
     settings: Res<AppSettings>,
-    strategies: Option<Single<&AgentStrategies>>,
+    strategies: AgentStrategies,
     models: Option<Single<&crate::host::model::AgentModelSelections>>,
     exec_override: Option<Single<&AgentExecutableOverride>>,
     mut metadata: Query<&mut PageMetadata>,
@@ -184,7 +184,7 @@ fn handle_spawn_agent_requests(
     mut commands: Commands,
 ) {
     for req in reader.read() {
-        let Some(strategies) = strategies.as_deref() else {
+        let Some(strategy) = strategies.get_cli(req.kind) else {
             let message = "agent strategies not registered; cannot spawn agent";
             bevy::log::warn!("{message}");
             attach_agent_spawn_error_to_stack(req.stack, req.kind, message, &mut commands);
@@ -216,14 +216,13 @@ fn handle_spawn_agent_requests(
         commands.entity(req.stack).insert(generation);
         let request = req.clone();
         let task_request = request.clone();
-        let strategies = AgentStrategies::clone(strategies);
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
             let result = crate::build_agent_launch(
                 task_request.kind,
                 &task_request.cwd,
                 task_request.session_id.as_deref(),
-                &strategies,
+                &strategy,
                 &exe_path,
                 process_id,
                 effort.as_deref(),
@@ -489,7 +488,7 @@ fn respond_page_agent_attach_default(
 
 fn rebuilt_args_env_for_restart(
     launch: &TerminalLaunch,
-    strategy: &dyn crate::host::cli::CliAgentStrategy,
+    strategy: &crate::host::cli::CliStrategy,
     session_id: Option<&str>,
     new_id: ProcessId,
 ) -> Result<(Vec<String>, Vec<(String, String)>, u64), String> {
@@ -497,9 +496,9 @@ fn rebuilt_args_env_for_restart(
         let mcp_revision =
             vmux_core::profile::mcp_credentials::McpCredentialAccess::stable_revision()?;
         let mcp_cfg =
-            crate::mcp::resolve(std::path::Path::new(&launch.cwd), new_id, strategy.kind())?;
-        let args = strategy.build_args(&mcp_cfg, session_id);
-        let fresh = strategy.build_env(&mcp_cfg);
+            crate::mcp::resolve(std::path::Path::new(&launch.cwd), new_id, strategy.kind)?;
+        let args = (strategy.build_args)(&mcp_cfg, session_id);
+        let fresh = (strategy.build_env)(&mcp_cfg);
         let fresh_keys: std::collections::HashSet<String> =
             fresh.iter().map(|(k, _)| k.clone()).collect();
         let mut env: Vec<(String, String)> = launch
@@ -527,7 +526,7 @@ fn handle_restart_agent_pty(
         Without<PendingAgentRestart>,
     >,
     connected: Option<Single<(), With<ServiceConnected>>>,
-    strategies: Option<Single<&AgentStrategies>>,
+    strategies: AgentStrategies,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -543,22 +542,17 @@ fn handle_restart_agent_pty(
         let kind = session.kind;
         let session_id = session_id.map(|session_id| session_id.0.clone());
         let new_id = ProcessId::new();
-        let strategies = strategies
-            .as_ref()
-            .map(|strategies| AgentStrategies::clone(**strategies));
+        let strategy = strategies.get_cli(kind);
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
             let result = match launch {
                 Some(launch) => {
-                    let Some(strategy) = strategies
-                        .as_ref()
-                        .and_then(|strategies| strategies.get_cli(kind))
-                    else {
+                    let Some(strategy) = strategy else {
                         return Err(format!("CLI strategy not registered for {kind:?}"));
                     };
                     let (args, env, mcp_revision) = rebuilt_args_env_for_restart(
                         &launch,
-                        strategy,
+                        &strategy,
                         session_id.as_deref(),
                         new_id,
                     )?;
@@ -709,13 +703,8 @@ mod tests {
             kind: vmux_core::terminal::TerminalKind::Claude,
         };
         let new_id = ProcessId::new();
-        let (args, _env, _) = rebuilt_args_env_for_restart(
-            &launch,
-            &crate::host::cli::claude::ClaudeStrategy,
-            None,
-            new_id,
-        )
-        .unwrap();
+        let (args, _env, _) =
+            rebuilt_args_env_for_restart(&launch, &crate::host::cli::CLAUDE, None, new_id).unwrap();
         let _ = std::fs::remove_dir_all(&temp);
         let joined = args.join(" ");
         assert!(joined.contains("--anchor"), "args carry --anchor: {joined}");
@@ -741,13 +730,9 @@ mod tests {
             kind: vmux_core::terminal::TerminalKind::Codex,
         };
 
-        let (_, env, _) = rebuilt_args_env_for_restart(
-            &launch,
-            &crate::host::cli::codex::CodexStrategy,
-            None,
-            ProcessId::new(),
-        )
-        .unwrap();
+        let (_, env, _) =
+            rebuilt_args_env_for_restart(&launch, &crate::host::cli::CODEX, None, ProcessId::new())
+                .unwrap();
 
         let _ = std::fs::remove_dir_all(&temp);
         assert!(
@@ -769,7 +754,7 @@ mod tests {
         assert!(
             rebuilt_args_env_for_restart(
                 &launch,
-                &crate::host::cli::codex::CodexStrategy,
+                &crate::host::cli::CODEX,
                 None,
                 ProcessId::new(),
             )

@@ -63,7 +63,7 @@ fn spawn_agent_session_discovery(mut commands: Commands) {
 
 #[allow(clippy::type_complexity)]
 fn format_agent_url(
-    strategies: Single<&AgentStrategies>,
+    strategies: AgentStrategies,
     mut q: Query<
         (Option<&SessionId>, &AgentSession, &mut PageMetadata),
         Or<(Changed<SessionId>, Added<AgentSession>, Added<PageMetadata>)>,
@@ -132,7 +132,7 @@ mod tests {
 #[cfg(test)]
 mod url_tests {
     use super::*;
-    use crate::host::cli::vibe::VibeStrategy;
+    use crate::host::cli::VIBE as VIBE_CLI;
 
     fn empty_meta() -> PageMetadata {
         PageMetadata {
@@ -146,9 +146,7 @@ mod url_tests {
     #[test]
     fn format_agent_url_emits_scheme_with_session_id() {
         let mut app = App::new();
-        let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(VibeStrategy));
-        app.world_mut().spawn(strategies);
+        app.world_mut().spawn(VIBE_CLI);
         app.add_systems(Update, format_agent_url);
 
         let entity = app
@@ -169,9 +167,7 @@ mod url_tests {
     #[test]
     fn format_agent_url_emits_fresh_cli_url_when_no_session_id() {
         let mut app = App::new();
-        let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(VibeStrategy));
-        app.world_mut().spawn(strategies);
+        app.world_mut().spawn(VIBE_CLI);
         app.add_systems(Update, format_agent_url);
 
         let entity = app
@@ -191,9 +187,7 @@ mod url_tests {
     #[test]
     fn format_agent_url_sets_title_with_short_session_id() {
         let mut app = App::new();
-        let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(VibeStrategy));
-        app.world_mut().spawn(strategies);
+        app.world_mut().spawn(VIBE_CLI);
         app.add_systems(Update, format_agent_url);
 
         let entity = app
@@ -214,9 +208,7 @@ mod url_tests {
     #[test]
     fn format_agent_url_truncates_long_session_id_in_title() {
         let mut app = App::new();
-        let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(VibeStrategy));
-        app.world_mut().spawn(strategies);
+        app.world_mut().spawn(VIBE_CLI);
         app.add_systems(Update, format_agent_url);
 
         let entity = app
@@ -237,9 +229,7 @@ mod url_tests {
     #[test]
     fn format_agent_url_sets_bare_name_title_when_no_session_id() {
         let mut app = App::new();
-        let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(VibeStrategy));
-        app.world_mut().spawn(strategies);
+        app.world_mut().spawn(VIBE_CLI);
         app.add_systems(Update, format_agent_url);
 
         let entity = app
@@ -259,9 +249,7 @@ mod url_tests {
     #[test]
     fn format_agent_url_clears_stale_builtin_icon_so_provider_favicon_resolves() {
         let mut app = App::new();
-        let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(VibeStrategy));
-        app.world_mut().spawn(strategies);
+        app.world_mut().spawn(VIBE_CLI);
         app.add_systems(Update, format_agent_url);
 
         let entity = app
@@ -321,7 +309,7 @@ fn clear_agent_session_dirty(mut discovery: Single<&mut AgentSessionDiscovery>) 
 
 fn discover_pending_agent_sessions(
     mut commands: Commands,
-    strategies: Single<&AgentStrategies>,
+    strategies: AgentStrategies,
     pending_sessions: Query<(Entity, &PendingAgentSession)>,
     sessions: Query<(&AgentSession, &SessionId)>,
 ) {
@@ -339,7 +327,7 @@ fn discover_pending_agent_sessions(
                 }
             })
             .collect::<HashSet<_>>();
-        if let Some(id) = strategy.discover_session(&pending.cwd, pending.spawn_time, &claimed) {
+        if let Some(id) = (strategy.discover_session)(&pending.cwd, pending.spawn_time, &claimed) {
             commands
                 .entity(entity)
                 .insert(SessionId(id))
@@ -355,33 +343,31 @@ struct AgentSessionWatcher {
 }
 
 fn start_agent_session_watchers(
-    strategies: Query<&AgentStrategies, Added<AgentStrategies>>,
+    strategies: Query<&crate::CliStrategy, Added<crate::CliStrategy>>,
     mut commands: Commands,
 ) {
-    for strategies in &strategies {
-        for strategy in strategies.cli_strategies() {
-            let root = strategy.sessions_root();
-            if std::fs::create_dir_all(&root).is_err() {
-                continue;
-            }
-            let (tx, rx) = mpsc::channel();
-            let watcher =
-                notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-                    if let Ok(event) = res
-                        && (event.kind.is_create() || event.kind.is_modify())
-                    {
-                        let _ = tx.send(());
-                    }
-                });
-            let Ok(mut watcher) = watcher else { continue };
-            if watcher.watch(&root, RecursiveMode::Recursive).is_err() {
-                continue;
-            }
-            commands.spawn(AgentSessionWatcher {
-                receiver: Mutex::new(rx),
-                _watcher: watcher,
-            });
+    for strategy in &strategies {
+        let root = (strategy.sessions_root)();
+        if std::fs::create_dir_all(&root).is_err() {
+            continue;
         }
+        let (tx, rx) = mpsc::channel();
+        let watcher =
+            notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+                if let Ok(event) = res
+                    && (event.kind.is_create() || event.kind.is_modify())
+                {
+                    let _ = tx.send(());
+                }
+            });
+        let Ok(mut watcher) = watcher else { continue };
+        if watcher.watch(&root, RecursiveMode::Recursive).is_err() {
+            continue;
+        }
+        commands.spawn(AgentSessionWatcher {
+            receiver: Mutex::new(rx),
+            _watcher: watcher,
+        });
     }
 }
 
@@ -402,14 +388,14 @@ fn mark_dirty_on_fs_change(
 fn detect_file_end_time_exit(
     mut commands: Commands,
     mut exited_writer: MessageWriter<AgentSessionExited>,
-    strategies: Single<&AgentStrategies>,
+    strategies: AgentStrategies,
     sessioned: Query<(Entity, &AgentSession, &SessionId)>,
 ) {
     for (entity, agent, sid) in &sessioned {
         let Some(strategy) = strategies.get_cli(agent.kind) else {
             continue;
         };
-        if !strategy.detect_end_time(&sid.0) {
+        if !(strategy.detect_end_time)(&sid.0) {
             continue;
         }
         commands
@@ -424,14 +410,12 @@ fn detect_file_end_time_exit(
 #[cfg(test)]
 mod discovery_tests {
     use super::*;
-    use crate::host::cli::vibe::VibeStrategy;
+    use crate::host::cli::VIBE as VIBE_CLI;
 
     #[test]
     fn pending_with_no_match_keeps_pending() {
         let mut app = App::new();
-        let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(VibeStrategy));
-        app.world_mut().spawn(strategies);
+        app.world_mut().spawn(VIBE_CLI);
         app.add_systems(Update, discover_pending_agent_sessions);
 
         let pending = PendingAgentSession {
@@ -447,50 +431,11 @@ mod discovery_tests {
 
     #[test]
     fn pending_is_retained_long_after_spawn_for_late_session_dir() {
-        use std::path::Path;
-
-        struct NeverDiscovers;
-        impl crate::strategy::AgentStrategy for NeverDiscovers {
-            fn kind(&self) -> AgentKind {
-                AgentKind::Vibe
-            }
-
-            fn variant(&self) -> crate::AgentVariant {
-                crate::AgentVariant::Cli
-            }
-        }
-
-        impl crate::CliAgentStrategy for NeverDiscovers {
-            fn sessions_root(&self) -> PathBuf {
-                PathBuf::from("/tmp/none")
-            }
-
-            fn build_args(&self, _: &crate::McpServerConfig, _: Option<&str>) -> Vec<String> {
-                vec![]
-            }
-
-            fn build_env(&self, _: &crate::McpServerConfig) -> Vec<(String, String)> {
-                vec![]
-            }
-
-            fn discover_session(
-                &self,
-                _: &Path,
-                _: SystemTime,
-                _: &HashSet<String>,
-            ) -> Option<String> {
-                None
-            }
-
-            fn detect_end_time(&self, _: &str) -> bool {
-                false
-            }
-        }
-
         let mut app = App::new();
-        let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(NeverDiscovers));
-        app.world_mut().spawn(strategies);
+        app.world_mut().spawn(crate::CliStrategy {
+            discover_session: |_, _, _| None,
+            ..VIBE_CLI
+        });
         app.add_systems(Update, discover_pending_agent_sessions);
 
         let pending = PendingAgentSession {
@@ -510,52 +455,15 @@ mod discovery_tests {
 #[cfg(test)]
 mod exit_tests {
     use super::*;
-    use std::path::Path;
+    use crate::host::cli::VIBE as VIBE_CLI;
 
     #[test]
     fn detect_file_end_time_exit_strips_components_when_strategy_says_ended() {
-        struct EndedStrategy;
-        impl crate::strategy::AgentStrategy for EndedStrategy {
-            fn kind(&self) -> AgentKind {
-                AgentKind::Vibe
-            }
-
-            fn variant(&self) -> crate::AgentVariant {
-                crate::AgentVariant::Cli
-            }
-        }
-
-        impl crate::CliAgentStrategy for EndedStrategy {
-            fn sessions_root(&self) -> PathBuf {
-                PathBuf::from("/tmp/none")
-            }
-
-            fn build_args(&self, _: &crate::McpServerConfig, _: Option<&str>) -> Vec<String> {
-                vec![]
-            }
-
-            fn build_env(&self, _: &crate::McpServerConfig) -> Vec<(String, String)> {
-                vec![]
-            }
-
-            fn discover_session(
-                &self,
-                _: &Path,
-                _: SystemTime,
-                _: &HashSet<String>,
-            ) -> Option<String> {
-                None
-            }
-
-            fn detect_end_time(&self, _: &str) -> bool {
-                true
-            }
-        }
-
         let mut app = App::new();
-        let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(EndedStrategy));
-        app.world_mut().spawn(strategies);
+        app.world_mut().spawn(crate::CliStrategy {
+            detect_end_time: |_| true,
+            ..VIBE_CLI
+        });
         app.add_message::<AgentSessionExited>()
             .add_systems(Update, detect_file_end_time_exit);
 

@@ -1,68 +1,24 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
 
-use bevy::prelude::Component;
-
-use super::cli::{CliAgentStrategy, ResumableSession};
+use super::cli::{CliStrategy, ResumableSession};
 use crate::AgentKind;
-use crate::AgentVariant;
-use crate::message::Message;
 
-pub trait AgentStrategy: Send + Sync + 'static {
-    fn kind(&self) -> AgentKind;
-    fn variant(&self) -> AgentVariant;
+#[derive(SystemParam)]
+pub struct AgentStrategies<'w, 's> {
+    cli: Query<'w, 's, &'static CliStrategy>,
 }
 
-#[derive(Component, Default, Clone)]
-pub struct AgentStrategies {
-    cli: HashMap<AgentKind, Arc<dyn CliAgentStrategy>>,
-}
-
-impl AgentStrategies {
-    pub fn register_cli(&mut self, strategy: Box<dyn CliAgentStrategy>) {
-        self.cli.insert(strategy.kind(), strategy.into());
+impl AgentStrategies<'_, '_> {
+    pub fn get_cli(&self, kind: AgentKind) -> Option<CliStrategy> {
+        self.cli
+            .iter()
+            .find(|strategy| strategy.kind == kind)
+            .copied()
     }
 
-    pub fn get_cli(&self, kind: AgentKind) -> Option<&dyn CliAgentStrategy> {
-        self.cli.get(&kind).map(Arc::as_ref)
-    }
-
-    pub fn cli_strategies(&self) -> impl Iterator<Item = &dyn CliAgentStrategy> {
-        self.cli.values().map(Arc::as_ref)
-    }
-
-    pub async fn list_all_sessions(&self) -> Vec<ResumableSession> {
-        let pool = bevy::tasks::IoTaskPool::get();
-        let mut scanning = Vec::new();
-        for strategy in self.cli.values() {
-            let strategy = strategy.clone();
-            scanning.push(pool.spawn(async move { strategy.list_sessions() }));
-        }
-        let mut all = Vec::new();
-        for scan in scanning {
-            all.extend(scan.await);
-        }
-        sort_sessions(all)
-    }
-
-    pub fn prompt_history(&self, kind: AgentKind, cwd: &std::path::Path) -> Vec<String> {
-        let Some(strategy) = self.get_cli(kind) else {
-            return Vec::new();
-        };
-        strategy.prompt_history(cwd)
-    }
-
-    pub fn latest_message(&self, kind: AgentKind, transcript: &std::path::Path) -> String {
-        let Some(strategy) = self.get_cli(kind) else {
-            return String::new();
-        };
-        strategy.latest_message(transcript)
-    }
-
-    pub fn load_transcript(&self, kind: AgentKind, sid: &str) -> Result<Vec<Message>, String> {
-        self.get_cli(kind)
-            .ok_or_else(|| format!("no session strategy registered for {}", kind.display_name()))?
-            .load_transcript(sid)
+    pub fn copied(&self) -> Vec<CliStrategy> {
+        self.cli.iter().copied().collect()
     }
 }
 
@@ -77,7 +33,7 @@ pub(crate) fn acp_agent_kind(agent_id: &str) -> Option<AgentKind> {
     })
 }
 
-fn sort_sessions(mut sessions: Vec<ResumableSession>) -> Vec<ResumableSession> {
+pub(crate) fn sort_sessions(mut sessions: Vec<ResumableSession>) -> Vec<ResumableSession> {
     sessions.sort_by_key(|s| std::cmp::Reverse(s.mtime));
     let mut seen = std::collections::HashSet::new();
     sessions.retain(|s| seen.insert((s.kind, s.sid.clone())));
@@ -87,51 +43,24 @@ fn sort_sessions(mut sessions: Vec<ResumableSession>) -> Vec<ResumableSession> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::time::SystemTime;
-
-    use crate::McpServerConfig;
-
-    struct StubStrategy;
-    impl AgentStrategy for StubStrategy {
-        fn kind(&self) -> AgentKind {
-            AgentKind::Claude
-        }
-
-        fn variant(&self) -> AgentVariant {
-            AgentVariant::Cli
-        }
-    }
-
-    impl CliAgentStrategy for StubStrategy {
-        fn sessions_root(&self) -> PathBuf {
-            PathBuf::from("/tmp/none")
-        }
-
-        fn build_args(&self, _: &McpServerConfig, _: Option<&str>) -> Vec<String> {
-            vec![]
-        }
-
-        fn build_env(&self, _: &McpServerConfig) -> Vec<(String, String)> {
-            vec![]
-        }
-
-        fn discover_session(&self, _: &Path, _: SystemTime, _: &HashSet<String>) -> Option<String> {
-            None
-        }
-
-        fn detect_end_time(&self, _: &str) -> bool {
-            false
-        }
-    }
 
     #[test]
     fn register_cli_and_lookup_by_kind() {
-        let mut s = AgentStrategies::default();
-        s.register_cli(Box::new(StubStrategy));
-        assert!(s.get_cli(AgentKind::Claude).is_some());
-        assert!(s.get_cli(AgentKind::Vibe).is_none());
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.spawn(crate::host::cli::CLAUDE);
+        let found = world
+            .run_system_once(|strategies: AgentStrategies| {
+                (
+                    strategies.get_cli(AgentKind::Claude).is_some(),
+                    strategies.get_cli(AgentKind::Vibe).is_some(),
+                )
+            })
+            .unwrap();
+        assert_eq!(found, (true, false));
     }
 
     #[test]

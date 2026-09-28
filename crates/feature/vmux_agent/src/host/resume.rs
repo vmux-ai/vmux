@@ -4,7 +4,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
 use crate::run_state::AgentRunState;
-use crate::strategy::{AgentStrategies, acp_agent_kind};
+use crate::strategy::{AgentStrategies, acp_agent_kind, sort_sessions};
 use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
 use vmux_chat::event::{
     ChatResumeQueryRequest, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
@@ -124,7 +124,7 @@ fn resume_entries(
     active_kind: Option<AgentKind>,
     active_name: &str,
     labels: &mut RepoLabels,
-    strategies: &AgentStrategies,
+    strategies: &[crate::CliStrategy],
 ) -> Vec<ResumableSessionEntry> {
     let mut entries = Vec::new();
     for session in sessions {
@@ -144,7 +144,11 @@ fn resume_entries(
         }
         .format();
         let (project, branch) = labels.resolve(&session.cwd, &dir);
-        let latest = strategies.latest_message(session.kind, &session.transcript);
+        let latest = strategies
+            .iter()
+            .find(|strategy| strategy.kind == session.kind)
+            .map(|strategy| (strategy.latest_message)(&session.transcript))
+            .unwrap_or_default();
         entries.push(ResumableSessionEntry {
             kind: session.kind.as_url_segment().to_string(),
             sid: session.sid,
@@ -285,22 +289,24 @@ struct PromptHistoryTask {
 
 fn on_prompt_history_request(
     trigger: On<UiInput<PromptHistoryRequest>>,
-    strategies: Option<Single<&AgentStrategies>>,
+    strategies: AgentStrategies,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let wake = vmux_core::host::wake::Wake::from_resource(proxy);
-    let strategies = strategies.map(|s| (*s).clone()).unwrap_or_default();
     let asked = trigger.event().payload.clone();
     let Some(kind) = AgentKind::from_url_segment(&asked.agent) else {
         return;
     };
+    let strategy = strategies.get_cli(kind);
     let task = IoTaskPool::get().spawn(async move {
         let _wake = wake;
         let cwd = std::path::PathBuf::from(&asked.cwd);
         PromptHistory {
-            prompts: strategies.prompt_history(kind, &cwd),
+            prompts: strategy
+                .map(|strategy| (strategy.prompt_history)(&cwd))
+                .unwrap_or_default(),
         }
     });
     commands.spawn(PromptHistoryTask { webview, task });
@@ -323,7 +329,7 @@ fn drain_prompt_history_tasks(
 
 fn on_resume_list_request(
     trigger: On<UiInput<ResumeListRequest>>,
-    strategies: Option<Single<&AgentStrategies>>,
+    strategies: AgentStrategies,
     ask: ResumeAsk,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     scan: Single<&ResumableScan>,
@@ -331,7 +337,7 @@ fn on_resume_list_request(
 ) {
     let webview = trigger.event().webview;
     let wake = vmux_core::host::wake::Wake::from_resource(proxy);
-    let strategies = strategies.map(|s| (*s).clone()).unwrap_or_default();
+    let strategies = strategies.copied();
     let (kind, agent_name) = ask.agent_of(webview);
     let project = ask.project_of(webview);
     let request_id = trigger.event().payload.request_id;
@@ -346,7 +352,16 @@ fn on_resume_list_request(
         let (ranked, scanned) = match held {
             Some(ranked) => (ranked, None),
             None => {
-                let all = strategies.list_all_sessions().await;
+                let pool = IoTaskPool::get();
+                let mut scanning = Vec::new();
+                for strategy in strategies.iter().copied() {
+                    scanning.push(pool.spawn(async move { (strategy.list_sessions)() }));
+                }
+                let mut all = Vec::new();
+                for scan in scanning {
+                    all.extend(scan.await);
+                }
+                let all = sort_sessions(all);
                 let ranked = Preferred::first(&all, kind, project.as_deref());
                 (ranked, Some(all))
             }
@@ -485,7 +500,7 @@ fn on_resume_session(
     child_of: Query<&ChildOf>,
     acp_sessions: Query<&AcpSession>,
     settings: Res<vmux_setting::AppSettings>,
-    strategies: Option<Single<&AgentStrategies>>,
+    strategies: AgentStrategies,
     mut commands: Commands,
     mut swap: MessageWriter<SwapStackSession>,
 ) {
@@ -501,14 +516,15 @@ fn on_resume_session(
         && let Some(target_url) =
             foreign_handoff_target(&acp.agent_id, acp_agent_kind(&acp.agent_id), kind)
     {
-        let strategies = strategies
-            .map(|strategies| (*strategies).clone())
-            .unwrap_or_default();
+        let strategy = strategies.get_cli(kind);
         let source_sid = payload.sid.clone();
         let source_agent = kind.display_name().to_string();
         let cwd = std::path::PathBuf::from(&payload.cwd);
         let task = IoTaskPool::get().spawn(async move {
-            let messages = strategies.load_transcript(kind, &source_sid)?;
+            let strategy = strategy.ok_or_else(|| {
+                format!("no session strategy registered for {}", kind.display_name())
+            })?;
+            let messages = (strategy.load_transcript)(&source_sid)?;
             let built = build_context(&messages, DEFAULT_CONTEXT_LIMIT);
             Ok(StackSessionHandoff {
                 source_agent,
@@ -608,7 +624,7 @@ mod tests {
             Some(AgentKind::Claude),
             "Antigravity",
             &mut RepoLabels::default(),
-            &AgentStrategies::default(),
+            &[],
         );
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].agent_name, "Antigravity");

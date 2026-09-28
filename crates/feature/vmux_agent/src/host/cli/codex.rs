@@ -6,10 +6,10 @@ use std::sync::{OnceLock, mpsc};
 use std::time::{Duration, Instant, SystemTime};
 
 use super::{
-    CliAgentStrategy, CliModelCatalog, PromptHistory, ResumableSession, lines_skipping_invalid_utf8,
+    CliModelCatalog, CliStrategy, PromptHistory, ResumableSession, empty_env,
+    lines_skipping_invalid_utf8, skip_prepare,
 };
-use crate::strategy::AgentStrategy;
-use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
+use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
 
 const DISABLED_FEATURES: &[&str] = &["shell_tool", "unified_exec"];
 const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(2);
@@ -42,133 +42,128 @@ an unavailable tool, continue with the available tools; for website visuals, use
 or available project assets.";
 const FILE_TOUCH_MATCHER: &str = "apply_patch|Edit|Write";
 
-pub struct CodexStrategy;
+pub(super) const CLI: CliStrategy = CliStrategy {
+    kind: AgentKind::Codex,
+    sessions_root,
+    build_args,
+    model_catalog: CodexModels::load,
+    model_args,
+    model_env: empty_env,
+    effort_args,
+    build_env,
+    prepare_launch: skip_prepare,
+    discover_session,
+    detect_end_time,
+    list_sessions,
+    latest_message: codex_latest_message,
+    prompt_history,
+    load_transcript,
+};
 
-impl AgentStrategy for CodexStrategy {
-    fn kind(&self) -> AgentKind {
-        AgentKind::Codex
-    }
-
-    fn variant(&self) -> AgentVariant {
-        AgentVariant::Cli
-    }
+fn sessions_root() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    PathBuf::from(home).join(".codex").join("sessions")
 }
 
-impl CliAgentStrategy for CodexStrategy {
-    fn sessions_root(&self) -> PathBuf {
-        let home = std::env::var("HOME").unwrap_or_default();
-        PathBuf::from(home).join(".codex").join("sessions")
+fn prompt_history(_cwd: &Path) -> Vec<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let path = PathBuf::from(home).join(".codex").join("history.jsonl");
+    let mut spoken = Vec::new();
+    for line in PromptHistory::lines_of(&path) {
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let Some(text) = entry.get("text").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        spoken.push(text.to_string());
     }
+    PromptHistory::recent(spoken)
+}
 
-    fn prompt_history(&self, _cwd: &Path) -> Vec<String> {
-        let home = std::env::var("HOME").unwrap_or_default();
-        let path = PathBuf::from(home).join(".codex").join("history.jsonl");
-        let mut spoken = Vec::new();
-        for line in PromptHistory::lines_of(&path) {
-            let Ok(entry) = serde_json::from_str::<serde_json::Value>(&line) else {
-                continue;
-            };
-            let Some(text) = entry.get("text").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            spoken.push(text.to_string());
-        }
-        PromptHistory::recent(spoken)
-    }
-
-    fn build_args(&self, mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
-        let mut args: Vec<String> = vec![
-            "-c".into(),
-            format!("mcp_servers.vmux.command={}", quote_toml(&mcp.command)),
-            "-c".into(),
-            format!("mcp_servers.vmux.args={}", toml_array(&mcp.args)),
-            "-c".into(),
-            format!(
-                "mcp_servers.vmux.tool_timeout_sec={}",
-                crate::mcp::LONG_MCP_TOOL_TIMEOUT_SECS
-            ),
-        ];
-        if let Some(cwd) = &mcp.cwd {
-            args.push("-c".into());
-            args.push(format!(
-                "mcp_servers.vmux.cwd={}",
-                quote_toml(&cwd.to_string_lossy())
-            ));
-        }
-        append_managed_mcp_args(&mut args);
+fn build_args(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "-c".into(),
+        format!("mcp_servers.vmux.command={}", quote_toml(&mcp.command)),
+        "-c".into(),
+        format!("mcp_servers.vmux.args={}", toml_array(&mcp.args)),
+        "-c".into(),
+        format!(
+            "mcp_servers.vmux.tool_timeout_sec={}",
+            crate::mcp::LONG_MCP_TOOL_TIMEOUT_SECS
+        ),
+    ];
+    if let Some(cwd) = &mcp.cwd {
         args.push("-c".into());
         args.push(format!(
-            "features.code_mode.direct_only_tool_namespaces=[{}]",
-            quote_toml(DIRECT_ONLY_NAMESPACE)
+            "mcp_servers.vmux.cwd={}",
+            quote_toml(&cwd.to_string_lossy())
         ));
+    }
+    append_managed_mcp_args(&mut args);
+    args.push("-c".into());
+    args.push(format!(
+        "features.code_mode.direct_only_tool_namespaces=[{}]",
+        quote_toml(DIRECT_ONLY_NAMESPACE)
+    ));
+    args.push("-c".into());
+    args.push("tools.web_search=false".to_string());
+    if let Some(skills) = build_skills_config_override(&codex_disabled_skill_files()) {
         args.push("-c".into());
-        args.push("tools.web_search=false".to_string());
-        if let Some(skills) = build_skills_config_override(&codex_disabled_skill_files()) {
-            args.push("-c".into());
-            args.push(skills);
-        }
-        args.push("-c".into());
-        args.push(format!(
-            "developer_instructions={}",
-            quote_toml(&vmux_core::knowledge::AgentPrompt::from(RUN_STEER_PROMPT).into_string())
-        ));
-        args.push("-c".into());
-        args.push("features.hooks=true".into());
-        args.push("-c".into());
-        args.push(build_file_touch_hook_override(mcp));
-        args.push("-c".into());
-        args.push(build_turn_end_hook_override(mcp));
-        for feature in DISABLED_FEATURES {
-            args.push("--disable".into());
-            args.push((*feature).to_string());
-        }
-        if let Some(sid) = session_id {
-            args.push("resume".into());
-            args.push(sid.to_string());
-        }
-        args
+        args.push(skills);
     }
+    args.push("-c".into());
+    args.push(format!(
+        "developer_instructions={}",
+        quote_toml(&vmux_core::knowledge::AgentPrompt::from(RUN_STEER_PROMPT).into_string())
+    ));
+    args.push("-c".into());
+    args.push("features.hooks=true".into());
+    args.push("-c".into());
+    args.push(build_file_touch_hook_override(mcp));
+    args.push("-c".into());
+    args.push(build_turn_end_hook_override(mcp));
+    for feature in DISABLED_FEATURES {
+        args.push("--disable".into());
+        args.push((*feature).to_string());
+    }
+    if let Some(sid) = session_id {
+        args.push("resume".into());
+        args.push(sid.to_string());
+    }
+    args
+}
 
-    fn model_catalog(&self) -> CliModelCatalog {
-        CodexModels::load()
-    }
+fn model_args(model: &str) -> Vec<String> {
+    vec!["--model".to_string(), model.to_string()]
+}
 
-    fn model_args(&self, model: &str) -> Vec<String> {
-        vec!["--model".to_string(), model.to_string()]
-    }
+fn effort_args(level: &str) -> Vec<String> {
+    vec!["-c".to_string(), format!("model_reasoning_effort={level}")]
+}
 
-    fn effort_args(&self, level: &str) -> Vec<String> {
-        vec!["-c".to_string(), format!("model_reasoning_effort={level}")]
-    }
+fn build_env(_mcp: &McpServerConfig) -> Vec<(String, String)> {
+    crate::managed_mcp::McpAuthorization::environment()
+}
 
-    fn build_env(&self, _mcp: &McpServerConfig) -> Vec<(String, String)> {
-        crate::managed_mcp::McpAuthorization::environment()
-    }
+fn discover_session(
+    cwd: &Path,
+    spawn_time: SystemTime,
+    claimed: &HashSet<String>,
+) -> Option<String> {
+    discover_codex_session_id(&sessions_root(), cwd, spawn_time, claimed)
+}
 
-    fn discover_session(
-        &self,
-        cwd: &Path,
-        spawn_time: SystemTime,
-        claimed: &HashSet<String>,
-    ) -> Option<String> {
-        discover_codex_session_id(&self.sessions_root(), cwd, spawn_time, claimed)
-    }
+fn detect_end_time(_session_id: &str) -> bool {
+    false
+}
 
-    fn detect_end_time(&self, _session_id: &str) -> bool {
-        false
-    }
+fn list_sessions() -> Vec<ResumableSession> {
+    list_codex_sessions(&sessions_root())
+}
 
-    fn list_sessions(&self) -> Vec<ResumableSession> {
-        list_codex_sessions(&self.sessions_root())
-    }
-
-    fn latest_message(&self, transcript: &Path) -> String {
-        codex_latest_message(transcript)
-    }
-
-    fn load_transcript(&self, session_id: &str) -> Result<Vec<Message>, String> {
-        load_codex_transcript(&self.sessions_root(), session_id)
-    }
+fn load_transcript(session_id: &str) -> Result<Vec<Message>, String> {
+    load_codex_transcript(&sessions_root(), session_id)
 }
 
 #[derive(Default, serde::Deserialize)]
@@ -861,10 +856,7 @@ mod tests {
 
         assert_eq!(models.selected, "gpt-next");
         assert_eq!(models.models[0].name, "GPT Next");
-        assert_eq!(
-            CodexStrategy.model_args("gpt-next"),
-            ["--model", "gpt-next"]
-        );
+        assert_eq!((CLI.model_args)("gpt-next"), ["--model", "gpt-next"]);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -930,7 +922,7 @@ mod tests {
     #[test]
     fn effort_args_pass_codex_reasoning_override() {
         assert_eq!(
-            CodexStrategy.effort_args("high"),
+            (CLI.effort_args)("high"),
             ["-c", "model_reasoning_effort=high"]
         );
     }
@@ -955,7 +947,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = CodexStrategy.build_args(&mcp, None);
+        let args = (CLI.build_args)(&mcp, None);
         assert!(!args.iter().any(|a| a == "-s"));
         assert!(!args.iter().any(|a| a == "-a"));
         assert!(
@@ -1027,7 +1019,7 @@ mod tests {
             args: vec!["mcp".into(), "--anchor".into(), "42".into()],
             cwd: None,
         };
-        let args = CodexStrategy.build_args(&mcp, None);
+        let args = (CLI.build_args)(&mcp, None);
         assert!(args.iter().any(|a| a == "features.hooks=true"));
         let hook = args
             .iter()
@@ -1046,7 +1038,7 @@ mod tests {
             args: vec!["mcp".into(), "--anchor".into(), "42".into()],
             cwd: None,
         };
-        let args = CodexStrategy.build_args(&mcp, None);
+        let args = (CLI.build_args)(&mcp, None);
         let hook = args
             .iter()
             .find(|a| a.starts_with("hooks.Stop="))
@@ -1067,7 +1059,7 @@ mod tests {
             args: vec![],
             cwd: None,
         };
-        let args = CodexStrategy.build_args(&mcp, Some("abc-123"));
+        let args = (CLI.build_args)(&mcp, Some("abc-123"));
         let resume_idx = args.iter().position(|a| a == "resume").unwrap();
         assert_eq!(args[resume_idx + 1], "abc-123");
         let last_dash_c = args.iter().rposition(|a| a == "-c").unwrap();
@@ -1086,7 +1078,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = CodexStrategy.build_args(&mcp, None);
+        let args = (CLI.build_args)(&mcp, None);
         let disabled: Vec<&str> = args
             .windows(2)
             .filter(|w| w[0] == "--disable")
@@ -1103,7 +1095,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = CodexStrategy.build_args(&mcp, None);
+        let args = (CLI.build_args)(&mcp, None);
         assert!(args.iter().any(|a| a == "tools.web_search=false"));
     }
 
@@ -1142,7 +1134,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = CodexStrategy.build_args(&mcp, None);
+        let args = (CLI.build_args)(&mcp, None);
         let steer = args
             .iter()
             .find(|a| a.starts_with("developer_instructions="))
@@ -1161,7 +1153,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = CodexStrategy.build_args(&mcp, None);
+        let args = (CLI.build_args)(&mcp, None);
         assert!(
             args.iter()
                 .any(|a| a == "features.code_mode.direct_only_tool_namespaces=[\"mcp__vmux\"]"),
@@ -1192,7 +1184,7 @@ mod tests {
 
     #[test]
     fn detect_end_time_always_false() {
-        assert!(!CodexStrategy.detect_end_time("anything"));
+        assert!(!(CLI.detect_end_time)("anything"));
     }
 
     #[test]

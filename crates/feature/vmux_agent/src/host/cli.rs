@@ -2,15 +2,20 @@ pub mod claude;
 pub mod codex;
 pub mod vibe;
 
+pub(super) const CLAUDE: CliStrategy = claude::CLI;
+pub(super) const CODEX: CliStrategy = codex::CLI;
+pub(super) const VIBE: CliStrategy = vibe::CLI;
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+
+use bevy::prelude::Component;
 
 use crate::message::Message;
 use vmux_core::agent::AgentKind;
 
 use crate::McpServerConfig;
-use crate::strategy::AgentStrategy;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CliModelCatalog {
@@ -113,49 +118,38 @@ pub(crate) fn lines_skipping_invalid_utf8<R: std::io::BufRead>(
         .flatten()
 }
 
-pub trait CliAgentStrategy: AgentStrategy {
-    fn sessions_root(&self) -> PathBuf;
-    fn build_args(&self, mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String>;
-    fn model_catalog(&self) -> CliModelCatalog {
-        CliModelCatalog::default()
-    }
+#[derive(Component, Clone, Copy)]
+pub struct CliStrategy {
+    pub kind: AgentKind,
+    pub sessions_root: fn() -> PathBuf,
+    pub build_args: fn(&McpServerConfig, Option<&str>) -> Vec<String>,
+    pub model_catalog: fn() -> CliModelCatalog,
+    pub model_args: fn(&str) -> Vec<String>,
+    pub model_env: fn(&str) -> Vec<(String, String)>,
+    pub effort_args: fn(&str) -> Vec<String>,
+    pub build_env: fn(&McpServerConfig) -> Vec<(String, String)>,
+    pub prepare_launch: fn(&McpServerConfig),
+    pub discover_session:
+        fn(cwd: &Path, spawn_time: SystemTime, claimed: &HashSet<String>) -> Option<String>,
+    pub detect_end_time: fn(&str) -> bool,
+    pub list_sessions: fn() -> Vec<ResumableSession>,
+    pub latest_message: fn(&Path) -> String,
+    pub prompt_history: fn(&Path) -> Vec<String>,
+    pub load_transcript: fn(&str) -> Result<Vec<Message>, String>,
+}
 
-    fn model_args(&self, _model: &str) -> Vec<String> {
-        Vec::new()
-    }
+pub(super) fn empty_args(_: &str) -> Vec<String> {
+    Vec::new()
+}
 
-    fn model_env(&self, _model: &str) -> Vec<(String, String)> {
-        Vec::new()
-    }
+pub(super) fn empty_env(_: &str) -> Vec<(String, String)> {
+    Vec::new()
+}
 
-    fn effort_args(&self, _level: &str) -> Vec<String> {
-        Vec::new()
-    }
+pub(super) fn skip_prepare(_: &McpServerConfig) {}
 
-    fn build_env(&self, mcp: &McpServerConfig) -> Vec<(String, String)>;
-    fn prepare_launch(&self, _mcp: &McpServerConfig) {}
-    fn discover_session(
-        &self,
-        cwd: &Path,
-        spawn_time: SystemTime,
-        claimed: &HashSet<String>,
-    ) -> Option<String>;
-    fn detect_end_time(&self, session_id: &str) -> bool;
-    fn list_sessions(&self) -> Vec<ResumableSession> {
-        Vec::new()
-    }
-
-    fn latest_message(&self, _transcript: &Path) -> String {
-        String::new()
-    }
-
-    fn prompt_history(&self, _cwd: &Path) -> Vec<String> {
-        Vec::new()
-    }
-
-    fn load_transcript(&self, session_id: &str) -> Result<Vec<Message>, String> {
-        Err(format!("transcript loading unsupported for {session_id}"))
-    }
+pub(super) fn empty_prompt_history(_: &Path) -> Vec<String> {
+    Vec::new()
 }
 
 #[cfg(test)]

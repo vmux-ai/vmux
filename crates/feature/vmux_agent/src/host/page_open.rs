@@ -977,11 +977,10 @@ fn data_url_for_html(html: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::cli::vibe::VibeStrategy;
+    use crate::host::cli::VIBE as VIBE_CLI;
     use crate::host::provider::AgentExecutableOverride;
     use crate::host::spawn::{SpawnPlugin, SpawnRequestSet, SpawnRequestsPlugin};
     use crate::host::test_support::{init_worktree_test_repo, test_settings};
-    use crate::strategy::AgentStrategies;
     use vmux_terminal::Terminal;
 
     pub(crate) fn swap_test_app() -> App {
@@ -1107,9 +1106,7 @@ mod tests {
     #[test]
     pub(crate) fn missing_vibe_cli_shows_setup_page_at_vibe_url() {
         let mut app = App::new();
-        let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(VibeStrategy));
-        app.world_mut().spawn(strategies);
+        app.world_mut().spawn(VIBE_CLI);
         app.world_mut()
             .spawn(AgentExecutableOverride(std::collections::HashMap::from([
                 (AgentKind::Vibe, false),
@@ -1158,7 +1155,12 @@ mod tests {
             let mut settings = test_settings();
             settings.agent.acp.clear();
             let mut app = App::new();
-            app.world_mut().spawn(AgentStrategies::default());
+            let strategy = match kind {
+                AgentKind::Claude => crate::host::cli::CLAUDE,
+                AgentKind::Codex => crate::host::cli::CODEX,
+                _ => unreachable!(),
+            };
+            app.world_mut().spawn(strategy);
             app.world_mut()
                 .spawn(AgentExecutableOverride(std::collections::HashMap::from([
                     (kind, false),
@@ -1244,7 +1246,6 @@ mod tests {
     pub(crate) fn canonical_and_legacy_setup_urls_attach_setup_page() {
         for url in ["vmux://sessions/codex/setup", "vmux://agent/codex/setup"] {
             let mut app = App::new();
-            app.world_mut().spawn(AgentStrategies::default());
             app.add_plugins(MinimalPlugins)
                 .add_message::<SpawnAgentInStackRequest>()
                 .insert_resource(test_settings())
@@ -2180,10 +2181,8 @@ mod tests {
 
     #[test]
     pub(crate) fn cli_initial_prompt_waits_for_terminal_readiness() {
-        let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(crate::host::cli::codex::CodexStrategy));
         let mut app = App::new();
-        app.world_mut().spawn(strategies);
+        app.world_mut().spawn(crate::host::cli::CODEX);
         app.world_mut()
             .spawn(AgentExecutableOverride(std::collections::HashMap::from([
                 (AgentKind::Codex, true),

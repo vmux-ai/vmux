@@ -3,7 +3,7 @@ use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
 use crate::event::AgentRequestInput;
 use crate::runtime::acp::{AcpModeState, AcpModelState};
-use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
+use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
 use vmux_api::protocol::{
     AgentCommandResult, AgentListModels, AgentSelectModel, AgentSetEffort, ClientMessage,
 };
@@ -497,20 +497,18 @@ fn on_start_select_mode(
 }
 
 fn seed_cli_model_lists(
-    strategies: Query<&AgentStrategies, Added<AgentStrategies>>,
+    strategies: Query<&crate::CliStrategy, Added<crate::CliStrategy>>,
     mut selections: Single<&mut AgentModelSelections>,
 ) {
-    for strategies in &strategies {
-        for strategy in strategies.cli_strategies() {
-            let catalog = strategy.model_catalog();
-            if catalog.models.is_empty() {
-                continue;
-            }
-            let kind = strategy.kind();
-            let agent_key = format!("cli:{}", kind.as_url_segment());
-            let url = vmux_command::snapshot::AgentPromptTarget::Cli(kind).url();
-            selections.remember_catalog(&agent_key, &url, &catalog.selected, &catalog.models);
+    for strategy in &strategies {
+        let catalog = (strategy.model_catalog)();
+        if catalog.models.is_empty() {
+            continue;
         }
+        let kind = strategy.kind;
+        let agent_key = format!("cli:{}", kind.as_url_segment());
+        let url = vmux_command::snapshot::AgentPromptTarget::Cli(kind).url();
+        selections.remember_catalog(&agent_key, &url, &catalog.selected, &catalog.models);
     }
 }
 

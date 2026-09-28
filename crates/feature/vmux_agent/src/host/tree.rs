@@ -9,16 +9,12 @@ use vmux_core::browser::{
 };
 use vmux_terminal::TerminalStackSpawnRequest;
 
-use super::cli::claude::ClaudeStrategy;
-use super::cli::codex::CodexStrategy;
-use super::cli::vibe::VibeStrategy;
 use crate::event::{
     AgentQueryRequest, AgentRequestInput, AgentToolCallRequest, RecordStartRequest,
     RecordStartResponse, RecordStopRequest, RecordStopResponse, ScreenshotRequest,
     ScreenshotResponse,
 };
 use crate::session;
-use crate::strategy::AgentStrategies;
 
 pub struct AgentPlugin;
 
@@ -114,11 +110,9 @@ impl Plugin for AgentSessionPlugin {
 }
 
 fn spawn_agent_strategies(mut commands: Commands) {
-    let mut strategies = AgentStrategies::default();
-    strategies.register_cli(Box::new(VibeStrategy));
-    strategies.register_cli(Box::new(ClaudeStrategy));
-    strategies.register_cli(Box::new(CodexStrategy));
-    commands.spawn((Name::new("Agent strategies"), strategies));
+    commands.spawn((Name::new("Vibe CLI strategy"), super::cli::VIBE));
+    commands.spawn((Name::new("Claude CLI strategy"), super::cli::CLAUDE));
+    commands.spawn((Name::new("Codex CLI strategy"), super::cli::CODEX));
 }
 
 fn register_agent_session_route(mut commands: Commands) {
@@ -156,10 +150,14 @@ mod tests {
             AgentSessionPlugin,
         ));
         app.world_mut().run_schedule(Startup);
-        let mut query = app.world_mut().query::<&AgentStrategies>();
-        let strategies = query.single(app.world()).unwrap();
-        assert!(strategies.get_cli(AgentKind::Vibe).is_some());
-        assert!(strategies.get_cli(AgentKind::Claude).is_some());
-        assert!(strategies.get_cli(AgentKind::Codex).is_some());
+        let kinds = app
+            .world_mut()
+            .query::<&crate::CliStrategy>()
+            .iter(app.world())
+            .map(|strategy| strategy.kind)
+            .collect::<std::collections::HashSet<_>>();
+        assert!(kinds.contains(&AgentKind::Vibe));
+        assert!(kinds.contains(&AgentKind::Claude));
+        assert!(kinds.contains(&AgentKind::Codex));
     }
 }

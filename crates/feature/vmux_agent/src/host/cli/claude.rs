@@ -5,11 +5,10 @@ use std::time::SystemTime;
 use serde_json::{Map, Value};
 
 use super::{
-    CliAgentStrategy, CliModelCatalog, PromptHistory, ResumableSession, SameProject,
-    lines_skipping_invalid_utf8,
+    CliModelCatalog, CliStrategy, PromptHistory, ResumableSession, SameProject, empty_env,
+    lines_skipping_invalid_utf8, skip_prepare,
 };
-use crate::strategy::AgentStrategy;
-use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
+use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
 
 const DISALLOWED_TOOLS: &str = "Bash,Monitor,WebSearch,WebFetch";
 const HOST_ALLOWED_TOOLS: &str = "mcp__vmux__run,mcp__vmux__read_terminal,\
@@ -40,112 +39,107 @@ request immediately. Never enumerate tool registries or wait for optional tools.
 an unavailable tool, continue with the available tools.";
 const FILE_TOUCH_MATCHER: &str = "Read|Edit|Write|MultiEdit";
 
-pub struct ClaudeStrategy;
+pub(super) const CLI: CliStrategy = CliStrategy {
+    kind: AgentKind::Claude,
+    sessions_root,
+    build_args,
+    model_catalog: ClaudeModels::load,
+    model_args,
+    model_env: empty_env,
+    effort_args,
+    build_env,
+    prepare_launch: skip_prepare,
+    discover_session,
+    detect_end_time,
+    list_sessions,
+    latest_message: claude_latest_message,
+    prompt_history,
+    load_transcript,
+};
 
-impl AgentStrategy for ClaudeStrategy {
-    fn kind(&self) -> AgentKind {
-        AgentKind::Claude
-    }
-
-    fn variant(&self) -> AgentVariant {
-        AgentVariant::Cli
-    }
+fn sessions_root() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    PathBuf::from(home).join(".claude").join("projects")
 }
 
-impl CliAgentStrategy for ClaudeStrategy {
-    fn sessions_root(&self) -> PathBuf {
-        let home = std::env::var("HOME").unwrap_or_default();
-        PathBuf::from(home).join(".claude").join("projects")
-    }
-
-    fn prompt_history(&self, cwd: &Path) -> Vec<String> {
-        let home = std::env::var("HOME").unwrap_or_default();
-        let path = PathBuf::from(home).join(".claude").join("history.jsonl");
-        let mut spoken = Vec::new();
-        for line in PromptHistory::lines_of(&path) {
-            let Ok(entry) = serde_json::from_str::<serde_json::Value>(&line) else {
-                continue;
-            };
-            let Some(project) = entry.get("project").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            if !SameProject::covers(project, cwd) {
-                continue;
-            }
-            let Some(text) = entry.get("display").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            spoken.push(text.to_string());
+fn prompt_history(cwd: &Path) -> Vec<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let path = PathBuf::from(home).join(".claude").join("history.jsonl");
+    let mut spoken = Vec::new();
+    for line in PromptHistory::lines_of(&path) {
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let Some(project) = entry.get("project").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if !SameProject::covers(project, cwd) {
+            continue;
         }
-        PromptHistory::recent(spoken)
+        let Some(text) = entry.get("display").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        spoken.push(text.to_string());
     }
+    PromptHistory::recent(spoken)
+}
 
-    fn build_args(&self, mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
-        let mut args = vec![
-            "--mcp-config".to_string(),
-            build_mcp_config_json(mcp),
-            "--settings".to_string(),
-            build_settings_json(mcp),
-            "--disallowedTools".to_string(),
-            DISALLOWED_TOOLS.to_string(),
-            "--allowedTools".to_string(),
-            allowed_tools(crate::managed_mcp::load().into_keys()),
-            "--append-system-prompt".to_string(),
-            vmux_core::knowledge::AgentPrompt::from(RUN_STEER_PROMPT).into_string(),
-        ];
-        if let Some(sid) = session_id {
-            args.push("--resume".to_string());
-            args.push(sid.to_string());
-        }
-        args
+fn build_args(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "--mcp-config".to_string(),
+        build_mcp_config_json(mcp),
+        "--settings".to_string(),
+        build_settings_json(mcp),
+        "--disallowedTools".to_string(),
+        DISALLOWED_TOOLS.to_string(),
+        "--allowedTools".to_string(),
+        allowed_tools(crate::managed_mcp::load().into_keys()),
+        "--append-system-prompt".to_string(),
+        vmux_core::knowledge::AgentPrompt::from(RUN_STEER_PROMPT).into_string(),
+    ];
+    if let Some(sid) = session_id {
+        args.push("--resume".to_string());
+        args.push(sid.to_string());
     }
+    args
+}
 
-    fn model_catalog(&self) -> CliModelCatalog {
-        ClaudeModels::load()
-    }
+fn model_args(model: &str) -> Vec<String> {
+    vec!["--model".to_string(), model.to_string()]
+}
 
-    fn model_args(&self, model: &str) -> Vec<String> {
-        vec!["--model".to_string(), model.to_string()]
-    }
+fn effort_args(level: &str) -> Vec<String> {
+    vec!["--effort".to_string(), level.to_string()]
+}
 
-    fn effort_args(&self, level: &str) -> Vec<String> {
-        vec!["--effort".to_string(), level.to_string()]
-    }
+fn build_env(_mcp: &McpServerConfig) -> Vec<(String, String)> {
+    let mut env = vec![(
+        "MCP_TOOL_TIMEOUT".to_string(),
+        (crate::mcp::LONG_MCP_TOOL_TIMEOUT_SECS * 1_000).to_string(),
+    )];
+    env.extend(crate::managed_mcp::McpAuthorization::environment());
+    env
+}
 
-    fn build_env(&self, _mcp: &McpServerConfig) -> Vec<(String, String)> {
-        let mut env = vec![(
-            "MCP_TOOL_TIMEOUT".to_string(),
-            (crate::mcp::LONG_MCP_TOOL_TIMEOUT_SECS * 1_000).to_string(),
-        )];
-        env.extend(crate::managed_mcp::McpAuthorization::environment());
-        env
-    }
+fn discover_session(
+    cwd: &Path,
+    spawn_time: SystemTime,
+    claimed: &HashSet<String>,
+) -> Option<String> {
+    let dir = sessions_root().join(project_dir_name(cwd));
+    discover_claude_session_id(&dir, spawn_time, claimed)
+}
 
-    fn discover_session(
-        &self,
-        cwd: &Path,
-        spawn_time: SystemTime,
-        claimed: &HashSet<String>,
-    ) -> Option<String> {
-        let dir = self.sessions_root().join(project_dir_name(cwd));
-        discover_claude_session_id(&dir, spawn_time, claimed)
-    }
+fn detect_end_time(_session_id: &str) -> bool {
+    false
+}
 
-    fn detect_end_time(&self, _session_id: &str) -> bool {
-        false
-    }
+fn list_sessions() -> Vec<ResumableSession> {
+    list_claude_sessions(&sessions_root())
+}
 
-    fn list_sessions(&self) -> Vec<ResumableSession> {
-        list_claude_sessions(&self.sessions_root())
-    }
-
-    fn latest_message(&self, transcript: &Path) -> String {
-        claude_latest_message(transcript)
-    }
-
-    fn load_transcript(&self, session_id: &str) -> Result<Vec<Message>, String> {
-        load_claude_transcript(&self.sessions_root(), session_id)
-    }
+fn load_transcript(session_id: &str) -> Result<Vec<Message>, String> {
+    load_claude_transcript(&sessions_root(), session_id)
 }
 
 #[derive(Default, serde::Deserialize)]
@@ -565,7 +559,7 @@ mod tests {
 
         assert_eq!(models.selected, "opus");
         assert!(models.models.iter().any(|model| model.id == "sonnet"));
-        assert_eq!(ClaudeStrategy.model_args("opus"), ["--model", "opus"]);
+        assert_eq!((CLI.model_args)("opus"), ["--model", "opus"]);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -614,7 +608,7 @@ mod tests {
 
     #[test]
     fn effort_args_pass_claude_effort_flag() {
-        assert_eq!(ClaudeStrategy.effort_args("high"), ["--effort", "high"]);
+        assert_eq!((CLI.effort_args)("high"), ["--effort", "high"]);
     }
 
     #[test]
@@ -624,7 +618,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = ClaudeStrategy.build_args(&mcp, None);
+        let args = (CLI.build_args)(&mcp, None);
         assert!(args.iter().any(|a| a == "--mcp-config"));
         assert!(!args.iter().any(|a| a == "--strict-mcp-config"));
         assert!(!args.iter().any(|a| a == "--permission-mode"));
@@ -638,7 +632,7 @@ mod tests {
             args: vec![],
             cwd: None,
         };
-        let args = ClaudeStrategy.build_args(&mcp, Some("abc-123"));
+        let args = (CLI.build_args)(&mcp, Some("abc-123"));
         let resume_idx = args.iter().position(|a| a == "--resume").unwrap();
         assert_eq!(args[resume_idx + 1], "abc-123");
         assert_eq!(
@@ -655,7 +649,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = ClaudeStrategy.build_args(&mcp, None);
+        let args = (CLI.build_args)(&mcp, None);
 
         let disallowed = args.iter().position(|a| a == "--disallowedTools").unwrap();
         assert_eq!(args[disallowed + 1], "Bash,Monitor,WebSearch,WebFetch");
@@ -694,7 +688,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = ClaudeStrategy.build_args(&mcp, None);
+        let args = (CLI.build_args)(&mcp, None);
         let settings = args.iter().position(|a| a == "--settings").unwrap();
         let json = &args[settings + 1];
         assert!(json.contains("Notification"));
@@ -713,7 +707,7 @@ mod tests {
             args: vec!["mcp".into(), "--anchor".into(), "42".into()],
             cwd: None,
         };
-        let args = ClaudeStrategy.build_args(&mcp, None);
+        let args = (CLI.build_args)(&mcp, None);
         let settings = args.iter().position(|a| a == "--settings").unwrap();
         let json = &args[settings + 1];
         assert!(json.contains("PostToolUse"), "json: {json}");
@@ -730,7 +724,7 @@ mod tests {
             args: vec!["mcp".into(), "--anchor".into(), "42".into()],
             cwd: None,
         };
-        let args = ClaudeStrategy.build_args(&mcp, None);
+        let args = (CLI.build_args)(&mcp, None);
         let settings = args.iter().position(|a| a == "--settings").unwrap();
         let json = &args[settings + 1];
         let parsed: Value = serde_json::from_str(json).unwrap();
@@ -748,7 +742,7 @@ mod tests {
 
     #[test]
     fn detect_end_time_always_false() {
-        assert!(!ClaudeStrategy.detect_end_time("anything"));
+        assert!(!(CLI.detect_end_time)("anything"));
     }
 
     #[test]
@@ -775,7 +769,7 @@ mod tests {
         };
 
         assert_eq!(
-            ClaudeStrategy.build_env(&mcp),
+            (CLI.build_env)(&mcp),
             vec![("MCP_TOOL_TIMEOUT".into(), "660000".into())]
         );
     }

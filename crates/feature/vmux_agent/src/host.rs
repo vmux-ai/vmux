@@ -65,7 +65,7 @@ pub(crate) use self::workspace::{
 pub use vmux_api::room as message;
 
 pub use crate::stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
-pub use cli::CliAgentStrategy;
+pub use cli::CliStrategy;
 pub use event::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
     ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
