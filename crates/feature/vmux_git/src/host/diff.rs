@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use crate::event::{DiffKind, DiffLine, GitDiffRequest, GitLineMarker, GitLineStatus};
+use crate::event::{DiffKind, DiffLine, GitLineMarker, GitLineStatus};
+use crate::state::GitPanel;
 
 use super::GitUpdateSet;
 use super::job::DiffJob;
@@ -16,10 +16,12 @@ pub(super) struct DiffPlugin;
 
 impl Plugin for DiffPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(GitDiffRequest,)>::default())
-            .add_observer(on_diff_request)
-            .add_observer(on_file_diff_refresh)
-            .add_systems(Update, start_diff_requests.in_set(GitUpdateSet::Diff));
+        app.add_observer(on_file_diff_refresh).add_systems(
+            Update,
+            (sync_page_diff_targets, start_diff_requests)
+                .chain()
+                .in_set(GitUpdateSet::Diff),
+        );
     }
 }
 
@@ -38,15 +40,32 @@ struct GitDiffTarget {
 }
 
 impl GitDiffTarget {
-    fn from_request(request: &GitDiffRequest) -> Self {
-        let repo_root = PathBuf::from(&request.repo_root);
-        let path =
-            super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
-        Self {
-            repo_root,
-            path,
-            path_bytes: request.path_bytes.clone(),
-            reference: request.reference.clone(),
+    fn for_page(
+        state: &super::state::GitState,
+        controller: &super::controller::GitController,
+    ) -> Option<Self> {
+        state.repository()?;
+        let controller = controller.state();
+        let repo_root = PathBuf::from(state.workspace());
+        if repo_root.as_os_str().is_empty() {
+            return None;
+        }
+        match controller.focused_panel {
+            GitPanel::Commits if !controller.selected_commit.is_empty() => Some(Self {
+                repo_root,
+                path: PathBuf::new(),
+                path_bytes: Vec::new(),
+                reference: controller.selected_commit.clone(),
+            }),
+            GitPanel::Files | GitPanel::Stash if !controller.selected_abs_path.is_empty() => {
+                Some(Self {
+                    repo_root,
+                    path: PathBuf::from(&controller.selected_abs_path),
+                    path_bytes: controller.selected_path_bytes.clone(),
+                    reference: String::new(),
+                })
+            }
+            _ => None,
         }
     }
 
@@ -65,6 +84,7 @@ impl GitDiffTarget {
 struct PendingGitDiff {
     target: GitDiffTarget,
     file: Option<FileDiffIdentity>,
+    page_revision: Option<u32>,
 }
 
 #[derive(Clone, Copy)]
@@ -78,6 +98,7 @@ pub(super) struct GitDiffQuery {
     target: GitDiffTarget,
     generation: u64,
     file: Option<FileDiffIdentity>,
+    page_revision: Option<u32>,
 }
 
 impl GitDiffQuery {
@@ -99,11 +120,38 @@ pub(super) struct FileDiffRefresh {
     pub(super) entity: Entity,
 }
 
-fn on_diff_request(trigger: On<UiInput<GitDiffRequest>>, mut commands: Commands) {
-    let target = GitDiffTarget::from_request(&trigger.event().payload);
-    commands
-        .entity(trigger.event().webview)
-        .insert(PendingGitDiff { target, file: None });
+fn sync_page_diff_targets(
+    pages: Query<(
+        Entity,
+        Ref<super::state::GitState>,
+        Ref<super::controller::GitController>,
+        Option<&PendingGitDiff>,
+        Option<&GitDiffQuery>,
+    )>,
+    mut commands: Commands,
+) {
+    for (entity, state, controller, pending, current) in &pages {
+        if !state.is_changed() && !controller.is_changed() {
+            continue;
+        }
+        let Some(target) = GitDiffTarget::for_page(&state, &controller) else {
+            commands.entity(entity).remove::<PendingGitDiff>();
+            continue;
+        };
+        let page_revision = state.diff_revision();
+        if pending.is_some_and(|pending| {
+            pending.target == target && pending.page_revision == Some(page_revision)
+        }) || current.is_some_and(|current| {
+            current.target == target && current.page_revision == Some(page_revision)
+        }) {
+            continue;
+        }
+        commands.entity(entity).insert(PendingGitDiff {
+            target,
+            file: None,
+            page_revision: Some(page_revision),
+        });
+    }
 }
 
 fn on_file_diff_refresh(
@@ -121,6 +169,7 @@ fn on_file_diff_refresh(
     commands.entity(trigger.entity).insert(PendingGitDiff {
         target,
         file: Some(FileDiffIdentity { document, refresh }),
+        page_revision: None,
     });
 }
 
@@ -161,6 +210,7 @@ fn start_diff_requests(
                 target: target.clone(),
                 generation,
                 file: pending.file,
+                page_revision: pending.page_revision,
             });
         commands.spawn((
             GitJob::new(entity),
@@ -371,6 +421,7 @@ mod tests {
                         reference: String::new(),
                     },
                     file: None,
+                    page_revision: None,
                 },
             ))
             .id();
@@ -390,6 +441,7 @@ mod tests {
                 reference: String::new(),
             },
             file: None,
+            page_revision: None,
         });
         app.update();
 
@@ -415,6 +467,7 @@ mod tests {
                 document: 7,
                 refresh: 0,
             }),
+            page_revision: None,
         };
 
         assert!(query.accepts_file(3, &file));

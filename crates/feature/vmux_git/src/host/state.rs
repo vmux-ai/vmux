@@ -134,6 +134,10 @@ impl GitState {
         &self.snapshot.workspace
     }
 
+    pub(super) fn diff_revision(&self) -> u32 {
+        self.snapshot.nonce
+    }
+
     pub(super) fn repository(&self) -> Option<&GitRepositorySnapshot> {
         self.snapshot.repository.as_ref()
     }

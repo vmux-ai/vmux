@@ -29,7 +29,6 @@ pub(super) fn GitDashboard() -> Element {
         return rsx! {};
     };
     let repo_root = use_memo(move || snapshot().workspace);
-    let nonce = use_memo(move || snapshot().nonce);
     let diff_viewport = use_memo(move || snapshot().diff_viewport);
     let selected_path = use_memo(move || controller().selected_path);
     let selected_path_bytes = use_memo(move || controller().selected_path_bytes);
@@ -90,7 +89,6 @@ pub(super) fn GitDashboard() -> Element {
                         repository: repository.clone(),
                         repo_root,
                         selected_commit,
-                        nonce,
                         diff_viewport,
                         loading: ui.diff_loading,
                     }
@@ -100,7 +98,6 @@ pub(super) fn GitDashboard() -> Element {
                         selected_path,
                         selected_path_bytes,
                         selected_abs_path,
-                        nonce,
                         diff_viewport,
                         loading: ui.diff_loading,
                     }

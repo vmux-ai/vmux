@@ -149,13 +149,6 @@ pub struct GitDirectoryParentRequest;
 #[vmux_api::ui_event]
 pub struct GitDirectoryToggleHiddenRequest;
 #[vmux_api::ui_event(Eq)]
-pub struct GitDiffRequest {
-    pub repo_root: String,
-    pub path: String,
-    pub path_bytes: Vec<u8>,
-    pub reference: String,
-}
-#[vmux_api::ui_event(Eq)]
 pub struct GitStageRequest {
     pub repo_root: String,
     pub path: String,

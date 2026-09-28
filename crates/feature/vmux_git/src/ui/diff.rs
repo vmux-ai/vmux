@@ -14,7 +14,6 @@ pub(super) fn CommitDiffCard(
     repository: GitRepositorySnapshot,
     repo_root: ReadSignal<String>,
     selected_commit: ReadSignal<String>,
-    nonce: ReadSignal<u32>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     loading: bool,
 ) -> Element {
@@ -28,20 +27,6 @@ pub(super) fn CommitDiffCard(
         .as_ref()
         .map(|commit| format!("{}  {}", commit.short_sha, commit.summary))
         .unwrap_or_else(|| translate("git-no-commits"));
-    use_effect(move || {
-        let repo_root = repo_root();
-        let reference = selected_commit();
-        let _ = nonce();
-        if repo_root.is_empty() || reference.is_empty() {
-            return;
-        }
-        let _ = vmux_ui::hooks::send(&crate::event::GitDiffRequest {
-            repo_root,
-            path: String::new(),
-            path_bytes: Vec::new(),
-            reference,
-        });
-    });
     rsx! {
         Card { variant: CardVariant::Panel, class: "order-2 min-h-[28rem] border-t-sky-400/25 sm:col-start-2 sm:row-start-1 sm:row-span-4 sm:min-h-0 sm:order-none",
             div { class: "flex h-7 shrink-0 items-center gap-1.5 border-b border-foreground/[0.07] bg-gradient-to-r from-sky-400/[0.055] to-transparent px-2",
@@ -74,25 +59,9 @@ pub(super) fn DiffCard(
     selected_path: ReadSignal<String>,
     selected_path_bytes: ReadSignal<Vec<u8>>,
     selected_abs_path: ReadSignal<String>,
-    nonce: ReadSignal<u32>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     loading: bool,
 ) -> Element {
-    use_effect(move || {
-        let repo_root = repo_root();
-        let path = selected_abs_path();
-        let path_bytes = selected_path_bytes();
-        let _ = nonce();
-        if repo_root.is_empty() || path.is_empty() {
-            return;
-        }
-        let _ = vmux_ui::hooks::send(&crate::event::GitDiffRequest {
-            repo_root,
-            path,
-            path_bytes,
-            reference: String::new(),
-        });
-    });
     rsx! {
         Card { variant: CardVariant::Panel, class: "order-2 min-h-[28rem] border-t-emerald-400/25 sm:col-start-2 sm:row-start-1 sm:row-span-4 sm:min-h-0 sm:order-none",
             div { class: "flex h-7 shrink-0 items-center gap-1.5 border-b border-foreground/[0.07] bg-gradient-to-r from-emerald-400/[0.055] to-transparent px-2",

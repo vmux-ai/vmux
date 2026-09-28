@@ -33,7 +33,6 @@
         "GitDirectoryActivateRequest",
         "GitDirectoryParentRequest",
         "GitDirectoryToggleHiddenRequest",
-        "GitDiffRequest",
         "GitStageRequest",
         "GitUnstageRequest",
         "GitDiscardRequest",
