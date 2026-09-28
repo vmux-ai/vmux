@@ -8,7 +8,6 @@ use vmux_editor::lsp::{LspDiagnosticsInbox, LspDiagnosticsSender};
 struct Mock {
     _client: ServerClient,
     diagnostics: LspDiagnosticsInbox,
-    _events: crossbeam_channel::Receiver<vmux_editor::lsp::server_request::ServerEvent>,
 }
 
 impl Mock {
@@ -24,9 +23,13 @@ impl Mock {
         };
 
         let (diagnostics, inbox) = LspDiagnosticsSender::channel();
-        let (events, event_inbox) = crossbeam_channel::unbounded();
-        let client = ServerClient::spawn(&spec, dir, diagnostics, events)
-            .expect("mock server spawns and initializes");
+        let client = ServerClient::spawn(
+            &spec,
+            dir,
+            diagnostics,
+            vmux_editor::lsp::server_request::ServerInputSender::default(),
+        )
+        .expect("mock server spawns and initializes");
 
         let uri = url::Url::from_file_path(&file).unwrap().to_string();
         client.did_open(&uri, "rust", 1, "fn x() {}\n");
@@ -34,7 +37,6 @@ impl Mock {
         Self {
             _client: client,
             diagnostics: inbox,
-            _events: event_inbox,
         }
     }
 

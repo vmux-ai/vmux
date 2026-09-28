@@ -312,13 +312,52 @@ pub struct FileDirEntry {
 }
 
 #[vmux_api::contract(Eq)]
-pub struct FileDirEvent {
+pub struct FileDirectoryState {
     pub path: String,
     pub abs_path: String,
     pub entries: Vec<FileDirEntry>,
-    pub parent_path: String,
     pub parent_entries: Vec<FileDirEntry>,
+    pub selected: u32,
+    pub show_hidden: bool,
 }
+
+#[vmux_api::ui_event(Eq)]
+pub struct FileDirectorySelectRequest {
+    pub index: u32,
+}
+
+#[vmux_api::ui_event]
+pub struct FileDirectoryNextRequest;
+
+#[vmux_api::ui_event]
+pub struct FileDirectoryPreviousRequest;
+
+#[vmux_api::ui_event(Eq)]
+pub struct FileDirectoryAscendRequest {
+    pub target: String,
+}
+
+#[vmux_api::ui_event(Eq)]
+pub struct FileDirectoryDescendRequest {
+    pub target: String,
+}
+
+#[vmux_api::ui_event]
+pub struct FileDirectoryActivateRequest;
+
+#[vmux_api::ui_event]
+pub struct FileDirectoryParentRequest;
+
+#[vmux_api::ui_event(Eq)]
+pub struct FileDirectoryOpenRequest {
+    pub path: String,
+}
+
+#[vmux_api::ui_event]
+pub struct FileDirectoryBackRequest;
+
+#[vmux_api::ui_event]
+pub struct FileDirectoryToggleHiddenRequest;
 
 #[vmux_api::contract(Default)]
 pub struct FileThemeEvent {

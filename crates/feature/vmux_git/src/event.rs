@@ -130,6 +130,10 @@ pub struct GitDirectoryOpenRequest {
 pub struct GitDirectorySelectRequest {
     pub index: u32,
 }
+#[vmux_api::ui_event]
+pub struct GitDirectoryNextRequest;
+#[vmux_api::ui_event]
+pub struct GitDirectoryPreviousRequest;
 #[vmux_api::ui_event(Eq)]
 pub struct GitDirectoryAscendRequest {
     pub target: String,
@@ -138,6 +142,10 @@ pub struct GitDirectoryAscendRequest {
 pub struct GitDirectoryDescendRequest {
     pub target: String,
 }
+#[vmux_api::ui_event]
+pub struct GitDirectoryActivateRequest;
+#[vmux_api::ui_event]
+pub struct GitDirectoryParentRequest;
 #[vmux_api::ui_event]
 pub struct GitDirectoryToggleHiddenRequest;
 #[vmux_api::ui_event(Eq)]

@@ -23,6 +23,10 @@ pub fn DirectoryNavigator(
     on_ascend: EventHandler<String>,
     on_descend: EventHandler<String>,
     on_open: EventHandler<FileDirEntry>,
+    on_next: EventHandler<()>,
+    on_previous: EventHandler<()>,
+    on_activate: EventHandler<()>,
+    on_parent: EventHandler<()>,
     on_toggle_hidden: EventHandler<()>,
 ) -> Element {
     let clicks = DirectoryClick {
@@ -38,8 +42,9 @@ pub fn DirectoryNavigator(
         .next()
         .unwrap_or_default()
         .to_string();
-    let keyboard_entries = entries.clone();
-    let keyboard_path = path.clone();
+    use_effect(move || {
+        ScrollIntoView::nearest(&format!("dir-row-{selected}"));
+    });
 
     rsx! {
         div {
@@ -51,34 +56,26 @@ pub fn DirectoryNavigator(
             onclick: move |event: Event<MouseData>| clicks.pane(event.client_coordinates()),
             onkeydown: move |event: KeyboardEvent| {
                 let key = event.key().to_string();
-                let next = match key.as_str() {
-                    "j" | "ArrowDown" => Some(
-                        (selected + 1).min(keyboard_entries.len().saturating_sub(1)),
-                    ),
-                    "k" | "ArrowUp" => Some(selected.saturating_sub(1)),
-                    _ => None,
-                };
-                if let Some(index) = next {
-                    event.prevent_default();
-                    event.stop_propagation();
-                    if let Some(entry) = keyboard_entries.get(index).cloned() {
-                        on_select.call((index, entry));
-                        ScrollIntoView::nearest(&format!("dir-row-{index}"));
-                    }
-                    return;
-                }
                 match key.as_str() {
+                    "j" | "ArrowDown" => {
+                        event.prevent_default();
+                        event.stop_propagation();
+                        on_next.call(());
+                    }
+                    "k" | "ArrowUp" => {
+                        event.prevent_default();
+                        event.stop_propagation();
+                        on_previous.call(());
+                    }
                     "l" | "ArrowRight" | "Enter" => {
                         event.prevent_default();
                         event.stop_propagation();
-                        if let Some(entry) = keyboard_entries.get(selected).cloned() {
-                            on_open.call(entry);
-                        }
+                        on_activate.call(());
                     }
                     "h" | "ArrowLeft" => {
                         event.prevent_default();
                         event.stop_propagation();
-                        on_ascend.call(keyboard_path.clone());
+                        on_parent.call(());
                     }
                     "." => {
                         event.prevent_default();

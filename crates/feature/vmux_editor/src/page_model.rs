@@ -2,8 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use unicode_width::UnicodeWidthChar;
 use vmux_core::event::{
-    DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, MdTableAlign, OpenEditorItem,
-    StyledSpan, TreeRow,
+    DiagSeverity, FileDiagnostic, LspPkgStatus, MdTableAlign, OpenEditorItem, StyledSpan, TreeRow,
 };
 
 pub fn editor_drag_started(origin: (i32, i32), current: (i32, i32)) -> bool {
@@ -433,18 +432,6 @@ pub fn note_cursor_activation(
     })
 }
 
-pub fn dir_select_index(entries: &[FileDirEntry], came_from: &str) -> usize {
-    let name = came_from
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .unwrap_or("");
-    if name.is_empty() {
-        return 0;
-    }
-    entries.iter().position(|e| e.name == name).unwrap_or(0)
-}
-
 pub fn gutter_width(total_lines: u32) -> usize {
     let digits = total_lines.max(1).to_string().len();
     digits.max(3)
@@ -809,14 +796,6 @@ mod editor_tab_tests {
 mod dir_browser_tests {
     use super::*;
 
-    fn entry(path: &str, is_dir: bool) -> FileDirEntry {
-        FileDirEntry {
-            name: path.rsplit('/').next().unwrap().to_string(),
-            path: path.to_string(),
-            is_dir,
-        }
-    }
-
     #[test]
     fn classify_dir_and_image_and_text() {
         assert_eq!(classify("/a/b", true), ContentClass::Dir);
@@ -835,20 +814,6 @@ mod dir_browser_tests {
         assert_eq!(clamp_selection(5, 3), 2);
         assert_eq!(clamp_selection(0, 0), 0);
         assert_eq!(clamp_selection(1, 3), 1);
-    }
-
-    #[test]
-    fn dir_select_index_matches_came_from_by_basename() {
-        let parent = vec![
-            entry("/a/x", true),
-            entry("/a/.worktrees", true),
-            entry("/a/y", false),
-        ];
-        assert_eq!(dir_select_index(&parent, "/a/.worktrees"), 1);
-        assert_eq!(dir_select_index(&parent, "a/.worktrees/"), 1);
-        assert_eq!(dir_select_index(&parent, "~/proj/a/.worktrees"), 1);
-        assert_eq!(dir_select_index(&parent, "/a/zzz"), 0);
-        assert_eq!(dir_select_index(&parent, ""), 0);
     }
 }
 

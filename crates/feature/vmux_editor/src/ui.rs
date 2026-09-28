@@ -11,10 +11,7 @@ mod status;
 mod text_geometry;
 mod toolbar;
 
-use directory::{
-    DirColumns, DirWindow, Preview, apply_dir, clear_preview, image_data_url, open_path, parent_of,
-    request_preview, scroll_row_into_view, toggle_video, visible_entries,
-};
+use directory::{Preview, PreviewPane, clear_preview, image_data_url, toggle_video};
 use dom::{EditorDom, ScrolledLineHeight};
 use editor::{EditorLines, StickyScope};
 use input::{
@@ -34,8 +31,8 @@ use crate::breadcrumb::EditorBreadcrumbs;
 use crate::explorer::SidebarView;
 use crate::page_key::{FilePage as FilePageState, use_file_keys};
 use crate::page_model::{
-    CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, clamp_selection,
-    editor_drag_started, gutter_width, note_cursor_activation, severity_color_class, span_style,
+    CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, editor_drag_started,
+    gutter_width, note_cursor_activation, severity_color_class, span_style,
 };
 use crate::state::use_file_ui;
 use dioxus::html::input_data::MouseButton;
@@ -46,6 +43,7 @@ use vmux_core::media::MediaKind;
 use vmux_git::event::{FileGitState, GitLineStatus};
 use vmux_git::ui::{DiffView, GitFooter};
 use vmux_ui::diff::DiffTone;
+use vmux_ui::directory::DirectoryNavigator;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send, use_theme, use_ui_state_root};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -108,13 +106,9 @@ pub fn Page() -> Element {
     let mut rename_failed_generation = use_signal(|| 0u32);
     let mut error = use_signal(String::new);
     let mut error_undecodable = use_signal(|| false);
-    let dir_entries = use_signal(Vec::<FileDirEntry>::new);
-    let parent_entries = use_signal(Vec::<FileDirEntry>::new);
-    let mut parent_path = use_signal(String::new);
+    let mut dir_entries = use_signal(Vec::<FileDirEntry>::new);
+    let mut parent_entries = use_signal(Vec::<FileDirEntry>::new);
     let mut selected = use_signal(|| 0usize);
-    let mut came_from = use_signal(String::new);
-    let mut back_dir = use_signal(|| Option::<String>::None);
-    let mut show_hidden = use_signal(|| true);
     let mut mode = use_signal(|| Mode::Text);
     let mut media = use_signal(|| Option::<FileMediaEvent>::None);
     let mut preview = use_signal(|| Preview::None);
@@ -613,11 +607,14 @@ pub fn Page() -> Element {
         })
     });
 
-    let directory_event = use_file_ui::<FileDirEvent>();
+    let directory_event = use_file_ui::<FileDirectoryState>();
     use_effect(move || {
         directory_event.for_each(|d| {
             error.set(String::new());
-            clear_preview(preview, thumbs);
+            if path() != d.path {
+                thumbs.set(HashMap::new());
+            }
+            preview.set(Preview::None);
             media.set(None);
             doc_title.set(
                 d.path
@@ -626,27 +623,17 @@ pub fn Page() -> Element {
                     .unwrap_or(&d.path)
                     .to_string(),
             );
-            parent_path.set(d.parent_path);
             git_path.set(d.abs_path);
             mode.set(Mode::Dir);
             diagnostics.set(Vec::new());
             hover_diag.set(None);
             lsp_status.set(None);
-            let came = came_from();
-            came_from.set(String::new());
-            apply_dir(
-                dir_entries,
-                parent_entries,
-                path,
-                selected,
-                preview,
-                thumbs,
-                show_hidden(),
-                d.entries,
-                d.parent_entries,
-                d.path,
-                (!came.is_empty()).then_some(came),
-            );
+            dir_entries.set(d.entries);
+            parent_entries.set(d.parent_entries);
+            path.set(d.path);
+            let index = usize::try_from(d.selected).unwrap_or_default();
+            selected.set(index);
+            vmux_ui::scroll::ScrollIntoView::nearest(&format!("dir-row-{index}"));
         })
     });
 
@@ -672,11 +659,6 @@ pub fn Page() -> Element {
                     let url = image_data_url(&bytes, &ev.path);
                     thumbs.write().insert(ev.path.clone(), url);
                 }
-                return;
-            }
-            let vis = visible_entries(&dir_entries.read(), show_hidden());
-            let sel_path = vis.get(selected()).map(|e| e.path.clone());
-            if sel_path.as_deref() != Some(ev.path.as_str()) {
                 return;
             }
             let next = match ev.kind {
@@ -847,119 +829,23 @@ pub fn Page() -> Element {
                     return;
                 }
                 match current_mode {
-                    Mode::Dir => {
-                        let vis = visible_entries(&dir_entries.read(), show_hidden());
-                        let len = vis.len();
-                        let cur = selected();
-                        match key.as_str() {
-                            "j" | "ArrowDown" => {
-                                e.prevent_default();
-                                let next = if len == 0 { 0 } else { (cur + 1).min(len - 1) };
-                                selected.set(next);
-                                scroll_row_into_view(next);
-                                if let Some(p) = vis.get(next).map(|x| x.path.clone()) {
-                                    request_preview(p);
-                                }
-                            }
-                            "k" | "ArrowUp" => {
-                                e.prevent_default();
-                                let next = cur.saturating_sub(1);
-                                selected.set(next);
-                                scroll_row_into_view(next);
-                                if let Some(p) = vis.get(next).map(|x| x.path.clone()) {
-                                    request_preview(p);
-                                }
-                            }
-                            "l" | "ArrowRight" | "Enter" => {
-                                e.prevent_default();
-                                let Some(ent) = vis.get(cur).cloned() else {
-                                    return;
-                                };
-                                if ent.is_dir {
-                                    let children = match &*preview.read() {
-                                        Preview::Dir(c) => Some(c.clone()),
-                                        _ => None,
-                                    };
-                                    if let Some(children) = children {
-                                        let cur_entries = dir_entries.read().clone();
-                                        parent_path.set(parent_of(&ent.path));
-                                        apply_dir(
-                                            dir_entries,
-                                            parent_entries,
-                                            path,
-                                            selected,
-                                            preview,
-                                            thumbs,
-                                            show_hidden(),
-                                            children,
-                                            cur_entries,
-                                            ent.path.clone(),
-                                            None,
-                                        );
-                                    }
-                                    open_path(ent.path);
-                                } else {
-                                    back_dir.set(Some(parent_of(&ent.path)));
-                                    open_path(ent.path);
-                                }
-                            }
-                            "Escape" => {
-                                e.prevent_default();
-                                let _ = send(&ExplorerCloseEditor { path: git_path() });
-                            }
-                            "h" | "ArrowLeft" => {
-                                let pp = parent_path();
-                                if !pp.is_empty() {
-                                    e.prevent_default();
-                                    let came = path();
-                                    came_from.set(came.clone());
-                                    let pe = parent_entries.read().clone();
-                                    if !pe.is_empty() {
-                                        parent_path.set(parent_of(&pp));
-                                        apply_dir(
-                                            dir_entries,
-                                            parent_entries,
-                                            path,
-                                            selected,
-                                            preview,
-                                            thumbs,
-                                            show_hidden(),
-                                            pe,
-                                            Vec::new(),
-                                            pp.clone(),
-                                            Some(came),
-                                        );
-                                    }
-                                    open_path(pp);
-                                }
-                            }
-                            "." => {
-                                e.prevent_default();
-                                let next = !show_hidden();
-                                show_hidden.set(next);
-                                let vis2 = visible_entries(&dir_entries.read(), next);
-                                let idx = clamp_selection(cur, vis2.len());
-                                selected.set(idx);
-                                scroll_row_into_view(idx);
-                                if let Some(p) = vis2.get(idx).map(|x| x.path.clone()) {
-                                    request_preview(p);
-                                }
-                            }
-                            " " => {
-                                e.prevent_default();
-                                toggle_video();
-                            }
-                            _ => {
-                                keys.offer(&e);
-                            }
-                        }
-                    }
-                    _ => {
-                        if matches!(key.as_str(), "Escape" | "h")
-                            && let Some(d) = back_dir()
-                        {
+                    Mode::Dir => match key.as_str() {
+                        "Escape" => {
                             e.prevent_default();
-                            open_path(d);
+                            let _ = send(&ExplorerCloseEditor { path: git_path() });
+                        }
+                        " " => {
+                            e.prevent_default();
+                            toggle_video();
+                        }
+                        _ => {
+                            keys.offer(&e);
+                        }
+                    },
+                    _ => {
+                        if matches!(key.as_str(), "Escape" | "h") {
+                            e.prevent_default();
+                            let _ = send(&FileDirectoryBackRequest);
                         }
                     }
                 }
@@ -1222,18 +1108,46 @@ pub fn Page() -> Element {
                     }
                 },
                 Mode::Dir => rsx! {
-                    DirColumns {
-                        window: DirWindow {
-                            dir_entries,
-                            parent_entries,
-                            path,
-                            parent_path,
-                            selected,
-                            preview,
-                            thumbs,
-                            came_from,
-                            back_dir,
-                            show_hidden,
+                    DirectoryNavigator {
+                        path: path(),
+                        parent_entries: parent_entries(),
+                        entries: dir_entries(),
+                        children: match preview() {
+                            Preview::Dir(entries) => Some(entries),
+                            _ => None,
+                        },
+                        selected: selected(),
+                        thumbs: thumbs(),
+                        preview: rsx! { PreviewPane { preview: preview() } },
+                        on_select: move |(index, _)| {
+                            let Ok(index) = u32::try_from(index) else {
+                                return;
+                            };
+                            let _ = send(&FileDirectorySelectRequest { index });
+                        },
+                        on_ascend: move |target| {
+                            let _ = send(&FileDirectoryAscendRequest { target });
+                        },
+                        on_descend: move |target| {
+                            let _ = send(&FileDirectoryDescendRequest { target });
+                        },
+                        on_open: move |entry: FileDirEntry| {
+                            let _ = send(&FileDirectoryOpenRequest { path: entry.path });
+                        },
+                        on_next: move |_| {
+                            let _ = send(&FileDirectoryNextRequest);
+                        },
+                        on_previous: move |_| {
+                            let _ = send(&FileDirectoryPreviousRequest);
+                        },
+                        on_activate: move |_| {
+                            let _ = send(&FileDirectoryActivateRequest);
+                        },
+                        on_parent: move |_| {
+                            let _ = send(&FileDirectoryParentRequest);
+                        },
+                        on_toggle_hidden: move |_| {
+                            let _ = send(&FileDirectoryToggleHiddenRequest);
                         },
                     }
                 },

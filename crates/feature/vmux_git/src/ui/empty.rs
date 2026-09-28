@@ -12,8 +12,9 @@ use vmux_ui::icon::{LineIcon, LineIconView};
 
 use super::state::GitPageState;
 use crate::event::{
-    GitDirectoryAscendRequest, GitDirectoryDescendRequest, GitDirectoryOpenRequest,
-    GitDirectorySelectRequest, GitDirectoryToggleHiddenRequest,
+    GitDirectoryActivateRequest, GitDirectoryAscendRequest, GitDirectoryDescendRequest,
+    GitDirectoryNextRequest, GitDirectoryOpenRequest, GitDirectoryParentRequest,
+    GitDirectoryPreviousRequest, GitDirectorySelectRequest, GitDirectoryToggleHiddenRequest,
 };
 
 #[component]
@@ -78,14 +79,26 @@ pub(super) fn EmptyRepository() -> Element {
                 on_descend: move |target| {
                     let _ = send(&GitDirectoryDescendRequest { target });
                 },
-                on_open: move |entry: vmux_core::event::FileDirEntry| {
-                    if entry.is_dir {
-                        let _ = send(&GitDirectoryOpenRequest { path: entry.path });
-                    }
-                },
-                on_toggle_hidden: move |_| {
-                    let _ = send(&GitDirectoryToggleHiddenRequest);
-                },
+                        on_open: move |entry: vmux_core::event::FileDirEntry| {
+                            if entry.is_dir {
+                                let _ = send(&GitDirectoryOpenRequest { path: entry.path });
+                            }
+                        },
+                        on_next: move |_| {
+                            let _ = send(&GitDirectoryNextRequest);
+                        },
+                        on_previous: move |_| {
+                            let _ = send(&GitDirectoryPreviousRequest);
+                        },
+                        on_activate: move |_| {
+                            let _ = send(&GitDirectoryActivateRequest);
+                        },
+                        on_parent: move |_| {
+                            let _ = send(&GitDirectoryParentRequest);
+                        },
+                        on_toggle_hidden: move |_| {
+                            let _ = send(&GitDirectoryToggleHiddenRequest);
+                        },
             }
         }
     }

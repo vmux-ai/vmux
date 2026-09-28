@@ -8,6 +8,7 @@ use vmux_core::event::{
     PreviewKind,
 };
 
+use crate::host::directory::FileDirectoryNavigation;
 use crate::host::editor::FileView;
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileDir};
 use crate::host::preview;
@@ -34,6 +35,7 @@ impl Plugin for MediaPlugin {
                 ),
             )
             .add_observer(on_file_preview_request)
+            .add_observer(load_file_preview)
             .add_observer(on_file_open_external)
             .add_observer(on_file_video_rect);
     }
@@ -49,6 +51,14 @@ pub struct FileMedia {
 struct ThumbTask {
     webview: Entity,
     task: Task<(String, Result<Vec<u8>, String>)>,
+}
+
+#[derive(EntityEvent)]
+pub(crate) struct FilePreviewLoad {
+    #[event_target]
+    pub(crate) webview: Entity,
+    pub(crate) request: FilePreviewRequest,
+    pub(crate) selected_only: bool,
 }
 
 type ReadyMedia = (
@@ -134,17 +144,37 @@ fn detach_video_overlays(
     }
 }
 
-fn on_file_preview_request(
-    trigger: On<UiInput<FilePreviewRequest>>,
+fn on_file_preview_request(trigger: On<UiInput<FilePreviewRequest>>, mut commands: Commands) {
+    commands.trigger(FilePreviewLoad {
+        webview: trigger.event().webview,
+        request: trigger.event().payload.clone(),
+        selected_only: false,
+    });
+}
+
+fn load_file_preview(
+    trigger: On<FilePreviewLoad>,
     file_views: Query<(), With<FileView>>,
+    directories: Query<(&FileDir, &FileDirectoryNavigation)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    let entity = trigger.event().webview;
+    let entity = trigger.event_target();
     if file_views.get(entity).is_err() {
         return;
     }
-    let request = trigger.event().payload.clone();
+    let request = trigger.event().request.clone();
+    let selected_navigation = if trigger.event().selected_only {
+        let Ok((directory, navigation)) = directories.get(entity) else {
+            return;
+        };
+        if !navigation.selects(directory, &request.path) {
+            return;
+        }
+        Some(navigation)
+    } else {
+        None
+    };
     let path = PathBuf::from(&request.path);
     if !needs_native_video(&path) {
         browsers.detach_media_overlay(&entity);
@@ -172,7 +202,12 @@ fn on_file_preview_request(
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    let kind = preview::build_preview_sync(&path);
+    let mut kind = preview::build_preview_sync(&path);
+    if let PreviewKind::Dir(entries) = &mut kind
+        && let Some(navigation) = selected_navigation
+    {
+        *entries = FileDirectoryNavigation::visible(entries, navigation.show_hidden);
+    }
     commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
         entity,
         &FilePreviewEvent {

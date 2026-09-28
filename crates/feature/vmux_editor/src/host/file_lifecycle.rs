@@ -16,7 +16,7 @@ use super::explorer::{
 use super::keymap::KeymapConfig;
 use super::note::NoteSent;
 use super::status::{FileInitialMetaSent, FileKeymapSent, FileThemeSent, FileViewModeSent};
-use crate::dir::{list_dir, parent_listing};
+use crate::directory::list_dir;
 use crate::edit::{EditCore, highlight_cache::HighlightCache};
 use crate::media::FileMedia;
 
@@ -545,22 +545,10 @@ fn reload_changed_files(
 
         if file.path.is_dir() {
             let entries = list_dir(&file.path);
-            commands.entity(entity).insert(FileDir {
-                entries: entries.clone(),
-            });
-            if ready {
-                let (parent_path, parent_entries) = parent_listing(&file.path);
-                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-                    entity,
-                    &FileDirEvent {
-                        path: file.display_path(),
-                        abs_path: file.path.to_string_lossy().into_owned(),
-                        entries,
-                        parent_path,
-                        parent_entries,
-                    },
-                ));
-            }
+            commands
+                .entity(entity)
+                .insert(FileDir { entries })
+                .remove::<FileInitialMetaSent>();
             continue;
         }
 

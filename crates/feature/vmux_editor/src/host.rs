@@ -18,6 +18,7 @@ impl Plugin for EditorPlugin {
             lsp::LspPlugin,
             app_key::KeyPlugin,
             search::SearchPlugin,
+            directory::DirectoryPlugin,
         ))
         .add_plugins(panel::PanelPlugin)
         .add_plugins((
@@ -64,7 +65,7 @@ pub mod shape;
 pub mod tool;
 
 pub(crate) mod app_key;
-pub(crate) mod dir;
+pub(crate) mod directory;
 pub(crate) mod editing;
 pub(crate) mod editor;
 pub(crate) mod explorer;

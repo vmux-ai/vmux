@@ -1,6 +1,6 @@
 use super::{
     ExplorerFocusEvent, ExplorerFsResult, ExplorerPanelEvent, ExplorerSearchEvent,
-    ExplorerTreeEvent, FileCodeActions, FileCursorEvent, FileDiagnostics, FileDirEvent,
+    ExplorerTreeEvent, FileCodeActions, FileCursorEvent, FileDiagnostics, FileDirectoryState,
     FileDirtyEvent, FileEditFailure, FileEncodingEvent, FileErrorEvent, FileHover, FileKey,
     FileKeymapEvent, FileLspStatus, FileMediaEvent, FileMetaEvent, FileNoteEvent, FilePanelState,
     FilePreviewEvent, FileRenamePrompt, FileScrollByEvent, FileShapeEvent, FileThemeEvent,
@@ -16,7 +16,7 @@ pub struct FileUiStatePatch {
     pub note: Option<FileNoteEvent>,
     pub error: Option<FileErrorEvent>,
     pub scroll_by: Option<FileScrollByEvent>,
-    pub directory: Option<FileDirEvent>,
+    pub directory: Option<FileDirectoryState>,
     pub theme: Option<FileThemeEvent>,
     pub preview: Option<FilePreviewEvent>,
     pub media: Option<FileMediaEvent>,

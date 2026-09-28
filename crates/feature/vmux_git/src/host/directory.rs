@@ -6,8 +6,10 @@ use vmux_core::event::FileDirEntry;
 use vmux_core::event::space::ProjectActivateRequest;
 
 use crate::event::{
-    GitDirectoryAscendRequest, GitDirectoryDescendRequest, GitDirectoryOpenRequest,
-    GitDirectorySelectRequest, GitDirectoryToggleHiddenRequest, GitRepositoryRequest,
+    GitDirectoryActivateRequest, GitDirectoryAscendRequest, GitDirectoryDescendRequest,
+    GitDirectoryNextRequest, GitDirectoryOpenRequest, GitDirectoryParentRequest,
+    GitDirectoryPreviousRequest, GitDirectorySelectRequest, GitDirectoryToggleHiddenRequest,
+    GitRepositoryRequest,
 };
 use crate::state::GitDirectoryState;
 
@@ -18,14 +20,22 @@ impl Plugin for DirectoryPlugin {
         app.add_plugins(UiEventPlugin::<(
             GitDirectoryOpenRequest,
             GitDirectorySelectRequest,
+            GitDirectoryNextRequest,
+            GitDirectoryPreviousRequest,
             GitDirectoryAscendRequest,
             GitDirectoryDescendRequest,
+            GitDirectoryActivateRequest,
+            GitDirectoryParentRequest,
             GitDirectoryToggleHiddenRequest,
         )>::default())
             .add_observer(on_directory_open_request)
             .add_observer(on_directory_select_request)
+            .add_observer(on_directory_next_request)
+            .add_observer(on_directory_previous_request)
             .add_observer(on_directory_ascend_request)
             .add_observer(on_directory_descend_request)
+            .add_observer(on_directory_activate_request)
+            .add_observer(on_directory_parent_request)
             .add_observer(on_directory_toggle_hidden_request)
             .add_observer(load_directory);
     }
@@ -72,6 +82,19 @@ impl GitDirectoryNavigation {
         self.current
             .as_ref()?
             .visible_entry(self.show_hidden, self.selected)
+    }
+
+    fn select(&mut self, index: usize) {
+        let entries = self
+            .current
+            .as_ref()
+            .map(|current| current.visible_entries(self.show_hidden))
+            .unwrap_or_default();
+        self.selected = index.min(entries.len().saturating_sub(1));
+        self.preview = entries
+            .get(self.selected)
+            .filter(|entry| entry.is_dir)
+            .map(|entry| DirectoryListing::read(Path::new(&entry.path)));
     }
 }
 
@@ -205,18 +228,29 @@ fn on_directory_select_request(
     let Ok(index) = usize::try_from(trigger.event().payload.index) else {
         return;
     };
-    let Some(entry) = navigation
-        .current
-        .as_ref()
-        .and_then(|current| current.visible_entry(navigation.show_hidden, index))
-        .cloned()
-    else {
+    navigation.select(index);
+}
+
+fn on_directory_next_request(
+    trigger: On<UiInput<GitDirectoryNextRequest>>,
+    mut navigation: Query<&mut GitDirectoryNavigation>,
+) {
+    let Ok(mut navigation) = navigation.get_mut(trigger.event().webview) else {
         return;
     };
-    navigation.selected = index;
-    navigation.preview = entry
-        .is_dir
-        .then(|| DirectoryListing::read(Path::new(&entry.path)));
+    let next = navigation.selected.saturating_add(1);
+    navigation.select(next);
+}
+
+fn on_directory_previous_request(
+    trigger: On<UiInput<GitDirectoryPreviousRequest>>,
+    mut navigation: Query<&mut GitDirectoryNavigation>,
+) {
+    let Ok(mut navigation) = navigation.get_mut(trigger.event().webview) else {
+        return;
+    };
+    let previous = navigation.selected.saturating_sub(1);
+    navigation.select(previous);
 }
 
 fn on_directory_ascend_request(
@@ -259,6 +293,45 @@ fn on_directory_descend_request(
     });
 }
 
+fn on_directory_activate_request(
+    trigger: On<UiInput<GitDirectoryActivateRequest>>,
+    navigation: Query<&GitDirectoryNavigation>,
+    mut commands: Commands,
+) {
+    let Ok(navigation) = navigation.get(trigger.event().webview) else {
+        return;
+    };
+    let Some(entry) = navigation.selected_entry().filter(|entry| entry.is_dir) else {
+        return;
+    };
+    commands.trigger(DirectoryLoad {
+        webview: trigger.event().webview,
+        path: entry.path.clone(),
+        came_from: String::new(),
+    });
+}
+
+fn on_directory_parent_request(
+    trigger: On<UiInput<GitDirectoryParentRequest>>,
+    navigation: Query<&GitDirectoryNavigation>,
+    mut commands: Commands,
+) {
+    let Ok(navigation) = navigation.get(trigger.event().webview) else {
+        return;
+    };
+    let Some(current) = navigation.current.as_ref() else {
+        return;
+    };
+    let Some(parent) = current.parent_path.as_ref() else {
+        return;
+    };
+    commands.trigger(DirectoryLoad {
+        webview: trigger.event().webview,
+        path: parent.to_string_lossy().into_owned(),
+        came_from: current.path.to_string_lossy().into_owned(),
+    });
+}
+
 fn on_directory_toggle_hidden_request(
     trigger: On<UiInput<GitDirectoryToggleHiddenRequest>>,
     mut navigation: Query<&mut GitDirectoryNavigation>,
@@ -267,16 +340,8 @@ fn on_directory_toggle_hidden_request(
         return;
     };
     navigation.show_hidden = !navigation.show_hidden;
-    let entries = navigation
-        .current
-        .as_ref()
-        .map(|current| current.visible_entries(navigation.show_hidden))
-        .unwrap_or_default();
-    navigation.selected = navigation.selected.min(entries.len().saturating_sub(1));
-    navigation.preview = entries
-        .get(navigation.selected)
-        .filter(|entry| entry.is_dir)
-        .map(|entry| DirectoryListing::read(Path::new(&entry.path)));
+    let selected = navigation.selected;
+    navigation.select(selected);
 }
 
 fn load_directory(

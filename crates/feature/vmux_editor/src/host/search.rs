@@ -7,7 +7,7 @@ use ignore::WalkBuilder;
 use regex::{Regex, RegexBuilder};
 use vmux_core::event::{ExplorerSearchFile, ExplorerSearchMatch, ExplorerSearchRequest};
 
-use crate::dir::project_root;
+use crate::directory::project_root;
 use crate::{FileView, GlobalSearchRequest};
 
 const MAX_MATCHES: usize = 500;

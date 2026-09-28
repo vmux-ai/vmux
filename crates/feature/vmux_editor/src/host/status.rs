@@ -2,9 +2,8 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::event::*;
 
-use crate::host::dir::parent_listing;
 use crate::host::editor::{Editor, FileDocumentRevision, FileView};
-use crate::host::file_lifecycle::{EditorFileLoadedSet, FileBuffer, FileDir};
+use crate::host::file_lifecycle::{EditorFileLoadedSet, FileBuffer};
 use crate::host::keymap::KeymapConfig;
 use crate::host::note::{NoteRevealLine, NoteSent};
 use crate::host::viewport::{CursorRenderRequest, FileViewport, ViewportRenderRequest};
@@ -18,8 +17,7 @@ impl Plugin for StatusPlugin {
             .add_plugins(UiEventPlugin::<(FileViewModeSet, FileKeymapSet)>::default())
             .add_systems(
                 Update,
-                (send_initial_meta, send_initial_text_meta, send_initial_dir)
-                    .after(EditorFileLoadedSet),
+                (send_initial_meta, send_initial_text_meta).after(EditorFileLoadedSet),
             )
             .add_systems(
                 Update,
@@ -275,30 +273,6 @@ fn apply_file_view_mode_requests(
 ) {
     if let Some(request) = requests.read().last() {
         mode.0 = request.0;
-    }
-}
-
-fn send_initial_dir(
-    dirs: Query<(Entity, &FileView, &FileDir), ReadyUnsentMeta>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (entity, file, dir) in &dirs {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        let (parent_path, parent_entries) = parent_listing(&file.path);
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-            entity,
-            &FileDirEvent {
-                path: file.display_path(),
-                abs_path: file.path.to_string_lossy().into_owned(),
-                entries: dir.entries.clone(),
-                parent_path,
-                parent_entries,
-            },
-        ));
-        commands.entity(entity).insert(FileInitialMetaSent);
     }
 }
 

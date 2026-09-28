@@ -150,15 +150,17 @@ mod file_event_tests {
     }
 
     #[test]
-    fn file_dir_event_has_parent_fields() {
-        let e = FileDirEvent {
+    fn file_directory_state_carries_projected_selection() {
+        let e = FileDirectoryState {
             path: "/a/b".into(),
             abs_path: "/a/b".into(),
             entries: vec![],
-            parent_path: "/a".into(),
             parent_entries: vec![],
+            selected: 2,
+            show_hidden: false,
         };
-        assert_eq!(e.parent_path, "/a");
+        assert_eq!(e.selected, 2);
+        assert!(!e.show_hidden);
     }
 
     #[test]
