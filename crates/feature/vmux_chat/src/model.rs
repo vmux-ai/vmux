@@ -32,6 +32,9 @@ pub struct Models(pub RemoteModelState);
 #[derive(Component, Default)]
 pub struct Picker(pub ModelState);
 
+type ChangedModelPicker<'w, 's> =
+    Query<'w, 's, (&'static Models, &'static mut Picker), (With<ChatRuntime>, Changed<Models>)>;
+
 fn receive_models(
     mut messages: MessageReader<Models>,
     mut runtimes: Query<&mut Models, With<ChatRuntime>>,
@@ -46,9 +49,7 @@ fn receive_models(
     }
 }
 
-fn project_model_picker(
-    mut runtimes: Query<(&Models, &mut Picker), (With<ChatRuntime>, Changed<Models>)>,
-) {
+fn project_model_picker(mut runtimes: ChangedModelPicker) {
     let Ok((models, mut picker)) = runtimes.single_mut() else {
         return;
     };

@@ -22,7 +22,7 @@ impl ToolScanner {
         Self(scan)
     }
 
-    pub(crate) fn scan(
+    pub fn scan(
         self,
         store: &ToolStore,
         manifest: &mut ToolsManifest,
@@ -54,7 +54,7 @@ impl ToolOperator {
         Self(run)
     }
 
-    pub(crate) fn run(
+    pub fn run(
         self,
         store: &ToolStore,
         operation: &ToolOperationKey,
@@ -72,7 +72,7 @@ impl ToolApplier {
         Self(run)
     }
 
-    pub(crate) fn run(self, store: &ToolStore) -> Result<usize, String> {
+    pub fn run(self, store: &ToolStore) -> Result<usize, String> {
         (self.0)(store)
     }
 }

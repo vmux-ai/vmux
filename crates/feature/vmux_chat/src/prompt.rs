@@ -81,6 +81,9 @@ pub struct Browsed {
 #[derive(Component, Default)]
 pub struct Media(pub ChatMediaState);
 
+type ChangedMediaPicker<'w, 's> =
+    Query<'w, 's, (&'static Browsed, &'static mut Media), (With<ChatRuntime>, Changed<Browsed>)>;
+
 fn receive_browsed(
     mut messages: MessageReader<Browsed>,
     mut runtimes: Query<&mut Browsed, With<ChatRuntime>>,
@@ -95,9 +98,7 @@ fn receive_browsed(
     }
 }
 
-fn project_media(
-    mut runtimes: Query<(&Browsed, &mut Media), (With<ChatRuntime>, Changed<Browsed>)>,
-) {
+fn project_media(mut runtimes: ChangedMediaPicker) {
     let Ok((browsed, mut media)) = runtimes.single_mut() else {
         return;
     };

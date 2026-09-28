@@ -5,7 +5,7 @@ use bevy_ecs::change_detection::{DetectChanges, Ref};
 use bevy_ecs::component::Component;
 use bevy_ecs::message::{Message, MessageReader, MessageWriter};
 use bevy_ecs::schedule::IntoScheduleConfigs;
-use bevy_ecs::system::{Commands, NonSendMut, Query};
+use bevy_ecs::system::{Commands, NonSendMut, Query, Single};
 use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};

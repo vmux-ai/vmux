@@ -72,7 +72,7 @@ fn project_launcher(
     let Ok((roster, mut launcher)) = runtimes.single_mut() else {
         return;
     };
-    launcher.snapshot = Launcher::snapshot(&roster);
+    launcher.snapshot = Launcher::snapshot(roster);
 }
 
 fn emit_launcher(

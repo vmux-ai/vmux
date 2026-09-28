@@ -168,17 +168,17 @@ async fn read_file_result(
     let path_text = path.to_string_lossy();
     let text = read_lines_bounded(&path_text, offset, limit)
         .map_err(|error| format!("read_file: {error}"))?;
-    if let Some(anchor) = anchor {
-        if let Ok(request) = AgentRequest::encode(&AgentFileTouched {
+    if let Some(anchor) = anchor
+        && let Ok(request) = AgentRequest::encode(&AgentFileTouched {
             anchor,
             path: path.to_string_lossy().into_owned(),
             line: offset,
             col: None,
             end_col: None,
             kind: FileTouchKind::Read,
-        }) {
-            let _ = run_agent_command(request, Some(anchor)).await;
-        }
+        })
+    {
+        let _ = run_agent_command(request, Some(anchor)).await;
     }
     Ok(json!({ "content": [{"type": "text", "text": text}] }))
 }
@@ -301,17 +301,16 @@ async fn grep_result(
     if let Some(anchor) = anchor {
         if let Some(file) = order.first()
             && let Ok(path) = std::fs::canonicalize(file)
-        {
-            if let Ok(request) = AgentRequest::encode(&AgentFileTouched {
+            && let Ok(request) = AgentRequest::encode(&AgentFileTouched {
                 anchor,
                 path: path.to_string_lossy().into_owned(),
                 line: first_line.get(file).copied(),
                 col: first_cols.get(file).map(|cols| cols.0),
                 end_col: first_cols.get(file).map(|cols| cols.1),
                 kind: FileTouchKind::Read,
-            }) {
-                let _ = run_agent_command(request, Some(anchor)).await;
-            }
+            })
+        {
+            let _ = run_agent_command(request, Some(anchor)).await;
         }
         let mut canonical_paths = std::collections::HashMap::new();
         let matches = search_matches
@@ -330,15 +329,15 @@ async fn grep_result(
                 })
             })
             .collect::<Vec<_>>();
-        if !matches.is_empty() {
-            if let Ok(request) = AgentRequest::encode(&AgentFileSearch {
+        if !matches.is_empty()
+            && let Ok(request) = AgentRequest::encode(&AgentFileSearch {
                 anchor,
                 root: search_path.to_string_lossy().into_owned(),
                 query: query.clone(),
                 matches,
-            }) {
-                let _ = run_agent_command(request, Some(anchor)).await;
-            }
+            })
+        {
+            let _ = run_agent_command(request, Some(anchor)).await;
         }
     }
 

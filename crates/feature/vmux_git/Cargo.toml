@@ -19,6 +19,7 @@ url = { workspace = true }
 vmux_core = { path = "../../util/vmux_core" }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_api = { path = "../../util/vmux_api" }
+vmux_native = { path = "../../util/vmux_native" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }
@@ -37,7 +38,6 @@ tempfile = "3"
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
-vmux_native = { path = "../../util/vmux_native" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 
 [lints]

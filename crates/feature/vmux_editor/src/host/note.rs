@@ -64,7 +64,6 @@ fn send_note(
             continue;
         };
         let references = index
-            .as_deref()
             .filter(|index| index.loaded() && file.path.starts_with(index.root()))
             .map(|index| {
                 index.resolve_blocks(&file.path, &mut note.blocks);

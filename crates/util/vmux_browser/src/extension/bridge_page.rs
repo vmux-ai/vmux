@@ -154,7 +154,7 @@ fn spawn_extension_bridge_pages(
                             runtime.extension_id
                         )),
                         PrivatePreloadScripts::from([bridge_config_source(
-                            &server,
+                            server,
                             identity,
                             conformance,
                         )]),

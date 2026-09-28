@@ -153,16 +153,44 @@ pub(crate) struct RoomTranscript {
     state: ChatTranscriptState,
 }
 
+type ChatProjectionOutput<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Ref<'static, Snapshot>,
+        Ref<'static, RoomTranscript>,
+        &'static mut ChatUiStateProjection,
+    ),
+    With<ChatRuntime>,
+>;
+
+type ChangedChatProjection<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Conversation,
+        &'static Log,
+        &'static LiveTurn,
+        &'static Agents,
+        &'static AttachmentPreviews,
+        &'static mut Snapshot,
+        &'static mut RoomTranscript,
+    ),
+    (
+        With<ChatRuntime>,
+        Or<(
+            Changed<Conversation>,
+            Changed<Log>,
+            Changed<LiveTurn>,
+            Changed<Agents>,
+            Changed<AttachmentPreviews>,
+        )>,
+    ),
+>;
+
 fn emit_snapshot(
     mut refreshes: MessageReader<RepublishChatUiState>,
-    mut runtimes: Query<
-        (
-            Ref<Snapshot>,
-            Ref<RoomTranscript>,
-            &mut ChatUiStateProjection,
-        ),
-        With<ChatRuntime>,
-    >,
+    mut runtimes: ChatProjectionOutput,
 ) {
     let refresh = refreshes.read().next().is_some();
     let Ok((snapshot, transcript, mut projection)) = runtimes.single_mut() else {
@@ -175,29 +203,7 @@ fn emit_snapshot(
     projection.write(&transcript.state);
 }
 
-fn project_snapshot(
-    mut runtimes: Query<
-        (
-            &Conversation,
-            &Log,
-            &LiveTurn,
-            &Agents,
-            &AttachmentPreviews,
-            &mut Snapshot,
-            &mut RoomTranscript,
-        ),
-        (
-            With<ChatRuntime>,
-            Or<(
-                Changed<Conversation>,
-                Changed<Log>,
-                Changed<LiveTurn>,
-                Changed<Agents>,
-                Changed<AttachmentPreviews>,
-            )>,
-        ),
-    >,
-) {
+fn project_snapshot(mut runtimes: ChangedChatProjection) {
     let Ok((conversation, log, live, agents, previews, mut snapshot, mut transcript)) =
         runtimes.single_mut()
     else {
