@@ -5,13 +5,14 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_core::page::PageReady;
 use vmux_core::tool::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind, ToolOperationNotice,
     ToolProvider, ToolStatus, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
     ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot, ToolsUiState,
 };
-use vmux_core::{PageOpenRequest, PageOpenTarget};
+use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 
 use crate::{
     ExternalToolOperation, ToolApplier, ToolOperationFailed, ToolOperationFinished,
@@ -41,6 +42,7 @@ impl Plugin for ToolHostPlugin {
             ToolOpenRequest,
             ToolsNavigateRequest,
         )>::default())
+        .add_observer(on_page_ready)
         .add_observer(on_refresh_request)
         .add_observer(on_tool_operation_request::<ToolInstallRequest>)
         .add_observer(on_tool_operation_request::<ToolUpdateRequest>)
@@ -68,6 +70,24 @@ impl Plugin for ToolHostPlugin {
             )
                 .chain(),
         );
+    }
+}
+
+fn on_page_ready(
+    trigger: On<UiInput<PageReady>>,
+    pages: Query<&PageMetadata>,
+    subscribers: Query<(), With<ToolSubscriber>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok(page) = pages.get(webview) else {
+        return;
+    };
+    if !page.url.starts_with(crate::ui::ToolsPage::URL) {
+        return;
+    }
+    if !subscribers.contains(webview) {
+        commands.entity(webview).insert(ToolSubscriber::default());
     }
 }
 
@@ -669,6 +689,27 @@ fn emit_tools_state(
 mod tests {
     use super::*;
     use vmux_core::tool::{ToolOperationKind, ToolProvider};
+
+    #[test]
+    fn tools_page_ready_registers_state_subscriber() {
+        let mut app = App::new();
+        app.add_observer(on_page_ready);
+        let webview = app
+            .world_mut()
+            .spawn(PageMetadata {
+                url: "vmux://tools/npm".to_string(),
+                ..Default::default()
+            })
+            .id();
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: PageReady {},
+        });
+        app.update();
+
+        assert!(app.world().get::<ToolSubscriber>(webview).is_some());
+    }
 
     #[test]
     fn tools_navigation_targets_the_emitting_page_stack() {

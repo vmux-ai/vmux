@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_core::event::PageContextRequest;
 use vmux_core::input::KeyModifiers;
 use vmux_ui::hooks::{send, use_theme};
 use vmux_ui::i18n::translate;
@@ -23,9 +22,6 @@ pub fn Page() -> Element {
         ..
     } = state;
 
-    use_effect(move || {
-        let _ = send(&PageContextRequest {});
-    });
     rsx! {
         document::Title { {translate("git-title")} }
         div {

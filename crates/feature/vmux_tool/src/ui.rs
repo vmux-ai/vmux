@@ -135,14 +135,9 @@ pub(crate) fn ToolsManagerTabs(mut active_route: Signal<ToolsRoute>) -> Element 
 
 #[component]
 fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
-    let locale = use_theme();
+    use_theme();
     let state = use_ui_state::<ToolsUiState>();
     let mut query = use_signal(String::new);
-
-    use_effect(move || {
-        locale();
-        request_snapshot(false);
-    });
 
     let current = state();
     let pending = current.pending.into_iter().collect::<BTreeSet<_>>();

@@ -7,3 +7,5 @@ mod ui;
 
 #[cfg(host)]
 pub use host::VaultPlugin;
+
+pub const VAULT_PAGE_URL: &str = "vmux://vault/";

@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_core::event::PageContextRequest;
 use vmux_core::event::space::ProjectActivateRequest;
+use vmux_core::page::PageReady;
 use vmux_git::state::{GitPageContext, GitWorkspaceChanged};
 
 use crate::space::FocusedSpace;
@@ -14,8 +14,8 @@ pub struct PageContextPlugin;
 
 impl Plugin for PageContextPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(PageContextRequest, ProjectActivateRequest)>::default())
-            .add_observer(on_page_context_request)
+        app.add_plugins(UiEventPlugin::<(ProjectActivateRequest,)>::default())
+            .add_observer(on_git_page_ready)
             .add_observer(on_project_activate);
     }
 }
@@ -141,30 +141,33 @@ fn apply_tab_workspace_selection(
     selection.startup_dir
 }
 
-fn on_page_context_request(
-    trigger: On<UiInput<PageContextRequest>>,
+fn on_git_page_ready(
+    trigger: On<UiInput<PageReady>>,
     child_of: Query<&ChildOf>,
     tabs: Query<&Tab>,
     pages: Query<&vmux_core::PageMetadata>,
     focused_space: FocusedSpace,
     mut commands: Commands,
 ) {
-    let path = crate::tab::ancestor_tab_startup_dir(trigger.event().webview, &child_of, &tabs)
+    let webview = trigger.event().webview;
+    let Ok(page) = pages.get(webview) else {
+        return;
+    };
+    if !page.url.starts_with(vmux_git::GIT_PAGE_URL) && page.url != vmux_git::GIT_DOCUMENT_URL {
+        return;
+    }
+    let path = crate::tab::ancestor_tab_startup_dir(webview, &child_of, &tabs)
         .map(PathBuf::from)
         .or_else(|| focused_space.startup_dir().map(PathBuf::from))
         .or_else(|| std::env::current_dir().ok())
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
-    let page_url = pages
-        .get(trigger.event().webview)
-        .map(|page| page.url.clone())
-        .unwrap_or_default();
     commands.trigger(
         vmux_core::host::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
-            trigger.event().webview,
+            webview,
             &GitPageContext {
                 working_directory: path,
-                page_url,
+                page_url: page.url.clone(),
             },
         ),
     );
@@ -252,6 +255,43 @@ fn on_project_activate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Resource, Default)]
+    struct ContextWrites(Vec<GitPageContext>);
+
+    fn capture_context(
+        trigger: On<vmux_core::host::UiStateWrite<vmux_git::state::GitUiState>>,
+        mut writes: ResMut<ContextWrites>,
+    ) {
+        if let Some(context) = &trigger.event().update().context {
+            writes.0.push(context.clone());
+        }
+    }
+
+    #[test]
+    fn git_page_ready_publishes_page_context() {
+        let mut app = App::new();
+        app.init_resource::<ContextWrites>()
+            .add_observer(on_git_page_ready)
+            .add_observer(capture_context);
+        let webview = app
+            .world_mut()
+            .spawn(vmux_core::PageMetadata {
+                url: "git://tmp/repo".to_string(),
+                ..Default::default()
+            })
+            .id();
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: PageReady {},
+        });
+        app.update();
+
+        let writes = &app.world().resource::<ContextWrites>().0;
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].page_url, "git://tmp/repo");
+    }
 
     #[test]
     fn project_activation_updates_the_owning_tab_workspace() {

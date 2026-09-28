@@ -14,6 +14,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_core::page::PageReady;
 use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 use vmux_core::vault::{
     VaultAuthorization, VaultChooseCloudFolderRequest, VaultCompletion, VaultConnectCloudRequest,
@@ -72,6 +73,7 @@ impl Plugin for VaultPlugin {
                 VaultRecoveryInputRequest,
             )>::default(),
         ))
+        .add_observer(on_vault_page_ready)
         .add_observer(on_vault_create_request)
         .add_observer(on_vault_connect_request)
         .add_observer(on_vault_sync_request)
@@ -129,6 +131,39 @@ impl Plugin for VaultPlugin {
             app.insert_non_send(watch);
         }
     }
+}
+
+fn on_vault_page_ready(
+    trigger: On<UiInput<PageReady>>,
+    pages: Query<&vmux_core::PageMetadata>,
+    mut registry: Query<&mut VaultRegistry>,
+    mut subscribers: Query<&mut VaultWorkflow, With<VaultSubscriber>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok(page) = pages.get(webview) else {
+        return;
+    };
+    if !page.url.starts_with(crate::VAULT_PAGE_URL) {
+        return;
+    }
+    let requested = VaultWorkflow::for_url(&page.url);
+    if let Ok(mut workflow) = subscribers.get_mut(webview) {
+        if workflow.state.provider.is_none() {
+            workflow.state.provider = requested.state.provider;
+        }
+    } else {
+        commands
+            .entity(webview)
+            .insert((VaultSubscriber::default(), requested));
+    }
+    let Ok(mut state) = registry.single_mut() else {
+        return;
+    };
+    state.dirty = true;
+    state.loaded = false;
+    state.generation = state.generation.wrapping_add(1);
+    state.revision = state.revision.wrapping_add(1);
 }
 
 const VAULT_AUTO_SYNC_DELAY: Duration = Duration::from_secs(2);
@@ -1941,6 +1976,36 @@ fn cloud_storage_roots(provider: &str) -> Vec<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vault_page_ready_registers_state_subscriber() {
+        let mut app = App::new();
+        app.add_observer(on_vault_page_ready);
+        app.world_mut().spawn(VaultRegistry::default());
+        let webview = app
+            .world_mut()
+            .spawn(vmux_core::PageMetadata {
+                url: "vmux://vault/?provider=dropbox".to_string(),
+                ..Default::default()
+            })
+            .id();
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: PageReady {},
+        });
+        app.update();
+
+        assert!(app.world().get::<VaultSubscriber>(webview).is_some());
+        assert_eq!(
+            app.world()
+                .get::<VaultWorkflow>(webview)
+                .unwrap()
+                .state
+                .provider,
+            Some(VaultConnectionProvider::Dropbox)
+        );
+    }
 
     struct VaultAutoSyncScenario;
 

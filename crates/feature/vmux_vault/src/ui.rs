@@ -26,7 +26,7 @@ pub struct VaultPage;
 
 #[component]
 pub fn Page() -> Element {
-    let locale = use_theme();
+    use_theme();
     let state = use_ui_state::<VaultUiState>();
     let mut recovery_key_copied = use_signal(|| false);
     let mut github_device_code_copied = use_signal(|| false);
@@ -39,13 +39,6 @@ pub fn Page() -> Element {
         if event.workflow.github_device_code.is_empty() {
             github_device_code_copied.set(false);
         }
-    });
-
-    use_effect(move || {
-        locale();
-        let _ = send(&VaultRefreshRequest {
-            load_repositories: false,
-        });
     });
 
     let current = state();

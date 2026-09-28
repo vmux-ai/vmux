@@ -1,6 +1,3 @@
-#[vmux_api::ui_event(Default, Eq)]
-pub struct PageContextRequest {}
-
 #[cfg(host)]
 #[derive(bevy::prelude::Message, Clone, Debug, PartialEq, Eq)]
 pub struct RecordVisitRequest {

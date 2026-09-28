@@ -10,7 +10,6 @@
         "PageReady",
         "ThemeEvent",
         "GitUiState",
-        "PageContextRequest",
         "GitKeyRequest",
         "GitPanelSelectRequest",
         "GitShortcutHelpRequest",

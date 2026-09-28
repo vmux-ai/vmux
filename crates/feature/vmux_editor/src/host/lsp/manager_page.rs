@@ -11,6 +11,7 @@ use vmux_core::event::{
     LspUpdateRequest,
 };
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_core::page::PageReady;
 use vmux_layout::native_open::HostedPage;
 
 use crate::lsp::catalog::{self, Package};
@@ -31,6 +32,7 @@ impl Plugin for ManagerPlugin {
                 LspUninstallRequest,
                 LspUpdateRequest,
             )>::default())
+            .add_observer(on_page_ready)
             .add_observer(on_catalog_request)
             .add_observer(on_install_request)
             .add_observer(on_uninstall_request)
@@ -60,6 +62,27 @@ impl Plugin for ManagerPlugin {
                     .chain(),
             );
     }
+}
+
+fn on_page_ready(
+    trigger: On<UiInput<PageReady>>,
+    pages: Query<&vmux_core::PageMetadata>,
+    mut commands: Commands,
+) {
+    let target = trigger.event().webview;
+    let Ok(page) = pages.get(target) else {
+        return;
+    };
+    if page.url.trim_end_matches('/') != LspManagerPage::URL {
+        return;
+    }
+    commands.spawn((
+        Name::new("LSP catalog"),
+        PendingCatalogJob {
+            target,
+            request: LspCatalogRequest::for_query("", false),
+        },
+    ));
 }
 
 #[derive(Clone, Message)]
@@ -688,6 +711,31 @@ fn publish_manager_state(
 mod tests {
     use super::*;
     use crate::lsp::catalog::Package;
+
+    #[test]
+    fn page_ready_starts_initial_catalog_job() {
+        let mut app = App::new();
+        app.add_observer(on_page_ready);
+        let webview = app
+            .world_mut()
+            .spawn(vmux_core::PageMetadata {
+                url: "vmux://tools/lsp".to_string(),
+                ..Default::default()
+            })
+            .id();
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: PageReady {},
+        });
+        app.update();
+
+        let mut jobs = app.world_mut().query::<&PendingCatalogJob>();
+        let job = jobs.single(app.world()).unwrap();
+        assert_eq!(job.target, webview);
+        assert!(job.request.query.is_empty());
+        assert!(!job.request.refresh);
+    }
 
     fn pkg(name: &str, source_id: &str) -> Package {
         Package {
