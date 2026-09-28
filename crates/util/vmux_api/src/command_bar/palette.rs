@@ -57,6 +57,38 @@ impl PaletteMode {
     }
 }
 
+#[vmux_api::contract(Copy, Default, Eq)]
+pub struct CommandPaletteMenuMoveEffect {
+    pub revision: u64,
+    pub next: bool,
+}
+
+#[vmux_api::contract(Copy, Default, Eq)]
+pub struct CommandPaletteMenuChooseEffect {
+    pub revision: u64,
+}
+
+#[vmux_api::contract(Copy, Default, Eq)]
+pub struct CommandPaletteMenuDismissEffect {
+    pub revision: u64,
+}
+
+#[vmux_api::contract(Copy, Default, Eq)]
+pub struct CommandPaletteMediaMoveEffect {
+    pub revision: u64,
+    pub next: bool,
+}
+
+#[vmux_api::contract(Copy, Default, Eq)]
+pub struct CommandPaletteMediaChooseEffect {
+    pub revision: u64,
+}
+
+#[vmux_api::contract(Copy, Default, Eq)]
+pub struct CommandPaletteMediaDismissEffect {
+    pub revision: u64,
+}
+
 #[vmux_api::contract(Eq)]
 pub struct ResumeSection {
     pub agent: String,
@@ -183,6 +215,12 @@ pub struct CommandPaletteProjection {
     pub close_revision: u64,
     pub mcp_open: bool,
     pub mcp_entries: Vec<McpServerEntry>,
+    pub menu_move: Option<CommandPaletteMenuMoveEffect>,
+    pub menu_choose: Option<CommandPaletteMenuChooseEffect>,
+    pub menu_dismiss: Option<CommandPaletteMenuDismissEffect>,
+    pub media_move: Option<CommandPaletteMediaMoveEffect>,
+    pub media_choose: Option<CommandPaletteMediaChooseEffect>,
+    pub media_dismiss: Option<CommandPaletteMediaDismissEffect>,
     pub prompt_targets: Vec<CommandBarResultItem>,
     pub default_target: Option<CommandBarResultItem>,
     pub ghost: String,

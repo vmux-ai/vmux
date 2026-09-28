@@ -91,6 +91,12 @@ pub struct CommandPaletteSubmitRequest {
 }
 
 #[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPaletteHistoryMoveRequest {
+    pub open_id: super::OpenId,
+    pub older: bool,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq)]
 pub struct CommandPaletteActivateRequest {
     pub open_id: super::OpenId,
     pub index: u32,

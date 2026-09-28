@@ -8,8 +8,11 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch, CommandPaletteActivateRequest,
-    CommandPaletteDraftRequest, CommandPaletteRemoveAttachmentRequest, CommandPaletteState,
-    CommandPaletteSubmitRequest, OpenId,
+    CommandPaletteDraftRequest, CommandPaletteHistoryMoveRequest, CommandPaletteMediaChooseEffect,
+    CommandPaletteMediaDismissEffect, CommandPaletteMediaMoveEffect,
+    CommandPaletteMenuChooseEffect, CommandPaletteMenuDismissEffect, CommandPaletteMenuMoveEffect,
+    CommandPaletteRemoveAttachmentRequest, CommandPaletteState, CommandPaletteSubmitRequest,
+    OpenId,
 };
 use vmux_api::mcp::{McpServerRequest, McpServers};
 use vmux_core::host::{UiState, UiStateWrite};
@@ -38,6 +41,7 @@ impl Plugin for PalettePlugin {
         app.add_plugins((
             UiEventPlugin::<(
                 CommandPaletteDraftRequest,
+                CommandPaletteHistoryMoveRequest,
                 CommandPaletteSubmitRequest,
                 CommandPaletteActivateRequest,
                 CommandPaletteRemoveAttachmentRequest,
@@ -52,10 +56,18 @@ impl Plugin for PalettePlugin {
         .add_observer(receive_palette_open)
         .add_observer(receive_mcp_servers)
         .add_observer(update_palette_draft)
+        .add_observer(move_palette_history)
         .add_observer(submit_palette)
         .add_observer(activate_palette_row)
         .add_observer(apply_palette_decision)
         .add_observer(apply_palette_key)
+        .add_observer(submit_palette_command)
+        .add_observer(move_palette_menu)
+        .add_observer(choose_palette_menu)
+        .add_observer(dismiss_palette_menu)
+        .add_observer(move_palette_media)
+        .add_observer(choose_palette_media)
+        .add_observer(dismiss_palette_media)
         .add_systems(
             Startup,
             spawn_palette_commands.in_set(RegisterCommandDefinitions),
@@ -109,6 +121,55 @@ struct PaletteDraftInput {
     navigating: bool,
     input_revision: u64,
     close_revision: u64,
+    history_cursor: Option<usize>,
+    history_scratch: String,
+    effect_revision: u64,
+    menu_move: Option<CommandPaletteMenuMoveEffect>,
+    menu_choose: Option<CommandPaletteMenuChooseEffect>,
+    menu_dismiss: Option<CommandPaletteMenuDismissEffect>,
+    media_move: Option<CommandPaletteMediaMoveEffect>,
+    media_choose: Option<CommandPaletteMediaChooseEffect>,
+    media_dismiss: Option<CommandPaletteMediaDismissEffect>,
+}
+
+impl PaletteDraftInput {
+    fn move_history(&mut self, history: &[String], older: bool) -> bool {
+        if history.is_empty() {
+            return false;
+        }
+        let current = self.query.clone();
+        let (query, cursor, scratch) = if older {
+            let next = self
+                .history_cursor
+                .map_or(history.len() - 1, |index| index.saturating_sub(1));
+            let scratch = match self.history_cursor {
+                Some(_) => self.history_scratch.clone(),
+                None => current.clone(),
+            };
+            (history[next].clone(), Some(next), scratch)
+        } else {
+            match self.history_cursor {
+                Some(index) if index + 1 < history.len() => (
+                    history[index + 1].clone(),
+                    Some(index + 1),
+                    self.history_scratch.clone(),
+                ),
+                Some(_) => (
+                    self.history_scratch.clone(),
+                    None,
+                    self.history_scratch.clone(),
+                ),
+                None => return false,
+            }
+        };
+        self.query = query;
+        self.history_cursor = cursor;
+        self.history_scratch = scratch;
+        self.selected = 0;
+        self.navigating = false;
+        self.input_revision = self.input_revision.wrapping_add(1).max(1);
+        true
+    }
 }
 
 #[derive(Component, Default)]
@@ -135,6 +196,33 @@ enum PaletteKey {
 #[derive(Component)]
 struct PaletteKeyBinding(PaletteKey);
 
+#[derive(Component)]
+struct PaletteSubmitBinding;
+
+#[derive(Component)]
+struct PaletteMenuNextBinding;
+
+#[derive(Component)]
+struct PaletteMenuPreviousBinding;
+
+#[derive(Component)]
+struct PaletteMenuChooseBinding;
+
+#[derive(Component)]
+struct PaletteMenuDismissBinding;
+
+#[derive(Component)]
+struct PaletteMediaNextBinding;
+
+#[derive(Component)]
+struct PaletteMediaPreviousBinding;
+
+#[derive(Component)]
+struct PaletteMediaChooseBinding;
+
+#[derive(Component)]
+struct PaletteMediaDismissBinding;
+
 #[derive(EntityEvent)]
 struct PaletteDecisionReady {
     #[event_target]
@@ -159,6 +247,39 @@ fn spawn_palette_commands(mut commands: Commands) {
     commands.spawn((
         definitions.take("command_bar_dismiss"),
         PaletteKeyBinding(PaletteKey::Dismiss),
+    ));
+    commands.spawn((definitions.take("command_bar_submit"), PaletteSubmitBinding));
+    commands.spawn((
+        definitions.take("command_bar_menu_next"),
+        PaletteMenuNextBinding,
+    ));
+    commands.spawn((
+        definitions.take("command_bar_menu_previous"),
+        PaletteMenuPreviousBinding,
+    ));
+    commands.spawn((
+        definitions.take("command_bar_menu_choose"),
+        PaletteMenuChooseBinding,
+    ));
+    commands.spawn((
+        definitions.take("command_bar_menu_dismiss"),
+        PaletteMenuDismissBinding,
+    ));
+    commands.spawn((
+        definitions.take("command_bar_media_next"),
+        PaletteMediaNextBinding,
+    ));
+    commands.spawn((
+        definitions.take("command_bar_media_previous"),
+        PaletteMediaPreviousBinding,
+    ));
+    commands.spawn((
+        definitions.take("command_bar_media_choose"),
+        PaletteMediaChooseBinding,
+    ));
+    commands.spawn((
+        definitions.take("command_bar_media_dismiss"),
+        PaletteMediaDismissBinding,
     ));
     definitions.assert_all_registered();
 }
@@ -227,6 +348,14 @@ fn receive_palette_open(
         0
     };
     draft.navigating = false;
+    draft.history_cursor = None;
+    draft.history_scratch.clear();
+    draft.menu_move = None;
+    draft.menu_choose = None;
+    draft.menu_dismiss = None;
+    draft.media_move = None;
+    draft.media_choose = None;
+    draft.media_dismiss = None;
     draft.input_revision = draft.input_revision.wrapping_add(1).max(1);
     draft.close_revision = 0;
     snapshot.0.open_id = opened.open_id;
@@ -248,7 +377,11 @@ fn update_palette_draft(
         return;
     }
     draft.open_id = request.open_id;
-    draft.query.clone_from(&request.query);
+    if draft.query != request.query {
+        draft.history_cursor = None;
+        draft.history_scratch.clear();
+        draft.query.clone_from(&request.query);
+    }
     draft.start = request.start;
     draft.target_url.clone_from(&request.target_url);
     draft.selected = request.selected as usize;
@@ -264,6 +397,21 @@ fn update_palette_draft(
         }
         _ => {}
     }
+}
+
+fn move_palette_history(
+    trigger: On<UiInput<CommandPaletteHistoryMoveRequest>>,
+    mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput, &PaletteSnapshot)>,
+) {
+    let target = trigger.event().webview;
+    let Ok((opened, mut input, snapshot)) = palettes.get_mut(target) else {
+        return;
+    };
+    let request = &trigger.event().payload;
+    if request.open_id != opened.0.open_id {
+        return;
+    }
+    input.move_history(&snapshot.0.prompt_history, request.older);
 }
 
 fn submit_palette(
@@ -500,6 +648,143 @@ fn apply_palette_key(
     input.input_revision = input.input_revision.wrapping_add(1).max(1);
 }
 
+fn submit_palette_command(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<PaletteSubmitBinding>>,
+    palettes: Query<&PaletteOpen>,
+    mut commands: Commands,
+) {
+    if !bindings.contains(trigger.event().command()) {
+        return;
+    }
+    let target = trigger.event().invocation().caller;
+    let Ok(opened) = palettes.get(target) else {
+        return;
+    };
+    commands.trigger(UiInput {
+        webview: target,
+        payload: CommandPaletteSubmitRequest {
+            open_id: opened.0.open_id,
+        },
+    });
+}
+
+fn move_palette_menu(
+    trigger: On<CommandDispatch>,
+    next: Query<(), With<PaletteMenuNextBinding>>,
+    previous: Query<(), With<PaletteMenuPreviousBinding>>,
+    mut inputs: Query<&mut PaletteDraftInput>,
+) {
+    let command = trigger.event().command();
+    let next = if next.contains(command) {
+        true
+    } else if previous.contains(command) {
+        false
+    } else {
+        return;
+    };
+    let Ok(mut input) = inputs.get_mut(trigger.event().invocation().caller) else {
+        return;
+    };
+    input.effect_revision = input.effect_revision.wrapping_add(1).max(1);
+    input.menu_move = Some(CommandPaletteMenuMoveEffect {
+        revision: input.effect_revision,
+        next,
+    });
+}
+
+fn choose_palette_menu(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<PaletteMenuChooseBinding>>,
+    mut inputs: Query<&mut PaletteDraftInput>,
+) {
+    if !bindings.contains(trigger.event().command()) {
+        return;
+    }
+    let Ok(mut input) = inputs.get_mut(trigger.event().invocation().caller) else {
+        return;
+    };
+    input.effect_revision = input.effect_revision.wrapping_add(1).max(1);
+    input.menu_choose = Some(CommandPaletteMenuChooseEffect {
+        revision: input.effect_revision,
+    });
+}
+
+fn dismiss_palette_menu(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<PaletteMenuDismissBinding>>,
+    mut inputs: Query<&mut PaletteDraftInput>,
+) {
+    if !bindings.contains(trigger.event().command()) {
+        return;
+    }
+    let Ok(mut input) = inputs.get_mut(trigger.event().invocation().caller) else {
+        return;
+    };
+    input.effect_revision = input.effect_revision.wrapping_add(1).max(1);
+    input.menu_dismiss = Some(CommandPaletteMenuDismissEffect {
+        revision: input.effect_revision,
+    });
+}
+
+fn move_palette_media(
+    trigger: On<CommandDispatch>,
+    next: Query<(), With<PaletteMediaNextBinding>>,
+    previous: Query<(), With<PaletteMediaPreviousBinding>>,
+    mut inputs: Query<&mut PaletteDraftInput>,
+) {
+    let command = trigger.event().command();
+    let next = if next.contains(command) {
+        true
+    } else if previous.contains(command) {
+        false
+    } else {
+        return;
+    };
+    let Ok(mut input) = inputs.get_mut(trigger.event().invocation().caller) else {
+        return;
+    };
+    input.effect_revision = input.effect_revision.wrapping_add(1).max(1);
+    input.media_move = Some(CommandPaletteMediaMoveEffect {
+        revision: input.effect_revision,
+        next,
+    });
+}
+
+fn choose_palette_media(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<PaletteMediaChooseBinding>>,
+    mut inputs: Query<&mut PaletteDraftInput>,
+) {
+    if !bindings.contains(trigger.event().command()) {
+        return;
+    }
+    let Ok(mut input) = inputs.get_mut(trigger.event().invocation().caller) else {
+        return;
+    };
+    input.effect_revision = input.effect_revision.wrapping_add(1).max(1);
+    input.media_choose = Some(CommandPaletteMediaChooseEffect {
+        revision: input.effect_revision,
+    });
+}
+
+fn dismiss_palette_media(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<PaletteMediaDismissBinding>>,
+    mut inputs: Query<&mut PaletteDraftInput>,
+) {
+    if !bindings.contains(trigger.event().command()) {
+        return;
+    }
+    let Ok(mut input) = inputs.get_mut(trigger.event().invocation().caller) else {
+        return;
+    };
+    input.effect_revision = input.effect_revision.wrapping_add(1).max(1);
+    input.media_dismiss = Some(CommandPaletteMediaDismissEffect {
+        revision: input.effect_revision,
+    });
+}
+
 fn project_palette(
     mut palettes: Query<(
         &PaletteOpen,
@@ -554,6 +839,12 @@ fn project_palette(
         projection.navigating = input.navigating;
         projection.input_revision = input.input_revision;
         projection.close_revision = input.close_revision;
+        projection.menu_move = input.menu_move;
+        projection.menu_choose = input.menu_choose;
+        projection.menu_dismiss = input.menu_dismiss;
+        projection.media_move = input.media_move;
+        projection.media_choose = input.media_choose;
+        projection.media_dismiss = input.media_dismiss;
         let palette = PaletteState::from_rows(&rows, &opened.0, &draft, surface);
         let next_context = PaletteContext {
             open_id: opened.0.open_id,
@@ -755,31 +1046,31 @@ mod tests {
     fn page_entity_projects_palette_rows() {
         let open_id = OpenId(7);
         let mut app = App::new();
-        app.add_systems(Update, project_palette);
-        let page = app
-            .world_mut()
-            .spawn((
-                PaletteOpen(CommandBarOpenEvent {
-                    open_id,
-                    commands: vec![CommandBarCommandEntry {
-                        id: "close_tab".to_string(),
-                        name: "Close Tab".to_string(),
-                        shortcut: String::new(),
-                    }],
-                    ..Default::default()
-                }),
-                PaletteDraftInput {
-                    open_id,
-                    query: ">close".to_string(),
-                    ..Default::default()
-                },
-                PaletteMcp::default(),
-                PaletteSnapshot(CommandPaletteState {
-                    open_id,
-                    ..Default::default()
-                }),
-            ))
-            .id();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_plugins(PalettePlugin);
+        let page = app.world_mut().spawn(HostsLauncher).id();
+        app.update();
+        app.world_mut().entity_mut(page).insert((
+            PaletteOpen(CommandBarOpenEvent {
+                open_id,
+                commands: vec![CommandBarCommandEntry {
+                    id: "close_tab".to_string(),
+                    name: "Close Tab".to_string(),
+                    shortcut: String::new(),
+                }],
+                ..Default::default()
+            }),
+            PaletteDraftInput {
+                open_id,
+                query: ">close".to_string(),
+                ..Default::default()
+            },
+            PaletteSnapshot(CommandPaletteState {
+                open_id,
+                ..Default::default()
+            }),
+        ));
 
         app.update();
 
@@ -836,6 +1127,87 @@ mod tests {
         assert_eq!(input.selected, 1);
         assert!(input.navigating);
         assert_eq!(input.input_revision, 1);
+
+        app.world_mut()
+            .resource_mut::<Messages<CommandInvocation>>()
+            .write(CommandInvocation::new(page, "command_bar_menu_next"));
+        app.update();
+
+        let snapshot = app.world().get::<PaletteSnapshot>(page).unwrap();
+        assert_eq!(
+            snapshot.0.projection.menu_move,
+            Some(CommandPaletteMenuMoveEffect {
+                revision: 1,
+                next: true,
+            })
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<CommandInvocation>>()
+            .write(CommandInvocation::new(page, "command_bar_media_previous"));
+        app.update();
+
+        let snapshot = app.world().get::<PaletteSnapshot>(page).unwrap();
+        assert_eq!(
+            snapshot.0.projection.media_move,
+            Some(CommandPaletteMediaMoveEffect {
+                revision: 2,
+                next: false,
+            })
+        );
+    }
+
+    #[test]
+    fn palette_history_is_recalled_in_host_state() {
+        let open_id = OpenId(11);
+        let mut app = App::new();
+        app.add_observer(move_palette_history);
+        let page = app
+            .world_mut()
+            .spawn((
+                PaletteOpen(CommandBarOpenEvent {
+                    open_id,
+                    ..Default::default()
+                }),
+                PaletteDraftInput {
+                    open_id,
+                    query: "unfinished".to_string(),
+                    ..Default::default()
+                },
+                PaletteSnapshot(CommandPaletteState {
+                    open_id,
+                    prompt_history: vec!["first".to_string(), "second".to_string()],
+                    ..Default::default()
+                }),
+            ))
+            .id();
+
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: CommandPaletteHistoryMoveRequest {
+                open_id,
+                older: true,
+            },
+        });
+
+        let input = app.world().get::<PaletteDraftInput>(page).unwrap();
+        assert_eq!(input.query, "second");
+        assert_eq!(input.history_cursor, Some(1));
+        assert_eq!(input.history_scratch, "unfinished");
+        assert_eq!(input.input_revision, 1);
+
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: CommandPaletteHistoryMoveRequest {
+                open_id,
+                older: false,
+            },
+        });
+
+        let input = app.world().get::<PaletteDraftInput>(page).unwrap();
+        assert_eq!(input.query, "unfinished");
+        assert_eq!(input.history_cursor, None);
+        assert_eq!(input.input_revision, 2);
     }
 
     #[test]

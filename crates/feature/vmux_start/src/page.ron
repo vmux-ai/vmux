@@ -27,6 +27,7 @@
         "PickRequest",
         "DismissRequest",
         "CommandPaletteDraftRequest",
+        "CommandPaletteHistoryMoveRequest",
         "CommandPaletteSubmitRequest",
         "CommandPaletteActivateRequest",
         "CommandPaletteRemoveAttachmentRequest",

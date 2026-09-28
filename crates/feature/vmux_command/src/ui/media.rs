@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerAttachment, focus_prompt_end};
 use vmux_ui::components::prompt_media_options::PromptMediaOption;
 use vmux_ui::file_icon::FilePath;
-use vmux_ui::hooks::send;
+use vmux_ui::hooks::{MenuDirection, send};
 
 #[derive(Clone, Copy)]
 pub struct PromptMedia {
@@ -90,35 +90,52 @@ impl PromptMedia {
         go_up: bool,
         query: Signal<String>,
     ) -> bool {
-        let value = query.peek().clone();
-        let entries = self.entries(&value);
-        let highlighted = (self.selected)().min(entries.len().saturating_sub(1));
         if go_down {
             event.prevent_default();
-            let last = entries.len().saturating_sub(1);
-            self.selected.set((highlighted + 1).min(last));
+            self.move_by(MenuDirection::Next, query);
             return true;
         }
         if go_up {
             event.prevent_default();
-            self.selected.set(highlighted.saturating_sub(1));
+            self.move_by(MenuDirection::Previous, query);
             return true;
         }
         if event.key() == Key::Enter && !event.modifiers().shift() {
             event.prevent_default();
-            self.pick(entries.get(highlighted), query);
+            self.choose(query);
             return true;
         }
         if event.key() == Key::Escape {
             event.prevent_default();
-            if let Some(found) = inline_media_query(&value) {
-                let mut query = query;
-                query.set(replace_inline_media_query(&value, found, ""));
-            }
-            self.selected.set(0);
+            self.dismiss(query);
             return true;
         }
         false
+    }
+
+    pub fn move_by(&mut self, direction: MenuDirection, query: Signal<String>) {
+        let entries = self.entries(&query.peek());
+        let highlighted = (self.selected)().min(entries.len().saturating_sub(1));
+        let next = match direction {
+            MenuDirection::Next => (highlighted + 1).min(entries.len().saturating_sub(1)),
+            MenuDirection::Previous => highlighted.saturating_sub(1),
+        };
+        self.selected.set(next);
+    }
+
+    pub fn choose(&mut self, query: Signal<String>) {
+        let value = query.peek().clone();
+        let entries = self.entries(&value);
+        let highlighted = (self.selected)().min(entries.len().saturating_sub(1));
+        self.pick(entries.get(highlighted), query);
+    }
+
+    pub fn dismiss(&mut self, mut query: Signal<String>) {
+        let value = query.peek().clone();
+        if let Some(found) = inline_media_query(&value) {
+            query.set(replace_inline_media_query(&value, found, ""));
+        }
+        self.selected.set(0);
     }
 
     pub fn pick_at(&mut self, index: usize, query: Signal<String>) {

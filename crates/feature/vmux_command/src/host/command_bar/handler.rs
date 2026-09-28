@@ -2234,6 +2234,7 @@ mod tests {
             .add_message::<RestoreKeyboardToStack>()
             .add_message::<PageOpenRequest>()
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>();
+        app.world_mut().spawn(CommandBarProjection::default());
 
         let modal = app
             .world_mut()
