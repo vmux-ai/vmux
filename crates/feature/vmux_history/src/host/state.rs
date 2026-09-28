@@ -20,6 +20,7 @@ impl Plugin for StatePlugin {
 pub(super) struct HistoryPageState {
     pub(super) query: Option<String>,
     pub(super) limit: u32,
+    pub(super) has_more: bool,
 }
 
 impl Default for HistoryPageState {
@@ -27,6 +28,7 @@ impl Default for HistoryPageState {
         Self {
             query: None,
             limit: 50,
+            has_more: false,
         }
     }
 }
@@ -40,12 +42,15 @@ impl HistoryPageState {
             Some(query.to_string())
         };
         self.limit = 50;
+        self.has_more = false;
     }
 
-    pub(super) fn load_more(&mut self, loaded: u32) {
-        if self.limit == loaded {
-            self.limit = self.limit.saturating_add(50);
+    pub(super) fn load_more(&mut self) {
+        if !self.has_more {
+            return;
         }
+        self.has_more = false;
+        self.limit = self.limit.saturating_add(50);
     }
 }
 
@@ -72,8 +77,9 @@ mod tests {
     fn search_resets_pagination_and_duplicate_load_more_is_ignored() {
         let mut state = HistoryPageState::default();
 
-        state.load_more(50);
-        state.load_more(50);
+        state.has_more = true;
+        state.load_more();
+        state.load_more();
         assert_eq!(state.limit, 100);
 
         state.search(" git ");

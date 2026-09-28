@@ -56,7 +56,7 @@ fn on_history_load_more_request(
     let Ok(mut state) = pages.get_mut(trigger.event().webview) else {
         return;
     };
-    state.load_more(trigger.event().payload.loaded);
+    state.load_more();
 }
 
 fn history_ui_state(
@@ -208,13 +208,14 @@ fn broadcast_history_changed(
 }
 
 fn publish_history_pages(
-    pages: Query<(Entity, &HistoryPageState), Changed<HistoryPageState>>,
+    mut pages: Query<(Entity, &mut HistoryPageState), Changed<HistoryPageState>>,
     urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
     visits: Query<(&CreatedAt, &VisitedUrl), With<Visit>>,
     mut commands: Commands,
 ) {
-    for (entity, state) in &pages {
-        let snapshot = history_ui_state(state, &urls, &visits);
+    for (entity, mut state) in &mut pages {
+        let snapshot = history_ui_state(&state, &urls, &visits);
+        state.bypass_change_detection().has_more = snapshot.has_more;
         commands.trigger(
             vmux_core::host::UiStateWrite::<crate::state::HistoryUiState>::from_event(
                 entity, &snapshot,

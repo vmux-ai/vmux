@@ -25,16 +25,15 @@ pub fn Page() -> Element {
     let state = use_ui_state::<HistoryUiState>();
     let snapshot = state();
     let has_more = snapshot.has_more;
-    let loaded = snapshot.entries.len() as u32;
 
     let load_more = move |e: Event<VisibleData>| {
         if !e.is_intersecting().unwrap_or(false) {
             return;
         }
-        if !has_more || loaded == 0 {
+        if !has_more {
             return;
         }
-        let _ = send(&HistoryLoadMoreRequest { loaded });
+        let _ = send(&HistoryLoadMoreRequest);
     };
 
     let mut confirm_open = use_signal(|| Some(false));

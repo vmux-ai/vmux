@@ -14,10 +14,8 @@ pub struct HistoryQueryRequest {
     pub query: String,
 }
 
-#[vmux_api::ui_event(Copy, Default)]
-pub struct HistoryLoadMoreRequest {
-    pub loaded: u32,
-}
+#[vmux_api::ui_event]
+pub struct HistoryLoadMoreRequest;
 
 #[vmux_api::ui_event]
 pub struct HistoryDeleteRequest {
