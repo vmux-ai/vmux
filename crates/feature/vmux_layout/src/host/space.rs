@@ -44,7 +44,7 @@ pub struct CurrentSpaceSet;
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::space"]
-#[require(Save)]
+#[require(Save, EffectiveStartupDir)]
 pub struct Space;
 
 #[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
@@ -55,6 +55,48 @@ pub struct SpaceId(pub String);
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CurrentSpace;
+
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct EffectiveStartupDir(pub Option<std::path::PathBuf>);
+
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct EffectiveStartupDirSet;
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct FocusedSpace<'w, 's> {
+    spaces: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static EffectiveStartupDir,
+            Has<CurrentSpace>,
+            Has<vmux_core::Active>,
+        ),
+        With<Space>,
+    >,
+}
+
+impl FocusedSpace<'_, '_> {
+    fn selected(&self) -> Option<(Entity, &EffectiveStartupDir)> {
+        self.spaces
+            .iter()
+            .find(|(_, _, current, _)| *current)
+            .or_else(|| self.spaces.iter().find(|(_, _, _, active)| *active))
+            .or_else(|| self.spaces.iter().next())
+            .map(|(entity, startup_dir, _, _)| (entity, startup_dir))
+    }
+
+    pub fn get(&self) -> Option<(Entity, Option<std::path::PathBuf>)> {
+        self.selected()
+            .map(|(entity, startup_dir)| (entity, startup_dir.0.clone()))
+    }
+
+    pub fn startup_dir(&self) -> Option<&std::path::Path> {
+        self.selected()
+            .and_then(|(_, startup_dir)| startup_dir.0.as_deref())
+    }
+}
 
 fn sync_current_space(
     spaces: Query<(Entity, Has<vmux_core::Active>, Has<CurrentSpace>), With<Space>>,

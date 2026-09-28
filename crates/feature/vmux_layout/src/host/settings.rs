@@ -22,12 +22,6 @@ pub struct ConfirmCloseSettings {
     pub enabled: bool,
 }
 
-#[derive(Resource, Clone, Debug, Default)]
-pub struct EffectiveStartupDir(pub Option<(Entity, Option<std::path::PathBuf>)>);
-
-#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct EffectiveStartupDirSet;
-
 impl Default for ConfirmCloseSettings {
     fn default() -> Self {
         Self { enabled: true }

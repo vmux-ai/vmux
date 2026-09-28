@@ -56,7 +56,7 @@ impl Plugin for SpacePlugin {
             .add_systems(
                 Update,
                 update_effective_startup_dir
-                    .in_set(vmux_layout::settings::EffectiveStartupDirSet)
+                    .in_set(vmux_layout::space::EffectiveStartupDirSet)
                     .before(vmux_command::ReadCommandRequests),
             )
             .add_systems(Update, sync_space_name_to_id)
@@ -156,54 +156,31 @@ fn update_effective_startup_url(
 
 fn update_effective_startup_dir(
     settings: Option<Res<vmux_setting::AppSettings>>,
-    current: Query<
-        (Entity, Ref<vmux_layout::space::SpaceId>),
+    mut spaces: Query<
         (
-            With<vmux_layout::space::Space>,
-            With<vmux_layout::space::CurrentSpace>,
-        ),
-    >,
-    spaces: Query<
-        (
-            Entity,
             Ref<vmux_layout::space::SpaceId>,
-            Has<vmux_core::Active>,
+            &mut vmux_layout::space::EffectiveStartupDir,
         ),
         With<vmux_layout::space::Space>,
     >,
-    mut effective: ResMut<vmux_layout::settings::EffectiveStartupDir>,
 ) {
-    let selected = current.iter().next().or_else(|| {
-        spaces
-            .iter()
-            .find(|(_, _, is_active)| *is_active)
-            .map(|(entity, id, _)| (entity, id))
-    });
-    let fallback = spaces.iter().next().map(|(entity, id, _)| (entity, id));
-    let Some((entity, id)) = selected.or(fallback) else {
-        if effective.0.is_some() {
-            effective.0 = None;
-        }
-        return;
-    };
-    if !settings
+    let settings_changed = settings
         .as_ref()
-        .is_some_and(|settings| settings.is_changed())
-        && !id.is_changed()
-        && effective.0.as_ref().map(|(current, _)| *current) == Some(entity)
-        && effective
-            .0
-            .as_ref()
-            .is_some_and(|(_, current)| current.as_ref().is_none_or(|path| path.is_dir()))
-    {
-        return;
-    }
-    let path = settings
-        .as_deref()
-        .and_then(|settings| settings.startup_dir(&id.0));
-    let next = (entity, path);
-    if effective.0.as_ref() != Some(&next) {
-        effective.0 = Some(next);
+        .is_some_and(|settings| settings.is_changed());
+    for (id, mut effective) in &mut spaces {
+        if !settings_changed
+            && !id.is_changed()
+            && !effective.is_added()
+            && effective.0.as_ref().is_none_or(|path| path.is_dir())
+        {
+            continue;
+        }
+        let next = settings
+            .as_deref()
+            .and_then(|settings| settings.startup_dir(&id.0));
+        if effective.0 != next {
+            effective.0 = next;
+        }
     }
 }
 
@@ -1284,7 +1261,7 @@ mod tests {
     }
 
     #[test]
-    fn effective_startup_dir_captures_active_space_entity_and_path() {
+    fn effective_startup_dir_is_stored_on_each_space() {
         let active_dir = tempfile::tempdir().unwrap();
         let inactive_dir = tempfile::tempdir().unwrap();
         let mut settings = test_settings();
@@ -1308,10 +1285,13 @@ mod tests {
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .insert_resource(settings)
             .add_systems(Update, update_effective_startup_dir);
-        app.world_mut().spawn((
-            vmux_layout::space::Space,
-            vmux_layout::space::SpaceId("inactive".into()),
-        ));
+        let inactive = app
+            .world_mut()
+            .spawn((
+                vmux_layout::space::Space,
+                vmux_layout::space::SpaceId("inactive".into()),
+            ))
+            .id();
         let active = app
             .world_mut()
             .spawn((
@@ -1325,9 +1305,17 @@ mod tests {
 
         assert_eq!(
             app.world()
-                .resource::<vmux_layout::settings::EffectiveStartupDir>()
+                .get::<vmux_layout::space::EffectiveStartupDir>(active)
+                .unwrap()
                 .0,
-            Some((active, Some(active_dir.path().to_path_buf())))
+            Some(active_dir.path().to_path_buf())
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_layout::space::EffectiveStartupDir>(inactive)
+                .unwrap()
+                .0,
+            Some(inactive_dir.path().to_path_buf())
         );
     }
 
@@ -1481,7 +1469,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
             .add_systems(Update, update_effective_startup_dir);
         let space = app
             .world_mut()
@@ -1496,9 +1483,10 @@ mod tests {
 
         assert_eq!(
             app.world()
-                .resource::<vmux_layout::settings::EffectiveStartupDir>()
+                .get::<vmux_layout::space::EffectiveStartupDir>(space)
+                .unwrap()
                 .0,
-            Some((space, None))
+            None
         );
     }
 
@@ -1508,7 +1496,10 @@ mod tests {
         struct ChangeCount(u32);
 
         fn count_changes(
-            effective: Res<vmux_layout::settings::EffectiveStartupDir>,
+            effective: Single<
+                Ref<vmux_layout::space::EffectiveStartupDir>,
+                With<vmux_layout::space::Space>,
+            >,
             mut count: ResMut<ChangeCount>,
         ) {
             if effective.is_changed() {
@@ -1519,7 +1510,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
             .init_resource::<ChangeCount>()
             .add_systems(
                 Update,
@@ -1546,7 +1536,10 @@ mod tests {
         struct ChangeCount(u32);
 
         fn count_changes(
-            effective: Res<vmux_layout::settings::EffectiveStartupDir>,
+            effective: Single<
+                Ref<vmux_layout::space::EffectiveStartupDir>,
+                With<vmux_layout::space::Space>,
+            >,
             mut count: ResMut<ChangeCount>,
         ) {
             if effective.is_changed() {
@@ -1621,9 +1614,10 @@ mod tests {
         app.update();
         assert_eq!(
             app.world()
-                .resource::<vmux_layout::settings::EffectiveStartupDir>()
+                .get::<vmux_layout::space::EffectiveStartupDir>(space)
+                .unwrap()
                 .0,
-            Some((space, Some(primary_path)))
+            Some(primary_path)
         );
 
         primary.close().unwrap();
@@ -1631,9 +1625,10 @@ mod tests {
 
         assert_eq!(
             app.world()
-                .resource::<vmux_layout::settings::EffectiveStartupDir>()
+                .get::<vmux_layout::space::EffectiveStartupDir>(space)
+                .unwrap()
                 .0,
-            Some((space, Some(fallback.path().to_path_buf())))
+            Some(fallback.path().to_path_buf())
         );
     }
 

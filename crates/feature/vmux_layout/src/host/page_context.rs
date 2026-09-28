@@ -6,7 +6,7 @@ use vmux_core::event::PageContextRequest;
 use vmux_core::event::space::ProjectActivateRequest;
 use vmux_git::state::{GitPageContext, GitWorkspaceChanged};
 
-use crate::settings::EffectiveStartupDir;
+use crate::space::FocusedSpace;
 use crate::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use crate::worktree::{ManagedWorktreeRoot, TabWorktreeReady};
 
@@ -146,17 +146,12 @@ fn on_page_context_request(
     child_of: Query<&ChildOf>,
     tabs: Query<&Tab>,
     pages: Query<&vmux_core::PageMetadata>,
-    effective_dir: Option<Res<EffectiveStartupDir>>,
+    focused_space: FocusedSpace,
     mut commands: Commands,
 ) {
     let path = crate::tab::ancestor_tab_startup_dir(trigger.event().webview, &child_of, &tabs)
         .map(PathBuf::from)
-        .or_else(|| {
-            effective_dir
-                .as_ref()
-                .and_then(|effective| effective.0.as_ref())
-                .and_then(|(_, path)| path.clone())
-        })
+        .or_else(|| focused_space.startup_dir().map(PathBuf::from))
         .or_else(|| std::env::current_dir().ok())
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();

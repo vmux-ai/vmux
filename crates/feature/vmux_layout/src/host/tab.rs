@@ -62,7 +62,7 @@ impl Plugin for TabPlugin {
                 .chain()
                 .in_set(LayoutRequestSet::Handle)
                 .in_set(TabCommandSet)
-                .after(crate::settings::EffectiveStartupDirSet),
+                .after(crate::space::EffectiveStartupDirSet),
         )
         .add_systems(
             Update,
@@ -309,18 +309,15 @@ fn handle_open_requests(
     mut requests: MessageReader<OpenRequest>,
     tabs: Query<Entity, With<Tab>>,
     focused_window: crate::window::FocusedWindow,
+    focused_space: crate::space::FocusedSpace,
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
-    effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
     for request in requests.read() {
         let Some(window) = focused_window.entity() else {
             continue;
         };
-        let Some((space, startup_dir)) = effective_startup_dir
-            .as_deref()
-            .and_then(|effective| effective.0.clone())
-        else {
+        let Some((space, startup_dir)) = focused_space.get() else {
             continue;
         };
         let requested = request
@@ -356,17 +353,14 @@ fn handle_create_requests(
     mut requests: MessageReader<CreateRequest>,
     tabs: Query<Entity, With<Tab>>,
     focused_window: crate::window::FocusedWindow,
-    effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
+    focused_space: crate::space::FocusedSpace,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
     for _ in requests.read() {
         let Some(window) = focused_window.entity() else {
             continue;
         };
-        let Some((space, startup_dir)) = effective_startup_dir
-            .as_deref()
-            .and_then(|effective| effective.0.clone())
-        else {
+        let Some((space, startup_dir)) = focused_space.get() else {
             continue;
         };
         layout_requests.write(TabLayoutSpawnRequest {
@@ -480,17 +474,14 @@ fn handle_new_tab_requests(
     mut requests: MessageReader<crate::NewTabRequest>,
     tabs: Query<Entity, With<Tab>>,
     focused_window: crate::window::FocusedWindow,
-    effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
+    focused_space: crate::space::FocusedSpace,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
     for request in requests.read() {
         let Some(window) = focused_window.entity() else {
             continue;
         };
-        let Some((space, startup_dir)) = effective_startup_dir
-            .as_deref()
-            .and_then(|effective| effective.0.clone())
-        else {
+        let Some((space, startup_dir)) = focused_space.get() else {
             continue;
         };
         let name = format!("Tab {}", tabs.iter().count() + 1);
@@ -986,10 +977,11 @@ mod tests {
             .world_mut()
             .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
             .id();
-        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
-            space,
-            Some(std::env::current_dir().unwrap()),
-        ))));
+        app.world_mut()
+            .entity_mut(space)
+            .insert(crate::space::EffectiveStartupDir(Some(
+                std::env::current_dir().unwrap(),
+            )));
         app.world_mut().spawn((
             Tab {
                 name: "Tab 1".into(),
@@ -1099,7 +1091,9 @@ mod tests {
             .get::<Children>(main)
             .and_then(|children| children.iter().next())
             .unwrap();
-        app.insert_resource(crate::settings::EffectiveStartupDir(Some((space, None))));
+        app.world_mut()
+            .entity_mut(space)
+            .insert(crate::space::EffectiveStartupDir(None));
         let existing_tab = app
             .world_mut()
             .query_filtered::<Entity, With<Tab>>()
@@ -1145,10 +1139,11 @@ mod tests {
             .and_then(|children| children.iter().next())
             .unwrap();
         let configured = tempfile::tempdir().unwrap();
-        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
-            space,
-            Some(configured.path().to_path_buf()),
-        ))));
+        app.world_mut()
+            .entity_mut(space)
+            .insert(crate::space::EffectiveStartupDir(Some(
+                configured.path().to_path_buf(),
+            )));
 
         app.world_mut()
             .resource_mut::<Messages<CreateRequest>>()

@@ -478,17 +478,14 @@ fn request_default_layout(
     host_windows: Query<&HostWindow>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     space_file: Query<&SpaceFilePresent>,
-    effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
+    focused_space: crate::space::FocusedSpace,
     mut requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
     if !tab_q.is_empty() || space_file.single().is_ok_and(|space_file| space_file.0) {
         return;
     }
 
-    let Some((space, startup_dir)) = effective_startup_dir
-        .as_deref()
-        .and_then(|effective| effective.0.clone())
-    else {
+    let Some((space, startup_dir)) = focused_space.get() else {
         return;
     };
     requests.write(TabLayoutSpawnRequest {
@@ -994,10 +991,11 @@ mod tests {
             .world_mut()
             .spawn((crate::space::Space, ChildOf(main)))
             .id();
-        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
-            space,
-            Some(startup_dir.path().to_path_buf()),
-        ))));
+        app.world_mut()
+            .entity_mut(space)
+            .insert(crate::space::EffectiveStartupDir(Some(
+                startup_dir.path().to_path_buf(),
+            )));
 
         app.update();
 
@@ -1035,10 +1033,11 @@ mod tests {
             .world_mut()
             .spawn((crate::space::Space, ChildOf(main)))
             .id();
-        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
-            space,
-            Some(startup_dir.path().to_path_buf()),
-        ))));
+        app.world_mut()
+            .entity_mut(space)
+            .insert(crate::space::EffectiveStartupDir(Some(
+                startup_dir.path().to_path_buf(),
+            )));
 
         app.update();
 
@@ -1070,7 +1069,9 @@ mod tests {
             .world_mut()
             .spawn((crate::space::Space, ChildOf(main)))
             .id();
-        app.insert_resource(crate::settings::EffectiveStartupDir(Some((space, None))));
+        app.world_mut()
+            .entity_mut(space)
+            .insert(crate::space::EffectiveStartupDir(None));
 
         app.update();
 
@@ -1196,10 +1197,11 @@ mod tests {
             .world_mut()
             .spawn((crate::space::Space, ChildOf(main)))
             .id();
-        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
-            space,
-            Some(startup_dir.path().to_path_buf()),
-        ))));
+        app.world_mut()
+            .entity_mut(space)
+            .insert(crate::space::EffectiveStartupDir(Some(
+                startup_dir.path().to_path_buf(),
+            )));
 
         app.update();
 
@@ -1240,10 +1242,11 @@ mod tests {
         app.world_mut().spawn(Main);
         app.world_mut().spawn(PrimaryWindow);
         let space = app.world_mut().spawn(crate::space::Space).id();
-        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
-            space,
-            Some(startup_dir.path().to_path_buf()),
-        ))));
+        app.world_mut()
+            .entity_mut(space)
+            .insert(crate::space::EffectiveStartupDir(Some(
+                startup_dir.path().to_path_buf(),
+            )));
 
         app.update();
 

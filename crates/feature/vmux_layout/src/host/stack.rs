@@ -1054,10 +1054,11 @@ mod tests {
             ))
             .id();
         let worktree = tempfile::tempdir().unwrap();
-        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
-            space,
-            Some(worktree.path().to_path_buf()),
-        ))));
+        app.world_mut()
+            .entity_mut(space)
+            .insert(crate::space::EffectiveStartupDir(Some(
+                worktree.path().to_path_buf(),
+            )));
         let tab_e = app
             .world_mut()
             .spawn((

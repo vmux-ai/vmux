@@ -85,15 +85,12 @@ fn handle_file_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children: Query<&Children>,
     mut views: Query<(&FileView, &mut PageMetadata)>,
-    effective_startup_dir: Option<Res<vmux_layout::settings::EffectiveStartupDir>>,
+    focused_space: vmux_layout::space::FocusedSpace,
     mut commands: Commands,
     mut record_writer: MessageWriter<vmux_core::event::RecordVisitRequest>,
 ) {
     for (entity, task) in &tasks {
-        let project_dir = effective_startup_dir
-            .as_deref()
-            .and_then(|effective| effective.0.as_ref())
-            .and_then(|(_, path)| path.as_deref());
+        let project_dir = focused_space.startup_dir();
         let knowledge_root = vmux_core::knowledge::KnowledgeVault::user().into_root();
         let Some(target) = FilePageTarget::resolve(&task.url, project_dir, &knowledge_root) else {
             continue;

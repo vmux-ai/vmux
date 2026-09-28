@@ -1759,10 +1759,11 @@ mod tests {
             .world_mut()
             .spawn((Space, SpaceId("s1".to_string()), vmux_core::Active))
             .id();
-        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
-            space,
-            Some(PathBuf::from("/tmp")),
-        ))));
+        app.world_mut()
+            .entity_mut(space)
+            .insert(crate::space::EffectiveStartupDir(Some(PathBuf::from(
+                "/tmp",
+            ))));
         let first = app
             .world_mut()
             .spawn((
