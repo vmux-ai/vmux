@@ -1,5 +1,6 @@
 use crate::host::{PendingNavigationSnapshot, apply_pending_navigation_updates};
 use bevy::ecs::relationship::Relationship;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, SnapshotResult};
 use vmux_core::LastActivatedAt;
@@ -63,17 +64,10 @@ fn parse_hex(s: &str) -> Option<[u8; 16]> {
     Some(out)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn start_snapshots(
     mut reader: MessageReader<BrowserSnapshotRequest>,
     cef_browsers: NonSend<Browsers>,
-    active: ActivePaneQuery,
-    panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    browsers: Query<(Entity, &ChildOf), With<Browser>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stacks: Query<Entity, With<Stack>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    targets: BrowserTarget,
     navigation_routes: Query<(Entity, &NavigationSnapshotResponseRoute)>,
     scroll_routes: Query<(Entity, &crate::scroll::ScrollSnapshotResponseRoute)>,
     mut writer: MessageWriter<BrowserSnapshotResponse>,
@@ -83,28 +77,7 @@ fn start_snapshots(
 ) {
     for request in reader.read() {
         let explicit_target = request.webview.is_some() || request.pane.is_some();
-        let webview = if let Some(webview) = request.webview {
-            browsers.contains(webview).then_some(webview)
-        } else if let Some(target) = request.pane.as_deref() {
-            vmux_layout::target::parse_browser_target(target, &panes, &stacks).and_then(|target| {
-                vmux_layout::target::webview_for_target(
-                    target,
-                    &pane_children,
-                    &stack_ts,
-                    &browsers,
-                    &terminals,
-                )
-            })
-        } else {
-            default_browser(
-                &active,
-                &panes,
-                &terminals,
-                &browsers,
-                &pane_children,
-                &stack_ts,
-            )
-        };
+        let webview = targets.resolve(request.webview, request.pane.as_deref());
         let sent = webview
             .map(|webview| cef_browsers.request_snapshot(&webview, &hex(&request.request_id)))
             .unwrap_or(false);
@@ -145,44 +118,69 @@ fn start_snapshots(
     }
 }
 
-pub(crate) fn default_browser(
-    active: &ActivePaneQuery,
-    panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    browsers: &Query<(Entity, &ChildOf), With<Browser>>,
-    pane_children: &Query<&Children, With<Pane>>,
-    stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
-) -> Option<Entity> {
-    active
-        .local()
-        .pane
-        .filter(|pane| panes.contains(*pane))
-        .and_then(|pane| {
-            active_webview_for_tab(
-                active_stack_in_pane(pane, pane_children, stack_ts),
-                browsers,
-                terminals,
-            )
-        })
-        .or_else(|| most_recent_browser(browsers, terminals, stack_ts))
+#[derive(SystemParam)]
+pub(crate) struct BrowserTarget<'w, 's> {
+    active: ActivePaneQuery<'w, 's>,
+    panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+    terminals: Query<'w, 's, (Entity, &'static ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    browsers: Query<'w, 's, (Entity, &'static ChildOf), With<Browser>>,
+    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    stacks: Query<'w, 's, Entity, With<Stack>>,
+    stack_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
 }
 
-pub(crate) fn most_recent_browser(
-    browsers: &Query<(Entity, &ChildOf), With<Browser>>,
-    terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
-) -> Option<Entity> {
-    browsers
-        .iter()
-        .filter_map(|(entity, child_of)| {
-            if terminals.iter().any(|(t, _)| t == entity) {
-                return None;
-            }
-            let (_, ts) = stack_ts.get(child_of.get()).ok()?;
-            Some((entity, ts.0))
-        })
-        .max_by_key(|&(_, ts)| ts)
-        .map(|(entity, _)| entity)
+impl BrowserTarget<'_, '_> {
+    pub(crate) fn resolve(&self, webview: Option<Entity>, pane: Option<&str>) -> Option<Entity> {
+        if let Some(webview) = webview {
+            return self.browsers.contains(webview).then_some(webview);
+        }
+        if let Some(target) = pane {
+            return vmux_layout::target::parse_browser_target(target, &self.panes, &self.stacks)
+                .and_then(|target| {
+                    vmux_layout::target::webview_for_target(
+                        target,
+                        &self.pane_children,
+                        &self.stack_ts,
+                        &self.browsers,
+                        &self.terminals,
+                    )
+                });
+        }
+        self.default()
+    }
+
+    fn default(&self) -> Option<Entity> {
+        self.active
+            .local()
+            .pane
+            .filter(|pane| self.panes.contains(*pane))
+            .and_then(|pane| {
+                active_webview_for_tab(
+                    active_stack_in_pane(pane, &self.pane_children, &self.stack_ts),
+                    &self.browsers,
+                    &self.terminals,
+                )
+            })
+            .or_else(|| self.most_recent())
+    }
+
+    fn most_recent(&self) -> Option<Entity> {
+        self.browsers
+            .iter()
+            .filter_map(|(entity, child_of)| {
+                if self
+                    .terminals
+                    .iter()
+                    .any(|(terminal, _)| terminal == entity)
+                {
+                    return None;
+                }
+                let (_, timestamp) = self.stack_ts.get(child_of.get()).ok()?;
+                Some((entity, timestamp.0))
+            })
+            .max_by_key(|&(_, timestamp)| timestamp)
+            .map(|(entity, _)| entity)
+    }
 }
 
 pub(crate) fn drive_pending_nav_snapshots(
