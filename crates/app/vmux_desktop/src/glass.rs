@@ -21,7 +21,7 @@ impl Plugin for GlassPlugin {
             .add_systems(
                 Update,
                 (
-                    sync_window_glass_visibility.in_set(crate::window_state::SyncWindowFullscreen),
+                    sync_window_glass_visibility.in_set(crate::window::SyncWindowFullscreen),
                     keep_window_surface_layer_transparent,
                 ),
             )
@@ -241,7 +241,7 @@ fn reveal_window_after_layout_ready(
 fn restore_fullscreen_after_reveal(
     state: NonSend<GlassState>,
     primary_window: Query<
-        (Entity, &crate::window_state::PendingFullscreenRestore),
+        (Entity, &crate::window::PendingFullscreenRestore),
         With<bevy::window::PrimaryWindow>,
     >,
     mut commands: Commands,
@@ -267,8 +267,8 @@ fn restore_fullscreen_after_reveal(
     }
     commands
         .entity(window)
-        .remove::<crate::window_state::PendingFullscreenRestore>()
-        .insert(crate::window_state::WindowRestoreComplete);
+        .remove::<crate::window::PendingFullscreenRestore>()
+        .insert(crate::window::WindowRestoreComplete);
 }
 
 fn should_attempt_activation(
@@ -328,10 +328,10 @@ fn sync_window_glass_visibility(
     mut window_q: Query<(
         Entity,
         &mut bevy::window::Window,
-        &mut crate::window_state::WindowFullscreen,
+        &mut crate::window::WindowFullscreen,
     )>,
     focused_window: vmux_layout::window::FocusedWindow,
-    mut exit_fullscreen: MessageReader<crate::window_state::ExitFullscreenRequest>,
+    mut exit_fullscreen: MessageReader<crate::window::ExitFullscreenRequest>,
 ) {
     use objc2::ClassType;
     use objc2_app_kit::NSWindowStyleMask;

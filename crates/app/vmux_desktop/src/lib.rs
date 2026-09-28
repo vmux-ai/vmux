@@ -44,8 +44,7 @@ pub(crate) mod shortcut;
 mod tray;
 #[cfg(feature = "updater")]
 pub mod updater;
-mod window_manager;
-mod window_state;
+mod window;
 use bevy::prelude::*;
 use bevy::window::{
     CompositeAlphaMode, ExitCondition, MonitorSelection, Window as NativeWindow, WindowPlugin,

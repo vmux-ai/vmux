@@ -1,19 +1,35 @@
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowPosition};
-use vmux_layout::window::WindowGeometry;
+use bevy_cef::prelude::HostWindow;
+use vmux_layout::window::{FocusedWindow, NewWindowWorkspace, VmuxWindow, WindowGeometry};
 
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
 use bevy::window::{MonitorSelection, WindowMode};
 
-pub(crate) struct WindowStatePlugin;
+pub(crate) struct DesktopWindowPlugin;
 
-#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct SyncWindowFullscreen;
-
-impl Plugin for WindowStatePlugin {
+impl Plugin for DesktopWindowPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ExitFullscreenRequest>()
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
+        app.add_message::<NewWindowRequest>()
+            .add_message::<CloseFocusedWindowRequest>()
+            .add_message::<CloseVmuxWindow>()
+            .add_message::<ExitFullscreenRequest>()
+            .add_systems(
+                Startup,
+                spawn_window_commands.in_set(vmux_command::RegisterCommandDefinitions),
+            )
             .add_systems(PreUpdate, ensure_window_state)
+            .add_systems(
+                Update,
+                (open_windows, close_focused_windows)
+                    .chain()
+                    .in_set(vmux_command::ReadCommandRequests)
+                    .after(vmux_layout::window::WindowFocusSet),
+            )
+            .add_systems(Update, close_windows.after(close_focused_windows))
             .add_systems(
                 Update,
                 (
@@ -35,19 +51,121 @@ impl Plugin for WindowStatePlugin {
     }
 }
 
+#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct SyncWindowFullscreen;
+
+#[derive(Message, Clone, Copy)]
+pub(crate) struct CloseVmuxWindow(pub Entity);
+
 #[derive(Message, Clone, Copy)]
 pub(crate) struct ExitFullscreenRequest;
 
-const MIN_WINDOW_SIZE: f32 = 100.0;
-
 #[derive(Component, Default, Debug)]
-pub struct WindowFullscreen(pub bool);
+pub(crate) struct WindowFullscreen(pub bool);
 
 #[derive(Component, Debug)]
-pub struct PendingFullscreenRestore(pub bool);
+pub(crate) struct PendingFullscreenRestore(pub bool);
 
 #[derive(Component, Default, Debug)]
-pub struct WindowRestoreComplete;
+pub(crate) struct WindowRestoreComplete;
+
+const MIN_WINDOW_SIZE: f32 = 100.0;
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+struct NewWindowRequest;
+
+impl TryFrom<&vmux_command::CommandInvocation> for NewWindowRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "new_window").then_some(Self).ok_or(())
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+struct CloseFocusedWindowRequest;
+
+impl TryFrom<&vmux_command::CommandInvocation> for CloseFocusedWindowRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "close_window").then_some(Self).ok_or(())
+    }
+}
+
+fn spawn_window_commands(mut commands: Commands) {
+    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("window.ron"));
+    commands.spawn(definitions.take("new_window").message::<NewWindowRequest>());
+    commands.spawn(
+        definitions
+            .take("close_window")
+            .message::<CloseFocusedWindowRequest>(),
+    );
+    definitions.assert_all_registered();
+}
+
+fn open_windows(
+    mut reader: MessageReader<NewWindowRequest>,
+    focused: FocusedWindow,
+    mut commands: Commands,
+) {
+    for _ in reader.read() {
+        if let Some(window) = focused.entity() {
+            commands.entity(window).remove::<vmux_core::Active>();
+        }
+        commands.spawn((
+            crate::window_config(true),
+            NewWindowWorkspace,
+            vmux_core::Active,
+        ));
+    }
+}
+
+fn close_focused_windows(
+    mut reader: MessageReader<CloseFocusedWindowRequest>,
+    focused: FocusedWindow,
+    mut close: MessageWriter<CloseVmuxWindow>,
+) {
+    for _ in reader.read() {
+        if let Some(window) = focused.entity() {
+            close.write(CloseVmuxWindow(window));
+        }
+    }
+}
+
+fn close_windows(
+    mut requests: MessageReader<CloseVmuxWindow>,
+    windows: Query<(Entity, Has<PrimaryWindow>), With<Window>>,
+    roots: Query<(Entity, &HostWindow), With<VmuxWindow>>,
+    mut hide_windows: MessageWriter<crate::runtime::HideAllWindowsRequest>,
+    mut commands: Commands,
+) {
+    let mut remaining: Vec<(Entity, bool)> = windows.iter().collect();
+    for request in requests.read() {
+        let Some(index) = remaining
+            .iter()
+            .position(|(window, _)| *window == request.0)
+        else {
+            continue;
+        };
+        if remaining.len() <= 1 {
+            hide_windows.write(crate::runtime::HideAllWindowsRequest);
+            continue;
+        }
+        let (_, primary) = remaining.remove(index);
+        if primary && let Some((next, _)) = remaining.first() {
+            commands.entity(*next).insert(PrimaryWindow);
+        }
+        for (root, host) in &roots {
+            if host.0 == request.0 {
+                commands.entity(root).despawn();
+            }
+        }
+        if windows.get(request.0).is_ok() {
+            commands.entity(request.0).despawn();
+        }
+    }
+}
 
 fn ensure_window_state(
     windows: Query<Entity, (With<Window>, Without<WindowFullscreen>)>,
@@ -160,8 +278,102 @@ fn restore_fullscreen_from_window_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::message::Messages;
 
-    fn app() -> App {
+    #[test]
+    fn new_window_command_spawns_a_full_window_request() {
+        let mut app = App::new();
+        app.add_message::<NewWindowRequest>()
+            .add_message::<CloseVmuxWindow>()
+            .add_systems(Update, open_windows);
+        app.world_mut()
+            .resource_mut::<Messages<NewWindowRequest>>()
+            .write(NewWindowRequest);
+
+        app.update();
+
+        let windows: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Window>, With<NewWindowWorkspace>)>()
+            .iter(app.world())
+            .collect();
+        assert_eq!(windows.len(), 1);
+        assert!(
+            app.world()
+                .entity(windows[0])
+                .contains::<vmux_core::Active>()
+        );
+    }
+
+    #[test]
+    fn closing_one_of_two_windows_despawns_only_its_shell() {
+        let mut app = App::new();
+        app.add_message::<crate::runtime::HideAllWindowsRequest>()
+            .add_message::<CloseVmuxWindow>()
+            .add_systems(Update, close_windows);
+        let first = app.world_mut().spawn(Window::default()).id();
+        let second = app.world_mut().spawn(Window::default()).id();
+        let first_root = app.world_mut().spawn((VmuxWindow, HostWindow(first))).id();
+        let second_root = app.world_mut().spawn((VmuxWindow, HostWindow(second))).id();
+        app.world_mut()
+            .resource_mut::<Messages<CloseVmuxWindow>>()
+            .write(CloseVmuxWindow(second));
+
+        app.update();
+
+        assert!(app.world().get_entity(first).is_ok());
+        assert!(app.world().get_entity(first_root).is_ok());
+        assert!(app.world().get_entity(second).is_err());
+        assert!(app.world().get_entity(second_root).is_err());
+    }
+
+    #[test]
+    fn closing_every_window_in_one_update_keeps_the_last_shell() {
+        let mut app = App::new();
+        app.add_message::<crate::runtime::HideAllWindowsRequest>()
+            .add_message::<CloseVmuxWindow>()
+            .add_systems(Update, close_windows);
+        let first = app.world_mut().spawn(Window::default()).id();
+        let second = app.world_mut().spawn(Window::default()).id();
+        app.world_mut()
+            .resource_mut::<Messages<CloseVmuxWindow>>()
+            .write(CloseVmuxWindow(first));
+        app.world_mut()
+            .resource_mut::<Messages<CloseVmuxWindow>>()
+            .write(CloseVmuxWindow(second));
+
+        app.update();
+
+        let windows: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<Window>>()
+            .iter(app.world())
+            .collect();
+        assert_eq!(windows, vec![second]);
+    }
+
+    #[test]
+    fn closing_the_primary_window_promotes_the_remaining_window() {
+        let mut app = App::new();
+        app.add_message::<crate::runtime::HideAllWindowsRequest>()
+            .add_message::<CloseVmuxWindow>()
+            .add_systems(Update, close_windows);
+        let primary = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        let remaining = app.world_mut().spawn(Window::default()).id();
+        app.world_mut()
+            .resource_mut::<Messages<CloseVmuxWindow>>()
+            .write(CloseVmuxWindow(primary));
+
+        app.update();
+
+        assert!(app.world().get_entity(primary).is_err());
+        assert!(app.world().entity(remaining).contains::<PrimaryWindow>());
+    }
+
+    fn geometry_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.world_mut().spawn((
@@ -178,7 +390,7 @@ mod tests {
 
     #[test]
     fn apply_geometry_sets_window_position_and_size() {
-        let mut app = app();
+        let mut app = geometry_app();
         app.add_systems(Update, apply_geometry_on_load);
         app.world_mut().spawn(WindowGeometry {
             fullscreen: false,
@@ -199,7 +411,7 @@ mod tests {
 
     #[test]
     fn apply_geometry_inserts_pending_fullscreen_intent() {
-        let mut app = app();
+        let mut app = geometry_app();
         app.add_systems(Update, apply_geometry_on_load);
         app.world_mut().spawn(WindowGeometry {
             fullscreen: true,
@@ -218,7 +430,7 @@ mod tests {
 
     #[test]
     fn capture_records_windowed_frame_when_not_fullscreen() {
-        let mut app = app();
+        let mut app = geometry_app();
         let primary = app
             .world_mut()
             .query_filtered::<Entity, With<PrimaryWindow>>()
@@ -243,7 +455,7 @@ mod tests {
 
     #[test]
     fn capture_preserves_windowed_frame_while_fullscreen() {
-        let mut app = app();
+        let mut app = geometry_app();
         let primary = app
             .world_mut()
             .query_filtered::<Entity, With<PrimaryWindow>>()
@@ -273,7 +485,7 @@ mod tests {
     #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
     #[test]
     fn window_mode_restore_marks_geometry_capture_ready() {
-        let mut app = app();
+        let mut app = geometry_app();
         let primary = app
             .world_mut()
             .query_filtered::<Entity, With<PrimaryWindow>>()

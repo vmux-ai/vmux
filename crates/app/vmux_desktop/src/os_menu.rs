@@ -37,7 +37,7 @@ impl Plugin for OsMenuPlugin {
             edit_items: Vec::new(),
         })
         .add_message::<OsMenuSelection>()
-        .add_message::<crate::window_manager::CloseVmuxWindow>()
+        .add_message::<crate::window::CloseVmuxWindow>()
         .add_message::<CloseRequest>()
         .add_message::<vmux_browser::OpenRequest>()
         .add_observer(remember_tab_close)
@@ -583,7 +583,7 @@ fn remember_native_page_open_requests(
 fn hide_window_on_close_request(
     mut closed: MessageReader<WindowCloseRequested>,
     mut windows: Query<&mut Window>,
-    mut close_windows: MessageWriter<crate::window_manager::CloseVmuxWindow>,
+    mut close_windows: MessageWriter<crate::window::CloseVmuxWindow>,
     state: Single<&OsMenuState>,
 ) {
     let from_menu_key_equivalent = state
@@ -613,7 +613,7 @@ fn hide_window_on_close_request(
             continue;
         }
         if window_count > 1 {
-            close_windows.write(crate::window_manager::CloseVmuxWindow(event.window));
+            close_windows.write(crate::window::CloseVmuxWindow(event.window));
             continue;
         }
         if let Ok(mut window) = windows.get_mut(event.window) {

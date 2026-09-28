@@ -1,7 +1,7 @@
 use crate::{
     display::DisplayPlugin, os_menu::OsMenuPlugin, permission::PermissionsPlugin,
     remote::RemotePlugin, runtime::RuntimePlugin, shortcut::ShortcutPlugin,
-    window_state::WindowStatePlugin,
+    window::DesktopWindowPlugin,
 };
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
@@ -45,8 +45,7 @@ pub(crate) struct NativeWindowPlugin;
 impl Plugin for NativeWindowPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            crate::window_manager::WindowManagerPlugin,
-            WindowStatePlugin,
+            DesktopWindowPlugin,
             DisplayPlugin,
             crate::appearance::DesktopAppearancePlugin,
             crate::boot_status::BootStatusPlugin,
