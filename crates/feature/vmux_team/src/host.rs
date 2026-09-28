@@ -111,7 +111,7 @@ fn spawn_profile_labels(mut commands: Commands) {
 }
 
 fn sync_user_profile_name(
-    active_space: vmux_space::ActiveSpace,
+    active_space: vmux_layout::space::FocusedSpace,
     mut user: Query<&mut Profile, With<User>>,
 ) {
     let Some(name) = active_space.profile() else {

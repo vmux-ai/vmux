@@ -301,7 +301,7 @@ fn on_terminal_removed(
 fn spawn_layout_requested_content(
     mut reader: MessageReader<TerminalLayoutSpawnRequest>,
     settings: Res<AppSettings>,
-    active_space: vmux_space::ActiveSpace,
+    active_space: vmux_layout::space::FocusedSpace,
     child_of: Query<&ChildOf>,
     tabs: Query<&vmux_layout::tab::Tab>,
     mut commands: Commands,
@@ -332,7 +332,7 @@ fn handle_terminal_page_open(
     child_of_q: Query<&ChildOf>,
     tabs: Query<&vmux_layout::tab::Tab>,
     settings: Res<AppSettings>,
-    active_space: vmux_space::ActiveSpace,
+    active_space: vmux_layout::space::FocusedSpace,
     mut commands: Commands,
 ) {
     let space_id = active_space
@@ -809,7 +809,7 @@ fn resolve_pending_terminal_cwd(
     spaces: Query<(), With<vmux_layout::space::Space>>,
     space_ids: Query<&vmux_layout::space::SpaceId>,
     settings: Res<AppSettings>,
-    active_space: vmux_space::ActiveSpace,
+    active_space: vmux_layout::space::FocusedSpace,
 ) {
     for (entity, mut launch) in &mut pending {
         if !launch.cwd.is_empty() {

@@ -9,7 +9,6 @@ use vmux_core::{KeyboardOwner, LastActivatedAt, PageMetadata};
 use vmux_layout::pane::{Pane, PaneSplit};
 use vmux_layout::stack::FocusedStack;
 use vmux_setting::AppSettings;
-use vmux_space::ActiveSpace;
 
 pub(super) struct AgentTerminalPlugin;
 
@@ -88,7 +87,7 @@ fn open_terminal_tab(
     mut requests: MessageReader<AgentNewTerminalTabRequest>,
     focus: FocusedStack,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    active_space: ActiveSpace,
+    active_space: vmux_layout::space::FocusedSpace,
     settings: Res<AppSettings>,
     mut terminal_spawn: MessageWriter<super::TerminalStackSpawnRequest>,
     mut process_spawn: MessageWriter<ProcessStackSpawnRequest>,

@@ -185,7 +185,10 @@ fn is_modifier_key(key: KeyCode) -> bool {
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
-    use vmux_command::{CommandDefinition, CommandInvocation, CommandPlugin, CommandRequest};
+    use vmux_command::{
+        CommandDefinition, CommandInvocation, CommandPlugin, CommandTypePlugin,
+        RegisterCommandDefinitions,
+    };
     use vmux_layout::pane::{
         ArrangeRequest as PaneArrangeRequest, CloseRequest as PaneCloseRequest,
         FocusRequest as PaneFocusRequest, OpenRequest as PaneOpenRequest,
@@ -204,30 +207,29 @@ mod tests {
     impl ShortcutFixture {
         fn app(settings: Option<AppSettings>) -> App {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, CommandPlugin, ShortcutPlugin))
-                .insert_resource(ButtonInput::<KeyCode>::default());
+            app.add_plugins((
+                MinimalPlugins,
+                CommandPlugin,
+                CommandTypePlugin::<PaneOpenRequest>::default(),
+                CommandTypePlugin::<PaneCloseRequest>::default(),
+                CommandTypePlugin::<PaneFocusRequest>::default(),
+                CommandTypePlugin::<PaneArrangeRequest>::default(),
+                CommandTypePlugin::<PaneResizeRequest>::default(),
+                CommandTypePlugin::<ToggleZoomRequest>::default(),
+                CommandTypePlugin::<TabFocusRequest>::default(),
+                CommandTypePlugin::<TabOpenRequest>::default(),
+                ShortcutPlugin,
+            ))
+            .add_systems(
+                Startup,
+                spawn_space_open_command.in_set(RegisterCommandDefinitions),
+            )
+            .insert_resource(ButtonInput::<KeyCode>::default());
             if let Some(settings) = settings {
                 app.insert_resource(settings);
             }
-            app.world_mut().spawn_batch(Self::definitions());
             app.update();
             app
-        }
-
-        fn definitions() -> Vec<CommandDefinition> {
-            let mut definitions = Vec::new();
-            definitions.extend(PaneOpenRequest::definitions());
-            definitions.extend(PaneCloseRequest::definitions());
-            definitions.extend(PaneFocusRequest::definitions());
-            definitions.extend(PaneArrangeRequest::definitions());
-            definitions.extend(PaneResizeRequest::definitions());
-            definitions.extend(ToggleZoomRequest::definitions());
-            definitions.extend(TabFocusRequest::definitions());
-            definitions.extend(TabOpenRequest::definitions());
-            definitions.push(
-                CommandDefinition::new("space_open", "Spaces", "Layout > Space").chord("Ctrl+b, s"),
-            );
-            definitions
         }
 
         fn invocations(app: &mut App) -> Vec<String> {
@@ -237,6 +239,12 @@ mod tests {
                 .map(|invocation| invocation.id)
                 .collect()
         }
+    }
+
+    fn spawn_space_open_command(mut commands: Commands) {
+        commands.spawn(
+            CommandDefinition::new("space_open", "Spaces", "Layout > Space").chord("Ctrl+b, s"),
+        );
     }
 
     fn test_settings_with_leader(key: &str) -> AppSettings {

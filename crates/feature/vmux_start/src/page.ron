@@ -8,7 +8,6 @@
     permissions: [
         "PageReady",
         "ThemeEvent",
-        "StartDataRequest",
         "StartSelectWorkspace",
         "StartBranchesRequest",
         "StartGoToBranch",

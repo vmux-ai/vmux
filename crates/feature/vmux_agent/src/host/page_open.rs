@@ -9,7 +9,6 @@ use vmux_core::{
     PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
 };
 use vmux_setting::AppSettings;
-use vmux_space::ActiveSpace;
 
 use super::attach::{
     acp_icon_for_id, acp_profile_name_for_id, acp_registry_agent_for_id, attach_acp_agent_to_stack,
@@ -43,7 +42,7 @@ impl Plugin for PageOpenPlugin {
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentPageOpenWorkspace<'w, 's> {
-    active_space: ActiveSpace<'w, 's>,
+    active_space: vmux_layout::space::FocusedSpace<'w, 's>,
     tabs: Query<'w, 's, &'static vmux_layout::tab::Tab>,
     spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
     space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
@@ -188,7 +187,7 @@ fn resolved_space_startup_dir(
     spaces: &Query<(), With<vmux_layout::space::Space>>,
     space_ids: &Query<&vmux_layout::space::SpaceId>,
     settings: &AppSettings,
-    active_space: &ActiveSpace,
+    active_space: &vmux_layout::space::FocusedSpace,
 ) -> Option<vmux_setting::StartupDir> {
     let space_id = vmux_layout::space::space_id_of(entity, child_of, spaces, space_ids)
         .map(|space_id| space_id.to_string())
@@ -213,7 +212,7 @@ fn prepare_agent_tab_worktrees(
         Option<&vmux_layout::tab::TabDirDecided>,
     )>,
     settings: Option<Res<AppSettings>>,
-    active_space: ActiveSpace,
+    active_space: vmux_layout::space::FocusedSpace,
     managed_root: Option<Res<vmux_layout::worktree::ManagedWorktreeRoot>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,

@@ -2,9 +2,8 @@
 
 use dioxus::prelude::*;
 use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, StartHero};
-use vmux_ui::hooks::{send, use_theme};
+use vmux_ui::hooks::use_theme;
 
-use crate::event::StartDataRequest;
 use vmux_command::palette::PaletteSurface;
 use vmux_command::ui::{CommandPalette, use_command_bar_ui};
 
@@ -16,14 +15,9 @@ pub(crate) struct StartPage;
 
 #[component]
 pub fn Page() -> Element {
-    let locale = use_theme();
+    use_theme();
     let state = use_command_bar_ui();
     let mut mounted = use_signal(|| false);
-
-    use_effect(move || {
-        locale();
-        let _ = send(&StartDataRequest);
-    });
 
     use_effect(move || {
         mounted.set(true);

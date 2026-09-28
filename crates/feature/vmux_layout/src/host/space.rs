@@ -72,6 +72,7 @@ pub struct FocusedSpace<'w, 's> {
             &'static SpaceId,
             &'static EffectiveStartupDir,
             &'static vmux_core::EffectiveStartupUrl,
+            &'static crate::profile::Profile,
             Has<CurrentSpace>,
             Has<vmux_core::Active>,
         ),
@@ -87,38 +88,48 @@ impl FocusedSpace<'_, '_> {
         &SpaceId,
         &EffectiveStartupDir,
         &vmux_core::EffectiveStartupUrl,
+        &crate::profile::Profile,
     )> {
         self.spaces
             .iter()
-            .find(|(_, _, _, _, current, _)| *current)
-            .or_else(|| self.spaces.iter().find(|(_, _, _, _, _, active)| *active))
+            .find(|(_, _, _, _, _, current, _)| *current)
+            .or_else(|| {
+                self.spaces
+                    .iter()
+                    .find(|(_, _, _, _, _, _, active)| *active)
+            })
             .or_else(|| self.spaces.iter().next())
-            .map(|(entity, id, startup_dir, startup_url, _, _)| {
-                (entity, id, startup_dir, startup_url)
+            .map(|(entity, id, startup_dir, startup_url, profile, _, _)| {
+                (entity, id, startup_dir, startup_url, profile)
             })
     }
 
     pub fn get(&self) -> Option<(Entity, Option<std::path::PathBuf>)> {
         self.selected()
-            .map(|(entity, _, startup_dir, _)| (entity, startup_dir.0.clone()))
+            .map(|(entity, _, startup_dir, _, _)| (entity, startup_dir.0.clone()))
     }
 
     pub fn entity(&self) -> Option<Entity> {
-        self.selected().map(|(entity, _, _, _)| entity)
+        self.selected().map(|(entity, _, _, _, _)| entity)
     }
 
     pub fn id(&self) -> Option<&str> {
-        self.selected().map(|(_, id, _, _)| id.0.as_str())
+        self.selected().map(|(_, id, _, _, _)| id.0.as_str())
+    }
+
+    pub fn profile(&self) -> Option<&str> {
+        self.selected()
+            .map(|(_, _, _, _, profile)| profile.name.as_str())
     }
 
     pub fn startup_dir(&self) -> Option<&std::path::Path> {
         self.selected()
-            .and_then(|(_, _, startup_dir, _)| startup_dir.0.as_deref())
+            .and_then(|(_, _, startup_dir, _, _)| startup_dir.0.as_deref())
     }
 
     pub fn startup_url(&self) -> Option<&str> {
         self.selected()
-            .map(|(_, _, _, startup_url)| startup_url.0.as_str())
+            .map(|(_, _, _, startup_url, _)| startup_url.0.as_str())
             .filter(|url| !url.is_empty())
     }
 

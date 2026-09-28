@@ -12,7 +12,6 @@ use vmux_chat::model::Models;
 use vmux_chat::prompt::{Attach, Attachments, Browsed, RemoveAttachment};
 use vmux_chat::room::{Conversation, Reported, Submitted};
 use vmux_chat::state::{ChatUiState, PublishComposerEffect, RepublishChatUiState};
-use vmux_start::event::StartDataRequest;
 use vmux_start::roster::RepublishLauncher;
 use vmux_team::roster::{Members, RepublishTeam};
 
@@ -179,7 +178,6 @@ impl PageHost for MobileHost {
             | SwitchSpaceRequest::ID
             | CommandBarExRequest::ID
             | CommandBarPickRequest::ID => Err(EventListenerError::Unsupported),
-            StartDataRequest::ID => Ok(()),
             _ => Err(EventListenerError::Unsupported),
         }
     }

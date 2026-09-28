@@ -13,7 +13,7 @@ use vmux_core::PageMetadata;
 use vmux_ui::i18n::Locale;
 
 use crate::START_PAGE_URL;
-use crate::event::{StartDataRequest, StartSelectWorkspace};
+use crate::event::StartSelectWorkspace;
 use vmux_command::build_command_bar_open_payload;
 use vmux_core::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_layout::settings::ResolvedLocale;
@@ -39,12 +39,10 @@ impl Plugin for StartPlugin {
             ),
         );
         app.add_plugins(UiEventPlugin::<(
-            StartDataRequest,
             StartSelectWorkspace,
             vmux_api::command_bar::StartBranchesRequest,
             vmux_api::command_bar::StartGoToBranch,
         )>::default())
-            .add_observer(on_start_data_request)
             .add_observer(on_start_select_workspace)
             .add_observer(on_start_branches_request)
             .add_observer(on_start_go_to_branch)
@@ -604,56 +602,6 @@ fn should_focus_start_sync(
     keyboard_target && (!synced || keyboard_target_added || focus_changed)
 }
 
-fn on_start_data_request(
-    trigger: On<UiInput<StartDataRequest>>,
-    keyboard_targets: Query<(), With<KeyboardOwner>>,
-    tab_gather: TabGatherParams,
-    prompt_context: StartPromptContextParams,
-    contributed_pages: Query<&ContributedPage>,
-    contributed_commands: Query<&ContributedCommand>,
-    locale: Option<Res<ResolvedLocale>>,
-    space_projects: vmux_space::SpaceProjects,
-    definitions: Query<&vmux_command::CommandDefinition>,
-    mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    let cwd = prompt_context.cwd(tab_gather.active_tab.get());
-    let git_info = (!cwd.is_empty())
-        .then(|| {
-            repo_info.as_mut().and_then(|cache| {
-                cache
-                    .bypass_change_detection()
-                    .get(std::path::Path::new(&cwd))
-            })
-        })
-        .flatten();
-    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
-    let payload = build_start_payload(
-        &tab_gather,
-        &prompt_context.command_bar,
-        &contributed_pages,
-        &contributed_commands,
-        &prompt_context,
-        tab_gather.active_tab.get(),
-        git_info.as_ref(),
-        space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
-        prompt_context.command_bar.agent_models.agents.clone(),
-        prompt_context.command_bar.agent_modes.agents.clone(),
-        &locale
-            .as_deref()
-            .map(|locale| locale.0.clone())
-            .unwrap_or_else(Locale::preferred),
-        &definitions,
-    );
-    commands.trigger(vmux_core::host::UiStateWrite::<
-        vmux_api::command_bar::CommandBarUiState,
-    >::from_event(webview, &payload));
-    if keyboard_targets.contains(webview) {
-        commands.trigger(CommandBarFocusRequested { webview });
-    }
-}
-
 fn publish_command_bar_focus(
     trigger: On<CommandBarFocusRequested>,
     mut revisions: Query<&mut CommandBarFocusRevision>,
@@ -765,7 +713,6 @@ fn begin_requested_inline_transition(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_cef::prelude::UiInput;
     use vmux_api::command_bar::CommandBarUiState;
     use vmux_core::host::UiStateWrite;
     use vmux_core::page::PageManifest;
@@ -788,21 +735,17 @@ mod tests {
         emitted.0.push(entry);
     }
 
-    fn start_ready_app() -> App {
+    fn start_focus_app() -> App {
         let mut app = App::new();
         app.init_resource::<EmittedIds>()
-            .add_observer(on_start_data_request)
             .add_observer(publish_command_bar_focus)
             .add_observer(capture_state);
-        app.world_mut().spawn(CommandBarProjection::default());
         app
     }
 
-    fn emit_start_ready(app: &mut App, webview: Entity) {
-        app.world_mut().trigger(UiInput {
-            webview,
-            payload: StartDataRequest,
-        });
+    fn request_start_focus(app: &mut App, webview: Entity) {
+        app.world_mut()
+            .trigger(CommandBarFocusRequested { webview });
         app.update();
     }
 
@@ -810,6 +753,7 @@ mod tests {
     fn start_plugin_spawns_manifest() {
         let mut app = App::new();
         app.add_plugins(StartPlugin);
+        app.world_mut().run_schedule(PreStartup);
         let mut q = app.world_mut().query::<&PageManifest>();
         assert!(q.iter(app.world()).any(|m| m.url == START_PAGE_URL));
     }
@@ -858,28 +802,25 @@ mod tests {
     }
 
     #[test]
-    fn cold_start_focuses_after_page_ready() {
-        let mut app = start_ready_app();
-        let webview = app.world_mut().spawn(KeyboardOwner).id();
+    fn first_focus_effect_starts_at_one() {
+        let mut app = start_focus_app();
+        let webview = app.world_mut().spawn_empty().id();
 
-        emit_start_ready(&mut app, webview);
+        request_start_focus(&mut app, webview);
 
         let emitted = &app.world().resource::<EmittedIds>().0;
-        assert_eq!(emitted, &[("snapshot", 0), ("focus", 1)]);
+        assert_eq!(emitted, &[("focus", 1)]);
     }
 
     #[test]
     fn repeated_focus_effects_advance_the_revision() {
-        let mut app = start_ready_app();
-        let webview = app.world_mut().spawn(KeyboardOwner).id();
+        let mut app = start_focus_app();
+        let webview = app.world_mut().spawn_empty().id();
 
-        emit_start_ready(&mut app, webview);
-        emit_start_ready(&mut app, webview);
+        request_start_focus(&mut app, webview);
+        request_start_focus(&mut app, webview);
 
         let emitted = &app.world().resource::<EmittedIds>().0;
-        assert_eq!(
-            emitted,
-            &[("snapshot", 0), ("focus", 1), ("snapshot", 0), ("focus", 2),]
-        );
+        assert_eq!(emitted, &[("focus", 1), ("focus", 2)]);
     }
 }

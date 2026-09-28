@@ -13,7 +13,6 @@ use vmux_command::WriteCommandRequests;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_service::client::ServiceRequest;
 use vmux_setting::AppSettings;
-use vmux_space::ActiveSpace;
 use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::{
     AgentRunTerminal, ProcessExited, ServiceMessageSet, Terminal, TerminalStackSpawnRequest,
@@ -259,7 +258,7 @@ fn handle_agent_self_commands(
     mut writers: AgentSelfCommandWriters,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
-    active_space: ActiveSpace,
+    active_space: vmux_layout::space::FocusedSpace,
     settings: Res<AppSettings>,
     mut spawn_counter: Single<&mut vmux_layout::pane::SpawnCounter>,
     mut tab_worktree: AgentTabWorktreeContext,
