@@ -289,7 +289,7 @@ fn start_list_tools(
             .remove::<vmux_tool::ToolCatalogRequest>()
             .remove::<vmux_tool::ToolCatalog>()
             .insert(McpExecution::new(async move {
-                if let Ok(connection) = vmux_service::client::ServiceConnection::connect().await
+                if let Ok(connection) = vmux_core::service::ServiceConnection::connect().await
                     && let Ok(ServiceMessage::AgentCommandsResult {
                         result: Ok(commands),
                         ..
@@ -446,7 +446,7 @@ async fn run_agent_command(
     anchor: Option<vmux_api::protocol::ProcessId>,
 ) -> Result<Value, String> {
     let request_id = vmux_api::protocol::AgentRequestId::new();
-    let connection = vmux_service::client::ServiceConnection::connect()
+    let connection = vmux_core::service::ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
     connection
@@ -501,7 +501,7 @@ pub fn command_result_to_mcp_response(
 }
 
 async fn agent_query(
-    connection: &vmux_service::client::ServiceConnection,
+    connection: &vmux_core::service::ServiceConnection,
     query: AgentRequest,
 ) -> Result<ServiceMessage, String> {
     let request_id = AgentRequestId::new();
@@ -552,7 +552,7 @@ fn query_response_request_id(message: &ServiceMessage) -> Option<AgentRequestId>
 }
 
 async fn run_agent_query(query: AgentRequest) -> Result<Value, String> {
-    let connection = vmux_service::client::ServiceConnection::connect()
+    let connection = vmux_core::service::ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
     let response = agent_query(&connection, query).await?;

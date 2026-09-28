@@ -10,9 +10,9 @@ use vmux_api::protocol::{
     AgentResumeInAcp, AgentRun, AgentRunCompletion, AgentRunWithPlacementOverride,
     AgentWorkingDirectory, ClientMessage, PlacementMode, ProcessId, ServiceMessage,
 };
+use vmux_core::service::ServiceConnection;
 use vmux_core::{HostShell, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
-use vmux_service::client::ServiceConnection;
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
 };

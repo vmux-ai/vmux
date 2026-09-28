@@ -2,45 +2,11 @@ use crate::{DaemonBinary, DaemonIdentity, ServicePaths};
 use bevy_ecs::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::io::BufReader;
-use tokio::net::UnixStream;
-use tokio::sync::Mutex as TokioMutex;
 use vmux_api::protocol::{ClientMessage, ServiceMessage};
-
-pub struct ServiceConnection {
-    reader: TokioMutex<BufReader<tokio::net::unix::OwnedReadHalf>>,
-    writer: TokioMutex<tokio::net::unix::OwnedWriteHalf>,
-}
-
-impl ServiceConnection {
-    pub async fn connect() -> std::io::Result<Self> {
-        let stream = UnixStream::connect(ServicePaths::current().socket()).await?;
-        let (reader, writer) = stream.into_split();
-        Ok(Self {
-            reader: TokioMutex::new(BufReader::new(reader)),
-            writer: TokioMutex::new(writer),
-        })
-    }
-
-    pub async fn send(&self, message: &ClientMessage) -> std::io::Result<()> {
-        let mut writer = self.writer.lock().await;
-        crate::framing::write_client_message(&mut *writer, message).await
-    }
-
-    pub async fn recv(&self) -> std::io::Result<Option<ServiceMessage>> {
-        let mut reader = self.reader.lock().await;
-        crate::framing::read_service_message(&mut *reader).await
-    }
-}
+use vmux_core::service::ServiceConnection;
 
 #[derive(Component)]
 pub(crate) struct ServiceClient(pub ServiceHandle);
-
-#[derive(Clone, Message)]
-pub struct ServiceRequest(pub ClientMessage);
-
-#[derive(Clone, Message)]
-pub struct ServiceInbound(pub ServiceMessage);
 
 const MAX_SERVICE_MESSAGES_PER_DRAIN: usize = 128;
 
@@ -148,7 +114,7 @@ impl ServiceHandle {
                 let stream = std::os::unix::net::UnixStream::connect(&sock)?;
                 stream.set_write_timeout(Some(std::time::Duration::from_millis(500)))?;
                 let mut stream = stream;
-                crate::framing::write_client_message_blocking(
+                vmux_core::service::write_client_message_blocking(
                     &mut stream,
                     &vmux_api::protocol::ClientMessage::Shutdown,
                 )

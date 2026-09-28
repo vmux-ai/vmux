@@ -1,3 +1,5 @@
+pub const RUN_OSC: &str = "6973";
+
 #[vmux_api::ui_state(Default)]
 pub struct ProcessesUiState {
     pub connected: bool,

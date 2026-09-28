@@ -4,8 +4,8 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use vmux_api::protocol::ClientMessage;
 use vmux_command::WriteCommandRequests;
-use vmux_service::client::ServiceRequest;
-use vmux_service::plugin::ServiceConnected;
+use vmux_core::service::ServiceConnected;
+use vmux_core::service::ServiceRequest;
 use vmux_terminal::ServiceMessageSet;
 
 use crate::event::AgentChoiceSelected;

@@ -7,7 +7,7 @@ use vmux_api::protocol::{
     AgentRequestId, AgentTurnEnded, ClientMessage, FileTouchKind, ProcessId, ServiceMessage,
 };
 use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
-use vmux_service::client::ServiceConnection;
+use vmux_core::service::ServiceConnection;
 
 pub struct AgentCliPlugin;
 

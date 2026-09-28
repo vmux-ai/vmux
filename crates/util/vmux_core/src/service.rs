@@ -1,5 +1,167 @@
 use std::path::PathBuf;
-use vmux_profile::{active_profile_name, build_profile, git_hash, shared_data_dir};
+use vmux_profile::{active_profile_name, build_profile, shared_data_dir};
+
+#[cfg(host)]
+use bevy::prelude::*;
+#[cfg(host)]
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
+#[cfg(host)]
+use tokio::net::UnixStream;
+#[cfg(host)]
+use tokio::sync::Mutex as TokioMutex;
+#[cfg(host)]
+use vmux_api::protocol::{ClientMessage, ServiceMessage};
+#[cfg(host)]
+use vmux_transport::framing::LengthPrefixed;
+
+#[cfg(host)]
+const CODEC: LengthPrefixed = LengthPrefixed::new(64 * 1024 * 1024);
+
+#[cfg(host)]
+#[derive(Clone, Message)]
+pub struct ServiceRequest(pub vmux_api::protocol::ClientMessage);
+
+#[cfg(host)]
+#[derive(Clone, Message)]
+pub struct ServiceInbound(pub vmux_api::protocol::ServiceMessage);
+
+#[cfg(host)]
+#[derive(Component)]
+pub struct ServiceConnected;
+
+#[cfg(host)]
+#[derive(Component, Clone, Debug)]
+pub struct ServiceUnavailable(pub String);
+
+#[cfg(host)]
+pub struct ServiceConnection {
+    reader: TokioMutex<BufReader<tokio::net::unix::OwnedReadHalf>>,
+    writer: TokioMutex<tokio::net::unix::OwnedWriteHalf>,
+}
+
+#[cfg(host)]
+impl ServiceConnection {
+    pub async fn connect() -> std::io::Result<Self> {
+        let stream = UnixStream::connect(ServicePaths::current().socket()).await?;
+        let (reader, writer) = stream.into_split();
+        Ok(Self {
+            reader: TokioMutex::new(BufReader::new(reader)),
+            writer: TokioMutex::new(writer),
+        })
+    }
+
+    pub async fn send(&self, message: &ClientMessage) -> std::io::Result<()> {
+        let mut writer = self.writer.lock().await;
+        write_client_message(&mut *writer, message).await
+    }
+
+    pub async fn recv(&self) -> std::io::Result<Option<ServiceMessage>> {
+        let mut reader = self.reader.lock().await;
+        read_service_message(&mut *reader).await
+    }
+}
+
+#[cfg(host)]
+pub async fn write_raw_frame<W>(writer: &mut W, data: &[u8]) -> std::io::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    CODEC.write(writer, data).await
+}
+
+#[cfg(host)]
+pub async fn read_raw_frame<R>(reader: &mut R) -> std::io::Result<Option<Vec<u8>>>
+where
+    R: AsyncReadExt + Unpin,
+{
+    CODEC.read(reader).await
+}
+
+#[cfg(host)]
+pub fn write_raw_frame_blocking<W: std::io::Write>(
+    writer: &mut W,
+    data: &[u8],
+) -> std::io::Result<()> {
+    CODEC.write_blocking(writer, data)
+}
+
+#[cfg(host)]
+pub fn read_raw_frame_blocking<R: std::io::Read>(
+    reader: &mut R,
+) -> std::io::Result<Option<Vec<u8>>> {
+    CODEC.read_blocking(reader)
+}
+
+#[cfg(host)]
+pub async fn write_client_message<W>(writer: &mut W, message: &ClientMessage) -> std::io::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(message)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    write_raw_frame(writer, &bytes).await
+}
+
+#[cfg(host)]
+pub async fn write_service_message<W>(
+    writer: &mut W,
+    message: &ServiceMessage,
+) -> std::io::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(message)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    write_raw_frame(writer, &bytes).await
+}
+
+#[cfg(host)]
+pub async fn read_client_message<R>(reader: &mut R) -> std::io::Result<Option<ClientMessage>>
+where
+    R: AsyncReadExt + Unpin,
+{
+    let Some(bytes) = read_raw_frame(reader).await? else {
+        return Ok(None);
+    };
+    rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes)
+        .map(Some)
+        .map_err(|error| std::io::Error::other(error.to_string()))
+}
+
+#[cfg(host)]
+pub async fn read_service_message<R>(reader: &mut R) -> std::io::Result<Option<ServiceMessage>>
+where
+    R: AsyncReadExt + Unpin,
+{
+    let Some(bytes) = read_raw_frame(reader).await? else {
+        return Ok(None);
+    };
+    rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes)
+        .map(Some)
+        .map_err(|error| std::io::Error::other(error.to_string()))
+}
+
+#[cfg(host)]
+pub fn write_client_message_blocking<W: std::io::Write>(
+    writer: &mut W,
+    message: &ClientMessage,
+) -> std::io::Result<()> {
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(message)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    write_raw_frame_blocking(writer, &bytes)
+}
+
+#[cfg(host)]
+pub fn read_service_message_blocking<R: std::io::Read>(
+    reader: &mut R,
+) -> std::io::Result<Option<ServiceMessage>> {
+    let Some(bytes) = read_raw_frame_blocking(reader)? else {
+        return Ok(None);
+    };
+    rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes)
+        .map(Some)
+        .map_err(|error| std::io::Error::other(error.to_string()))
+}
 
 #[derive(Clone, Debug)]
 pub struct ServicePaths {
@@ -122,42 +284,6 @@ impl RemotePaths {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct LaunchAgent {
-    profile: String,
-}
-
-impl LaunchAgent {
-    pub fn current() -> Self {
-        Self::for_profile(ServicePaths::build_profile())
-    }
-
-    pub fn for_profile(profile: impl Into<String>) -> Self {
-        Self {
-            profile: profile.into(),
-        }
-    }
-
-    pub fn profile(&self) -> &str {
-        &self.profile
-    }
-
-    pub fn label(&self) -> String {
-        match self.profile.as_str() {
-            "release" => "ai.vmux.service".to_string(),
-            "local" => format!("ai.vmux.service.{}", git_hash()),
-            profile => format!("ai.vmux.service.{profile}"),
-        }
-    }
-
-    pub fn plist_path(&self) -> PathBuf {
-        let home = std::env::var_os("HOME").expect("HOME not set");
-        PathBuf::from(home)
-            .join("Library/LaunchAgents")
-            .join(format!("{}.plist", self.label()))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,27 +293,6 @@ mod tests {
         let p = ServicePaths::build_profile();
         assert!(!p.is_empty());
         assert!(matches!(p, "release" | "local" | "dev"));
-    }
-
-    #[test]
-    fn launchd_label_includes_profile() {
-        assert_eq!(
-            LaunchAgent::for_profile("dev").label(),
-            "ai.vmux.service.dev"
-        );
-        assert_eq!(
-            LaunchAgent::for_profile("release").label(),
-            "ai.vmux.service"
-        );
-        let local = LaunchAgent::for_profile("local").label();
-        assert!(
-            local.starts_with("ai.vmux.service."),
-            "expected local label to start with 'ai.vmux.service.', got {local}"
-        );
-        assert_ne!(
-            local, "ai.vmux.service.local",
-            "local profile should expand to per-SHA label, not literal 'local'"
-        );
     }
 
     #[test]
@@ -284,13 +389,5 @@ mod tests {
             "got {}",
             ServicePaths::log_dir().display()
         );
-    }
-
-    #[test]
-    fn plist_path_lives_in_user_launchagents() {
-        let p = LaunchAgent::for_profile("dev").plist_path();
-        let s = p.to_string_lossy();
-        assert!(s.contains("Library/LaunchAgents"));
-        assert!(s.ends_with("ai.vmux.service.dev.plist"));
     }
 }

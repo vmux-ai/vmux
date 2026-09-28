@@ -10305,7 +10305,6 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_native",
- "vmux_service",
  "vmux_setting",
  "vmux_space",
  "vmux_start",
@@ -10433,6 +10432,7 @@ dependencies = [
  "bevy_cef_core",
  "bevy_ecs",
  "bevy_reflect",
+ "chrono",
  "moonshine-save",
  "percent-encoding",
  "rkyv",
@@ -10442,6 +10442,7 @@ dependencies = [
  "sha2",
  "similar",
  "tempfile",
+ "tokio",
  "toml",
  "url",
  "uuid",
@@ -10449,6 +10450,7 @@ dependencies = [
  "vmux_flex",
  "vmux_path",
  "vmux_profile",
+ "vmux_transport",
  "zip",
 ]
 
@@ -10461,6 +10463,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "vmux_core",
  "vmux_service",
 ]
 
@@ -10585,7 +10588,6 @@ dependencies = [
  "vmux_mcp",
  "vmux_native",
  "vmux_path",
- "vmux_service",
  "vmux_setting",
  "vmux_space",
  "vmux_tool",
@@ -10749,7 +10751,6 @@ dependencies = [
  "tokio",
  "vmux_api",
  "vmux_core",
- "vmux_service",
  "vmux_tool",
 ]
 
@@ -10786,7 +10787,6 @@ dependencies = [
  "vmux_app",
  "vmux_chat",
  "vmux_path",
- "vmux_service",
  "vmux_start",
  "vmux_team",
  "vmux_transport",
@@ -11062,7 +11062,6 @@ dependencies = [
  "vmux_core",
  "vmux_layout",
  "vmux_native",
- "vmux_service",
  "vmux_space",
  "vmux_tool",
  "vmux_ui",
@@ -11094,7 +11093,6 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_native",
- "vmux_service",
  "vmux_setting",
  "vmux_space",
  "vmux_tool",

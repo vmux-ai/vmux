@@ -43,7 +43,6 @@ vmux_history = { path = "../../feature/vmux_history" }
 vmux_layout = { path = "../../feature/vmux_layout" }
 vmux_tool = { path = "../../feature/vmux_tool" }
 vmux_native = { path = "../vmux_native" }
-vmux_service = { path = "../../feature/vmux_service" }
 vmux_setting = { path = "../../feature/vmux_setting" }
 vmux_space = { path = "../../feature/vmux_space" }
 vmux_start = { path = "../../feature/vmux_start" }

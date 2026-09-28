@@ -40,7 +40,6 @@ quinn = { workspace = true }
 vmux_transport = { path = "../../util/vmux_transport" }
 vmux_app = { path = "../../util/vmux_app", features = ["mobile"] }
 vmux_path = { path = "../../util/vmux_path" }
-vmux_service = { path = "../../feature/vmux_service" }
 vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
 vmux_chat = { path = "../../feature/vmux_chat" }
 vmux_start = { path = "../../feature/vmux_start" }

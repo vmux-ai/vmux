@@ -7,6 +7,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+chrono = { workspace = true }
 percent-encoding = "2"
 rkyv = { workspace = true }
 serde = { workspace = true }
@@ -31,8 +32,10 @@ moonshine-save = { workspace = true }
 ron = { workspace = true }
 sha2 = "0.10"
 toml = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "net", "sync"] }
 url = { workspace = true }
 vmux_flex = { path = "../vmux_flex" }
+vmux_transport = { path = "../vmux_transport" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [lints]

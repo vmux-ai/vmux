@@ -12,6 +12,7 @@ use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_command::WriteCommandRequests;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_core::input::KeyStroke;
+use vmux_core::service::{ServiceConnected, ServiceRequest, ServiceUnavailable};
 use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_core::{
     PageIdentity, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
@@ -20,10 +21,6 @@ use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest};
 use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
-use vmux_service::{
-    client::ServiceRequest,
-    plugin::{ServiceConnected, ServiceUnavailable},
-};
 use vmux_setting::AppSettings;
 
 #[cfg(test)]

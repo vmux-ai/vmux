@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::event::{AgentApprovalReply, ApprovalDecision};
 use crate::run_state::AgentRunState;
 use vmux_api::protocol::{ClientMessage, SharedMessage};
-use vmux_service::client::ServiceRequest;
+use vmux_core::service::ServiceRequest;
 use vmux_session::AcpSession;
 use vmux_session::{AgentApprovalPolicy, AgentSession, approval_tool_key};
 

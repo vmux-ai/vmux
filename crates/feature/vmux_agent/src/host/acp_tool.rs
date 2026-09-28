@@ -6,11 +6,11 @@ use std::thread::JoinHandle;
 use bevy::prelude::*;
 use vmux_api::protocol::{ClientMessage, ManagedMcpServer};
 use vmux_core::event::InstallPhase;
+use vmux_core::service::ServiceConnected;
+use vmux_core::service::ServiceRequest;
 use vmux_core::tool::{ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus};
 use vmux_editor::lsp::package_path::{PackageName, PackagePath};
 use vmux_editor::lsp::{archive, download, store};
-use vmux_service::client::ServiceRequest;
-use vmux_service::plugin::ServiceConnected;
 use vmux_session::AcpSession;
 use vmux_setting::{AcpAgentConfig, AppSettings};
 use vmux_tool::{

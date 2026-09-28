@@ -2,10 +2,10 @@ use bevy::prelude::*;
 use crossbeam_channel::Receiver;
 use vmux_api::protocol::{ClientMessage, SharedMessage};
 use vmux_core::LastActivatedAt;
+use vmux_core::service::ServiceRequest;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::pane::PanePlacement;
 use vmux_layout::stack::stack_bundle;
-use vmux_service::client::ServiceRequest;
 use vmux_terminal::reattach_terminal_bundle;
 
 use crate::event::AgentApprovalRequest;

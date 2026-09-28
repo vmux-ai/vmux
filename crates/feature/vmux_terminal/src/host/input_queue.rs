@@ -4,8 +4,8 @@ use bevy::ecs::entity::EntityHashMap;
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use vmux_api::protocol::{ClientMessage, ProcessId};
-use vmux_service::client::ServiceRequest;
-use vmux_service::plugin::ServiceConnected;
+use vmux_core::service::ServiceConnected;
+use vmux_core::service::ServiceRequest;
 
 use super::plugin::{
     AwaitingProcessCreated, PendingServiceCreate, ServiceMessageSet, ShellOutputSeen,

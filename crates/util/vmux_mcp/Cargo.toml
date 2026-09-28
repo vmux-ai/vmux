@@ -17,7 +17,6 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 vmux_api = { path = "../vmux_api" }
 vmux_core = { path = "../vmux_core" }
-vmux_service = { path = "../../feature/vmux_service" }
 vmux_tool = { path = "../../feature/vmux_tool" }
 
 [dev-dependencies]

@@ -546,7 +546,7 @@ async fn handle_client(
 
     loop {
         let msg: Option<ClientMessage> =
-            match crate::framing::read_client_message(&mut reader).await {
+            match vmux_core::service::read_client_message(&mut reader).await {
                 Ok(msg) => msg,
                 Err(error) => {
                     tracing::warn!(%error, "client stream ended mid-frame");
@@ -580,13 +580,13 @@ async fn handle_client(
                         };
                         let w = writer.clone();
                         let mut w = w.lock().await;
-                        crate::framing::write_service_message(&mut *w, &resp).await?;
+                        vmux_core::service::write_service_message(&mut *w, &resp).await?;
                     }
                     Err(reason) => {
                         let resp = ServiceMessage::ProcessCreateFailed { process_id, reason };
                         let w = writer.clone();
                         let mut w = w.lock().await;
-                        crate::framing::write_service_message(&mut *w, &resp).await?;
+                        vmux_core::service::write_service_message(&mut *w, &resp).await?;
                     }
                 }
             }
@@ -606,7 +606,7 @@ async fn handle_client(
                                         Err(_) => break,
                                     };
                                     let mut w = w.lock().await;
-                                    if crate::framing::write_raw_frame(&mut *w, &bytes)
+                                    if vmux_core::service::write_raw_frame(&mut *w, &bytes)
                                         .await
                                         .is_err()
                                     {
@@ -630,7 +630,7 @@ async fn handle_client(
                         message: format!("process not found: {process_id}"),
                     };
                     let mut w = writer.lock().await;
-                    crate::framing::write_service_message(&mut *w, &resp).await?;
+                    vmux_core::service::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
@@ -693,7 +693,7 @@ async fn handle_client(
                 let processes = mgr.processes.values().map(|p| p.info()).collect::<Vec<_>>();
                 let resp = ServiceMessage::ProcessList { processes };
                 let mut w = writer.lock().await;
-                crate::framing::write_service_message(&mut *w, &resp).await?;
+                vmux_core::service::write_service_message(&mut *w, &resp).await?;
             }
 
             ClientMessage::KillProcess { process_id } => {
@@ -709,13 +709,13 @@ async fn handle_client(
                 if let Some(process) = mgr.processes.get(&process_id) {
                     let snap = process.snapshot().into_service_message(process_id);
                     let mut w = writer.lock().await;
-                    crate::framing::write_service_message(&mut *w, &snap).await?;
+                    vmux_core::service::write_service_message(&mut *w, &snap).await?;
                 } else {
                     let resp = ServiceMessage::Error {
                         message: format!("process not found: {process_id}"),
                     };
                     let mut w = writer.lock().await;
-                    crate::framing::write_service_message(&mut *w, &resp).await?;
+                    vmux_core::service::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
@@ -758,7 +758,7 @@ async fn handle_client(
                         .unwrap_or_default();
                 let resp = ServiceMessage::SelectionText { process_id, text };
                 let mut w = writer.lock().await;
-                crate::framing::write_service_message(&mut *w, &resp).await?;
+                vmux_core::service::write_service_message(&mut *w, &resp).await?;
             }
 
             ClientMessage::EnterCopyMode { process_id } => {
@@ -776,7 +776,7 @@ async fn handle_client(
                 {
                     let resp = ServiceMessage::SelectionText { process_id, text };
                     let mut w = writer.lock().await;
-                    crate::framing::write_service_message(&mut *w, &resp).await?;
+                    vmux_core::service::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
@@ -795,7 +795,7 @@ async fn handle_client(
                                     Err(_) => break,
                                 };
                                 let mut w = w.lock().await;
-                                if crate::framing::write_raw_frame(&mut *w, &bytes)
+                                if vmux_core::service::write_raw_frame(&mut *w, &bytes)
                                     .await
                                     .is_err()
                                 {
@@ -829,7 +829,7 @@ async fn handle_client(
                         Err(_) => return,
                     };
                     let mut w = writer.lock().await;
-                    let _ = crate::framing::write_raw_frame(&mut *w, &bytes).await;
+                    let _ = vmux_core::service::write_raw_frame(&mut *w, &bytes).await;
                 });
             }
 
@@ -843,7 +843,7 @@ async fn handle_client(
                     processes: Vec::new(),
                 };
                 let mut w = writer.lock().await;
-                crate::framing::write_service_message(&mut *w, &resp).await?;
+                vmux_core::service::write_service_message(&mut *w, &resp).await?;
                 shutdown_tx.send(()).await.ok();
                 break;
             }
@@ -859,7 +859,7 @@ async fn handle_client(
                     process_count,
                 };
                 let mut w = writer.lock().await;
-                crate::framing::write_service_message(&mut *w, &resp).await?;
+                vmux_core::service::write_service_message(&mut *w, &resp).await?;
             }
 
             ClientMessage::AgentQuery { request_id, query } => {
@@ -878,14 +878,14 @@ async fn handle_client(
                                 Err(_) => return,
                             };
                             let mut writer = writer.lock().await;
-                            let _ = crate::framing::write_raw_frame(&mut *writer, &bytes).await;
+                            let _ = vmux_core::service::write_raw_frame(&mut *writer, &bytes).await;
                         });
                         continue;
                     }
                     Err(message) => ServiceMessage::Error { message },
                 };
                 let mut writer = writer.lock().await;
-                crate::framing::write_service_message(&mut *writer, &response).await?;
+                vmux_core::service::write_service_message(&mut *writer, &response).await?;
             }
 
             ClientMessage::AgentQueryError {
@@ -1091,7 +1091,7 @@ async fn handle_client(
                 if let Err(message) = result {
                     let resp = ServiceMessage::Error { message };
                     let mut w = writer.lock().await;
-                    crate::framing::write_service_message(&mut *w, &resp).await?;
+                    vmux_core::service::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
@@ -1113,7 +1113,7 @@ async fn handle_client(
                 if let Some(mut rx) = rx {
                     if let Some(snapshot) = agent_sessions.snapshot(sid.clone()).await {
                         let mut w = writer.lock().await;
-                        crate::framing::write_service_message(&mut *w, &snapshot).await?;
+                        vmux_core::service::write_service_message(&mut *w, &snapshot).await?;
                     }
                     if let Some(old) = page_agent_forwarders.remove(&sid) {
                         old.abort();
@@ -1128,7 +1128,7 @@ async fn handle_client(
                                         Err(_) => break,
                                     };
                                     let mut w = w.lock().await;
-                                    if crate::framing::write_raw_frame(&mut *w, &bytes)
+                                    if vmux_core::service::write_raw_frame(&mut *w, &bytes)
                                         .await
                                         .is_err()
                                     {
@@ -1182,7 +1182,7 @@ async fn handle_client(
                 {
                     let resp = ServiceMessage::Error { message };
                     let mut w = writer.lock().await;
-                    crate::framing::write_service_message(&mut *w, &resp).await?;
+                    vmux_core::service::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
@@ -1322,26 +1322,26 @@ async fn handle_client(
                 {
                     let response = ServiceMessage::Error { message };
                     let mut writer = writer.lock().await;
-                    crate::framing::write_service_message(&mut *writer, &response).await?;
+                    vmux_core::service::write_service_message(&mut *writer, &response).await?;
                     continue;
                 }
                 let rx = acp_sessions.subscribe(sid.clone()).await;
                 if let Some(mut rx) = rx {
                     if let Some(snapshot) = acp_sessions.snapshot(sid.clone()).await {
                         let mut w = writer.lock().await;
-                        crate::framing::write_service_message(&mut *w, &snapshot).await?;
+                        vmux_core::service::write_service_message(&mut *w, &snapshot).await?;
                     }
                     if let Some(agent_info) = acp_sessions.agent_info(sid.clone()).await {
                         let mut w = writer.lock().await;
-                        crate::framing::write_service_message(&mut *w, &agent_info).await?;
+                        vmux_core::service::write_service_message(&mut *w, &agent_info).await?;
                     }
                     if let Some(model_info) = acp_sessions.model_info(sid.clone()).await {
                         let mut w = writer.lock().await;
-                        crate::framing::write_service_message(&mut *w, &model_info).await?;
+                        vmux_core::service::write_service_message(&mut *w, &model_info).await?;
                     }
                     if let Some(mode_info) = acp_sessions.mode_info(sid.clone()).await {
                         let mut w = writer.lock().await;
-                        crate::framing::write_service_message(&mut *w, &mode_info).await?;
+                        vmux_core::service::write_service_message(&mut *w, &mode_info).await?;
                     }
                     if let Some(old) = page_agent_forwarders.remove(&sid) {
                         old.abort();
@@ -1356,7 +1356,7 @@ async fn handle_client(
                                         Err(_) => break,
                                     };
                                     let mut w = w.lock().await;
-                                    if crate::framing::write_raw_frame(&mut *w, &bytes)
+                                    if vmux_core::service::write_raw_frame(&mut *w, &bytes)
                                         .await
                                         .is_err()
                                     {
@@ -1493,7 +1493,7 @@ mod tests {
         let (_r, mut w) = stream.into_split();
         let bytes =
             rkyv::to_bytes::<rkyv::rancor::Error>(&ClientMessage::Shutdown).expect("serialize");
-        crate::framing::write_raw_frame(&mut w, &bytes)
+        vmux_core::service::write_raw_frame(&mut w, &bytes)
             .await
             .expect("write shutdown");
 
@@ -1605,7 +1605,7 @@ mod tests {
             rows: 24,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&create).expect("serialize");
-        crate::framing::write_raw_frame(&mut w, &bytes)
+        vmux_core::service::write_raw_frame(&mut w, &bytes)
             .await
             .expect("write create");
 
@@ -1672,7 +1672,7 @@ mod tests {
             rows: 24,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&create).expect("serialize");
-        crate::framing::write_raw_frame(&mut w, &bytes)
+        vmux_core::service::write_raw_frame(&mut w, &bytes)
             .await
             .expect("write create");
 

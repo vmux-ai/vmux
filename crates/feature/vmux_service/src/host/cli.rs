@@ -7,8 +7,8 @@ use bevy_ecs::prelude::*;
 use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
 
 #[cfg(target_os = "macos")]
-use super::paths::LaunchAgent;
-use super::paths::ServicePaths;
+use super::LaunchAgent;
+use vmux_core::service::ServicePaths;
 
 pub struct ServiceCliPlugin;
 
@@ -252,9 +252,9 @@ fn live_status_inner() -> std::io::Result<Option<(u64, u32)>> {
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
     let mut stream = stream;
-    crate::framing::write_client_message_blocking(&mut stream, &ClientMessage::Status)?;
+    vmux_core::service::write_client_message_blocking(&mut stream, &ClientMessage::Status)?;
     let mut reader = std::io::BufReader::new(&mut stream);
-    let msg = crate::framing::read_service_message_blocking(&mut reader)?;
+    let msg = vmux_core::service::read_service_message_blocking(&mut reader)?;
     Ok(match msg {
         Some(ServiceMessage::StatusResponse {
             uptime_secs,

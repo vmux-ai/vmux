@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentRequestId, ClientMessage};
-use vmux_service::client::ServiceRequest;
+use vmux_core::service::ServiceRequest;
 
 use crate::event::{AgentQueryRequest, AgentRequestInput, AgentToolCallRequest, CommandOrigin};
 

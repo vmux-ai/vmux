@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_api::protocol::{ClientMessage, ProcessId};
+use vmux_api::service::*;
 use vmux_command::{CommandDefinitions, CommandInvocation, CommandRequest, CommandTypePlugin};
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_core::page::PageReady;
+use vmux_core::service::ServiceConnected;
+use vmux_core::service::ServiceRequest;
 use vmux_history::LastActivatedAt;
-use vmux_service::client::ServiceRequest;
-use vmux_service::event::*;
-use vmux_service::plugin::ServiceConnected;
 
 use super::input_queue::TerminalProcessIndex;
 use crate::Terminal;

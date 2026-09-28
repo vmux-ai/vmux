@@ -10,7 +10,7 @@ use vmux_setting::AppSettings;
 #[test]
 fn pending_navigation_updates_keep_only_the_latest_request() {
     let mut app = App::new();
-    app.add_message::<vmux_service::client::ServiceRequest>()
+    app.add_message::<vmux_core::service::ServiceRequest>()
         .add_message::<PendingNavigationUpdate>()
         .add_systems(Update, apply_pending_navigation_updates);
     let webview = app.world_mut().spawn_empty().id();

@@ -56,7 +56,6 @@ vmux_layout = { path = "../vmux_layout" }
 vmux_mcp = { path = "../../util/vmux_mcp" }
 vmux_tool = { path = "../vmux_tool" }
 vmux_path = { path = "../../util/vmux_path" }
-vmux_service = { path = "../vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 zip = { version = "2", default-features = false, features = ["deflate"] }

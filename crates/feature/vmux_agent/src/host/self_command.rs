@@ -10,8 +10,8 @@ use vmux_api::protocol::{
 #[cfg(test)]
 use vmux_api::protocol::{AgentRequest, AgentRequestId};
 use vmux_command::WriteCommandRequests;
+use vmux_core::service::ServiceRequest;
 use vmux_layout::event::TERMINAL_PAGE_URL;
-use vmux_service::client::ServiceRequest;
 use vmux_setting::AppSettings;
 use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::{

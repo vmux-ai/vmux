@@ -8,10 +8,10 @@ use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
     PageAgentSpawnStackRequest, RestartAgentPty, SpawnAgentInStackRequest,
 };
+use vmux_core::service::ServiceConnected;
+use vmux_core::service::ServiceRequest;
 use vmux_core::{LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled};
 use vmux_layout::pane::ForcePaneClose;
-use vmux_service::client::ServiceRequest;
-use vmux_service::plugin::ServiceConnected;
 use vmux_setting::AppSettings;
 use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::{

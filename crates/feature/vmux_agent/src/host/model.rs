@@ -13,7 +13,7 @@ use vmux_chat::event::{
     SlashCommandEntry, SlashCommands,
 };
 use vmux_command::event::{StartSelectMode, StartSelectModel};
-use vmux_service::client::ServiceRequest;
+use vmux_core::service::ServiceRequest;
 use vmux_session::AcpSession;
 
 pub(super) struct ChatModelPlugin;

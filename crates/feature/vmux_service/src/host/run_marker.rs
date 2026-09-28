@@ -1,7 +1,5 @@
 use vte::{Parser, Perform};
 
-pub const VMUX_RUN_OSC: &str = "6973";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunMarker {
     pub token: String,
@@ -39,7 +37,7 @@ struct Collector {
 
 impl Perform for Collector {
     fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
-        if params.first().copied() != Some(VMUX_RUN_OSC.as_bytes()) {
+        if params.first().copied() != Some(vmux_api::service::RUN_OSC.as_bytes()) {
             return;
         }
         let token = params

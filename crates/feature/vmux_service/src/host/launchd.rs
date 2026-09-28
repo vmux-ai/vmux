@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::paths::{LaunchAgent, ServicePaths};
+use super::LaunchAgent;
+use vmux_core::service::ServicePaths;
 
 impl LaunchAgent {
     pub fn plist_xml(&self, binary_path: &Path, log_path: &Path) -> String {

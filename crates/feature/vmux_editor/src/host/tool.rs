@@ -7,8 +7,8 @@ use vmux_api::protocol::{
     ClientMessage, FileTouchKind, ProcessId, ServiceMessage,
 };
 use vmux_core::ProcessAnchor;
+use vmux_core::service::ServiceConnection;
 use vmux_mcp::protocol::McpExecution;
-use vmux_service::client::ServiceConnection;
 use vmux_tool::{ToolAppExt, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin};
 
 pub struct FileToolPlugin;

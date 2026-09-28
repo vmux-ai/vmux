@@ -8,8 +8,7 @@ use crate::event::{
 use bevy::prelude::*;
 use vmux_api::protocol::{ClientMessage, ServiceMessage, SharedEvent};
 use vmux_core::agent::AgentCommandResponse;
-use vmux_service::client::{ServiceInbound, ServiceRequest};
-use vmux_service::plugin::ServiceConnected;
+use vmux_core::service::{ServiceConnected, ServiceInbound, ServiceRequest};
 use vmux_terminal::ServiceMessageSet;
 
 pub(crate) struct AgentIngressPlugin;

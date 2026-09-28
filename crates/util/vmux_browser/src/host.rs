@@ -525,12 +525,12 @@ pub(crate) struct PageOpenAwaitSnapshot {
 }
 
 pub(crate) fn send_page_open_response(
-    service_requests: &mut MessageWriter<vmux_service::client::ServiceRequest>,
+    service_requests: &mut MessageWriter<vmux_core::service::ServiceRequest>,
     request_id: Option<[u8; 16]>,
     result: Result<(), String>,
 ) {
     use vmux_api::protocol::{AgentCommandResult, AgentRequestId, ClientMessage};
-    use vmux_service::client::ServiceRequest;
+    use vmux_core::service::ServiceRequest;
     let Some(request_id) = request_id else {
         return;
     };
@@ -590,7 +590,7 @@ pub(crate) fn apply_pending_navigation_updates(
     mut updates: MessageReader<PendingNavigationUpdate>,
     existing: Query<(Entity, &PendingNavigationSnapshot)>,
     mut commands: Commands,
-    mut service_requests: MessageWriter<vmux_service::client::ServiceRequest>,
+    mut service_requests: MessageWriter<vmux_core::service::ServiceRequest>,
 ) {
     let mut pending = existing
         .iter()

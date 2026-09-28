@@ -27,7 +27,7 @@ pub(crate) struct NavigationPlugin;
 
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<vmux_service::client::ServiceRequest>();
+        app.add_message::<vmux_core::service::ServiceRequest>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -262,7 +262,7 @@ pub(crate) fn handle_browser_navigate_requests(
     stack_metadata: Query<&PageMetadata, With<Stack>>,
     recent_interactions: Query<&RecentBrowserInteraction>,
     mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
-    mut service_requests: MessageWriter<vmux_service::client::ServiceRequest>,
+    mut service_requests: MessageWriter<vmux_core::service::ServiceRequest>,
 ) {
     for request in reader.read() {
         let vmux_layout::BrowserNavigateRequest {

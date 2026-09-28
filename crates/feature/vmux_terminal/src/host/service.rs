@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{ProcessId, ServiceMessage};
 use vmux_core::event::TermViewportPatch;
-use vmux_service::client::ServiceInbound;
+use vmux_core::service::ServiceInbound;
 
 use super::input_queue::TerminalProcessIndex;
 use super::plugin::{

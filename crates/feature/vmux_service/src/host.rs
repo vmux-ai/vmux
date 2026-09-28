@@ -11,8 +11,8 @@ pub mod cleanup;
 pub mod cli;
 pub use cli::ServiceCliPlugin;
 pub mod client;
-pub mod framing;
 pub mod http;
+mod launch_agent;
 #[cfg(target_os = "macos")]
 pub mod launchd;
 mod osc133;
@@ -32,6 +32,6 @@ pub mod stream;
 pub mod supervisor;
 
 mod daemon;
-mod paths;
 pub use daemon::*;
-pub use paths::*;
+pub use launch_agent::LaunchAgent;
+pub use vmux_core::service::{RemotePaths, ServicePaths};

@@ -445,7 +445,7 @@ fn command_with_marker(shell: &str, command: &str, token: &str, env: PagerEnv) -
         .and_then(|s| s.to_str())
         .unwrap_or(shell);
     let pager = env.prefix(base);
-    let osc = vmux_service::run_marker::VMUX_RUN_OSC;
+    let osc = vmux_api::service::RUN_OSC;
     match base {
         "nu" | "nushell" => format!(
             "{pager}$env.LAST_EXIT_CODE = 0; let __vmux_status = try {{ {command}; $env.LAST_EXIT_CODE }} catch {{|error| $error.exit_code? | default 1 }}; print -rn $\"\\u{{1b}}]{osc};{token};($__vmux_status)\\u{{7}}\""

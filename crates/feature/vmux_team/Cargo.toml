@@ -22,7 +22,6 @@ vmux_native = { path = "../../util/vmux_native" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 serde_json = { workspace = true }
-vmux_service = { path = "../vmux_service" }
 vmux_core = { path = "../../util/vmux_core" }
 bevy = { workspace = true }
 bevy_cef = { workspace = true }

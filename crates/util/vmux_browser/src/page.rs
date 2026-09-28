@@ -25,7 +25,7 @@ pub(crate) struct PagePlugin;
 
 impl Plugin for PagePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<vmux_service::client::ServiceRequest>()
+        app.add_message::<vmux_core::service::ServiceRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<CefPageAttachRequest>()
             .add_message::<PendingNavigationUpdate>()
@@ -124,7 +124,7 @@ fn handle_page_open_requests(
     stack_filter: Query<Entity, With<Stack>>,
     time: Res<Time>,
     mut commands: Commands,
-    mut service_requests: MessageWriter<vmux_service::client::ServiceRequest>,
+    mut service_requests: MessageWriter<vmux_core::service::ServiceRequest>,
 ) {
     for request in reader.read() {
         let stack = match resolve_page_open_target(
@@ -368,7 +368,7 @@ fn respond_page_open_tasks(
     child_of: Query<&ChildOf>,
     mut pending_navigation: MessageWriter<PendingNavigationUpdate>,
     mut commands: Commands,
-    mut service_requests: MessageWriter<vmux_service::client::ServiceRequest>,
+    mut service_requests: MessageWriter<vmux_core::service::ServiceRequest>,
 ) {
     for (entity, task, error, await_snapshot) in &tasks {
         if let Some(error) = error {

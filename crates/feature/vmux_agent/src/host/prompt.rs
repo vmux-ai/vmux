@@ -10,7 +10,7 @@ use vmux_chat::event::{
     ChatEscape, ChatResume, ChatStop, ChatSubmit,
 };
 use vmux_chat::host::{ChatAttachmentProjection, ChatView};
-use vmux_service::client::ServiceRequest;
+use vmux_core::service::ServiceRequest;
 use vmux_session::AcpSession;
 use vmux_session::{
     AgentConversationTitle, AgentSession, PromptQueue, provisional_conversation_title,
