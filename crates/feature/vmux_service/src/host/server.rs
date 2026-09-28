@@ -16,6 +16,7 @@ use vmux_api::protocol::{
 use super::query::{ProcessQueries, ProcessQueryPlugin};
 use crate::acp::{AcpSessionPlugin, AcpSessions};
 use crate::agent::{AgentSessionPlugin, AgentSessions};
+use crate::remote::authorization::{RemoteAuthorizationPlugin, RemoteAuthorizations};
 use crate::remote::client_operation::{ClientOperationPlugin, ClientOperations};
 
 type PendingQueries = crate::agent::AgentQueryResponses;
@@ -87,6 +88,8 @@ pub(crate) struct ServiceDaemonPlugin {
     query_plugin: std::sync::Mutex<Option<ProcessQueryPlugin>>,
     client_operations: ClientOperations,
     client_operation_plugin: std::sync::Mutex<Option<ClientOperationPlugin>>,
+    authorizations: RemoteAuthorizations,
+    authorization_plugin: std::sync::Mutex<Option<RemoteAuthorizationPlugin>>,
     agent_sessions: AgentSessions,
     agent_session_plugin: std::sync::Mutex<Option<AgentSessionPlugin>>,
     acp_sessions: AcpSessions,
@@ -103,6 +106,7 @@ impl ServiceDaemonPlugin {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
         let (query_plugin, queries) = ProcessQueryPlugin::new(Arc::clone(&manager), wake.clone());
         let (client_operation_plugin, client_operations) = ClientOperationPlugin::new(wake.clone());
+        let (authorization_plugin, authorizations) = RemoteAuthorizationPlugin::new(wake.clone());
         let (agent_session_plugin, agent_sessions) =
             AgentSessionPlugin::new(runtime.clone(), wake.clone());
         let (acp_session_plugin, acp_sessions) = AcpSessionPlugin::new(runtime.clone(), wake);
@@ -115,6 +119,8 @@ impl ServiceDaemonPlugin {
             query_plugin: std::sync::Mutex::new(Some(query_plugin)),
             client_operations,
             client_operation_plugin: std::sync::Mutex::new(Some(client_operation_plugin)),
+            authorizations,
+            authorization_plugin: std::sync::Mutex::new(Some(authorization_plugin)),
             agent_sessions,
             agent_session_plugin: std::sync::Mutex::new(Some(agent_session_plugin)),
             acp_sessions,
@@ -148,6 +154,13 @@ impl Plugin for ServiceDaemonPlugin {
             .unwrap()
             .take()
             .expect("service daemon plugin can only be built once");
+        let authorizations = self.authorizations.clone();
+        let authorization_plugin = self
+            .authorization_plugin
+            .lock()
+            .unwrap()
+            .take()
+            .expect("service daemon plugin can only be built once");
         let agent_sessions = self.agent_sessions.clone();
         let agent_session_plugin = self
             .agent_session_plugin
@@ -165,6 +178,7 @@ impl Plugin for ServiceDaemonPlugin {
         app.add_plugins((
             query_plugin,
             client_operation_plugin,
+            authorization_plugin,
             agent_session_plugin,
             acp_session_plugin,
         ));
@@ -173,6 +187,7 @@ impl Plugin for ServiceDaemonPlugin {
             server_manager,
             queries,
             client_operations,
+            authorizations,
             agent_sessions,
             acp_sessions,
             self.runtime.clone(),
@@ -184,6 +199,7 @@ impl Plugin for ServiceDaemonPlugin {
                 manager,
                 queries,
                 client_operations,
+                authorizations,
                 agent_sessions,
                 acp_sessions,
                 runtime,
@@ -195,15 +211,17 @@ impl Plugin for ServiceDaemonPlugin {
                 .expect("service daemon can only start once");
             let started_at = ServiceStartedAt(Instant::now());
             let task = runtime.spawn(async move {
-                run_server(
+                ServiceServer {
                     listener,
                     manager,
-                    queries,
+                    process_queries: queries,
                     client_operations,
+                    authorizations,
                     agent_sessions,
                     acp_sessions,
                     started_at,
-                )
+                }
+                .run()
                 .await;
                 let _ = exit.send(()).await;
             });
@@ -335,82 +353,98 @@ where
     mgr.processes.get_mut(&id).map(f)
 }
 
-async fn run_server(
+struct ServiceServer {
     listener: UnixListener,
     manager: Arc<Mutex<ProcessManager>>,
     process_queries: ProcessQueries,
     client_operations: ClientOperations,
+    authorizations: RemoteAuthorizations,
     agent_sessions: AgentSessions,
     acp_sessions: AcpSessions,
     started_at: ServiceStartedAt,
-) {
-    let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
-    let pending_queries = PendingQueries::default();
-    let pending_commands = PendingCommands::default();
-    let pending_tool_calls = crate::agent::AgentToolResponses::default();
-    let remote_broker = crate::agent::AgentBroker::new(
-        agent_tx.clone(),
-        pending_commands.clone(),
-        pending_queries.clone(),
-        pending_tool_calls.clone(),
-    );
-    let remote_handle = crate::remote::server::spawn(
-        agent_sessions.clone(),
-        acp_sessions.clone(),
-        remote_broker,
-        client_operations,
-    );
-    let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+}
 
-    loop {
-        tokio::select! {
-            accept = listener.accept() => {
-                let (stream, _) = match accept {
-                    Ok(conn) => conn,
-                    Err(e) => {
-                        tracing::error!(error = %e, "accept error");
-                        continue;
-                    }
-                };
-                let mgr = Arc::clone(&manager);
-                let agent_tx = agent_tx.clone();
-                let pending_queries = pending_queries.clone();
-                let pending_commands = pending_commands.clone();
-                let pending_tool_calls = pending_tool_calls.clone();
-                let agent_sessions = agent_sessions.clone();
-                let acp_sessions = acp_sessions.clone();
-                let process_queries = process_queries.clone();
-                let shutdown_tx = shutdown_tx.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = handle_client(
-                        stream,
-                        mgr,
-                        agent_tx,
-                        pending_queries,
-                        pending_commands,
-                        pending_tool_calls,
-                        agent_sessions,
-                        acp_sessions,
-                        process_queries,
-                        shutdown_tx,
-                        started_at,
-                    )
-                    .await
-                    {
-                        tracing::error!(error = %e, "client error");
-                    }
-                });
-            }
-            _ = shutdown_rx.recv() => {
-                tracing::info!("server: drain signaled, closing listener");
-                break;
+impl ServiceServer {
+    async fn run(self) {
+        let Self {
+            listener,
+            manager,
+            process_queries,
+            client_operations,
+            authorizations,
+            agent_sessions,
+            acp_sessions,
+            started_at,
+        } = self;
+        let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
+        let pending_queries = PendingQueries::default();
+        let pending_commands = PendingCommands::default();
+        let pending_tool_calls = crate::agent::AgentToolResponses::default();
+        let remote_broker = crate::agent::AgentBroker::new(
+            agent_tx.clone(),
+            pending_commands.clone(),
+            pending_queries.clone(),
+            pending_tool_calls.clone(),
+        );
+        let remote_handle = crate::remote::server::spawn(
+            agent_sessions.clone(),
+            acp_sessions.clone(),
+            remote_broker,
+            client_operations,
+            authorizations,
+        );
+        let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+
+        loop {
+            tokio::select! {
+                accept = listener.accept() => {
+                    let (stream, _) = match accept {
+                        Ok(conn) => conn,
+                        Err(e) => {
+                            tracing::error!(error = %e, "accept error");
+                            continue;
+                        }
+                    };
+                    let mgr = Arc::clone(&manager);
+                    let agent_tx = agent_tx.clone();
+                    let pending_queries = pending_queries.clone();
+                    let pending_commands = pending_commands.clone();
+                    let pending_tool_calls = pending_tool_calls.clone();
+                    let agent_sessions = agent_sessions.clone();
+                    let acp_sessions = acp_sessions.clone();
+                    let process_queries = process_queries.clone();
+                    let shutdown_tx = shutdown_tx.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_client(
+                            stream,
+                            mgr,
+                            agent_tx,
+                            pending_queries,
+                            pending_commands,
+                            pending_tool_calls,
+                            agent_sessions,
+                            acp_sessions,
+                            process_queries,
+                            shutdown_tx,
+                            started_at,
+                        )
+                        .await
+                        {
+                            tracing::error!(error = %e, "client error");
+                        }
+                    });
+                }
+                _ = shutdown_rx.recv() => {
+                    tracing::info!("server: drain signaled, closing listener");
+                    break;
+                }
             }
         }
-    }
 
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    remote_handle.abort();
-    tracing::info!("server: drain complete, exiting");
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        remote_handle.abort();
+        tracing::info!("server: drain complete, exiting");
+    }
 }
 
 fn command_result_to_content(result: vmux_api::protocol::AgentCommandResult) -> (String, bool) {
@@ -1444,15 +1478,19 @@ mod tests {
         let (_agent_plugin, agent_sessions) =
             crate::agent::AgentSessionPlugin::new(tokio::runtime::Handle::current(), wake);
         let acp_sessions = crate::acp::AcpSessions::closed();
-        let mut server = Box::pin(super::run_server(
-            listener,
-            Arc::clone(&manager),
-            process_queries,
-            ClientOperations::closed(),
-            agent_sessions,
-            acp_sessions,
-            ServiceStartedAt(Instant::now()),
-        ));
+        let mut server = Box::pin(
+            super::ServiceServer {
+                listener,
+                manager: Arc::clone(&manager),
+                process_queries,
+                client_operations: ClientOperations::closed(),
+                authorizations: RemoteAuthorizations::closed(),
+                agent_sessions,
+                acp_sessions,
+                started_at: ServiceStartedAt(Instant::now()),
+            }
+            .run(),
+        );
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {

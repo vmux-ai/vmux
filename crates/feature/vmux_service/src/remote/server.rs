@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use crate::{RelayToken, RemoteAuthorizationStore};
+use crate::RelayToken;
 use base64::Engine;
-use tokio::sync::Mutex;
 
 use crate::RemotePaths;
 use crate::acp::AcpSessions;
 use crate::agent::{AgentBroker, AgentSessions};
 use crate::message::Message;
+use crate::remote::authorization::RemoteAuthorizations;
 use crate::remote::client_operation::ClientOperations;
 use crate::remote::{ClientOpId, RemoteMediaEntry, RemoteSession};
 use vmux_api::protocol::AgentAttachment;
@@ -25,7 +25,7 @@ const MAX_CLIENT_OP_ID_BYTES: usize = 256;
 #[derive(Clone)]
 pub(crate) struct RemoteState {
     pub(crate) relay_token: Arc<str>,
-    pub(crate) authorizations: Arc<Mutex<RemoteAuthorizationStore>>,
+    pub(crate) authorizations: RemoteAuthorizations,
     pub(crate) agents: AgentSessions,
     pub(crate) acp: AcpSessions,
     pub(crate) broker: AgentBroker,
@@ -37,6 +37,7 @@ pub(crate) fn spawn(
     acp: AcpSessions,
     broker: AgentBroker,
     client_ops: ClientOperations,
+    authorizations: RemoteAuthorizations,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let relay_token = match RelayToken::ensure() {
@@ -46,14 +47,9 @@ pub(crate) fn spawn(
                 return;
             }
         };
-        let authorizations = RemoteAuthorizationStore::current();
-        if let Err(error) = authorizations.ensure() {
-            tracing::error!(%error, "remote: authorization setup failed");
-            return;
-        }
         let state = RemoteState {
             relay_token: Arc::from(relay_token.as_str()),
-            authorizations: Arc::new(Mutex::new(authorizations)),
+            authorizations,
             agents,
             acp,
             broker,

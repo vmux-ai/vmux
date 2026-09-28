@@ -111,9 +111,8 @@ async fn admit(
     let credential = setup.credential.clone();
     let outcome = state
         .authorizations
-        .lock()
+        .authenticate(setup.client_id.clone(), credential.clone())
         .await
-        .authenticate(&setup.client_id, &credential)
         .map_err(|error| {
             tracing::warn!(%error, "remote quic: authorization store failed");
             Rejection::Unauthorized
@@ -153,9 +152,8 @@ impl ActiveAuthorization {
     async fn is_current(&self, state: &super::server::RemoteState) -> bool {
         match state
             .authorizations
-            .lock()
+            .authorizes(self.client_id.clone(), self.device_token.clone())
             .await
-            .authorizes(&self.client_id, &self.device_token)
         {
             Ok(authorized) => authorized,
             Err(error) => {
@@ -496,9 +494,11 @@ pub(crate) fn spawn_with_identity(
 mod live {
     use super::*;
     use crate::RemoteAuthorizationStore;
+    use crate::remote::authorization::RemoteAuthorizationPlugin;
+    use bevy::prelude::{App, MinimalPlugins};
     use std::net::Ipv4Addr;
     use std::sync::Arc;
-    use tokio::sync::{Mutex, broadcast};
+    use tokio::sync::{broadcast, mpsc};
     use vmux_api::protocol::SharedResponse;
     use vmux_transport::DeviceId;
     use vmux_transport::quic::endpoint::{SelfSignedIdentity, Trust};
@@ -507,19 +507,31 @@ mod live {
         _directory: tempfile::TempDir,
         address: std::net::SocketAddr,
         fingerprint: String,
-        authorizations: RemoteAuthorizationStore,
+        authorization_store: RemoteAuthorizationStore,
+        _authorization_runtime: std::thread::JoinHandle<()>,
     }
 
     impl Harness {
         fn start() -> Self {
             let directory = tempfile::tempdir().unwrap();
-            let authorizations =
+            let authorization_store =
                 RemoteAuthorizationStore::new(directory.path().join("authorizations.json"));
-            authorizations.ensure().unwrap();
+            authorization_store.ensure().unwrap();
+            let (wake, mut wake_inbox) = mpsc::unbounded_channel();
+            let (authorization_plugin, authorizations) =
+                RemoteAuthorizationPlugin::with_store(authorization_store.clone(), wake);
+            let authorization_runtime = std::thread::spawn(move || {
+                let mut authorization_app = App::new();
+                authorization_app.add_plugins((MinimalPlugins, authorization_plugin));
+                authorization_app.update();
+                while wake_inbox.blocking_recv().is_some() {
+                    authorization_app.update();
+                }
+            });
             let (agent_tx, _) = broadcast::channel(8);
             let state = super::super::server::RemoteState {
                 relay_token: Arc::from("relay-token"),
-                authorizations: Arc::new(Mutex::new(authorizations.clone())),
+                authorizations: authorizations.clone(),
                 agents: crate::agent::AgentSessions::closed(),
                 acp: crate::acp::AcpSessions::closed(),
                 broker: crate::agent::AgentBroker::new(
@@ -547,7 +559,8 @@ mod live {
                 _directory: directory,
                 address,
                 fingerprint,
-                authorizations,
+                authorization_store,
+                _authorization_runtime: authorization_runtime,
             }
         }
 
@@ -589,7 +602,7 @@ mod live {
         }
 
         async fn pair(&self, client_id: &DeviceId) -> (quinn::Connection, String) {
-            let pairing_token = self.authorizations.pairing_token().unwrap();
+            let pairing_token = self.authorization_store.pairing_token().unwrap();
             let (connection, accepted) = self
                 .connect(client_id, ClientCredential::Pairing(pairing_token))
                 .await
@@ -749,7 +762,7 @@ mod live {
         let client = DeviceId::new("test-device");
         let (connection, _) = harness.pair(&client).await;
 
-        assert!(harness.authorizations.revoke(&client).unwrap());
+        assert!(harness.authorization_store.revoke(&client).unwrap());
         let closed = tokio::time::timeout(Duration::from_secs(5), connection.closed())
             .await
             .expect("revocation close timeout");

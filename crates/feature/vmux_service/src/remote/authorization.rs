@@ -1,10 +1,12 @@
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use bevy::prelude::Component;
+use bevy::prelude::*;
 use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
+use tokio::sync::{mpsc, oneshot};
 use vmux_transport::{ClientCredential, DeviceId};
 
 use crate::RemotePaths;
@@ -63,6 +65,190 @@ pub struct AuthorizedDevice {
 pub enum AuthorizationOutcome {
     Accepted,
     Paired { device_token: String },
+}
+
+pub(crate) struct RemoteAuthorizationPlugin {
+    startup: Mutex<Option<(RemoteAuthorizationStore, AuthorizationReceivers)>>,
+}
+
+impl RemoteAuthorizationPlugin {
+    pub(crate) fn new(wake: mpsc::UnboundedSender<()>) -> (Self, RemoteAuthorizations) {
+        Self::with_store(RemoteAuthorizationStore::current(), wake)
+    }
+
+    pub(crate) fn with_store(
+        store: RemoteAuthorizationStore,
+        wake: mpsc::UnboundedSender<()>,
+    ) -> (Self, RemoteAuthorizations) {
+        let (authenticate, authenticate_inbox) = mpsc::unbounded_channel();
+        let (revalidate, revalidate_inbox) = mpsc::unbounded_channel();
+        (
+            Self {
+                startup: Mutex::new(Some((
+                    store,
+                    AuthorizationReceivers {
+                        authenticate: authenticate_inbox,
+                        revalidate: revalidate_inbox,
+                    },
+                ))),
+            },
+            RemoteAuthorizations {
+                authenticate,
+                revalidate,
+                wake,
+            },
+        )
+    }
+}
+
+impl Plugin for RemoteAuthorizationPlugin {
+    fn build(&self, app: &mut App) {
+        let startup = Mutex::new(Some(
+            self.startup
+                .lock()
+                .unwrap()
+                .take()
+                .expect("remote authorization plugin can only be built once"),
+        ));
+        app.add_systems(Startup, move |mut commands: Commands| {
+            let (store, receivers) = startup
+                .lock()
+                .unwrap()
+                .take()
+                .expect("remote authorization runtime can only start once");
+            commands.spawn((
+                Name::new("remote authorizations"),
+                store,
+                AuthorizationInbox(receivers),
+            ));
+        })
+        .add_systems(
+            Update,
+            (
+                receive_authorization_requests,
+                ApplyDeferred,
+                process_authorization_requests,
+            )
+                .chain(),
+        );
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct RemoteAuthorizations {
+    authenticate: mpsc::UnboundedSender<AuthenticateAuthorization>,
+    revalidate: mpsc::UnboundedSender<RevalidateAuthorization>,
+    wake: mpsc::UnboundedSender<()>,
+}
+
+impl RemoteAuthorizations {
+    pub(crate) async fn authenticate(
+        &self,
+        client_id: DeviceId,
+        credential: ClientCredential,
+    ) -> std::io::Result<Option<AuthorizationOutcome>> {
+        let (response, receiver) = oneshot::channel();
+        self.authenticate
+            .send(AuthenticateAuthorization {
+                client_id,
+                credential,
+                response: Some(response),
+            })
+            .map_err(|_| Self::unavailable())?;
+        self.wake.send(()).map_err(|_| Self::unavailable())?;
+        receiver.await.map_err(|_| Self::unavailable())?
+    }
+
+    pub(crate) async fn authorizes(
+        &self,
+        client_id: DeviceId,
+        device_token: String,
+    ) -> std::io::Result<bool> {
+        let (response, receiver) = oneshot::channel();
+        self.revalidate
+            .send(RevalidateAuthorization {
+                client_id,
+                device_token,
+                response: Some(response),
+            })
+            .map_err(|_| Self::unavailable())?;
+        self.wake.send(()).map_err(|_| Self::unavailable())?;
+        receiver.await.map_err(|_| Self::unavailable())?
+    }
+
+    #[cfg(test)]
+    pub(crate) fn closed() -> Self {
+        let (authenticate, authenticate_inbox) = mpsc::unbounded_channel();
+        let (revalidate, revalidate_inbox) = mpsc::unbounded_channel();
+        let (wake, wake_inbox) = mpsc::unbounded_channel();
+        drop((authenticate_inbox, revalidate_inbox, wake_inbox));
+        Self {
+            authenticate,
+            revalidate,
+            wake,
+        }
+    }
+
+    fn unavailable() -> std::io::Error {
+        std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "remote authorization runtime unavailable",
+        )
+    }
+}
+
+struct AuthorizationReceivers {
+    authenticate: mpsc::UnboundedReceiver<AuthenticateAuthorization>,
+    revalidate: mpsc::UnboundedReceiver<RevalidateAuthorization>,
+}
+
+#[derive(Component)]
+struct AuthorizationInbox(AuthorizationReceivers);
+
+#[derive(Component)]
+struct AuthenticateAuthorization {
+    client_id: DeviceId,
+    credential: ClientCredential,
+    response: Option<oneshot::Sender<std::io::Result<Option<AuthorizationOutcome>>>>,
+}
+
+#[derive(Component)]
+struct RevalidateAuthorization {
+    client_id: DeviceId,
+    device_token: String,
+    response: Option<oneshot::Sender<std::io::Result<bool>>>,
+}
+
+fn receive_authorization_requests(
+    mut inbox: Single<&mut AuthorizationInbox>,
+    mut commands: Commands,
+) {
+    while let Ok(request) = inbox.0.authenticate.try_recv() {
+        commands.spawn(request);
+    }
+    while let Ok(request) = inbox.0.revalidate.try_recv() {
+        commands.spawn(request);
+    }
+}
+
+fn process_authorization_requests(
+    store: Single<&RemoteAuthorizationStore>,
+    mut authentications: Query<(Entity, &mut AuthenticateAuthorization)>,
+    mut revalidations: Query<(Entity, &mut RevalidateAuthorization)>,
+    mut commands: Commands,
+) {
+    for (entity, mut request) in &mut authentications {
+        if let Some(response) = request.response.take() {
+            let _ = response.send(store.authenticate(&request.client_id, &request.credential));
+        }
+        commands.entity(entity).despawn();
+    }
+    for (entity, mut request) in &mut revalidations {
+        if let Some(response) = request.response.take() {
+            let _ = response.send(store.authorizes(&request.client_id, &request.device_token));
+        }
+        commands.entity(entity).despawn();
+    }
 }
 
 #[derive(Clone, Component, Debug)]

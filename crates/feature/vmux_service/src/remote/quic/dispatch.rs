@@ -202,18 +202,13 @@ async fn release(state: &RemoteState, client_op_id: &ClientOpId) {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use tokio::sync::{Mutex, broadcast};
+    use tokio::sync::broadcast;
 
     fn empty_state() -> RemoteState {
         let (agent_tx, _) = broadcast::channel(8);
         RemoteState {
             relay_token: Arc::from("token"),
-            authorizations: Arc::new(Mutex::new(crate::RemoteAuthorizationStore::new(
-                tempfile::tempdir()
-                    .unwrap()
-                    .keep()
-                    .join("authorizations.json"),
-            ))),
+            authorizations: crate::remote::authorization::RemoteAuthorizations::closed(),
             agents: crate::agent::AgentSessions::closed(),
             acp: crate::acp::AcpSessions::closed(),
             broker: crate::agent::AgentBroker::new(
