@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,55 +66,37 @@ pub struct ExtensionModel {
 }
 
 #[derive(Component)]
-pub struct ExtensionStableIds {
+pub struct ExtensionIdSequence {
     next_window: i32,
     next_tab: i32,
-    windows: HashMap<Entity, i32>,
-    tabs: HashMap<Entity, i32>,
 }
 
-impl Default for ExtensionStableIds {
+impl Default for ExtensionIdSequence {
     fn default() -> Self {
         Self {
             next_window: 1,
             next_tab: 1,
-            windows: HashMap::new(),
-            tabs: HashMap::new(),
         }
     }
 }
 
-impl ExtensionStableIds {
-    pub(crate) fn window(&mut self, entity: Entity) -> i32 {
-        if let Some(id) = self.windows.get(&entity) {
-            return *id;
-        }
-        let id = self.next_window;
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExtensionWindowId(pub i32);
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExtensionTabId(pub i32);
+
+impl ExtensionIdSequence {
+    pub(crate) fn next_window(&mut self) -> ExtensionWindowId {
+        let id = ExtensionWindowId(self.next_window);
         self.next_window += 1;
-        self.windows.insert(entity, id);
         id
     }
 
-    pub(crate) fn tab(&mut self, entity: Entity) -> i32 {
-        if let Some(id) = self.tabs.get(&entity) {
-            return *id;
-        }
-        let id = self.next_tab;
+    pub(crate) fn next_tab(&mut self) -> ExtensionTabId {
+        let id = ExtensionTabId(self.next_tab);
         self.next_tab += 1;
-        self.tabs.insert(entity, id);
         id
-    }
-
-    pub(crate) fn tab_entity(&self, id: i32) -> Option<Entity> {
-        self.tabs
-            .iter()
-            .find_map(|(entity, stable_id)| (*stable_id == id).then_some(*entity))
-    }
-
-    pub(crate) fn window_entity(&self, id: i32) -> Option<Entity> {
-        self.windows
-            .iter()
-            .find_map(|(entity, stable_id)| (*stable_id == id).then_some(*entity))
     }
 }
 

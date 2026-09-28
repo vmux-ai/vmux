@@ -12,7 +12,7 @@ use vmux_layout::stack::{CloseStackRequest, Stack};
 use super::ExtensionPopup;
 use super::bridge::BridgeAuthorization;
 use super::model::{
-    ExtensionModel, ExtensionModelEvent, ExtensionStableIds, ExtensionTabSnapshot,
+    ExtensionModel, ExtensionModelEvent, ExtensionTabId, ExtensionTabSnapshot, ExtensionWindowId,
     ExtensionWindowSnapshot,
 };
 
@@ -165,14 +165,16 @@ pub fn dispatch(
 
 fn route_close_extension_windows(
     mut requests: MessageReader<CloseExtensionWindowRequest>,
-    stable_ids: Single<&ExtensionStableIds>,
+    tab_ids: Query<(Entity, &ExtensionTabId)>,
     stacks: Query<(Entity, &PageMetadata, Option<&LastActivatedAt>), With<Stack>>,
     mut close_requests: MessageWriter<CloseStackRequest>,
 ) {
     for request in requests.read() {
         let mut targets = HashSet::new();
         for tab_id in &request.tab_ids {
-            if let Some(entity) = stable_ids.tab_entity(*tab_id)
+            if let Some(entity) = tab_ids
+                .iter()
+                .find_map(|(entity, id)| (id.0 == *tab_id).then_some(entity))
                 && stacks.contains(entity)
             {
                 targets.insert(entity);
@@ -224,14 +226,13 @@ pub fn sync_extension_windows(
 
 fn apply_host_window_updates(
     mut requests: MessageReader<UpdateHostWindowRequest>,
-    stable_ids: Single<&ExtensionStableIds>,
-    mut native_windows: Query<&mut Window>,
+    mut native_windows: Query<(&ExtensionWindowId, &mut Window)>,
 ) {
     for request in requests.read() {
-        let Some(entity) = stable_ids.window_entity(request.window_id) else {
-            continue;
-        };
-        let Ok(mut window) = native_windows.get_mut(entity) else {
+        let Some((_, mut window)) = native_windows
+            .iter_mut()
+            .find(|(id, _)| id.0 == request.window_id)
+        else {
             continue;
         };
         if request.update.left.is_some() || request.update.top.is_some() {
@@ -1334,7 +1335,6 @@ mod tests {
     #[test]
     fn close_fallback_selects_most_recent_matching_extension_page() {
         let mut app = App::new();
-        app.world_mut().spawn(ExtensionStableIds::default());
         app.add_message::<CloseExtensionWindowRequest>()
             .add_message::<CloseStackRequest>()
             .add_systems(Update, route_close_extension_windows);

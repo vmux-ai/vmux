@@ -11,8 +11,8 @@ use vmux_layout::stack::{FocusedStack, Stack};
 use vmux_layout::tab::Tab;
 
 use super::model::{
-    ExtensionModel, ExtensionModelEvent, ExtensionStableIds, ExtensionTabSnapshot,
-    ExtensionWindowSnapshot, extension_visible_url,
+    ExtensionIdSequence, ExtensionModel, ExtensionModelEvent, ExtensionTabId, ExtensionTabSnapshot,
+    ExtensionWindowId, ExtensionWindowSnapshot, extension_visible_url,
 };
 use crate::extension::bridge_page::ExtensionBridgeWebview;
 
@@ -27,7 +27,12 @@ impl Plugin for ExtensionProjectPlugin {
             .add_systems(Startup, spawn_extension_model)
             .add_systems(
                 Update,
-                rebuild_extension_model
+                (
+                    assign_extension_ids,
+                    bevy::ecs::schedule::ApplyDeferred,
+                    rebuild_extension_model,
+                )
+                    .chain()
                     .in_set(ExtensionProjectionSet)
                     .after(vmux_layout::LayoutCefStateSet::Apply)
                     .after(vmux_layout::stack::ComputeFocusSet),
@@ -48,6 +53,7 @@ type HierarchyData = (
 type PageData = (
     Entity,
     &'static PageMetadata,
+    &'static ExtensionTabId,
     Option<&'static LastActivatedAt>,
     Option<&'static vmux_core::PageIdentity>,
     Has<ExtensionBridgeWebview>,
@@ -56,6 +62,7 @@ type PageData = (
 
 struct WindowCandidate {
     entity: Entity,
+    id: i32,
     primary: bool,
     focused: bool,
     left: i32,
@@ -66,6 +73,7 @@ struct WindowCandidate {
 
 struct PageCandidate {
     entity: Entity,
+    id: i32,
     host_window: Option<Entity>,
     activated_at: i64,
     url: String,
@@ -80,20 +88,33 @@ struct ProjectedTab {
 }
 
 fn spawn_extension_model(mut commands: Commands) {
-    commands.spawn((ExtensionModel::default(), ExtensionStableIds::default()));
+    commands.spawn((ExtensionModel::default(), ExtensionIdSequence::default()));
+}
+
+fn assign_extension_ids(
+    windows: Query<Entity, (With<Window>, Without<ExtensionWindowId>)>,
+    tabs: Query<Entity, (With<Stack>, With<PageMetadata>, Without<ExtensionTabId>)>,
+    mut sequence: Single<&mut ExtensionIdSequence>,
+    mut commands: Commands,
+) {
+    for entity in &windows {
+        commands.entity(entity).insert(sequence.next_window());
+    }
+    for entity in &tabs {
+        commands.entity(entity).insert(sequence.next_tab());
+    }
 }
 
 fn rebuild_extension_model(
-    window_query: Query<(Entity, &Window, Has<PrimaryWindow>)>,
+    window_query: Query<(Entity, &Window, &ExtensionWindowId, Has<PrimaryWindow>)>,
     space_query: Query<(Entity, Option<&Order>), With<Space>>,
     hierarchy: Query<HierarchyData>,
     page_query: Query<PageData>,
     focused_stack: FocusedStack,
-    runtime: Single<(&mut ExtensionModel, &mut ExtensionStableIds)>,
+    mut current: Single<&mut ExtensionModel>,
     mut events: MessageWriter<ExtensionModelEvent>,
 ) {
-    let (mut current, mut stable_ids) = runtime.into_inner();
-    let previous = current.clone();
+    let previous = (**current).clone();
     let focused_stack = focused_stack.as_ref().and_then(|focused| focused.stack);
     let windows = WindowCandidate::collect(&window_query);
     let primary_window = windows
@@ -106,7 +127,7 @@ fn rebuild_extension_model(
     let (projected_windows, mut projected_tabs) = {
         let window_ids = windows
             .iter()
-            .map(|window| (window.entity, stable_ids.window(window.entity)))
+            .map(|window| (window.entity, window.id))
             .collect::<HashMap<_, _>>();
         let projected_windows = windows
             .iter()
@@ -134,7 +155,7 @@ fn rebuild_extension_model(
                 let window_id = window_ids[&window_entity];
                 let index = indices.entry(window_id).or_default();
                 let tab = ExtensionTabSnapshot {
-                    id: stable_ids.tab(page.entity),
+                    id: page.id,
                     window_id,
                     index: *index,
                     active: false,
@@ -164,15 +185,17 @@ fn rebuild_extension_model(
         events.write(event);
     }
     if previous != model {
-        *current = model;
+        **current = model;
     }
 }
 
 impl WindowCandidate {
-    fn collect(query: &Query<(Entity, &Window, Has<PrimaryWindow>)>) -> Vec<Self> {
+    fn collect(
+        query: &Query<(Entity, &Window, &ExtensionWindowId, Has<PrimaryWindow>)>,
+    ) -> Vec<Self> {
         let mut windows = query
             .iter()
-            .map(|(entity, window, primary)| {
+            .map(|(entity, window, id, primary)| {
                 let scale = window.resolution.scale_factor().max(f32::EPSILON);
                 let (left, top) = match window.position {
                     WindowPosition::At(position) => (
@@ -183,6 +206,7 @@ impl WindowCandidate {
                 };
                 WindowCandidate {
                     entity,
+                    id: id.0,
                     primary,
                     focused: window.focused,
                     left,
@@ -256,7 +280,8 @@ impl PageCandidate {
         page_query: &Query<PageData>,
         entity: Entity,
     ) -> Option<Self> {
-        let (_, metadata, activated, identity, is_bridge, loading) = page_query.get(entity).ok()?;
+        let (_, metadata, id, activated, identity, is_bridge, loading) =
+            page_query.get(entity).ok()?;
         if is_bridge || !extension_visible_url(&metadata.url) {
             return None;
         }
@@ -273,6 +298,7 @@ impl PageCandidate {
             });
         Some(Self {
             entity,
+            id: id.0,
             host_window: Self::host_window(hierarchy, entity),
             activated_at: activated.map_or(0, |activated| activated.0),
             url: metadata.url.clone(),

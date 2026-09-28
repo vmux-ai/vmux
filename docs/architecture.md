@@ -158,6 +158,15 @@ shell the moment a `Terminal` component is added — no subclass, no base class.
 each system declares the data it touches, Bevy runs non-conflicting systems across cores
 for you.
 
+A custom `SystemParam` names a coherent capability over the world. Use one when related
+queries, commands, or message access would exceed Bevy's system-parameter arity or when it
+makes a system materially easier to read and follow, especially when lookup and validation
+rules are shared by several systems. Its methods may synchronously inspect or update the ECS
+data it contains. The calling system still owns request iteration,
+lifecycle transitions, asynchronous task boundaries, cross-feature dispatch, and schedule
+ordering. A miscellaneous parameter bundle or a large hidden `run`/`dispatch` workflow is not
+a capability and stays as ordinary system logic.
+
 ### Plugins
 
 One crate, one capability, one `build()`. A plugin bundles its components, systems,
