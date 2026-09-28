@@ -2,6 +2,9 @@ use std::sync::Arc;
 
 use crate::RelayToken;
 use base64::Engine;
+use bevy::prelude::*;
+use tokio::runtime::Handle;
+use tokio::sync::watch;
 
 use crate::RemotePaths;
 use crate::remote::authorization::RemoteAuthorizations;
@@ -11,6 +14,153 @@ use vmux_agent::acp::AcpSessions;
 use vmux_agent::service::{AgentBroker, AgentSessions};
 use vmux_api::protocol::AgentAttachment;
 use vmux_api::room::Message;
+
+pub(crate) struct RemotePlugin;
+
+impl Plugin for RemotePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            super::authorization::RemoteAuthorizationPlugin,
+            super::client_operation::ClientOperationPlugin,
+        ))
+        .add_systems(Startup, start_remote_runtime)
+        .add_systems(
+            Update,
+            (refresh_remote_exposure, reconcile_remote_dialer).chain(),
+        );
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct RemoteRuntimeStartup(Option<RemoteRuntimeStart>);
+
+struct RemoteRuntimeStart {
+    runtime: Handle,
+    authorizations: RemoteAuthorizations,
+    agents: AgentSessions,
+    acp: AcpSessions,
+    broker: AgentBroker,
+    client_ops: ClientOperations,
+}
+
+impl RemoteRuntimeStartup {
+    pub(crate) fn new(
+        runtime: Handle,
+        authorizations: RemoteAuthorizations,
+        agents: AgentSessions,
+        acp: AcpSessions,
+        broker: AgentBroker,
+        client_ops: ClientOperations,
+    ) -> Self {
+        Self(Some(RemoteRuntimeStart {
+            runtime,
+            authorizations,
+            agents,
+            acp,
+            broker,
+            client_ops,
+        }))
+    }
+}
+
+#[derive(Component)]
+struct RemoteRuntime {
+    runtime: Handle,
+    liveness: watch::Sender<bool>,
+}
+
+#[derive(Component, Clone, Copy)]
+struct RemoteExposure(bool);
+
+#[derive(Component)]
+struct RemoteDialerTask(tokio::task::JoinHandle<()>);
+
+impl Drop for RemoteDialerTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+fn start_remote_runtime(
+    mut startups: Query<(Entity, &mut RemoteRuntimeStartup)>,
+    mut commands: Commands,
+) {
+    for (entity, mut startup) in &mut startups {
+        let Some(start) = startup.0.take() else {
+            continue;
+        };
+        let relay_token = match RelayToken::ensure() {
+            Ok(token) => token,
+            Err(error) => {
+                tracing::error!(%error, "remote: token setup failed");
+                commands.entity(entity).remove::<RemoteRuntimeStartup>();
+                continue;
+            }
+        };
+        let exposed = remote_enabled();
+        let (liveness, _) = watch::channel(exposed);
+        commands
+            .entity(entity)
+            .remove::<RemoteRuntimeStartup>()
+            .insert((
+                RemoteState {
+                    relay_token: Arc::from(relay_token.as_str()),
+                    authorizations: start.authorizations,
+                    agents: start.agents,
+                    acp: start.acp,
+                    broker: start.broker,
+                    client_ops: start.client_ops,
+                },
+                RemoteRuntime {
+                    runtime: start.runtime,
+                    liveness,
+                },
+                RemoteExposure(exposed),
+            ));
+    }
+}
+
+fn refresh_remote_exposure(mut runtimes: Query<(&RemoteRuntime, &mut RemoteExposure)>) {
+    for (runtime, mut exposure) in &mut runtimes {
+        let exposed = remote_enabled();
+        if exposure.0 == exposed {
+            continue;
+        }
+        exposure.0 = exposed;
+        runtime.liveness.send_replace(exposed);
+        tracing::info!(enabled = exposed, "remote quic: exposure changed");
+    }
+}
+
+fn reconcile_remote_dialer(
+    runtimes: Query<(
+        Entity,
+        &RemoteState,
+        &RemoteRuntime,
+        &RemoteExposure,
+        Option<&RemoteDialerTask>,
+    )>,
+    mut commands: Commands,
+) {
+    for (entity, state, runtime, exposure, running) in &runtimes {
+        if !exposure.0 {
+            if running.is_some() {
+                commands.entity(entity).remove::<RemoteDialerTask>();
+                tracing::info!("remote quic: the relay dialer stopped");
+            }
+            continue;
+        }
+        if running.is_some_and(|task| !task.0.is_finished()) {
+            continue;
+        }
+        tracing::info!("remote quic: dialing the relay");
+        let task = runtime.runtime.spawn(super::quic::dialer::run(
+            state.clone(),
+            runtime.liveness.subscribe(),
+        ));
+        commands.entity(entity).insert(RemoteDialerTask(task));
+    }
+}
 
 pub(crate) const MAX_PROMPT_BYTES: usize = 64 * 1024;
 const MAX_ATTACHMENTS: usize = 16;
@@ -22,7 +172,7 @@ const MEDIA_THUMBNAIL_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
 const MEDIA_THUMBNAIL_MAX_EDGE: u32 = 512;
 const MAX_CLIENT_OP_ID_BYTES: usize = 256;
 
-#[derive(Clone)]
+#[derive(Clone, Component)]
 pub(crate) struct RemoteState {
     pub(crate) relay_token: Arc<str>,
     pub(crate) authorizations: RemoteAuthorizations,
@@ -30,35 +180,6 @@ pub(crate) struct RemoteState {
     pub(crate) acp: AcpSessions,
     pub(crate) broker: AgentBroker,
     pub(crate) client_ops: ClientOperations,
-}
-
-pub(crate) fn spawn(
-    agents: AgentSessions,
-    acp: AcpSessions,
-    broker: AgentBroker,
-    client_ops: ClientOperations,
-    authorizations: RemoteAuthorizations,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let relay_token = match RelayToken::ensure() {
-            Ok(token) => token,
-            Err(error) => {
-                tracing::error!(%error, "remote: token setup failed");
-                return;
-            }
-        };
-        let state = RemoteState {
-            relay_token: Arc::from(relay_token.as_str()),
-            authorizations,
-            agents,
-            acp,
-            broker,
-            client_ops,
-        };
-        if let Err(error) = super::quic::Supervisor::spawn(state).await {
-            tracing::error!(%error, "remote quic: the relay supervisor ended");
-        }
-    })
 }
 
 pub(crate) fn remote_enabled() -> bool {
