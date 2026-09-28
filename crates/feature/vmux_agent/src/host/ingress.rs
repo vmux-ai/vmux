@@ -6,8 +6,10 @@ use crate::event::{
     PageAgentSnapshot, PageAgentWorkspaceChanged,
 };
 use bevy::prelude::*;
-use vmux_api::protocol::{ServiceMessage, SharedEvent};
-use vmux_service::client::ServiceInbound;
+use vmux_api::protocol::{ClientMessage, ServiceMessage, SharedEvent};
+use vmux_core::agent::AgentCommandResponse;
+use vmux_service::client::{ServiceInbound, ServiceRequest};
+use vmux_service::plugin::ServiceConnected;
 use vmux_terminal::ServiceMessageSet;
 
 pub(crate) struct AgentIngressPlugin;
@@ -15,6 +17,7 @@ pub(crate) struct AgentIngressPlugin;
 impl Plugin for AgentIngressPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceInbound>()
+            .add_message::<AgentCommandResponse>()
             .add_message::<AgentRequestInput>()
             .add_message::<AgentQueryRequest>()
             .add_message::<AgentToolCallRequest>()
@@ -31,7 +34,36 @@ impl Plugin for AgentIngressPlugin {
             .add_message::<PageAgentModeSelectionResult>()
             .add_message::<PageAgentSessionCreated>()
             .add_message::<PageAgentAcpTerminalCreated>()
-            .add_systems(Update, route_service_messages.in_set(ServiceMessageSet));
+            .add_systems(
+                Update,
+                (
+                    subscribe_agent_commands,
+                    route_service_messages.in_set(ServiceMessageSet),
+                ),
+            )
+            .add_systems(Last, forward_agent_command_responses);
+    }
+}
+
+fn subscribe_agent_commands(
+    connected: Query<(), Added<ServiceConnected>>,
+    mut requests: MessageWriter<ServiceRequest>,
+) {
+    if connected.is_empty() {
+        return;
+    }
+    requests.write(ServiceRequest(ClientMessage::SubscribeAgentCommands));
+}
+
+fn forward_agent_command_responses(
+    mut responses: MessageReader<AgentCommandResponse>,
+    mut requests: MessageWriter<ServiceRequest>,
+) {
+    for response in responses.read() {
+        requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
+            request_id: response.request_id,
+            result: response.result.clone(),
+        }));
     }
 }
 

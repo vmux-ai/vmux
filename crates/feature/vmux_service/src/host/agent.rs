@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use bevy::prelude::{
     App, ApplyDeferred, Commands, Component, Entity, IntoScheduleConfigs, Name, Plugin, Query,
-    Single, Update,
+    Single, Startup, Update,
 };
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
@@ -252,12 +252,20 @@ impl Plugin for AgentSessionPlugin {
             .unwrap()
             .take()
             .expect("agent session plugin can only be built once");
-        app.world_mut().spawn((
-            Name::new("agent session runtime"),
-            AgentSessionRuntime(self.runtime.clone()),
-            AgentSessionInbox(inbox),
-        ));
-        app.add_systems(
+        let startup = StdMutex::new(Some((self.runtime.clone(), inbox)));
+        app.add_systems(Startup, move |mut commands: Commands| {
+            let (runtime, inbox) = startup
+                .lock()
+                .unwrap()
+                .take()
+                .expect("agent session runtime can only start once");
+            commands.spawn((
+                Name::new("agent session runtime"),
+                AgentSessionRuntime(runtime),
+                AgentSessionInbox(inbox),
+            ));
+        })
+        .add_systems(
             Update,
             (
                 receive_agent_session_requests,

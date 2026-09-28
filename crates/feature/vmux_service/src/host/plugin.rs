@@ -8,7 +8,6 @@ use crate::DaemonBinary;
 use crate::client::{ServiceClient, ServiceHandle, ServiceInbound, ServiceRequest, ServiceWake};
 use crate::registry::Backend;
 use vmux_api::protocol::ClientMessage;
-use vmux_core::agent::AgentCommandResponse;
 
 #[derive(Component)]
 struct ServiceConnectRetry {
@@ -59,7 +58,6 @@ impl Plugin for ServicePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
             .add_message::<ServiceInbound>()
-            .add_message::<AgentCommandResponse>()
             .add_systems(
                 Startup,
                 (
@@ -81,25 +79,8 @@ impl Plugin for ServicePlugin {
             )
             .add_systems(
                 Last,
-                (
-                    forward_agent_command_responses,
-                    queue_service_requests,
-                    send_service_requests,
-                )
-                    .chain(),
+                (queue_service_requests, send_service_requests).chain(),
             );
-    }
-}
-
-fn forward_agent_command_responses(
-    mut responses: MessageReader<AgentCommandResponse>,
-    mut requests: MessageWriter<ServiceRequest>,
-) {
-    for response in responses.read() {
-        requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
-            request_id: response.request_id,
-            result: response.result.clone(),
-        }));
     }
 }
 
@@ -200,7 +181,6 @@ fn connect_service(
         let socket = crate::ServicePaths::current().socket();
         if socket.exists()
             && let Some(handle) = ServiceHandle::connect_with_wake(wake.0.clone())
-            && handle.send(ClientMessage::SubscribeAgentCommands)
         {
             commands
                 .entity(entity)

@@ -38,11 +38,19 @@ impl Plugin for ClientOperationPlugin {
             .unwrap()
             .take()
             .expect("client operation plugin can only be built once");
-        app.world_mut().spawn((
-            Name::new("remote client operations"),
-            ClientOperationInbox(inbox),
-        ));
-        app.add_systems(
+        let startup = Mutex::new(Some(inbox));
+        app.add_systems(Startup, move |mut commands: Commands| {
+            let inbox = startup
+                .lock()
+                .unwrap()
+                .take()
+                .expect("client operation runtime can only start once");
+            commands.spawn((
+                Name::new("remote client operations"),
+                ClientOperationInbox(inbox),
+            ));
+        })
+        .add_systems(
             Update,
             (
                 receive_client_operation_requests,

@@ -175,12 +175,20 @@ impl Plugin for ProcessQueryPlugin {
             .unwrap()
             .take()
             .expect("daemon query plugin can only be built once");
-        app.world_mut().spawn((
-            Name::new("vmux service process runtime"),
-            ProcessRuntime(Arc::clone(&self.manager)),
-            ProcessQueryInbox(receivers),
-        ));
-        app.add_systems(
+        let startup = Mutex::new(Some((Arc::clone(&self.manager), receivers)));
+        app.add_systems(Startup, move |mut commands: Commands| {
+            let (manager, receivers) = startup
+                .lock()
+                .unwrap()
+                .take()
+                .expect("daemon query runtime can only start once");
+            commands.spawn((
+                Name::new("vmux service process runtime"),
+                ProcessRuntime(manager),
+                ProcessQueryInbox(receivers),
+            ));
+        })
+        .add_systems(
             Update,
             (
                 receive_process_queries,

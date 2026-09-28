@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use bevy::prelude::{
     App, ApplyDeferred, Commands, Component, Entity, IntoScheduleConfigs, Name, Plugin, Query,
-    Single, Update,
+    Single, Startup, Update,
 };
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -85,12 +85,20 @@ impl Plugin for AcpSessionPlugin {
             .unwrap()
             .take()
             .expect("ACP session plugin can only be built once");
-        app.world_mut().spawn((
-            Name::new("ACP session runtime"),
-            AcpSessionRuntime(self.runtime.clone()),
-            AcpSessionInbox(inbox),
-        ));
-        app.add_systems(
+        let startup = StdMutex::new(Some((self.runtime.clone(), inbox)));
+        app.add_systems(Startup, move |mut commands: Commands| {
+            let (runtime, inbox) = startup
+                .lock()
+                .unwrap()
+                .take()
+                .expect("ACP session runtime can only start once");
+            commands.spawn((
+                Name::new("ACP session runtime"),
+                AcpSessionRuntime(runtime),
+                AcpSessionInbox(inbox),
+            ));
+        })
+        .add_systems(
             Update,
             (
                 receive_acp_session_requests,

@@ -162,32 +162,58 @@ impl Plugin for ServiceDaemonPlugin {
             .unwrap()
             .take()
             .expect("service daemon plugin can only be built once");
-        let started_at = ServiceStartedAt(Instant::now());
         app.add_plugins((
             query_plugin,
             client_operation_plugin,
             agent_session_plugin,
             acp_session_plugin,
         ));
-        let task = self.runtime.spawn(async move {
-            run_server(
+        let startup = std::sync::Mutex::new(Some((
+            listener,
+            server_manager,
+            queries,
+            client_operations,
+            agent_sessions,
+            acp_sessions,
+            self.runtime.clone(),
+            exit,
+        )));
+        app.add_systems(Startup, move |mut commands: Commands| {
+            let (
                 listener,
-                server_manager,
+                manager,
                 queries,
                 client_operations,
                 agent_sessions,
                 acp_sessions,
+                runtime,
+                exit,
+            ) = startup
+                .lock()
+                .unwrap()
+                .take()
+                .expect("service daemon can only start once");
+            let started_at = ServiceStartedAt(Instant::now());
+            let task = runtime.spawn(async move {
+                run_server(
+                    listener,
+                    manager,
+                    queries,
+                    client_operations,
+                    agent_sessions,
+                    acp_sessions,
+                    started_at,
+                )
+                .await;
+                let _ = exit.send(()).await;
+            });
+            commands.spawn((
+                Name::new("vmux service daemon"),
+                ServiceDaemon,
                 started_at,
-            )
-            .await;
-            let _ = exit.send(()).await;
+                ServiceServerTask(task),
+            ));
         });
-        app.world_mut().spawn((
-            Name::new("vmux service daemon"),
-            ServiceDaemon,
-            started_at,
-            ServiceServerTask(task),
-        ));
     }
 }
 
