@@ -342,7 +342,7 @@ fn receive_palette_open(
     draft.open_id = opened.open_id;
     draft.query.clone_from(&opened.url);
     draft.target_url.clear();
-    draft.selected = if opened.picker.is_some_and(|picker| picker.is_space()) {
+    draft.selected = if opened.picker == Some(vmux_api::command_bar::CommandBarPicker::Space) {
         active_space_index(&opened.spaces)
     } else {
         0

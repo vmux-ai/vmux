@@ -169,30 +169,6 @@ mod tests {
     }
 
     #[test]
-    fn a_typed_line_number_is_one_based_and_anything_else_is_refused() {
-        assert_eq!(
-            CommandBarPick::goto_line("42"),
-            Some(CommandBarPick::GotoLine { line: 41 })
-        );
-        assert_eq!(
-            CommandBarPick::goto_line("  7  "),
-            Some(CommandBarPick::GotoLine { line: 6 })
-        );
-        assert_eq!(
-            CommandBarPick::goto_line("12:5"),
-            Some(CommandBarPick::GotoLine { line: 11 }),
-            "a pasted line:column lands on the line"
-        );
-        assert_eq!(
-            CommandBarPick::goto_line("0"),
-            Some(CommandBarPick::GotoLine { line: 0 })
-        );
-        for refused in ["", "abc", "-3", "3.5"] {
-            assert_eq!(CommandBarPick::goto_line(refused), None, "{refused}");
-        }
-    }
-
-    #[test]
     fn an_asserted_picker_survives_the_wire() {
         let event = CommandBarOpenEvent {
             picker: Some(CommandBarPicker::EncodingReopen),

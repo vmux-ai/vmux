@@ -25,14 +25,18 @@ impl CommandBarPicks {
             CommandBarPicker::Space | CommandBarPicker::GotoLine => Vec::new(),
             CommandBarPicker::Indent => Self::indents(locale),
             CommandBarPicker::LineEnding => vec![
-                CommandBarPick::LineEnding { crlf: false }.labelled("LF"),
-                CommandBarPick::LineEnding { crlf: true }.labelled("CRLF"),
+                Self::row("LF", CommandBarPick::LineEnding { crlf: false }),
+                Self::row("CRLF", CommandBarPick::LineEnding { crlf: true }),
             ],
             CommandBarPicker::Encoding => vec![
-                CommandBarPick::Picker(CommandBarPicker::EncodingReopen)
-                    .labelled(locale.translate(CommandBarPicker::EncodingReopen.label())),
-                CommandBarPick::Picker(CommandBarPicker::EncodingSave)
-                    .labelled(locale.translate(CommandBarPicker::EncodingSave.label())),
+                Self::row(
+                    locale.translate(Self::label(CommandBarPicker::EncodingReopen)),
+                    CommandBarPick::Picker(CommandBarPicker::EncodingReopen),
+                ),
+                Self::row(
+                    locale.translate(Self::label(CommandBarPicker::EncodingSave)),
+                    CommandBarPick::Picker(CommandBarPicker::EncodingSave),
+                ),
             ],
             CommandBarPicker::EncodingReopen => Self::encodings(false),
             CommandBarPicker::EncodingSave => Self::encodings(true),
@@ -49,7 +53,7 @@ impl CommandBarPicks {
                 };
                 let label = locale
                     .translate_with(id, &[("width", TranslationValue::Number(i64::from(width)))]);
-                rows.push(CommandBarPick::Indent { spaces, width }.labelled(label));
+                rows.push(Self::row(label, CommandBarPick::Indent { spaces, width }));
             }
         }
         rows
@@ -58,15 +62,34 @@ impl CommandBarPicks {
     fn encodings(save: bool) -> Vec<CommandBarPickRow> {
         let mut rows = Vec::with_capacity(vmux_core::event::FileEncoding::ALL.len());
         for encoding in vmux_core::event::FileEncoding::ALL {
-            rows.push(
+            rows.push(Self::row(
+                encoding.label(),
                 CommandBarPick::Encoding {
                     label: encoding.label().to_string(),
                     save,
-                }
-                .labelled(encoding.label()),
-            );
+                },
+            ));
         }
         rows
+    }
+
+    fn row(label: impl Into<String>, pick: CommandBarPick) -> CommandBarPickRow {
+        CommandBarPickRow {
+            label: label.into(),
+            pick,
+        }
+    }
+
+    const fn label(picker: CommandBarPicker) -> &'static str {
+        match picker {
+            CommandBarPicker::Space => "",
+            CommandBarPicker::GotoLine => "editor-status-goto-title",
+            CommandBarPicker::Indent => "editor-status-indent-title",
+            CommandBarPicker::LineEnding => "editor-status-eol-title",
+            CommandBarPicker::Encoding => "editor-status-encoding-title",
+            CommandBarPicker::EncodingReopen => "editor-status-encoding-reopen",
+            CommandBarPicker::EncodingSave => "editor-status-encoding-save",
+        }
     }
 }
 

@@ -125,7 +125,7 @@ pub struct CommandBarField;
 
 impl CommandBarField {
     pub fn focus(opened: &CommandBarOpenEvent) {
-        if PaletteRows::infer_mode(&opened.url, opened.picker).opens_at_end(&opened.url) {
+        if PaletteRows::opens_at_end(&opened.url, opened.picker) {
             FocusClaim::new(COMMAND_BAR_INPUT_ID)
                 .caret_at_end()
                 .request();

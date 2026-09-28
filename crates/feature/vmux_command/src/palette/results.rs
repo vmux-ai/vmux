@@ -1,7 +1,7 @@
 use vmux_api::PageIcon;
 use vmux_api::chat::{ResumableSessionEntry, SlashCommand};
 use vmux_api::command_bar::{
-    CommandBarCommandEntry, CommandBarPage, CommandBarPickRow, CommandBarPicker,
+    CommandBarCommandEntry, CommandBarPage, CommandBarPick, CommandBarPickRow, CommandBarPicker,
     CommandBarRecentFile, CommandBarSpace, CommandBarTab, CommandBarWorkDir, HistoryEntry,
     SearchEngine,
 };
@@ -91,7 +91,7 @@ impl ResumeRows {
             {
                 continue;
             }
-            let section = ResumeSection::from(entry);
+            let section = Self::section(entry);
             if let Some((_, entries)) = groups.iter_mut().find(|(held, _)| *held == section) {
                 entries.push(entry.clone());
             } else {
@@ -112,6 +112,23 @@ impl ResumeRows {
         }
         rows
     }
+
+    fn section(entry: &ResumableSessionEntry) -> ResumeSection {
+        let agent = match entry.agent_name.is_empty() {
+            true => entry.kind.clone(),
+            false => entry.agent_name.clone(),
+        };
+        let project = match entry.project.is_empty() {
+            true => entry.subtitle.clone(),
+            false => entry.project.clone(),
+        };
+        ResumeSection {
+            agent,
+            project,
+            branch: entry.branch.clone(),
+            count: 0,
+        }
+    }
 }
 
 pub struct PickerRows;
@@ -122,12 +139,13 @@ impl PickerRows {
         picks: &[CommandBarPickRow],
         query: &str,
     ) -> Vec<CommandBarResultItem> {
-        if picker.takes_typed_value() {
+        if Self::takes_typed_value(picker) {
             return Vec::new();
         }
+        let needle = query.trim().to_lowercase();
         let mut rows = Vec::with_capacity(picks.len());
         for row in picks {
-            if !row.matches(query) {
+            if !needle.is_empty() && !row.label.to_lowercase().contains(&needle) {
                 continue;
             }
             rows.push(CommandBarResultItem::Pick {
@@ -136,6 +154,37 @@ impl PickerRows {
             });
         }
         rows
+    }
+
+    pub fn typed(picker: CommandBarPicker, input: &str) -> Option<CommandBarPick> {
+        if !Self::takes_typed_value(picker) {
+            return None;
+        }
+        let trimmed = input.trim();
+        let digits = match trimmed.split_once(':') {
+            Some((line, _)) => line.trim(),
+            None => trimmed,
+        };
+        let line = digits.parse::<u32>().ok()?;
+        Some(CommandBarPick::GotoLine {
+            line: line.saturating_sub(1),
+        })
+    }
+
+    pub const fn takes_typed_value(picker: CommandBarPicker) -> bool {
+        matches!(picker, CommandBarPicker::GotoLine)
+    }
+
+    pub const fn placeholder(picker: CommandBarPicker) -> &'static str {
+        match picker {
+            CommandBarPicker::Space => "command-switch-space",
+            CommandBarPicker::GotoLine => "editor-status-goto-placeholder",
+            CommandBarPicker::Indent
+            | CommandBarPicker::LineEnding
+            | CommandBarPicker::Encoding
+            | CommandBarPicker::EncodingReopen
+            | CommandBarPicker::EncodingSave => "editor-status-pick-placeholder",
+        }
     }
 }
 

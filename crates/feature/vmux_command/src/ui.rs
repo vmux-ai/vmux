@@ -8,7 +8,7 @@ use crate::palette::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
     command_bar_row_overlay_class, result_list_class,
 };
-use crate::palette::{PaletteGlyph, PaletteRows, PaletteState, PaletteSurface};
+use crate::palette::{PaletteGlyph, PaletteMode, PaletteRows, PaletteState, PaletteSurface};
 use crate::prompt_media::{ChatPasteMedia, ChatPickFiles, inline_media_query};
 use crate::ui::composer::{ComposerChips, ComposerMenuSet, use_prompt_recall};
 use crate::ui::media::{PromptMedia, use_prompt_media};
@@ -16,6 +16,7 @@ use crate::ui::signals::{
     COMMAND_BAR_INPUT_ID, CommandBarField, Readline, TypedDigit, use_palette_signals,
 };
 use dioxus::prelude::*;
+use vmux_api::command_bar::CommandBarPicker;
 use vmux_core::input::{PageKeyContext, Unclaimed};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
@@ -708,8 +709,23 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 }
 
 #[component]
-fn PaletteModeChip(mode: vmux_api::command_bar::PaletteMode) -> Element {
-    let id = mode.label();
+fn PaletteModeChip(mode: PaletteMode) -> Element {
+    let id = match mode {
+        PaletteMode::Ex => "palette-mode-ex",
+        PaletteMode::Command => "palette-mode-command",
+        PaletteMode::Path => "palette-mode-path",
+        PaletteMode::Slash => "palette-mode-slash",
+        PaletteMode::Picking(picker) => match picker {
+            CommandBarPicker::Space => "",
+            CommandBarPicker::GotoLine => "editor-status-goto-title",
+            CommandBarPicker::Indent => "editor-status-indent-title",
+            CommandBarPicker::LineEnding => "editor-status-eol-title",
+            CommandBarPicker::Encoding => "editor-status-encoding-title",
+            CommandBarPicker::EncodingReopen => "editor-status-encoding-reopen",
+            CommandBarPicker::EncodingSave => "editor-status-encoding-save",
+        },
+        PaletteMode::Search | PaletteMode::Url => "",
+    };
     let label = if id.is_empty() {
         String::new()
     } else {
