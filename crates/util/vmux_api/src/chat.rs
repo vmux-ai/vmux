@@ -415,18 +415,6 @@ pub enum SlashCommand {
     Cli,
 }
 
-impl SlashCommand {
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Upload => "upload",
-            Self::Resume => "resume",
-            Self::Mcp => "mcp",
-            Self::Model => "model",
-            Self::Cli => "cli",
-        }
-    }
-}
-
 #[vmux_api::contract(Default, Eq)]
 pub struct SlashCommandEntry {
     pub command: SlashCommand,

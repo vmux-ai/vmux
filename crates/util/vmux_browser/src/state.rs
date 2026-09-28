@@ -33,6 +33,17 @@ use crate::host::{
 };
 use vmux_flex::prelude::*;
 
+pub(crate) struct PagePresentation;
+
+impl PagePresentation {
+    pub(crate) fn title(metadata: &PageMetadata, identity: Option<&PageIdentity>) -> String {
+        match identity.and_then(|identity| identity.title.as_deref()) {
+            Some(title) if !title.is_empty() => title.to_string(),
+            _ => metadata.title.clone(),
+        }
+    }
+}
+
 #[derive(bevy::ecs::system::SystemParam)]
 struct FocusedLayout<'w, 's> {
     focused: vmux_layout::window::FocusedWindow<'w, 's>,
@@ -566,7 +577,7 @@ fn push_stacks_host_emit(
                     can_go_forward = ns.can_go_forward;
                 }
             }
-            let title = meta.title_with(osc).to_string();
+            let title = PagePresentation::title(meta, osc);
             rows.push(StackRow {
                 address: roots.resolve(&meta.url, &title),
                 title,
@@ -670,7 +681,7 @@ fn push_pane_tree_emit(
                                 title: if is_new_stack {
                                     "New Stack".to_string()
                                 } else {
-                                    meta.title_with(osc).to_string()
+                                    PagePresentation::title(meta, osc)
                                 },
                                 url: if is_new_stack {
                                     String::new()
@@ -998,7 +1009,7 @@ fn push_tabs_host_emit(
             let found =
                 active_stack.and_then(|s| first_browser_meta(s, &stack_children, &browser_meta));
             let title = found
-                .map(|(meta, osc)| meta.title_with(osc).to_string())
+                .map(|(meta, osc)| PagePresentation::title(meta, osc))
                 .unwrap_or_default();
             let (url, icon, bg_color) = found
                 .map(|(meta, _)| (meta.url.clone(), meta.icon.clone(), meta.bg_color.clone()))

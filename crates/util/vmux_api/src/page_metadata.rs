@@ -16,22 +16,6 @@ pub struct PageMetadata {
     pub bg_color: Option<String>,
 }
 
-impl PageMetadata {
-    pub fn title_with<'a>(&'a self, identity: Option<&'a PageIdentity>) -> &'a str {
-        match identity.and_then(|identity| identity.title.as_deref()) {
-            Some(title) if !title.is_empty() => title,
-            _ => &self.title,
-        }
-    }
-
-    pub fn icon_with<'a>(&'a self, identity: Option<&'a PageIdentity>) -> &'a crate::PageIcon {
-        match identity.and_then(|identity| identity.icon.as_ref()) {
-            Some(icon) if !icon.is_none() => icon,
-            _ => &self.icon,
-        }
-    }
-}
-
 #[cfg_attr(bevy_linked, derive(Component))]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PageIdentity {

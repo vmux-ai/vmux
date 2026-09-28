@@ -276,7 +276,7 @@ impl PageCandidate {
             host_window: Self::host_window(hierarchy, entity),
             activated_at: activated.map_or(0, |activated| activated.0),
             url: metadata.url.clone(),
-            title: metadata.title_with(identity).to_string(),
+            title: crate::state::PagePresentation::title(metadata, identity),
             status: if loading || child_loading {
                 "loading"
             } else {

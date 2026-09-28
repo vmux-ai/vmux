@@ -387,7 +387,7 @@ impl Chat {
         let query = query.to_lowercase();
         let mut matching = Vec::new();
         for command in self.slash.commands.read().iter() {
-            if command.command.name().starts_with(&query) {
+            if SlashCommands::name(command.command).starts_with(&query) {
                 matching.push(command.clone());
             }
         }
@@ -1062,6 +1062,18 @@ pub struct SlashCommands {
     pub commands: Signal<Vec<SlashCommandEntry>>,
     pub menu_sel: Signal<usize>,
     pub composer_context: Signal<ComposerContext>,
+}
+
+impl SlashCommands {
+    pub const fn name(command: SlashCommand) -> &'static str {
+        match command {
+            SlashCommand::Upload => "upload",
+            SlashCommand::Resume => "resume",
+            SlashCommand::Mcp => "mcp",
+            SlashCommand::Model => "model",
+            SlashCommand::Cli => "cli",
+        }
+    }
 }
 
 pub fn use_slash_commands() -> SlashCommands {

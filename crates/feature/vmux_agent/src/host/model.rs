@@ -1040,19 +1040,48 @@ mod tests {
 
     #[test]
     fn slash_commands_include_mcp_and_gate_cli_by_runtime() {
-        let names = |cross, models| {
+        let commands = |cross, models| {
             ModelProjection::slash_commands(cross, models)
                 .commands
                 .iter()
-                .map(|command| command.command.name())
+                .map(|entry| entry.command)
                 .collect::<Vec<_>>()
         };
-        assert_eq!(names(false, false), ["upload", "resume", "mcp"]);
-        assert_eq!(names(false, true), ["upload", "resume", "mcp", "model"]);
-        assert_eq!(names(true, false), ["upload", "resume", "mcp", "cli"]);
         assert_eq!(
-            names(true, true),
-            ["upload", "resume", "mcp", "model", "cli"]
+            commands(false, false),
+            [
+                SlashCommand::Upload,
+                SlashCommand::Resume,
+                SlashCommand::Mcp
+            ]
+        );
+        assert_eq!(
+            commands(false, true),
+            [
+                SlashCommand::Upload,
+                SlashCommand::Resume,
+                SlashCommand::Mcp,
+                SlashCommand::Model,
+            ]
+        );
+        assert_eq!(
+            commands(true, false),
+            [
+                SlashCommand::Upload,
+                SlashCommand::Resume,
+                SlashCommand::Mcp,
+                SlashCommand::Cli,
+            ]
+        );
+        assert_eq!(
+            commands(true, true),
+            [
+                SlashCommand::Upload,
+                SlashCommand::Resume,
+                SlashCommand::Mcp,
+                SlashCommand::Model,
+                SlashCommand::Cli,
+            ]
         );
     }
 

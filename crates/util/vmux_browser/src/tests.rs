@@ -56,18 +56,18 @@ fn reported_title_wins_unless_it_is_absent_or_blank() {
         title: "host".to_string(),
         ..Default::default()
     };
-    assert_eq!(meta.title_with(None), "host");
+    assert_eq!(crate::state::PagePresentation::title(&meta, None), "host");
     assert_eq!(
-        meta.title_with(Some(&PageIdentity::from("reported"))),
+        crate::state::PagePresentation::title(&meta, Some(&PageIdentity::from("reported"))),
         "reported"
     );
     assert_eq!(
-        meta.title_with(Some(&PageIdentity::from(""))),
+        crate::state::PagePresentation::title(&meta, Some(&PageIdentity::from(""))),
         "host",
         "a page that blanks its own title has nothing to say, so the host name stands"
     );
     assert_eq!(
-        meta.title_with(Some(&PageIdentity::default())),
+        crate::state::PagePresentation::title(&meta, Some(&PageIdentity::default())),
         "host",
         "an identity reporting only an icon must not blank the title"
     );

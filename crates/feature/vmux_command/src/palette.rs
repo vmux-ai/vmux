@@ -243,7 +243,7 @@ impl PaletteRows {
         let lowered = name.to_lowercase();
         slash_commands
             .iter()
-            .any(|command| command.command.name().starts_with(&lowered))
+            .any(|command| SlashRows::name(command.command).starts_with(&lowered))
     }
 
     fn with_completions(
