@@ -21,7 +21,7 @@ use crate::remote::RemoteSession;
 use vmux_api::protocol::ServiceMessage;
 use vmux_api::room::Message;
 
-pub(crate) struct AcpSessionPlugin;
+pub struct AcpSessionPlugin;
 
 impl Plugin for AcpSessionPlugin {
     fn build(&self, app: &mut App) {

@@ -19,7 +19,7 @@ mod osc133;
 pub mod plugin;
 pub mod process;
 pub mod providers;
-mod query;
+pub mod query;
 pub mod registry;
 mod request;
 pub mod run_marker;

@@ -13,11 +13,11 @@ use vmux_api::protocol::{
     ServiceMessage, SharedMessage, compose_agent_prompt,
 };
 
-use super::query::{ProcessQueries, ProcessQueryPlugin};
-use crate::acp::{AcpSessionPlugin, AcpSessions};
-use crate::agent::{AgentSessionPlugin, AgentSessions};
-use crate::remote::authorization::{RemoteAuthorizationPlugin, RemoteAuthorizations};
-use crate::remote::client_operation::{ClientOperationPlugin, ClientOperations};
+use super::query::ProcessQueries;
+use crate::acp::AcpSessions;
+use crate::agent::AgentSessions;
+use crate::remote::authorization::RemoteAuthorizations;
+use crate::remote::client_operation::ClientOperations;
 
 type PendingQueries = crate::agent::AgentQueryResponses;
 
@@ -119,14 +119,7 @@ impl ServiceDaemonPlugin {
 
 impl Plugin for ServiceDaemonPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            ProcessQueryPlugin,
-            ClientOperationPlugin,
-            RemoteAuthorizationPlugin,
-            AgentSessionPlugin,
-            AcpSessionPlugin,
-        ))
-        .add_systems(Startup, start_service_daemon);
+        app.add_systems(Startup, start_service_daemon);
     }
 }
 

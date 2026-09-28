@@ -188,7 +188,7 @@ impl ProcessQueries {
     }
 }
 
-pub(crate) struct ProcessQueryPlugin;
+pub struct ProcessQueryPlugin;
 
 impl Plugin for ProcessQueryPlugin {
     fn build(&self, app: &mut App) {

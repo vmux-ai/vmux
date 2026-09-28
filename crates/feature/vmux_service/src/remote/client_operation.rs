@@ -4,7 +4,7 @@ use vmux_api::room::ClientOpId;
 
 const MAX_CLIENT_OPERATIONS: usize = 4096;
 
-pub(crate) struct ClientOperationPlugin;
+pub struct ClientOperationPlugin;
 
 impl Plugin for ClientOperationPlugin {
     fn build(&self, app: &mut App) {

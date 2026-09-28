@@ -22,8 +22,15 @@ fn main() {
     );
 
     let mut app = App::new();
-    app.add_plugins(vmux_service::server::ServiceDaemonPlugin)
-        .set_runner(wake_driven_runner(handle, wake_rx, signal_rx));
+    app.add_plugins((
+        vmux_service::query::ProcessQueryPlugin,
+        vmux_service::remote::client_operation::ClientOperationPlugin,
+        vmux_service::remote::authorization::RemoteAuthorizationPlugin,
+        vmux_service::agent::AgentSessionPlugin,
+        vmux_service::acp::AcpSessionPlugin,
+        vmux_service::server::ServiceDaemonPlugin,
+    ))
+    .set_runner(wake_driven_runner(handle, wake_rx, signal_rx));
     app.world_mut().spawn(daemon);
     app.run();
 }

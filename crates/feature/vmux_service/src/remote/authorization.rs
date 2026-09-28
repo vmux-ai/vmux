@@ -66,7 +66,7 @@ pub enum AuthorizationOutcome {
     Paired { device_token: String },
 }
 
-pub(crate) struct RemoteAuthorizationPlugin;
+pub struct RemoteAuthorizationPlugin;
 
 impl Plugin for RemoteAuthorizationPlugin {
     fn build(&self, app: &mut App) {

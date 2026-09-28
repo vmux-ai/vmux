@@ -6,7 +6,7 @@ pub use vmux_api::room::{
 #[cfg(host)]
 pub mod authorization;
 #[cfg(host)]
-pub(crate) mod client_operation;
+pub mod client_operation;
 #[cfg(host)]
 pub mod pairing;
 #[cfg(host)]

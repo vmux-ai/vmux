@@ -201,7 +201,7 @@ pub enum SessionInput {
     Close,
 }
 
-pub(crate) struct AgentSessionPlugin;
+pub struct AgentSessionPlugin;
 
 impl Plugin for AgentSessionPlugin {
     fn build(&self, app: &mut App) {
