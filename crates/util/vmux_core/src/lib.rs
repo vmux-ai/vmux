@@ -24,6 +24,7 @@ pub use input::{KeyModifiers, KeyStroke};
 pub use page_metadata::{PageIdentity, PageMetadata};
 pub use process_id::ProcessId;
 pub use smart_bookmark_folder::SmartBookmarkFolder;
+pub use vmux_macro::service_message;
 
 #[cfg(host)]
 pub mod host;

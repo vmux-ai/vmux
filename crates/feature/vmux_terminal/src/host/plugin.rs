@@ -33,7 +33,7 @@ use super::mouse::TerminalMouseState;
 use super::process_control::{PendingTerminalSnapshot, ProcessControlPlugin, TerminalGridSize};
 use super::prompt::PromptCapture;
 use super::service::{
-    ServiceIngressPlugin, ServiceIngressSet, TerminalProcessCreateFailed, TerminalProcessCreated,
+    ServiceIngressPlugin, TerminalProcessCreateFailed, TerminalProcessCreated,
     TerminalSelectionText, TerminalServiceError, TerminalViewportUpdate,
 };
 use super::state::{
@@ -43,6 +43,7 @@ use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::{ProcessExited, RetainOnProcessExit, Terminal};
 use vmux_core::KeyboardOwner;
+use vmux_core::service::ServiceMessageSet;
 use vmux_flex::prelude::*;
 
 #[vmux_native::page]
@@ -215,9 +216,8 @@ impl Plugin for TerminalUpdatePlugin {
                     apply_service_errors,
                     copy_service_selection,
                 )
-                    .after(ServiceIngressSet)
-                    .in_set(WriteCommandRequests)
-                    .in_set(ServiceMessageSet),
+                    .after(ServiceMessageSet)
+                    .in_set(WriteCommandRequests),
                 handle_terminal_navigation_commands.in_set(vmux_command::ReadCommandRequests),
                 handle_terminal_clear_command.in_set(vmux_command::ReadCommandRequests),
                 handle_terminal_copy_mode_command.in_set(vmux_command::ReadCommandRequests),
@@ -290,9 +290,6 @@ pub struct TerminalStackSpawnRequest {
     pub process_id: Option<ProcessId>,
     pub activate: bool,
 }
-
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ServiceMessageSet;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TerminalStackSpawnSet;

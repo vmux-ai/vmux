@@ -41,7 +41,7 @@ impl Plugin for NavigationPlugin {
                 Update,
                 (
                     drain_committed_navigation,
-                    handle_browser_navigate_requests.after(vmux_terminal::ServiceMessageSet),
+                    handle_browser_navigate_requests.after(vmux_core::service::ServiceMessageSet),
                     handle_browser_go_back_requests,
                     handle_browser_go_forward_requests,
                     handle_open_in_new_stack_requests,

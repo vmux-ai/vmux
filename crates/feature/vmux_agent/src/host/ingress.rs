@@ -6,42 +6,63 @@ use crate::event::{
     UiAgentWorkspaceChanged,
 };
 use bevy::prelude::*;
-use vmux_api::protocol::{ClientMessage, ServiceMessage, SharedEvent};
+use vmux_api::protocol::ClientMessage;
 use vmux_core::agent::AgentCommandResponse;
-use vmux_core::service::{ServiceConnected, ServiceInbound, ServiceRequest};
-use vmux_terminal::ServiceMessageSet;
+use vmux_core::service::{
+    ServiceConnected, ServiceMessagePlugin, ServiceMessageSet, ServiceRequest,
+};
+
+#[vmux_core::service_message(AgentRequest)]
+struct InboundAgentRequest {
+    request_id: vmux_api::protocol::AgentRequestId,
+    anchor: Option<vmux_api::ProcessId>,
+    request: vmux_api::protocol::AgentRequest,
+}
+
+#[vmux_core::service_message(Shared(SharedEvent::AgentAwaitingApproval))]
+struct InboundAgentAwaitingApproval {
+    sid: String,
+    call_id: String,
+    name: String,
+    args: vmux_api::protocol::JsonValue,
+}
 
 pub(crate) struct AgentIngressPlugin;
 
 impl Plugin for AgentIngressPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ServiceInbound>()
-            .add_message::<ServiceRequest>()
-            .add_message::<AgentCommandResponse>()
-            .add_message::<AgentRequestInput>()
-            .add_message::<AgentQueryRequest>()
-            .add_message::<AgentToolCallRequest>()
-            .add_message::<UiAgentDelta>()
-            .add_message::<UiAgentRunStatus>()
-            .add_message::<UiAgentAwaitingApproval>()
-            .add_message::<UiAgentApprovalResolved>()
-            .add_message::<UiAgentSnapshot>()
-            .add_message::<UiAgentInfo>()
-            .add_message::<UiAgentWorkspaceChanged>()
-            .add_message::<UiAgentModelInfo>()
-            .add_message::<UiAgentModelSelectionResult>()
-            .add_message::<UiAgentModeInfo>()
-            .add_message::<UiAgentModeSelectionResult>()
-            .add_message::<UiAgentSessionCreated>()
-            .add_message::<UiAgentAcpTerminalCreated>()
-            .add_systems(
-                Update,
-                (
-                    subscribe_agent_commands,
-                    route_service_messages.in_set(ServiceMessageSet),
-                ),
-            )
-            .add_systems(Last, forward_agent_command_responses);
+        app.add_plugins((
+            ServiceMessagePlugin::<InboundAgentRequest>::default(),
+            ServiceMessagePlugin::<AgentQueryRequest>::default(),
+            ServiceMessagePlugin::<AgentToolCallRequest>::default(),
+            ServiceMessagePlugin::<UiAgentDelta>::default(),
+            ServiceMessagePlugin::<UiAgentRunStatus>::default(),
+            ServiceMessagePlugin::<InboundAgentAwaitingApproval>::default(),
+            ServiceMessagePlugin::<UiAgentApprovalResolved>::default(),
+            ServiceMessagePlugin::<UiAgentSnapshot>::default(),
+            ServiceMessagePlugin::<UiAgentInfo>::default(),
+            ServiceMessagePlugin::<UiAgentWorkspaceChanged>::default(),
+            ServiceMessagePlugin::<UiAgentModelInfo>::default(),
+            ServiceMessagePlugin::<UiAgentModelSelectionResult>::default(),
+            ServiceMessagePlugin::<UiAgentModeInfo>::default(),
+            ServiceMessagePlugin::<UiAgentModeSelectionResult>::default(),
+        ))
+        .add_plugins((
+            ServiceMessagePlugin::<UiAgentSessionCreated>::default(),
+            ServiceMessagePlugin::<UiAgentAcpTerminalCreated>::default(),
+        ))
+        .add_message::<ServiceRequest>()
+        .add_message::<AgentCommandResponse>()
+        .add_message::<AgentRequestInput>()
+        .add_message::<UiAgentAwaitingApproval>()
+        .add_systems(
+            Update,
+            (
+                subscribe_agent_commands,
+                (route_agent_requests, route_approval_requests).in_set(ServiceMessageSet),
+            ),
+        )
+        .add_systems(Last, forward_agent_command_responses);
     }
 }
 
@@ -67,216 +88,46 @@ fn forward_agent_command_responses(
     }
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
-struct AgentIngressWriters<'w> {
-    requests: MessageWriter<'w, AgentRequestInput>,
-    queries: MessageWriter<'w, AgentQueryRequest>,
-    tool_calls: MessageWriter<'w, AgentToolCallRequest>,
-    deltas: MessageWriter<'w, UiAgentDelta>,
-    run_statuses: MessageWriter<'w, UiAgentRunStatus>,
-    approvals: MessageWriter<'w, UiAgentAwaitingApproval>,
-    approval_resolutions: MessageWriter<'w, UiAgentApprovalResolved>,
-    snapshots: MessageWriter<'w, UiAgentSnapshot>,
-    agent_info: MessageWriter<'w, UiAgentInfo>,
-    workspace_changes: MessageWriter<'w, UiAgentWorkspaceChanged>,
-    model_info: MessageWriter<'w, UiAgentModelInfo>,
-    model_selection_results: MessageWriter<'w, UiAgentModelSelectionResult>,
-    mode_info: MessageWriter<'w, UiAgentModeInfo>,
-    mode_selection_results: MessageWriter<'w, UiAgentModeSelectionResult>,
-    session_created: MessageWriter<'w, UiAgentSessionCreated>,
-    terminal_created: MessageWriter<'w, UiAgentAcpTerminalCreated>,
-}
-
-fn route_service_messages(
-    mut inbound: MessageReader<ServiceInbound>,
-    mut writers: AgentIngressWriters,
+fn route_agent_requests(
+    mut inbound: MessageReader<InboundAgentRequest>,
+    mut requests: MessageWriter<AgentRequestInput>,
 ) {
     for inbound in inbound.read() {
-        match &inbound.0 {
-            ServiceMessage::AgentRequest {
-                request_id,
-                anchor,
-                request,
-            } => {
-                writers.requests.write(AgentRequestInput {
-                    request_id: *request_id,
-                    origin: CommandOrigin::Agent {
-                        sid: None,
-                        anchor: *anchor,
-                    },
-                    request: request.clone(),
-                });
-            }
-            ServiceMessage::AgentQuery { request_id, query } => {
-                writers.queries.write(AgentQueryRequest {
-                    request_id: *request_id,
-                    query: query.clone(),
-                });
-            }
-            ServiceMessage::AgentToolCall {
-                request_id,
-                sid,
-                name,
-                args,
-            } => {
-                writers.tool_calls.write(AgentToolCallRequest {
-                    request_id: *request_id,
-                    sid: sid.clone(),
-                    name: name.clone(),
-                    args: args.clone(),
-                });
-            }
-            ServiceMessage::Shared(SharedEvent::AgentDelta { sid, text }) => {
-                writers.deltas.write(UiAgentDelta {
-                    sid: sid.clone(),
-                    text: text.clone(),
-                });
-            }
-            ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged { sid, status }) => {
-                writers.run_statuses.write(UiAgentRunStatus {
-                    sid: sid.clone(),
-                    status: status.clone(),
-                });
-            }
-            ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
-                sid,
-                call_id,
-                name,
-                args,
-            }) => {
-                let args = serde_json::Value::try_from(args)
-                    .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
-                writers.approvals.write(UiAgentAwaitingApproval {
-                    sid: sid.clone(),
-                    call_id: call_id.clone(),
-                    name: name.clone(),
-                    args,
-                });
-            }
-            ServiceMessage::Shared(SharedEvent::AgentApprovalResolved { sid, call_id }) => {
-                writers.approval_resolutions.write(UiAgentApprovalResolved {
-                    sid: sid.clone(),
-                    call_id: call_id.clone(),
-                });
-            }
-            ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { sid, messages }) => {
-                writers.snapshots.write(UiAgentSnapshot {
-                    sid: sid.clone(),
-                    messages: messages.clone(),
-                });
-            }
-            ServiceMessage::Shared(SharedEvent::AcpAgentInfo { sid, name }) => {
-                writers.agent_info.write(UiAgentInfo {
-                    sid: sid.clone(),
-                    name: name.clone(),
-                });
-            }
-            ServiceMessage::Shared(SharedEvent::AcpWorkspaceChanged {
-                sid,
-                name,
-                branch,
-                cwd,
-                workspace_cwd,
-            }) => {
-                writers.workspace_changes.write(UiAgentWorkspaceChanged {
-                    sid: sid.clone(),
-                    name: name.clone(),
-                    branch: branch.clone(),
-                    cwd: cwd.clone(),
-                    workspace_cwd: workspace_cwd.clone(),
-                });
-            }
-            ServiceMessage::Shared(SharedEvent::AcpModelInfo {
-                sid,
-                config_id,
-                current_model_id,
-                models,
-            }) => {
-                writers.model_info.write(UiAgentModelInfo {
-                    sid: sid.clone(),
-                    config_id: config_id.clone(),
-                    current_model_id: current_model_id.clone(),
-                    models: models.clone(),
-                });
-            }
-            ServiceMessage::AcpModelSelectionResult {
-                sid,
-                request_id,
-                model_id,
-                succeeded,
-            } => {
-                writers
-                    .model_selection_results
-                    .write(UiAgentModelSelectionResult {
-                        sid: sid.clone(),
-                        request_id: *request_id,
-                        model_id: model_id.clone(),
-                        succeeded: *succeeded,
-                    });
-            }
-            ServiceMessage::AcpModeInfo {
-                sid,
-                config_id,
-                current_mode_id,
-                modes,
-            } => {
-                writers.mode_info.write(UiAgentModeInfo {
-                    sid: sid.clone(),
-                    config_id: config_id.clone(),
-                    current_mode_id: current_mode_id.clone(),
-                    modes: modes.clone(),
-                });
-            }
-            ServiceMessage::AcpModeSelectionResult {
-                sid,
-                request_id,
-                mode_id,
-                succeeded,
-            } => {
-                writers
-                    .mode_selection_results
-                    .write(UiAgentModeSelectionResult {
-                        sid: sid.clone(),
-                        request_id: *request_id,
-                        mode_id: mode_id.clone(),
-                        succeeded: *succeeded,
-                    });
-            }
-            ServiceMessage::AcpSessionCreated {
-                sid,
-                acp_session_id,
-            } => {
-                writers.session_created.write(UiAgentSessionCreated {
-                    sid: sid.clone(),
-                    acp_session_id: acp_session_id.clone(),
-                });
-            }
-            ServiceMessage::AcpTerminalCreated {
-                sid,
-                terminal_id,
-                process_id,
-                command,
-                args,
-                cwd,
-            } => {
-                writers.terminal_created.write(UiAgentAcpTerminalCreated {
-                    sid: sid.clone(),
-                    terminal_id: terminal_id.clone(),
-                    process_id: *process_id,
-                    command: command.clone(),
-                    args: args.clone(),
-                    cwd: cwd.clone(),
-                });
-            }
-            _ => {}
-        }
+        requests.write(AgentRequestInput {
+            request_id: inbound.request_id,
+            origin: CommandOrigin::Agent {
+                sid: None,
+                anchor: inbound.anchor,
+            },
+            request: inbound.request.clone(),
+        });
+    }
+}
+
+fn route_approval_requests(
+    mut inbound: MessageReader<InboundAgentAwaitingApproval>,
+    mut approvals: MessageWriter<UiAgentAwaitingApproval>,
+) {
+    for inbound in inbound.read() {
+        let args = serde_json::Value::try_from(&inbound.args)
+            .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
+        approvals.write(UiAgentAwaitingApproval {
+            sid: inbound.sid.clone(),
+            call_id: inbound.call_id.clone(),
+            name: inbound.name.clone(),
+            args,
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::protocol::{AgentRenameProfile, AgentRequest, AgentRequestId, AgentVaultStatus};
+    use vmux_api::protocol::{
+        AgentRenameProfile, AgentRequest, AgentRequestId, AgentVaultStatus, ServiceMessage,
+        SharedEvent,
+    };
+    use vmux_core::service::ServiceInbound;
 
     #[test]
     fn routes_agent_messages_without_terminal_ownership() {

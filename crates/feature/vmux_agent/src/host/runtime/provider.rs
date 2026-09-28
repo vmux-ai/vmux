@@ -44,7 +44,9 @@ impl Plugin for ProviderAgentPlugin {
                     request_provider_session_spawn.before(vmux_tool::ToolResolveSet),
                     spawn_provider_session.after(vmux_tool::ToolResolveSet),
                     send_provider_agent_input,
-                    consume_provider_agent_stream.after(approval::ApprovalSyncSet),
+                    consume_provider_agent_stream
+                        .after(vmux_core::service::ServiceMessageSet)
+                        .after(approval::ApprovalSyncSet),
                     attach_last_run_state_kind,
                 ),
             );

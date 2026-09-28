@@ -1,22 +1,21 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{ProcessId, ServiceMessage};
+use vmux_api::protocol::{CommandLifecycleKind, ProcessId, ProcessInfo};
+use vmux_api::{TermCursor, TermLine, TermSelectionRange};
 use vmux_core::event::TermViewportPatch;
-use vmux_core::service::ServiceInbound;
+use vmux_core::service::{ServiceMessagePlugin, ServiceMessageSet};
 
 use super::input_queue::TerminalProcessIndex;
-use super::plugin::{
-    CommandLifecycleEvent, OscTitleChanged, ProcessExitedEvent, ServiceMessageSet,
-};
+use super::plugin::{CommandLifecycleEvent, OscTitleChanged, ProcessExitedEvent};
 use super::state::{TerminalCopyMode, TerminalMode};
 use crate::Terminal;
 
-#[derive(Message)]
+#[vmux_core::service_message(ProcessCreated)]
 pub(crate) struct TerminalProcessCreated {
     pub process_id: ProcessId,
     pub pid: u32,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(ProcessCreateFailed)]
 pub(crate) struct TerminalProcessCreateFailed {
     pub process_id: ProcessId,
     pub reason: String,
@@ -29,206 +28,250 @@ pub(crate) struct TerminalViewportUpdate {
     pub request_snapshot_if_hidden: bool,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(Error)]
 pub(crate) struct TerminalServiceError {
     pub message: String,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(SelectionText)]
 pub(crate) struct TerminalSelectionText {
     pub process_id: ProcessId,
     pub text: String,
 }
 
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct ServiceIngressSet;
+#[vmux_core::service_message(ViewportPatch)]
+struct ProcessViewportPatch {
+    process_id: ProcessId,
+    changed_lines: Vec<(u32, TermLine)>,
+    cursor: TermCursor,
+    cols: u16,
+    rows: u16,
+    selection: Option<TermSelectionRange>,
+    copy_mode: bool,
+    full: bool,
+    first_row: u32,
+    total_rows: u32,
+    alt: bool,
+    mouse: bool,
+    evicted_total: u64,
+}
+
+#[vmux_core::service_message(Snapshot)]
+struct ProcessSnapshot {
+    process_id: ProcessId,
+    lines: Vec<TermLine>,
+    cursor: TermCursor,
+    cols: u16,
+    rows: u16,
+}
+
+#[vmux_core::service_message(ProcessExited)]
+struct ProcessExitedInput {
+    process_id: ProcessId,
+}
+
+#[vmux_core::service_message(ProcessTitle)]
+struct ProcessTitleInput {
+    process_id: ProcessId,
+    title: String,
+}
+
+#[vmux_core::service_message(CommandLifecycle)]
+struct ProcessCommandLifecycle {
+    process_id: ProcessId,
+    kind: CommandLifecycleKind,
+}
+
+#[vmux_core::service_message(ProcessList)]
+struct ProcessListInput {
+    processes: Vec<ProcessInfo>,
+}
+
+#[vmux_core::service_message(Bell)]
+struct ProcessBell {
+    process_id: ProcessId,
+}
+
+#[vmux_core::service_message(TerminalMode)]
+struct ProcessTerminalMode {
+    process_id: ProcessId,
+    mouse_capture: bool,
+    copy_mode: bool,
+    alt_screen: bool,
+    focus_reporting: bool,
+}
 
 pub(crate) struct ServiceIngressPlugin;
 
 impl Plugin for ServiceIngressPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<TerminalProcessCreated>()
-            .add_message::<TerminalProcessCreateFailed>()
-            .add_message::<TerminalViewportUpdate>()
-            .add_message::<TerminalServiceError>()
-            .add_message::<TerminalSelectionText>()
-            .add_systems(
-                Update,
-                (route_service_messages, project_terminal_modes)
-                    .in_set(ServiceIngressSet)
-                    .in_set(ServiceMessageSet),
-            );
+        app.add_plugins((
+            ServiceMessagePlugin::<TerminalProcessCreated>::default(),
+            ServiceMessagePlugin::<TerminalProcessCreateFailed>::default(),
+            ServiceMessagePlugin::<ProcessViewportPatch>::default(),
+            ServiceMessagePlugin::<ProcessSnapshot>::default(),
+            ServiceMessagePlugin::<ProcessExitedInput>::default(),
+            ServiceMessagePlugin::<ProcessTitleInput>::default(),
+            ServiceMessagePlugin::<ProcessCommandLifecycle>::default(),
+            ServiceMessagePlugin::<ProcessListInput>::default(),
+            ServiceMessagePlugin::<TerminalServiceError>::default(),
+            ServiceMessagePlugin::<TerminalSelectionText>::default(),
+            ServiceMessagePlugin::<ProcessBell>::default(),
+            ServiceMessagePlugin::<ProcessTerminalMode>::default(),
+        ))
+        .add_message::<TerminalViewportUpdate>()
+        .add_systems(
+            Update,
+            (
+                project_viewport_patches,
+                project_snapshots,
+                project_process_exits,
+                project_process_titles,
+                project_command_lifecycle,
+                project_process_list,
+                project_bells,
+                project_terminal_modes,
+            )
+                .in_set(ServiceMessageSet)
+                .chain(),
+        );
     }
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
-struct IngressWriters<'w> {
-    created: MessageWriter<'w, TerminalProcessCreated>,
-    create_failed: MessageWriter<'w, TerminalProcessCreateFailed>,
-    viewport: MessageWriter<'w, TerminalViewportUpdate>,
-    exited: MessageWriter<'w, ProcessExitedEvent>,
-    process_snapshot: MessageWriter<'w, super::process_monitor::ServiceProcessSnapshot>,
-    service_error: MessageWriter<'w, TerminalServiceError>,
-    selection: MessageWriter<'w, TerminalSelectionText>,
-    lifecycle: MessageWriter<'w, CommandLifecycleEvent>,
-    title: MessageWriter<'w, OscTitleChanged>,
-    bell: MessageWriter<'w, vmux_core::notify::BellReceived>,
+fn project_viewport_patches(
+    mut patches: MessageReader<ProcessViewportPatch>,
+    mut updates: MessageWriter<TerminalViewportUpdate>,
+) {
+    for patch in patches.read() {
+        updates.write(TerminalViewportUpdate {
+            process_id: patch.process_id,
+            patch: TermViewportPatch {
+                changed_lines: patch.changed_lines.clone(),
+                cursor: patch.cursor.clone(),
+                cols: patch.cols,
+                rows: patch.rows,
+                selection: patch.selection,
+                copy_mode: patch.copy_mode,
+                full: patch.full,
+                first_row: patch.first_row,
+                total_rows: patch.total_rows,
+                alt: patch.alt,
+                mouse: patch.mouse,
+                evicted_total: patch.evicted_total,
+            },
+            request_snapshot_if_hidden: true,
+        });
+    }
 }
 
-fn route_service_messages(mut inbound: MessageReader<ServiceInbound>, mut writers: IngressWriters) {
-    for inbound in inbound.read() {
-        match &inbound.0 {
-            ServiceMessage::ProcessCreated { process_id, pid } => {
-                writers.created.write(TerminalProcessCreated {
-                    process_id: *process_id,
-                    pid: *pid,
-                });
-            }
-            ServiceMessage::ProcessCreateFailed { process_id, reason } => {
-                writers.create_failed.write(TerminalProcessCreateFailed {
-                    process_id: *process_id,
-                    reason: reason.clone(),
-                });
-            }
-            ServiceMessage::ViewportPatch {
-                process_id,
-                changed_lines,
-                cursor,
-                cols,
-                rows,
-                selection,
-                copy_mode,
-                full,
-                first_row,
-                total_rows,
-                alt,
-                mouse,
-                evicted_total,
-            } => {
-                writers.viewport.write(TerminalViewportUpdate {
-                    process_id: *process_id,
-                    patch: TermViewportPatch {
-                        changed_lines: changed_lines.clone(),
-                        cursor: cursor.clone(),
-                        cols: *cols,
-                        rows: *rows,
-                        selection: *selection,
-                        copy_mode: *copy_mode,
-                        full: *full,
-                        first_row: *first_row,
-                        total_rows: *total_rows,
-                        alt: *alt,
-                        mouse: *mouse,
-                        evicted_total: *evicted_total,
-                    },
-                    request_snapshot_if_hidden: true,
-                });
-            }
-            ServiceMessage::ProcessExited { process_id, .. } => {
-                writers.exited.write(ProcessExitedEvent {
-                    process_id: *process_id,
-                });
-            }
-            ServiceMessage::ProcessTitle { process_id, title } => {
-                writers.title.write(OscTitleChanged {
-                    process_id: *process_id,
-                    title: title.clone(),
-                });
-            }
-            ServiceMessage::CommandLifecycle { process_id, kind } => {
-                writers.lifecycle.write(CommandLifecycleEvent {
-                    process_id: *process_id,
-                    kind: kind.clone(),
-                });
-            }
-            ServiceMessage::ProcessList { processes } => {
-                writers
-                    .process_snapshot
-                    .write(super::process_monitor::ServiceProcessSnapshot(
-                        processes.clone(),
-                    ));
-            }
-            ServiceMessage::Snapshot {
-                process_id,
-                lines,
-                cursor,
-                cols,
-                rows,
-            } => {
-                writers.viewport.write(TerminalViewportUpdate {
-                    process_id: *process_id,
-                    patch: TermViewportPatch {
-                        changed_lines: lines
-                            .iter()
-                            .cloned()
-                            .enumerate()
-                            .map(|(index, line)| (index as u32, line))
-                            .collect(),
-                        cursor: cursor.clone(),
-                        cols: *cols,
-                        rows: *rows,
-                        selection: None,
-                        copy_mode: false,
-                        full: true,
-                        first_row: 0,
-                        total_rows: u32::from(*rows),
-                        alt: false,
-                        mouse: false,
-                        evicted_total: 0,
-                    },
-                    request_snapshot_if_hidden: false,
-                });
-            }
-            ServiceMessage::Error { message } => {
-                writers.service_error.write(TerminalServiceError {
-                    message: message.clone(),
-                });
-            }
-            ServiceMessage::SelectionText { process_id, text } => {
-                writers.selection.write(TerminalSelectionText {
-                    process_id: *process_id,
-                    text: text.clone(),
-                });
-            }
-            ServiceMessage::Bell { process_id } => {
-                writers.bell.write(vmux_core::notify::BellReceived {
-                    process_id: *process_id,
-                });
-            }
-            _ => {}
-        }
+fn project_snapshots(
+    mut snapshots: MessageReader<ProcessSnapshot>,
+    mut updates: MessageWriter<TerminalViewportUpdate>,
+) {
+    for snapshot in snapshots.read() {
+        updates.write(TerminalViewportUpdate {
+            process_id: snapshot.process_id,
+            patch: TermViewportPatch {
+                changed_lines: snapshot
+                    .lines
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(index, line)| (index as u32, line))
+                    .collect(),
+                cursor: snapshot.cursor.clone(),
+                cols: snapshot.cols,
+                rows: snapshot.rows,
+                selection: None,
+                copy_mode: false,
+                full: true,
+                first_row: 0,
+                total_rows: u32::from(snapshot.rows),
+                alt: false,
+                mouse: false,
+                evicted_total: 0,
+            },
+            request_snapshot_if_hidden: false,
+        });
+    }
+}
+
+fn project_process_exits(
+    mut inbound: MessageReader<ProcessExitedInput>,
+    mut exited: MessageWriter<ProcessExitedEvent>,
+) {
+    for message in inbound.read() {
+        exited.write(ProcessExitedEvent {
+            process_id: message.process_id,
+        });
+    }
+}
+
+fn project_process_titles(
+    mut inbound: MessageReader<ProcessTitleInput>,
+    mut titles: MessageWriter<OscTitleChanged>,
+) {
+    for message in inbound.read() {
+        titles.write(OscTitleChanged {
+            process_id: message.process_id,
+            title: message.title.clone(),
+        });
+    }
+}
+
+fn project_command_lifecycle(
+    mut inbound: MessageReader<ProcessCommandLifecycle>,
+    mut lifecycle: MessageWriter<CommandLifecycleEvent>,
+) {
+    for message in inbound.read() {
+        lifecycle.write(CommandLifecycleEvent {
+            process_id: message.process_id,
+            kind: message.kind.clone(),
+        });
+    }
+}
+
+fn project_process_list(
+    mut inbound: MessageReader<ProcessListInput>,
+    mut snapshots: MessageWriter<super::process_monitor::ServiceProcessSnapshot>,
+) {
+    for message in inbound.read() {
+        snapshots.write(super::process_monitor::ServiceProcessSnapshot(
+            message.processes.clone(),
+        ));
+    }
+}
+
+fn project_bells(
+    mut inbound: MessageReader<ProcessBell>,
+    mut bells: MessageWriter<vmux_core::notify::BellReceived>,
+) {
+    for message in inbound.read() {
+        bells.write(vmux_core::notify::BellReceived {
+            process_id: message.process_id,
+        });
     }
 }
 
 fn project_terminal_modes(
-    mut inbound: MessageReader<ServiceInbound>,
+    mut inbound: MessageReader<ProcessTerminalMode>,
     process_index: Single<&TerminalProcessIndex>,
     mut terminals: Query<(&mut TerminalMode, &mut TerminalCopyMode), With<Terminal>>,
 ) {
     for inbound in inbound.read() {
-        let ServiceMessage::TerminalMode {
-            process_id,
-            mouse_capture,
-            copy_mode,
-            alt_screen,
-            focus_reporting,
-        } = &inbound.0
-        else {
-            continue;
-        };
-        let Some(entity) = process_index.get(process_id) else {
+        let Some(entity) = process_index.get(&inbound.process_id) else {
             continue;
         };
         let Ok((mut mode, mut copy_mode_state)) = terminals.get_mut(entity) else {
             continue;
         };
         *mode = TerminalMode {
-            mouse_capture: *mouse_capture,
-            copy_mode: *copy_mode,
-            alt_screen: *alt_screen,
-            focus_reporting: *focus_reporting,
+            mouse_capture: inbound.mouse_capture,
+            copy_mode: inbound.copy_mode,
+            alt_screen: inbound.alt_screen,
+            focus_reporting: inbound.focus_reporting,
         };
-        copy_mode_state.set(*copy_mode);
+        copy_mode_state.set(inbound.copy_mode);
     }
 }
 
@@ -236,6 +279,8 @@ fn project_terminal_modes(
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
+    use vmux_api::protocol::ServiceMessage;
+    use vmux_core::service::ServiceInbound;
 
     #[test]
     fn transport_envelopes_become_terminal_messages() {

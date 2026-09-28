@@ -12,9 +12,8 @@ use vmux_api::protocol::{
     AgentSpace, AgentVaultStatus, AgentWorkingDirectory, ClientMessage, JsonValue, ProcessId,
 };
 use vmux_command::WriteCommandRequests;
-use vmux_core::service::ServiceRequest;
+use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_setting::AppSettings;
-use vmux_terminal::ServiceMessageSet;
 
 use crate::event::{
     AgentQueryRequest, RecordStartRequest, RecordStartResponse, RecordStopRequest,

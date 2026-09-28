@@ -17,7 +17,9 @@ impl Plugin for AttentionPlugin {
             Update,
             (
                 agent_bell_to_attention,
-                handle_agent_turn_ended.in_set(TurnEndedSet),
+                handle_agent_turn_ended
+                    .in_set(TurnEndedSet)
+                    .after(vmux_core::service::ServiceMessageSet),
             )
                 .chain()
                 .after(vmux_layout::stack::ComputeFocusSet),

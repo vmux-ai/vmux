@@ -1,9 +1,10 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use vmux_api::protocol::ProcessId;
+use vmux_core::service::ServiceMessageSet;
 
 use crate::host::input_queue::{InputQueuePlugin, QueueTerminalInput, TerminalProcessIndex};
-use crate::host::plugin::{ServiceMessageSet, TerminalStackSpawnRequest};
+use crate::host::plugin::TerminalStackSpawnRequest;
 use crate::{ProcessExited, Terminal};
 
 pub struct TerminalRequestPlugin;

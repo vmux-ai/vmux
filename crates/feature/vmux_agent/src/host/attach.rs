@@ -7,9 +7,8 @@ use vmux_api::protocol::{AgentCommandResult, AgentResumeInAcp, ClientMessage, Pr
 use vmux_command::WriteCommandRequests;
 use vmux_core::PageMetadata;
 use vmux_core::agent::AgentKind;
-use vmux_core::service::ServiceRequest;
+use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_setting::AppSettings;
-use vmux_terminal::ServiceMessageSet;
 use vmux_terminal::Terminal;
 use vmux_terminal::launch::TerminalLaunch;
 

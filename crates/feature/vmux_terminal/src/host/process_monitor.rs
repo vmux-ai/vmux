@@ -55,7 +55,7 @@ impl Plugin for ProcessMonitorPlugin {
                     broadcast_to_monitors,
                 )
                     .chain()
-                    .after(crate::plugin::ServiceMessageSet),
+                    .after(vmux_core::service::ServiceMessageSet),
             )
             .add_systems(
                 Update,

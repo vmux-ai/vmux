@@ -2,6 +2,7 @@ mod app_plugin;
 mod bin_event;
 mod contract;
 mod native_page;
+mod service_message;
 mod string_id;
 mod ui_event_variants;
 mod ui_state;
@@ -104,6 +105,15 @@ pub fn ui_state_patch(args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn page(args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match native_page::expand(args.into(), input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn service_message(args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match service_message::expand(args.into(), input) {
         Ok(tokens) => tokens.into(),
         Err(error) => error.to_compile_error().into(),
     }

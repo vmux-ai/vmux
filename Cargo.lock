@@ -10455,6 +10455,7 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_flex",
+ "vmux_macro",
  "vmux_path",
  "vmux_profile",
  "vmux_transport",

@@ -8,9 +8,9 @@ use vmux_api::protocol::{AgentFileSearch, AgentFileTouched};
 use vmux_command::WriteCommandRequests;
 use vmux_core::agent::AgentKind;
 use vmux_core::event::{ExplorerSearchFile, ExplorerSearchMatch};
+use vmux_core::service::ServiceMessageSet;
 use vmux_layout::pane::Pane;
 use vmux_setting::AppSettings;
-use vmux_terminal::ServiceMessageSet;
 
 use crate::event::{AgentRequestInput, CommandOrigin};
 use crate::session::AgentSession;

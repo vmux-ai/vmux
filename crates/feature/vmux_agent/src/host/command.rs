@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, AgentNotify};
 use vmux_command::WriteCommandRequests;
 use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
-use vmux_terminal::ServiceMessageSet;
+use vmux_core::service::ServiceMessageSet;
 
 use crate::host::event::CommandOrigin;
 

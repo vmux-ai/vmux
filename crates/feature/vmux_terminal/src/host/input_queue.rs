@@ -4,12 +4,10 @@ use bevy::ecs::entity::EntityHashMap;
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use vmux_api::protocol::{ClientMessage, ProcessId};
-use vmux_core::service::ServiceConnected;
-use vmux_core::service::ServiceRequest;
+use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
 
 use super::plugin::{
-    AwaitingProcessCreated, PendingServiceCreate, ServiceMessageSet, ShellOutputSeen,
-    TerminalReinputRequest,
+    AwaitingProcessCreated, PendingServiceCreate, ShellOutputSeen, TerminalReinputRequest,
 };
 use crate::{ProcessExited, Terminal};
 

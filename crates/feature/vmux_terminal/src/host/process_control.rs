@@ -2,13 +2,10 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput, WebviewSize};
 use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_core::page::PageReady;
-use vmux_core::service::ServiceConnected;
-use vmux_core::service::ServiceRequest;
+use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
 
 use crate::Terminal;
 use crate::event::{TermResizeEvent, TermScrollEvent};
-
-use super::plugin::ServiceMessageSet;
 
 pub(super) struct ProcessControlPlugin;
 

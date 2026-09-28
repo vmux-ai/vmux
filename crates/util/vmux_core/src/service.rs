@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,6 +31,58 @@ pub struct ServiceRequest(pub vmux_api::protocol::ClientMessage);
 #[cfg(host)]
 #[derive(Clone, Message)]
 pub struct ServiceInbound(pub vmux_api::protocol::ServiceMessage);
+
+#[cfg(host)]
+pub trait ServiceMessageVariant: Message + Sized {
+    fn from_service_message(message: &ServiceMessage) -> Option<Self>;
+}
+
+#[cfg(host)]
+pub struct ServiceMessagePlugin<M>(PhantomData<fn() -> M>);
+
+#[cfg(host)]
+impl<M> Default for ServiceMessagePlugin<M> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+#[cfg(host)]
+impl<M> Plugin for ServiceMessagePlugin<M>
+where
+    M: ServiceMessageVariant,
+{
+    fn build(&self, app: &mut App) {
+        app.add_message::<ServiceInbound>()
+            .add_message::<M>()
+            .configure_sets(Update, (ServiceMessageDecodeSet, ServiceMessageSet).chain())
+            .add_systems(
+                Update,
+                route_service_message::<M>.in_set(ServiceMessageDecodeSet),
+            );
+    }
+}
+
+#[cfg(host)]
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ServiceMessageSet;
+
+#[cfg(host)]
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct ServiceMessageDecodeSet;
+
+#[cfg(host)]
+fn route_service_message<M: ServiceMessageVariant>(
+    mut inbound: MessageReader<ServiceInbound>,
+    mut messages: MessageWriter<M>,
+) {
+    for inbound in inbound.read() {
+        let Some(message) = M::from_service_message(&inbound.0) else {
+            continue;
+        };
+        messages.write(message);
+    }
+}
 
 #[cfg(host)]
 #[derive(Component)]

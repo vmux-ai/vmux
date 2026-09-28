@@ -8,13 +8,13 @@ use vmux_api::protocol::{
 pub use vmux_api::protocol::ApprovalDecision;
 pub use vmux_core::agent::{AgentRequestInput, CommandOrigin};
 
-#[derive(Message)]
+#[vmux_core::service_message(AgentQuery)]
 pub struct AgentQueryRequest {
     pub request_id: AgentRequestId,
     pub query: AgentRequest,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(AgentToolCall)]
 pub struct AgentToolCallRequest {
     pub request_id: AgentRequestId,
     pub sid: String,
@@ -22,13 +22,13 @@ pub struct AgentToolCallRequest {
     pub args: JsonValue,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(Shared(SharedEvent::AgentDelta))]
 pub struct UiAgentDelta {
     pub sid: String,
     pub text: String,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(Shared(SharedEvent::AgentRunStatusChanged))]
 pub struct UiAgentRunStatus {
     pub sid: String,
     pub status: AgentRunStatus,
@@ -42,25 +42,25 @@ pub struct UiAgentAwaitingApproval {
     pub args: Value,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(Shared(SharedEvent::AgentApprovalResolved))]
 pub struct UiAgentApprovalResolved {
     pub sid: String,
     pub call_id: String,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(Shared(SharedEvent::AgentMessagesSnapshot))]
 pub struct UiAgentSnapshot {
     pub sid: String,
     pub messages: Vec<vmux_api::room::Message>,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(Shared(SharedEvent::AcpAgentInfo))]
 pub struct UiAgentInfo {
     pub sid: String,
     pub name: String,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(Shared(SharedEvent::AcpWorkspaceChanged))]
 pub struct UiAgentWorkspaceChanged {
     pub sid: String,
     pub name: String,
@@ -69,7 +69,7 @@ pub struct UiAgentWorkspaceChanged {
     pub workspace_cwd: String,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(Shared(SharedEvent::AcpModelInfo))]
 pub struct UiAgentModelInfo {
     pub sid: String,
     pub config_id: String,
@@ -77,7 +77,7 @@ pub struct UiAgentModelInfo {
     pub models: Vec<AcpModelOption>,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(AcpModelSelectionResult)]
 pub struct UiAgentModelSelectionResult {
     pub sid: String,
     pub request_id: u64,
@@ -85,7 +85,7 @@ pub struct UiAgentModelSelectionResult {
     pub succeeded: bool,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(AcpModeInfo)]
 pub struct UiAgentModeInfo {
     pub sid: String,
     pub config_id: String,
@@ -93,7 +93,7 @@ pub struct UiAgentModeInfo {
     pub modes: Vec<AcpModeOption>,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(AcpModeSelectionResult)]
 pub struct UiAgentModeSelectionResult {
     pub sid: String,
     pub request_id: u64,
@@ -101,13 +101,13 @@ pub struct UiAgentModeSelectionResult {
     pub succeeded: bool,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(AcpSessionCreated)]
 pub struct UiAgentSessionCreated {
     pub sid: String,
     pub acp_session_id: String,
 }
 
-#[derive(Message)]
+#[vmux_core::service_message(AcpTerminalCreated)]
 pub struct UiAgentAcpTerminalCreated {
     pub sid: String,
     pub terminal_id: String,

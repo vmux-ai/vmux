@@ -8,15 +8,12 @@ use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
     PageAgentSpawnStackRequest, RestartAgentPty, SpawnAgentInStackRequest,
 };
-use vmux_core::service::ServiceConnected;
-use vmux_core::service::ServiceRequest;
+use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
 use vmux_core::{LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled};
 use vmux_layout::pane::ForcePaneClose;
 use vmux_setting::AppSettings;
 use vmux_terminal::launch::TerminalLaunch;
-use vmux_terminal::{
-    ProcessExited, ServiceMessageSet, TerminalGridSize, new_terminal_bundle_with_cwd,
-};
+use vmux_terminal::{ProcessExited, TerminalGridSize, new_terminal_bundle_with_cwd};
 
 use crate::session::{AgentSession, AgentSessionExited, PendingAgentSession, SessionId};
 use crate::strategy::AgentStrategies;

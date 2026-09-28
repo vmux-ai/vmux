@@ -45,7 +45,7 @@ impl Plugin for ChatModelPlugin {
             .add_systems(
                 Update,
                 (
-                    answer_remote_model_commands,
+                    answer_remote_model_commands.after(vmux_core::service::ServiceMessageSet),
                     seed_cli_model_lists,
                     apply_model_selection,
                     apply_mode_selection,

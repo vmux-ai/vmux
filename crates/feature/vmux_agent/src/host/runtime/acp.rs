@@ -38,17 +38,20 @@ impl Plugin for AcpAgentPlugin {
                 (
                     send_acp_input,
                     receive_catalog,
-                    apply_acp_agent_info,
-                    apply_acp_workspace_changed,
                     (
-                        apply_acp_model_info.in_set(AcpModelInfoSet),
-                        apply_acp_model_selection_result,
-                        apply_acp_mode_info,
-                        apply_acp_mode_selection_result,
+                        apply_acp_agent_info,
+                        apply_acp_workspace_changed,
+                        (
+                            apply_acp_model_info.in_set(AcpModelInfoSet),
+                            apply_acp_model_selection_result,
+                            apply_acp_mode_info,
+                            apply_acp_mode_selection_result,
+                        )
+                            .chain(),
+                        apply_acp_session_created,
+                        apply_acp_terminal_created,
                     )
-                        .chain(),
-                    apply_acp_session_created,
-                    apply_acp_terminal_created,
+                        .after(vmux_core::service::ServiceMessageSet),
                 ),
             )
             .add_observer(close_acp_session_on_remove)

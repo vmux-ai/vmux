@@ -3,11 +3,12 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use vmux_api::protocol::ProcessId;
 use vmux_core::page::PageReady;
+use vmux_core::service::ServiceMessageSet;
 
 use crate::Terminal;
 use crate::event::{AgentPromptDraftEvent, TermLoadingEvent};
 
-use super::plugin::{ServiceMessageSet, ShellOutputSeen};
+use super::plugin::ShellOutputSeen;
 use super::prompt::{BufferedAgentPrompt, PromptCapture};
 use super::state::TerminalMode;
 
