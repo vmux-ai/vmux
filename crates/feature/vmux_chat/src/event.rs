@@ -161,11 +161,8 @@ pub struct SelectMode {
     pub mode_id: String,
 }
 
-#[vmux_api::ui_event(Default)]
-pub struct ChatHistoryRequest {
-    pub generation: u64,
-    pub request_id: u64,
-}
+#[vmux_api::ui_event]
+pub struct ChatHistoryMoreRequest;
 
 #[vmux_api::contract(Default, Eq)]
 pub struct ChatTranscriptState {
@@ -265,10 +262,8 @@ pub struct ChatSelectorDismissEffect {
 #[vmux_api::ui_event]
 pub struct ChatSelectWorkspace;
 
-#[vmux_api::ui_event(Default)]
-pub struct ChatBranchesRequest {
-    pub project: String,
-}
+#[vmux_api::ui_event]
+pub struct ChatBranchesRequest;
 
 #[vmux_api::contract(Default)]
 pub struct ChatBranchesState {

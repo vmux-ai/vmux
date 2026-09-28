@@ -9,7 +9,7 @@ use vmux_api::protocol::{
 use vmux_chat::event::{
     ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
 };
-use vmux_chat::host::{ChatBranchesProjection, ChatView};
+use vmux_chat::host::{ChatBranchesProjection, ChatComposerContext, ChatView};
 use vmux_core::agent::{AgentRequestInput, CommandOrigin};
 use vmux_session::AcpSession;
 use vmux_session::AgentApprovalPolicy;
@@ -41,19 +41,17 @@ struct ComposerContextInput {
     projects: Vec<vmux_core::event::ProjectRow>,
 }
 
-#[derive(Default)]
-struct ComposerContextCache {
-    entries: std::collections::HashMap<Entity, ComposerContextCacheEntry>,
-}
-
-struct ComposerContextCacheEntry {
-    input: ComposerContextInput,
-    context: ComposerContext,
-}
-
 #[allow(clippy::too_many_arguments)]
 fn push_composer_context_to_page(
-    views: Query<(Entity, &ChildOf, Ref<vmux_core::page::PageReady>), With<ChatView>>,
+    mut views: Query<
+        (
+            Entity,
+            &ChildOf,
+            Ref<vmux_core::page::PageReady>,
+            &mut ChatComposerContext,
+        ),
+        With<ChatView>,
+    >,
     sessions: Query<(Option<&AcpSession>, Option<&AgentApprovalPolicy>)>,
     child_of: Query<&ChildOf>,
     tabs: Query<(
@@ -64,17 +62,9 @@ fn push_composer_context_to_page(
     browsers: NonSend<Browsers>,
     mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
     space_projects: SpaceProjects,
-    mut cache: Local<ComposerContextCache>,
     mut commands: Commands,
 ) {
-    let live_views = views
-        .iter()
-        .map(|(webview, _, _)| webview)
-        .collect::<std::collections::HashSet<_>>();
-    cache
-        .entries
-        .retain(|webview, _| live_views.contains(webview));
-    for (webview, parent, ready) in &views {
+    for (webview, parent, ready, mut current) in &mut views {
         if !browsers.can_emit_to(&webview) {
             continue;
         }
@@ -92,10 +82,10 @@ fn push_composer_context_to_page(
             })
             .flatten();
         let context = composer_context_from_input(&input, info.as_ref());
-        let changed = cache
-            .entries
-            .get(&webview)
-            .is_none_or(|entry| entry.input != input || entry.context != context);
+        let changed = current.0 != context;
+        if changed {
+            current.0.clone_from(&context);
+        }
         if changed || ready.is_changed() {
             commands.trigger(
                 vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
@@ -103,9 +93,6 @@ fn push_composer_context_to_page(
                 ),
             );
         }
-        cache
-            .entries
-            .insert(webview, ComposerContextCacheEntry { input, context });
     }
 }
 
@@ -205,18 +192,17 @@ struct BranchRead {
 fn on_chat_branches_request(
     trigger: On<UiInput<ChatBranchesRequest>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut projections: Query<&mut ChatBranchesProjection, With<ChatView>>,
+    mut projections: Query<(&ChatComposerContext, &mut ChatBranchesProjection), With<ChatView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let request = &trigger.event().payload;
-    let project = request.project.trim().to_string();
+    let Ok((context, mut projection)) = projections.get_mut(webview) else {
+        return;
+    };
+    let project = context.0.cwd.trim().to_string();
     if project.is_empty() {
         return;
     }
-    let Ok(mut projection) = projections.get_mut(webview) else {
-        return;
-    };
     let request_id = projection.start(project.clone());
     commands.trigger(
         vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(

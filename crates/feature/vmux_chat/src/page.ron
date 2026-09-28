@@ -9,7 +9,7 @@
         "ThemeEvent",
         "ChatUiState",
         "SelectMode",
-        "ChatHistoryRequest",
+        "ChatHistoryMoreRequest",
         "ChatSubmit",
         "ChatDraftChanged",
         "ChatRemoveAttachment",

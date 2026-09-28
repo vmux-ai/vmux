@@ -9,7 +9,7 @@ use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
 #[cfg(test)]
 use vmux_chat::event::ChatItem;
 use vmux_chat::event::{
-    CHAT_INITIAL_ITEM_LIMIT, ChatHistoryRequest, ChatSnapshot, PendingApproval,
+    CHAT_INITIAL_ITEM_LIMIT, ChatHistoryMoreRequest, ChatSnapshot, PendingApproval,
     QueuedPromptSnapshot,
 };
 use vmux_chat::host::{
@@ -27,8 +27,8 @@ pub(super) struct ChatTranscriptPlugin;
 
 impl Plugin for ChatTranscriptPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(ChatHistoryRequest,)>::default())
-            .add_observer(on_chat_history_request)
+        app.add_plugins(UiEventPlugin::<(ChatHistoryMoreRequest,)>::default())
+            .add_observer(on_chat_history_more_request)
             .add_observer(reset_chat_synced_on_page_ready)
             .add_systems(
                 Update,
@@ -469,8 +469,8 @@ fn reset_chat_synced_on_page_ready(
     }
 }
 
-fn on_chat_history_request(
-    trigger: On<UiInput<ChatHistoryRequest>>,
+fn on_chat_history_more_request(
+    trigger: On<UiInput<ChatHistoryMoreRequest>>,
     mut views: Query<(&ChildOf, &mut ChatTranscriptProjection), With<ChatView>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -482,9 +482,7 @@ fn on_chat_history_request(
     let Ok((parent, mut transcript)) = views.get_mut(webview) else {
         return;
     };
-    let Some(query) =
-        transcript.start_history_query(webview, parent.parent(), &trigger.event().payload)
-    else {
+    let Some(query) = transcript.start_history_query(webview, parent.parent()) else {
         return;
     };
     commands.spawn(query);
@@ -746,17 +744,10 @@ mod tests {
             start: 2,
             total: 4,
         }));
-        let generation = transcript.state.generation;
         let query = transcript
-            .start_history_query(
-                webview,
-                session,
-                &ChatHistoryRequest {
-                    generation,
-                    request_id: 1,
-                },
-            )
+            .start_history_query(webview, session)
             .expect("valid history request");
+        let generation = query.generation;
         assert!(transcript.state.loading);
         assert!(transcript.finish_history_query(&ChatHistoryResult {
             webview,
@@ -786,29 +777,24 @@ mod tests {
             start: 2,
             total: 4,
         });
-        let generation = transcript.state.generation;
-        assert!(
-            transcript
-                .start_history_query(
-                    webview,
-                    session,
-                    &ChatHistoryRequest {
-                        generation: generation.saturating_sub(1),
-                        request_id: 1,
-                    },
-                )
-                .is_none()
-        );
+        let stale = transcript
+            .start_history_query(webview, session)
+            .expect("initial generation");
+        transcript.merge_tail(TranscriptTail {
+            items: vec![ChatItem::user("replacement")],
+            start: 1,
+            total: 2,
+        });
+        assert!(!transcript.finish_history_query(&ChatHistoryResult {
+            webview,
+            generation: stale.generation,
+            request_id: stale.request_id,
+            page: None,
+        }));
         let query = transcript
-            .start_history_query(
-                webview,
-                session,
-                &ChatHistoryRequest {
-                    generation,
-                    request_id: 2,
-                },
-            )
+            .start_history_query(webview, session)
             .expect("current generation");
+        let generation = query.generation;
         assert!(transcript.finish_history_query(&ChatHistoryResult {
             webview,
             generation,
@@ -820,8 +806,8 @@ mod tests {
                 total: 4,
             }),
         }));
-        assert_eq!(transcript.state.loaded_start, 2);
-        assert_eq!(transcript.state.items.len(), 2);
+        assert_eq!(transcript.state.loaded_start, 1);
+        assert_eq!(transcript.state.items.len(), 1);
         assert!(!transcript.state.loading);
     }
 

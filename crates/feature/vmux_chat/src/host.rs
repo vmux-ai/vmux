@@ -3,8 +3,8 @@ use bevy_ecs::prelude::*;
 use crate::composer::ComposerState;
 use crate::event::{
     CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_HISTORY_PAGE_SIZE, ChatAttachment, ChatBranch,
-    ChatBranchesState, ChatHistoryRequest, ChatItem, ChatMediaState, ChatResumeState, ChatSnapshot,
-    ChatTranscriptState, ResumableSessions,
+    ChatBranchesState, ChatItem, ChatMediaState, ChatResumeState, ChatSnapshot,
+    ChatTranscriptState, ComposerContext, ResumableSessions,
 };
 
 type ChatUiStateUpdates = vmux_core::host::UiState<crate::state::ChatUiState>;
@@ -15,10 +15,14 @@ type ChatUiStateUpdates = vmux_core::host::UiState<crate::state::ChatUiState>;
     ChatAttachmentProjection,
     ChatSnapshotProjection,
     ChatMediaProjection,
+    ChatComposerContext,
     ComposerState,
     crate::key::ChatKeyEffectRevision
 )]
 pub struct ChatView;
+
+#[derive(Component, Default)]
+pub struct ChatComposerContext(pub ComposerContext);
 
 #[derive(Component, Default)]
 pub struct ChatSnapshotProjection(pub ChatSnapshot);
@@ -112,22 +116,17 @@ impl ChatTranscriptProjection {
         &mut self,
         webview: Entity,
         session: Entity,
-        request: &ChatHistoryRequest,
     ) -> Option<ChatHistoryQuery> {
-        if request.generation != self.state.generation
-            || request.request_id <= self.state.request_id
-            || self.state.loaded_start == 0
-            || self.state.loading
-        {
+        if self.state.loaded_start == 0 || self.state.loading {
             return None;
         }
-        self.state.request_id = request.request_id;
+        self.state.request_id = self.state.request_id.wrapping_add(1).max(1);
         self.state.loading = true;
         Some(ChatHistoryQuery {
             webview,
             session,
-            generation: request.generation,
-            request_id: request.request_id,
+            generation: self.state.generation,
+            request_id: self.state.request_id,
             before: self.state.loaded_start,
             limit: CHAT_HISTORY_PAGE_SIZE.min(CHAT_HISTORY_MAX_PAGE_SIZE),
         })

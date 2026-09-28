@@ -3,8 +3,8 @@ use crate::event::ChatResumeState;
 use crate::event::{
     ApprovalDecision, ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachments, ChatBranch,
     ChatBranchesRequest, ChatBranchesState, ChatChoiceSelected, ChatComposerEffect,
-    ChatDraftChanged, ChatHistoryMoveEffect, ChatHistoryRequest, ChatItem, ChatListChooseEffect,
-    ChatListMoveEffect, ChatMediaEntry, ChatMediaState, ChatRemoveAttachment,
+    ChatDraftChanged, ChatHistoryMoreRequest, ChatHistoryMoveEffect, ChatItem,
+    ChatListChooseEffect, ChatListMoveEffect, ChatMediaEntry, ChatMediaState, ChatRemoveAttachment,
     ChatSelectorDismissEffect, ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit,
     ChatTranscriptState, ComposerContext, ModelOptionEntry, QueuedPromptSnapshot,
     ResumableSessionEntry, ResumeSession, SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
@@ -318,7 +318,6 @@ impl Chat {
         set_if_changed(transcript.messages_total, state.total);
         set_if_changed(transcript.history_loading, state.loading);
         set_if_changed(transcript.generation, state.generation);
-        set_if_changed(transcript.request_id, state.request_id);
         set_if_changed(transcript.prepend_revision, state.prepend_revision);
         set_if_changed(transcript.active_subagents, state.active_subagents);
         set_if_changed(transcript.active_tasks, state.active_tasks);
@@ -328,17 +327,7 @@ impl Chat {
     }
 
     pub fn request_history(&self) {
-        let transcript = self.transcript;
-        let before = (self.transcript.loaded_start)();
-        let generation = (transcript.generation)();
-        if before == 0 || generation == 0 || (transcript.history_loading)() {
-            return;
-        }
-        let request_id = (transcript.request_id)().saturating_add(1);
-        let _ = send(&ChatHistoryRequest {
-            generation,
-            request_id,
-        });
+        let _ = send(&ChatHistoryMoreRequest);
     }
 }
 
@@ -656,13 +645,10 @@ impl Chat {
             return None;
         }
         let chat = *self;
-        let owner = context.cwd.clone();
         let open = EventHandler::new(move |()| {
             chat.open_menu(ComposerMenuKind::Branch);
-            if chat.menu.is(ComposerMenuKind::Branch) && !owner.is_empty() {
-                let _ = send(&ChatBranchesRequest {
-                    project: owner.clone(),
-                });
+            if chat.menu.is(ComposerMenuKind::Branch) {
+                let _ = send(&ChatBranchesRequest);
             }
         });
         if context.branch.is_empty() {
@@ -852,7 +838,6 @@ pub struct Transcript {
     pub messages_total: Signal<u32>,
     pub history_loading: Signal<bool>,
     pub generation: Signal<u64>,
-    pub request_id: Signal<u64>,
     pub prepend_revision: Signal<u64>,
     pub active_subagents: Signal<u32>,
     pub active_tasks: Signal<u32>,
@@ -868,7 +853,6 @@ pub fn use_transcript() -> Transcript {
         messages_total: use_signal(|| 0),
         history_loading: use_signal(|| false),
         generation: use_signal(|| 0),
-        request_id: use_signal(|| 0),
         prepend_revision: use_signal(|| 0),
         active_subagents: use_signal(|| 0),
         active_tasks: use_signal(|| 0),
