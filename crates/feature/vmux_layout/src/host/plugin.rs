@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use vmux_core::host::persistence::PersistenceAppExt;
 
 use super::agent::LayoutAgentPlugin;
 use super::command::LayoutRequestPlugin;
@@ -40,7 +41,7 @@ impl Plugin for LayoutPlugin {
         }
         app.add_systems(Startup, spawn_update_state)
             .add_plugins((LayoutContractPlugin, LayoutRequestPlugin, LayoutAgentPlugin))
-            .register_type::<Open>()
+            .register_persisted::<Open>()
             .init_resource::<settings::ConfirmCloseSettings>()
             .init_resource::<settings::ResolvedLocale>()
             .add_message::<TerminalLayoutSpawnRequest>()

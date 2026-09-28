@@ -43,6 +43,7 @@ use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::{ProcessExited, RetainOnProcessExit, Terminal};
 use vmux_core::KeyboardOwner;
+use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_core::service::ServiceMessageSet;
 use vmux_flex::prelude::*;
 
@@ -77,7 +78,7 @@ impl Plugin for TerminalPlugin {
             crate::TerminalToolPlugin,
         ))
         .add_plugins(crate::contract::TerminalContractPlugin)
-        .register_type::<crate::launch::TerminalLaunch>()
+        .register_persisted::<crate::launch::TerminalLaunch>()
         .register_type::<crate::launch::TerminalKind>()
         .add_message::<TerminalStackSpawnRequest>()
         .add_message::<TerminalSpawnRequest>()

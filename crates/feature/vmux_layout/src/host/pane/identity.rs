@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
+use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_history::LastActivatedAt;
 
 use super::{Pane, PaneSplit, first_leaf_descendant, leaf_pane_bundle};
@@ -9,7 +10,7 @@ pub(super) struct IdentityPlugin;
 
 impl Plugin for IdentityPlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<PaneId>()
+        app.register_persisted::<PaneId>()
             .register_type::<SpawnSeq>()
             .add_systems(Update, repair_stacks_parented_to_splits)
             .add_systems(Update, stamp_spawn_seq)

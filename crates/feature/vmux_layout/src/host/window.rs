@@ -13,6 +13,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
+use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_core::page::PageEmbedSet;
 use vmux_core::{PageOpenRequest, PageOpenSet, PageOpenTarget};
 use vmux_flex::prelude::*;
@@ -28,7 +29,7 @@ impl Plugin for WindowLayoutPlugin {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
         app.add_message::<MinimizeWindowRequest>()
-            .register_type::<WindowGeometry>()
+            .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
             .add_systems(

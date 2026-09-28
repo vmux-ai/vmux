@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use vmux_core::host::persistence::PersistenceAppExt;
 
 mod agent;
 mod index;
@@ -14,7 +15,7 @@ impl Plugin for KnowledgePlugin {
                 agent::KnowledgeAgentPlugin,
                 index::KnowledgeIndexPlugin,
             ))
-            .register_type::<ExpandedKnowledgeDirs>();
+            .register_persisted::<ExpandedKnowledgeDirs>();
     }
 }
 

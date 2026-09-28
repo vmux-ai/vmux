@@ -5,11 +5,12 @@ use bevy::prelude::*;
 use bevy::{ecs::system::NonSendMarker, winit::WINIT_WINDOWS};
 #[cfg(target_os = "macos")]
 use bevy_cef::prelude::HostWindow;
+use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
 
 impl Plugin for SideSheetLayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<SideSheetSectionsExpanded>()
+        app.register_persisted::<SideSheetSectionsExpanded>()
             .register_type::<SideSheetPaneExpanded>()
             .add_systems(
                 PostUpdate,

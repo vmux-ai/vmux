@@ -14,6 +14,7 @@ use moonshine_save::prelude::*;
 use vmux_command::CommandDefinition;
 use vmux_command::{CommandDefinitions, CommandInvocation};
 use vmux_core::Order;
+use vmux_core::host::persistence::PersistenceAppExt;
 pub use vmux_core::workspace::TabCommandSet;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
@@ -25,11 +26,11 @@ pub struct TabPlugin;
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(TabCommandPlugin)
-            .register_type::<Tab>()
+            .register_persisted::<Tab>()
             .register_type::<Option<String>>()
-            .register_type::<TabWorkspace>()
-            .register_type::<TabWorktree>()
-            .register_type::<TabDirDecided>()
+            .register_persisted::<TabWorkspace>()
+            .register_persisted::<TabWorktree>()
+            .register_persisted::<TabDirDecided>()
             .add_message::<CloseTabRequest>()
             .add_message::<crate::NewTabRequest>()
             .add_message::<vmux_core::launcher::LauncherDismissRequest>()

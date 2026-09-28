@@ -3,6 +3,7 @@ use bevy_cef::prelude::*;
 use vmux_core::event::{
     ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPanelViewSet, ExplorerPanelWidth,
 };
+use vmux_core::host::persistence::PersistenceAppExt;
 
 use super::{ExplorerPanelDefaults, ExplorerPanelSent, RevealCurrent, StackExplorerRevision};
 use crate::host::editor::FileView;
@@ -12,7 +13,7 @@ pub(super) struct PanelPlugin;
 impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_explorer_panel_defaults)
-            .register_type::<StackExplorerVisibility>()
+            .register_persisted::<StackExplorerVisibility>()
             .add_systems(Update, (load_explorer_panel_defaults, emit_explorer_panel))
             .add_observer(toggle_explorer)
             .add_observer(reveal_in_explorer)

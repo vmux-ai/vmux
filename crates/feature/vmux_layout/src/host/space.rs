@@ -1,14 +1,15 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
 use moonshine_save::prelude::*;
+use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
 
 use super::command::LayoutRequestSet;
 
 impl Plugin for SpaceLayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<Space>()
-            .register_type::<SpaceId>()
+        app.register_persisted::<Space>()
+            .register_persisted::<SpaceId>()
             .add_systems(
                 Update,
                 (

@@ -1,11 +1,12 @@
 use bevy::prelude::*;
+use vmux_core::host::persistence::PersistenceAppExt;
 
 pub struct SpaceProjectPlugin;
 
 impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_repository_roots)
-            .register_type::<ExpandedProjectDirs>()
+            .register_persisted::<ExpandedProjectDirs>()
             .add_observer(on_project_tree_toggle)
             .add_systems(
                 Update,

@@ -10,18 +10,31 @@ use std::path::{Path, PathBuf};
 
 use vmux_browser::Browser;
 use vmux_core::host::page::NativelyHosted;
-use vmux_core::{
-    ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, Order, PageMetadata,
-};
+#[cfg(test)]
+use vmux_core::host::persistence::PersistenceAppExt;
+use vmux_core::host::persistence::{PersistenceDirty, persisted_components};
+#[cfg(test)]
+use vmux_core::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage};
+use vmux_core::{CreatedAt, Order, PageMetadata};
 use vmux_flex::prelude::*;
+#[cfg(test)]
 use vmux_layout::profile::Profile;
-use vmux_layout::space::{Space, SpaceId};
+use vmux_layout::space::Space;
+#[cfg(test)]
+use vmux_layout::space::SpaceId;
 use vmux_layout::{
-    LayoutStartupSet, Open, SpaceFilePresent,
-    pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
+    LayoutStartupSet, SpaceFilePresent,
+    pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
     stack::Stack,
-    tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree},
-    window::{Main, WindowGeometry},
+    tab::Tab,
+    window::Main,
+};
+#[cfg(test)]
+use vmux_layout::{
+    Open,
+    pane::PaneId,
+    tab::{TabDirDecided, TabWorkspace, TabWorktree},
+    window::WindowGeometry,
 };
 use vmux_setting::AppSettings;
 use vmux_terminal::Terminal;
@@ -47,6 +60,7 @@ impl Plugin for PersistencePlugin {
             )
             .add_systems(Startup, rebuild_space_views.in_set(LayoutStartupSet::Post))
             .add_observer(mark_space_views_need_rebuild)
+            .add_observer(mark_persistence_dirty)
             .add_systems(
                 Update,
                 (rebuild_space_views, clear_space_views_need_rebuild)
@@ -56,7 +70,7 @@ impl Plugin for PersistencePlugin {
             .add_systems(
                 Update,
                 (
-                    (mark_dirty_on_change, auto_save_system).chain(),
+                    auto_save_system,
                     sync_launch_to_stack,
                     handle_save_space_requests,
                 ),
@@ -64,13 +78,19 @@ impl Plugin for PersistencePlugin {
     }
 }
 
-fn spawn_space_persistence(mut commands: Commands) {
+fn spawn_space_persistence(registry: Res<AppTypeRegistry>, mut commands: Commands) {
+    let components = persisted_components(&registry.read())
+        .allow::<Save>()
+        .allow::<ChildOf>()
+        .allow::<Children>()
+        .allow::<Name>();
     commands.spawn((
         Name::new("Space persistence"),
         AutoSave {
             debounce: Timer::from_seconds(0.5, TimerMode::Once),
             periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
             dirty: false,
+            components,
         },
     ));
 }
@@ -78,6 +98,7 @@ fn spawn_space_persistence(mut commands: Commands) {
 fn handle_save_space_requests(
     mut requests: MessageReader<vmux_space::SaveSpaceRequest>,
     save_entities: SpaceSaveEntities,
+    persistence: Single<&AutoSave>,
     mut commands: Commands,
 ) {
     for request in requests.read() {
@@ -85,6 +106,7 @@ fn handle_save_space_requests(
             &mut commands,
             request.path.clone(),
             save_entities.excluded(),
+            persistence.components.clone(),
         );
     }
 }
@@ -116,6 +138,7 @@ struct AutoSave {
     debounce: Timer,
     periodic: Timer,
     dirty: bool,
+    components: WorldFilter,
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -142,31 +165,6 @@ impl SpaceSaveEntities<'_, '_> {
                     .is_some_and(|window| window != primary_window)
             })
             .collect()
-    }
-}
-
-#[derive(bevy::ecs::system::SystemParam)]
-struct TabPersistenceChanges<'w, 's> {
-    changed_workspaces: Query<'w, 's, (), Changed<TabWorkspace>>,
-    changed_worktrees: Query<'w, 's, (), Changed<TabWorktree>>,
-    removed_workspaces: RemovedComponents<'w, 's, TabWorkspace>,
-    removed_worktrees: RemovedComponents<'w, 's, TabWorktree>,
-}
-
-#[derive(bevy::ecs::system::SystemParam)]
-struct ViewStateChanges<'w, 's> {
-    explorer: Query<'w, 's, (), Changed<vmux_editor::StackExplorerVisibility>>,
-    sections: Query<'w, 's, (), Changed<vmux_layout::side_sheet::SideSheetSectionsExpanded>>,
-    project_dirs: Query<'w, 's, (), Changed<vmux_space::ExpandedProjectDirs>>,
-    knowledge_dirs: Query<'w, 's, (), Changed<vmux_knowledge::ExpandedKnowledgeDirs>>,
-}
-
-impl ViewStateChanges<'_, '_> {
-    fn any(&self) -> bool {
-        !self.explorer.is_empty()
-            || !self.sections.is_empty()
-            || !self.project_dirs.is_empty()
-            || !self.knowledge_dirs.is_empty()
     }
 }
 
@@ -201,46 +199,9 @@ fn write_store_schema_version(path: &Path) {
     );
 }
 
-fn mark_dirty_on_change(
-    mut auto_save: Single<&mut AutoSave>,
-    added_stacks: Query<(), Added<Stack>>,
-    added_panes: Query<(), Added<Pane>>,
-    added_tabs: Query<(), Added<Tab>>,
-    changed_tabs: Query<(), Changed<Tab>>,
-    mut tab_changes: TabPersistenceChanges,
-    removed_stacks: RemovedComponents<Stack>,
-    removed_panes: RemovedComponents<Pane>,
-    changed_meta: Query<(), (Changed<PageMetadata>, With<Stack>)>,
-    changed_size: Query<(), Changed<PaneSize>>,
-    changed_children: Query<(), Changed<Children>>,
-    changed_geometry: Query<(), Changed<WindowGeometry>>,
-    view_state: ViewStateChanges,
-    added_archived: Query<(), Added<ArchivedPage>>,
-    mut removed_archived: RemovedComponents<ArchivedPage>,
-    added_visits: Query<(), Added<vmux_history::Visit>>,
-) {
-    if !added_stacks.is_empty()
-        || !added_panes.is_empty()
-        || !added_tabs.is_empty()
-        || !changed_tabs.is_empty()
-        || !tab_changes.changed_workspaces.is_empty()
-        || !tab_changes.changed_worktrees.is_empty()
-        || !removed_stacks.is_empty()
-        || !removed_panes.is_empty()
-        || tab_changes.removed_worktrees.read().count() > 0
-        || tab_changes.removed_workspaces.read().count() > 0
-        || !changed_meta.is_empty()
-        || !changed_size.is_empty()
-        || !changed_children.is_empty()
-        || !changed_geometry.is_empty()
-        || view_state.any()
-        || !added_archived.is_empty()
-        || removed_archived.read().count() > 0
-        || !added_visits.is_empty()
-    {
-        auto_save.dirty = true;
-        auto_save.debounce.reset();
-    }
+fn mark_persistence_dirty(_trigger: On<PersistenceDirty>, mut auto_save: Single<&mut AutoSave>) {
+    auto_save.dirty = true;
+    auto_save.debounce.reset();
 }
 
 fn auto_save_system(
@@ -259,25 +220,41 @@ fn auto_save_system(
     if auto_save.dirty {
         auto_save.debounce.tick(time.delta());
         if auto_save.debounce.is_finished() {
-            save_space_to_path_excluding(&mut commands, store_path(), save_entities.excluded());
+            save_space_to_path_excluding(
+                &mut commands,
+                store_path(),
+                save_entities.excluded(),
+                auto_save.components.clone(),
+            );
             auto_save.dirty = false;
         }
     }
 
     if auto_save.periodic.just_finished() {
-        save_space_to_path_excluding(&mut commands, store_path(), save_entities.excluded());
+        save_space_to_path_excluding(
+            &mut commands,
+            store_path(),
+            save_entities.excluded(),
+            auto_save.components.clone(),
+        );
     }
 }
 
 #[cfg(test)]
-pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
-    save_space_to_path_excluding(commands, path, std::iter::empty());
+pub(crate) fn save_space_to_path(world: &mut World, path: PathBuf) {
+    let components = persisted_components(&world.resource::<AppTypeRegistry>().read())
+        .allow::<Save>()
+        .allow::<ChildOf>()
+        .allow::<Children>()
+        .allow::<Name>();
+    save_space_to_path_excluding(&mut world.commands(), path, std::iter::empty(), components);
 }
 
 fn save_space_to_path_excluding(
     commands: &mut Commands,
     path: PathBuf,
     excluded: impl IntoIterator<Item = Entity>,
+    components: WorldFilter,
 ) {
     if vmux_core::profile::is_test_session() {
         return;
@@ -288,43 +265,7 @@ fn save_space_to_path_excluding(
     write_store_schema_version(&path);
     let mut save = SaveWorld::default_into_file(path);
     save.entities = EntityFilter::block(excluded);
-    save.components = WorldFilter::deny_all()
-        .allow::<Save>()
-        .allow::<ChildOf>()
-        .allow::<Children>()
-        .allow::<Name>()
-        .allow::<Stack>()
-        .allow::<Tab>()
-        .allow::<TabWorkspace>()
-        .allow::<TabWorktree>()
-        .allow::<TabDirDecided>()
-        .allow::<Pane>()
-        .allow::<PaneSplit>()
-        .allow::<PaneSize>()
-        .allow::<Space>()
-        .allow::<SpaceId>()
-        .allow::<WindowGeometry>()
-        .allow::<Profile>()
-        .allow::<Open>()
-        .allow::<PageMetadata>()
-        .allow::<ArchivedPage>()
-        .allow::<ArchivedPagePosition>()
-        .allow::<ArchivedTabPage>()
-        .allow::<PaneId>()
-        .allow::<vmux_history::CreatedAt>()
-        .allow::<vmux_history::LastActivatedAt>()
-        .allow::<vmux_history::Visit>()
-        .allow::<vmux_core::Url>()
-        .allow::<vmux_core::VisitCount>()
-        .allow::<vmux_core::LastVisitedAt>()
-        .allow::<vmux_core::VisitedUrl>()
-        .allow::<vmux_core::TransitionType>()
-        .allow::<vmux_core::Order>()
-        .allow::<vmux_editor::StackExplorerVisibility>()
-        .allow::<vmux_knowledge::ExpandedKnowledgeDirs>()
-        .allow::<vmux_layout::side_sheet::SideSheetSectionsExpanded>()
-        .allow::<vmux_space::ExpandedProjectDirs>()
-        .allow::<vmux_terminal::launch::TerminalLaunch>();
+    save.components = components;
     commands.trigger_save(save);
 }
 
@@ -874,9 +815,11 @@ mod tests {
                 debounce: Timer::from_seconds(0.5, TimerMode::Once),
                 periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
                 dirty: false,
+                components: WorldFilter::allow_all(),
             })
             .id();
-        app.add_systems(Update, mark_dirty_on_change);
+        app.register_persisted::<ArchivedPage>()
+            .add_observer(mark_persistence_dirty);
         app.update();
         app.world_mut()
             .get_mut::<AutoSave>(auto_save)
@@ -896,9 +839,11 @@ mod tests {
                 debounce: Timer::from_seconds(0.5, TimerMode::Once),
                 periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
                 dirty: false,
+                components: WorldFilter::allow_all(),
             })
             .id();
-        app.add_systems(Update, mark_dirty_on_change);
+        app.register_persisted::<vmux_history::Visit>()
+            .add_observer(mark_persistence_dirty);
         app.update();
         app.world_mut()
             .get_mut::<AutoSave>(auto_save)
@@ -918,9 +863,11 @@ mod tests {
                 debounce: Timer::from_seconds(0.5, TimerMode::Once),
                 periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
                 dirty: false,
+                components: WorldFilter::allow_all(),
             })
             .id();
-        app.add_systems(Update, mark_dirty_on_change);
+        app.register_persisted::<vmux_editor::StackExplorerVisibility>()
+            .add_observer(mark_persistence_dirty);
         let stack = app
             .world_mut()
             .spawn(vmux_editor::StackExplorerVisibility { visible: false })
@@ -949,9 +896,11 @@ mod tests {
                 debounce: Timer::from_seconds(0.5, TimerMode::Once),
                 periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
                 dirty: false,
+                components: WorldFilter::allow_all(),
             })
             .id();
-        app.add_systems(Update, mark_dirty_on_change);
+        app.register_persisted::<Tab>()
+            .add_observer(mark_persistence_dirty);
         let tab = app.world_mut().spawn(Tab::default()).id();
         app.update();
         app.world_mut()
@@ -978,9 +927,11 @@ mod tests {
                 debounce: Timer::from_seconds(0.5, TimerMode::Once),
                 periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
                 dirty: false,
+                components: WorldFilter::allow_all(),
             })
             .id();
-        app.add_systems(Update, mark_dirty_on_change);
+        app.register_persisted::<TabWorkspace>()
+            .add_observer(mark_persistence_dirty);
         let tab = app.world_mut().spawn(Tab::default()).id();
         app.update();
         app.world_mut()
@@ -1005,9 +956,12 @@ mod tests {
                 debounce: Timer::from_seconds(0.5, TimerMode::Once),
                 periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
                 dirty: false,
+                components: WorldFilter::allow_all(),
             })
             .id();
-        app.add_systems(Update, mark_dirty_on_change);
+        app.register_persisted::<Tab>()
+            .register_persisted::<TabWorktree>()
+            .add_observer(mark_persistence_dirty);
         let tab = app
             .world_mut()
             .spawn((
@@ -1313,7 +1267,7 @@ mod tests {
             vmux_core::TransitionType::Typed,
         ));
 
-        save_space_to_path(&mut app_save.world_mut().commands(), path.clone());
+        save_space_to_path(app_save.world_mut(), path.clone());
         app_save.update();
 
         assert!(path.exists(), "save file should exist");
@@ -1386,7 +1340,7 @@ mod tests {
                 bg_color: None,
             },
         ));
-        save_space_to_path(&mut app_save.world_mut().commands(), path.clone());
+        save_space_to_path(app_save.world_mut(), path.clone());
         app_save.update();
 
         let current = std::fs::read_to_string(&path).expect("saved store");
@@ -1426,12 +1380,12 @@ mod tests {
         app_save
             .add_plugins(MinimalPlugins)
             .add_plugins(vmux_core::CorePlugin)
-            .register_type::<vmux_editor::StackExplorerVisibility>()
+            .register_persisted::<vmux_editor::StackExplorerVisibility>()
             .add_observer(save_on_default_event);
         app_save
             .world_mut()
             .spawn((Save, vmux_editor::StackExplorerVisibility { visible: true }));
-        save_space_to_path(&mut app_save.world_mut().commands(), path.clone());
+        save_space_to_path(app_save.world_mut(), path.clone());
         app_save.update();
 
         let mut app_load = App::new();
@@ -1508,7 +1462,7 @@ mod tests {
         app_save.add_plugins(MinimalPlugins);
         app_save.add_plugins(vmux_core::CorePlugin);
         app_save
-            .register_type::<WindowGeometry>()
+            .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>();
         app_save.add_observer(save_on_default_event);
@@ -1521,7 +1475,7 @@ mod tests {
             },
         ));
 
-        save_space_to_path(&mut app_save.world_mut().commands(), path.clone());
+        save_space_to_path(app_save.world_mut(), path.clone());
         app_save.update();
         assert!(path.exists(), "store file should exist");
 
@@ -1593,6 +1547,9 @@ mod tests {
         app_save
             .add_plugins(MinimalPlugins)
             .add_plugins(vmux_core::CorePlugin)
+            .register_persisted::<Space>()
+            .register_persisted::<SpaceId>()
+            .register_persisted::<WindowGeometry>()
             .add_observer(save_on_default_event);
         app_save.world_mut().spawn((
             Save,
@@ -1605,7 +1562,7 @@ mod tests {
             },
         ));
 
-        save_space_to_path(&mut app_save.world_mut().commands(), path.clone());
+        save_space_to_path(app_save.world_mut(), path.clone());
         app_save.update();
 
         assert!(path.exists(), "custom store should be saved");
@@ -1627,7 +1584,7 @@ mod tests {
         let mut app_save = App::new();
         app_save.add_plugins(MinimalPlugins);
         app_save.add_plugins(vmux_core::CorePlugin);
-        app_save.register_type::<PaneId>();
+        app_save.register_persisted::<PaneId>();
         app_save.add_observer(save_on_default_event);
         app_save
             .world_mut()
@@ -1655,7 +1612,7 @@ mod tests {
                 active: true,
             },
         ));
-        save_space_to_path(&mut app_save.world_mut().commands(), path.clone());
+        save_space_to_path(app_save.world_mut(), path.clone());
         app_save.update();
         assert!(path.exists());
 
@@ -2016,10 +1973,11 @@ mod tests {
             debounce: Timer::from_seconds(0.0, TimerMode::Once),
             periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
             dirty: true,
+            components: WorldFilter::allow_all(),
         });
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_core::CorePlugin)
-            .register_type::<WindowGeometry>()
+            .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
             .add_observer(save_on_default_event)
@@ -2048,10 +2006,11 @@ mod tests {
             debounce: Timer::from_seconds(0.0, TimerMode::Once),
             periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
             dirty: true,
+            components: WorldFilter::allow_all(),
         });
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_core::CorePlugin)
-            .register_type::<WindowGeometry>()
+            .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
             .add_observer(save_on_default_event)

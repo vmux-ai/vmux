@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_api::open_target::PaneDirection;
+use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -10,8 +11,8 @@ pub(super) struct TreePlugin;
 
 impl Plugin for TreePlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<Pane>()
-            .register_type::<PaneSplit>()
+        app.register_persisted::<Pane>()
+            .register_persisted::<PaneSplit>()
             .register_type::<PaneSplitDirection>();
     }
 }

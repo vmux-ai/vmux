@@ -1,5 +1,7 @@
 use bevy::prelude::*;
+use moonshine_save::prelude::Save;
 
+use super::persistence::PersistenceAppExt;
 use crate::archive::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PaneStep, SplitAxis};
 use crate::component::{
     ActivateRequest, Active, Bookmark, BookmarkOrder, Collapsed, CreatedAt, Folder,
@@ -13,24 +15,24 @@ pub struct CorePlugin;
 
 impl Plugin for CorePlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<PageMetadata>()
+        app.register_persisted::<PageMetadata>()
             .register_type::<PageIcon>()
             .register_type::<BuiltinIcon>()
-            .register_type::<ArchivedPage>()
-            .register_type::<ArchivedPagePosition>()
-            .register_type::<ArchivedTabPage>()
+            .register_persisted::<ArchivedPage>()
+            .register_persisted::<ArchivedPagePosition>()
+            .register_persisted::<ArchivedTabPage>()
             .register_type::<PaneStep>()
             .register_type::<SplitAxis>()
             .register_type::<Vec<PaneStep>>()
-            .register_type::<CreatedAt>()
-            .register_type::<LastActivatedAt>()
-            .register_type::<Visit>()
-            .register_type::<Url>()
-            .register_type::<VisitCount>()
-            .register_type::<LastVisitedAt>()
-            .register_type::<VisitedUrl>()
-            .register_type::<TransitionType>()
-            .register_type::<Order>()
+            .register_persisted::<CreatedAt>()
+            .register_persisted::<LastActivatedAt>()
+            .register_persisted::<Visit>()
+            .register_persisted::<Url>()
+            .register_persisted::<VisitCount>()
+            .register_persisted::<LastVisitedAt>()
+            .register_persisted::<VisitedUrl>()
+            .register_persisted::<TransitionType>()
+            .register_persisted::<Order>()
             .register_type::<Active>()
             .register_type::<BookmarkOrder>()
             .register_type::<Pin>()
@@ -41,6 +43,10 @@ impl Plugin for CorePlugin {
             .register_type::<Uuid>()
             .register_type::<Children>()
             .register_type::<ChildOf>()
+            .track_persistence::<Save>()
+            .track_persistence::<Name>()
+            .track_persistence::<Children>()
+            .track_persistence::<ChildOf>()
             .add_observer(activate)
             .add_plugins(crate::page::HostHistoryPlugin);
     }

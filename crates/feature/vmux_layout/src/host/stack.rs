@@ -13,6 +13,7 @@ use moonshine_save::prelude::*;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
 use vmux_command::{CommandDefinitions, CommandInvocation};
+use vmux_core::host::persistence::PersistenceAppExt;
 pub use vmux_core::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
@@ -37,7 +38,7 @@ impl Plugin for StackPlugin {
                 Startup,
                 spawn_stack_commands.in_set(vmux_command::RegisterCommandDefinitions),
             )
-            .register_type::<Stack>()
+            .register_persisted::<Stack>()
             .add_message::<CloseStackRequest>()
             .add_systems(
                 Update,

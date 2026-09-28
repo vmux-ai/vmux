@@ -13,6 +13,7 @@ pub mod notify;
 pub mod overlay;
 pub mod page;
 pub mod page_open;
+pub mod persistence;
 pub mod profile;
 pub mod team;
 pub mod terminal;
