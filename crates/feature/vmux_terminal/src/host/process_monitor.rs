@@ -126,9 +126,6 @@ impl Default for ProcessMonitor {
 struct ProcessMonitorDirty;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct ServiceProcessId(ProcessId);
-
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct ProcessPid(u32);
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -153,15 +150,9 @@ impl From<&vmux_api::protocol::ProcessInfo> for ServiceProcess {
 }
 
 impl ServiceProcess {
-    fn entry(
-        &self,
-        id: ServiceProcessId,
-        pid: ProcessPid,
-        usage: Usage,
-        attached: bool,
-    ) -> ProcessEntry {
+    fn entry(&self, id: ProcessId, pid: ProcessPid, usage: Usage, attached: bool) -> ProcessEntry {
         ProcessEntry {
-            id: id.0.to_string(),
+            id: id.to_string(),
             managed: true,
             shell: self.shell.clone(),
             cwd: self.cwd.clone(),
@@ -256,7 +247,7 @@ fn spawn_process_monitor(mut commands: Commands) {
 
 fn reconcile_service_processes(
     mut snapshots: MessageReader<ServiceProcessSnapshot>,
-    existing: Query<(Entity, &ServiceProcessId), With<ServiceProcess>>,
+    existing: Query<(Entity, &ProcessId), With<ServiceProcess>>,
     runtime: Query<Entity, With<ProcessMonitor>>,
     mut commands: Commands,
 ) {
@@ -265,12 +256,12 @@ fn reconcile_service_processes(
     };
     let mut by_id = HashMap::new();
     for (entity, id) in &existing {
-        by_id.insert(id.0, entity);
+        by_id.insert(*id, entity);
     }
     for (index, process) in snapshot.0.iter().enumerate() {
         let components = (
             Name::new(format!("Service process {}", process.id)),
-            ServiceProcessId(process.id),
+            process.id,
             ProcessPid(process.pid),
             Order(index as u32),
             ServiceProcess::from(process),
@@ -404,13 +395,7 @@ fn sample_process_usage(
 
 fn broadcast_to_monitors(
     runtime: Query<(Entity, Has<ProcessMonitorDirty>), With<ProcessMonitor>>,
-    service_processes: Query<(
-        &ServiceProcessId,
-        &ProcessPid,
-        &ServiceProcess,
-        &Usage,
-        &Order,
-    )>,
+    service_processes: Query<(&ProcessId, &ProcessPid, &ServiceProcess, &Usage, &Order)>,
     local_processes: Query<(&ProcessPid, &LocalVmuxProcess, &Usage)>,
     connected: Option<Single<(), With<ServiceConnected>>>,
     monitors: Query<Entity, (With<ProcessMonitorView>, With<PageReady>)>,
@@ -437,7 +422,7 @@ fn broadcast_to_monitors(
         managed_pids.insert(pid.0);
         ordered.push((
             order.0,
-            process.entry(*id, *pid, *usage, attached_ids.contains(&id.0)),
+            process.entry(*id, *pid, *usage, attached_ids.contains(id)),
         ));
     }
     ordered.sort_by_key(|(order, _)| *order);
@@ -518,7 +503,7 @@ fn on_process_navigate(
 
 fn on_process_kill(
     trigger: On<UiInput<ProcessKillEvent>>,
-    service_processes: Query<(Entity, &ServiceProcessId), With<ServiceProcess>>,
+    service_processes: Query<(Entity, &ProcessId), With<ServiceProcess>>,
     runtime: Query<Entity, With<ProcessMonitor>>,
     process_index: Single<&TerminalProcessIndex>,
     terminals: Query<&ChildOf, With<Terminal>>,
@@ -531,7 +516,7 @@ fn on_process_kill(
     if let Ok(process_id) = pid.parse::<ProcessId>() {
         service_requests.write(ServiceRequest(ClientMessage::KillProcess { process_id }));
         for (entity, id) in &service_processes {
-            if id.0 == process_id {
+            if *id == process_id {
                 commands.entity(entity).despawn();
             }
         }
@@ -553,7 +538,7 @@ fn on_process_kill(
 
 fn on_process_kill_all(
     _trigger: On<UiInput<ProcessKillAllEvent>>,
-    service_processes: Query<(Entity, &ServiceProcessId), With<ServiceProcess>>,
+    service_processes: Query<(Entity, &ProcessId), With<ServiceProcess>>,
     runtime: Query<Entity, With<ProcessMonitor>>,
     process_index: Single<&TerminalProcessIndex>,
     terminals: Query<&ChildOf, With<Terminal>>,
@@ -562,7 +547,7 @@ fn on_process_kill_all(
 ) {
     let process_ids: Vec<(Entity, ProcessId)> = service_processes
         .iter()
-        .map(|(entity, id)| (entity, id.0))
+        .map(|(entity, id)| (entity, *id))
         .collect();
 
     for (process_entity, process_id) in &process_ids {
@@ -621,9 +606,9 @@ mod tests {
 
         let mut ids = app
             .world_mut()
-            .query_filtered::<&ServiceProcessId, With<ServiceProcess>>()
+            .query_filtered::<&ProcessId, With<ServiceProcess>>()
             .iter(app.world())
-            .map(|id| id.0)
+            .copied()
             .collect::<Vec<_>>();
         ids.sort_by_key(|id| id.0);
         assert_eq!(ids, vec![keep, remove]);
@@ -634,9 +619,9 @@ mod tests {
 
         let ids = app
             .world_mut()
-            .query_filtered::<&ServiceProcessId, With<ServiceProcess>>()
+            .query_filtered::<&ProcessId, With<ServiceProcess>>()
             .iter(app.world())
-            .map(|id| id.0)
+            .copied()
             .collect::<Vec<_>>();
         assert_eq!(ids, vec![keep]);
     }
@@ -691,7 +676,7 @@ mod tests {
     fn service_process_entry_attaches_usage() {
         let id = process_id(1);
         let entry = ServiceProcess::from(&process_info(id)).entry(
-            ServiceProcessId(id),
+            id,
             ProcessPid(42),
             Usage {
                 cpu_percent: 12.5,
@@ -709,7 +694,7 @@ mod tests {
     fn service_process_entry_defaults_usage() {
         let id = process_id(1);
         let entry = ServiceProcess::from(&process_info(id)).entry(
-            ServiceProcessId(id),
+            id,
             ProcessPid(42),
             Usage::default(),
             false,
