@@ -1,9 +1,6 @@
 pub mod dispatch;
 
 pub(crate) mod dialer;
-mod supervisor;
-
-pub(crate) use supervisor::Supervisor;
 
 use std::time::Duration;
 
@@ -20,7 +17,6 @@ use vmux_transport::quic::{
     ClientCredential, ClientSetup, CloseCode, MessageType, SessionAccepted,
 };
 
-const REMOTE_STATE_POLL: Duration = Duration::from_secs(1);
 const AUTHORIZATION_POLL: Duration = Duration::from_secs(1);
 
 const MAX_HELLO_BYTES: usize = 16 * 1024;
@@ -162,25 +158,6 @@ impl ActiveAuthorization {
             }
         }
     }
-}
-
-pub fn spawn_liveness_watch() -> watch::Receiver<bool> {
-    let (tx, rx) = watch::channel(super::server::remote_enabled());
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(REMOTE_STATE_POLL);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            ticker.tick().await;
-            let enabled = super::server::remote_enabled();
-            if *tx.borrow() != enabled {
-                if tx.send(enabled).is_err() {
-                    return;
-                }
-                tracing::info!(enabled, "remote quic: exposure changed");
-            }
-        }
-    });
-    rx
 }
 
 const SETUP: FrameStream = FrameStream::new(MAX_HELLO_BYTES);

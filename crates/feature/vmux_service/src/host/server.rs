@@ -13,9 +13,7 @@ use vmux_process::{ProcessLaunch, ProcessRuntime};
 use crate::remote::authorization::RemoteAuthorizations;
 use crate::remote::client_operation::ClientOperations;
 use vmux_agent::acp::AcpSessions;
-use vmux_agent::service::AgentSessions;
-
-type PendingQueries = vmux_agent::service::AgentQueryResponses;
+use vmux_agent::service::{AgentBroker, AgentSessions};
 
 pub struct ServiceDaemonPlugin;
 
@@ -32,15 +30,30 @@ impl ServiceDaemonPlugin {
         let (agent_sessions, agent_session_runtime) =
             AgentSessions::new(runtime.clone(), wake.clone());
         let (acp_sessions, acp_session_runtime) = AcpSessions::new(runtime.clone(), wake);
+        let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
+        let broker = AgentBroker::new(
+            agent_tx.clone(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        );
+        let remote_runtime = crate::remote::server::RemoteRuntimeStartup::new(
+            runtime.clone(),
+            authorizations,
+            agent_sessions.clone(),
+            acp_sessions.clone(),
+            broker.clone(),
+            client_operations,
+        );
         (
             Name::new("vmux service runtime"),
             ServiceDaemonStartup(Some(ServiceDaemonStart {
                 listener,
                 processes,
-                client_operations,
-                authorizations,
                 agent_sessions,
                 acp_sessions,
+                agent_tx,
+                broker,
                 runtime,
                 exit,
             })),
@@ -49,13 +62,20 @@ impl ServiceDaemonPlugin {
             authorization_runtime,
             agent_session_runtime,
             acp_session_runtime,
+            remote_runtime,
         )
     }
 }
 
 impl Plugin for ServiceDaemonPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, start_service_daemon);
+        app.add_plugins((
+            vmux_process::ProcessPlugin,
+            crate::remote::RemotePlugin,
+            vmux_agent::service::AgentSessionPlugin,
+            vmux_agent::acp::AcpSessionPlugin,
+        ))
+        .add_systems(Startup, start_service_daemon);
     }
 }
 
@@ -65,10 +85,10 @@ struct ServiceDaemonStartup(Option<ServiceDaemonStart>);
 struct ServiceDaemonStart {
     listener: UnixListener,
     processes: ProcessRuntime,
-    client_operations: ClientOperations,
-    authorizations: RemoteAuthorizations,
     agent_sessions: AgentSessions,
     acp_sessions: AcpSessions,
+    agent_tx: broadcast::Sender<ServiceMessage>,
+    broker: AgentBroker,
     runtime: tokio::runtime::Handle,
     exit: mpsc::Sender<()>,
 }
@@ -101,10 +121,10 @@ fn start_service_daemon(
             ServiceServer {
                 listener: start.listener,
                 processes: start.processes,
-                client_operations: start.client_operations,
-                authorizations: start.authorizations,
                 agent_sessions: start.agent_sessions,
                 acp_sessions: start.acp_sessions,
+                agent_tx: start.agent_tx,
+                broker: start.broker,
                 started_at,
             }
             .run()
@@ -117,8 +137,6 @@ fn start_service_daemon(
             .insert((ServiceDaemon, started_at, ServiceServerTask(task)));
     }
 }
-
-type PendingCommands = vmux_agent::service::AgentCommandResponses;
 
 fn page_agent_prompt(text: String, attachments: &[AgentAttachment]) -> String {
     if attachments.is_empty() {
@@ -173,10 +191,10 @@ async fn route_agent_input(
 struct ServiceServer {
     listener: UnixListener,
     processes: ProcessRuntime,
-    client_operations: ClientOperations,
-    authorizations: RemoteAuthorizations,
     agent_sessions: AgentSessions,
     acp_sessions: AcpSessions,
+    agent_tx: broadcast::Sender<ServiceMessage>,
+    broker: AgentBroker,
     started_at: ServiceStartedAt,
 }
 
@@ -185,29 +203,12 @@ impl ServiceServer {
         let Self {
             listener,
             processes,
-            client_operations,
-            authorizations,
             agent_sessions,
             acp_sessions,
+            agent_tx,
+            broker,
             started_at,
         } = self;
-        let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
-        let pending_queries = PendingQueries::default();
-        let pending_commands = PendingCommands::default();
-        let pending_tool_calls = vmux_agent::service::AgentToolResponses::default();
-        let remote_broker = vmux_agent::service::AgentBroker::new(
-            agent_tx.clone(),
-            pending_commands.clone(),
-            pending_queries.clone(),
-            pending_tool_calls.clone(),
-        );
-        let remote_handle = crate::remote::server::spawn(
-            agent_sessions.clone(),
-            acp_sessions.clone(),
-            remote_broker,
-            client_operations,
-            authorizations,
-        );
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
         loop {
@@ -222,9 +223,7 @@ impl ServiceServer {
                     };
                     let processes = processes.clone();
                     let agent_tx = agent_tx.clone();
-                    let pending_queries = pending_queries.clone();
-                    let pending_commands = pending_commands.clone();
-                    let pending_tool_calls = pending_tool_calls.clone();
+                    let broker = broker.clone();
                     let agent_sessions = agent_sessions.clone();
                     let acp_sessions = acp_sessions.clone();
                     let shutdown_tx = shutdown_tx.clone();
@@ -233,9 +232,7 @@ impl ServiceServer {
                             stream,
                             processes,
                             agent_tx,
-                            pending_queries,
-                            pending_commands,
-                            pending_tool_calls,
+                            broker,
                             agent_sessions,
                             acp_sessions,
                             shutdown_tx,
@@ -255,7 +252,6 @@ impl ServiceServer {
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        remote_handle.abort();
         tracing::info!("server: drain complete, exiting");
     }
 }
@@ -381,10 +377,9 @@ fn query_response_to_content(response: ServiceMessage) -> Option<(String, bool)>
 async fn route_agent_query_response(
     request_id: vmux_api::protocol::AgentRequestId,
     response: ServiceMessage,
-    pending_queries: &PendingQueries,
-    broker: &vmux_agent::service::AgentBroker,
+    broker: &AgentBroker,
 ) {
-    if pending_queries.resolve(request_id, response.clone()).await {
+    if broker.resolve_query(request_id, response.clone()).await {
         return;
     }
     if let Some((content, is_error)) = query_response_to_content(response) {
@@ -397,9 +392,7 @@ async fn handle_client(
     stream: tokio::net::UnixStream,
     processes: ProcessRuntime,
     agent_tx: broadcast::Sender<ServiceMessage>,
-    pending_queries: PendingQueries,
-    pending_commands: PendingCommands,
-    pending_tool_calls: vmux_agent::service::AgentToolResponses,
+    broker: AgentBroker,
     agent_sessions: AgentSessions,
     acp_sessions: AcpSessions,
     shutdown_tx: mpsc::Sender<()>,
@@ -413,12 +406,6 @@ async fn handle_client(
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     let mut agent_subscription: Option<tokio::task::JoinHandle<()>> = None;
     let mut page_agent_forwarders: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
-    let broker = vmux_agent::service::AgentBroker::new(
-        agent_tx.clone(),
-        pending_commands.clone(),
-        pending_queries.clone(),
-        pending_tool_calls.clone(),
-    );
 
     let mut created_processes: Vec<ProcessId> = Vec::new();
 
@@ -748,7 +735,6 @@ async fn handle_client(
                         request_id,
                         message,
                     },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -758,7 +744,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentLayoutResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -767,7 +752,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::ProcessOutputResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -776,7 +760,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::ProcessTranscriptResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -785,7 +768,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::ProcessCommandExitResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -794,7 +776,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::ProcessRunCompletionResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -803,7 +784,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentSettingsResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -812,7 +792,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentSpacesResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -821,7 +800,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentScreenshotResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -830,7 +808,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentBrowserSnapshotResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -839,7 +816,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentBrowserScrollResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -848,7 +824,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentRecordStartResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -857,7 +832,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentRecordStopResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -866,7 +840,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentBookmarksResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -875,7 +848,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentSimulatorScreenshotResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -884,7 +856,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentSimulatorControlResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -893,7 +864,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentWorkingDirectoryResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -902,7 +872,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentVaultStatusResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -911,7 +880,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentCommandsResult { request_id, result },
-                    &pending_queries,
                     &broker,
                 )
                 .await;
@@ -1291,13 +1259,20 @@ mod tests {
         let (acp_sessions, acp_runtime) =
             vmux_agent::acp::AcpSessions::new(tokio::runtime::Handle::current(), wake);
         drop(acp_runtime);
+        let (agent_tx, _) = broadcast::channel(8);
+        let broker = AgentBroker::new(
+            agent_tx.clone(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        );
         super::ServiceServer {
             listener,
             processes,
-            client_operations: ClientOperations::closed(),
-            authorizations: RemoteAuthorizations::closed(),
             agent_sessions,
             acp_sessions,
+            agent_tx,
+            broker,
             started_at: ServiceStartedAt(Instant::now()),
         }
         .run()

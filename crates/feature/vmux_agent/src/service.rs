@@ -150,6 +150,10 @@ impl AgentBroker {
         self.commands.resolve(request_id, result).await
     }
 
+    pub async fn resolve_query(&self, request_id: AgentRequestId, result: ServiceMessage) -> bool {
+        self.queries.resolve(request_id, result).await
+    }
+
     pub async fn resolve_tool(&self, request_id: AgentRequestId, content: String, is_error: bool) {
         self.tools.resolve(request_id, (content, is_error)).await;
     }

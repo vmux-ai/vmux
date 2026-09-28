@@ -16,15 +16,14 @@ const MIN_INNER_MTU: usize = 1200;
 
 const TUNNEL_OVERHEAD: usize = 64;
 
-pub fn spawn(state: RemoteState, liveness: watch::Receiver<bool>) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut backoff = Backoff::new();
-        loop {
-            let ended = Registration::hold(&state, &liveness).await;
-            ended.report();
-            tokio::time::sleep(backoff.after(&ended)).await;
-        }
-    })
+pub async fn run(state: RemoteState, liveness: watch::Receiver<bool>) {
+    RegisteredDevice::release_stale();
+    let mut backoff = Backoff::new();
+    loop {
+        let ended = Registration::hold(&state, &liveness).await;
+        ended.report();
+        tokio::time::sleep(backoff.after(&ended)).await;
+    }
 }
 
 struct Registration {

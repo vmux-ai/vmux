@@ -15,6 +15,9 @@ pub mod quic;
 pub mod server;
 
 #[cfg(host)]
+pub(crate) use server::RemotePlugin;
+
+#[cfg(host)]
 pub(crate) fn write_private(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
     let _ = std::fs::remove_file(path);
     #[cfg(unix)]
