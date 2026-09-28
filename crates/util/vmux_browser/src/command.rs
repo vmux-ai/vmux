@@ -247,51 +247,65 @@ fn handle_navigation_requests(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[derive(SystemParam)]
+struct BrowserOpen<'w, 's> {
+    active_stack: ActiveStack<'w, 's>,
+    browsers: Query<
+        'w,
+        's,
+        (Entity, &'static ChildOf),
+        (With<Browser>, Without<Header>, Without<SideSheet>),
+    >,
+    kinds: Query<'w, 's, (Has<Terminal>, Has<vmux_editor::FileView>)>,
+    focused_space: vmux_layout::space::FocusedSpace<'w, 's>,
+    native_pages: Query<'w, 's, &'static NativelyHosted>,
+    host_spawn_routes: Query<'w, 's, &'static HostSpawnRoute>,
+    metadata: Query<'w, 's, &'static mut PageMetadata, With<Browser>>,
+}
+
+impl BrowserOpen<'_, '_> {
+    fn target(&self) -> Option<(Entity, Entity, bool)> {
+        let stack = self.active_stack.get()?;
+        let webview = self
+            .browsers
+            .iter()
+            .find_map(|(entity, child_of)| (child_of.get() == stack).then_some(entity))?;
+        let is_terminal = self.kinds.get(webview).is_ok_and(|kind| kind.0);
+        Some((stack, webview, is_terminal))
+    }
+
+    fn hosted(&self, url: &str) -> bool {
+        self.native_pages.iter().any(|page| page.answers_for(url))
+            || self
+                .host_spawn_routes
+                .iter()
+                .any(|route| route.answers_for(url))
+    }
+}
+
 fn handle_open_requests(
     mut open_requests: MessageReader<OpenRequest>,
-    active_stack: ActiveStack,
-    browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
-    kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
-    focused_space: vmux_layout::space::FocusedSpace,
-    native_pages: Query<&NativelyHosted>,
-    host_spawn_routes: Query<&HostSpawnRoute>,
-    mut meta_q: Query<&mut PageMetadata, With<Browser>>,
+    mut browser: BrowserOpen,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
     for request in open_requests.read() {
-        let Some(active) = active_stack.get() else {
+        let Some((active, webview, is_terminal)) = browser.target() else {
             continue;
         };
-        let Some(webview) = browsers
-            .iter()
-            .find(|(_, child_of)| child_of.get() == active)
-            .map(|(entity, _)| entity)
-        else {
-            continue;
-        };
-        let (is_terminal, _) = kind_q.get(webview).unwrap_or((false, false));
-        let resolved = request.resolved_url(focused_space.startup_url());
+        let resolved = request.resolved_url(browser.focused_space.startup_url());
         if resolved.is_empty() {
             continue;
         }
         let resolved =
             VmuxRoute::canonical(&resolved).unwrap_or_else(|| resolved.trim().to_string());
-        let current_url = meta_q
+        let current_url = browser
+            .metadata
             .get(webview)
             .map(|metadata| metadata.url.clone())
             .unwrap_or_default();
-        let current_is_hosted = native_pages
-            .iter()
-            .any(|page| page.answers_for(&current_url))
-            || host_spawn_routes
-                .iter()
-                .any(|route| route.answers_for(&current_url));
-        let resolved_is_hosted = native_pages.iter().any(|page| page.answers_for(&resolved))
-            || host_spawn_routes
-                .iter()
-                .any(|route| route.answers_for(&resolved));
+        let current_is_hosted = browser.hosted(&current_url);
+        let resolved_is_hosted = browser.hosted(&resolved);
         if is_terminal || current_is_hosted || resolved_is_hosted {
             page_open_requests.write(PageOpenRequest {
                 target: PageOpenTarget::Stack(active),
@@ -300,7 +314,7 @@ fn handle_open_requests(
             });
             continue;
         }
-        if let Ok(mut metadata) = meta_q.get_mut(webview) {
+        if let Ok(mut metadata) = browser.metadata.get_mut(webview) {
             metadata.url = resolved.clone();
             metadata.title = resolved.clone();
             metadata.icon = vmux_core::PageIcon::None;

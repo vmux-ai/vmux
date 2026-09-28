@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use bevy::app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
 use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
 
 #[cfg(target_os = "macos")]
@@ -100,48 +101,49 @@ fn route_service_cli(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn execute_service_cli(
-    status: Query<Entity, Added<ServiceStatusRequest>>,
-    start: Query<Entity, Added<ServiceStartRequest>>,
-    stop: Query<Entity, Added<ServiceStopRequest>>,
-    restart: Query<Entity, Added<ServiceRestartRequest>>,
-    logs: Query<(Entity, &ServiceLogsRequest), Added<ServiceLogsRequest>>,
-    install: Query<Entity, Added<ServiceInstallRequest>>,
-    uninstall: Query<Entity, Added<ServiceUninstallRequest>>,
-    mut commands: Commands,
-) {
-    for entity in &status {
+#[derive(SystemParam)]
+struct ServiceCliRequests<'w, 's> {
+    status: Query<'w, 's, Entity, Added<ServiceStatusRequest>>,
+    start: Query<'w, 's, Entity, Added<ServiceStartRequest>>,
+    stop: Query<'w, 's, Entity, Added<ServiceStopRequest>>,
+    restart: Query<'w, 's, Entity, Added<ServiceRestartRequest>>,
+    logs: Query<'w, 's, (Entity, &'static ServiceLogsRequest), Added<ServiceLogsRequest>>,
+    install: Query<'w, 's, Entity, Added<ServiceInstallRequest>>,
+    uninstall: Query<'w, 's, Entity, Added<ServiceUninstallRequest>>,
+}
+
+fn execute_service_cli(requests: ServiceCliRequests, mut commands: Commands) {
+    for entity in &requests.status {
         commands
             .entity(entity)
             .insert(CliResult::from_io(cmd_status()));
     }
-    for entity in &start {
+    for entity in &requests.start {
         commands
             .entity(entity)
             .insert(CliResult::from_io(cmd_start_current()));
     }
-    for entity in &stop {
+    for entity in &requests.stop {
         commands
             .entity(entity)
             .insert(CliResult::from_io(cmd_stop_current()));
     }
-    for entity in &restart {
+    for entity in &requests.restart {
         commands
             .entity(entity)
             .insert(CliResult::from_io(cmd_restart_current()));
     }
-    for (entity, request) in &logs {
+    for (entity, request) in &requests.logs {
         commands
             .entity(entity)
             .insert(CliResult::from_io(cmd_logs(request.0)));
     }
-    for entity in &install {
+    for entity in &requests.install {
         commands
             .entity(entity)
             .insert(CliResult::from_io(cmd_install_current()));
     }
-    for entity in &uninstall {
+    for entity in &requests.uninstall {
         commands
             .entity(entity)
             .insert(CliResult::from_io(cmd_uninstall_current()));
