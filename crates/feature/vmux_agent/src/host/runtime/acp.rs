@@ -3,7 +3,7 @@ use crossbeam_channel::Receiver;
 use vmux_api::protocol::{ClientMessage, SharedMessage};
 use vmux_core::LastActivatedAt;
 use vmux_layout::event::TERMINAL_PAGE_URL;
-use vmux_layout::pane::{PlacementCtx, resolve_spiral_pane};
+use vmux_layout::pane::PanePlacement;
 use vmux_layout::stack::stack_bundle;
 use vmux_service::client::ServiceRequest;
 use vmux_terminal::reattach_terminal_bundle;
@@ -520,7 +520,7 @@ fn apply_acp_session_created(
 fn apply_acp_terminal_created(
     mut reader: MessageReader<crate::event::PageAgentAcpTerminalCreated>,
     sessions: Query<(Entity, &AcpSession)>,
-    ctx: PlacementCtx,
+    ctx: PanePlacement,
     mut commands: Commands,
 ) {
     let mut split_batch = std::collections::HashSet::new();
@@ -535,13 +535,12 @@ fn apply_acp_terminal_created(
         let Ok(agent_pane) = ctx.child_of_q.get(stack).map(|child_of| child_of.parent()) else {
             continue;
         };
-        let target_pane = resolve_spiral_pane(
+        let target_pane = ctx.resolve_spiral(
             &mut commands,
             agent_pane,
             TERMINAL_PAGE_URL,
             false,
             &mut split_batch,
-            &ctx,
         );
         let tab = commands
             .spawn((stack_bundle(), LastActivatedAt(0), ChildOf(target_pane)))

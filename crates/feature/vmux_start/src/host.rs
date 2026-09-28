@@ -19,7 +19,7 @@ use vmux_command::build_command_bar_open_payload;
 use vmux_core::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_layout::settings::ResolvedLocale;
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
-use vmux_layout::workspace_snapshot::{TabGatherParams, gather_command_bar_tabs};
+use vmux_layout::workspace_snapshot::TabGather;
 
 #[vmux_native::page]
 pub struct StartPlugin;
@@ -87,7 +87,7 @@ struct PendingStartWorkspacePicker {
 }
 
 #[derive(SystemParam)]
-struct StartPromptContextParams<'w, 's> {
+struct StartPromptContext<'w, 's> {
     tabs: Query<
         'w,
         's,
@@ -101,7 +101,7 @@ struct StartPromptContextParams<'w, 's> {
     warmed_branches_for: Local<'s, String>,
 }
 
-impl StartPromptContextParams<'_, '_> {
+impl StartPromptContext<'_, '_> {
     fn unrooted() -> CommandBarPromptContext {
         CommandBarPromptContext {
             slash_commands: vec![
@@ -474,8 +474,8 @@ fn apply_chosen_project(
 }
 
 fn sync_live_start_pages(
-    tab_gather: TabGatherParams,
-    mut prompt_context: StartPromptContextParams,
+    tab_gather: TabGather,
+    mut prompt_context: StartPromptContext,
     contributions: (
         Query<&ContributedPage>,
         Query<&ContributedCommand>,
@@ -644,11 +644,11 @@ fn publish_command_bar_focus(
 }
 
 fn build_start_payload(
-    tab_gather: &TabGatherParams,
+    tab_gather: &TabGather,
     command_bar: &CommandBarProjection,
     contributed_pages: &Query<&ContributedPage>,
     contributed_commands: &Query<&ContributedCommand>,
-    prompt_context: &StartPromptContextParams,
+    prompt_context: &StartPromptContext,
     active_tab: Option<Entity>,
     git_info: Option<&vmux_git::worktree::RepoInfo>,
     projects: Vec<vmux_api::space::ProjectRow>,
@@ -659,19 +659,7 @@ fn build_start_payload(
 ) -> CommandBarOpenEvent {
     let active_stack_count = tab_gather.stack_q.iter().count();
     let space_name = command_bar.spaces.active_space_name.clone();
-    let tabs = gather_command_bar_tabs(
-        active_tab,
-        &tab_gather.all_children,
-        &tab_gather.leaf_panes,
-        &tab_gather.pane_ts,
-        &tab_gather.pane_children,
-        &tab_gather.stack_ts,
-        &tab_gather.stack_q,
-        &tab_gather.browser_meta,
-        &tab_gather.child_of_q,
-        &space_name,
-        locale,
-    );
+    let tabs = tab_gather.tabs(active_tab, &space_name, locale);
     let mut payload = build_command_bar_open_payload(
         OpenId::NONE,
         false,

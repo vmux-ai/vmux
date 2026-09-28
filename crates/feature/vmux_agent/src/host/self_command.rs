@@ -28,9 +28,9 @@ use super::run_terminal::{
     RunPlacementPolicy, RunTerminal, RunTerminalBucketPanes, RunTerminalCandidate,
 };
 use super::workspace::{
-    AgentTabWorktreeContext, PendingAgentChoice, PendingWorkspacePicker, ResumeAgentChoice,
-    USER_CHOICE_REQUESTED, WORKSPACE_SELECTION_PENDING, WORKSPACE_SELECTION_REQUESTED,
-    WorkspacePickerContext, activate_agent_directory, activate_agent_worktree,
+    AgentTabWorkspace, AgentWorkspacePicker, PendingAgentChoice, PendingWorkspacePicker,
+    ResumeAgentChoice, USER_CHOICE_REQUESTED, WORKSPACE_SELECTION_PENDING,
+    WORKSPACE_SELECTION_REQUESTED, activate_agent_directory, activate_agent_worktree,
     ambiguous_worktree_message, existing_worktree_candidates, resolve_requested_worktree,
     workspace_path_task, workspace_picker_task,
 };
@@ -254,15 +254,15 @@ fn handle_agent_self_commands(
     >,
     launch_q: Query<&TerminalLaunch>,
     mut acp_sessions: Query<&mut vmux_session::AcpSession>,
-    ctx: vmux_layout::pane::PlacementCtx,
+    ctx: vmux_layout::pane::PanePlacement,
     mut writers: AgentSelfCommandWriters,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
     active_space: vmux_layout::space::FocusedSpace,
     settings: Res<AppSettings>,
     mut spawn_counter: Single<&mut vmux_layout::pane::SpawnCounter>,
-    mut tab_worktree: AgentTabWorktreeContext,
-    mut workspace_picker: WorkspacePickerContext,
+    mut tab_worktree: AgentTabWorkspace,
+    mut workspace_picker: AgentWorkspacePicker,
 ) {
     use vmux_api::protocol::{AgentCommandResult, ClientMessage};
     let managed_root = tab_worktree
@@ -484,11 +484,8 @@ fn handle_agent_self_commands(
                                 if let Some(pane) = bucket_pane {
                                     pane
                                 } else {
-                                    let anchor_pane = anchor_pane.unwrap_or_else(|| {
-                                        vmux_layout::pane::resolve_split_anchor_pane(
-                                            self_pane, &ctx,
-                                        )
-                                    });
+                                    let anchor_pane =
+                                        anchor_pane.unwrap_or_else(|| ctx.split_anchor(self_pane));
                                     let split = AgentPane::new(anchor_pane).split(
                                         direction,
                                         focus,
@@ -508,13 +505,12 @@ fn handle_agent_self_commands(
                                 }
                             }
                             (Some(pane), _) => pane,
-                            (None, _) => vmux_layout::pane::resolve_spiral_pane(
+                            (None, _) => ctx.resolve_spiral(
                                 &mut commands,
                                 self_pane,
                                 TERMINAL_PAGE_URL,
                                 focus,
                                 &mut split_this_batch,
-                                &ctx,
                             ),
                         };
                         let sequence = NextPaneSpawnSequence::take(&mut spawn_counter, &ctx.seq_q);

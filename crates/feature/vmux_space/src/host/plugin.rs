@@ -268,16 +268,15 @@ fn broadcast_spaces_to_views(
     >,
     browsers: NonSend<Browsers>,
     settings: Option<Res<vmux_setting::AppSettings>>,
-    mains: Query<Entity, With<vmux_layout::window::Main>>,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
+    space_window: SpaceWindow,
     layout_ui: Query<(), With<LayoutUiStateUpdates>>,
     spaces_ui: Query<(), With<SpacesUiStateUpdates>>,
     mut commands: Commands,
 ) {
     for (entity, selection, snapshot, sent) in &mut views {
-        let host = vmux_layout::window::host_window_of(entity, &child_of, &host_windows);
-        let main = host.and_then(|host| main_for_window(host, &mains, &child_of, &host_windows));
+        let main = space_window
+            .window_of(entity)
+            .and_then(|window| space_window.main(window));
         let rows = space_rows_from_world(&spaces, &tab_q, settings.as_deref(), main);
         let active = rows
             .iter()
@@ -392,6 +391,42 @@ type SpaceTabQuery<'w, 's> = Query<
     With<vmux_layout::tab::Tab>,
 >;
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct SpaceWindow<'w, 's> {
+    mains: Query<'w, 's, Entity, With<vmux_layout::window::Main>>,
+    host_windows: Query<'w, 's, &'static HostWindow>,
+    focused: vmux_layout::window::FocusedWindow<'w, 's>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+}
+
+impl SpaceWindow<'_, '_> {
+    fn for_webview(&self, webview: Entity) -> Option<(Entity, Entity)> {
+        let window = self
+            .host_windows
+            .get(webview)
+            .ok()
+            .map(|host| host.0)
+            .or_else(|| self.focused.entity())?;
+        Some((window, self.main(window)?))
+    }
+
+    fn focused(&self) -> Option<(Entity, Entity)> {
+        let window = self.focused.entity()?;
+        Some((window, self.main(window)?))
+    }
+
+    fn main(&self, window: Entity) -> Option<Entity> {
+        self.mains.iter().find(|main| {
+            vmux_layout::window::host_window_of(*main, &self.child_of, &self.host_windows)
+                == Some(window)
+        })
+    }
+
+    fn window_of(&self, entity: Entity) -> Option<Entity> {
+        vmux_layout::window::host_window_of(entity, &self.child_of, &self.host_windows)
+    }
+}
+
 fn bump_space_tab(tabs: &SpaceTabQuery, space: Entity, commands: &mut Commands) {
     if let Some((tab, _, _, _)) = tabs
         .iter()
@@ -410,17 +445,6 @@ fn deactivate_spaces_in_main(spaces: &SpaceQuery, main: Entity, commands: &mut C
             commands.entity(entity).remove::<vmux_core::Active>();
         }
     }
-}
-
-fn main_for_window(
-    window: Entity,
-    mains: &Query<Entity, With<vmux_layout::window::Main>>,
-    child_of: &Query<&ChildOf>,
-    host_windows: &Query<&HostWindow>,
-) -> Option<Entity> {
-    mains.iter().find(|main| {
-        vmux_layout::window::host_window_of(*main, child_of, host_windows) == Some(window)
-    })
 }
 
 #[derive(Clone)]
@@ -557,27 +581,17 @@ fn on_space_rename(
 
 fn on_space_open_page(
     trigger: On<UiInput<SpaceOpenPageRequest>>,
-    mains: Query<Entity, With<vmux_layout::window::Main>>,
-    host_windows: Query<&HostWindow>,
-    focused_window: vmux_layout::window::FocusedWindow,
+    space_window: SpaceWindow,
     focus: vmux_layout::stack::FocusedStack,
     mut spawn_requests: Option<MessageWriter<PageOpenRequest>>,
     stacks: Query<(Entity, &PageMetadata), With<Stack>>,
-    child_of: Query<&ChildOf>,
     mut commands: Commands,
 ) {
-    let window = host_windows
-        .get(trigger.event().webview)
-        .ok()
-        .map(|host| host.0)
-        .or_else(|| focused_window.entity());
-    let Some(window) = window else { return };
-    let Some(_) = main_for_window(window, &mains, &child_of, &host_windows) else {
+    let Some((window, _)) = space_window.for_webview(trigger.event().webview) else {
         return;
     };
     if let Some((existing, _)) = stacks.iter().find(|(stack, metadata)| {
-        metadata.url == SPACES_PAGE_URL
-            && vmux_layout::window::host_window_of(*stack, &child_of, &host_windows) == Some(window)
+        metadata.url == SPACES_PAGE_URL && space_window.window_of(*stack) == Some(window)
     }) {
         commands.trigger(vmux_core::ActivateRequest { entity: existing });
         return;
@@ -602,29 +616,19 @@ fn on_space_open_page(
     });
 }
 
-#[allow(clippy::too_many_arguments)]
 fn on_space_delete(
     trigger: On<UiInput<SpaceDeleteRequest>>,
     spaces: SpaceQuery,
     space_list: SpaceListQuery,
     tabs: SpaceTabQuery,
-    mains: Query<Entity, With<vmux_layout::window::Main>>,
-    host_windows: Query<&HostWindow>,
-    focused_window: vmux_layout::window::FocusedWindow,
+    space_window: SpaceWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
-    child_of: Query<&ChildOf>,
     settings: Option<Res<vmux_setting::AppSettings>>,
     mut commands: Commands,
 ) {
-    let window = host_windows
-        .get(trigger.event().webview)
-        .ok()
-        .map(|host| host.0)
-        .or_else(|| focused_window.entity());
-    let Some(window) = window else { return };
-    let Some(_) = main_for_window(window, &mains, &child_of, &host_windows) else {
+    if space_window.for_webview(trigger.event().webview).is_none() {
         return;
-    };
+    }
     let id = trigger.event().payload.space_id.as_str();
     let logical_ids: std::collections::HashSet<&str> = spaces
         .iter()
@@ -664,9 +668,7 @@ fn on_space_delete(
             bump_space_tab(&tabs, target_entity, &mut commands);
             continue;
         }
-        let Some(affected_window) =
-            vmux_layout::window::host_window_of(affected_main, &child_of, &host_windows)
-        else {
+        let Some(affected_window) = space_window.window_of(affected_main) else {
             continue;
         };
         let space = commands.spawn(fallback.bundle(affected_main)).id();
@@ -674,27 +676,17 @@ fn on_space_delete(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn on_space_attach(
     trigger: On<UiInput<SpaceAttachRequest>>,
     spaces: SpaceQuery,
     space_list: SpaceListQuery,
     tabs: SpaceTabQuery,
-    mains: Query<Entity, With<vmux_layout::window::Main>>,
-    host_windows: Query<&HostWindow>,
-    focused_window: vmux_layout::window::FocusedWindow,
+    space_window: SpaceWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
-    child_of: Query<&ChildOf>,
     settings: Option<Res<vmux_setting::AppSettings>>,
     mut commands: Commands,
 ) {
-    let window = host_windows
-        .get(trigger.event().webview)
-        .ok()
-        .map(|host| host.0)
-        .or_else(|| focused_window.entity());
-    let Some(window) = window else { return };
-    let Some(main) = main_for_window(window, &mains, &child_of, &host_windows) else {
+    let Some((window, main)) = space_window.for_webview(trigger.event().webview) else {
         return;
     };
     let id = trigger.event().payload.space_id.as_str();
@@ -720,25 +712,15 @@ fn on_space_attach(
     bump_space_tab(&tabs, entity, &mut commands);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn on_space_create(
     trigger: On<UiInput<SpaceCreateRequest>>,
     spaces: SpaceQuery,
-    mains: Query<Entity, With<vmux_layout::window::Main>>,
-    host_windows: Query<&HostWindow>,
-    focused_window: vmux_layout::window::FocusedWindow,
+    space_window: SpaceWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
-    child_of: Query<&ChildOf>,
     settings: Option<Res<vmux_setting::AppSettings>>,
     mut commands: Commands,
 ) {
-    let window = host_windows
-        .get(trigger.event().webview)
-        .ok()
-        .map(|host| host.0)
-        .or_else(|| focused_window.entity());
-    let Some(window) = window else { return };
-    let Some(main) = main_for_window(window, &mains, &child_of, &host_windows) else {
+    let Some((window, main)) = space_window.for_webview(trigger.event().webview) else {
         return;
     };
     let count = spaces
@@ -791,23 +773,16 @@ fn on_space_create(
     });
 }
 
-#[allow(clippy::too_many_arguments)]
 fn handle_open_in_new_space(
     mut reader: MessageReader<OpenRequest>,
     spaces: SpaceQuery,
-    mains: Query<Entity, With<vmux_layout::window::Main>>,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
-    focused_window: vmux_layout::window::FocusedWindow,
+    space_window: SpaceWindow,
     settings: Option<Res<vmux_setting::AppSettings>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        let Some(window) = focused_window.entity() else {
-            continue;
-        };
-        let Some(main) = main_for_window(window, &mains, &child_of, &host_windows) else {
+        let Some((window, main)) = space_window.focused() else {
             continue;
         };
 
@@ -988,13 +963,7 @@ mod tests {
 
         let resolved = app
             .world_mut()
-            .run_system_once(
-                move |mains: Query<Entity, With<vmux_layout::window::Main>>,
-                      child_of: Query<&ChildOf>,
-                      host_windows: Query<&HostWindow>| {
-                    main_for_window(window, &mains, &child_of, &host_windows)
-                },
-            )
+            .run_system_once(move |space_window: SpaceWindow| space_window.main(window))
             .unwrap();
 
         assert_eq!(resolved, Some(main));

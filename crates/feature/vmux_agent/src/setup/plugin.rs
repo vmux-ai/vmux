@@ -155,7 +155,7 @@ fn publish_agent_install_outcome(
 fn on_agent_install_run(
     trigger: On<UiInput<AgentInstallRunRequest>>,
     focus: vmux_layout::stack::FocusedStack,
-    ctx: vmux_layout::pane::PlacementCtx,
+    ctx: vmux_layout::pane::PanePlacement,
     mut install_panes: Query<(Entity, &mut AgentInstallPane)>,
     mut commands: Commands,
     mut spawn: MessageWriter<vmux_terminal::TerminalStackSpawnRequest>,

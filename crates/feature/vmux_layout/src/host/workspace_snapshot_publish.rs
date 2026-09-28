@@ -5,7 +5,7 @@ use vmux_command::snapshot::{
 use vmux_ui::i18n::Locale;
 
 use crate::settings::ResolvedLocale;
-use crate::workspace_snapshot::{TabGatherParams, gather_command_bar_tabs};
+use crate::workspace_snapshot::TabGather;
 
 pub(crate) struct SnapshotPlugin;
 
@@ -19,7 +19,7 @@ impl Plugin for SnapshotPlugin {
 }
 
 fn publish_workspace_snapshot(
-    tab_gather: TabGatherParams,
+    tab_gather: TabGather,
     locale: Option<Res<ResolvedLocale>>,
     projects: Query<(&crate::tab::Tab, Option<&crate::tab::TabWorkspace>)>,
     mut state: Single<&mut CommandBarProjection>,
@@ -38,19 +38,7 @@ fn publish_workspace_snapshot(
         .as_deref()
         .map(|resolved| resolved.0.clone())
         .unwrap_or_else(Locale::preferred);
-    let tabs = gather_command_bar_tabs(
-        active_tab,
-        &tab_gather.all_children,
-        &tab_gather.leaf_panes,
-        &tab_gather.pane_ts,
-        &tab_gather.pane_children,
-        &tab_gather.stack_ts,
-        &tab_gather.stack_q,
-        &tab_gather.browser_meta,
-        &tab_gather.child_of_q,
-        &state.spaces.active_space_name,
-        &locale,
-    );
+    let tabs = tab_gather.tabs(active_tab, &state.spaces.active_space_name, &locale);
     let next = CommandBarWorkspaceSnapshot {
         stack,
         pane,

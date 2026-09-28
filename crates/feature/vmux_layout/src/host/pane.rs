@@ -40,7 +40,7 @@ pub use identity::{PaneId, SpawnCounter, SpawnSeq};
 use open::OpenPlugin;
 #[cfg(test)]
 use open::{BesideOpenPlugin, DirectionalOpenPlugin};
-pub use open::{OpenBesideRequest, PlacementCtx, resolve_spiral_pane, resolve_split_anchor_pane};
+pub use open::{OpenBesideRequest, PanePlacement};
 use resize::ResizePlugin;
 pub use resize::{PaneDrag, PaneSize, PaneSplitGaps, apply_pane_split_gaps, pane_split_gaps};
 use tree::TreePlugin;
@@ -2008,10 +2008,10 @@ mod tests {
 
     fn split_anchor_test_sys(
         input: Res<SplitAnchorInput>,
-        ctx: PlacementCtx,
+        ctx: PanePlacement,
         mut out: ResMut<SplitAnchorOut>,
     ) {
-        out.0 = Some(resolve_split_anchor_pane(input.anchor, &ctx));
+        out.0 = Some(ctx.split_anchor(input.anchor));
     }
 
     #[derive(Resource)]
@@ -2026,18 +2026,12 @@ mod tests {
     fn spiral_test_sys(
         input: Res<SpiralInput>,
         mut commands: Commands,
-        ctx: PlacementCtx,
+        ctx: PanePlacement,
         mut out: ResMut<SpiralOut>,
     ) {
         let mut batch = std::collections::HashSet::new();
-        out.0 = Some(resolve_spiral_pane(
-            &mut commands,
-            input.anchor,
-            &input.url,
-            false,
-            &mut batch,
-            &ctx,
-        ));
+        out.0 =
+            Some(ctx.resolve_spiral(&mut commands, input.anchor, &input.url, false, &mut batch));
     }
 
     fn spiral_app(anchor_url: &str, other: Option<(&str, u64, Vec2)>) -> (App, Entity) {

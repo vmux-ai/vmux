@@ -78,7 +78,7 @@ pub(crate) struct PendingWorkspacePicker {
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct WorkspacePickerContext<'w, 's> {
+pub(crate) struct AgentWorkspacePicker<'w, 's> {
     pub(crate) pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
     pub(crate) choices: Query<'w, 's, &'static PendingAgentChoice>,
     pub(crate) chat_views: Query<'w, 's, (), With<vmux_chat::host::ChatView>>,
@@ -245,7 +245,7 @@ fn chat_agent_continuation_message(sid: &str, context: &str) -> ClientMessage {
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct AgentTabWorktreeContext<'w, 's> {
+pub(crate) struct AgentTabWorkspace<'w, 's> {
     pub(crate) tabs: Query<'w, 's, &'static mut vmux_layout::tab::Tab>,
     pub(crate) worktrees: Query<'w, 's, &'static vmux_layout::tab::TabWorktree>,
     pub(crate) workspaces: Query<'w, 's, &'static vmux_layout::tab::TabWorkspace>,
