@@ -21,7 +21,6 @@ pub mod event;
 pub mod exec;
 pub mod follow;
 pub mod handoff;
-pub mod http;
 mod ingress;
 pub mod launch;
 pub mod managed_mcp;
@@ -30,7 +29,6 @@ pub(crate) mod model;
 pub mod page_open;
 mod prompt;
 pub mod provider;
-pub mod providers;
 pub mod query;
 mod resume;
 pub mod run_state;
@@ -42,7 +40,6 @@ pub mod session;
 pub mod snapshot_updater;
 pub mod spawn;
 pub mod strategy;
-pub mod stream;
 pub mod toast;
 mod tool;
 mod transcript;
@@ -67,6 +64,7 @@ pub(crate) use self::workspace::{
 
 pub use vmux_api::room as message;
 
+pub use crate::stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
 pub use cli::CliAgentStrategy;
 pub use event::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
@@ -77,7 +75,6 @@ pub use mcp::McpServerConfig;
 pub use message::{AssistantBlock, Message};
 pub use run_state::AgentRunState;
 pub use run_state_kind::{AgentRunStateKind, LastRunStateKind};
-pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
 pub use toast::{AgentToast, ToastLevel};
 pub use tool::WorkspaceToolPlugin;
 pub use url::{AgentKind, AgentUrl};

@@ -1,8 +1,8 @@
 pub mod event;
 
-#[cfg(host)]
+#[cfg(all(host, feature = "app"))]
 pub mod plugin;
-#[cfg(host)]
+#[cfg(all(host, feature = "app"))]
 pub use plugin::AgentSetupPlugin;
-#[cfg(host)]
+#[cfg(all(host, feature = "app"))]
 pub(crate) use plugin::{AgentSetupNavigated, AgentSetupView};
