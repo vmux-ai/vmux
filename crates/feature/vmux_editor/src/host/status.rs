@@ -13,11 +13,8 @@ pub(crate) struct StatusPlugin;
 
 impl Plugin for StatusPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Name::new("Shared file view mode"),
-            SharedFileViewMode::default(),
-        ));
-        app.add_message::<vmux_setting::SettingsWriteRequest>()
+        app.add_systems(Startup, spawn_shared_file_view_mode)
+            .add_message::<vmux_setting::SettingsWriteRequest>()
             .add_plugins(UiEventPlugin::<(FileViewModeSet, FileKeymapSet)>::default())
             .add_systems(
                 Update,
@@ -36,6 +33,13 @@ impl Plugin for StatusPlugin {
             .add_observer(on_file_view_mode_set)
             .add_observer(on_file_keymap_set);
     }
+}
+
+fn spawn_shared_file_view_mode(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Shared file view mode"),
+        SharedFileViewMode::default(),
+    ));
 }
 
 #[derive(Component)]

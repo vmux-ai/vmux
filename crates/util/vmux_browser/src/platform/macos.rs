@@ -33,33 +33,41 @@ pub(super) struct MacosBrowserPlugin;
 impl Plugin for MacosBrowserPlugin {
     fn build(&self, app: &mut App) {
         let (metadata_tx, metadata_rx) = async_channel::unbounded();
-        app.world_mut().spawn((
-            Name::new("Native page metadata"),
-            NativePageMetadataSender(metadata_tx),
-            NativePageMetadataReceiver(metadata_rx),
-        ));
-        app.add_systems(First, accept_page_wakes)
-            .add_systems(
-                Update,
-                (
-                    apply_native_page_metadata,
-                    open_native_pages.after(PageOpenSet::HandleKnownPages),
-                    sync_native_appearance.run_if(resource_changed::<AppSettings>),
-                    sync_native_page_scale,
-                )
-                    .chain(),
+        let startup = Mutex::new(Some((metadata_tx, metadata_rx)));
+        app.add_systems(Startup, move |mut commands: Commands| {
+            let (sender, receiver) = startup
+                .lock()
+                .unwrap()
+                .take()
+                .expect("native page metadata runtime can only start once");
+            commands.spawn((
+                Name::new("Native page metadata"),
+                NativePageMetadataSender(sender),
+                NativePageMetadataReceiver(receiver),
+            ));
+        })
+        .add_systems(First, accept_page_wakes)
+        .add_systems(
+            Update,
+            (
+                apply_native_page_metadata,
+                open_native_pages.after(PageOpenSet::HandleKnownPages),
+                sync_native_appearance.run_if(resource_changed::<AppSettings>),
+                sync_native_page_scale,
             )
-            .add_systems(
-                PostUpdate,
-                (place_native_pages, render_native_pages)
-                    .chain()
-                    .after(crate::present::sync_windowed_frames),
-            )
-            .add_systems(
-                PostUpdate,
-                focus_native_page.after(crate::host_focus::apply_windowed_host_focus),
-            )
-            .add_observer(forward_host_emit);
+                .chain(),
+        )
+        .add_systems(
+            PostUpdate,
+            (place_native_pages, render_native_pages)
+                .chain()
+                .after(crate::present::sync_windowed_frames),
+        )
+        .add_systems(
+            PostUpdate,
+            focus_native_page.after(crate::host_focus::apply_windowed_host_focus),
+        )
+        .add_observer(forward_host_emit);
     }
 }
 

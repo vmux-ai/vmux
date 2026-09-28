@@ -22,30 +22,29 @@ pub(crate) struct ExtensionBrokerPlugin;
 
 impl Plugin for ExtensionBrokerPlugin {
     fn build(&self, app: &mut App) {
-        let entity = app
-            .world_mut()
-            .spawn((
-                Name::new("Extension broker"),
-                BridgeSubscriptions::default(),
-                BridgeResponseCache::default(),
-                PendingBridgeEvents::default(),
-            ))
-            .id();
-        if extension_conformance_enabled() {
-            app.world_mut()
-                .entity_mut(entity)
-                .insert(ConformanceWakeTimer::default());
-        }
-        app.add_systems(
-            Update,
-            drain_bridge_requests.after(super::windows::sync_extension_windows),
-        )
-        .add_systems(
-            Update,
-            forward_extension_model_events.after(super::project::ExtensionProjectionSet),
-        )
-        .add_systems(Update, fire_conformance_wake_timer)
-        .add_systems(Update, arm_bridge_wake);
+        app.add_systems(Startup, spawn_extension_broker)
+            .add_systems(
+                Update,
+                drain_bridge_requests.after(super::windows::sync_extension_windows),
+            )
+            .add_systems(
+                Update,
+                forward_extension_model_events.after(super::project::ExtensionProjectionSet),
+            )
+            .add_systems(Update, fire_conformance_wake_timer)
+            .add_systems(Update, arm_bridge_wake);
+    }
+}
+
+fn spawn_extension_broker(mut commands: Commands) {
+    let mut entity = commands.spawn((
+        Name::new("Extension broker"),
+        BridgeSubscriptions::default(),
+        BridgeResponseCache::default(),
+        PendingBridgeEvents::default(),
+    ));
+    if extension_conformance_enabled() {
+        entity.insert(ConformanceWakeTimer::default());
     }
 }
 

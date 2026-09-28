@@ -16,9 +16,8 @@ pub(super) struct CompletionPlugin;
 
 impl Plugin for CompletionPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut()
-            .spawn((Name::new("Project file index"), ProjectIndex::default()));
-        app.add_plugins(UiEventPlugin::<(PathCompleteRequest,)>::default())
+        app.add_systems(Startup, spawn_project_index)
+            .add_plugins(UiEventPlugin::<(PathCompleteRequest,)>::default())
             .add_observer(on_path_complete_request)
             .add_systems(
                 Update,
@@ -30,6 +29,10 @@ impl Plugin for CompletionPlugin {
                 ),
             );
     }
+}
+
+fn spawn_project_index(mut commands: Commands) {
+    commands.spawn((Name::new("Project file index"), ProjectIndex::default()));
 }
 
 fn on_path_complete_request(

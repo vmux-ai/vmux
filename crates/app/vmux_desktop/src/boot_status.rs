@@ -10,17 +10,20 @@ pub(crate) struct BootStatusPlugin;
 
 impl Plugin for BootStatusPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Name::new("Boot status"),
-            SplashStatus::default(),
-            RestoreComplete::default(),
-            SpaceFilePresent::default(),
-        ));
-        app.add_systems(
+        app.add_systems(Startup, spawn_boot_status).add_systems(
             Update,
             compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
         );
     }
+}
+
+fn spawn_boot_status(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Boot status"),
+        SplashStatus::default(),
+        RestoreComplete::default(),
+        SpaceFilePresent::default(),
+    ));
 }
 
 fn stack_in_active_space(

@@ -4,9 +4,8 @@ pub struct SpaceProjectPlugin;
 
 impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut()
-            .spawn((Name::new("Repository roots"), RepoRoots::default()));
-        app.register_type::<ExpandedProjectDirs>()
+        app.add_systems(Startup, spawn_repository_roots)
+            .register_type::<ExpandedProjectDirs>()
             .add_observer(on_project_tree_toggle)
             .add_systems(
                 Update,
@@ -18,6 +17,10 @@ impl Plugin for SpaceProjectPlugin {
                 ),
             );
     }
+}
+
+fn spawn_repository_roots(mut commands: Commands) {
+    commands.spawn((Name::new("Repository roots"), RepoRoots::default()));
 }
 
 fn on_project_tree_toggle(

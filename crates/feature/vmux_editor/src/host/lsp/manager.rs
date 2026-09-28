@@ -1252,39 +1252,49 @@ fn apply_semantic_tokens(
     }
 }
 
-pub fn build(app: &mut App, diagnostics: LspDiagnosticsSender) {
-    let events = {
-        let world = app.world_mut();
-        let mut senders = world.query::<&ServerEventSender>();
-        senders.single(world).unwrap().0.clone()
-    };
+pub fn build(
+    app: &mut App,
+    diagnostics: LspDiagnosticsSender,
+    diagnostics_inbox: LspDiagnosticsInbox,
+) {
     let (lint, lint_inbox) = crate::lsp::LintDiagnosticsSender::channel();
-    app.world_mut().spawn((
-        Name::new("LSP manager"),
-        LspManager::new(diagnostics, events),
-    ));
-    app.world_mut()
-        .spawn((Name::new("Lint diagnostics"), lint, lint_inbox));
-    app.add_message::<LspGoto>()
-        .add_message::<LspFolds>()
-        .add_message::<LspSemantic>()
-        .add_message::<LspRequestedEdit>()
-        .add_message::<LspCodeActionRequest>()
-        .add_systems(
-            Update,
-            (
-                lsp_open_documents,
-                lint_on_open,
-                drain_lsp_diagnostics,
-                drain_lint,
-                request_code_actions,
-                drain_lsp_requests,
-                apply_semantic_tokens,
-                emit_diagnostics_system,
-                lsp_status_system,
-            )
-                .chain(),
-        );
+    let startup = std::sync::Mutex::new(Some((diagnostics, diagnostics_inbox, lint, lint_inbox)));
+    app.add_systems(
+        Startup,
+        move |events: Single<&ServerEventSender>, mut commands: Commands| {
+            let (diagnostics, diagnostics_inbox, lint, lint_inbox) = startup
+                .lock()
+                .unwrap()
+                .take()
+                .expect("LSP runtime can only start once");
+            commands.spawn((
+                Name::new("LSP manager"),
+                LspManager::new(diagnostics, events.0.clone()),
+            ));
+            commands.spawn((Name::new("LSP diagnostics"), diagnostics_inbox));
+            commands.spawn((Name::new("Lint diagnostics"), lint, lint_inbox));
+        },
+    )
+    .add_message::<LspGoto>()
+    .add_message::<LspFolds>()
+    .add_message::<LspSemantic>()
+    .add_message::<LspRequestedEdit>()
+    .add_message::<LspCodeActionRequest>()
+    .add_systems(
+        Update,
+        (
+            lsp_open_documents,
+            lint_on_open,
+            drain_lsp_diagnostics,
+            drain_lint,
+            request_code_actions,
+            drain_lsp_requests,
+            apply_semantic_tokens,
+            emit_diagnostics_system,
+            lsp_status_system,
+        )
+            .chain(),
+    );
 }
 
 use bevy_cef::prelude::Browsers;

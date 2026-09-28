@@ -10,10 +10,6 @@ pub(crate) struct BookmarkPersistencePlugin;
 
 impl Plugin for BookmarkPersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Name::new("Bookmark persistence"),
-            BookmarkAutoSave::default(),
-        ));
         app.register_type::<OfferedBookmarkDefaults>()
             .init_resource::<OfferedBookmarkDefaults>()
             .add_observer(save_on::<SaveWorld<BookmarkFilter>>)
@@ -22,7 +18,13 @@ impl Plugin for BookmarkPersistencePlugin {
             .add_observer(seed_bookmark_defaults)
             .add_systems(
                 Startup,
-                load_bookmarks_on_startup.after(LayoutStartupSet::Persistence),
+                (
+                    spawn_bookmark_persistence,
+                    ApplyDeferred,
+                    load_bookmarks_on_startup,
+                )
+                    .chain()
+                    .after(LayoutStartupSet::Persistence),
             )
             .add_systems(
                 PostUpdate,
@@ -37,6 +39,13 @@ impl Plugin for BookmarkPersistencePlugin {
                     .chain(),
             );
     }
+}
+
+fn spawn_bookmark_persistence(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Bookmark persistence"),
+        BookmarkAutoSave::default(),
+    ));
 }
 
 type BookmarkFilter = Or<(With<Pin>, With<Bookmark>, With<Folder>)>;

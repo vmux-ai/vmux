@@ -38,9 +38,8 @@ impl Plugin for LayoutPlugin {
                 crate::error_page::ErrorPage::plugin(),
             ));
         }
-        app.world_mut()
-            .spawn((Name::new("Update state"), crate::UpdateState::default()));
-        app.add_plugins((LayoutContractPlugin, LayoutRequestPlugin, LayoutAgentPlugin))
+        app.add_systems(Startup, spawn_update_state)
+            .add_plugins((LayoutContractPlugin, LayoutRequestPlugin, LayoutAgentPlugin))
             .register_type::<Open>()
             .init_resource::<settings::ConfirmCloseSettings>()
             .init_resource::<settings::ResolvedLocale>()
@@ -91,6 +90,10 @@ impl Plugin for LayoutPlugin {
                 crate::pending_stack::PendingStackPlugin,
             ));
     }
+}
+
+fn spawn_update_state(mut commands: Commands) {
+    commands.spawn((Name::new("Update state"), crate::UpdateState::default()));
 }
 
 #[vmux_native::page(file = "src/error.ron")]

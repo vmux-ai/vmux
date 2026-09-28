@@ -12,28 +12,30 @@ pub struct ServerRequestPlugin;
 impl Plugin for ServerRequestPlugin {
     fn build(&self, app: &mut App) {
         let (sender, receiver) = crossbeam_channel::unbounded();
-        app.world_mut().spawn((
-            Name::new("LSP server events"),
-            ServerEventSender(sender),
-            ServerEventInbox(receiver),
-        ));
-        app.add_message::<ServerReply>()
-            .configure_sets(
-                Update,
-                (
-                    ServerRequestSet::Receive,
-                    ServerRequestSet::Answer,
-                    ServerRequestSet::Reply,
-                )
-                    .chain(),
+        app.add_systems(PreStartup, move |mut commands: Commands| {
+            commands.spawn((
+                Name::new("LSP server events"),
+                ServerEventSender(sender.clone()),
+                ServerEventInbox(receiver.clone()),
+            ));
+        })
+        .add_message::<ServerReply>()
+        .configure_sets(
+            Update,
+            (
+                ServerRequestSet::Receive,
+                ServerRequestSet::Answer,
+                ServerRequestSet::Reply,
             )
-            .add_systems(
-                Update,
-                (
-                    spawn_server_requests.in_set(ServerRequestSet::Receive),
-                    answer_server_requests.in_set(ServerRequestSet::Reply),
-                ),
-            );
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            (
+                spawn_server_requests.in_set(ServerRequestSet::Receive),
+                answer_server_requests.in_set(ServerRequestSet::Reply),
+            ),
+        );
     }
 }
 

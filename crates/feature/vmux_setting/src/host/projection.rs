@@ -19,11 +19,8 @@ pub(super) struct ProjectionPlugin;
 
 impl Plugin for ProjectionPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Name::new("Update check status"),
-            CurrentUpdateCheckStatus::default(),
-        ));
-        app.add_plugins(vmux_core::host::UiStatePlugin::<SettingsUiState>::default())
+        app.add_systems(Startup, spawn_update_check_status)
+            .add_plugins(vmux_core::host::UiStatePlugin::<SettingsUiState>::default())
             .add_systems(
                 Update,
                 (
@@ -35,6 +32,13 @@ impl Plugin for ProjectionPlugin {
                     .chain(),
             );
     }
+}
+
+fn spawn_update_check_status(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Update check status"),
+        CurrentUpdateCheckStatus::default(),
+    ));
 }
 
 #[derive(Component, Default)]

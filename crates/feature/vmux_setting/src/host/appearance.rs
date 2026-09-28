@@ -8,16 +8,21 @@ pub struct AppearancePlugin;
 
 impl Plugin for AppearancePlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Name::new("System appearance"),
-            SystemAppearance::default(),
-            ResolvedColorScheme::default(),
-        ));
-        app.add_message::<ColorSchemeChanged>().add_systems(
-            Update,
-            (track_window_theme, update_resolved_color_scheme).chain(),
-        );
+        app.add_systems(Startup, spawn_system_appearance)
+            .add_message::<ColorSchemeChanged>()
+            .add_systems(
+                Update,
+                (track_window_theme, update_resolved_color_scheme).chain(),
+            );
     }
+}
+
+fn spawn_system_appearance(mut commands: Commands) {
+    commands.spawn((
+        Name::new("System appearance"),
+        SystemAppearance::default(),
+        ResolvedColorScheme::default(),
+    ));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

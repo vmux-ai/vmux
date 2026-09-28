@@ -12,16 +12,27 @@ pub struct UiStatePlugin;
 
 impl Plugin for UiStatePlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Name::new("Command bar projection"),
-            CommandBarProjection::default(),
-        ));
-        app.add_plugins(vmux_core::host::UiStatePlugin::<
+        app.add_systems(
+            Startup,
+            (
+                spawn_command_bar_projection,
+                ApplyDeferred,
+                update_pages_snapshot,
+            )
+                .chain(),
+        )
+        .add_plugins(vmux_core::host::UiStatePlugin::<
             vmux_api::command_bar::CommandBarUiState,
         >::default())
-            .add_systems(Startup, update_pages_snapshot)
-            .add_systems(PreUpdate, attach_command_bar_ui_state);
+        .add_systems(PreUpdate, attach_command_bar_ui_state);
     }
+}
+
+fn spawn_command_bar_projection(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Command bar projection"),
+        CommandBarProjection::default(),
+    ));
 }
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]

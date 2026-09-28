@@ -22,13 +22,16 @@ impl<M: HostedPage> Default for HostedPagePlugin<M> {
 
 impl<M: HostedPage> Plugin for HostedPagePlugin<M> {
     fn build(&self, app: &mut App) {
-        app.world_mut()
-            .spawn(NativelyHosted::page(M::URL, M::TITLE));
-        app.add_systems(
-            Update,
-            mark_hosted_view::<M>.after(PageOpenSet::HandleKnownPages),
-        );
+        app.add_systems(Startup, spawn_hosted_page::<M>)
+            .add_systems(
+                Update,
+                mark_hosted_view::<M>.after(PageOpenSet::HandleKnownPages),
+            );
     }
+}
+
+fn spawn_hosted_page<M: HostedPage>(mut commands: Commands) {
+    commands.spawn(NativelyHosted::page(M::URL, M::TITLE));
 }
 
 fn mark_hosted_view<M: HostedPage>(

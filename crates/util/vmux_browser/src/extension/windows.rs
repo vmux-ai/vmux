@@ -20,9 +20,8 @@ pub(crate) struct ExtensionWindowsPlugin;
 
 impl Plugin for ExtensionWindowsPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut()
-            .spawn((Name::new("Extension windows"), ExtensionWindows::default()));
-        app.add_message::<OpenExtensionWindowRequest>()
+        app.add_systems(Startup, spawn_extension_windows)
+            .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_systems(
@@ -39,6 +38,10 @@ impl Plugin for ExtensionWindowsPlugin {
                     .after(super::broker::drain_bridge_requests),
             );
     }
+}
+
+fn spawn_extension_windows(mut commands: Commands) {
+    commands.spawn((Name::new("Extension windows"), ExtensionWindows::default()));
 }
 
 pub const WINDOW_ID_NONE: i32 = -1;

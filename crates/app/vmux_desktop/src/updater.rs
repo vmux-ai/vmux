@@ -18,9 +18,16 @@ impl Plugin for UpdatePlugin {
             poll_interval: self.updater.poll_interval,
         };
         let checker = UpdateChecker::new(config.initial_delay);
-        app.world_mut()
-            .spawn((Name::new("Update checker"), config, checker));
-        app.add_systems(Update, poll_update_result);
+        let startup = Mutex::new(Some((config, checker)));
+        app.add_systems(Startup, move |mut commands: Commands| {
+            let (config, checker) = startup
+                .lock()
+                .unwrap()
+                .take()
+                .expect("update checker can only start once");
+            commands.spawn((Name::new("Update checker"), config, checker));
+        })
+        .add_systems(Update, poll_update_result);
     }
 }
 

@@ -22,12 +22,8 @@ pub(crate) struct HostFocusPlugin;
 
 impl Plugin for HostFocusPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Name::new("Host focus"),
-            HostFocusIntent::default(),
-            KeyboardContext::default(),
-        ));
-        app.add_systems(Update, sync_keyboard_context.in_set(KeyboardContextSet))
+        app.add_systems(Startup, spawn_host_focus)
+            .add_systems(Update, sync_keyboard_context.in_set(KeyboardContextSet))
             .add_systems(
                 PostUpdate,
                 (compute_host_focus_intent, apply_windowed_host_focus)
@@ -38,6 +34,14 @@ impl Plugin for HostFocusPlugin {
             )
             .add_plugins(platform::HostFocusPlatformPlugin);
     }
+}
+
+fn spawn_host_focus(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Host focus"),
+        HostFocusIntent::default(),
+        KeyboardContext::default(),
+    ));
 }
 
 fn page_owns_escape(terminal_focused: bool, overlay_open: bool) -> bool {

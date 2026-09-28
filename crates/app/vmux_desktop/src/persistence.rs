@@ -31,14 +31,6 @@ pub(crate) struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Name::new("Space persistence"),
-            AutoSave {
-                debounce: Timer::from_seconds(0.5, TimerMode::Once),
-                periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-                dirty: false,
-            },
-        ));
         app.add_plugins(crate::bookmark::BookmarkPersistencePlugin)
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<vmux_space::SaveSpaceRequest>()
@@ -46,7 +38,13 @@ impl Plugin for PersistencePlugin {
             .add_observer(load_on_default_event)
             .add_systems(
                 Startup,
-                load_space_on_startup.in_set(LayoutStartupSet::Persistence),
+                (
+                    spawn_space_persistence,
+                    ApplyDeferred,
+                    load_space_on_startup,
+                )
+                    .chain()
+                    .in_set(LayoutStartupSet::Persistence),
             )
             .add_systems(Startup, rebuild_space_views.in_set(LayoutStartupSet::Post))
             .add_observer(mark_space_views_need_rebuild)
@@ -65,6 +63,17 @@ impl Plugin for PersistencePlugin {
                 ),
             );
     }
+}
+
+fn spawn_space_persistence(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Space persistence"),
+        AutoSave {
+            debounce: Timer::from_seconds(0.5, TimerMode::Once),
+            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+            dirty: false,
+        },
+    ));
 }
 
 fn handle_save_space_requests(

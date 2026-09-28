@@ -32,10 +32,9 @@ pub mod workspace_edit;
 impl Plugin for LspPlugin {
     fn build(&self, app: &mut App) {
         let (diagnostics, inbox) = LspDiagnosticsSender::channel();
-        app.world_mut().spawn((Name::new("LSP diagnostics"), inbox));
         app.add_plugins(server_request::ServerRequestPlugin)
             .add_systems(Startup, spawn_tool_provider);
-        manager::build(app, diagnostics);
+        manager::build(app, diagnostics, inbox);
         app.add_plugins(manager_page::ManagerPlugin);
     }
 }

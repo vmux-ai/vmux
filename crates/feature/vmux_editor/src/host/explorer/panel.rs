@@ -9,19 +9,23 @@ pub(super) struct PanelPlugin;
 
 impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Name::new("Explorer panel defaults"),
-            ExplorerPanelDefaults {
-                default_visible: false,
-                width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
-                loaded: false,
-            },
-        ));
-        app.register_type::<StackExplorerVisibility>()
+        app.add_systems(Startup, spawn_explorer_panel_defaults)
+            .register_type::<StackExplorerVisibility>()
             .add_systems(Update, (load_explorer_panel_defaults, emit_explorer_panel))
             .add_observer(on_explorer_panel_set_visible)
             .add_observer(on_explorer_panel_width);
     }
+}
+
+fn spawn_explorer_panel_defaults(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Explorer panel defaults"),
+        ExplorerPanelDefaults {
+            default_visible: false,
+            width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
+            loaded: false,
+        },
+    ));
 }
 
 #[derive(Component, Reflect, Clone, Copy, Debug, Default, PartialEq, Eq)]

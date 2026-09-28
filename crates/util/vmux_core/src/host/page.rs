@@ -2,7 +2,7 @@ use bevy::{
     asset::io::embedded::EmbeddedAssetRegistry,
     prelude::{
         App, Commands, Component, Entity, IntoScheduleConfigs, Message, MessageReader,
-        MessageWriter, On, Plugin, Query, ResMut, Startup, SystemSet, Update,
+        MessageWriter, On, Plugin, PreStartup, Query, ResMut, Startup, SystemSet, Update,
     },
 };
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
@@ -129,16 +129,22 @@ impl PageManifestPlugin {
 
 impl Plugin for PageManifestPlugin {
     fn build(&self, app: &mut App) {
-        if let Some(hosted) = self.alias {
-            app.world_mut().spawn(hosted);
-        }
-        let mut registration = app.world_mut().spawn(self.manifest);
-        if let Some(hosted) = self.hosted {
-            registration.insert(hosted);
-        }
-        if let Some(route) = self.route {
-            registration.insert(route);
-        }
+        let manifest = self.manifest;
+        let hosted = self.hosted;
+        let route = self.route;
+        let alias = self.alias;
+        app.add_systems(PreStartup, move |mut commands: Commands| {
+            if let Some(alias) = alias {
+                commands.spawn(alias);
+            }
+            let mut registration = commands.spawn(manifest);
+            if let Some(hosted) = hosted {
+                registration.insert(hosted);
+            }
+            if let Some(route) = route {
+                registration.insert(route);
+            }
+        });
     }
 
     fn is_unique(&self) -> bool {

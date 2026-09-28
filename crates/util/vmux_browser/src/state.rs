@@ -63,28 +63,31 @@ pub(crate) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut()
-            .spawn((Name::new("Page state revision"), StateRevision::default()));
-        app.add_systems(
-            Update,
-            mark_page_state_dirty
-                .after(vmux_layout::apply_cef_state_from_webview)
-                .after(vmux_layout::stack::ComputeFocusSet),
-        )
-        .add_systems(
-            Update,
-            (
-                push_layout_state_emit,
-                push_stacks_host_emit,
-                push_pane_tree_emit,
-                push_tabs_host_emit,
-                push_bookmarks_host_emit,
-                push_update_notice_emit,
-                push_projects_host_emit,
+        app.add_systems(Startup, spawn_state_revision)
+            .add_systems(
+                Update,
+                mark_page_state_dirty
+                    .after(vmux_layout::apply_cef_state_from_webview)
+                    .after(vmux_layout::stack::ComputeFocusSet),
             )
-                .after(mark_page_state_dirty),
-        );
+            .add_systems(
+                Update,
+                (
+                    push_layout_state_emit,
+                    push_stacks_host_emit,
+                    push_pane_tree_emit,
+                    push_tabs_host_emit,
+                    push_bookmarks_host_emit,
+                    push_update_notice_emit,
+                    push_projects_host_emit,
+                )
+                    .after(mark_page_state_dirty),
+            );
     }
+}
+
+fn spawn_state_revision(mut commands: Commands) {
+    commands.spawn((Name::new("Page state revision"), StateRevision::default()));
 }
 
 #[derive(Component, Default)]

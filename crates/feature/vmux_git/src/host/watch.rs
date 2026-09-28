@@ -13,55 +13,59 @@ pub(super) struct WatchPlugin;
 
 impl Plugin for WatchPlugin {
     fn build(&self, app: &mut App) {
-        let (tx, rx) = mpsc::channel();
-        let proxy = app
-            .world()
-            .get_resource::<EventLoopProxyWrapper>()
-            .map(|wrapper| (**wrapper).clone());
-        match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
-            if !should_forward_git_watch_result(&result) {
-                return;
-            }
-            let _ = tx.send(result);
-            if let Some(proxy) = proxy.as_ref() {
-                let _ = proxy.send_event(WinitUserEvent::WakeUp);
-            }
-        }) {
-            Ok(watcher) => {
-                app.insert_non_send(GitWatch {
-                    watcher,
-                    rx,
-                    watch_references: HashMap::new(),
-                    subscriptions: HashMap::new(),
-                    repo_info_subscriptions: HashMap::new(),
-                });
-            }
-            Err(error) => bevy::log::warn!("git watcher init failed: {error}"),
-        }
-        let wake = app
-            .world()
-            .get_resource::<EventLoopProxyWrapper>()
-            .map(|wrapper| (**wrapper).clone());
-        app.world_mut().spawn((
-            Name::new("Repository info cache"),
-            RepoInfoCache {
-                entries: HashMap::new(),
-                canonical: HashMap::new(),
-                guessed: HashMap::new(),
-                wake,
-            },
-        ));
-        app.add_systems(
-            Update,
-            (
-                drain_git_watch,
-                poll_repo_info_cache,
-                sync_repo_info_watches,
-            )
-                .chain()
-                .in_set(GitUpdateSet::Watch),
-        );
+        app.add_systems(Startup, initialize_git_watch)
+            .add_systems(Startup, spawn_repo_info_cache)
+            .add_systems(
+                Update,
+                (
+                    drain_git_watch,
+                    poll_repo_info_cache,
+                    sync_repo_info_watches,
+                )
+                    .chain()
+                    .in_set(GitUpdateSet::Watch),
+            );
     }
+}
+
+fn initialize_git_watch(world: &mut World) {
+    let (tx, rx) = mpsc::channel();
+    let proxy = world
+        .get_resource::<EventLoopProxyWrapper>()
+        .map(|wrapper| (**wrapper).clone());
+    match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+        if !should_forward_git_watch_result(&result) {
+            return;
+        }
+        let _ = tx.send(result);
+        if let Some(proxy) = proxy.as_ref() {
+            let _ = proxy.send_event(WinitUserEvent::WakeUp);
+        }
+    }) {
+        Ok(watcher) => {
+            world.insert_non_send(GitWatch {
+                watcher,
+                rx,
+                watch_references: HashMap::new(),
+                subscriptions: HashMap::new(),
+                repo_info_subscriptions: HashMap::new(),
+            });
+        }
+        Err(error) => bevy::log::warn!("git watcher init failed: {error}"),
+    }
+}
+
+fn spawn_repo_info_cache(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands: Commands) {
+    let wake = proxy.map(|wrapper| (**wrapper).clone());
+    commands.spawn((
+        Name::new("Repository info cache"),
+        RepoInfoCache {
+            entries: HashMap::new(),
+            canonical: HashMap::new(),
+            guessed: HashMap::new(),
+            wake,
+        },
+    ));
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
