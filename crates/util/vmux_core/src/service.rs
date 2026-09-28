@@ -1,4 +1,8 @@
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 use vmux_profile::{active_profile_name, build_profile, shared_data_dir};
 
 #[cfg(host)]
@@ -9,6 +13,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 #[cfg(host)]
 use tokio::sync::Mutex as TokioMutex;
+#[cfg(host)]
+use tokio::sync::oneshot;
 #[cfg(host)]
 use vmux_api::protocol::{ClientMessage, ServiceMessage};
 #[cfg(host)]
@@ -32,6 +38,65 @@ pub struct ServiceConnected;
 #[cfg(host)]
 #[derive(Component, Clone, Debug)]
 pub struct ServiceUnavailable(pub String);
+
+#[cfg(host)]
+pub struct PendingRequests<K, V> {
+    entries: Arc<TokioMutex<HashMap<K, oneshot::Sender<V>>>>,
+}
+
+#[cfg(host)]
+impl<K, V> Clone for PendingRequests<K, V> {
+    fn clone(&self) -> Self {
+        Self {
+            entries: Arc::clone(&self.entries),
+        }
+    }
+}
+
+#[cfg(host)]
+impl<K, V> Default for PendingRequests<K, V> {
+    fn default() -> Self {
+        Self {
+            entries: Arc::new(TokioMutex::new(HashMap::new())),
+        }
+    }
+}
+
+#[cfg(host)]
+impl<K, V> PendingRequests<K, V>
+where
+    K: Copy + Eq + Hash,
+{
+    pub async fn request(
+        &self,
+        id: K,
+        timeout: Duration,
+        publish: impl FnOnce() -> bool,
+        unavailable: &'static str,
+        timed_out: &'static str,
+    ) -> Result<V, String> {
+        let (sender, receiver) = oneshot::channel();
+        self.entries.lock().await.insert(id, sender);
+        if !publish() {
+            self.entries.lock().await.remove(&id);
+            return Err(unavailable.to_string());
+        }
+        match tokio::time::timeout(timeout, receiver).await {
+            Ok(Ok(response)) => Ok(response),
+            _ => {
+                self.entries.lock().await.remove(&id);
+                Err(timed_out.to_string())
+            }
+        }
+    }
+
+    pub async fn resolve(&self, id: K, response: V) -> bool {
+        let Some(sender) = self.entries.lock().await.remove(&id) else {
+            return false;
+        };
+        sender.send(response).is_ok()
+    }
+}
 
 #[cfg(host)]
 pub struct ServiceConnection {

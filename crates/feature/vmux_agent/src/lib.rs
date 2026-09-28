@@ -6,6 +6,8 @@ pub mod setup;
 pub mod http;
 #[cfg(all(host, feature = "provider"))]
 pub mod providers;
+#[cfg(all(host, feature = "service"))]
+pub mod service;
 #[cfg(all(host, feature = "provider"))]
 pub mod stream;
 

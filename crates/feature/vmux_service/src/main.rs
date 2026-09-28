@@ -27,7 +27,7 @@ fn main() {
         vmux_service::query::ProcessQueryPlugin,
         vmux_service::remote::client_operation::ClientOperationPlugin,
         vmux_service::remote::authorization::RemoteAuthorizationPlugin,
-        vmux_service::agent::AgentSessionPlugin,
+        vmux_agent::service::AgentSessionPlugin,
         vmux_service::acp::AcpSessionPlugin,
         vmux_service::server::ServiceDaemonPlugin,
     ))

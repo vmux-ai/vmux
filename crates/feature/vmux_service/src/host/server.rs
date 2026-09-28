@@ -15,11 +15,11 @@ use vmux_api::protocol::{
 
 use super::query::ProcessQueries;
 use crate::acp::AcpSessions;
-use crate::agent::AgentSessions;
 use crate::remote::authorization::RemoteAuthorizations;
 use crate::remote::client_operation::ClientOperations;
+use vmux_agent::service::AgentSessions;
 
-type PendingQueries = crate::agent::AgentQueryResponses;
+type PendingQueries = vmux_agent::service::AgentQueryResponses;
 
 impl ProcessUpdate {
     fn into_service_message(self, process_id: ProcessId) -> ServiceMessage {
@@ -184,7 +184,7 @@ fn start_service_daemon(
     }
 }
 
-type PendingCommands = crate::agent::AgentCommandResponses;
+type PendingCommands = vmux_agent::service::AgentCommandResponses;
 
 fn to_acp_mcp_server(
     server: ManagedMcpServer,
@@ -271,7 +271,10 @@ async fn route_agent_input(
     }
     let text = compose_agent_prompt(&page_agent_prompt(text, &attachments), context.as_deref());
     agent_sessions
-        .input(sid, crate::agent::SessionInput::User { text, attachments })
+        .input(
+            sid,
+            vmux_agent::service::SessionInput::User { text, attachments },
+        )
         .await;
 }
 
@@ -313,8 +316,8 @@ impl ServiceServer {
         let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
         let pending_queries = PendingQueries::default();
         let pending_commands = PendingCommands::default();
-        let pending_tool_calls = crate::agent::AgentToolResponses::default();
-        let remote_broker = crate::agent::AgentBroker::new(
+        let pending_tool_calls = vmux_agent::service::AgentToolResponses::default();
+        let remote_broker = vmux_agent::service::AgentBroker::new(
             agent_tx.clone(),
             pending_commands.clone(),
             pending_queries.clone(),
@@ -503,7 +506,7 @@ async fn route_agent_query_response(
     request_id: vmux_api::protocol::AgentRequestId,
     response: ServiceMessage,
     pending_queries: &PendingQueries,
-    broker: &crate::agent::AgentBroker,
+    broker: &vmux_agent::service::AgentBroker,
 ) {
     if pending_queries.resolve(request_id, response.clone()).await {
         return;
@@ -520,7 +523,7 @@ async fn handle_client(
     agent_tx: broadcast::Sender<ServiceMessage>,
     pending_queries: PendingQueries,
     pending_commands: PendingCommands,
-    pending_tool_calls: crate::agent::AgentToolResponses,
+    pending_tool_calls: vmux_agent::service::AgentToolResponses,
     agent_sessions: AgentSessions,
     acp_sessions: AcpSessions,
     process_queries: ProcessQueries,
@@ -535,7 +538,7 @@ async fn handle_client(
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     let mut agent_subscription: Option<tokio::task::JoinHandle<()>> = None;
     let mut page_agent_forwarders: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
-    let broker = crate::agent::AgentBroker::new(
+    let broker = vmux_agent::service::AgentBroker::new(
         agent_tx.clone(),
         pending_commands.clone(),
         pending_queries.clone(),
@@ -1228,7 +1231,7 @@ async fn handle_client(
                     .await
                 {
                     agent_sessions
-                        .input(sid, crate::agent::SessionInput::Cancel)
+                        .input(sid, vmux_agent::service::SessionInput::Cancel)
                         .await;
                 }
             }
@@ -1251,7 +1254,7 @@ async fn handle_client(
                     agent_sessions
                         .input(
                             sid,
-                            crate::agent::SessionInput::Approve { call_id, decision },
+                            vmux_agent::service::SessionInput::Approve { call_id, decision },
                         )
                         .await;
                 }
@@ -1409,7 +1412,7 @@ mod tests {
         let (process_queries, _process_runtime) =
             ProcessQueries::new(Arc::clone(&manager), wake.clone());
         let (agent_sessions, _agent_runtime) =
-            crate::agent::AgentSessions::new(tokio::runtime::Handle::current(), wake);
+            vmux_agent::service::AgentSessions::new(tokio::runtime::Handle::current(), wake);
         let acp_sessions = crate::acp::AcpSessions::closed();
         let mut server = Box::pin(
             super::ServiceServer {

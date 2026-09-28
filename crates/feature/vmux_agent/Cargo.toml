@@ -13,6 +13,13 @@ provider = [
     "dep:futures-util",
     "dep:reqwest",
 ]
+service = [
+    "provider",
+    "dep:bevy",
+    "dep:bevy_ecs",
+    "dep:tokio",
+    "dep:vmux_core",
+]
 app = [
     "provider",
     "dep:base64",

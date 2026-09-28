@@ -10,10 +10,8 @@ use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
 use vmux_core::agent::SessionId;
 use vmux_core::{AgentWorkingDir, CreatedAt};
 
-use super::request::PendingRequests;
-use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
-use vmux_agent::providers::{anthropic, mistral, openai};
-use vmux_agent::stream::{BuildRequest, ParseSse, StreamEvent, ToolDef};
+use crate::providers::{anthropic, mistral, openai};
+use crate::stream::{BuildRequest, ParseSse, StreamEvent, ToolDef};
 use vmux_api::BinEvent;
 use vmux_api::protocol::{
     AGENT_QUERY_TIMEOUT, AGENT_REQUEST_TIMEOUT, AGENT_TOOL_TIMEOUT, AgentAttachment,
@@ -21,11 +19,12 @@ use vmux_api::protocol::{
     AgentRunStatus, ApprovalDecision, BROWSER_NAVIGATE_TIMEOUT, JsonValue, ProcessId,
     ServiceMessage, SharedEvent,
 };
-use vmux_api::room::{AssistantBlock, Message};
+use vmux_api::room::{AssistantBlock, Message, RemoteApproval, RemoteSession, RemoteStatus};
+use vmux_core::service::PendingRequests;
 
-pub(crate) type AgentCommandResponses = PendingRequests<AgentRequestId, AgentCommandResult>;
-pub(crate) type AgentQueryResponses = PendingRequests<AgentRequestId, ServiceMessage>;
-pub(crate) type AgentToolResponses = PendingRequests<AgentRequestId, (String, bool)>;
+pub type AgentCommandResponses = PendingRequests<AgentRequestId, AgentCommandResult>;
+pub type AgentQueryResponses = PendingRequests<AgentRequestId, ServiceMessage>;
+pub type AgentToolResponses = PendingRequests<AgentRequestId, (String, bool)>;
 
 const NO_AGENT_SUBSCRIBER: &str = "no desktop subscribed to agent commands";
 
@@ -38,7 +37,7 @@ pub struct AgentBroker {
 }
 
 impl AgentBroker {
-    pub(crate) fn new(
+    pub fn new(
         outbound: broadcast::Sender<ServiceMessage>,
         commands: AgentCommandResponses,
         queries: AgentQueryResponses,
@@ -52,7 +51,7 @@ impl AgentBroker {
         }
     }
 
-    pub(crate) async fn command(
+    pub async fn command(
         &self,
         request_id: AgentRequestId,
         anchor: Option<ProcessId>,
@@ -85,7 +84,7 @@ impl AgentBroker {
             .await
     }
 
-    pub(crate) async fn query(
+    pub async fn query(
         &self,
         request_id: AgentRequestId,
         query: AgentRequest,
@@ -113,7 +112,7 @@ impl AgentBroker {
             .await
     }
 
-    pub(crate) async fn tool_call(
+    pub async fn tool_call(
         &self,
         request_id: AgentRequestId,
         sid: String,
@@ -143,7 +142,7 @@ impl AgentBroker {
             .await
     }
 
-    pub(crate) async fn resolve_command(
+    pub async fn resolve_command(
         &self,
         request_id: AgentRequestId,
         result: AgentCommandResult,
@@ -151,12 +150,7 @@ impl AgentBroker {
         self.commands.resolve(request_id, result).await
     }
 
-    pub(crate) async fn resolve_tool(
-        &self,
-        request_id: AgentRequestId,
-        content: String,
-        is_error: bool,
-    ) {
+    pub async fn resolve_tool(&self, request_id: AgentRequestId, content: String, is_error: bool) {
         self.tools.resolve(request_id, (content, is_error)).await;
     }
 }
@@ -225,7 +219,7 @@ impl Plugin for AgentSessionPlugin {
 }
 
 #[derive(Clone)]
-pub(crate) struct AgentSessions {
+pub struct AgentSessions {
     spawns: mpsc::UnboundedSender<SpawnAgentSession>,
     inputs: mpsc::UnboundedSender<AgentSessionInputRequest>,
     subscriptions: mpsc::UnboundedSender<SubscribeAgentSession>,
@@ -238,7 +232,7 @@ pub(crate) struct AgentSessions {
 }
 
 impl AgentSessions {
-    pub(crate) fn new(runtime: Handle, wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
+    pub fn new(runtime: Handle, wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
         let (spawns, spawn_inbox) = mpsc::unbounded_channel();
         let (inputs, input_inbox) = mpsc::unbounded_channel();
         let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
@@ -275,7 +269,7 @@ impl AgentSessions {
         )
     }
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn spawn(
+    pub async fn spawn(
         &self,
         sid: String,
         provider: String,
@@ -306,7 +300,7 @@ impl AgentSessions {
             .map_err(|_| "agent session spawn was cancelled".to_string())?
     }
 
-    pub(crate) async fn input(&self, sid: String, input: SessionInput) -> bool {
+    pub async fn input(&self, sid: String, input: SessionInput) -> bool {
         let (response, receiver) = oneshot::channel();
         if self
             .inputs
@@ -323,10 +317,7 @@ impl AgentSessions {
         receiver.await.unwrap_or(false)
     }
 
-    pub(crate) async fn subscribe(
-        &self,
-        sid: String,
-    ) -> Option<broadcast::Receiver<ServiceMessage>> {
+    pub async fn subscribe(&self, sid: String) -> Option<broadcast::Receiver<ServiceMessage>> {
         let (response, receiver) = oneshot::channel();
         self.subscriptions
             .send(SubscribeAgentSession {
@@ -338,7 +329,7 @@ impl AgentSessions {
         receiver.await.ok().flatten()
     }
 
-    pub(crate) async fn snapshot(&self, sid: String) -> Option<ServiceMessage> {
+    pub async fn snapshot(&self, sid: String) -> Option<ServiceMessage> {
         let (response, receiver) = oneshot::channel();
         self.snapshots
             .send(SnapshotAgentSession {
@@ -350,7 +341,7 @@ impl AgentSessions {
         receiver.await.ok().flatten()
     }
 
-    pub(crate) async fn remote_messages(&self, sid: String) -> Option<Vec<Message>> {
+    pub async fn remote_messages(&self, sid: String) -> Option<Vec<Message>> {
         let (response, receiver) = oneshot::channel();
         self.messages
             .send(AgentSessionMessages {
@@ -362,7 +353,7 @@ impl AgentSessions {
         receiver.await.ok().flatten()
     }
 
-    pub(crate) async fn remote_sessions(&self) -> Vec<RemoteSession> {
+    pub async fn remote_sessions(&self) -> Vec<RemoteSession> {
         let (response, receiver) = oneshot::channel();
         if self
             .lists
@@ -377,7 +368,7 @@ impl AgentSessions {
         receiver.await.unwrap_or_default()
     }
 
-    pub(crate) async fn remote_session(&self, sid: String) -> Option<RemoteSession> {
+    pub async fn remote_session(&self, sid: String) -> Option<RemoteSession> {
         let (response, receiver) = oneshot::channel();
         self.lookups
             .send(FindAgentSession {
@@ -389,7 +380,7 @@ impl AgentSessions {
         receiver.await.ok().flatten()
     }
 
-    pub(crate) async fn close(&self, sid: String) -> bool {
+    pub async fn close(&self, sid: String) -> bool {
         let (response, receiver) = oneshot::channel();
         if self
             .closes
@@ -403,41 +394,6 @@ impl AgentSessions {
             return false;
         }
         receiver.await.unwrap_or(false)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn closed() -> Self {
-        let (spawns, spawn_inbox) = mpsc::unbounded_channel();
-        let (inputs, input_inbox) = mpsc::unbounded_channel();
-        let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
-        let (snapshots, snapshot_inbox) = mpsc::unbounded_channel();
-        let (messages, message_inbox) = mpsc::unbounded_channel();
-        let (lists, list_inbox) = mpsc::unbounded_channel();
-        let (lookups, lookup_inbox) = mpsc::unbounded_channel();
-        let (closes, close_inbox) = mpsc::unbounded_channel();
-        let (wake, wake_inbox) = mpsc::unbounded_channel();
-        drop((
-            spawn_inbox,
-            input_inbox,
-            subscription_inbox,
-            snapshot_inbox,
-            message_inbox,
-            list_inbox,
-            lookup_inbox,
-            close_inbox,
-            wake_inbox,
-        ));
-        Self {
-            spawns,
-            inputs,
-            subscriptions,
-            snapshots,
-            messages,
-            lists,
-            lookups,
-            closes,
-            wake,
-        }
     }
 }
 
@@ -867,7 +823,7 @@ fn spawn_sse(
         }
     });
     let http = tokio::spawn(async move {
-        vmux_agent::http::drive_sse(request, parse, cb_tx).await;
+        crate::http::drive_sse(request, parse, cb_tx).await;
     });
     (ev_rx, http)
 }

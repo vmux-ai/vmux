@@ -532,12 +532,19 @@ mod live {
                 }
             });
             let (agent_tx, _) = broadcast::channel(8);
+            let (agent_wake, agent_wake_inbox) = mpsc::unbounded_channel();
+            drop(agent_wake_inbox);
+            let (agents, agent_runtime) = vmux_agent::service::AgentSessions::new(
+                tokio::runtime::Handle::current(),
+                agent_wake,
+            );
+            drop(agent_runtime);
             let state = super::super::server::RemoteState {
                 relay_token: Arc::from("relay-token"),
                 authorizations: authorizations.clone(),
-                agents: crate::agent::AgentSessions::closed(),
+                agents,
                 acp: crate::acp::AcpSessions::closed(),
-                broker: crate::agent::AgentBroker::new(
+                broker: vmux_agent::service::AgentBroker::new(
                     agent_tx,
                     Default::default(),
                     Default::default(),

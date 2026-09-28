@@ -46,7 +46,7 @@ futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 ring = { workspace = true }
 vmux_core = { path = "../../util/vmux_core" }
-vmux_agent = { path = "../vmux_agent", default-features = false, features = ["provider"] }
+vmux_agent = { path = "../vmux_agent", default-features = false, features = ["service"] }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_profile = { path = "../../util/vmux_profile" }
 agent-client-protocol = "1.0.1"

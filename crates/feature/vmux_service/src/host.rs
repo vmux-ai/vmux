@@ -5,7 +5,6 @@ pub use crate::remote::pairing;
 pub use vmux_transport::DeviceId;
 
 pub mod acp;
-pub mod agent;
 pub mod bundle;
 pub mod cleanup;
 pub mod cli;
@@ -19,7 +18,6 @@ pub mod plugin;
 pub mod process;
 pub mod query;
 pub mod registry;
-mod request;
 pub mod run_marker;
 pub mod runner;
 pub mod server;
