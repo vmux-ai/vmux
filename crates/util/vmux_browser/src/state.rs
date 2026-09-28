@@ -203,6 +203,48 @@ impl ProjectionCache {
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct LayoutProjection<'w, 's> {
+    commands: Commands<'w, 's>,
+    browsers: NonSend<'w, Browsers>,
+    layout: FocusedLayout<'w, 's>,
+    revision: Single<'w, 's, &'static StateRevision>,
+    cache: Local<'s, ProjectionCache>,
+}
+
+#[derive(Clone, Copy)]
+struct ProjectionTarget {
+    entity: Entity,
+    revision: u64,
+    page_ready_changed: bool,
+}
+
+impl LayoutProjection<'_, '_> {
+    fn target(&self) -> Option<ProjectionTarget> {
+        let (entity, page_ready_changed) = self.layout.get()?;
+        if !self.browsers.can_emit_to(&entity) {
+            return None;
+        }
+        let target = ProjectionTarget {
+            entity,
+            revision: self.revision.0,
+            page_ready_changed,
+        };
+        self.cache
+            .needs_rebuild(entity, target.revision, page_ready_changed)
+            .then_some(target)
+    }
+
+    fn should_emit(&mut self, target: ProjectionTarget, body: String) -> bool {
+        self.cache.should_emit(
+            target.entity,
+            target.revision,
+            body,
+            target.page_ready_changed,
+        )
+    }
+}
+
 type PageProjectionChanged = Or<(
     Changed<PageMetadata>,
     Changed<PageIdentity>,
@@ -387,28 +429,25 @@ fn mark_page_state_dirty(
 }
 
 fn push_layout_state_emit(
-    mut commands: Commands,
-    browsers: NonSend<Browsers>,
-    layout: FocusedLayout,
+    mut projection: LayoutProjection,
     child_of: Query<&ChildOf>,
     header_q: Query<(Entity, Has<Open>, Option<&ComputedNode>), With<Header>>,
     side_sheet_q: Query<(Entity, &SideSheetPosition, Has<Open>, &Node), With<SideSheet>>,
     window_q: Query<(&HostWindow, &Node), With<VmuxWindow>>,
     windows: Query<&Window>,
     settings: Res<AppSettings>,
-    revision: Single<&StateRevision>,
-    mut cache: Local<ProjectionCache>,
 ) {
-    let Some((cef_e, page_ready_changed)) = layout.get() else {
+    let Some(target) = projection.target() else {
         return;
     };
-    if !browsers.can_emit_to(&cef_e) {
-        return;
-    }
-    if !cache.needs_rebuild(cef_e, revision.0, page_ready_changed) {
-        return;
-    }
-    let Some(host_window) = layout.host_windows.get(cef_e).ok().map(|host| host.0) else {
+    let cef_e = target.entity;
+    let Some(host_window) = projection
+        .layout
+        .host_windows
+        .get(cef_e)
+        .ok()
+        .map(|host| host.0)
+    else {
         return;
     };
     let window_padding = window_q
@@ -418,8 +457,11 @@ fn push_layout_state_emit(
         .unwrap_or_else(|| layout_window_padding_from_settings(&settings));
     let header_open = header_q.iter().any(|(entity, is_open, _)| {
         is_open
-            && vmux_layout::window::host_window_of(entity, &child_of, &layout.host_windows)
-                == Some(host_window)
+            && vmux_layout::window::host_window_of(
+                entity,
+                &child_of,
+                &projection.layout.host_windows,
+            ) == Some(host_window)
     });
     let window_width_px = windows
         .get(host_window)
@@ -427,7 +469,7 @@ fn push_layout_state_emit(
         .map(|window| window.resolution.physical_width() as f32)
         .unwrap_or(0.0);
     let header_offsets = header_q.iter().find_map(|(entity, _, computed)| {
-        if vmux_layout::window::host_window_of(entity, &child_of, &layout.host_windows)
+        if vmux_layout::window::host_window_of(entity, &child_of, &projection.layout.host_windows)
             == Some(host_window)
         {
             LayoutFixedOffsets::from_node(computed?, window_width_px)
@@ -441,8 +483,11 @@ fn push_layout_state_emit(
         vmux_layout::event::SideSheetResizeEvent::live(settings.layout.side_sheet.width).clamped();
     for (entity, position, is_open, node) in &side_sheet_q {
         if *position != SideSheetPosition::Left
-            || vmux_layout::window::host_window_of(entity, &child_of, &layout.host_windows)
-                != Some(host_window)
+            || vmux_layout::window::host_window_of(
+                entity,
+                &child_of,
+                &projection.layout.host_windows,
+            ) != Some(host_window)
         {
             continue;
         }
@@ -471,10 +516,12 @@ fn push_layout_state_emit(
         window_pad_left: window_padding.left,
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
-    if !cache.should_emit(cef_e, revision.0, body, page_ready_changed) {
+    if !projection.should_emit(target, body) {
         return;
     }
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+    projection
+        .commands
+        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
 struct AddressRoots<'a> {
@@ -510,11 +557,8 @@ impl AddressRoots<'_> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn push_stacks_host_emit(
-    mut commands: Commands,
-    browsers: NonSend<Browsers>,
-    layout: FocusedLayout,
+    mut projection: LayoutProjection,
     browser_q: Query<
         (
             &PageMetadata,
@@ -530,18 +574,11 @@ fn push_stacks_host_emit(
     focus: vmux_layout::stack::FocusedStack,
     child_of_q: Query<&ChildOf>,
     mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
-    revision: Single<&StateRevision>,
-    mut cache: Local<ProjectionCache>,
 ) {
-    let Some((cef_e, page_ready_changed)) = layout.get() else {
+    let Some(target) = projection.target() else {
         return;
     };
-    if !browsers.can_emit_to(&cef_e) {
-        return;
-    }
-    if !cache.needs_rebuild(cef_e, revision.0, page_ready_changed) {
-        return;
-    }
+    let cef_e = target.entity;
     let active_pane = focus.pane;
     let active_stack_opt = focus.stack;
     if let Some(active_stack_entity) = active_stack_opt
@@ -598,20 +635,21 @@ fn push_stacks_host_emit(
         can_go_forward,
         is_zoomed,
     };
-    commands
+    projection
+        .commands
         .entity(cef_e)
         .insert(StackProjection(payload.clone()));
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-    if !cache.should_emit(cef_e, revision.0, ron_body, page_ready_changed) {
+    if !projection.should_emit(target, ron_body) {
         return;
     }
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+    projection
+        .commands
+        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
 fn push_pane_tree_emit(
-    mut commands: Commands,
-    browsers: NonSend<Browsers>,
-    layout: FocusedLayout,
+    mut projection: LayoutProjection,
     focus: vmux_layout::stack::FocusedStack,
     tab_q: Query<(), With<Tab>>,
     sections_of: vmux_layout::side_sheet::SideSheetSections,
@@ -632,18 +670,11 @@ fn push_pane_tree_emit(
         ),
         With<Browser>,
     >,
-    revision: Single<&StateRevision>,
-    mut cache: Local<ProjectionCache>,
 ) {
-    let Some((cef_e, page_ready_changed)) = layout.get() else {
+    let Some(target) = projection.target() else {
         return;
     };
-    if !browsers.can_emit_to(&cef_e) {
-        return;
-    }
-    if !cache.needs_rebuild(cef_e, revision.0, page_ready_changed) {
-        return;
-    }
+    let cef_e = target.entity;
 
     let active_pane = focus.pane;
 
@@ -726,14 +757,17 @@ fn push_pane_tree_emit(
         });
     }
     let payload = PaneTreeState { panes };
-    commands
+    projection
+        .commands
         .entity(cef_e)
         .insert(PaneTreeProjection(payload.clone()));
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-    if !cache.should_emit(cef_e, revision.0, ron_body, page_ready_changed) {
+    if !projection.should_emit(target, ron_body) {
         return;
     }
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+    projection
+        .commands
+        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
 fn abbreviate_project_path(path: &std::path::Path) -> String {
@@ -751,25 +785,15 @@ fn abbreviate_project_path(path: &std::path::Path) -> String {
     format!("~{rest}")
 }
 
-#[allow(clippy::too_many_arguments)]
 fn push_projects_host_emit(
-    mut commands: Commands,
-    browsers: NonSend<Browsers>,
-    layout: FocusedLayout,
+    mut projection: LayoutProjection,
     space_projects: vmux_space::SpaceProjects,
-    revision: Single<&StateRevision>,
-    mut cache: Local<ProjectionCache>,
     mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
 ) {
-    let Some((cef_e, page_ready_changed)) = layout.get() else {
+    let Some(target) = projection.target() else {
         return;
     };
-    if !browsers.can_emit_to(&cef_e) {
-        return;
-    }
-    if !cache.needs_rebuild(cef_e, revision.0, page_ready_changed) {
-        return;
-    }
+    let cef_e = target.entity;
     let mut projects = space_projects.active_rows();
     for row in &mut projects {
         row.display_path = abbreviate_project_path(std::path::Path::new(&row.path));
@@ -813,21 +837,21 @@ fn push_projects_host_emit(
         }
     }
     let payload = TabBoundaryState { boundary, projects };
-    commands
+    projection
+        .commands
         .entity(cef_e)
         .insert(ProjectProjection(payload.clone()));
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-    if !cache.should_emit(cef_e, revision.0, ron_body, page_ready_changed) {
+    if !projection.should_emit(target, ron_body) {
         return;
     }
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+    projection
+        .commands
+        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
-#[allow(clippy::too_many_arguments)]
 fn push_bookmarks_host_emit(
-    mut commands: Commands,
-    browsers: NonSend<Browsers>,
-    layout: FocusedLayout,
+    mut projection: LayoutProjection,
     pins: Query<
         (
             &vmux_core::Uuid,
@@ -868,18 +892,11 @@ fn push_bookmarks_host_emit(
         ),
         With<vmux_core::Bookmark>,
     >,
-    revision: Single<&StateRevision>,
-    mut cache: Local<ProjectionCache>,
 ) {
-    let Some((cef_e, page_ready_changed)) = layout.get() else {
+    let Some(target) = projection.target() else {
         return;
     };
-    if !browsers.can_emit_to(&cef_e) {
-        return;
-    }
-    if !cache.needs_rebuild(cef_e, revision.0, page_ready_changed) {
-        return;
-    }
+    let cef_e = target.entity;
 
     let row = |uuid: &vmux_core::Uuid, meta: &PageMetadata, bookmarked: bool, pinned: bool| {
         vmux_api::bookmark::BookmarkRow {
@@ -944,20 +961,21 @@ fn push_bookmarks_host_emit(
         roots,
         folders,
     };
-    commands
+    projection
+        .commands
         .entity(cef_e)
         .insert(BookmarkProjection(payload.clone()));
     let body = ron::ser::to_string(&payload).unwrap_or_default();
-    if !cache.should_emit(cef_e, revision.0, body, page_ready_changed) {
+    if !projection.should_emit(target, body) {
         return;
     }
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+    projection
+        .commands
+        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
 fn push_tabs_host_emit(
-    mut commands: Commands,
-    browsers: NonSend<Browsers>,
-    layout: FocusedLayout,
+    mut projection: LayoutProjection,
     tabs: Query<(Entity, &Tab, &LastActivatedAt)>,
     tab_q: Query<Entity, With<Tab>>,
     active_tab_param: vmux_layout::stack::ActiveTabParam,
@@ -969,18 +987,11 @@ fn push_tabs_host_emit(
     stack_children: Query<&Children>,
     browser_meta: Query<(&PageMetadata, Option<&PageIdentity>), With<Browser>>,
     done_agents: Query<Entity, With<vmux_core::notify::AgentDoneUnseen>>,
-    revision: Single<&StateRevision>,
-    mut cache: Local<ProjectionCache>,
 ) {
-    let Some((cef_e, page_ready_changed)) = layout.get() else {
+    let Some(target) = projection.target() else {
         return;
     };
-    if !browsers.can_emit_to(&cef_e) {
-        return;
-    }
-    if !cache.needs_rebuild(cef_e, revision.0, page_ready_changed) {
-        return;
-    }
+    let cef_e = target.entity;
 
     let active_tab = active_tab_param.get();
 
@@ -1034,10 +1045,12 @@ fn push_tabs_host_emit(
 
     let payload = TabListState { tabs: rows };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
-    if !cache.should_emit(cef_e, revision.0, body, page_ready_changed) {
+    if !projection.should_emit(target, body) {
         return;
     }
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
+    projection
+        .commands
+        .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
 fn push_update_notice_emit(

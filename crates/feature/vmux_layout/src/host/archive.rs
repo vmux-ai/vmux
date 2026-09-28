@@ -469,6 +469,51 @@ struct ReopenLayout<'w, 's> {
     children_q: Query<'w, 's, &'static Children>,
     stacks_q: Query<'w, 's, (), With<Stack>>,
     tabs: Query<'w, 's, (), With<Tab>>,
+    spaces: Query<'w, 's, (Entity, &'static SpaceId), With<Space>>,
+    any_space: Query<'w, 's, Entity, With<Space>>,
+    current_space: Query<'w, 's, Entity, With<CurrentSpace>>,
+    focused_window: crate::window::FocusedWindow<'w, 's>,
+    primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
+    settings: Res<'w, LayoutSettings>,
+}
+
+struct ReopenTarget {
+    space: Entity,
+    origin_matches: bool,
+    window: Entity,
+}
+
+impl ReopenLayout<'_, '_> {
+    fn target(&self, space_id: &str) -> Option<ReopenTarget> {
+        let focused_window = self.focused_window.entity();
+        let origin_space = self
+            .spaces
+            .iter()
+            .filter(|(_, id)| id.0 == space_id)
+            .find(|(space, _)| {
+                focused_window.is_some_and(|focused| {
+                    crate::window::host_window_of(*space, &self.child_of, &self.host_windows)
+                        == Some(focused)
+                })
+            })
+            .or_else(|| self.spaces.iter().find(|(_, id)| id.0 == space_id))
+            .map(|(entity, _)| entity);
+        let space = origin_space
+            .or_else(|| {
+                self.current_space
+                    .iter()
+                    .find(|entity| self.any_space.contains(*entity))
+            })
+            .or_else(|| self.any_space.iter().next())?;
+        let window = crate::window::host_window_of(space, &self.child_of, &self.host_windows)
+            .or(focused_window)
+            .or_else(|| self.primary_window.single().ok())?;
+        Some(ReopenTarget {
+            space,
+            origin_matches: origin_space == Some(space),
+            window,
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -479,18 +524,11 @@ struct ReopenEntry {
     tab: Option<ArchivedTabPage>,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn handle_reopen_closed_page(
     mut reader: MessageReader<ReopenClosedPage>,
     archived: Query<(Entity, &ArchivedPage, Option<&ArchivedTabPage>)>,
     positions: Query<&ArchivedPagePosition>,
-    spaces: Query<(Entity, &SpaceId), With<Space>>,
-    any_space: Query<Entity, With<Space>>,
     layout: ReopenLayout,
-    current_space: Query<Entity, With<CurrentSpace>>,
-    focused_window: crate::window::FocusedWindow,
-    settings: Res<LayoutSettings>,
-    primary_window: Query<Entity, With<PrimaryWindow>>,
     mut commands: Commands,
 ) {
     let mut reopen = false;
@@ -509,32 +547,7 @@ fn handle_reopen_closed_page(
         return;
     };
 
-    let focused_window = focused_window.entity();
-    let origin_space = spaces
-        .iter()
-        .filter(|(_, id)| id.0 == page.space_id)
-        .find(|(space, _)| {
-            focused_window.is_some_and(|focused| {
-                crate::window::host_window_of(*space, &layout.child_of, &layout.host_windows)
-                    == Some(focused)
-            })
-        })
-        .or_else(|| spaces.iter().find(|(_, id)| id.0 == page.space_id))
-        .map(|(e, _)| e);
-    let target_space = origin_space
-        .or_else(|| {
-            current_space
-                .iter()
-                .find(|entity| any_space.get(*entity).is_ok())
-        })
-        .or_else(|| any_space.iter().next());
-    let Some(space) = target_space else {
-        return;
-    };
-    let Some(window) = crate::window::host_window_of(space, &layout.child_of, &layout.host_windows)
-        .or(focused_window)
-        .or_else(|| primary_window.single().ok())
-    else {
+    let Some(target) = layout.target(&page.space_id) else {
         return;
     };
 
@@ -552,12 +565,12 @@ fn handle_reopen_closed_page(
             })
             .collect();
         let restored = restore_archived_tab(
-            space,
-            origin_space == Some(space),
+            target.space,
+            target.origin_matches,
             &tab,
             entries,
             &mut commands,
-            window,
+            target.window,
         );
         for (entry, stack) in restored {
             reopen_page_content(&entry.page, stack, &mut commands);
@@ -568,14 +581,14 @@ fn handle_reopen_closed_page(
 
     let position = positions.get(entry_entity).ok().cloned();
     let (stack, focus_anchor) = resolve_reopen_stack(
-        space,
-        origin_space == Some(space),
+        target.space,
+        target.origin_matches,
         page.tab_index,
         position.as_ref(),
         &layout,
         &mut commands,
-        window,
-        settings.pane.gap,
+        target.window,
+        layout.settings.pane.gap,
     );
     commands.entity(stack).insert(PageMetadata {
         url: page.url.clone(),
@@ -583,7 +596,7 @@ fn handle_reopen_closed_page(
         ..default()
     });
     commands
-        .entity(space)
+        .entity(target.space)
         .insert(vmux_history::LastActivatedAt::now());
     commands
         .entity(stack)
