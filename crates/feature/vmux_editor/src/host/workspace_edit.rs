@@ -239,13 +239,14 @@ mod tests {
         fn with_workspace_edit(path: &Path, panes: usize, edit: lsp_types::WorkspaceEdit) -> Self {
             let (mut app, views) = Self::bare(path, panes);
             let (outgoing, sent) = std::sync::mpsc::channel();
-            let events = {
+            let inputs = {
                 let world = app.world_mut();
-                let mut senders = world.query::<&crate::lsp::server_request::ServerEventSender>();
-                senders.single(world).unwrap().0.clone()
+                let mut senders = world.query::<&crate::lsp::server_request::ServerInputSender>();
+                senders.single(world).unwrap().clone()
             };
-            events
-                .send(crate::lsp::server_request::ServerEvent::ApplyEdit {
+            inputs
+                .apply_edits
+                .send(crate::lsp::server_request::ApplyEditInput {
                     reply: crate::lsp::server_request::ReplyHandle::new(
                         crate::lsp::wire::RequestId::Number(1000),
                         outgoing,
@@ -270,7 +271,7 @@ mod tests {
             app.world_mut().insert_non_send(Browsers::default());
             app.world_mut().spawn(crate::lsp::manager::LspManager::new(
                 crate::lsp::LspDiagnosticsSender::default(),
-                crate::lsp::server_request::ServerEventSender::default().0,
+                crate::lsp::server_request::ServerInputSender::default(),
             ));
 
             let mut views = Vec::new();

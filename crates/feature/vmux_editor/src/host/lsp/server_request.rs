@@ -11,12 +11,17 @@ pub struct ServerRequestPlugin;
 
 impl Plugin for ServerRequestPlugin {
     fn build(&self, app: &mut App) {
-        let (sender, receiver) = crossbeam_channel::unbounded();
+        let (apply_edit_sender, apply_edit_receiver) = crossbeam_channel::unbounded();
+        let (log_sender, log_receiver) = crossbeam_channel::unbounded();
         app.add_systems(PreStartup, move |mut commands: Commands| {
             commands.spawn((
-                Name::new("LSP server events"),
-                ServerEventSender(sender.clone()),
-                ServerEventInbox(receiver.clone()),
+                Name::new("LSP server input"),
+                ServerInputSender {
+                    apply_edits: apply_edit_sender.clone(),
+                    logs: log_sender.clone(),
+                },
+                ApplyEditInbox(apply_edit_receiver.clone()),
+                ServerLogInbox(log_receiver.clone()),
             ));
         })
         .add_message::<ServerReply>()
@@ -32,7 +37,8 @@ impl Plugin for ServerRequestPlugin {
         .add_systems(
             Update,
             (
-                spawn_server_requests.in_set(ServerRequestSet::Receive),
+                spawn_apply_edit_requests.in_set(ServerRequestSet::Receive),
+                write_server_logs.in_set(ServerRequestSet::Receive),
                 answer_server_requests.in_set(ServerRequestSet::Reply),
             ),
         );
@@ -47,28 +53,34 @@ pub enum ServerRequestSet {
 }
 
 #[derive(Component, Clone)]
-pub struct ServerEventSender(pub crossbeam_channel::Sender<ServerEvent>);
+pub struct ServerInputSender {
+    pub(crate) apply_edits: crossbeam_channel::Sender<ApplyEditInput>,
+    pub(crate) logs: crossbeam_channel::Sender<ServerLogInput>,
+}
 
-impl Default for ServerEventSender {
+impl Default for ServerInputSender {
     fn default() -> Self {
-        let (sender, _) = crossbeam_channel::unbounded();
-        Self(sender)
+        let (apply_edits, _) = crossbeam_channel::unbounded();
+        let (logs, _) = crossbeam_channel::unbounded();
+        Self { apply_edits, logs }
     }
 }
 
 #[derive(Component)]
-struct ServerEventInbox(crossbeam_channel::Receiver<ServerEvent>);
+struct ApplyEditInbox(crossbeam_channel::Receiver<ApplyEditInput>);
 
-pub enum ServerEvent {
-    ApplyEdit {
-        reply: ReplyHandle,
-        root: PathBuf,
-        params: lsp_types::ApplyWorkspaceEditParams,
-    },
-    Log {
-        level: lsp_types::MessageType,
-        text: String,
-    },
+#[derive(Component)]
+struct ServerLogInbox(crossbeam_channel::Receiver<ServerLogInput>);
+
+pub struct ApplyEditInput {
+    pub reply: ReplyHandle,
+    pub root: PathBuf,
+    pub params: lsp_types::ApplyWorkspaceEditParams,
+}
+
+pub struct ServerLogInput {
+    pub level: lsp_types::MessageType,
+    pub text: String,
 }
 
 #[derive(Clone)]
@@ -128,24 +140,24 @@ pub struct ServerReply {
     pub result: Value,
 }
 
-fn spawn_server_requests(events: Single<&ServerEventInbox>, mut commands: Commands) {
-    for event in events.0.try_iter() {
-        match event {
-            ServerEvent::ApplyEdit {
-                reply,
-                root,
-                params,
-            } => {
-                commands.spawn((
-                    ServerRequestPending::new(reply),
-                    AwaitingApplyEdit { root, params },
-                ));
-            }
-            ServerEvent::Log { level, text } => match level {
-                lsp_types::MessageType::ERROR => tracing::error!("lsp: {text}"),
-                lsp_types::MessageType::WARNING => tracing::warn!("lsp: {text}"),
-                _ => tracing::info!("lsp: {text}"),
+fn spawn_apply_edit_requests(inputs: Single<&ApplyEditInbox>, mut commands: Commands) {
+    for input in inputs.0.try_iter() {
+        commands.spawn((
+            ServerRequestPending::new(input.reply),
+            AwaitingApplyEdit {
+                root: input.root,
+                params: input.params,
             },
+        ));
+    }
+}
+
+fn write_server_logs(inputs: Single<&ServerLogInbox>) {
+    for input in inputs.0.try_iter() {
+        match input.level {
+            lsp_types::MessageType::ERROR => tracing::error!("lsp: {}", input.text),
+            lsp_types::MessageType::WARNING => tracing::warn!("lsp: {}", input.text),
+            _ => tracing::info!("lsp: {}", input.text),
         }
     }
 }
@@ -180,22 +192,24 @@ mod tests {
     struct Harness {
         app: App,
         outgoing: mpsc::Receiver<Value>,
-        events: crossbeam_channel::Sender<ServerEvent>,
+        inputs: ServerInputSender,
     }
 
     impl Harness {
         fn start() -> Self {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, ServerRequestPlugin));
-            let events = {
+            app.update();
+            let inputs = {
                 let world = app.world_mut();
-                let mut senders = world.query::<&ServerEventSender>();
-                senders.single(world).unwrap().0.clone()
+                let mut senders = world.query::<&ServerInputSender>();
+                senders.single(world).unwrap().clone()
             };
             let (tx, outgoing) = mpsc::channel();
             let reply = ReplyHandle::new(RequestId::Number(1000), tx);
-            events
-                .send(ServerEvent::ApplyEdit {
+            inputs
+                .apply_edits
+                .send(ApplyEditInput {
                     reply,
                     root: std::path::PathBuf::from("/tmp/project"),
                     params: lsp_types::ApplyWorkspaceEditParams {
@@ -207,7 +221,7 @@ mod tests {
             Self {
                 app,
                 outgoing,
-                events,
+                inputs,
             }
         }
 
@@ -288,8 +302,9 @@ mod tests {
     #[test]
     fn a_log_event_spawns_no_request() {
         let mut h = Harness::start();
-        h.events
-            .send(ServerEvent::Log {
+        h.inputs
+            .logs
+            .send(ServerLogInput {
                 level: lsp_types::MessageType::ERROR,
                 text: "boom".to_string(),
             })

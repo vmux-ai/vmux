@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use crate::lsp::reader::Reader;
 use crate::lsp::registry::ServerSpec;
-use crate::lsp::server_request::ServerEvent;
+use crate::lsp::server_request::ServerInputSender;
 use crate::lsp::{ServerKey, framing};
 
 pub struct ServerClient {
@@ -105,7 +105,7 @@ impl ServerClient {
         spec: &ServerSpec,
         root: &std::path::Path,
         diagnostics: LspDiagnosticsSender,
-        events: crossbeam_channel::Sender<ServerEvent>,
+        inputs: ServerInputSender,
     ) -> std::io::Result<Self> {
         let store_root = crate::lsp::store::default_root();
         let mut child = Command::new(&spec.command)
@@ -142,7 +142,7 @@ impl ServerClient {
             }
         });
 
-        let dispatcher = Reader::new(pending.clone(), diagnostics, outgoing.clone(), events, root);
+        let dispatcher = Reader::new(pending.clone(), diagnostics, outgoing.clone(), inputs, root);
         let reader = std::thread::spawn(move || dispatcher.run(stdout));
 
         let cmd_name = spec.command.clone();

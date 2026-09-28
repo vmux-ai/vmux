@@ -207,7 +207,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, NavigationPlugin, TabsPlugin, PageOpenPlugin));
         app.world_mut().spawn(crate::lsp::manager::LspManager::new(
             crate::lsp::LspDiagnosticsSender::default(),
-            crate::lsp::server_request::ServerEventSender::default().0,
+            crate::lsp::server_request::ServerInputSender::default(),
         ));
         app
     }

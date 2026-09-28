@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use serde_json::Value;
 
 use crate::lsp::client::path_from_uri;
-use crate::lsp::server_request::{ReplyHandle, ServerEvent};
+use crate::lsp::server_request::{ApplyEditInput, ReplyHandle, ServerInputSender, ServerLogInput};
 use crate::lsp::wire::{ErrorCode, Incoming, RequestId};
 use crate::lsp::{LspDiagnosticsSender, PendingMap, framing};
 
@@ -14,7 +14,7 @@ pub struct Reader {
     pending: PendingMap,
     diagnostics: LspDiagnosticsSender,
     outgoing: mpsc::Sender<Value>,
-    events: crossbeam_channel::Sender<ServerEvent>,
+    inputs: ServerInputSender,
     root_uri: String,
     root_name: String,
     root: PathBuf,
@@ -25,7 +25,7 @@ impl Reader {
         pending: PendingMap,
         diagnostics: LspDiagnosticsSender,
         outgoing: mpsc::Sender<Value>,
-        events: crossbeam_channel::Sender<ServerEvent>,
+        inputs: ServerInputSender,
         root: &std::path::Path,
     ) -> Self {
         let root_uri = url::Url::from_file_path(root)
@@ -40,7 +40,7 @@ impl Reader {
             pending,
             diagnostics,
             outgoing,
-            events,
+            inputs,
             root_uri,
             root_name,
             root: root.to_path_buf(),
@@ -109,12 +109,12 @@ impl Reader {
             return;
         };
         let reply = ReplyHandle::new(id, self.outgoing.clone());
-        let event = ServerEvent::ApplyEdit {
+        let input = ApplyEditInput {
             reply: reply.clone(),
             root: self.root.clone(),
             params,
         };
-        if self.events.send(event).is_err() {
+        if self.inputs.apply_edits.send(input).is_err() {
             reply.err(ErrorCode::RequestCancelled);
         }
     }
@@ -134,7 +134,7 @@ impl Reader {
         let Ok(parsed) = serde_json::from_value::<lsp_types::LogMessageParams>(params) else {
             return;
         };
-        let _ = self.events.send(ServerEvent::Log {
+        let _ = self.inputs.logs.send(ServerLogInput {
             level: parsed.typ,
             text: parsed.message,
         });
@@ -167,26 +167,32 @@ mod tests {
         reader: Reader,
         diagnostics: crate::lsp::LspDiagnosticsInbox,
         sent: mpsc::Receiver<Value>,
-        events: crossbeam_channel::Receiver<ServerEvent>,
+        apply_edits: crossbeam_channel::Receiver<ApplyEditInput>,
+        logs: crossbeam_channel::Receiver<ServerLogInput>,
     }
 
     impl Harness {
         fn start() -> Self {
             let (outgoing, sent) = mpsc::channel();
-            let (event_tx, events) = crossbeam_channel::unbounded();
+            let (apply_edit_tx, apply_edits) = crossbeam_channel::unbounded();
+            let (log_tx, logs) = crossbeam_channel::unbounded();
             let (diagnostics, inbox) = LspDiagnosticsSender::channel();
             let reader = Reader::new(
                 PendingMap::default(),
                 diagnostics,
                 outgoing,
-                event_tx,
+                ServerInputSender {
+                    apply_edits: apply_edit_tx,
+                    logs: log_tx,
+                },
                 std::path::Path::new("/tmp/proj"),
             );
             Self {
                 reader,
                 diagnostics: inbox,
                 sent,
-                events,
+                apply_edits,
+                logs,
             }
         }
 
@@ -295,10 +301,7 @@ mod tests {
             h.sent.try_recv().is_err(),
             "the world answers applyEdit, not the reader"
         );
-        assert!(matches!(
-            h.events.try_recv(),
-            Ok(ServerEvent::ApplyEdit { .. })
-        ));
+        assert!(h.apply_edits.try_recv().is_ok());
     }
 
     #[test]
@@ -306,7 +309,10 @@ mod tests {
         let h = Harness::start();
         let reply = h.reply_to(json!({"id": 9, "method": "workspace/applyEdit", "params": 7}));
         assert_eq!(reply["error"]["code"], -32602);
-        assert!(h.events.try_recv().is_err(), "nothing reaches the world");
+        assert!(
+            h.apply_edits.try_recv().is_err(),
+            "nothing reaches the world"
+        );
     }
 
     #[test]
@@ -316,9 +322,12 @@ mod tests {
             "method": "window/logMessage",
             "params": {"type": 1, "message": "boom"},
         }));
-        let Ok(ServerEvent::Log { text, .. }) = h.events.try_recv() else {
-            panic!("a log notification should be observable");
-        };
-        assert_eq!(text, "boom");
+        assert_eq!(
+            h.logs
+                .try_recv()
+                .expect("a log notification should be observable")
+                .text,
+            "boom"
+        );
     }
 }

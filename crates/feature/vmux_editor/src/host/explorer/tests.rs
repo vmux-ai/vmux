@@ -754,7 +754,7 @@ fn open_editors_track_on_navigate_and_close() {
     app.add_plugins((MinimalPlugins, TabsPlugin));
     app.world_mut().spawn(crate::lsp::manager::LspManager::new(
         crate::lsp::LspDiagnosticsSender::default(),
-        crate::lsp::server_request::ServerEventSender::default().0,
+        crate::lsp::server_request::ServerInputSender::default(),
     ));
     let a = PathBuf::from("/proj/a.rs");
     let b = PathBuf::from("/proj/b.rs");

@@ -87,7 +87,7 @@ use bevy::prelude::*;
 
 use crate::lsp::client::{ServerClient, server_key};
 use crate::lsp::registry::{ServerSpec, resolve_spec, workspace_root};
-use crate::lsp::server_request::{ServerEvent, ServerEventSender};
+use crate::lsp::server_request::ServerInputSender;
 use crate::lsp::{LspDiagnosticsInbox, LspDiagnosticsSender, OpenDoc, ServerKey, store};
 
 type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
@@ -157,7 +157,7 @@ pub struct LspManager {
     open_docs: HashMap<PathBuf, OpenDoc>,
     failed: HashSet<ServerKey>,
     diagnostics: LspDiagnosticsSender,
-    events: crossbeam_channel::Sender<ServerEvent>,
+    inputs: ServerInputSender,
 }
 
 struct StartingServer {
@@ -198,17 +198,14 @@ fn read_text(path: &Path) -> Option<String> {
 }
 
 impl LspManager {
-    pub(crate) fn new(
-        diagnostics: LspDiagnosticsSender,
-        events: crossbeam_channel::Sender<ServerEvent>,
-    ) -> Self {
+    pub(crate) fn new(diagnostics: LspDiagnosticsSender, inputs: ServerInputSender) -> Self {
         Self {
             servers: HashMap::new(),
             starting: HashMap::new(),
             open_docs: HashMap::new(),
             failed: HashSet::new(),
             diagnostics,
-            events,
+            inputs,
         }
     }
 
@@ -276,10 +273,10 @@ impl LspManager {
         let spec = spec.clone();
         let root = root.to_path_buf();
         let diagnostics = self.diagnostics.clone();
-        let events = self.events.clone();
+        let inputs = self.inputs.clone();
         let command = spec.command.clone();
         let task = bevy::tasks::IoTaskPool::get()
-            .spawn(async move { ServerClient::spawn(&spec, &root, diagnostics, events) });
+            .spawn(async move { ServerClient::spawn(&spec, &root, diagnostics, inputs) });
         self.starting.insert(key, StartingServer { command, task });
         ServerReadiness::Starting
     }
@@ -1261,7 +1258,7 @@ pub fn build(
     let startup = std::sync::Mutex::new(Some((diagnostics, diagnostics_inbox, lint, lint_inbox)));
     app.add_systems(
         Startup,
-        move |events: Single<&ServerEventSender>, mut commands: Commands| {
+        move |inputs: Single<&ServerInputSender>, mut commands: Commands| {
             let (diagnostics, diagnostics_inbox, lint, lint_inbox) = startup
                 .lock()
                 .unwrap()
@@ -1269,7 +1266,7 @@ pub fn build(
                 .expect("LSP runtime can only start once");
             commands.spawn((
                 Name::new("LSP manager"),
-                LspManager::new(diagnostics, events.0.clone()),
+                LspManager::new(diagnostics, inputs.clone()),
             ));
             commands.spawn((Name::new("LSP diagnostics"), diagnostics_inbox));
             commands.spawn((Name::new("Lint diagnostics"), lint, lint_inbox));
