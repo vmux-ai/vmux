@@ -10303,6 +10303,7 @@ dependencies = [
  "vmux_flex",
  "vmux_git",
  "vmux_history",
+ "vmux_input",
  "vmux_layout",
  "vmux_native",
  "vmux_setting",
@@ -10501,7 +10502,6 @@ dependencies = [
  "objc2-quartz-core 0.3.2",
  "objc2-screen-capture-kit",
  "objc2-user-notifications 0.3.2",
- "parking_lot",
  "raw-window-handle 0.6.2",
  "rfd 0.15.4",
  "rkyv",
@@ -10527,6 +10527,7 @@ dependencies = [
  "vmux_flex",
  "vmux_git",
  "vmux_history",
+ "vmux_input",
  "vmux_knowledge",
  "vmux_layout",
  "vmux_native",
@@ -10673,6 +10674,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_input"
+version = "0.0.34"
+dependencies = [
+ "bevy",
+ "bevy_cef_core",
+ "block2 0.6.2",
+ "crossbeam-channel",
+ "objc2-app-kit 0.3.2",
+ "parking_lot",
+ "vmux_command",
+ "vmux_core",
+]
+
+[[package]]
 name = "vmux_knowledge"
 version = "0.0.35"
 dependencies = [
@@ -10722,6 +10737,7 @@ dependencies = [
  "vmux_flex",
  "vmux_git",
  "vmux_history",
+ "vmux_input",
  "vmux_native",
  "vmux_tool",
  "vmux_ui",

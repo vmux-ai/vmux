@@ -9,31 +9,25 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::{Receiver, Sender};
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
 use parking_lot::Mutex;
+use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_core::input::{
     ConsumesNativeKey, NativeKey, NativeKeyCapture, NativeKeyClaimSet, NativeKeyInput,
     NativeKeyInputSet, PassesNativeKey,
 };
 
-use crate::shortcut::{KeyCombo, Keymap, Modifiers};
+use crate::{KeyboardContext, KeyboardContextSet};
 
-pub(crate) struct KeyboardPlugin;
+pub struct KeyboardPlugin;
 
 impl Plugin for KeyboardPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ApplicationKeyPlugin)
-            .add_message::<NativeKeyInput>()
-            .add_systems(
-                Startup,
-                (spawn_keyboard_bridge, install_monitor)
-                    .chain()
-                    .after(crate::shortcut::ShortcutInit),
-            )
+        app.add_message::<NativeKeyInput>()
+            .add_systems(Startup, spawn_keyboard_bridge)
+            .add_systems(Update, install_monitor)
             .add_systems(
                 Update,
                 sync_keyboard_context
-                    .after(vmux_layout::stack::ComputeFocusSet)
-                    .after(vmux_browser::KeyboardContextSet)
-                    .after(vmux_shortcut::ShortcutCaptureSet)
+                    .after(KeyboardContextSet)
                     .after(NativeKeyClaimSet)
                     .before(NativeKeyInputSet),
             )
@@ -42,115 +36,8 @@ impl Plugin for KeyboardPlugin {
                 dispatch_keyboard_input
                     .after(sync_keyboard_context)
                     .in_set(NativeKeyInputSet)
-                    .in_set(vmux_command::WriteCommandRequests)
-                    .before(vmux_simulator::SimulatorInputSet),
+                    .in_set(vmux_command::WriteCommandRequests),
             );
-    }
-}
-
-#[derive(Message, Clone, Copy)]
-pub(crate) struct ExitFullscreenRequest;
-
-struct ApplicationKeyPlugin;
-
-impl Plugin for ApplicationKeyPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_message::<ExitFullscreenRequest>()
-            .add_message::<crate::runtime::HideAllWindowsRequest>()
-            .add_message::<NativeKeyInput>()
-            .add_systems(Startup, spawn_application_key_bindings)
-            .add_systems(
-                Update,
-                sync_application_key_bindings
-                    .in_set(NativeKeyClaimSet)
-                    .after(vmux_browser::KeyboardContextSet)
-                    .after(crate::window_state::SyncWindowFullscreen),
-            )
-            .add_systems(
-                Update,
-                handle_application_key_input.after(NativeKeyInputSet),
-            );
-    }
-}
-
-#[derive(Component)]
-struct ExitFullscreenKey;
-
-#[derive(Component)]
-struct HideWindowsKey;
-
-fn spawn_application_key_bindings(mut commands: Commands) {
-    commands.spawn((
-        Name::new("Hide windows key"),
-        HideWindowsKey,
-        NativeKey {
-            key: KeyCode::KeyQ,
-            modifiers: vmux_core::KeyModifiers {
-                super_key: true,
-                ..default()
-            },
-        },
-        ConsumesNativeKey,
-        vmux_core::Active,
-    ));
-    for shift in [false, true] {
-        commands.spawn((
-            Name::new("Exit fullscreen key"),
-            ExitFullscreenKey,
-            NativeKey {
-                key: KeyCode::Escape,
-                modifiers: vmux_core::KeyModifiers { shift, ..default() },
-            },
-            ConsumesNativeKey,
-        ));
-    }
-}
-
-fn sync_application_key_bindings(
-    browser: Query<&vmux_browser::KeyboardContext>,
-    focused_window: vmux_layout::window::FocusedWindow,
-    fullscreen: Query<&crate::window_state::WindowFullscreen>,
-    bindings: Query<(Entity, Has<vmux_core::Active>), With<ExitFullscreenKey>>,
-    mut commands: Commands,
-) {
-    let page_owns_escape = browser
-        .single()
-        .ok()
-        .is_some_and(|context| context.page_owns_escape);
-    let enabled = focused_window
-        .entity()
-        .and_then(|window| fullscreen.get(window).ok())
-        .is_some_and(|fullscreen| fullscreen.0)
-        && !page_owns_escape;
-    for (entity, active) in &bindings {
-        if active == enabled {
-            continue;
-        }
-        if enabled {
-            commands.entity(entity).insert(vmux_core::Active);
-        } else {
-            commands.entity(entity).remove::<vmux_core::Active>();
-        }
-    }
-}
-
-fn handle_application_key_input(
-    mut inputs: MessageReader<NativeKeyInput>,
-    bindings: Query<(Has<ExitFullscreenKey>, Has<HideWindowsKey>), With<vmux_core::Active>>,
-    mut fullscreen: MessageWriter<ExitFullscreenRequest>,
-    mut hide_windows: MessageWriter<crate::runtime::HideAllWindowsRequest>,
-) {
-    for input in inputs.read() {
-        let Some(claim) = input.claim else { continue };
-        let Ok((exits_fullscreen, hides_windows)) = bindings.get(claim) else {
-            continue;
-        };
-        if exits_fullscreen {
-            fullscreen.write(ExitFullscreenRequest);
-        }
-        if hides_windows {
-            hide_windows.write(crate::runtime::HideAllWindowsRequest);
-        }
     }
 }
 
@@ -182,9 +69,12 @@ struct KeyboardInbox {
     inputs: Receiver<NativeKeyInput>,
 }
 
+#[derive(Component)]
+struct KeyboardMonitorPending;
+
 fn spawn_keyboard_bridge(mut commands: Commands) {
     let (bridge, inbox) = KeyboardBridge::channel();
-    commands.spawn((Name::new("Keyboard"), bridge, inbox));
+    commands.spawn((Name::new("Keyboard"), bridge, inbox, KeyboardMonitorPending));
 }
 
 impl KeyboardBridge {
@@ -482,11 +372,18 @@ fn key_code_from_vk(vk: u16) -> Option<KeyCode> {
 }
 
 fn install_monitor(
-    keyboard: Single<&KeyboardBridge>,
-    keymap: Single<&Keymap>,
+    keyboard: Query<(Entity, &KeyboardBridge), With<KeyboardMonitorPending>>,
+    keymaps: Query<&Keymap>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
 ) {
     let Some(proxy) = proxy else {
+        return;
+    };
+    let Ok((entity, keyboard)) = keyboard.single() else {
+        return;
+    };
+    let Ok(keymap) = keymaps.single() else {
         return;
     };
     keyboard.context.lock().keymap = Some((*keymap).clone());
@@ -494,12 +391,13 @@ fn install_monitor(
     keyboard.install(move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     });
+    commands.entity(entity).remove::<KeyboardMonitorPending>();
 }
 
 fn sync_keyboard_context(
     keyboard: Single<&KeyboardBridge>,
     keymap: Single<Ref<Keymap>>,
-    browser: Query<&vmux_browser::KeyboardContext>,
+    contexts: Query<&KeyboardContext>,
     capture: Query<(), With<NativeKeyCapture>>,
     claims: Query<
         (
@@ -535,7 +433,7 @@ fn sync_keyboard_context(
             context.consumed.insert(combo, entity);
         }
     }
-    context.text_entry_owns_keys = browser
+    context.text_entry_owns_keys = contexts
         .single()
         .ok()
         .is_some_and(|context| context.text_entry_owns_keys);
@@ -559,20 +457,45 @@ fn dispatch_keyboard_input(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::message::Messages;
+    use vmux_command::shortcut::{Binding, Shortcut, Source};
 
     fn map() -> Keymap {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin))
-            .add_plugins(vmux_command::command_bar::CommandBarPlugin)
-            .add_plugins((
-                vmux_layout::pane::PaneCommandPlugin,
-                vmux_layout::tab::TabCommandPlugin,
-            ));
-        app.world_mut().run_schedule(Startup);
-        let mut query = app.world_mut().query::<&vmux_command::CommandDefinition>();
-        let definitions = query.iter(app.world()).cloned().collect::<Vec<_>>();
-        Keymap::defaults_with(&definitions)
+        let mut map = Keymap::defaults();
+        map.register([
+            "select_pane_left",
+            "browser_open_command_bar",
+            "browser_open_page_in_command_bar",
+            "browser_open_path_bar",
+        ]);
+        map.extend(
+            Source::Default,
+            [
+                Binding {
+                    shortcut: Shortcut::Chord(
+                        combo(KeyCode::KeyB, true),
+                        combo(KeyCode::KeyH, false),
+                    ),
+                    command: "select_pane_left".to_string(),
+                    when: None,
+                },
+                Binding {
+                    shortcut: Shortcut::Direct(super_combo(KeyCode::KeyK)),
+                    command: "browser_open_command_bar".to_string(),
+                    when: None,
+                },
+                Binding {
+                    shortcut: Shortcut::Direct(super_combo(KeyCode::KeyL)),
+                    command: "browser_open_page_in_command_bar".to_string(),
+                    when: None,
+                },
+                Binding {
+                    shortcut: Shortcut::Direct(super_combo(KeyCode::Slash)),
+                    command: "browser_open_path_bar".to_string(),
+                    when: None,
+                },
+            ],
+        );
+        map
     }
 
     fn combo(key: KeyCode, ctrl: bool) -> KeyCombo {
@@ -655,54 +578,6 @@ mod tests {
             false,
         );
         assert!(matches!(disposition, KeyDisposition::PassThrough));
-    }
-
-    #[test]
-    fn fullscreen_escape_becomes_an_ecs_request_unless_the_page_owns_it() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(ApplicationKeyPlugin);
-        let window = app
-            .world_mut()
-            .spawn(crate::window_state::WindowFullscreen(true))
-            .id();
-        app.world_mut().entity_mut(window).insert(vmux_core::Active);
-        app.update();
-        let mut claims = app.world_mut().query_filtered::<
-            (Entity, &NativeKey),
-            (With<ExitFullscreenKey>, With<vmux_core::Active>),
-        >();
-        let claim = claims
-            .iter(app.world())
-            .find_map(|(entity, key)| (!key.modifiers.shift).then_some(entity))
-            .unwrap();
-        let mut key = input(KeyCode::Escape);
-        key.claim = Some(claim);
-        app.world_mut()
-            .resource_mut::<Messages<NativeKeyInput>>()
-            .write(key);
-        app.update();
-        assert_eq!(
-            app.world_mut()
-                .resource_mut::<Messages<ExitFullscreenRequest>>()
-                .drain()
-                .count(),
-            1
-        );
-
-        app.world_mut().spawn(vmux_browser::KeyboardContext {
-            page_owns_escape: true,
-            text_entry_owns_keys: false,
-        });
-        app.update();
-
-        assert!(
-            app.world_mut()
-                .query_filtered::<Entity, (With<ExitFullscreenKey>, With<vmux_core::Active>)>()
-                .iter(app.world())
-                .next()
-                .is_none()
-        );
     }
 
     #[test]

@@ -21,6 +21,11 @@ impl PluginGroup for DesktopPluginGroup {
             .add(RemotePlugin)
             .add(UpdaterPlugin);
 
+        #[cfg(target_os = "macos")]
+        {
+            builder = builder.add(crate::input::DesktopInputPlugin);
+        }
+
         #[cfg(feature = "native-notifications")]
         {
             builder = builder.add(crate::notify::NotificationPlugin);

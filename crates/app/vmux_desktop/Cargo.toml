@@ -80,7 +80,6 @@ libc = "0.2"
 moonshine-save = { workspace = true }
 muda = "0.19"
 notify = { workspace = true }
-parking_lot = "0.12"
 rfd = { workspace = true }
 ron = { workspace = true }
 semver = { version = "1", optional = true }
@@ -103,6 +102,7 @@ vmux_editor = { path = "../../feature/vmux_editor" }
 vmux_flex = { path = "../../util/vmux_flex" }
 vmux_git = { path = "../../feature/vmux_git" }
 vmux_history = { path = "../../feature/vmux_history" }
+vmux_input = { path = "../../feature/vmux_input" }
 vmux_knowledge = { path = "../../feature/vmux_knowledge" }
 vmux_layout = { path = "../../feature/vmux_layout" }
 vmux_native = { path = "../../util/vmux_native" }

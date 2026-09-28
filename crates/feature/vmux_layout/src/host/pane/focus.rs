@@ -284,7 +284,7 @@ fn apply_pending_hover(
     mut commands: Commands,
     mut last_motion_sequence: Local<u64>,
 ) {
-    let Some(pointer) = crate::native_pointer::snapshot() else {
+    let Some(pointer) = vmux_input::pointer::snapshot() else {
         return;
     };
     if pointer.motion_sequence == 0 || pointer.motion_sequence == *last_motion_sequence {

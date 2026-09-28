@@ -308,7 +308,7 @@ fn sync_layout_cef_frame_rate(
     focused_window: vmux_layout::window::FocusedWindow,
 ) {
     let inside = NativeLayout::pointer_is_inside();
-    let pointer = vmux_layout::native_pointer::snapshot();
+    let pointer = vmux_input::pointer::snapshot();
     let cursor_moved = cursor_events.read().count() > 0;
     let button_changed = button_events.read().count() > 0;
     let wheel_changed = wheel_events.read().count() > 0;

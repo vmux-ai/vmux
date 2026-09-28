@@ -68,7 +68,7 @@ fn grab_key_window_on_pane_hover(
     if !app_is_frontmost() {
         return;
     }
-    let Some(pointer) = vmux_layout::native_pointer::snapshot() else {
+    let Some(pointer) = vmux_input::pointer::snapshot() else {
         return;
     };
     let mut over_pane = false;
@@ -493,7 +493,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         }
         let buttons = native_mouse_buttons();
         if pointer_position_changed && let Some((x, y)) = location {
-            vmux_layout::native_pointer::publish(Vec2::new(x, y), buttons, motion);
+            vmux_input::pointer::publish(Vec2::new(x, y), buttons, motion);
         }
         if motion && event_belongs_to_main_window {
             let interval = if event_type == NSEventType::MouseMoved {
@@ -535,7 +535,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 .take();
             IN_LIVE_RESIZE.store(false, Ordering::Relaxed);
         }
-        vmux_layout::native_pointer::publish_buttons(native_mouse_buttons());
+        vmux_input::pointer::publish_buttons(native_mouse_buttons());
         global_wake(NATIVE_MOUSE_MOVE_WAKE_INTERVAL);
     });
     let mouse_mask = NSEventMask::MouseMoved

@@ -11,7 +11,6 @@ pub mod cef;
 mod command;
 pub mod contract;
 pub mod native_open;
-pub mod native_pointer;
 pub mod overlay;
 pub mod page_context;
 pub mod pane;

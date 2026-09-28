@@ -80,7 +80,7 @@ fn publish_layout_pointer_inside(
                 (scale.is_finite() && scale > 0.0).then_some(scale)
             })
             .and_then(|scale| {
-                vmux_layout::native_pointer::snapshot().map(|pointer| pointer.position_px / scale)
+                vmux_input::pointer::snapshot().map(|pointer| pointer.position_px / scale)
             })
             .is_some_and(|position| cef_pointer_regions_contains(position, &cef_regions));
     #[cfg(not(target_os = "macos"))]
@@ -162,7 +162,7 @@ fn forward_layout_cef_mouse_button(
             continue;
         };
         #[cfg(target_os = "macos")]
-        let native_pointer = vmux_layout::native_pointer::snapshot();
+        let native_pointer = vmux_input::pointer::snapshot();
         #[cfg(target_os = "macos")]
         let position = native_pointer
             .map(|pointer| pointer.position_px / window.resolution.scale_factor())

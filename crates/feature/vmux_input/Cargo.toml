@@ -1,0 +1,29 @@
+[package]
+name = "vmux_input"
+build = "../../build_cfg_git.rs"
+description = "Native keyboard and pointer input for vmux"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bevy = { workspace = true }
+bevy_cef_core = { workspace = true }
+crossbeam-channel = { workspace = true }
+parking_lot = "0.12"
+vmux_command = { path = "../vmux_command" }
+vmux_core = { path = "../../util/vmux_core" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "block2",
+    "std",
+    "NSEvent",
+] }
+
+[lints]
+workspace = true

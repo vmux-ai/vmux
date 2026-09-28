@@ -17,9 +17,9 @@ mod disabled_features;
 mod display;
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod glass;
-mod key_claim;
 #[cfg(target_os = "macos")]
-mod keyboard;
+mod input;
+mod key_claim;
 mod log_forward;
 #[cfg(feature = "native-notifications")]
 mod notify;

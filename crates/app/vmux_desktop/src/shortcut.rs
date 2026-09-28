@@ -24,9 +24,6 @@ impl Plugin for ShortcutPlugin {
             )
             .add_systems(Update, sync_keymap)
             .add_systems(Update, process_key_input.in_set(WriteCommandRequests));
-
-        #[cfg(target_os = "macos")]
-        app.add_plugins(crate::keyboard::KeyboardPlugin);
     }
 }
 

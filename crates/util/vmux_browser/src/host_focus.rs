@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, HostWindow, WebviewWindowed};
 use vmux_core::KeyboardOwner;
 use vmux_core::overlay::{OverlayState, OverlayStateQuery, WindowOverlay};
+use vmux_input::{KeyboardContext, KeyboardContextSet};
 use vmux_layout::Header;
 use vmux_layout::side_sheet::SideSheet;
 use vmux_layout::stack::FocusedStack;
@@ -59,15 +60,6 @@ fn sync_keyboard_context(
         text_entry_owns_keys: overlay_owns_input,
     };
 }
-
-#[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct KeyboardContext {
-    pub page_owns_escape: bool,
-    pub text_entry_owns_keys: bool,
-}
-
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct KeyboardContextSet;
 
 #[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostFocusIntent {

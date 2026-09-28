@@ -21,7 +21,7 @@ mod tool;
 mod window_drag;
 pub use command::{NavigationRequest, OpenRequest, ShowDevToolsRequest, ZoomRequest};
 pub use host::AgentBrowserResolve;
-pub use host_focus::{HostFocusIntent, KeyboardContext, KeyboardContextSet};
+pub use host_focus::HostFocusIntent;
 pub use navigation::OpenHistoryRequest;
 pub use tool::BrowserToolPlugin;
 pub use window_drag::WindowDragRegion;
