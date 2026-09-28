@@ -22,14 +22,14 @@ impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
             .add_plugins(crate::acp_tool::AcpToolPlugin)
-            .add_message::<crate::event::PageAgentInfo>()
-            .add_message::<crate::event::PageAgentWorkspaceChanged>()
-            .add_message::<crate::event::PageAgentModelInfo>()
-            .add_message::<crate::event::PageAgentModelSelectionResult>()
-            .add_message::<crate::event::PageAgentModeInfo>()
-            .add_message::<crate::event::PageAgentModeSelectionResult>()
-            .add_message::<crate::event::PageAgentSessionCreated>()
-            .add_message::<crate::event::PageAgentAcpTerminalCreated>()
+            .add_message::<crate::event::UiAgentInfo>()
+            .add_message::<crate::event::UiAgentWorkspaceChanged>()
+            .add_message::<crate::event::UiAgentModelInfo>()
+            .add_message::<crate::event::UiAgentModelSelectionResult>()
+            .add_message::<crate::event::UiAgentModeInfo>()
+            .add_message::<crate::event::UiAgentModeSelectionResult>()
+            .add_message::<crate::event::UiAgentSessionCreated>()
+            .add_message::<crate::event::UiAgentAcpTerminalCreated>()
             .add_systems(Startup, (spawn_acp_catalog, start_catalog_fetch))
             .add_systems(
                 Update,
@@ -234,7 +234,7 @@ fn receive_catalog(
 }
 
 fn apply_acp_agent_info(
-    mut reader: MessageReader<crate::event::PageAgentInfo>,
+    mut reader: MessageReader<crate::event::UiAgentInfo>,
     mut sessions: Query<(&AcpSession, &mut vmux_core::team::Profile)>,
 ) {
     for event in reader.read() {
@@ -251,7 +251,7 @@ fn apply_acp_agent_info(
 }
 
 fn validate_acp_workspace(
-    event: &crate::event::PageAgentWorkspaceChanged,
+    event: &crate::event::UiAgentWorkspaceChanged,
 ) -> Result<vmux_git::worktree::ValidatedLinkedWorkspace, String> {
     vmux_git::worktree::validate_linked_workspace(
         std::path::Path::new(&event.cwd),
@@ -275,7 +275,7 @@ fn ancestor_tab(
 }
 
 fn apply_acp_workspace_changed(
-    mut reader: MessageReader<crate::event::PageAgentWorkspaceChanged>,
+    mut reader: MessageReader<crate::event::UiAgentWorkspaceChanged>,
     mut sessions: Query<(Entity, &mut AcpSession)>,
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<vmux_layout::tab::Tab>>,
@@ -344,7 +344,7 @@ fn apply_acp_workspace_changed(
 }
 
 fn apply_acp_model_info(
-    mut reader: MessageReader<crate::event::PageAgentModelInfo>,
+    mut reader: MessageReader<crate::event::UiAgentModelInfo>,
     mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpModelState>)>,
     mut commands: Commands,
 ) {
@@ -386,7 +386,7 @@ fn apply_acp_model_info(
 }
 
 fn apply_acp_model_selection_result(
-    mut reader: MessageReader<crate::event::PageAgentModelSelectionResult>,
+    mut reader: MessageReader<crate::event::UiAgentModelSelectionResult>,
     mut sessions: Query<(&AcpSession, &mut AcpModelState)>,
 ) {
     for event in reader.read() {
@@ -406,7 +406,7 @@ fn apply_acp_model_selection_result(
 }
 
 fn apply_acp_mode_info(
-    mut reader: MessageReader<crate::event::PageAgentModeInfo>,
+    mut reader: MessageReader<crate::event::UiAgentModeInfo>,
     mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpModeState>)>,
     mut commands: Commands,
 ) {
@@ -442,7 +442,7 @@ fn apply_acp_mode_info(
 }
 
 fn apply_acp_mode_selection_result(
-    mut reader: MessageReader<crate::event::PageAgentModeSelectionResult>,
+    mut reader: MessageReader<crate::event::UiAgentModeSelectionResult>,
     mut sessions: Query<(&AcpSession, &mut AcpModeState)>,
 ) {
     for event in reader.read() {
@@ -492,7 +492,7 @@ fn auto_allow_acp_approval(
 
 #[allow(clippy::type_complexity)]
 fn apply_acp_session_created(
-    mut reader: MessageReader<crate::event::PageAgentSessionCreated>,
+    mut reader: MessageReader<crate::event::UiAgentSessionCreated>,
     mut sessions: Query<
         (
             Entity,
@@ -537,7 +537,7 @@ fn apply_acp_session_created(
 
 #[allow(clippy::too_many_arguments)]
 fn apply_acp_terminal_created(
-    mut reader: MessageReader<crate::event::PageAgentAcpTerminalCreated>,
+    mut reader: MessageReader<crate::event::UiAgentAcpTerminalCreated>,
     sessions: Query<(Entity, &AcpSession)>,
     ctx: PanePlacement,
     mut commands: Commands,
@@ -904,7 +904,7 @@ mod tests {
         let project_dir = repo.path().canonicalize().unwrap();
         let worktree_dir = worktree.canonicalize().unwrap();
         let mut app = App::new();
-        app.add_message::<crate::event::PageAgentWorkspaceChanged>()
+        app.add_message::<crate::event::UiAgentWorkspaceChanged>()
             .add_systems(Update, apply_acp_workspace_changed);
         let tab = app
             .world_mut()
@@ -939,8 +939,8 @@ mod tests {
             })
             .id();
         app.world_mut()
-            .resource_mut::<Messages<crate::event::PageAgentWorkspaceChanged>>()
-            .write(crate::event::PageAgentWorkspaceChanged {
+            .resource_mut::<Messages<crate::event::UiAgentWorkspaceChanged>>()
+            .write(crate::event::UiAgentWorkspaceChanged {
                 sid: "matching-sid".into(),
                 name: "quiet-amber-wolf".into(),
                 branch: "vibe/quiet-amber-wolf".into(),
@@ -974,7 +974,7 @@ mod tests {
 
     #[test]
     fn live_acp_identity_updates_only_matching_profile() {
-        use crate::event::PageAgentInfo;
+        use crate::event::UiAgentInfo;
         use vmux_core::team::Profile;
 
         let mut app = App::new();
@@ -1007,7 +1007,7 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().write_message(PageAgentInfo {
+        app.world_mut().write_message(UiAgentInfo {
             sid: "s1".into(),
             name: "Antigravity".into(),
         });
@@ -1022,7 +1022,7 @@ mod tests {
             "Claude"
         );
 
-        app.world_mut().write_message(PageAgentInfo {
+        app.world_mut().write_message(UiAgentInfo {
             sid: "s1".into(),
             name: "   ".into(),
         });
@@ -1036,7 +1036,7 @@ mod tests {
 
     #[test]
     fn live_acp_model_info_updates_only_matching_session() {
-        use crate::event::PageAgentModelInfo;
+        use crate::event::UiAgentModelInfo;
         use vmux_api::protocol::AcpModelOption;
 
         let mut app = App::new();
@@ -1063,7 +1063,7 @@ mod tests {
             })
             .id();
 
-        app.world_mut().write_message(PageAgentModelInfo {
+        app.world_mut().write_message(UiAgentModelInfo {
             sid: "s1".into(),
             config_id: "model".into(),
             current_model_id: "sonnet".into(),
@@ -1083,7 +1083,7 @@ mod tests {
 
     #[test]
     fn model_results_preserve_latest_pending_selection() {
-        use crate::event::{PageAgentModelInfo, PageAgentModelSelectionResult};
+        use crate::event::{UiAgentModelInfo, UiAgentModelSelectionResult};
         use vmux_api::protocol::AcpModelOption;
 
         let models = vec![
@@ -1104,8 +1104,8 @@ mod tests {
             },
         ];
         let mut app = App::new();
-        app.add_message::<PageAgentModelInfo>()
-            .add_message::<PageAgentModelSelectionResult>()
+        app.add_message::<UiAgentModelInfo>()
+            .add_message::<UiAgentModelSelectionResult>()
             .add_systems(
                 Update,
                 (apply_acp_model_info, apply_acp_model_selection_result).chain(),
@@ -1133,7 +1133,7 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().write_message(PageAgentModelInfo {
+        app.world_mut().write_message(UiAgentModelInfo {
             sid: "s1".into(),
             config_id: "model".into(),
             current_model_id: "opus".into(),
@@ -1149,13 +1149,12 @@ mod tests {
         );
         assert_eq!(state.current_name(), "Fable");
 
-        app.world_mut()
-            .write_message(PageAgentModelSelectionResult {
-                sid: "s1".into(),
-                request_id: 1,
-                model_id: "fable".into(),
-                succeeded: false,
-            });
+        app.world_mut().write_message(UiAgentModelSelectionResult {
+            sid: "s1".into(),
+            request_id: 1,
+            model_id: "fable".into(),
+            succeeded: false,
+        });
         app.update();
         assert_eq!(
             app.world()
@@ -1167,13 +1166,12 @@ mod tests {
             Some(2)
         );
 
-        app.world_mut()
-            .write_message(PageAgentModelSelectionResult {
-                sid: "s1".into(),
-                request_id: 2,
-                model_id: "fable".into(),
-                succeeded: false,
-            });
+        app.world_mut().write_message(UiAgentModelSelectionResult {
+            sid: "s1".into(),
+            request_id: 2,
+            model_id: "fable".into(),
+            succeeded: false,
+        });
         app.update();
         let state = app.world().get::<AcpModelState>(entity).unwrap();
         assert!(state.pending.is_none());
@@ -1186,13 +1184,12 @@ mod tests {
                 model_id: "fable".into(),
             });
         }
-        app.world_mut()
-            .write_message(PageAgentModelSelectionResult {
-                sid: "s1".into(),
-                request_id: 3,
-                model_id: "fable".into(),
-                succeeded: true,
-            });
+        app.world_mut().write_message(UiAgentModelSelectionResult {
+            sid: "s1".into(),
+            request_id: 3,
+            model_id: "fable".into(),
+            succeeded: true,
+        });
         app.update();
         let state = app.world().get::<AcpModelState>(entity).unwrap();
         assert_eq!(state.current_model_id, "fable");
@@ -1201,7 +1198,7 @@ mod tests {
 
     #[test]
     fn mode_results_preserve_latest_pending_selection() {
-        use crate::event::{PageAgentModeInfo, PageAgentModeSelectionResult};
+        use crate::event::{UiAgentModeInfo, UiAgentModeSelectionResult};
         use vmux_api::protocol::AcpModeOption;
 
         let modes = vec![
@@ -1217,8 +1214,8 @@ mod tests {
             },
         ];
         let mut app = App::new();
-        app.add_message::<PageAgentModeInfo>()
-            .add_message::<PageAgentModeSelectionResult>()
+        app.add_message::<UiAgentModeInfo>()
+            .add_message::<UiAgentModeSelectionResult>()
             .add_systems(
                 Update,
                 (apply_acp_mode_info, apply_acp_mode_selection_result).chain(),
@@ -1245,13 +1242,13 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().write_message(PageAgentModeInfo {
+        app.world_mut().write_message(UiAgentModeInfo {
             sid: "s1".into(),
             config_id: String::new(),
             current_mode_id: "ask".into(),
             modes,
         });
-        app.world_mut().write_message(PageAgentModeSelectionResult {
+        app.world_mut().write_message(UiAgentModeSelectionResult {
             sid: "s1".into(),
             request_id: 1,
             mode_id: "auto".into(),
@@ -1266,7 +1263,7 @@ mod tests {
             Some(2)
         );
 
-        app.world_mut().write_message(PageAgentModeSelectionResult {
+        app.world_mut().write_message(UiAgentModeSelectionResult {
             sid: "s1".into(),
             request_id: 2,
             mode_id: "auto".into(),
@@ -1281,13 +1278,13 @@ mod tests {
 
     #[test]
     fn acp_terminal_stack_does_not_take_focus_from_agent() {
-        use crate::event::PageAgentAcpTerminalCreated;
+        use crate::event::UiAgentAcpTerminalCreated;
         use vmux_layout::pane::leaf_pane_bundle;
         use vmux_layout::stack::Stack;
         use vmux_layout::tab::tab_bundle;
 
         let mut app = App::new();
-        app.add_message::<PageAgentAcpTerminalCreated>()
+        app.add_message::<UiAgentAcpTerminalCreated>()
             .add_systems(Update, apply_acp_terminal_created);
         let tab = app.world_mut().spawn(tab_bundle()).id();
         let pane = app
@@ -1315,7 +1312,7 @@ mod tests {
                 url: "vmux://sessions/claude".into(),
                 ..default()
             });
-        app.world_mut().write_message(PageAgentAcpTerminalCreated {
+        app.world_mut().write_message(UiAgentAcpTerminalCreated {
             sid: "s1".into(),
             terminal_id: "terminal-1".into(),
             process_id: vmux_core::ProcessId::new(),

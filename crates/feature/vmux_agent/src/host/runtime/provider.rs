@@ -4,8 +4,8 @@ use crate::AgentVariant;
 use crate::approval;
 use crate::event::{AgentApprovalRequest, AgentDelta};
 use crate::event::{
-    PageAgentApprovalResolved, PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus,
-    PageAgentSnapshot,
+    UiAgentApprovalResolved, UiAgentAwaitingApproval, UiAgentDelta, UiAgentRunStatus,
+    UiAgentSnapshot,
 };
 use crate::handoff::{ImportedConversation, PendingHandoff, sanitize_replayed_messages};
 use crate::run_state::AgentRunState;
@@ -27,11 +27,11 @@ impl Plugin for ProviderAgentPlugin {
         }
         app.register_type::<AgentSession>()
             .register_type::<AgentApprovalPolicy>()
-            .add_message::<PageAgentDelta>()
-            .add_message::<PageAgentRunStatus>()
-            .add_message::<PageAgentAwaitingApproval>()
-            .add_message::<PageAgentApprovalResolved>()
-            .add_message::<PageAgentSnapshot>()
+            .add_message::<UiAgentDelta>()
+            .add_message::<UiAgentRunStatus>()
+            .add_message::<UiAgentAwaitingApproval>()
+            .add_message::<UiAgentApprovalResolved>()
+            .add_message::<UiAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_plugins(approval::ApprovalPlugin)
             .add_plugins(ToastPlugin)
@@ -207,11 +207,11 @@ fn close_provider_session_on_remove(
 
 #[allow(clippy::type_complexity)]
 fn consume_provider_agent_stream(
-    mut deltas: MessageReader<PageAgentDelta>,
-    mut statuses: MessageReader<PageAgentRunStatus>,
-    mut approvals: MessageReader<PageAgentAwaitingApproval>,
-    mut resolved_approvals: MessageReader<PageAgentApprovalResolved>,
-    mut snapshots: MessageReader<PageAgentSnapshot>,
+    mut deltas: MessageReader<UiAgentDelta>,
+    mut statuses: MessageReader<UiAgentRunStatus>,
+    mut approvals: MessageReader<UiAgentAwaitingApproval>,
+    mut resolved_approvals: MessageReader<UiAgentApprovalResolved>,
+    mut snapshots: MessageReader<UiAgentSnapshot>,
     mut q: Query<(
         Entity,
         &mut AgentMessages,
@@ -357,11 +357,11 @@ mod tests {
     #[test]
     fn auto_approved_acp_request_without_service_falls_back_to_awaiting_state() {
         let mut app = App::new();
-        app.add_message::<PageAgentDelta>()
-            .add_message::<PageAgentRunStatus>()
-            .add_message::<PageAgentAwaitingApproval>()
-            .add_message::<PageAgentApprovalResolved>()
-            .add_message::<PageAgentSnapshot>()
+        app.add_message::<UiAgentDelta>()
+            .add_message::<UiAgentRunStatus>()
+            .add_message::<UiAgentAwaitingApproval>()
+            .add_message::<UiAgentApprovalResolved>()
+            .add_message::<UiAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_provider_agent_stream);
         let mut policy = AgentApprovalPolicy::default();
@@ -382,7 +382,7 @@ mod tests {
                 policy,
             ))
             .id();
-        app.world_mut().write_message(PageAgentAwaitingApproval {
+        app.world_mut().write_message(UiAgentAwaitingApproval {
             sid: "s1".into(),
             call_id: "call-1".into(),
             name: "run".into(),
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn interrupted_status_pauses_queue_and_idles() {
         use crate::event::{
-            PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
+            UiAgentAwaitingApproval, UiAgentDelta, UiAgentRunStatus, UiAgentSnapshot,
         };
         use vmux_api::protocol::AgentRunStatus;
         use vmux_session::AcpSession;
@@ -409,11 +409,11 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_message::<PageAgentDelta>()
-            .add_message::<PageAgentRunStatus>()
-            .add_message::<PageAgentAwaitingApproval>()
-            .add_message::<PageAgentApprovalResolved>()
-            .add_message::<PageAgentSnapshot>()
+            .add_message::<UiAgentDelta>()
+            .add_message::<UiAgentRunStatus>()
+            .add_message::<UiAgentAwaitingApproval>()
+            .add_message::<UiAgentApprovalResolved>()
+            .add_message::<UiAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_provider_agent_stream);
 
@@ -434,7 +434,7 @@ mod tests {
                 queue,
             ))
             .id();
-        app.world_mut().write_message(PageAgentRunStatus {
+        app.world_mut().write_message(UiAgentRunStatus {
             sid: "s1".into(),
             status: AgentRunStatus::Interrupted,
         });
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn flush_pending_interrupt_does_not_pause() {
         use crate::event::{
-            PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
+            UiAgentAwaitingApproval, UiAgentDelta, UiAgentRunStatus, UiAgentSnapshot,
         };
         use vmux_api::protocol::AgentRunStatus;
         use vmux_session::AcpSession;
@@ -461,11 +461,11 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_message::<PageAgentDelta>()
-            .add_message::<PageAgentRunStatus>()
-            .add_message::<PageAgentAwaitingApproval>()
-            .add_message::<PageAgentApprovalResolved>()
-            .add_message::<PageAgentSnapshot>()
+            .add_message::<UiAgentDelta>()
+            .add_message::<UiAgentRunStatus>()
+            .add_message::<UiAgentAwaitingApproval>()
+            .add_message::<UiAgentApprovalResolved>()
+            .add_message::<UiAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_provider_agent_stream);
 
@@ -488,7 +488,7 @@ mod tests {
                 queue,
             ))
             .id();
-        app.world_mut().write_message(PageAgentRunStatus {
+        app.world_mut().write_message(UiAgentRunStatus {
             sid: "s1".into(),
             status: AgentRunStatus::Interrupted,
         });
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn flush_pending_error_rearms_queue() {
         use crate::event::{
-            PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
+            UiAgentAwaitingApproval, UiAgentDelta, UiAgentRunStatus, UiAgentSnapshot,
         };
         use vmux_api::protocol::AgentRunStatus;
         use vmux_session::AcpSession;
@@ -522,11 +522,11 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_message::<PageAgentDelta>()
-            .add_message::<PageAgentRunStatus>()
-            .add_message::<PageAgentAwaitingApproval>()
-            .add_message::<PageAgentApprovalResolved>()
-            .add_message::<PageAgentSnapshot>()
+            .add_message::<UiAgentDelta>()
+            .add_message::<UiAgentRunStatus>()
+            .add_message::<UiAgentAwaitingApproval>()
+            .add_message::<UiAgentApprovalResolved>()
+            .add_message::<UiAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_provider_agent_stream);
 
@@ -548,7 +548,7 @@ mod tests {
                 queue,
             ))
             .id();
-        app.world_mut().write_message(PageAgentRunStatus {
+        app.world_mut().write_message(UiAgentRunStatus {
             sid: "s1".into(),
             status: AgentRunStatus::Errored("cancel race".into()),
         });
@@ -571,11 +571,11 @@ mod tests {
     fn acp_streaming_to_idle_raises_attention() {
         use vmux_session::PromptQueue;
         let mut app = App::new();
-        app.add_message::<PageAgentDelta>()
-            .add_message::<PageAgentRunStatus>()
-            .add_message::<PageAgentAwaitingApproval>()
-            .add_message::<PageAgentApprovalResolved>()
-            .add_message::<PageAgentSnapshot>()
+        app.add_message::<UiAgentDelta>()
+            .add_message::<UiAgentRunStatus>()
+            .add_message::<UiAgentAwaitingApproval>()
+            .add_message::<UiAgentApprovalResolved>()
+            .add_message::<UiAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_provider_agent_stream);
         let entity = app
@@ -595,8 +595,8 @@ mod tests {
             .id();
 
         app.world_mut()
-            .resource_mut::<bevy::ecs::message::Messages<PageAgentRunStatus>>()
-            .write(PageAgentRunStatus {
+            .resource_mut::<bevy::ecs::message::Messages<UiAgentRunStatus>>()
+            .write(UiAgentRunStatus {
                 sid: "s1".into(),
                 status: AgentRunStatus::Idle,
             });
@@ -615,11 +615,11 @@ mod tests {
     fn idle_to_idle_does_not_raise_attention() {
         use vmux_session::PromptQueue;
         let mut app = App::new();
-        app.add_message::<PageAgentDelta>()
-            .add_message::<PageAgentRunStatus>()
-            .add_message::<PageAgentAwaitingApproval>()
-            .add_message::<PageAgentApprovalResolved>()
-            .add_message::<PageAgentSnapshot>()
+        app.add_message::<UiAgentDelta>()
+            .add_message::<UiAgentRunStatus>()
+            .add_message::<UiAgentAwaitingApproval>()
+            .add_message::<UiAgentApprovalResolved>()
+            .add_message::<UiAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_provider_agent_stream);
         app.world_mut().spawn((
@@ -636,8 +636,8 @@ mod tests {
         ));
 
         app.world_mut()
-            .resource_mut::<bevy::ecs::message::Messages<PageAgentRunStatus>>()
-            .write(PageAgentRunStatus {
+            .resource_mut::<bevy::ecs::message::Messages<UiAgentRunStatus>>()
+            .write(UiAgentRunStatus {
                 sid: "s1".into(),
                 status: AgentRunStatus::Idle,
             });
@@ -654,11 +654,11 @@ mod tests {
     #[test]
     fn remote_approval_resolution_restores_streaming_state() {
         let mut app = App::new();
-        app.add_message::<PageAgentDelta>()
-            .add_message::<PageAgentRunStatus>()
-            .add_message::<PageAgentAwaitingApproval>()
-            .add_message::<PageAgentApprovalResolved>()
-            .add_message::<PageAgentSnapshot>()
+        app.add_message::<UiAgentDelta>()
+            .add_message::<UiAgentRunStatus>()
+            .add_message::<UiAgentAwaitingApproval>()
+            .add_message::<UiAgentApprovalResolved>()
+            .add_message::<UiAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_provider_agent_stream);
         let entity = app
@@ -680,7 +680,7 @@ mod tests {
                 PromptQueue::default(),
             ))
             .id();
-        app.world_mut().write_message(PageAgentApprovalResolved {
+        app.world_mut().write_message(UiAgentApprovalResolved {
             sid: "s1".into(),
             call_id: "call-1".into(),
         });

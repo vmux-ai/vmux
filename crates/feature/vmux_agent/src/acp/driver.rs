@@ -38,7 +38,7 @@ use vmux_api::protocol::{
 };
 #[cfg(test)]
 use vmux_api::room::AssistantBlock;
-use vmux_api::room::{Message, RemoteApproval, RemoteSession, RemoteStatus};
+use vmux_api::room::{Message, RemoteApproval};
 #[cfg(test)]
 use vmux_process::{Process, ProcessManager};
 use vmux_process::{ProcessCreated, ProcessLaunch, ProcessRuntime, ProcessUpdate};
@@ -267,11 +267,6 @@ pub(super) struct AcpShared {
     pub pending_perms: Mutex<HashMap<String, oneshot::Sender<ApprovalDecision>>>,
     pub terminals: Mutex<HashMap<String, AcpTerminal>>,
     processes: AcpProcesses,
-    agent_name: Mutex<Option<String>>,
-    model_info: Mutex<Option<AcpModelInfoState>>,
-    mode_info: Mutex<Option<AcpModeInfoState>>,
-    status: Mutex<AgentRunStatus>,
-    approval: Mutex<Option<RemoteApproval>>,
     pub cancel_requested: AtomicBool,
     stderr_tail: Mutex<VecDeque<String>>,
     startup_ready: AtomicBool,
@@ -311,11 +306,6 @@ impl AcpShared {
             pending_perms: Mutex::new(HashMap::new()),
             terminals: Mutex::new(HashMap::new()),
             processes: processes.into(),
-            agent_name: Mutex::new(None),
-            model_info: Mutex::new(None),
-            mode_info: Mutex::new(None),
-            status: Mutex::new(AgentRunStatus::Idle),
-            approval: Mutex::new(None),
             cancel_requested: AtomicBool::new(false),
             stderr_tail: Mutex::new(VecDeque::new()),
             startup_ready: AtomicBool::new(false),
@@ -338,7 +328,7 @@ impl AcpShared {
         })
     }
 
-    fn cwd(&self) -> PathBuf {
+    pub(super) fn cwd(&self) -> PathBuf {
         self.cwd.lock().unwrap().clone()
     }
 
@@ -364,107 +354,12 @@ impl AcpShared {
         }));
     }
 
-    pub fn agent_info_message(&self) -> Option<ServiceMessage> {
-        self.agent_name.lock().unwrap().as_ref().map(|name| {
-            ServiceMessage::Shared(SharedEvent::AcpAgentInfo {
-                sid: self.sid.clone(),
-                name: name.clone(),
-            })
-        })
-    }
-
-    pub fn model_info_message(&self) -> Option<ServiceMessage> {
-        self.model_info
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|state| state.message(&self.sid))
-    }
-
-    pub fn mode_info_message(&self) -> Option<ServiceMessage> {
-        self.mode_info
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|state| state.message(&self.sid))
-    }
-
-    pub fn remote_session(
-        &self,
-        agent_id: &str,
-        created_at_ms: u64,
-        messages: &[Message],
-    ) -> RemoteSession {
-        let name = self
-            .agent_name
-            .lock()
-            .unwrap()
-            .clone()
-            .unwrap_or_else(|| agent_id.to_string());
-        let model = self
-            .model_info
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|state| state.current_model_id.clone())
-            .filter(|model| !model.is_empty());
-        RemoteSession {
-            sid: self.sid.clone(),
-            room_id: vmux_api::room::RoomId::for_session(&self.sid),
-            title: vmux_api::room::Message::conversation_title(messages, &name),
-            name,
-            runtime: "acp".to_string(),
-            model,
-            cwd: self.cwd().to_string_lossy().into_owned(),
-            status: RemoteStatus::from(&*self.status.lock().unwrap()),
-            approval: self.approval.lock().unwrap().clone(),
-            created_at_ms,
-        }
-    }
-
-    pub fn resolve_approval(&self, call_id: &str) -> bool {
-        let mut approval = self.approval.lock().unwrap();
-        if approval
-            .as_ref()
-            .is_none_or(|pending| pending.call_id != call_id)
-        {
-            return false;
-        }
-        *approval = None;
-        self.emit(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved {
-            sid: self.sid.clone(),
-            call_id: call_id.to_string(),
-        }));
-        true
-    }
-
     fn publish_agent_info(&self, name: String) {
-        *self.agent_name.lock().unwrap() = Some(name.clone());
-        self.emit(ServiceMessage::Shared(SharedEvent::AcpAgentInfo {
-            sid: self.sid.clone(),
-            name,
-        }));
+        self.project(AcpProjectionInput::AgentInfo(name));
     }
 
     fn publish_model_info(&self, config_options: &[SessionConfigOption]) {
-        let next = model_info(config_options);
-        let mut current = self.model_info.lock().unwrap();
-        if *current == next {
-            return;
-        }
-        let removed = current.is_some() && next.is_none();
-        *current = next.clone();
-        drop(current);
-        if let Some(state) = next {
-            self.emit(state.message(&self.sid));
-        } else if removed {
-            self.emit(ServiceMessage::Shared(SharedEvent::AcpModelInfo {
-                sid: self.sid.clone(),
-                config_id: String::new(),
-                current_model_id: String::new(),
-                models: Vec::new(),
-            }));
-        }
+        self.project(AcpProjectionInput::ModelInfo(config_options.to_vec()));
     }
 
     fn publish_mode_info(
@@ -472,52 +367,14 @@ impl AcpShared {
         config_options: &[SessionConfigOption],
         modes: Option<&SessionModeState>,
     ) {
-        let next = mode_info(config_options, modes);
-        let mut current = self.mode_info.lock().unwrap();
-        if *current == next {
-            return;
-        }
-        let removed = current.is_some() && next.is_none();
-        *current = next.clone();
-        drop(current);
-        if let Some(state) = next {
-            self.emit(state.message(&self.sid));
-        } else if removed {
-            self.emit(ServiceMessage::AcpModeInfo {
-                sid: self.sid.clone(),
-                config_id: String::new(),
-                current_mode_id: String::new(),
-                modes: Vec::new(),
-            });
-        }
-    }
-
-    fn publish_mode_config_info(&self, config_options: &[SessionConfigOption]) {
-        let has_mode_config = mode_config(config_options).is_some();
-        let had_mode_config = self
-            .mode_info
-            .lock()
-            .unwrap()
-            .as_ref()
-            .is_some_and(|state| !state.config_id.is_empty());
-        if has_mode_config || had_mode_config {
-            self.publish_mode_info(config_options, None);
-        }
+        self.project(AcpProjectionInput::ModeInfo {
+            config_options: config_options.to_vec(),
+            modes: modes.cloned(),
+        });
     }
 
     fn publish_selected_mode(&self, mode_id: &str) {
-        let mut current = self.mode_info.lock().unwrap();
-        let Some(state) = current.as_mut() else {
-            return;
-        };
-        if !state.modes.iter().any(|mode| mode.id == mode_id) {
-            return;
-        }
-        if state.current_mode_id == mode_id {
-            return;
-        }
-        state.current_mode_id = mode_id.to_string();
-        self.emit(state.message(&self.sid));
+        self.project(AcpProjectionInput::SelectedMode(mode_id.to_string()));
     }
 
     fn publish_selected_config_mode(
@@ -526,20 +383,11 @@ impl AcpShared {
         mode_id: &str,
         config_options: &[SessionConfigOption],
     ) {
-        let response = mode_info(config_options, None);
-        let mut current = self.mode_info.lock().unwrap();
-        let Some(mut next) = response.or_else(|| current.clone()) else {
-            return;
-        };
-        if next.config_id == config_id && next.modes.iter().any(|mode| mode.id == mode_id) {
-            next.current_mode_id = mode_id.to_string();
-        }
-        if current.as_ref() == Some(&next) {
-            return;
-        }
-        *current = Some(next.clone());
-        drop(current);
-        self.emit(next.message(&self.sid));
+        self.project(AcpProjectionInput::SelectedConfigMode {
+            config_id: config_id.to_string(),
+            mode_id: mode_id.to_string(),
+            config_options: config_options.to_vec(),
+        });
     }
 
     fn publish_selected_model(
@@ -548,20 +396,11 @@ impl AcpShared {
         model_id: &str,
         config_options: &[SessionConfigOption],
     ) {
-        let response = model_info(config_options);
-        let mut current = self.model_info.lock().unwrap();
-        let Some(mut next) = response.or_else(|| current.clone()) else {
-            return;
-        };
-        if next.config_id == config_id && next.models.iter().any(|model| model.id == model_id) {
-            next.current_model_id = model_id.to_string();
-        }
-        if current.as_ref() == Some(&next) {
-            return;
-        }
-        *current = Some(next.clone());
-        drop(current);
-        self.emit(next.message(&self.sid));
+        self.project(AcpProjectionInput::SelectedModel {
+            config_id: config_id.to_string(),
+            model_id: model_id.to_string(),
+            config_options: config_options.to_vec(),
+        });
     }
 
     fn begin_history_replay(&self) {
@@ -583,17 +422,13 @@ impl AcpShared {
     }
 
     fn emit_status(&self, status: AgentRunStatus) {
-        if let AgentRunStatus::Errored(message) = &status {
-            tracing::warn!(target: "acp", sid = %self.sid, "{message}");
-        }
-        if !matches!(status, AgentRunStatus::Streaming) {
-            *self.approval.lock().unwrap() = None;
-        }
-        *self.status.lock().unwrap() = status.clone();
-        self.emit(ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged {
-            sid: self.sid.clone(),
-            status,
-        }));
+        self.project(AcpProjectionInput::Status(status));
+    }
+
+    async fn selection_snapshot(&self) -> super::AcpSelectionSnapshot {
+        let (response, receiver) = oneshot::channel();
+        self.project(AcpProjectionInput::SelectionSnapshot(response));
+        receiver.await.unwrap_or_default()
     }
 
     fn push_stderr(&self, line: String) {
@@ -623,158 +458,7 @@ fn stderr_detail_from(tail: &VecDeque<String>, shown: usize) -> String {
 }
 
 fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
-    if let SessionUpdate::ConfigOptionUpdate(config) = &update {
-        shared.publish_model_info(&config.config_options);
-        shared.publish_mode_config_info(&config.config_options);
-    }
-    if let SessionUpdate::CurrentModeUpdate(mode) = &update {
-        shared.publish_selected_mode(&mode.current_mode_id.to_string());
-    }
     shared.project(AcpProjectionInput::Update(update));
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct AcpModelInfoState {
-    config_id: String,
-    current_model_id: String,
-    models: Vec<vmux_api::protocol::AcpModelOption>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct AcpModeInfoState {
-    config_id: String,
-    current_mode_id: String,
-    modes: Vec<vmux_api::protocol::AcpModeOption>,
-}
-
-impl AcpModeInfoState {
-    fn message(&self, sid: &str) -> ServiceMessage {
-        ServiceMessage::AcpModeInfo {
-            sid: sid.to_string(),
-            config_id: self.config_id.clone(),
-            current_mode_id: self.current_mode_id.clone(),
-            modes: self.modes.clone(),
-        }
-    }
-}
-
-impl AcpModelInfoState {
-    fn message(&self, sid: &str) -> ServiceMessage {
-        ServiceMessage::Shared(SharedEvent::AcpModelInfo {
-            sid: sid.to_string(),
-            config_id: self.config_id.clone(),
-            current_model_id: self.current_model_id.clone(),
-            models: self.models.clone(),
-        })
-    }
-}
-
-fn model_info(config_options: &[SessionConfigOption]) -> Option<AcpModelInfoState> {
-    let config = config_options.iter().find(|config| {
-        matches!(
-            config.category.as_ref(),
-            Some(SessionConfigOptionCategory::Model)
-        ) || config.id.to_string().eq_ignore_ascii_case("model")
-            || config.name.trim().eq_ignore_ascii_case("model")
-    })?;
-    let SessionConfigKind::Select(select) = &config.kind else {
-        return None;
-    };
-    let options = match &select.options {
-        SessionConfigSelectOptions::Ungrouped(options) => options.iter().collect::<Vec<_>>(),
-        SessionConfigSelectOptions::Grouped(groups) => groups
-            .iter()
-            .flat_map(|group| group.options.iter())
-            .collect::<Vec<_>>(),
-        _ => return None,
-    };
-    Some(AcpModelInfoState {
-        config_id: config.id.to_string(),
-        current_model_id: select.current_value.to_string(),
-        models: options
-            .into_iter()
-            .map(|option| vmux_api::protocol::AcpModelOption {
-                id: option.value.to_string(),
-                name: option.name.clone(),
-                description: option.description.clone(),
-            })
-            .collect(),
-    })
-}
-
-fn mode_config(config_options: &[SessionConfigOption]) -> Option<&SessionConfigOption> {
-    let selectable =
-        |config: &&SessionConfigOption| matches!(&config.kind, SessionConfigKind::Select(_));
-    config_options
-        .iter()
-        .filter(selectable)
-        .find(|config| {
-            matches!(
-                config.category.as_ref(),
-                Some(SessionConfigOptionCategory::Mode)
-            )
-        })
-        .or_else(|| {
-            config_options.iter().filter(selectable).find(|config| {
-                config.id.to_string().eq_ignore_ascii_case("mode")
-                    || config.name.trim().eq_ignore_ascii_case("mode")
-            })
-        })
-        .or_else(|| {
-            config_options.iter().filter(selectable).find(|config| {
-                config
-                    .id
-                    .to_string()
-                    .to_ascii_lowercase()
-                    .contains("permission")
-                    || config.name.to_ascii_lowercase().contains("permission")
-            })
-        })
-}
-
-fn mode_info(
-    config_options: &[SessionConfigOption],
-    legacy: Option<&SessionModeState>,
-) -> Option<AcpModeInfoState> {
-    if let Some(config) = mode_config(config_options) {
-        let SessionConfigKind::Select(select) = &config.kind else {
-            return None;
-        };
-        let options = match &select.options {
-            SessionConfigSelectOptions::Ungrouped(options) => options.iter().collect::<Vec<_>>(),
-            SessionConfigSelectOptions::Grouped(groups) => groups
-                .iter()
-                .flat_map(|group| group.options.iter())
-                .collect::<Vec<_>>(),
-            _ => return None,
-        };
-        return Some(AcpModeInfoState {
-            config_id: config.id.to_string(),
-            current_mode_id: select.current_value.to_string(),
-            modes: options
-                .into_iter()
-                .map(|option| vmux_api::protocol::AcpModeOption {
-                    id: option.value.to_string(),
-                    name: option.name.clone(),
-                    description: option.description.clone(),
-                })
-                .collect(),
-        });
-    }
-    let legacy = legacy?;
-    Some(AcpModeInfoState {
-        config_id: String::new(),
-        current_mode_id: legacy.current_mode_id.to_string(),
-        modes: legacy
-            .available_modes
-            .iter()
-            .map(|mode| vmux_api::protocol::AcpModeOption {
-                id: mode.id.to_string(),
-                name: mode.name.clone(),
-                description: mode.description.clone(),
-            })
-            .collect(),
-    })
 }
 
 async fn resolve_approval_details(
@@ -988,19 +672,13 @@ pub async fn run(
                     .lock()
                     .unwrap()
                     .insert(call_id.clone(), tx);
-                *perm_shared.approval.lock().unwrap() = Some(RemoteApproval {
+                perm_shared.project(AcpProjectionInput::ApprovalRequested(RemoteApproval {
                     call_id: call_id.clone(),
                     name: name.clone(),
                     args: vmux_api::json::JsonValue::parse_or_string(&args_json),
-                });
-                perm_shared.emit(ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
-                    sid: perm_shared.sid.clone(),
-                    call_id: call_id.clone(),
-                    name,
-                    args: vmux_api::json::JsonValue::parse_or_string(&args_json),
                 }));
                 let decision = rx.await.unwrap_or(ApprovalDecision::Deny);
-                *perm_shared.approval.lock().unwrap() = None;
+                perm_shared.project(AcpProjectionInput::ApprovalResolved(call_id));
                 let outcome = match pick_permission_option(&req.options, decision) {
                     Some(id) => {
                         RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(id))
@@ -1281,7 +959,7 @@ pub async fn run(
                                 acp_session_id: active_session_id.to_string(),
                             });
                         }
-                        let available_mode = main_shared.mode_info.lock().unwrap().clone();
+                        let available_mode = main_shared.selection_snapshot().await.mode;
                         if let Some(mode_id) = preferred_mode
                             && let Some(mode) = available_mode
                             && mode.current_mode_id != mode_id
@@ -1344,7 +1022,6 @@ pub async fn run(
                         })?;
                     }
                     AcpInput::Approve { call_id, decision } => {
-                        *main_shared.approval.lock().unwrap() = None;
                         if let Some(tx) = main_shared.pending_perms.lock().unwrap().remove(&call_id)
                         {
                             let _ = tx.send(decision);
@@ -1362,9 +1039,9 @@ pub async fn run(
                             continue;
                         };
                         let current_model_id = main_shared
-                            .model_info
-                            .lock()
-                            .unwrap()
+                            .selection_snapshot()
+                            .await
+                            .model
                             .as_ref()
                             .map(|state| state.current_model_id.clone());
                         let needs_fresh_session = continuity
@@ -2194,6 +1871,11 @@ mod tests {
                     super::super::AcpSessionShared(Arc::clone(&shared)),
                     super::super::AcpProjectionInbox(projection_rx),
                     AcpProjector::default(),
+                    super::super::AcpAgentName::default(),
+                    super::super::AcpModelState::default(),
+                    super::super::AcpModeState::default(),
+                    super::super::AcpRunState(AgentRunStatus::Idle),
+                    super::super::AcpApprovalState::default(),
                     super::super::AcpHistoryReplay::default(),
                 ))
                 .id();
@@ -2394,25 +2076,17 @@ mod tests {
 
     #[test]
     fn acp_agent_info_is_replayable_without_a_subscriber() {
-        let (stream_tx, stream_rx) = broadcast::channel(1);
-        drop(stream_rx);
-        let shared = AcpShared::new(
-            "s1".into(),
-            PathBuf::from("/tmp"),
-            ProcessId::new(),
-            stream_tx,
-            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-        );
+        let mut harness = ProjectionHarness::new(1);
+        harness.shared.publish_agent_info("Antigravity".into());
+        harness.update();
 
-        shared.publish_agent_info("Antigravity".into());
-
-        match shared.agent_info_message() {
-            Some(ServiceMessage::Shared(SharedEvent::AcpAgentInfo { sid, name })) => {
-                assert_eq!(sid, "s1");
-                assert_eq!(name, "Antigravity");
-            }
-            other => panic!("expected replayable ACP agent info, got {other:?}"),
-        }
+        let name = harness
+            .app
+            .world()
+            .entity(harness.entity)
+            .get::<super::super::AcpAgentName>()
+            .unwrap();
+        assert_eq!(name.0.as_deref(), Some("Antigravity"));
     }
 
     #[test]
@@ -2433,7 +2107,7 @@ mod tests {
         )
         .category(SessionConfigOptionCategory::Model);
 
-        let info = model_info(&[config]).expect("model selector");
+        let info = super::super::AcpModelInfo::from_config(&[config]).expect("model selector");
 
         assert_eq!(info.config_id, "llm");
         assert_eq!(info.current_model_id, "opus");
@@ -2451,7 +2125,7 @@ mod tests {
             vec![SessionConfigSelectOption::new("gpt-5", "GPT-5")],
         );
 
-        let info = model_info(&[config]).expect("model selector");
+        let info = super::super::AcpModelInfo::from_config(&[config]).expect("model selector");
 
         assert_eq!(info.config_id, "model");
         assert_eq!(info.current_model_id, "gpt-5");
@@ -2467,7 +2141,7 @@ mod tests {
             ],
         );
 
-        let info = mode_info(&[], Some(&modes)).expect("legacy modes");
+        let info = super::super::AcpModeInfo::from_config(&[], Some(&modes)).expect("legacy modes");
 
         assert!(info.config_id.is_empty());
         assert_eq!(info.current_mode_id, "ask");
@@ -2493,7 +2167,8 @@ mod tests {
         )
         .category(SessionConfigOptionCategory::Mode);
 
-        let info = mode_info(&[config], Some(&legacy)).expect("mode selector");
+        let info = super::super::AcpModeInfo::from_config(&[config], Some(&legacy))
+            .expect("mode selector");
 
         assert_eq!(info.config_id, "approval");
         assert_eq!(info.current_mode_id, "auto");
@@ -2509,7 +2184,8 @@ mod tests {
             vec![SessionConfigSelectOption::new("ask", "Ask")],
         );
 
-        let info = mode_info(&[config], None).expect("permission selector");
+        let info =
+            super::super::AcpModeInfo::from_config(&[config], None).expect("permission selector");
 
         assert_eq!(info.config_id, "permission_policy");
         assert_eq!(info.current_mode_id, "ask");
@@ -2545,14 +2221,7 @@ mod tests {
 
     #[test]
     fn selected_mode_uses_cached_options_when_set_response_is_empty() {
-        let (stream_tx, mut stream_rx) = broadcast::channel(4);
-        let shared = AcpShared::new(
-            "s1".into(),
-            PathBuf::from("/tmp"),
-            ProcessId::new(),
-            stream_tx,
-            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-        );
+        let mut harness = ProjectionHarness::new(4);
         let config = SessionConfigOption::select(
             "approval",
             "Permissions",
@@ -2563,12 +2232,16 @@ mod tests {
             ],
         )
         .category(SessionConfigOptionCategory::Mode);
-        shared.publish_mode_info(&[config], None);
-        let _ = stream_rx.try_recv();
+        harness.shared.publish_mode_info(&[config], None);
+        harness.update();
+        let _ = harness.stream.try_recv();
 
-        shared.publish_selected_config_mode("approval", "auto", &[]);
+        harness
+            .shared
+            .publish_selected_config_mode("approval", "auto", &[]);
+        harness.update();
 
-        match stream_rx.try_recv().expect("selected mode update") {
+        match harness.stream.try_recv().expect("selected mode update") {
             ServiceMessage::AcpModeInfo {
                 current_mode_id,
                 modes,
@@ -2583,15 +2256,7 @@ mod tests {
 
     #[test]
     fn acp_model_info_is_replayable_without_a_subscriber() {
-        let (stream_tx, stream_rx) = broadcast::channel(1);
-        drop(stream_rx);
-        let shared = AcpShared::new(
-            "s1".into(),
-            PathBuf::from("/tmp"),
-            ProcessId::new(),
-            stream_tx,
-            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-        );
+        let mut harness = ProjectionHarness::new(1);
         let config = SessionConfigOption::select(
             "model",
             "Model",
@@ -2600,21 +2265,20 @@ mod tests {
         )
         .category(SessionConfigOptionCategory::Model);
 
-        shared.publish_model_info(&[config]);
+        harness.shared.publish_model_info(&[config]);
+        harness.update();
 
-        match shared.model_info_message() {
-            Some(ServiceMessage::Shared(SharedEvent::AcpModelInfo {
-                sid,
-                current_model_id,
-                models,
-                ..
-            })) => {
-                assert_eq!(sid, "s1");
-                assert_eq!(current_model_id, "sonnet");
-                assert_eq!(models[0].name, "Claude Sonnet");
-            }
-            other => panic!("expected replayable ACP model info, got {other:?}"),
-        }
+        let model = harness
+            .app
+            .world()
+            .entity(harness.entity)
+            .get::<super::super::AcpModelState>()
+            .unwrap()
+            .0
+            .as_ref()
+            .unwrap();
+        assert_eq!(model.current_model_id, "sonnet");
+        assert_eq!(model.models[0].name, "Claude Sonnet");
     }
 
     #[test]
@@ -2647,14 +2311,7 @@ mod tests {
 
     #[test]
     fn selected_model_wins_over_stale_set_response() {
-        let (stream_tx, mut stream_rx) = broadcast::channel(4);
-        let shared = AcpShared::new(
-            "s1".into(),
-            PathBuf::from("/tmp"),
-            ProcessId::new(),
-            stream_tx,
-            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-        );
+        let mut harness = ProjectionHarness::new(4);
         let stale = SessionConfigOption::select(
             "model",
             "Model",
@@ -2665,12 +2322,18 @@ mod tests {
             ],
         )
         .category(SessionConfigOptionCategory::Model);
-        shared.publish_model_info(std::slice::from_ref(&stale));
-        let _ = stream_rx.try_recv();
+        harness
+            .shared
+            .publish_model_info(std::slice::from_ref(&stale));
+        harness.update();
+        let _ = harness.stream.try_recv();
 
-        shared.publish_selected_model("model", "default", &[stale]);
+        harness
+            .shared
+            .publish_selected_model("model", "default", &[stale]);
+        harness.update();
 
-        match stream_rx.try_recv().expect("selected model update") {
+        match harness.stream.try_recv().expect("selected model update") {
             ServiceMessage::Shared(SharedEvent::AcpModelInfo {
                 current_model_id, ..
             }) => assert_eq!(current_model_id, "default"),
@@ -2680,14 +2343,7 @@ mod tests {
 
     #[test]
     fn selected_model_uses_cached_options_when_set_response_is_empty() {
-        let (stream_tx, mut stream_rx) = broadcast::channel(4);
-        let shared = AcpShared::new(
-            "s1".into(),
-            PathBuf::from("/tmp"),
-            ProcessId::new(),
-            stream_tx,
-            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-        );
+        let mut harness = ProjectionHarness::new(4);
         let config = SessionConfigOption::select(
             "model",
             "Model",
@@ -2698,12 +2354,16 @@ mod tests {
             ],
         )
         .category(SessionConfigOptionCategory::Model);
-        shared.publish_model_info(&[config]);
-        let _ = stream_rx.try_recv();
+        harness.shared.publish_model_info(&[config]);
+        harness.update();
+        let _ = harness.stream.try_recv();
 
-        shared.publish_selected_model("model", "default", &[]);
+        harness
+            .shared
+            .publish_selected_model("model", "default", &[]);
+        harness.update();
 
-        match stream_rx.try_recv().expect("selected model update") {
+        match harness.stream.try_recv().expect("selected model update") {
             ServiceMessage::Shared(SharedEvent::AcpModelInfo {
                 current_model_id,
                 models,
@@ -3308,21 +2968,36 @@ mod tests {
 
     #[test]
     fn approval_resolution_is_broadcast_immediately() {
-        let (shared, mut receiver) =
-            test_shared(Arc::new(tokio::sync::Mutex::new(ProcessManager::default())));
-        *shared.approval.lock().unwrap() = Some(RemoteApproval {
-            call_id: "call-1".into(),
-            name: "run".into(),
-            args: vmux_api::json::JsonValue::Object(Vec::new()),
-        });
+        let mut harness = ProjectionHarness::new(4);
+        harness
+            .shared
+            .project(AcpProjectionInput::ApprovalRequested(RemoteApproval {
+                call_id: "call-1".into(),
+                name: "run".into(),
+                args: vmux_api::json::JsonValue::Object(Vec::new()),
+            }));
+        harness.update();
+        let _ = harness.stream.try_recv();
 
-        assert!(shared.resolve_approval("call-1"));
+        harness
+            .shared
+            .project(AcpProjectionInput::ApprovalResolved("call-1".into()));
+        harness.update();
         assert!(matches!(
-            receiver.try_recv(),
+            harness.stream.try_recv(),
             Ok(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved { sid, call_id }))
                 if sid == "s1" && call_id == "call-1"
         ));
-        assert!(shared.approval.lock().unwrap().is_none());
+        assert!(
+            harness
+                .app
+                .world()
+                .entity(harness.entity)
+                .get::<super::super::AcpApprovalState>()
+                .unwrap()
+                .0
+                .is_none()
+        );
     }
 
     #[test]

@@ -23,19 +23,19 @@ pub struct AgentToolCallRequest {
 }
 
 #[derive(Message)]
-pub struct PageAgentDelta {
+pub struct UiAgentDelta {
     pub sid: String,
     pub text: String,
 }
 
 #[derive(Message)]
-pub struct PageAgentRunStatus {
+pub struct UiAgentRunStatus {
     pub sid: String,
     pub status: AgentRunStatus,
 }
 
 #[derive(Message)]
-pub struct PageAgentAwaitingApproval {
+pub struct UiAgentAwaitingApproval {
     pub sid: String,
     pub call_id: String,
     pub name: String,
@@ -43,25 +43,25 @@ pub struct PageAgentAwaitingApproval {
 }
 
 #[derive(Message)]
-pub struct PageAgentApprovalResolved {
+pub struct UiAgentApprovalResolved {
     pub sid: String,
     pub call_id: String,
 }
 
 #[derive(Message)]
-pub struct PageAgentSnapshot {
+pub struct UiAgentSnapshot {
     pub sid: String,
     pub messages: Vec<vmux_api::room::Message>,
 }
 
 #[derive(Message)]
-pub struct PageAgentInfo {
+pub struct UiAgentInfo {
     pub sid: String,
     pub name: String,
 }
 
 #[derive(Message)]
-pub struct PageAgentWorkspaceChanged {
+pub struct UiAgentWorkspaceChanged {
     pub sid: String,
     pub name: String,
     pub branch: String,
@@ -70,7 +70,7 @@ pub struct PageAgentWorkspaceChanged {
 }
 
 #[derive(Message)]
-pub struct PageAgentModelInfo {
+pub struct UiAgentModelInfo {
     pub sid: String,
     pub config_id: String,
     pub current_model_id: String,
@@ -78,7 +78,7 @@ pub struct PageAgentModelInfo {
 }
 
 #[derive(Message)]
-pub struct PageAgentModelSelectionResult {
+pub struct UiAgentModelSelectionResult {
     pub sid: String,
     pub request_id: u64,
     pub model_id: String,
@@ -86,7 +86,7 @@ pub struct PageAgentModelSelectionResult {
 }
 
 #[derive(Message)]
-pub struct PageAgentModeInfo {
+pub struct UiAgentModeInfo {
     pub sid: String,
     pub config_id: String,
     pub current_mode_id: String,
@@ -94,7 +94,7 @@ pub struct PageAgentModeInfo {
 }
 
 #[derive(Message)]
-pub struct PageAgentModeSelectionResult {
+pub struct UiAgentModeSelectionResult {
     pub sid: String,
     pub request_id: u64,
     pub mode_id: String,
@@ -102,13 +102,13 @@ pub struct PageAgentModeSelectionResult {
 }
 
 #[derive(Message)]
-pub struct PageAgentSessionCreated {
+pub struct UiAgentSessionCreated {
     pub sid: String,
     pub acp_session_id: String,
 }
 
 #[derive(Message)]
-pub struct PageAgentAcpTerminalCreated {
+pub struct UiAgentAcpTerminalCreated {
     pub sid: String,
     pub terminal_id: String,
     pub process_id: ProcessId,

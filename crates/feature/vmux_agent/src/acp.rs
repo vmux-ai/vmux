@@ -19,10 +19,10 @@ use vmux_core::agent::SessionId;
 use vmux_core::{CreatedAt, ProcessId};
 
 use vmux_api::protocol::{
-    AgentAttachment, AgentFileTouched, AgentRequest, AgentRequestId, ManagedMcpServer,
-    ManagedMcpTransport, ServiceMessage, SharedEvent,
+    AcpModeOption, AcpModelOption, AgentAttachment, AgentFileTouched, AgentRequest, AgentRequestId,
+    AgentRunStatus, ManagedMcpServer, ManagedMcpTransport, ServiceMessage, SharedEvent,
 };
-use vmux_api::room::{Message, RemoteSession};
+use vmux_api::room::{Message, RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_process::ProcessRuntime;
 
 enum AcpProjectionInput {
@@ -38,6 +38,192 @@ enum AcpProjectionInput {
         query: ApprovalDetailsQuery,
         response: oneshot::Sender<Option<(String, String)>>,
     },
+    AgentInfo(String),
+    ModelInfo(Vec<agent_client_protocol::schema::v1::SessionConfigOption>),
+    ModeInfo {
+        config_options: Vec<agent_client_protocol::schema::v1::SessionConfigOption>,
+        modes: Option<agent_client_protocol::schema::v1::SessionModeState>,
+    },
+    SelectedMode(String),
+    SelectedConfigMode {
+        config_id: String,
+        mode_id: String,
+        config_options: Vec<agent_client_protocol::schema::v1::SessionConfigOption>,
+    },
+    SelectedModel {
+        config_id: String,
+        model_id: String,
+        config_options: Vec<agent_client_protocol::schema::v1::SessionConfigOption>,
+    },
+    Status(AgentRunStatus),
+    ApprovalRequested(RemoteApproval),
+    ApprovalResolved(String),
+    SelectionSnapshot(oneshot::Sender<AcpSelectionSnapshot>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AcpModelInfo {
+    config_id: String,
+    current_model_id: String,
+    models: Vec<AcpModelOption>,
+}
+
+impl AcpModelInfo {
+    fn from_config(
+        config_options: &[agent_client_protocol::schema::v1::SessionConfigOption],
+    ) -> Option<Self> {
+        use agent_client_protocol::schema::v1::{
+            SessionConfigKind, SessionConfigOptionCategory, SessionConfigSelectOptions,
+        };
+
+        let config = config_options.iter().find(|config| {
+            matches!(
+                config.category.as_ref(),
+                Some(SessionConfigOptionCategory::Model)
+            ) || config.id.to_string().eq_ignore_ascii_case("model")
+                || config.name.trim().eq_ignore_ascii_case("model")
+        })?;
+        let SessionConfigKind::Select(select) = &config.kind else {
+            return None;
+        };
+        let options = match &select.options {
+            SessionConfigSelectOptions::Ungrouped(options) => options.iter().collect::<Vec<_>>(),
+            SessionConfigSelectOptions::Grouped(groups) => groups
+                .iter()
+                .flat_map(|group| group.options.iter())
+                .collect::<Vec<_>>(),
+            _ => return None,
+        };
+        Some(Self {
+            config_id: config.id.to_string(),
+            current_model_id: select.current_value.to_string(),
+            models: options
+                .into_iter()
+                .map(|option| AcpModelOption {
+                    id: option.value.to_string(),
+                    name: option.name.clone(),
+                    description: option.description.clone(),
+                })
+                .collect(),
+        })
+    }
+
+    fn message(&self, sid: &str) -> ServiceMessage {
+        ServiceMessage::Shared(SharedEvent::AcpModelInfo {
+            sid: sid.to_string(),
+            config_id: self.config_id.clone(),
+            current_model_id: self.current_model_id.clone(),
+            models: self.models.clone(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AcpModeInfo {
+    config_id: String,
+    current_mode_id: String,
+    modes: Vec<AcpModeOption>,
+}
+
+impl AcpModeInfo {
+    fn config(
+        config_options: &[agent_client_protocol::schema::v1::SessionConfigOption],
+    ) -> Option<&agent_client_protocol::schema::v1::SessionConfigOption> {
+        use agent_client_protocol::schema::v1::{SessionConfigKind, SessionConfigOptionCategory};
+
+        let selectable = |config: &&agent_client_protocol::schema::v1::SessionConfigOption| {
+            matches!(&config.kind, SessionConfigKind::Select(_))
+        };
+        config_options
+            .iter()
+            .filter(selectable)
+            .find(|config| {
+                matches!(
+                    config.category.as_ref(),
+                    Some(SessionConfigOptionCategory::Mode)
+                )
+            })
+            .or_else(|| {
+                config_options.iter().filter(selectable).find(|config| {
+                    config.id.to_string().eq_ignore_ascii_case("mode")
+                        || config.name.trim().eq_ignore_ascii_case("mode")
+                })
+            })
+            .or_else(|| {
+                config_options.iter().filter(selectable).find(|config| {
+                    config
+                        .id
+                        .to_string()
+                        .to_ascii_lowercase()
+                        .contains("permission")
+                        || config.name.to_ascii_lowercase().contains("permission")
+                })
+            })
+    }
+
+    fn from_config(
+        config_options: &[agent_client_protocol::schema::v1::SessionConfigOption],
+        legacy: Option<&agent_client_protocol::schema::v1::SessionModeState>,
+    ) -> Option<Self> {
+        use agent_client_protocol::schema::v1::{SessionConfigKind, SessionConfigSelectOptions};
+
+        if let Some(config) = Self::config(config_options) {
+            let SessionConfigKind::Select(select) = &config.kind else {
+                return None;
+            };
+            let options = match &select.options {
+                SessionConfigSelectOptions::Ungrouped(options) => {
+                    options.iter().collect::<Vec<_>>()
+                }
+                SessionConfigSelectOptions::Grouped(groups) => groups
+                    .iter()
+                    .flat_map(|group| group.options.iter())
+                    .collect::<Vec<_>>(),
+                _ => return None,
+            };
+            return Some(Self {
+                config_id: config.id.to_string(),
+                current_mode_id: select.current_value.to_string(),
+                modes: options
+                    .into_iter()
+                    .map(|option| AcpModeOption {
+                        id: option.value.to_string(),
+                        name: option.name.clone(),
+                        description: option.description.clone(),
+                    })
+                    .collect(),
+            });
+        }
+        let legacy = legacy?;
+        Some(Self {
+            config_id: String::new(),
+            current_mode_id: legacy.current_mode_id.to_string(),
+            modes: legacy
+                .available_modes
+                .iter()
+                .map(|mode| AcpModeOption {
+                    id: mode.id.to_string(),
+                    name: mode.name.clone(),
+                    description: mode.description.clone(),
+                })
+                .collect(),
+        })
+    }
+
+    fn message(&self, sid: &str) -> ServiceMessage {
+        ServiceMessage::AcpModeInfo {
+            sid: sid.to_string(),
+            config_id: self.config_id.clone(),
+            current_mode_id: self.current_mode_id.clone(),
+            modes: self.modes.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct AcpSelectionSnapshot {
+    model: Option<AcpModelInfo>,
+    mode: Option<AcpModeInfo>,
 }
 
 pub struct AcpSessionPlugin;
@@ -506,6 +692,100 @@ struct AcpSessionShared(Arc<AcpShared>);
 struct AcpProjectionInbox(mpsc::UnboundedReceiver<AcpProjectionInput>);
 
 #[derive(Component, Default)]
+struct AcpAgentName(Option<String>);
+
+#[derive(Component, Default)]
+struct AcpModelState(Option<AcpModelInfo>);
+
+impl AcpModelState {
+    fn replace(&mut self, next: Option<AcpModelInfo>, sid: &str) -> Option<ServiceMessage> {
+        if self.0 == next {
+            return None;
+        }
+        let removed = self.0.is_some() && next.is_none();
+        self.0 = next;
+        if let Some(info) = &self.0 {
+            return Some(info.message(sid));
+        }
+        removed.then(|| {
+            ServiceMessage::Shared(SharedEvent::AcpModelInfo {
+                sid: sid.to_string(),
+                config_id: String::new(),
+                current_model_id: String::new(),
+                models: Vec::new(),
+            })
+        })
+    }
+
+    fn select(
+        &mut self,
+        config_id: &str,
+        model_id: &str,
+        config_options: &[agent_client_protocol::schema::v1::SessionConfigOption],
+        sid: &str,
+    ) -> Option<ServiceMessage> {
+        let next = AcpModelInfo::from_config(config_options).or_else(|| self.0.clone())?;
+        let mut next = next;
+        if next.config_id == config_id && next.models.iter().any(|model| model.id == model_id) {
+            next.current_model_id = model_id.to_string();
+        }
+        self.replace(Some(next), sid)
+    }
+}
+
+#[derive(Component, Default)]
+struct AcpModeState(Option<AcpModeInfo>);
+
+impl AcpModeState {
+    fn replace(&mut self, next: Option<AcpModeInfo>, sid: &str) -> Option<ServiceMessage> {
+        if self.0 == next {
+            return None;
+        }
+        let removed = self.0.is_some() && next.is_none();
+        self.0 = next;
+        if let Some(info) = &self.0 {
+            return Some(info.message(sid));
+        }
+        removed.then(|| ServiceMessage::AcpModeInfo {
+            sid: sid.to_string(),
+            config_id: String::new(),
+            current_mode_id: String::new(),
+            modes: Vec::new(),
+        })
+    }
+
+    fn select(&mut self, mode_id: &str, sid: &str) -> Option<ServiceMessage> {
+        let state = self.0.as_mut()?;
+        if !state.modes.iter().any(|mode| mode.id == mode_id) || state.current_mode_id == mode_id {
+            return None;
+        }
+        state.current_mode_id = mode_id.to_string();
+        Some(state.message(sid))
+    }
+
+    fn select_config(
+        &mut self,
+        config_id: &str,
+        mode_id: &str,
+        config_options: &[agent_client_protocol::schema::v1::SessionConfigOption],
+        sid: &str,
+    ) -> Option<ServiceMessage> {
+        let next = AcpModeInfo::from_config(config_options, None).or_else(|| self.0.clone())?;
+        let mut next = next;
+        if next.config_id == config_id && next.modes.iter().any(|mode| mode.id == mode_id) {
+            next.current_mode_id = mode_id.to_string();
+        }
+        self.replace(Some(next), sid)
+    }
+}
+
+#[derive(Component)]
+struct AcpRunState(AgentRunStatus);
+
+#[derive(Component, Default)]
+struct AcpApprovalState(Option<RemoteApproval>);
+
+#[derive(Component, Default)]
 struct AcpHistoryReplay {
     active: bool,
     updates: usize,
@@ -602,6 +882,11 @@ fn spawn_acp_sessions(
                 AcpSessionShared(shared),
                 AcpProjectionInbox(projection_rx),
                 AcpProjector::default(),
+                AcpAgentName::default(),
+                AcpModelState::default(),
+                AcpModeState::default(),
+                AcpRunState(AgentRunStatus::Idle),
+                AcpApprovalState::default(),
                 AcpHistoryReplay::default(),
                 AcpSessionAgent(request.agent_id.clone()),
                 CreatedAt::now(),
@@ -623,9 +908,26 @@ fn project_acp_sessions(
         &mut AcpProjectionInbox,
         &mut AcpProjector,
         &mut AcpHistoryReplay,
+        &mut AcpAgentName,
+        &mut AcpModelState,
+        &mut AcpModeState,
+        &mut AcpRunState,
+        &mut AcpApprovalState,
     )>,
 ) {
-    for (sid, shared, mut inbox, mut projector, mut replay) in &mut sessions {
+    for (
+        sid,
+        shared,
+        mut inbox,
+        mut projector,
+        mut replay,
+        mut agent_name,
+        mut model,
+        mut mode,
+        mut run_state,
+        mut approval,
+    ) in &mut sessions
+    {
         while let Ok(input) = inbox.0.try_recv() {
             match input {
                 AcpProjectionInput::BeginHistoryReplay => {
@@ -634,6 +936,40 @@ fn project_acp_sessions(
                     replay.updates = 0;
                 }
                 AcpProjectionInput::Update(update) => {
+                    match &update {
+                        agent_client_protocol::schema::v1::SessionUpdate::ConfigOptionUpdate(
+                            config,
+                        ) => {
+                            if let Some(message) = model
+                                .replace(AcpModelInfo::from_config(&config.config_options), &sid.0)
+                            {
+                                shared.0.emit(message);
+                            }
+                            let has_mode = AcpModeInfo::config(&config.config_options).is_some();
+                            let had_mode = mode
+                                .0
+                                .as_ref()
+                                .is_some_and(|state| !state.config_id.is_empty());
+                            if (has_mode || had_mode)
+                                && let Some(message) = mode.replace(
+                                    AcpModeInfo::from_config(&config.config_options, None),
+                                    &sid.0,
+                                )
+                            {
+                                shared.0.emit(message);
+                            }
+                        }
+                        agent_client_protocol::schema::v1::SessionUpdate::CurrentModeUpdate(
+                            current,
+                        ) => {
+                            if let Some(message) =
+                                mode.select(&current.current_mode_id.to_string(), &sid.0)
+                            {
+                                shared.0.emit(message);
+                            }
+                        }
+                        _ => {}
+                    }
                     let intents = projector.apply(update);
                     shared
                         .0
@@ -729,24 +1065,122 @@ fn project_acp_sessions(
                 AcpProjectionInput::ApprovalDetails { query, response } => {
                     let _ = response.send(projector.approval_details(&query));
                 }
+                AcpProjectionInput::AgentInfo(name) => {
+                    agent_name.0 = Some(name.clone());
+                    shared
+                        .0
+                        .emit(ServiceMessage::Shared(SharedEvent::AcpAgentInfo {
+                            sid: sid.0.clone(),
+                            name,
+                        }));
+                }
+                AcpProjectionInput::ModelInfo(config_options) => {
+                    if let Some(message) =
+                        model.replace(AcpModelInfo::from_config(&config_options), &sid.0)
+                    {
+                        shared.0.emit(message);
+                    }
+                }
+                AcpProjectionInput::ModeInfo {
+                    config_options,
+                    modes,
+                } => {
+                    if let Some(message) = mode.replace(
+                        AcpModeInfo::from_config(&config_options, modes.as_ref()),
+                        &sid.0,
+                    ) {
+                        shared.0.emit(message);
+                    }
+                }
+                AcpProjectionInput::SelectedMode(mode_id) => {
+                    if let Some(message) = mode.select(&mode_id, &sid.0) {
+                        shared.0.emit(message);
+                    }
+                }
+                AcpProjectionInput::SelectedConfigMode {
+                    config_id,
+                    mode_id,
+                    config_options,
+                } => {
+                    if let Some(message) =
+                        mode.select_config(&config_id, &mode_id, &config_options, &sid.0)
+                    {
+                        shared.0.emit(message);
+                    }
+                }
+                AcpProjectionInput::SelectedModel {
+                    config_id,
+                    model_id,
+                    config_options,
+                } => {
+                    if let Some(message) =
+                        model.select(&config_id, &model_id, &config_options, &sid.0)
+                    {
+                        shared.0.emit(message);
+                    }
+                }
+                AcpProjectionInput::Status(status) => {
+                    if let AgentRunStatus::Errored(message) = &status {
+                        tracing::warn!(target: "acp", sid = %sid.0, "{message}");
+                    }
+                    if !matches!(status, AgentRunStatus::Streaming) {
+                        approval.0 = None;
+                    }
+                    run_state.0 = status.clone();
+                    shared
+                        .0
+                        .emit(ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged {
+                            sid: sid.0.clone(),
+                            status,
+                        }));
+                }
+                AcpProjectionInput::ApprovalRequested(next) => {
+                    approval.0 = Some(next.clone());
+                    shared
+                        .0
+                        .emit(ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
+                            sid: sid.0.clone(),
+                            call_id: next.call_id,
+                            name: next.name,
+                            args: next.args,
+                        }));
+                }
+                AcpProjectionInput::ApprovalResolved(call_id) => {
+                    if approval
+                        .0
+                        .as_ref()
+                        .is_some_and(|pending| pending.call_id == call_id)
+                    {
+                        approval.0 = None;
+                        shared
+                            .0
+                            .emit(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved {
+                                sid: sid.0.clone(),
+                                call_id,
+                            }));
+                    }
+                }
+                AcpProjectionInput::SelectionSnapshot(response) => {
+                    let _ = response.send(AcpSelectionSnapshot {
+                        model: model.0.clone(),
+                        mode: mode.0.clone(),
+                    });
+                }
             }
         }
     }
 }
 
 fn route_acp_session_inputs(
-    sessions: Query<(&SessionId, &AcpSessionInput, &AcpSessionShared)>,
+    sessions: Query<(&SessionId, &AcpSessionInput)>,
     mut requests: Query<(Entity, &mut AcpSessionInputRequest)>,
     mut commands: Commands,
 ) {
     for (request_entity, mut request) in &mut requests {
         let mut accepted = false;
-        for (sid, input, shared) in &sessions {
+        for (sid, input) in &sessions {
             if sid.0 != request.sid {
                 continue;
-            }
-            if let Some(AcpInput::Approve { call_id, .. }) = &request.input {
-                shared.0.resolve_approval(call_id);
             }
             if let Some(session_input) = request.input.take() {
                 accepted = input.0.send(session_input).is_ok();
@@ -781,7 +1215,14 @@ fn subscribe_acp_sessions(
 }
 
 fn read_acp_session_state(
-    sessions: Query<(&SessionId, &AcpSessionShared, &AcpProjector)>,
+    sessions: Query<(
+        &SessionId,
+        &AcpSessionShared,
+        &AcpProjector,
+        &AcpAgentName,
+        &AcpModelState,
+        &AcpModeState,
+    )>,
     mut snapshots: Query<(Entity, &mut SnapshotAcpSession)>,
     mut agent_infos: Query<(Entity, &mut AcpSessionAgentInfo)>,
     mut model_infos: Query<(Entity, &mut AcpSessionModelInfo)>,
@@ -791,7 +1232,7 @@ fn read_acp_session_state(
 ) {
     for (request_entity, mut request) in &mut snapshots {
         let mut result = None;
-        for (sid, shared, projector) in &sessions {
+        for (sid, shared, projector, _, _, _) in &sessions {
             if sid.0 == request.sid {
                 result = Some(shared.0.snapshot_message(projector.messages()));
                 break;
@@ -804,9 +1245,14 @@ fn read_acp_session_state(
     }
     for (request_entity, mut request) in &mut agent_infos {
         let mut result = None;
-        for (sid, shared, _) in &sessions {
+        for (sid, _, _, agent_name, _, _) in &sessions {
             if sid.0 == request.sid {
-                result = shared.0.agent_info_message();
+                result = agent_name.0.as_ref().map(|name| {
+                    ServiceMessage::Shared(SharedEvent::AcpAgentInfo {
+                        sid: sid.0.clone(),
+                        name: name.clone(),
+                    })
+                });
                 break;
             }
         }
@@ -817,9 +1263,9 @@ fn read_acp_session_state(
     }
     for (request_entity, mut request) in &mut model_infos {
         let mut result = None;
-        for (sid, shared, _) in &sessions {
+        for (sid, _, _, _, model, _) in &sessions {
             if sid.0 == request.sid {
-                result = shared.0.model_info_message();
+                result = model.0.as_ref().map(|model| model.message(&sid.0));
                 break;
             }
         }
@@ -830,9 +1276,9 @@ fn read_acp_session_state(
     }
     for (request_entity, mut request) in &mut mode_infos {
         let mut result = None;
-        for (sid, shared, _) in &sessions {
+        for (sid, _, _, _, _, mode) in &sessions {
             if sid.0 == request.sid {
-                result = shared.0.mode_info_message();
+                result = mode.0.as_ref().map(|mode| mode.message(&sid.0));
                 break;
             }
         }
@@ -843,7 +1289,7 @@ fn read_acp_session_state(
     }
     for (request_entity, mut request) in &mut messages {
         let mut result = None;
-        for (sid, _, projector) in &sessions {
+        for (sid, _, projector, _, _, _) in &sessions {
             if sid.0 == request.sid {
                 result = Some(projector.messages().to_vec());
                 break;
@@ -863,6 +1309,10 @@ fn list_acp_sessions(
         &AcpSessionAgent,
         &CreatedAt,
         &AcpProjector,
+        &AcpAgentName,
+        &AcpModelState,
+        &AcpRunState,
+        &AcpApprovalState,
     )>,
     mut lists: Query<(Entity, &mut ListAcpSessions)>,
     mut lookups: Query<(Entity, &mut FindAcpSession)>,
@@ -870,12 +1320,25 @@ fn list_acp_sessions(
 ) {
     for (request_entity, mut request) in &mut lists {
         let mut result = Vec::new();
-        for (_, shared, agent, created_at, projector) in &sessions {
-            result.push(shared.0.remote_session(
-                &agent.0,
-                created_at.0.max(0) as u64,
-                projector.messages(),
-            ));
+        for (sid, shared, agent, created_at, projector, name, model, status, approval) in &sessions
+        {
+            let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
+            result.push(RemoteSession {
+                sid: sid.0.clone(),
+                room_id: vmux_api::room::RoomId::for_session(&sid.0),
+                title: Message::conversation_title(projector.messages(), &name),
+                name,
+                runtime: "acp".to_string(),
+                model: model
+                    .0
+                    .as_ref()
+                    .map(|state| state.current_model_id.clone())
+                    .filter(|model| !model.is_empty()),
+                cwd: shared.0.cwd().to_string_lossy().into_owned(),
+                status: RemoteStatus::from(&status.0),
+                approval: approval.0.clone(),
+                created_at_ms: created_at.0.max(0) as u64,
+            });
         }
         if let Some(response) = request.response.take() {
             let _ = response.send(result);
@@ -884,13 +1347,26 @@ fn list_acp_sessions(
     }
     for (request_entity, mut request) in &mut lookups {
         let mut result = None;
-        for (sid, shared, agent, created_at, projector) in &sessions {
+        for (sid, shared, agent, created_at, projector, name, model, status, approval) in &sessions
+        {
             if sid.0 == request.sid {
-                result = Some(shared.0.remote_session(
-                    &agent.0,
-                    created_at.0.max(0) as u64,
-                    projector.messages(),
-                ));
+                let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
+                result = Some(RemoteSession {
+                    sid: sid.0.clone(),
+                    room_id: vmux_api::room::RoomId::for_session(&sid.0),
+                    title: Message::conversation_title(projector.messages(), &name),
+                    name,
+                    runtime: "acp".to_string(),
+                    model: model
+                        .0
+                        .as_ref()
+                        .map(|state| state.current_model_id.clone())
+                        .filter(|model| !model.is_empty()),
+                    cwd: shared.0.cwd().to_string_lossy().into_owned(),
+                    status: RemoteStatus::from(&status.0),
+                    approval: approval.0.clone(),
+                    created_at_ms: created_at.0.max(0) as u64,
+                });
                 break;
             }
         }

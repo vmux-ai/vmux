@@ -1,9 +1,9 @@
 use crate::event::{
     AgentQueryRequest, AgentRequestInput, AgentToolCallRequest, CommandOrigin,
-    PageAgentAcpTerminalCreated, PageAgentApprovalResolved, PageAgentAwaitingApproval,
-    PageAgentDelta, PageAgentInfo, PageAgentModeInfo, PageAgentModeSelectionResult,
-    PageAgentModelInfo, PageAgentModelSelectionResult, PageAgentRunStatus, PageAgentSessionCreated,
-    PageAgentSnapshot, PageAgentWorkspaceChanged,
+    UiAgentAcpTerminalCreated, UiAgentApprovalResolved, UiAgentAwaitingApproval, UiAgentDelta,
+    UiAgentInfo, UiAgentModeInfo, UiAgentModeSelectionResult, UiAgentModelInfo,
+    UiAgentModelSelectionResult, UiAgentRunStatus, UiAgentSessionCreated, UiAgentSnapshot,
+    UiAgentWorkspaceChanged,
 };
 use bevy::prelude::*;
 use vmux_api::protocol::{ClientMessage, ServiceMessage, SharedEvent};
@@ -21,19 +21,19 @@ impl Plugin for AgentIngressPlugin {
             .add_message::<AgentRequestInput>()
             .add_message::<AgentQueryRequest>()
             .add_message::<AgentToolCallRequest>()
-            .add_message::<PageAgentDelta>()
-            .add_message::<PageAgentRunStatus>()
-            .add_message::<PageAgentAwaitingApproval>()
-            .add_message::<PageAgentApprovalResolved>()
-            .add_message::<PageAgentSnapshot>()
-            .add_message::<PageAgentInfo>()
-            .add_message::<PageAgentWorkspaceChanged>()
-            .add_message::<PageAgentModelInfo>()
-            .add_message::<PageAgentModelSelectionResult>()
-            .add_message::<PageAgentModeInfo>()
-            .add_message::<PageAgentModeSelectionResult>()
-            .add_message::<PageAgentSessionCreated>()
-            .add_message::<PageAgentAcpTerminalCreated>()
+            .add_message::<UiAgentDelta>()
+            .add_message::<UiAgentRunStatus>()
+            .add_message::<UiAgentAwaitingApproval>()
+            .add_message::<UiAgentApprovalResolved>()
+            .add_message::<UiAgentSnapshot>()
+            .add_message::<UiAgentInfo>()
+            .add_message::<UiAgentWorkspaceChanged>()
+            .add_message::<UiAgentModelInfo>()
+            .add_message::<UiAgentModelSelectionResult>()
+            .add_message::<UiAgentModeInfo>()
+            .add_message::<UiAgentModeSelectionResult>()
+            .add_message::<UiAgentSessionCreated>()
+            .add_message::<UiAgentAcpTerminalCreated>()
             .add_systems(
                 Update,
                 (
@@ -72,19 +72,19 @@ struct AgentIngressWriters<'w> {
     requests: MessageWriter<'w, AgentRequestInput>,
     queries: MessageWriter<'w, AgentQueryRequest>,
     tool_calls: MessageWriter<'w, AgentToolCallRequest>,
-    deltas: MessageWriter<'w, PageAgentDelta>,
-    run_statuses: MessageWriter<'w, PageAgentRunStatus>,
-    approvals: MessageWriter<'w, PageAgentAwaitingApproval>,
-    approval_resolutions: MessageWriter<'w, PageAgentApprovalResolved>,
-    snapshots: MessageWriter<'w, PageAgentSnapshot>,
-    agent_info: MessageWriter<'w, PageAgentInfo>,
-    workspace_changes: MessageWriter<'w, PageAgentWorkspaceChanged>,
-    model_info: MessageWriter<'w, PageAgentModelInfo>,
-    model_selection_results: MessageWriter<'w, PageAgentModelSelectionResult>,
-    mode_info: MessageWriter<'w, PageAgentModeInfo>,
-    mode_selection_results: MessageWriter<'w, PageAgentModeSelectionResult>,
-    session_created: MessageWriter<'w, PageAgentSessionCreated>,
-    terminal_created: MessageWriter<'w, PageAgentAcpTerminalCreated>,
+    deltas: MessageWriter<'w, UiAgentDelta>,
+    run_statuses: MessageWriter<'w, UiAgentRunStatus>,
+    approvals: MessageWriter<'w, UiAgentAwaitingApproval>,
+    approval_resolutions: MessageWriter<'w, UiAgentApprovalResolved>,
+    snapshots: MessageWriter<'w, UiAgentSnapshot>,
+    agent_info: MessageWriter<'w, UiAgentInfo>,
+    workspace_changes: MessageWriter<'w, UiAgentWorkspaceChanged>,
+    model_info: MessageWriter<'w, UiAgentModelInfo>,
+    model_selection_results: MessageWriter<'w, UiAgentModelSelectionResult>,
+    mode_info: MessageWriter<'w, UiAgentModeInfo>,
+    mode_selection_results: MessageWriter<'w, UiAgentModeSelectionResult>,
+    session_created: MessageWriter<'w, UiAgentSessionCreated>,
+    terminal_created: MessageWriter<'w, UiAgentAcpTerminalCreated>,
 }
 
 fn route_service_messages(
@@ -127,13 +127,13 @@ fn route_service_messages(
                 });
             }
             ServiceMessage::Shared(SharedEvent::AgentDelta { sid, text }) => {
-                writers.deltas.write(PageAgentDelta {
+                writers.deltas.write(UiAgentDelta {
                     sid: sid.clone(),
                     text: text.clone(),
                 });
             }
             ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged { sid, status }) => {
-                writers.run_statuses.write(PageAgentRunStatus {
+                writers.run_statuses.write(UiAgentRunStatus {
                     sid: sid.clone(),
                     status: status.clone(),
                 });
@@ -146,7 +146,7 @@ fn route_service_messages(
             }) => {
                 let args = serde_json::Value::try_from(args)
                     .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
-                writers.approvals.write(PageAgentAwaitingApproval {
+                writers.approvals.write(UiAgentAwaitingApproval {
                     sid: sid.clone(),
                     call_id: call_id.clone(),
                     name: name.clone(),
@@ -154,21 +154,19 @@ fn route_service_messages(
                 });
             }
             ServiceMessage::Shared(SharedEvent::AgentApprovalResolved { sid, call_id }) => {
-                writers
-                    .approval_resolutions
-                    .write(PageAgentApprovalResolved {
-                        sid: sid.clone(),
-                        call_id: call_id.clone(),
-                    });
+                writers.approval_resolutions.write(UiAgentApprovalResolved {
+                    sid: sid.clone(),
+                    call_id: call_id.clone(),
+                });
             }
             ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { sid, messages }) => {
-                writers.snapshots.write(PageAgentSnapshot {
+                writers.snapshots.write(UiAgentSnapshot {
                     sid: sid.clone(),
                     messages: messages.clone(),
                 });
             }
             ServiceMessage::Shared(SharedEvent::AcpAgentInfo { sid, name }) => {
-                writers.agent_info.write(PageAgentInfo {
+                writers.agent_info.write(UiAgentInfo {
                     sid: sid.clone(),
                     name: name.clone(),
                 });
@@ -180,7 +178,7 @@ fn route_service_messages(
                 cwd,
                 workspace_cwd,
             }) => {
-                writers.workspace_changes.write(PageAgentWorkspaceChanged {
+                writers.workspace_changes.write(UiAgentWorkspaceChanged {
                     sid: sid.clone(),
                     name: name.clone(),
                     branch: branch.clone(),
@@ -194,7 +192,7 @@ fn route_service_messages(
                 current_model_id,
                 models,
             }) => {
-                writers.model_info.write(PageAgentModelInfo {
+                writers.model_info.write(UiAgentModelInfo {
                     sid: sid.clone(),
                     config_id: config_id.clone(),
                     current_model_id: current_model_id.clone(),
@@ -209,7 +207,7 @@ fn route_service_messages(
             } => {
                 writers
                     .model_selection_results
-                    .write(PageAgentModelSelectionResult {
+                    .write(UiAgentModelSelectionResult {
                         sid: sid.clone(),
                         request_id: *request_id,
                         model_id: model_id.clone(),
@@ -222,7 +220,7 @@ fn route_service_messages(
                 current_mode_id,
                 modes,
             } => {
-                writers.mode_info.write(PageAgentModeInfo {
+                writers.mode_info.write(UiAgentModeInfo {
                     sid: sid.clone(),
                     config_id: config_id.clone(),
                     current_mode_id: current_mode_id.clone(),
@@ -237,7 +235,7 @@ fn route_service_messages(
             } => {
                 writers
                     .mode_selection_results
-                    .write(PageAgentModeSelectionResult {
+                    .write(UiAgentModeSelectionResult {
                         sid: sid.clone(),
                         request_id: *request_id,
                         mode_id: mode_id.clone(),
@@ -248,7 +246,7 @@ fn route_service_messages(
                 sid,
                 acp_session_id,
             } => {
-                writers.session_created.write(PageAgentSessionCreated {
+                writers.session_created.write(UiAgentSessionCreated {
                     sid: sid.clone(),
                     acp_session_id: acp_session_id.clone(),
                 });
@@ -261,7 +259,7 @@ fn route_service_messages(
                 args,
                 cwd,
             } => {
-                writers.terminal_created.write(PageAgentAcpTerminalCreated {
+                writers.terminal_created.write(UiAgentAcpTerminalCreated {
                     sid: sid.clone(),
                     terminal_id: terminal_id.clone(),
                     process_id: *process_id,
@@ -316,7 +314,7 @@ mod tests {
             .collect::<Vec<_>>();
         let deltas = app
             .world_mut()
-            .resource_mut::<Messages<PageAgentDelta>>()
+            .resource_mut::<Messages<UiAgentDelta>>()
             .drain()
             .collect::<Vec<_>>();
         let queries = app

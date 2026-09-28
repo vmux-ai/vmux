@@ -14,7 +14,6 @@ mod chat_projection;
 mod cli;
 pub mod command;
 pub mod command_bar;
-mod composer;
 pub mod echo;
 pub mod echo_plugin;
 pub mod event;

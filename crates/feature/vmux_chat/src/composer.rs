@@ -7,9 +7,11 @@ use bevy_app::{App, Plugin};
 #[cfg(host)]
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use crate::event::ChatComposerEffect;
 #[cfg(host)]
 use crate::event::ChatDraftChanged;
+use crate::event::{
+    ChatComposerEffect, ChatPickFiles, ChatResumeQueryRequest, ChatSlashCommandRequest,
+};
 #[cfg(host)]
 use crate::host::ChatView;
 use crate::selector::{SelectorMode, selector_mode};
@@ -129,6 +131,12 @@ pub struct ComposerQueriesChanged {
     changes: ComposerQueryChanges,
 }
 
+#[derive(EntityEvent)]
+pub struct ChatCliRequest {
+    #[event_target]
+    webview: Entity,
+}
+
 impl ComposerQueriesChanged {
     pub fn new(target: Entity, changes: ComposerQueryChanges) -> Option<Self> {
         changes.changed().then_some(Self { target, changes })
@@ -153,8 +161,9 @@ pub struct ChatComposerPlugin;
 #[cfg(host)]
 impl Plugin for ChatComposerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(ChatDraftChanged,)>::default())
+        app.add_plugins(UiEventPlugin::<(ChatDraftChanged, ChatSlashCommandRequest)>::default())
             .add_observer(on_draft_changed)
+            .add_observer(on_slash_command)
             .add_observer(on_queries_changed);
     }
 }
@@ -176,14 +185,57 @@ fn on_draft_changed(
 }
 
 #[cfg(host)]
-fn on_queries_changed(trigger: On<ComposerQueriesChanged>, mut commands: Commands) {
-    let Some(query) = trigger.event().media() else {
+fn on_slash_command(
+    trigger: On<UiInput<ChatSlashCommandRequest>>,
+    mut composers: Query<&mut ComposerState, With<ChatView>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let command = trigger.event().payload.command;
+    let Ok(mut composer) = composers.get_mut(webview) else {
         return;
     };
-    commands.trigger(crate::media::ChatMediaQuery::new(
-        trigger.event_target(),
-        query.to_string(),
-    ));
+    let (effect, changes) = composer.slash_effect(command);
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
+    );
+    if let Some(changed) = ComposerQueriesChanged::new(webview, changes) {
+        commands.trigger(changed);
+    }
+    match command {
+        SlashCommand::Upload => commands.trigger(UiInput {
+            webview,
+            payload: ChatPickFiles,
+        }),
+        SlashCommand::Cli => commands.trigger(ChatCliRequest { webview }),
+        SlashCommand::Resume | SlashCommand::Mcp | SlashCommand::Model => {}
+    }
+}
+
+#[cfg(host)]
+fn on_queries_changed(trigger: On<ComposerQueriesChanged>, mut commands: Commands) {
+    let webview = trigger.event_target();
+    if let Some(query) = trigger.event().media() {
+        commands.trigger(crate::media::ChatMediaQuery::new(
+            webview,
+            query.to_string(),
+        ));
+    }
+    if let Some(query) = trigger.event().resume() {
+        commands.trigger(UiInput {
+            webview,
+            payload: ChatResumeQueryRequest {
+                active: query.active,
+                query: query.query.clone(),
+            },
+        });
+    }
+    if trigger.event().opens_mcp() {
+        commands.trigger(UiInput {
+            webview,
+            payload: vmux_api::mcp::McpServersRequest,
+        });
+    }
 }
 
 #[cfg(test)]
