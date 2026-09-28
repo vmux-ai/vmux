@@ -49,6 +49,7 @@ pub struct AgentSessionPlugin;
 
 impl Plugin for AgentSessionPlugin {
     fn build(&self, app: &mut App) {
+        app.add_systems(PreStartup, spawn_agent_store_validator);
         app.add_systems(
             Startup,
             (spawn_agent_strategies, register_agent_session_route).chain(),
@@ -111,6 +112,16 @@ impl Plugin for AgentSessionPlugin {
         .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>()
         .add_systems(Update, super::run_terminal::remember_configured_shell);
     }
+}
+
+fn spawn_agent_store_validator(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Agent workspace-store validator"),
+        vmux_core::host::persistence::WorkspaceStoreValidator {
+            name: "agent URL",
+            rejects: crate::AgentUrl::rejects_persisted_store,
+        },
+    ));
 }
 
 fn spawn_agent_strategies(mut commands: Commands) {

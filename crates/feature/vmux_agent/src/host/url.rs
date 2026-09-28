@@ -128,6 +128,29 @@ impl AgentUrl {
             }
         }
     }
+
+    pub(crate) fn rejects_persisted_store(body: &str) -> bool {
+        for prefix in ["vmux://sessions/", "vmux://agent/"] {
+            if body.split(prefix).skip(1).any(|tail| {
+                let suffix = tail.split('"').next().unwrap_or_default();
+                let url = format!("{prefix}{suffix}");
+                let normalized = url.trim_end_matches('/');
+                if matches!(normalized, "vmux://sessions" | "vmux://agent") {
+                    return false;
+                }
+                if AgentKind::all()
+                    .into_iter()
+                    .any(|kind| normalized == kind.cli_url_prefix().trim_end_matches('/'))
+                {
+                    return false;
+                }
+                AgentUrl::parse(normalized).is_none()
+            }) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 #[cfg(test)]
@@ -220,6 +243,25 @@ mod tests {
     fn too_many_segments_rejected() {
         assert_eq!(AgentUrl::parse("vmux://sessions/vibe/cli/abc/extra"), None);
         assert_eq!(AgentUrl::parse("vmux://sessions/o/m/sid/extra"), None);
+    }
+
+    #[test]
+    fn malformed_persisted_agent_urls_are_rejected() {
+        assert!(!AgentUrl::rejects_persisted_store(
+            r#"url: "vmux://sessions/echo/echo/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
+        ));
+        assert!(!AgentUrl::rejects_persisted_store(
+            r#"url: "vmux://agent/claude/session-id""#
+        ));
+        assert!(!AgentUrl::rejects_persisted_store(
+            r#"url: "vmux://sessions/codex/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
+        ));
+        assert!(!AgentUrl::rejects_persisted_store(
+            r#"url: "vmux://sessions/vibe/""#
+        ));
+        assert!(AgentUrl::rejects_persisted_store(
+            r#"url: "vmux://sessions/a/b/c/d/e""#
+        ));
     }
 
     #[test]

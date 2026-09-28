@@ -1,12 +1,13 @@
-use std::path::PathBuf;
-
 use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::page::PageReady;
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_layout::native_open::HostedPagePlugin;
+use vmux_layout::space::Space;
 use vmux_layout::stack::Stack;
-use vmux_layout::{LayoutUiStateUpdates, TabLayoutSpawnContent, TabLayoutSpawnRequest};
+use vmux_layout::{
+    LayoutUiStateUpdates, SpaceFilePresent, TabLayoutSpawnContent, TabLayoutSpawnRequest,
+};
 
 use super::SpacesUiStateUpdates;
 use super::agent::SpaceAgentPlugin;
@@ -32,7 +33,6 @@ impl Plugin for SpacePlugin {
             .add_plugins(super::SpaceToolPlugin)
             .add_plugins(vmux_layout::LayoutContractPlugin)
             .add_plugins(vmux_core::host::UiStatePlugin::<SpacesUiState>::default())
-            .add_message::<SaveSpaceRequest>()
             .add_message::<SpaceAttachRequest>()
             .add_message::<SpaceCreateRequest>()
             .add_message::<SpaceDeleteRequest>()
@@ -63,7 +63,12 @@ impl Plugin for SpacePlugin {
             .add_systems(Update, sync_space_name_to_id)
             .add_systems(
                 Startup,
-                update_effective_startup
+                (
+                    ensure_bootstrap_space,
+                    ApplyDeferred,
+                    update_effective_startup,
+                )
+                    .chain()
                     .after(vmux_setting::SettingsLoadSet)
                     .after(vmux_layout::LayoutStartupSet::Persistence)
                     .before(vmux_layout::LayoutStartupSet::DefaultTab),
@@ -105,9 +110,17 @@ impl Plugin for SpacePlugin {
     }
 }
 
-#[derive(Message, Clone)]
-pub struct SaveSpaceRequest {
-    pub path: PathBuf,
+fn ensure_bootstrap_space(
+    spaces: Query<(), With<Space>>,
+    space_file: Query<&SpaceFilePresent>,
+    mut commands: Commands,
+) {
+    if !spaces.is_empty() || space_file.single().is_ok_and(|space_file| space_file.0) {
+        return;
+    }
+    commands.spawn(crate::spaces::space_profile_bundle(
+        &crate::model::bootstrap_space_record(),
+    ));
 }
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]

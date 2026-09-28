@@ -10,7 +10,7 @@ mod tool;
 
 type SpacesUiStateUpdates = vmux_core::host::UiState<vmux_api::space::SpacesUiState>;
 
-pub use plugin::{SaveSpaceRequest, SpacePlugin};
+pub use plugin::SpacePlugin;
 pub use project::{ExpandedProjectDirs, SpaceProjects};
 pub use spaces::Spaces;
 pub use tool::SpaceToolPlugin;

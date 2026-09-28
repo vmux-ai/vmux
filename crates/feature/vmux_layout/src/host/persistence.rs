@@ -2,7 +2,7 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
-use vmux_core::host::persistence::PageRestore;
+use vmux_core::host::persistence::{PageRestore, WorkspaceStoreValidator};
 use vmux_core::{CreatedAt, Order, PageMetadata, PageOpenId, PageOpenTask};
 use vmux_flex::prelude::*;
 
@@ -22,12 +22,49 @@ pub(crate) struct LayoutPersistencePlugin;
 
 impl Plugin for LayoutPersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, restore_layout_views.in_set(LayoutStartupSet::Post))
+        app.add_systems(PreStartup, spawn_layout_store_validator)
+            .add_systems(Startup, restore_layout_views.in_set(LayoutStartupSet::Post))
             .add_systems(
                 Update,
                 restore_layout_views.in_set(LayoutPersistenceSet::Restore),
             );
     }
+}
+
+fn spawn_layout_store_validator(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Layout workspace-store validator"),
+        WorkspaceStoreValidator {
+            name: "empty page metadata",
+            rejects: persisted_store_has_only_empty_page_urls,
+        },
+    ));
+}
+
+fn persisted_store_has_only_empty_page_urls(body: &str) -> bool {
+    let mut has_url = false;
+    let mut has_nonempty_url = false;
+    let mut in_page_metadata = false;
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("\"vmux_header::system::PageMetadata\":") {
+            in_page_metadata = true;
+            continue;
+        }
+        if !in_page_metadata {
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("url: \"")
+            && let Some((url, _)) = rest.split_once('"')
+        {
+            has_url = true;
+            has_nonempty_url |= !url.trim().is_empty();
+        }
+        if trimmed == ")," {
+            in_page_metadata = false;
+        }
+    }
+    has_url && !has_nonempty_url
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -209,5 +246,15 @@ mod tests {
         tabs.sort_by_key(|(_, order, created)| (order.unwrap_or(u32::MAX), created.unwrap_or(0)));
 
         assert_eq!(tabs.map(|(entity, _, _)| entity), [ordered, legacy]);
+    }
+
+    #[test]
+    fn empty_page_metadata_rejects_a_persisted_store() {
+        assert!(persisted_store_has_only_empty_page_urls(
+            "\"vmux_header::system::PageMetadata\": (\nurl: \"\",\n),"
+        ));
+        assert!(!persisted_store_has_only_empty_page_urls(
+            "\"vmux_header::system::PageMetadata\": (\nurl: \"vmux://start/\",\n),"
+        ));
     }
 }

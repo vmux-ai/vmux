@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::reflect::{FromType, GetTypeRegistration, TypePath, TypeRegistry};
 use bevy_world_serialization::WorldFilter;
+use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct WorkspacePersisted;
@@ -16,6 +17,31 @@ pub struct PersistenceDirty;
 
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct PageRestore;
+
+#[derive(Message, Clone)]
+pub struct WorkspaceSaveRequest {
+    pub path: PathBuf,
+}
+
+#[derive(Component)]
+pub struct WorkspaceStoreValidator {
+    pub name: &'static str,
+    pub rejects: fn(&str) -> bool,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct WorkspaceStoreValidators<'w, 's> {
+    validators: Query<'w, 's, &'static WorkspaceStoreValidator>,
+}
+
+impl WorkspaceStoreValidators<'_, '_> {
+    pub fn rejected_by(&self, body: &str) -> Option<&'static str> {
+        self.validators
+            .iter()
+            .find(|validator| (validator.rejects)(body))
+            .map(|validator| validator.name)
+    }
+}
 
 pub trait PersistenceAppExt {
     fn register_persisted<T>(&mut self) -> &mut Self

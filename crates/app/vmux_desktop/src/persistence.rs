@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 
 #[cfg(test)]
 use vmux_core::host::persistence::PersistenceAppExt;
-use vmux_core::host::persistence::{PersistenceDirty, persisted_components};
+use vmux_core::host::persistence::{
+    PersistenceDirty, WorkspaceSaveRequest, WorkspaceStoreValidators, persisted_components,
+};
 #[cfg(test)]
 use vmux_core::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
 #[cfg(test)]
@@ -26,7 +28,7 @@ use vmux_layout::{
     stack::Stack,
     tab::Tab,
     tab::{TabDirDecided, TabWorkspace, TabWorktree},
-    window::{Main, WindowGeometry},
+    window::WindowGeometry,
 };
 #[cfg(test)]
 use vmux_setting::AppSettings;
@@ -35,7 +37,7 @@ pub(crate) struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<vmux_space::SaveSpaceRequest>()
+        app.add_message::<WorkspaceSaveRequest>()
             .add_observer(save_on_default_event)
             .add_observer(load_on_default_event)
             .add_systems(
@@ -78,7 +80,7 @@ fn spawn_space_persistence(registry: Res<AppTypeRegistry>, mut commands: Command
 }
 
 fn handle_save_space_requests(
-    mut requests: MessageReader<vmux_space::SaveSpaceRequest>,
+    mut requests: MessageReader<WorkspaceSaveRequest>,
     save_entities: SpaceSaveEntities,
     persistence: Single<&AutoSave>,
     mut commands: Commands,
@@ -251,6 +253,7 @@ fn save_space_to_path_excluding(
 
 pub(crate) fn load_space_on_startup(
     registry: Res<AppTypeRegistry>,
+    validators: WorkspaceStoreValidators,
     mut restore: Single<(
         Entity,
         &mut crate::boot_status::RestoreComplete,
@@ -258,15 +261,13 @@ pub(crate) fn load_space_on_startup(
     )>,
     mut commands: Commands,
 ) {
-    let bootstrap = vmux_space::model::bootstrap_space_record();
     if vmux_core::profile::is_test_session() {
         restore.1.0 = true;
         restore.2.0 = false;
-        commands.spawn(vmux_space::spaces::space_profile_bundle(&bootstrap));
         return;
     }
     let path = store_path();
-    let removed_stale = remove_stale_space_if_needed(&path);
+    let removed_stale = remove_rejected_store_if_needed(&path, &validators);
     let removed_incompatible = {
         let registry = registry.read();
         remove_incompatible_store_if_needed(&path, &registry)
@@ -296,7 +297,6 @@ pub(crate) fn load_space_on_startup(
         commands.trigger_load(load);
     } else {
         restore.1.0 = true;
-        commands.spawn(vmux_space::spaces::space_profile_bundle(&bootstrap));
     }
 }
 
@@ -335,14 +335,14 @@ fn normalized_store_icons(body: &str) -> Option<(String, Vec<String>)> {
     }
 }
 
-fn remove_stale_space_if_needed(path: &Path) -> bool {
+fn remove_rejected_store_if_needed(path: &Path, validators: &WorkspaceStoreValidators) -> bool {
     let Ok(body) = std::fs::read_to_string(path) else {
         return false;
     };
-    if !space_is_stale(&body) {
+    let Some(validator) = validators.rejected_by(&body) else {
         return false;
-    }
-    warn!("Removing stale store from {:?}", path);
+    };
+    warn!(%validator, "Removing rejected store from {:?}", path);
     let _ = std::fs::remove_file(path);
     true
 }
@@ -382,69 +382,6 @@ fn component_type_path_keys(body: &str) -> impl Iterator<Item = &str> {
             None
         }
     })
-}
-
-fn space_is_stale(body: &str) -> bool {
-    space_contains_stale_agent_url(body) || space_is_prompt_only_empty_url(body)
-}
-
-fn space_contains_stale_agent_url(body: &str) -> bool {
-    for prefix in ["vmux://sessions/", "vmux://agent/"] {
-        if body.split(prefix).skip(1).any(|tail| {
-            let suffix = tail.split('"').next().unwrap_or_default();
-            let url = format!("{prefix}{suffix}");
-            is_stale_agent_url(&url)
-        }) {
-            return true;
-        }
-    }
-    false
-}
-
-fn is_stale_agent_url(url: &str) -> bool {
-    let normalized = url.trim_end_matches('/');
-    if matches!(normalized, "vmux://sessions" | "vmux://agent") {
-        return false;
-    }
-    if is_bare_agent_kind_url(normalized) {
-        return false;
-    }
-    vmux_agent::AgentUrl::parse(normalized).is_none()
-}
-
-fn is_bare_agent_kind_url(normalized: &str) -> bool {
-    vmux_agent::AgentKind::all()
-        .into_iter()
-        .any(|kind| normalized == kind.cli_url_prefix().trim_end_matches('/'))
-}
-
-fn space_is_prompt_only_empty_url(body: &str) -> bool {
-    let urls = page_metadata_urls(body);
-    !urls.is_empty() && urls.iter().all(|url| url.trim().is_empty())
-}
-
-fn page_metadata_urls(body: &str) -> Vec<&str> {
-    let mut urls = Vec::new();
-    let mut in_page_metadata = false;
-    for line in body.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("\"vmux_header::system::PageMetadata\":") {
-            in_page_metadata = true;
-            continue;
-        }
-        if !in_page_metadata {
-            continue;
-        }
-        if let Some(rest) = trimmed.strip_prefix("url: \"")
-            && let Some((url, _)) = rest.split_once('"')
-        {
-            urls.push(url);
-        }
-        if trimmed == ")," {
-            in_page_metadata = false;
-        }
-    }
-    urls
 }
 
 #[cfg(test)]
@@ -1209,98 +1146,6 @@ mod tests {
         assert!(tab.active);
     }
 
-    #[test]
-    fn current_page_agent_url_does_not_mark_space_stale() {
-        assert!(!space_contains_stale_agent_url(
-            r#"url: "vmux://sessions/echo/echo/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
-        ));
-    }
-
-    #[test]
-    fn legacy_agent_url_does_not_mark_space_stale() {
-        assert!(!space_contains_stale_agent_url(
-            r#"url: "vmux://agent/claude/session-id""#
-        ));
-    }
-
-    #[test]
-    fn known_cli_agent_url_does_not_mark_space_stale() {
-        assert!(!space_contains_stale_agent_url(
-            r#"url: "vmux://sessions/codex/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
-        ));
-    }
-
-    #[test]
-    fn bare_cli_agent_url_does_not_mark_space_stale() {
-        assert!(!space_contains_stale_agent_url(
-            r#"url: "vmux://sessions/vibe/""#
-        ));
-    }
-
-    #[test]
-    fn malformed_agent_url_marks_space_stale() {
-        assert!(!space_contains_stale_agent_url(
-            r#"url: "vmux://sessions/bogus/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
-        ));
-        assert!(space_contains_stale_agent_url(
-            r#"url: "vmux://sessions/a/b/c/d/e""#
-        ));
-    }
-
-    #[test]
-    fn current_page_agent_space_file_is_not_removed_before_load() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let space_dir = dir.path().join("profiles/personal/spaces/space-1");
-        std::fs::create_dir_all(&space_dir).expect("space dir");
-        let path = space_dir.join("space.ron");
-        std::fs::write(
-            &path,
-            r#"url: "vmux://sessions/echo/echo/edb5335d-20cf-4c3d-9433-8619c405a0f2""#,
-        )
-        .expect("write space");
-
-        assert!(!remove_stale_space_if_needed(&path));
-        assert!(path.exists());
-        assert!(space_dir.exists());
-    }
-
-    #[test]
-    fn prompt_only_empty_url_space_is_removed_before_load() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let space_dir = dir.path().join("profiles/personal/spaces/space-1");
-        std::fs::create_dir_all(&space_dir).expect("space dir");
-        let path = space_dir.join("space.ron");
-        std::fs::write(
-            &path,
-            r#"
-(
-  resources: {},
-  entities: {
-    1: (
-      components: {
-        "vmux_desktop::layout::stack::Stack": (
-          scroll_x: 0.0,
-          scroll_y: 0.0,
-        ),
-        "vmux_header::system::PageMetadata": (
-          title: "",
-          url: "",
-          icon: None,
-          bg_color: None,
-        ),
-      },
-    ),
-  },
-)
-"#,
-        )
-        .expect("write prompt-only space");
-
-        assert!(remove_stale_space_if_needed(&path));
-        assert!(!path.exists());
-        assert!(space_dir.exists());
-    }
-
     fn registry_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -1429,8 +1274,8 @@ mod tests {
     }
 
     #[test]
-    fn incompatible_store_resets_layout_on_startup() {
-        let _home = HomeEnvGuard::use_temp_home("incompatible-store-resets-layout-on-startup");
+    fn incompatible_store_is_removed_on_startup() {
+        let _home = HomeEnvGuard::use_temp_home("incompatible-store-is-removed-on-startup");
         let path = store_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("store dir");
@@ -1449,8 +1294,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .add_plugins(PersistencePlugin);
-        app.world_mut().spawn(Main);
-        app.world_mut().spawn(PrimaryWindow);
         app.update();
 
         assert!(
@@ -1461,8 +1304,6 @@ mod tests {
             !store_version_path().exists(),
             "store.version should be removed with the incompatible store"
         );
-        let spaces = app.world_mut().query::<&Space>().iter(app.world()).count();
-        assert_eq!(spaces, 1, "a fresh space should be spawned after reset");
     }
 
     #[test]
