@@ -5,6 +5,8 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use vmux_api::protocol::AgentAttachment;
 use vmux_core::KeyboardOwner;
 use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
+use vmux_core::host::persistence::PageRestore;
+use vmux_core::terminal::TerminalLaunch;
 use vmux_core::{
     PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
 };
@@ -462,7 +464,7 @@ fn drain_agent_tab_worktrees(
 
 fn handle_agent_page_open(
     mut open_q: ParamSet<(
-        Query<(Entity, &PageOpenTask), PendingPageOpen>,
+        Query<(Entity, &PageOpenTask, Has<PageRestore>), PendingPageOpen>,
         Query<(
             &vmux_core::PendingPrompt,
             Option<&vmux_core::PendingPromptAttachments>,
@@ -484,14 +486,15 @@ fn handle_agent_page_open(
     workspace: AgentPageOpenWorkspace,
     catalog: Option<Single<&crate::runtime::acp::AcpCatalog>>,
     transitions: Query<&vmux_start::StartInlineTransition>,
+    launches: Query<&TerminalLaunch>,
 ) {
     let catalog = catalog.as_ref().map(|catalog| **catalog);
-    let tasks: Vec<(Entity, PageOpenTask)> = open_q
+    let tasks: Vec<(Entity, PageOpenTask, bool)> = open_q
         .p0()
         .iter()
-        .map(|(entity, task)| (entity, task.clone()))
+        .map(|(entity, task, restoring)| (entity, task.clone(), restoring))
         .collect();
-    for (entity, task) in tasks {
+    for (entity, task, restoring) in tasks {
         if !vmux_api::VmuxRoute::parse(&task.url).is_some_and(|route| route.is_agent()) {
             continue;
         }
@@ -507,21 +510,29 @@ fn handle_agent_page_open(
             &settings,
             &workspace.active_space,
         );
-        let default_cwd = match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
-            Ok(Some(path)) => path,
-            Ok(None) => match space_startup_dir {
-                Some(dir) => dir.path,
-                None => match AgentCwd::projects() {
-                    Ok(path) => path,
-                    Err(message) => {
-                        commands.entity(entity).insert(PageOpenError { message });
-                        continue;
-                    }
+        let restored_cwd = restoring
+            .then(|| launches.get(task.stack).ok())
+            .flatten()
+            .map(|launch| PathBuf::from(&launch.cwd));
+        let default_cwd = if let Some(cwd) = restored_cwd {
+            cwd
+        } else {
+            match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
+                Ok(Some(path)) => path,
+                Ok(None) => match space_startup_dir {
+                    Some(dir) => dir.path,
+                    None => match AgentCwd::projects() {
+                        Ok(path) => path,
+                        Err(message) => {
+                            commands.entity(entity).insert(PageOpenError { message });
+                            continue;
+                        }
+                    },
                 },
-            },
-            Err(message) => {
-                commands.entity(entity).insert(PageOpenError { message });
-                continue;
+                Err(message) => {
+                    commands.entity(entity).insert(PageOpenError { message });
+                    continue;
+                }
             }
         };
         let (initial_prompt, initial_attachments) = open_q

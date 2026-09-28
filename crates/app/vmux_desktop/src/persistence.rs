@@ -8,44 +8,34 @@ use moonshine_save::prelude::*;
 use moonshine_save::save::EntityFilter;
 use std::path::{Path, PathBuf};
 
-use vmux_browser::Browser;
-use vmux_core::host::page::NativelyHosted;
 #[cfg(test)]
 use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_core::host::persistence::{PersistenceDirty, persisted_components};
 #[cfg(test)]
-use vmux_core::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage};
-use vmux_core::{CreatedAt, Order, PageMetadata};
-use vmux_flex::prelude::*;
+use vmux_core::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
 #[cfg(test)]
 use vmux_layout::profile::Profile;
 use vmux_layout::space::Space;
 #[cfg(test)]
 use vmux_layout::space::SpaceId;
-use vmux_layout::{
-    LayoutStartupSet, SpaceFilePresent,
-    pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
-    stack::Stack,
-    tab::Tab,
-    window::Main,
-};
+use vmux_layout::{LayoutPersistenceSet, LayoutStartupSet, SpaceFilePresent};
 #[cfg(test)]
 use vmux_layout::{
     Open,
-    pane::PaneId,
+    pane::{Pane, PaneId, PaneSize, PaneSplit},
+    stack::Stack,
+    tab::Tab,
     tab::{TabDirDecided, TabWorkspace, TabWorktree},
-    window::WindowGeometry,
+    window::{Main, WindowGeometry},
 };
+#[cfg(test)]
 use vmux_setting::AppSettings;
-use vmux_terminal::Terminal;
-use vmux_terminal::new_terminal_bundle_with_cwd;
 
 pub(crate) struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .add_message::<vmux_space::SaveSpaceRequest>()
+        app.add_message::<vmux_space::SaveSpaceRequest>()
             .add_observer(save_on_default_event)
             .add_observer(load_on_default_event)
             .add_systems(
@@ -58,23 +48,15 @@ impl Plugin for PersistencePlugin {
                     .chain()
                     .in_set(LayoutStartupSet::Persistence),
             )
-            .add_systems(Startup, rebuild_space_views.in_set(LayoutStartupSet::Post))
-            .add_observer(mark_space_views_need_rebuild)
+            .add_observer(mark_restore_pending)
             .add_observer(mark_persistence_dirty)
             .add_systems(
                 Update,
-                (rebuild_space_views, clear_space_views_need_rebuild)
-                    .chain()
-                    .run_if(any_with_component::<SpaceViewsNeedRebuild>),
+                complete_restore
+                    .after(LayoutPersistenceSet::Restore)
+                    .run_if(any_with_component::<RestorePending>),
             )
-            .add_systems(
-                Update,
-                (
-                    auto_save_system,
-                    sync_launch_to_stack,
-                    handle_save_space_requests,
-                ),
-            );
+            .add_systems(Update, (auto_save_system, handle_save_space_requests));
     }
 }
 
@@ -112,25 +94,23 @@ fn handle_save_space_requests(
 }
 
 #[derive(Component)]
-struct SpaceViewsNeedRebuild;
+struct RestorePending;
 
-fn mark_space_views_need_rebuild(
+fn mark_restore_pending(
     _trigger: On<Loaded>,
     persistence: Single<Entity, With<AutoSave>>,
     mut commands: Commands,
 ) {
-    commands.entity(*persistence).insert(SpaceViewsNeedRebuild);
+    commands.entity(*persistence).insert(RestorePending);
 }
 
-fn clear_space_views_need_rebuild(
+fn complete_restore(
     mut restore: Single<&mut crate::boot_status::RestoreComplete>,
-    persistence: Single<Entity, With<SpaceViewsNeedRebuild>>,
+    persistence: Single<Entity, With<RestorePending>>,
     mut commands: Commands,
 ) {
     restore.0 = true;
-    commands
-        .entity(*persistence)
-        .remove::<SpaceViewsNeedRebuild>();
+    commands.entity(*persistence).remove::<RestorePending>();
 }
 
 #[derive(Component)]
@@ -467,262 +447,10 @@ fn page_metadata_urls(body: &str) -> Vec<&str> {
     urls
 }
 
-fn sort_tabs_by_order(mut tabs: Vec<(Entity, Option<u32>, Option<i64>)>) -> Vec<Entity> {
-    tabs.sort_by_key(|(_, order, created)| (order.unwrap_or(u32::MAX), created.unwrap_or(0)));
-    tabs.into_iter().map(|(entity, _, _)| entity).collect()
-}
-
-pub(crate) fn rebuild_space_views(
-    main_q: Query<Entity, With<Main>>,
-    tabs_need_view: Query<(Entity, Option<&Order>, Option<&CreatedAt>), (With<Tab>, Without<Node>)>,
-    spaces_need_view: Query<Entity, (With<Space>, Without<Node>)>,
-    splits_need_view: Query<(Entity, &PaneSplit), Without<Node>>,
-    panes_need_view: Query<Entity, (With<Pane>, Without<PaneSplit>, Without<Node>)>,
-    stacks_need_view: Query<
-        (
-            Entity,
-            &PageMetadata,
-            Option<&vmux_terminal::launch::TerminalLaunch>,
-        ),
-        (With<Stack>, Without<Node>),
-    >,
-    pane_sizes: Query<&PaneSize>,
-    child_of_q: Query<&ChildOf>,
-    all_children: Query<&Children>,
-    browser_q: Query<(), With<Browser>>,
-    native_pages: Query<&NativelyHosted>,
-    primary_window: Single<Entity, With<PrimaryWindow>>,
-    settings: Res<AppSettings>,
-    mut spawn_agent: MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
-    mut commands: Commands,
-) {
-    if tabs_need_view.is_empty()
-        && spaces_need_view.is_empty()
-        && splits_need_view.is_empty()
-        && panes_need_view.is_empty()
-        && stacks_need_view.is_empty()
-    {
-        return;
-    }
-
-    let Ok(main) = main_q.single() else { return };
-    let pw = *primary_window;
-
-    for space in &spaces_need_view {
-        commands
-            .entity(space)
-            .insert((vmux_layout::space::space_view_bundle(), ChildOf(main)));
-    }
-
-    let saved_tab_order: Vec<(Entity, Option<u32>, Option<i64>)> = tabs_need_view
-        .iter()
-        .map(|(entity, order, created)| (entity, order.map(|o| o.0), created.map(|c| c.0)))
-        .collect();
-    for tab_e in sort_tabs_by_order(saved_tab_order) {
-        commands.entity(tab_e).insert((
-            Transform::default(),
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                ..default()
-            },
-        ));
-        if let Ok(co) = child_of_q.get(tab_e) {
-            commands.entity(tab_e).insert(ChildOf(co.get()));
-        }
-    }
-
-    for (entity, split) in &splits_need_view {
-        let flex_dir = match split.direction {
-            PaneSplitDirection::Row => FlexDirection::Row,
-            PaneSplitDirection::Column => FlexDirection::Column,
-        };
-        let gap = pane_split_gaps(split.direction, vmux_layout::event::PANE_GAP_PX);
-        let mut ecmds = commands.entity(entity);
-        ecmds.insert((
-            HostWindow(pw),
-            Transform::default(),
-            Node {
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                flex_direction: flex_dir,
-                column_gap: gap.column_gap,
-                row_gap: gap.row_gap,
-                ..default()
-            },
-        ));
-    }
-
-    for entity in &panes_need_view {
-        let grow = pane_sizes.get(entity).map(|s| s.flex_grow).unwrap_or(1.0);
-        commands.entity(entity).insert((
-            Transform::default(),
-            Node {
-                flex_grow: grow,
-                flex_basis: Val::Px(0.0),
-                align_items: AlignItems::Stretch,
-                justify_content: JustifyContent::Stretch,
-                ..default()
-            },
-        ));
-    }
-
-    let mut despawned = std::collections::HashSet::new();
-    for (entity, meta, saved_launch) in &stacks_need_view {
-        if meta.url.is_empty() {
-            despawned.insert(entity);
-            commands.entity(entity).despawn();
-            continue;
-        }
-
-        let mut ecmds = commands.entity(entity);
-        ecmds.insert((
-            Transform::default(),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                ..default()
-            },
-        ));
-
-        let has_browser = all_children
-            .get(entity)
-            .map(|ch| ch.iter().any(|e| browser_q.contains(e)))
-            .unwrap_or(false);
-
-        if !has_browser {
-            if let Some(page) = native_pages.iter().find(|page| page.answers_for(&meta.url)) {
-                commands.spawn((
-                    vmux_layout::cef::Browser::native_page(&meta.url, page.title),
-                    ChildOf(entity),
-                ));
-            } else if vmux_api::VmuxRoute::parse(&meta.url).is_some_and(|route| route.is_terminal())
-            {
-                let cwd = saved_launch.map(|l| std::path::PathBuf::from(&l.cwd));
-                let term = commands
-                    .spawn((
-                        new_terminal_bundle_with_cwd(&settings, cwd.as_deref()),
-                        ChildOf(entity),
-                    ))
-                    .id();
-                if let Some(launch) = saved_launch {
-                    commands.entity(term).insert(launch.clone());
-                }
-            } else if let Some(agent_url) = vmux_agent::AgentUrl::parse(&meta.url).filter(|u| {
-                matches!(
-                    u,
-                    vmux_agent::AgentUrl::Cli { .. } | vmux_agent::AgentUrl::Acp { .. }
-                )
-            }) {
-                match agent_url {
-                    vmux_agent::AgentUrl::Cli { kind, sid } => {
-                        let session_id = (sid != vmux_agent::url::CLI_FRESH_SID).then_some(sid);
-                        let cwd = saved_launch
-                            .map(|l| std::path::PathBuf::from(&l.cwd))
-                            .unwrap_or_else(|| {
-                                std::env::current_dir()
-                                    .unwrap_or_else(|_| std::path::PathBuf::from("/"))
-                            });
-                        spawn_agent.write(vmux_core::agent::SpawnAgentInStackRequest {
-                            kind,
-                            cwd,
-                            session_id,
-                            stack: entity,
-                            initial_prompt: None,
-                            initial_attachments: Vec::new(),
-                        });
-                    }
-                    _ => {
-                        commands.spawn(vmux_core::PageOpenTask {
-                            id: vmux_core::PageOpenId::new(),
-                            stack: entity,
-                            url: meta.url.clone(),
-                            request_id: None,
-                        });
-                    }
-                }
-            } else if meta.url.starts_with("file:") {
-                if let Some(bundle) = vmux_editor::restore_file_view_bundle(&meta.url) {
-                    commands.spawn((bundle, ChildOf(entity)));
-                }
-            } else {
-                let browser = commands
-                    .spawn((Browser::new(&meta.url), ChildOf(entity)))
-                    .id();
-                commands.entity(browser).insert(meta.clone());
-            }
-        }
-    }
-
-    let mut seen_parents = std::collections::HashSet::new();
-    for entity in splits_need_view
-        .iter()
-        .map(|(e, _)| e)
-        .chain(panes_need_view.iter())
-        .chain(stacks_need_view.iter().map(|(e, _, _)| e))
-    {
-        let Ok(co) = child_of_q.get(entity) else {
-            continue;
-        };
-        let parent = co.get();
-        if !seen_parents.insert(parent) {
-            continue;
-        }
-        let Ok(children) = all_children.get(parent) else {
-            continue;
-        };
-        for child in children.iter() {
-            if despawned.contains(&child) {
-                continue;
-            }
-            if let Ok(co) = child_of_q.get(child) {
-                commands.entity(child).insert(ChildOf(co.get()));
-            }
-        }
-    }
-
-    info!(
-        "Rebuilt space views: {} tabs, {} splits, {} panes, {} stacks",
-        tabs_need_view.iter().count(),
-        splits_need_view.iter().count(),
-        panes_need_view.iter().count(),
-        stacks_need_view.iter().count(),
-    );
-}
-
-fn sync_launch_to_stack(
-    terminals: Query<
-        (&ChildOf, &vmux_terminal::launch::TerminalLaunch),
-        (
-            With<Terminal>,
-            Changed<vmux_terminal::launch::TerminalLaunch>,
-        ),
-    >,
-    stacks: Query<(), With<Stack>>,
-    mut commands: Commands,
-) {
-    for (child_of, launch) in &terminals {
-        let parent = child_of.get();
-        if stacks.contains(parent) {
-            commands.entity(parent).insert(launch.clone());
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::entity::EntityHashMap;
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_layout::event::TERMINAL_PAGE_URL;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -986,40 +714,6 @@ mod tests {
         assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
     }
 
-    #[test]
-    fn sort_tabs_orders_by_order_field() {
-        let a = Entity::from_bits(10);
-        let b = Entity::from_bits(11);
-        let c = Entity::from_bits(12);
-        let input = vec![
-            (a, Some(2u32), Some(100i64)),
-            (b, Some(0), Some(200)),
-            (c, Some(1), Some(50)),
-        ];
-        assert_eq!(sort_tabs_by_order(input), vec![b, c, a]);
-    }
-
-    #[test]
-    fn sort_tabs_legacy_falls_back_to_created_at() {
-        let a = Entity::from_bits(10);
-        let b = Entity::from_bits(11);
-        let c = Entity::from_bits(12);
-        let input = vec![
-            (a, None, Some(2i64)),
-            (b, None, Some(3)),
-            (c, None, Some(1)),
-        ];
-        assert_eq!(sort_tabs_by_order(input), vec![c, a, b]);
-    }
-
-    #[test]
-    fn sort_tabs_ordered_before_unordered() {
-        let ordered = Entity::from_bits(1);
-        let legacy = Entity::from_bits(2);
-        let input = vec![(legacy, None, Some(0i64)), (ordered, Some(5u32), Some(999))];
-        assert_eq!(sort_tabs_by_order(input), vec![ordered, legacy]);
-    }
-
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     struct HomeEnvGuard {
@@ -1088,148 +782,6 @@ mod tests {
             editor: Default::default(),
             appearance: Default::default(),
         }
-    }
-
-    #[test]
-    fn persisted_terminal_tab_reattaches_saved_process() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(test_settings())
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .add_systems(Update, rebuild_space_views);
-
-        let main = app.world_mut().spawn(Main).id();
-        app.world_mut().spawn(PrimaryWindow);
-        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
-        let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
-        let saved_url = format!(
-            "{}{}",
-            TERMINAL_PAGE_URL,
-            uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap()
-        );
-        let tab = app
-            .world_mut()
-            .spawn((
-                Stack::default(),
-                PageMetadata {
-                    title: "Terminal".to_string(),
-                    url: saved_url.clone(),
-                    icon: vmux_core::PageIcon::None,
-                    bg_color: None,
-                },
-                ChildOf(pane),
-            ))
-            .id();
-
-        app.update();
-
-        let children = app.world().get::<Children>(tab).unwrap();
-        let terminal = children
-            .iter()
-            .find(|entity| app.world().entity(*entity).contains::<Terminal>())
-            .unwrap();
-        let meta = app.world().get::<PageMetadata>(terminal).unwrap();
-
-        let _ = saved_url;
-        assert_eq!(meta.url, TERMINAL_PAGE_URL);
-    }
-
-    #[test]
-    fn a_restored_natively_hosted_page_is_rebuilt_native_not_cef() {
-        for saved_url in [
-            "vmux://start/",
-            "vmux://start",
-            "vmux://vault/?provider=github",
-        ] {
-            let mut app = App::new();
-            app.add_plugins(MinimalPlugins)
-                .insert_resource(test_settings())
-                .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-                .add_systems(Update, rebuild_space_views);
-
-            let main = app.world_mut().spawn(Main).id();
-            app.world_mut().spawn(PrimaryWindow);
-            app.world_mut()
-                .spawn(NativelyHosted::page("vmux://start/", "Start"));
-            app.world_mut()
-                .spawn(NativelyHosted::page("vmux://vault/", "Vault"));
-            let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
-            let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
-            let stack = app
-                .world_mut()
-                .spawn((
-                    Stack::default(),
-                    PageMetadata {
-                        url: saved_url.to_string(),
-                        ..default()
-                    },
-                    ChildOf(pane),
-                ))
-                .id();
-
-            app.update();
-
-            let page = app
-                .world()
-                .get::<Children>(stack)
-                .and_then(|children| children.iter().next())
-                .unwrap_or_else(|| panic!("{saved_url} restored no page"));
-            assert!(
-                app.world()
-                    .entity(page)
-                    .contains::<vmux_core::host::page::HostsPage>(),
-                "{saved_url} restored without a native host"
-            );
-            assert!(
-                !app.world().entity(page).contains::<WebviewSource>(),
-                "{saved_url} restored as a CEF browser, which serves it no document"
-            );
-        }
-    }
-
-    #[test]
-    fn a_restored_web_page_is_still_rebuilt_as_a_cef_browser() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(test_settings())
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .add_systems(Update, rebuild_space_views);
-
-        let main = app.world_mut().spawn(Main).id();
-        app.world_mut().spawn(PrimaryWindow);
-        app.world_mut()
-            .spawn(NativelyHosted::page("vmux://start/", "Start"));
-        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
-        let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
-        let stack = app
-            .world_mut()
-            .spawn((
-                Stack::default(),
-                PageMetadata {
-                    url: "https://example.com/".to_string(),
-                    ..default()
-                },
-                ChildOf(pane),
-            ))
-            .id();
-
-        app.update();
-
-        let page = app
-            .world()
-            .get::<Children>(stack)
-            .and_then(|children| children.iter().next())
-            .expect("restored page");
-        assert!(app.world().entity(page).contains::<WebviewSource>());
-    }
-
-    #[test]
-    fn a_neighbouring_url_does_not_claim_a_hosted_page() {
-        let page = NativelyHosted::page("vmux://vault/", "Vault");
-        assert!(page.answers_for("vmux://vault"));
-        assert!(page.answers_for("vmux://vault/?provider=github"));
-        assert!(!page.answers_for("vmux://vaults/"));
-        assert!(!page.answers_for("vmux://vault/deep"));
     }
 
     #[test]
@@ -1655,58 +1207,6 @@ mod tests {
         assert_eq!(tab.tab_name, "Recovered");
         assert_eq!(tab.tab_startup_dir.as_deref(), Some("/tmp/recovered"));
         assert!(tab.active);
-    }
-
-    #[test]
-    fn runtime_loaded_space_rebuilds_browser_views() {
-        let _home = HomeEnvGuard::use_temp_home("runtime-loaded-space-rebuilds-browser-views");
-        let mut app = App::new();
-        app.world_mut()
-            .spawn(crate::boot_status::RestoreComplete::default());
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(test_settings())
-            .add_plugins(PersistencePlugin);
-
-        let main = app.world_mut().spawn(Main).id();
-        app.world_mut().spawn(PrimaryWindow);
-        app.update();
-
-        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
-        let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
-        let tab = app
-            .world_mut()
-            .spawn((
-                Stack::default(),
-                PageMetadata {
-                    title: "Example".to_string(),
-                    url: "https://example.com".to_string(),
-                    icon: vmux_core::PageIcon::Favicon(
-                        "https://example.com/favicon.ico".to_string(),
-                    ),
-                    bg_color: Some("#123456".to_string()),
-                },
-                ChildOf(pane),
-            ))
-            .id();
-
-        app.world_mut().trigger(Loaded {
-            entity_map: EntityHashMap::default(),
-        });
-        app.update();
-
-        let children = app.world().get::<Children>(tab).unwrap();
-        let browser = children
-            .iter()
-            .find(|entity| app.world().entity(*entity).contains::<Browser>())
-            .expect("browser child");
-        let meta = app.world().get::<PageMetadata>(browser).unwrap();
-        assert_eq!(meta.title, "Example");
-        assert_eq!(meta.url, "https://example.com");
-        assert_eq!(
-            meta.icon,
-            vmux_core::PageIcon::Favicon("https://example.com/favicon.ico".to_string())
-        );
-        assert_eq!(meta.bg_color.as_deref(), Some("#123456"));
     }
 
     #[test]

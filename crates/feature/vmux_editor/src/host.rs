@@ -88,6 +88,5 @@ pub use contract::ContractPlugin;
 pub use editor::FileView;
 pub use explorer::{GlobalSearchRequest, StackExplorerVisibility};
 pub use lsp::LspPlugin;
-pub use page_open::restore_file_view_bundle;
 pub use status::FileViewModeRequest;
 pub use tool::FileToolPlugin;

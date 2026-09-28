@@ -297,23 +297,31 @@ fn classify_unclaimed_page_open_tasks(
 
 fn attach_cef_pages(
     attachments: Query<(Entity, &CefPageAttachment, Option<&PageOpenTask>)>,
+    stack_metadata: Query<&PageMetadata, With<Stack>>,
     mut commands: Commands,
 ) {
     for (entity, attachment, task) in &attachments {
         commands.entity(attachment.stack).despawn_children();
-        commands.entity(attachment.stack).insert(PageMetadata {
-            url: attachment.url.clone(),
-            title: attachment.title.clone(),
-            bg_color: attachment.bg_color.clone(),
-            ..default()
-        });
+        let metadata = task
+            .and_then(|_| stack_metadata.get(attachment.stack).ok())
+            .filter(|metadata| metadata.url == attachment.url)
+            .cloned()
+            .unwrap_or_else(|| PageMetadata {
+                url: attachment.url.clone(),
+                title: attachment.title.clone(),
+                bg_color: attachment.bg_color.clone(),
+                ..default()
+            });
+        commands.entity(attachment.stack).insert(metadata.clone());
         let browser = commands
             .spawn((
-                Browser::new_with_title(&attachment.url, &attachment.title),
+                Browser::new_with_title(&attachment.url, &metadata.title),
                 ChildOf(attachment.stack),
             ))
             .id();
-        commands.entity(browser).insert(vmux_core::KeyboardOwner);
+        commands
+            .entity(browser)
+            .insert((vmux_core::KeyboardOwner, metadata));
         if task.is_some() {
             commands
                 .entity(entity)

@@ -3,6 +3,7 @@ use vmux_core::host::persistence::PersistenceAppExt;
 
 use super::agent::LayoutAgentPlugin;
 use super::command::LayoutRequestPlugin;
+use super::persistence::LayoutPersistencePlugin;
 use super::projection::LayoutUiProjectionPlugin;
 use crate::active_pane::ActivePanePlugin;
 use crate::archive::ArchivePlugin;
@@ -65,6 +66,7 @@ impl Plugin for LayoutPlugin {
                 crate::bookmark_tool::BookmarkToolPlugin,
                 ProfilePlugin,
                 LayoutUiProjectionPlugin,
+                LayoutPersistencePlugin,
                 LayoutOverlayPlugin,
                 SpaceLayoutPlugin,
                 WindowLayoutPlugin,

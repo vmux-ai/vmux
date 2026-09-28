@@ -11,6 +11,7 @@ use bevy_cef::prelude::*;
 use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_command::WriteCommandRequests;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
+use vmux_core::host::persistence::{PageRestore, PersistenceAppExt};
 use vmux_core::input::KeyStroke;
 use vmux_core::service::{ServiceConnected, ServiceRequest, ServiceUnavailable};
 use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
@@ -19,7 +20,7 @@ use vmux_core::{
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
-use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest};
+use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest, Stack};
 use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
 use vmux_setting::AppSettings;
 
@@ -43,7 +44,6 @@ use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::{ProcessExited, RetainOnProcessExit, Terminal};
 use vmux_core::KeyboardOwner;
-use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_core::service::ServiceMessageSet;
 use vmux_flex::prelude::*;
 
@@ -80,6 +80,7 @@ impl Plugin for TerminalPlugin {
         .add_plugins(crate::contract::TerminalContractPlugin)
         .register_persisted::<crate::launch::TerminalLaunch>()
         .register_type::<crate::launch::TerminalKind>()
+        .add_systems(Update, sync_launch_to_stack)
         .add_message::<TerminalStackSpawnRequest>()
         .add_message::<TerminalSpawnRequest>()
         .add_plugins((
@@ -178,6 +179,21 @@ fn initialize_terminal_state(terminals: Query<Entity, Added<Terminal>>, mut comm
             TerminalShortcutState::default(),
             TerminalMouseState::default(),
         ));
+    }
+}
+
+fn sync_launch_to_stack(
+    terminals: Query<
+        (&ChildOf, &crate::launch::TerminalLaunch),
+        (With<Terminal>, Changed<crate::launch::TerminalLaunch>),
+    >,
+    stacks: Query<(), With<Stack>>,
+    mut commands: Commands,
+) {
+    for (parent, launch) in &terminals {
+        if stacks.contains(parent.get()) {
+            commands.entity(parent.get()).insert(launch.clone());
+        }
     }
 }
 
@@ -359,10 +375,11 @@ fn spawn_layout_requested_content(
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
 fn handle_terminal_page_open(
-    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
+    tasks: Query<(Entity, &PageOpenTask, Has<PageRestore>), PendingPageOpen>,
     pid_indexes: Query<&pid::PidToEntity>,
     child_of_q: Query<&ChildOf>,
     tabs: Query<&vmux_layout::tab::Tab>,
+    saved_launches: Query<&crate::launch::TerminalLaunch, With<Stack>>,
     settings: Res<AppSettings>,
     active_space: vmux_layout::space::FocusedSpace,
     mut commands: Commands,
@@ -370,7 +387,7 @@ fn handle_terminal_page_open(
     let space_id = active_space
         .id()
         .unwrap_or(vmux_space::model::BOOTSTRAP_SPACE_ID);
-    for (entity, task) in &tasks {
+    for (entity, task, restoring) in &tasks {
         if task.url != TERMINAL_PAGE_URL.trim_end_matches('/')
             && !task.url.starts_with(TERMINAL_PAGE_URL)
         {
@@ -386,7 +403,7 @@ fn handle_terminal_page_open(
             }
         };
         let path = parsed.path().trim_start_matches('/');
-        if !path.is_empty() {
+        if !path.is_empty() && !restoring {
             let Ok(pid) = path.parse::<u32>() else {
                 commands.entity(entity).insert(PageOpenError {
                     message: format!("malformed terminal URL '{}'", task.url),
@@ -407,11 +424,17 @@ fn handle_terminal_page_open(
             }
             warn!("no terminal pane for pid {pid}; spawning new");
         }
+        let saved_launch = restoring
+            .then(|| saved_launches.get(task.stack).ok())
+            .flatten()
+            .cloned();
         let cwd_param = parsed
             .query_pairs()
             .find(|(key, _)| key == "cwd")
             .map(|(_, value)| value.into_owned());
-        let cwd = if let Some(cwd) = cwd_param.as_deref() {
+        let cwd = if let Some(launch) = saved_launch.as_ref() {
+            Some(PathBuf::from(&launch.cwd))
+        } else if let Some(cwd) = cwd_param.as_deref() {
             match vmux_space::cwd::valid_cwd(cwd) {
                 Ok(cwd) => cwd,
                 Err(message) => {
@@ -447,6 +470,9 @@ fn handle_terminal_page_open(
                 ChildOf(task.stack),
             ))
             .id();
+        if let Some(launch) = saved_launch {
+            commands.entity(terminal).insert(launch);
+        }
         commands.entity(terminal).insert(KeyboardOwner);
         commands.entity(entity).insert(PageOpenHandled);
     }

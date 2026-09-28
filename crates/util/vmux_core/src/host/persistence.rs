@@ -14,6 +14,9 @@ impl<T> FromType<T> for WorkspacePersisted {
 #[derive(Event, Clone, Copy, Debug, Default)]
 pub struct PersistenceDirty;
 
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct PageRestore;
+
 pub trait PersistenceAppExt {
     fn register_persisted<T>(&mut self) -> &mut Self
     where

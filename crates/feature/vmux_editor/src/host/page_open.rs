@@ -76,11 +76,6 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
     )
 }
 
-pub fn restore_file_view_bundle(url: &str) -> Option<impl Bundle> {
-    let path = vmux_core::file_url::FileUrl::parse(url)?.path()?;
-    Some(new_file_view_bundle(url, path))
-}
-
 fn handle_file_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children: Query<&Children>,

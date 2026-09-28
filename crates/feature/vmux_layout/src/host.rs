@@ -15,6 +15,7 @@ pub mod overlay;
 pub mod page_context;
 pub mod pane;
 pub mod pending_stack;
+mod persistence;
 pub mod placement;
 pub mod plugin;
 pub mod profile;
@@ -47,6 +48,7 @@ pub use cef::{
 pub use contract::LayoutContractPlugin;
 pub use header::Header;
 pub use pane::OpenBesideRequest;
+pub use persistence::LayoutPersistenceSet;
 pub use plugin::LayoutPlugin;
 pub use stack::{CloseStackReason, CloseStackRequest};
 pub use vmux_core::ContributedCommandChosen;
