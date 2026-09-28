@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use bevy::prelude::{
-    App, ApplyDeferred, Commands, Component, Entity, IntoScheduleConfigs, Name, Plugin, Query,
-    Single, Startup, Update,
+    App, ApplyDeferred, Bundle, Commands, Component, Entity, IntoScheduleConfigs, Name, Plugin,
+    Query, Single, Update,
 };
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
@@ -201,72 +201,11 @@ pub enum SessionInput {
     Close,
 }
 
-pub(crate) struct AgentSessionPlugin {
-    inbox: StdMutex<Option<AgentSessionReceivers>>,
-    runtime: Handle,
-}
-
-impl AgentSessionPlugin {
-    pub(crate) fn new(runtime: Handle, wake: mpsc::UnboundedSender<()>) -> (Self, AgentSessions) {
-        let (spawns, spawn_inbox) = mpsc::unbounded_channel();
-        let (inputs, input_inbox) = mpsc::unbounded_channel();
-        let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
-        let (snapshots, snapshot_inbox) = mpsc::unbounded_channel();
-        let (messages, message_inbox) = mpsc::unbounded_channel();
-        let (lists, list_inbox) = mpsc::unbounded_channel();
-        let (lookups, lookup_inbox) = mpsc::unbounded_channel();
-        let (closes, close_inbox) = mpsc::unbounded_channel();
-        (
-            Self {
-                inbox: StdMutex::new(Some(AgentSessionReceivers {
-                    spawns: spawn_inbox,
-                    inputs: input_inbox,
-                    subscriptions: subscription_inbox,
-                    snapshots: snapshot_inbox,
-                    messages: message_inbox,
-                    lists: list_inbox,
-                    lookups: lookup_inbox,
-                    closes: close_inbox,
-                })),
-                runtime,
-            },
-            AgentSessions {
-                spawns,
-                inputs,
-                subscriptions,
-                snapshots,
-                messages,
-                lists,
-                lookups,
-                closes,
-                wake,
-            },
-        )
-    }
-}
+pub(crate) struct AgentSessionPlugin;
 
 impl Plugin for AgentSessionPlugin {
     fn build(&self, app: &mut App) {
-        let inbox = self
-            .inbox
-            .lock()
-            .unwrap()
-            .take()
-            .expect("agent session plugin can only be built once");
-        let startup = StdMutex::new(Some((self.runtime.clone(), inbox)));
-        app.add_systems(Startup, move |mut commands: Commands| {
-            let (runtime, inbox) = startup
-                .lock()
-                .unwrap()
-                .take()
-                .expect("agent session runtime can only start once");
-            commands.spawn((
-                Name::new("agent session runtime"),
-                AgentSessionRuntime(runtime),
-                AgentSessionInbox(inbox),
-            ));
-        })
-        .add_systems(
+        app.add_systems(
             Update,
             (
                 receive_agent_session_requests,
@@ -299,6 +238,42 @@ pub(crate) struct AgentSessions {
 }
 
 impl AgentSessions {
+    pub(crate) fn new(runtime: Handle, wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
+        let (spawns, spawn_inbox) = mpsc::unbounded_channel();
+        let (inputs, input_inbox) = mpsc::unbounded_channel();
+        let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
+        let (snapshots, snapshot_inbox) = mpsc::unbounded_channel();
+        let (messages, message_inbox) = mpsc::unbounded_channel();
+        let (lists, list_inbox) = mpsc::unbounded_channel();
+        let (lookups, lookup_inbox) = mpsc::unbounded_channel();
+        let (closes, close_inbox) = mpsc::unbounded_channel();
+        (
+            Self {
+                spawns,
+                inputs,
+                subscriptions,
+                snapshots,
+                messages,
+                lists,
+                lookups,
+                closes,
+                wake,
+            },
+            (
+                AgentSessionRuntime(runtime),
+                AgentSessionInbox(AgentSessionReceivers {
+                    spawns: spawn_inbox,
+                    inputs: input_inbox,
+                    subscriptions: subscription_inbox,
+                    snapshots: snapshot_inbox,
+                    messages: message_inbox,
+                    lists: list_inbox,
+                    lookups: lookup_inbox,
+                    closes: close_inbox,
+                }),
+            ),
+        )
+    }
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn(
         &self,
@@ -1214,9 +1189,11 @@ mod tests {
             .build()
             .unwrap();
         let (wake, _wake_inbox) = mpsc::unbounded_channel();
-        let (plugin, _sessions) = AgentSessionPlugin::new(runtime.handle().clone(), wake);
+        let (_sessions, session_runtime) = AgentSessions::new(runtime.handle().clone(), wake);
         let mut app = App::new();
-        app.add_plugins(plugin);
+        app.add_plugins(AgentSessionPlugin);
+        app.world_mut()
+            .spawn((Name::new("agent session runtime"), session_runtime));
         let (spawn_response, mut spawn_result) = oneshot::channel();
         app.world_mut().spawn(SpawnAgentSession {
             sid: "s".into(),

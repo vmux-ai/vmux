@@ -494,8 +494,8 @@ pub(crate) fn spawn_with_identity(
 mod live {
     use super::*;
     use crate::RemoteAuthorizationStore;
-    use crate::remote::authorization::RemoteAuthorizationPlugin;
-    use bevy::prelude::{App, MinimalPlugins};
+    use crate::remote::authorization::{RemoteAuthorizationPlugin, RemoteAuthorizations};
+    use bevy::prelude::{App, MinimalPlugins, Name};
     use std::net::Ipv4Addr;
     use std::sync::Arc;
     use tokio::sync::{broadcast, mpsc};
@@ -518,11 +518,14 @@ mod live {
                 RemoteAuthorizationStore::new(directory.path().join("authorizations.json"));
             authorization_store.ensure().unwrap();
             let (wake, mut wake_inbox) = mpsc::unbounded_channel();
-            let (authorization_plugin, authorizations) =
-                RemoteAuthorizationPlugin::with_store(authorization_store.clone(), wake);
+            let (authorizations, authorization_runtime) =
+                RemoteAuthorizations::with_store(authorization_store.clone(), wake);
             let authorization_runtime = std::thread::spawn(move || {
                 let mut authorization_app = App::new();
-                authorization_app.add_plugins((MinimalPlugins, authorization_plugin));
+                authorization_app.add_plugins((MinimalPlugins, RemoteAuthorizationPlugin));
+                authorization_app
+                    .world_mut()
+                    .spawn((Name::new("remote authorizations"), authorization_runtime));
                 authorization_app.update();
                 while wake_inbox.blocking_recv().is_some() {
                     authorization_app.update();

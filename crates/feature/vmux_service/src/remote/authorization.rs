@@ -1,6 +1,5 @@
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
@@ -67,62 +66,11 @@ pub enum AuthorizationOutcome {
     Paired { device_token: String },
 }
 
-pub(crate) struct RemoteAuthorizationPlugin {
-    startup: Mutex<Option<(RemoteAuthorizationStore, AuthorizationReceivers)>>,
-}
-
-impl RemoteAuthorizationPlugin {
-    pub(crate) fn new(wake: mpsc::UnboundedSender<()>) -> (Self, RemoteAuthorizations) {
-        Self::with_store(RemoteAuthorizationStore::current(), wake)
-    }
-
-    pub(crate) fn with_store(
-        store: RemoteAuthorizationStore,
-        wake: mpsc::UnboundedSender<()>,
-    ) -> (Self, RemoteAuthorizations) {
-        let (authenticate, authenticate_inbox) = mpsc::unbounded_channel();
-        let (revalidate, revalidate_inbox) = mpsc::unbounded_channel();
-        (
-            Self {
-                startup: Mutex::new(Some((
-                    store,
-                    AuthorizationReceivers {
-                        authenticate: authenticate_inbox,
-                        revalidate: revalidate_inbox,
-                    },
-                ))),
-            },
-            RemoteAuthorizations {
-                authenticate,
-                revalidate,
-                wake,
-            },
-        )
-    }
-}
+pub(crate) struct RemoteAuthorizationPlugin;
 
 impl Plugin for RemoteAuthorizationPlugin {
     fn build(&self, app: &mut App) {
-        let startup = Mutex::new(Some(
-            self.startup
-                .lock()
-                .unwrap()
-                .take()
-                .expect("remote authorization plugin can only be built once"),
-        ));
-        app.add_systems(Startup, move |mut commands: Commands| {
-            let (store, receivers) = startup
-                .lock()
-                .unwrap()
-                .take()
-                .expect("remote authorization runtime can only start once");
-            commands.spawn((
-                Name::new("remote authorizations"),
-                store,
-                AuthorizationInbox(receivers),
-            ));
-        })
-        .add_systems(
+        app.add_systems(
             Update,
             (
                 receive_authorization_requests,
@@ -142,6 +90,32 @@ pub(crate) struct RemoteAuthorizations {
 }
 
 impl RemoteAuthorizations {
+    pub(crate) fn new(wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
+        Self::with_store(RemoteAuthorizationStore::current(), wake)
+    }
+
+    pub(crate) fn with_store(
+        store: RemoteAuthorizationStore,
+        wake: mpsc::UnboundedSender<()>,
+    ) -> (Self, impl Bundle) {
+        let (authenticate, authenticate_inbox) = mpsc::unbounded_channel();
+        let (revalidate, revalidate_inbox) = mpsc::unbounded_channel();
+        (
+            Self {
+                authenticate,
+                revalidate,
+                wake,
+            },
+            (
+                store,
+                AuthorizationInbox(AuthorizationReceivers {
+                    authenticate: authenticate_inbox,
+                    revalidate: revalidate_inbox,
+                }),
+            ),
+        )
+    }
+
     pub(crate) async fn authenticate(
         &self,
         client_id: DeviceId,

@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use bevy::prelude::*;
 use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
@@ -57,7 +57,10 @@ pub(crate) struct ProcessQueries {
 }
 
 impl ProcessQueries {
-    fn new(wake: mpsc::UnboundedSender<()>) -> (Self, ProcessQueryReceivers) {
+    pub(crate) fn new(
+        manager: Arc<AsyncMutex<ProcessManager>>,
+        wake: mpsc::UnboundedSender<()>,
+    ) -> (Self, impl Bundle) {
         let (output, output_rx) = mpsc::unbounded_channel();
         let (transcript, transcript_rx) = mpsc::unbounded_channel();
         let (command_exit, command_exit_rx) = mpsc::unbounded_channel();
@@ -70,12 +73,15 @@ impl ProcessQueries {
                 run_completion,
                 wake,
             },
-            ProcessQueryReceivers {
-                output: output_rx,
-                transcript: transcript_rx,
-                command_exit: command_exit_rx,
-                run_completion: run_completion_rx,
-            },
+            (
+                ProcessRuntime(manager),
+                ProcessQueryInbox(ProcessQueryReceivers {
+                    output: output_rx,
+                    transcript: transcript_rx,
+                    command_exit: command_exit_rx,
+                    run_completion: run_completion_rx,
+                }),
+            ),
         )
     }
 
@@ -182,49 +188,11 @@ impl ProcessQueries {
     }
 }
 
-pub(crate) struct ProcessQueryPlugin {
-    manager: Arc<AsyncMutex<ProcessManager>>,
-    receivers: Mutex<Option<ProcessQueryReceivers>>,
-}
-
-impl ProcessQueryPlugin {
-    pub(crate) fn new(
-        manager: Arc<AsyncMutex<ProcessManager>>,
-        wake: mpsc::UnboundedSender<()>,
-    ) -> (Self, ProcessQueries) {
-        let (queries, receivers) = ProcessQueries::new(wake);
-        (
-            Self {
-                manager,
-                receivers: Mutex::new(Some(receivers)),
-            },
-            queries,
-        )
-    }
-}
+pub(crate) struct ProcessQueryPlugin;
 
 impl Plugin for ProcessQueryPlugin {
     fn build(&self, app: &mut App) {
-        let receivers = self
-            .receivers
-            .lock()
-            .unwrap()
-            .take()
-            .expect("daemon query plugin can only be built once");
-        let startup = Mutex::new(Some((Arc::clone(&self.manager), receivers)));
-        app.add_systems(Startup, move |mut commands: Commands| {
-            let (manager, receivers) = startup
-                .lock()
-                .unwrap()
-                .take()
-                .expect("daemon query runtime can only start once");
-            commands.spawn((
-                Name::new("vmux service process runtime"),
-                ProcessRuntime(manager),
-                ProcessQueryInbox(receivers),
-            ));
-        })
-        .add_systems(
+        app.add_systems(
             Update,
             (
                 receive_process_queries,
@@ -365,9 +333,11 @@ mod tests {
         let manager = Arc::new(AsyncMutex::new(ProcessManager::new(
             mpsc::unbounded_channel().0,
         )));
-        let (plugin, queries) = ProcessQueryPlugin::new(manager, wake);
+        let (queries, runtime) = ProcessQueries::new(manager, wake);
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, plugin));
+        app.add_plugins((MinimalPlugins, ProcessQueryPlugin));
+        app.world_mut()
+            .spawn((Name::new("vmux service process runtime"), runtime));
         let process_id = ProcessId::new();
         let query = tokio::spawn(async move { queries.output(process_id).await });
         for _ in 0..4 {

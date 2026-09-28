@@ -17,15 +17,13 @@ pub fn run() {
     let listener = rt.block_on(bootstrap(signal_tx.clone()));
 
     let handle = rt.handle().clone();
-    App::new()
-        .add_plugins(crate::server::ServiceDaemonPlugin::new(
-            listener,
-            wake_tx,
-            handle.clone(),
-            signal_tx,
-        ))
-        .set_runner(wake_driven_runner(handle, wake_rx, signal_rx))
-        .run();
+    let daemon =
+        crate::server::ServiceDaemonPlugin::runtime(listener, wake_tx, handle.clone(), signal_tx);
+    let mut app = App::new();
+    app.add_plugins(crate::server::ServiceDaemonPlugin)
+        .set_runner(wake_driven_runner(handle, wake_rx, signal_rx));
+    app.world_mut().spawn(daemon);
+    app.run();
 }
 
 async fn bootstrap(signal_tx: mpsc::Sender<()>) -> tokio::net::UnixListener {

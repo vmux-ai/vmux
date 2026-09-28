@@ -5,11 +5,11 @@ pub use driver::{AcpInput, AcpShared};
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 
 use bevy::prelude::{
-    App, ApplyDeferred, Commands, Component, Entity, IntoScheduleConfigs, Name, Plugin, Query,
-    Single, Startup, Update,
+    App, ApplyDeferred, Bundle, Commands, Component, Entity, IntoScheduleConfigs, Name, Plugin,
+    Query, Single, Update,
 };
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -21,84 +21,11 @@ use crate::remote::RemoteSession;
 use vmux_api::protocol::ServiceMessage;
 use vmux_api::room::Message;
 
-pub(crate) struct AcpSessionPlugin {
-    inbox: StdMutex<Option<AcpSessionReceivers>>,
-    runtime: Handle,
-}
-
-impl AcpSessionPlugin {
-    pub(crate) fn new(runtime: Handle, wake: mpsc::UnboundedSender<()>) -> (Self, AcpSessions) {
-        let (spawns, spawn_inbox) = mpsc::unbounded_channel();
-        let (inputs, input_inbox) = mpsc::unbounded_channel();
-        let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
-        let (snapshots, snapshot_inbox) = mpsc::unbounded_channel();
-        let (agent_infos, agent_info_inbox) = mpsc::unbounded_channel();
-        let (model_infos, model_info_inbox) = mpsc::unbounded_channel();
-        let (mode_infos, mode_info_inbox) = mpsc::unbounded_channel();
-        let (messages, message_inbox) = mpsc::unbounded_channel();
-        let (lists, list_inbox) = mpsc::unbounded_channel();
-        let (lookups, lookup_inbox) = mpsc::unbounded_channel();
-        let (rebinds, rebind_inbox) = mpsc::unbounded_channel();
-        let (closes, close_inbox) = mpsc::unbounded_channel();
-        (
-            Self {
-                inbox: StdMutex::new(Some(AcpSessionReceivers {
-                    spawns: spawn_inbox,
-                    inputs: input_inbox,
-                    subscriptions: subscription_inbox,
-                    snapshots: snapshot_inbox,
-                    agent_infos: agent_info_inbox,
-                    model_infos: model_info_inbox,
-                    mode_infos: mode_info_inbox,
-                    messages: message_inbox,
-                    lists: list_inbox,
-                    lookups: lookup_inbox,
-                    rebinds: rebind_inbox,
-                    closes: close_inbox,
-                })),
-                runtime,
-            },
-            AcpSessions {
-                spawns,
-                inputs,
-                subscriptions,
-                snapshots,
-                agent_infos,
-                model_infos,
-                mode_infos,
-                messages,
-                lists,
-                lookups,
-                rebinds,
-                closes,
-                wake,
-            },
-        )
-    }
-}
+pub(crate) struct AcpSessionPlugin;
 
 impl Plugin for AcpSessionPlugin {
     fn build(&self, app: &mut App) {
-        let inbox = self
-            .inbox
-            .lock()
-            .unwrap()
-            .take()
-            .expect("ACP session plugin can only be built once");
-        let startup = StdMutex::new(Some((self.runtime.clone(), inbox)));
-        app.add_systems(Startup, move |mut commands: Commands| {
-            let (runtime, inbox) = startup
-                .lock()
-                .unwrap()
-                .take()
-                .expect("ACP session runtime can only start once");
-            commands.spawn((
-                Name::new("ACP session runtime"),
-                AcpSessionRuntime(runtime),
-                AcpSessionInbox(inbox),
-            ));
-        })
-        .add_systems(
+        app.add_systems(
             Update,
             (
                 receive_acp_session_requests,
@@ -135,6 +62,54 @@ pub(crate) struct AcpSessions {
 }
 
 impl AcpSessions {
+    pub(crate) fn new(runtime: Handle, wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
+        let (spawns, spawn_inbox) = mpsc::unbounded_channel();
+        let (inputs, input_inbox) = mpsc::unbounded_channel();
+        let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
+        let (snapshots, snapshot_inbox) = mpsc::unbounded_channel();
+        let (agent_infos, agent_info_inbox) = mpsc::unbounded_channel();
+        let (model_infos, model_info_inbox) = mpsc::unbounded_channel();
+        let (mode_infos, mode_info_inbox) = mpsc::unbounded_channel();
+        let (messages, message_inbox) = mpsc::unbounded_channel();
+        let (lists, list_inbox) = mpsc::unbounded_channel();
+        let (lookups, lookup_inbox) = mpsc::unbounded_channel();
+        let (rebinds, rebind_inbox) = mpsc::unbounded_channel();
+        let (closes, close_inbox) = mpsc::unbounded_channel();
+        (
+            Self {
+                spawns,
+                inputs,
+                subscriptions,
+                snapshots,
+                agent_infos,
+                model_infos,
+                mode_infos,
+                messages,
+                lists,
+                lookups,
+                rebinds,
+                closes,
+                wake,
+            },
+            (
+                AcpSessionRuntime(runtime),
+                AcpSessionInbox(AcpSessionReceivers {
+                    spawns: spawn_inbox,
+                    inputs: input_inbox,
+                    subscriptions: subscription_inbox,
+                    snapshots: snapshot_inbox,
+                    agent_infos: agent_info_inbox,
+                    model_infos: model_info_inbox,
+                    mode_infos: mode_info_inbox,
+                    messages: message_inbox,
+                    lists: list_inbox,
+                    lookups: lookup_inbox,
+                    rebinds: rebind_inbox,
+                    closes: close_inbox,
+                }),
+            ),
+        )
+    }
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn(
         &self,

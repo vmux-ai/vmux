@@ -1,56 +1,14 @@
-use std::sync::Mutex;
-
 use bevy::prelude::*;
 use tokio::sync::{mpsc, oneshot};
 use vmux_api::room::ClientOpId;
 
 const MAX_CLIENT_OPERATIONS: usize = 4096;
 
-pub(crate) struct ClientOperationPlugin {
-    inbox: Mutex<Option<ClientOperationReceivers>>,
-}
-
-impl ClientOperationPlugin {
-    pub(crate) fn new(wake: mpsc::UnboundedSender<()>) -> (Self, ClientOperations) {
-        let (claims, claim_inbox) = mpsc::unbounded_channel();
-        let (releases, release_inbox) = mpsc::unbounded_channel();
-        (
-            Self {
-                inbox: Mutex::new(Some(ClientOperationReceivers {
-                    claims: claim_inbox,
-                    releases: release_inbox,
-                })),
-            },
-            ClientOperations {
-                claims,
-                releases,
-                wake,
-            },
-        )
-    }
-}
+pub(crate) struct ClientOperationPlugin;
 
 impl Plugin for ClientOperationPlugin {
     fn build(&self, app: &mut App) {
-        let inbox = self
-            .inbox
-            .lock()
-            .unwrap()
-            .take()
-            .expect("client operation plugin can only be built once");
-        let startup = Mutex::new(Some(inbox));
-        app.add_systems(Startup, move |mut commands: Commands| {
-            let inbox = startup
-                .lock()
-                .unwrap()
-                .take()
-                .expect("client operation runtime can only start once");
-            commands.spawn((
-                Name::new("remote client operations"),
-                ClientOperationInbox(inbox),
-            ));
-        })
-        .add_systems(
+        app.add_systems(
             Update,
             (
                 receive_client_operation_requests,
@@ -72,6 +30,21 @@ pub(crate) struct ClientOperations {
 }
 
 impl ClientOperations {
+    pub(crate) fn new(wake: mpsc::UnboundedSender<()>) -> (Self, impl Bundle) {
+        let (claims, claim_inbox) = mpsc::unbounded_channel();
+        let (releases, release_inbox) = mpsc::unbounded_channel();
+        (
+            Self {
+                claims,
+                releases,
+                wake,
+            },
+            ClientOperationInbox(ClientOperationReceivers {
+                claims: claim_inbox,
+                releases: release_inbox,
+            }),
+        )
+    }
     pub(crate) async fn claim(&self, id: ClientOpId) -> bool {
         let (response, receiver) = oneshot::channel();
         if self
@@ -239,9 +212,11 @@ mod tests {
     #[tokio::test]
     async fn client_operations_are_entities_with_bounded_claims() {
         let (wake, _wake_inbox) = mpsc::unbounded_channel();
-        let (plugin, operations) = ClientOperationPlugin::new(wake);
+        let (operations, runtime) = ClientOperations::new(wake);
         let mut app = App::new();
-        app.add_plugins(plugin);
+        app.add_plugins(ClientOperationPlugin);
+        app.world_mut()
+            .spawn((Name::new("remote client operations"), runtime));
 
         let first = ClientOpId::new("first");
         assert!(claim(&mut app, operations.clone(), first.clone()).await);

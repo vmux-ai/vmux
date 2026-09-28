@@ -79,160 +79,70 @@ impl ProcessSnapshot {
     }
 }
 
-pub(crate) struct ServiceDaemonPlugin {
-    listener: std::sync::Mutex<Option<UnixListener>>,
-    manager: Arc<Mutex<ProcessManager>>,
-    runtime: tokio::runtime::Handle,
-    exit: mpsc::Sender<()>,
-    queries: ProcessQueries,
-    query_plugin: std::sync::Mutex<Option<ProcessQueryPlugin>>,
-    client_operations: ClientOperations,
-    client_operation_plugin: std::sync::Mutex<Option<ClientOperationPlugin>>,
-    authorizations: RemoteAuthorizations,
-    authorization_plugin: std::sync::Mutex<Option<RemoteAuthorizationPlugin>>,
-    agent_sessions: AgentSessions,
-    agent_session_plugin: std::sync::Mutex<Option<AgentSessionPlugin>>,
-    acp_sessions: AcpSessions,
-    acp_session_plugin: std::sync::Mutex<Option<AcpSessionPlugin>>,
-}
+pub(crate) struct ServiceDaemonPlugin;
 
 impl ServiceDaemonPlugin {
-    pub(crate) fn new(
+    pub(crate) fn runtime(
         listener: UnixListener,
         wake: mpsc::UnboundedSender<()>,
         runtime: tokio::runtime::Handle,
         exit: mpsc::Sender<()>,
-    ) -> Self {
+    ) -> impl Bundle {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
-        let (query_plugin, queries) = ProcessQueryPlugin::new(Arc::clone(&manager), wake.clone());
-        let (client_operation_plugin, client_operations) = ClientOperationPlugin::new(wake.clone());
-        let (authorization_plugin, authorizations) = RemoteAuthorizationPlugin::new(wake.clone());
-        let (agent_session_plugin, agent_sessions) =
-            AgentSessionPlugin::new(runtime.clone(), wake.clone());
-        let (acp_session_plugin, acp_sessions) = AcpSessionPlugin::new(runtime.clone(), wake);
-        Self {
-            listener: std::sync::Mutex::new(Some(listener)),
-            manager,
-            runtime,
-            exit,
-            queries,
-            query_plugin: std::sync::Mutex::new(Some(query_plugin)),
-            client_operations,
-            client_operation_plugin: std::sync::Mutex::new(Some(client_operation_plugin)),
-            authorizations,
-            authorization_plugin: std::sync::Mutex::new(Some(authorization_plugin)),
-            agent_sessions,
-            agent_session_plugin: std::sync::Mutex::new(Some(agent_session_plugin)),
-            acp_sessions,
-            acp_session_plugin: std::sync::Mutex::new(Some(acp_session_plugin)),
-        }
-    }
-}
-
-impl Plugin for ServiceDaemonPlugin {
-    fn build(&self, app: &mut App) {
-        let listener = self
-            .listener
-            .lock()
-            .unwrap()
-            .take()
-            .expect("service daemon plugin can only be built once");
-        let manager = Arc::clone(&self.manager);
-        let server_manager = Arc::clone(&manager);
-        let queries = self.queries.clone();
-        let exit = self.exit.clone();
-        let query_plugin = self
-            .query_plugin
-            .lock()
-            .unwrap()
-            .take()
-            .expect("service daemon plugin can only be built once");
-        let client_operations = self.client_operations.clone();
-        let client_operation_plugin = self
-            .client_operation_plugin
-            .lock()
-            .unwrap()
-            .take()
-            .expect("service daemon plugin can only be built once");
-        let authorizations = self.authorizations.clone();
-        let authorization_plugin = self
-            .authorization_plugin
-            .lock()
-            .unwrap()
-            .take()
-            .expect("service daemon plugin can only be built once");
-        let agent_sessions = self.agent_sessions.clone();
-        let agent_session_plugin = self
-            .agent_session_plugin
-            .lock()
-            .unwrap()
-            .take()
-            .expect("service daemon plugin can only be built once");
-        let acp_sessions = self.acp_sessions.clone();
-        let acp_session_plugin = self
-            .acp_session_plugin
-            .lock()
-            .unwrap()
-            .take()
-            .expect("service daemon plugin can only be built once");
-        app.add_plugins((
-            query_plugin,
-            client_operation_plugin,
-            authorization_plugin,
-            agent_session_plugin,
-            acp_session_plugin,
-        ));
-        let startup = std::sync::Mutex::new(Some((
-            listener,
-            server_manager,
-            queries,
-            client_operations,
-            authorizations,
-            agent_sessions,
-            acp_sessions,
-            self.runtime.clone(),
-            exit,
-        )));
-        app.add_systems(Startup, move |mut commands: Commands| {
-            let (
+        let (queries, process_runtime) = ProcessQueries::new(Arc::clone(&manager), wake.clone());
+        let (client_operations, client_operation_runtime) = ClientOperations::new(wake.clone());
+        let (authorizations, authorization_runtime) = RemoteAuthorizations::new(wake.clone());
+        let (agent_sessions, agent_session_runtime) =
+            AgentSessions::new(runtime.clone(), wake.clone());
+        let (acp_sessions, acp_session_runtime) = AcpSessions::new(runtime.clone(), wake);
+        (
+            Name::new("vmux service runtime"),
+            ServiceDaemonStartup(Some(ServiceDaemonStart {
                 listener,
                 manager,
-                queries,
+                process_queries: queries,
                 client_operations,
                 authorizations,
                 agent_sessions,
                 acp_sessions,
                 runtime,
                 exit,
-            ) = startup
-                .lock()
-                .unwrap()
-                .take()
-                .expect("service daemon can only start once");
-            let started_at = ServiceStartedAt(Instant::now());
-            let task = runtime.spawn(async move {
-                ServiceServer {
-                    listener,
-                    manager,
-                    process_queries: queries,
-                    client_operations,
-                    authorizations,
-                    agent_sessions,
-                    acp_sessions,
-                    started_at,
-                }
-                .run()
-                .await;
-                let _ = exit.send(()).await;
-            });
-            commands.spawn((
-                Name::new("vmux service daemon"),
-                ServiceDaemon,
-                started_at,
-                ServiceServerTask(task),
-            ));
-        });
+            })),
+            process_runtime,
+            client_operation_runtime,
+            authorization_runtime,
+            agent_session_runtime,
+            acp_session_runtime,
+        )
     }
+}
+
+impl Plugin for ServiceDaemonPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            ProcessQueryPlugin,
+            ClientOperationPlugin,
+            RemoteAuthorizationPlugin,
+            AgentSessionPlugin,
+            AcpSessionPlugin,
+        ))
+        .add_systems(Startup, start_service_daemon);
+    }
+}
+
+#[derive(Component)]
+struct ServiceDaemonStartup(Option<ServiceDaemonStart>);
+
+struct ServiceDaemonStart {
+    listener: UnixListener,
+    manager: Arc<Mutex<ProcessManager>>,
+    process_queries: ProcessQueries,
+    client_operations: ClientOperations,
+    authorizations: RemoteAuthorizations,
+    agent_sessions: AgentSessions,
+    acp_sessions: AcpSessions,
+    runtime: tokio::runtime::Handle,
+    exit: mpsc::Sender<()>,
 }
 
 #[derive(Component)]
@@ -247,6 +157,37 @@ struct ServiceServerTask(tokio::task::JoinHandle<()>);
 impl Drop for ServiceServerTask {
     fn drop(&mut self) {
         self.0.abort();
+    }
+}
+
+fn start_service_daemon(
+    mut startups: Query<(Entity, &mut ServiceDaemonStartup)>,
+    mut commands: Commands,
+) {
+    for (entity, mut startup) in &mut startups {
+        let Some(start) = startup.0.take() else {
+            continue;
+        };
+        let started_at = ServiceStartedAt(Instant::now());
+        let task = start.runtime.spawn(async move {
+            ServiceServer {
+                listener: start.listener,
+                manager: start.manager,
+                process_queries: start.process_queries,
+                client_operations: start.client_operations,
+                authorizations: start.authorizations,
+                agent_sessions: start.agent_sessions,
+                acp_sessions: start.acp_sessions,
+                started_at,
+            }
+            .run()
+            .await;
+            let _ = start.exit.send(()).await;
+        });
+        commands
+            .entity(entity)
+            .remove::<ServiceDaemonStartup>()
+            .insert((ServiceDaemon, started_at, ServiceServerTask(task)));
     }
 }
 
@@ -1472,10 +1413,10 @@ mod tests {
 
     async fn run_test_server(listener: UnixListener, wake: mpsc::UnboundedSender<()>) {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
-        let (_query_plugin, process_queries) =
-            ProcessQueryPlugin::new(Arc::clone(&manager), wake.clone());
-        let (_agent_plugin, agent_sessions) =
-            crate::agent::AgentSessionPlugin::new(tokio::runtime::Handle::current(), wake);
+        let (process_queries, _process_runtime) =
+            ProcessQueries::new(Arc::clone(&manager), wake.clone());
+        let (agent_sessions, _agent_runtime) =
+            crate::agent::AgentSessions::new(tokio::runtime::Handle::current(), wake);
         let acp_sessions = crate::acp::AcpSessions::closed();
         let mut server = Box::pin(
             super::ServiceServer {
