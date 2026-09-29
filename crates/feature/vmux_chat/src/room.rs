@@ -389,7 +389,7 @@ mod tests {
             RemoteEvent::Snapshot {
                 room_id: RoomId::from("r"),
                 through_seq: seq,
-                events: vmux_core::room::RoomEvents::from_messages(
+                events: vmux_session::room::RoomEvents::from_messages(
                     "s",
                     seq,
                     &[RoomMessage::user(text)],
@@ -438,7 +438,7 @@ mod tests {
             Self {
                 room_id: None,
                 through_seq: 0,
-                events: vmux_core::room::RoomEvents::from_messages(
+                events: vmux_session::room::RoomEvents::from_messages(
                     "s",
                     0,
                     &[
@@ -492,7 +492,7 @@ mod tests {
         let log = Log {
             room_id: None,
             through_seq: 0,
-            events: vmux_core::room::RoomEvents::from_messages(
+            events: vmux_session::room::RoomEvents::from_messages(
                 "s",
                 100,
                 &[RoomMessage::user("hello")],

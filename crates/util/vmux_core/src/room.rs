@@ -1,40 +1,5 @@
 use unicode_segmentation::UnicodeSegmentation;
-use vmux_api::room::{EventId, MemberId, Message, RoomEvent, RoomId};
-
-pub struct RoomEvents;
-
-impl RoomEvents {
-    pub fn from_messages(sid: &str, created_at_ms: u64, messages: &[Message]) -> Vec<RoomEvent> {
-        let room_id = RoomId::for_session(sid);
-        let local_member = MemberId::local(&room_id);
-        let agent_member = MemberId::agent(&room_id);
-        let mut events = Vec::with_capacity(messages.len());
-        let mut reply_to = None;
-        for (index, message) in messages.iter().enumerate() {
-            let server_seq = index as u64 + 1;
-            let event_id = EventId::new(format!("{}:event:{server_seq}", room_id.as_str()));
-            let is_user = matches!(message, Message::User { .. });
-            events.push(RoomEvent {
-                event_id: event_id.clone(),
-                room_id: room_id.clone(),
-                actor_id: if is_user {
-                    local_member.clone()
-                } else {
-                    agent_member.clone()
-                },
-                client_op_id: None,
-                server_seq,
-                created_at_ms: created_at_ms.saturating_add(index as u64),
-                reply_to: if is_user { None } else { reply_to.clone() },
-                message: message.clone(),
-            });
-            if is_user {
-                reply_to = Some(event_id);
-            }
-        }
-        events
-    }
-}
+use vmux_api::room::Message;
 
 pub struct ConversationTitle;
 
@@ -122,28 +87,6 @@ impl ConversationTitle {
 mod tests {
     use super::*;
     use vmux_api::room::AssistantBlock;
-
-    #[test]
-    fn message_projection_has_stable_order_and_reply_links() {
-        let events = RoomEvents::from_messages(
-            "session-1",
-            100,
-            &[
-                Message::user("hello"),
-                Message::Assistant {
-                    blocks: vec![AssistantBlock::Text("hi".to_string())],
-                },
-            ],
-        );
-
-        assert_eq!(
-            events[0].event_id,
-            EventId::new("session:session-1:event:1")
-        );
-        assert_eq!(events[1].server_seq, 2);
-        assert_eq!(events[1].reply_to, Some(events[0].event_id.clone()));
-        assert_eq!(events[1].created_at_ms, 101);
-    }
 
     #[test]
     fn title_uses_the_first_user_prompt() {

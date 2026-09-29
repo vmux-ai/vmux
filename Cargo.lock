@@ -10797,6 +10797,7 @@ dependencies = [
  "vmux_chat",
  "vmux_core",
  "vmux_path",
+ "vmux_session",
  "vmux_start",
  "vmux_team",
  "vmux_transport",
@@ -10938,7 +10939,6 @@ dependencies = [
  "serde",
  "serde_json",
  "vmux_api",
- "vmux_core",
 ]
 
 [[package]]

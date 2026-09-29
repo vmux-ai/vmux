@@ -15,7 +15,6 @@ bevy_reflect = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 vmux_api = { path = "../vmux_api", features = ["bevy"] }
-vmux_core = { path = "../vmux_core" }
 
 [lints]
 workspace = true

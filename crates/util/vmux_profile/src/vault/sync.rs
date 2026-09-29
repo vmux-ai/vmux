@@ -276,7 +276,7 @@ fn collect_fingerprint_directory(
     Ok(())
 }
 
-fn ignored_path(relative: &Path) -> bool {
+pub(super) fn ignored_path(relative: &Path) -> bool {
     if relative.file_name().is_some_and(|name| name == ".DS_Store") {
         return true;
     }
