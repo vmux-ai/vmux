@@ -852,6 +852,71 @@ mod tests {
         dir
     }
 
+    fn vibe_session_app(root: PathBuf) -> App {
+        let mut app = App::new();
+        app.add_message::<DiscoverAgentSessions>()
+            .add_message::<AgentSessionExited>()
+            .add_systems(Update, (discover_sessions, detect_ended_sessions));
+        app.world_mut().spawn((VibeCli, CliSessionRoot(root)));
+        app
+    }
+
+    #[test]
+    fn discovery_message_claims_matching_pending_session() {
+        let tmp = unique_tmp("vibe-ecs-discover");
+        let cwd = tmp.join("workspace");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let spawn_time = SystemTime::now();
+        std::thread::sleep(Duration::from_millis(20));
+        write_meta(
+            &tmp.join("session_20260929_120000_vb1"),
+            "full-vb1",
+            &cwd.to_string_lossy(),
+            "2026-09-29T12:00:00+00:00",
+            None,
+        );
+        let mut app = vibe_session_app(tmp.clone());
+        let entity = app
+            .world_mut()
+            .spawn(PendingAgentSession {
+                kind: AgentKind::Vibe,
+                spawn_time,
+                cwd,
+            })
+            .id();
+
+        app.world_mut().write_message(DiscoverAgentSessions);
+        app.update();
+
+        assert_eq!(
+            app.world().get::<SessionId>(entity).map(|id| id.0.as_str()),
+            Some("vb1")
+        );
+        assert!(app.world().get::<PendingAgentSession>(entity).is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn discovery_message_keeps_unmatched_pending_session() {
+        let tmp = unique_tmp("vibe-ecs-unmatched");
+        let mut app = vibe_session_app(tmp.clone());
+        let entity = app
+            .world_mut()
+            .spawn(PendingAgentSession {
+                kind: AgentKind::Vibe,
+                spawn_time: SystemTime::UNIX_EPOCH,
+                cwd: tmp.join("missing"),
+            })
+            .id();
+
+        app.world_mut().write_message(DiscoverAgentSessions);
+        app.update();
+
+        assert!(app.world().get::<PendingAgentSession>(entity).is_some());
+        assert!(app.world().get::<SessionId>(entity).is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn discover_returns_short_uuid_from_session_dir_name() {
         let tmp = unique_tmp("vibe-discover-shortid");
@@ -940,41 +1005,36 @@ mod tests {
     }
 
     #[test]
-    fn detect_end_time_returns_true_when_meta_has_end_time() {
+    fn discovery_message_removes_ended_session_and_emits_exit() {
         let tmp = unique_tmp("vibe-end");
-        let sessions = tmp.join("sessions");
         let cwd = "/tmp/work";
         write_meta(
-            &sessions.join("a"),
+            &tmp.join("a"),
             "ended-id",
             cwd,
             "2026-05-11T12:00:00+00:00",
             Some("2026-05-11T13:00:00+00:00"),
         );
-        write_meta(
-            &sessions.join("b"),
-            "live-id",
-            cwd,
-            "2026-05-11T12:00:00+00:00",
-            None,
-        );
+        let mut app = vibe_session_app(tmp.clone());
+        let entity = app
+            .world_mut()
+            .spawn((
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                SessionId("ended-id".to_string()),
+            ))
+            .id();
 
-        let read_end = |id: &str| -> bool {
-            let entries = std::fs::read_dir(&sessions).unwrap();
-            for entry in entries.flatten() {
-                let path = entry.path().join("meta.json");
-                let text = std::fs::read_to_string(&path).unwrap();
-                let head: MetaJsonHead = serde_json::from_str(&text).unwrap();
-                if head.session_id != id {
-                    continue;
-                }
-                let exit: MetaJsonExit = serde_json::from_str(&text).unwrap();
-                return exit.end_time.is_some();
-            }
-            false
-        };
-        assert!(read_end("ended-id"));
-        assert!(!read_end("live-id"));
+        app.world_mut().write_message(DiscoverAgentSessions);
+        app.update();
+
+        assert!(app.world().get::<AgentSession>(entity).is_none());
+        assert!(app.world().get::<SessionId>(entity).is_none());
+        assert_eq!(
+            app.world().resource::<Messages<AgentSessionExited>>().len(),
+            1
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

@@ -5,9 +5,9 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use vmux_api::protocol::ClientMessage;
 use vmux_chat::host::{ChatSynced, ChatView};
 use vmux_command::WriteCommandRequests;
-#[cfg(test)]
-use vmux_core::AgentWorkingDir;
 use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
+#[cfg(test)]
+use vmux_core::{AgentWorkingDir, agent::AgentKind};
 use vmux_git::worktree::{
     CheckoutInfo, is_linked_worktree, repository_init, worktree_registrations,
 };
