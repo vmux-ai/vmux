@@ -1,5 +1,17 @@
 use bevy::prelude::*;
+use bevy_cef::prelude::UiInput;
+use vmux_command::snapshot::{
+    CommandBarProjectRoots, CommandBarProjection, WriteCommandBarSnapshots,
+};
+use vmux_core::event::{ProjectRow, ProjectRowKind, ProjectTreeToggle};
 use vmux_core::host::persistence::PersistenceAppExt;
+use vmux_git::worktree::LinkedRepoRoot;
+use vmux_layout::pane::Pane;
+use vmux_layout::space::{
+    EffectiveStartupSet, FocusedSpace, Space, SpaceId, SpaceOfPane, space_id_of, space_of,
+};
+use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
+use vmux_setting::{AppSettings, SettingsSaveRequest, SpaceOverrides, SpaceProject};
 
 pub struct SpaceProjectPlugin;
 
@@ -11,9 +23,9 @@ impl Plugin for SpaceProjectPlugin {
             .add_systems(
                 Update,
                 (
-                    remember_space_project.before(vmux_layout::space::EffectiveStartupSet),
+                    remember_space_project.before(EffectiveStartupSet),
                     publish_project_roots
-                        .in_set(vmux_command::snapshot::WriteCommandBarSnapshots)
+                        .in_set(WriteCommandBarSnapshots)
                         .after(remember_space_project),
                 ),
             );
@@ -25,8 +37,8 @@ fn spawn_repository_roots(mut commands: Commands) {
 }
 
 fn on_project_tree_toggle(
-    trigger: On<bevy_cef::prelude::UiInput<vmux_core::event::ProjectTreeToggle>>,
-    space_of_pane: vmux_layout::space::SpaceOfPane,
+    trigger: On<UiInput<ProjectTreeToggle>>,
+    space_of_pane: SpaceOfPane,
     mut expanded: Query<&mut ExpandedProjectDirs>,
     mut commands: Commands,
 ) {
@@ -43,10 +55,7 @@ fn on_project_tree_toggle(
     commands.entity(space).insert(dirs);
 }
 
-fn publish_project_roots(
-    projects: SpaceProjects,
-    mut state: Single<&mut vmux_command::snapshot::CommandBarProjection>,
-) {
+fn publish_project_roots(projects: SpaceProjects, mut state: Single<&mut CommandBarProjection>) {
     let mut next = Vec::new();
     let mut active = None;
     for project in projects.active_projects() {
@@ -58,7 +67,7 @@ fn publish_project_roots(
         }
         next.push(project.path);
     }
-    let roots = vmux_command::snapshot::CommandBarProjectRoots {
+    let roots = CommandBarProjectRoots {
         roots: next,
         active,
     };
@@ -86,7 +95,7 @@ impl ExpandedProjectDirs {
         self.0.iter().any(|held| held == path)
     }
 
-    fn children_of(&self, dir: &std::path::Path, depth: u32) -> Vec<vmux_core::event::ProjectRow> {
+    fn children_of(&self, dir: &std::path::Path, depth: u32) -> Vec<ProjectRow> {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return Vec::new();
         };
@@ -100,13 +109,13 @@ impl ExpandedProjectDirs {
                 continue;
             };
             let path = entry.path().to_string_lossy().into_owned();
-            rows.push(vmux_core::event::ProjectRow {
+            rows.push(ProjectRow {
                 label: name,
                 display_path: path.clone(),
                 depth,
                 kind: match kind.is_dir() {
-                    true => vmux_core::event::ProjectRowKind::Directory,
-                    false => vmux_core::event::ProjectRowKind::File,
+                    true => ProjectRowKind::Directory,
+                    false => ProjectRowKind::File,
                 },
                 expanded: kind.is_dir() && self.holds(&path),
                 path,
@@ -117,16 +126,8 @@ impl ExpandedProjectDirs {
             });
         }
         rows.sort_by(|a, b| {
-            let b_opens = matches!(
-                b.kind,
-                vmux_core::event::ProjectRowKind::Project
-                    | vmux_core::event::ProjectRowKind::Directory
-            );
-            let a_opens = matches!(
-                a.kind,
-                vmux_core::event::ProjectRowKind::Project
-                    | vmux_core::event::ProjectRowKind::Directory
-            );
+            let b_opens = matches!(b.kind, ProjectRowKind::Project | ProjectRowKind::Directory);
+            let a_opens = matches!(a.kind, ProjectRowKind::Project | ProjectRowKind::Directory);
             let folder_first = b_opens.cmp(&a_opens);
             folder_first.then_with(|| a.label.to_lowercase().cmp(&b.label.to_lowercase()))
         });
@@ -158,17 +159,17 @@ const UNLISTED_DIRS: &[&str] = &[
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct SpaceProjects<'w, 's> {
-    settings: Option<Res<'w, vmux_setting::AppSettings>>,
-    active_space: vmux_layout::space::FocusedSpace<'w, 's>,
+    settings: Option<Res<'w, AppSettings>>,
+    active_space: FocusedSpace<'w, 's>,
     child_of: Query<'w, 's, &'static ChildOf>,
-    spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
-    space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
-    expanded: Query<'w, 's, &'static ExpandedProjectDirs, With<vmux_layout::space::Space>>,
+    spaces: Query<'w, 's, (), With<Space>>,
+    space_ids: Query<'w, 's, &'static SpaceId>,
+    expanded: Query<'w, 's, &'static ExpandedProjectDirs, With<Space>>,
 }
 
 impl SpaceProjects<'_, '_> {
-    pub fn rows(&self, entity: Entity) -> Vec<vmux_core::event::ProjectRow> {
-        let Some(space) = vmux_layout::space::space_of(entity, &self.child_of, &self.spaces) else {
+    pub fn rows(&self, entity: Entity) -> Vec<ProjectRow> {
+        let Some(space) = space_of(entity, &self.child_of, &self.spaces) else {
             return self.active_rows();
         };
         let Ok(space_id) = self.space_ids.get(space) else {
@@ -177,7 +178,7 @@ impl SpaceProjects<'_, '_> {
         self.rows_of(&space_id.0, Some(space))
     }
 
-    pub fn active_rows(&self) -> Vec<vmux_core::event::ProjectRow> {
+    pub fn active_rows(&self) -> Vec<ProjectRow> {
         let Some(space) = self.active_space.entity() else {
             return Vec::new();
         };
@@ -187,14 +188,14 @@ impl SpaceProjects<'_, '_> {
         self.rows_of(space_id, Some(space))
     }
 
-    pub fn active_projects(&self) -> Vec<vmux_core::event::ProjectRow> {
+    pub fn active_projects(&self) -> Vec<ProjectRow> {
         let Some(space_id) = self.active_space.id() else {
             return Vec::new();
         };
         self.projects_of(space_id)
     }
 
-    fn projects_of(&self, space_id: &str) -> Vec<vmux_core::event::ProjectRow> {
+    fn projects_of(&self, space_id: &str) -> Vec<ProjectRow> {
         let Some(settings) = self.settings.as_deref() else {
             return Vec::new();
         };
@@ -204,7 +205,7 @@ impl SpaceProjects<'_, '_> {
         overrides.project_rows()
     }
 
-    fn rows_of(&self, space_id: &str, space: Option<Entity>) -> Vec<vmux_core::event::ProjectRow> {
+    fn rows_of(&self, space_id: &str, space: Option<Entity>) -> Vec<ProjectRow> {
         let listed = self.projects_of(space_id);
         let Some(expanded) = space.and_then(|space| self.expanded.get(space).ok()) else {
             return listed;
@@ -227,13 +228,13 @@ impl SpaceProjects<'_, '_> {
 #[derive(bevy::ecs::system::SystemParam)]
 struct SpaceOfTab<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
-    spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
-    ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
+    spaces: Query<'w, 's, (), With<Space>>,
+    ids: Query<'w, 's, &'static SpaceId>,
 }
 
 impl SpaceOfTab<'_, '_> {
     fn find(&self, tab: Entity) -> Option<String> {
-        vmux_layout::space::space_id_of(tab, &self.child_of, &self.spaces, &self.ids)
+        space_id_of(tab, &self.child_of, &self.spaces, &self.ids)
     }
 }
 
@@ -251,7 +252,7 @@ impl RepoRoots {
     }
 
     fn read(dir: &str) -> Option<String> {
-        let root = vmux_git::worktree::LinkedRepoRoot::find(std::path::Path::new(dir))?;
+        let root = LinkedRepoRoot::find(std::path::Path::new(dir))?;
         let root = root.to_string_lossy().into_owned();
         (root != dir && !root.is_empty()).then_some(root)
     }
@@ -260,14 +261,14 @@ impl RepoRoots {
 fn remember_space_project(
     bound: Query<(
         Entity,
-        Ref<vmux_layout::tab::TabWorkspace>,
-        Option<Ref<vmux_layout::tab::TabWorktree>>,
-        Option<&vmux_layout::tab::Tab>,
+        Ref<TabWorkspace>,
+        Option<Ref<TabWorktree>>,
+        Option<&Tab>,
     )>,
     space_of_tab: SpaceOfTab,
     mut roots: Single<&mut RepoRoots>,
-    settings: Option<ResMut<vmux_setting::AppSettings>>,
-    mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
+    settings: Option<ResMut<AppSettings>>,
+    mut saves: MessageWriter<SettingsSaveRequest>,
 ) {
     if bound.is_empty() {
         return;
@@ -302,11 +303,11 @@ fn remember_space_project(
                             &worktree.checkout_dir
                         }
                     });
-                vmux_setting::SpaceProject::checked_out(&worktree.repo_root, checkout)
+                SpaceProject::checked_out(&worktree.repo_root, checkout)
             }
             _ => match roots.resolve(dir) {
-                Some(root) => vmux_setting::SpaceProject::checked_out(&root, dir),
-                None => vmux_setting::SpaceProject::at(dir),
+                Some(root) => SpaceProject::checked_out(&root, dir),
+                None => SpaceProject::at(dir),
             },
         };
         let changed = settings
@@ -314,7 +315,7 @@ fn remember_space_project(
             .remember_space_project(&space_id, project);
         if changed {
             settings.set_changed();
-            saves.write(vmux_setting::SettingsSaveRequest);
+            saves.write(SettingsSaveRequest);
         }
     }
 }
@@ -327,10 +328,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct SawSettingsChange(bool);
 
-    fn record_settings_change(
-        settings: Res<vmux_setting::AppSettings>,
-        mut saw: ResMut<SawSettingsChange>,
-    ) {
+    fn record_settings_change(settings: Res<AppSettings>, mut saw: ResMut<SawSettingsChange>) {
         saw.0 = settings.is_changed();
     }
 
@@ -345,25 +343,16 @@ mod tests {
         fn start(space_id: &str) -> Self {
             let mut app = App::new();
             app.add_plugins(SpaceProjectPlugin)
-                .add_message::<vmux_setting::SettingsSaveRequest>()
+                .add_message::<SettingsSaveRequest>()
                 .init_resource::<SawSettingsChange>()
                 .add_systems(Update, record_settings_change.after(remember_space_project))
-                .insert_resource(vmux_setting::AppSettings::embedded());
+                .insert_resource(AppSettings::embedded());
             let space = app
                 .world_mut()
-                .spawn((
-                    vmux_layout::space::Space,
-                    vmux_layout::space::SpaceId(space_id.to_string()),
-                ))
+                .spawn((Space, SpaceId(space_id.to_string())))
                 .id();
-            let tab = app
-                .world_mut()
-                .spawn((vmux_layout::tab::Tab::default(), ChildOf(space)))
-                .id();
-            let pane = app
-                .world_mut()
-                .spawn((vmux_layout::pane::Pane, ChildOf(tab)))
-                .id();
+            let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+            let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
             app.update();
             Self {
                 app,
@@ -374,11 +363,9 @@ mod tests {
         }
 
         fn toggle(&mut self, path: &str, pane_id: String) {
-            self.app.world_mut().trigger(bevy_cef::prelude::UiInput::<
-                vmux_core::event::ProjectTreeToggle,
-            > {
+            self.app.world_mut().trigger(UiInput::<ProjectTreeToggle> {
                 webview: Entity::PLACEHOLDER,
-                payload: vmux_core::event::ProjectTreeToggle {
+                payload: ProjectTreeToggle {
                     path: path.to_string(),
                     pane_id,
                 },
@@ -398,7 +385,7 @@ mod tests {
             self.app
                 .world_mut()
                 .entity_mut(self.tab)
-                .insert(vmux_layout::tab::TabWorkspace {
+                .insert(TabWorkspace {
                     project_dir: project_dir.to_string(),
                 });
             self.app.update();
@@ -407,14 +394,14 @@ mod tests {
         fn select_worktree(&mut self, project_dir: &str, repo_root: &str) {
             self.app
                 .world_mut()
-                .get_mut::<vmux_layout::tab::Tab>(self.tab)
+                .get_mut::<Tab>(self.tab)
                 .unwrap()
                 .startup_dir = Some(project_dir.to_string());
             self.app.world_mut().entity_mut(self.tab).insert((
-                vmux_layout::tab::TabWorkspace {
+                TabWorkspace {
                     project_dir: project_dir.to_string(),
                 },
-                vmux_layout::tab::TabWorktree {
+                TabWorktree {
                     repo_root: repo_root.to_string(),
                     checkout_dir: project_dir.to_string(),
                     branch: "vmux/test".to_string(),
@@ -432,14 +419,14 @@ mod tests {
         ) {
             self.app
                 .world_mut()
-                .get_mut::<vmux_layout::tab::Tab>(self.tab)
+                .get_mut::<Tab>(self.tab)
                 .unwrap()
                 .startup_dir = Some(checkout_dir.to_string());
             self.app.world_mut().entity_mut(self.tab).insert((
-                vmux_layout::tab::TabWorkspace {
+                TabWorkspace {
                     project_dir: project_dir.to_string(),
                 },
-                vmux_layout::tab::TabWorktree {
+                TabWorktree {
                     repo_root: repo_root.to_string(),
                     checkout_dir: checkout_dir.to_string(),
                     branch: "vmux/test".to_string(),
@@ -452,7 +439,7 @@ mod tests {
         fn checkouts(&self, space_id: &str) -> Vec<Option<String>> {
             self.app
                 .world()
-                .resource::<vmux_setting::AppSettings>()
+                .resource::<AppSettings>()
                 .spaces
                 .get(space_id)
                 .map(|space| space.projects.iter().map(|p| p.checkout.clone()).collect())
@@ -462,7 +449,7 @@ mod tests {
         fn remembered(&self, space_id: &str) -> Option<String> {
             self.app
                 .world()
-                .resource::<vmux_setting::AppSettings>()
+                .resource::<AppSettings>()
                 .spaces
                 .get(space_id)?
                 .active_dir()
@@ -472,7 +459,7 @@ mod tests {
         fn listed(&self, space_id: &str) -> Vec<String> {
             self.app
                 .world()
-                .resource::<vmux_setting::AppSettings>()
+                .resource::<AppSettings>()
                 .spaces
                 .get(space_id)
                 .map(|space| space.projects.iter().map(|p| p.path.clone()).collect())
@@ -482,7 +469,7 @@ mod tests {
         fn known(&self) -> Vec<String> {
             self.app
                 .world()
-                .resource::<vmux_setting::AppSettings>()
+                .resource::<AppSettings>()
                 .projects
                 .iter()
                 .map(|p| p.path.clone())
@@ -492,7 +479,7 @@ mod tests {
         fn drain_saves(&mut self) -> usize {
             self.app
                 .world_mut()
-                .resource_mut::<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>()
+                .resource_mut::<bevy::ecs::message::Messages<SettingsSaveRequest>>()
                 .drain()
                 .count()
         }
@@ -531,11 +518,11 @@ mod tests {
         let project = root.path().join("project");
         std::fs::create_dir_all(project.join("src")).unwrap();
         let path = project.to_string_lossy().into_owned();
-        let mut settings = vmux_setting::AppSettings::embedded();
+        let mut settings = AppSettings::embedded();
         settings.spaces.insert(
             "work".to_string(),
-            vmux_setting::SpaceOverrides {
-                projects: vec![vmux_setting::SpaceProject::at(path.clone())],
+            SpaceOverrides {
+                projects: vec![SpaceProject::at(path.clone())],
                 active_project: Some(path.clone()),
                 ..Default::default()
             },
@@ -545,17 +532,14 @@ mod tests {
         let expanded_space = app
             .world_mut()
             .spawn((
-                vmux_layout::space::Space,
-                vmux_layout::space::SpaceId("work".to_string()),
+                Space,
+                SpaceId("work".to_string()),
                 ExpandedProjectDirs(vec![path]),
             ))
             .id();
         let collapsed_space = app
             .world_mut()
-            .spawn((
-                vmux_layout::space::Space,
-                vmux_layout::space::SpaceId("work".to_string()),
-            ))
+            .spawn((Space, SpaceId("work".to_string())))
             .id();
         let expanded_pane = app.world_mut().spawn(ChildOf(expanded_space)).id();
         let collapsed_pane = app.world_mut().spawn(ChildOf(collapsed_space)).id();
