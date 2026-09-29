@@ -26,6 +26,37 @@ pub struct CheckoutInfo {
     pub common_dir: PathBuf,
 }
 
+impl TryFrom<&Path> for CheckoutInfo {
+    type Error = GitError;
+
+    fn try_from(dir: &Path) -> Result<Self, Self::Error> {
+        let input_dir = dir
+            .canonicalize()
+            .map_err(|error| GitError(format!("invalid checkout directory: {error}")))?;
+        if !input_dir.is_dir() {
+            return Err(GitError("checkout path is not a directory".to_string()));
+        }
+        let common_dir = rev_parse_path(&input_dir, "--git-common-dir", "git common dir")?;
+        let common_dir = common_dir
+            .canonicalize()
+            .map_err(|error| GitError(format!("invalid git common directory: {error}")))?;
+        let root = match rev_parse_path(&input_dir, "--show-toplevel", "git checkout root") {
+            Ok(root) => root,
+            Err(_) if is_bare_repository(&input_dir) => bare_checkout_root(&input_dir, &common_dir),
+            Err(error) => return Err(error),
+        };
+        let root = root
+            .canonicalize()
+            .map_err(|error| GitError(format!("invalid checkout root: {error}")))?;
+        if !root.is_dir() || !input_dir.starts_with(&root) {
+            return Err(GitError(
+                "git checkout root does not contain the input directory".to_string(),
+            ));
+        }
+        Ok(Self { root, common_dir })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeRegistration {
     pub path: PathBuf,
@@ -176,7 +207,9 @@ impl Drop for RepositoryWorktreeLock {
 }
 
 fn lock_repository_worktrees(root: &Path) -> Result<RepositoryWorktreeLock, GitError> {
-    let path = common_dir_of(root)?.join("vmux-worktrees.lock");
+    let path = CheckoutInfo::try_from(root)?
+        .common_dir
+        .join("vmux-worktrees.lock");
     let file = OpenOptions::new()
         .create(true)
         .read(true)
@@ -241,37 +274,6 @@ fn bare_checkout_root(input_dir: &Path, common_dir: &Path) -> PathBuf {
         .to_path_buf()
 }
 
-pub fn checkout_info(dir: &Path) -> Result<CheckoutInfo, GitError> {
-    let input_dir = dir
-        .canonicalize()
-        .map_err(|error| GitError(format!("invalid checkout directory: {error}")))?;
-    if !input_dir.is_dir() {
-        return Err(GitError("checkout path is not a directory".to_string()));
-    }
-    let common_dir = rev_parse_path(&input_dir, "--git-common-dir", "git common dir")?;
-    let common_dir = common_dir
-        .canonicalize()
-        .map_err(|error| GitError(format!("invalid git common directory: {error}")))?;
-    let root = match rev_parse_path(&input_dir, "--show-toplevel", "git checkout root") {
-        Ok(root) => root,
-        Err(_) if is_bare_repository(&input_dir) => bare_checkout_root(&input_dir, &common_dir),
-        Err(error) => return Err(error),
-    };
-    let root = root
-        .canonicalize()
-        .map_err(|error| GitError(format!("invalid checkout root: {error}")))?;
-    if !root.is_dir() || !input_dir.starts_with(&root) {
-        return Err(GitError(
-            "git checkout root does not contain the input directory".to_string(),
-        ));
-    }
-    Ok(CheckoutInfo { root, common_dir })
-}
-
-pub fn repo_root_of(dir: &Path) -> Result<PathBuf, GitError> {
-    checkout_info(dir).map(|info| info.root)
-}
-
 pub fn repository_init(dir: &Path) -> Result<PathBuf, GitError> {
     let dir = dir
         .canonicalize()
@@ -283,7 +285,7 @@ pub fn repository_init(dir: &Path) -> Result<PathBuf, GitError> {
     if !ok {
         return Err(git_err(&stdout, &stderr));
     }
-    checkout_info(&dir).map(|info| info.root)
+    CheckoutInfo::try_from(dir.as_path()).map(|info| info.root)
 }
 
 pub fn ensure_initial_commit(root: &Path) -> Result<(), GitError> {
@@ -334,10 +336,6 @@ pub fn ensure_initial_snapshot(root: &Path, message: &str) -> Result<(), GitErro
         return Err(git_err(&stdout, &stderr));
     }
     Ok(())
-}
-
-pub fn common_dir_of(dir: &Path) -> Result<PathBuf, GitError> {
-    checkout_info(dir).map(|info| info.common_dir)
 }
 
 pub fn head_ref(root: &Path) -> Result<String, GitError> {
@@ -818,8 +816,8 @@ pub fn validate_linked_workspace(
     let workspace_cwd = workspace_cwd
         .canonicalize()
         .map_err(|error| format!("invalid project directory: {error}"))?;
-    let checkout = checkout_info(&cwd).map_err(|error| error.0)?;
-    let workspace = checkout_info(&workspace_cwd).map_err(|error| error.0)?;
+    let checkout = CheckoutInfo::try_from(&cwd).map_err(|error| error.0)?;
+    let workspace = CheckoutInfo::try_from(&workspace_cwd).map_err(|error| error.0)?;
     if checkout.common_dir != workspace.common_dir {
         return Err("worktree belongs to a different repository".to_string());
     }
@@ -943,12 +941,16 @@ mod tests {
     }
 
     #[test]
-    fn head_ref_and_repo_root_of() {
+    fn head_ref_and_checkout_root() {
         let repo = test_repo::init();
         commit_initial(repo.path());
         assert_eq!(head_ref(repo.path()).unwrap(), "main");
         assert_eq!(
-            repo_root_of(repo.path()).unwrap().canonicalize().unwrap(),
+            CheckoutInfo::try_from(repo.path())
+                .unwrap()
+                .root
+                .canonicalize()
+                .unwrap(),
             repo.path().canonicalize().unwrap()
         );
     }
@@ -969,7 +971,7 @@ mod tests {
         commit_initial(repo.path());
         test_repo::run(repo.path(), &["config", "core.bare", "true"]);
 
-        let info = checkout_info(repo.path()).unwrap();
+        let info = CheckoutInfo::try_from(repo.path()).unwrap();
 
         assert_eq!(info.root, repo.path().canonicalize().unwrap());
         assert_eq!(
@@ -1242,10 +1244,16 @@ mod tests {
         commit_initial(other.path());
         let not_repo = tempfile::tempdir().unwrap();
 
-        let main_common = common_dir_of(repo.path()).unwrap();
-        assert_eq!(common_dir_of(&wt).unwrap(), main_common);
-        assert_ne!(common_dir_of(other.path()).unwrap(), main_common);
-        assert!(common_dir_of(not_repo.path()).is_err());
+        let main_common = CheckoutInfo::try_from(repo.path()).unwrap().common_dir;
+        assert_eq!(
+            CheckoutInfo::try_from(wt.as_path()).unwrap().common_dir,
+            main_common
+        );
+        assert_ne!(
+            CheckoutInfo::try_from(other.path()).unwrap().common_dir,
+            main_common
+        );
+        assert!(CheckoutInfo::try_from(not_repo.path()).is_err());
     }
 
     #[test]
@@ -1260,7 +1268,12 @@ mod tests {
             .read(true)
             .write(true)
             .truncate(false)
-            .open(common_dir_of(&wt).unwrap().join("vmux-worktrees.lock"))
+            .open(
+                CheckoutInfo::try_from(wt.as_path())
+                    .unwrap()
+                    .common_dir
+                    .join("vmux-worktrees.lock"),
+            )
             .unwrap();
 
         assert_ne!(
@@ -1281,8 +1294,8 @@ mod tests {
         let wt = repo.path().join(".worktrees/feat");
         worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
 
-        let main = checkout_info(repo.path()).unwrap();
-        let linked = checkout_info(&wt).unwrap();
+        let main = CheckoutInfo::try_from(repo.path()).unwrap();
+        let linked = CheckoutInfo::try_from(&wt).unwrap();
 
         assert_eq!(main.root, repo.path().canonicalize().unwrap());
         assert_eq!(linked.root, wt.canonicalize().unwrap());
@@ -1300,7 +1313,7 @@ mod tests {
         test_repo::run(repo.path(), &["config", "user.name", "Test"]);
         test_repo::run(repo.path(), &["config", "commit.gpgsign", "false"]);
 
-        let info = checkout_info(repo.path()).unwrap();
+        let info = CheckoutInfo::try_from(repo.path()).unwrap();
 
         assert_eq!(info.root, repo.path().canonicalize().unwrap());
     }
@@ -1318,6 +1331,6 @@ mod tests {
         .unwrap();
         assert!(ok, "git config failed: {stderr}");
 
-        assert!(checkout_info(repo.path()).is_err());
+        assert!(CheckoutInfo::try_from(repo.path()).is_err());
     }
 }

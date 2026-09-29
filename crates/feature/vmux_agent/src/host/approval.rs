@@ -98,7 +98,8 @@ impl AgentApprovalStore {
 }
 
 fn approval_scope_key(cwd: &Path) -> Option<String> {
-    vmux_git::worktree::common_dir_of(cwd)
+    vmux_git::worktree::CheckoutInfo::try_from(cwd)
+        .map(|checkout| checkout.common_dir)
         .ok()
         .or_else(|| std::fs::canonicalize(cwd).ok())
         .map(|path| path.to_string_lossy().into_owned())

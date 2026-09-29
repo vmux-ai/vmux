@@ -331,7 +331,8 @@ fn prepare_agent_tab_worktrees(
                 && !current_dir
                     .as_deref()
                     .is_some_and(vmux_git::worktree::is_linked_worktree)
-                && vmux_git::worktree::checkout_info(Path::new(&workspace.project_dir)).is_ok();
+                && vmux_git::worktree::CheckoutInfo::try_from(Path::new(&workspace.project_dir))
+                    .is_ok();
             let mut entity = commands.entity(tab_entity);
             if needs_worktree {
                 entity.insert(crate::host::RepositoryNeedsWorktree);

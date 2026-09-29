@@ -331,7 +331,7 @@ fn activate_selected_workspace(
     commands: &mut Commands,
 ) -> Result<(PathBuf, Option<ClientMessage>, SelectedWorkspaceKind), String> {
     let kind = if selected.join(".git").exists() {
-        vmux_git::worktree::checkout_info(selected)
+        vmux_git::worktree::CheckoutInfo::try_from(selected)
             .map_err(|error| format!("selected project has invalid Git metadata: {}", error.0))?;
         SelectedWorkspaceKind::Git {
             needs_worktree: !vmux_git::worktree::is_linked_worktree(selected),
@@ -380,7 +380,7 @@ pub(crate) fn existing_worktree_candidates(
         .canonicalize()
         .map_err(|error| format!("invalid project directory: {error}"))?;
     let project_checkout =
-        vmux_git::worktree::checkout_info(&project_dir).map_err(|error| error.0)?;
+        vmux_git::worktree::CheckoutInfo::try_from(&project_dir).map_err(|error| error.0)?;
     let relative_dir = project_dir
         .strip_prefix(&project_checkout.root)
         .map_err(|_| "project directory is outside its checkout".to_string())?;
@@ -389,7 +389,7 @@ pub(crate) fn existing_worktree_candidates(
         .into_iter()
         .filter_map(|registration| {
             let branch = registration.branch?;
-            let checkout = vmux_git::worktree::checkout_info(&registration.path).ok()?;
+            let checkout = vmux_git::worktree::CheckoutInfo::try_from(&registration.path).ok()?;
             if checkout.common_dir != project_checkout.common_dir
                 || !vmux_git::worktree::is_linked_worktree(&checkout.root)
             {

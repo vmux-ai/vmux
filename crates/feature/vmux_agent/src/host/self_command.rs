@@ -751,7 +751,7 @@ fn handle_agent_self_commands(
                             }));
                             continue;
                         };
-                        if vmux_git::worktree::checkout_info(&project_dir).is_err() {
+                        if vmux_git::worktree::CheckoutInfo::try_from(&project_dir).is_err() {
                             AgentCommandResult::Text(project_dir.to_string_lossy().into_owned())
                         } else {
                             let candidate = if *create {
