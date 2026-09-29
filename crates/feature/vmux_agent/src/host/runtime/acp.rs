@@ -1,13 +1,17 @@
 use bevy::prelude::*;
 use crossbeam_channel::Receiver;
-use vmux_api::protocol::{ClientMessage, SharedMessage};
+use vmux_api::protocol::{AcpModeOption, AcpModelOption, ClientMessage, SharedMessage};
 use vmux_chat::composer::ChatCliRequest;
-use vmux_core::LastActivatedAt;
 use vmux_core::agent::SwapStackSession;
 use vmux_core::service::ServiceRequest;
+use vmux_core::team::Profile;
+use vmux_core::{LastActivatedAt, PageMetadata, ProcessId};
+use vmux_layout::Browser;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::pane::PanePlacement;
 use vmux_layout::stack::stack_bundle;
+use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
+use vmux_layout::worktree::TabWorktreeReady;
 use vmux_terminal::reattach_terminal_bundle;
 
 use crate::event::AgentApprovalRequest;
@@ -149,8 +153,8 @@ enum AcpWorkspaceState {
 fn ancestor_acp_workspace_state(
     entity: Entity,
     child_of: &Query<&ChildOf>,
-    tabs: &Query<&vmux_layout::tab::Tab>,
-    workspaces: &Query<(), With<vmux_layout::tab::TabWorkspace>>,
+    tabs: &Query<&Tab>,
+    workspaces: &Query<(), With<TabWorkspace>>,
     pending_projects: &Query<(), With<crate::host::PendingAgentProject>>,
     repositories_needing_worktrees: &Query<(), With<crate::host::RepositoryNeedsWorktree>>,
 ) -> Option<AcpWorkspaceState> {
@@ -192,7 +196,7 @@ pub struct AcpModelState {
     pub current_model_id: String,
     pub default_model_id: String,
     pub(crate) pending: Option<PendingAcpModelSelection>,
-    pub models: Vec<vmux_api::protocol::AcpModelOption>,
+    pub models: Vec<AcpModelOption>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -206,7 +210,7 @@ pub struct AcpModeState {
     pub config_id: String,
     pub current_mode_id: String,
     pub(crate) pending: Option<PendingAcpModeSelection>,
-    pub modes: Vec<vmux_api::protocol::AcpModeOption>,
+    pub modes: Vec<AcpModeOption>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -296,7 +300,7 @@ fn receive_catalog(
 
 fn apply_acp_agent_info(
     mut reader: MessageReader<crate::event::UiAgentInfo>,
-    mut sessions: Query<(&AcpSession, &mut vmux_core::team::Profile)>,
+    mut sessions: Query<(&AcpSession, &mut Profile)>,
 ) {
     for event in reader.read() {
         let name = event.name.trim();
@@ -305,7 +309,7 @@ fn apply_acp_agent_info(
         }
         for (session, mut profile) in &mut sessions {
             if session.sid == event.sid && profile.name != name {
-                *profile = vmux_core::team::Profile::registry(name, &session.agent_id);
+                *profile = Profile::registry(name, &session.agent_id);
             }
         }
     }
@@ -324,7 +328,7 @@ fn validate_acp_workspace(
 fn ancestor_tab(
     entity: Entity,
     child_of: &Query<&ChildOf>,
-    tabs: &Query<(), With<vmux_layout::tab::Tab>>,
+    tabs: &Query<(), With<Tab>>,
 ) -> Option<Entity> {
     let mut current = entity;
     loop {
@@ -339,10 +343,10 @@ fn apply_acp_workspace_changed(
     mut reader: MessageReader<crate::event::UiAgentWorkspaceChanged>,
     mut sessions: Query<(Entity, &mut AcpSession)>,
     child_of: Query<&ChildOf>,
-    tab_entities: Query<(), With<vmux_layout::tab::Tab>>,
-    mut tabs: Query<&mut vmux_layout::tab::Tab>,
-    mut workspaces: Query<&mut vmux_layout::tab::TabWorkspace>,
-    managed: Query<&vmux_layout::tab::TabWorktree>,
+    tab_entities: Query<(), With<Tab>>,
+    mut tabs: Query<&mut Tab>,
+    mut workspaces: Query<&mut TabWorkspace>,
+    managed: Query<&TabWorktree>,
     mut commands: Commands,
 ) {
     for event in reader.read() {
@@ -368,11 +372,9 @@ fn apply_acp_workspace_changed(
             if let Ok(mut workspace) = workspaces.get_mut(tab_entity) {
                 workspace.project_dir.clone_from(&workspace_project_dir);
             } else {
-                commands
-                    .entity(tab_entity)
-                    .insert(vmux_layout::tab::TabWorkspace {
-                        project_dir: workspace_project_dir.clone(),
-                    });
+                commands.entity(tab_entity).insert(TabWorkspace {
+                    project_dir: workspace_project_dir.clone(),
+                });
             }
             let keeps_managed = managed.get(tab_entity).ok().is_some_and(|metadata| {
                 metadata.branch == event.branch
@@ -384,13 +386,11 @@ fn apply_acp_workspace_changed(
             });
             let mut entity = commands.entity(tab_entity);
             entity
-                .insert(vmux_layout::tab::TabDirDecided)
-                .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
+                .insert(TabDirDecided)
+                .remove::<TabWorktreeUnavailable>();
             if !keeps_managed {
-                entity
-                    .remove::<vmux_layout::tab::TabWorktree>()
-                    .remove::<vmux_layout::worktree::TabWorktreeReady>();
-            } else if let Ok(ready) = vmux_layout::worktree::TabWorktreeReady::new(
+                entity.remove::<TabWorktree>().remove::<TabWorktreeReady>();
+            } else if let Ok(ready) = TabWorktreeReady::new(
                 &cwd,
                 &workspace_project_dir,
                 managed.get(tab_entity).unwrap(),
@@ -398,7 +398,7 @@ fn apply_acp_workspace_changed(
             ) {
                 entity.insert(ready);
             } else {
-                entity.remove::<vmux_layout::worktree::TabWorktreeReady>();
+                entity.remove::<TabWorktreeReady>();
             }
         }
     }
@@ -558,13 +558,13 @@ fn apply_acp_session_created(
         (
             Entity,
             &mut AcpSession,
-            &mut vmux_core::PageMetadata,
+            &mut PageMetadata,
             Option<&ImportedConversation>,
         ),
-        Without<vmux_layout::Browser>,
+        Without<Browser>,
     >,
     children: Query<&Children>,
-    mut browser_meta: Query<&mut vmux_core::PageMetadata, With<vmux_layout::Browser>>,
+    mut browser_meta: Query<&mut PageMetadata, With<Browser>>,
 ) {
     for ev in reader.read() {
         for (stack, mut session, mut stack_meta, imported) in &mut sessions {
@@ -643,8 +643,8 @@ fn send_acp_input(
         Option<&mut ImportedConversation>,
     )>,
     child_of: Query<&ChildOf>,
-    tabs: Query<&vmux_layout::tab::Tab>,
-    workspaces: Query<(), With<vmux_layout::tab::TabWorkspace>>,
+    tabs: Query<&Tab>,
+    workspaces: Query<(), With<TabWorkspace>>,
     pending_projects: Query<(), With<crate::host::PendingAgentProject>>,
     repositories_needing_worktrees: Query<(), With<crate::host::RepositoryNeedsWorktree>>,
     policy: Single<&AcpWorkspacePolicy>,
@@ -728,7 +728,7 @@ mod tests {
             agent_id: "claude".into(),
             sid: "s1".into(),
             cwd: "/tmp".into(),
-            anchor: vmux_core::ProcessId::new(),
+            anchor: ProcessId::new(),
             resume: None,
         };
         let mut policy = AgentApprovalPolicy::default();
@@ -877,7 +877,7 @@ mod tests {
         let mut app = App::new();
         let tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "Tab 1".into(),
                 startup_dir: None,
             })
@@ -887,8 +887,8 @@ mod tests {
             world
                 .run_system_once(
                     move |child_of: Query<&ChildOf>,
-                          tabs: Query<&vmux_layout::tab::Tab>,
-                          workspaces: Query<(), With<vmux_layout::tab::TabWorkspace>>,
+                          tabs: Query<&Tab>,
+                          workspaces: Query<(), With<TabWorkspace>>,
                           pending: Query<(), With<crate::host::PendingAgentProject>>,
                           needs_worktree: Query<
                         (),
@@ -916,7 +916,7 @@ mod tests {
             Some(AcpWorkspaceState::PendingWorktree)
         );
         app.world_mut().entity_mut(tab).insert((
-            vmux_layout::tab::Tab {
+            Tab {
                 name: "Tab 1".into(),
                 startup_dir: Some("/repo".into()),
             },
@@ -928,7 +928,7 @@ mod tests {
         );
         app.world_mut()
             .entity_mut(tab)
-            .insert(vmux_layout::tab::TabWorkspace {
+            .insert(TabWorkspace {
                 project_dir: "/repo".into(),
             })
             .remove::<crate::host::RepositoryNeedsWorktree>();
@@ -969,11 +969,11 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                vmux_layout::tab::Tab {
+                Tab {
                     name: "matching".into(),
                     startup_dir: Some(project_dir.to_string_lossy().into_owned()),
                 },
-                vmux_layout::tab::TabWorkspace {
+                TabWorkspace {
                     project_dir: project_dir.to_string_lossy().into_owned(),
                 },
             ))
@@ -985,7 +985,7 @@ mod tests {
                     agent_id: "mistral-vibe".into(),
                     sid: "matching-sid".into(),
                     cwd: project_dir.clone(),
-                    anchor: vmux_core::ProcessId::new(),
+                    anchor: ProcessId::new(),
                     resume: None,
                 },
                 ChildOf(tab),
@@ -993,7 +993,7 @@ mod tests {
             .id();
         let unrelated_tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "unrelated".into(),
                 startup_dir: Some(project_dir.to_string_lossy().into_owned()),
             })
@@ -1015,16 +1015,12 @@ mod tests {
             worktree_dir
         );
         assert_eq!(
-            app.world()
-                .get::<vmux_layout::tab::Tab>(tab)
-                .unwrap()
-                .startup_dir
-                .as_deref(),
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
             Some(worktree_dir.to_string_lossy().as_ref())
         );
         assert_eq!(
             app.world()
-                .get::<vmux_layout::tab::Tab>(unrelated_tab)
+                .get::<Tab>(unrelated_tab)
                 .unwrap()
                 .startup_dir
                 .as_deref(),
@@ -1035,7 +1031,6 @@ mod tests {
     #[test]
     fn live_acp_identity_updates_only_matching_profile() {
         use crate::event::UiAgentInfo;
-        use vmux_core::team::Profile;
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
@@ -1047,7 +1042,7 @@ mod tests {
                     agent_id: "antigravity".into(),
                     sid: "s1".into(),
                     cwd: "/tmp".into(),
-                    anchor: vmux_core::ProcessId::new(),
+                    anchor: ProcessId::new(),
                     resume: None,
                 },
                 Profile::registry("Configured", "antigravity"),
@@ -1060,7 +1055,7 @@ mod tests {
                     agent_id: "claude".into(),
                     sid: "s2".into(),
                     cwd: "/tmp".into(),
-                    anchor: vmux_core::ProcessId::new(),
+                    anchor: ProcessId::new(),
                     resume: None,
                 },
                 Profile::registry("Claude", "claude"),
@@ -1097,7 +1092,6 @@ mod tests {
     #[test]
     fn live_acp_model_info_updates_only_matching_session() {
         use crate::event::UiAgentModelInfo;
-        use vmux_api::protocol::AcpModelOption;
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
@@ -1108,7 +1102,7 @@ mod tests {
                 agent_id: "claude".into(),
                 sid: "s1".into(),
                 cwd: "/tmp".into(),
-                anchor: vmux_core::ProcessId::new(),
+                anchor: ProcessId::new(),
                 resume: None,
             })
             .id();
@@ -1118,7 +1112,7 @@ mod tests {
                 agent_id: "codex".into(),
                 sid: "s2".into(),
                 cwd: "/tmp".into(),
-                anchor: vmux_core::ProcessId::new(),
+                anchor: ProcessId::new(),
                 resume: None,
             })
             .id();
@@ -1144,7 +1138,6 @@ mod tests {
     #[test]
     fn model_results_preserve_latest_pending_selection() {
         use crate::event::{UiAgentModelInfo, UiAgentModelSelectionResult};
-        use vmux_api::protocol::AcpModelOption;
 
         let models = vec![
             AcpModelOption {
@@ -1177,7 +1170,7 @@ mod tests {
                     agent_id: "claude".into(),
                     sid: "s1".into(),
                     cwd: "/tmp".into(),
-                    anchor: vmux_core::ProcessId::new(),
+                    anchor: ProcessId::new(),
                     resume: None,
                 },
                 AcpModelState {
@@ -1259,7 +1252,6 @@ mod tests {
     #[test]
     fn mode_results_preserve_latest_pending_selection() {
         use crate::event::{UiAgentModeInfo, UiAgentModeSelectionResult};
-        use vmux_api::protocol::AcpModeOption;
 
         let modes = vec![
             AcpModeOption {
@@ -1287,7 +1279,7 @@ mod tests {
                     agent_id: "claude".into(),
                     sid: "s1".into(),
                     cwd: "/tmp".into(),
-                    anchor: vmux_core::ProcessId::new(),
+                    anchor: ProcessId::new(),
                     resume: None,
                 },
                 AcpModeState {
@@ -1361,21 +1353,19 @@ mod tests {
                     agent_id: "claude".into(),
                     sid: "s1".into(),
                     cwd: "/tmp".into(),
-                    anchor: vmux_core::ProcessId::new(),
+                    anchor: ProcessId::new(),
                     resume: None,
                 },
             ))
             .id();
-        app.world_mut()
-            .entity_mut(agent)
-            .insert(vmux_core::PageMetadata {
-                url: "vmux://sessions/claude".into(),
-                ..default()
-            });
+        app.world_mut().entity_mut(agent).insert(PageMetadata {
+            url: "vmux://sessions/claude".into(),
+            ..default()
+        });
         app.world_mut().write_message(UiAgentAcpTerminalCreated {
             sid: "s1".into(),
             terminal_id: "terminal-1".into(),
-            process_id: vmux_core::ProcessId::new(),
+            process_id: ProcessId::new(),
             command: "echo".into(),
             args: vec!["hi".into()],
             cwd: Some("/tmp".into()),
@@ -1416,7 +1406,7 @@ mod tests {
             agent_id: "vibe-acp".to_string(),
             sid: "s1".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
-            anchor: vmux_core::ProcessId::new(),
+            anchor: ProcessId::new(),
             resume: None,
         });
         app.update();

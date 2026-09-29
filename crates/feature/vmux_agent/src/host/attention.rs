@@ -1,7 +1,14 @@
 use bevy::prelude::*;
 #[cfg(test)]
 use vmux_api::protocol::AgentRequest;
-use vmux_api::protocol::AgentTurnEnded;
+use vmux_api::protocol::{AgentTurnEnded, ProcessId};
+#[cfg(test)]
+use vmux_core::agent::AgentKind as CoreAgentKind;
+use vmux_core::notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
+use vmux_core::service::ServiceMessageSet;
+use vmux_core::team::{Agent, Profile};
+use vmux_layout::active_pane::ActiveStack;
+use vmux_layout::stack::{ComputeFocusSet, FocusedStack, Stack};
 
 use crate::event::AgentRequestInput;
 use crate::session::SessionId;
@@ -19,29 +26,29 @@ impl Plugin for AttentionPlugin {
                 agent_bell_to_attention,
                 handle_agent_turn_ended
                     .in_set(TurnEndedSet)
-                    .after(vmux_core::service::ServiceMessageSet),
+                    .after(ServiceMessageSet),
             )
                 .chain()
-                .after(vmux_layout::stack::ComputeFocusSet),
+                .after(ComputeFocusSet),
         )
         .add_systems(
             Update,
             (mark_agent_done, clear_agent_done)
                 .chain()
-                .after(vmux_layout::stack::ComputeFocusSet)
+                .after(ComputeFocusSet)
                 .after(crate::tidy::TidySet),
         );
     }
 }
 
 fn agent_bell_to_attention(
-    mut reader: MessageReader<vmux_core::notify::BellReceived>,
-    mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
-    agents: Query<(Entity, &vmux_api::protocol::ProcessId), With<vmux_core::team::Agent>>,
+    mut reader: MessageReader<BellReceived>,
+    mut attention: MessageWriter<AgentAttention>,
+    agents: Query<(Entity, &ProcessId), With<Agent>>,
 ) {
     for ev in reader.read() {
         if let Some((entity, _)) = agents.iter().find(|(_, pid)| **pid == ev.process_id) {
-            attention.write(vmux_core::notify::AgentAttention {
+            attention.write(AgentAttention {
                 entity,
                 title: None,
                 body: None,
@@ -50,7 +57,7 @@ fn agent_bell_to_attention(
     }
 }
 
-pub(crate) const DONE_DEDUP_WINDOW_SECS: f64 = 3.0;
+const DONE_DEDUP_WINDOW_SECS: f64 = 3.0;
 
 fn window_foreground(windows: &Query<&Window, With<bevy::window::PrimaryWindow>>) -> bool {
     windows
@@ -63,16 +70,16 @@ fn window_foreground(windows: &Query<&Window, With<bevy::window::PrimaryWindow>>
 fn agent_is_viewed(
     entity: Entity,
     foreground: bool,
-    focused: &vmux_layout::active_pane::ActiveStack,
-    stacks: &Query<(), With<vmux_layout::stack::Stack>>,
+    focused: &ActiveStack,
+    stacks: &Query<(), With<Stack>>,
     child_of: &Query<&ChildOf>,
 ) -> bool {
     foreground && focused.stack == agent_stack(entity, stacks, child_of)
 }
 
-pub(crate) fn agent_stack(
+fn agent_stack(
     entity: Entity,
-    stacks: &Query<(), With<vmux_layout::stack::Stack>>,
+    stacks: &Query<(), With<Stack>>,
     child_of: &Query<&ChildOf>,
 ) -> Option<Entity> {
     stacks
@@ -83,17 +90,13 @@ pub(crate) fn agent_stack(
 }
 
 fn mark_agent_done(
-    mut reader: MessageReader<vmux_core::notify::AgentAttention>,
-    mut notify: MessageWriter<vmux_core::notify::OsNotify>,
+    mut reader: MessageReader<AgentAttention>,
+    mut notify: MessageWriter<OsNotify>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    focused: vmux_layout::stack::FocusedStack,
-    stacks: Query<(), With<vmux_layout::stack::Stack>>,
+    focused: FocusedStack,
+    stacks: Query<(), With<Stack>>,
     child_of: Query<&ChildOf>,
-    meta: Query<(
-        &vmux_core::team::Profile,
-        Option<&SessionId>,
-        Option<&vmux_core::team::Agent>,
-    )>,
+    meta: Query<(&Profile, Option<&SessionId>, Option<&Agent>)>,
     time: Res<Time>,
     mut last_notify: Local<std::collections::HashMap<Entity, f64>>,
     mut commands: Commands,
@@ -101,14 +104,10 @@ fn mark_agent_done(
     let foreground = window_foreground(&windows);
     for att in reader.read() {
         if agent_is_viewed(att.entity, foreground, &focused, &stacks, &child_of) {
-            commands
-                .entity(att.entity)
-                .remove::<vmux_core::notify::AgentDoneUnseen>();
+            commands.entity(att.entity).remove::<AgentDoneUnseen>();
             continue;
         }
-        commands
-            .entity(att.entity)
-            .insert(vmux_core::notify::AgentDoneUnseen);
+        commands.entity(att.entity).insert(AgentDoneUnseen);
         let now = time.elapsed_secs_f64();
         if last_notify
             .get(&att.entity)
@@ -149,15 +148,15 @@ fn mark_agent_done(
                     format!("session {short_sid}")
                 }
             });
-        notify.write(vmux_core::notify::OsNotify { title, body });
+        notify.write(OsNotify { title, body });
     }
 }
 
 fn clear_agent_done(
-    done: Query<Entity, With<vmux_core::notify::AgentDoneUnseen>>,
+    done: Query<Entity, With<AgentDoneUnseen>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    focused: vmux_layout::stack::FocusedStack,
-    stacks: Query<(), With<vmux_layout::stack::Stack>>,
+    focused: FocusedStack,
+    stacks: Query<(), With<Stack>>,
     child_of: Query<&ChildOf>,
     mut prev_focused: Local<Option<Entity>>,
     mut commands: Commands,
@@ -173,17 +172,15 @@ fn clear_agent_done(
     };
     for entity in &done {
         if agent_stack(entity, &stacks, &child_of) == Some(stack) {
-            commands
-                .entity(entity)
-                .remove::<vmux_core::notify::AgentDoneUnseen>();
+            commands.entity(entity).remove::<AgentDoneUnseen>();
         }
     }
 }
 
 fn handle_agent_turn_ended(
     mut reader: MessageReader<AgentRequestInput>,
-    agents: Query<(Entity, &vmux_api::protocol::ProcessId), With<vmux_core::team::Agent>>,
-    mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
+    agents: Query<(Entity, &ProcessId), With<Agent>>,
+    mut attention: MessageWriter<AgentAttention>,
 ) {
     for request in reader.read() {
         let Ok(Some(command)) = request.decode::<AgentTurnEnded>() else {
@@ -191,7 +188,7 @@ fn handle_agent_turn_ended(
         };
         let anchor = &command.anchor;
         if let Some((entity, _)) = agents.iter().find(|(_, pid)| *pid == anchor) {
-            attention.write(vmux_core::notify::AgentAttention {
+            attention.write(AgentAttention {
                 entity,
                 title: None,
                 body: None,
@@ -208,21 +205,18 @@ mod tests {
     pub(crate) fn bell_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<vmux_core::notify::BellReceived>()
-            .add_message::<vmux_core::notify::AgentAttention>()
+            .add_message::<BellReceived>()
+            .add_message::<AgentAttention>()
             .add_systems(Update, agent_bell_to_attention);
         app
     }
 
-    pub(crate) fn spawn_agent_with_pid(
-        app: &mut App,
-        pid: vmux_api::protocol::ProcessId,
-    ) -> Entity {
+    pub(crate) fn spawn_agent_with_pid(app: &mut App, pid: ProcessId) -> Entity {
         app.world_mut()
             .spawn((
-                vmux_core::team::Agent {
+                Agent {
                     sid: "s".to_string(),
-                    kind: Some(vmux_core::agent::AgentKind::Claude),
+                    kind: Some(CoreAgentKind::Claude),
                 },
                 pid,
             ))
@@ -232,7 +226,7 @@ mod tests {
     pub(crate) fn attentions(app: &App) -> Vec<Entity> {
         let messages = app
             .world()
-            .resource::<bevy::ecs::message::Messages<vmux_core::notify::AgentAttention>>();
+            .resource::<bevy::ecs::message::Messages<AgentAttention>>();
         let mut cursor = messages.get_cursor();
         cursor.read(messages).map(|a| a.entity).collect()
     }
@@ -241,12 +235,12 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<AgentRequestInput>()
-            .add_message::<vmux_core::notify::AgentAttention>()
+            .add_message::<AgentAttention>()
             .add_systems(Update, handle_agent_turn_ended);
         app
     }
 
-    pub(crate) fn send_turn_ended(app: &mut App, anchor: vmux_api::protocol::ProcessId) {
+    pub(crate) fn send_turn_ended(app: &mut App, anchor: ProcessId) {
         app.world_mut()
             .resource_mut::<bevy::ecs::message::Messages<AgentRequestInput>>()
             .write(AgentRequestInput {
@@ -262,7 +256,7 @@ mod tests {
     #[test]
     fn turn_ended_resolves_to_agent_attention() {
         let mut app = turn_end_test_app();
-        let pid = vmux_api::protocol::ProcessId::new();
+        let pid = ProcessId::new();
         let agent = spawn_agent_with_pid(&mut app, pid);
         send_turn_ended(&mut app, pid);
         app.update();
@@ -272,33 +266,33 @@ mod tests {
     #[test]
     fn turn_ended_unknown_anchor_emits_nothing() {
         let mut app = turn_end_test_app();
-        let _agent = spawn_agent_with_pid(&mut app, vmux_api::protocol::ProcessId::new());
-        send_turn_ended(&mut app, vmux_api::protocol::ProcessId::new());
+        let _agent = spawn_agent_with_pid(&mut app, ProcessId::new());
+        send_turn_ended(&mut app, ProcessId::new());
         app.update();
         assert!(attentions(&app).is_empty());
     }
 
     #[test]
     fn bell_resolves_to_agent_attention() {
-        use vmux_api::protocol::ProcessId;
+        use ProcessId;
         let mut app = bell_test_app();
         let pid = ProcessId::new();
         let agent = spawn_agent_with_pid(&mut app, pid);
         app.world_mut()
-            .resource_mut::<bevy::ecs::message::Messages<vmux_core::notify::BellReceived>>()
-            .write(vmux_core::notify::BellReceived { process_id: pid });
+            .resource_mut::<bevy::ecs::message::Messages<BellReceived>>()
+            .write(BellReceived { process_id: pid });
         app.update();
         assert_eq!(attentions(&app), vec![agent]);
     }
 
     #[test]
     fn bell_unknown_process_id_emits_nothing() {
-        use vmux_api::protocol::ProcessId;
+        use ProcessId;
         let mut app = bell_test_app();
         let _agent = spawn_agent_with_pid(&mut app, ProcessId::new());
         app.world_mut()
-            .resource_mut::<bevy::ecs::message::Messages<vmux_core::notify::BellReceived>>()
-            .write(vmux_core::notify::BellReceived {
+            .resource_mut::<bevy::ecs::message::Messages<BellReceived>>()
+            .write(BellReceived {
                 process_id: ProcessId::new(),
             });
         app.update();
@@ -308,25 +302,18 @@ mod tests {
     pub(crate) fn done_test_app() -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
-            .add_message::<vmux_core::notify::AgentAttention>()
-            .add_message::<vmux_core::notify::OsNotify>()
+            .add_message::<AgentAttention>()
+            .add_message::<OsNotify>()
             .add_systems(Update, (mark_agent_done, clear_agent_done));
-        app.world_mut()
-            .spawn(vmux_layout::active_pane::ActiveStack::default().local_bundle());
+        app.world_mut().spawn(ActiveStack::default().local_bundle());
         app
     }
 
     pub(crate) fn spawn_agent_in_stack(app: &mut App) -> (Entity, Entity) {
-        let stack = app
-            .world_mut()
-            .spawn(vmux_layout::stack::Stack::default())
-            .id();
+        let stack = app.world_mut().spawn(Stack::default()).id();
         let agent = app
             .world_mut()
-            .spawn((
-                vmux_core::team::Profile::agent(vmux_core::agent::AgentKind::Claude),
-                ChildOf(stack),
-            ))
+            .spawn((Profile::agent(CoreAgentKind::Claude), ChildOf(stack)))
             .id();
         (agent, stack)
     }
@@ -345,15 +332,15 @@ mod tests {
     pub(crate) fn os_notify_count(app: &App) -> usize {
         let messages = app
             .world()
-            .resource::<bevy::ecs::message::Messages<vmux_core::notify::OsNotify>>();
+            .resource::<bevy::ecs::message::Messages<OsNotify>>();
         let mut cursor = messages.get_cursor();
         cursor.read(messages).count()
     }
 
     pub(crate) fn send_attention(app: &mut App, entity: Entity) {
         app.world_mut()
-            .resource_mut::<bevy::ecs::message::Messages<vmux_core::notify::AgentAttention>>()
-            .write(vmux_core::notify::AgentAttention {
+            .resource_mut::<bevy::ecs::message::Messages<AgentAttention>>()
+            .write(AgentAttention {
                 entity,
                 title: None,
                 body: None,
@@ -362,7 +349,7 @@ mod tests {
 
     fn focus_stack(app: &mut App, stack: Entity) {
         let world = app.world_mut();
-        let mut query = world.query::<&mut vmux_layout::active_pane::ActiveStack>();
+        let mut query = world.query::<&mut ActiveStack>();
         query.single_mut(world).unwrap().stack = Some(stack);
     }
 
@@ -373,11 +360,7 @@ mod tests {
         set_window(&mut app, false);
         send_attention(&mut app, agent);
         app.update();
-        assert!(
-            app.world()
-                .get::<vmux_core::notify::AgentDoneUnseen>(agent)
-                .is_some()
-        );
+        assert!(app.world().get::<AgentDoneUnseen>(agent).is_some());
         assert_eq!(os_notify_count(&app), 1);
     }
 
@@ -391,9 +374,7 @@ mod tests {
         send_attention(&mut app, agent);
         app.update();
         assert!(
-            app.world()
-                .get::<vmux_core::notify::AgentDoneUnseen>(agent)
-                .is_none(),
+            app.world().get::<AgentDoneUnseen>(agent).is_none(),
             "focused agent has no unseen marker"
         );
         assert_eq!(os_notify_count(&app), 0, "no banner when foreground");
@@ -404,10 +385,7 @@ mod tests {
         let mut app = done_test_app();
         let stack = app
             .world_mut()
-            .spawn((
-                vmux_layout::stack::Stack::default(),
-                vmux_core::team::Profile::agent(vmux_core::agent::AgentKind::Claude),
-            ))
+            .spawn((Stack::default(), Profile::agent(CoreAgentKind::Claude)))
             .id();
         set_window(&mut app, true);
         focus_stack(&mut app, stack);
@@ -415,9 +393,7 @@ mod tests {
         send_attention(&mut app, stack);
         app.update();
         assert!(
-            app.world()
-                .get::<vmux_core::notify::AgentDoneUnseen>(stack)
-                .is_none(),
+            app.world().get::<AgentDoneUnseen>(stack).is_none(),
             "focused stack agent has no unseen marker"
         );
         assert_eq!(os_notify_count(&app), 0, "no banner when foreground");
@@ -426,26 +402,13 @@ mod tests {
     #[test]
     fn clear_removes_marker_from_focused_stack_agent() {
         let mut app = done_test_app();
-        let stack = app
-            .world_mut()
-            .spawn(vmux_layout::stack::Stack::default())
-            .id();
+        let stack = app.world_mut().spawn(Stack::default()).id();
         set_window(&mut app, true);
-        app.world_mut()
-            .entity_mut(stack)
-            .insert(vmux_core::notify::AgentDoneUnseen);
+        app.world_mut().entity_mut(stack).insert(AgentDoneUnseen);
         app.update();
-        assert!(
-            app.world()
-                .get::<vmux_core::notify::AgentDoneUnseen>(stack)
-                .is_some()
-        );
+        assert!(app.world().get::<AgentDoneUnseen>(stack).is_some());
         focus_stack(&mut app, stack);
         app.update();
-        assert!(
-            app.world()
-                .get::<vmux_core::notify::AgentDoneUnseen>(stack)
-                .is_none()
-        );
+        assert!(app.world().get::<AgentDoneUnseen>(stack).is_none());
     }
 }
