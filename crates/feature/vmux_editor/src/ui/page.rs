@@ -23,9 +23,12 @@ use std::collections::HashMap;
 
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
+use vmux_core::KeymapKind;
+use vmux_core::editor::{CursorPos, EditMode, SelSpan};
 use vmux_core::event::*;
 use vmux_core::knowledge::{KnowledgeProperty, KnowledgeReference};
 use vmux_core::media::MediaKind;
+use vmux_core::scroll::{EDGE_TRIGGER_K, needs_refetch};
 use vmux_git::event::{FileGitState, GitLineStatus};
 use vmux_git::ui::{DiffView, GitFooter};
 use vmux_ui::diff::DiffTone;
@@ -35,6 +38,7 @@ use vmux_ui::hooks::{PressedKey, send, use_theme, use_ui_state_root};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::platform::sleep_ms;
+use vmux_ui::scroll::ScrollIntoView;
 
 #[component]
 pub fn Page() -> Element {
@@ -48,9 +52,9 @@ pub fn Page() -> Element {
     let mut first_row = use_signal(|| 0u32);
     let mut gutter_hover = use_signal(|| false);
     let mut language = use_signal(String::new);
-    let mut indent = use_signal(vmux_core::event::FileIndent::default);
-    let mut line_ending = use_signal(vmux_core::event::FileLineEnding::default);
-    let mut encoding = use_signal(vmux_core::event::FileEncoding::default);
+    let mut indent = use_signal(FileIndent::default);
+    let mut line_ending = use_signal(FileLineEnding::default);
+    let mut encoding = use_signal(FileEncoding::default);
     let mut lines = use_signal(Vec::<FileLine>::new);
     let mut sticky_lines = use_signal(Vec::<FileLine>::new);
     let mut outline = use_signal(Vec::<OutlineRow>::new);
@@ -121,10 +125,10 @@ pub fn Page() -> Element {
     let mut note_dragging = use_signal(|| false);
     let mut editor_dragging = use_signal(|| false);
     let mut editor_drag_origin = use_signal(|| Option::<(i32, i32)>::None);
-    let mut ed_mode = use_signal(|| vmux_core::editor::EditMode::Insert);
+    let mut ed_mode = use_signal(|| EditMode::Insert);
     let mut ed_label = use_signal(String::new);
-    let mut search_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
-    let mut word_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
+    let mut search_spans = use_signal(Vec::<SelSpan>::new);
+    let mut word_spans = use_signal(Vec::<SelSpan>::new);
     let find_open = use_signal(|| false);
     let find_forward = use_signal(|| true);
     let mut find_revision = use_signal(|| 0u64);
@@ -133,12 +137,12 @@ pub fn Page() -> Element {
     let find_query = use_signal(String::new);
     let mut find_total = use_signal(|| 0u32);
     let mut find_index = use_signal(|| 0u32);
-    let mut keymap = use_signal(vmux_core::KeymapKind::default);
-    let mut cursor = use_signal(vmux_core::editor::CursorPos::default);
-    let mut carets = use_signal(Vec::<vmux_core::editor::CursorPos>::new);
-    let mut sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
-    let mut source_cursor = use_signal(vmux_core::editor::CursorPos::default);
-    let mut source_sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
+    let mut keymap = use_signal(KeymapKind::default);
+    let mut cursor = use_signal(CursorPos::default);
+    let mut carets = use_signal(Vec::<CursorPos>::new);
+    let mut sel = use_signal(Vec::<SelSpan>::new);
+    let mut source_cursor = use_signal(CursorPos::default);
+    let mut source_sel = use_signal(Vec::<SelSpan>::new);
     let mut open_editors = use_signal(Vec::<OpenEditorItem>::new);
     let ime = use_ime_guard();
     let typed = use_signal(String::new);
@@ -330,7 +334,7 @@ pub fn Page() -> Element {
                     .peek()
                     .as_slice()
                     .block_index_for_line(c.source_primary.line);
-                if *keymap.peek() == vmux_core::KeymapKind::Vim
+                if *keymap.peek() == KeymapKind::Vim
                     && !note_cursor.editing()
                     && let Some(index) = active
                 {
@@ -426,7 +430,7 @@ pub fn Page() -> Element {
     use_effect(move || {
         keymap_event.for_each(|event| {
             keymap.set(event.keymap);
-            if event.keymap == vmux_core::KeymapKind::Vim
+            if event.keymap == KeymapKind::Vim
                 && file_view_mode() == FileViewMode::Note
                 && is_markdown()
             {
@@ -457,7 +461,7 @@ pub fn Page() -> Element {
             doc_title.set(title.clone());
             let activation = NoteCursorActivation::resolve(
                 reveal_line,
-                keymap() == vmux_core::KeymapKind::Vim && file_view_mode() == FileViewMode::Note,
+                keymap() == KeymapKind::Vim && file_view_mode() == FileViewMode::Note,
                 source_cursor().line,
             );
             let activation = activation.and_then(|activation| {
@@ -633,7 +637,7 @@ pub fn Page() -> Element {
             path.set(d.path);
             let index = usize::try_from(d.selected).unwrap_or_default();
             selected.set(index);
-            vmux_ui::scroll::ScrollIntoView::nearest(&format!("dir-row-{index}"));
+            ScrollIntoView::nearest(&format!("dir-row-{index}"));
         })
     });
 
@@ -884,7 +888,7 @@ pub fn Page() -> Element {
                     FindBar {
                         query: find_query,
                         forward: find_forward,
-                        vim: keymap() == vmux_core::KeymapKind::Vim,
+                        vim: keymap() == KeymapKind::Vim,
                         total: find_total(),
                         index: find_index(),
                     }
@@ -940,11 +944,11 @@ pub fn Page() -> Element {
                         class: "flex shrink-0 items-center gap-0.5 rounded-md bg-foreground/[0.06] p-0.5 text-[10px] font-medium ring-1 ring-inset ring-foreground/10",
                         title: translate("schema-keymap"),
                         button {
-                            class: file_mode_class(keymap() == vmux_core::KeymapKind::Vscode),
+                            class: file_mode_class(keymap() == KeymapKind::Vscode),
                             onclick: move |_| {
-                                let next = vmux_core::KeymapKind::Vscode;
+                                let next = KeymapKind::Vscode;
                                 keymap.set(next);
-                                ed_mode.set(vmux_core::editor::EditMode::Insert);
+                                ed_mode.set(EditMode::Insert);
                                 ed_label.set(String::new());
                                 let _ = send(&FileKeymapSet { keymap: next });
                                 if file_view_mode() == FileViewMode::Note
@@ -959,11 +963,11 @@ pub fn Page() -> Element {
                             {translate("editor-keymap-standard")}
                         }
                         button {
-                            class: file_mode_class(keymap() == vmux_core::KeymapKind::Vim),
+                            class: file_mode_class(keymap() == KeymapKind::Vim),
                             onclick: move |_| {
-                                let next = vmux_core::KeymapKind::Vim;
+                                let next = KeymapKind::Vim;
                                 keymap.set(next);
-                                let next_mode = vmux_core::editor::EditMode::Normal;
+                                let next_mode = EditMode::Normal;
                                 ed_mode.set(next_mode);
                                 ed_label.set(next_mode.label().to_string());
                                 let _ = send(&FileKeymapSet { keymap: next });
@@ -1166,7 +1170,7 @@ pub fn Page() -> Element {
                                     id: SCROLL_ID,
                                     class: "file-mode-note-enter min-h-0 flex-1 overflow-auto px-8 py-8",
                                     onclick: move |event| {
-                                        if keymap() == vmux_core::KeymapKind::Vim {
+                                        if keymap() == KeymapKind::Vim {
                                             event.prevent_default();
                                             let line = source_cursor().line;
                                             if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
@@ -1274,13 +1278,13 @@ pub fn Page() -> Element {
                                                 }
                                                 if event.key() == Key::Escape {
                                                     event.prevent_default();
-                                                    if keymap() != vmux_core::KeymapKind::Vim {
+                                                    if keymap() != KeymapKind::Vim {
                                                         note_cursor.set_editing(false);
                                                     }
                                                     if let Some(stroke) = PressedKey::new(&event.data()).stroke() {
                                                         let _ = send(&stroke);
                                                     }
-                                                    if keymap() == vmux_core::KeymapKind::Vim {
+                                                    if keymap() == KeymapKind::Vim {
                                                         focus_file_input();
                                                     } else {
                                                         focus_container();
@@ -1421,13 +1425,13 @@ pub fn Page() -> Element {
                                         }
                                         last_scroll_req.set(vis_first);
                                         let vis_rows = (event.client_height() as f64 / ch).ceil() as u32 + 1;
-                                        let trigger = (vis_rows as f32 * vmux_core::scroll::EDGE_TRIGGER_K).ceil() as u32;
+                                        let trigger = (vis_rows as f32 * EDGE_TRIGGER_K).ceil() as u32;
                                         let rfirst = first_row();
                                         let loaded_len = line_layouts
                                             .read()
                                             .last()
                                             .map_or(0, |line| line.row + line.rows as u32 - rfirst);
-                                        let needs_rows = vmux_core::scroll::needs_refetch(
+                                        let needs_rows = needs_refetch(
                                             vis_first,
                                             vis_rows,
                                             rfirst,
@@ -1768,9 +1772,9 @@ pub fn Page() -> Element {
             GitFooter {
                 git_state,
                 always_visible: mode() == Mode::Text
-                    && keymap() == vmux_core::KeymapKind::Vim,
+                    && keymap() == KeymapKind::Vim,
                 leading: rsx! {
-                    if mode() == Mode::Text && keymap() == vmux_core::KeymapKind::Vim {
+                    if mode() == Mode::Text && keymap() == KeymapKind::Vim {
                         VimStatus { label: ed_label() }
                     }
                 },
