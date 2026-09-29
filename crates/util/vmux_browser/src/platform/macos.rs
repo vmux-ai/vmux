@@ -14,13 +14,16 @@ use bevy_cef_core::prelude::{
     BinIpcEventRaw, Browsers, CefRequest, CefResponse, Requester, Responser,
     asset_load_path_from_request_url,
 };
-use vmux_core::PageOpenSet;
+use vmux_api::UiEventPermissions;
 use vmux_core::host::page::HostsPage;
+use vmux_core::page::PageReady;
 use vmux_core::page_metadata::PageMetadata;
+use vmux_core::{PageIcon, PageOpenSet};
 use vmux_layout::LayoutCef;
+use vmux_layout::window::FocusedWindow;
 use vmux_native::{
-    Appearance, AssetReply, Embedding, NativePage, NativePagePlacement, NativePageRegistration,
-    SiblingOrder, WebView,
+    Appearance, AssetReply, Assets as NativeAssets, Embedding, NativePage, NativePagePlacement,
+    NativePageRegistration, Outbox as NativeOutbox, SiblingOrder, Wake as NativeWake, WebView,
 };
 use vmux_setting::{AppSettings, ColorScheme};
 use vmux_ui::hooks::EventListenerError;
@@ -113,7 +116,7 @@ fn apply_native_page_metadata(
         if let Some(favicon) = update.favicon
             && !favicon.is_empty()
         {
-            metadata.icon = vmux_core::PageIcon::favicon(favicon);
+            metadata.icon = PageIcon::favicon(favicon);
         }
     }
 }
@@ -197,9 +200,7 @@ fn open_native_pages(world: &mut World) {
                 remounted
             };
             if remounted {
-                world
-                    .entity_mut(entity)
-                    .remove::<vmux_core::page::PageReady>();
+                world.entity_mut(entity).remove::<PageReady>();
             }
             info!("browser_platform: navigated {entity:?} to {}", page.url);
             continue;
@@ -313,7 +314,7 @@ fn render_native_pages(hosted: Option<NonSend<HostedPages>>) {
 fn focus_native_page(
     hosted: Option<NonSend<HostedPages>>,
     intent: Single<&crate::host_focus::HostFocusIntent>,
-    focused_window: vmux_layout::window::FocusedWindow,
+    focused_window: FocusedWindow,
 ) {
     let Some(hosted) = hosted else {
         return;
@@ -342,7 +343,7 @@ fn host_window_for(world: &World, entity: Entity) -> Option<Entity> {
 fn forward_host_emit(
     host_emit: On<BinHostEmitEvent>,
     hosted: Option<NonSend<HostedPages>>,
-    permissions: Query<&vmux_api::UiEventPermissions>,
+    permissions: Query<&UiEventPermissions>,
 ) {
     let Some(hosted) = hosted else {
         return;
@@ -350,11 +351,7 @@ fn forward_host_emit(
     let Some(page) = hosted.get(host_emit.webview()) else {
         return;
     };
-    if !vmux_api::UiEventPermissions::allows_page(
-        permissions.iter(),
-        page.page.url,
-        host_emit.permission(),
-    ) {
+    if !UiEventPermissions::allows_page(permissions.iter(), page.page.url, host_emit.permission()) {
         warn!(
             "blocked binary host event {} for unexpected native page URL {}",
             host_emit.id(),
@@ -545,7 +542,7 @@ impl PageWaker {
 
 static PAGE_WAKE_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-impl vmux_native::Wake for PageWaker {
+impl NativeWake for PageWaker {
     fn wake(&self) {
         let Some(proxy) = self.0.as_ref() else {
             return;
@@ -569,7 +566,7 @@ struct PageOutbox {
     waker: PageWaker,
 }
 
-impl vmux_native::Outbox for PageOutbox {
+impl NativeOutbox for PageOutbox {
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
         self.bin_ipc
             .send_blocking(BinIpcEventRaw {
@@ -597,7 +594,7 @@ impl vmux_native::Outbox for PageOutbox {
             })
             .is_ok()
         {
-            vmux_native::Wake::wake(&self.waker);
+            NativeWake::wake(&self.waker);
         }
     }
 
@@ -613,7 +610,7 @@ impl vmux_native::Outbox for PageOutbox {
             })
             .is_ok()
         {
-            vmux_native::Wake::wake(&self.waker);
+            NativeWake::wake(&self.waker);
         }
     }
 }
@@ -625,7 +622,7 @@ struct PageAssets {
     simulator_frames: SimulatorFrameProxy,
 }
 
-impl vmux_native::Assets for PageAssets {
+impl NativeAssets for PageAssets {
     fn fetch(&self, url: &str, reply: AssetReply) {
         match SimulatorFrameRequest::parse(url, &self.page_url.borrow()) {
             Ok(Some(request)) => {
@@ -658,7 +655,7 @@ impl vmux_native::Assets for PageAssets {
             reply.fail("request channel closed");
             return;
         }
-        vmux_native::Wake::wake(&self.waker);
+        NativeWake::wake(&self.waker);
         std::thread::spawn(move || match rx.recv_blocking() {
             Ok(response) => reply.respond(
                 response.status_code as u16,

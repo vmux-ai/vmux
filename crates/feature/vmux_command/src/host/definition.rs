@@ -1,6 +1,10 @@
 use std::collections::{BTreeMap, HashSet};
 
 use bevy::prelude::*;
+use vmux_api::InputSchema;
+use vmux_api::json::JsonValue;
+use vmux_api::protocol::AgentCommandTool;
+use vmux_core::JsonArguments;
 use vmux_ui::i18n::Locale;
 
 use crate::shortcut::{Binding, KeyCombo, Modifiers, Shortcut, Source, When, resolve_key};
@@ -28,16 +32,14 @@ pub struct CommandShortcut {
 struct CommandMcpManifest {
     description: String,
     #[serde(default)]
-    input_schema: Option<vmux_api::InputSchema>,
+    input_schema: Option<InputSchema>,
     #[serde(default)]
     allow_agent: bool,
 }
 
 impl CommandMcpManifest {
     fn into_mcp(self) -> CommandMcp {
-        let input_schema = self
-            .input_schema
-            .unwrap_or_else(vmux_api::InputSchema::object);
+        let input_schema = self.input_schema.unwrap_or_else(InputSchema::object);
         let definition = CommandMcp::new(self.description, input_schema);
         if self.allow_agent {
             return definition.allow_agent();
@@ -221,12 +223,12 @@ pub enum AgentAccess {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandMcp {
     pub description: String,
-    pub input_schema: vmux_api::InputSchema,
+    pub input_schema: InputSchema,
     pub agent_access: AgentAccess,
 }
 
 impl CommandMcp {
-    pub fn new(description: impl Into<String>, input_schema: vmux_api::InputSchema) -> Self {
+    pub fn new(description: impl Into<String>, input_schema: InputSchema) -> Self {
         Self {
             description: description.into(),
             input_schema,
@@ -282,12 +284,12 @@ impl CommandDefinition {
         (self, CommandMessage::of::<T>())
     }
 
-    pub fn agent_tool(&self) -> Option<vmux_api::protocol::AgentCommandTool> {
+    pub fn agent_tool(&self) -> Option<AgentCommandTool> {
         let mcp = self.mcp.as_ref()?;
-        Some(vmux_api::protocol::AgentCommandTool {
+        Some(AgentCommandTool {
             name: self.id.clone(),
             description: mcp.description.clone(),
-            input_schema: vmux_api::json::JsonValue::from(mcp.input_schema.to_json()),
+            input_schema: JsonValue::from(mcp.input_schema.to_json()),
         })
     }
 
@@ -333,10 +335,7 @@ impl CommandDefinition {
     }
 
     pub fn expose_to_mcp(mut self) -> Self {
-        self.mcp = Some(CommandMcp::new(
-            self.label.clone(),
-            vmux_api::InputSchema::object(),
-        ));
+        self.mcp = Some(CommandMcp::new(self.label.clone(), InputSchema::object()));
         self
     }
 
@@ -586,7 +585,7 @@ impl CommandDefinition {
 pub struct CommandInvocation {
     pub caller: Entity,
     pub id: String,
-    pub arguments: vmux_core::JsonArguments,
+    pub arguments: JsonArguments,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -617,12 +616,12 @@ impl CommandInvocation {
         Self {
             caller,
             id: id.into(),
-            arguments: vmux_core::JsonArguments(serde_json::json!({})),
+            arguments: JsonArguments(serde_json::json!({})),
         }
     }
 
     pub fn with_arguments(mut self, arguments: serde_json::Value) -> Self {
-        self.arguments = vmux_core::JsonArguments(arguments);
+        self.arguments = JsonArguments(arguments);
         self
     }
 
