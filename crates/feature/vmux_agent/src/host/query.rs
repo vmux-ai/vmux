@@ -12,16 +12,30 @@ use vmux_api::protocol::{
     AgentSpace, AgentVaultStatus, AgentWorkingDirectory, ClientMessage, JsonValue, ProcessId,
 };
 use vmux_command::WriteCommandRequests;
+use vmux_core::browser::{
+    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
+    BrowserSnapshotRequest, BrowserSnapshotResponse,
+};
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
+use vmux_core::{
+    Active, Bookmark, BookmarkOrder, Collapsed, Folder, Order, PageMetadata, Pin, Uuid,
+};
+use vmux_layout::active_pane::ActivatePane;
+use vmux_layout::apply::{LayoutApplyResponse, LayoutSnapshotRequest, LayoutSnapshotResponse};
+use vmux_layout::space::{Space, SpaceId};
+use vmux_layout::tab::Tab;
+use vmux_layout::window::{FocusedWindow, host_window_of};
 use vmux_setting::AppSettings;
+use vmux_simulator::{
+    SimulatorButtonPressRequest, SimulatorControlResponse, SimulatorKeyPressRequest,
+    SimulatorScreenshotRequest, SimulatorScreenshotResponse, SimulatorSwipeRequest,
+    SimulatorTapRequest, SimulatorTypeTextRequest,
+};
+use vmux_space::model::bootstrap_profile_name;
 
 use crate::event::{
     AgentQueryRequest, RecordStartRequest, RecordStartResponse, RecordStopRequest,
     RecordStopResponse, RecordingInfo, ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
-};
-use vmux_core::browser::{
-    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
-    BrowserSnapshotRequest, BrowserSnapshotResponse,
 };
 
 use vmux_browser::AgentBrowserResolve;
@@ -83,7 +97,7 @@ struct BrowserScrollResolveRequest {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct AgentQueryWriters<'w> {
-    layout: MessageWriter<'w, vmux_layout::apply::LayoutSnapshotRequest>,
+    layout: MessageWriter<'w, LayoutSnapshotRequest>,
     working_directory: MessageWriter<'w, WorkingDirectoryRequest>,
     settings: MessageWriter<'w, SettingsReadRequest>,
     spaces: MessageWriter<'w, SpaceListRequest>,
@@ -95,12 +109,12 @@ struct AgentQueryWriters<'w> {
     browser_scroll: MessageWriter<'w, BrowserScrollResolveRequest>,
     record_start: MessageWriter<'w, RecordStartRequest>,
     record_stop: MessageWriter<'w, RecordStopRequest>,
-    simulator_screenshot: MessageWriter<'w, vmux_simulator::SimulatorScreenshotRequest>,
-    simulator_tap: MessageWriter<'w, vmux_simulator::SimulatorTapRequest>,
-    simulator_swipe: MessageWriter<'w, vmux_simulator::SimulatorSwipeRequest>,
-    simulator_type_text: MessageWriter<'w, vmux_simulator::SimulatorTypeTextRequest>,
-    simulator_key_press: MessageWriter<'w, vmux_simulator::SimulatorKeyPressRequest>,
-    simulator_button_press: MessageWriter<'w, vmux_simulator::SimulatorButtonPressRequest>,
+    simulator_screenshot: MessageWriter<'w, SimulatorScreenshotRequest>,
+    simulator_tap: MessageWriter<'w, SimulatorTapRequest>,
+    simulator_swipe: MessageWriter<'w, SimulatorSwipeRequest>,
+    simulator_type_text: MessageWriter<'w, SimulatorTypeTextRequest>,
+    simulator_key_press: MessageWriter<'w, SimulatorKeyPressRequest>,
+    simulator_button_press: MessageWriter<'w, SimulatorButtonPressRequest>,
 }
 
 fn route_agent_queries(
@@ -113,12 +127,10 @@ fn route_agent_queries(
             AgentReadLayout::ID => serde_json::from_slice::<AgentReadLayout>(&request.query.body)
                 .map_err(|error| error.to_string())
                 .map(|query| {
-                    writers
-                        .layout
-                        .write(vmux_layout::apply::LayoutSnapshotRequest {
-                            request_id: request.request_id.0,
-                            anchor: query.anchor,
-                        });
+                    writers.layout.write(LayoutSnapshotRequest {
+                        request_id: request.request_id.0,
+                        anchor: query.anchor,
+                    });
                 }),
             AgentGetSettings::ID => serde_json::from_slice::<AgentGetSettings>(&request.query.body)
                 .map_err(|error| error.to_string())
@@ -200,76 +212,68 @@ fn route_agent_queries(
                 serde_json::from_slice::<AgentSimulatorScreenshot>(&request.query.body)
                     .map_err(|error| error.to_string())
                     .map(|_| {
-                        writers.simulator_screenshot.write(
-                            vmux_simulator::SimulatorScreenshotRequest {
+                        writers
+                            .simulator_screenshot
+                            .write(SimulatorScreenshotRequest {
                                 request_id: request.request_id.0,
-                            },
-                        );
+                            });
                     })
             }
             AgentSimulatorTap::ID => {
                 serde_json::from_slice::<AgentSimulatorTap>(&request.query.body)
                     .map_err(|error| error.to_string())
                     .map(|query| {
-                        writers
-                            .simulator_tap
-                            .write(vmux_simulator::SimulatorTapRequest {
-                                request_id: request.request_id.0,
-                                x: query.x,
-                                y: query.y,
-                            });
+                        writers.simulator_tap.write(SimulatorTapRequest {
+                            request_id: request.request_id.0,
+                            x: query.x,
+                            y: query.y,
+                        });
                     })
             }
             AgentSimulatorSwipe::ID => {
                 serde_json::from_slice::<AgentSimulatorSwipe>(&request.query.body)
                     .map_err(|error| error.to_string())
                     .map(|query| {
-                        writers
-                            .simulator_swipe
-                            .write(vmux_simulator::SimulatorSwipeRequest {
-                                request_id: request.request_id.0,
-                                start_x: query.start_x,
-                                start_y: query.start_y,
-                                end_x: query.end_x,
-                                end_y: query.end_y,
-                                duration_ms: query.duration_ms,
-                            });
+                        writers.simulator_swipe.write(SimulatorSwipeRequest {
+                            request_id: request.request_id.0,
+                            start_x: query.start_x,
+                            start_y: query.start_y,
+                            end_x: query.end_x,
+                            end_y: query.end_y,
+                            duration_ms: query.duration_ms,
+                        });
                     })
             }
             AgentSimulatorTypeText::ID => {
                 serde_json::from_slice::<AgentSimulatorTypeText>(&request.query.body)
                     .map_err(|error| error.to_string())
                     .map(|query| {
-                        writers.simulator_type_text.write(
-                            vmux_simulator::SimulatorTypeTextRequest {
-                                request_id: request.request_id.0,
-                                text: query.text,
-                            },
-                        );
+                        writers.simulator_type_text.write(SimulatorTypeTextRequest {
+                            request_id: request.request_id.0,
+                            text: query.text,
+                        });
                     })
             }
             AgentSimulatorKeyPress::ID => {
                 serde_json::from_slice::<AgentSimulatorKeyPress>(&request.query.body)
                     .map_err(|error| error.to_string())
                     .map(|query| {
-                        writers.simulator_key_press.write(
-                            vmux_simulator::SimulatorKeyPressRequest {
-                                request_id: request.request_id.0,
-                                keycode: query.keycode,
-                            },
-                        );
+                        writers.simulator_key_press.write(SimulatorKeyPressRequest {
+                            request_id: request.request_id.0,
+                            keycode: query.keycode,
+                        });
                     })
             }
             AgentSimulatorButtonPress::ID => {
                 serde_json::from_slice::<AgentSimulatorButtonPress>(&request.query.body)
                     .map_err(|error| error.to_string())
                     .map(|query| {
-                        writers.simulator_button_press.write(
-                            vmux_simulator::SimulatorButtonPressRequest {
+                        writers
+                            .simulator_button_press
+                            .write(SimulatorButtonPressRequest {
                                 request_id: request.request_id.0,
                                 button: query.button,
-                            },
-                        );
+                            });
                     })
             }
             AgentWorkingDirectory::ID => {
@@ -370,16 +374,7 @@ struct AgentSpaceCatalog(Vec<AgentSpace>);
 
 impl AgentSpaceCatalog {
     fn collect(
-        spaces: &Query<
-            (
-                Entity,
-                &vmux_layout::space::SpaceId,
-                &Name,
-                Has<vmux_core::Active>,
-                Option<&vmux_core::Order>,
-            ),
-            With<vmux_layout::space::Space>,
-        >,
+        spaces: &Query<(Entity, &SpaceId, &Name, Has<Active>, Option<&Order>), With<Space>>,
         focused_window: Option<Entity>,
         child_of: &Query<&ChildOf>,
         host_windows: &Query<&HostWindow>,
@@ -387,7 +382,7 @@ impl AgentSpaceCatalog {
         let mut rows: Vec<(u32, AgentSpace)> = Vec::new();
         for (entity, id, name, is_active, order) in spaces {
             let local = focused_window.is_some_and(|focused| {
-                vmux_layout::window::host_window_of(entity, child_of, host_windows) == Some(focused)
+                host_window_of(entity, child_of, host_windows) == Some(focused)
             });
             let order = order.map(|order| order.0).unwrap_or(u32::MAX);
             if let Some((existing_order, row)) =
@@ -404,7 +399,7 @@ impl AgentSpaceCatalog {
                 AgentSpace {
                     id: id.0.clone(),
                     name: name.to_string(),
-                    profile: vmux_space::model::bootstrap_profile_name(),
+                    profile: bootstrap_profile_name(),
                     is_active: local && is_active,
                 },
             ));
@@ -417,7 +412,7 @@ impl AgentSpaceCatalog {
 fn answer_working_directory_queries(
     mut reader: MessageReader<WorkingDirectoryRequest>,
     browse: AgentBrowserResolve,
-    tabs: Query<&vmux_layout::tab::Tab>,
+    tabs: Query<&Tab>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
@@ -457,17 +452,8 @@ fn answer_settings_queries(
 
 fn answer_space_queries(
     mut reader: MessageReader<SpaceListRequest>,
-    spaces: Query<
-        (
-            Entity,
-            &vmux_layout::space::SpaceId,
-            &Name,
-            Has<vmux_core::Active>,
-            Option<&vmux_core::Order>,
-        ),
-        With<vmux_layout::space::Space>,
-    >,
-    focused_window: vmux_layout::window::FocusedWindow,
+    spaces: Query<(Entity, &SpaceId, &Name, Has<Active>, Option<&Order>), With<Space>>,
+    focused_window: FocusedWindow,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -514,40 +500,19 @@ fn answer_vault_queries(
 
 fn answer_bookmark_queries(
     mut reader: MessageReader<BookmarkListRequest>,
-    pins: Query<
-        (
-            &vmux_core::Uuid,
-            &vmux_core::PageMetadata,
-            &vmux_core::BookmarkOrder,
-        ),
-        With<vmux_core::Pin>,
-    >,
+    pins: Query<(&Uuid, &PageMetadata, &BookmarkOrder), With<Pin>>,
     folders: Query<
         (
-            &vmux_core::Uuid,
+            &Uuid,
             &Name,
             Option<&Children>,
-            Has<vmux_core::Collapsed>,
-            &vmux_core::BookmarkOrder,
+            Has<Collapsed>,
+            &BookmarkOrder,
         ),
-        With<vmux_core::Folder>,
+        With<Folder>,
     >,
-    top_level: Query<
-        (
-            &vmux_core::Uuid,
-            &vmux_core::PageMetadata,
-            &vmux_core::BookmarkOrder,
-        ),
-        (With<vmux_core::Bookmark>, Without<ChildOf>),
-    >,
-    bookmarks: Query<
-        (
-            &vmux_core::Uuid,
-            &vmux_core::PageMetadata,
-            &vmux_core::BookmarkOrder,
-        ),
-        With<vmux_core::Bookmark>,
-    >,
+    top_level: Query<(&Uuid, &PageMetadata, &BookmarkOrder), (With<Bookmark>, Without<ChildOf>)>,
+    bookmarks: Query<(&Uuid, &PageMetadata, &BookmarkOrder), With<Bookmark>>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
@@ -627,7 +592,7 @@ fn route_browser_queries(
     mut scrolls: MessageReader<BrowserScrollResolveRequest>,
     mut snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
     mut scroll_writer: MessageWriter<BrowserScrollRequest>,
-    mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
+    mut activate: MessageWriter<ActivatePane>,
     browse: AgentBrowserResolve,
 ) {
     for request in snapshots.read() {
@@ -657,7 +622,7 @@ fn route_browser_queries(
 }
 
 fn forward_layout_apply_responses(
-    mut reader: MessageReader<vmux_layout::apply::LayoutApplyResponse>,
+    mut reader: MessageReader<LayoutApplyResponse>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in reader.read() {
@@ -673,7 +638,7 @@ fn forward_layout_apply_responses(
 }
 
 fn forward_layout_snapshot_responses(
-    mut reader: MessageReader<vmux_layout::apply::LayoutSnapshotResponse>,
+    mut reader: MessageReader<LayoutSnapshotResponse>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in reader.read() {
@@ -786,7 +751,7 @@ fn forward_record_stop_responses(
 }
 
 fn forward_simulator_control_responses(
-    mut reader: MessageReader<vmux_simulator::SimulatorControlResponse>,
+    mut reader: MessageReader<SimulatorControlResponse>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in reader.read() {
@@ -798,7 +763,7 @@ fn forward_simulator_control_responses(
 }
 
 fn forward_simulator_screenshot_responses(
-    mut reader: MessageReader<vmux_simulator::SimulatorScreenshotResponse>,
+    mut reader: MessageReader<SimulatorScreenshotResponse>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in reader.read() {
@@ -829,7 +794,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<AgentQueryRequest>()
             .add_message::<ServiceRequest>()
-            .add_message::<vmux_layout::apply::LayoutSnapshotRequest>()
+            .add_message::<LayoutSnapshotRequest>()
             .add_message::<WorkingDirectoryRequest>()
             .add_message::<SettingsReadRequest>()
             .add_message::<SpaceListRequest>()
@@ -841,12 +806,12 @@ mod tests {
             .add_message::<BrowserScrollResolveRequest>()
             .add_message::<RecordStartRequest>()
             .add_message::<RecordStopRequest>()
-            .add_message::<vmux_simulator::SimulatorScreenshotRequest>()
-            .add_message::<vmux_simulator::SimulatorTapRequest>()
-            .add_message::<vmux_simulator::SimulatorSwipeRequest>()
-            .add_message::<vmux_simulator::SimulatorTypeTextRequest>()
-            .add_message::<vmux_simulator::SimulatorKeyPressRequest>()
-            .add_message::<vmux_simulator::SimulatorButtonPressRequest>()
+            .add_message::<SimulatorScreenshotRequest>()
+            .add_message::<SimulatorTapRequest>()
+            .add_message::<SimulatorSwipeRequest>()
+            .add_message::<SimulatorTypeTextRequest>()
+            .add_message::<SimulatorKeyPressRequest>()
+            .add_message::<SimulatorButtonPressRequest>()
             .add_systems(Update, route_agent_queries);
         app
     }
@@ -892,17 +857,8 @@ mod tests {
     }
 
     fn collect_space_rows(
-        spaces: Query<
-            (
-                Entity,
-                &vmux_layout::space::SpaceId,
-                &Name,
-                Has<vmux_core::Active>,
-                Option<&vmux_core::Order>,
-            ),
-            With<vmux_layout::space::Space>,
-        >,
-        focused_window: vmux_layout::window::FocusedWindow,
+        spaces: Query<(Entity, &SpaceId, &Name, Has<Active>, Option<&Order>), With<Space>>,
+        focused_window: FocusedWindow,
         child_of: Query<&ChildOf>,
         host_windows: Query<&HostWindow>,
     ) -> Vec<AgentSpace> {
@@ -913,30 +869,27 @@ mod tests {
     fn listed_spaces_are_global_but_active_state_is_window_local() {
         let mut app = App::new();
         let first_window = app.world_mut().spawn(Window::default()).id();
-        let second_window = app
-            .world_mut()
-            .spawn((Window::default(), vmux_core::Active))
-            .id();
+        let second_window = app.world_mut().spawn((Window::default(), Active)).id();
         let first_root = app.world_mut().spawn(HostWindow(first_window)).id();
         let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
         app.world_mut().spawn((
-            vmux_layout::space::Space,
-            vmux_layout::space::SpaceId("shared".to_string()),
+            Space,
+            SpaceId("shared".to_string()),
             Name::new("shared"),
-            vmux_core::Active,
+            Active,
             ChildOf(first_root),
         ));
         app.world_mut().spawn((
-            vmux_layout::space::Space,
-            vmux_layout::space::SpaceId("shared".to_string()),
+            Space,
+            SpaceId("shared".to_string()),
             Name::new("shared"),
             ChildOf(second_root),
         ));
         app.world_mut().spawn((
-            vmux_layout::space::Space,
-            vmux_layout::space::SpaceId("local".to_string()),
+            Space,
+            SpaceId("local".to_string()),
             Name::new("local"),
-            vmux_core::Active,
+            Active,
             ChildOf(second_root),
         ));
 
