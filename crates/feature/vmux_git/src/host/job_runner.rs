@@ -16,7 +16,7 @@ use super::job::{
     PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob, StageJob, StashDropJob, StashPopJob,
     StashPushJob, UnstageJob,
 };
-use super::runner::GitRepository;
+use super::repository::GitRepository;
 
 pub(super) struct JobPlugin;
 
@@ -630,7 +630,10 @@ fn result_then_status(
     }
 }
 
-fn operation(operation: &str, result: Result<String, super::runner::GitError>) -> OperationOutput {
+fn operation(
+    operation: &str,
+    result: Result<String, super::repository::GitError>,
+) -> OperationOutput {
     match result {
         Ok(message) => OperationOutput {
             result: GitOperationResult {
@@ -644,7 +647,7 @@ fn operation(operation: &str, result: Result<String, super::runner::GitError>) -
     }
 }
 
-fn failed_operation(operation: &str, error: super::runner::GitError) -> OperationOutput {
+fn failed_operation(operation: &str, error: super::repository::GitError) -> OperationOutput {
     OperationOutput {
         result: GitOperationResult {
             operation: operation.to_string(),
@@ -659,7 +662,7 @@ fn failed_operation(operation: &str, error: super::runner::GitError) -> Operatio
 mod tests {
     use super::*;
     use crate::event::{FileStatus, GitDiffViewport};
-    use crate::host::runner::test_repo;
+    use crate::host::repository::test_repo;
 
     #[derive(Resource, Default)]
     struct CapturedOutputs {

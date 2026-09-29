@@ -5,7 +5,6 @@ mod diff;
 mod directory;
 mod job;
 mod job_runner;
-mod repository;
 mod repository_picker;
 mod state;
 mod status;
@@ -13,7 +12,7 @@ mod watch;
 
 mod highlight;
 mod parse;
-pub mod runner;
+mod repository;
 pub mod worktree;
 
 use bevy::prelude::*;
@@ -21,6 +20,7 @@ use vmux_core::host::page::NativelyHosted;
 
 pub use app::GitCheckForUpdatesRequest;
 pub use diff::GitDiffSource;
+pub use repository::{GitError, GitRepository};
 pub use status::FileGit;
 pub use watch::RepoInfoCache;
 
@@ -30,7 +30,6 @@ use crate::host::controller::ControllerPlugin;
 use crate::host::diff::DiffPlugin;
 use crate::host::directory::DirectoryPlugin;
 use crate::host::job_runner::JobPlugin;
-use crate::host::repository::RepositoryPlugin;
 use crate::host::repository_picker::RepositoryPickerPlugin;
 use crate::host::status::StatusPlugin;
 use crate::host::watch::WatchPlugin;
@@ -65,7 +64,6 @@ impl Plugin for GitPlugin {
             ChangesPlugin,
             DiffPlugin,
             DirectoryPlugin,
-            RepositoryPlugin,
             RepositoryPickerPlugin,
         ))
         .add_plugins(

@@ -29,8 +29,8 @@ fn on_config_edit_request(
         .and_then(|stack| child_of.get(stack.parent()).ok())
         .map(|pane| PageOpenTarget::NewStackInPane(pane.parent()))
         .unwrap_or(PageOpenTarget::ActiveStack);
-    let Ok(path) =
-        super::runner::GitRepository::at(trigger.event().payload.repo_root.clone()).config_path()
+    let Ok(path) = super::repository::GitRepository::at(trigger.event().payload.repo_root.clone())
+        .config_path()
     else {
         return;
     };

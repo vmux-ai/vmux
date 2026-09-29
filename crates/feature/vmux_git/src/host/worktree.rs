@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::host::runner::{GitError, git, git_err, git_read};
+use crate::host::repository::{GitError, git, git_err, git_read};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeInfo {
@@ -842,7 +842,7 @@ pub fn validate_linked_workspace(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::runner::test_repo;
+    use crate::host::repository::test_repo;
 
     fn commit_initial(repo: &Path) {
         test_repo::write(repo, "seed.txt", "seed\n");

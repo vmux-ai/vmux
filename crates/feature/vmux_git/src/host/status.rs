@@ -12,7 +12,7 @@ use crate::event::{FileGitState, FileStatus, GitDiffViewport, GitFileStatus, Git
 
 use super::GitDiffSource;
 use super::GitUpdateSet;
-use super::runner::GitRepository;
+use super::repository::GitRepository;
 use super::watch::GitWatch;
 
 const STATUS_DEBOUNCE: Duration = Duration::from_millis(120);
@@ -284,7 +284,7 @@ fn poll_status_refreshes(
         }
         let path = PathBuf::from(&file.state.path);
         if !GitRepository::has_repository(&path) {
-            file.apply_status(super::runner::non_repository_status(&path));
+            file.apply_status(super::repository::non_repository_status(&path));
             commands.entity(entity).remove::<PendingGitStatus>();
             continue;
         }
@@ -454,7 +454,7 @@ fn publish_file_git_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::runner::test_repo;
+    use crate::host::repository::test_repo;
     use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
     use vmux_api::BinEvent;
     use vmux_core::event::FileUiState;

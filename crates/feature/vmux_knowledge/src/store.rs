@@ -58,7 +58,7 @@ mod tests {
         ensure_vault_repository(temp.path()).unwrap();
         assert!(temp.path().join(".git").is_dir());
         assert!(
-            vmux_git::runner::GitRepository::at(temp.path())
+            vmux_git::GitRepository::at(temp.path())
                 .file_statuses()
                 .unwrap()
                 .is_empty()

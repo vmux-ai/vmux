@@ -280,25 +280,25 @@ fn resolve_git_path(root: &Path, value: &str) -> PathBuf {
 
 fn git_watch_targets(
     file: &Path,
-) -> Result<(PathBuf, Vec<GitWatchTarget>), super::runner::GitError> {
-    let repository = super::runner::GitRepository::discover(file)?;
+) -> Result<(PathBuf, Vec<GitWatchTarget>), super::repository::GitError> {
+    let repository = super::repository::GitRepository::discover(file)?;
     let root = repository.path().to_path_buf();
-    let (stdout, stderr, ok) = super::runner::git(
+    let (stdout, stderr, ok) = super::repository::git(
         &root,
         &["rev-parse", "--absolute-git-dir", "--git-common-dir"],
     )?;
     if !ok {
-        return Err(super::runner::git_err(&stdout, &stderr));
+        return Err(super::repository::git_err(&stdout, &stderr));
     }
     let mut lines = stdout.lines();
     let git_dir = lines
         .next()
         .map(|line| resolve_git_path(&root, line))
-        .ok_or_else(|| super::runner::GitError("missing git directory".into()))?;
+        .ok_or_else(|| super::repository::GitError("missing git directory".into()))?;
     let common_dir = lines
         .next()
         .map(|line| resolve_git_path(&root, line))
-        .ok_or_else(|| super::runner::GitError("missing common git directory".into()))?;
+        .ok_or_else(|| super::repository::GitError("missing common git directory".into()))?;
     let mut targets = vec![
         GitWatchTarget {
             path: canonical(&root),
@@ -414,7 +414,7 @@ impl GitWatch {
         &mut self,
         entity: Entity,
         path: &Path,
-    ) -> Result<PathBuf, super::runner::GitError> {
+    ) -> Result<PathBuf, super::repository::GitError> {
         let path = canonical(path);
         if let Some(subscription) = self
             .subscriptions
@@ -656,7 +656,7 @@ fn sync_repo_info_watches(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::runner::test_repo;
+    use crate::host::repository::test_repo;
 
     #[test]
     fn git_watch_targets_cover_index_and_refs() {

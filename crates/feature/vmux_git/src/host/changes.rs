@@ -17,7 +17,7 @@ use super::job::{
     RevertJob, StageAllJob, StageJob, StashDropJob, StashPopJob, StashPushJob, UnstageJob,
 };
 use super::job_runner::GitJob;
-use super::runner::GitRepository;
+use super::repository::{GitRepository, RequestPath};
 
 pub(super) struct ChangesPlugin;
 
@@ -62,8 +62,7 @@ impl Plugin for ChangesPlugin {
 fn on_stage_request(trigger: On<UiInput<GitStageRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
-    let path =
-        super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
+    let path = RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
     commands.spawn((
         GitJob::new(trigger.event().webview),
         GitRepository::at(repo_root),
@@ -74,8 +73,7 @@ fn on_stage_request(trigger: On<UiInput<GitStageRequest>>, mut commands: Command
 fn on_unstage_request(trigger: On<UiInput<GitUnstageRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
-    let path =
-        super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
+    let path = RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
     commands.spawn((
         GitJob::new(trigger.event().webview),
         GitRepository::at(repo_root),
@@ -86,8 +84,7 @@ fn on_unstage_request(trigger: On<UiInput<GitUnstageRequest>>, mut commands: Com
 fn on_discard_request(trigger: On<UiInput<GitDiscardRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
-    let path =
-        super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
+    let path = RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
     commands.spawn((
         GitJob::new(trigger.event().webview),
         GitRepository::at(repo_root),
@@ -339,8 +336,7 @@ fn on_stage_all_request(trigger: On<UiInput<GitStageAllRequest>>, mut commands: 
 fn on_hunk_request(trigger: On<UiInput<GitHunkRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
-    let path =
-        super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
+    let path = RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
     commands.spawn((
         GitJob::new(trigger.event().webview),
         GitRepository::at(repo_root),

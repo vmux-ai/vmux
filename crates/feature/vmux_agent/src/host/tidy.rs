@@ -142,7 +142,7 @@ fn is_changed(
     if let Some((root, set)) = repos.iter().find(|(r, _)| abs.starts_with(r)) {
         return set.contains(&rel_str(root, &abs));
     }
-    match vmux_git::runner::GitRepository::discover(&abs)
+    match vmux_git::GitRepository::discover(&abs)
         .and_then(|repository| repository.dirty_paths().map(|set| (repository, set)))
     {
         Ok((repository, set)) => {

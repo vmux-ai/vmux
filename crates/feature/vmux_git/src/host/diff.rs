@@ -9,7 +9,7 @@ use crate::state::GitPanel;
 use super::GitUpdateSet;
 use super::job::DiffJob;
 use super::job_runner::GitJob;
-use super::runner::GitRepository;
+use super::repository::GitRepository;
 
 const DIFF_WINDOW_ROWS: u32 = 200_000;
 
