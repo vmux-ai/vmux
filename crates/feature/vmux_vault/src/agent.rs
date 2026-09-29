@@ -1,11 +1,10 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
-use vmux_api::protocol::{
-    AgentOpenBeside, AgentRequest, AgentRequestId, AgentVaultStatus, ClientMessage,
-};
+use vmux_api::protocol::{AgentRequest, AgentRequestId, AgentVaultStatus, ClientMessage};
 use vmux_core::ProcessAnchor;
 use vmux_core::service::ServiceRequest;
+use vmux_layout::AgentOpenBeside;
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
     ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,

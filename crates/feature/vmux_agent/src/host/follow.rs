@@ -443,10 +443,9 @@ mod tests {
     use super::*;
     use crate::host::run_terminal::AgentCwd;
     use crate::host::test_support::test_settings;
-    use vmux_api::protocol::{
-        AgentFileSearch, AgentFileTouched, AgentRequestId, AgentRun, ProcessId,
-    };
+    use vmux_api::protocol::{AgentFileSearch, AgentFileTouched, AgentRequestId, ProcessId};
     use vmux_layout::pane::PaneSplit;
+    use vmux_terminal::{AgentRun, PlacementMode};
 
     #[test]
     fn file_touch_url_builds_goto_fragment() {
@@ -1089,10 +1088,10 @@ mod tests {
                 request: AgentRequest::encode(&AgentRun {
                     anchor,
                     command: "pwd".into(),
-                    direction: vmux_api::protocol::AgentPaneDirection::Right,
+                    direction: vmux_layout::AgentPaneDirection::Right,
                     focus: false,
                     beside: None,
-                    mode: vmux_api::protocol::PlacementMode::Auto,
+                    mode: PlacementMode::Auto,
                     terminal: None,
                     done_marker: None,
                 })

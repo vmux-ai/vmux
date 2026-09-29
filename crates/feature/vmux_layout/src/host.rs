@@ -39,6 +39,7 @@ mod swap;
 mod webview_reveal;
 mod zoom;
 
+pub use agent::{AgentOpenBeside, AgentPaneDirection};
 pub use cef::{
     Browser, LayoutCef, LayoutCefPlugin, LayoutCefStateSet, Loading, NavigationState,
     ReloadRevision,

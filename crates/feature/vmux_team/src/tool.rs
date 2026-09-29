@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_api::protocol::{AgentRenameProfile, AgentRequest};
+use vmux_api::protocol::AgentRequest;
+use vmux_space::AgentRenameProfile;
 use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin};
 
 pub struct TeamToolPlugin;

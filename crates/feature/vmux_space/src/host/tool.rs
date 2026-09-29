@@ -2,11 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
 use serde::Deserialize;
 use vmux_api::BinEvent;
-use vmux_api::protocol::{
-    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch, AgentListSpaces,
-    AgentPrepareWorktree, AgentRequest, AgentSpace, AgentSpaceCreate, AgentSpaceDelete,
-    AgentSpaceRename, ClientMessage,
-};
+use vmux_api::protocol::{AgentRequest, AgentSpace, ClientMessage};
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_core::{Active, Order, ProcessAnchor};
 use vmux_layout::space::{Space, SpaceId};
@@ -16,6 +12,10 @@ use vmux_tool::{
     ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
 };
 
+use super::{
+    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch,
+    AgentListSpaces, AgentPrepareWorktree, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
+};
 use crate::model::bootstrap_profile_name;
 
 pub struct SpaceToolPlugin;

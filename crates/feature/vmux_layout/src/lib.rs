@@ -24,10 +24,10 @@ pub mod error_page;
 pub mod host;
 #[cfg(host)]
 pub use host::{
-    Browser, BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest,
-    CloseRequiresConfirmation, CloseStackReason, CloseStackRequest, ContributedCommandChosen,
-    Header, LauncherDismissRequest, LayoutCef, LayoutCefPlugin, LayoutCefStateSet,
-    LayoutContractPlugin, LayoutPersistenceSet, LayoutPlugin, LayoutStartupSet,
+    AgentOpenBeside, AgentPaneDirection, Browser, BrowserGoBackRequest, BrowserGoForwardRequest,
+    BrowserNavigateRequest, CloseRequiresConfirmation, CloseStackReason, CloseStackRequest,
+    ContributedCommandChosen, Header, LauncherDismissRequest, LayoutCef, LayoutCefPlugin,
+    LayoutCefStateSet, LayoutContractPlugin, LayoutPersistenceSet, LayoutPlugin, LayoutStartupSet,
     LayoutUiStateUpdates, Loading, NavigationState, NewTabRequest, Open, OpenBesideRequest,
     OpenInNewStackRequest, PendingWebviewReveal, ReloadRevision, TabLayoutSpawnContent,
     TabLayoutSpawnRequest, TerminalLayoutSpawnRequest, UpdateState, active, active_pane, apply,

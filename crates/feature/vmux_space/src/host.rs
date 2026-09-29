@@ -12,6 +12,11 @@ mod tool;
 type SpacesUiStateUpdates = vmux_core::host::UiState<vmux_api::space::SpacesUiState>;
 
 pub use plugin::SpacePlugin;
+pub use agent::{
+    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktree,
+    AgentCreateWorktreeOnBranch, AgentListSpaces, AgentPrepareWorktree, AgentRenameProfile,
+    AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
+};
 pub use project::{ExpandedProjectDirs, SpaceProjects};
 pub use spaces::Spaces;
 pub use tool::SpaceToolPlugin;

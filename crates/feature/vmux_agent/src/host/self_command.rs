@@ -2,19 +2,23 @@ use std::path::Path;
 
 use bevy::prelude::*;
 use vmux_api::BinEvent;
-use vmux_api::protocol::{
-    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktree,
-    AgentCreateWorktreeOnBranch, AgentOpenBeside, AgentPrepareWorktree, AgentRun,
-    AgentRunWithPlacementOverride, ClientMessage, ProcessId,
-};
+use vmux_api::protocol::{ClientMessage, ProcessId};
 #[cfg(test)]
 use vmux_api::protocol::{AgentRequest, AgentRequestId};
 use vmux_chat::host::USER_CHOICE_REQUESTED;
 use vmux_command::WriteCommandRequests;
+use vmux_core::agent::{AgentRequestBlocked, AgentRequestPrerequisiteSet};
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_setting::AppSettings;
-use vmux_terminal::{TerminalStackSpawnRequest, TerminalStackSpawnSet};
+use vmux_space::{
+    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktree,
+    AgentCreateWorktreeOnBranch, AgentPrepareWorktree,
+};
+use vmux_terminal::{
+    AgentRun, AgentRunWithPlacementOverride, PlacementMode, TerminalStackSpawnRequest,
+    TerminalStackSpawnSet,
+};
 
 use crate::event::AgentRequestInput;
 
@@ -42,6 +46,7 @@ impl Plugin for SelfCommandPlugin {
             Update,
             handle_agent_self_commands
                 .in_set(SelfCommandSet)
+                .in_set(AgentRequestPrerequisiteSet)
                 .in_set(WriteCommandRequests)
                 .after(ServiceMessageSet)
                 .after(vmux_layout::worktree::TabDirectoryRebindSet)
@@ -125,9 +130,7 @@ pub(crate) fn rebind_acp_workspace(
 }
 
 fn self_command_anchor(request: &AgentRequestInput) -> Option<ProcessId> {
-    if let Ok(Some(command)) = request.decode::<AgentOpenBeside>() {
-        Some(command.anchor)
-    } else if let Some(run) = SelfRun::decode(request) {
+    if let Some(run) = SelfRun::decode(request) {
         Some(run.payload.anchor)
     } else if let Ok(Some(command)) = request.decode::<AgentCreateWorktree>() {
         Some(command.anchor)
@@ -219,7 +222,6 @@ impl WorkspaceChoice {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct AgentSelfCommandWriters<'w> {
-    open_beside: MessageWriter<'w, vmux_layout::OpenBesideRequest>,
     terminal_stack_spawn: MessageWriter<'w, TerminalStackSpawnRequest>,
     terminal_reinput: MessageWriter<'w, vmux_terminal::TerminalReinputRequest>,
 }
@@ -234,6 +236,7 @@ fn handle_agent_self_commands(
     mut writers: AgentSelfCommandWriters,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
+    mut blocked_requests: MessageWriter<AgentRequestBlocked>,
     active_space: vmux_layout::space::FocusedSpace,
     settings: Res<AppSettings>,
     mut next_pane_sequence: NextPaneSpawnSequence,
@@ -272,26 +275,7 @@ fn handle_agent_self_commands(
             }));
             continue;
         }
-        let result = if let Ok(Some(command)) = request.decode::<AgentOpenBeside>() {
-            let anchor = &command.anchor;
-            let direction = &command.direction;
-            let url = &command.url;
-            let focus = &command.focus;
-            match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
-                None => AgentCommandResult::Error("self process not found".to_string()),
-                Some((_, pane, _)) => {
-                    let focus = request.origin.allows_focus(*focus);
-                    writers.open_beside.write(vmux_layout::OpenBesideRequest {
-                        pane,
-                        direction: direction.as_ref().map(AgentPane::direction),
-                        url: url.clone(),
-                        request_id: request.request_id.0,
-                        focus,
-                    });
-                    AgentCommandResult::Ok
-                }
-            }
-        } else if let Some(decoded) = SelfRun::decode(request) {
+        let result = if let Some(decoded) = SelfRun::decode(request) {
             'run: {
                 let run = &decoded.payload;
                 let anchor = &run.anchor;
@@ -304,8 +288,8 @@ fn handle_agent_self_commands(
                 let done_marker = &run.done_marker;
                 let placement_override = decoded.placement_override
                     || beside.is_some()
-                    || *mode != vmux_api::protocol::PlacementMode::Auto
-                    || *direction != vmux_api::protocol::AgentPaneDirection::Right;
+                    || *mode != PlacementMode::Auto
+                    || *direction != vmux_layout::AgentPaneDirection::Right;
                 if let Err(error) = RunPlacementPolicy::new(placement_override).validate(&settings)
                 {
                     break 'run AgentCommandResult::Error(error.to_string());
@@ -376,7 +360,7 @@ fn handle_agent_self_commands(
                             &ctx.seq_q,
                         );
                         if beside.is_none()
-                            && *mode == vmux_api::protocol::PlacementMode::Auto
+                            && *mode == PlacementMode::Auto
                             && let Some(pid) = pending_run_spawns.append_input(
                                 *anchor,
                                 &mut terminal_spawns,
@@ -390,7 +374,7 @@ fn handle_agent_self_commands(
                             .entry(*anchor)
                             .or_insert((agent_term, stored_region));
                         if beside.is_none()
-                            && *mode == vmux_api::protocol::PlacementMode::Auto
+                            && *mode == PlacementMode::Auto
                             && let Some(candidate) =
                                 region.1.choose_reusable_terminal(self_pane, &candidates)
                         {
@@ -437,7 +421,6 @@ fn handle_agent_self_commands(
                         }
                         let shell = shell.into_string();
 
-                        use vmux_api::protocol::PlacementMode;
                         let target_pane = match (beside_pane, *mode) {
                             (anchor_pane, PlacementMode::Split) => {
                                 let bucket_pane = if anchor_pane.is_none() {
@@ -495,7 +478,7 @@ fn handle_agent_self_commands(
                             activate: focus,
                         });
                         region.1.run_pane = Some(target_pane);
-                        if beside.is_none() && *mode != vmux_api::protocol::PlacementMode::Split {
+                        if beside.is_none() && *mode != PlacementMode::Split {
                             region.1.run_terminal = Some(new_pid);
                             pending_run_spawns.insert(
                                 *anchor,
@@ -986,6 +969,10 @@ fn handle_agent_self_commands(
             && let Some(anchor) = request_anchor
         {
             failed_worktree_anchors.insert(anchor);
+            blocked_requests.write(AgentRequestBlocked {
+                anchor,
+                reason: "Skipped because worktree activation did not complete.".to_string(),
+            });
         }
         service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
             request_id: request.request_id,
@@ -1004,7 +991,6 @@ fn handle_agent_self_commands(
 mod tests {
     use super::*;
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
-    use vmux_api::protocol::{AgentCreateWorktreeOnBranch, AgentOpenBeside};
 
     #[test]
     fn agent_run_spawns_terminal_before_next_agent_command_frame() {
@@ -1052,11 +1038,15 @@ mod tests {
         let sibling = AgentRequestInput {
             request_id: AgentRequestId::new(),
             origin: crate::event::CommandOrigin::User,
-            request: AgentRequest::encode(&AgentOpenBeside {
+            request: AgentRequest::encode(&AgentRun {
                 anchor,
-                direction: None,
-                url: "https://example.com".into(),
+                command: "pwd".to_string(),
+                direction: vmux_layout::AgentPaneDirection::Right,
                 focus: false,
+                beside: None,
+                mode: PlacementMode::Auto,
+                terminal: None,
+                done_marker: None,
             })
             .unwrap(),
         };

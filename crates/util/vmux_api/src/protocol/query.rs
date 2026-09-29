@@ -29,9 +29,6 @@ pub struct AgentProcessRunCompletion {
 #[vmux_api::agent(Copy, Eq)]
 pub struct AgentGetSettings;
 
-#[vmux_api::agent(Copy, Eq)]
-pub struct AgentListSpaces;
-
 #[vmux_api::agent(Eq)]
 pub struct AgentScreenshot {
     pub pane: Option<String>,

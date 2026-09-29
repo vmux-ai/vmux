@@ -2,10 +2,8 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
 use super::project::SpaceProjects;
-use vmux_api::protocol::{
-    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch, AgentRequest,
-    AgentRequestId,
-};
+use super::{AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch};
+use vmux_api::protocol::{AgentRequest, AgentRequestId};
 use vmux_chat::event::{
     ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
 };

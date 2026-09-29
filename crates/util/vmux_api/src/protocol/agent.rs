@@ -48,20 +48,6 @@ impl AgentRequestId {
 }
 
 #[vmux_api::contract(Copy, Eq)]
-pub enum AgentShellMode {
-    NewTab,
-    Active,
-}
-
-#[vmux_api::contract(Copy, Eq)]
-pub enum AgentPaneDirection {
-    Top,
-    Right,
-    Bottom,
-    Left,
-}
-
-#[vmux_api::contract(Copy, Eq)]
 pub enum ManagedMcpTransport {
     Stdio,
     Http,
@@ -78,13 +64,6 @@ pub struct ManagedMcpServer {
     pub cwd: Option<String>,
     pub url: Option<String>,
     pub headers: Vec<(String, String)>,
-}
-
-#[vmux_api::contract(Copy, Eq)]
-pub enum PlacementMode {
-    Auto,
-    Split,
-    Stack,
 }
 
 #[vmux_api::contract(Copy, Eq)]
@@ -117,34 +96,8 @@ pub struct AgentInvokeCommand {
 }
 
 #[vmux_api::agent]
-pub struct AgentNewTerminalTab {
-    pub cwd: String,
-    pub command: String,
-    pub args: Vec<String>,
-    pub env: Vec<(String, String)>,
-}
-
-#[vmux_api::agent]
-pub struct AgentRunShell {
-    pub command: String,
-    pub cwd: String,
-    pub mode: AgentShellMode,
-}
-
-#[vmux_api::agent]
-pub struct AgentTerminalSend {
-    pub text: String,
-    pub terminal: Option<String>,
-}
-
-#[vmux_api::agent]
 pub struct AgentFocusPane {
     pub pane: String,
-}
-
-#[vmux_api::agent]
-pub struct AgentRenameProfile {
-    pub name: String,
 }
 
 #[vmux_api::agent]
@@ -164,45 +117,6 @@ pub struct AgentOpenInNewStack {
 }
 
 #[vmux_api::agent]
-pub struct AgentSpaceCreate {
-    pub name: Option<String>,
-}
-
-#[vmux_api::agent]
-pub struct AgentSpaceRename {
-    pub space_id: String,
-    pub name: String,
-}
-
-#[vmux_api::agent]
-pub struct AgentSpaceDelete {
-    pub space_id: String,
-}
-
-#[vmux_api::agent]
-pub struct AgentOpenBeside {
-    pub anchor: ProcessId,
-    pub direction: Option<AgentPaneDirection>,
-    pub url: String,
-    pub focus: bool,
-}
-
-#[vmux_api::agent]
-pub struct AgentRun {
-    pub anchor: ProcessId,
-    pub command: String,
-    pub direction: AgentPaneDirection,
-    pub focus: bool,
-    pub beside: Option<ProcessId>,
-    pub mode: PlacementMode,
-    pub terminal: Option<ProcessId>,
-    pub done_marker: Option<String>,
-}
-
-#[vmux_api::agent]
-pub struct AgentRunWithPlacementOverride(pub AgentRun);
-
-#[vmux_api::agent]
 pub struct AgentNotify {
     pub title: Option<String>,
     pub body: Option<String>,
@@ -219,11 +133,6 @@ pub struct AgentFileTouched {
 }
 
 #[vmux_api::agent(Copy, Eq)]
-pub struct AgentCreateWorktree {
-    pub anchor: ProcessId,
-}
-
-#[vmux_api::agent(Copy, Eq)]
 pub struct AgentTurnEnded {
     pub anchor: ProcessId,
 }
@@ -231,18 +140,6 @@ pub struct AgentTurnEnded {
 #[vmux_api::agent(Copy, Eq)]
 pub struct AgentResumeInAcp {
     pub anchor: ProcessId,
-}
-
-#[vmux_api::agent(Copy, Eq)]
-pub struct AgentChooseWorkspace {
-    pub anchor: ProcessId,
-}
-
-#[vmux_api::agent]
-pub struct AgentCreateWorktreeOnBranch {
-    pub anchor: ProcessId,
-    pub branch: String,
-    pub project: Option<String>,
 }
 
 #[vmux_api::agent]
@@ -281,20 +178,6 @@ pub struct AgentRequestUserChoice {
     pub anchor: ProcessId,
     pub question: String,
     pub options: Vec<String>,
-}
-
-#[vmux_api::agent]
-pub struct AgentChooseWorkspaceAtPath {
-    pub anchor: ProcessId,
-    pub path: String,
-}
-
-#[vmux_api::agent]
-pub struct AgentPrepareWorktree {
-    pub anchor: ProcessId,
-    pub path: Option<String>,
-    pub task: Option<String>,
-    pub create: bool,
 }
 
 #[vmux_api::agent]

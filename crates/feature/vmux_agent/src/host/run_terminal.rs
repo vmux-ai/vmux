@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use vmux_api::protocol::{AgentPaneDirection, ProcessId};
+use vmux_api::protocol::ProcessId;
 use vmux_api::service::RUN_OSC;
 #[cfg(test)]
 use vmux_api::terminal::CursorStyle;
@@ -10,6 +10,7 @@ use vmux_core::PageMetadata;
 use vmux_core::profile::ProjectsDirectory;
 #[cfg(test)]
 use vmux_core::{LastActivatedAt, terminal::TerminalKind as CoreTerminalKind};
+use vmux_layout::AgentPaneDirection;
 use vmux_layout::pane::{
     Pane, PaneSplit, PaneSplitDirection, SpawnCounter, SpawnSeq, direction_to_split,
 };

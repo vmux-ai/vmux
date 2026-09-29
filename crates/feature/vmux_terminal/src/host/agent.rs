@@ -1,9 +1,7 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use vmux_api::protocol::{
-    AgentCommandResult, AgentNewTerminalTab, AgentRunShell, AgentTerminalSend,
-};
+use vmux_api::protocol::{AgentCommandResult, ProcessId};
 use vmux_core::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
@@ -11,6 +9,55 @@ use vmux_core::{KeyboardOwner, LastActivatedAt, PageMetadata};
 use vmux_layout::pane::{Pane, PaneSplit};
 use vmux_layout::stack::FocusedStack;
 use vmux_setting::AppSettings;
+
+#[vmux_api::contract(Copy, Eq)]
+pub enum AgentShellMode {
+    NewTab,
+    Active,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub enum PlacementMode {
+    Auto,
+    Split,
+    Stack,
+}
+
+#[vmux_api::agent]
+pub struct AgentNewTerminalTab {
+    pub cwd: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+#[vmux_api::agent]
+pub struct AgentRunShell {
+    pub command: String,
+    pub cwd: String,
+    pub mode: AgentShellMode,
+}
+
+#[vmux_api::agent]
+pub struct AgentTerminalSend {
+    pub text: String,
+    pub terminal: Option<String>,
+}
+
+#[vmux_api::agent]
+pub struct AgentRun {
+    pub anchor: ProcessId,
+    pub command: String,
+    pub direction: vmux_layout::AgentPaneDirection,
+    pub focus: bool,
+    pub beside: Option<ProcessId>,
+    pub mode: PlacementMode,
+    pub terminal: Option<ProcessId>,
+    pub done_marker: Option<String>,
+}
+
+#[vmux_api::agent]
+pub struct AgentRunWithPlacementOverride(pub AgentRun);
 
 pub(super) struct AgentTerminalPlugin;
 
@@ -101,8 +148,8 @@ fn run_shell(
 ) {
     for request in requests.read() {
         let mode = match request.payload.mode {
-            vmux_api::protocol::AgentShellMode::Active => super::ShellMode::Active,
-            vmux_api::protocol::AgentShellMode::NewTab => super::ShellMode::NewTab,
+            AgentShellMode::Active => super::ShellMode::Active,
+            AgentShellMode::NewTab => super::ShellMode::NewTab,
         };
         run.write(super::RunShellRequest {
             command: request.payload.command.clone(),

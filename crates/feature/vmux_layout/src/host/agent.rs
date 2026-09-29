@@ -2,12 +2,41 @@ use bevy::prelude::*;
 use vmux_api::protocol::{
     AgentBookmarkAdd, AgentBookmarkFolderCreate, AgentBookmarkPin, AgentBookmarkPinUrl,
     AgentBookmarkRemove, AgentBookmarkUnpin, AgentCommandResult, AgentFocusPane, AgentUpdateLayout,
+    ProcessId,
 };
 use vmux_core::agent::{
-    AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
+    AgentCommandResponse, AgentRequestAppExt, AgentRequestApplySet, AgentRequestBlocked,
+    AgentRequestMessage, AgentRequestRouteSet,
 };
 
 use crate::stack::FocusedStack;
+
+#[vmux_api::contract(Copy, Eq)]
+pub enum AgentPaneDirection {
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
+
+impl From<AgentPaneDirection> for vmux_api::open_target::PaneDirection {
+    fn from(direction: AgentPaneDirection) -> Self {
+        match direction {
+            AgentPaneDirection::Top => Self::Top,
+            AgentPaneDirection::Right => Self::Right,
+            AgentPaneDirection::Bottom => Self::Bottom,
+            AgentPaneDirection::Left => Self::Left,
+        }
+    }
+}
+
+#[vmux_api::agent]
+pub struct AgentOpenBeside {
+    pub anchor: ProcessId,
+    pub direction: Option<AgentPaneDirection>,
+    pub url: String,
+    pub focus: bool,
+}
 
 pub(super) struct LayoutAgentPlugin;
 
@@ -21,6 +50,7 @@ impl Plugin for LayoutAgentPlugin {
             .add_agent_request::<AgentBookmarkFolderCreate>()
             .add_agent_request::<AgentFocusPane>()
             .add_agent_request::<AgentUpdateLayout>()
+            .add_agent_request::<AgentOpenBeside>()
             .add_message::<FocusPaneRequest>()
             .add_systems(
                 Update,
@@ -39,7 +69,49 @@ impl Plugin for LayoutAgentPlugin {
                 (request_focus, focus_pane, update_layout)
                     .chain()
                     .after(AgentRequestRouteSet),
-            );
+            )
+            .add_systems(Update, open_beside.in_set(AgentRequestApplySet));
+    }
+}
+
+fn open_beside(
+    mut requests: MessageReader<AgentRequestMessage<AgentOpenBeside>>,
+    mut blocked: MessageReader<AgentRequestBlocked>,
+    anchors: Query<(&ProcessId, &ChildOf)>,
+    child_of: Query<&ChildOf>,
+    mut open: MessageWriter<crate::OpenBesideRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
+) {
+    let blocked = blocked
+        .read()
+        .map(|blocked| (blocked.anchor, blocked.reason.clone()))
+        .collect::<std::collections::HashMap<_, _>>();
+    for request in requests.read() {
+        let result = if let Some(reason) = blocked.get(&request.payload.anchor) {
+            AgentCommandResult::Error(reason.clone())
+        } else {
+            let pane = anchors
+                .iter()
+                .find_map(|(process_id, child_of)| {
+                    (*process_id == request.payload.anchor).then_some(child_of.parent())
+                })
+                .and_then(|stack| child_of.get(stack).ok())
+                .map(ChildOf::parent);
+            match pane {
+                None => AgentCommandResult::Error("self process not found".to_string()),
+                Some(pane) => {
+                    open.write(crate::OpenBesideRequest {
+                        pane,
+                        direction: request.payload.direction.map(Into::into),
+                        url: request.payload.url.clone(),
+                        request_id: request.reply.request_id.0,
+                        focus: request.origin.allows_focus(request.payload.focus),
+                    });
+                    AgentCommandResult::Ok
+                }
+            }
+        };
+        responses.write(request.reply.response(result));
     }
 }
 
@@ -218,5 +290,104 @@ fn create_bookmark_folder(
             request.payload.name.clone(),
         ));
         responses.write(request.reply.ok());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vmux_core::agent::{AgentReply, CommandOrigin};
+
+    struct OpenBesideFixture {
+        app: App,
+        anchor: ProcessId,
+    }
+
+    impl OpenBesideFixture {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_message::<AgentRequestMessage<AgentOpenBeside>>()
+                .add_message::<AgentRequestBlocked>()
+                .add_message::<crate::OpenBesideRequest>()
+                .add_message::<AgentCommandResponse>()
+                .add_systems(Update, open_beside);
+            let pane = app.world_mut().spawn_empty().id();
+            let stack = app.world_mut().spawn(ChildOf(pane)).id();
+            let anchor = ProcessId::new();
+            app.world_mut().spawn((anchor, ChildOf(stack)));
+            Self { app, anchor }
+        }
+
+        fn request(&mut self) -> vmux_api::protocol::AgentRequestId {
+            let request_id = vmux_api::protocol::AgentRequestId::new();
+            self.app.world_mut().write_message(AgentRequestMessage {
+                reply: AgentReply::new(request_id),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: Some(self.anchor),
+                },
+                payload: AgentOpenBeside {
+                    anchor: self.anchor,
+                    direction: Some(AgentPaneDirection::Left),
+                    url: "https://example.com".to_string(),
+                    focus: true,
+                },
+            });
+            request_id
+        }
+    }
+
+    #[test]
+    fn open_beside_routes_from_the_layout_feature() {
+        let mut fixture = OpenBesideFixture::new();
+        let request_id = fixture.request();
+        fixture.app.update();
+
+        let requests = fixture
+            .app
+            .world_mut()
+            .resource_mut::<Messages<crate::OpenBesideRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].request_id, request_id.0);
+        assert_eq!(
+            requests[0].direction,
+            Some(vmux_api::open_target::PaneDirection::Left)
+        );
+        assert!(!requests[0].focus);
+    }
+
+    #[test]
+    fn prerequisite_failure_blocks_layout_agent_requests() {
+        let mut fixture = OpenBesideFixture::new();
+        let request_id = fixture.request();
+        fixture.app.world_mut().write_message(AgentRequestBlocked {
+            anchor: fixture.anchor,
+            reason: "worktree failed".to_string(),
+        });
+        fixture.app.update();
+
+        assert!(
+            fixture
+                .app
+                .world_mut()
+                .resource_mut::<Messages<crate::OpenBesideRequest>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        let responses = fixture
+            .app
+            .world_mut()
+            .resource_mut::<Messages<AgentCommandResponse>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0].request_id, request_id);
+        assert_eq!(
+            responses[0].result,
+            AgentCommandResult::Error("worktree failed".to_string())
+        );
     }
 }

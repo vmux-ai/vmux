@@ -3,10 +3,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 use vmux_api::protocol::{
-    AgentPaneDirection, AgentProcessRunCompletion, AgentReadProcessOutput,
-    AgentReadProcessTranscript, AgentRequest, AgentRequestId, AgentRun, AgentRunCompletion,
-    AgentRunWithPlacementOverride, AgentTerminalSend, ClientMessage, PlacementMode, ProcessId,
-    ServiceMessage,
+    AgentProcessRunCompletion, AgentReadProcessOutput, AgentReadProcessTranscript, AgentRequest,
+    AgentRequestId, AgentRunCompletion, ClientMessage, ProcessId, ServiceMessage,
 };
 use vmux_core::service::ServiceConnection;
 use vmux_core::{HostShell, ProcessAnchor};
@@ -15,6 +13,9 @@ use vmux_mcp::protocol::{McpExecution, McpRequest};
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
 };
+
+use super::{AgentRun, AgentRunWithPlacementOverride, AgentTerminalSend, PlacementMode};
+use vmux_layout::AgentPaneDirection;
 
 const RUN_PROCESS_MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
 const RUN_POLL_INTERVAL: Duration = Duration::from_millis(200);

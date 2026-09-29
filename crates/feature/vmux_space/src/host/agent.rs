@@ -1,10 +1,63 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{
-    AgentRenameProfile, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
-};
+use vmux_api::protocol::ProcessId;
 use vmux_core::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
+
+#[vmux_api::agent]
+pub struct AgentRenameProfile {
+    pub name: String,
+}
+
+#[vmux_api::agent]
+pub struct AgentSpaceCreate {
+    pub name: Option<String>,
+}
+
+#[vmux_api::agent]
+pub struct AgentSpaceRename {
+    pub space_id: String,
+    pub name: String,
+}
+
+#[vmux_api::agent]
+pub struct AgentSpaceDelete {
+    pub space_id: String,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentCreateWorktree {
+    pub anchor: ProcessId,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentChooseWorkspace {
+    pub anchor: ProcessId,
+}
+
+#[vmux_api::agent]
+pub struct AgentCreateWorktreeOnBranch {
+    pub anchor: ProcessId,
+    pub branch: String,
+    pub project: Option<String>,
+}
+
+#[vmux_api::agent]
+pub struct AgentChooseWorkspaceAtPath {
+    pub anchor: ProcessId,
+    pub path: String,
+}
+
+#[vmux_api::agent]
+pub struct AgentPrepareWorktree {
+    pub anchor: ProcessId,
+    pub path: Option<String>,
+    pub task: Option<String>,
+    pub create: bool,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentListSpaces;
 
 pub(super) struct SpaceAgentPlugin;
 

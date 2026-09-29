@@ -127,9 +127,9 @@ fn route_approval_requests(
 mod tests {
     use super::*;
     use vmux_api::protocol::{
-        AgentRenameProfile, AgentRequest, AgentRequestId, AgentVaultStatus, ServiceMessage,
-        SharedEvent,
+        AgentRequest, AgentRequestId, AgentVaultStatus, ServiceMessage, SharedEvent,
     };
+    use vmux_space::AgentRenameProfile;
     use vmux_core::service::ServiceInbound;
 
     #[test]

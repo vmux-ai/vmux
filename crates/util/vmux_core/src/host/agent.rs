@@ -68,6 +68,18 @@ pub struct AgentRequestMessage<T> {
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AgentRequestRouteSet;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct AgentRequestPrerequisiteSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct AgentRequestApplySet;
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct AgentRequestBlocked {
+    pub anchor: vmux_api::ProcessId,
+    pub reason: String,
+}
+
 pub trait AgentRequestAppExt {
     fn add_agent_request<T>(&mut self) -> &mut Self
     where
@@ -82,9 +94,19 @@ impl AgentRequestAppExt for App {
         self.add_message::<AgentRequestInput>()
             .add_message::<AgentRequestMessage<T>>()
             .add_message::<AgentCommandResponse>()
+            .add_message::<AgentRequestBlocked>()
             .configure_sets(
                 Update,
                 AgentRequestRouteSet.after(crate::service::ServiceMessageSet),
+            )
+            .configure_sets(
+                Update,
+                (
+                    AgentRequestRouteSet,
+                    AgentRequestPrerequisiteSet,
+                    AgentRequestApplySet,
+                )
+                    .chain(),
             )
             .add_systems(
                 Update,
