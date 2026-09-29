@@ -5,9 +5,11 @@ use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 use super::{FocusRequest, Pane, PaneDrag, PaneFocus, PaneSplit};
+#[cfg(test)]
+use crate::stack::Stack;
 use crate::{
     host::command::LayoutRequestSet,
-    stack::{ActiveTabParam, Stack, active_among, active_pane_in_tab, active_stack_in_pane},
+    stack::{ActiveTabParam, LayoutFocus, active_among},
 };
 
 #[cfg_attr(target_os = "macos", allow(dead_code))]
@@ -52,8 +54,7 @@ pub struct PendingCursorWarp;
 fn on_pane_select(
     mut reader: MessageReader<FocusRequest>,
     active_tab_param: ActiveTabParam,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    focus_query: LayoutFocus,
     pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_layout: Query<&ComputedNode, With<Pane>>,
     mut commands: Commands,
@@ -64,12 +65,11 @@ fn on_pane_select(
         let Some(tab) = active_tab_param.get() else {
             continue;
         };
-        let panes = collect_tab_leaf_panes(tab, &all_children, &leaf_panes);
+        let panes = focus_query.leaves(tab);
         if panes.len() < 2 {
             continue;
         }
-        let Some(current) = active_pane_in_tab(tab, &all_children, &leaf_panes, &pane_activity)
-        else {
+        let Some(current) = focus_query.pane(tab) else {
             continue;
         };
         let target = match focus {
@@ -127,26 +127,6 @@ fn on_pane_select(
     }
 }
 
-fn collect_tab_leaf_panes(
-    root: Entity,
-    all_children: &Query<&Children>,
-    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-) -> Vec<Entity> {
-    let mut result = Vec::new();
-    let mut pending = vec![root];
-    while let Some(entity) = pending.pop() {
-        if leaf_panes.contains(entity) {
-            result.push(entity);
-        }
-        if let Ok(children) = all_children.get(entity) {
-            for child in children.iter() {
-                pending.push(child);
-            }
-        }
-    }
-    result
-}
-
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 fn poll_cursor_pane_focus(
     windows: Query<(Entity, &Window)>,
@@ -156,8 +136,7 @@ fn poll_cursor_pane_focus(
     leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
     pane_cooldowns: Query<&PaneHoverCooldown>,
     pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_activity: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus,
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     active_drags: Query<(), With<PaneDrag>>,
@@ -210,7 +189,7 @@ fn poll_cursor_pane_focus(
     }
 
     commands.entity(target).insert(LastActivatedAt::now());
-    if let Some(stack) = active_stack_in_pane(target, &pane_children, &stack_activity) {
+    if let Some(stack) = focus.stack(target) {
         commands.entity(stack).insert(LastActivatedAt::now());
     }
 }
@@ -279,8 +258,7 @@ fn apply_pending_hover(
     leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
     pane_cooldowns: Query<&PaneHoverCooldown>,
     pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_activity: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus,
     mut commands: Commands,
     mut last_motion_sequence: Local<u64>,
 ) {
@@ -324,7 +302,7 @@ fn apply_pending_hover(
         return;
     }
     commands.entity(target).insert(LastActivatedAt::now());
-    if let Some(stack) = active_stack_in_pane(target, &pane_children, &stack_activity) {
+    if let Some(stack) = focus.stack(target) {
         commands.entity(stack).insert(LastActivatedAt::now());
     }
 }

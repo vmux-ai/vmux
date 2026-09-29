@@ -1,5 +1,5 @@
 use crate::{
-    stack::{ActiveTabParam, Stack, active_stack_in_pane, focused_stack, stack_bundle},
+    stack::{ActiveTabParam, LayoutFocus, Stack, stack_bundle},
     tab::Tab,
 };
 use bevy::{ecs::relationship::Relationship, prelude::*};
@@ -648,7 +648,15 @@ fn collect_leaf_infos(
     spawn_seq_overrides: &std::collections::HashMap<Entity, u64>,
 ) -> Vec<crate::placement::LeafInfo> {
     let mut panes = Vec::new();
-    crate::stack::collect_leaf_panes(tab, all_children, leaf_panes, &mut panes);
+    let mut pending = vec![tab];
+    while let Some(entity) = pending.pop() {
+        if leaf_panes.contains(entity) {
+            panes.push(entity);
+        }
+        if let Ok(children) = all_children.get(entity) {
+            pending.extend(children.iter());
+        }
+    }
     panes
         .into_iter()
         .map(|pane| {
@@ -870,11 +878,9 @@ fn find_sibling_pane(
 fn handle_open_in_pane(
     mut reader: MessageReader<OpenRequest>,
     active_tab_param: ActiveTabParam,
-    all_children: Query<&Children>,
+    focus: LayoutFocus,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
     tab_filter: Query<Entity, With<Stack>>,
@@ -890,14 +896,7 @@ fn handle_open_in_pane(
             url,
         } = request;
 
-        let (_, active_pane_opt, _) = focused_stack(
-            active_tab_param.get(),
-            &all_children,
-            &leaf_panes,
-            &pane_ts,
-            &pane_children,
-            &stack_ts,
-        );
+        let (_, active_pane_opt, _) = focus.resolve(active_tab_param.get());
         let Some(active) = active_pane_opt else {
             continue;
         };
@@ -955,7 +954,8 @@ fn handle_open_in_pane(
         } else {
             match mode {
                 PaneOpenMode::InPlace => {
-                    let active_stack = active_stack_in_pane(target_pane, &pane_children, &stack_ts)
+                    let active_stack = focus
+                        .stack(target_pane)
                         .or_else(|| first_stack_in_pane(target_pane, &pane_children, &tab_filter));
                     if let Some(stack) = active_stack {
                         open_stack(stack, resolved, None, &mut page_open_requests);

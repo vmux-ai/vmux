@@ -17,8 +17,7 @@ use crate::plugin::reattach_terminal_bundle;
 use vmux_core::{KeyboardOwner, Order};
 use vmux_layout::{
     native_open::HostedUiPlugin,
-    pane::{Pane, PaneSplit},
-    stack::{ActiveTabParam, OpenRequest, Stack, focused_stack, stack_bundle},
+    stack::{ActiveTabParam, LayoutFocus, OpenRequest, Stack, stack_bundle},
 };
 
 pub struct ProcessMonitorPlugin;
@@ -468,11 +467,7 @@ fn on_process_navigate(
     terminals: Query<&ChildOf, With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Stack>>,
     active_tab_param: ActiveTabParam,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus,
     mut commands: Commands,
 ) {
     let pid = &trigger.event().payload.process_id;
@@ -492,14 +487,7 @@ fn on_process_navigate(
         }
         return;
     }
-    let (_, active_pane, _) = focused_stack(
-        active_tab_param.get(),
-        &all_children,
-        &leaf_panes,
-        &pane_ts,
-        &pane_children,
-        &stack_ts,
-    );
+    let (_, active_pane, _) = focus.resolve(active_tab_param.get());
     let Some(pane) = active_pane else { return };
 
     let tab = commands

@@ -12,10 +12,7 @@ use vmux_history::LastActivatedAt;
 use crate::{
     CloseRequiresConfirmation,
     settings::ConfirmCloseSettings,
-    stack::{
-        ActiveTabParam, CloseConfirmed, PendingStackClose, Stack, active_stack_in_pane,
-        focused_stack, stack_bundle,
-    },
+    stack::{ActiveTabParam, CloseConfirmed, LayoutFocus, PendingStackClose, Stack, stack_bundle},
 };
 
 #[cfg(test)]
@@ -82,11 +79,9 @@ struct CloseDialogOperation {
 fn request_pane_close(
     mut reader: MessageReader<CloseRequest>,
     active_tab: ActiveTabParam,
+    focus: LayoutFocus,
     all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_times: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
-    stack_times: Query<(Entity, &LastActivatedAt), With<Stack>>,
     close_required: Query<(), With<CloseRequiresConfirmation>>,
     confirmed: Query<(), With<CloseConfirmed>>,
     pending: Query<(), With<PendingPaneClose>>,
@@ -95,14 +90,7 @@ fn request_pane_close(
     mut commands: Commands,
 ) {
     for _ in reader.read() {
-        let (_, Some(active), _) = focused_stack(
-            active_tab.get(),
-            &all_children,
-            &leaf_panes,
-            &pane_times,
-            &pane_children,
-            &stack_times,
-        ) else {
+        let (_, Some(active), _) = focus.resolve(active_tab.get()) else {
             continue;
         };
         let needs_confirmation = settings.enabled
@@ -127,7 +115,7 @@ fn close_panes(
     pane_children: Query<&Children, With<Pane>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_times: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    stack_times: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus,
     child_of: Query<&ChildOf>,
     splits: Query<&PaneSplit>,
     stacks: Query<Entity, With<Stack>>,
@@ -176,7 +164,8 @@ fn close_panes(
                 .unwrap_or(siblings[0]);
             let leaf = first_leaf_descendant(newest, &pane_children, &leaf_panes);
             commands.entity(leaf).insert(LastActivatedAt::now());
-            if let Some(stack) = active_stack_in_pane(leaf, &pane_children, &stack_times)
+            if let Some(stack) = focus
+                .stack(leaf)
                 .or_else(|| first_stack_in_pane(leaf, &pane_children, &stacks))
             {
                 commands.entity(stack).insert(LastActivatedAt::now());
@@ -224,7 +213,8 @@ fn close_panes(
         commands
             .entity(new_active_pane)
             .insert(LastActivatedAt::now());
-        let active_stack = active_stack_in_pane(new_active_pane, &pane_children, &stack_times)
+        let active_stack = focus
+            .stack(new_active_pane)
             .or_else(|| first_stack_in_pane(new_active_pane, &pane_children, &stacks))
             .or_else(|| {
                 sibling_children

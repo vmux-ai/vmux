@@ -1,5 +1,4 @@
-use crate::pane::{Pane, PaneSplit};
-use crate::stack::{ActiveTabParam, Stack, focused_stack};
+use crate::stack::{ActiveTabParam, LayoutFocus, Stack};
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
@@ -22,9 +21,7 @@ use vmux_command::{
     CommandDefinitions, CommandInvocation, CommandRuntimePlugin, RegisterCommandDefinitions,
 };
 use vmux_core::host::page::PageManifest;
-use vmux_core::{
-    Bookmark, BookmarkOrder, Collapsed, Folder, LastActivatedAt, PageIcon, PageMetadata, Pin, Uuid,
-};
+use vmux_core::{Bookmark, BookmarkOrder, Collapsed, Folder, PageIcon, PageMetadata, Pin, Uuid};
 
 use super::{command::LayoutRequestSet, stack::OpenRequest};
 
@@ -1092,11 +1089,7 @@ fn handle_bookmark_requests(
     mut toggles: MessageReader<BookmarkToggleActiveRequest>,
     mut pins: MessageReader<BookmarkPinActiveRequest>,
     active_tab_param: ActiveTabParam,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus,
     stack_meta: Query<&PageMetadata, With<Stack>>,
     mut toggle_requests: MessageWriter<ToggleForUrlRequest>,
     mut pin_requests: MessageWriter<PinUrlRequest>,
@@ -1106,14 +1099,7 @@ fn handle_bookmark_requests(
     if toggle_count == 0 && pin_count == 0 {
         return;
     }
-    let (_, _, Some(stack)) = focused_stack(
-        active_tab_param.get(),
-        &all_children,
-        &leaf_panes,
-        &pane_ts,
-        &pane_children,
-        &stack_ts,
-    ) else {
+    let (_, _, Some(stack)) = focus.resolve(active_tab_param.get()) else {
         return;
     };
     let Ok(meta) = stack_meta.get(stack) else {

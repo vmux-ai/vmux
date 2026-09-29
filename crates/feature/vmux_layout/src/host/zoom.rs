@@ -7,7 +7,7 @@ use vmux_history::LastActivatedAt;
 
 use crate::{
     pane::{FocusRequest, OpenRequest, Pane, PaneSplit, ToggleZoomRequest},
-    stack::{ActiveTabParam, Stack, focused_stack},
+    stack::{ActiveTabParam, LayoutFocus},
     tab::Tab,
 };
 
@@ -125,10 +125,7 @@ fn handle_zoom_command(
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab: ActiveTabParam,
     children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    panes: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stacks: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus,
     parents: Query<&ChildOf>,
     splits: Query<&PaneSplit>,
     zoomed: Query<(), With<Zoomed>>,
@@ -139,14 +136,7 @@ fn handle_zoom_command(
     if !unzoom_only && toggle_count == 0 {
         return;
     }
-    let (_, active_pane, _) = focused_stack(
-        active_tab.get(),
-        &children,
-        &leaf_panes,
-        &panes,
-        &pane_children,
-        &stacks,
-    );
+    let (_, active_pane, _) = focus.resolve(active_tab.get());
     let Some(active_pane) = active_pane else {
         return;
     };

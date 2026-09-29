@@ -10,6 +10,8 @@ use bevy::{
 use bevy_cef::prelude::*;
 use vmux_api::protocol::{ClientMessage, CopyModeKey, ProcessId};
 use vmux_clipboard::Clipboard;
+#[cfg(test)]
+use vmux_command::CommandDefinition;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_command::{
     CommandDefinitions, CommandRuntimePlugin, ReadCommandRequests, WriteCommandRequests,

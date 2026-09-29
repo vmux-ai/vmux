@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use vmux_core::terminal::{ProcessExited, Terminal};
 
 use crate::pane::{Pane, PaneSplit};
-use crate::stack::Stack;
+use crate::stack::{LayoutFocus, Stack};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SiblingDirection {
@@ -22,8 +22,8 @@ pub enum BrowserTarget {
 pub struct BrowserTargets<'w, 's, B: Component> {
     panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
     stacks: Query<'w, 's, Entity, With<Stack>>,
-    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
-    stack_timestamps: Query<'w, 's, (Entity, &'static vmux_core::LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus<'w, 's>,
+    stack_activity: Query<'w, 's, (Entity, &'static vmux_core::LastActivatedAt), With<Stack>>,
     browsers: Query<'w, 's, (Entity, &'static ChildOf), With<B>>,
     terminals: Query<'w, 's, (Entity, &'static ChildOf), (With<Terminal>, Without<ProcessExited>)>,
 }
@@ -64,7 +64,7 @@ impl<B: Component> BrowserTargets<'_, '_, B> {
     }
 
     pub fn active_stack(&self, pane: Entity) -> Option<Entity> {
-        crate::stack::active_stack_in_pane(pane, &self.pane_children, &self.stack_timestamps)
+        self.focus.stack(pane)
     }
 
     pub fn webview(&self, target: BrowserTarget) -> Option<Entity> {
@@ -103,7 +103,7 @@ impl<B: Component> BrowserTargets<'_, '_, B> {
                 {
                     return None;
                 }
-                let (_, timestamp) = self.stack_timestamps.get(child_of.get()).ok()?;
+                let (_, timestamp) = self.stack_activity.get(child_of.get()).ok()?;
                 Some((entity, timestamp.0))
             })
             .max_by_key(|&(_, timestamp)| timestamp)

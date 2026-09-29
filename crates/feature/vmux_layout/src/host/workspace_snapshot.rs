@@ -3,21 +3,18 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_api::command_bar::CommandBarTab;
 use vmux_core::PageMetadata;
-use vmux_history::LastActivatedAt;
 use vmux_ui::i18n::{Locale, TranslationValue};
 
 use crate::cef::Browser;
-use crate::pane::{Pane, PaneSplit};
-use crate::stack::{ActiveTabParam, Stack, collect_leaf_panes, focused_stack};
+use crate::pane::Pane;
+use crate::stack::{ActiveTabParam, LayoutFocus, Stack};
 
 #[derive(SystemParam)]
 pub struct TabGather<'w, 's> {
     pub active_tab: ActiveTabParam<'w, 's>,
+    pub focus: LayoutFocus<'w, 's>,
     pub all_children: Query<'w, 's, &'static Children>,
-    pub leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
-    pub pane_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
     pub pane_children: Query<'w, 's, &'static Children, With<Pane>>,
-    pub stack_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
     pub stack_q: Query<'w, 's, Entity, With<Stack>>,
     pub browser_meta: Query<'w, 's, &'static PageMetadata, With<Browser>>,
     pub child_of_q: Query<'w, 's, &'static ChildOf>,
@@ -34,27 +31,14 @@ impl TabGather<'_, '_> {
         let Some(active_tab_e) = active_tab else {
             return bar_tabs;
         };
-        let (_, _, active_stack) = focused_stack(
-            active_tab,
-            &self.all_children,
-            &self.leaf_panes,
-            &self.pane_ts,
-            &self.pane_children,
-            &self.stack_ts,
-        );
+        let (_, _, active_stack) = self.focus.resolve(active_tab);
         let active_pane = active_stack.and_then(|stack| {
             self.child_of_q
                 .get(stack)
                 .ok()
                 .map(|child_of| child_of.get())
         });
-        let mut tab_panes = Vec::new();
-        collect_leaf_panes(
-            active_tab_e,
-            &self.all_children,
-            &self.leaf_panes,
-            &mut tab_panes,
-        );
+        let tab_panes = self.focus.leaves(active_tab_e);
         for (pane_pos, &pane_e) in tab_panes.iter().enumerate() {
             let is_active_pane = active_pane == Some(pane_e);
             let Ok(children) = self.pane_children.get(pane_e) else {

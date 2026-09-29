@@ -770,17 +770,12 @@ fn sync_window_layout_to_settings(
 
 fn sync_main_column_gap_to_pane_count(
     focus: crate::stack::FocusedStack,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    layout_focus: crate::stack::LayoutFocus,
     mut main_column_q: Query<&mut Node, With<MainColumn>>,
 ) {
     let pane_count = focus
         .tab
-        .map(|tab_e| {
-            let mut leaves = Vec::new();
-            crate::stack::collect_leaf_panes(tab_e, &all_children, &leaf_panes, &mut leaves);
-            leaves.len()
-        })
+        .map(|tab| layout_focus.leaves(tab).len())
         .unwrap_or(0);
     let target = if pane_count > 1 {
         crate::event::PANE_GAP_PX

@@ -1,12 +1,10 @@
-use bevy::{ecs::relationship::Relationship, prelude::*};
-use vmux_history::LastActivatedAt;
-
 use crate::host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings};
+use bevy::{ecs::relationship::Relationship, prelude::*};
 
 use super::{ArrangeRequest, ArrangementSet, Pane, PaneArrangement, PaneSplit, PaneSplitDirection};
 use crate::{
     host::command::LayoutRequestSet,
-    stack::{ActiveTabParam, Stack, focused_stack},
+    stack::{ActiveTabParam, LayoutFocus},
     target::SiblingDirection,
 };
 
@@ -28,9 +26,7 @@ fn arrange_from_commands(
     active_tab: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_activity: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus,
     parents: Query<&ChildOf>,
     splits: Query<&PaneSplit>,
     mut commands: Commands,
@@ -38,14 +34,7 @@ fn arrange_from_commands(
     for request in reader.read() {
         let arrangement = request.0;
         let tab = active_tab.get();
-        let (_, Some(active), _) = focused_stack(
-            tab,
-            &all_children,
-            &leaf_panes,
-            &pane_activity,
-            &pane_children,
-            &stack_activity,
-        ) else {
+        let (_, Some(active), _) = focus.resolve(tab) else {
             continue;
         };
 

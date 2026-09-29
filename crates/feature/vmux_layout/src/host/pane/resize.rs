@@ -3,14 +3,17 @@ use moonshine_save::prelude::*;
 use vmux_api::open_target::PaneDirection;
 use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
+#[cfg(test)]
 use vmux_history::LastActivatedAt;
 
 use crate::settings::LayoutSettings;
 
 use super::{Pane, PaneResize, PaneSplit, PaneSplitDirection, ResizeRequest};
+#[cfg(test)]
+use crate::stack::Stack;
 use crate::{
     host::command::LayoutRequestSet,
-    stack::{ActiveTabParam, Stack, focused_stack},
+    stack::{ActiveTabParam, LayoutFocus},
 };
 
 const MIN_PANE_PX: f32 = 60.0;
@@ -83,24 +86,14 @@ fn resize_from_commands(
     mut reader: MessageReader<ResizeRequest>,
     active_tab: ActiveTabParam,
     all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_activity: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus,
     parents: Query<&ChildOf>,
     splits: Query<&PaneSplit>,
     mut sizes: ParamSet<(Query<&mut Node>, Query<&mut PaneSize>, Query<&ComputedNode>)>,
 ) {
     for request in reader.read() {
         let resize = request.0;
-        let (_, Some(active), _) = focused_stack(
-            active_tab.get(),
-            &all_children,
-            &leaf_panes,
-            &pane_activity,
-            &pane_children,
-            &stack_activity,
-        ) else {
+        let (_, Some(active), _) = focus.resolve(active_tab.get()) else {
             continue;
         };
 

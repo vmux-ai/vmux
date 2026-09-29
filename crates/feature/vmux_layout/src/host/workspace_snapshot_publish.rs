@@ -26,14 +26,7 @@ fn publish_workspace_snapshot(
 ) {
     let active_tab = tab_gather.active_tab.get();
     let project_root = ProjectRoot::resolve(active_tab, &projects);
-    let (_, pane, stack) = crate::stack::focused_stack(
-        active_tab,
-        &tab_gather.all_children,
-        &tab_gather.leaf_panes,
-        &tab_gather.pane_ts,
-        &tab_gather.pane_children,
-        &tab_gather.stack_ts,
-    );
+    let (_, pane, stack) = tab_gather.focus.resolve(active_tab);
     let locale = locale
         .as_deref()
         .map(|resolved| resolved.0.clone())

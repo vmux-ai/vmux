@@ -406,7 +406,7 @@ pub fn active_among<'a>(
     entities.max_by_key(|(_, ts)| ts.0).map(|(e, _)| e)
 }
 
-pub fn collect_leaf_panes(
+fn collect_leaf_panes(
     root: Entity,
     all_children: &Query<&Children>,
     leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -422,7 +422,7 @@ pub fn collect_leaf_panes(
     }
 }
 
-pub fn active_pane_in_tab(
+fn active_pane_in_tab(
     tab: Entity,
     all_children: &Query<&Children>,
     leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -433,7 +433,7 @@ pub fn active_pane_in_tab(
     active_among(panes.iter().filter_map(|&e| pane_ts.get(e).ok()))
 }
 
-pub fn active_stack_in_pane(
+fn active_stack_in_pane(
     pane: Entity,
     pane_children: &Query<&Children, With<Pane>>,
     tab_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
@@ -468,32 +468,53 @@ impl ActiveTabParam<'_, '_> {
     }
 }
 
-pub fn focused_stack(
-    active_tab: Option<Entity>,
-    all_children: &Query<&Children>,
-    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: &Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: &Query<&Children, With<Pane>>,
-    stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
-) -> (Option<Entity>, Option<Entity>, Option<Entity>) {
-    let pane = active_tab.and_then(|t| active_pane_in_tab(t, all_children, leaf_panes, pane_ts));
-    let stack = pane.and_then(|p| active_stack_in_pane(p, pane_children, stack_ts));
-    (active_tab, pane, stack)
+#[derive(SystemParam)]
+pub struct LayoutFocus<'w, 's> {
+    all_children: Query<'w, 's, &'static Children>,
+    leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_activity: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
+    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    stack_activity: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
+}
+
+impl LayoutFocus<'_, '_> {
+    pub fn leaves(&self, root: Entity) -> Vec<Entity> {
+        let mut panes = Vec::new();
+        collect_leaf_panes(root, &self.all_children, &self.leaf_panes, &mut panes);
+        panes
+    }
+
+    pub fn pane(&self, tab: Entity) -> Option<Entity> {
+        active_pane_in_tab(
+            tab,
+            &self.all_children,
+            &self.leaf_panes,
+            &self.pane_activity,
+        )
+    }
+
+    pub fn stack(&self, pane: Entity) -> Option<Entity> {
+        active_stack_in_pane(pane, &self.pane_children, &self.stack_activity)
+    }
+
+    pub fn resolve(
+        &self,
+        active_tab: Option<Entity>,
+    ) -> (Option<Entity>, Option<Entity>, Option<Entity>) {
+        let pane = active_tab.and_then(|tab| self.pane(tab));
+        let stack = pane.and_then(|pane| self.stack(pane));
+        (active_tab, pane, stack)
+    }
 }
 
 fn compute_focused_stack(
     mut profiles: Query<(&ProfileId, &mut ActiveStack)>,
     active_tab_param: ActiveTabParam,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus,
     mut commands: Commands,
 ) {
     let tab = active_tab_param.get();
-    let pane = tab.and_then(|t| active_pane_in_tab(t, &all_children, &leaf_panes, &pane_ts));
-    let stack = pane.and_then(|p| active_stack_in_pane(p, &pane_children, &stack_ts));
+    let (_, pane, stack) = focus.resolve(tab);
     let next = ActiveStack {
         tab,
         pane,
@@ -530,24 +551,13 @@ pub fn stack_bundle() -> impl Bundle {
 fn handle_open_requests(
     mut reader: MessageReader<OpenRequest>,
     active_tab_param: ActiveTabParam,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus,
     focused_space: crate::space::FocusedSpace,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        let (_, active_pane, _) = focused_stack(
-            active_tab_param.get(),
-            &all_children,
-            &leaf_panes,
-            &pane_ts,
-            &pane_children,
-            &stack_ts,
-        );
+        let (_, active_pane, _) = focus.resolve(active_tab_param.get());
         let Some(pane) = active_pane else {
             continue;
         };
@@ -570,22 +580,11 @@ fn handle_open_requests(
 fn handle_close_requests(
     mut reader: MessageReader<CloseRequest>,
     active_tab_param: ActiveTabParam,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus,
     mut requests: MessageWriter<CloseStackRequest>,
 ) {
     for _ in reader.read() {
-        let (_, _, active_stack) = focused_stack(
-            active_tab_param.get(),
-            &all_children,
-            &leaf_panes,
-            &pane_ts,
-            &pane_children,
-            &stack_ts,
-        );
+        let (_, _, active_stack) = focus.resolve(active_tab_param.get());
         let Some(active_stack) = active_stack else {
             continue;
         };
@@ -596,31 +595,19 @@ fn handle_close_requests(
 fn handle_focus_requests(
     mut reader: MessageReader<FocusRequest>,
     active_tab_param: ActiveTabParam,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus,
     stack_q: Query<Entity, With<Stack>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        let (active_tab, active_pane, active_stack) = focused_stack(
-            active_tab_param.get(),
-            &all_children,
-            &leaf_panes,
-            &pane_ts,
-            &pane_children,
-            &stack_ts,
-        );
+        let (active_tab, active_pane, active_stack) = focus.resolve(active_tab_param.get());
         let Some(active_tab) = active_tab else {
             continue;
         };
-        let mut tab_panes = Vec::new();
-        collect_leaf_panes(active_tab, &all_children, &leaf_panes, &mut tab_panes);
+        let tab_panes = focus.leaves(active_tab);
         let mut stacks = Vec::new();
         for &pane in &tab_panes {
-            if let Ok(children) = pane_children.get(pane) {
+            if let Ok(children) = focus.pane_children.get(pane) {
                 for child in children.iter() {
                     if stack_q.contains(child) {
                         stacks.push((pane, child));
@@ -656,30 +643,19 @@ fn handle_focus_requests(
 fn handle_move_requests(
     mut reader: MessageReader<MoveRequest>,
     active_tab_param: ActiveTabParam,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus,
     stack_q: Query<Entity, With<Stack>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        let (_, active_pane, active_stack) = focused_stack(
-            active_tab_param.get(),
-            &all_children,
-            &leaf_panes,
-            &pane_ts,
-            &pane_children,
-            &stack_ts,
-        );
+        let (_, active_pane, active_stack) = focus.resolve(active_tab_param.get());
         let Some(pane) = active_pane else {
             continue;
         };
         let Some(stack) = active_stack else {
             continue;
         };
-        let Ok(children) = pane_children.get(pane) else {
+        let Ok(children) = focus.pane_children.get(pane) else {
             continue;
         };
         let kind_positions: Vec<usize> = children
@@ -718,11 +694,7 @@ fn entity_tree_contains_stack_other_than(
 
 fn open_startup_url_if_no_stacks(
     active_tab_param: ActiveTabParam,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    focus: LayoutFocus,
     stack_q: Query<Entity, With<Stack>>,
     closing_primary: Query<(), (With<PrimaryWindow>, With<ClosingWindow>)>,
     focused_space: crate::space::FocusedSpace,
@@ -732,18 +704,12 @@ fn open_startup_url_if_no_stacks(
     if !closing_primary.is_empty() {
         return;
     }
-    let (active_tab, active_pane, _) = focused_stack(
-        active_tab_param.get(),
-        &all_children,
-        &leaf_panes,
-        &pane_ts,
-        &pane_children,
-        &stack_ts,
-    );
-    if active_tab.is_some_and(|tab| entity_tree_contains_stack(tab, &all_children, &stack_q)) {
+    let (active_tab, active_pane, _) = focus.resolve(active_tab_param.get());
+    if active_tab.is_some_and(|tab| entity_tree_contains_stack(tab, &focus.all_children, &stack_q))
+    {
         return;
     }
-    let Some(pane) = active_pane.or_else(|| leaf_panes.iter().next()) else {
+    let Some(pane) = active_pane.or_else(|| focus.leaf_panes.iter().next()) else {
         return;
     };
     let stack = commands
