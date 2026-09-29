@@ -8,8 +8,8 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::ime::use_ime_guard;
 
 use super::focus_file_input;
+use super::key::FileKeys;
 use crate::event::FileEditorOperation;
-use crate::page_key::FileKeys;
 
 const RENAME_ID: &str = "file-rename";
 const CODE_ACTION_ID: &str = "file-code-action";

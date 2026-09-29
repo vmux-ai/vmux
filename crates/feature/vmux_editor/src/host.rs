@@ -7,7 +7,7 @@ impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins((
-            crate::lsp_page::LspPage::plugin(),
+            crate::ui::LspPage::plugin(),
             crate::ui::FilePage::plugin(),
             crate::ui::ProjectsPage::plugin(),
             crate::ui::KnowledgePage::plugin(),

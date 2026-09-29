@@ -7,8 +7,8 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
-use crate::explorer::OutlineGlyph;
-use crate::state::use_file_ui;
+use super::explorer::OutlineGlyph;
+use super::state::use_file_ui;
 
 const PATH_CRUMBS_MAX: usize = 4;
 

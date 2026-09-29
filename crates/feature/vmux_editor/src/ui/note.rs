@@ -16,8 +16,8 @@ use vmux_ui::platform::sleep_ms;
 use vmux_ui::scroll::ScrollIntoView;
 use vmux_ui::text_run::TextRun;
 
+use super::markdown::{ListEditLine, ListLineHit, MdBlockView, NoteLineChunk, NoteSourceLine};
 use super::{diff_tone, focus_file_input};
-use crate::note::{ListEditLine, ListLineHit, MdBlockView, NoteLineChunk, NoteSourceLine};
 use crate::page_model::{
     NoteInlineKind, NoteInlineNode, heading_class, note_inline_nodes, note_list_marker_prefix_len,
     note_source_offset, note_source_position,

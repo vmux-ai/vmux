@@ -4,9 +4,9 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::platform::{now_millis, random_index, sleep_ms};
 
+use super::explorer::{ExplorerPanel, SidebarView};
+use super::key::FileKeys;
 use super::{Mode, focus_container, focus_file_input};
-use crate::explorer::{ExplorerPanel, SidebarView};
-use crate::page_key::FileKeys;
 
 const EXPLORER_SQUEEZE_TOLERANCE_PX: u32 = 160;
 const EDITOR_MIN_WIDTH_PX: u32 = 320;
