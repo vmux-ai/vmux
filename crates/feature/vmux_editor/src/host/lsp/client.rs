@@ -107,7 +107,7 @@ impl ServerClient {
         diagnostics: LspDiagnosticsSender,
         inputs: ServerInputSender,
     ) -> std::io::Result<Self> {
-        let store = crate::lsp::store::LspStore::current();
+        let store = crate::lsp::store::PackageStore::lsp();
         let mut child = Command::new(&spec.command)
             .args(&spec.args)
             .current_dir(root)

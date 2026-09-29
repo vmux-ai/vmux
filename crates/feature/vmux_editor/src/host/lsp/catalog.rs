@@ -175,7 +175,7 @@ impl Catalog {
         Ok(Self { packages })
     }
 
-    pub fn load(store: &store::LspStore, refresh: bool) -> Result<Self, String> {
+    pub fn load(store: &store::PackageStore, refresh: bool) -> Result<Self, String> {
         if !refresh && store.catalog_path().is_file() {
             return CatalogSource::read(&store.catalog_path())?.catalog();
         }
@@ -189,7 +189,7 @@ impl Catalog {
         Self::fetch(&artifact, store)
     }
 
-    fn fetch(artifact: &RemoteArtifact, store: &store::LspStore) -> Result<Self, String> {
+    fn fetch(artifact: &RemoteArtifact, store: &store::PackageStore) -> Result<Self, String> {
         let registry_dir = store.registries_dir();
         std::fs::create_dir_all(&registry_dir).map_err(|error| error.to_string())?;
         let staging = tempfile::tempdir_in(&registry_dir).map_err(|error| error.to_string())?;
@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn ensure_catalog_reads_cache_without_network() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = store::LspStore::at(tmp.path());
+        let store = store::PackageStore::at(tmp.path());
         std::fs::create_dir_all(store.registries_dir()).unwrap();
         std::fs::write(store.catalog_path(), SAMPLE).unwrap();
         let catalog = Catalog::load(&store, false).unwrap();
@@ -366,7 +366,7 @@ mod tests {
             url: format!("http://{addr}/registry.json.zip"),
             sha256: digest,
         };
-        let store = store::LspStore::at(tmp.path());
+        let store = store::PackageStore::at(tmp.path());
         let catalog = Catalog::fetch(&artifact, &store).unwrap();
         assert_eq!(catalog.packages().len(), 3);
         assert!(store.catalog_path().is_file());

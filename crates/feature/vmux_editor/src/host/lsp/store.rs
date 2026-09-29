@@ -9,7 +9,7 @@ use crate::lsp::package_path::{PackageName, PackagePath};
 const RECEIPT_MAX_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LspStore {
+pub struct PackageStore {
     root: PathBuf,
 }
 
@@ -28,8 +28,8 @@ pub enum Resolution {
     Missing,
 }
 
-impl LspStore {
-    pub fn current() -> Self {
+impl PackageStore {
+    pub fn lsp() -> Self {
         Self::at(vmux_core::profile::ProfilePaths::current().lsp())
     }
 
@@ -231,7 +231,7 @@ mod tests {
     #[test]
     fn write_read_installed_roundtrip() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = LspStore::at(tmp.path());
+        let store = PackageStore::at(tmp.path());
         let name = PackageName::parse("foo").unwrap();
         let pkgdir = store.package_dir(&name);
         std::fs::create_dir_all(&pkgdir).unwrap();
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn link_and_remove() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = LspStore::at(tmp.path());
+        let store = PackageStore::at(tmp.path());
         let name = PackageName::parse("foo").unwrap();
         let bin_name = PackageName::parse("foo").unwrap();
         let package_binary = PackagePath::parse("foo-bin").unwrap();
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn resolution_prefers_managed_then_path_then_missing() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = LspStore::at(tmp.path());
+        let store = PackageStore::at(tmp.path());
         let name = PackageName::parse("foo").unwrap();
         let bin_name = PackageName::parse("foo").unwrap();
         let package_binary = PackagePath::parse("foo-bin").unwrap();
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn failed_activation_restores_previous_package() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = LspStore::at(tmp.path());
+        let store = PackageStore::at(tmp.path());
         let name = PackageName::parse("foo").unwrap();
         let target = store.package_dir(&name);
         std::fs::create_dir_all(&target).unwrap();
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn invalid_or_mismatched_receipts_are_ignored() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = LspStore::at(tmp.path());
+        let store = PackageStore::at(tmp.path());
         let name = PackageName::parse("foo").unwrap();
         let dir = store.package_dir(&name);
         std::fs::create_dir_all(&dir).unwrap();

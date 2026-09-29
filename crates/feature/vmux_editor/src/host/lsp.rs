@@ -59,7 +59,7 @@ fn scan_tools(
     manifest: &mut ToolsManifest,
     refresh: bool,
 ) -> Result<ToolProviderSnapshot, String> {
-    let store = store::LspStore::current();
+    let store = store::PackageStore::lsp();
     let catalog = if refresh {
         Catalog::load(&store, true).unwrap_or_default()
     } else if store.catalog_path().is_file() {
@@ -145,7 +145,7 @@ fn operate_tool(
             if id.is_empty() {
                 return Err("package name is required".to_string());
             }
-            let store = store::LspStore::current();
+            let store = store::PackageStore::lsp();
             let catalog = Catalog::load(&store, false)?;
             let package = catalog
                 .find(id)
@@ -164,7 +164,7 @@ fn operate_tool(
                 return Err("package name is required".to_string());
             }
             let name = package_path::PackageName::parse(id)?;
-            store::LspStore::current()
+            store::PackageStore::lsp()
                 .remove(&name)
                 .map_err(|error| error.to_string())?;
             tool_store.set_managed_package(ToolProvider::Lsp, id, false)?;

@@ -9,22 +9,22 @@ use super::service_worker_cache::ServiceWorkerCache;
 pub struct PreparedExtensions(pub Vec<PreparedRuntime>);
 
 pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
-    let root = store::root();
-    let runtime_store = runtime_store_root();
+    let store = store::ExtensionStore::current();
+    let runtime_store = store::ExtensionStore::at(runtime_store_root());
     let profile = vmux_core::profile::Profile::current().into_id();
-    let mut idx = store::Index::load(&root)?;
+    let mut idx = store.load_index()?;
     let migrating = idx.requires_save();
     let mut index_changed = migrating;
     if migrating {
-        migrate_index_permissions(&root, &mut idx)?;
+        migrate_index_permissions(&store, &mut idx)?;
     }
     let (prepared, preparation_changed) =
         prepare_enabled_entries(&profile, &mut idx.entries, |entry| {
-            runtime::prepare_runtime_in(&root, &runtime_store, &profile, entry)
+            runtime::prepare_runtime_in(&store, &runtime_store, &profile, entry)
         })?;
     index_changed |= preparation_changed;
     if index_changed {
-        idx.save(&root)?;
+        store.save_index(&idx)?;
     }
     let profile_dir = vmux_core::profile::ProfilePaths::current().profile();
     ServiceWorkerCache::from(profile_dir.as_path()).reconcile(&prepared)?;
@@ -37,7 +37,7 @@ pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
     } else {
         unsafe { std::env::set_var("VMUX_LOAD_EXTENSIONS", dirs.join(",")) };
     }
-    store::save_loaded_ids(&root, &profile, &idx.enabled_ids_for(&profile))?;
+    store.save_loaded_ids(&profile, &idx.enabled_ids_for(&profile))?;
     Ok(prepared)
 }
 
@@ -85,15 +85,15 @@ fn runtime_store_root() -> std::path::PathBuf {
 }
 
 fn migrate_index_permissions(
-    root: &std::path::Path,
+    store: &store::ExtensionStore,
     index: &mut store::Index,
 ) -> Result<(), String> {
     for entry in &mut index.entries {
-        let expected = store::source_dir(root, &entry.id, &entry.version);
+        let expected = store.source_dir(&entry.id, &entry.version);
         let source = if expected.exists() {
             expected
         } else {
-            store::migrate_legacy_package(root, entry)?
+            store.migrate_legacy_package(entry)?
         };
         let text = std::fs::read_to_string(source.join("manifest.json"))
             .map_err(|error| error.to_string())?;
@@ -198,12 +198,13 @@ mod tests {
     #[test]
     fn migration_populates_every_entry_and_enabled_profile() {
         let root = tempfile::tempdir().unwrap();
+        let store = store::ExtensionStore::at(root.path());
         let ids = [
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         ];
         for (id, permission) in ids.iter().zip(["storage", "bookmarks"]) {
-            let source = store::source_dir(root.path(), id, "1");
+            let source = store.source_dir(id, "1");
             std::fs::create_dir_all(&source).unwrap();
             std::fs::write(
                 source.join("manifest.json"),
@@ -237,9 +238,9 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let mut index = store::Index::load(root.path()).unwrap();
+        let mut index = store.load_index().unwrap();
 
-        migrate_index_permissions(root.path(), &mut index).unwrap();
+        migrate_index_permissions(&store, &mut index).unwrap();
 
         assert_eq!(index.entries[0].permissions, ["storage"]);
         assert_eq!(

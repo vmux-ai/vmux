@@ -537,12 +537,13 @@ fn prepare_fixture(root: &Path, target: &str, collector: &str) -> Result<PathBuf
 
 fn install_vmux_fixture(home: &Path, extension: &Path, extension_id: &str) -> Result<(), String> {
     let root = home.join(".vmux/extensions");
+    let store = store::ExtensionStore::at(&root);
     let manifest_text = std::fs::read_to_string(extension.join("manifest.json"))
         .map_err(|error| error.to_string())?;
     let parsed = manifest::parse(&manifest_text)?;
-    let source = store::source_dir(&root, extension_id, &parsed.version);
+    let source = store.source_dir(extension_id, &parsed.version);
     copy_tree(extension, &source)?;
-    let source_hash = store::tree_sha256(&source)?;
+    let source_hash = store.source_hash(&source)?;
     let mut profile_enabled = std::collections::BTreeMap::new();
     profile_enabled.insert(CONFORMANCE_PROFILE.into(), true);
     let mut index = store::Index::default();
@@ -571,7 +572,7 @@ fn install_vmux_fixture(home: &Path, extension: &Path, extension_id: &str) -> Re
         source_hash,
         public_key_b64: Some(base64::engine::general_purpose::STANDARD.encode(FIXTURE_PUBLIC_KEY)),
     });
-    index.save(&root)
+    store.save_index(&index)
 }
 
 fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
@@ -987,7 +988,9 @@ mod tests {
 
         install_vmux_fixture(&home, &extension, &extension_id).unwrap();
 
-        let index = store::Index::load(&home.join(".vmux/extensions")).unwrap();
+        let index = store::ExtensionStore::at(home.join(".vmux/extensions"))
+            .load_index()
+            .unwrap();
         let entry = &index.entries[0];
         assert_eq!(entry.id, extension_id);
         assert!(entry.enabled_for(CONFORMANCE_PROFILE));

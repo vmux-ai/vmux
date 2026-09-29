@@ -9,8 +9,10 @@ use vmux_core::event::InstallPhase;
 use vmux_core::service::ServiceConnected;
 use vmux_core::service::ServiceRequest;
 use vmux_core::tool::{ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus};
-use vmux_editor::lsp::package_path::{PackageName, PackagePath};
-use vmux_editor::lsp::{archive, download, store};
+use vmux_editor::lsp::archive::ArchiveKind;
+use vmux_editor::lsp::download::{self, RemoteArtifact};
+use vmux_editor::lsp::package_path::{PackageName, PackagePath, Sha256Digest};
+use vmux_editor::lsp::store::{PackageStore, Receipt};
 use vmux_session::AcpSession;
 use vmux_setting::{AcpAgentConfig, AppSettings};
 use vmux_tool::{
@@ -64,7 +66,8 @@ fn scan_tools(
                 .collect::<BTreeMap<_, _>>()
         })
         .unwrap_or_default();
-    let receipts = store::installed(&vmux_core::profile::ProfilePaths::current().agents());
+    let package_store = PackageStore::at(vmux_core::profile::ProfilePaths::current().agents());
+    let receipts = package_store.installed();
     let inventory = receipts
         .into_values()
         .filter(|receipt| receipt.source_id.starts_with("acp:"))
@@ -1035,29 +1038,25 @@ pub struct ResolvedAgent {
 const NODE_VERSION: &str = "22.11.0";
 const UV_VERSION: &str = "0.5.11";
 
-fn store_root() -> PathBuf {
-    vmux_core::profile::ProfilePaths::current().agents()
-}
-
 fn write_agent_receipt(
-    root: &Path,
+    store: &PackageStore,
     agent: &RegistryAgent,
     version: Option<&str>,
 ) -> Result<(), String> {
     let name = PackageName::parse(&agent.id)?;
-    store::write_receipt(
-        root,
-        &name,
-        &store::Receipt {
-            name: name.clone(),
-            version: version
-                .map(str::to_string)
-                .or_else(|| agent.version.clone()),
-            source_id: format!("acp:{}", agent.id),
-            bin: std::collections::BTreeMap::new(),
-        },
-    )
-    .map_err(|e| e.to_string())
+    store
+        .write_receipt(
+            &name,
+            &Receipt {
+                name: name.clone(),
+                version: version
+                    .map(str::to_string)
+                    .or_else(|| agent.version.clone()),
+                source_id: format!("acp:{}", agent.id),
+                bin: std::collections::BTreeMap::new(),
+            },
+        )
+        .map_err(|e| e.to_string())
 }
 
 fn package_base(package: &str) -> &str {
@@ -1096,11 +1095,9 @@ fn resolved_cmd_path(pkgdir: &Path, target: &BinaryTarget, file: &str) -> Result
         .trim_start_matches(".\\")
         .replace('\\', "/");
     let rel = PackagePath::parse(&rel)?;
-    match archive::kind_for(file) {
-        archive::ArchiveKind::TarGz | archive::ArchiveKind::Zip => Ok(pkgdir.join(rel.as_path())),
-        archive::ArchiveKind::Gz | archive::ArchiveKind::Raw => {
-            Ok(pkgdir.join(cmd_basename(rel.as_str())))
-        }
+    match ArchiveKind::for_file(file) {
+        ArchiveKind::TarGz | ArchiveKind::Zip => Ok(pkgdir.join(rel.as_path())),
+        ArchiveKind::Gz | ArchiveKind::Raw => Ok(pkgdir.join(cmd_basename(rel.as_str()))),
     }
 }
 
@@ -1111,19 +1108,20 @@ fn ensure_binary_installed(
     let target = agent
         .binary_for_host()
         .ok_or_else(|| format!("no binary distribution for this platform: {}", agent.id))?;
-    let root = store_root();
+    let store = PackageStore::at(vmux_core::profile::ProfilePaths::current().agents());
     let name = PackageName::parse(&agent.id)?;
-    let pkgdir = store::package_dir(&root, &name);
+    let pkgdir = store.package_dir(&name);
     let file = archive_filename(&target.archive).to_string();
     PackageName::parse(&file)?;
     let cmd_path = resolved_cmd_path(&pkgdir, target, &file)?;
 
-    let up_to_date = store::read_receipt(&root, &name)
-        .map(|r| r.version == agent.version)
+    let up_to_date = store
+        .read_receipt(&name)
+        .map(|receipt| receipt.version == agent.version)
         .unwrap_or(false);
-    let package_added = !is_agent_installed_at(&root, agent);
+    let package_added = !is_agent_installed_at(&store, agent);
     if !up_to_date || !cmd_path.exists() {
-        install_binary(agent, target, &root, &name, &file, &mut emit)?;
+        install_binary(agent, target, &store, &name, &file, &mut emit)?;
     }
 
     Ok(ResolvedAgent {
@@ -1150,13 +1148,13 @@ fn node_target() -> Option<&'static str> {
 }
 
 fn ensure_node(
-    root: &Path,
+    store: &PackageStore,
     emit: &mut impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<PathBuf, String> {
     let target = node_target().ok_or("managed Node not supported on this platform")?;
     let dirname = format!("node-v{NODE_VERSION}-{target}");
     let name = PackageName::parse("node")?;
-    let node_parent = store::package_dir(root, &name);
+    let node_parent = store.package_dir(&name);
     let bindir = node_parent.join(&dirname).join("bin");
     if bindir.join("node").exists() {
         return Ok(bindir);
@@ -1165,9 +1163,8 @@ fn ensure_node(
     let file = format!("{dirname}.tar.gz");
     let url = format!("https://nodejs.org/dist/v{NODE_VERSION}/{file}");
     let checksum_url = format!("https://nodejs.org/dist/v{NODE_VERSION}/SHASUMS256.txt");
-    let digest =
-        download::sha256_from_manifest(&checksum_url, &file, download::CHECKSUM_MAX_BYTES)?;
-    let staging_root = store::staging_dir(root);
+    let digest = Sha256Digest::from_manifest(&checksum_url, &file, download::CHECKSUM_MAX_BYTES)?;
+    let staging_root = store.staging_dir();
     std::fs::create_dir_all(&staging_root).map_err(|e| e.to_string())?;
     let staging = tempfile::Builder::new()
         .prefix("node")
@@ -1180,20 +1177,23 @@ fn ensure_node(
         Some(0),
         "downloading Node runtime",
     );
-    download::download_to(
-        &url,
+    RemoteArtifact::new(url.clone(), digest).download_to(
         &dl,
         download::PACKAGE_MAX_BYTES,
-        &digest,
-        |d, total| {
-            let pct = total.and_then(|t| (t > 0).then(|| ((d * 100) / t) as u8));
-            emit(InstallPhase::Downloading, pct, "downloading Node runtime");
+        |downloaded, total| {
+            let percent =
+                total.and_then(|total| (total > 0).then(|| ((downloaded * 100) / total) as u8));
+            emit(
+                InstallPhase::Downloading,
+                percent,
+                "downloading Node runtime",
+            );
         },
     )?;
 
     let staged_package = staging.path().join("package");
     emit(InstallPhase::Extracting, None, "extracting Node runtime");
-    archive::extract(&dl, archive::ArchiveKind::TarGz, &staged_package, &dirname)?;
+    ArchiveKind::TarGz.extract(&dl, &staged_package, &dirname)?;
     if !staged_package.join(&dirname).join("bin/node").exists()
         || !staged_package
             .join(&dirname)
@@ -1202,17 +1202,17 @@ fn ensure_node(
     {
         return Err("managed Node missing after extract".to_string());
     }
-    store::write_receipt_in(
-        &staged_package,
-        &store::Receipt {
-            name: name.clone(),
-            version: Some(NODE_VERSION.to_string()),
-            source_id: url,
-            bin: Default::default(),
-        },
-    )
+    Receipt {
+        name: name.clone(),
+        version: Some(NODE_VERSION.to_string()),
+        source_id: url,
+        bin: Default::default(),
+    }
+    .write_to(&staged_package)
     .map_err(|error| error.to_string())?;
-    store::activate_package(root, &name, &staged_package).map_err(|error| error.to_string())?;
+    store
+        .activate_package(&name, &staged_package)
+        .map_err(|error| error.to_string())?;
     Ok(bindir)
 }
 
@@ -1226,13 +1226,13 @@ fn ensure_npx_installed(
         .npx
         .as_ref()
         .ok_or_else(|| format!("no npx distribution: {}", agent.id))?;
-    let root = store_root();
-    let package_added = !is_agent_installed_at(&root, agent);
-    let bindir = ensure_node(&root, &mut emit)?;
-    let npx = node_cli(&root, "npx-cli.js")
+    let store = PackageStore::at(vmux_core::profile::ProfilePaths::current().agents());
+    let package_added = !is_agent_installed_at(&store, agent);
+    let bindir = ensure_node(&store, &mut emit)?;
+    let npx = node_cli(&store, "npx-cli.js")
         .filter(|path| path.is_file())
         .ok_or("managed npx missing after extract")?;
-    write_agent_receipt(&root, agent, version)?;
+    write_agent_receipt(&store, agent, version)?;
     emit(InstallPhase::Done, Some(100), "ready");
 
     let mut args = vec![
@@ -1265,13 +1265,13 @@ fn uv_target() -> Option<&'static str> {
 }
 
 fn ensure_uv(
-    root: &Path,
+    store: &PackageStore,
     emit: &mut impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<PathBuf, String> {
     let target = uv_target().ok_or("managed uv not supported on this platform")?;
     let dirname = format!("uv-{target}");
     let name = PackageName::parse("uv")?;
-    let uv_parent = store::package_dir(root, &name);
+    let uv_parent = store.package_dir(&name);
     let bindir = uv_parent.join(&dirname);
     if bindir.join("uvx").exists() {
         return Ok(bindir);
@@ -1280,9 +1280,8 @@ fn ensure_uv(
     let file = format!("{dirname}.tar.gz");
     let url = format!("https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/{file}");
     let checksum_url = format!("{url}.sha256");
-    let digest =
-        download::sha256_from_manifest(&checksum_url, &file, download::CHECKSUM_MAX_BYTES)?;
-    let staging_root = store::staging_dir(root);
+    let digest = Sha256Digest::from_manifest(&checksum_url, &file, download::CHECKSUM_MAX_BYTES)?;
+    let staging_root = store.staging_dir();
     std::fs::create_dir_all(&staging_root).map_err(|e| e.to_string())?;
     let staging = tempfile::Builder::new()
         .prefix("uv")
@@ -1291,20 +1290,19 @@ fn ensure_uv(
     let dl = staging.path().join(&file);
 
     emit(InstallPhase::Downloading, Some(0), "downloading uv runtime");
-    download::download_to(
-        &url,
+    RemoteArtifact::new(url.clone(), digest).download_to(
         &dl,
         download::PACKAGE_MAX_BYTES,
-        &digest,
-        |d, total| {
-            let pct = total.and_then(|t| (t > 0).then(|| ((d * 100) / t) as u8));
-            emit(InstallPhase::Downloading, pct, "downloading uv runtime");
+        |downloaded, total| {
+            let percent =
+                total.and_then(|total| (total > 0).then(|| ((downloaded * 100) / total) as u8));
+            emit(InstallPhase::Downloading, percent, "downloading uv runtime");
         },
     )?;
 
     let staged_package = staging.path().join("package");
     emit(InstallPhase::Extracting, None, "extracting uv runtime");
-    archive::extract(&dl, archive::ArchiveKind::TarGz, &staged_package, &dirname)?;
+    ArchiveKind::TarGz.extract(&dl, &staged_package, &dirname)?;
 
     #[cfg(unix)]
     {
@@ -1321,17 +1319,17 @@ fn ensure_uv(
     if !staged_package.join(&dirname).join("uvx").exists() {
         return Err("managed uv missing after extract".to_string());
     }
-    store::write_receipt_in(
-        &staged_package,
-        &store::Receipt {
-            name: name.clone(),
-            version: Some(UV_VERSION.to_string()),
-            source_id: url,
-            bin: Default::default(),
-        },
-    )
+    Receipt {
+        name: name.clone(),
+        version: Some(UV_VERSION.to_string()),
+        source_id: url,
+        bin: Default::default(),
+    }
+    .write_to(&staged_package)
     .map_err(|error| error.to_string())?;
-    store::activate_package(root, &name, &staged_package).map_err(|error| error.to_string())?;
+    store
+        .activate_package(&name, &staged_package)
+        .map_err(|error| error.to_string())?;
     Ok(bindir)
 }
 
@@ -1345,10 +1343,10 @@ fn ensure_uvx_installed(
         .uvx
         .as_ref()
         .ok_or_else(|| format!("no uvx distribution: {}", agent.id))?;
-    let root = store_root();
-    let package_added = !is_agent_installed_at(&root, agent);
-    let bindir = ensure_uv(&root, &mut emit)?;
-    write_agent_receipt(&root, agent, version)?;
+    let store = PackageStore::at(vmux_core::profile::ProfilePaths::current().agents());
+    let package_added = !is_agent_installed_at(&store, agent);
+    let bindir = ensure_uv(&store, &mut emit)?;
+    write_agent_receipt(&store, agent, version)?;
     emit(InstallPhase::Done, Some(100), "ready");
 
     let mut args = vec![package_spec(&dist.package, version)];
@@ -1366,52 +1364,50 @@ fn ensure_uvx_installed(
     })
 }
 
-fn node_bindir(root: &Path) -> Option<PathBuf> {
+fn node_bindir(store: &PackageStore) -> Option<PathBuf> {
     let target = node_target()?;
     Some(
-        store::packages_dir(root)
+        store
+            .packages_dir()
             .join("node")
             .join(format!("node-v{NODE_VERSION}-{target}"))
             .join("bin"),
     )
 }
 
-fn node_cli(root: &Path, file: &str) -> Option<PathBuf> {
+fn node_cli(store: &PackageStore, file: &str) -> Option<PathBuf> {
     Some(
-        node_bindir(root)?
+        node_bindir(store)?
             .parent()?
             .join("lib/node_modules/npm/bin")
             .join(file),
     )
 }
 
-fn uv_bindir(root: &Path) -> Option<PathBuf> {
+fn uv_bindir(store: &PackageStore) -> Option<PathBuf> {
     let target = uv_target()?;
-    Some(
-        store::packages_dir(root)
-            .join("uv")
-            .join(format!("uv-{target}")),
-    )
+    Some(store.packages_dir().join("uv").join(format!("uv-{target}")))
 }
 
 pub fn is_agent_installed(agent: &RegistryAgent) -> bool {
-    is_agent_installed_at(&store_root(), agent)
+    let store = PackageStore::at(vmux_core::profile::ProfilePaths::current().agents());
+    is_agent_installed_at(&store, agent)
 }
 
-fn is_agent_installed_at(root: &Path, agent: &RegistryAgent) -> bool {
+fn is_agent_installed_at(store: &PackageStore, agent: &RegistryAgent) -> bool {
     let Ok(name) = PackageName::parse(&agent.id) else {
         return false;
     };
-    if !store::is_installed(root, &name) {
+    if !store.is_installed(&name) {
         return false;
     }
     match agent.preferred_runtime() {
         acp_registry::Runtime::None => true,
         acp_registry::Runtime::Node => {
-            node_bindir(root).is_some_and(|bindir| bindir.join("node").is_file())
-                && node_cli(root, "npx-cli.js").is_some_and(|path| path.is_file())
+            node_bindir(store).is_some_and(|bindir| bindir.join("node").is_file())
+                && node_cli(store, "npx-cli.js").is_some_and(|path| path.is_file())
         }
-        acp_registry::Runtime::Uv => uv_bindir(root)
+        acp_registry::Runtime::Uv => uv_bindir(store)
             .map(|b| b.join("uvx").exists())
             .unwrap_or(false),
     }
@@ -1421,19 +1417,22 @@ pub fn is_update_available(agent: &RegistryAgent) -> bool {
     let Ok(name) = PackageName::parse(&agent.id) else {
         return false;
     };
+    let store = PackageStore::at(vmux_core::profile::ProfilePaths::current().agents());
     matches!(agent.preferred_runtime(), acp_registry::Runtime::None)
-        && store::read_receipt(&store_root(), &name)
+        && store
+            .read_receipt(&name)
             .map(|r| r.version != agent.version)
             .unwrap_or(false)
 }
 
 pub fn uninstall(id: &str) -> Result<(), String> {
-    uninstall_at(&store_root(), id)
+    let store = PackageStore::at(vmux_core::profile::ProfilePaths::current().agents());
+    uninstall_at(&store, id)
 }
 
-fn uninstall_at(root: &Path, id: &str) -> Result<(), String> {
+fn uninstall_at(store: &PackageStore, id: &str) -> Result<(), String> {
     let name = PackageName::parse(id)?;
-    store::remove(root, &name).map_err(|e| e.to_string())
+    store.remove(&name).map_err(|error| error.to_string())
 }
 
 pub fn registry_id_alias(id: &str) -> &str {
@@ -1503,10 +1502,10 @@ pub fn fetch_package_versions(agent: &RegistryAgent) -> Vec<String> {
 }
 
 fn npm_versions(package: &str) -> Vec<String> {
-    let root = store_root();
-    let managed = node_bindir(&root).and_then(|bindir| {
+    let store = PackageStore::at(vmux_core::profile::ProfilePaths::current().agents());
+    let managed = node_bindir(&store).and_then(|bindir| {
         let node = bindir.join("node");
-        let npm = node_cli(&root, "npm-cli.js")?;
+        let npm = node_cli(&store, "npm-cli.js")?;
         (node.is_file() && npm.is_file()).then_some((node, npm))
     });
     let mut command = match managed {
@@ -1541,7 +1540,7 @@ fn npm_versions(package: &str) -> Vec<String> {
 fn install_binary(
     agent: &RegistryAgent,
     target: &BinaryTarget,
-    root: &Path,
+    store: &PackageStore,
     name: &PackageName,
     file: &str,
     emit: &mut impl FnMut(InstallPhase, Option<u8>, &str),
@@ -1550,7 +1549,7 @@ fn install_binary(
         .sha256
         .as_ref()
         .ok_or_else(|| format!("ACP registry has no SHA-256 digest for {}", agent.id))?;
-    let staging_root = store::staging_dir(root);
+    let staging_root = store.staging_dir();
     std::fs::create_dir_all(&staging_root).map_err(|e| e.to_string())?;
     let staging = tempfile::Builder::new()
         .prefix(name.as_str())
@@ -1559,25 +1558,19 @@ fn install_binary(
     let dl = staging.path().join(file);
 
     emit(InstallPhase::Downloading, Some(0), &target.archive);
-    download::download_to(
-        &target.archive,
+    RemoteArtifact::new(target.archive.clone(), digest.clone()).download_to(
         &dl,
         download::PACKAGE_MAX_BYTES,
-        digest,
-        |d, total| {
-            let pct = total.and_then(|t| (t > 0).then(|| ((d * 100) / t) as u8));
-            emit(InstallPhase::Downloading, pct, "downloading");
+        |downloaded, total| {
+            let percent =
+                total.and_then(|total| (total > 0).then(|| ((downloaded * 100) / total) as u8));
+            emit(InstallPhase::Downloading, percent, "downloading");
         },
     )?;
 
     let staged_package = staging.path().join("package");
     emit(InstallPhase::Extracting, None, "extracting");
-    archive::extract(
-        &dl,
-        archive::kind_for(file),
-        &staged_package,
-        cmd_basename(&target.cmd),
-    )?;
+    ArchiveKind::for_file(file).extract(&dl, &staged_package, cmd_basename(&target.cmd))?;
     let staged_cmd = resolved_cmd_path(&staged_package, target, file)?;
 
     #[cfg(unix)]
@@ -1597,17 +1590,17 @@ fn install_binary(
         ));
     }
 
-    store::write_receipt_in(
-        &staged_package,
-        &store::Receipt {
-            name: name.clone(),
-            version: agent.version.clone(),
-            source_id: format!("acp:{}", agent.id),
-            bin: Default::default(),
-        },
-    )
+    Receipt {
+        name: name.clone(),
+        version: agent.version.clone(),
+        source_id: format!("acp:{}", agent.id),
+        bin: Default::default(),
+    }
+    .write_to(&staged_package)
     .map_err(|error| error.to_string())?;
-    store::activate_package(root, name, &staged_package).map_err(|error| error.to_string())?;
+    store
+        .activate_package(name, &staged_package)
+        .map_err(|error| error.to_string())?;
     emit(InstallPhase::Done, Some(100), "installed");
     Ok(())
 }
@@ -1775,26 +1768,27 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let node = node_bindir(&root).unwrap().join("node");
+        let store = PackageStore::at(&root);
+        let node = node_bindir(&store).unwrap().join("node");
         std::fs::create_dir_all(node.parent().unwrap()).unwrap();
         std::fs::write(&node, b"").unwrap();
-        let npx = node_cli(&root, "npx-cli.js").unwrap();
+        let npx = node_cli(&store, "npx-cli.js").unwrap();
         std::fs::create_dir_all(npx.parent().unwrap()).unwrap();
         std::fs::write(npx, b"").unwrap();
         let installed = npx_agent("installed-agent");
         let available = npx_agent("available-agent");
 
-        assert!(!is_agent_installed_at(&root, &installed));
-        assert!(!is_agent_installed_at(&root, &available));
+        assert!(!is_agent_installed_at(&store, &installed));
+        assert!(!is_agent_installed_at(&store, &available));
 
-        write_agent_receipt(&root, &installed, None).unwrap();
+        write_agent_receipt(&store, &installed, None).unwrap();
 
-        assert!(is_agent_installed_at(&root, &installed));
-        assert!(!is_agent_installed_at(&root, &available));
+        assert!(is_agent_installed_at(&store, &installed));
+        assert!(!is_agent_installed_at(&store, &available));
 
-        uninstall_at(&root, &installed.id).unwrap();
+        uninstall_at(&store, &installed.id).unwrap();
 
-        assert!(!is_agent_installed_at(&root, &installed));
+        assert!(!is_agent_installed_at(&store, &installed));
         assert!(node.exists());
         std::fs::remove_dir_all(root).unwrap();
     }

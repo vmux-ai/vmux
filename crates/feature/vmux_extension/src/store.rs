@@ -10,6 +10,11 @@ static INDEX_LOCK: Mutex<()> = Mutex::new(());
 const INDEX_VERSION: u32 = 3;
 const LEGACY_PROFILE: &str = "personal";
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExtensionStore {
+    root: PathBuf,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtEntry {
     pub id: String,
@@ -98,63 +103,74 @@ impl Default for Index {
     }
 }
 
-pub fn root() -> PathBuf {
-    vmux_core::profile::ProfilePaths::current().extensions()
-}
-
-pub fn loaded_ids() -> Vec<String> {
-    let root = root();
-    let profile = vmux_core::profile::Profile::current().into_id();
-    let profile_path = loaded_path(&root, &profile);
-    std::fs::read_to_string(profile_path)
-        .or_else(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                std::fs::read_to_string(root.join("loaded.txt"))
-            } else {
-                Err(error)
-            }
-        })
-        .ok()
-        .map(|contents| {
-            contents
-                .lines()
-                .filter(|line| !line.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-pub fn save_loaded_ids(root: &Path, profile: &str, ids: &[String]) -> Result<(), String> {
-    std::fs::create_dir_all(root).map_err(|error| error.to_string())?;
-    let path = loaded_path(root, profile);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+impl ExtensionStore {
+    pub fn current() -> Self {
+        Self::at(vmux_core::profile::ProfilePaths::current().extensions())
     }
-    std::fs::write(path, ids.join("\n")).map_err(|error| error.to_string())
+
+    pub fn at(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn loaded_ids(&self, profile: &str) -> Vec<String> {
+        std::fs::read_to_string(self.loaded_path(profile))
+            .or_else(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    std::fs::read_to_string(self.root.join("loaded.txt"))
+                } else {
+                    Err(error)
+                }
+            })
+            .ok()
+            .map(|contents| {
+                contents
+                    .lines()
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn save_loaded_ids(&self, profile: &str, ids: &[String]) -> Result<(), String> {
+        std::fs::create_dir_all(&self.root).map_err(|error| error.to_string())?;
+        let path = self.loaded_path(profile);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        std::fs::write(path, ids.join("\n")).map_err(|error| error.to_string())
+    }
+
+    pub fn packages_dir(&self) -> PathBuf {
+        self.root.join("packages")
+    }
+
+    pub fn runtimes_dir(&self) -> PathBuf {
+        self.root.join("runtime")
+    }
+
+    pub fn source_dir(&self, id: &str, version: &str) -> PathBuf {
+        self.packages_dir().join(id).join(version).join("source")
+    }
+
+    pub fn runtime_dir(&self, profile: &str, id: &str) -> PathBuf {
+        self.runtimes_dir().join(profile).join(id)
+    }
+
+    pub fn source_hash(&self, source: &Path) -> Result<String, String> {
+        tree_sha256(source)
+    }
+
+    fn loaded_path(&self, profile: &str) -> PathBuf {
+        self.root.join("loaded").join(format!("{profile}.txt"))
+    }
 }
 
-fn loaded_path(root: &Path, profile: &str) -> PathBuf {
-    root.join("loaded").join(format!("{profile}.txt"))
-}
-
-pub fn packages_root(root: &Path) -> PathBuf {
-    root.join("packages")
-}
-
-pub fn runtimes_root(root: &Path) -> PathBuf {
-    root.join("runtime")
-}
-
-pub fn source_dir(root: &Path, id: &str, version: &str) -> PathBuf {
-    packages_root(root).join(id).join(version).join("source")
-}
-
-pub fn runtime_profile_dir(root: &Path, profile: &str, id: &str) -> PathBuf {
-    runtimes_root(root).join(profile).join(id)
-}
-
-pub fn tree_sha256(root: &Path) -> Result<String, String> {
+fn tree_sha256(root: &Path) -> Result<String, String> {
     use sha2::{Digest, Sha256};
 
     let mut files = Vec::new();
@@ -276,81 +292,38 @@ fn validate_source(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn migrate_legacy_package(root: &Path, entry: &ExtEntry) -> Result<PathBuf, String> {
-    let source = source_dir(root, &entry.id, &entry.version);
-    if source.exists() {
-        validate_source(&source)?;
-        let hash = tree_sha256(&source)?;
-        if !entry.source_hash.is_empty() && hash != entry.source_hash {
-            return Err(format!("source hash mismatch for {}", entry.id));
+impl ExtensionStore {
+    pub fn migrate_legacy_package(&self, entry: &ExtEntry) -> Result<PathBuf, String> {
+        let source = self.source_dir(&entry.id, &entry.version);
+        if source.exists() {
+            validate_source(&source)?;
+            let hash = self.source_hash(&source)?;
+            if !entry.source_hash.is_empty() && hash != entry.source_hash {
+                return Err(format!("source hash mismatch for {}", entry.id));
+            }
+            return Ok(source);
         }
-        return Ok(source);
-    }
 
-    let legacy = root.join(&entry.id);
-    if !legacy.is_dir() {
-        return Err(format!("legacy extension package not found: {}", entry.id));
+        let legacy = self.root.join(&entry.id);
+        if !legacy.is_dir() {
+            return Err(format!("legacy extension package not found: {}", entry.id));
+        }
+        let parent = source.parent().ok_or("source directory has no parent")?;
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        let temporary = parent.join("source.tmp");
+        if temporary.exists() {
+            std::fs::remove_dir_all(&temporary).map_err(|error| error.to_string())?;
+        }
+        copy_tree(&legacy, &temporary)?;
+        restore_original_worker(&temporary)?;
+        validate_source(&temporary)?;
+        self.source_hash(&temporary)?;
+        std::fs::rename(&temporary, &source).map_err(|error| error.to_string())?;
+        Ok(source)
     }
-    let parent = source.parent().ok_or("source directory has no parent")?;
-    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    let temporary = parent.join("source.tmp");
-    if temporary.exists() {
-        std::fs::remove_dir_all(&temporary).map_err(|error| error.to_string())?;
-    }
-    copy_tree(&legacy, &temporary)?;
-    restore_original_worker(&temporary)?;
-    validate_source(&temporary)?;
-    tree_sha256(&temporary)?;
-    std::fs::rename(&temporary, &source).map_err(|error| error.to_string())?;
-    Ok(source)
 }
 
 impl Index {
-    pub fn load(root: &Path) -> Result<Self, String> {
-        let path = root.join("index.json");
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let s = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        let mut index: Self = serde_json::from_str(&s).map_err(|e| e.to_string())?;
-        if index.version < INDEX_VERSION {
-            for entry in &mut index.entries {
-                if index.version < 2 && entry.profile_enabled.is_empty() {
-                    entry
-                        .profile_enabled
-                        .insert(LEGACY_PROFILE.into(), entry.enabled);
-                }
-                entry.enabled = false;
-                if index.version < 3 {
-                    let legacy_grants = ExtensionGrants {
-                        permissions: entry.permissions.clone(),
-                        host_permissions: entry.host_permissions.clone(),
-                    };
-                    for profile in entry
-                        .profile_enabled
-                        .iter()
-                        .filter_map(|(profile, enabled)| enabled.then_some(profile.clone()))
-                        .collect::<Vec<_>>()
-                    {
-                        entry
-                            .approved_grants
-                            .entry(profile)
-                            .or_insert_with(|| legacy_grants.clone());
-                    }
-                }
-            }
-            index.version = INDEX_VERSION;
-            index.migrated = true;
-        }
-        Ok(index)
-    }
-
-    pub fn save(&self, root: &Path) -> Result<(), String> {
-        std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
-        let s = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(root.join("index.json"), s).map_err(|e| e.to_string())
-    }
-
     pub fn requires_save(&self) -> bool {
         self.migrated
     }
@@ -425,11 +398,11 @@ impl Index {
             .collect()
     }
 
-    pub fn enabled_dirs_for(&self, root: &Path, profile: &str) -> Vec<PathBuf> {
+    pub fn enabled_dirs_for(&self, store: &ExtensionStore, profile: &str) -> Vec<PathBuf> {
         self.entries
             .iter()
             .filter(|entry| entry.enabled_for(profile))
-            .map(|entry| source_dir(root, &entry.id, &entry.version))
+            .map(|entry| store.source_dir(&entry.id, &entry.version))
             .collect()
     }
 
@@ -498,80 +471,127 @@ impl ExtEntry {
     }
 }
 
-pub fn update_index<F: FnOnce(&mut Index)>(root: &Path, f: F) -> Result<(), String> {
-    let _guard = INDEX_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut idx = Index::load(root)?;
-    f(&mut idx);
-    idx.save(root)
-}
-
-pub fn update_index_if_changed<T, F>(root: &Path, f: F) -> Result<Option<T>, String>
-where
-    F: FnOnce(&mut Index) -> Option<T>,
-{
-    let _guard = INDEX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-    let mut index = Index::load(root)?;
-    let Some(value) = f(&mut index) else {
-        return Ok(None);
-    };
-    index.save(root)?;
-    Ok(Some(value))
-}
-
-pub fn uninstall(root: &Path, id: &str) -> Result<(), String> {
-    if webstore::extension_id(id).as_deref() != Some(id) {
-        return Err(format!("invalid extension id: {id}"));
-    }
-    let _guard = INDEX_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    for dir in [root.join(id), packages_root(root).join(id)] {
-        if dir.exists() {
-            std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+impl ExtensionStore {
+    pub fn load_index(&self) -> Result<Index, String> {
+        let path = self.root.join("index.json");
+        if !path.exists() {
+            return Ok(Index::default());
         }
+        let source = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        let mut index: Index = serde_json::from_str(&source).map_err(|error| error.to_string())?;
+        if index.version < INDEX_VERSION {
+            for entry in &mut index.entries {
+                if index.version < 2 && entry.profile_enabled.is_empty() {
+                    entry
+                        .profile_enabled
+                        .insert(LEGACY_PROFILE.into(), entry.enabled);
+                }
+                entry.enabled = false;
+                if index.version < 3 {
+                    let legacy_grants = ExtensionGrants {
+                        permissions: entry.permissions.clone(),
+                        host_permissions: entry.host_permissions.clone(),
+                    };
+                    for profile in entry
+                        .profile_enabled
+                        .iter()
+                        .filter_map(|(profile, enabled)| enabled.then_some(profile.clone()))
+                        .collect::<Vec<_>>()
+                    {
+                        entry
+                            .approved_grants
+                            .entry(profile)
+                            .or_insert_with(|| legacy_grants.clone());
+                    }
+                }
+            }
+            index.version = INDEX_VERSION;
+            index.migrated = true;
+        }
+        Ok(index)
     }
-    let runtimes = runtimes_root(root);
-    if runtimes.exists() {
-        for profile in std::fs::read_dir(&runtimes).map_err(|error| error.to_string())? {
-            let profile = profile.map_err(|error| error.to_string())?;
-            let runtime = profile.path().join(id);
-            if runtime.exists() {
-                std::fs::remove_dir_all(runtime).map_err(|error| error.to_string())?;
+
+    pub fn save_index(&self, index: &Index) -> Result<(), String> {
+        std::fs::create_dir_all(&self.root).map_err(|error| error.to_string())?;
+        let source = serde_json::to_string_pretty(index).map_err(|error| error.to_string())?;
+        std::fs::write(self.root.join("index.json"), source).map_err(|error| error.to_string())
+    }
+
+    pub fn update_index(&self, update: impl FnOnce(&mut Index)) -> Result<(), String> {
+        let _guard = INDEX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut index = self.load_index()?;
+        update(&mut index);
+        self.save_index(&index)
+    }
+
+    pub fn update_index_if_changed<T>(
+        &self,
+        update: impl FnOnce(&mut Index) -> Option<T>,
+    ) -> Result<Option<T>, String> {
+        let _guard = INDEX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut index = self.load_index()?;
+        let Some(value) = update(&mut index) else {
+            return Ok(None);
+        };
+        self.save_index(&index)?;
+        Ok(Some(value))
+    }
+
+    pub fn uninstall(&self, id: &str) -> Result<(), String> {
+        if webstore::extension_id(id).as_deref() != Some(id) {
+            return Err(format!("invalid extension id: {id}"));
+        }
+        let _guard = INDEX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        for directory in [self.root.join(id), self.packages_dir().join(id)] {
+            if directory.exists() {
+                std::fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
             }
         }
-    }
-    let mut idx = Index::load(root)?;
-    idx.remove(id);
-    idx.save(root)
-}
-
-pub fn uninstall_for_profile(root: &Path, profile: &str, id: &str) -> Result<(), String> {
-    if webstore::extension_id(id).as_deref() != Some(id) {
-        return Err(format!("invalid extension id: {id}"));
-    }
-    let _guard = INDEX_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut idx = Index::load(root)?;
-    let Some(entry) = idx.entries.iter_mut().find(|entry| entry.id == id) else {
-        return Ok(());
-    };
-    entry.profile_enabled.remove(profile);
-    entry.profile_pinned.remove(profile);
-    entry.approved_grants.remove(profile);
-    let remove_package = entry.profile_enabled.is_empty();
-    if remove_package {
-        idx.remove(id);
-    }
-    idx.save(root)?;
-    let runtime = runtime_profile_dir(root, profile, id);
-    if runtime.exists() {
-        std::fs::remove_dir_all(runtime).map_err(|error| error.to_string())?;
-    }
-    if remove_package {
-        for dir in [root.join(id), packages_root(root).join(id)] {
-            if dir.exists() {
-                std::fs::remove_dir_all(&dir).map_err(|error| error.to_string())?;
+        let runtimes = self.runtimes_dir();
+        if runtimes.exists() {
+            for profile in std::fs::read_dir(&runtimes).map_err(|error| error.to_string())? {
+                let profile = profile.map_err(|error| error.to_string())?;
+                let runtime = profile.path().join(id);
+                if runtime.exists() {
+                    std::fs::remove_dir_all(runtime).map_err(|error| error.to_string())?;
+                }
             }
         }
+        let mut index = self.load_index()?;
+        index.remove(id);
+        self.save_index(&index)
     }
-    Ok(())
+
+    pub fn uninstall_for_profile(&self, profile: &str, id: &str) -> Result<(), String> {
+        if webstore::extension_id(id).as_deref() != Some(id) {
+            return Err(format!("invalid extension id: {id}"));
+        }
+        let _guard = INDEX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut index = self.load_index()?;
+        let Some(entry) = index.entries.iter_mut().find(|entry| entry.id == id) else {
+            return Ok(());
+        };
+        entry.profile_enabled.remove(profile);
+        entry.profile_pinned.remove(profile);
+        entry.approved_grants.remove(profile);
+        let remove_package = entry.profile_enabled.is_empty();
+        if remove_package {
+            index.remove(id);
+        }
+        self.save_index(&index)?;
+        let runtime = self.runtime_dir(profile, id);
+        if runtime.exists() {
+            std::fs::remove_dir_all(runtime).map_err(|error| error.to_string())?;
+        }
+        if remove_package {
+            for directory in [self.root.join(id), self.packages_dir().join(id)] {
+                if directory.exists() {
+                    std::fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -603,10 +623,11 @@ mod tests {
     #[test]
     fn index_round_trip() {
         let dir = tempfile::tempdir().unwrap();
+        let store = ExtensionStore::at(dir.path());
         let mut idx = Index::default();
         idx.upsert(entry("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true));
-        idx.save(dir.path()).unwrap();
-        let loaded = Index::load(dir.path()).unwrap();
+        store.save_index(&idx).unwrap();
+        let loaded = store.load_index().unwrap();
         assert_eq!(loaded.entries.len(), 1);
         assert!(loaded.entries[0].enabled_for("personal"));
     }
@@ -623,6 +644,7 @@ mod tests {
     #[test]
     fn enabled_dirs_reflects_profile_toggle() {
         let root = tempfile::tempdir().unwrap();
+        let store = ExtensionStore::at(root.path());
         let mut idx = Index::default();
         idx.upsert(entry("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true));
         idx.upsert(entry("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", false));
@@ -632,11 +654,11 @@ mod tests {
             idx.set_enabled_for("work", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", true, true),
             EnableForProfileResult::Updated
         );
-        let dirs = idx.enabled_dirs_for(root.path(), "work");
+        let dirs = idx.enabled_dirs_for(&store, "work");
         assert_eq!(dirs.len(), 1);
         assert_eq!(
             dirs[0],
-            source_dir(root.path(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "1")
+            store.source_dir("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "1")
         );
     }
 
@@ -653,31 +675,33 @@ mod tests {
     #[test]
     fn uninstall_rejects_non_extension_id() {
         let root = tempfile::tempdir().unwrap();
-        assert!(uninstall(root.path(), "../evil").is_err());
-        assert!(uninstall(root.path(), "/etc/passwd").is_err());
-        assert!(uninstall(root.path(), "short").is_err());
+        let store = ExtensionStore::at(root.path());
+        assert!(store.uninstall("../evil").is_err());
+        assert!(store.uninstall("/etc/passwd").is_err());
+        assert!(store.uninstall("short").is_err());
     }
 
     #[test]
     fn uninstall_removes_packages_and_profile_runtimes() {
         let root = tempfile::tempdir().unwrap();
+        let store = ExtensionStore::at(root.path());
         let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let package = packages_root(root.path()).join(id);
-        let personal = runtime_profile_dir(root.path(), "personal", id);
-        let work = runtime_profile_dir(root.path(), "work", id);
+        let package = store.packages_dir().join(id);
+        let personal = store.runtime_dir("personal", id);
+        let work = store.runtime_dir("work", id);
         std::fs::create_dir_all(&package).unwrap();
         std::fs::create_dir_all(&personal).unwrap();
         std::fs::create_dir_all(&work).unwrap();
         let mut index = Index::default();
         index.upsert(entry(id, true));
-        index.save(root.path()).unwrap();
+        store.save_index(&index).unwrap();
 
-        uninstall(root.path(), id).unwrap();
+        store.uninstall(id).unwrap();
 
         assert!(!package.exists());
         assert!(!personal.exists());
         assert!(!work.exists());
-        assert!(Index::load(root.path()).unwrap().entries.is_empty());
+        assert!(store.load_index().unwrap().entries.is_empty());
     }
 
     #[test]
@@ -742,32 +766,34 @@ mod tests {
     #[test]
     fn profile_uninstall_preserves_shared_package_until_unused() {
         let root = tempfile::tempdir().unwrap();
+        let store = ExtensionStore::at(root.path());
         let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let package = packages_root(root.path()).join(id);
+        let package = store.packages_dir().join(id);
         std::fs::create_dir_all(&package).unwrap();
         let mut item = entry(id, true);
         item.profile_enabled.insert("work".into(), true);
         let mut index = Index::default();
         index.upsert(item);
-        index.save(root.path()).unwrap();
+        store.save_index(&index).unwrap();
 
-        uninstall_for_profile(root.path(), "personal", id).unwrap();
+        store.uninstall_for_profile("personal", id).unwrap();
 
-        let index = Index::load(root.path()).unwrap();
+        let index = store.load_index().unwrap();
         assert_eq!(index.entries.len(), 1);
         assert!(!index.entries[0].installed_for("personal"));
         assert!(index.entries[0].installed_for("work"));
         assert!(package.exists());
 
-        uninstall_for_profile(root.path(), "work", id).unwrap();
+        store.uninstall_for_profile("work", id).unwrap();
 
-        assert!(Index::load(root.path()).unwrap().entries.is_empty());
+        assert!(store.load_index().unwrap().entries.is_empty());
         assert!(!package.exists());
     }
 
     #[test]
     fn legacy_global_enablement_migrates_only_to_personal_profile() {
         let root = tempfile::tempdir().unwrap();
+        let store = ExtensionStore::at(root.path());
         std::fs::write(
             root.path().join("index.json"),
             serde_json::json!({
@@ -784,7 +810,7 @@ mod tests {
         )
         .unwrap();
 
-        let index = Index::load(root.path()).unwrap();
+        let index = store.load_index().unwrap();
         let entry = &index.entries[0];
 
         assert!(index.requires_save());
@@ -796,6 +822,7 @@ mod tests {
     #[test]
     fn migrates_legacy_package_without_generated_files() {
         let root = tempfile::tempdir().unwrap();
+        let store = ExtensionStore::at(root.path());
         let entry = entry("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true);
         let legacy = root.path().join(&entry.id);
         std::fs::create_dir_all(&legacy).unwrap();
@@ -823,15 +850,15 @@ mod tests {
         )
         .unwrap();
 
-        let migrated = migrate_legacy_package(root.path(), &entry).unwrap();
-        assert_eq!(migrated, source_dir(root.path(), &entry.id, &entry.version));
+        let migrated = store.migrate_legacy_package(&entry).unwrap();
+        assert_eq!(migrated, store.source_dir(&entry.id, &entry.version));
         let manifest: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(migrated.join("manifest.json")).unwrap())
                 .unwrap();
         assert_eq!(manifest["background"]["service_worker"], "background.js");
         assert!(!migrated.join("vmux_patch.js").exists());
         assert!(!migrated.join("vmux_shim.json").exists());
-        assert_eq!(tree_sha256(&migrated).unwrap().len(), 64);
+        assert_eq!(store.source_hash(&migrated).unwrap().len(), 64);
         assert!(legacy.join("vmux_shim.json").exists());
     }
 }

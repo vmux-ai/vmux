@@ -108,7 +108,9 @@ fn on_open_request(
     mut commands: Commands,
 ) {
     let id = trigger.event().payload.id.clone();
-    let index = store::Index::load(&store::root()).unwrap_or_default();
+    let index = store::ExtensionStore::current()
+        .load_index()
+        .unwrap_or_default();
     let Some(entry) = index.entries.into_iter().find(|entry| entry.id == id) else {
         return;
     };

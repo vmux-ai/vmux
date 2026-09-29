@@ -147,7 +147,7 @@ impl Package {
         source: &Purl,
         asset: &Asset,
         artifact: &RemoteArtifact,
-        store: &store::LspStore,
+        store: &store::PackageStore,
         mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
     ) -> Result<store::Receipt, String> {
         let asset_bin = asset
@@ -235,7 +235,7 @@ impl Package {
     fn install_github(
         &self,
         source: &Purl,
-        store: &store::LspStore,
+        store: &store::PackageStore,
         target: PlatformTarget,
         mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
     ) -> Result<store::Receipt, String> {
@@ -270,7 +270,7 @@ impl Package {
     fn finalize_links(
         &self,
         source: &Purl,
-        store: &store::LspStore,
+        store: &store::PackageStore,
         staged_package: &Path,
         emit: &mut impl FnMut(InstallPhase, Option<u8>, &str),
     ) -> Result<store::Receipt, String> {
@@ -312,7 +312,7 @@ impl Package {
     fn install_toolchain(
         &self,
         source: &Purl,
-        store: &store::LspStore,
+        store: &store::PackageStore,
         mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
     ) -> Result<store::Receipt, String> {
         let toolchain = source.toolchain().ok_or("unknown source")?;
@@ -336,7 +336,7 @@ impl Package {
 
     pub(crate) fn install(
         &self,
-        store: &store::LspStore,
+        store: &store::PackageStore,
         target: PlatformTarget,
         emit: impl FnMut(InstallPhase, Option<u8>, &str),
     ) -> Result<store::Receipt, String> {
@@ -386,7 +386,7 @@ mod tests {
     fn install_from_url_extracts_links_and_writes_receipt() {
         let (url, file, digest) = serve_gz_once(b"#!/bin/sh\necho hi\n");
         let tmp = tempfile::tempdir().unwrap();
-        let store = store::LspStore::at(tmp.path());
+        let store = store::PackageStore::at(tmp.path());
         let mut bin = BTreeMap::new();
         bin.insert(
             PackageName::parse("myserver").unwrap(),

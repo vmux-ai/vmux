@@ -14,8 +14,8 @@ pub fn install(
 ) -> Result<store::ExtEntry, String> {
     progress(ExtInstallPhase::Resolving, None, "resolving");
     let id = webstore::extension_id(source).ok_or("not a Chrome Web Store URL or extension id")?;
-    let root = store::root();
-    let staging = root.join("staging").join(&id);
+    let store = store::ExtensionStore::current();
+    let staging = store.path().join("staging").join(&id);
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
 
@@ -25,16 +25,20 @@ pub fn install(
 
     progress(ExtInstallPhase::Unpacking, None, "unpacking");
     let bytes = std::fs::read(&crx_path).map_err(|e| e.to_string())?;
-    let entry = install_crx(&root, &id, &bytes)?;
+    let entry = install_crx(&store, &id, &bytes)?;
     progress(ExtInstallPhase::Done, Some(100), "done");
     Ok(entry)
 }
 
-fn install_crx(root: &Path, id: &str, bytes: &[u8]) -> Result<store::ExtEntry, String> {
+fn install_crx(
+    store: &store::ExtensionStore,
+    id: &str,
+    bytes: &[u8],
+) -> Result<store::ExtEntry, String> {
     let public_key = crx::crx_public_key_for(bytes, id)
         .ok_or_else(|| format!("CRX does not contain the developer key for extension {id}"))?;
     let public_key_b64 = Some(base64::engine::general_purpose::STANDARD.encode(public_key));
-    let staging = root.join("staging").join(id);
+    let staging = store.path().join("staging").join(id);
     std::fs::create_dir_all(&staging).map_err(|error| error.to_string())?;
     let unpack_dir = staging.join("unpacked");
     let _ = std::fs::remove_dir_all(&unpack_dir);
@@ -49,12 +53,12 @@ fn install_crx(root: &Path, id: &str, bytes: &[u8]) -> Result<store::ExtEntry, S
         .as_ref()
         .and_then(|rel| icon_data_url(&unpack_dir, rel));
 
-    let final_dir = store::source_dir(root, id, &m.version);
+    let final_dir = store.source_dir(id, &m.version);
     let final_parent = final_dir.parent().ok_or("source directory has no parent")?;
     std::fs::create_dir_all(final_parent).map_err(|error| error.to_string())?;
     let _ = std::fs::remove_dir_all(&final_dir);
     std::fs::rename(&unpack_dir, &final_dir).map_err(|e| e.to_string())?;
-    let source_hash = store::tree_sha256(&final_dir)?;
+    let source_hash = store.source_hash(&final_dir)?;
     let _ = std::fs::remove_dir_all(&staging);
 
     let profile = vmux_core::profile::Profile::current().into_id();
@@ -83,7 +87,7 @@ fn install_crx(root: &Path, id: &str, bytes: &[u8]) -> Result<store::ExtEntry, S
         public_key_b64,
     };
     let mut persisted = None;
-    store::update_index(root, |idx| {
+    store.update_index(|idx| {
         let mut upsert_entry = entry.clone();
         if let Some(existing) = idx.entries.iter().find(|item| item.id == upsert_entry.id) {
             upsert_entry.enabled = existing.enabled;
@@ -181,12 +185,13 @@ mod tests {
             }"#,
         );
 
-        let entry = install_crx(root.path(), &id, &bytes).unwrap();
+        let store = store::ExtensionStore::at(root.path());
+        let entry = install_crx(&store, &id, &bytes).unwrap();
 
-        let source = store::source_dir(root.path(), &id, &entry.version);
+        let source = store.source_dir(&id, &entry.version);
         assert!(source.join("manifest.json").exists());
         assert!(!root.path().join(&id).exists());
-        assert_eq!(entry.source_hash, store::tree_sha256(&source).unwrap());
+        assert_eq!(entry.source_hash, store.source_hash(&source).unwrap());
         assert_eq!(
             entry.public_key_b64,
             Some(base64::engine::general_purpose::STANDARD.encode(b"PUBKEY"))
@@ -216,25 +221,27 @@ mod tests {
                 "background": { "service_worker": "background.js" }
             }"#,
         );
-        install_crx(root.path(), &id, &initial).unwrap();
-        store::update_index(root.path(), |index| {
-            let entry = index
-                .entries
-                .iter_mut()
-                .find(|entry| entry.id == id)
-                .unwrap();
-            for profile in ["personal", "work"] {
-                entry.profile_enabled.insert(profile.into(), true);
-                entry.approved_grants.insert(
-                    profile.into(),
-                    store::ExtensionGrants {
-                        permissions: vec!["storage".into(), "history".into()],
-                        host_permissions: Vec::new(),
-                    },
-                );
-            }
-        })
-        .unwrap();
+        let store = store::ExtensionStore::at(root.path());
+        install_crx(&store, &id, &initial).unwrap();
+        store
+            .update_index(|index| {
+                let entry = index
+                    .entries
+                    .iter_mut()
+                    .find(|entry| entry.id == id)
+                    .unwrap();
+                for profile in ["personal", "work"] {
+                    entry.profile_enabled.insert(profile.into(), true);
+                    entry.approved_grants.insert(
+                        profile.into(),
+                        store::ExtensionGrants {
+                            permissions: vec!["storage".into(), "history".into()],
+                            host_permissions: Vec::new(),
+                        },
+                    );
+                }
+            })
+            .unwrap();
         let (_, update) = fixture_crx(
             r#"{
                 "manifest_version": 3,
@@ -245,8 +252,9 @@ mod tests {
             }"#,
         );
 
-        let returned = install_crx(root.path(), &id, &update).unwrap();
-        let stored = store::Index::load(root.path())
+        let returned = install_crx(&store, &id, &update).unwrap();
+        let stored = store
+            .load_index()
             .unwrap()
             .entries
             .into_iter()

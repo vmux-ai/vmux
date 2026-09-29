@@ -227,7 +227,7 @@ fn start_catalog_jobs(
         let target = pending.target;
         let request = pending.request.clone();
         let task = IoTaskPool::get().spawn(async move {
-            let store = store::LspStore::current();
+            let store = store::PackageStore::lsp();
             let catalog = Catalog::load(&store, request.refresh).unwrap_or_default();
             let mut packages = catalog
                 .search(&request.query, &request.language, &request.category)
@@ -282,7 +282,7 @@ fn install_package(
     name: String,
     progress: Sender<LspInstallProgress>,
 ) -> Result<LspPackageStatus, LspInstallProgress> {
-    let store = store::LspStore::current();
+    let store = store::PackageStore::lsp();
     let catalog = Catalog::load(&store, false).unwrap_or_default();
     let Some(package) = catalog.find(&name).cloned() else {
         return Err(LspInstallProgress {
@@ -318,7 +318,7 @@ fn install_package(
 }
 
 fn uninstall_package(name: String) -> Result<LspPackageStatus, LspInstallProgress> {
-    let store = store::LspStore::current();
+    let store = store::PackageStore::lsp();
     let Ok(package) = crate::lsp::package_path::PackageName::parse(&name) else {
         return Err(LspInstallProgress {
             name,
@@ -411,7 +411,7 @@ fn start_uninstall_jobs(
 }
 
 impl Package {
-    fn to_lsp_package(&self, store: &store::LspStore) -> LspPackage {
+    fn to_lsp_package(&self, store: &store::PackageStore) -> LspPackage {
         let source = Purl::parse(&self.source_id);
         let kind = source
             .as_ref()
@@ -739,7 +739,7 @@ mod tests {
     #[test]
     fn installability_by_source() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = store::LspStore::at(tmp.path());
+        let store = store::PackageStore::at(tmp.path());
         let gh = pkg("zzz-fake-lsp", "pkg:github/x/zzz-fake-lsp@1").to_lsp_package(&store);
         assert!(gh.installable);
         assert_eq!(gh.requires, None);
@@ -758,7 +758,7 @@ mod tests {
     #[test]
     fn installed_with_newer_catalog_is_outdated() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = store::LspStore::at(tmp.path());
+        let store = store::PackageStore::at(tmp.path());
         std::fs::create_dir_all(store.packages_dir().join("foo")).unwrap();
         let mut bin = std::collections::BTreeMap::new();
         let name = crate::lsp::package_path::PackageName::parse("foo").unwrap();

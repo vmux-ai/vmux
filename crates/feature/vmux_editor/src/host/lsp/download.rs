@@ -40,6 +40,34 @@ pub struct RemoteArtifact {
     pub sha256: Sha256Digest,
 }
 
+impl Sha256Digest {
+    pub fn from_manifest(url: &str, filename: &str, max_bytes: u64) -> Result<Self, String> {
+        let url = checked_url(url)?;
+        let response = client()?
+            .get(url)
+            .send()
+            .map_err(|error| error.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!("http {}", response.status()));
+        }
+        let bytes = BoundedResponse(response).read(max_bytes, "checksum manifest")?;
+        let text = std::str::from_utf8(&bytes).map_err(|error| error.to_string())?;
+        for line in text.lines() {
+            let mut fields = line.split_whitespace();
+            let Some(digest) = fields.next() else {
+                continue;
+            };
+            let Some(name) = fields.next() else {
+                continue;
+            };
+            if name.trim_start_matches('*') == filename {
+                return Self::parse(digest);
+            }
+        }
+        Err(format!("checksum not found for {filename}"))
+    }
+}
+
 fn client() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(15))
@@ -278,6 +306,15 @@ mod tests {
             .send()
             .unwrap();
         assert!(BoundedResponse(declared).read(3, "response").is_err());
+    }
+
+    #[test]
+    fn parses_bounded_checksum_manifest() {
+        let filename = "package.tar.gz";
+        let hash = "ed16a0c68a7df1e55597fcb7c884140ce292def6116cbaab1fc05045433494b9";
+        let body = format!("{hash}  {filename}\n").into_bytes().leak();
+        let digest = Sha256Digest::from_manifest(&serve_once(body), filename, 1024).unwrap();
+        assert_eq!(digest.as_str(), hash);
     }
 
     #[test]
