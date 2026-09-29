@@ -257,8 +257,10 @@ fn import_npm_manifest_system(
     }
 }
 
-pub fn import_npm_manifest(path: &Path) -> Result<usize, String> {
-    import_npm_manifest_in(&ToolStore::current(), path)
+impl ToolStore {
+    pub fn import_npm_manifest(&self, path: &Path) -> Result<usize, String> {
+        import_npm_manifest_in(self, path)
+    }
 }
 
 fn import_npm_manifest_in(store: &ToolStore, path: &Path) -> Result<usize, String> {

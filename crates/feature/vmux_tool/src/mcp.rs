@@ -66,7 +66,7 @@ fn scan(
     manifest: &mut ToolsManifest,
     _refresh: bool,
 ) -> Result<ToolProviderSnapshot, String> {
-    let (discovered, errors) = discover_mcp_servers_at(store.home());
+    let (discovered, errors) = store.discover_mcp_servers();
     let errors = errors
         .into_iter()
         .map(|error| format!("MCP Servers: {error}"))
@@ -525,8 +525,28 @@ pub struct DiscoveredMcpServer {
     pub conflict: bool,
 }
 
-pub fn default_mcp_config_paths() -> Vec<PathBuf> {
-    default_mcp_config_paths_in(ToolStore::current().home())
+impl ToolStore {
+    pub fn default_mcp_config_paths(&self) -> Vec<PathBuf> {
+        default_mcp_config_paths_in(self.home())
+    }
+
+    pub fn discover_mcp_servers(&self) -> (BTreeMap<String, DiscoveredMcpServer>, Vec<String>) {
+        discover_mcp_servers_at(self.home())
+    }
+
+    pub fn import_mcp_config(&self, path: &Path) -> Result<usize, String> {
+        import_mcp_config_in(self, path)
+    }
+
+    pub fn import_default_mcp_configs(&self) -> Result<usize, String> {
+        let (servers, errors) = discover_mcp_servers_in(&self.default_mcp_config_paths());
+        import_discovered_mcp_configs_in(self, &DiscoveredMcpServers { servers, errors })
+    }
+
+    pub fn import_discovered_mcp_server(&self, name: &str) -> Result<(), String> {
+        let (servers, errors) = discover_mcp_servers_in(&self.default_mcp_config_paths());
+        import_discovered_mcp_server_in(self, name, &DiscoveredMcpServers { servers, errors })
+    }
 }
 
 fn default_mcp_config_paths_in(home: &Path) -> Vec<PathBuf> {
@@ -539,10 +559,6 @@ fn default_mcp_config_paths_in(home: &Path) -> Vec<PathBuf> {
     .into_iter()
     .filter(|path| path.is_file())
     .collect()
-}
-
-pub fn discover_mcp_servers() -> (BTreeMap<String, DiscoveredMcpServer>, Vec<String>) {
-    discover_mcp_servers_at(ToolStore::current().home())
 }
 
 pub fn discover_mcp_servers_at(
@@ -584,10 +600,6 @@ fn discover_mcp_servers_in(
     (discovered, errors)
 }
 
-pub fn import_mcp_config(path: &Path) -> Result<usize, String> {
-    import_mcp_config_in(&ToolStore::current(), path)
-}
-
 fn import_mcp_config_in(store: &ToolStore, path: &Path) -> Result<usize, String> {
     store.migrate_legacy_storage()?;
     let path = store.expand_user_path(path)?;
@@ -611,12 +623,6 @@ pub fn import_mcp_config_to(path: &Path, manifest_path: &Path) -> Result<usize, 
     }
     manifest.write_to(manifest_path)?;
     Ok(imported)
-}
-
-pub fn import_default_mcp_configs() -> Result<usize, String> {
-    let store = ToolStore::current();
-    let (servers, errors) = discover_mcp_servers_in(&default_mcp_config_paths_in(store.home()));
-    import_discovered_mcp_configs_in(&store, &DiscoveredMcpServers { servers, errors })
 }
 
 fn import_discovered_mcp_configs_in(
@@ -652,12 +658,6 @@ fn import_discovered_mcp_configs_in(
     }
     store.save(&manifest)?;
     Ok(imported)
-}
-
-pub fn import_discovered_mcp_server(name: &str) -> Result<(), String> {
-    let store = ToolStore::current();
-    let (servers, errors) = discover_mcp_servers_in(&default_mcp_config_paths_in(store.home()));
-    import_discovered_mcp_server_in(&store, name, &DiscoveredMcpServers { servers, errors })
 }
 
 fn import_discovered_mcp_server_in(

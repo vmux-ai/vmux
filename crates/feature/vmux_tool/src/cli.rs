@@ -119,13 +119,13 @@ fn execute_status(requests: Query<Entity, Added<ToolStatusRequest>>, mut command
 }
 
 fn execute_apply(requests: Query<Entity, Added<ToolApplyRequest>>, mut commands: Commands) {
+    let store = crate::ToolStore::current();
     for entity in &requests {
-        let result = crate::ToolStore::current()
-            .load()
-            .map_err(io::Error::other)
-            .and_then(|manifest| {
-                crate::apply_enabled_dotfiles(&manifest).map_err(io::Error::other)
-            });
+        let result = store.load().map_err(io::Error::other).and_then(|manifest| {
+            store
+                .apply_enabled_dotfiles(&manifest)
+                .map_err(io::Error::other)
+        });
         match result {
             Ok(linked) => {
                 println!("linked {linked} file(s)");
@@ -144,8 +144,9 @@ fn execute_homebrew_import(
     requests: Query<(Entity, &HomebrewImportRequest), Added<HomebrewImportRequest>>,
     mut commands: Commands,
 ) {
+    let store = crate::ToolStore::current();
     for (entity, request) in &requests {
-        let result = crate::import_brewfile(&request.0).map_err(io::Error::other);
+        let result = store.import_brewfile(&request.0).map_err(io::Error::other);
         match result {
             Ok((formulae, casks)) => {
                 println!("imported {formulae} formulae and {casks} casks");
@@ -164,8 +165,11 @@ fn execute_npm_import(
     requests: Query<(Entity, &NpmImportRequest), Added<NpmImportRequest>>,
     mut commands: Commands,
 ) {
+    let store = crate::ToolStore::current();
     for (entity, request) in &requests {
-        let result = crate::import_npm_manifest(&request.0).map_err(io::Error::other);
+        let result = store
+            .import_npm_manifest(&request.0)
+            .map_err(io::Error::other);
         match result {
             Ok(imported) => {
                 println!("imported {imported} NPM package(s)");
@@ -184,10 +188,11 @@ fn execute_mcp_import(
     requests: Query<(Entity, &McpImportRequest), Added<McpImportRequest>>,
     mut commands: Commands,
 ) {
+    let store = crate::ToolStore::current();
     for (entity, request) in &requests {
         let result = match &request.0 {
-            Some(path) => crate::import_mcp_config(path),
-            None => crate::import_default_mcp_configs(),
+            Some(path) => store.import_mcp_config(path),
+            None => store.import_default_mcp_configs(),
         }
         .map_err(io::Error::other);
         match result {
@@ -208,10 +213,11 @@ fn execute_dotfile_import(
     requests: Query<(Entity, &DotfileImportRequest), Added<DotfileImportRequest>>,
     mut commands: Commands,
 ) {
+    let store = crate::ToolStore::current();
     for (entity, request) in &requests {
         let result = match &request.0 {
-            Some(path) => crate::import_dotfiles(path).map_err(io::Error::other),
-            None => import_dotfile_packages(),
+            Some(path) => store.import_dotfiles(path).map_err(io::Error::other),
+            None => import_dotfile_packages(&store),
         };
         match result {
             Ok(imported) => {
@@ -231,8 +237,12 @@ fn execute_adopt(
     requests: Query<(Entity, &DotfileAdoptRequest), Added<DotfileAdoptRequest>>,
     mut commands: Commands,
 ) {
+    let store = crate::ToolStore::current();
     for (entity, request) in &requests {
-        match crate::adopt_dotfile(&request.path, &request.package).map_err(io::Error::other) {
+        match store
+            .adopt_dotfile(&request.path, &request.package)
+            .map_err(io::Error::other)
+        {
             Ok(destination) => {
                 println!("{}", destination.display());
                 commands.entity(entity).insert(CliResult::success());
@@ -250,8 +260,12 @@ fn execute_unlink(
     requests: Query<(Entity, &DotfileUnlinkRequest), Added<DotfileUnlinkRequest>>,
     mut commands: Commands,
 ) {
+    let store = crate::ToolStore::current();
     for (entity, request) in &requests {
-        match crate::disable_and_unlink_dotfile_package(&request.0).map_err(io::Error::other) {
+        match store
+            .disable_and_unlink_dotfile_package(&request.0)
+            .map_err(io::Error::other)
+        {
             Ok(removed) => {
                 println!("unlinked {removed} file(s)");
                 commands.entity(entity).insert(CliResult::success());
@@ -265,9 +279,8 @@ fn execute_unlink(
     }
 }
 
-fn import_dotfile_packages() -> io::Result<usize> {
-    let packages = crate::dotfile_packages().map_err(io::Error::other)?;
-    let store = crate::ToolStore::current();
+fn import_dotfile_packages(store: &crate::ToolStore) -> io::Result<usize> {
+    let packages = store.dotfile_packages().map_err(io::Error::other)?;
     let mut manifest = store.load().map_err(io::Error::other)?;
     let mut imported = 0;
     for package in packages {
@@ -294,7 +307,7 @@ fn status() -> io::Result<()> {
             println!("  {name} · {:?}", server.transport);
         }
     }
-    let mut packages = crate::dotfile_packages().map_err(io::Error::other)?;
+    let mut packages = store.dotfile_packages().map_err(io::Error::other)?;
     for package in &manifest.dotfiles.packages {
         if !packages.contains(package) {
             packages.push(package.clone());
@@ -306,7 +319,7 @@ fn status() -> io::Result<()> {
     }
     for package in packages {
         let managed = manifest.dotfiles.packages.contains(&package);
-        match crate::plan_dotfile_package(&package) {
+        match store.plan_dotfile_package(&package) {
             Ok(plan) => println!(
                 "  {}{} · {} linked · {} missing · {} conflicts",
                 package,

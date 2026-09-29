@@ -322,12 +322,10 @@ pub struct BrewfileImport {
     pub casks: Vec<String>,
 }
 
-pub fn brewfile_path() -> PathBuf {
-    ToolStore::current().brewfile_path()
-}
-
-pub fn import_brewfile(path: &Path) -> Result<(usize, usize), String> {
-    import_brewfile_in(&ToolStore::current(), path)
+impl ToolStore {
+    pub fn import_brewfile(&self, path: &Path) -> Result<(usize, usize), String> {
+        import_brewfile_in(self, path)
+    }
 }
 
 pub fn import_brewfile_to(path: &Path, manifest_path: &Path) -> Result<(usize, usize), String> {
