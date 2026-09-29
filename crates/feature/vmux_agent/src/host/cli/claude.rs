@@ -70,17 +70,12 @@ fn discover_sessions(
 }
 
 const DISALLOWED_TOOLS: &str = "Bash,Monitor,WebSearch,WebFetch";
-const HOST_ALLOWED_TOOLS: &str = "mcp__vmux__run,mcp__vmux__read_terminal,\
-mcp__vmux__browser_navigate,mcp__vmux__browser_snapshot,mcp__vmux__browser_scroll,\
-mcp__vmux__request_user_choice,mcp__vmux__set_conversation_title,\
-mcp__vmux__select_project,mcp__vmux__create_worktree";
+const HOST_ALLOWED_TOOLS: &str = "mcp__vmux__*";
 const RUN_STEER_PROMPT: &str = "The native Bash, WebSearch, and WebFetch tools are disabled. Run \
 ALL shell commands via the mcp__vmux__run tool (a visible terminal the user can watch and take \
 over). Use the output returned by run directly; call read_terminal only when run says the command \
-is still running. Do ALL web access via the vmux browser tools in the user's visible browser: \
-mcp__vmux__browser_navigate (it returns the page snapshot on load), then mcp__vmux__browser_scroll \
-to read more. Omit the pane argument - it targets your own browser pane. Do not look for a \
-built-in web search. An unbound tab starts in ~/.vmux/projects. Before accessing project files or \
+is still running. Use the available vmux MCP tools for web access and follow their descriptions; \
+do not look for a built-in web search. An unbound tab starts in ~/.vmux/projects. Before accessing project files or \
 running project commands, call mcp__vmux__select_project with the known project path or omit it to \
 open the picker. Paths inside ~/.vmux/projects are selected immediately; paths outside it require \
 explicit user approval in the native picker. For a \
@@ -712,18 +707,13 @@ mod tests {
         assert_eq!(args[disallowed + 1], "Bash,Monitor,WebSearch,WebFetch");
 
         let allowed = args.iter().position(|a| a == "--allowedTools").unwrap();
-        assert!(args[allowed + 1].contains("mcp__vmux__run"));
-        assert!(args[allowed + 1].contains("mcp__vmux__read_terminal"));
-        assert!(args[allowed + 1].contains("mcp__vmux__request_user_choice"));
-        assert!(args[allowed + 1].contains("mcp__vmux__select_project"));
-        assert!(args[allowed + 1].contains("mcp__vmux__create_worktree"));
+        assert!(args[allowed + 1].contains("mcp__vmux__*"));
 
         let steer = args
             .iter()
             .position(|a| a == "--append-system-prompt")
             .unwrap();
         assert!(args[steer + 1].contains("mcp__vmux__run"));
-        assert!(args[steer + 1].contains("browser_navigate"));
         let workspace = args[steer + 1].find("mcp__vmux__select_project").unwrap();
         let worktree = args[steer + 1].find("mcp__vmux__create_worktree").unwrap();
         assert!(workspace < worktree);
@@ -735,7 +725,7 @@ mod tests {
 
         assert!(allowed.contains("mcp__linear__*"));
         assert!(allowed.contains("mcp__notion__*"));
-        assert!(allowed.contains("mcp__vmux__run"));
+        assert!(allowed.contains("mcp__vmux__*"));
     }
 
     #[test]

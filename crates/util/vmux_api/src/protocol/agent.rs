@@ -398,13 +398,9 @@ pub struct AgentSetEffort {
     pub level: String,
 }
 
-pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-pub const RECORD_STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-
-pub const AGENT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-
-pub const BROWSER_NAVIGATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+pub const AGENT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 pub const AGENT_TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 

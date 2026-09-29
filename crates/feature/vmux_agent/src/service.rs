@@ -12,12 +12,10 @@ use vmux_core::{AgentWorkingDir, CreatedAt};
 
 use crate::provider::{anthropic, mistral, openai};
 use crate::stream::{BuildRequest, ParseSse, StreamEvent, ToolDef};
-use vmux_api::BinEvent;
 use vmux_api::protocol::{
     AGENT_QUERY_TIMEOUT, AGENT_REQUEST_TIMEOUT, AGENT_TOOL_TIMEOUT, AgentAttachment,
-    AgentBrowserNavigate, AgentCommandResult, AgentRecordStop, AgentRequest, AgentRequestId,
-    AgentRunStatus, ApprovalDecision, BROWSER_NAVIGATE_TIMEOUT, JsonValue, ProcessId,
-    ServiceMessage, SharedEvent,
+    AgentCommandResult, AgentRequest, AgentRequestId, AgentRunStatus, ApprovalDecision, JsonValue,
+    ProcessId, ServiceMessage, SharedEvent,
 };
 use vmux_api::room::{AssistantBlock, Message, RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_core::service::PendingRequests;
@@ -83,15 +81,10 @@ impl AgentBroker {
         if self.outbound.receiver_count() == 0 {
             return Err(NO_AGENT_SUBSCRIBER.to_string());
         }
-        let timeout = if request.id == AgentBrowserNavigate::ID {
-            BROWSER_NAVIGATE_TIMEOUT
-        } else {
-            AGENT_REQUEST_TIMEOUT
-        };
         self.commands
             .request(
                 request_id,
-                timeout,
+                AGENT_REQUEST_TIMEOUT,
                 || {
                     self.outbound
                         .send(ServiceMessage::AgentRequest {
@@ -115,15 +108,10 @@ impl AgentBroker {
         if self.outbound.receiver_count() == 0 {
             return Err(NO_AGENT_SUBSCRIBER.to_string());
         }
-        let timeout = if query.id == AgentRecordStop::ID {
-            vmux_api::protocol::RECORD_STOP_TIMEOUT
-        } else {
-            AGENT_QUERY_TIMEOUT
-        };
         self.queries
             .request(
                 request_id,
-                timeout,
+                AGENT_QUERY_TIMEOUT,
                 || {
                     self.outbound
                         .send(ServiceMessage::AgentQuery { request_id, query })

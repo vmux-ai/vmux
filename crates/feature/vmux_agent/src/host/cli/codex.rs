@@ -80,11 +80,9 @@ commands via the mcp__vmux__run tool (a visible terminal the user can watch and 
 output returned by run directly; call read_terminal only when run says the command is still running. To READ \
 a file, use the mcp__vmux__read_file tool (it shows the file in a pane beside you and returns its \
 text) - do NOT cat/sed/head/tail a file via run. To SEARCH code, use the mcp__vmux__grep tool (it \
-opens each matching file in a pane and returns the matches) - do NOT run rg/grep/ag via run. OpenAI's bundled browser skill is disabled inside vmux. \
-Never use browser:control-in-app-browser, a Node REPL, agent.browsers, or connector discovery. Do ALL web access via the vmux browser tools in the \
-user's visible browser. If the user refers to a page already visible beside you, first call mcp__vmux__browser_snapshot without a pane argument. \
-For a new URL, call mcp__vmux__browser_navigate, then mcp__vmux__browser_scroll to read more. Omitting the pane targets the visible browser pane associated with you. \
-Do not look for a built-in web search. An unbound tab starts in ~/.vmux/projects. Before accessing \
+opens each matching file in a pane and returns the matches) - do NOT run rg/grep/ag via run. Use the \
+available vmux MCP tools for web access and follow their descriptions. Do not look for a built-in \
+web search or connector discovery. An unbound tab starts in ~/.vmux/projects. Before accessing \
 project files or running project commands, call mcp__vmux__select_project, passing its known path \
 or omitting it to open the picker. Paths inside ~/.vmux/projects are selected immediately; paths \
 outside it require explicit user approval in the native picker. For a new project, first use mcp__vmux__request_user_choice to offer \
@@ -1191,7 +1189,7 @@ mod tests {
     }
 
     #[test]
-    fn build_args_steers_web_access_to_vmux_browser() {
+    fn build_args_steers_web_access_to_registered_vmux_tools() {
         let mcp = McpServerConfig {
             command: "/bin/vmux".into(),
             args: vec!["mcp".into()],
@@ -1203,10 +1201,7 @@ mod tests {
             .find(|a| a.starts_with("developer_instructions="))
             .expect("developer_instructions override present");
         assert!(steer.contains("mcp__vmux__run"));
-        assert!(steer.contains("browser_navigate"));
-        assert!(steer.contains("browser_snapshot"));
-        assert!(steer.contains("page already visible beside you"));
-        assert!(steer.contains("Never use browser:control-in-app-browser"));
+        assert!(steer.contains("available vmux MCP tools for web access"));
     }
 
     #[test]

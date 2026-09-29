@@ -1977,8 +1977,7 @@ mod tests {
             assert!(instructions.contains("topic materially changes"));
             assert!(instructions.contains("same-topic follow-ups"));
             assert!(instructions.contains("never needs user permission"));
-            assert!(instructions.contains("mcp__vmux__browser_snapshot"));
-            assert!(instructions.contains("page already visible beside you"));
+            assert!(instructions.contains("available vmux MCP tools for web access"));
         }
     }
 

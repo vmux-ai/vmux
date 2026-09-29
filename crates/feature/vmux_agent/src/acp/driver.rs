@@ -1356,9 +1356,7 @@ where
 }
 
 const CLAUDE_ACP_STEER_PROMPT: &str = "The native Bash, WebSearch, and WebFetch tools are disabled. \
-Run ALL shell commands via the mcp__vmux__run tool, which opens a visible terminal the user can \
-watch and take over. Use mcp__vmux__read_terminal to inspect continued output. Omit the pane \
-argument because it targets your own terminal pane. Do ALL web access via the vmux browser tools. \
+Use the available vmux MCP tools for shell and web access and follow their descriptions. \
 If you invoke a required Skill tool, continue the original user request in the same turn after \
 the skill loads. Never end the turn after skill activation or answer only Ready.";
 const CONVERSATION_TITLE_STEER_PROMPT: &str = "On the first user message, always call mcp__vmux__set_conversation_title as the first tool of the turn. The host immediately shows the raw first prompt as a provisional title; replace it with a concise 3 to 7 word summary with corrected spelling and grammar. On later user messages, call the tool only when the conversation topic materially changes; keep the current title for same-topic follow-ups. When needed, call it before reading skills, calling any other tool, or answering. Never copy the user's prompt verbatim. This tool never needs user permission.";
@@ -1413,17 +1411,7 @@ fn session_meta_for_agent_with_knowledge(
         "claudeCode": {
             "options": {
                 "disallowedTools": ["Bash", "Monitor", "WebSearch", "WebFetch"],
-                "allowedTools": [
-                    "mcp__vmux__set_conversation_title",
-                    "mcp__vmux__request_user_choice",
-                    "mcp__vmux__select_workspace",
-                    "mcp__vmux__create_worktree",
-                    "mcp__vmux__run",
-                    "mcp__vmux__read_terminal",
-                    "mcp__vmux__browser_navigate",
-                    "mcp__vmux__browser_snapshot",
-                    "mcp__vmux__browser_scroll",
-                ],
+                "allowedTools": ["mcp__vmux__*"],
             },
         },
     }) else {
@@ -2788,17 +2776,10 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|tool| tool == "mcp__vmux__run")
-        );
-        assert!(
-            options["allowedTools"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|tool| tool == "mcp__vmux__set_conversation_title")
+                .any(|tool| tool == "mcp__vmux__*")
         );
         let prompt = meta["systemPrompt"]["append"].as_str().unwrap();
-        assert!(prompt.contains("mcp__vmux__run"));
+        assert!(prompt.contains("available vmux MCP tools"));
         assert!(prompt.contains("continue the original user request"));
         assert!(prompt.contains("memory context"));
         assert!(prompt.contains("mcp__vmux__set_conversation_title"));
