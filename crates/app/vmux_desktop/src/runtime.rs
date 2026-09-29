@@ -2,16 +2,22 @@
 mod macos;
 #[cfg(any(target_os = "macos", test))]
 mod native;
-#[cfg(not(target_os = "macos"))]
-mod other;
 
 #[cfg(target_os = "macos")]
-use macos as platform;
-#[cfg(not(target_os = "macos"))]
-use other as platform;
+use macos::{live_resize_active, native_pointer_inside};
 
 #[cfg(target_os = "macos")]
 pub(crate) use macos::ensure_native_window_active;
+
+#[cfg(not(target_os = "macos"))]
+fn live_resize_active() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+fn native_pointer_inside() -> bool {
+    false
+}
 
 use bevy::prelude::*;
 #[cfg(feature = "tray")]
@@ -31,7 +37,7 @@ pub struct RuntimePlugin;
 impl Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(target_os = "macos")]
-        app.add_plugins(platform::RuntimePlatformPlugin);
+        app.add_plugins(macos::RuntimePlatformPlugin);
 
         app.add_message::<HideAllWindowsRequest>()
             .add_message::<vmux_input::HideWindowsShortcut>()
@@ -151,8 +157,8 @@ fn sync_winit_power_mode(
     let all_hidden = windows.iter().all(|w| !w.visible);
     let any_visible = windows.iter().any(|w| w.visible);
     let any_focused = windows.iter().any(|w| w.visible && w.focused);
-    let live_resize = platform::live_resize_active();
-    let native_pointer_inside = platform::native_pointer_inside();
+    let live_resize = live_resize_active();
+    let native_pointer_inside = native_pointer_inside();
     let next = if all_hidden {
         hidden_winit_settings()
     } else {
@@ -413,7 +419,7 @@ mod tests {
         use bevy::ecs::schedule::{NodeId, Schedules};
 
         let mut app = App::new();
-        app.add_plugins(platform::RuntimePlatformPlugin);
+        app.add_plugins(macos::RuntimePlatformPlugin);
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
         let Some(mut schedule) = schedules.remove(label) else {
             return Vec::new();

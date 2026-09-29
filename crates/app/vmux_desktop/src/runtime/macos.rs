@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use vmux_flex::prelude::*;
+use vmux_setting::{ResolvedScheme, SystemAppearance};
 
 use super::native::{
     NativeWindowFrame, NativeWindowResizeDrag, TitlebarClick, TitlebarClicks,
@@ -17,7 +18,8 @@ pub(super) struct RuntimePlatformPlugin;
 
 impl Plugin for RuntimePlatformPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, activate_app_during_boot)
+        app.add_systems(Startup, seed_system_appearance)
+            .add_systems(Update, activate_app_during_boot)
             .add_systems(Update, grab_key_window_on_pane_hover)
             .add_systems(
                 Startup,
@@ -28,6 +30,24 @@ impl Plugin for RuntimePlatformPlugin {
                 ),
             );
     }
+}
+
+fn seed_system_appearance(
+    _non_send: bevy::ecs::system::NonSendMarker,
+    mut system: Single<&mut SystemAppearance>,
+) {
+    if system.0.is_some() {
+        return;
+    }
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return;
+    };
+    let appearance = objc2_app_kit::NSApp(mtm).effectiveAppearance().name();
+    system.0 = Some(if appearance.to_string().contains("Dark") {
+        ResolvedScheme::Dark
+    } else {
+        ResolvedScheme::Light
+    });
 }
 
 const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);

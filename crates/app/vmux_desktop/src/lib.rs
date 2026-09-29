@@ -4,7 +4,6 @@
     clippy::new_ret_no_self
 )]
 
-mod appearance;
 mod boot_status;
 #[cfg(any(feature = "recording", feature = "screenshots"))]
 mod capture_output;
