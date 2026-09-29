@@ -3,7 +3,7 @@ use bevy_cef::prelude::*;
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_layout::{
     Browser,
-    native_open::HostedPage,
+    native_open::HostedUiPlugin,
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
 };
@@ -32,7 +32,7 @@ impl Plugin for StatePlugin {
             .add_observer(issue_open_settings)
             .add_message::<CheckForUpdatesRequest>()
             .add_plugins((
-                vmux_layout::native_open::HostedPagePlugin::<Settings>::default(),
+                HostedUiPlugin::<Settings>::new(super::SettingsPlugin::MANIFEST),
                 UiEventPlugin::<(SettingsRequest, CheckForUpdatesEvent)>::default(),
             ))
             .add_observer(on_settings_request)
@@ -111,12 +111,6 @@ impl Settings {
     }
 }
 
-impl HostedPage for Settings {
-    const HOST: &'static str = "settings";
-    const URL: &'static str = SETTINGS_PAGE_URL;
-    const TITLE: &'static str = "Settings";
-}
-
 fn on_settings_request(
     trigger: On<UiInput<SettingsRequest>>,
     mut settings: ResMut<AppSettings>,
@@ -170,14 +164,16 @@ fn handle_open_settings_command(
 mod page_open_tests {
     use super::*;
     use vmux_core::{PageOpenHandled, PageOpenId, PageOpenTask};
-    use vmux_layout::native_open::{HostedPagePlugin, NativeOpenPlugin};
+    use vmux_layout::native_open::{HostedUiPlugin, NativeOpenPlugin};
 
     #[test]
     fn settings_page_open_spawns_marker_and_handles() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(NativeOpenPlugin)
-            .add_plugins(HostedPagePlugin::<Settings>::default());
+            .add_plugins(HostedUiPlugin::<Settings>::new(
+                super::super::SettingsPlugin::MANIFEST,
+            ));
         let stack = app.world_mut().spawn_empty().id();
         let claimed = app
             .world_mut()
@@ -209,7 +205,9 @@ mod page_open_tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(NativeOpenPlugin)
-            .add_plugins(HostedPagePlugin::<Settings>::default());
+            .add_plugins(HostedUiPlugin::<Settings>::new(
+                super::super::SettingsPlugin::MANIFEST,
+            ));
         let stack = app.world_mut().spawn_empty().id();
         for _ in 0..2 {
             app.world_mut().spawn(PageOpenTask {

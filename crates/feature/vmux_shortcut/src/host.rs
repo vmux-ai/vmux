@@ -12,7 +12,7 @@ use vmux_command::{CommandDefinition, ResolvedLocale};
 use vmux_core::input::{NativeKeyCapture, NativeKeyInput, NativeKeyInputSet};
 use vmux_core::page::PageReady;
 use vmux_core::{PageOpenSet, PageOpenTask, workspace::ComputeFocusSet};
-use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
+use vmux_layout::native_open::HostedUiPlugin;
 use vmux_layout::stack::FocusedStack;
 use vmux_layout::window::host_window_of;
 use vmux_ui::i18n::Locale;
@@ -24,32 +24,31 @@ impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::ShortcutPage::plugin());
-        app.add_plugins(Self::MANIFEST.plugin())
-            .add_plugins((
-                HostedPagePlugin::<Shortcuts>::default(),
-                UiEventPlugin::<(ShortcutProbePressRequest, ShortcutProbeClearRequest)>::default(),
-                vmux_core::host::UiStatePlugin::<ShortcutUiState>::default(),
-            ))
-            .add_message::<NativeKeyInput>()
-            .add_observer(send_shortcuts)
-            .add_observer(on_shortcut_probe_press_request)
-            .add_observer(on_shortcut_probe_clear_request)
-            .add_observer(on_shortcut_probe_press)
-            .add_systems(
-                Update,
-                normalize_shortcut_alias.in_set(PageOpenSet::ResolveTarget),
-            )
-            .add_systems(
-                Update,
-                sync_shortcut_capture
-                    .in_set(ShortcutCaptureSet)
-                    .after(ComputeFocusSet),
-            )
-            .add_systems(Update, capture_native_keys.after(NativeKeyInputSet))
-            .add_systems(
-                Update,
-                (expire_shortcut_probe, publish_shortcut_state).chain(),
-            );
+        app.add_plugins((
+            HostedUiPlugin::<Shortcuts>::new(Self::MANIFEST),
+            UiEventPlugin::<(ShortcutProbePressRequest, ShortcutProbeClearRequest)>::default(),
+            vmux_core::host::UiStatePlugin::<ShortcutUiState>::default(),
+        ))
+        .add_message::<NativeKeyInput>()
+        .add_observer(send_shortcuts)
+        .add_observer(on_shortcut_probe_press_request)
+        .add_observer(on_shortcut_probe_clear_request)
+        .add_observer(on_shortcut_probe_press)
+        .add_systems(
+            Update,
+            normalize_shortcut_alias.in_set(PageOpenSet::ResolveTarget),
+        )
+        .add_systems(
+            Update,
+            sync_shortcut_capture
+                .in_set(ShortcutCaptureSet)
+                .after(ComputeFocusSet),
+        )
+        .add_systems(Update, capture_native_keys.after(NativeKeyInputSet))
+        .add_systems(
+            Update,
+            (expire_shortcut_probe, publish_shortcut_state).chain(),
+        );
     }
 }
 
@@ -318,12 +317,6 @@ impl ShortcutStroke {
     fn is_plain_escape(&self) -> bool {
         self.code == "Escape" && !self.ctrl && !self.shift && !self.alt && !self.super_key
     }
-}
-
-impl HostedPage for Shortcuts {
-    const HOST: &'static str = "shortcuts";
-    const URL: &'static str = PAGE_URL;
-    const TITLE: &'static str = "Keyboard Shortcuts";
 }
 
 fn send_shortcuts(

@@ -12,7 +12,7 @@ use vmux_core::event::{
 };
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_core::page::PageReady;
-use vmux_layout::native_open::HostedPage;
+use vmux_layout::native_open::HostedUiPlugin;
 
 use crate::lsp::catalog::{self, Package};
 use crate::lsp::{install, purl, store, target};
@@ -22,8 +22,7 @@ pub struct ManagerPlugin;
 
 impl Plugin for ManagerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(Self::MANIFEST.plugin())
-            .add_plugins(vmux_layout::native_open::HostedPagePlugin::<LspManagerPage>::default())
+        app.add_plugins(HostedUiPlugin::<LspManagerPage>::new(Self::MANIFEST))
             .add_plugins(UiStatePlugin::<LspManagerUiState>::default())
             .add_message::<PackageInstallRequest>()
             .add_plugins(UiEventPlugin::<(
@@ -94,12 +93,6 @@ pub(crate) struct PackageInstallRequest {
 #[derive(Component, Default)]
 #[require(ManagerState, UiState<LspManagerUiState>)]
 struct LspManagerPage;
-
-impl HostedPage for LspManagerPage {
-    const HOST: &'static str = "tools";
-    const URL: &'static str = "vmux://tools/lsp";
-    const TITLE: &'static str = "Language Servers";
-}
 
 #[derive(Component)]
 struct ManagerState {

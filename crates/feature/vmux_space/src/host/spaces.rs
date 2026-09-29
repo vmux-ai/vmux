@@ -1,7 +1,5 @@
 use bevy::prelude::*;
-use vmux_layout::native_open::HostedPage;
 
-use crate::event::SPACES_PAGE_URL;
 use crate::model::SpaceRecord;
 
 pub fn space_profile_bundle(record: &SpaceRecord) -> impl Bundle {
@@ -24,12 +22,6 @@ pub(crate) struct SpaceSelection(pub(crate) usize);
 
 #[derive(Component, Default)]
 pub(crate) struct SpacesPageSnapshot(pub(crate) vmux_api::space::SpacesListEvent);
-
-impl HostedPage for Spaces {
-    const HOST: &'static str = "spaces";
-    const URL: &'static str = SPACES_PAGE_URL;
-    const TITLE: &'static str = "Spaces";
-}
 
 #[cfg(test)]
 mod tests {

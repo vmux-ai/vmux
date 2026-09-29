@@ -13,7 +13,7 @@ use vmux_core::host::{UiStatePlugin, UiStateWrite};
 use vmux_core::profile::{ProfileId, ProfileLabel};
 use vmux_core::team::{Agent, Profile, User};
 use vmux_layout::cef::LayoutCef;
-use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
+use vmux_layout::native_open::HostedUiPlugin;
 use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
 use vmux_layout::space::{CurrentSpace, Space, space_of};
 use vmux_layout::stack::Stack;
@@ -28,14 +28,13 @@ impl Plugin for TeamPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::TeamPage::plugin());
-        app.add_plugins(Self::MANIFEST.plugin())
-            .add_plugins((
-                HostedPagePlugin::<Team>::default(),
-                TeamProjectionPlugin,
-                TeamIntentPlugin,
-                crate::TeamToolPlugin,
-            ))
-            .add_systems(Startup, (spawn_user_profile, spawn_profile_labels));
+        app.add_plugins((
+            HostedUiPlugin::<Team>::new(Self::MANIFEST),
+            TeamProjectionPlugin,
+            TeamIntentPlugin,
+            crate::TeamToolPlugin,
+        ))
+        .add_systems(Startup, (spawn_user_profile, spawn_profile_labels));
     }
 }
 
@@ -82,12 +81,6 @@ pub struct ProfileSwitchRequested {
 
 #[derive(Component, Default)]
 struct Team;
-
-impl HostedPage for Team {
-    const HOST: &'static str = "team";
-    const URL: &'static str = TEAM_PAGE_URL;
-    const TITLE: &'static str = "Team";
-}
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 struct TeamPresentation(TeamEvent);
@@ -657,7 +650,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_layout::native_open::NativeOpenPlugin)
-            .add_plugins(HostedPagePlugin::<Team>::default());
+            .add_plugins(HostedUiPlugin::<Team>::new(TeamPlugin::MANIFEST));
 
         let stack = app.world_mut().spawn(Stack::default()).id();
         app.world_mut().spawn(PageOpenTask {

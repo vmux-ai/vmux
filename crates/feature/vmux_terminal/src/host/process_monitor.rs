@@ -16,7 +16,7 @@ use crate::Terminal;
 use crate::plugin::reattach_terminal_bundle;
 use vmux_core::{KeyboardOwner, Order};
 use vmux_layout::{
-    native_open::{HostedPage, HostedPagePlugin},
+    native_open::HostedUiPlugin,
     pane::{Pane, PaneSplit},
     stack::{ActiveTabParam, OpenRequest, Stack, focused_stack, stack_bundle},
 };
@@ -30,8 +30,7 @@ impl Plugin for ProcessMonitorPlugin {
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
-        app.add_plugins(crate::monitor::ProcessMonitorPage::MANIFEST.plugin())
-            .add_message::<ServiceProcessSnapshot>()
+        app.add_message::<ServiceProcessSnapshot>()
             .add_message::<OpenServicesRequest>()
             .add_systems(
                 Startup,
@@ -64,19 +63,15 @@ impl Plugin for ProcessMonitorPlugin {
             .add_observer(on_process_navigate)
             .add_observer(on_process_kill)
             .add_observer(on_process_kill_all)
-            .add_plugins(HostedPagePlugin::<ProcessMonitorView>::default());
+            .add_plugins(HostedUiPlugin::<ProcessMonitorView>::new(
+                crate::monitor::ProcessMonitorPage::MANIFEST,
+            ));
     }
 }
 
 #[derive(Component, Default)]
 #[require(UiState<ProcessesUiState>)]
 pub struct ProcessMonitorView;
-
-impl HostedPage for ProcessMonitorView {
-    const HOST: &'static str = "services";
-    const URL: &'static str = crate::monitor::ProcessMonitorPage::URL;
-    const TITLE: &'static str = "Background Services";
-}
 
 #[derive(Message)]
 struct OpenServicesRequest;

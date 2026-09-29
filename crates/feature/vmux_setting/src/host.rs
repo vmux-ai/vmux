@@ -38,7 +38,6 @@ impl Plugin for SettingsPlugin {
             appearance::AppearancePlugin,
             vmux_layout::LayoutContractPlugin,
         ))
-        .add_plugins(Self::MANIFEST.plugin())
         .add_message::<vmux_core::page::SettingsPageSpawnRequest>()
         .add_systems(Update, respond_settings_spawn.in_set(ReadCommandRequests));
     }

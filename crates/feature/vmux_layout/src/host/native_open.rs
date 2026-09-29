@@ -6,23 +6,28 @@ use vmux_core::host::page::NativelyHosted;
 
 use crate::cef::Browser;
 
-pub trait HostedPage: Component + Default {
-    const HOST: &'static str;
-    const URL: &'static str;
-    const TITLE: &'static str;
+pub struct HostedUiPlugin<M: Component + Default> {
+    manifest: PageManifest,
+    marker: std::marker::PhantomData<fn() -> M>,
 }
 
-pub struct HostedPagePlugin<M: HostedPage>(std::marker::PhantomData<fn() -> M>);
-
-impl<M: HostedPage> Default for HostedPagePlugin<M> {
-    fn default() -> Self {
-        Self(std::marker::PhantomData)
+impl<M: Component + Default> HostedUiPlugin<M> {
+    pub const fn new(manifest: PageManifest) -> Self {
+        Self {
+            manifest,
+            marker: std::marker::PhantomData,
+        }
     }
 }
 
-impl<M: HostedPage> Plugin for HostedPagePlugin<M> {
+impl<M: Component + Default> Plugin for HostedUiPlugin<M> {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_hosted_page::<M>)
+        app.insert_resource(HostedUiManifest::<M>::new(self.manifest))
+            .add_plugins(
+                self.manifest
+                    .plugin()
+                    .hosted(NativelyHosted::page(self.manifest.url, self.manifest.title)),
+            )
             .add_systems(
                 Update,
                 mark_hosted_view::<M>.after(PageOpenSet::HandleKnownPages),
@@ -30,16 +35,28 @@ impl<M: HostedPage> Plugin for HostedPagePlugin<M> {
     }
 }
 
-fn spawn_hosted_page<M: HostedPage>(mut commands: Commands) {
-    commands.spawn(NativelyHosted::page(M::URL, M::TITLE));
+#[derive(Resource)]
+struct HostedUiManifest<M> {
+    page: PageManifest,
+    marker: std::marker::PhantomData<fn() -> M>,
 }
 
-fn mark_hosted_view<M: HostedPage>(
+impl<M> HostedUiManifest<M> {
+    const fn new(page: PageManifest) -> Self {
+        Self {
+            page,
+            marker: std::marker::PhantomData,
+        }
+    }
+}
+
+fn mark_hosted_view<M: Component + Default>(
+    manifest: Res<HostedUiManifest<M>>,
     views: Query<(Entity, &PageMetadata), (With<vmux_core::host::page::HostsPage>, Without<M>)>,
     mut commands: Commands,
 ) {
     for (entity, page) in &views {
-        if page.url == M::URL {
+        if manifest.page.answers_for(&page.url) {
             commands.entity(entity).try_insert(M::default());
         }
     }
