@@ -18,7 +18,6 @@ use crate::{
     ToolApplier, ToolOperationFailed, ToolOperationFinished, ToolOperationRequest,
     ToolOperationRouteFlush, ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask,
     ToolProviderId, ToolProviderSnapshot, ToolScanner, ToolStoreOperation, ToolStoreTarget,
-    finish_tool_operation,
 };
 
 pub(crate) struct DotfileToolPlugin;
@@ -51,21 +50,6 @@ impl Plugin for DotfileToolPlugin {
                     unlink_dotfile_package_system,
                     apply_enabled_dotfiles_system,
                     adopt_dotfile_system,
-                )
-                    .after(ToolOperationRouteFlush),
-            )
-            .add_systems(
-                Update,
-                (
-                    finish_tool_operation::<DiscoveredDotfilePackages>,
-                    finish_tool_operation::<DotfilePlan>,
-                    finish_tool_operation::<ImportedDotfiles>,
-                    finish_tool_operation::<ImportedAvailableDotfiles>,
-                    finish_tool_operation::<LinkedDotfilePackage>,
-                    finish_tool_operation::<DisabledDotfilePackage>,
-                    finish_tool_operation::<UnlinkedDotfilePackage>,
-                    finish_tool_operation::<AppliedEnabledDotfiles>,
-                    finish_tool_operation::<AdoptedDotfile>,
                 )
                     .after(ToolOperationRouteFlush),
             )
@@ -358,8 +342,8 @@ fn complete_adoption(
 pub struct DiscoverDotfilePackages;
 
 #[derive(EcsComponent, Clone, Debug, Default, PartialEq, Eq)]
-pub struct DiscoveredDotfilePackages {
-    pub packages: Vec<String>,
+pub(super) struct DiscoveredDotfilePackages {
+    packages: Vec<String>,
 }
 
 fn discover_dotfile_packages_system(
@@ -449,8 +433,8 @@ impl ImportDotfiles {
 }
 
 #[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ImportedDotfiles {
-    pub packages: usize,
+pub(super) struct ImportedDotfiles {
+    packages: usize,
 }
 
 fn import_dotfiles_system(
@@ -490,8 +474,8 @@ fn import_dotfiles_system(
 pub struct ImportAvailableDotfiles;
 
 #[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ImportedAvailableDotfiles {
-    pub packages: usize,
+pub(super) struct ImportedAvailableDotfiles {
+    packages: usize,
 }
 
 fn import_available_dotfiles_system(
@@ -546,8 +530,8 @@ impl LinkDotfilePackage {
 }
 
 #[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LinkedDotfilePackage {
-    pub files: usize,
+pub(super) struct LinkedDotfilePackage {
+    files: usize,
 }
 
 fn link_dotfile_package_system(
@@ -598,8 +582,8 @@ impl DisableDotfilePackage {
 }
 
 #[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DisabledDotfilePackage {
-    pub files: usize,
+pub(super) struct DisabledDotfilePackage {
+    files: usize,
 }
 
 fn disable_dotfile_package_system(
@@ -652,8 +636,8 @@ impl UnlinkDotfilePackage {
 }
 
 #[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct UnlinkedDotfilePackage {
-    pub files: usize,
+pub(super) struct UnlinkedDotfilePackage {
+    files: usize,
 }
 
 fn unlink_dotfile_package_system(
@@ -692,8 +676,8 @@ fn unlink_dotfile_package_system(
 pub struct ApplyEnabledDotfiles;
 
 #[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AppliedEnabledDotfiles {
-    pub files: usize,
+pub(super) struct AppliedEnabledDotfiles {
+    files: usize,
 }
 
 fn apply_enabled_dotfiles_system(
@@ -744,8 +728,8 @@ impl AdoptDotfile {
 }
 
 #[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
-pub struct AdoptedDotfile {
-    pub path: PathBuf,
+pub(super) struct AdoptedDotfile {
+    path: PathBuf,
 }
 
 fn adopt_dotfile_system(

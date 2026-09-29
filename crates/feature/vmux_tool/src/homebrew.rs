@@ -14,7 +14,7 @@ use crate::{
     ToolInventory, ToolInventoryItem, ToolOperationFailed, ToolOperationFinished,
     ToolOperationRequest, ToolOperationRouteFlush, ToolOperationRouteSet, ToolOperationSucceeded,
     ToolOperationTask, ToolOperator, ToolProviderId, ToolProviderSnapshot, ToolScanner,
-    ToolStoreOperation, ToolStoreTarget, finish_tool_operation,
+    ToolStoreOperation, ToolStoreTarget,
 };
 
 pub(crate) struct HomebrewToolPlugin;
@@ -25,11 +25,7 @@ impl Plugin for HomebrewToolPlugin {
             .add_systems(Update, route.in_set(ToolOperationRouteSet))
             .add_systems(
                 Update,
-                (
-                    import_brewfile_system,
-                    finish_tool_operation::<ImportedBrewfile>,
-                )
-                    .after(ToolOperationRouteFlush),
+                import_brewfile_system.after(ToolOperationRouteFlush),
             )
             .add_systems(Update, complete);
     }
@@ -281,9 +277,9 @@ impl ImportBrewfile {
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ImportedBrewfile {
-    pub formulae: usize,
-    pub casks: usize,
+pub(super) struct ImportedBrewfile {
+    formulae: usize,
+    casks: usize,
 }
 
 fn import_brewfile_system(

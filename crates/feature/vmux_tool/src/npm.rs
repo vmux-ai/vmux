@@ -14,7 +14,7 @@ use crate::{
     ToolInventory, ToolInventoryItem, ToolOperationFailed, ToolOperationFinished,
     ToolOperationRequest, ToolOperationRouteFlush, ToolOperationRouteSet, ToolOperationSucceeded,
     ToolOperationTask, ToolOperator, ToolProviderId, ToolProviderSnapshot, ToolScanner,
-    ToolStoreOperation, ToolStoreTarget, finish_tool_operation,
+    ToolStoreOperation, ToolStoreTarget,
 };
 
 pub(crate) struct NpmToolPlugin;
@@ -25,11 +25,7 @@ impl Plugin for NpmToolPlugin {
             .add_systems(Update, route.in_set(ToolOperationRouteSet))
             .add_systems(
                 Update,
-                (
-                    import_npm_manifest_system,
-                    finish_tool_operation::<ImportedNpmManifest>,
-                )
-                    .after(ToolOperationRouteFlush),
+                import_npm_manifest_system.after(ToolOperationRouteFlush),
             )
             .add_systems(Update, complete);
     }
@@ -223,8 +219,8 @@ impl ImportNpmManifest {
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ImportedNpmManifest {
-    pub packages: usize,
+pub(super) struct ImportedNpmManifest {
+    packages: usize,
 }
 
 fn import_npm_manifest_system(

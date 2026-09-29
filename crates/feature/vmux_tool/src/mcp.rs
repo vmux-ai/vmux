@@ -14,7 +14,7 @@ use crate::manifest::{ToolStore, ToolsManifest};
 use crate::{
     ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteFlush,
     ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolProviderId,
-    ToolProviderSnapshot, ToolScanner, ToolStoreOperation, ToolStoreTarget, finish_tool_operation,
+    ToolProviderSnapshot, ToolScanner, ToolStoreOperation, ToolStoreTarget,
 };
 
 pub(crate) struct McpToolPlugin;
@@ -35,10 +35,6 @@ impl Plugin for McpToolPlugin {
                     import_default_mcp_configs_system,
                     import_mcp_server_system,
                     forget_mcp_server_system,
-                    finish_tool_operation::<DiscoveredMcpServers>,
-                    finish_tool_operation::<ImportedMcpConfig>,
-                    finish_tool_operation::<ImportedMcpServer>,
-                    finish_tool_operation::<ForgottenMcpServer>,
                 )
                     .after(ToolOperationRouteFlush),
             )
@@ -264,7 +260,7 @@ fn complete_server_forget(
 struct DiscoverMcpServers;
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
-struct DiscoveredMcpServers {
+pub(super) struct DiscoveredMcpServers {
     servers: BTreeMap<String, DiscoveredMcpServer>,
     errors: Vec<String>,
 }
@@ -323,7 +319,7 @@ struct ImportMcpConfig {
 struct ImportDefaultMcpConfigs;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-struct ImportedMcpConfig {
+pub(super) struct ImportedMcpConfig {
     servers: usize,
 }
 
@@ -394,7 +390,7 @@ struct ImportMcpServer {
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-struct ImportedMcpServer {
+pub(super) struct ImportedMcpServer {
     name: String,
 }
 
@@ -440,7 +436,7 @@ struct ForgetMcpServer {
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-struct ForgottenMcpServer {
+pub(super) struct ForgottenMcpServer {
     name: String,
 }
 

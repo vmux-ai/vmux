@@ -91,6 +91,27 @@ impl Plugin for ToolRuntimePlugin {
                 route_external_tool_operation::<ToolImportRequest>,
             )
                 .after(ToolOperationRouteFlush),
+        )
+        .add_systems(
+            Update,
+            (
+                ToolOperationTask::<mcp::DiscoveredMcpServers>::finish,
+                ToolOperationTask::<mcp::ImportedMcpConfig>::finish,
+                ToolOperationTask::<mcp::ImportedMcpServer>::finish,
+                ToolOperationTask::<mcp::ForgottenMcpServer>::finish,
+                ToolOperationTask::<dotfiles::DiscoveredDotfilePackages>::finish,
+                ToolOperationTask::<dotfiles::DotfilePlan>::finish,
+                ToolOperationTask::<dotfiles::ImportedDotfiles>::finish,
+                ToolOperationTask::<dotfiles::ImportedAvailableDotfiles>::finish,
+                ToolOperationTask::<dotfiles::LinkedDotfilePackage>::finish,
+                ToolOperationTask::<dotfiles::DisabledDotfilePackage>::finish,
+                ToolOperationTask::<dotfiles::UnlinkedDotfilePackage>::finish,
+                ToolOperationTask::<dotfiles::AppliedEnabledDotfiles>::finish,
+                ToolOperationTask::<dotfiles::AdoptedDotfile>::finish,
+                ToolOperationTask::<homebrew::ImportedBrewfile>::finish,
+                ToolOperationTask::<npm::ImportedNpmManifest>::finish,
+            )
+                .after(ToolOperationRouteFlush),
         );
     }
 }
@@ -124,22 +145,21 @@ pub struct ToolOperationFailed(pub String);
 #[derive(Component)]
 pub(crate) struct ToolOperationTask<T: Component>(Task<Result<T, String>>);
 
-pub(crate) fn finish_tool_operation<T: Component>(
-    mut operations: Query<(Entity, &mut ToolOperationTask<T>)>,
-    mut commands: Commands,
-) {
-    for (entity, mut operation) in &mut operations {
-        let Some(result) = future::block_on(future::poll_once(&mut operation.0)) else {
-            continue;
-        };
-        let mut entity = commands.entity(entity);
-        entity.remove::<ToolOperationTask<T>>();
-        match result {
-            Ok(output) => {
-                entity.insert(output);
-            }
-            Err(error) => {
-                entity.insert((ToolOperationFinished, ToolOperationFailed(error)));
+impl<T: Component> ToolOperationTask<T> {
+    fn finish(mut operations: Query<(Entity, &mut Self)>, mut commands: Commands) {
+        for (entity, mut operation) in &mut operations {
+            let Some(result) = future::block_on(future::poll_once(&mut operation.0)) else {
+                continue;
+            };
+            let mut entity = commands.entity(entity);
+            entity.remove::<Self>();
+            match result {
+                Ok(output) => {
+                    entity.insert(output);
+                }
+                Err(error) => {
+                    entity.insert((ToolOperationFinished, ToolOperationFailed(error)));
+                }
             }
         }
     }
