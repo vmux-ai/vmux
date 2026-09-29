@@ -9,7 +9,7 @@ use crate::edit::Selection;
 use crate::host::editor::{
     Editor, FileDocumentRevision, FileNavigateRequest, FileView, ParkedEdit, ParkedEdits,
 };
-use crate::host::file_lifecycle::{FileBuffer, FileDir, canon};
+use crate::host::file_lifecycle::{FileBuffer, FileDir};
 use crate::host::note::NoteRevealLine;
 use crate::host::note::NoteSent;
 use crate::host::status::FileInitialMetaSent;
@@ -279,7 +279,9 @@ fn apply_goto(
         else {
             continue;
         };
-        if canon(&view.path) == canon(&goto.path) {
+        if vmux_path::PathIdentity::resolve(&view.path)
+            == vmux_path::PathIdentity::resolve(&goto.path)
+        {
             goto_caret(
                 goto.entity,
                 &mut edit,

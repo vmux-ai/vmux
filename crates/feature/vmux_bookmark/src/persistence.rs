@@ -51,8 +51,13 @@ fn spawn_bookmark_persistence(mut commands: Commands) {
 
 type BookmarkFilter = Or<(With<Pin>, With<Bookmark>, With<Folder>)>;
 
-pub(crate) fn bookmarks_path() -> PathBuf {
-    vmux_core::profile::profile_dir().join("bookmarks.ron")
+#[derive(Component)]
+struct BookmarkPersistencePath(PathBuf);
+
+impl Default for BookmarkPersistencePath {
+    fn default() -> Self {
+        Self(vmux_core::profile::profile_dir().join("bookmarks.ron"))
+    }
 }
 
 fn bookmark_scene_filter() -> WorldFilter {
@@ -89,12 +94,13 @@ fn save_bookmarks_to_path(commands: &mut Commands, path: PathBuf) {
 
 fn load_bookmarks_on_startup(
     persistence: Single<Entity, With<BookmarkAutoSave>>,
+    path: Single<&BookmarkPersistencePath>,
     mut commands: Commands,
 ) {
     if vmux_core::profile::is_test_session() {
         return;
     }
-    let path = bookmarks_path();
+    let path = path.0.clone();
     if !path.exists() {
         commands.trigger(SeedBookmarkDefaults);
         return;
@@ -346,6 +352,7 @@ fn seed_bookmark_defaults(
 }
 
 #[derive(Component, Default)]
+#[require(BookmarkPersistencePath)]
 struct BookmarkAutoSave {
     dirty: bool,
 }
@@ -614,11 +621,15 @@ fn mark_bookmarks_dirty(
     }
 }
 
-fn autosave_bookmarks(mut auto: Single<&mut BookmarkAutoSave>, mut commands: Commands) {
+fn autosave_bookmarks(
+    mut auto: Single<&mut BookmarkAutoSave>,
+    path: Single<&BookmarkPersistencePath>,
+    mut commands: Commands,
+) {
     if !auto.dirty {
         return;
     }
-    save_bookmarks_to_path(&mut commands, bookmarks_path());
+    save_bookmarks_to_path(&mut commands, path.0.clone());
     auto.dirty = false;
 }
 

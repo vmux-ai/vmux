@@ -1236,8 +1236,8 @@ fn apply_semantic_tokens(
         let Ok((mut edit, view)) = views.get_mut(message.entity) else {
             continue;
         };
-        if crate::host::file_lifecycle::canon(&view.path)
-            != crate::host::file_lifecycle::canon(&message.path)
+        if vmux_path::PathIdentity::resolve(&view.path)
+            != vmux_path::PathIdentity::resolve(&message.path)
         {
             continue;
         }
@@ -1299,10 +1299,6 @@ use vmux_core::event::FileDiagnostics;
 
 use crate::lsp::{LintDiagnosticsInbox, LintDiagnosticsSender};
 
-fn canon(p: &Path) -> PathBuf {
-    vmux_path::PathIdentity::resolve(p).into_path_buf()
-}
-
 #[derive(Component, Default)]
 struct LspDiagnostics {
     mapped: Vec<FileDiagnostic>,
@@ -1358,9 +1354,9 @@ fn drain_lsp_diagnostics(
     mut commands: Commands,
 ) {
     for (path, diags) in inbox.drain() {
-        let target = canon(&path);
+        let target = vmux_path::PathIdentity::resolve(&path);
         for (entity, view, edit) in &views {
-            if canon(&view.path) != target {
+            if vmux_path::PathIdentity::resolve(&view.path) != target {
                 continue;
             }
             let mapped = map_diags(&diags, |line| rope_line_text(&edit.core.buffer.rope, line));
@@ -1378,9 +1374,9 @@ fn drain_lint(
     mut commands: Commands,
 ) {
     for (path, diags) in inbox.drain() {
-        let target = canon(&path);
+        let target = vmux_path::PathIdentity::resolve(&path);
         for (entity, view) in &views {
-            if canon(&view.path) == target {
+            if vmux_path::PathIdentity::resolve(&view.path) == target {
                 commands
                     .entity(entity)
                     .insert(LintDiagnostics(diags.clone()));

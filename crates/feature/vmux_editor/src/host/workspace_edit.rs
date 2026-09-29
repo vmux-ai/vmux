@@ -4,7 +4,7 @@ use bevy_cef::prelude::*;
 
 use super::editing::EditRequest;
 use super::editor::{Editor, FileView};
-use super::file_lifecycle::{SelfWrites, canon};
+use super::file_lifecycle::SelfWrites;
 use crate::edit::EditCommand;
 use crate::lsp::workspace_edit::WorkspaceEditPlan;
 
@@ -136,10 +136,10 @@ impl PreparedDocument {
             ));
         }
 
-        let wanted = canon(document.path.as_path());
+        let wanted = vmux_path::PathIdentity::resolve(document.path.as_path());
         let targets: Vec<Entity> = views
             .iter()
-            .filter(|(_, view, ..)| canon(&view.path) == wanted)
+            .filter(|(_, view, ..)| vmux_path::PathIdentity::resolve(&view.path) == wanted)
             .map(|(entity, ..)| entity)
             .collect();
         let source = if targets.is_empty() {
@@ -183,9 +183,10 @@ fn apply_prepared_document(
     if document.targets.is_empty() {
         vmux_path::AtomicFile::write(document.path.as_path(), document.updated.as_bytes())
             .map_err(|error| format!("{}: {error}", document.path.as_path().display()))?;
-        self_writes
-            .0
-            .insert(canon(document.path.as_path()), std::time::Instant::now());
+        self_writes.0.insert(
+            vmux_path::PathIdentity::resolve(document.path.as_path()).into_path_buf(),
+            std::time::Instant::now(),
+        );
         return Ok(());
     }
     for entity in document.targets {

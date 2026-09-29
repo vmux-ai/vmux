@@ -9,7 +9,7 @@ use crate::edit::EditCore;
 use crate::edit::{EditCommand, Motion, Selection};
 use crate::host::editor::Editor;
 use crate::host::explorer::{OpenEditorsDirty, OutlineDirty};
-use crate::host::file_lifecycle::{SelfWrites, canon};
+use crate::host::file_lifecycle::SelfWrites;
 use crate::host::keymap::{EditorKeymap, KeymapConfig};
 use crate::host::language::{
     EditorCompletionRequest, EditorDefinitionRequest, EditorHoverRequest, EditorReferencesRequest,
@@ -425,9 +425,10 @@ fn apply_edit_request(
             };
             match vmux_path::AtomicFile::write(&path, &bytes) {
                 Ok(()) => {
-                    self_writes
-                        .0
-                        .insert(canon(&path), std::time::Instant::now());
+                    self_writes.0.insert(
+                        vmux_path::PathIdentity::resolve(&path).into_path_buf(),
+                        std::time::Instant::now(),
+                    );
                     let was_dirty = edit.core.dirty;
                     edit.core.mark_saved();
                     if was_dirty {

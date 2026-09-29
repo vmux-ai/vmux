@@ -1,4 +1,5 @@
 use super::{KnowledgePropertyKind, markdown_metadata};
+use bevy::prelude::Component;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
@@ -10,6 +11,7 @@ const MEMORIES_PROMPT_MARKER: &str = "vmux Knowledge memories are user-owned con
 const KNOWLEDGE_SECTIONS: [&str; 5] = ["skills", "memories", "projects", "meetings", "handbook"];
 const MAX_NOTE_BYTES: usize = 2 * 1024 * 1024;
 
+#[derive(Clone, Component)]
 pub struct KnowledgeVault {
     root: PathBuf,
 }

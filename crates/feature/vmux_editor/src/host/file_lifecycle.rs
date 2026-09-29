@@ -433,10 +433,6 @@ fn reset_file_sent_markers_on_page_ready(
     }
 }
 
-pub(crate) fn canon(path: &Path) -> PathBuf {
-    vmux_path::PathIdentity::resolve(path).into_path_buf()
-}
-
 fn watch_dir_for(path: &Path) -> Option<PathBuf> {
     let mut dir = if path.is_dir() { path } else { path.parent()? };
     loop {
@@ -492,7 +488,7 @@ fn drain_file_changes(
     while let Ok(result) = watch.rx.try_recv() {
         if let Ok(event) = result {
             for path in event.paths {
-                changed.insert(canon(&path));
+                changed.insert(vmux_path::PathIdentity::resolve(&path).into_path_buf());
             }
         }
     }
@@ -506,7 +502,7 @@ fn drain_file_changes(
             .retain(|_, written| written.elapsed() < std::time::Duration::from_secs(2));
     }
     for (entity, file, missing) in &views {
-        let path = canon(&file.path);
+        let path = vmux_path::PathIdentity::resolve(&file.path).into_path_buf();
         let self_written = self_writes
             .as_ref()
             .is_some_and(|self_writes| self_writes.0.contains_key(&path));
@@ -518,7 +514,7 @@ fn drain_file_changes(
     let mut changed_dirs = HashSet::new();
     for path in &changed {
         if let Some(parent) = path.parent() {
-            changed_dirs.insert(canon(parent));
+            changed_dirs.insert(vmux_path::PathIdentity::resolve(parent).into_path_buf());
         }
     }
     for (tree_entity, mut tree) in &mut trees {

@@ -69,8 +69,18 @@ struct RemoteRuntime {
     liveness: watch::Sender<bool>,
 }
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
 struct RemoteExposure(bool);
+
+impl RemoteExposure {
+    fn current() -> Self {
+        Self::read(&RemotePaths::current().state())
+    }
+
+    fn read(path: &std::path::Path) -> Self {
+        Self(std::fs::read_to_string(path).is_ok_and(|state| state.trim() == "enabled"))
+    }
+}
 
 #[derive(Component)]
 struct RemoteDialerTask(tokio::task::JoinHandle<()>);
@@ -97,8 +107,8 @@ fn start_remote_runtime(
                 continue;
             }
         };
-        let exposed = remote_enabled();
-        let (liveness, _) = watch::channel(exposed);
+        let exposure = RemoteExposure::current();
+        let (liveness, _) = watch::channel(exposure.0);
         commands
             .entity(entity)
             .remove::<RemoteRuntimeStartup>()
@@ -115,20 +125,20 @@ fn start_remote_runtime(
                     runtime: start.runtime,
                     liveness,
                 },
-                RemoteExposure(exposed),
+                exposure,
             ));
     }
 }
 
 fn refresh_remote_exposure(mut runtimes: Query<(&RemoteRuntime, &mut RemoteExposure)>) {
     for (runtime, mut exposure) in &mut runtimes {
-        let exposed = remote_enabled();
-        if exposure.0 == exposed {
+        let current = RemoteExposure::current();
+        if *exposure == current {
             continue;
         }
-        exposure.0 = exposed;
-        runtime.liveness.send_replace(exposed);
-        tracing::info!(enabled = exposed, "remote quic: exposure changed");
+        *exposure = current;
+        runtime.liveness.send_replace(current.0);
+        tracing::info!(enabled = current.0, "remote quic: exposure changed");
     }
 }
 
@@ -180,14 +190,6 @@ pub(crate) struct RemoteState {
     pub(crate) acp: AcpSessions,
     pub(crate) broker: AgentBroker,
     pub(crate) client_ops: ClientOperations,
-}
-
-pub(crate) fn remote_enabled() -> bool {
-    remote_enabled_at(&RemotePaths::current().state())
-}
-
-fn remote_enabled_at(path: &std::path::Path) -> bool {
-    std::fs::read_to_string(path).is_ok_and(|state| state.trim() == "enabled")
 }
 
 pub(crate) async fn broker_result(
@@ -479,11 +481,11 @@ mod tests {
     fn remote_state_requires_enabled_marker() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("remote-state");
-        assert!(!remote_enabled_at(&path));
+        assert!(!RemoteExposure::read(&path).0);
         std::fs::write(&path, b"disabled\n").unwrap();
-        assert!(!remote_enabled_at(&path));
+        assert!(!RemoteExposure::read(&path).0);
         std::fs::write(&path, b"enabled\n").unwrap();
-        assert!(remote_enabled_at(&path));
+        assert!(RemoteExposure::read(&path).0);
     }
 
     #[test]

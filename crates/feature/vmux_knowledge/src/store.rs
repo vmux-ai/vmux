@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[cfg(all(unix, test))]
 use std::os::unix::fs::MetadataExt;
@@ -6,10 +6,6 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 const DIRECTORIES: [&str; 5] = ["skills", "memories", "projects", "meetings", "handbook"];
 const LEGACY_DIRECTORIES: [&str; 4] = ["decisions", "runbooks", "research", "templates"];
-
-pub fn vault_dir() -> PathBuf {
-    vmux_core::knowledge::KnowledgeVault::user().into_root()
-}
 
 pub fn ensure_vault(root: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;

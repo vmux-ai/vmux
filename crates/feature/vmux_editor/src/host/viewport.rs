@@ -8,7 +8,7 @@ use vmux_core::scroll::{clamp_top_line, rows_from_viewport, window_range};
 
 use crate::host::edit::Selection;
 use crate::host::editor::{Editor, FileView};
-use crate::host::file_lifecycle::{EditorFileLoadedSet, canon};
+use crate::host::file_lifecycle::EditorFileLoadedSet;
 use crate::host::keymap::EditorKeymap;
 
 const STICKY_SCROLL_DEPTH: usize = 5;
@@ -509,7 +509,9 @@ fn apply_lsp_folds(
         let Ok((mut edit, file, _, _)) = views.get_mut(fold.entity) else {
             continue;
         };
-        if canon(&file.path) != canon(&fold.path) {
+        if vmux_path::PathIdentity::resolve(&file.path)
+            != vmux_path::PathIdentity::resolve(&fold.path)
+        {
             continue;
         }
         let regions = if fold.regions.is_empty() {

@@ -5,9 +5,9 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use vmux_core::knowledge::KnowledgeIndex;
+use vmux_core::knowledge::{KnowledgeIndex, KnowledgeVault};
 
-use crate::store::{ensure_vault, ensure_vault_repository, vault_dir};
+use crate::store::{ensure_vault, ensure_vault_repository};
 
 pub(super) struct KnowledgeIndexPlugin;
 
@@ -32,24 +32,25 @@ fn initialize_knowledge_index(
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut watch: NonSendMut<KnowledgeWatch>,
 ) {
+    let vault = KnowledgeVault::user();
     commands.spawn((
         Name::new("Knowledge index"),
         KnowledgeIndexRuntime::default(),
         KnowledgeIndex::default(),
+        vault.clone(),
     ));
-    let vault = vault_dir();
-    if let Err(error) = ensure_vault(&vault) {
+    if let Err(error) = ensure_vault(vault.root()) {
         warn!("knowledge vault initialization failed: {error}");
         return;
     }
-    if let Err(error) = ensure_vault_repository(&vault) {
+    if let Err(error) = ensure_vault_repository(vault.root()) {
         warn!("knowledge Git initialization failed: {error}");
     }
     if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
         warn!("external agent Knowledge sync failed: {error}");
     }
     let wake = wake.map(|wrapper| (**wrapper).clone());
-    match KnowledgeWatcher::watching(&vault, wake) {
+    match KnowledgeWatcher::watching(vault.root(), wake) {
         Ok(watcher) => watch.0 = Some(watcher),
         Err(error) => warn!("knowledge watcher init failed: {error}"),
     }
@@ -121,6 +122,7 @@ fn drain_knowledge_watch(
 
 fn start_knowledge_index(
     mut runtime: Single<&mut KnowledgeIndexRuntime>,
+    vault: Single<&KnowledgeVault>,
     pending: Query<(), With<KnowledgeIndexTask>>,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -129,9 +131,10 @@ fn start_knowledge_index(
         return;
     }
     let generation = runtime.generation;
+    let root = vault.root().to_path_buf();
     let wake = wake.map(|wrapper| (**wrapper).clone());
     let task = IoTaskPool::get().spawn(async move {
-        let result = KnowledgeIndex::build(&vault_dir()).map_err(|error| error.to_string());
+        let result = KnowledgeIndex::build(&root).map_err(|error| error.to_string());
         if let Some(wake) = wake {
             let _ = wake.send_event(WinitUserEvent::WakeUp);
         }
