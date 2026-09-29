@@ -8,21 +8,38 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
-use vmux_api::protocol::{ClientMessage, ProcessId};
-use vmux_command::WriteCommandRequests;
+use vmux_api::protocol::{ClientMessage, CopyModeKey, ProcessId};
+use vmux_clipboard::Clipboard;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
+use vmux_command::{
+    CommandDefinition, CommandRuntimePlugin, ReadCommandRequests, WriteCommandRequests,
+};
+use vmux_core::agent::{
+    AgentKind as CoreAgentKind, AgentSession as CoreAgentSession, RestartAgentPty,
+};
+use vmux_core::event::TerminalUiState;
+use vmux_core::host::UiStateWrite;
+use vmux_core::host::page::{BindsEditingChords, HostsPage};
 use vmux_core::host::persistence::{PageRestore, PersistenceAppExt};
 use vmux_core::input::KeyStroke;
 use vmux_core::service::{ServiceConnected, ServiceRequest, ServiceUnavailable};
 use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_core::{
-    PageIdentity, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
+    KeyboardOwner, PageIcon, PageIdentity, PageMetadata, PageOpenError, PageOpenHandled,
+    PageOpenId, PageOpenSet, PageOpenTask,
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
-use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest, Stack};
+use vmux_layout::event::TERMINAL_CEF_BG_COLOR;
+use vmux_layout::space::FocusedSpace;
+use vmux_layout::stack::{
+    CloseRequest as StackCloseRequest, FocusRequest, FocusedStack, Stack, stack_bundle,
+};
+use vmux_layout::tab::{Tab, ancestor_tab_startup_dir};
 use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
-use vmux_setting::AppSettings;
+use vmux_setting::{AppSettings, SpaceOverrides};
+use vmux_space::model::{BOOTSTRAP_SPACE_ID, SpaceRecord, bootstrap_space_record};
+use vmux_space::spaces::space_profile_bundle;
 
 #[cfg(test)]
 use super::input_queue::InputQueuePlugin;
@@ -43,7 +60,6 @@ use super::state::{
 use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::{ProcessExited, RetainOnProcessExit, Terminal};
-use vmux_core::KeyboardOwner;
 use vmux_core::service::ServiceMessageSet;
 use vmux_flex::prelude::*;
 
@@ -54,8 +70,8 @@ impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::TerminalPage::plugin());
-        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
-            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
         }
         app.add_plugins(
             Self::MANIFEST
@@ -73,7 +89,7 @@ impl Plugin for TerminalPlugin {
             spawn_terminal_commands.in_set(vmux_command::RegisterCommandDefinitions),
         )
         .add_plugins((
-            vmux_core::host::UiStatePlugin::<vmux_core::event::TerminalUiState>::default(),
+            vmux_core::host::UiStatePlugin::<TerminalUiState>::default(),
             super::agent::AgentTerminalPlugin,
             crate::TerminalToolPlugin,
         ))
@@ -98,10 +114,8 @@ impl Plugin for TerminalPlugin {
 }
 
 fn spawn_terminal_commands(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_feature_ron(
-        include_str!("../feature.ron"),
-        "command",
-    );
+    let mut definitions =
+        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "command");
     commands.spawn(
         definitions
             .take("terminal_close")
@@ -141,10 +155,7 @@ impl Plugin for TerminalServicePlugin {
                     .in_set(TerminalStackSpawnSet)
                     .after(ServiceMessageSet),
             )
-            .add_systems(
-                Update,
-                respond_terminal_spawn.in_set(vmux_command::ReadCommandRequests),
-            )
+            .add_systems(Update, respond_terminal_spawn.in_set(ReadCommandRequests))
             .add_systems(
                 Update,
                 prewarm_login_shell_env.run_if(resource_added::<AppSettings>),
@@ -238,9 +249,9 @@ impl Plugin for TerminalUpdatePlugin {
                 )
                     .after(ServiceMessageSet)
                     .in_set(WriteCommandRequests),
-                handle_terminal_navigation_commands.in_set(vmux_command::ReadCommandRequests),
-                handle_terminal_clear_command.in_set(vmux_command::ReadCommandRequests),
-                handle_terminal_copy_mode_command.in_set(vmux_command::ReadCommandRequests),
+                handle_terminal_navigation_commands.in_set(ReadCommandRequests),
+                handle_terminal_clear_command.in_set(ReadCommandRequests),
+                handle_terminal_copy_mode_command.in_set(ReadCommandRequests),
             )
                 .chain(),
         );
@@ -319,7 +330,7 @@ fn format_terminal_url(
         (Option<&Pid>, &mut PageMetadata),
         (
             With<Terminal>,
-            Without<vmux_core::agent::AgentSession>,
+            Without<CoreAgentSession>,
             Or<(Changed<Pid>, Added<PageMetadata>)>,
         ),
     >,
@@ -352,16 +363,14 @@ fn on_terminal_removed(
 fn spawn_layout_requested_content(
     mut reader: MessageReader<TerminalLayoutSpawnRequest>,
     settings: Res<AppSettings>,
-    active_space: vmux_layout::space::FocusedSpace,
+    active_space: FocusedSpace,
     child_of: Query<&ChildOf>,
-    tabs: Query<&vmux_layout::tab::Tab>,
+    tabs: Query<&Tab>,
     mut commands: Commands,
 ) {
-    let space_id = active_space
-        .id()
-        .unwrap_or(vmux_space::model::BOOTSTRAP_SPACE_ID);
+    let space_id = active_space.id().unwrap_or(BOOTSTRAP_SPACE_ID);
     for request in reader.read() {
-        let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(request.stack, &child_of, &tabs);
+        let tab_dir = ancestor_tab_startup_dir(request.stack, &child_of, &tabs);
         let Ok(cwd) = settings.workspace_dir(space_id, tab_dir.as_deref()) else {
             continue;
         };
@@ -381,15 +390,13 @@ fn handle_terminal_page_open(
     tasks: Query<(Entity, &PageOpenTask, Has<PageRestore>), PendingPageOpen>,
     pid_indexes: Query<&pid::PidToEntity>,
     child_of_q: Query<&ChildOf>,
-    tabs: Query<&vmux_layout::tab::Tab>,
+    tabs: Query<&Tab>,
     saved_launches: Query<&crate::launch::TerminalLaunch, With<Stack>>,
     settings: Res<AppSettings>,
-    active_space: vmux_layout::space::FocusedSpace,
+    active_space: FocusedSpace,
     mut commands: Commands,
 ) {
-    let space_id = active_space
-        .id()
-        .unwrap_or(vmux_space::model::BOOTSTRAP_SPACE_ID);
+    let space_id = active_space.id().unwrap_or(BOOTSTRAP_SPACE_ID);
     for (entity, task, restoring) in &tasks {
         if task.url != TERMINAL_PAGE_URL.trim_end_matches('/')
             && !task.url.starts_with(TERMINAL_PAGE_URL)
@@ -446,8 +453,7 @@ fn handle_terminal_page_open(
                 }
             }
         } else {
-            let tab_dir =
-                vmux_layout::tab::ancestor_tab_startup_dir(task.stack, &child_of_q, &tabs);
+            let tab_dir = ancestor_tab_startup_dir(task.stack, &child_of_q, &tabs);
             match settings.workspace_dir(space_id, tab_dir.as_deref()) {
                 Ok(cwd) => cwd,
                 Err(message) => {
@@ -464,7 +470,7 @@ fn handle_terminal_page_open(
         commands.entity(task.stack).insert(PageMetadata {
             url: TERMINAL_PAGE_URL.to_string(),
             title,
-            bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+            bg_color: Some(TERMINAL_CEF_BG_COLOR.to_string()),
             ..default()
         });
         let terminal = commands
@@ -497,11 +503,7 @@ fn respond_terminal_spawn(
             TerminalSpawnTarget::Stack(stack) => (stack, None),
             TerminalSpawnTarget::NewStackInPane(pane) => (
                 commands
-                    .spawn((
-                        vmux_layout::stack::stack_bundle(),
-                        LastActivatedAt::now(),
-                        ChildOf(pane),
-                    ))
+                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                     .id(),
                 Some(pane),
             ),
@@ -574,12 +576,12 @@ fn new_terminal_bundle_with_cwd_and_shell(
             PageMetadata {
                 title: format!("Terminal ({})", &process_id.to_string()[..8]),
                 url: TERMINAL_PAGE_URL.to_string(),
-                icon: vmux_core::PageIcon::None,
+                icon: PageIcon::None,
                 bg_color: None,
             },
             WebviewWindowed,
-            vmux_core::host::page::HostsPage,
-            vmux_core::host::page::BindsEditingChords,
+            HostsPage,
+            BindsEditingChords,
         ),
         (
             WebviewSize(Vec2::new(1280.0, 720.0)),
@@ -611,11 +613,7 @@ fn respond_terminal_stack_spawn(
             LastActivatedAt(0)
         };
         let stack = commands
-            .spawn((
-                vmux_layout::stack::stack_bundle(),
-                stack_ts,
-                ChildOf(request.pane),
-            ))
+            .spawn((stack_bundle(), stack_ts, ChildOf(request.pane)))
             .id();
         let title = request
             .cwd
@@ -625,7 +623,7 @@ fn respond_terminal_stack_spawn(
         commands.entity(stack).insert(PageMetadata {
             url: TERMINAL_PAGE_URL.to_string(),
             title,
-            bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+            bg_color: Some(TERMINAL_CEF_BG_COLOR.to_string()),
             ..default()
         });
         let terminal = commands
@@ -662,12 +660,12 @@ pub fn reattach_terminal_bundle(process_id: ProcessId) -> impl Bundle {
             PageMetadata {
                 title: format!("Terminal ({})", &process_id.to_string()[..8]),
                 url: TERMINAL_PAGE_URL.to_string(),
-                icon: vmux_core::PageIcon::None,
+                icon: PageIcon::None,
                 bg_color: None,
             },
             WebviewWindowed,
-            vmux_core::host::page::HostsPage,
-            vmux_core::host::page::BindsEditingChords,
+            HostsPage,
+            BindsEditingChords,
         ),
         (
             WebviewSize(Vec2::new(1280.0, 720.0)),
@@ -769,9 +767,7 @@ fn broadcast_service_unavailable(
 ) {
     let evt = ServiceUnavailableEvent { message };
     for entity in terminals.iter() {
-        commands.trigger(vmux_core::host::UiStateWrite::<
-            vmux_core::event::TerminalUiState,
-        >::from_event(entity, &evt));
+        commands.trigger(UiStateWrite::<TerminalUiState>::from_event(entity, &evt));
     }
 }
 
@@ -819,10 +815,10 @@ fn agent_focus_transition(
 fn sync_agent_focus(
     agents: Query<
         (Entity, &ProcessId, &TerminalMode, Has<AgentFocusBlurred>),
-        With<vmux_core::agent::AgentSession>,
+        With<CoreAgentSession>,
     >,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    focus: vmux_layout::stack::FocusedStack,
+    focus: FocusedStack,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -866,20 +862,20 @@ fn resolve_pending_terminal_cwd(
         (With<Terminal>, With<PendingServiceCreate>),
     >,
     child_of: Query<&ChildOf>,
-    tabs: Query<&vmux_layout::tab::Tab>,
+    tabs: Query<&Tab>,
     spaces: Query<(), With<vmux_layout::space::Space>>,
     space_ids: Query<&vmux_layout::space::SpaceId>,
     settings: Res<AppSettings>,
-    active_space: vmux_layout::space::FocusedSpace,
+    active_space: FocusedSpace,
 ) {
     for (entity, mut launch) in &mut pending {
         if !launch.cwd.is_empty() {
             continue;
         }
-        let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(entity, &child_of, &tabs);
+        let tab_dir = ancestor_tab_startup_dir(entity, &child_of, &tabs);
         let space_id = vmux_layout::space::space_id_of(entity, &child_of, &spaces, &space_ids)
             .or_else(|| active_space.id().map(str::to_string))
-            .unwrap_or_else(|| vmux_space::model::BOOTSTRAP_SPACE_ID.to_string());
+            .unwrap_or_else(|| BOOTSTRAP_SPACE_ID.to_string());
         let Ok(Some(cwd)) = settings.workspace_dir(&space_id, tab_dir.as_deref()) else {
             continue;
         };
@@ -903,7 +899,7 @@ fn send_service_requests(
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
     settings: Res<AppSettings>,
-    agent_sessions: Query<&vmux_core::agent::AgentSession>,
+    agent_sessions: Query<&CoreAgentSession>,
 ) {
     if connected.is_none() {
         return;
@@ -1015,9 +1011,7 @@ fn apply_viewport_updates(
         for (_, line) in patch.changed_lines.iter_mut() {
             crate::link::annotate_links(line, None);
         }
-        commands.trigger(vmux_core::host::UiStateWrite::<
-            vmux_core::event::TerminalUiState,
-        >::from_event(entity, &patch));
+        commands.trigger(UiStateWrite::<TerminalUiState>::from_event(entity, &patch));
     }
 }
 
@@ -1037,7 +1031,7 @@ fn apply_process_exits(
         With<Terminal>,
     >,
     process_index: Single<&TerminalProcessIndex>,
-    agent_sessions: Query<&vmux_core::agent::AgentSession>,
+    agent_sessions: Query<&CoreAgentSession>,
     mut stack_close_requests: MessageWriter<StackCloseRequest>,
     mut commands: Commands,
 ) {
@@ -1062,9 +1056,7 @@ fn apply_process_exits(
             .remove::<CloseRequiresConfirmation>()
             .remove::<AgentLoading>();
         let is_agent = if let Ok(session) = agent_sessions.get(entity) {
-            commands.trigger(vmux_core::host::UiStateWrite::<
-                vmux_core::event::TerminalUiState,
-            >::from_event(
+            commands.trigger(UiStateWrite::<TerminalUiState>::from_event(
                 entity,
                 &crate::event::TermLoadingEvent {
                     loading: false,
@@ -1090,7 +1082,7 @@ fn apply_service_errors(
     process_index: Single<&TerminalProcessIndex>,
     launches: Query<&crate::launch::TerminalLaunch>,
     settings: Res<AppSettings>,
-    agent_sessions: Query<&vmux_core::agent::AgentSession>,
+    agent_sessions: Query<&CoreAgentSession>,
     mut service_requests: MessageWriter<ServiceRequest>,
     mut commands: Commands,
 ) {
@@ -1147,7 +1139,7 @@ fn copy_service_selection(
 ) {
     for selection in selections.read() {
         if process_index.get(&selection.process_id).is_some() && !selection.text.is_empty() {
-            vmux_clipboard::Clipboard::write(selection.text.clone());
+            Clipboard::write(selection.text.clone());
         }
     }
 }
@@ -1167,7 +1159,7 @@ fn should_close_terminal_stack_on_exit(is_agent: bool, retain_on_exit: bool) -> 
 }
 
 #[cfg(test)]
-fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<vmux_api::protocol::CopyModeKey> {
+fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<CopyModeKey> {
     map_copy_mode_key_from_input(CopyModeKeyInput {
         key,
         key_code: KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified),
@@ -1176,10 +1168,8 @@ fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<vmux_api::protocol::CopyMo
     })
 }
 
-fn map_copy_mode_key_from_input(
-    input: CopyModeKeyInput<'_>,
-) -> Option<vmux_api::protocol::CopyModeKey> {
-    use vmux_api::protocol::CopyModeKey as K;
+fn map_copy_mode_key_from_input(input: CopyModeKeyInput<'_>) -> Option<CopyModeKey> {
+    use CopyModeKey as K;
     match (input.key, input.ctrl) {
         (Key::ArrowLeft, _) => Some(K::Left),
         (Key::ArrowRight, _) => Some(K::Right),
@@ -1233,7 +1223,7 @@ fn map_copy_mode_key_with_state(
     copy_mode: &mut TerminalCopyMode,
     key: &Key,
     ctrl: bool,
-) -> Option<vmux_api::protocol::CopyModeKey> {
+) -> Option<CopyModeKey> {
     map_copy_mode_keys_with_state(
         copy_mode,
         CopyModeKeyInput {
@@ -1250,8 +1240,8 @@ fn map_copy_mode_key_with_state(
 fn map_copy_mode_keys_with_state(
     copy_mode: &mut TerminalCopyMode,
     input: CopyModeKeyInput<'_>,
-) -> Vec<vmux_api::protocol::CopyModeKey> {
-    use vmux_api::protocol::CopyModeKey as K;
+) -> Vec<CopyModeKey> {
+    use CopyModeKey as K;
 
     let state = &mut copy_mode.input;
     if let Some(pending) = state.pending_key.take() {
@@ -1316,10 +1306,7 @@ fn map_copy_mode_keys_with_state(
         .unwrap_or_default()
 }
 
-fn repeat_copy_mode_key(
-    state: &mut CopyModeInputState,
-    key: vmux_api::protocol::CopyModeKey,
-) -> Vec<vmux_api::protocol::CopyModeKey> {
+fn repeat_copy_mode_key(state: &mut CopyModeInputState, key: CopyModeKey) -> Vec<CopyModeKey> {
     let repeat = if copy_mode_key_uses_count(key) {
         state.count.take().unwrap_or(1)
     } else {
@@ -1329,8 +1316,8 @@ fn repeat_copy_mode_key(
     vec![key; repeat as usize]
 }
 
-fn copy_mode_key_uses_count(key: vmux_api::protocol::CopyModeKey) -> bool {
-    use vmux_api::protocol::CopyModeKey as K;
+fn copy_mode_key_uses_count(key: CopyModeKey) -> bool {
+    use CopyModeKey as K;
     !matches!(
         key,
         K::StartSelection | K::StartLineSelection | K::Copy | K::Exit
@@ -1518,34 +1505,34 @@ fn write_clipboard_image_temp(process_id: ProcessId, png: &[u8]) -> Option<std::
 }
 
 fn resolve_paste(is_vibe: bool, process_id: ProcessId) -> Option<Vec<u8>> {
-    if let Some(path) = vmux_clipboard::Clipboard::image_file_path() {
+    if let Some(path) = Clipboard::image_file_path() {
         return Some(bracketed_paste(
             image_path_payload(is_vibe, &path).as_bytes(),
         ));
     }
-    if vmux_clipboard::Clipboard::has_image() {
+    if Clipboard::has_image() {
         if is_vibe {
-            let png = vmux_clipboard::Clipboard::read_image_png()?;
+            let png = Clipboard::read_image_png()?;
             let path = write_clipboard_image_temp(process_id, &png)?;
             let payload = image_path_payload(true, &path.to_string_lossy());
             return Some(bracketed_paste(payload.as_bytes()));
         }
         return Some(vec![CTRL_V]);
     }
-    let text = vmux_clipboard::Clipboard::read_text()?;
+    let text = Clipboard::read_text()?;
     (!text.is_empty()).then(|| bracketed_paste(text.as_bytes()))
 }
 
 fn resolve_paste_text(is_vibe: bool, process_id: ProcessId) -> Option<String> {
-    if let Some(path) = vmux_clipboard::Clipboard::image_file_path() {
+    if let Some(path) = Clipboard::image_file_path() {
         return Some(image_path_payload(is_vibe, &path));
     }
-    if vmux_clipboard::Clipboard::has_image() {
-        let png = vmux_clipboard::Clipboard::read_image_png()?;
+    if Clipboard::has_image() {
+        let png = Clipboard::read_image_png()?;
         let path = write_clipboard_image_temp(process_id, &png)?;
         return Some(image_path_payload(is_vibe, &path.to_string_lossy()));
     }
-    let text = vmux_clipboard::Clipboard::read_text()?;
+    let text = Clipboard::read_text()?;
     (!text.is_empty()).then_some(text)
 }
 
@@ -1720,7 +1707,7 @@ fn on_term_key(
         ),
         With<Terminal>,
     >,
-    agents: Query<&vmux_core::agent::AgentSession>,
+    agents: Query<&CoreAgentSession>,
     launches: Query<&crate::launch::TerminalLaunch>,
     keymap: Single<&Keymap>,
     mut command_invocations: MessageWriter<vmux_command::CommandInvocation>,
@@ -1751,8 +1738,7 @@ fn on_term_key(
         return;
     }
     let process_id = *pid;
-    let is_vibe = agents.get(entity).ok().map(|session| session.kind)
-        == Some(vmux_core::agent::AgentKind::Vibe)
+    let is_vibe = agents.get(entity).ok().map(|session| session.kind) == Some(CoreAgentKind::Vibe)
         || launches.get(entity).ok().map(|launch| launch.kind.clone())
             == Some(crate::launch::TerminalKind::Vibe);
     if let Ok(mut capture) = capture_q.get_mut(entity) {
@@ -1761,10 +1747,9 @@ fn on_term_key(
             .flatten();
         if capture.apply(event, pasted) {
             let (draft, skipped) = (capture.draft.clone(), capture.skipped);
-            commands.trigger(vmux_core::host::UiStateWrite::<
-                vmux_core::event::TerminalUiState,
-            >::from_event(
-                entity, &AgentPromptDraftEvent { draft, skipped }
+            commands.trigger(UiStateWrite::<TerminalUiState>::from_event(
+                entity,
+                &AgentPromptDraftEvent { draft, skipped },
             ));
         }
         return;
@@ -1775,7 +1760,7 @@ fn on_term_key(
             "KeyV" => {
                 let agent_kind = agents.get(entity).ok().map(|session| session.kind);
                 let launch_kind = launches.get(entity).ok().map(|launch| launch.kind.clone());
-                let is_vibe = agent_kind == Some(vmux_core::agent::AgentKind::Vibe)
+                let is_vibe = agent_kind == Some(CoreAgentKind::Vibe)
                     || launch_kind == Some(crate::launch::TerminalKind::Vibe);
                 if let Some(data) = resolve_paste(is_vibe, process_id) {
                     service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
@@ -1833,12 +1818,12 @@ fn on_restart_pty(
         &mut ProcessId,
         &mut PageMetadata,
         Option<&mut crate::launch::TerminalLaunch>,
-        Option<&vmux_core::agent::AgentSession>,
+        Option<&CoreAgentSession>,
         Option<&TerminalGridSize>,
         Has<crate::AgentRunTerminal>,
     )>,
     settings: Res<AppSettings>,
-    mut restart_agent: MessageWriter<vmux_core::agent::RestartAgentPty>,
+    mut restart_agent: MessageWriter<RestartAgentPty>,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -1849,7 +1834,7 @@ fn on_restart_pty(
     };
 
     if agent_session.is_some() {
-        restart_agent.write(vmux_core::agent::RestartAgentPty { entity });
+        restart_agent.write(RestartAgentPty { entity });
         return;
     }
 
@@ -1907,7 +1892,7 @@ fn handle_terminal_copy_mode_command(
     >,
     keyboard_targets: Query<(), With<KeyboardOwner>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    focus: vmux_layout::stack::FocusedStack,
+    focus: FocusedStack,
     process_index: Single<&TerminalProcessIndex>,
     mut copy_modes: Query<&mut TerminalCopyMode, With<Terminal>>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -1939,7 +1924,7 @@ fn handle_terminal_navigation_commands(
     mut close_requests: MessageReader<super::command::TerminalCloseRequest>,
     mut next_requests: MessageReader<super::command::TerminalNextRequest>,
     mut previous_requests: MessageReader<super::command::TerminalPrevRequest>,
-    focus: vmux_layout::stack::FocusedStack,
+    focus: FocusedStack,
     terminals: Query<&ChildOf, With<Terminal>>,
     mut stack_close_requests: MessageWriter<StackCloseRequest>,
     mut stack_focus_requests: MessageWriter<FocusRequest>,
@@ -1968,7 +1953,7 @@ fn handle_terminal_navigation_commands(
 
 fn handle_terminal_clear_command(
     mut requests: MessageReader<super::command::TerminalClearRequest>,
-    focus: vmux_layout::stack::FocusedStack,
+    focus: FocusedStack,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     mut terminal_inputs: MessageWriter<QueueTerminalInput>,
 ) {
@@ -1996,8 +1981,8 @@ fn is_copy_mode_active(mode: &TerminalMode, copy_mode: &TerminalCopyMode) -> boo
     mode.copy_mode || copy_mode.active
 }
 
-fn copy_mode_key_exits(key: vmux_api::protocol::CopyModeKey) -> bool {
-    use vmux_api::protocol::CopyModeKey as K;
+fn copy_mode_key_exits(key: CopyModeKey) -> bool {
+    use CopyModeKey as K;
     matches!(key, K::Copy | K::Exit)
 }
 
@@ -2052,9 +2037,7 @@ fn apply_osc_title(
             .as_ref()
             .is_some_and(|browsers| browsers.can_emit_to(&entity))
         {
-            commands.trigger(vmux_core::host::UiStateWrite::<
-                vmux_core::event::TerminalUiState,
-            >::from_event(
+            commands.trigger(UiStateWrite::<TerminalUiState>::from_event(
                 entity,
                 &TermTitleEvent {
                     title: ev.title.clone(),
@@ -2089,9 +2072,9 @@ mod tests {
     };
     use vmux_setting::{BrowserSettings, ShortcutSettings};
 
-    fn spawn_active_space(app: &mut App, record: &vmux_space::model::SpaceRecord) {
+    fn spawn_active_space(app: &mut App, record: &SpaceRecord) {
         app.world_mut().spawn((
-            vmux_space::spaces::space_profile_bundle(record),
+            space_profile_bundle(record),
             vmux_layout::space::CurrentSpace,
         ));
     }
@@ -2268,16 +2251,13 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .add_systems(Update, handle_terminal_page_open);
-        spawn_active_space(&mut app, &vmux_space::model::bootstrap_space_record());
+        spawn_active_space(&mut app, &bootstrap_space_record());
 
-        let stack = app
-            .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
-            .id();
+        let stack = app.world_mut().spawn(stack_bundle()).id();
         let task = app
             .world_mut()
             .spawn(PageOpenTask {
-                id: vmux_core::PageOpenId::new(),
+                id: PageOpenId::new(),
                 stack,
                 url: "vmux://terminal".to_string(),
                 request_id: None,
@@ -2300,11 +2280,11 @@ mod tests {
     #[test]
     fn open_terminal_page_uses_per_space_startup_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let record = vmux_space::model::bootstrap_space_record();
+        let record = bootstrap_space_record();
         let mut settings = test_settings();
         settings.spaces.insert(
             record.id.clone(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(dir.path().to_string_lossy().into()),
                 ..Default::default()
@@ -2317,12 +2297,9 @@ mod tests {
             .add_systems(Update, handle_terminal_page_open);
         spawn_active_space(&mut app, &record);
 
-        let stack = app
-            .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
-            .id();
+        let stack = app.world_mut().spawn(stack_bundle()).id();
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "vmux://terminal".to_string(),
             request_id: None,
@@ -2339,19 +2316,16 @@ mod tests {
 
     #[test]
     fn open_terminal_page_without_workspace_uses_shell_default() {
-        let record = vmux_space::model::bootstrap_space_record();
+        let record = bootstrap_space_record();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .add_systems(Update, handle_terminal_page_open);
         spawn_active_space(&mut app, &record);
 
-        let stack = app
-            .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
-            .id();
+        let stack = app.world_mut().spawn(stack_bundle()).id();
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "vmux://terminal".to_string(),
             request_id: None,
@@ -2370,11 +2344,11 @@ mod tests {
     fn open_terminal_page_prefers_ancestor_tab_startup_dir() {
         let space_dir = tempfile::tempdir().unwrap();
         let tab_dir = tempfile::tempdir().unwrap();
-        let record = vmux_space::model::bootstrap_space_record();
+        let record = bootstrap_space_record();
         let mut settings = test_settings();
         settings.spaces.insert(
             record.id.clone(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(space_dir.path().to_string_lossy().into()),
                 ..Default::default()
@@ -2389,17 +2363,14 @@ mod tests {
 
         let tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "t".into(),
                 startup_dir: Some(tab_dir.path().to_string_lossy().into()),
             })
             .id();
-        let stack = app
-            .world_mut()
-            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
-            .id();
+        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(tab))).id();
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "vmux://terminal".to_string(),
             request_id: None,
@@ -2420,11 +2391,11 @@ mod tests {
     #[test]
     fn open_terminal_page_rejects_invalid_ancestor_tab_startup_dir() {
         let fallback_dir = tempfile::tempdir().unwrap();
-        let record = vmux_space::model::bootstrap_space_record();
+        let record = bootstrap_space_record();
         let mut settings = test_settings();
         settings.spaces.insert(
             record.id.clone(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(fallback_dir.path().to_string_lossy().into()),
                 ..Default::default()
@@ -2439,19 +2410,16 @@ mod tests {
 
         let tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "t".into(),
                 startup_dir: Some("/no/such/vmux-tab-workspace".into()),
             })
             .id();
-        let stack = app
-            .world_mut()
-            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
-            .id();
+        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(tab))).id();
         let task = app
             .world_mut()
             .spawn(PageOpenTask {
-                id: vmux_core::PageOpenId::new(),
+                id: PageOpenId::new(),
                 stack,
                 url: "vmux://terminal".to_string(),
                 request_id: None,
@@ -2473,11 +2441,11 @@ mod tests {
     #[test]
     fn layout_terminal_rejects_invalid_ancestor_tab_startup_dir() {
         let fallback_dir = tempfile::tempdir().unwrap();
-        let record = vmux_space::model::bootstrap_space_record();
+        let record = bootstrap_space_record();
         let mut settings = test_settings();
         settings.spaces.insert(
             record.id.clone(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(fallback_dir.path().to_string_lossy().into()),
                 ..Default::default()
@@ -2493,15 +2461,12 @@ mod tests {
 
         let tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "t".into(),
                 startup_dir: Some("/no/such/vmux-tab-workspace".into()),
             })
             .id();
-        let stack = app
-            .world_mut()
-            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
-            .id();
+        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(tab))).id();
         app.world_mut()
             .resource_mut::<Messages<TerminalLayoutSpawnRequest>>()
             .write(TerminalLayoutSpawnRequest { stack });
@@ -2697,7 +2662,7 @@ mod tests {
             ..Default::default()
         };
         let mut state = TerminalShortcutState::default();
-        let definitions = [vmux_command::CommandDefinition::new(
+        let definitions = [CommandDefinition::new(
             "browser_open_page_in_command_bar",
             "Edit Page",
             "Browser > Bar",
@@ -2725,12 +2690,11 @@ mod tests {
             ..Default::default()
         };
         let mut state = TerminalShortcutState::default();
-        let definitions = [vmux_command::CommandDefinition::new(
-            "toggle_layout",
-            "Toggle Layout",
-            "Layout > Layout",
-        )
-        .direct("Super+Shift+S")];
+        let definitions =
+            [
+                CommandDefinition::new("toggle_layout", "Toggle Layout", "Layout > Layout")
+                    .direct("Super+Shift+S"),
+            ];
         let keymap = Keymap::defaults_with(&definitions);
 
         assert_eq!(
@@ -2758,7 +2722,7 @@ mod tests {
 
     #[test]
     fn vim_visual_keys_map_to_copy_mode_actions() {
-        use vmux_api::protocol::CopyModeKey as K;
+        use CopyModeKey as K;
 
         assert_eq!(
             map_copy_mode_key(&Key::Character("v".into()), false),
@@ -2788,7 +2752,7 @@ mod tests {
 
     #[test]
     fn vim_g_ends_visual_selection_at_last_non_blank() {
-        use vmux_api::protocol::CopyModeKey as K;
+        use CopyModeKey as K;
 
         let mut copy_mode = TerminalCopyMode::default();
 
@@ -2804,7 +2768,7 @@ mod tests {
 
     #[test]
     fn vim_visual_motion_keys_map_to_copy_mode_actions() {
-        use vmux_api::protocol::CopyModeKey as K;
+        use CopyModeKey as K;
 
         let mut copy_mode = TerminalCopyMode::default();
 
@@ -2870,7 +2834,7 @@ mod tests {
 
     #[test]
     fn shifted_minus_resolves_g_() {
-        use vmux_api::protocol::CopyModeKey as K;
+        use CopyModeKey as K;
 
         let mut copy_mode = TerminalCopyMode::default();
 
@@ -2915,7 +2879,7 @@ mod tests {
 
     #[test]
     fn exiting_copy_mode_clears_local_latch() {
-        use vmux_api::protocol::CopyModeKey as K;
+        use CopyModeKey as K;
 
         let mut copy_mode = TerminalCopyMode::default();
         copy_mode.set(true);
@@ -3103,7 +3067,7 @@ mod tests {
         app.update();
         assert_eq!(
             app.world()
-                .get::<vmux_core::PageIdentity>(e)
+                .get::<PageIdentity>(e)
                 .and_then(|identity| identity.title.clone()),
             Some("claude — repo".to_string())
         );
@@ -3115,7 +3079,7 @@ mod tests {
                 title: String::new(),
             });
         app.update();
-        assert!(app.world().get::<vmux_core::PageIdentity>(e).is_none());
+        assert!(app.world().get::<PageIdentity>(e).is_none());
     }
 
     #[test]
@@ -3128,14 +3092,14 @@ mod tests {
         let pid = ProcessId::new();
         let e = app
             .world_mut()
-            .spawn((Terminal, pid, vmux_core::PageIdentity::from("working")))
+            .spawn((Terminal, pid, PageIdentity::from("working")))
             .id();
 
         app.world_mut()
             .resource_mut::<Messages<ProcessExitedEvent>>()
             .write(ProcessExitedEvent { process_id: pid });
         app.update();
-        assert!(app.world().get::<vmux_core::PageIdentity>(e).is_none());
+        assert!(app.world().get::<PageIdentity>(e).is_none());
     }
 
     #[test]
