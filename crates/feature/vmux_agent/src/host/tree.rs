@@ -166,7 +166,7 @@ mod tests {
         app.world_mut().run_schedule(Startup);
         let kinds = app
             .world_mut()
-            .query::<&crate::CliStrategy>()
+            .query::<&crate::CliSessionSource>()
             .iter(app.world())
             .map(|strategy| strategy.kind)
             .collect::<std::collections::HashSet<_>>();

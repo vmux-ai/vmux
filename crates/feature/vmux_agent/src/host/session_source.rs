@@ -1,24 +1,32 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
-use super::cli::{CliStrategy, ResumableSession};
+use super::cli::{CliPromptHistory, CliSessionSource, ResumableSession};
 use crate::AgentKind;
 
 #[derive(SystemParam)]
-pub struct AgentStrategies<'w, 's> {
-    cli: Query<'w, 's, &'static CliStrategy>,
+pub struct CliSessionSources<'w, 's> {
+    cli: Query<'w, 's, &'static CliSessionSource>,
+    history: Query<'w, 's, (&'static CliSessionSource, &'static CliPromptHistory)>,
 }
 
-impl AgentStrategies<'_, '_> {
-    pub fn get_cli(&self, kind: AgentKind) -> Option<CliStrategy> {
+impl CliSessionSources<'_, '_> {
+    pub fn get(&self, kind: AgentKind) -> Option<CliSessionSource> {
         self.cli
             .iter()
             .find(|strategy| strategy.kind == kind)
             .copied()
     }
 
-    pub fn copied(&self) -> Vec<CliStrategy> {
+    pub fn all(&self) -> Vec<CliSessionSource> {
         self.cli.iter().copied().collect()
+    }
+
+    pub fn prompt_history(&self, kind: AgentKind) -> Option<CliPromptHistory> {
+        self.history
+            .iter()
+            .find(|(source, _)| source.kind == kind)
+            .map(|(_, history)| *history)
     }
 }
 
@@ -53,10 +61,10 @@ mod tests {
         let mut world = World::new();
         world.spawn(crate::host::cli::CLAUDE);
         let found = world
-            .run_system_once(|strategies: AgentStrategies| {
+            .run_system_once(|sources: CliSessionSources| {
                 (
-                    strategies.get_cli(AgentKind::Claude).is_some(),
-                    strategies.get_cli(AgentKind::Vibe).is_some(),
+                    sources.get(AgentKind::Claude).is_some(),
+                    sources.get(AgentKind::Vibe).is_some(),
                 )
             })
             .unwrap();
@@ -73,6 +81,7 @@ mod tests {
             transcript: PathBuf::from("/w/none.jsonl"),
             mtime: SystemTime::UNIX_EPOCH + Duration::from_secs(secs),
             title: sid.into(),
+            latest: String::new(),
             cross_runtime: true,
         };
         let got = sort_sessions(vec![mk("a", 10), mk("b", 30), mk("a", 20)]);

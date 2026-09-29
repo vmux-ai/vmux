@@ -3,7 +3,7 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
-use crate::strategy::{AgentStrategies, acp_agent_kind, sort_sessions};
+use crate::session_source::{CliSessionSources, acp_agent_kind, sort_sessions};
 use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
 use vmux_chat::event::{
     ChatResumeQueryRequest, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
@@ -124,7 +124,6 @@ fn resume_entries(
     active_kind: Option<AgentKind>,
     active_name: &str,
     labels: &mut RepoLabels,
-    strategies: &[crate::CliStrategy],
 ) -> Vec<ResumableSessionEntry> {
     let mut entries = Vec::new();
     for session in sessions {
@@ -144,18 +143,13 @@ fn resume_entries(
         }
         .format();
         let (project, branch) = labels.resolve(&session.cwd, &dir);
-        let latest = strategies
-            .iter()
-            .find(|strategy| strategy.kind == session.kind)
-            .map(|strategy| (strategy.latest_message)(&session.transcript))
-            .unwrap_or_default();
         entries.push(ResumableSessionEntry {
             kind: session.kind.as_url_segment().to_string(),
             sid: session.sid,
             cwd: session.cwd.to_string_lossy().to_string(),
             url,
             title: session.title,
-            latest,
+            latest: session.latest,
             subtitle: dir,
             age_seconds: relative_time_seconds(session.mtime),
             updated_at: chrono::DateTime::<chrono::Local>::from(session.mtime)
@@ -289,7 +283,7 @@ struct PromptHistoryTask {
 
 fn on_prompt_history_request(
     trigger: On<UiInput<PromptHistoryRequest>>,
-    strategies: AgentStrategies,
+    sources: CliSessionSources,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -299,14 +293,12 @@ fn on_prompt_history_request(
     let Some(kind) = AgentKind::from_url_segment(&asked.agent) else {
         return;
     };
-    let strategy = strategies.get_cli(kind);
+    let history = sources.prompt_history(kind);
     let task = IoTaskPool::get().spawn(async move {
         let _wake = wake;
         let cwd = std::path::PathBuf::from(&asked.cwd);
         PromptHistory {
-            prompts: strategy
-                .map(|strategy| strategy.prompt_history(&cwd))
-                .unwrap_or_default(),
+            prompts: history.map(|history| (history.0)(&cwd)).unwrap_or_default(),
         }
     });
     commands.spawn(PromptHistoryTask { webview, task });
@@ -329,7 +321,7 @@ fn drain_prompt_history_tasks(
 
 fn on_resume_list_request(
     trigger: On<UiInput<ResumeListRequest>>,
-    strategies: AgentStrategies,
+    sources: CliSessionSources,
     ask: ResumeAsk,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     scan: Single<&ResumableScan>,
@@ -337,7 +329,7 @@ fn on_resume_list_request(
 ) {
     let webview = trigger.event().webview;
     let wake = vmux_core::host::wake::Wake::from_resource(proxy);
-    let strategies = strategies.copied();
+    let sources = sources.all();
     let (kind, agent_name) = ask.agent_of(webview);
     let project = ask.project_of(webview);
     let request_id = trigger.event().payload.request_id;
@@ -354,8 +346,8 @@ fn on_resume_list_request(
             None => {
                 let pool = IoTaskPool::get();
                 let mut scanning = Vec::new();
-                for strategy in strategies.iter().copied() {
-                    scanning.push(pool.spawn(async move { (strategy.list_sessions)() }));
+                for source in sources.iter().copied() {
+                    scanning.push(pool.spawn(async move { (source.list_sessions)() }));
                 }
                 let mut all = Vec::new();
                 for scan in scanning {
@@ -366,7 +358,7 @@ fn on_resume_list_request(
                 (ranked, Some(all))
             }
         };
-        let mut built = resume_entries(ranked, kind, &agent_name, &mut labels, &strategies);
+        let mut built = resume_entries(ranked, kind, &agent_name, &mut labels);
         built.retain(|session| ResumeListAnswer::matches(session, &query));
         let total = built.len() as u32;
         let sessions = built
@@ -500,7 +492,7 @@ fn on_resume_session(
     child_of: Query<&ChildOf>,
     acp_sessions: Query<&AcpSession>,
     settings: Res<vmux_setting::AppSettings>,
-    strategies: AgentStrategies,
+    sources: CliSessionSources,
     mut commands: Commands,
     mut swap: MessageWriter<SwapStackSession>,
 ) {
@@ -516,15 +508,18 @@ fn on_resume_session(
         && let Some(target_url) =
             foreign_handoff_target(&acp.agent_id, acp_agent_kind(&acp.agent_id), kind)
     {
-        let strategy = strategies.get_cli(kind);
+        let source = sources.get(kind);
         let source_sid = payload.sid.clone();
         let source_agent = kind.display_name().to_string();
         let cwd = std::path::PathBuf::from(&payload.cwd);
         let task = IoTaskPool::get().spawn(async move {
-            let strategy = strategy.ok_or_else(|| {
-                format!("no session strategy registered for {}", kind.display_name())
+            let source = source.ok_or_else(|| {
+                format!(
+                    "no CLI session source registered for {}",
+                    kind.display_name()
+                )
             })?;
-            let messages = (strategy.load_transcript)(&source_sid)?;
+            let messages = (source.load_transcript)(&source_sid)?;
             let built = build_context(&messages, DEFAULT_CONTEXT_LIMIT);
             Ok(StackSessionHandoff {
                 source_agent,
@@ -557,7 +552,7 @@ fn on_resume_session(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::strategy::kind_supports_cross_runtime;
+    use crate::session_source::kind_supports_cross_runtime;
 
     #[test]
     fn resume_query_matches_sid_title_and_cwd_case_insensitively() {
@@ -614,6 +609,7 @@ mod tests {
             transcript: "/work/none.jsonl".into(),
             mtime: SystemTime::UNIX_EPOCH,
             title: sid.into(),
+            latest: String::new(),
             cross_runtime: kind_supports_cross_runtime(kind),
         };
         let entries = resume_entries(
@@ -624,7 +620,6 @@ mod tests {
             Some(AgentKind::Claude),
             "Antigravity",
             &mut RepoLabels::default(),
-            &[],
         );
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].agent_name, "Antigravity");

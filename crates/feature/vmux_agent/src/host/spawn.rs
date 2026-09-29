@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy::tasks::{Task, futures_lite::future};
 use std::sync::atomic::{AtomicU64, Ordering};
 use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_command::WriteCommandRequests;
@@ -16,9 +16,10 @@ use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::{ProcessExited, TerminalGridSize, new_terminal_bundle_with_cwd};
 
 use crate::session::{AgentSession, AgentSessionExited, PendingAgentSession, SessionId};
-use crate::strategy::AgentStrategies;
+use crate::session_source::CliSessionSources;
 
 use super::attach::{AgentStackAttachment, PageAgentAttachment};
+use super::launch::{AgentLaunchRequest, AgentRestartRequest, PreparedAgentLaunch};
 use super::page_open::{
     attach_agent_spawn_error_to_stack, attach_cli_setup_to_stack, cli_initial_prompt,
 };
@@ -31,10 +32,20 @@ pub(super) struct SpawnRequestsPlugin;
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct SpawnRequestSet;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct PrepareAgentLaunchSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct ApplyAgentLaunchSet;
+
 impl Plugin for SpawnPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
             .add_plugins(SpawnRequestsPlugin)
+            .configure_sets(
+                Update,
+                (SpawnRequestSet, PrepareAgentLaunchSet, ApplyAgentLaunchSet).chain(),
+            )
             .add_systems(
                 Update,
                 detect_agent_session_process_exit
@@ -45,8 +56,11 @@ impl Plugin for SpawnPlugin {
             .add_systems(
                 Update,
                 (
-                    (handle_restart_agent_pty, drain_agent_restarts)
-                        .chain()
+                    handle_restart_agent_pty
+                        .in_set(SpawnRequestSet)
+                        .before(ServiceMessageSet),
+                    drain_agent_restarts
+                        .in_set(ApplyAgentLaunchSet)
                         .before(ServiceMessageSet),
                     respond_page_agent_attach,
                     respond_page_agent_spawn_stack,
@@ -59,12 +73,9 @@ impl Plugin for SpawnPlugin {
 
 impl Plugin for SpawnRequestsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<SpawnAgentInStackRequest>().add_systems(
-            Update,
-            (handle_spawn_agent_requests, drain_agent_launches)
-                .chain()
-                .in_set(SpawnRequestSet),
-        );
+        app.add_message::<SpawnAgentInStackRequest>()
+            .add_systems(Update, handle_spawn_agent_requests.in_set(SpawnRequestSet))
+            .add_systems(Update, drain_agent_launches.in_set(ApplyAgentLaunchSet));
     }
 }
 
@@ -128,8 +139,10 @@ struct PendingAgentLaunch {
     request: SpawnAgentInStackRequest,
     process_id: ProcessId,
     generation: AgentLaunchGeneration,
-    task: Task<Result<crate::launch::PreparedAgentLaunch, String>>,
 }
+
+#[derive(Component)]
+pub(super) struct AgentLaunchTask(pub(super) Task<Result<PreparedAgentLaunch, String>>);
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 struct AgentLaunchGeneration(u64);
@@ -157,32 +170,23 @@ impl PendingAgentLaunch {
 }
 
 #[derive(Component)]
-struct PendingAgentRestart {
-    task: Task<Result<RestartedAgentLaunch, String>>,
-}
+struct PendingAgentRestart;
 
-type RestartedAgentLaunch = (
-    ProcessId,
-    String,
-    Vec<String>,
-    String,
-    Vec<(String, String)>,
-    u64,
-);
+#[derive(Component)]
+pub(super) struct AgentRestartTask(pub(super) Task<Result<PreparedAgentLaunch, String>>);
 
 fn handle_spawn_agent_requests(
     mut reader: MessageReader<SpawnAgentInStackRequest>,
     settings: Res<AppSettings>,
-    strategies: AgentStrategies,
+    sources: CliSessionSources,
     models: Option<Single<&crate::host::model::AgentModelSelections>>,
     executables: AgentExecutables,
     mut metadata: Query<&mut PageMetadata>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     for req in reader.read() {
-        let Some(strategy) = strategies.get_cli(req.kind) else {
-            let message = "agent strategies not registered; cannot spawn agent";
+        let Some(source) = sources.get(req.kind) else {
+            let message = "CLI session source not registered; cannot spawn agent";
             bevy::log::warn!("{message}");
             attach_agent_spawn_error_to_stack(req.stack, req.kind, message, &mut commands);
             continue;
@@ -213,44 +217,36 @@ fn handle_spawn_agent_requests(
         let generation = AgentLaunchGeneration::next();
         commands.entity(req.stack).insert(generation);
         let request = req.clone();
-        let task_request = request.clone();
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result = crate::build_agent_launch(
-                task_request.kind,
-                &task_request.cwd,
-                &shell,
-                task_request.session_id.as_deref(),
-                &strategy,
-                &exe_path,
+        commands.spawn((
+            PendingAgentLaunch {
+                request,
                 process_id,
-                effort.as_deref(),
-                model.as_deref(),
-            );
-            if let Some(wake) = wake {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        commands.spawn(PendingAgentLaunch {
-            request,
-            process_id,
-            generation,
-            task,
-        });
+                generation,
+            },
+            AgentLaunchRequest {
+                cwd: req.cwd.clone(),
+                shell,
+                session_id: req.session_id.clone(),
+                executable: exe_path,
+                anchor: process_id,
+                effort,
+                model,
+                kind: source.kind,
+            },
+        ));
     }
 }
 
 fn drain_agent_launches(
-    mut pending: Query<(Entity, &mut PendingAgentLaunch)>,
+    mut pending: Query<(Entity, &PendingAgentLaunch, &mut AgentLaunchTask)>,
     settings: Res<AppSettings>,
     entities: Query<()>,
     stacks: Query<(&AgentLaunchGeneration, Option<&PageMetadata>)>,
     mut spawn_requests: MessageWriter<SpawnAgentInStackRequest>,
     mut commands: Commands,
 ) {
-    for (entity, mut pending) in &mut pending {
-        let Some(result) = future::block_on(future::poll_once(&mut pending.task)) else {
+    for (entity, pending, mut task) in &mut pending {
+        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
             continue;
         };
         commands.entity(entity).despawn();
@@ -435,44 +431,6 @@ fn respond_page_agent_attach_default(
     }
 }
 
-fn rebuilt_args_env_for_restart(
-    launch: &TerminalLaunch,
-    strategy: &crate::host::cli::CliStrategy,
-    shell: &str,
-    session_id: Option<&str>,
-    new_id: ProcessId,
-) -> Result<(Vec<String>, Vec<(String, String)>, u64), String> {
-    for _ in 0..3 {
-        let mcp_revision =
-            vmux_core::profile::mcp_credentials::McpCredentialAccess::stable_revision()?;
-        let mcp_cfg = crate::mcp::resolve(
-            std::path::Path::new(&launch.cwd),
-            new_id,
-            strategy.kind,
-            shell,
-        )?;
-        let args = (strategy.build_args)(&mcp_cfg, session_id);
-        let fresh = (strategy.build_env)(&mcp_cfg);
-        let fresh_keys: std::collections::HashSet<String> =
-            fresh.iter().map(|(k, _)| k.clone()).collect();
-        let mut env: Vec<(String, String)> = launch
-            .env
-            .iter()
-            .filter(|(k, _)| {
-                !fresh_keys.contains(k)
-                    && !crate::managed_mcp::McpAuthorization::is_environment_variable(k)
-            })
-            .cloned()
-            .collect();
-        env.extend(fresh);
-        if vmux_core::profile::mcp_credentials::McpCredentialAccess::revision() != mcp_revision {
-            continue;
-        }
-        return Ok((args, env, mcp_revision));
-    }
-    Err("MCP configuration changed repeatedly while preparing the agent restart".to_string())
-}
-
 fn handle_restart_agent_pty(
     mut reader: MessageReader<RestartAgentPty>,
     settings: Res<AppSettings>,
@@ -481,8 +439,6 @@ fn handle_restart_agent_pty(
         Without<PendingAgentRestart>,
     >,
     connected: Option<Single<(), With<ServiceConnected>>>,
-    strategies: AgentStrategies,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     if connected.is_none() {
@@ -497,35 +453,22 @@ fn handle_restart_agent_pty(
         let kind = session.kind;
         let session_id = session_id.map(|session_id| session_id.0.clone());
         let new_id = ProcessId::new();
-        let strategy = strategies.get_cli(kind);
         let shell =
             crate::host::run_terminal::AgentTerminalShell::configured(&settings).into_string();
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result = match launch {
-                Some(launch) => {
-                    let Some(strategy) = strategy else {
-                        return Err(format!("CLI strategy not registered for {kind:?}"));
-                    };
-                    let (args, env, mcp_revision) = rebuilt_args_env_for_restart(
-                        &launch,
-                        &strategy,
-                        &shell,
-                        session_id.as_deref(),
-                        new_id,
-                    )?;
-                    Ok((new_id, launch.command, args, launch.cwd, env, mcp_revision))
-                }
-                None => Err("agent launch configuration is unavailable".to_string()),
-            };
-            if let Some(wake) = wake {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        commands
-            .entity(msg.entity)
-            .insert(PendingAgentRestart { task });
+        let Some(launch) = launch else {
+            bevy::log::warn!("agent launch configuration is unavailable");
+            continue;
+        };
+        commands.entity(msg.entity).insert((
+            PendingAgentRestart,
+            AgentRestartRequest {
+                launch,
+                shell,
+                session_id,
+                anchor: new_id,
+                kind,
+            },
+        ));
     }
 }
 
@@ -535,7 +478,8 @@ fn drain_agent_restarts(
         &mut ProcessId,
         Option<&mut TerminalLaunch>,
         Option<&TerminalGridSize>,
-        &mut PendingAgentRestart,
+        &AgentRestartRequest,
+        &mut AgentRestartTask,
     )>,
     connected: Option<Single<(), With<ServiceConnected>>>,
     mut restart_requests: MessageWriter<RestartAgentPty>,
@@ -545,18 +489,26 @@ fn drain_agent_restarts(
     if connected.is_none() {
         return;
     }
-    for (entity, mut pid, mut launch, grid, mut pending) in &mut q {
-        let Some(result) = future::block_on(future::poll_once(&mut pending.task)) else {
+    for (entity, mut pid, mut launch, grid, request, mut task) in &mut q {
+        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
             continue;
         };
-        let (new_id, command, args, cwd, env, mcp_revision) = match result {
-            Ok(launch) => launch,
+        let prepared = match result {
+            Ok(prepared) => prepared,
             Err(error) => {
                 bevy::log::warn!("agent restart preparation failed: {error}");
-                commands.entity(entity).remove::<PendingAgentRestart>();
+                commands
+                    .entity(entity)
+                    .remove::<(PendingAgentRestart, AgentRestartRequest, AgentRestartTask)>();
                 continue;
             }
         };
+        let new_id = request.anchor;
+        let command = prepared.launch.command;
+        let args = prepared.launch.args;
+        let cwd = prepared.launch.cwd;
+        let env = prepared.launch.env;
+        let mcp_revision = prepared.mcp_revision;
         let (cols, rows) = grid.map(|grid| (grid.cols, grid.rows)).unwrap_or((80, 24));
         let validation = vmux_core::profile::mcp_credentials::McpCredentialAccess::with_revision(
             mcp_revision,
@@ -578,13 +530,17 @@ fn drain_agent_restarts(
                 }));
             }
             Ok(None) => {
-                commands.entity(entity).remove::<PendingAgentRestart>();
+                commands
+                    .entity(entity)
+                    .remove::<(PendingAgentRestart, AgentRestartRequest, AgentRestartTask)>();
                 restart_requests.write(RestartAgentPty { entity });
                 continue;
             }
             Err(error) => {
                 bevy::log::warn!("agent restart validation failed: {error}");
-                commands.entity(entity).remove::<PendingAgentRestart>();
+                commands
+                    .entity(entity)
+                    .remove::<(PendingAgentRestart, AgentRestartRequest, AgentRestartTask)>();
                 continue;
             }
         }
@@ -594,10 +550,11 @@ fn drain_agent_restarts(
             launch.env = env;
         }
         commands.trigger(vmux_terminal::TerminalRestartRequest { terminal: entity });
-        commands
-            .entity(entity)
-            .remove::<ProcessExited>()
-            .remove::<PendingAgentRestart>();
+        commands.entity(entity).remove::<ProcessExited>().remove::<(
+            PendingAgentRestart,
+            AgentRestartRequest,
+            AgentRestartTask,
+        )>();
     }
 }
 
@@ -661,15 +618,17 @@ mod tests {
             kind: vmux_core::terminal::TerminalKind::Claude,
         };
         let new_id = ProcessId::new();
-        let (args, _env, _) = rebuilt_args_env_for_restart(
-            &launch,
-            &crate::host::cli::CLAUDE,
-            "/bin/zsh",
-            None,
-            new_id,
-        )
+        let prepared = AgentRestartRequest {
+            launch,
+            shell: "/bin/zsh".to_string(),
+            session_id: None,
+            anchor: new_id,
+            kind: crate::AgentKind::Claude,
+        }
+        .prepare::<crate::host::cli::claude::ClaudeLaunch>()
         .unwrap();
         let _ = std::fs::remove_dir_all(&temp);
+        let args = prepared.launch.args;
         let joined = args.join(" ");
         assert!(joined.contains("--anchor"), "args carry --anchor: {joined}");
         assert!(joined.contains(&new_id.to_string()), "anchor is the new id");
@@ -694,16 +653,18 @@ mod tests {
             kind: vmux_core::terminal::TerminalKind::Codex,
         };
 
-        let (_, env, _) = rebuilt_args_env_for_restart(
-            &launch,
-            &crate::host::cli::CODEX,
-            "/bin/zsh",
-            None,
-            ProcessId::new(),
-        )
+        let prepared = AgentRestartRequest {
+            launch,
+            shell: "/bin/zsh".to_string(),
+            session_id: None,
+            anchor: ProcessId::new(),
+            kind: crate::AgentKind::Codex,
+        }
+        .prepare::<crate::host::cli::codex::CodexLaunch>()
         .unwrap();
 
         let _ = std::fs::remove_dir_all(&temp);
+        let env = prepared.launch.env;
         assert!(
             !env.iter()
                 .any(|(name, _)| name.starts_with("VMUX_MCP_OAUTH_"))
@@ -721,13 +682,14 @@ mod tests {
         };
 
         assert!(
-            rebuilt_args_env_for_restart(
-                &launch,
-                &crate::host::cli::CODEX,
-                "/bin/zsh",
-                None,
-                ProcessId::new(),
-            )
+            AgentRestartRequest {
+                launch,
+                shell: "/bin/zsh".to_string(),
+                session_id: None,
+                anchor: ProcessId::new(),
+                kind: crate::AgentKind::Codex,
+            }
+            .prepare::<crate::host::cli::codex::CodexLaunch>()
             .is_err()
         );
     }

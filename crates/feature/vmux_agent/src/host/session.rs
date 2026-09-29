@@ -11,7 +11,7 @@ pub use vmux_core::agent::{AgentSession, PendingAgentSession, SessionId};
 
 #[cfg(test)]
 use crate::AgentKind;
-use crate::strategy::AgentStrategies;
+use crate::session_source::CliSessionSources;
 
 use super::cli::CliSessionRoot;
 
@@ -49,14 +49,14 @@ impl Plugin for AgentSessionLifecyclePlugin {
 
 #[allow(clippy::type_complexity)]
 fn format_agent_url(
-    strategies: AgentStrategies,
+    sources: CliSessionSources,
     mut q: Query<
         (Option<&SessionId>, &AgentSession, &mut PageMetadata),
         Or<(Changed<SessionId>, Added<AgentSession>, Added<PageMetadata>)>,
     >,
 ) {
     for (sid, agent, mut meta) in &mut q {
-        if strategies.get_cli(agent.kind).is_none() {
+        if sources.get(agent.kind).is_none() {
             continue;
         }
         let next = match sid {

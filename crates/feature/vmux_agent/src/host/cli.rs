@@ -3,32 +3,98 @@ pub mod codex;
 pub mod vibe;
 
 #[cfg(test)]
-pub(super) const CLAUDE: CliStrategy = claude::CLI;
+pub(super) const CLAUDE: CliSessionSource = claude::SESSIONS;
 #[cfg(test)]
-pub(super) const CODEX: CliStrategy = codex::CLI;
+pub(super) const CODEX: CliSessionSource = codex::SESSIONS;
 #[cfg(test)]
-pub(super) const VIBE: CliStrategy = vibe::CLI;
+pub(super) const VIBE: CliSessionSource = vibe::SESSIONS;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use bevy::prelude::{App, Component, Plugin};
+use bevy::prelude::*;
+use bevy::tasks::IoTaskPool;
 
 use crate::message::Message;
 use vmux_core::agent::AgentKind;
 
-use crate::McpServerConfig;
+use crate::host::launch::{AgentLaunchRequest, AgentRestartRequest, CliLaunchProvider};
+use crate::host::spawn::{AgentLaunchTask, AgentRestartTask, PrepareAgentLaunchSet};
 
 pub(super) struct CliPlugin;
 
 impl Plugin for CliPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            CliLaunchPlugin,
             vibe::VibeCliPlugin,
             claude::ClaudeCliPlugin,
             codex::CodexCliPlugin,
         ));
+    }
+}
+
+pub(super) struct CliLaunchPlugin;
+
+impl Plugin for CliLaunchPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                prepare_launches::<vibe::VibeLaunch>,
+                prepare_launches::<claude::ClaudeLaunch>,
+                prepare_launches::<codex::CodexLaunch>,
+                prepare_restarts::<vibe::VibeLaunch>,
+                prepare_restarts::<claude::ClaudeLaunch>,
+                prepare_restarts::<codex::CodexLaunch>,
+            )
+                .in_set(PrepareAgentLaunchSet),
+        );
+    }
+}
+
+fn prepare_launches<P: CliLaunchProvider>(
+    requests: Query<(Entity, &AgentLaunchRequest), Added<AgentLaunchRequest>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (entity, request) in &requests {
+        if request.kind != P::KIND {
+            continue;
+        }
+        let request = request.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = request.prepare::<P>();
+            if let Some(wake) = wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands.entity(entity).insert(AgentLaunchTask(task));
+    }
+}
+
+fn prepare_restarts<P: CliLaunchProvider>(
+    requests: Query<(Entity, &AgentRestartRequest), Added<AgentRestartRequest>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (entity, request) in &requests {
+        if request.kind != P::KIND {
+            continue;
+        }
+        let request = request.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = request.prepare::<P>();
+            if let Some(wake) = wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands.entity(entity).insert(AgentRestartTask(task));
     }
 }
 
@@ -58,6 +124,7 @@ pub struct ResumableSession {
     pub transcript: PathBuf,
     pub mtime: SystemTime,
     pub title: String,
+    pub latest: String,
     pub cross_runtime: bool,
 }
 
@@ -146,49 +213,14 @@ pub(crate) fn lines_skipping_invalid_utf8<R: std::io::BufRead>(
 }
 
 #[derive(Component, Clone, Copy)]
-pub struct CliStrategy {
+pub struct CliSessionSource {
     pub kind: AgentKind,
-    pub build_args: fn(&McpServerConfig, Option<&str>) -> Vec<String>,
-    pub model_args: Option<fn(&str) -> Vec<String>>,
-    pub model_env: Option<fn(&str) -> Vec<(String, String)>>,
-    pub effort_args: Option<fn(&str) -> Vec<String>>,
-    pub build_env: fn(&McpServerConfig) -> Vec<(String, String)>,
-    pub prepare_launch: Option<fn(&McpServerConfig)>,
     pub list_sessions: fn() -> Vec<ResumableSession>,
-    pub latest_message: fn(&Path) -> String,
-    pub prompt_history: Option<fn(&Path) -> Vec<String>>,
     pub load_transcript: fn(&str) -> Result<Vec<Message>, String>,
 }
 
-impl CliStrategy {
-    pub fn model_args(&self, model: &str) -> Vec<String> {
-        self.model_args
-            .map(|build| build(model))
-            .unwrap_or_default()
-    }
-
-    pub fn model_env(&self, model: &str) -> Vec<(String, String)> {
-        self.model_env.map(|build| build(model)).unwrap_or_default()
-    }
-
-    pub fn effort_args(&self, effort: &str) -> Vec<String> {
-        self.effort_args
-            .map(|build| build(effort))
-            .unwrap_or_default()
-    }
-
-    pub fn prepare_launch(&self, mcp: &McpServerConfig) {
-        if let Some(prepare) = self.prepare_launch {
-            prepare(mcp);
-        }
-    }
-
-    pub fn prompt_history(&self, cwd: &Path) -> Vec<String> {
-        self.prompt_history
-            .map(|load| load(cwd))
-            .unwrap_or_default()
-    }
-}
+#[derive(Component, Clone, Copy)]
+pub struct CliPromptHistory(pub fn(&Path) -> Vec<String>);
 
 #[cfg(test)]
 mod tests {

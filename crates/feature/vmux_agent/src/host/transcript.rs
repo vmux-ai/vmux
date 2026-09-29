@@ -4,7 +4,7 @@ use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use super::model::{ModeProjection, ModelProjection};
 use crate::handoff::ImportedConversation;
 use crate::runtime::acp::{AcpModeState, AcpModelState};
-use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
+use crate::session_source::{acp_agent_kind, kind_supports_cross_runtime};
 #[cfg(test)]
 use vmux_chat::event::ChatItem;
 use vmux_chat::event::{

@@ -5,12 +5,13 @@ use std::time::SystemTime;
 use bevy::prelude::*;
 
 use super::{
-    CliModelCatalog, CliSessionRoot, CliStrategy, ResumableSession, VibeCli,
+    CliModelCatalog, CliSessionRoot, CliSessionSource, ResumableSession, VibeCli,
     lines_skipping_invalid_utf8,
 };
 use crate::session::{AgentSession, AgentSessionExited, PendingAgentSession, SessionId};
 use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
 
+use super::super::launch::CliLaunchProvider;
 use super::super::session::{DiscoverAgentSessions, DiscoverAgentSessionsSet};
 
 pub(super) struct VibeCliPlugin;
@@ -26,9 +27,9 @@ impl Plugin for VibeCliPlugin {
 
 fn spawn_vibe_cli(mut commands: Commands) {
     commands.spawn((
-        Name::new("Vibe CLI strategy"),
+        Name::new("Vibe CLI session source"),
         VibeCli,
-        CLI,
+        SESSIONS,
         CliSessionRoot(sessions_root()),
         VibeModels::load(),
     ));
@@ -101,25 +102,39 @@ fn vibe_home() -> PathBuf {
         })
 }
 
-pub(super) const CLI: CliStrategy = CliStrategy {
+pub(super) const SESSIONS: CliSessionSource = CliSessionSource {
     kind: AgentKind::Vibe,
-    build_args,
-    model_args: None,
-    model_env: Some(model_env),
-    effort_args: None,
-    build_env,
-    prepare_launch: Some(prepare_launch),
     list_sessions,
-    latest_message: vibe_latest_message,
-    prompt_history: None,
     load_transcript,
 };
+
+pub(crate) struct VibeLaunch;
+
+impl CliLaunchProvider for VibeLaunch {
+    const KIND: AgentKind = AgentKind::Vibe;
+
+    fn arguments(_mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
+        build_args(session_id)
+    }
+
+    fn model_environment(model: &str) -> Vec<(String, String)> {
+        vec![("VIBE_ACTIVE_MODEL".to_string(), model.to_string())]
+    }
+
+    fn environment(mcp: &McpServerConfig) -> Vec<(String, String)> {
+        build_env(mcp)
+    }
+
+    fn prepare(mcp: &McpServerConfig) {
+        ensure_vibe_hooks(&mcp.command);
+    }
+}
 
 fn sessions_root() -> PathBuf {
     vibe_home().join("logs").join("session")
 }
 
-fn build_args(_mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
+fn build_args(session_id: Option<&str>) -> Vec<String> {
     let mut args = vec!["--trust".to_string()];
     for tool in VIBE_WEB_TOOLS {
         args.push("--disabled-tools".to_string());
@@ -133,10 +148,6 @@ fn build_args(_mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
         args.push(sid.to_string());
     }
     args
-}
-
-fn model_env(model: &str) -> Vec<(String, String)> {
-    vec![("VIBE_ACTIVE_MODEL".to_string(), model.to_string())]
 }
 
 fn build_env(mcp: &McpServerConfig) -> Vec<(String, String)> {
@@ -159,10 +170,6 @@ fn build_env(mcp: &McpServerConfig) -> Vec<(String, String)> {
     ];
     env.extend(crate::managed_mcp::McpAuthorization::environment());
     env
-}
-
-fn prepare_launch(mcp: &McpServerConfig) {
-    ensure_vibe_hooks(&mcp.command);
 }
 
 fn list_sessions() -> Vec<ResumableSession> {
@@ -515,11 +522,13 @@ fn list_vibe_sessions(root: &Path) -> Vec<ResumableSession> {
                     })
             })
             .unwrap_or_else(|| short_id.to_string());
+        let transcript = path.join("messages.jsonl");
         out.push(ResumableSession {
             kind: AgentKind::Vibe,
             sid: short_id.to_string(),
             cwd,
-            transcript: path.join("messages.jsonl"),
+            latest: vibe_latest_message(&transcript),
+            transcript,
             mtime,
             title,
             cross_runtime: true,
@@ -630,7 +639,7 @@ mod tests {
         assert_eq!(models.models[0].id, "opus");
         assert_eq!(models.models[0].description, "anthropic");
         assert_eq!(
-            CLI.model_env("opus"),
+            VibeLaunch::model_environment("opus"),
             [("VIBE_ACTIVE_MODEL".to_string(), "opus".to_string())]
         );
         let _ = std::fs::remove_dir_all(&tmp);
@@ -646,7 +655,7 @@ mod tests {
         let prev = std::env::var("VMUX_TEST").ok();
         unsafe { std::env::remove_var("VMUX_TEST") };
         assert_eq!(
-            (CLI.build_args)(&mcp, None),
+            VibeLaunch::arguments(&mcp, None),
             vec![
                 "--trust",
                 "--disabled-tools",
@@ -656,7 +665,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            (CLI.build_args)(&mcp, Some("sid-1")),
+            VibeLaunch::arguments(&mcp, Some("sid-1")),
             vec![
                 "--trust",
                 "--disabled-tools",
@@ -669,7 +678,7 @@ mod tests {
         );
         unsafe { std::env::set_var("VMUX_TEST", "1") };
         assert!(
-            (CLI.build_args)(&mcp, None)
+            VibeLaunch::arguments(&mcp, None)
                 .iter()
                 .any(|a| a == "--auto-approve")
         );
@@ -686,7 +695,7 @@ mod tests {
             args: vec![],
             cwd: None,
         };
-        let env = (CLI.build_env)(&mcp);
+        let env = VibeLaunch::environment(&mcp);
         assert!(env.iter().all(|(key, _)| key != "VIBE_DISABLED_TOOLS"));
     }
 
@@ -697,7 +706,7 @@ mod tests {
             args: vec![],
             cwd: None,
         };
-        let env = (CLI.build_env)(&mcp);
+        let env = VibeLaunch::environment(&mcp);
         assert!(
             env.iter()
                 .any(|(k, v)| k == "VIBE_ENABLE_EXPERIMENTAL_HOOKS" && v == "true")

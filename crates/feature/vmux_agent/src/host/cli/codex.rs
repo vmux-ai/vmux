@@ -8,12 +8,13 @@ use std::time::{Duration, Instant, SystemTime};
 use bevy::prelude::*;
 
 use super::{
-    CliModelCatalog, CliSessionRoot, CliStrategy, CodexCli, PromptHistory, ResumableSession,
-    lines_skipping_invalid_utf8,
+    CliModelCatalog, CliPromptHistory, CliSessionRoot, CliSessionSource, CodexCli, PromptHistory,
+    ResumableSession, lines_skipping_invalid_utf8,
 };
 use crate::session::{AgentSession, PendingAgentSession, SessionId};
 use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
 
+use super::super::launch::CliLaunchProvider;
 use super::super::session::{DiscoverAgentSessions, DiscoverAgentSessionsSet};
 
 pub(super) struct CodexCliPlugin;
@@ -27,9 +28,10 @@ impl Plugin for CodexCliPlugin {
 
 fn spawn_codex_cli(mut commands: Commands) {
     commands.spawn((
-        Name::new("Codex CLI strategy"),
+        Name::new("Codex CLI session source"),
         CodexCli,
-        CLI,
+        SESSIONS,
+        CliPromptHistory(prompt_history),
         CliSessionRoot(sessions_root()),
         CodexModels::load(),
     ));
@@ -101,19 +103,33 @@ an unavailable tool, continue with the available tools; for website visuals, use
 or available project assets.";
 const FILE_TOUCH_MATCHER: &str = "apply_patch|Edit|Write";
 
-pub(super) const CLI: CliStrategy = CliStrategy {
+pub(super) const SESSIONS: CliSessionSource = CliSessionSource {
     kind: AgentKind::Codex,
-    build_args,
-    model_args: Some(model_args),
-    model_env: None,
-    effort_args: Some(effort_args),
-    build_env,
-    prepare_launch: None,
     list_sessions,
-    latest_message: codex_latest_message,
-    prompt_history: Some(prompt_history),
     load_transcript,
 };
+
+pub(crate) struct CodexLaunch;
+
+impl CliLaunchProvider for CodexLaunch {
+    const KIND: AgentKind = AgentKind::Codex;
+
+    fn arguments(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
+        build_args(mcp, session_id)
+    }
+
+    fn model_arguments(model: &str) -> Vec<String> {
+        model_args(model)
+    }
+
+    fn effort_arguments(effort: &str) -> Vec<String> {
+        effort_args(effort)
+    }
+
+    fn environment(mcp: &McpServerConfig) -> Vec<(String, String)> {
+        build_env(mcp)
+    }
+}
 
 fn sessions_root() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
@@ -753,6 +769,7 @@ fn list_codex_sessions(root: &Path) -> Vec<ResumableSession> {
             kind: AgentKind::Codex,
             sid: head.payload.id.clone(),
             cwd: PathBuf::from(&head.payload.cwd),
+            latest: codex_latest_message(path),
             transcript: path.to_path_buf(),
             mtime,
             title,
@@ -899,7 +916,10 @@ mod tests {
 
         assert_eq!(models.selected, "gpt-next");
         assert_eq!(models.models[0].name, "GPT Next");
-        assert_eq!(CLI.model_args("gpt-next"), ["--model", "gpt-next"]);
+        assert_eq!(
+            CodexLaunch::model_arguments("gpt-next"),
+            ["--model", "gpt-next"]
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -965,7 +985,7 @@ mod tests {
     #[test]
     fn effort_args_pass_codex_reasoning_override() {
         assert_eq!(
-            CLI.effort_args("high"),
+            CodexLaunch::effort_arguments("high"),
             ["-c", "model_reasoning_effort=high"]
         );
     }
@@ -990,7 +1010,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = (CLI.build_args)(&mcp, None);
+        let args = CodexLaunch::arguments(&mcp, None);
         assert!(!args.iter().any(|a| a == "-s"));
         assert!(!args.iter().any(|a| a == "-a"));
         assert!(
@@ -1062,7 +1082,7 @@ mod tests {
             args: vec!["mcp".into(), "--anchor".into(), "42".into()],
             cwd: None,
         };
-        let args = (CLI.build_args)(&mcp, None);
+        let args = CodexLaunch::arguments(&mcp, None);
         assert!(args.iter().any(|a| a == "features.hooks=true"));
         let hook = args
             .iter()
@@ -1081,7 +1101,7 @@ mod tests {
             args: vec!["mcp".into(), "--anchor".into(), "42".into()],
             cwd: None,
         };
-        let args = (CLI.build_args)(&mcp, None);
+        let args = CodexLaunch::arguments(&mcp, None);
         let hook = args
             .iter()
             .find(|a| a.starts_with("hooks.Stop="))
@@ -1102,7 +1122,7 @@ mod tests {
             args: vec![],
             cwd: None,
         };
-        let args = (CLI.build_args)(&mcp, Some("abc-123"));
+        let args = CodexLaunch::arguments(&mcp, Some("abc-123"));
         let resume_idx = args.iter().position(|a| a == "resume").unwrap();
         assert_eq!(args[resume_idx + 1], "abc-123");
         let last_dash_c = args.iter().rposition(|a| a == "-c").unwrap();
@@ -1121,7 +1141,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = (CLI.build_args)(&mcp, None);
+        let args = CodexLaunch::arguments(&mcp, None);
         let disabled: Vec<&str> = args
             .windows(2)
             .filter(|w| w[0] == "--disable")
@@ -1138,7 +1158,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = (CLI.build_args)(&mcp, None);
+        let args = CodexLaunch::arguments(&mcp, None);
         assert!(args.iter().any(|a| a == "tools.web_search=false"));
     }
 
@@ -1177,7 +1197,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = (CLI.build_args)(&mcp, None);
+        let args = CodexLaunch::arguments(&mcp, None);
         let steer = args
             .iter()
             .find(|a| a.starts_with("developer_instructions="))
@@ -1196,7 +1216,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = (CLI.build_args)(&mcp, None);
+        let args = CodexLaunch::arguments(&mcp, None);
         assert!(
             args.iter()
                 .any(|a| a == "features.code_mode.direct_only_tool_namespaces=[\"mcp__vmux\"]"),

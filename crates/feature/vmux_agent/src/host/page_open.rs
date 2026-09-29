@@ -2069,15 +2069,19 @@ mod tests {
             .spawn(AgentExecutableOverride(std::collections::HashMap::from([
                 (AgentKind::Codex, true),
             ])));
-        app.add_plugins((MinimalPlugins, SpawnPlugin))
-            .add_message::<SpawnAgentInStackRequest>()
-            .add_message::<crate::session::AgentSessionExited>()
-            .add_message::<vmux_core::agent::RestartAgentPty>()
-            .add_message::<vmux_core::agent::PageAgentAttachRequest>()
-            .add_message::<vmux_core::agent::PageAgentSpawnStackRequest>()
-            .add_message::<vmux_core::agent::PageAgentSpawnDefaultRequest>()
-            .add_message::<vmux_core::agent::PageAgentAttachDefaultRequest>()
-            .insert_resource(test_settings());
+        app.add_plugins((
+            MinimalPlugins,
+            crate::host::cli::CliLaunchPlugin,
+            SpawnPlugin,
+        ))
+        .add_message::<SpawnAgentInStackRequest>()
+        .add_message::<crate::session::AgentSessionExited>()
+        .add_message::<vmux_core::agent::RestartAgentPty>()
+        .add_message::<vmux_core::agent::PageAgentAttachRequest>()
+        .add_message::<vmux_core::agent::PageAgentSpawnStackRequest>()
+        .add_message::<vmux_core::agent::PageAgentSpawnDefaultRequest>()
+        .add_message::<vmux_core::agent::PageAgentAttachDefaultRequest>()
+        .insert_resource(test_settings());
         let stack = app.world_mut().spawn(stack_bundle()).id();
         app.world_mut()
             .entity_mut(stack)

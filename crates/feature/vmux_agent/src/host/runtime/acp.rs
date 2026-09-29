@@ -101,8 +101,8 @@ fn cli_target(
     resume: Option<&str>,
     cwd: &std::path::Path,
 ) -> Option<(String, std::path::PathBuf)> {
-    let kind = crate::strategy::acp_agent_kind(agent_id)?;
-    if !crate::strategy::kind_supports_cross_runtime(kind) {
+    let kind = crate::session_source::acp_agent_kind(agent_id)?;
+    if !crate::session_source::kind_supports_cross_runtime(kind) {
         return None;
     }
     let sid = resume?;

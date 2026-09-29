@@ -6,12 +6,13 @@ use bevy::prelude::*;
 use serde_json::{Map, Value};
 
 use super::{
-    ClaudeCli, CliModelCatalog, CliSessionRoot, CliStrategy, PromptHistory, ResumableSession,
-    SameProject, lines_skipping_invalid_utf8,
+    ClaudeCli, CliModelCatalog, CliPromptHistory, CliSessionRoot, CliSessionSource, PromptHistory,
+    ResumableSession, SameProject, lines_skipping_invalid_utf8,
 };
 use crate::session::{AgentSession, PendingAgentSession, SessionId};
 use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
 
+use super::super::launch::CliLaunchProvider;
 use super::super::session::{DiscoverAgentSessions, DiscoverAgentSessionsSet};
 
 pub(super) struct ClaudeCliPlugin;
@@ -25,9 +26,10 @@ impl Plugin for ClaudeCliPlugin {
 
 fn spawn_claude_cli(mut commands: Commands) {
     commands.spawn((
-        Name::new("Claude CLI strategy"),
+        Name::new("Claude CLI session source"),
         ClaudeCli,
-        CLI,
+        SESSIONS,
+        CliPromptHistory(prompt_history),
         CliSessionRoot(sessions_root()),
         ClaudeModels::load(),
     ));
@@ -96,19 +98,33 @@ request immediately. Never enumerate tool registries or wait for optional tools.
 an unavailable tool, continue with the available tools.";
 const FILE_TOUCH_MATCHER: &str = "Read|Edit|Write|MultiEdit";
 
-pub(super) const CLI: CliStrategy = CliStrategy {
+pub(super) const SESSIONS: CliSessionSource = CliSessionSource {
     kind: AgentKind::Claude,
-    build_args,
-    model_args: Some(model_args),
-    model_env: None,
-    effort_args: Some(effort_args),
-    build_env,
-    prepare_launch: None,
     list_sessions,
-    latest_message: claude_latest_message,
-    prompt_history: Some(prompt_history),
     load_transcript,
 };
+
+pub(crate) struct ClaudeLaunch;
+
+impl CliLaunchProvider for ClaudeLaunch {
+    const KIND: AgentKind = AgentKind::Claude;
+
+    fn arguments(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
+        build_args(mcp, session_id)
+    }
+
+    fn model_arguments(model: &str) -> Vec<String> {
+        model_args(model)
+    }
+
+    fn effort_arguments(effort: &str) -> Vec<String> {
+        effort_args(effort)
+    }
+
+    fn environment(mcp: &McpServerConfig) -> Vec<(String, String)> {
+        build_env(mcp)
+    }
+}
 
 fn sessions_root() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
@@ -395,6 +411,7 @@ fn list_claude_sessions(root: &Path) -> Vec<ResumableSession> {
                 kind: AgentKind::Claude,
                 sid: stem.to_string(),
                 cwd: head.cwd,
+                latest: claude_latest_message(&path),
                 transcript: path,
                 mtime,
                 title: head.title,
@@ -599,7 +616,7 @@ mod tests {
 
         assert_eq!(models.selected, "opus");
         assert!(models.models.iter().any(|model| model.id == "sonnet"));
-        assert_eq!(CLI.model_args("opus"), ["--model", "opus"]);
+        assert_eq!(ClaudeLaunch::model_arguments("opus"), ["--model", "opus"]);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -648,7 +665,7 @@ mod tests {
 
     #[test]
     fn effort_args_pass_claude_effort_flag() {
-        assert_eq!(CLI.effort_args("high"), ["--effort", "high"]);
+        assert_eq!(ClaudeLaunch::effort_arguments("high"), ["--effort", "high"]);
     }
 
     #[test]
@@ -658,7 +675,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = (CLI.build_args)(&mcp, None);
+        let args = ClaudeLaunch::arguments(&mcp, None);
         assert!(args.iter().any(|a| a == "--mcp-config"));
         assert!(!args.iter().any(|a| a == "--strict-mcp-config"));
         assert!(!args.iter().any(|a| a == "--permission-mode"));
@@ -672,7 +689,7 @@ mod tests {
             args: vec![],
             cwd: None,
         };
-        let args = (CLI.build_args)(&mcp, Some("abc-123"));
+        let args = ClaudeLaunch::arguments(&mcp, Some("abc-123"));
         let resume_idx = args.iter().position(|a| a == "--resume").unwrap();
         assert_eq!(args[resume_idx + 1], "abc-123");
         assert_eq!(
@@ -689,7 +706,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = (CLI.build_args)(&mcp, None);
+        let args = ClaudeLaunch::arguments(&mcp, None);
 
         let disallowed = args.iter().position(|a| a == "--disallowedTools").unwrap();
         assert_eq!(args[disallowed + 1], "Bash,Monitor,WebSearch,WebFetch");
@@ -728,7 +745,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = (CLI.build_args)(&mcp, None);
+        let args = ClaudeLaunch::arguments(&mcp, None);
         let settings = args.iter().position(|a| a == "--settings").unwrap();
         let json = &args[settings + 1];
         assert!(json.contains("Notification"));
@@ -747,7 +764,7 @@ mod tests {
             args: vec!["mcp".into(), "--anchor".into(), "42".into()],
             cwd: None,
         };
-        let args = (CLI.build_args)(&mcp, None);
+        let args = ClaudeLaunch::arguments(&mcp, None);
         let settings = args.iter().position(|a| a == "--settings").unwrap();
         let json = &args[settings + 1];
         assert!(json.contains("PostToolUse"), "json: {json}");
@@ -764,7 +781,7 @@ mod tests {
             args: vec!["mcp".into(), "--anchor".into(), "42".into()],
             cwd: None,
         };
-        let args = (CLI.build_args)(&mcp, None);
+        let args = ClaudeLaunch::arguments(&mcp, None);
         let settings = args.iter().position(|a| a == "--settings").unwrap();
         let json = &args[settings + 1];
         let parsed: Value = serde_json::from_str(json).unwrap();
@@ -804,7 +821,7 @@ mod tests {
         };
 
         assert_eq!(
-            (CLI.build_env)(&mcp),
+            ClaudeLaunch::environment(&mcp),
             vec![("MCP_TOOL_TIMEOUT".into(), "660000".into())]
         );
     }
