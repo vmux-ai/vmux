@@ -14,7 +14,7 @@ use vmux_core::host::persistence::{
     PersistenceDirty, WorkspaceRestore, WorkspaceSaveRequest, WorkspaceStoreValidators,
     persisted_components,
 };
-use vmux_core::profile::{is_test_session, store_dir};
+use vmux_core::profile::{ProfilePaths, is_test_session};
 #[cfg(test)]
 use vmux_core::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
 use vmux_layout::space::Space;
@@ -154,7 +154,7 @@ struct WorkspaceStorePath(PathBuf);
 
 impl Default for WorkspaceStorePath {
     fn default() -> Self {
-        Self(store_dir().join("store.ron"))
+        Self(ProfilePaths::current().store().join("store.ron"))
     }
 }
 

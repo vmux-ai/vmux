@@ -19,7 +19,7 @@ use vmux_command::event::{StartSelectMode, StartSelectModel};
 use vmux_command::snapshot::{AgentPromptTarget, CommandBarProjection};
 use vmux_core::agent::{default_effort, effort_levels};
 use vmux_core::host::UiStateWrite;
-use vmux_core::profile::profile_dir;
+use vmux_core::profile::ProfilePaths;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_layout::Browser;
 use vmux_path::AtomicFile;
@@ -303,11 +303,11 @@ impl SavedAgentModel {
 }
 
 fn agent_model_selections_path() -> std::path::PathBuf {
-    profile_dir().join("agent-models.json")
+    ProfilePaths::current().profile().join("agent-models.json")
 }
 
 fn agent_mode_selections_path() -> std::path::PathBuf {
-    profile_dir().join("agent-modes.json")
+    ProfilePaths::current().profile().join("agent-modes.json")
 }
 
 fn spawn_agent_model_registry(mut commands: Commands) {

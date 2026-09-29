@@ -47,7 +47,11 @@ struct AgentApprovalStore {
 
 impl AgentApprovalStore {
     fn load() -> Self {
-        Self::load_from(vmux_core::profile::profile_dir().join("agent-approvals.json"))
+        Self::load_from(
+            vmux_core::profile::ProfilePaths::current()
+                .profile()
+                .join("agent-approvals.json"),
+        )
     }
 
     fn load_from(path: PathBuf) -> Self {

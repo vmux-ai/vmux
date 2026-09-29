@@ -223,6 +223,13 @@ pub(super) struct ImportedNpmManifest {
     packages: usize,
 }
 
+impl ImportedNpmManifest {
+    #[cfg(test)]
+    pub(super) fn packages(&self) -> usize {
+        self.packages
+    }
+}
+
 fn import_npm_manifest_system(
     operations: Query<
         (Entity, &ImportNpmManifest, &ToolStoreTarget),

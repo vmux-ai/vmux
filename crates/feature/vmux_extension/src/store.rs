@@ -99,7 +99,7 @@ impl Default for Index {
 }
 
 pub fn root() -> PathBuf {
-    vmux_core::profile::extensions_dir()
+    vmux_core::profile::ProfilePaths::current().extensions()
 }
 
 pub fn loaded_ids() -> Vec<String> {

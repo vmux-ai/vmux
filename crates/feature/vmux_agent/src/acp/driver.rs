@@ -2498,7 +2498,7 @@ mod tests {
 
     #[test]
     fn approval_details_fall_back_to_projected_tool_call() {
-        let mut projector = AcpProjector::new();
+        let mut projector = AcpProjector::default();
         projector.apply(agent_client_protocol::schema::v1::SessionUpdate::ToolCall(
             ToolCall::new("call-1", "vmux.run")
                 .raw_input(serde_json::json!({"command": "echo hi", "focus": true})),
@@ -2523,7 +2523,7 @@ mod tests {
 
     #[test]
     fn approval_details_prefer_permission_request_fields() {
-        let mut projector = AcpProjector::new();
+        let mut projector = AcpProjector::default();
         projector.apply(agent_client_protocol::schema::v1::SessionUpdate::ToolCall(
             ToolCall::new("call-1", "old").raw_input(serde_json::json!({"command": "old"})),
         ));
@@ -2556,7 +2556,7 @@ mod tests {
         );
 
         let query = ApprovalDetailsQuery::from_request(&request);
-        assert_eq!(AcpProjector::new().approval_details(&query), None);
+        assert_eq!(AcpProjector::default().approval_details(&query), None);
         assert_eq!(query.fallback(), ("Use tool".to_string(), "{}".to_string()));
     }
 

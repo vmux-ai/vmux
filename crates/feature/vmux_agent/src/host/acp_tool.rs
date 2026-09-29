@@ -64,7 +64,7 @@ fn scan_tools(
                 .collect::<BTreeMap<_, _>>()
         })
         .unwrap_or_default();
-    let receipts = store::installed(&acp_registry::agents_dir());
+    let receipts = store::installed(&vmux_core::profile::ProfilePaths::current().agents());
     let inventory = receipts
         .into_values()
         .filter(|receipt| receipt.source_id.starts_with("acp:"))
@@ -1036,7 +1036,7 @@ const NODE_VERSION: &str = "22.11.0";
 const UV_VERSION: &str = "0.5.11";
 
 fn store_root() -> PathBuf {
-    acp_registry::agents_dir()
+    vmux_core::profile::ProfilePaths::current().agents()
 }
 
 fn write_agent_receipt(

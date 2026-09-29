@@ -50,7 +50,9 @@ fn spawn_media_permission_store(mut commands: Commands) {
 }
 
 fn store_path() -> PathBuf {
-    vmux_core::profile::profile_dir().join("media_permissions.ron")
+    vmux_core::profile::ProfilePaths::current()
+        .profile()
+        .join("media_permissions.ron")
 }
 
 impl MediaPermissionStore {

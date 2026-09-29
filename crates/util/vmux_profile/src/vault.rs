@@ -20,11 +20,13 @@ pub use status::VaultStatus;
 pub use sync::{initialize, sync};
 
 pub fn root_dir() -> PathBuf {
-    super::config_dir()
+    super::ProfilePaths::current().config()
 }
 
 pub fn repository_dir() -> PathBuf {
-    super::application_data_dir().join("vault")
+    super::ProfilePaths::current()
+        .application_data()
+        .join("vault")
 }
 
 pub fn is_managed_local_path(path: &Path) -> bool {

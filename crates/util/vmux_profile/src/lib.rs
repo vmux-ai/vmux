@@ -61,7 +61,7 @@ impl Profile {
     }
 
     pub fn display_name(&self) -> String {
-        self.display_name_in(&shared_data_dir(), is_test_session())
+        self.display_name_in(&ProfilePaths::current().shared_data(), is_test_session())
     }
 
     pub fn set_display_name(&self, name: &str) -> std::io::Result<()> {
@@ -72,7 +72,7 @@ impl Profile {
                 "profile name cannot be empty",
             ));
         }
-        let path = self.display_name_path(&shared_data_dir());
+        let path = self.display_name_path(&ProfilePaths::current().shared_data());
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -82,17 +82,21 @@ impl Profile {
     pub fn exists(&self) -> bool {
         *self == Self::current()
             || self
-                .display_name_path(&shared_data_dir())
+                .display_name_path(&ProfilePaths::current().shared_data())
                 .parent()
                 .is_some_and(|path| path.is_dir())
     }
 
     pub fn all() -> Vec<Self> {
-        Self::all_in(&shared_data_dir(), Self::current())
+        Self::all_in(&ProfilePaths::current().shared_data(), Self::current())
     }
 
     pub fn create(name: &str) -> std::io::Result<Self> {
-        Self::create_in(&shared_data_dir(), name)
+        Self::create_in(&ProfilePaths::current().shared_data(), name)
+    }
+
+    pub fn cef_keychain_switches(&self) -> &'static [&'static str] {
+        cef_keychain_switches_for(is_test_session())
     }
 
     fn display_name_path(&self, data: &std::path::Path) -> PathBuf {
@@ -175,6 +179,125 @@ impl From<Profile> for String {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct ProfilePaths {
+    build: &'static str,
+    profile: Profile,
+}
+
+impl ProfilePaths {
+    pub fn current() -> Self {
+        Self {
+            build: build_profile(),
+            profile: Profile::current(),
+        }
+    }
+
+    pub fn shared_data(&self) -> PathBuf {
+        #[cfg(target_os = "macos")]
+        {
+            let home = std::env::var_os("HOME").expect("HOME not set");
+            PathBuf::from(home)
+                .join("Library/Application Support")
+                .join(data_dir_suffix_for(self.build))
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            std::env::temp_dir().join(data_dir_suffix_for(self.build))
+        }
+    }
+
+    pub fn application_data(&self) -> PathBuf {
+        let data = self.shared_data();
+        match self.build {
+            "release" | "local" => data,
+            _ => data.parent().map(PathBuf::from).unwrap_or(data),
+        }
+    }
+
+    pub fn config(&self) -> PathBuf {
+        home_dir().join(".vmux")
+    }
+
+    pub fn projects(&self) -> PathBuf {
+        self.config().join("projects")
+    }
+
+    pub fn recording(&self) -> PathBuf {
+        recording_dir_for(&self.shared_data(), self.profile.id())
+    }
+
+    pub fn settings_candidates(&self) -> Vec<PathBuf> {
+        settings_candidates_in(&self.config(), config_suffix())
+    }
+
+    pub fn settings(&self) -> PathBuf {
+        let candidates = self.settings_candidates();
+        candidates
+            .iter()
+            .find(|path| path.exists())
+            .cloned()
+            .unwrap_or_else(|| {
+                candidates
+                    .last()
+                    .cloned()
+                    .expect("settings candidates always include the shared path")
+            })
+    }
+
+    pub fn profile(&self) -> PathBuf {
+        self.shared_data().join("profiles").join(self.profile.id())
+    }
+
+    pub fn session(&self) -> PathBuf {
+        self.profile().join("session.ron")
+    }
+
+    pub fn cef_cache(&self) -> Option<String> {
+        cef_cache_path_in(
+            &self.shared_data(),
+            self.profile.id(),
+            self.build,
+            env!("VMUX_WORKTREE_ID"),
+        )
+        .to_str()
+        .map(str::to_owned)
+    }
+
+    pub fn store(&self) -> PathBuf {
+        let directory = store_dir_for(&self.shared_data(), self.profile.id());
+        let _ = std::fs::create_dir_all(&directory);
+        directory
+    }
+
+    pub fn agents(&self) -> PathBuf {
+        self.managed("agents")
+    }
+
+    pub fn extensions(&self) -> PathBuf {
+        self.managed("extensions")
+    }
+
+    pub fn lsp(&self) -> PathBuf {
+        self.managed("lsp")
+    }
+
+    pub fn migrate_legacy_personal_layout(&self) {
+        if is_test_session() {
+            return;
+        }
+        let home = home_dir();
+        let data = self.shared_data();
+        let managed_data = self.application_data();
+        migrate_legacy_personal_layout_in(&home, &data, &managed_data);
+        prune_empty_legacy_space_dirs_in(&data);
+    }
+
+    fn managed(&self, name: &str) -> PathBuf {
+        self.application_data().join(name)
+    }
+}
+
 fn data_dir_suffix_for(profile: &str) -> PathBuf {
     match profile {
         "release" | "local" => PathBuf::from("Vmux"),
@@ -182,49 +305,8 @@ fn data_dir_suffix_for(profile: &str) -> PathBuf {
     }
 }
 
-fn data_dir_suffix() -> PathBuf {
-    data_dir_suffix_for(build_profile())
-}
-
-pub fn shared_data_dir() -> PathBuf {
-    #[cfg(target_os = "macos")]
-    {
-        let home = std::env::var_os("HOME").expect("HOME not set");
-        PathBuf::from(home)
-            .join("Library/Application Support")
-            .join(data_dir_suffix())
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        std::env::temp_dir().join(data_dir_suffix())
-    }
-}
-
-pub fn application_data_dir() -> PathBuf {
-    let data = shared_data_dir();
-    match build_profile() {
-        "release" | "local" => data,
-        _ => data.parent().map(PathBuf::from).unwrap_or(data),
-    }
-}
-
-pub fn config_dir() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"));
-    home.join(".vmux")
-}
-
-pub fn projects_dir() -> PathBuf {
-    config_dir().join("projects")
-}
-
 fn recording_dir_for(data: &std::path::Path, profile: &str) -> PathBuf {
     data.join("profiles").join(profile).join("recording")
-}
-
-pub fn recording_dir() -> PathBuf {
-    recording_dir_for(&shared_data_dir(), Profile::current().id())
 }
 
 fn config_suffix() -> Option<&'static str> {
@@ -243,45 +325,6 @@ fn settings_candidates_in(base: &std::path::Path, suffix: Option<&str>) -> Vec<P
     candidates
 }
 
-pub fn settings_path_candidates() -> Vec<PathBuf> {
-    settings_candidates_in(&config_dir(), config_suffix())
-}
-
-pub fn settings_path() -> PathBuf {
-    let candidates = settings_path_candidates();
-    candidates
-        .iter()
-        .find(|path| path.exists())
-        .cloned()
-        .unwrap_or_else(|| {
-            candidates
-                .last()
-                .cloned()
-                .expect("settings candidates always include the shared path")
-        })
-}
-
-pub fn profile_dir() -> PathBuf {
-    shared_data_dir()
-        .join("profiles")
-        .join(Profile::current().id())
-}
-
-pub fn session_path() -> PathBuf {
-    profile_dir().join("session.ron")
-}
-
-pub fn cef_cache_path() -> Option<String> {
-    cef_cache_path_in(
-        &shared_data_dir(),
-        Profile::current().id(),
-        build_profile(),
-        env!("VMUX_WORKTREE_ID"),
-    )
-    .to_str()
-    .map(str::to_owned)
-}
-
 fn cef_cache_path_in(
     data: &std::path::Path,
     profile: &str,
@@ -297,10 +340,6 @@ fn cef_cache_path_in(
         .join(format!("{build_profile}-{worktree_id}"))
 }
 
-pub fn cef_keychain_switches() -> &'static [&'static str] {
-    cef_keychain_switches_for(is_test_session())
-}
-
 fn cef_keychain_switches_for(is_test_session: bool) -> &'static [&'static str] {
     if is_test_session {
         &["use-mock-keychain"]
@@ -311,28 +350,6 @@ fn cef_keychain_switches_for(is_test_session: bool) -> &'static [&'static str] {
 
 fn store_dir_for(base: &std::path::Path, _profile: &str) -> PathBuf {
     base.to_path_buf()
-}
-
-pub fn store_dir() -> PathBuf {
-    let dir = store_dir_for(&shared_data_dir(), Profile::current().id());
-    let _ = std::fs::create_dir_all(&dir);
-    dir
-}
-
-fn managed_dir(name: &str) -> PathBuf {
-    application_data_dir().join(name)
-}
-
-pub fn agents_dir() -> PathBuf {
-    managed_dir("agents")
-}
-
-pub fn extensions_dir() -> PathBuf {
-    managed_dir("extensions")
-}
-
-pub fn lsp_dir() -> PathBuf {
-    managed_dir("lsp")
 }
 
 fn spaces_root_for(data: &std::path::Path, _profile: &str) -> PathBuf {
@@ -448,17 +465,6 @@ fn migrate_legacy_personal_layout_in(
         }
     }
     let _ = std::fs::remove_dir(config.join("profiles"));
-}
-
-pub fn migrate_legacy_personal_layout() {
-    if is_test_session() {
-        return;
-    }
-    let home = home_dir();
-    let data = shared_data_dir();
-    let managed_data = application_data_dir();
-    migrate_legacy_personal_layout_in(&home, &data, &managed_data);
-    prune_empty_legacy_space_dirs_in(&data);
 }
 
 #[cfg(test)]
@@ -665,13 +671,18 @@ mod tests {
 
     #[test]
     fn shared_data_dir_ends_with_profile_suffix() {
-        assert!(shared_data_dir().ends_with(data_dir_suffix()));
+        assert!(
+            ProfilePaths::current()
+                .shared_data()
+                .ends_with(data_dir_suffix_for(build_profile()))
+        );
     }
 
     #[test]
     fn managed_data_uses_build_agnostic_application_support_root() {
-        let shared = shared_data_dir();
-        let managed = application_data_dir();
+        let paths = ProfilePaths::current();
+        let shared = paths.shared_data();
+        let managed = paths.application_data();
         assert!(shared.starts_with(&managed));
         if matches!(build_profile(), "release" | "local") {
             assert_eq!(shared, managed);
@@ -782,9 +793,10 @@ mod tests {
 
     #[test]
     fn settings_live_in_dot_vmux_not_data_dir() {
-        for candidate in settings_path_candidates() {
-            assert!(candidate.starts_with(config_dir()));
-            assert!(!candidate.starts_with(shared_data_dir()));
+        let paths = ProfilePaths::current();
+        for candidate in paths.settings_candidates() {
+            assert!(candidate.starts_with(paths.config()));
+            assert!(!candidate.starts_with(paths.shared_data()));
         }
     }
 

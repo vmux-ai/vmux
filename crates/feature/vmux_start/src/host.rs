@@ -220,7 +220,7 @@ fn on_start_select_workspace(
         return;
     }
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let projects_dir = vmux_core::profile::projects_dir();
+    let projects_dir = vmux_core::profile::ProfilePaths::current().projects();
     let initial_dir = std::fs::create_dir_all(&projects_dir)
         .ok()
         .map(|_| projects_dir)

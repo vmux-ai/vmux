@@ -15,7 +15,9 @@ fn build_settings_schema() -> SettingsSchema {
 }
 
 fn build_settings_schema_for(locale: &Locale) -> SettingsSchema {
-    let directory = vmux_core::profile::config_dir().join("locales");
+    let directory = vmux_core::profile::ProfilePaths::current()
+        .config()
+        .join("locales");
     let tag = locale.as_str();
     if let Some(source) = [tag, tag.split('-').next().unwrap_or(tag)]
         .into_iter()

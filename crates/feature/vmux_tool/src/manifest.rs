@@ -145,7 +145,7 @@ impl ToolStore {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/"));
-        Self::new(vmux_profile::config_dir(), home)
+        Self::new(vmux_profile::ProfilePaths::current().config(), home)
     }
 
     pub fn new(config_dir: impl Into<PathBuf>, home: impl Into<PathBuf>) -> Self {

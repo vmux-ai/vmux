@@ -9,7 +9,7 @@ use crate::lsp::package_path::{PackageName, PackagePath};
 const RECEIPT_MAX_BYTES: u64 = 1024 * 1024;
 
 pub fn default_root() -> PathBuf {
-    vmux_core::profile::lsp_dir()
+    vmux_core::profile::ProfilePaths::current().lsp()
 }
 
 pub fn bin_dir(root: &Path) -> PathBuf {

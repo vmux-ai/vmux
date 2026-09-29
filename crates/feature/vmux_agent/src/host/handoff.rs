@@ -131,7 +131,9 @@ pub fn save(
     imported: &ImportedConversation,
 ) -> Result<(), String> {
     save_in(
-        &vmux_core::profile::profile_dir().join("handoffs"),
+        &vmux_core::profile::ProfilePaths::current()
+            .profile()
+            .join("handoffs"),
         agent_id,
         session_id,
         imported,
@@ -140,7 +142,9 @@ pub fn save(
 
 pub fn load(agent_id: &str, session_id: &str) -> Option<ImportedConversation> {
     load_in(
-        &vmux_core::profile::profile_dir().join("handoffs"),
+        &vmux_core::profile::ProfilePaths::current()
+            .profile()
+            .join("handoffs"),
         agent_id,
         session_id,
     )

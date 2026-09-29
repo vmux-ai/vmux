@@ -33,7 +33,7 @@ fn main() {
         }
     );
 
-    vmux_core::profile::migrate_legacy_personal_layout();
+    vmux_core::profile::ProfilePaths::current().migrate_legacy_personal_layout();
 
     let mut app = App::new();
     app.add_plugins(VmuxPlugin);

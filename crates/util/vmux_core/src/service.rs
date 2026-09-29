@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use vmux_profile::{Profile, build_profile, shared_data_dir};
+use vmux_profile::{Profile, ProfilePaths, build_profile};
 
 #[cfg(host)]
 use bevy::prelude::*;
@@ -300,15 +300,17 @@ impl ServicePaths {
     }
 
     pub fn dir() -> PathBuf {
-        shared_data_dir().join("services")
+        ProfilePaths::current().shared_data().join("services")
     }
 
     pub fn log_dir() -> PathBuf {
-        shared_data_dir().join("logs")
+        ProfilePaths::current().shared_data().join("logs")
     }
 
     pub fn shell_integration_dir() -> PathBuf {
-        shared_data_dir().join("shell-integration")
+        ProfilePaths::current()
+            .shared_data()
+            .join("shell-integration")
     }
 
     pub fn socket(&self) -> PathBuf {
@@ -475,7 +477,7 @@ mod tests {
 
     #[test]
     fn service_and_log_dirs_nest_under_profile_data_dir() {
-        let base = shared_data_dir();
+        let base = ProfilePaths::current().shared_data();
         assert_eq!(ServicePaths::dir(), base.join("services"));
         assert_eq!(ServicePaths::log_dir(), base.join("logs"));
     }

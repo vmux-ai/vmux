@@ -18,7 +18,11 @@ pub struct KnowledgeVault {
 
 impl KnowledgeVault {
     pub fn user() -> Self {
-        Self::at(crate::profile::config_dir().join("knowledge"))
+        Self::at(
+            crate::profile::ProfilePaths::current()
+                .config()
+                .join("knowledge"),
+        )
     }
 
     pub fn at(root: impl Into<PathBuf>) -> Self {

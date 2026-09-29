@@ -160,7 +160,10 @@ impl SafeStorageContext {
         #[cfg(not(any(test, debug_assertions)))]
         let test_session = false;
 
-        Self::for_environment(crate::application_data_dir(), test_session)
+        Self::for_environment(
+            crate::ProfilePaths::current().application_data(),
+            test_session,
+        )
     }
 
     fn for_environment(application_data: PathBuf, test_session: bool) -> Self {

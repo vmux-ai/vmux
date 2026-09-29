@@ -43,7 +43,9 @@ pub(crate) fn configure_cef_backend_sync(app: &mut App) -> &mut App {
 
 pub(crate) fn cef_command_line_config() -> CommandLineConfig {
     CommandLineConfig {
-        switches: vmux_core::profile::cef_keychain_switches().to_vec(),
+        switches: vmux_core::profile::Profile::current()
+            .cef_keychain_switches()
+            .to_vec(),
         switch_values: vec![("disable-features", "BackForwardCache")],
     }
 }
@@ -86,7 +88,9 @@ pub(crate) fn browser_accept_language_list(locale: &str) -> String {
 }
 
 fn external_locale_catalog(locale: &str) -> Option<String> {
-    let directory = vmux_core::profile::config_dir().join("locales");
+    let directory = vmux_core::profile::ProfilePaths::current()
+        .config()
+        .join("locales");
     [locale, locale.split('-').next().unwrap_or(locale)]
         .into_iter()
         .find_map(|tag| std::fs::read_to_string(directory.join(format!("{tag}.ftl"))).ok())
@@ -536,5 +540,5 @@ impl PendingNavigationUpdate {
 }
 
 pub(crate) fn cef_root_cache_path() -> Option<String> {
-    vmux_core::profile::cef_cache_path()
+    vmux_core::profile::ProfilePaths::current().cef_cache()
 }

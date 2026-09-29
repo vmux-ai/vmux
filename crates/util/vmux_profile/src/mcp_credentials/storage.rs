@@ -131,10 +131,13 @@ impl McpCredentialStorage {
     }
 
     fn path(account: &str) -> std::path::PathBuf {
-        crate::profile_dir().join("mcp-credentials").join(format!(
-            "{}.json",
-            crate::safe_storage::encoded_file_name(account)
-        ))
+        crate::ProfilePaths::current()
+            .profile()
+            .join("mcp-credentials")
+            .join(format!(
+                "{}.json",
+                crate::safe_storage::encoded_file_name(account)
+            ))
     }
 }
 

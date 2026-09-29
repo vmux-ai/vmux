@@ -1121,7 +1121,7 @@ fn parse_settings(text: &str) -> Result<AppSettings, ron::error::SpannedError> {
 }
 
 fn read_settings_and_path() -> (AppSettings, Option<std::path::PathBuf>) {
-    let path = vmux_core::profile::settings_path();
+    let path = vmux_core::profile::ProfilePaths::current().settings();
     let parent_ready = path
         .parent()
         .is_some_and(|parent| std::fs::create_dir_all(parent).is_ok());

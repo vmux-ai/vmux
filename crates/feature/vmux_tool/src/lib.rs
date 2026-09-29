@@ -352,7 +352,7 @@ brew "ripgrep"
         }
 
         let output = app.world().get::<ImportedNpmManifest>(operation).unwrap();
-        assert_eq!(output, &ImportedNpmManifest { packages: 1 });
+        assert_eq!(output.packages(), 1);
         assert_eq!(
             app.world().get::<ToolOperationSucceeded>(operation),
             Some(&ToolOperationSucceeded(

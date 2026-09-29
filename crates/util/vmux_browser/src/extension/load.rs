@@ -26,7 +26,8 @@ pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
     if index_changed {
         idx.save(&root)?;
     }
-    ServiceWorkerCache::from(vmux_core::profile::profile_dir().as_path()).reconcile(&prepared)?;
+    let profile_dir = vmux_core::profile::ProfilePaths::current().profile();
+    ServiceWorkerCache::from(profile_dir.as_path()).reconcile(&prepared)?;
     let dirs = prepared
         .iter()
         .map(|item| item.dir.to_string_lossy())
@@ -78,7 +79,9 @@ fn prepare_enabled_entries(
 }
 
 fn runtime_store_root() -> std::path::PathBuf {
-    vmux_core::profile::shared_data_dir().join("extensions")
+    vmux_core::profile::ProfilePaths::current()
+        .shared_data()
+        .join("extensions")
 }
 
 fn migrate_index_permissions(

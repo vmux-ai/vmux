@@ -557,7 +557,7 @@ pub(crate) struct ProjectsDirectory(PathBuf);
 
 impl ProjectsDirectory {
     pub(crate) fn ensure() -> Result<Self, String> {
-        Self::ensure_at(vmux_core::profile::projects_dir())
+        Self::ensure_at(vmux_core::profile::ProfilePaths::current().projects())
     }
 
     fn ensure_at(path: PathBuf) -> Result<Self, String> {

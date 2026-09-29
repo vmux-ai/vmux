@@ -304,7 +304,9 @@ impl GitHubCli {
             })?;
         Some(Self {
             executable,
-            config_dir: crate::application_data_dir().join("auth/github"),
+            config_dir: crate::ProfilePaths::current()
+                .application_data()
+                .join("auth/github"),
         })
     }
 

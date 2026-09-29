@@ -106,12 +106,10 @@ impl RegistryAgent {
     }
 }
 
-pub fn agents_dir() -> PathBuf {
-    vmux_core::profile::agents_dir()
-}
-
 fn cache_path() -> PathBuf {
-    agents_dir().join("registry.json")
+    vmux_core::profile::ProfilePaths::current()
+        .agents()
+        .join("registry.json")
 }
 
 pub fn parse(json: &str) -> Result<Registry, String> {
@@ -128,7 +126,7 @@ pub fn fetch_blocking() -> Result<Registry, String> {
         .and_then(|r| r.text())
         .map_err(|e| format!("acp registry: fetch failed: {e}"))?;
     let registry = parse(&text)?;
-    let dir = agents_dir();
+    let dir = vmux_core::profile::ProfilePaths::current().agents();
     if std::fs::create_dir_all(&dir).is_ok() {
         let _ = vmux_path::AtomicFile::write(cache_path(), text.as_bytes());
     }

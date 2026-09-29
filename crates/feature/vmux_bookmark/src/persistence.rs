@@ -4,7 +4,7 @@ use bevy_world_serialization::WorldFilter;
 use moonshine_save::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use vmux_core::profile::{is_test_session, profile_dir};
+use vmux_core::profile::{ProfilePaths, is_test_session};
 use vmux_core::{
     Bookmark, BookmarkOrder, Collapsed, Folder, Order, PageIcon, PageMetadata, Pin,
     SmartBookmarkFolder, Uuid,
@@ -62,7 +62,7 @@ struct BookmarkPersistencePath(PathBuf);
 
 impl Default for BookmarkPersistencePath {
     fn default() -> Self {
-        Self(profile_dir().join("bookmarks.ron"))
+        Self(ProfilePaths::current().profile().join("bookmarks.ron"))
     }
 }
 

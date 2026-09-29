@@ -164,7 +164,7 @@ impl FilePageTarget {
                 path: Some(
                     project_dir
                         .map(Path::to_path_buf)
-                        .unwrap_or_else(vmux_core::profile::projects_dir),
+                        .unwrap_or_else(|| vmux_core::profile::ProfilePaths::current().projects()),
                 ),
                 error: String::new(),
             });
