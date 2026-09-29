@@ -14,7 +14,6 @@ mod cli;
 pub mod command;
 pub mod command_bar;
 pub mod echo;
-pub mod echo_plugin;
 pub mod event;
 pub mod exec;
 pub mod follow;

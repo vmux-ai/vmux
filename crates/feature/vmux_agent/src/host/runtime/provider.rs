@@ -50,11 +50,6 @@ impl Plugin for ProviderAgentPlugin {
                     attach_last_run_state_kind,
                 ),
             );
-
-        app.add_plugins(crate::host::provider::anthropic::AnthropicPlugin)
-            .add_plugins(crate::host::provider::mistral::MistralPlugin)
-            .add_plugins(crate::host::provider::openai::OpenAiPlugin)
-            .add_plugins(crate::echo_plugin::EchoPlugin);
     }
 }
 
