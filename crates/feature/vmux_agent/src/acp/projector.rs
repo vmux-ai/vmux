@@ -216,11 +216,6 @@ pub struct AcpProjector {
 }
 
 impl AcpProjector {
-    #[cfg(test)]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn messages(&self) -> &[Message] {
         &self.messages
     }
@@ -1097,7 +1092,7 @@ mod tests {
                 "workspaceCwd": project_path
             }),
         );
-        let mut projector = AcpProjector::new();
+        let mut projector = AcpProjector::default();
 
         let intents = projector.apply(SessionUpdate::SessionInfoUpdate(
             SessionInfoUpdate::new().meta(meta),
@@ -1127,7 +1122,7 @@ mod tests {
                 "workspaceCwd": project.path().to_string_lossy()
             }),
         );
-        let mut projector = AcpProjector::new();
+        let mut projector = AcpProjector::default();
 
         let intents = projector.apply(SessionUpdate::SessionInfoUpdate(
             SessionInfoUpdate::new().meta(meta),
@@ -1138,7 +1133,7 @@ mod tests {
 
     #[test]
     fn message_chunks_accumulate_into_one_assistant_message() {
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         let first = p.apply(chunk("Hel"));
         let second = p.apply(chunk("lo"));
         assert_eq!(
@@ -1160,7 +1155,7 @@ mod tests {
 
     #[test]
     fn push_user_records_a_turn_before_following_assistant_text() {
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         let attachment = AgentAttachment {
             path: "/tmp/image.png".into(),
             name: "image.png".into(),
@@ -1187,7 +1182,7 @@ mod tests {
 
     #[test]
     fn tool_call_with_diff_emits_proposed_diff_and_records_block() {
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         let tc = ToolCall::new("c1", "Edit file").content(vec![ToolCallContent::Diff(
             Diff::new("/tmp/a.rs", "b").old_text("a"),
         )]);
@@ -1213,7 +1208,7 @@ mod tests {
 
     #[test]
     fn codex_subagent_metadata_projects_first_class_block() {
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         let tc = ToolCall::new("sub-1", "Start subagent explorer")
             .status(ToolCallStatus::InProgress)
             .raw_input(serde_json::json!({
@@ -1254,7 +1249,7 @@ mod tests {
 
     #[test]
     fn codex_collaboration_metadata_projects_child_threads() {
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("spawn-1", "spawn_agent")
                 .status(ToolCallStatus::InProgress)
@@ -1291,7 +1286,7 @@ mod tests {
     fn subagent_update_without_metadata_preserves_identity_and_records_output() {
         use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
 
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("sub-1", "Start subagent explorer")
                 .status(ToolCallStatus::InProgress)
@@ -1329,7 +1324,7 @@ mod tests {
 
     #[test]
     fn claude_agent_and_child_tool_preserve_parent_relationship() {
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("agent-1", "Inspect ACP support")
                 .status(ToolCallStatus::InProgress)
@@ -1373,7 +1368,7 @@ mod tests {
     fn edit_diff_without_locations_emits_and_retries_file_touch() {
         use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
 
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         let started = p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Editing files")
                 .kind(ToolKind::Edit)
@@ -1399,7 +1394,7 @@ mod tests {
 
     #[test]
     fn tool_call_details_returns_projected_title_and_input() {
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "vmux.run")
                 .raw_input(serde_json::json!({"command": "echo hi", "focus": true})),
@@ -1416,7 +1411,7 @@ mod tests {
 
     #[test]
     fn conversation_title_tool_stays_out_of_transcript() {
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         let started = p.apply(SessionUpdate::ToolCall(
             ToolCall::new("title-1", "mcp__vmux__set_conversation_title")
                 .raw_input(serde_json::json!({"title": "Paris Izakaya Website"})),
@@ -1459,7 +1454,7 @@ mod tests {
 
     #[test]
     fn read_tool_call_locations_emit_file_touched() {
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         let tc = ToolCall::new("c1", "Read file")
             .kind(ToolKind::Read)
             .locations(vec![ToolCallLocation::new("/repo/src/main.rs")]);
@@ -1475,7 +1470,7 @@ mod tests {
     fn completed_edit_retries_file_touch_from_initial_tool_call() {
         use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
 
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         let tc = ToolCall::new("c1", "Write file")
             .kind(ToolKind::Edit)
             .locations(vec![ToolCallLocation::new("/repo/new.rs")]);
@@ -1497,7 +1492,7 @@ mod tests {
     fn failed_edit_clears_pending_and_suppresses_future_touches() {
         use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
 
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Write file")
                 .kind(ToolKind::Edit)
@@ -1530,7 +1525,7 @@ mod tests {
     fn locations_only_update_uses_initial_edit_kind() {
         use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
 
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Write file").kind(ToolKind::Edit),
         ));
@@ -1553,7 +1548,7 @@ mod tests {
     fn kind_only_update_uses_initial_locations() {
         use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
 
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Write file")
                 .locations(vec![ToolCallLocation::new("/repo/new.rs")]),
@@ -1577,7 +1572,7 @@ mod tests {
     fn completion_with_explicit_locations_uses_replacement() {
         use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
 
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Write files")
                 .kind(ToolKind::Edit)
@@ -1609,7 +1604,7 @@ mod tests {
     fn completion_reclassification_does_not_replay_initial_edit() {
         use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
 
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Write file")
                 .kind(ToolKind::Edit)
@@ -1641,7 +1636,7 @@ mod tests {
     fn repeated_completion_emits_no_duplicate_file_touch() {
         use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
 
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Write file")
                 .kind(ToolKind::Edit)
@@ -1672,7 +1667,7 @@ mod tests {
     fn read_completion_with_unchanged_identity_emits_no_duplicate_touch() {
         use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
 
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Read file")
                 .kind(ToolKind::Read)
@@ -1696,7 +1691,7 @@ mod tests {
 
     #[test]
     fn finalized_file_touch_tombstones_are_bounded() {
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         for index in 0..1025 {
             p.apply(SessionUpdate::ToolCall(
                 ToolCall::new(format!("c{index}"), "Read file")
@@ -1711,7 +1706,7 @@ mod tests {
 
     #[test]
     fn in_progress_file_touches_are_bounded() {
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         for index in 0..1025 {
             p.apply(SessionUpdate::ToolCall(
                 ToolCall::new(format!("c{index}"), "Read file")
@@ -1727,7 +1722,7 @@ mod tests {
 
     #[test]
     fn non_file_tool_call_emits_no_file_touched() {
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         let tc = ToolCall::new("c1", "run a command")
             .kind(ToolKind::Execute)
             .locations(vec![ToolCallLocation::new("/repo/x")]);
@@ -1747,7 +1742,7 @@ mod tests {
 
     #[test]
     fn thought_chunks_accumulate_into_a_thinking_block() {
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         p.apply(thought("plan"));
         p.apply(thought("ning"));
         assert_eq!(p.messages().len(), 1);
@@ -1762,7 +1757,7 @@ mod tests {
     #[test]
     fn plan_update_replaces_the_single_plan_block() {
         use agent_client_protocol::schema::v1::{Plan, PlanEntry, PlanEntryPriority};
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         p.apply(SessionUpdate::Plan(Plan::new(vec![PlanEntry::new(
             "step one",
             PlanEntryPriority::High,
@@ -1791,7 +1786,7 @@ mod tests {
     #[test]
     fn tool_call_update_content_becomes_a_tool_result() {
         use agent_client_protocol::schema::v1::{Content, ToolCallUpdate, ToolCallUpdateFields};
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(ToolCall::new("c1", "run")));
         let fields = ToolCallUpdateFields::new()
             .status(ToolCallStatus::Completed)
@@ -1810,7 +1805,7 @@ mod tests {
 
     #[test]
     fn tool_call_with_terminal_folds_to_pane_pointer_result() {
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         let tc = ToolCall::new("c1", "Run")
             .content(vec![ToolCallContent::Terminal(Terminal::new("t1"))]);
         p.apply(SessionUpdate::ToolCall(tc));
@@ -1824,7 +1819,7 @@ mod tests {
     #[test]
     fn tool_call_with_terminal_and_text_prefers_text_output() {
         use agent_client_protocol::schema::v1::Content;
-        let mut p = AcpProjector::new();
+        let mut p = AcpProjector::default();
         let tc = ToolCall::new("c1", "Run").content(vec![
             ToolCallContent::Terminal(Terminal::new("t1")),
             ToolCallContent::Content(Content::new(ContentBlock::Text(TextContent::new(
