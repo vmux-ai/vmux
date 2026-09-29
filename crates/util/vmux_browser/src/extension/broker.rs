@@ -25,7 +25,9 @@ impl Plugin for ExtensionBrokerPlugin {
         app.add_systems(Startup, spawn_extension_broker)
             .add_systems(
                 Update,
-                drain_bridge_requests.after(super::windows::sync_extension_windows),
+                drain_bridge_requests
+                    .in_set(super::ExtensionSystemSet::DrainBridge)
+                    .after(super::ExtensionSystemSet::SyncWindows),
             )
             .add_systems(
                 Update,
@@ -129,7 +131,7 @@ impl Default for ConformanceWakeTimer {
     }
 }
 
-pub fn drain_bridge_requests(
+fn drain_bridge_requests(
     server: Single<&ExtensionBridgeServer>,
     broker: Single<(
         &mut BridgeSubscriptions,
@@ -701,7 +703,7 @@ fn collect_request_targets(
     }
 }
 
-pub fn forward_extension_model_events(
+fn forward_extension_model_events(
     mut events: MessageReader<ExtensionModelEvent>,
     subscriptions: Single<&BridgeSubscriptions>,
     server: Single<&ExtensionBridgeServer>,

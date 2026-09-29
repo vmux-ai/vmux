@@ -26,7 +26,9 @@ impl Plugin for ExtensionWindowsPlugin {
             .add_message::<UpdateHostWindowRequest>()
             .add_systems(
                 Update,
-                sync_extension_windows.after(super::project::ExtensionProjectionSet),
+                sync_extension_windows
+                    .in_set(super::ExtensionSystemSet::SyncWindows)
+                    .after(super::project::ExtensionProjectionSet),
             )
             .add_systems(
                 Update,
@@ -35,7 +37,7 @@ impl Plugin for ExtensionWindowsPlugin {
                     route_close_extension_windows,
                     apply_host_window_updates,
                 )
-                    .after(super::broker::drain_bridge_requests),
+                    .after(super::ExtensionSystemSet::DrainBridge),
             );
     }
 }
@@ -211,7 +213,7 @@ fn route_close_extension_windows(
     }
 }
 
-pub fn sync_extension_windows(
+fn sync_extension_windows(
     model: Single<Ref<ExtensionModel>>,
     mut windows: Single<&mut ExtensionWindows>,
 ) {

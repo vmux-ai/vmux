@@ -15,8 +15,8 @@ use vmux_layout::Browser;
 use vmux_layout::LayoutCef;
 
 use crate::host::{
-    CefPointerRegionQuery, LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE,
-    cef_pointer_regions_contains, pointer_button_from_mouse_button,
+    CefPointerRegions, LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE,
+    pointer_button_from_mouse_button,
 };
 
 pub(crate) struct InputPlugin;
@@ -57,7 +57,7 @@ fn publish_layout_pointer_inside(
     focused_window: vmux_layout::window::FocusedWindow,
     layout_q: Query<(Entity, &HostWindow), With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
-    cef_regions: CefPointerRegionQuery<'_, '_>,
+    cef_regions: CefPointerRegions,
 ) {
     let Some(window_entity) = focused_window.entity() else {
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
@@ -82,14 +82,14 @@ fn publish_layout_pointer_inside(
             .and_then(|scale| {
                 vmux_input::pointer::snapshot().map(|pointer| pointer.position_px / scale)
             })
-            .is_some_and(|position| cef_pointer_regions_contains(position, &cef_regions));
+            .is_some_and(|position| cef_regions.contains(position));
     #[cfg(not(target_os = "macos"))]
     let inside = pointer_capture_q.contains(layout)
         || windows
             .get(window_entity)
             .ok()
             .and_then(Window::cursor_position)
-            .is_some_and(|pos| cef_pointer_regions_contains(pos, &cef_regions));
+            .is_some_and(|pos| cef_regions.contains(pos));
     NATIVE_LAYOUT_POINTER_INSIDE.store(inside, Ordering::Relaxed);
 }
 
@@ -106,7 +106,7 @@ fn forward_layout_cef_cursor_move(
     browsers: NonSend<Browsers>,
     layout_q: Query<(Entity, &HostWindow), With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
-    cef_regions: CefPointerRegionQuery<'_, '_>,
+    cef_regions: CefPointerRegions,
     mut was_in_region: Local<bool>,
 ) {
     if suppress.0 {
@@ -122,8 +122,7 @@ fn forward_layout_cef_cursor_move(
             *was_in_region = false;
             continue;
         };
-        let in_region = pointer_capture_q.contains(layout)
-            || cef_pointer_regions_contains(event.position, &cef_regions);
+        let in_region = pointer_capture_q.contains(layout) || cef_regions.contains(event.position);
         if in_region {
             browsers.send_mouse_move(&layout, buttons.get_pressed(), event.position, false);
         } else if *was_in_region {
@@ -140,7 +139,7 @@ fn forward_layout_cef_mouse_button(
     browsers: NonSend<Browsers>,
     layout_q: Query<(Entity, &HostWindow), With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
-    cef_regions: CefPointerRegionQuery<'_, '_>,
+    cef_regions: CefPointerRegions,
     mut captured: Local<Option<Entity>>,
 ) {
     if suppress.0 {
@@ -172,8 +171,7 @@ fn forward_layout_cef_mouse_button(
         let Some(position) = position else {
             continue;
         };
-        let inside = pointer_capture_q.contains(layout)
-            || cef_pointer_regions_contains(position, &cef_regions);
+        let inside = pointer_capture_q.contains(layout) || cef_regions.contains(position);
         if event.state == ButtonState::Pressed && inside {
             *captured = Some(layout);
         }

@@ -19,8 +19,7 @@ use vmux_layout::{Header, LayoutCef, side_sheet::SideSheet, state::LayoutUiState
 use crate::NativeLayout;
 #[cfg(not(target_os = "macos"))]
 use crate::host::{
-    CefPointerRegionQuery, LayoutHoverRefreshState, LayoutPointerCapture,
-    cef_pointer_regions_contains, reset_layout_cef_hover,
+    CefPointerRegions, LayoutHoverRefreshState, LayoutPointerCapture, reset_layout_cef_hover,
 };
 use crate::host::{
     LAYOUT_INPUT_BURST, LayoutFrameRateState, NATIVE_LAYOUT_POINTER_INSIDE,
@@ -97,7 +96,7 @@ fn refresh_layout_cef_hover(
     suppress: Res<CefSuppressPointerInput>,
     layout_q: Query<(Entity, &HostWindow), With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
-    cef_regions: CefPointerRegionQuery<'_, '_>,
+    cef_regions: CefPointerRegions,
     mut state: Local<LayoutHoverRefreshState>,
 ) {
     let Some(window_entity) = focused_window.entity() else {
@@ -137,7 +136,7 @@ fn refresh_layout_cef_hover(
     };
     let sequence = 0;
     let position = cursor_px / scale;
-    let in_region = pointer_capture || cef_pointer_regions_contains(position, &cef_regions);
+    let in_region = pointer_capture || cef_regions.contains(position);
     NATIVE_LAYOUT_POINTER_INSIDE.store(in_region, Ordering::Relaxed);
     let unchanged = state.sequence == sequence
         && state.position == Some(position)

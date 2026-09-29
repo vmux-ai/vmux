@@ -9,17 +9,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use vmux_command::command_bar::handler::PendingCommandBarReveal;
 use vmux_command::command_bar::panel::CommandBarPanelActive;
-use vmux_core::{PageIdentity, PageMetadata, PageOpenSet, page::PageReady};
+use vmux_core::{PageOpenSet, page::PageReady};
 use vmux_flex::prelude::*;
-use vmux_history::LastActivatedAt;
 use vmux_layout::{
-    Browser, Header, Open, PendingWebviewReveal, UpdateState,
-    bookmark::BookmarkContextMenuActive,
-    overlay::LayoutOverlayActive,
-    pane::{Pane, PaneSplit},
-    side_sheet::SideSheet,
-    stack::{Stack, active_stack_in_pane, collect_leaf_panes},
-    tab::Tab,
+    Browser, Header, Open, PendingWebviewReveal, UpdateState, bookmark::BookmarkContextMenuActive,
+    overlay::LayoutOverlayActive, side_sheet::SideSheet,
 };
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
@@ -125,7 +119,7 @@ pub(crate) type CefPointerRegionRow<'a> = (
     bool,
 );
 
-pub(crate) type CefPointerRegionQuery<'w, 's> = Query<
+type CefPointerRegionQuery<'w, 's> = Query<
     'w,
     's,
     (
@@ -138,6 +132,22 @@ pub(crate) type CefPointerRegionQuery<'w, 's> = Query<
     ),
     Or<(With<Header>, With<SideSheet>)>,
 >;
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct CefPointerRegions<'w, 's> {
+    rows: CefPointerRegionQuery<'w, 's>,
+}
+
+impl CefPointerRegions<'_, '_> {
+    pub(crate) fn contains(&self, cursor: Vec2) -> bool {
+        for row in self.rows.iter() {
+            if CefPointerHitRect::from_row(row).contains(cursor) {
+                return true;
+            }
+        }
+        false
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct CefPointerHitRect {
@@ -163,18 +173,6 @@ impl CefPointerHitRect {
     }
 }
 
-pub(crate) fn cef_pointer_regions_contains(
-    cursor_pos: Vec2,
-    cef_regions: &CefPointerRegionQuery<'_, '_>,
-) -> bool {
-    for row in cef_regions.iter() {
-        if CefPointerHitRect::from_row(row).contains(cursor_pos) {
-            return true;
-        }
-    }
-    false
-}
-
 pub(crate) fn pointer_button_from_mouse_button(button: MouseButton) -> Option<PointerButton> {
     match button {
         MouseButton::Left => Some(PointerButton::Primary),
@@ -189,23 +187,6 @@ pub(crate) type LayoutPointerCapture = Or<(
     With<CommandBarPanelActive>,
     With<LayoutOverlayActive>,
 )>;
-
-pub(crate) fn tab_of(
-    start: Entity,
-    child_of_q: &Query<&ChildOf>,
-    tab_q: &Query<Entity, With<Tab>>,
-) -> Option<Entity> {
-    let mut e = start;
-    loop {
-        if tab_q.contains(e) {
-            return Some(e);
-        }
-        match child_of_q.get(e) {
-            Ok(co) => e = co.get(),
-            Err(_) => return None,
-        }
-    }
-}
 
 fn sync_cef_backend(
     browser_entities: Query<Entity, With<Browser>>,
@@ -474,32 +455,6 @@ impl LayoutFixedOffsets {
 
 pub(crate) fn should_emit_cached_payload(body: &str, last: &str, page_ready_changed: bool) -> bool {
     page_ready_changed || body != last
-}
-
-pub(crate) fn active_stack_in_tab(
-    tab_e: Entity,
-    all_children: &Query<&Children>,
-    leaf_pane_q: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_children: &Query<&Children, With<Pane>>,
-    stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
-) -> Option<Entity> {
-    let mut leaves = Vec::new();
-    collect_leaf_panes(tab_e, all_children, leaf_pane_q, &mut leaves);
-    leaves
-        .into_iter()
-        .filter_map(|p| active_stack_in_pane(p, pane_children, stack_ts).map(|s| (s, p)))
-        .filter_map(|(s, _)| stack_ts.get(s).ok())
-        .max_by_key(|(_, ts)| ts.0)
-        .map(|(e, _)| e)
-}
-
-pub(crate) fn first_browser_meta<'a>(
-    stack: Entity,
-    stack_children: &Query<&Children>,
-    browser_meta: &'a Query<(&PageMetadata, Option<&PageIdentity>), With<Browser>>,
-) -> Option<(&'a PageMetadata, Option<&'a PageIdentity>)> {
-    let kids = stack_children.get(stack).ok()?;
-    kids.iter().find_map(|c| browser_meta.get(c).ok())
 }
 
 pub(crate) fn should_emit_update(

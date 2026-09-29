@@ -28,8 +28,8 @@ use vmux_layout::{
 use vmux_setting::AppSettings;
 
 use crate::host::{
-    LayoutFixedOffsets, active_stack_in_tab, first_browser_meta, layout_window_padding_from_node,
-    layout_window_padding_from_settings, should_emit_cached_payload, should_emit_update, tab_of,
+    LayoutFixedOffsets, layout_window_padding_from_node, layout_window_padding_from_settings,
+    should_emit_cached_payload, should_emit_update,
 };
 use vmux_flex::prelude::*;
 
@@ -41,6 +41,107 @@ impl PagePresentation {
             Some(title) if !title.is_empty() => title.to_string(),
             _ => metadata.title.clone(),
         }
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct TabProjectionData<'w, 's> {
+    tabs: Query<'w, 's, (Entity, &'static Tab, &'static LastActivatedAt)>,
+    tab_entities: Query<'w, 's, Entity, With<Tab>>,
+    active_tab: vmux_layout::stack::ActiveTabParam<'w, 's>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    all_children: Query<'w, 's, &'static Children>,
+    leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    stack_timestamps: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
+    stack_children: Query<'w, 's, &'static Children>,
+    browser_metadata:
+        Query<'w, 's, (&'static PageMetadata, Option<&'static PageIdentity>), With<Browser>>,
+    done_agents: Query<'w, 's, Entity, With<vmux_core::notify::AgentDoneUnseen>>,
+}
+
+impl TabProjectionData<'_, '_> {
+    fn tab_of(&self, start: Entity) -> Option<Entity> {
+        let mut entity = start;
+        loop {
+            if self.tab_entities.contains(entity) {
+                return Some(entity);
+            }
+            let parent = self.child_of.get(entity).ok()?;
+            entity = parent.get();
+        }
+    }
+
+    fn active_stack(&self, tab: Entity) -> Option<Entity> {
+        let mut leaves = Vec::new();
+        collect_leaf_panes(tab, &self.all_children, &self.leaf_panes, &mut leaves);
+        leaves
+            .into_iter()
+            .filter_map(|pane| {
+                active_stack_in_pane(pane, &self.pane_children, &self.stack_timestamps)
+            })
+            .filter_map(|stack| self.stack_timestamps.get(stack).ok())
+            .max_by_key(|(_, timestamp)| timestamp.0)
+            .map(|(entity, _)| entity)
+    }
+
+    fn page(&self, stack: Entity) -> Option<(&PageMetadata, Option<&PageIdentity>)> {
+        let children = self.stack_children.get(stack).ok()?;
+        children
+            .iter()
+            .find_map(|child| self.browser_metadata.get(child).ok())
+    }
+
+    fn rows(&self) -> Vec<TabRow> {
+        let active_tab = self.active_tab.get();
+        let done_tabs = self
+            .done_agents
+            .iter()
+            .filter_map(|agent| self.tab_of(agent))
+            .collect::<std::collections::HashSet<_>>();
+        let ordered = match active_tab {
+            Some(anchor) => vmux_layout::tab::active_tab_siblings(
+                anchor,
+                &self.child_of,
+                &self.all_children,
+                &self.tab_entities,
+            ),
+            None => Vec::new(),
+        };
+        let mut rows = Vec::new();
+        for entity in ordered {
+            let Ok((entity, tab, _)) = self.tabs.get(entity) else {
+                continue;
+            };
+            let page = self.active_stack(entity).and_then(|stack| self.page(stack));
+            let title = page
+                .map(|(metadata, identity)| PagePresentation::title(metadata, identity))
+                .unwrap_or_default();
+            let (url, icon, bg_color) = page
+                .map(|(metadata, _)| {
+                    (
+                        metadata.url.clone(),
+                        metadata.icon.clone(),
+                        metadata.bg_color.clone(),
+                    )
+                })
+                .unwrap_or_default();
+            rows.push(TabRow {
+                id: entity.to_bits().to_string(),
+                name: if tab.name.is_empty() {
+                    "Tab".to_string()
+                } else {
+                    tab.name.clone()
+                },
+                is_active: Some(entity) == active_tab,
+                bg_color,
+                title,
+                url,
+                icon,
+                is_done_unseen: done_tabs.contains(&entity),
+            });
+        }
+        rows
     }
 }
 
@@ -974,76 +1075,13 @@ fn push_bookmarks_host_emit(
         .trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
-fn push_tabs_host_emit(
-    mut projection: LayoutProjection,
-    tabs: Query<(Entity, &Tab, &LastActivatedAt)>,
-    tab_q: Query<Entity, With<Tab>>,
-    active_tab_param: vmux_layout::stack::ActiveTabParam,
-    child_of_q: Query<&ChildOf>,
-    all_children: Query<&Children>,
-    leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    stack_children: Query<&Children>,
-    browser_meta: Query<(&PageMetadata, Option<&PageIdentity>), With<Browser>>,
-    done_agents: Query<Entity, With<vmux_core::notify::AgentDoneUnseen>>,
-) {
+fn push_tabs_host_emit(mut projection: LayoutProjection, tabs: TabProjectionData) {
     let Some(target) = projection.target() else {
         return;
     };
     let cef_e = target.entity;
 
-    let active_tab = active_tab_param.get();
-
-    let done_tabs: std::collections::HashSet<Entity> = done_agents
-        .iter()
-        .filter_map(|agent| tab_of(agent, &child_of_q, &tab_q))
-        .collect();
-
-    let ordered = if let Some(anchor) = active_tab {
-        vmux_layout::tab::active_tab_siblings(anchor, &child_of_q, &all_children, &tab_q)
-    } else {
-        Vec::new()
-    };
-
-    let rows: Vec<TabRow> = ordered
-        .iter()
-        .filter_map(|e| tabs.get(*e).ok())
-        .map(|(entity, tab, _)| {
-            let active_stack = active_stack_in_tab(
-                entity,
-                &all_children,
-                &leaf_pane_q,
-                &pane_children,
-                &stack_ts,
-            );
-            let found =
-                active_stack.and_then(|s| first_browser_meta(s, &stack_children, &browser_meta));
-            let title = found
-                .map(|(meta, osc)| PagePresentation::title(meta, osc))
-                .unwrap_or_default();
-            let (url, icon, bg_color) = found
-                .map(|(meta, _)| (meta.url.clone(), meta.icon.clone(), meta.bg_color.clone()))
-                .unwrap_or_default();
-            let name = if tab.name.is_empty() {
-                "Tab".to_string()
-            } else {
-                tab.name.clone()
-            };
-            TabRow {
-                id: entity.to_bits().to_string(),
-                name,
-                is_active: Some(entity) == active_tab,
-                bg_color,
-                title,
-                url,
-                icon,
-                is_done_unseen: done_tabs.contains(&entity),
-            }
-        })
-        .collect();
-
-    let payload = TabListState { tabs: rows };
+    let payload = TabListState { tabs: tabs.rows() };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
     if !projection.should_emit(target, body) {
         return;
