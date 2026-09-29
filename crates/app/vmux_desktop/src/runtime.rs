@@ -30,8 +30,10 @@ pub struct RuntimePlugin;
 
 impl Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(platform::RuntimePlatformPlugin)
-            .add_message::<HideAllWindowsRequest>()
+        #[cfg(target_os = "macos")]
+        app.add_plugins(platform::RuntimePlatformPlugin);
+
+        app.add_message::<HideAllWindowsRequest>()
             .add_message::<vmux_input::HideWindowsShortcut>()
             .add_systems(Update, hide_all_windows)
             .add_systems(Update, keep_awake_while_revealing);
@@ -406,6 +408,7 @@ mod tests {
         assert!(!layout_window);
     }
 
+    #[cfg(target_os = "macos")]
     fn platform_systems(label: impl bevy::ecs::schedule::ScheduleLabel) -> Vec<String> {
         use bevy::ecs::schedule::{NodeId, Schedules};
 
@@ -436,6 +439,7 @@ mod tests {
         names
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn startup_installs_the_mouse_wake_monitor_and_activates_the_window() {
         let startup = platform_systems(Startup);
@@ -449,6 +453,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn app_activation_starts_during_boot() {
         let update = platform_systems(Update);
