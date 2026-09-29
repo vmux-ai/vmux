@@ -1,10 +1,19 @@
 use bevy::{ecs::entity::EntityHashMap, ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
+use vmux_api::VmuxRoute;
+use vmux_api::bookmark::{
+    BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
+};
 use vmux_core::{
-    PageIdentity, PageMetadata,
+    Active, Bookmark, BookmarkOrder, Collapsed, Folder, PageIcon, PageIdentity, PageMetadata, Pin,
+    SmartBookmarkFolder, Uuid,
+    file_url::FileUrl,
     host::UiStateWrite,
+    notify::AgentDoneUnseen,
     page::{HostHistory, PageReady},
 };
+use vmux_git::worktree::RepoInfo;
+use vmux_git::{GitDiffSource, RepoInfoCache};
 use vmux_history::LastActivatedAt;
 use vmux_layout::projection::{
     BookmarkProjection, PaneTreeProjection, ProjectProjection, StackProjection,
@@ -13,19 +22,21 @@ use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, LayoutCef, NavigationState, Open, UpdateState,
     event::{
-        HEADER_HEIGHT_PX, LayoutGeometry, PaneNode, PaneTreeState, StackNavigationState, StackNode,
-        StackRow, TabBoundary, TabBoundaryState, TabListState, TabRow, UpdateCleared,
-        UpdateProgress, UpdateReady,
+        AddressParts, HEADER_HEIGHT_PX, LayoutGeometry, PANE_GAP_PX, PaneNode, PaneTreeState,
+        StackNavigationState, StackNode, StackRow, TabBoundary, TabBoundaryState, TabListState,
+        TabRow, UpdateCleared, UpdateProgress, UpdateReady,
     },
-    pane::{Pane, PaneSplit, SideSheetCardCollapsed},
-    side_sheet::{SideSheet, SideSheetPosition},
-    stack::{Stack, active_stack_in_pane, collect_leaf_panes},
+    pane::{Pane, PaneSplit, SideSheetCardCollapsed, Zoomed},
+    side_sheet::{SideSheet, SideSheetPosition, SideSheetSections, SideSheetSectionsExpanded},
+    space::{CurrentSpace, Space, SpaceId},
+    stack::{ActiveTabParam, FocusedStack, Stack, active_stack_in_pane, collect_leaf_panes},
     state::LayoutUiState,
-    tab::Tab,
-    window::VmuxWindow,
+    tab::{Tab, active_tab_siblings},
+    window::{FocusedWindow, VmuxWindow, host_window_of},
 };
 
 use vmux_setting::AppSettings;
+use vmux_space::{ExpandedProjectDirs, SpaceProjects};
 
 use crate::host::{
     LayoutFixedOffsets, layout_window_padding_from_node, layout_window_padding_from_settings,
@@ -48,7 +59,7 @@ impl PagePresentation {
 struct TabProjectionData<'w, 's> {
     tabs: Query<'w, 's, (Entity, &'static Tab, &'static LastActivatedAt)>,
     tab_entities: Query<'w, 's, Entity, With<Tab>>,
-    active_tab: vmux_layout::stack::ActiveTabParam<'w, 's>,
+    active_tab: ActiveTabParam<'w, 's>,
     child_of: Query<'w, 's, &'static ChildOf>,
     all_children: Query<'w, 's, &'static Children>,
     leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -57,7 +68,7 @@ struct TabProjectionData<'w, 's> {
     stack_children: Query<'w, 's, &'static Children>,
     browser_metadata:
         Query<'w, 's, (&'static PageMetadata, Option<&'static PageIdentity>), With<Browser>>,
-    done_agents: Query<'w, 's, Entity, With<vmux_core::notify::AgentDoneUnseen>>,
+    done_agents: Query<'w, 's, Entity, With<AgentDoneUnseen>>,
 }
 
 impl TabProjectionData<'_, '_> {
@@ -100,7 +111,7 @@ impl TabProjectionData<'_, '_> {
             .filter_map(|agent| self.tab_of(agent))
             .collect::<std::collections::HashSet<_>>();
         let ordered = match active_tab {
-            Some(anchor) => vmux_layout::tab::active_tab_siblings(
+            Some(anchor) => active_tab_siblings(
                 anchor,
                 &self.child_of,
                 &self.all_children,
@@ -147,7 +158,7 @@ impl TabProjectionData<'_, '_> {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct FocusedLayout<'w, 's> {
-    focused: vmux_layout::window::FocusedWindow<'w, 's>,
+    focused: FocusedWindow<'w, 's>,
     layouts: Query<'w, 's, (Entity, Ref<'static, PageReady>), With<LayoutCef>>,
     host_windows: Query<'w, 's, &'static HostWindow>,
 }
@@ -217,15 +228,15 @@ struct ProjectionCache {
     bodies: EntityHashMap<String>,
 }
 
-struct BookmarkFolders(Vec<vmux_api::bookmark::BookmarkFolderChoice>);
+struct BookmarkFolders(Vec<BookmarkFolderChoice>);
 
 impl BookmarkFolders {
-    fn from_nodes(nodes: &[vmux_api::bookmark::BookmarkNode]) -> Self {
+    fn from_nodes(nodes: &[BookmarkNode]) -> Self {
         let folders = nodes
             .iter()
             .filter_map(|node| match node {
-                vmux_api::bookmark::BookmarkNode::Folder(folder) => Some(folder.clone()),
-                vmux_api::bookmark::BookmarkNode::Entry(_) => None,
+                BookmarkNode::Folder(folder) => Some(folder.clone()),
+                BookmarkNode::Entry(_) => None,
             })
             .collect::<Vec<_>>();
         let mut output = Vec::new();
@@ -241,12 +252,12 @@ impl BookmarkFolders {
     }
 
     fn collect(
-        folders: &[vmux_api::bookmark::BookmarkFolderRow],
+        folders: &[BookmarkFolderRow],
         parent: Option<&str>,
         parent_label: &str,
         ancestors: &[String],
         visited: &mut std::collections::HashSet<String>,
-        output: &mut Vec<vmux_api::bookmark::BookmarkFolderChoice>,
+        output: &mut Vec<BookmarkFolderChoice>,
     ) {
         for folder in folders
             .iter()
@@ -259,7 +270,7 @@ impl BookmarkFolders {
                 true => folder.name.clone(),
                 false => format!("{parent_label} / {}", folder.name),
             };
-            output.push(vmux_api::bookmark::BookmarkFolderChoice {
+            output.push(BookmarkFolderChoice {
                 uuid: folder.uuid.clone(),
                 label: label.clone(),
                 ancestors: ancestors.to_vec(),
@@ -352,8 +363,8 @@ type PageProjectionChanged = Or<(
     Changed<NavigationState>,
     Changed<HostHistory>,
     Changed<Loading>,
-    Changed<vmux_git::GitDiffSource>,
-    Changed<vmux_core::notify::AgentDoneUnseen>,
+    Changed<GitDiffSource>,
+    Changed<AgentDoneUnseen>,
 )>;
 
 type LayoutProjectionChanged = Or<(
@@ -367,8 +378,8 @@ type LayoutProjectionChanged = Or<(
     Changed<Tab>,
     Changed<Window>,
     Changed<HostWindow>,
-    Changed<vmux_layout::space::SpaceId>,
-    Changed<vmux_layout::side_sheet::SideSheetSectionsExpanded>,
+    Changed<SpaceId>,
+    Changed<SideSheetSectionsExpanded>,
 )>;
 
 type LayoutMarkerChanged = Or<(
@@ -381,21 +392,21 @@ type LayoutMarkerChanged = Or<(
     Changed<Stack>,
     Changed<Pane>,
     Changed<PaneSplit>,
-    Changed<vmux_layout::pane::Zoomed>,
-    Changed<vmux_layout::space::Space>,
-    Changed<vmux_layout::space::CurrentSpace>,
-    Changed<vmux_core::Active>,
+    Changed<Zoomed>,
+    Changed<Space>,
+    Changed<CurrentSpace>,
+    Changed<Active>,
 )>;
 
 type BookmarkProjectionChanged = Or<(
-    Changed<vmux_core::Uuid>,
-    Changed<vmux_core::BookmarkOrder>,
-    Changed<vmux_core::Bookmark>,
-    Changed<vmux_core::Pin>,
-    Changed<vmux_core::Folder>,
+    Changed<Uuid>,
+    Changed<BookmarkOrder>,
+    Changed<Bookmark>,
+    Changed<Pin>,
+    Changed<Folder>,
     Changed<Name>,
-    Changed<vmux_core::Collapsed>,
-    Changed<vmux_core::SmartBookmarkFolder>,
+    Changed<Collapsed>,
+    Changed<SmartBookmarkFolder>,
 )>;
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -404,7 +415,7 @@ struct StateChanges<'w, 's> {
     layout: Query<'w, 's, (), LayoutProjectionChanged>,
     markers: Query<'w, 's, (), LayoutMarkerChanged>,
     bookmarks: Query<'w, 's, (), BookmarkProjectionChanged>,
-    projects: Query<'w, 's, (), Changed<vmux_space::ExpandedProjectDirs>>,
+    projects: Query<'w, 's, (), Changed<ExpandedProjectDirs>>,
 }
 
 impl StateChanges<'_, '_> {
@@ -428,9 +439,9 @@ struct PageStateRemovals<'w, 's> {
     navigation: RemovedComponents<'w, 's, NavigationState>,
     history: RemovedComponents<'w, 's, HostHistory>,
     loading: RemovedComponents<'w, 's, Loading>,
-    git_diff: RemovedComponents<'w, 's, vmux_git::GitDiffSource>,
-    done: RemovedComponents<'w, 's, vmux_core::notify::AgentDoneUnseen>,
-    active: RemovedComponents<'w, 's, vmux_core::Active>,
+    git_diff: RemovedComponents<'w, 's, GitDiffSource>,
+    done: RemovedComponents<'w, 's, AgentDoneUnseen>,
+    active: RemovedComponents<'w, 's, Active>,
     header: RemovedComponents<'w, 's, Header>,
     open: RemovedComponents<'w, 's, Open>,
     side_sheet: RemovedComponents<'w, 's, SideSheet>,
@@ -446,21 +457,20 @@ struct PageStateRemovals<'w, 's> {
     last_activated: RemovedComponents<'w, 's, LastActivatedAt>,
     pane: RemovedComponents<'w, 's, Pane>,
     pane_split: RemovedComponents<'w, 's, PaneSplit>,
-    zoomed: RemovedComponents<'w, 's, vmux_layout::pane::Zoomed>,
-    space: RemovedComponents<'w, 's, vmux_layout::space::Space>,
-    space_id: RemovedComponents<'w, 's, vmux_layout::space::SpaceId>,
-    current_space: RemovedComponents<'w, 's, vmux_layout::space::CurrentSpace>,
-    sections_expanded:
-        RemovedComponents<'w, 's, vmux_layout::side_sheet::SideSheetSectionsExpanded>,
-    uuid: RemovedComponents<'w, 's, vmux_core::Uuid>,
-    bookmark_order: RemovedComponents<'w, 's, vmux_core::BookmarkOrder>,
-    bookmark: RemovedComponents<'w, 's, vmux_core::Bookmark>,
-    pin: RemovedComponents<'w, 's, vmux_core::Pin>,
-    folder: RemovedComponents<'w, 's, vmux_core::Folder>,
+    zoomed: RemovedComponents<'w, 's, Zoomed>,
+    space: RemovedComponents<'w, 's, Space>,
+    space_id: RemovedComponents<'w, 's, SpaceId>,
+    current_space: RemovedComponents<'w, 's, CurrentSpace>,
+    sections_expanded: RemovedComponents<'w, 's, SideSheetSectionsExpanded>,
+    uuid: RemovedComponents<'w, 's, Uuid>,
+    bookmark_order: RemovedComponents<'w, 's, BookmarkOrder>,
+    bookmark: RemovedComponents<'w, 's, Bookmark>,
+    pin: RemovedComponents<'w, 's, Pin>,
+    folder: RemovedComponents<'w, 's, Folder>,
     name: RemovedComponents<'w, 's, Name>,
-    collapsed: RemovedComponents<'w, 's, vmux_core::Collapsed>,
-    smart_folder: RemovedComponents<'w, 's, vmux_core::SmartBookmarkFolder>,
-    expanded_projects: RemovedComponents<'w, 's, vmux_space::ExpandedProjectDirs>,
+    collapsed: RemovedComponents<'w, 's, Collapsed>,
+    smart_folder: RemovedComponents<'w, 's, SmartBookmarkFolder>,
+    expanded_projects: RemovedComponents<'w, 's, ExpandedProjectDirs>,
 }
 
 impl PageStateRemovals<'_, '_> {
@@ -514,10 +524,10 @@ impl PageStateRemovals<'_, '_> {
 fn mark_page_state_dirty(
     changes: StateChanges,
     mut removals: PageStateRemovals,
-    focused_window: vmux_layout::window::FocusedWindow,
-    focused_stack: vmux_layout::stack::FocusedStack,
+    focused_window: FocusedWindow,
+    focused_stack: FocusedStack,
     settings: Res<AppSettings>,
-    repo_info: Option<Single<Ref<vmux_git::RepoInfoCache>>>,
+    repo_info: Option<Single<Ref<RepoInfoCache>>>,
     mut revision: Single<&mut StateRevision>,
 ) {
     let resource_changed = focused_window.is_changed()
@@ -558,11 +568,8 @@ fn push_layout_state_emit(
         .unwrap_or_else(|| layout_window_padding_from_settings(&settings));
     let header_open = header_q.iter().any(|(entity, is_open, _)| {
         is_open
-            && vmux_layout::window::host_window_of(
-                entity,
-                &child_of,
-                &projection.layout.host_windows,
-            ) == Some(host_window)
+            && host_window_of(entity, &child_of, &projection.layout.host_windows)
+                == Some(host_window)
     });
     let window_width_px = windows
         .get(host_window)
@@ -570,9 +577,7 @@ fn push_layout_state_emit(
         .map(|window| window.resolution.physical_width() as f32)
         .unwrap_or(0.0);
     let header_offsets = header_q.iter().find_map(|(entity, _, computed)| {
-        if vmux_layout::window::host_window_of(entity, &child_of, &projection.layout.host_windows)
-            == Some(host_window)
-        {
+        if host_window_of(entity, &child_of, &projection.layout.host_windows) == Some(host_window) {
             LayoutFixedOffsets::from_node(computed?, window_width_px)
         } else {
             None
@@ -584,11 +589,8 @@ fn push_layout_state_emit(
         vmux_layout::event::SideSheetResizeEvent::live(settings.layout.side_sheet.width).clamped();
     for (entity, position, is_open, node) in &side_sheet_q {
         if *position != SideSheetPosition::Left
-            || vmux_layout::window::host_window_of(
-                entity,
-                &child_of,
-                &projection.layout.host_windows,
-            ) != Some(host_window)
+            || host_window_of(entity, &child_of, &projection.layout.host_windows)
+                != Some(host_window)
         {
             continue;
         }
@@ -606,7 +608,7 @@ fn push_layout_state_emit(
             .map(|offsets| offsets.height)
             .unwrap_or(HEADER_HEIGHT_PX),
         side_sheet_width,
-        pane_gap: vmux_layout::event::PANE_GAP_PX,
+        pane_gap: PANE_GAP_PX,
         radius: settings.layout.radius,
         header_left: header_offsets.map(|offsets| offsets.left),
         header_top: header_offsets.map(|offsets| offsets.top),
@@ -626,30 +628,25 @@ fn push_layout_state_emit(
 }
 
 struct AddressRoots<'a> {
-    repos: Option<&'a mut vmux_git::RepoInfoCache>,
+    repos: Option<&'a mut RepoInfoCache>,
     home: std::path::PathBuf,
 }
 
 impl AddressRoots<'_> {
-    fn resolve(&mut self, url: &str, title: &str) -> vmux_layout::event::AddressParts {
-        let Some(path) = vmux_core::file_url::FileUrl::parse(url).and_then(|url| url.path()) else {
-            return match vmux_api::VmuxRoute::parse(url).is_some() {
-                true => vmux_layout::event::AddressParts::internal(url),
-                false => vmux_layout::event::AddressParts::web(url, title),
+    fn resolve(&mut self, url: &str, title: &str) -> AddressParts {
+        let Some(path) = FileUrl::parse(url).and_then(|url| url.path()) else {
+            return match VmuxRoute::parse(url).is_some() {
+                true => AddressParts::internal(url),
+                false => AddressParts::web(url, title),
             };
         };
         if let Some(info) = self.checkout_of(&path) {
-            return vmux_layout::event::AddressParts::in_repo(
-                &path,
-                &info.repo_root,
-                &info.name,
-                &info.branch,
-            );
+            return AddressParts::in_repo(&path, &info.repo_root, &info.name, &info.branch);
         }
-        vmux_layout::event::AddressParts::on_disk(&path, &self.home)
+        AddressParts::on_disk(&path, &self.home)
     }
 
-    fn checkout_of(&mut self, path: &std::path::Path) -> Option<vmux_git::worktree::RepoInfo> {
+    fn checkout_of(&mut self, path: &std::path::Path) -> Option<RepoInfo> {
         let dir = match path.is_dir() {
             true => path,
             false => path.parent()?,
@@ -671,10 +668,10 @@ fn push_stacks_host_emit(
         With<Browser>,
     >,
     stack_q: Query<(), With<Stack>>,
-    zoomed_q: Query<(), With<vmux_layout::pane::Zoomed>>,
-    focus: vmux_layout::stack::FocusedStack,
+    zoomed_q: Query<(), With<Zoomed>>,
+    focus: FocusedStack,
     child_of_q: Query<&ChildOf>,
-    mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
+    mut repo_info: Option<Single<&mut RepoInfoCache>>,
 ) {
     let Some(target) = projection.target() else {
         return;
@@ -751,9 +748,9 @@ fn push_stacks_host_emit(
 
 fn push_pane_tree_emit(
     mut projection: LayoutProjection,
-    focus: vmux_layout::stack::FocusedStack,
+    focus: FocusedStack,
     tab_q: Query<(), With<Tab>>,
-    sections_of: vmux_layout::side_sheet::SideSheetSections,
+    sections_of: SideSheetSections,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     collapsed_panes: Query<(), With<SideSheetCardCollapsed>>,
@@ -766,7 +763,7 @@ fn push_pane_tree_emit(
             &PageMetadata,
             Has<Loading>,
             Option<&PageIdentity>,
-            Option<&vmux_git::GitDiffSource>,
+            Option<&GitDiffSource>,
             Has<vmux_core::team::Agent>,
         ),
         With<Browser>,
@@ -821,7 +818,7 @@ fn push_pane_tree_emit(
                                     meta.url.clone()
                                 },
                                 icon: if is_new_stack {
-                                    vmux_core::PageIcon::None
+                                    PageIcon::None
                                 } else {
                                     meta.icon.clone()
                                 },
@@ -840,7 +837,7 @@ fn push_pane_tree_emit(
                         agent_id: None,
                         title: "New Stack".to_string(),
                         url: String::new(),
-                        icon: vmux_core::PageIcon::None,
+                        icon: PageIcon::None,
                         is_active: stack_is_active,
                         is_loading: false,
                         is_dirty: false,
@@ -888,8 +885,8 @@ fn abbreviate_project_path(path: &std::path::Path) -> String {
 
 fn push_projects_host_emit(
     mut projection: LayoutProjection,
-    space_projects: vmux_space::SpaceProjects,
-    mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
+    space_projects: SpaceProjects,
+    mut repo_info: Option<Single<&mut RepoInfoCache>>,
 ) {
     let Some(target) = projection.target() else {
         return;
@@ -953,70 +950,46 @@ fn push_projects_host_emit(
 
 fn push_bookmarks_host_emit(
     mut projection: LayoutProjection,
-    pins: Query<
-        (
-            &vmux_core::Uuid,
-            &PageMetadata,
-            &vmux_core::BookmarkOrder,
-            Has<vmux_core::Bookmark>,
-        ),
-        With<vmux_core::Pin>,
-    >,
+    pins: Query<(&Uuid, &PageMetadata, &BookmarkOrder, Has<Bookmark>), With<Pin>>,
     folders: Query<
         (
             Entity,
-            &vmux_core::Uuid,
+            &Uuid,
             &Name,
             Option<&Children>,
-            Has<vmux_core::Collapsed>,
-            Option<&vmux_core::SmartBookmarkFolder>,
-            &vmux_core::BookmarkOrder,
+            Has<Collapsed>,
+            Option<&SmartBookmarkFolder>,
+            &BookmarkOrder,
             Option<&ChildOf>,
         ),
-        With<vmux_core::Folder>,
+        With<Folder>,
     >,
     top_bookmarks: Query<
-        (
-            &vmux_core::Uuid,
-            &PageMetadata,
-            &vmux_core::BookmarkOrder,
-            Has<vmux_core::Pin>,
-        ),
-        (With<vmux_core::Bookmark>, Without<ChildOf>),
+        (&Uuid, &PageMetadata, &BookmarkOrder, Has<Pin>),
+        (With<Bookmark>, Without<ChildOf>),
     >,
-    child_bookmarks: Query<
-        (
-            &vmux_core::Uuid,
-            &PageMetadata,
-            &vmux_core::BookmarkOrder,
-            Has<vmux_core::Pin>,
-        ),
-        With<vmux_core::Bookmark>,
-    >,
+    child_bookmarks: Query<(&Uuid, &PageMetadata, &BookmarkOrder, Has<Pin>), With<Bookmark>>,
 ) {
     let Some(target) = projection.target() else {
         return;
     };
     let cef_e = target.entity;
 
-    let row = |uuid: &vmux_core::Uuid, meta: &PageMetadata, bookmarked: bool, pinned: bool| {
-        vmux_api::bookmark::BookmarkRow {
-            uuid: uuid.0.clone(),
-            metadata: meta.clone(),
-            bookmarked,
-            pinned,
-        }
+    let row = |uuid: &Uuid, meta: &PageMetadata, bookmarked: bool, pinned: bool| BookmarkRow {
+        uuid: uuid.0.clone(),
+        metadata: meta.clone(),
+        bookmarked,
+        pinned,
     };
 
-    let mut pin_entries: Vec<(u32, vmux_api::bookmark::BookmarkRow)> = pins
+    let mut pin_entries: Vec<(u32, BookmarkRow)> = pins
         .iter()
         .map(|(u, m, o, bookmarked)| (o.0, row(u, m, bookmarked, true)))
         .collect();
     pin_entries.sort_by_key(|(order, _)| *order);
-    let pin_rows: Vec<vmux_api::bookmark::BookmarkRow> =
-        pin_entries.into_iter().map(|(_, r)| r).collect();
+    let pin_rows: Vec<BookmarkRow> = pin_entries.into_iter().map(|(_, r)| r).collect();
 
-    let mut roots: Vec<(u32, vmux_api::bookmark::BookmarkNode)> = Vec::new();
+    let mut roots: Vec<(u32, BookmarkNode)> = Vec::new();
     for (_, uuid, name, children, collapsed, smart, order, parent) in folders.iter() {
         if smart.is_some() {
             continue;
@@ -1038,7 +1011,7 @@ fn push_bookmarks_host_emit(
         });
         roots.push((
             order.0,
-            vmux_api::bookmark::BookmarkNode::Folder(vmux_api::bookmark::BookmarkFolderRow {
+            BookmarkNode::Folder(BookmarkFolderRow {
                 uuid: uuid.0.clone(),
                 name: name.as_str().to_string(),
                 collapsed,
@@ -1048,16 +1021,13 @@ fn push_bookmarks_host_emit(
         ));
     }
     for (uuid, meta, order, pinned) in top_bookmarks.iter() {
-        roots.push((
-            order.0,
-            vmux_api::bookmark::BookmarkNode::Entry(row(uuid, meta, true, pinned)),
-        ));
+        roots.push((order.0, BookmarkNode::Entry(row(uuid, meta, true, pinned))));
     }
     roots.sort_by_key(|(o, _)| *o);
-    let roots: Vec<vmux_api::bookmark::BookmarkNode> = roots.into_iter().map(|(_, n)| n).collect();
+    let roots: Vec<BookmarkNode> = roots.into_iter().map(|(_, n)| n).collect();
 
     let folders = BookmarkFolders::from_nodes(&roots).0;
-    let payload = vmux_api::bookmark::BookmarkStateEvent {
+    let payload = BookmarkStateEvent {
         pins: pin_rows,
         roots,
         folders,
