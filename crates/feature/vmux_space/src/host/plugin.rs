@@ -1,12 +1,28 @@
 use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
-use vmux_core::host::persistence::WorkspaceRestore;
-use vmux_core::page::PageReady;
-use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
+use vmux_command::{
+    CommandDefinitions, CommandInvocation, CommandRuntimePlugin, ReadCommandRequests,
+    RegisterCommandDefinitions,
+};
+use vmux_core::host::{UiStateWrite, persistence::WorkspaceRestore};
+use vmux_core::page::{PageReady, SpacesPageSpawnRequest};
+use vmux_core::{
+    ActivateRequest, Active, EffectiveStartupUrl, Order, PageMetadata, PageOpenRequest,
+    PageOpenTarget,
+};
+use vmux_history::LastActivatedAt;
 use vmux_layout::native_open::HostedUiPlugin;
-use vmux_layout::space::Space;
-use vmux_layout::stack::Stack;
-use vmux_layout::{LayoutUiStateUpdates, TabLayoutSpawnContent, TabLayoutSpawnRequest};
+use vmux_layout::space::{
+    CurrentSpaceSet, EffectiveStartupDir, EffectiveStartupSet, FocusedSpace, Space, SpaceId,
+};
+use vmux_layout::stack::{FocusedStack, Stack};
+use vmux_layout::tab::Tab;
+use vmux_layout::window::{FocusedWindow, Main};
+use vmux_layout::{
+    LayoutCef, LayoutContractPlugin, LayoutStartupSet, LayoutUiStateUpdates, TabLayoutSpawnContent,
+    TabLayoutSpawnRequest,
+};
+use vmux_setting::{AppSettings, SettingsLoadSet, SettingsSaveRequest};
 
 use super::SpacesUiStateUpdates;
 use super::agent::SpaceAgentPlugin;
@@ -24,8 +40,8 @@ impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::SpacesPage::plugin());
-        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
-            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
         }
         app.add_plugins((
             SpaceAgentPlugin,
@@ -33,7 +49,7 @@ impl Plugin for SpacePlugin {
             super::persistence::WorkspacePersistencePlugin,
         ))
         .add_plugins(super::SpaceToolPlugin)
-        .add_plugins(vmux_layout::LayoutContractPlugin)
+        .add_plugins(LayoutContractPlugin)
         .add_plugins(vmux_core::host::UiStatePlugin::<SpacesUiState>::default())
         .add_message::<SpaceAttachRequest>()
         .add_message::<SpaceCreateRequest>()
@@ -43,7 +59,7 @@ impl Plugin for SpacePlugin {
         .add_message::<OpenRequest>()
         .add_systems(
             Startup,
-            spawn_space_commands.in_set(vmux_command::RegisterCommandDefinitions),
+            spawn_space_commands.in_set(RegisterCommandDefinitions),
         )
         .add_systems(
             Update,
@@ -58,9 +74,9 @@ impl Plugin for SpacePlugin {
         .add_systems(
             Update,
             update_effective_startup
-                .in_set(vmux_layout::space::EffectiveStartupSet)
-                .after(vmux_layout::space::CurrentSpaceSet)
-                .before(vmux_command::ReadCommandRequests),
+                .in_set(EffectiveStartupSet)
+                .after(CurrentSpaceSet)
+                .before(ReadCommandRequests),
         )
         .add_systems(Update, sync_space_name_to_id)
         .add_systems(
@@ -71,15 +87,12 @@ impl Plugin for SpacePlugin {
                 update_effective_startup,
             )
                 .chain()
-                .after(vmux_setting::SettingsLoadSet)
-                .after(vmux_layout::LayoutStartupSet::Persistence)
-                .before(vmux_layout::LayoutStartupSet::DefaultTab),
+                .after(SettingsLoadSet)
+                .after(LayoutStartupSet::Persistence)
+                .before(LayoutStartupSet::DefaultTab),
         )
-        .add_message::<vmux_core::page::SpacesPageSpawnRequest>()
-        .add_systems(
-            Update,
-            respond_spaces_spawn.in_set(vmux_command::ReadCommandRequests),
-        )
+        .add_message::<SpacesPageSpawnRequest>()
+        .add_systems(Update, respond_spaces_spawn.in_set(ReadCommandRequests))
         .add_plugins((
             HostedUiPlugin::<Spaces>::new(Self::MANIFEST),
             super::key::SpaceKeyPlugin,
@@ -104,10 +117,7 @@ impl Plugin for SpacePlugin {
         .add_observer(on_project_activate)
         .add_observer(on_project_forget)
         .add_observer(reset_spaces_sent_marker_on_page_ready)
-        .add_systems(
-            Update,
-            handle_open_in_new_space.in_set(vmux_command::ReadCommandRequests),
-        )
+        .add_systems(Update, handle_open_in_new_space.in_set(ReadCommandRequests))
         .add_systems(Update, broadcast_spaces_to_views);
     }
 }
@@ -130,10 +140,10 @@ pub struct OpenRequest {
     pub url: Option<String>,
 }
 
-impl TryFrom<&vmux_command::CommandInvocation> for OpenRequest {
+impl TryFrom<&CommandInvocation> for OpenRequest {
     type Error = ();
 
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "open_in_new_space")
             .then(|| Self {
                 url: invocation.argument("url"),
@@ -143,10 +153,8 @@ impl TryFrom<&vmux_command::CommandInvocation> for OpenRequest {
 }
 
 fn spawn_space_commands(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_feature_ron(
-        include_str!("../feature.ron"),
-        "plugin",
-    );
+    let mut definitions =
+        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "plugin");
     commands.spawn(
         definitions
             .take("open_in_new_space")
@@ -156,14 +164,14 @@ fn spawn_space_commands(mut commands: Commands) {
 }
 
 fn update_effective_startup(
-    settings: Option<Res<vmux_setting::AppSettings>>,
+    settings: Option<Res<AppSettings>>,
     mut spaces: Query<
         (
-            Ref<vmux_layout::space::SpaceId>,
-            &mut vmux_core::EffectiveStartupUrl,
-            &mut vmux_layout::space::EffectiveStartupDir,
+            Ref<SpaceId>,
+            &mut EffectiveStartupUrl,
+            &mut EffectiveStartupDir,
         ),
-        With<vmux_layout::space::Space>,
+        With<Space>,
     >,
 ) {
     let settings_changed = settings
@@ -199,7 +207,7 @@ struct SpacesListSent;
 fn reset_spaces_sent_marker_on_page_ready(
     trigger: On<UiInput<PageReady>>,
     spaces_views: Query<(), With<Spaces>>,
-    cef_views: Query<(), With<vmux_layout::LayoutCef>>,
+    cef_views: Query<(), With<LayoutCef>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -214,14 +222,14 @@ type SpaceListQuery<'w, 's> = Query<
     's,
     (
         Entity,
-        &'static vmux_layout::space::SpaceId,
+        &'static SpaceId,
         &'static Name,
-        Has<vmux_core::Active>,
-        Option<&'static vmux_core::Order>,
+        Has<Active>,
+        Option<&'static Order>,
         Option<&'static Children>,
         &'static ChildOf,
     ),
-    With<vmux_layout::space::Space>,
+    With<Space>,
 >;
 
 fn display_dir(path: &std::path::Path) -> String {
@@ -235,8 +243,8 @@ fn display_dir(path: &std::path::Path) -> String {
 
 fn space_rows_from_world(
     spaces: &SpaceListQuery,
-    tab_q: &Query<(), With<vmux_layout::tab::Tab>>,
-    settings: Option<&vmux_setting::AppSettings>,
+    tab_q: &Query<(), With<Tab>>,
+    settings: Option<&AppSettings>,
     main: Option<Entity>,
 ) -> Vec<SpaceRow> {
     let profile = crate::model::bootstrap_profile_name();
@@ -278,7 +286,7 @@ fn space_rows_from_world(
 
 fn broadcast_spaces_to_views(
     spaces: SpaceListQuery,
-    tab_q: Query<(), With<vmux_layout::tab::Tab>>,
+    tab_q: Query<(), With<Tab>>,
     mut views: Query<
         (
             Entity,
@@ -286,13 +294,10 @@ fn broadcast_spaces_to_views(
             Option<&SpacesPageSnapshot>,
             Has<SpacesListSent>,
         ),
-        (
-            With<PageReady>,
-            Or<(With<Spaces>, With<vmux_layout::LayoutCef>)>,
-        ),
+        (With<PageReady>, Or<(With<Spaces>, With<LayoutCef>)>),
     >,
     browsers: NonSend<Browsers>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
+    settings: Option<Res<AppSettings>>,
     space_window: SpaceWindow,
     layout_ui: Query<(), With<LayoutUiStateUpdates>>,
     spaces_ui: Query<(), With<SpacesUiStateUpdates>>,
@@ -331,14 +336,12 @@ fn broadcast_spaces_to_views(
             commands
                 .entity(entity)
                 .insert(vmux_layout::projection::SpacesProjection(payload.clone()));
-            commands.trigger(vmux_core::host::UiStateWrite::<
-                vmux_layout::state::LayoutUiState,
-            >::from_event(entity, &payload));
+            commands.trigger(
+                UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(entity, &payload),
+            );
         }
         if spaces_ui.contains(entity) {
-            commands.trigger(vmux_core::host::UiStateWrite::<SpacesUiState>::from_event(
-                entity, &payload,
-            ));
+            commands.trigger(UiStateWrite::<SpacesUiState>::from_event(entity, &payload));
         }
         commands
             .entity(entity)
@@ -348,9 +351,9 @@ fn broadcast_spaces_to_views(
 
 fn on_project_activate(
     trigger: On<UiInput<ProjectActivateRequest>>,
-    active: vmux_layout::space::FocusedSpace,
-    settings: Option<ResMut<vmux_setting::AppSettings>>,
-    mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
+    active: FocusedSpace,
+    settings: Option<ResMut<AppSettings>>,
+    mut saves: MessageWriter<SettingsSaveRequest>,
 ) {
     let (Some(space_id), Some(mut settings)) = (active.id(), settings) else {
         return;
@@ -360,15 +363,15 @@ fn on_project_activate(
         .activate_space_project(space_id, trigger.event().payload.path.trim());
     if changed {
         settings.set_changed();
-        saves.write(vmux_setting::SettingsSaveRequest);
+        saves.write(SettingsSaveRequest);
     }
 }
 
 fn on_project_forget(
     trigger: On<UiInput<ProjectForgetRequest>>,
-    active: vmux_layout::space::FocusedSpace,
-    settings: Option<ResMut<vmux_setting::AppSettings>>,
-    mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
+    active: FocusedSpace,
+    settings: Option<ResMut<AppSettings>>,
+    mut saves: MessageWriter<SettingsSaveRequest>,
 ) {
     let (Some(space_id), Some(mut settings)) = (active.id(), settings) else {
         return;
@@ -378,7 +381,7 @@ fn on_project_forget(
         .forget_space_project(space_id, trigger.event().payload.path.trim());
     if changed {
         settings.set_changed();
-        saves.write(vmux_setting::SettingsSaveRequest);
+        saves.write(SettingsSaveRequest);
     }
 }
 
@@ -396,12 +399,12 @@ type SpaceQuery<'w, 's> = Query<
     's,
     (
         Entity,
-        &'static vmux_layout::space::SpaceId,
-        Has<vmux_core::Active>,
-        Option<&'static vmux_core::Order>,
+        &'static SpaceId,
+        Has<Active>,
+        Option<&'static Order>,
         &'static ChildOf,
     ),
-    With<vmux_layout::space::Space>,
+    With<Space>,
 >;
 
 type SpaceTabQuery<'w, 's> = Query<
@@ -409,11 +412,11 @@ type SpaceTabQuery<'w, 's> = Query<
     's,
     (
         Entity,
-        &'static vmux_layout::space::SpaceId,
-        &'static vmux_history::LastActivatedAt,
+        &'static SpaceId,
+        &'static LastActivatedAt,
         &'static ChildOf,
     ),
-    With<vmux_layout::tab::Tab>,
+    With<Tab>,
 >;
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -431,16 +434,14 @@ impl SpaceGraph<'_, '_> {
             .filter(|(_, _, _, parent)| parent.parent() == space)
             .max_by_key(|(_, _, timestamp, _)| timestamp.0)
         {
-            commands
-                .entity(tab)
-                .insert(vmux_history::LastActivatedAt::now());
+            commands.entity(tab).insert(LastActivatedAt::now());
         }
     }
 
     fn deactivate_in_main(&self, main: Entity, commands: &mut Commands) {
         for (entity, _, active, _, parent) in &self.spaces {
             if parent.parent() == main && active {
-                commands.entity(entity).remove::<vmux_core::Active>();
+                commands.entity(entity).remove::<Active>();
             }
         }
     }
@@ -448,9 +449,9 @@ impl SpaceGraph<'_, '_> {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct SpaceWindow<'w, 's> {
-    mains: Query<'w, 's, Entity, With<vmux_layout::window::Main>>,
+    mains: Query<'w, 's, Entity, With<Main>>,
     host_windows: Query<'w, 's, &'static HostWindow>,
-    focused: vmux_layout::window::FocusedWindow<'w, 's>,
+    focused: FocusedWindow<'w, 's>,
     child_of: Query<'w, 's, &'static ChildOf>,
 }
 
@@ -516,12 +517,12 @@ impl SpaceViewTemplate {
 
     fn bundle(&self, main: Entity) -> impl Bundle {
         (
-            vmux_layout::space::Space,
-            vmux_layout::space::SpaceId(self.id.clone()),
+            Space,
+            SpaceId(self.id.clone()),
             Name::new(self.name.clone()),
-            vmux_core::Order(self.order),
-            vmux_core::Active,
-            vmux_history::LastActivatedAt::now(),
+            Order(self.order),
+            Active,
+            LastActivatedAt::now(),
             vmux_layout::space::space_view_bundle(),
             ChildOf(main),
         )
@@ -531,7 +532,7 @@ impl SpaceViewTemplate {
         &self,
         space: Entity,
         window: Entity,
-        settings: Option<&vmux_setting::AppSettings>,
+        settings: Option<&AppSettings>,
     ) -> TabLayoutSpawnRequest {
         let startup_dir = settings.and_then(|settings| settings.startup_dir(&self.id));
         let content = settings
@@ -555,13 +556,7 @@ impl SpaceViewTemplate {
 }
 
 fn sync_space_name_to_id(
-    mut spaces: Query<
-        (&vmux_layout::space::SpaceId, &mut Name),
-        (
-            With<vmux_layout::space::Space>,
-            Changed<vmux_layout::space::SpaceId>,
-        ),
-    >,
+    mut spaces: Query<(&SpaceId, &mut Name), (With<Space>, Changed<SpaceId>)>,
 ) {
     for (id, mut name) in &mut spaces {
         if name.as_str() != id.0 {
@@ -598,19 +593,16 @@ fn on_space_rename(
         if id.0 != request.space_id {
             continue;
         }
-        commands.entity(entity).insert((
-            Name::new(new_id.clone()),
-            vmux_layout::space::SpaceId(new_id.clone()),
-        ));
+        commands
+            .entity(entity)
+            .insert((Name::new(new_id.clone()), SpaceId(new_id.clone())));
     }
     if new_id == request.space_id {
         return;
     }
     for (tab, id, _, _) in &graph.tabs {
         if id.0 == request.space_id {
-            commands
-                .entity(tab)
-                .insert(vmux_layout::space::SpaceId(new_id.clone()));
+            commands.entity(tab).insert(SpaceId(new_id.clone()));
         }
     }
 }
@@ -618,7 +610,7 @@ fn on_space_rename(
 fn on_space_open_page(
     trigger: On<UiInput<SpaceOpenPageRequest>>,
     space_window: SpaceWindow,
-    focus: vmux_layout::stack::FocusedStack,
+    focus: FocusedStack,
     mut spawn_requests: Option<MessageWriter<PageOpenRequest>>,
     stacks: Query<(Entity, &PageMetadata), With<Stack>>,
     mut commands: Commands,
@@ -629,7 +621,7 @@ fn on_space_open_page(
     if let Some((existing, _)) = stacks.iter().find(|(stack, metadata)| {
         metadata.url == SPACES_PAGE_URL && space_window.window_of(*stack) == Some(window)
     }) {
-        commands.trigger(vmux_core::ActivateRequest { entity: existing });
+        commands.trigger(ActivateRequest { entity: existing });
         return;
     }
     let Some(pane) = focus.as_deref().and_then(|focus| focus.pane) else {
@@ -641,7 +633,7 @@ fn on_space_open_page(
     let stack = commands
         .spawn((
             vmux_layout::stack::stack_bundle(),
-            vmux_history::LastActivatedAt::now(),
+            LastActivatedAt::now(),
             ChildOf(pane),
         ))
         .id();
@@ -657,7 +649,7 @@ fn on_space_delete(
     graph: SpaceGraph,
     space_window: SpaceWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
+    settings: Option<Res<AppSettings>>,
     mut commands: Commands,
 ) {
     if space_window.for_webview(trigger.event().webview).is_none() {
@@ -700,7 +692,7 @@ fn on_space_delete(
         {
             commands
                 .entity(target_entity)
-                .insert((vmux_core::Active, vmux_history::LastActivatedAt::now()));
+                .insert((Active, LastActivatedAt::now()));
             graph.bump_tab(target_entity, &mut commands);
             continue;
         }
@@ -717,7 +709,7 @@ fn on_space_attach(
     graph: SpaceGraph,
     space_window: SpaceWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
+    settings: Option<Res<AppSettings>>,
     mut commands: Commands,
 ) {
     let Some((window, main)) = space_window.for_webview(trigger.event().webview) else {
@@ -743,7 +735,7 @@ fn on_space_attach(
     graph.deactivate_in_main(main, &mut commands);
     commands
         .entity(entity)
-        .insert((vmux_core::Active, vmux_history::LastActivatedAt::now()));
+        .insert((Active, LastActivatedAt::now()));
     graph.bump_tab(entity, &mut commands);
 }
 
@@ -752,7 +744,7 @@ fn on_space_create(
     graph: SpaceGraph,
     space_window: SpaceWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
+    settings: Option<Res<AppSettings>>,
     mut commands: Commands,
 ) {
     let Some((window, main)) = space_window.for_webview(trigger.event().webview) else {
@@ -786,12 +778,12 @@ fn on_space_create(
     graph.deactivate_in_main(main, &mut commands);
     let space = commands
         .spawn((
-            vmux_layout::space::Space,
-            vmux_layout::space::SpaceId(id.clone()),
+            Space,
+            SpaceId(id.clone()),
             Name::new(id.clone()),
-            vmux_core::Order(order),
-            vmux_core::Active,
-            vmux_history::LastActivatedAt::now(),
+            Order(order),
+            Active,
+            LastActivatedAt::now(),
             vmux_layout::space::space_view_bundle(),
             ChildOf(main),
         ))
@@ -817,7 +809,7 @@ fn handle_open_in_new_space(
     mut reader: MessageReader<OpenRequest>,
     graph: SpaceGraph,
     space_window: SpaceWindow,
-    settings: Option<Res<vmux_setting::AppSettings>>,
+    settings: Option<Res<AppSettings>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
 ) {
@@ -849,12 +841,12 @@ fn handle_open_in_new_space(
         graph.deactivate_in_main(main, &mut commands);
         let space = commands
             .spawn((
-                vmux_layout::space::Space,
-                vmux_layout::space::SpaceId(id.clone()),
+                Space,
+                SpaceId(id.clone()),
                 Name::new(id.clone()),
-                vmux_core::Order(order),
-                vmux_core::Active,
-                vmux_history::LastActivatedAt::now(),
+                Order(order),
+                Active,
+                LastActivatedAt::now(),
                 vmux_layout::space::space_view_bundle(),
                 ChildOf(main),
             ))
@@ -867,8 +859,8 @@ fn handle_open_in_new_space(
             .map(|settings| settings.startup_url(&id))
             .unwrap_or_default();
         commands.entity(space).insert((
-            vmux_layout::space::EffectiveStartupDir(startup_dir.clone()),
-            vmux_core::EffectiveStartupUrl(startup_url.clone()),
+            EffectiveStartupDir(startup_dir.clone()),
+            EffectiveStartupUrl(startup_url.clone()),
         ));
         let content = request
             .url
@@ -898,7 +890,7 @@ fn handle_open_in_new_space(
 }
 
 fn respond_spaces_spawn(
-    mut reader: MessageReader<vmux_core::page::SpacesPageSpawnRequest>,
+    mut reader: MessageReader<SpacesPageSpawnRequest>,
     mut page_open: MessageWriter<PageOpenRequest>,
 ) {
     for req in reader.read() {
@@ -919,15 +911,13 @@ mod tests {
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
+    use vmux_setting::{BrowserSettings, ShortcutSettings};
 
     #[test]
     fn space_mcp_definition_dispatches_to_the_typed_request() {
-        let definitions = vmux_command::CommandDefinitions::from_feature_ron(
-            include_str!("../feature.ron"),
-            "plugin",
-        )
-        .into_vec();
+        let definitions =
+            CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "plugin")
+                .into_vec();
         let tools = definitions
             .iter()
             .filter_map(vmux_command::CommandDefinition::agent_tool)
@@ -939,9 +929,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["open_in_new_space"],
         );
-        let invocation =
-            vmux_command::CommandInvocation::new(Entity::PLACEHOLDER, "open_in_new_space")
-                .with_arguments(serde_json::json!({"url": "https://vmux.ai"}));
+        let invocation = CommandInvocation::new(Entity::PLACEHOLDER, "open_in_new_space")
+            .with_arguments(serde_json::json!({"url": "https://vmux.ai"}));
         assert!(OpenRequest::try_from(&invocation).is_ok());
     }
 
@@ -1002,10 +991,7 @@ mod tests {
         let window = app.world_mut().spawn_empty().id();
         let root = app.world_mut().spawn(HostWindow(window)).id();
         let column = app.world_mut().spawn(ChildOf(root)).id();
-        let main = app
-            .world_mut()
-            .spawn((vmux_layout::window::Main, ChildOf(column)))
-            .id();
+        let main = app.world_mut().spawn((Main, ChildOf(column))).id();
 
         let resolved = app
             .world_mut()
@@ -1029,7 +1015,7 @@ mod tests {
         );
 
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
+        app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .insert_resource(settings)
             .add_systems(Update, update_effective_startup);
         let space = app
@@ -1043,10 +1029,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world()
-                .get::<vmux_core::EffectiveStartupUrl>(space)
-                .unwrap()
-                .0,
+            app.world().get::<EffectiveStartupUrl>(space).unwrap().0,
             "https://work.example"
         );
     }
@@ -1054,43 +1037,35 @@ mod tests {
     #[test]
     fn attaching_a_shared_space_creates_a_window_local_view() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
+        app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
             .add_observer(on_space_attach);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
-        app.world_mut()
-            .entity_mut(second_window)
-            .insert(vmux_core::Active);
+        app.world_mut().entity_mut(second_window).insert(Active);
         let first_root = app.world_mut().spawn(HostWindow(first_window)).id();
         let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
         let first_column = app.world_mut().spawn(ChildOf(first_root)).id();
         let second_column = app.world_mut().spawn(ChildOf(second_root)).id();
-        let first_main = app
-            .world_mut()
-            .spawn((vmux_layout::window::Main, ChildOf(first_column)))
-            .id();
-        let second_main = app
-            .world_mut()
-            .spawn((vmux_layout::window::Main, ChildOf(second_column)))
-            .id();
+        let first_main = app.world_mut().spawn((Main, ChildOf(first_column))).id();
+        let second_main = app.world_mut().spawn((Main, ChildOf(second_column))).id();
         app.world_mut().spawn((
-            vmux_layout::space::Space,
-            vmux_layout::space::SpaceId("shared".to_string()),
+            Space,
+            SpaceId("shared".to_string()),
             Name::new("shared"),
-            vmux_core::Order(0),
-            vmux_core::Active,
+            Order(0),
+            Active,
             vmux_layout::space::space_view_bundle(),
             ChildOf(first_main),
         ));
         let previous = app
             .world_mut()
             .spawn((
-                vmux_layout::space::Space,
-                vmux_layout::space::SpaceId("second".to_string()),
+                Space,
+                SpaceId("second".to_string()),
                 Name::new("second"),
-                vmux_core::Order(0),
-                vmux_core::Active,
+                Order(0),
+                Active,
                 vmux_layout::space::space_view_bundle(),
                 ChildOf(second_main),
             ))
@@ -1107,15 +1082,10 @@ mod tests {
 
         let shared_views: Vec<(Entity, Entity, bool)> = app
             .world_mut()
-            .query_filtered::<
-                (Entity, &ChildOf, Has<vmux_core::Active>),
-                With<vmux_layout::space::Space>,
-            >()
+            .query_filtered::<(Entity, &ChildOf, Has<Active>), With<Space>>()
             .iter(app.world())
             .filter_map(|(entity, parent, active)| {
-                let id = app
-                    .world()
-                    .get::<vmux_layout::space::SpaceId>(entity)?;
+                let id = app.world().get::<SpaceId>(entity)?;
                 (id.0 == "shared").then_some((entity, parent.parent(), active))
             })
             .collect();
@@ -1130,46 +1100,38 @@ mod tests {
                 .iter()
                 .any(|(_, parent, active)| *parent == second_main && *active)
         );
-        assert!(!app.world().entity(previous).contains::<vmux_core::Active>());
+        assert!(!app.world().entity(previous).contains::<Active>());
     }
 
     #[test]
     fn deleting_a_shared_space_removes_every_view_and_activates_local_fallbacks() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
+        app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
             .add_observer(on_space_delete);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
-        app.world_mut()
-            .entity_mut(second_window)
-            .insert(vmux_core::Active);
+        app.world_mut().entity_mut(second_window).insert(Active);
         let first_root = app.world_mut().spawn(HostWindow(first_window)).id();
         let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
-        let first_main = app
-            .world_mut()
-            .spawn((vmux_layout::window::Main, ChildOf(first_root)))
-            .id();
-        let second_main = app
-            .world_mut()
-            .spawn((vmux_layout::window::Main, ChildOf(second_root)))
-            .id();
+        let first_main = app.world_mut().spawn((Main, ChildOf(first_root))).id();
+        let second_main = app.world_mut().spawn((Main, ChildOf(second_root))).id();
         for main in [first_main, second_main] {
             app.world_mut().spawn((
-                vmux_layout::space::Space,
-                vmux_layout::space::SpaceId("shared".to_string()),
+                Space,
+                SpaceId("shared".to_string()),
                 Name::new("shared"),
-                vmux_core::Order(0),
-                vmux_core::Active,
+                Order(0),
+                Active,
                 vmux_layout::space::space_view_bundle(),
                 ChildOf(main),
             ));
         }
         app.world_mut().spawn((
-            vmux_layout::space::Space,
-            vmux_layout::space::SpaceId("fallback".to_string()),
+            Space,
+            SpaceId("fallback".to_string()),
             Name::new("fallback"),
-            vmux_core::Order(1),
+            Order(1),
             vmux_layout::space::space_view_bundle(),
             ChildOf(first_main),
         ));
@@ -1185,11 +1147,7 @@ mod tests {
 
         let views: Vec<(String, Entity, bool)> = app
             .world_mut()
-            .query_filtered::<(
-                &vmux_layout::space::SpaceId,
-                &ChildOf,
-                Has<vmux_core::Active>,
-            ), With<vmux_layout::space::Space>>()
+            .query_filtered::<(&SpaceId, &ChildOf, Has<Active>), With<Space>>()
             .iter(app.world())
             .map(|(id, parent, active)| (id.0.clone(), parent.parent(), active))
             .collect();
@@ -1235,23 +1193,16 @@ mod tests {
                 vmux_layout::space::CurrentSpace,
             ))
             .id();
-        let tab = app
-            .world_mut()
-            .spawn((vmux_layout::tab::Tab::default(), ChildOf(space)))
-            .id();
+        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
 
         app.update();
 
         assert_eq!(
-            app.world()
-                .get::<vmux_layout::tab::Tab>(tab)
-                .unwrap()
-                .startup_dir
-                .as_deref(),
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
             None
         );
         app.world_mut()
-            .resource_mut::<vmux_setting::AppSettings>()
+            .resource_mut::<AppSettings>()
             .spaces
             .get_mut("work")
             .unwrap()
@@ -1260,11 +1211,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world()
-                .get::<vmux_layout::tab::Tab>(tab)
-                .unwrap()
-                .startup_dir
-                .as_deref(),
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
             None
         );
     }
@@ -1291,39 +1238,26 @@ mod tests {
             },
         );
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
+        app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .insert_resource(settings)
             .add_systems(Update, update_effective_startup);
         let inactive = app
             .world_mut()
-            .spawn((
-                vmux_layout::space::Space,
-                vmux_layout::space::SpaceId("inactive".into()),
-            ))
+            .spawn((Space, SpaceId("inactive".into())))
             .id();
         let active = app
             .world_mut()
-            .spawn((
-                vmux_layout::space::Space,
-                vmux_layout::space::SpaceId("active".into()),
-                vmux_core::Active,
-            ))
+            .spawn((Space, SpaceId("active".into()), Active))
             .id();
 
         app.update();
 
         assert_eq!(
-            app.world()
-                .get::<vmux_layout::space::EffectiveStartupDir>(active)
-                .unwrap()
-                .0,
+            app.world().get::<EffectiveStartupDir>(active).unwrap().0,
             Some(active_dir.path().to_path_buf())
         );
         assert_eq!(
-            app.world()
-                .get::<vmux_layout::space::EffectiveStartupDir>(inactive)
-                .unwrap()
-                .0,
+            app.world().get::<EffectiveStartupDir>(inactive).unwrap().0,
             Some(inactive_dir.path().to_path_buf())
         );
     }
@@ -1340,7 +1274,7 @@ mod tests {
         );
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<vmux_setting::SettingsSaveRequest>()
+            .add_message::<SettingsSaveRequest>()
             .insert_resource(settings)
             .add_observer(on_project_activate)
             .add_observer(on_project_forget);
@@ -1389,7 +1323,7 @@ mod tests {
             .iter()
             .map(|dir| {
                 app.world_mut()
-                    .spawn(vmux_layout::tab::Tab {
+                    .spawn(Tab {
                         startup_dir: Some((*dir).to_string()),
                         ..Default::default()
                     })
@@ -1400,7 +1334,7 @@ mod tests {
             .iter()
             .map(|tab| {
                 app.world()
-                    .get::<vmux_layout::tab::Tab>(*tab)
+                    .get::<Tab>(*tab)
                     .and_then(|t| t.startup_dir.clone())
             })
             .collect();
@@ -1420,7 +1354,7 @@ mod tests {
             .iter()
             .map(|tab| {
                 app.world()
-                    .get::<vmux_layout::tab::Tab>(*tab)
+                    .get::<Tab>(*tab)
                     .and_then(|t| t.startup_dir.clone())
             })
             .collect();
@@ -1481,20 +1415,13 @@ mod tests {
             .add_systems(Update, update_effective_startup);
         let space = app
             .world_mut()
-            .spawn((
-                vmux_layout::space::Space,
-                vmux_layout::space::SpaceId("work".into()),
-                vmux_core::Active,
-            ))
+            .spawn((Space, SpaceId("work".into()), Active))
             .id();
 
         app.update();
 
         assert_eq!(
-            app.world()
-                .get::<vmux_layout::space::EffectiveStartupDir>(space)
-                .unwrap()
-                .0,
+            app.world().get::<EffectiveStartupDir>(space).unwrap().0,
             None
         );
     }
@@ -1505,10 +1432,7 @@ mod tests {
         struct ChangeCount(u32);
 
         fn count_changes(
-            effective: Single<
-                Ref<vmux_layout::space::EffectiveStartupDir>,
-                With<vmux_layout::space::Space>,
-            >,
+            effective: Single<Ref<EffectiveStartupDir>, With<Space>>,
             mut count: ResMut<ChangeCount>,
         ) {
             if effective.is_changed() {
@@ -1527,11 +1451,8 @@ mod tests {
                     count_changes.after(update_effective_startup),
                 ),
             );
-        app.world_mut().spawn((
-            vmux_layout::space::Space,
-            vmux_layout::space::SpaceId("work".into()),
-            vmux_core::Active,
-        ));
+        app.world_mut()
+            .spawn((Space, SpaceId("work".into()), Active));
 
         app.update();
         app.update();
@@ -1545,10 +1466,7 @@ mod tests {
         struct ChangeCount(u32);
 
         fn count_changes(
-            effective: Single<
-                Ref<vmux_layout::space::EffectiveStartupDir>,
-                With<vmux_layout::space::Space>,
-            >,
+            effective: Single<Ref<EffectiveStartupDir>, With<Space>>,
             mut count: ResMut<ChangeCount>,
         ) {
             if effective.is_changed() {
@@ -1567,7 +1485,7 @@ mod tests {
             },
         );
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
+        app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .insert_resource(settings)
             .init_resource::<ChangeCount>()
             .add_systems(
@@ -1577,11 +1495,8 @@ mod tests {
                     count_changes.after(update_effective_startup),
                 ),
             );
-        app.world_mut().spawn((
-            vmux_layout::space::Space,
-            vmux_layout::space::SpaceId("work".into()),
-            vmux_core::Active,
-        ));
+        app.world_mut()
+            .spawn((Space, SpaceId("work".into()), Active));
 
         app.update();
         app.update();
@@ -1608,24 +1523,17 @@ mod tests {
             },
         );
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
+        app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .insert_resource(settings)
             .add_systems(Update, update_effective_startup);
         let space = app
             .world_mut()
-            .spawn((
-                vmux_layout::space::Space,
-                vmux_layout::space::SpaceId("work".into()),
-                vmux_core::Active,
-            ))
+            .spawn((Space, SpaceId("work".into()), Active))
             .id();
 
         app.update();
         assert_eq!(
-            app.world()
-                .get::<vmux_layout::space::EffectiveStartupDir>(space)
-                .unwrap()
-                .0,
+            app.world().get::<EffectiveStartupDir>(space).unwrap().0,
             Some(primary_path)
         );
 
@@ -1633,10 +1541,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world()
-                .get::<vmux_layout::space::EffectiveStartupDir>(space)
-                .unwrap()
-                .0,
+            app.world().get::<EffectiveStartupDir>(space).unwrap().0,
             Some(fallback.path().to_path_buf())
         );
     }
@@ -1644,18 +1549,18 @@ mod tests {
     #[test]
     fn rename_reslugs_space_id_and_retags_tabs() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
+        app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
             .add_observer(on_space_rename);
         app.world_mut().spawn(bevy::window::PrimaryWindow);
-        let main = app.world_mut().spawn(vmux_layout::window::Main).id();
+        let main = app.world_mut().spawn(Main).id();
         let space = app
             .world_mut()
             .spawn((
-                vmux_layout::space::Space,
-                vmux_layout::space::SpaceId("rename-src-test".to_string()),
+                Space,
+                SpaceId("rename-src-test".to_string()),
                 Name::new("rename-src-test"),
-                vmux_core::Active,
+                Active,
                 vmux_layout::space::CurrentSpace,
                 ChildOf(main),
             ))
@@ -1663,9 +1568,9 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                vmux_layout::tab::Tab::default(),
-                vmux_layout::space::SpaceId("rename-src-test".to_string()),
-                vmux_history::LastActivatedAt::now(),
+                Tab::default(),
+                SpaceId("rename-src-test".to_string()),
+                LastActivatedAt::now(),
                 ChildOf(space),
             ))
             .id();
@@ -1680,9 +1585,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world()
-                .get::<vmux_layout::space::SpaceId>(space)
-                .map(|s| s.0.clone()),
+            app.world().get::<SpaceId>(space).map(|s| s.0.clone()),
             Some("vmux-ai/vmux".to_string())
         );
         assert_eq!(
@@ -1690,9 +1593,7 @@ mod tests {
             Some("vmux-ai/vmux".to_string())
         );
         assert_eq!(
-            app.world()
-                .get::<vmux_layout::space::SpaceId>(tab)
-                .map(|s| s.0.clone()),
+            app.world().get::<SpaceId>(tab).map(|s| s.0.clone()),
             Some("vmux-ai/vmux".to_string())
         );
         assert!(
