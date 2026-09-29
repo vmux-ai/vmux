@@ -5,6 +5,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::{McpServerManifest, McpTransport, ToolStore};
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
@@ -31,6 +32,7 @@ impl Plugin for McpConnectionPlugin {
             UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default(),
             UiStatePlugin::<McpServers>::default(),
         ))
+        .add_systems(Startup, spawn_mcp_catalog)
         .add_message::<PageOpenRequest>()
         .add_observer(request_mcp_connections)
         .add_observer(begin_mcp_snapshot)
@@ -133,6 +135,7 @@ fn request_mcp_server(
 
 fn start_mcp_operation(
     pending: Query<(Entity, &PendingMcpOperation), Without<McpOperationTask>>,
+    catalog: McpCatalog,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -140,20 +143,24 @@ fn start_mcp_operation(
         let generation = pending.generation;
         let id = pending.id.clone();
         let operation = pending.operation;
+        let server = catalog.server(&id);
         let task_id = id.clone();
         let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let progress_wake = completion_wake.clone();
         let (progress_sender, progress_receiver) = mpsc::channel();
         let task = IoTaskPool::get().spawn(async move {
-            let result = match operation {
-                McpServerOperation::Connect => McpConnection::connect(&task_id, |url| {
-                    if progress_sender.send(url).is_ok()
-                        && let Some(wake) = &progress_wake
-                    {
-                        let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-                    }
-                }),
-                McpServerOperation::Disconnect => McpConnection::disconnect(&task_id),
+            let result = match (operation, server.as_ref()) {
+                (McpServerOperation::Connect, Some(server)) => {
+                    McpConnection::connect(server, |url| {
+                        if progress_sender.send(url).is_ok()
+                            && let Some(wake) = &progress_wake
+                        {
+                            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+                        }
+                    })
+                }
+                (McpServerOperation::Disconnect, Some(server)) => McpConnection::disconnect(server),
+                (_, None) => Err(format!("Unknown MCP server: {task_id}")),
             };
             if let Some(wake) = completion_wake {
                 let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
@@ -214,12 +221,14 @@ fn drain_mcp_operations(
 
 fn start_mcp_snapshots(
     requests: Query<(Entity, &PendingMcpSnapshot), Without<McpSnapshotTask>>,
+    catalog: McpCatalog,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     for (target, request) in &requests {
         let generation = request.generation;
         let result = request.result.clone();
+        let source = catalog.snapshot_source();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         commands
             .entity(target)
@@ -227,7 +236,7 @@ fn start_mcp_snapshots(
             .insert(McpSnapshotTask {
                 generation,
                 task: IoTaskPool::get().spawn(async move {
-                    let snapshot = McpCatalog::snapshot(result);
+                    let snapshot = source.load(result);
                     if let Some(wake) = wake {
                         let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
                     }
@@ -311,65 +320,105 @@ struct McpSnapshotTask {
     task: Task<McpServers>,
 }
 
-#[derive(Clone, Copy)]
-struct McpCatalogEntry {
-    id: &'static str,
-    name: &'static str,
-    url: &'static str,
-    scopes: &'static [&'static str],
+#[derive(Deserialize)]
+struct McpFeatureManifest {
+    mcp_servers: Vec<McpCatalogManifest>,
 }
 
-impl McpCatalogEntry {
-    fn server(self) -> McpServerManifest {
+#[derive(Deserialize)]
+struct McpCatalogManifest {
+    id: String,
+    name: String,
+    url: String,
+    scopes: Vec<String>,
+}
+
+#[derive(Component, Clone)]
+struct McpCatalogServer {
+    id: String,
+    url: String,
+    scopes: Vec<String>,
+}
+
+impl McpCatalogServer {
+    fn manifest(&self) -> McpServerManifest {
         McpServerManifest {
             transport: McpTransport::Http,
             command: None,
             args: Vec::new(),
             env: Default::default(),
             cwd: None,
-            url: Some(self.url.to_string()),
+            url: Some(self.url.clone()),
             headers: Default::default(),
             header_env: Default::default(),
             bearer_token_env_var: None,
         }
     }
 
-    fn owns(self, server: &McpServerManifest) -> bool {
-        server == &self.server()
+    fn owns(&self, server: &McpServerManifest) -> bool {
+        server == &self.manifest()
     }
 }
 
-struct McpCatalog;
+fn spawn_mcp_catalog(mut commands: Commands) {
+    let manifest: McpFeatureManifest = ron::from_str(include_str!("feature.ron"))
+        .expect("tool feature manifest must be valid RON");
+    let mut ids = BTreeSet::new();
+    for server in manifest.mcp_servers {
+        assert!(ids.insert(server.id.clone()), "duplicate MCP server ID");
+        commands.spawn((
+            Name::new(server.name),
+            McpCatalogServer {
+                id: server.id,
+                url: server.url,
+                scopes: server.scopes,
+            },
+        ));
+    }
+}
 
-impl McpCatalog {
-    const ENTRIES: [McpCatalogEntry; 1] = [McpCatalogEntry {
-        id: "linear",
-        name: "Linear",
-        url: "https://mcp.linear.app/mcp",
-        scopes: &["read", "write"],
-    }];
+#[derive(SystemParam)]
+struct McpCatalog<'w, 's> {
+    servers: Query<'w, 's, (&'static Name, &'static McpCatalogServer)>,
+}
 
-    fn get(id: &str) -> Option<McpCatalogEntry> {
-        Self::ENTRIES.iter().copied().find(|entry| entry.id == id)
+impl McpCatalog<'_, '_> {
+    fn server(&self, id: &str) -> Option<McpCatalogServer> {
+        self.servers
+            .iter()
+            .find_map(|(_, server)| (server.id == id).then(|| server.clone()))
     }
 
-    fn snapshot(result: Option<McpServerResult>) -> McpServers {
+    fn snapshot_source(&self) -> McpSnapshotSource {
+        McpSnapshotSource(
+            self.servers
+                .iter()
+                .map(|(name, server)| (name.as_str().to_string(), server.clone()))
+                .collect(),
+        )
+    }
+}
+
+struct McpSnapshotSource(Vec<(String, McpCatalogServer)>);
+
+impl McpSnapshotSource {
+    fn load(self, result: Option<McpServerResult>) -> McpServers {
         let manifest = ToolStore::current().load().unwrap_or_default();
         let mut servers = Vec::new();
         let mut catalog_ids = BTreeSet::new();
-        for entry in Self::ENTRIES {
-            catalog_ids.insert(entry.id);
+        for (name, server) in self.0 {
+            catalog_ids.insert(server.id.clone());
             let configured = manifest
                 .mcp
                 .servers
-                .get(entry.id)
-                .is_some_and(|server| entry.owns(server));
-            let occupied = manifest.mcp.servers.contains_key(entry.id);
+                .get(&server.id)
+                .is_some_and(|manifest| server.owns(manifest));
+            let occupied = manifest.mcp.servers.contains_key(&server.id);
             let authenticated = configured
-                && McpCredentialStorage::load(entry.id)
+                && McpCredentialStorage::load(&server.id)
                     .ok()
                     .flatten()
-                    .is_some_and(|credentials| credentials.authorizes(entry.url));
+                    .is_some_and(|credentials| credentials.authorizes(&server.url));
             let status = match (configured, authenticated, occupied) {
                 (false, _, true) => McpServerStatus::Configured,
                 (true, true, _) => McpServerStatus::Connected,
@@ -377,8 +426,8 @@ impl McpCatalog {
                 (false, _, false) => McpServerStatus::Available,
             };
             servers.push(McpServerEntry {
-                id: entry.id.to_string(),
-                name: entry.name.to_string(),
+                id: server.id,
+                name,
                 description: String::new(),
                 status,
             });
@@ -411,9 +460,8 @@ impl McpCatalog {
 struct McpConnection;
 
 impl McpConnection {
-    fn connect(id: &str, progress: impl FnOnce(String)) -> Result<(), String> {
-        let entry = McpCatalog::get(id).ok_or_else(|| format!("Unknown MCP server: {id}"))?;
-        Self::ensure_catalog_slot(entry)?;
+    fn connect(server: &McpCatalogServer, progress: impl FnOnce(String)) -> Result<(), String> {
+        Self::ensure_catalog_slot(server)?;
         let listener = TcpListener::bind("127.0.0.1:0")
             .map_err(|error| format!("failed to open OAuth callback: {error}"))?;
         let address = listener
@@ -425,7 +473,7 @@ impl McpConnection {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| error.to_string())?;
-        let protected = Self::protected_metadata(&client, entry.url)?;
+        let protected = Self::protected_metadata(&client, &server.url)?;
         let issuer = protected
             .authorization_servers
             .first()
@@ -450,8 +498,8 @@ impl McpConnection {
             .append_pair("code_challenge", &challenge)
             .append_pair("code_challenge_method", "S256")
             .append_pair("state", &state)
-            .append_pair("resource", entry.url)
-            .append_pair("scope", &entry.scopes.join(" "));
+            .append_pair("resource", &server.url)
+            .append_pair("scope", &server.scopes.join(" "));
         progress(url.to_string());
         let code = McpCallback::receive(listener, &state)?;
         let token = Self::exchange(
@@ -461,7 +509,7 @@ impl McpConnection {
             &code,
             &verifier,
             &redirect_uri,
-            entry.url,
+            &server.url,
         )?;
         let credentials = McpOauthCredentials {
             token_endpoint: authorization.token_endpoint,
@@ -470,14 +518,15 @@ impl McpConnection {
             access_token: token.access_token,
             refresh_token: token.refresh_token,
             expires_at: McpOauthCredentials::expires_at(token.expires_in),
-            scope: token.scope.unwrap_or_else(|| entry.scopes.join(" ")),
-            resource: entry.url.to_string(),
+            scope: token.scope.unwrap_or_else(|| server.scopes.join(" ")),
+            resource: server.url.clone(),
         };
+        let id = &server.id;
         McpCredentialAccess::write(|| {
-            Self::ensure_catalog_slot(entry)?;
+            Self::ensure_catalog_slot(server)?;
             let original_credentials = McpCredentialStorage::load(id)?;
             McpCredentialStorage::store(id, &credentials)?;
-            if let Err(error) = Self::write_manifest(entry) {
+            if let Err(error) = Self::write_manifest(server) {
                 let credentials_rollback = original_credentials
                     .as_ref()
                     .map(|credentials| McpCredentialStorage::store(id, credentials))
@@ -488,18 +537,18 @@ impl McpConnection {
         })
     }
 
-    fn disconnect(id: &str) -> Result<(), String> {
-        let entry = McpCatalog::get(id).ok_or_else(|| format!("Unknown MCP server: {id}"))?;
+    fn disconnect(server: &McpCatalogServer) -> Result<(), String> {
+        let id = &server.id;
         McpCredentialAccess::write(|| {
             let credentials = McpCredentialStorage::load(id)?;
             let store = ToolStore::current();
             let original = store.load()?;
-            let server = original
+            let configured = original
                 .mcp
                 .servers
                 .get(id)
                 .ok_or_else(|| format!("MCP server is not configured: {id}"))?;
-            if !entry.owns(server) {
+            if !server.owns(configured) {
                 return Err(format!(
                     "MCP server ID is already managed by tools.toml: {id}"
                 ));
@@ -636,35 +685,35 @@ impl McpConnection {
         format!("{error}; {}", failures.join("; "))
     }
 
-    fn write_manifest(entry: McpCatalogEntry) -> Result<(), String> {
+    fn write_manifest(server: &McpCatalogServer) -> Result<(), String> {
         let store = ToolStore::current();
         let mut manifest = store.load()?;
-        if let Some(server) = manifest.mcp.servers.get(entry.id)
-            && !entry.owns(server)
+        if let Some(manifest_server) = manifest.mcp.servers.get(&server.id)
+            && !server.owns(manifest_server)
         {
             return Err(format!(
                 "MCP server ID is already managed by tools.toml: {}",
-                entry.id
+                server.id
             ));
         }
         manifest
             .mcp
             .servers
-            .insert(entry.id.to_string(), entry.server());
+            .insert(server.id.clone(), server.manifest());
         store.save(&manifest)
     }
 
-    fn ensure_catalog_slot(entry: McpCatalogEntry) -> Result<(), String> {
+    fn ensure_catalog_slot(server: &McpCatalogServer) -> Result<(), String> {
         let manifest = ToolStore::current().load()?;
-        let Some(server) = manifest.mcp.servers.get(entry.id) else {
+        let Some(manifest_server) = manifest.mcp.servers.get(&server.id) else {
             return Ok(());
         };
-        if entry.owns(server) {
+        if server.owns(manifest_server) {
             return Ok(());
         }
         Err(format!(
             "MCP server ID is already managed by tools.toml: {}",
-            entry.id
+            server.id
         ))
     }
 }
