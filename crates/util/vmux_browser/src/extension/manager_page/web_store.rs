@@ -115,7 +115,7 @@ fn inject_page(
         return;
     };
     let injector = WebStoreInjector::resolve(current, extension_id);
-    let profile = vmux_core::profile::active_profile_name();
+    let profile = vmux_core::profile::Profile::current().into_id();
     let index = store::Index::load(&store::root()).unwrap_or_default();
     let installed = index
         .entries

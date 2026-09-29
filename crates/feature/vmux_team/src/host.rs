@@ -12,10 +12,7 @@ use vmux_core::event::team::{
 use vmux_core::host::{UiStatePlugin, UiStateWrite};
 use vmux_core::notify::AgentDoneUnseen;
 use vmux_core::page::PageReady;
-use vmux_core::profile::{
-    ProfileId, ProfileLabel, active_profile_name, create_profile, is_test_session,
-    profile_display_name, profile_exists, profile_ids, sanitize_profile, set_profile_display_name,
-};
+use vmux_core::profile::{Profile as StoredProfile, ProfileId, ProfileLabel, is_test_session};
 use vmux_core::team::{Agent, Profile, Tester, User};
 use vmux_core::{ActivateRequest, Active, PageMetadata};
 use vmux_layout::cef::LayoutCef;
@@ -102,11 +99,12 @@ fn spawn_user_profile(mut commands: Commands) {
 }
 
 fn spawn_profile_labels(mut commands: Commands) {
-    let active = active_profile_name();
-    for id in profile_ids() {
-        let name = profile_display_name(&id);
+    let active = StoredProfile::current();
+    for profile in StoredProfile::all() {
+        let id = profile.id().to_string();
+        let name = profile.display_name();
         let mut entity = commands.spawn((ProfileLabel, ProfileId(id.clone()), Name::new(name)));
-        if id == active {
+        if profile == active {
             entity.insert(Active);
         }
     }
@@ -460,8 +458,9 @@ fn on_team_profile_create_request(
     mut commands: Commands,
 ) {
     let name = trigger.event().payload.name.trim().to_string();
-    match create_profile(&name) {
-        Ok(profile_id) => {
+    match StoredProfile::create(&name) {
+        Ok(profile) => {
+            let profile_id = profile.into_id();
             commands.spawn((ProfileLabel, ProfileId(profile_id.clone()), Name::new(name)));
             profile_switches.write(ProfileSwitchRequested { profile_id });
         }
@@ -474,10 +473,11 @@ fn on_team_profile_switch_request(
     profile_labels: Query<&ProfileId, With<ProfileLabel>>,
     mut profile_switches: MessageWriter<ProfileSwitchRequested>,
 ) {
-    let profile_id = sanitize_profile(&trigger.event().payload.profile_id);
-    if profile_id == active_profile_name() || !profile_exists(&profile_id) {
+    let profile = StoredProfile::named(&trigger.event().payload.profile_id);
+    if profile == StoredProfile::current() || !profile.exists() {
         return;
     }
+    let profile_id = profile.into_id();
     if profile_labels.iter().any(|id| id.0 == profile_id) {
         profile_switches.write(ProfileSwitchRequested { profile_id });
     }
@@ -491,18 +491,19 @@ fn on_team_profile_update_request(
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
-    let profile_id = sanitize_profile(&request.profile_id);
-    if let Err(error) = set_profile_display_name(&profile_id, &request.name) {
+    let profile = StoredProfile::named(&request.profile_id);
+    if let Err(error) = profile.set_display_name(&request.name) {
         bevy::log::warn!("profile update failed: {error}");
         return;
     }
+    let profile_id = profile.id().to_string();
     let name = request.name.trim().to_string();
     for (id, mut label) in &mut profile_labels {
         if id.0 == profile_id {
             *label = Name::new(name.clone());
         }
     }
-    if profile_id != active_profile_name() {
+    if profile != StoredProfile::current() {
         return;
     }
     for mut profile in &mut space_profiles {

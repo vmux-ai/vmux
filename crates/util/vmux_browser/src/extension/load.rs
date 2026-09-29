@@ -11,7 +11,7 @@ pub struct PreparedExtensions(pub Vec<PreparedRuntime>);
 pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
     let root = store::root();
     let runtime_store = runtime_store_root();
-    let profile = vmux_core::profile::active_profile_name();
+    let profile = vmux_core::profile::Profile::current().into_id();
     let mut idx = store::Index::load(&root)?;
     let migrating = idx.requires_save();
     let mut index_changed = migrating;

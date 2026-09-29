@@ -71,7 +71,7 @@ fn resolve_inner(
     shell: &str,
 ) -> Result<McpServerConfig, String> {
     let sidecar = vmux_sidecar_path()?;
-    let profile = vmux_core::profile::active_profile_name();
+    let profile = vmux_core::profile::Profile::current().into_id();
     resolve_with_sidecar(
         &sidecar,
         cwd,

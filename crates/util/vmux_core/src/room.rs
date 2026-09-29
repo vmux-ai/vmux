@@ -86,7 +86,6 @@ impl ConversationTitle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::room::AssistantBlock;
 
     #[test]
     fn title_uses_the_first_user_prompt() {

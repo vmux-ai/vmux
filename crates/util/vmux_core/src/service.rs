@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use vmux_profile::{active_profile_name, build_profile, shared_data_dir};
+use vmux_profile::{Profile, build_profile, shared_data_dir};
 
 #[cfg(host)]
 use bevy::prelude::*;
@@ -291,7 +291,7 @@ impl ServicePaths {
     pub fn current() -> Self {
         Self {
             build: build_profile(),
-            profile: active_profile_name(),
+            profile: Profile::current().into_id(),
         }
     }
 

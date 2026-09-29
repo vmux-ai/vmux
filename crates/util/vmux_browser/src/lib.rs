@@ -66,7 +66,7 @@ pub struct BrowserPlugin;
 
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
-        let profile = vmux_core::profile::active_profile_name();
+        let profile = vmux_core::profile::Profile::current().into_id();
         let startup_settings = vmux_setting::AppSettings::from_disk();
         let startup_locale =
             Locale::requested(Some(&startup_settings.appearance.locale)).into_string();

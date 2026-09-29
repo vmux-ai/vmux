@@ -27,7 +27,7 @@ impl McpCredentialStorage {
     }
 
     fn account(server: &str) -> String {
-        format!("{}:{server}", crate::active_profile_name())
+        format!("{}:{server}", crate::Profile::current())
     }
 
     fn decode(bytes: &[u8]) -> Result<McpOauthCredentials, String> {

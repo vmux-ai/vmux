@@ -104,7 +104,7 @@ pub fn root() -> PathBuf {
 
 pub fn loaded_ids() -> Vec<String> {
     let root = root();
-    let profile = vmux_core::profile::active_profile_name();
+    let profile = vmux_core::profile::Profile::current().into_id();
     let profile_path = loaded_path(&root, &profile);
     std::fs::read_to_string(profile_path)
         .or_else(|error| {

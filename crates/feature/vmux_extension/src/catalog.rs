@@ -133,7 +133,7 @@ fn push(outbox: &ExtensionOutbox, msg: OutMsg) {
 
 fn snapshot() -> ExtensionsEvent {
     let root = store::root();
-    let profile = vmux_core::profile::active_profile_name();
+    let profile = vmux_core::profile::Profile::current().into_id();
     let index = store::Index::load(&root).unwrap_or_default();
     let loaded = store::loaded_ids();
     index.snapshot(&profile, &loaded)
@@ -226,7 +226,7 @@ fn on_page_ready(
 
 fn on_toggle_request(trigger: On<UiInput<ExtToggleRequest>>, runtime: Single<&ExtensionOutbox>) {
     let request = trigger.event().payload.clone();
-    let profile = vmux_core::profile::active_profile_name();
+    let profile = vmux_core::profile::Profile::current().into_id();
     let _ = store::update_index(&store::root(), |index| {
         index.set_enabled_for(
             &profile,
@@ -242,7 +242,7 @@ fn on_uninstall_request(
     trigger: On<UiInput<ExtUninstallRequest>>,
     runtime: Single<&ExtensionOutbox>,
 ) {
-    let profile = vmux_core::profile::active_profile_name();
+    let profile = vmux_core::profile::Profile::current().into_id();
     let _ = store::uninstall_for_profile(&store::root(), &profile, &trigger.event().payload.id);
     queue_snapshot(&runtime);
 }
@@ -251,7 +251,7 @@ fn on_pin_request(trigger: On<UiInput<ExtPinRequest>>, runtime: Single<&Extensio
     let request = trigger.event().payload.clone();
     let outbox = runtime.clone();
     std::thread::spawn(move || {
-        let profile = vmux_core::profile::active_profile_name();
+        let profile = vmux_core::profile::Profile::current().into_id();
         let loaded = store::loaded_ids();
         let result = store::update_index_if_changed(&store::root(), |index| {
             index

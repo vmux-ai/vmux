@@ -112,7 +112,7 @@ fn on_open_request(
     let Some(entry) = index.entries.into_iter().find(|entry| entry.id == id) else {
         return;
     };
-    if !entry.enabled_for(&vmux_core::profile::active_profile_name()) {
+    if !entry.enabled_for(vmux_core::profile::Profile::current().id()) {
         return;
     }
     let Some(popup) = entry.popup else {

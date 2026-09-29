@@ -1,7 +1,7 @@
 pub fn bootstrap_profile_name() -> String {
     #[cfg(host)]
     {
-        vmux_core::profile::display_name()
+        vmux_core::profile::Profile::current().display_name()
     }
     #[cfg(not(host))]
     {

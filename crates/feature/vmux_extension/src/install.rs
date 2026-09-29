@@ -57,7 +57,7 @@ fn install_crx(root: &Path, id: &str, bytes: &[u8]) -> Result<store::ExtEntry, S
     let source_hash = store::tree_sha256(&final_dir)?;
     let _ = std::fs::remove_dir_all(&staging);
 
-    let profile = vmux_core::profile::active_profile_name();
+    let profile = vmux_core::profile::Profile::current().into_id();
     let mut profile_enabled = std::collections::BTreeMap::new();
     profile_enabled.insert(profile.clone(), false);
 
