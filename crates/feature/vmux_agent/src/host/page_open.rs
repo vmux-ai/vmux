@@ -38,7 +38,7 @@ use vmux_space::spaces::space_profile_bundle;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
 
 use super::attach::{
-    AcpAgentAttachment, AgentStackAttachment, PageAgentAttachment, acp_icon_for_id,
+    AcpAgentAttachment, AgentStrategies, PageAgentAttachment, acp_icon_for_id,
     acp_profile_name_for_id, acp_registry_agent_for_id,
 };
 use super::run_terminal::AgentCwd;
@@ -493,7 +493,7 @@ fn handle_agent_page_open(
     cli_sessions: Query<(Entity, &CoreAgentSession, &CoreSessionId)>,
     acp_sessions: Query<&AcpSession>,
     child_of_q: Query<&ChildOf>,
-    attachments: AgentStackAttachment,
+    strategies: AgentStrategies,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
     mut commands: Commands,
     settings: Res<AppSettings>,
@@ -575,7 +575,7 @@ fn handle_agent_page_open(
             &agents,
             &cli_sessions,
             &acp_sessions,
-            &attachments,
+            &strategies,
             &mut spawn_agent,
             &mut commands,
             &default_cwd,
@@ -602,7 +602,6 @@ fn handle_swap_stack_session(
     mut reader: MessageReader<SwapStackSession>,
     settings: Res<AppSettings>,
     catalog: Option<Single<&crate::runtime::acp::AcpCatalog>>,
-    attachments: AgentStackAttachment,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
     mut commands: Commands,
 ) {
@@ -684,11 +683,10 @@ fn handle_swap_stack_session(
                 let routing_sid = uuid::Uuid::new_v4().to_string();
                 let icon = acp_icon_for_id(catalog, &id);
                 let name = acp_profile_name_for_id(&id, cfg, catalog);
-                let request =
-                    AcpAgentAttachment::new(ev.stack, id, name, routing_sid, ev.cwd.clone())
-                        .icon(icon)
-                        .resume(sid);
-                attachments.acp(request, &mut commands);
+                let request = AcpAgentAttachment::new(id, name, routing_sid, ev.cwd.clone())
+                    .icon(icon)
+                    .resume(sid);
+                commands.entity(ev.stack).insert(request);
                 if let Some((imported, pending)) = imported {
                     commands.entity(ev.stack).insert((imported, pending));
                 }
@@ -707,7 +705,7 @@ fn handle_agent_page_open_task(
     agents: &Query<&CoreAgentSession>,
     cli_sessions: &Query<(Entity, &CoreAgentSession, &CoreSessionId)>,
     acp_sessions: &Query<&AcpSession>,
-    attachments: &AgentStackAttachment,
+    strategies: &AgentStrategies,
     spawn_agent: &mut MessageWriter<SpawnAgentInStackRequest>,
     commands: &mut Commands,
     default_cwd: &std::path::Path,
@@ -727,12 +725,13 @@ fn handle_agent_page_open_task(
             model,
             sid,
         }) => {
+            let kind = strategies.page_kind(&provider, &model)?;
             if transition_webview.is_none() {
                 commands.entity(task.stack).despawn_children();
             }
-            let request = PageAgentAttachment::new(task.stack, provider, model, sid)
+            let request = PageAgentAttachment::new(kind, provider, model, sid)
                 .with_webview(transition_webview);
-            attachments.page(request, commands)?;
+            commands.entity(task.stack).insert(request);
             insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
             Ok(())
         }
@@ -741,18 +740,15 @@ fn handle_agent_page_open_task(
                 "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
                     .to_string()
             })?;
+            let kind = strategies.page_kind(&provider.provider, &provider.default_model)?;
             let sid = uuid::Uuid::new_v4().to_string();
             if transition_webview.is_none() {
                 commands.entity(task.stack).despawn_children();
             }
-            let request = PageAgentAttachment::new(
-                task.stack,
-                provider.provider,
-                provider.default_model,
-                sid,
-            )
-            .with_webview(transition_webview);
-            attachments.page(request, commands)?;
+            let request =
+                PageAgentAttachment::new(kind, provider.provider, provider.default_model, sid)
+                    .with_webview(transition_webview);
+            commands.entity(task.stack).insert(request);
             insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
             Ok(())
         }
@@ -821,17 +817,11 @@ fn handle_agent_page_open_task(
             let routing_sid = uuid::Uuid::new_v4().to_string();
             let icon = acp_icon_for_id(catalog, &id);
             let name = acp_profile_name_for_id(&id, cfg, catalog);
-            let request = AcpAgentAttachment::new(
-                task.stack,
-                id,
-                name,
-                routing_sid,
-                default_cwd.to_path_buf(),
-            )
-            .icon(icon)
-            .resume(sid)
-            .webview(transition_webview);
-            attachments.acp(request, commands);
+            let request = AcpAgentAttachment::new(id, name, routing_sid, default_cwd.to_path_buf())
+                .icon(icon)
+                .resume(sid)
+                .webview(transition_webview);
+            commands.entity(task.stack).insert(request);
             insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
             Ok(())
         }

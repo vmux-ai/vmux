@@ -18,7 +18,7 @@ use vmux_terminal::{ProcessExited, TerminalGridSize, new_terminal_bundle_with_cw
 use crate::session::{AgentSession, AgentSessionExited, PendingAgentSession, SessionId};
 use crate::session_source::CliSessionSources;
 
-use super::attach::{AgentStackAttachment, PageAgentAttachment};
+use super::attach::{AgentStrategies, PageAgentAttachment};
 use super::launch::{AgentLaunchRequest, AgentRestartRequest, PreparedAgentLaunch};
 use super::page_open::{
     attach_agent_spawn_error_to_stack, attach_cli_setup_to_stack, cli_initial_prompt,
@@ -347,26 +347,32 @@ fn drain_agent_launches(
 
 fn respond_page_agent_attach(
     mut reader: MessageReader<PageAgentAttachRequest>,
-    attachments: AgentStackAttachment,
+    strategies: AgentStrategies,
     mut commands: Commands,
 ) {
     for req in reader.read() {
+        let Ok(kind) = strategies.page_kind(&req.provider, &req.model) else {
+            continue;
+        };
         let request = PageAgentAttachment::new(
-            req.stack,
+            kind,
             req.provider.clone(),
             req.model.clone(),
             req.sid.clone(),
         );
-        let _ = attachments.page(request, &mut commands);
+        commands.entity(req.stack).insert(request);
     }
 }
 
 fn respond_page_agent_spawn_stack(
     mut reader: MessageReader<PageAgentSpawnStackRequest>,
-    attachments: AgentStackAttachment,
+    strategies: AgentStrategies,
     mut commands: Commands,
 ) {
     for req in reader.read() {
+        let Ok(kind) = strategies.page_kind(&req.provider, &req.model) else {
+            continue;
+        };
         let stack = commands
             .spawn((
                 vmux_layout::stack::stack_bundle(),
@@ -375,18 +381,18 @@ fn respond_page_agent_spawn_stack(
             ))
             .id();
         let request = PageAgentAttachment::new(
-            stack,
+            kind,
             req.provider.clone(),
             req.model.clone(),
             req.sid.clone(),
         );
-        let _ = attachments.page(request, &mut commands);
+        commands.entity(stack).insert(request);
     }
 }
 
 fn respond_page_agent_spawn_default(
     mut reader: MessageReader<PageAgentSpawnDefaultRequest>,
-    attachments: AgentStackAttachment,
+    strategies: AgentStrategies,
     mut commands: Commands,
 ) {
     for req in reader.read() {
@@ -394,6 +400,9 @@ fn respond_page_agent_spawn_default(
             bevy::log::warn!(
                 "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
             );
+            continue;
+        };
+        let Ok(kind) = strategies.page_kind(&p.provider, &p.default_model) else {
             continue;
         };
         let sid = uuid::Uuid::new_v4().to_string();
@@ -404,16 +413,14 @@ fn respond_page_agent_spawn_default(
                 ChildOf(req.pane),
             ))
             .id();
-        let request = PageAgentAttachment::new(stack, p.provider, p.default_model, sid);
-        if let Err(error) = attachments.page(request, &mut commands) {
-            bevy::log::warn!("page agent stack spawn failed: {error}");
-        }
+        let request = PageAgentAttachment::new(kind, p.provider, p.default_model, sid);
+        commands.entity(stack).insert(request);
     }
 }
 
 fn respond_page_agent_attach_default(
     mut reader: MessageReader<PageAgentAttachDefaultRequest>,
-    attachments: AgentStackAttachment,
+    strategies: AgentStrategies,
     mut commands: Commands,
 ) {
     for req in reader.read() {
@@ -423,11 +430,12 @@ fn respond_page_agent_attach_default(
             );
             continue;
         };
+        let Ok(kind) = strategies.page_kind(&p.provider, &p.default_model) else {
+            continue;
+        };
         let sid = uuid::Uuid::new_v4().to_string();
-        let request = PageAgentAttachment::new(req.stack, p.provider, p.default_model, sid);
-        if let Err(error) = attachments.page(request, &mut commands) {
-            bevy::log::warn!("page agent attach failed: {error}");
-        }
+        let request = PageAgentAttachment::new(kind, p.provider, p.default_model, sid);
+        commands.entity(req.stack).insert(request);
     }
 }
 
