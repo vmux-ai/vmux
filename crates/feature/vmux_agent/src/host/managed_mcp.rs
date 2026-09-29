@@ -50,7 +50,7 @@ impl IntoIterator for ManagedMcpServers {
     }
 }
 
-pub(crate) struct PreparedManagedMcpServers {
+struct PreparedManagedMcpServers {
     pub(crate) servers: Vec<ManagedMcpServer>,
     pub(crate) revision: u64,
 }

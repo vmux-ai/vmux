@@ -108,7 +108,7 @@ enum ReqKind {
 }
 
 #[derive(Component)]
-pub(crate) struct LspRequestOperation {
+struct LspRequestOperation {
     target: Entity,
     kind: ReqKind,
     rx: crossbeam_channel::Receiver<serde_json::Value>,

@@ -211,7 +211,7 @@ fn maintain_archive(
 }
 
 #[derive(SystemParam)]
-pub(crate) struct TabArchiveLayout<'w, 's> {
+struct TabArchiveLayout<'w, 's> {
     stack_pages: Query<
         'w,
         's,

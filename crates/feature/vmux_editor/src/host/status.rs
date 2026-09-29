@@ -57,7 +57,7 @@ impl Default for SharedFileViewMode {
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct FileViewModeRevision(pub(crate) u64);
+struct FileViewModeRevision(pub(crate) u64);
 
 impl Default for FileViewModeRevision {
     fn default() -> Self {

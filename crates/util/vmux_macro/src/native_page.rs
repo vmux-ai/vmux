@@ -199,7 +199,7 @@ impl Parse for ManifestArgs {
     }
 }
 
-pub(crate) fn expand_manifest(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStream> {
+fn expand_manifest(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStream> {
     let args = syn::parse2::<ManifestArgs>(args)?;
     let manifest = PageManifestFile::read(&args.file, args.page.as_ref())?.manifest(&args.file)?;
     let ident = &input.ident;

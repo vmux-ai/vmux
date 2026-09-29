@@ -110,7 +110,7 @@ mod accept_language_tests {
     }
 }
 
-pub(crate) type CefPointerRegionRow<'a> = (
+type CefPointerRegionRow<'a> = (
     Option<&'a Header>,
     Option<&'a SideSheet>,
     &'a Node,

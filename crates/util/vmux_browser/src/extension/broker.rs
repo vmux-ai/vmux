@@ -92,7 +92,7 @@ pub struct BridgeSubscription {
 pub struct BridgeSubscriptions(pub HashMap<String, Vec<BridgeSubscription>>);
 
 #[derive(Default)]
-pub(crate) struct SeenBridgeRequests(HashMap<(String, u64), VecDeque<String>>);
+struct SeenBridgeRequests(HashMap<(String, u64), VecDeque<String>>);
 
 #[derive(Component, Default)]
 pub struct BridgeResponseCache(HashMap<String, VecDeque<(String, BridgeServerMessage)>>);

@@ -59,17 +59,17 @@ pub(crate) struct QueueTerminalInput {
 
 #[derive(Component)]
 #[relationship(relationship_target = TerminalInputs)]
-pub(crate) struct TerminalInputTarget {
+struct TerminalInputTarget {
     #[relationship]
     terminal: Entity,
 }
 
 #[derive(Component)]
 #[relationship_target(relationship = TerminalInputTarget)]
-pub(crate) struct TerminalInputs(Vec<Entity>);
+struct TerminalInputs(Vec<Entity>);
 
 #[derive(Component)]
-pub(crate) struct TerminalInput {
+struct TerminalInput {
     sequence: u64,
     data: Vec<u8>,
 }

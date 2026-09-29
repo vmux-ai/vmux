@@ -10,7 +10,7 @@ use vmux_setting::{AppSettings, SettingsLoadSet};
 pub struct ShortcutPlugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct ShortcutInit;
+struct ShortcutInit;
 
 impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {

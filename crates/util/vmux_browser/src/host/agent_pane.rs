@@ -21,7 +21,7 @@ pub struct AgentBrowserResolve<'w, 's> {
     active: vmux_layout::active_pane::ActivePaneQuery<'w, 's>,
 }
 
-pub(crate) struct AgentBrowserPaneClaim {
+struct AgentBrowserPaneClaim {
     pub(crate) pane: Entity,
     pub(crate) stack: Option<Entity>,
     pub(crate) activation: vmux_layout::active_pane::ActivatePane,

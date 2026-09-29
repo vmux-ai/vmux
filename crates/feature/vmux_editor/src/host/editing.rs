@@ -78,7 +78,7 @@ impl FileFindOpenRequest {
 }
 
 #[derive(EntityEvent)]
-pub(crate) struct FileFindCloseRequest {
+struct FileFindCloseRequest {
     #[event_target]
     entity: Entity,
 }

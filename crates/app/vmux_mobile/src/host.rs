@@ -43,7 +43,7 @@ const MODEL_FETCH_ATTEMPTS: u8 = 5;
 
 const MODEL_RETRY_INTERVAL_MS: u32 = 1_000;
 
-pub(crate) struct MobileHost {
+struct MobileHost {
     epoch: u64,
     runtime: RuntimeHandle,
     api: Api,
@@ -83,7 +83,7 @@ fn superseded(epoch: u64) -> bool {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub(crate) struct ComposerExchange {
+struct ComposerExchange {
     media_request: Signal<Option<ChatMediaListRequest>>,
     offered: Signal<Vec<RemoteMediaEntry>>,
     draft: Signal<String>,

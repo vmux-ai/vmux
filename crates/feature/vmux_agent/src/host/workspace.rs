@@ -53,15 +53,15 @@ pub(crate) const USER_CHOICE_REQUESTED: &str = "User choice requested. Stop this
 
 pub(crate) const WORKSPACE_SELECTION_PENDING: &str = "Project selection is already pending. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
 
-pub(crate) const INITIALIZE_GIT_QUESTION: &str = "Initialize Git repository?";
+const INITIALIZE_GIT_QUESTION: &str = "Initialize Git repository?";
 
-pub(crate) const INITIALIZE_GIT_OPTIONS: [&str; 2] = ["Initialize Git", "Not now"];
+const INITIALIZE_GIT_OPTIONS: [&str; 2] = ["Initialize Git", "Not now"];
 
 #[derive(Component, Clone, Debug)]
 pub(crate) struct PendingAgentProject(pub(crate) PathBuf);
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PendingAgentContinuation(String);
+struct PendingAgentContinuation(String);
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PendingAgentChoice {
@@ -74,7 +74,7 @@ pub(crate) struct PendingAgentChoice {
 pub(crate) struct ResumeAgentChoice;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub(crate) struct InitializeGitAgentChoice {
+struct InitializeGitAgentChoice {
     pub(crate) tab_entity: Entity,
     pub(crate) workspace: PathBuf,
 }
@@ -375,13 +375,13 @@ fn activate_selected_workspace(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SelectedWorkspaceKind {
+enum SelectedWorkspaceKind {
     Plain,
     Git { needs_worktree: bool },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ExistingWorktreeCandidate {
+struct ExistingWorktreeCandidate {
     pub(crate) checkout_dir: PathBuf,
     pub(crate) execution_dir: PathBuf,
     pub(crate) branch: String,

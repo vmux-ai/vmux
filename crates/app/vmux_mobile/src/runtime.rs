@@ -18,16 +18,16 @@ thread_local! {
     static UI_RUNTIME: RefCell<Option<RuntimeHandle>> = const { RefCell::new(None) };
 }
 
-pub(crate) struct MobileRuntime {
+struct MobileRuntime {
     app: App,
     lifecycle: AppLifecycle,
     finished: bool,
 }
 
 #[derive(Default)]
-pub(crate) struct UiStateListeners(pub(crate) HashMap<String, BytesListener>);
+struct UiStateListeners(pub(crate) HashMap<String, BytesListener>);
 
-pub(crate) struct MobileRuntimePlugin;
+struct MobileRuntimePlugin;
 
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 struct DeliverUiStateEmits;

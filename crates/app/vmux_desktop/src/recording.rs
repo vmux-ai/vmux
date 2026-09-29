@@ -58,7 +58,7 @@ pub(crate) struct RecordOutcome {
 }
 
 #[derive(Component)]
-pub(crate) struct RecordingBridge {
+struct RecordingBridge {
     pub(crate) tx: Sender<RecordOutcome>,
     rx: Receiver<RecordOutcome>,
 }

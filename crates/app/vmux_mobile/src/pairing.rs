@@ -74,7 +74,7 @@ pub(crate) enum AuthState {
 }
 
 #[derive(Clone, Default, PartialEq)]
-pub(crate) struct ConnectionView {
+struct ConnectionView {
     pub(crate) auth: AuthState,
     pub(crate) pair_url: String,
     pub(crate) error: String,
@@ -85,7 +85,7 @@ pub(crate) struct ConnectionView {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct ConnectionProjection {
+struct ConnectionProjection {
     pub(crate) view: Signal<ConnectionView>,
     pub(crate) api: Signal<Option<Api>>,
     pub(crate) sessions: Signal<Vec<RemoteSession>>,
@@ -677,7 +677,7 @@ fn normalized_pairing_base(mut url: Url) -> Result<String, String> {
 }
 
 #[derive(Props, Clone, PartialEq)]
-pub(crate) struct PairCardProps {
+struct PairCardProps {
     pub(crate) value: String,
     pub(crate) error: String,
     pub(crate) pairing: bool,

@@ -50,7 +50,7 @@ impl Plugin for FollowPlugin {
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct AgentFileResolve<'w, 's> {
+struct AgentFileResolve<'w, 's> {
     activate: MessageWriter<'w, ActivatePane>,
     page_open: MessageWriter<'w, PageOpenRequest>,
     open_beside: MessageWriter<'w, OpenBesideRequest>,
@@ -85,7 +85,7 @@ pub(crate) struct FilePageTarget {
     navigate: bool,
 }
 
-pub(crate) struct PendingFilePreview {
+struct PendingFilePreview {
     anchor: ProcessId,
     agent_pane: Entity,
     url: String,

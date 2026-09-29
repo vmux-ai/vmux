@@ -1035,7 +1035,7 @@ struct SettingsFeaturePolicy {
 }
 
 #[derive(Component)]
-pub(crate) struct SettingsWatcher {
+struct SettingsWatcher {
     rx: Mutex<mpsc::Receiver<()>>,
     path: std::path::PathBuf,
     _watcher: RecommendedWatcher,
@@ -1629,7 +1629,7 @@ const SETTINGS_SAVE_DEBOUNCE: Duration = Duration::from_millis(400);
 pub struct SettingsSaveRequest;
 
 #[derive(Component, Default)]
-pub(crate) struct SettingsSaveDebounce {
+struct SettingsSaveDebounce {
     pub due: Option<Instant>,
 }
 

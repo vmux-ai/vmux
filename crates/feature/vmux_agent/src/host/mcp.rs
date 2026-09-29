@@ -6,7 +6,7 @@ pub use vmux_core::agent::McpServerConfig;
 use crate::{AgentKind, exec};
 
 const DEFAULT_RUN_TIMEOUT_SECS: u64 = 50;
-pub(crate) const LONG_RUN_TIMEOUT_SECS: u64 = 600;
+const LONG_RUN_TIMEOUT_SECS: u64 = 600;
 pub(crate) const LONG_MCP_TOOL_TIMEOUT_SECS: u64 = LONG_RUN_TIMEOUT_SECS + 60;
 
 pub fn resolve(

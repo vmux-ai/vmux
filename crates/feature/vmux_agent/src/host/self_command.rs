@@ -232,7 +232,7 @@ impl WorkspaceChoice {
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct AgentSelfCommandWriters<'w> {
+struct AgentSelfCommandWriters<'w> {
     open_beside: MessageWriter<'w, vmux_layout::OpenBesideRequest>,
     terminal_stack_spawn: MessageWriter<'w, TerminalStackSpawnRequest>,
     terminal_reinput: MessageWriter<'w, vmux_terminal::TerminalReinputRequest>,

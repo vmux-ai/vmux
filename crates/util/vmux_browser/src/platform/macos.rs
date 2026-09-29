@@ -557,7 +557,7 @@ impl vmux_native::Wake for PageWaker {
     }
 }
 
-pub(crate) fn accept_page_wakes(_: bevy::ecs::system::NonSendMarker) {
+fn accept_page_wakes(_: bevy::ecs::system::NonSendMarker) {
     PAGE_WAKE_PENDING.store(false, std::sync::atomic::Ordering::Release);
 }
 

@@ -81,7 +81,7 @@ fn log_windowed_view_state(
     }
 }
 
-pub(crate) type LayoutKeyboardCapture = Or<(
+type LayoutKeyboardCapture = Or<(
     With<BookmarkTextInputActive>,
     With<BookmarkContextMenuActive>,
     With<CommandBarPanelActive>,
@@ -102,7 +102,7 @@ impl WindowHierarchy<'_, '_> {
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct WindowFrameQueries<'w, 's> {
+struct WindowFrameQueries<'w, 's> {
     hierarchy: WindowHierarchy<'w, 's>,
     pane_rect: Query<'w, 's, &'static ComputedNode, With<Pane>>,
     header_rect: Query<'w, 's, (Entity, &'static ComputedNode), (With<Header>, With<Open>)>,
@@ -677,7 +677,7 @@ pub(crate) struct WindowedFrameRect {
 }
 
 #[derive(Default)]
-pub(crate) struct FrameSyncMemory {
+struct FrameSyncMemory {
     raised_frame: std::collections::HashMap<Entity, (i32, i32, i32, i32)>,
     visible_pages: Vec<Entity>,
     visible_frames: Vec<WindowedFrameRect>,

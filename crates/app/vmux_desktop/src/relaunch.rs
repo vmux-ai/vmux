@@ -17,7 +17,7 @@ impl Plugin for RelaunchPlugin {
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct UiRelaunchRequest {
+struct UiRelaunchRequest {
     channel: String,
 }
 

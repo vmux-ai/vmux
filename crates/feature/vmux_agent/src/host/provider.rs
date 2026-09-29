@@ -71,7 +71,7 @@ pub fn resolve_default_app_provider() -> Option<&'static BuiltinProvider> {
         .or(Some(&ECHO_DEFAULT))
 }
 
-pub(crate) const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
+const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
     &[AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex];
 
 #[derive(Component, Clone, Default)]

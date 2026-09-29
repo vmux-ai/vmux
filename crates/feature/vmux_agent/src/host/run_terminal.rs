@@ -221,7 +221,7 @@ impl AgentPane {
     }
 }
 
-pub(crate) struct AgentPaneSplit {
+struct AgentPaneSplit {
     pub(crate) pane: Entity,
     pub(crate) direction: PaneSplitDirection,
     pub(crate) existing_tabs: Vec<Entity>,
@@ -243,7 +243,7 @@ impl NextPaneSpawnSequence {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct RunTerminalBucketPaneCandidate {
+struct RunTerminalBucketPaneCandidate {
     pane: Entity,
     pane_spawn_seq: u64,
 }

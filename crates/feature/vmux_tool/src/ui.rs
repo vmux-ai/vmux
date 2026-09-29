@@ -34,7 +34,7 @@ pub fn Page() -> Element {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum ToolsRoute {
+enum ToolsRoute {
     #[default]
     Acp,
     Lsp,

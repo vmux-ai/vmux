@@ -11,7 +11,7 @@ use crate::event::{
 use crate::state::{LayoutUiState, LayoutUiStatePatch};
 
 #[derive(Clone, Default)]
-pub(crate) struct LayoutPageState {
+struct LayoutPageState {
     pub layout: Option<LayoutGeometry>,
     pub stacks: Option<StackNavigationState>,
     pub tab_strip: Option<TabStripState>,

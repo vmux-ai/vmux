@@ -59,7 +59,7 @@ impl Plugin for PageOpenPlugin {
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct AgentPageOpenWorkspace<'w, 's> {
+struct AgentPageOpenWorkspace<'w, 's> {
     active_space: FocusedSpace<'w, 's>,
     tabs: Query<'w, 's, &'static Tab>,
     spaces: Query<'w, 's, (), With<Space>>,

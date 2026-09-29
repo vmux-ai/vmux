@@ -26,7 +26,7 @@ struct TabClickBlock {
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
-pub(crate) struct TabDragVisual {
+struct TabDragVisual {
     offset_x: f64,
     source: bool,
     active: bool,

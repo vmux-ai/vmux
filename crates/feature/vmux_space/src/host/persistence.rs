@@ -218,7 +218,7 @@ fn auto_save_system(
 }
 
 #[cfg(test)]
-pub(crate) fn save_space_to_path(world: &mut World, path: PathBuf) {
+fn save_space_to_path(world: &mut World, path: PathBuf) {
     let components = persisted_components(&world.resource::<AppTypeRegistry>().read())
         .allow::<Save>()
         .allow::<ChildOf>()

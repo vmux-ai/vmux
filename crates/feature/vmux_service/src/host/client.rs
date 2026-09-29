@@ -10,7 +10,7 @@ pub(crate) struct ServiceClient(pub ServiceHandle);
 
 const MAX_SERVICE_MESSAGES_PER_DRAIN: usize = 128;
 
-pub(crate) struct ServiceDrain {
+struct ServiceDrain {
     pub messages: Vec<ServiceMessage>,
     pub disconnected: bool,
     pub capped: bool,

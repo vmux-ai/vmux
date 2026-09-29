@@ -416,7 +416,7 @@ pub struct ToolQuery(pub Result<AgentRequest, String>);
 
 #[derive(Clone, Copy, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum ToolAvailability {
+enum ToolAvailability {
     #[default]
     Always,
     OutsideAcpSession,
@@ -434,22 +434,22 @@ impl ToolAvailability {
 }
 
 #[derive(Component)]
-pub(crate) struct RegisteredTool;
+struct RegisteredTool;
 
 #[derive(Component)]
-pub(crate) struct ToolAliases(pub(crate) Vec<String>);
+struct ToolAliases(pub(crate) Vec<String>);
 
 #[derive(Component)]
-pub(crate) struct ToolDescription(pub(crate) String);
+struct ToolDescription(pub(crate) String);
 
 #[derive(Component)]
-pub(crate) struct ToolInputSchema(pub(crate) InputSchema);
+struct ToolInputSchema(pub(crate) InputSchema);
 
 #[derive(Component)]
-pub(crate) struct ToolAccess(pub(crate) ToolAvailability);
+struct ToolAccess(pub(crate) ToolAvailability);
 
 #[derive(Component)]
-pub(crate) struct ShellAware;
+struct ShellAware;
 
 #[derive(Component, Clone, Debug)]
 pub struct ToolDispatchError(pub(crate) String);
