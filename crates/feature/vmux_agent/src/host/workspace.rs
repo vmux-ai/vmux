@@ -3,8 +3,23 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use vmux_api::protocol::ClientMessage;
+use vmux_chat::host::{ChatSynced, ChatView};
 use vmux_command::WriteCommandRequests;
+use vmux_core::AgentWorkingDir;
+use vmux_core::agent::AgentKind as CoreAgentKind;
 use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
+use vmux_git::worktree::{
+    CheckoutInfo, create_worktree_for_branch_blocking, is_linked_worktree, repository_init,
+    worktree_add, worktree_list, worktree_registrations,
+};
+use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
+use vmux_layout::worktree::{
+    ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady, is_generated_tab_name,
+};
+use vmux_session::{
+    AcpSession, AgentConversationTitle, AgentRunState, AgentSession as PageAgentSession,
+};
+use vmux_terminal::BufferedAgentPrompt;
 
 use crate::event::AgentChoiceSelected;
 use crate::session::AgentSession;
@@ -79,11 +94,10 @@ pub(crate) struct PendingWorkspacePicker {
 pub(crate) struct AgentWorkspacePicker<'w, 's> {
     pub(crate) pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
     pub(crate) choices: Query<'w, 's, &'static PendingAgentChoice>,
-    pub(crate) chat_views: Query<'w, 's, (), With<vmux_chat::host::ChatView>>,
-    pub(crate) page_sessions: Query<'w, 's, &'static vmux_session::AgentSession>,
+    pub(crate) chat_views: Query<'w, 's, (), With<ChatView>>,
+    pub(crate) page_sessions: Query<'w, 's, &'static PageAgentSession>,
     pub(crate) cli_sessions: Query<'w, 's, &'static AgentSession>,
-    pub(crate) conversation_titles:
-        Query<'w, 's, &'static mut vmux_session::AgentConversationTitle>,
+    pub(crate) conversation_titles: Query<'w, 's, &'static mut AgentConversationTitle>,
     pub(crate) proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
 }
 
@@ -109,13 +123,13 @@ fn resume_agent_choice(
     commands
         .entity(event.webview)
         .remove::<(PendingAgentChoice, ResumeAgentChoice)>()
-        .remove::<vmux_chat::host::ChatSynced>();
+        .remove::<ChatSynced>();
 }
 
 fn initialize_git_agent_choice(
     trigger: On<AgentChoiceSelected>,
     choices: Query<(&PendingAgentChoice, &InitializeGitAgentChoice), Without<ResumeAgentChoice>>,
-    tabs: Query<(), With<vmux_layout::tab::Tab>>,
+    tabs: Query<(), With<Tab>>,
     mut commands: Commands,
 ) {
     let event = trigger.event();
@@ -128,7 +142,7 @@ fn initialize_git_agent_choice(
     let continuation = if !tabs.contains(initialize.tab_entity) {
         failed_workspace_continuation("The project tab no longer exists")
     } else if event.index == 0 {
-        match vmux_git::worktree::repository_init(&initialize.workspace) {
+        match repository_init(&initialize.workspace) {
             Ok(root) => new_git_workspace_ready_continuation(&root),
             Err(error) => git_initialization_failed_continuation(&initialize.workspace, &error.0),
         }
@@ -141,7 +155,7 @@ fn initialize_git_agent_choice(
     commands
         .entity(event.webview)
         .remove::<(PendingAgentChoice, InitializeGitAgentChoice)>()
-        .remove::<vmux_chat::host::ChatSynced>();
+        .remove::<ChatSynced>();
 }
 
 pub(crate) fn workspace_picker_task(
@@ -187,9 +201,9 @@ pub(crate) fn workspace_path_task(
     })
 }
 
-fn bind_tab_workspace(tab: &mut vmux_layout::tab::Tab, project_dir: &Path, execution_dir: &Path) {
+fn bind_tab_workspace(tab: &mut Tab, project_dir: &Path, execution_dir: &Path) {
     tab.startup_dir = Some(execution_dir.to_string_lossy().into_owned());
-    if vmux_layout::worktree::is_generated_tab_name(&tab.name)
+    if is_generated_tab_name(&tab.name)
         && let Some(name) = project_dir.file_name().and_then(|name| name.to_str())
         && !name.is_empty()
     {
@@ -244,20 +258,20 @@ fn chat_agent_continuation_message(sid: &str, context: &str) -> ClientMessage {
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentTabWorkspace<'w, 's> {
-    pub(crate) tabs: Query<'w, 's, &'static mut vmux_layout::tab::Tab>,
-    pub(crate) worktrees: Query<'w, 's, &'static vmux_layout::tab::TabWorktree>,
-    pub(crate) workspaces: Query<'w, 's, &'static vmux_layout::tab::TabWorkspace>,
+    pub(crate) tabs: Query<'w, 's, &'static mut Tab>,
+    pub(crate) worktrees: Query<'w, 's, &'static TabWorktree>,
+    pub(crate) workspaces: Query<'w, 's, &'static TabWorkspace>,
     pub(crate) pending_projects: Query<'w, 's, &'static PendingAgentProject>,
-    pub(crate) managed_root: Option<Res<'w, vmux_layout::worktree::ManagedWorktreeRoot>>,
+    pub(crate) managed_root: Option<Res<'w, ManagedWorktreeRoot>>,
 }
 
 pub(crate) fn activate_agent_worktree(
     tab_entity: Entity,
     agent_entity: Entity,
     project_dir: &Path,
-    activation: vmux_layout::worktree::TabWorktreeActivation,
-    tabs: &mut Query<&mut vmux_layout::tab::Tab>,
-    acp_sessions: &mut Query<&mut vmux_session::AcpSession>,
+    activation: TabWorktreeActivation,
+    tabs: &mut Query<&mut Tab>,
+    acp_sessions: &mut Query<&mut AcpSession>,
     child_of: &Query<&ChildOf>,
     commands: &mut Commands,
 ) -> Result<(PathBuf, Option<ClientMessage>), String> {
@@ -271,16 +285,16 @@ pub(crate) fn activate_agent_worktree(
     commands
         .entity(tab_entity)
         .insert((
-            vmux_layout::tab::TabWorkspace {
+            TabWorkspace {
                 project_dir: project_dir.to_string_lossy().into_owned(),
             },
             activation.metadata,
             activation.ready,
-            vmux_layout::tab::TabDirDecided,
+            TabDirDecided,
         ))
         .remove::<PendingAgentProject>()
         .remove::<RepositoryNeedsWorktree>()
-        .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
+        .remove::<TabWorktreeUnavailable>();
     let rebind = ancestor_acp_stack(agent_entity, acp_sessions, child_of)
         .and_then(|stack| rebind_acp_workspace(stack, &execution_dir, acp_sessions, commands));
     Ok((execution_dir, rebind))
@@ -292,8 +306,8 @@ pub(crate) fn activate_agent_directory(
     agent_entity: Entity,
     project_dir: &Path,
     execution_dir: &Path,
-    tabs: &mut Query<&mut vmux_layout::tab::Tab>,
-    acp_sessions: &mut Query<&mut vmux_session::AcpSession>,
+    tabs: &mut Query<&mut Tab>,
+    acp_sessions: &mut Query<&mut AcpSession>,
     child_of: &Query<&ChildOf>,
     commands: &mut Commands,
 ) -> Result<Option<ClientMessage>, String> {
@@ -306,16 +320,16 @@ pub(crate) fn activate_agent_directory(
     commands
         .entity(tab_entity)
         .insert((
-            vmux_layout::tab::TabWorkspace {
+            TabWorkspace {
                 project_dir: project_dir.to_string_lossy().into_owned(),
             },
-            vmux_layout::tab::TabDirDecided,
+            TabDirDecided,
         ))
         .remove::<PendingAgentProject>()
         .remove::<RepositoryNeedsWorktree>()
-        .remove::<vmux_layout::tab::TabWorktree>()
-        .remove::<vmux_layout::worktree::TabWorktreeReady>()
-        .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
+        .remove::<TabWorktree>()
+        .remove::<TabWorktreeReady>()
+        .remove::<TabWorktreeUnavailable>();
     Ok(ancestor_acp_stack(agent_entity, acp_sessions, child_of)
         .and_then(|stack| rebind_acp_workspace(stack, execution_dir, acp_sessions, commands)))
 }
@@ -325,16 +339,16 @@ fn activate_selected_workspace(
     tab_entity: Entity,
     agent_entity: Entity,
     selected: &Path,
-    tabs: &mut Query<&mut vmux_layout::tab::Tab>,
-    acp_sessions: &mut Query<&mut vmux_session::AcpSession>,
+    tabs: &mut Query<&mut Tab>,
+    acp_sessions: &mut Query<&mut AcpSession>,
     child_of: &Query<&ChildOf>,
     commands: &mut Commands,
 ) -> Result<(PathBuf, Option<ClientMessage>, SelectedWorkspaceKind), String> {
     let kind = if selected.join(".git").exists() {
-        vmux_git::worktree::CheckoutInfo::try_from(selected)
+        CheckoutInfo::try_from(selected)
             .map_err(|error| format!("selected project has invalid Git metadata: {}", error.0))?;
         SelectedWorkspaceKind::Git {
-            needs_worktree: !vmux_git::worktree::is_linked_worktree(selected),
+            needs_worktree: !is_linked_worktree(selected),
         }
     } else {
         SelectedWorkspaceKind::Plain
@@ -379,19 +393,18 @@ pub(crate) fn existing_worktree_candidates(
     let project_dir = project_dir
         .canonicalize()
         .map_err(|error| format!("invalid project directory: {error}"))?;
-    let project_checkout =
-        vmux_git::worktree::CheckoutInfo::try_from(&project_dir).map_err(|error| error.0)?;
+    let project_checkout = CheckoutInfo::try_from(&project_dir).map_err(|error| error.0)?;
     let relative_dir = project_dir
         .strip_prefix(&project_checkout.root)
         .map_err(|_| "project directory is outside its checkout".to_string())?;
-    let mut candidates = vmux_git::worktree::worktree_registrations(&project_checkout.root)
+    let mut candidates = worktree_registrations(&project_checkout.root)
         .map_err(|error| error.0)?
         .into_iter()
         .filter_map(|registration| {
             let branch = registration.branch?;
-            let checkout = vmux_git::worktree::CheckoutInfo::try_from(&registration.path).ok()?;
+            let checkout = CheckoutInfo::try_from(&registration.path).ok()?;
             if checkout.common_dir != project_checkout.common_dir
-                || !vmux_git::worktree::is_linked_worktree(&checkout.root)
+                || !is_linked_worktree(&checkout.root)
             {
                 return None;
             }
@@ -452,9 +465,9 @@ pub(crate) fn ambiguous_worktree_message(candidates: &[ExistingWorktreeCandidate
 
 fn drain_workspace_picker_tasks(
     mut pickers: Query<(Entity, &mut PendingWorkspacePicker)>,
-    chat_views: Query<(), With<vmux_chat::host::ChatView>>,
-    mut tabs: Query<&mut vmux_layout::tab::Tab>,
-    mut acp_sessions: Query<&mut vmux_session::AcpSession>,
+    chat_views: Query<(), With<ChatView>>,
+    mut tabs: Query<&mut Tab>,
+    mut acp_sessions: Query<&mut AcpSession>,
     child_of: Query<&ChildOf>,
     mut commands: Commands,
     connected: Option<Single<(), With<ServiceConnected>>>,
@@ -514,7 +527,7 @@ fn drain_workspace_picker_tasks(
                                                     workspace: execution_dir,
                                                 },
                                             ))
-                                            .remove::<vmux_chat::host::ChatSynced>();
+                                            .remove::<ChatSynced>();
                                         None
                                     }
                                     SelectedWorkspaceKind::Plain => Some(format!(
@@ -550,10 +563,10 @@ fn send_pending_agent_continuations(
     mut sessions: Query<(
         Entity,
         &PendingAgentContinuation,
-        Option<&vmux_session::AcpSession>,
-        Option<&vmux_session::AgentSession>,
+        Option<&AcpSession>,
+        Option<&PageAgentSession>,
         Option<&AgentSession>,
-        Option<&mut vmux_session::AgentRunState>,
+        Option<&mut AgentRunState>,
     )>,
     connected: Option<Single<(), With<ServiceConnected>>>,
     mut commands: Commands,
@@ -563,7 +576,7 @@ fn send_pending_agent_continuations(
         if cli.is_some() {
             commands
                 .entity(entity)
-                .insert(vmux_terminal::BufferedAgentPrompt {
+                .insert(BufferedAgentPrompt {
                     text: continuation.0.clone(),
                     submit: true,
                 })
@@ -579,17 +592,14 @@ fn send_pending_agent_continuations(
         let (Some(sid), Some(mut state)) = (sid, state) else {
             continue;
         };
-        if !matches!(
-            *state,
-            vmux_session::AgentRunState::Idle | vmux_session::AgentRunState::Errored(_)
-        ) {
+        if !matches!(*state, AgentRunState::Idle | AgentRunState::Errored(_)) {
             continue;
         }
         service_requests.write(ServiceRequest(chat_agent_continuation_message(
             sid,
             &continuation.0,
         )));
-        *state = vmux_session::AgentRunState::Streaming;
+        *state = AgentRunState::Streaming;
         commands.entity(entity).remove::<PendingAgentContinuation>();
     }
 }
@@ -601,7 +611,6 @@ mod tests {
     use crate::host::test_support::init_worktree_test_repo;
     use vmux_api::protocol::ProcessId;
     use vmux_api::protocol::SharedMessage;
-    use vmux_core::agent::AgentKind;
 
     #[test]
     fn workspace_selection_continuations_resume_original_request() {
@@ -658,7 +667,7 @@ mod tests {
         let session = app.world_mut().spawn_empty().id();
         let tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "Project".into(),
                 startup_dir: Some(workspace_path.to_string_lossy().into_owned()),
             })
@@ -720,10 +729,8 @@ mod tests {
                 .is_none()
         );
         assert_eq!(
-            app.world()
-                .get::<vmux_terminal::BufferedAgentPrompt>(entity)
-                .unwrap(),
-            &vmux_terminal::BufferedAgentPrompt {
+            app.world().get::<BufferedAgentPrompt>(entity).unwrap(),
+            &BufferedAgentPrompt {
                 text: "continue original request".to_string(),
                 submit: true,
             }
@@ -766,7 +773,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                vmux_layout::tab::Tab {
+                Tab {
                     name: "Tab 1".into(),
                     startup_dir: None,
                 },
@@ -777,30 +784,28 @@ mod tests {
         let stack = app
             .world_mut()
             .spawn((
-                vmux_session::AcpSession {
+                AcpSession {
                     agent_id: "claude".into(),
                     sid: "routing-session".into(),
                     cwd: AgentCwd::projects().unwrap(),
                     anchor,
                     resume: None,
                 },
-                vmux_core::AgentWorkingDir(
-                    AgentCwd::projects().unwrap().to_string_lossy().into_owned(),
-                ),
+                AgentWorkingDir(AgentCwd::projects().unwrap().to_string_lossy().into_owned()),
                 ChildOf(pane),
             ))
             .id();
         let view = app
             .world_mut()
-            .spawn((vmux_chat::host::ChatView, anchor, ChildOf(stack)))
+            .spawn((ChatView, anchor, ChildOf(stack)))
             .id();
 
         let project_for_system = project_dir.clone();
         let rebind = app
             .world_mut()
             .run_system_once(
-                move |mut tabs: Query<&mut vmux_layout::tab::Tab>,
-                      mut sessions: Query<&mut vmux_session::AcpSession>,
+                move |mut tabs: Query<&mut Tab>,
+                      mut sessions: Query<&mut AcpSession>,
                       child_of: Query<&ChildOf>,
                       mut commands: Commands| {
                     activate_agent_worktree(
@@ -820,44 +825,31 @@ mod tests {
             .1
             .unwrap();
 
-        let tab_state = app.world().get::<vmux_layout::tab::Tab>(tab).unwrap();
+        let tab_state = app.world().get::<Tab>(tab).unwrap();
         assert_eq!(
             tab_state.startup_dir.as_deref(),
             Some(execution_dir.to_string_lossy().as_ref())
         );
         assert_eq!(
-            app.world()
-                .get::<vmux_layout::tab::TabWorkspace>(tab)
-                .unwrap()
-                .project_dir,
+            app.world().get::<TabWorkspace>(tab).unwrap().project_dir,
             project_dir.to_string_lossy()
         );
         assert_eq!(
-            app.world()
-                .get::<vmux_layout::tab::TabWorktree>(tab)
-                .unwrap()
-                .branch,
+            app.world().get::<TabWorktree>(tab).unwrap().branch,
             "feature/fun-terminal"
         );
-        assert!(
-            app.world()
-                .get::<vmux_layout::worktree::TabWorktreeReady>(tab)
-                .is_some()
-        );
+        assert!(app.world().get::<TabWorktreeReady>(tab).is_some());
         assert!(app.world().get::<PendingAgentProject>(tab).is_none());
-        let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();
+        let session = app.world().get::<AcpSession>(stack).unwrap();
         assert_eq!(session.sid, "routing-session");
         assert_eq!(session.anchor, anchor);
         assert_eq!(session.cwd, execution_dir);
         assert_eq!(
-            app.world()
-                .get::<vmux_core::AgentWorkingDir>(stack)
-                .unwrap()
-                .0,
+            app.world().get::<AgentWorkingDir>(stack).unwrap().0,
             execution_dir.to_string_lossy()
         );
         assert_eq!(app.world().get::<ChildOf>(view).unwrap().parent(), stack);
-        assert!(app.world().get::<vmux_chat::host::ChatView>(view).is_some());
+        assert!(app.world().get::<ChatView>(view).is_some());
         assert!(matches!(
             rebind,
             ClientMessage::RebindAcpWorkspace { sid, cwd }
@@ -873,15 +865,14 @@ mod tests {
         let project_dir = repo.path().canonicalize().unwrap();
         let external_root = tempfile::tempdir().unwrap();
         let external = external_root.path().join("existing");
-        vmux_git::worktree::worktree_add(&project_dir, &external, "feature/existing", "main")
-            .unwrap();
+        worktree_add(&project_dir, &external, "feature/existing", "main").unwrap();
         let external = external.canonicalize().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
         let linked_tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "Existing".into(),
                 startup_dir: None,
             })
@@ -891,8 +882,8 @@ mod tests {
         let linked_execution = app
             .world_mut()
             .run_system_once(
-                move |mut tabs: Query<&mut vmux_layout::tab::Tab>,
-                      mut sessions: Query<&mut vmux_session::AcpSession>,
+                move |mut tabs: Query<&mut Tab>,
+                      mut sessions: Query<&mut AcpSession>,
                       child_of: Query<&ChildOf>,
                       mut commands: Commands| {
                     activate_selected_workspace(
@@ -911,11 +902,7 @@ mod tests {
             .0;
 
         assert_eq!(linked_execution, external);
-        assert!(
-            app.world()
-                .get::<vmux_layout::tab::TabWorktree>(linked_tab)
-                .is_none()
-        );
+        assert!(app.world().get::<TabWorktree>(linked_tab).is_none());
         assert!(
             app.world()
                 .get::<RepositoryNeedsWorktree>(linked_tab)
@@ -923,21 +910,16 @@ mod tests {
         );
         assert_eq!(
             app.world()
-                .get::<vmux_layout::tab::TabWorkspace>(linked_tab)
+                .get::<TabWorkspace>(linked_tab)
                 .unwrap()
                 .project_dir,
             external.to_string_lossy()
         );
-        assert_eq!(
-            vmux_git::worktree::worktree_list(&project_dir)
-                .unwrap()
-                .len(),
-            2
-        );
+        assert_eq!(worktree_list(&project_dir).unwrap().len(), 2);
 
         let managed_tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "Managed".into(),
                 startup_dir: None,
             })
@@ -947,8 +929,8 @@ mod tests {
         let managed_execution = app
             .world_mut()
             .run_system_once(
-                move |mut tabs: Query<&mut vmux_layout::tab::Tab>,
-                      mut sessions: Query<&mut vmux_session::AcpSession>,
+                move |mut tabs: Query<&mut Tab>,
+                      mut sessions: Query<&mut AcpSession>,
                       child_of: Query<&ChildOf>,
                       mut commands: Commands| {
                     activate_selected_workspace(
@@ -967,11 +949,7 @@ mod tests {
             .0;
 
         assert_eq!(managed_execution, project_dir);
-        assert!(
-            app.world()
-                .get::<vmux_layout::tab::TabWorktree>(managed_tab)
-                .is_none()
-        );
+        assert!(app.world().get::<TabWorktree>(managed_tab).is_none());
         assert!(
             app.world()
                 .get::<RepositoryNeedsWorktree>(managed_tab)
@@ -979,17 +957,12 @@ mod tests {
         );
         assert_eq!(
             app.world()
-                .get::<vmux_layout::tab::TabWorkspace>(managed_tab)
+                .get::<TabWorkspace>(managed_tab)
                 .unwrap()
                 .project_dir,
             project_dir.to_string_lossy()
         );
-        assert_eq!(
-            vmux_git::worktree::worktree_list(&project_dir)
-                .unwrap()
-                .len(),
-            2
-        );
+        assert_eq!(worktree_list(&project_dir).unwrap().len(), 2);
     }
 
     #[test]
@@ -1002,7 +975,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         let tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "Create".into(),
                 startup_dir: None,
             })
@@ -1013,8 +986,8 @@ mod tests {
         let (execution_dir, _, kind) = app
             .world_mut()
             .run_system_once(
-                move |mut tabs: Query<&mut vmux_layout::tab::Tab>,
-                      mut sessions: Query<&mut vmux_session::AcpSession>,
+                move |mut tabs: Query<&mut Tab>,
+                      mut sessions: Query<&mut AcpSession>,
                       child_of: Query<&ChildOf>,
                       mut commands: Commands| {
                     activate_selected_workspace(
@@ -1034,10 +1007,7 @@ mod tests {
         assert_eq!(execution_dir, selected);
         assert_eq!(kind, SelectedWorkspaceKind::Plain);
         assert_eq!(
-            app.world()
-                .get::<vmux_layout::tab::TabWorkspace>(tab)
-                .unwrap()
-                .project_dir,
+            app.world().get::<TabWorkspace>(tab).unwrap().project_dir,
             selected.to_string_lossy()
         );
         assert!(app.world().get::<RepositoryNeedsWorktree>(tab).is_none());
@@ -1050,8 +1020,8 @@ mod tests {
         let roots = tempfile::tempdir().unwrap();
         let first = roots.path().join("first");
         let second = roots.path().join("second");
-        vmux_git::worktree::worktree_add(&project_dir, &first, "feature/first", "main").unwrap();
-        vmux_git::worktree::worktree_add(&project_dir, &second, "feature/second", "main").unwrap();
+        worktree_add(&project_dir, &first, "feature/first", "main").unwrap();
+        worktree_add(&project_dir, &second, "feature/second", "main").unwrap();
 
         let candidates = existing_worktree_candidates(&project_dir).unwrap();
         let resolved = resolve_requested_worktree(&project_dir, &first).unwrap();
