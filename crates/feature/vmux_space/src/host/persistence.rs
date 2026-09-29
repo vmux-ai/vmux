@@ -109,6 +109,7 @@ fn complete_restore(
 }
 
 #[derive(Component)]
+#[require(WorkspaceStorePath)]
 struct AutoSave {
     debounce: Timer,
     periodic: Timer,
@@ -145,33 +146,33 @@ impl SpaceSaveEntities<'_, '_> {
 
 const STORE_SCHEMA_VERSION: u32 = 4;
 
-pub(crate) fn store_path() -> PathBuf {
-    vmux_core::profile::store_dir().join("store.ron")
+#[derive(Component)]
+struct WorkspaceStorePath(PathBuf);
+
+impl Default for WorkspaceStorePath {
+    fn default() -> Self {
+        Self(vmux_core::profile::store_dir().join("store.ron"))
+    }
 }
 
-fn store_version_path() -> PathBuf {
-    store_version_path_for_store(&store_path())
-}
+impl WorkspaceStorePath {
+    fn version(&self) -> PathBuf {
+        self.0
+            .parent()
+            .map(|parent| parent.join("store.version"))
+            .unwrap_or_else(|| PathBuf::from("store.version"))
+    }
 
-fn store_version_path_for_store(path: &Path) -> PathBuf {
-    path.parent()
-        .map(|parent| parent.join("store.version"))
-        .unwrap_or_else(|| PathBuf::from("store.version"))
-}
+    fn schema_is_current(&self) -> bool {
+        std::fs::read_to_string(self.version())
+            .ok()
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .is_some_and(|version| version >= STORE_SCHEMA_VERSION)
+    }
 
-fn store_schema_is_current() -> bool {
-    std::fs::read_to_string(store_version_path())
-        .ok()
-        .and_then(|s| s.trim().parse::<u32>().ok())
-        .map(|v| v >= STORE_SCHEMA_VERSION)
-        .unwrap_or(false)
-}
-
-fn write_store_schema_version(path: &Path) {
-    let _ = std::fs::write(
-        store_version_path_for_store(path),
-        STORE_SCHEMA_VERSION.to_string(),
-    );
+    fn write_schema_version(&self) {
+        let _ = std::fs::write(self.version(), STORE_SCHEMA_VERSION.to_string());
+    }
 }
 
 fn mark_persistence_dirty(_trigger: On<PersistenceDirty>, mut auto_save: Single<&mut AutoSave>) {
@@ -182,6 +183,7 @@ fn mark_persistence_dirty(_trigger: On<PersistenceDirty>, mut auto_save: Single<
 fn auto_save_system(
     time: Res<Time>,
     mut auto_save: Single<&mut AutoSave>,
+    path: Single<&WorkspaceStorePath>,
     spaces: Query<(), With<Space>>,
     save_entities: SpaceSaveEntities,
     mut commands: Commands,
@@ -197,7 +199,7 @@ fn auto_save_system(
         if auto_save.debounce.is_finished() {
             save_space_to_path_excluding(
                 &mut commands,
-                store_path(),
+                path.0.clone(),
                 save_entities.excluded(),
                 auto_save.components.clone(),
             );
@@ -208,7 +210,7 @@ fn auto_save_system(
     if auto_save.periodic.just_finished() {
         save_space_to_path_excluding(
             &mut commands,
-            store_path(),
+            path.0.clone(),
             save_entities.excluded(),
             auto_save.components.clone(),
         );
@@ -237,7 +239,7 @@ fn save_space_to_path_excluding(
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    write_store_schema_version(&path);
+    WorkspaceStorePath(path.clone()).write_schema_version();
     let mut save = SaveWorld::default_into_file(path);
     save.entities = EntityFilter::block(excluded);
     save.components = components;
@@ -248,6 +250,7 @@ fn load_space_on_startup(
     registry: Res<AppTypeRegistry>,
     validators: WorkspaceStoreValidators,
     mut restore: Single<&mut WorkspaceRestore>,
+    path: Single<&WorkspaceStorePath>,
     mut commands: Commands,
 ) {
     if vmux_core::profile::is_test_session() {
@@ -255,25 +258,25 @@ fn load_space_on_startup(
         restore.store_present = false;
         return;
     }
-    let path = store_path();
-    let removed_stale = remove_rejected_store_if_needed(&path, &validators);
+    let path = &path.0;
+    let removed_stale = remove_rejected_store_if_needed(path, &validators);
     let removed_incompatible = {
         let registry = registry.read();
-        remove_incompatible_store_if_needed(&path, &registry)
+        remove_incompatible_store_if_needed(path, &registry)
     };
-    let schema_outdated = path.exists() && !store_schema_is_current();
+    let schema_outdated = path.exists() && !WorkspaceStorePath(path.clone()).schema_is_current();
     if schema_outdated {
         warn!("Store schema outdated; resetting {:?}", path);
-        if let Err(e) = std::fs::remove_file(&path) {
+        if let Err(e) = std::fs::remove_file(path) {
             warn!("Failed to remove outdated store {:?}: {e}", path);
         }
-        let _ = std::fs::remove_file(store_version_path());
+        let _ = std::fs::remove_file(WorkspaceStorePath(path.clone()).version());
     }
     let exists = path.exists() && !removed_stale && !removed_incompatible && !schema_outdated;
     restore.store_present = exists;
     if exists {
         info!("Loading space from {:?}", path);
-        let load = match std::fs::read_to_string(&path)
+        let load = match std::fs::read_to_string(path)
             .ok()
             .and_then(|body| normalized_store_icons(&body))
         {
@@ -281,7 +284,7 @@ fn load_space_on_startup(
                 warn!(?unknown, "Replacing unavailable persisted page icons");
                 LoadWorld::default_from_stream(std::io::Cursor::new(body.into_bytes()))
             }
-            None => LoadWorld::default_from_file(path),
+            None => LoadWorld::default_from_file(path.clone()),
         };
         commands.trigger_load(load);
     } else {
@@ -900,7 +903,7 @@ mod tests {
             "schema version should be written next to custom store"
         );
         assert!(
-            !store_version_path().exists(),
+            !WorkspaceStorePath::default().version().exists(),
             "custom save must not write default store.version"
         );
     }
@@ -1116,7 +1119,8 @@ mod tests {
     #[test]
     fn incompatible_store_is_removed_on_startup() {
         let _home = HomeEnvGuard::use_temp_home("incompatible-store-is-removed-on-startup");
-        let path = store_path();
+        let store = WorkspaceStorePath::default();
+        let path = store.0.clone();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("store dir");
         }
@@ -1125,8 +1129,7 @@ mod tests {
             store_body_with_key("vmux_desktop::ghost::DoesNotExist"),
         )
         .expect("write store");
-        std::fs::write(store_version_path(), STORE_SCHEMA_VERSION.to_string())
-            .expect("write version");
+        std::fs::write(store.version(), STORE_SCHEMA_VERSION.to_string()).expect("write version");
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -1139,7 +1142,7 @@ mod tests {
             "incompatible store should be removed on startup"
         );
         assert!(
-            !store_version_path().exists(),
+            !store.version().exists(),
             "store.version should be removed with the incompatible store"
         );
     }
@@ -1172,7 +1175,7 @@ mod tests {
         app.update();
         app.update();
         assert!(
-            !store_path().exists(),
+            !WorkspaceStorePath::default().0.exists(),
             "auto_save must skip when no Space exists"
         );
     }
@@ -1207,7 +1210,7 @@ mod tests {
         app.update();
         app.update();
         assert!(
-            store_path().exists(),
+            WorkspaceStorePath::default().0.exists(),
             "auto_save must save when a Space exists"
         );
     }
