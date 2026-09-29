@@ -23,7 +23,7 @@ impl PluginGroup for DesktopPluginGroup {
 
         #[cfg(target_os = "macos")]
         {
-            builder = builder.add(crate::input::DesktopInputPlugin);
+            builder = builder.add(vmux_input::KeyboardPlugin);
         }
 
         #[cfg(feature = "native-notifications")]

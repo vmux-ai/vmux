@@ -9,11 +9,12 @@ pub(crate) struct GlassPlugin;
 impl Plugin for GlassPlugin {
     fn build(&self, app: &mut App) {
         app.init_non_send::<GlassState>()
+            .add_message::<vmux_input::ExitFullscreenShortcut>()
             .add_systems(PreUpdate, install_window_glass)
             .add_systems(
                 Update,
                 (
-                    sync_window_glass_visibility.in_set(crate::window::SyncWindowFullscreen),
+                    sync_window_glass_visibility.in_set(vmux_core::WindowFullscreenSet),
                     keep_window_surface_layer_transparent,
                 ),
             )
@@ -295,16 +296,18 @@ fn sync_window_glass_visibility(
     mut window_q: Query<(
         Entity,
         &mut bevy::window::Window,
-        &mut crate::window::WindowFullscreen,
+        &mut vmux_core::WindowFullscreen,
     )>,
     focused_window: vmux_layout::window::FocusedWindow,
     mut exit_fullscreen: MessageReader<crate::window::ExitFullscreenRequest>,
+    mut shortcut: MessageReader<vmux_input::ExitFullscreenShortcut>,
 ) {
     use objc2::ClassType;
     use objc2_app_kit::NSWindowStyleMask;
 
     let mut focused_fullscreen = false;
-    let exit_fullscreen = exit_fullscreen.read().next().is_some();
+    let exit_fullscreen =
+        exit_fullscreen.read().next().is_some() || shortcut.read().next().is_some();
     state.0.retain(|entity, _| window_q.contains(*entity));
     for (entity, mut window, mut window_fullscreen) in &mut window_q {
         let Some(glass) = state.0.get_mut(&entity) else {

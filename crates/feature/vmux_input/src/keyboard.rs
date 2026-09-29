@@ -15,14 +15,19 @@ use vmux_core::input::{
     NativeKeyInputSet, PassesNativeKey,
 };
 
-use crate::{KeyboardContext, KeyboardContextSet};
+use crate::{ExitFullscreenShortcut, HideWindowsShortcut, KeyboardContext, KeyboardContextSet};
 
 pub struct KeyboardPlugin;
 
 impl Plugin for KeyboardPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<NativeKeyInput>()
-            .add_systems(Startup, spawn_keyboard_bridge)
+            .add_message::<ExitFullscreenShortcut>()
+            .add_message::<HideWindowsShortcut>()
+            .add_systems(
+                Startup,
+                (spawn_keyboard_bridge, spawn_application_key_bindings),
+            )
             .add_systems(Update, install_monitor)
             .add_systems(
                 Update,
@@ -37,9 +42,26 @@ impl Plugin for KeyboardPlugin {
                     .after(sync_keyboard_context)
                     .in_set(NativeKeyInputSet)
                     .in_set(vmux_command::WriteCommandRequests),
+            )
+            .add_systems(
+                Update,
+                sync_application_key_bindings
+                    .in_set(NativeKeyClaimSet)
+                    .after(KeyboardContextSet)
+                    .after(vmux_core::WindowFullscreenSet),
+            )
+            .add_systems(
+                Update,
+                publish_application_key_shortcuts.after(NativeKeyInputSet),
             );
     }
 }
+
+#[derive(Component)]
+struct ExitFullscreenKey;
+
+#[derive(Component)]
+struct HideWindowsKey;
 
 #[derive(Component, Clone)]
 struct KeyboardBridge {
@@ -75,6 +97,33 @@ struct KeyboardMonitorPending;
 fn spawn_keyboard_bridge(mut commands: Commands) {
     let (bridge, inbox) = KeyboardBridge::channel();
     commands.spawn((Name::new("Keyboard"), bridge, inbox, KeyboardMonitorPending));
+}
+
+fn spawn_application_key_bindings(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Hide windows key"),
+        HideWindowsKey,
+        NativeKey {
+            key: KeyCode::KeyQ,
+            modifiers: vmux_core::KeyModifiers {
+                super_key: true,
+                ..default()
+            },
+        },
+        ConsumesNativeKey,
+        vmux_core::Active,
+    ));
+    for shift in [false, true] {
+        commands.spawn((
+            Name::new("Exit fullscreen key"),
+            ExitFullscreenKey,
+            NativeKey {
+                key: KeyCode::Escape,
+                modifiers: vmux_core::KeyModifiers { shift, ..default() },
+            },
+            ConsumesNativeKey,
+        ));
+    }
 }
 
 impl KeyboardBridge {
@@ -454,9 +503,57 @@ fn dispatch_keyboard_input(
     }
 }
 
+fn sync_application_key_bindings(
+    context: Query<&KeyboardContext>,
+    fullscreen: Query<&vmux_core::WindowFullscreen, (With<Window>, With<vmux_core::Active>)>,
+    bindings: Query<(Entity, Has<vmux_core::Active>), With<ExitFullscreenKey>>,
+    mut commands: Commands,
+) {
+    let page_owns_escape = context
+        .single()
+        .ok()
+        .is_some_and(|context| context.page_owns_escape);
+    let enabled = fullscreen
+        .single()
+        .ok()
+        .is_some_and(|fullscreen| fullscreen.0)
+        && !page_owns_escape;
+    for (entity, active) in &bindings {
+        if active == enabled {
+            continue;
+        }
+        if enabled {
+            commands.entity(entity).insert(vmux_core::Active);
+        } else {
+            commands.entity(entity).remove::<vmux_core::Active>();
+        }
+    }
+}
+
+fn publish_application_key_shortcuts(
+    mut inputs: MessageReader<NativeKeyInput>,
+    bindings: Query<(Has<ExitFullscreenKey>, Has<HideWindowsKey>), With<vmux_core::Active>>,
+    mut exit_fullscreen: MessageWriter<ExitFullscreenShortcut>,
+    mut hide_windows: MessageWriter<HideWindowsShortcut>,
+) {
+    for input in inputs.read() {
+        let Some(claim) = input.claim else { continue };
+        let Ok((exits_fullscreen, hides_windows)) = bindings.get(claim) else {
+            continue;
+        };
+        if exits_fullscreen {
+            exit_fullscreen.write(ExitFullscreenShortcut);
+        }
+        if hides_windows {
+            hide_windows.write(HideWindowsShortcut);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::message::Messages;
     use vmux_command::shortcut::{Binding, Shortcut, Source};
 
     fn map() -> Keymap {
@@ -646,5 +743,71 @@ mod tests {
 
         assert!(stroke.releases_capture());
         assert!(!modified.releases_capture());
+    }
+
+    #[test]
+    fn fullscreen_escape_publishes_a_shortcut_unless_the_page_owns_it() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<NativeKeyInput>()
+            .add_message::<ExitFullscreenShortcut>()
+            .add_message::<HideWindowsShortcut>()
+            .add_systems(Startup, spawn_application_key_bindings)
+            .add_systems(
+                Update,
+                (
+                    sync_application_key_bindings,
+                    publish_application_key_shortcuts,
+                )
+                    .chain(),
+            );
+        app.world_mut().spawn((
+            Window::default(),
+            vmux_core::WindowFullscreen(true),
+            vmux_core::Active,
+        ));
+        app.update();
+        let mut claims = app.world_mut().query_filtered::<
+            (Entity, &NativeKey),
+            (With<ExitFullscreenKey>, With<vmux_core::Active>),
+        >();
+        let claim = claims
+            .iter(app.world())
+            .find_map(|(entity, key)| (!key.modifiers.shift).then_some(entity))
+            .unwrap();
+        app.world_mut()
+            .resource_mut::<Messages<NativeKeyInput>>()
+            .write(NativeKeyInput {
+                key: Some(KeyCode::Escape),
+                native_code: 0,
+                text: String::new(),
+                modifiers: Default::default(),
+                repeat: false,
+                captured: false,
+                claim: Some(claim),
+                pressed_at_ms: 0,
+            });
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<ExitFullscreenShortcut>>()
+                .drain()
+                .count(),
+            1
+        );
+
+        app.world_mut().spawn(KeyboardContext {
+            page_owns_escape: true,
+            text_entry_owns_keys: false,
+        });
+        app.update();
+
+        assert!(
+            app.world_mut()
+                .query_filtered::<Entity, (With<ExitFullscreenKey>, With<vmux_core::Active>)>()
+                .iter(app.world())
+                .next()
+                .is_none()
+        );
     }
 }

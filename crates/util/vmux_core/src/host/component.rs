@@ -11,6 +11,12 @@ pub fn now_millis() -> i64 {
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct KeyboardOwner;
 
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WindowFullscreen(pub bool);
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct WindowFullscreenSet;
+
 #[derive(Component, Clone, Debug)]
 pub struct AgentWorkingDir(pub String);
 

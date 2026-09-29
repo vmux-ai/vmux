@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowPosition};
 use bevy_cef::prelude::HostWindow;
 use vmux_core::host::persistence::WorkspaceRestore;
+use vmux_core::{WindowFullscreen, WindowFullscreenSet};
 use vmux_layout::window::{
     CloseFocusedWindowRequest, FocusedWindow, NewWindowRequest, NewWindowWorkspace, VmuxWindow,
     WindowGeometry,
@@ -41,22 +42,16 @@ impl Plugin for DesktopWindowPlugin {
                 sync_fullscreen_signal_from_mode,
                 restore_fullscreen_from_window_mode,
             )
-                .in_set(SyncWindowFullscreen),
+                .in_set(WindowFullscreenSet),
         );
     }
 }
-
-#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct SyncWindowFullscreen;
 
 #[derive(Message, Clone, Copy)]
 pub(crate) struct CloseVmuxWindow(pub Entity);
 
 #[derive(Message, Clone, Copy)]
 pub(crate) struct ExitFullscreenRequest;
-
-#[derive(Component, Default, Debug)]
-pub(crate) struct WindowFullscreen(pub bool);
 
 #[derive(Component, Debug)]
 pub(crate) struct PendingFullscreenRestore(pub bool);

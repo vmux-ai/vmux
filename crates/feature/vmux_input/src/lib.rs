@@ -7,6 +7,12 @@ pub mod pointer;
 #[cfg(target_os = "macos")]
 pub use keyboard::KeyboardPlugin;
 
+#[derive(Message, Clone, Copy, Debug)]
+pub struct ExitFullscreenShortcut;
+
+#[derive(Message, Clone, Copy, Debug)]
+pub struct HideWindowsShortcut;
+
 #[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyboardContext {
     pub page_owns_escape: bool,

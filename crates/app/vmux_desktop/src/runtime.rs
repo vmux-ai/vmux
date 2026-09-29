@@ -32,6 +32,7 @@ impl Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(platform::RuntimePlatformPlugin)
             .add_message::<HideAllWindowsRequest>()
+            .add_message::<vmux_input::HideWindowsShortcut>()
             .add_systems(Update, hide_all_windows)
             .add_systems(Update, keep_awake_while_revealing);
         #[cfg(feature = "tray")]
@@ -205,10 +206,11 @@ fn keep_awake_while_revealing(
 
 fn hide_all_windows(
     mut requests: MessageReader<HideAllWindowsRequest>,
+    mut shortcuts: MessageReader<vmux_input::HideWindowsShortcut>,
     mut windows: Query<&mut Window>,
     browsers: Option<NonSend<Browsers>>,
 ) {
-    if requests.read().count() == 0 {
+    if requests.read().count() == 0 && shortcuts.read().count() == 0 {
         return;
     }
     for mut window in &mut windows {
