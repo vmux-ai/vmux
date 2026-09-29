@@ -4,12 +4,17 @@ use std::thread::JoinHandle;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy::{ecs::system::SystemParam, prelude::*};
 
+use crate::event::{
+    GitBranchLog, GitDiffViewport, GitFileStatus, GitOperationError, GitOperationResult,
+    GitRepositorySnapshot,
+};
+
 use super::GitUpdateSet;
 use super::job::{
     AmendJob, BranchLogJob, CheckoutCommitJob, CherryPickJob, CommitJob, CreateBranchJob,
-    DeleteBranchJob, DiffJob, DiscardJob, FastForwardJob, FetchJob, GitJobEmit, HunkJob, MergeJob,
-    PullJob, PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob, StageJob, StashDropJob,
-    StashPopJob, StashPushJob, UnstageJob,
+    DeleteBranchJob, DiffJob, DiscardJob, FastForwardJob, FetchJob, HunkJob, MergeJob, PullJob,
+    PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob, StageJob, StashDropJob, StashPopJob,
+    StashPushJob, UnstageJob,
 };
 
 pub(super) struct JobPlugin;
@@ -19,8 +24,19 @@ impl Plugin for JobPlugin {
         app.add_observer(queue_git_job_failure).add_systems(
             Update,
             (
-                poll_git_jobs,
-                deliver_git_outputs,
+                (
+                    poll_git_jobs::<RepositoryOutput>,
+                    poll_git_jobs::<BranchLogOutput>,
+                    poll_git_jobs::<DiffOutput>,
+                    poll_git_jobs::<OperationOutput>,
+                ),
+                (
+                    deliver_repository_outputs,
+                    deliver_branch_log_outputs,
+                    deliver_diff_outputs,
+                    deliver_operation_outputs,
+                    deliver_failure_outputs,
+                ),
                 bevy::ecs::schedule::ApplyDeferred,
                 (
                     start_repository_jobs,
@@ -82,143 +98,214 @@ impl GitJob {
 pub(super) struct GitJobs(Vec<Entity>);
 
 #[derive(Component)]
-struct RunningGitJob {
-    thread: Option<JoinHandle<Vec<GitJobEmit>>>,
+struct GitJobRunning;
+
+#[derive(Component)]
+struct GitJobTask<T: Send + Sync + 'static> {
+    thread: Option<JoinHandle<T>>,
 }
 
 #[derive(Component)]
-struct GitJobOutput {
-    emits: Vec<GitJobEmit>,
+struct RepositoryOutput(Result<GitRepositorySnapshot, GitOperationError>);
+
+#[derive(Component)]
+struct BranchLogOutput(Result<GitBranchLog, GitOperationError>);
+
+#[derive(Component)]
+struct DiffOutput(GitDiffViewport);
+
+#[derive(Component, Clone, Debug)]
+struct OperationOutput {
+    result: GitOperationResult,
+    status: Option<Result<GitFileStatus, GitOperationError>>,
 }
+
+#[derive(Component)]
+struct FailureOutput(GitOperationError);
 
 fn queue_git_job_failure(trigger: On<GitJobFailure>, mut commands: Commands) {
     commands.spawn((
         GitJob::new(trigger.event().webview),
-        GitJobOutput {
-            emits: vec![GitJobEmit::Error(crate::event::GitOperationError {
-                message: trigger.event().message.clone(),
-            })],
-        },
+        FailureOutput(GitOperationError {
+            message: trigger.event().message.clone(),
+        }),
     ));
 }
 
-fn poll_git_jobs(mut jobs: Query<(Entity, &mut RunningGitJob)>, mut commands: Commands) {
-    for (entity, mut running) in &mut jobs {
-        if !running.thread.as_ref().is_some_and(JoinHandle::is_finished) {
+fn poll_git_jobs<T: Component>(
+    mut jobs: Query<(Entity, &mut GitJobTask<T>)>,
+    mut commands: Commands,
+) {
+    for (entity, mut task) in &mut jobs {
+        if !task.thread.as_ref().is_some_and(JoinHandle::is_finished) {
             continue;
         }
-        let emits = match running.thread.take().unwrap().join() {
-            Ok(emits) => emits,
-            Err(_) => vec![GitJobEmit::Error(crate::event::GitOperationError {
-                message: "Git job worker panicked".to_string(),
-            })],
-        };
-        commands
-            .entity(entity)
-            .remove::<RunningGitJob>()
-            .insert(GitJobOutput { emits });
+        let mut entity = commands.entity(entity);
+        entity.remove::<(GitJobRunning, GitJobTask<T>)>();
+        match task.thread.take().unwrap().join() {
+            Ok(output) => {
+                entity.insert(output);
+            }
+            Err(_) => {
+                entity.insert(FailureOutput(GitOperationError {
+                    message: "Git job worker panicked".to_string(),
+                }));
+            }
+        }
     }
 }
 
-fn deliver_git_outputs(
-    mut outputs: Query<(Entity, &GitJob, &mut GitJobOutput)>,
+fn deliver_repository_outputs(
+    outputs: Query<(Entity, &GitJob, &RepositoryOutput)>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
     mut views: Query<(
         &mut super::state::GitState,
         &mut super::controller::GitController,
     )>,
+    mut commands: Commands,
+) {
+    for (entity, job, output) in &outputs {
+        let webview = job.webview;
+        match &output.0 {
+            Ok(event) => {
+                if let Ok(mut page) = pages.get_mut(webview) {
+                    if let Some(url) = crate::GitUrl::from_path(Path::new(&event.repo_root)) {
+                        page.url = url;
+                    }
+                    page.title = match event.branch.is_empty() {
+                        true => event.repo_name.clone(),
+                        false => format!("{} · {}", event.repo_name, event.branch),
+                    };
+                }
+                if let Ok((mut view, mut controller)) = views.get_mut(webview) {
+                    controller.reconcile_repository(event);
+                    view.set_repository(event.clone());
+                    if let Some(payload) = controller.branch_log_request(&view) {
+                        commands.trigger(bevy_cef::prelude::UiInput { webview, payload });
+                    }
+                }
+            }
+            Err(error) => {
+                if let Ok((mut view, _)) = views.get_mut(webview) {
+                    view.apply_error(error);
+                }
+            }
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+fn deliver_branch_log_outputs(
+    outputs: Query<(Entity, &GitJob, &BranchLogOutput)>,
+    mut views: Query<(
+        &mut super::state::GitState,
+        &mut super::controller::GitController,
+    )>,
+    mut commands: Commands,
+) {
+    for (entity, job, output) in &outputs {
+        if let Ok((mut view, _)) = views.get_mut(job.webview) {
+            match &output.0 {
+                Ok(event) => view.set_branch_log(event.clone()),
+                Err(error) => view.apply_error(error),
+            }
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+fn deliver_diff_outputs(
+    outputs: Query<(Entity, &GitJob, &DiffOutput)>,
+    mut views: Query<&mut super::state::GitState>,
     mut files: Query<&mut super::status::FileGit>,
     diffs: Query<&super::diff::GitDiffQuery>,
+    mut commands: Commands,
+) {
+    for (entity, job, output) in &outputs {
+        let webview = job.webview;
+        let event = &output.0;
+        let Ok(query) = diffs.get(webview) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        if let Ok(mut view) = views.get_mut(webview) {
+            if query.accepts(event.generation) {
+                view.set_diff_viewport(event.clone());
+            }
+            commands.entity(entity).despawn();
+            continue;
+        }
+        if let Ok(mut file) = files.get_mut(webview)
+            && query.accepts_file(event.generation, &file)
+        {
+            file.apply_diff(event.clone());
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+fn deliver_operation_outputs(
+    outputs: Query<(Entity, &GitJob, &OperationOutput)>,
+    mut views: Query<(
+        &mut super::state::GitState,
+        &mut super::controller::GitController,
+    )>,
+    mut files: Query<&mut super::status::FileGit>,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let wake = wake.as_deref().map(|wake| (**wake).clone());
-    for (entity, job, mut output) in &mut outputs {
+    for (entity, job, output) in &outputs {
         let webview = job.webview;
-        for emit in std::mem::take(&mut output.emits) {
-            match emit {
-                GitJobEmit::Repository(event) => {
-                    if let Ok(mut page) = pages.get_mut(webview) {
-                        if let Some(url) = crate::GitUrl::from_path(Path::new(&event.repo_root)) {
-                            page.url = url;
-                        }
-                        page.title = match event.branch.is_empty() {
-                            true => event.repo_name.clone(),
-                            false => format!("{} · {}", event.repo_name, event.branch),
-                        };
-                    }
-                    if let Ok((mut view, mut controller)) = views.get_mut(webview) {
-                        controller.reconcile_repository(&event);
-                        view.set_repository(event);
-                        if let Some(payload) = controller.branch_log_request(&view) {
-                            commands.trigger(bevy_cef::prelude::UiInput { webview, payload });
-                        }
-                    }
-                }
-                GitJobEmit::BranchLog(event) => {
-                    if let Ok((mut view, _)) = views.get_mut(webview) {
-                        view.set_branch_log(event);
-                    }
-                }
-                GitJobEmit::Status(event) => {
-                    if let Ok(mut file) = files.get_mut(webview) {
-                        file.apply_status(event);
-                    }
-                }
-                GitJobEmit::DiffViewport(event) => {
-                    let Ok(query) = diffs.get(webview) else {
-                        continue;
-                    };
-                    if let Ok((mut view, _)) = views.get_mut(webview) {
-                        if query.accepts(event.generation) {
-                            view.set_diff_viewport(event);
-                        }
-                        continue;
-                    }
-                    let Ok(mut file) = files.get_mut(webview) else {
-                        continue;
-                    };
-                    if !query.accepts_file(event.generation, &file) {
-                        continue;
-                    }
-                    file.apply_diff(event);
-                }
-                GitJobEmit::Result(event) => {
-                    if let Ok((mut view, mut controller)) = views.get_mut(webview) {
-                        let branch = controller.apply_result(&event);
-                        view.apply_result(&event);
-                        if let Some(branch) = branch {
-                            commands.trigger(bevy_cef::prelude::UiInput {
-                                webview,
-                                payload: vmux_core::event::space::ProjectActivateRequest {
-                                    path: view.workspace().to_string(),
-                                    branch,
-                                    checkout: String::new(),
-                                    pane_id: None,
-                                },
-                            });
-                        }
-                        if !view.workspace().is_empty() {
-                            commands.spawn((
-                                GitJob::new(webview),
-                                RepositoryJob {
-                                    path: view.workspace().into(),
-                                },
-                            ));
-                        }
-                    } else if let Ok(mut file) = files.get_mut(webview) {
-                        let refresh = file.apply_result(event, wake.clone());
-                        commands.entity(webview).insert(refresh);
-                    }
-                }
-                GitJobEmit::Error(event) => {
-                    if let Ok((mut view, _)) = views.get_mut(webview) {
-                        view.apply_error(&event);
-                    } else if let Ok(mut file) = files.get_mut(webview) {
-                        file.apply_error(event.message);
-                    }
-                }
+        if let Ok((mut view, mut controller)) = views.get_mut(webview) {
+            let branch = controller.apply_result(&output.result);
+            view.apply_result(&output.result);
+            if let Some(branch) = branch {
+                commands.trigger(bevy_cef::prelude::UiInput {
+                    webview,
+                    payload: vmux_core::event::space::ProjectActivateRequest {
+                        path: view.workspace().to_string(),
+                        branch,
+                        checkout: String::new(),
+                        pane_id: None,
+                    },
+                });
             }
+            if let Some(Err(error)) = &output.status {
+                view.apply_error(error);
+            }
+            if !view.workspace().is_empty() {
+                commands.spawn((
+                    GitJob::new(webview),
+                    RepositoryJob {
+                        path: view.workspace().into(),
+                    },
+                ));
+            }
+        } else if let Ok(mut file) = files.get_mut(webview) {
+            let refresh = file.apply_result(output.result.clone(), wake.clone());
+            match &output.status {
+                Some(Ok(status)) => file.apply_status(status.clone()),
+                Some(Err(error)) => file.apply_error(error.message.clone()),
+                None => {}
+            }
+            commands.entity(webview).insert(refresh);
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+fn deliver_failure_outputs(
+    outputs: Query<(Entity, &GitJob, &FailureOutput)>,
+    mut views: Query<&mut super::state::GitState>,
+    mut files: Query<&mut super::status::FileGit>,
+    mut commands: Commands,
+) {
+    for (entity, job, output) in &outputs {
+        if let Ok(mut view) = views.get_mut(job.webview) {
+            view.apply_error(&output.0);
+        } else if let Ok(mut file) = files.get_mut(job.webview) {
+            file.apply_error(output.0.message.clone());
         }
         commands.entity(entity).despawn();
     }
@@ -228,13 +315,13 @@ fn deliver_git_outputs(
 struct GitJobStarter<'w, 's, J: Component> {
     queues: Query<'w, 's, &'static GitJobs>,
     pending: Query<'w, 's, &'static J>,
-    running: Query<'w, 's, (), With<RunningGitJob>>,
+    running: Query<'w, 's, (), With<GitJobRunning>>,
     wake: Option<Res<'w, EventLoopProxyWrapper>>,
     commands: Commands<'w, 's>,
 }
 
 impl<J: Component + Clone> GitJobStarter<'_, '_, J> {
-    fn start(&mut self, run: fn(J) -> Vec<GitJobEmit>) {
+    fn start<O: Component>(&mut self, run: fn(J) -> O) {
         let wake = self.wake.as_deref().map(|wake| (**wake).clone());
         for queue in &self.queues {
             let Some(entity) = queue.iter().next() else {
@@ -249,59 +336,56 @@ impl<J: Component + Clone> GitJobStarter<'_, '_, J> {
             let job = job.clone();
             let wake = wake.clone();
             let thread = std::thread::spawn(move || {
-                let emits = run(job);
+                let output = run(job);
                 if let Some(wake) = wake {
                     let _ = wake.send_event(WinitUserEvent::WakeUp);
                 }
-                emits
+                output
             });
-            self.commands
-                .entity(entity)
-                .remove::<J>()
-                .insert(RunningGitJob {
+            self.commands.entity(entity).remove::<J>().insert((
+                GitJobRunning,
+                GitJobTask {
                     thread: Some(thread),
-                });
+                },
+            ));
         }
     }
 }
 
 fn start_repository_jobs(mut jobs: GitJobStarter<RepositoryJob>) {
-    jobs.start(
-        |job| match crate::event::GitRepositorySnapshot::load(&job.path) {
-            Ok(event) => vec![GitJobEmit::Repository(event)],
-            Err(error) => vec![GitJobEmit::Error(crate::event::GitOperationError {
-                message: error.0,
-            })],
-        },
-    );
+    jobs.start(|job| {
+        RepositoryOutput(
+            GitRepositorySnapshot::load(&job.path)
+                .map_err(|error| GitOperationError { message: error.0 }),
+        )
+    });
 }
 
 fn start_branch_log_jobs(mut jobs: GitJobStarter<BranchLogJob>) {
     jobs.start(|job| {
-        match crate::event::GitCommitEntry::for_reference(&job.repo_root, &job.branch) {
-            Ok(commits) => vec![GitJobEmit::BranchLog(crate::event::GitBranchLog {
-                repo_root: job.repo_root.to_string_lossy().into_owned(),
-                branch: job.branch,
-                commits,
-            })],
-            Err(error) => vec![GitJobEmit::Error(crate::event::GitOperationError {
-                message: error.0,
-            })],
-        }
+        BranchLogOutput(
+            crate::event::GitCommitEntry::for_reference(&job.repo_root, &job.branch)
+                .map(|commits| GitBranchLog {
+                    repo_root: job.repo_root.to_string_lossy().into_owned(),
+                    branch: job.branch,
+                    commits,
+                })
+                .map_err(|error| GitOperationError { message: error.0 }),
+        )
     });
 }
 
 fn start_diff_jobs(mut jobs: GitJobStarter<DiffJob>) {
     jobs.start(|job| {
         if !super::runner::has_repository(&job.repo_root) {
-            return vec![GitJobEmit::DiffViewport(crate::event::GitDiffViewport {
+            return DiffOutput(GitDiffViewport {
                 generation: job.generation,
                 first_line: job.top_line,
                 total_lines: 0,
                 lines: Vec::new(),
                 markers: Vec::new(),
                 error: String::new(),
-            })];
+            });
         }
         let result = if job.reference.is_empty() {
             match job.content.as_deref() {
@@ -317,23 +401,23 @@ fn start_diff_jobs(mut jobs: GitJobStarter<DiffJob>) {
             Ok(all_lines) => {
                 let markers = super::diff::GitDiffMarkers::from_lines(&all_lines).into_inner();
                 let (total_lines, lines) = super::parse::window(&all_lines, job.top_line, job.rows);
-                vec![GitJobEmit::DiffViewport(crate::event::GitDiffViewport {
+                DiffOutput(GitDiffViewport {
                     generation: job.generation,
                     first_line: job.top_line.min(total_lines),
                     total_lines,
                     lines,
                     markers,
                     error: String::new(),
-                })]
+                })
             }
-            Err(error) => vec![GitJobEmit::DiffViewport(crate::event::GitDiffViewport {
+            Err(error) => DiffOutput(GitDiffViewport {
                 generation: job.generation,
                 first_line: job.top_line,
                 total_lines: 0,
                 lines: Vec::new(),
                 markers: Vec::new(),
                 error: error.0,
-            })],
+            }),
         }
     });
 }
@@ -487,18 +571,17 @@ fn result_then_status(
     path: &Path,
     operation: &str,
     message: &str,
-) -> Vec<GitJobEmit> {
-    let result = GitJobEmit::Result(crate::event::GitOperationResult {
-        operation: operation.to_string(),
-        ok: true,
-        message: message.to_string(),
-    });
-    match super::runner::status_at(repo_root, path) {
-        Ok(event) => vec![result, GitJobEmit::Status(event)],
-        Err(error) => vec![
-            result,
-            GitJobEmit::Error(crate::event::GitOperationError { message: error.0 }),
-        ],
+) -> OperationOutput {
+    OperationOutput {
+        result: GitOperationResult {
+            operation: operation.to_string(),
+            ok: true,
+            message: message.to_string(),
+        },
+        status: Some(
+            super::runner::status_at(repo_root, path)
+                .map_err(|error| GitOperationError { message: error.0 }),
+        ),
     }
 }
 
@@ -507,30 +590,36 @@ fn mutate(
     path: &Path,
     operation: &str,
     run: fn(&Path, &Path) -> Result<(), super::runner::GitError>,
-) -> Vec<GitJobEmit> {
+) -> OperationOutput {
     match run(repo_root, path) {
         Ok(()) => result_then_status(repo_root, path, operation, "ok"),
         Err(error) => failed_operation(operation, error),
     }
 }
 
-fn operation(operation: &str, result: Result<String, super::runner::GitError>) -> Vec<GitJobEmit> {
+fn operation(operation: &str, result: Result<String, super::runner::GitError>) -> OperationOutput {
     match result {
-        Ok(message) => vec![GitJobEmit::Result(crate::event::GitOperationResult {
-            operation: operation.to_string(),
-            ok: true,
-            message,
-        })],
+        Ok(message) => OperationOutput {
+            result: GitOperationResult {
+                operation: operation.to_string(),
+                ok: true,
+                message,
+            },
+            status: None,
+        },
         Err(error) => failed_operation(operation, error),
     }
 }
 
-fn failed_operation(operation: &str, error: super::runner::GitError) -> Vec<GitJobEmit> {
-    vec![GitJobEmit::Result(crate::event::GitOperationResult {
-        operation: operation.to_string(),
-        ok: false,
-        message: error.0,
-    })]
+fn failed_operation(operation: &str, error: super::runner::GitError) -> OperationOutput {
+    OperationOutput {
+        result: GitOperationResult {
+            operation: operation.to_string(),
+            ok: false,
+            message: error.0,
+        },
+        status: None,
+    }
 }
 
 #[cfg(test)]
@@ -540,14 +629,21 @@ mod tests {
     use crate::host::runner::test_repo;
 
     #[derive(Resource, Default)]
-    struct CapturedOutputs(Vec<GitJobEmit>);
+    struct CapturedOutputs {
+        diffs: Vec<GitDiffViewport>,
+        operations: Vec<OperationOutput>,
+    }
 
     fn capture_outputs(
-        mut outputs: Query<&mut GitJobOutput>,
+        diffs: Query<&DiffOutput>,
+        operations: Query<&OperationOutput>,
         mut captured: ResMut<CapturedOutputs>,
     ) {
-        for mut output in &mut outputs {
-            captured.0.append(&mut output.emits);
+        for output in &diffs {
+            captured.diffs.push(output.0.clone());
+        }
+        for output in &operations {
+            captured.operations.push(output.clone());
         }
     }
 
@@ -558,18 +654,20 @@ mod tests {
             .add_systems(
                 Update,
                 capture_outputs
-                    .after(poll_git_jobs)
-                    .before(deliver_git_outputs),
+                    .after(poll_git_jobs::<DiffOutput>)
+                    .after(poll_git_jobs::<OperationOutput>)
+                    .before(deliver_diff_outputs)
+                    .before(deliver_operation_outputs),
             );
         app
     }
 
-    fn captured(app: &mut App) -> Vec<GitJobEmit> {
+    fn captured(app: &mut App) -> CapturedOutputs {
         for _ in 0..10_000 {
             app.update();
             let mut captured = app.world_mut().resource_mut::<CapturedOutputs>();
-            if !captured.0.is_empty() {
-                return std::mem::take(&mut captured.0);
+            if !captured.diffs.is_empty() || !captured.operations.is_empty() {
+                return std::mem::take(&mut *captured);
             }
             std::thread::yield_now();
         }
@@ -619,9 +717,9 @@ mod tests {
         );
         app.update();
 
-        assert!(app.world().get::<RunningGitJob>(first).is_some());
+        assert!(app.world().get::<GitJobRunning>(first).is_some());
         assert!(app.world().get::<RepositoryJob>(second).is_some());
-        assert!(app.world().get::<RunningGitJob>(second).is_none());
+        assert!(app.world().get::<GitJobRunning>(second).is_none());
     }
 
     #[test]
@@ -643,11 +741,8 @@ mod tests {
         ));
 
         assert!(matches!(
-            captured(&mut app).as_slice(),
-            [GitJobEmit::DiffViewport(GitDiffViewport {
-                generation: 7,
-                ..
-            })]
+            captured(&mut app).diffs.as_slice(),
+            [GitDiffViewport { generation: 7, .. }]
         ));
     }
 
@@ -664,13 +759,15 @@ mod tests {
             },
         ));
 
-        match captured(&mut app).as_slice() {
-            [GitJobEmit::Result(result), GitJobEmit::Status(status)] => {
-                assert!(result.ok);
-                assert_eq!(status.file_status, FileStatus::Staged);
-            }
-            other => panic!("unexpected: {other:?}"),
-        }
+        let captured = captured(&mut app);
+        let [output] = captured.operations.as_slice() else {
+            panic!("unexpected: {:?}", captured.operations);
+        };
+        assert!(output.result.ok);
+        assert!(matches!(
+            &output.status,
+            Some(Ok(status)) if status.file_status == FileStatus::Staged
+        ));
     }
 
     #[test]
@@ -693,14 +790,14 @@ mod tests {
         ));
 
         assert!(matches!(
-            captured(&mut app).as_slice(),
-            [GitJobEmit::DiffViewport(GitDiffViewport {
+            captured(&mut app).diffs.as_slice(),
+            [GitDiffViewport {
                 generation: 7,
                 total_lines: 0,
                 lines,
                 markers,
                 ..
-            })] if lines.is_empty() && markers.is_empty()
+            }] if lines.is_empty() && markers.is_empty()
         ));
     }
 }

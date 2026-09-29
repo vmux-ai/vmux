@@ -2,18 +2,6 @@ use std::path::PathBuf;
 
 use bevy::prelude::Component;
 
-use crate::event::*;
-
-#[derive(Debug, Clone)]
-pub(super) enum GitJobEmit {
-    Repository(GitRepositorySnapshot),
-    BranchLog(GitBranchLog),
-    Status(GitFileStatus),
-    DiffViewport(GitDiffViewport),
-    Result(GitOperationResult),
-    Error(GitOperationError),
-}
-
 #[derive(Clone, Component)]
 pub(super) struct RepositoryJob {
     pub(super) path: PathBuf,
