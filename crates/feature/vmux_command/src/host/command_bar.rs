@@ -1,13 +1,13 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 use bevy::prelude::*;
+use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 
 mod completion;
 pub mod handler;
 mod palette;
 pub mod panel;
 pub mod project_files;
-pub mod wake;
 pub mod work_snapshot;
 
 #[derive(EntityEvent)]
@@ -35,7 +35,25 @@ impl Plugin for CommandBarPlugin {
             handler::InputPlugin,
             palette::PalettePlugin,
             panel::PanelPlugin,
-            wake::WakePlugin,
-        ));
+        ))
+        .add_systems(
+            Update,
+            keep_awake_while_command_bar_opening.after(crate::ReadCommandRequests),
+        );
+    }
+}
+
+fn keep_awake_while_command_bar_opening(
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    pending: Query<&handler::PendingCommandBarReveal>,
+) {
+    if !pending
+        .iter()
+        .any(handler::PendingCommandBarReveal::is_active)
+    {
+        return;
+    }
+    if let Some(proxy) = proxy {
+        let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
     }
 }

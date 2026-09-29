@@ -1,5 +1,5 @@
+use super::Header;
 use crate::Open;
-use crate::host::header::Header;
 use crate::settings::LayoutSettings;
 use crate::side_sheet::SideSheet;
 use crate::window::VmuxWindow;

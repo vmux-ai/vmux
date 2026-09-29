@@ -36,7 +36,6 @@ pub mod workspace_snapshot;
 pub mod workspace_snapshot_publish;
 pub mod worktree;
 
-mod header;
 mod swap;
 mod webview_reveal;
 mod zoom;
@@ -46,7 +45,6 @@ pub use cef::{
     ReloadRevision,
 };
 pub use contract::LayoutContractPlugin;
-pub use header::Header;
 pub use pane::OpenBesideRequest;
 pub use persistence::LayoutPersistenceSet;
 pub use plugin::LayoutPlugin;
@@ -69,6 +67,9 @@ pub enum LayoutStartupSet {
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout"]
 pub struct Open;
+
+#[derive(Component)]
+pub struct Header;
 
 #[derive(Component)]
 pub struct CloseRequiresConfirmation;

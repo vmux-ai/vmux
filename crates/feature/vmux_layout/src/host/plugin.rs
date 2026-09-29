@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use vmux_core::host::persistence::PersistenceAppExt;
+use vmux_flex::prelude::*;
 
 use super::agent::LayoutAgentPlugin;
 use super::command::LayoutRequestPlugin;
@@ -9,13 +10,12 @@ use crate::active_pane::ActivePanePlugin;
 use crate::archive::ArchivePlugin;
 use crate::bookmark::BookmarkPlugin;
 use crate::contract::LayoutContractPlugin;
-use crate::host::header::HeaderLayoutPlugin;
+use crate::event::CEF_RESERVED_HEIGHT_PX;
 use crate::host::webview_reveal::WebviewRevealPlugin;
 use crate::native_open::NativeOpenPlugin;
 use crate::overlay::LayoutOverlayPlugin;
 use crate::page_context::PageContextPlugin;
 use crate::pane::PanePlugin;
-use crate::profile::ProfilePlugin;
 use crate::side_sheet::SideSheetLayoutPlugin;
 use crate::space::SpaceLayoutPlugin;
 use crate::stack::StackPlugin;
@@ -25,7 +25,8 @@ use crate::warm_page::PrewarmPagesPlugin;
 use crate::window::WindowLayoutPlugin;
 use crate::worktree::WorktreePlugin;
 use crate::{
-    LayoutStartupSet, Open, TabLayoutSpawnRequest, TerminalLayoutSpawnRequest, apply, settings,
+    Header, LayoutStartupSet, Open, TabLayoutSpawnRequest, TerminalLayoutSpawnRequest, apply,
+    settings,
 };
 
 #[vmux_native::page]
@@ -41,8 +42,13 @@ impl Plugin for LayoutPlugin {
             ));
         }
         app.add_systems(Startup, spawn_update_state)
+            .add_systems(
+                PostUpdate,
+                sync_header_visibility.before(LayoutSystems::Layout),
+            )
             .add_plugins((LayoutContractPlugin, LayoutRequestPlugin, LayoutAgentPlugin))
             .register_persisted::<Open>()
+            .register_persisted::<crate::profile::Profile>()
             .init_resource::<settings::ConfirmCloseSettings>()
             .init_resource::<settings::ResolvedLocale>()
             .add_message::<TerminalLayoutSpawnRequest>()
@@ -64,7 +70,6 @@ impl Plugin for LayoutPlugin {
                 apply::LayoutApplyPlugin,
                 crate::tool::LayoutToolPlugin,
                 crate::bookmark_tool::BookmarkToolPlugin,
-                ProfilePlugin,
                 LayoutUiProjectionPlugin,
                 LayoutOverlayPlugin,
                 SpaceLayoutPlugin,
@@ -74,7 +79,6 @@ impl Plugin for LayoutPlugin {
                 StackPlugin,
                 ActivePanePlugin,
                 SideSheetLayoutPlugin,
-                HeaderLayoutPlugin,
                 WorktreePlugin,
             ))
             .add_plugins((
@@ -97,6 +101,28 @@ impl Plugin for LayoutPlugin {
 
 fn spawn_update_state(mut commands: Commands) {
     commands.spawn((Name::new("Update state"), crate::UpdateState::default()));
+}
+
+fn sync_header_visibility(
+    mut headers: Query<(&mut Visibility, &mut Node), With<Header>>,
+    added: Query<Entity, (With<Header>, Added<Open>)>,
+    mut removed: RemovedComponents<Open>,
+) {
+    for entity in &added {
+        if let Ok((mut visibility, mut node)) = headers.get_mut(entity) {
+            *visibility = Visibility::Visible;
+            node.display = Display::Flex;
+            node.height = Val::Px(CEF_RESERVED_HEIGHT_PX);
+        }
+    }
+
+    for entity in removed.read() {
+        if let Ok((mut visibility, mut node)) = headers.get_mut(entity) {
+            *visibility = Visibility::Hidden;
+            node.display = Display::None;
+            node.height = Val::Px(0.0);
+        }
+    }
 }
 
 #[vmux_native::page(page = "error")]

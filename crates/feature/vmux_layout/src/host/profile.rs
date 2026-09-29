@@ -1,18 +1,9 @@
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_core::host::persistence::PersistenceAppExt;
 
 pub use vmux_core::profile::{
     active_profile_name, cef_cache_path, profile_dir, session_path, shared_data_dir,
 };
-
-impl Plugin for ProfilePlugin {
-    fn build(&self, app: &mut App) {
-        app.register_persisted::<Profile>();
-    }
-}
-
-pub struct ProfilePlugin;
 
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
