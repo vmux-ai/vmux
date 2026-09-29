@@ -17,7 +17,7 @@ use vmux_layout::{
     stack::Stack,
 };
 
-use crate::host::{PendingNavigationUpdate, send_page_open_response};
+use crate::host::{PendingNavigationUpdate, page_open_response};
 use crate::input::RecentBrowserInteraction;
 use crate::snapshot::BrowserTarget;
 
@@ -343,9 +343,6 @@ fn handle_browser_navigate_requests(
                         None => PendingNavigationUpdate::clear(webview),
                     };
                     pending_navigation.write(update);
-                    if request_id.is_none() {
-                        send_page_open_response(&mut service_requests, None, Ok(()));
-                    }
                 } else {
                     let target = active_stack
                         .filter(|_| replace_start)
@@ -358,11 +355,12 @@ fn handle_browser_navigate_requests(
                     });
                 }
             } else {
-                send_page_open_response(
-                    &mut service_requests,
+                if let Some(response) = page_open_response(
                     request_id,
                     Err(format!("browser_navigate: invalid pane id '{s}'")),
-                );
+                ) {
+                    service_requests.write(response);
+                }
             }
         } else if let Some(stack) = focus.stack.filter(|stack| {
             !new_stack
@@ -381,11 +379,12 @@ fn handle_browser_navigate_requests(
         } else if let Some(webview) = targets.active_webview(focus.stack) {
             if is_vmux_route || url.starts_with("file:") {
                 let Some(pane) = focus.pane.filter(|pane| targets.contains_pane(*pane)) else {
-                    send_page_open_response(
-                        &mut service_requests,
+                    if let Some(response) = page_open_response(
                         request_id,
                         Err("browser_navigate: no focused pane for vmux URL".to_string()),
-                    );
+                    ) {
+                        service_requests.write(response);
+                    }
                     continue;
                 };
                 page_open_writer.write(PageOpenRequest {
@@ -408,9 +407,6 @@ fn handle_browser_navigate_requests(
                     None => PendingNavigationUpdate::clear(webview),
                 };
                 pending_navigation.write(update);
-                if request_id.is_none() {
-                    send_page_open_response(&mut service_requests, None, Ok(()));
-                }
             }
         } else if let Some(pane) = focus.pane.filter(|pane| targets.contains_pane(*pane)) {
             page_open_writer.write(PageOpenRequest {
@@ -419,11 +415,12 @@ fn handle_browser_navigate_requests(
                 request_id,
             });
         } else {
-            send_page_open_response(
-                &mut service_requests,
+            if let Some(response) = page_open_response(
                 request_id,
                 Err("browser_navigate: no focused pane".to_string()),
-            );
+            ) {
+                service_requests.write(response);
+            }
         }
     }
 }

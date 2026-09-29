@@ -84,39 +84,8 @@ struct McpStdio {
     failed: bool,
 }
 
-impl McpStdio {
-    fn start(invocation: Entity) -> Self {
-        let (sender, receiver) = std::sync::mpsc::sync_channel(64);
-        std::thread::spawn(move || {
-            let stdin = io::stdin();
-            let mut reader = stdin.lock();
-            loop {
-                match crate::protocol::read_json_line(&mut reader) {
-                    Ok(Some(value)) => {
-                        if sender.send(McpStdin::Input(value)).is_err() {
-                            return;
-                        }
-                    }
-                    Ok(None) => {
-                        let _ = sender.send(McpStdin::Eof);
-                        return;
-                    }
-                    Err(error) => {
-                        let _ = sender.send(McpStdin::Error(error.to_string()));
-                        return;
-                    }
-                }
-            }
-        });
-        Self {
-            invocation,
-            receiver: Mutex::new(receiver),
-            pending: 0,
-            eof: false,
-            failed: false,
-        }
-    }
-}
+#[derive(Component)]
+struct McpStdinWorker(Option<std::thread::JoinHandle<()>>);
 
 enum McpStdin {
     Input(serde_json::Value),
@@ -142,6 +111,39 @@ fn start_stdio(
         if let Some(profile) = options.profile {
             unsafe { std::env::set_var("VMUX_PROFILE", profile) };
         }
+        let (sender, receiver) = std::sync::mpsc::sync_channel(64);
+        let worker = std::thread::Builder::new()
+            .name("mcp-stdin".into())
+            .spawn(move || {
+                let stdin = io::stdin();
+                let mut reader = stdin.lock();
+                loop {
+                    match crate::protocol::read_json_line(&mut reader) {
+                        Ok(Some(value)) => {
+                            if sender.send(McpStdin::Input(value)).is_err() {
+                                return;
+                            }
+                        }
+                        Ok(None) => {
+                            let _ = sender.send(McpStdin::Eof);
+                            return;
+                        }
+                        Err(error) => {
+                            let _ = sender.send(McpStdin::Error(error.to_string()));
+                            return;
+                        }
+                    }
+                }
+            });
+        let worker = match worker {
+            Ok(worker) => worker,
+            Err(error) => {
+                commands.entity(entity).insert(CliResult(Err(format!(
+                    "failed to start MCP stdin worker: {error}"
+                ))));
+                continue;
+            }
+        };
         commands.spawn((
             Name::new("MCP protocol runtime"),
             McpServer::default(),
@@ -152,7 +154,14 @@ fn start_stdio(
                 run_block_timeout: options.run_block_timeout,
                 shell: options.shell,
             },
-            McpStdio::start(entity),
+            McpStdio {
+                invocation: entity,
+                receiver: Mutex::new(receiver),
+                pending: 0,
+                eof: false,
+                failed: false,
+            },
+            McpStdinWorker(Some(worker)),
         ));
     }
 }
@@ -215,10 +224,16 @@ fn write_stdio(
     }
 }
 
-fn finish_stdio(servers: Query<(Entity, &McpStdio)>, mut commands: Commands) {
-    for (server, stdio) in &servers {
+fn finish_stdio(
+    mut servers: Query<(Entity, &McpStdio, &mut McpStdinWorker)>,
+    mut commands: Commands,
+) {
+    for (server, stdio, mut worker) in &mut servers {
         if !stdio.eof || stdio.pending != 0 {
             continue;
+        }
+        if let Some(worker) = worker.0.take() {
+            let _ = worker.join();
         }
         if !stdio.failed {
             commands

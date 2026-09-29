@@ -21,7 +21,7 @@ use vmux_layout::{
 
 use crate::host::{
     PageOpenAwaitSnapshot, PageOpenFallbackDeferred, PendingNavigationSnapshot,
-    PendingNavigationUpdate, send_page_open_response,
+    PendingNavigationUpdate, page_open_response,
 };
 
 pub(crate) struct PagePlugin;
@@ -107,7 +107,9 @@ fn apply_pending_navigation_updates(
     for update in updates.read() {
         if let Some((entity, displaced)) = pending.remove(&update.webview) {
             commands.entity(entity).despawn();
-            send_page_open_response(&mut service_requests, Some(displaced.request_id), Ok(()));
+            if let Some(response) = page_open_response(Some(displaced.request_id), Ok(())) {
+                service_requests.write(response);
+            }
         }
         if let Some(next) = update.pending.clone() {
             let entity = commands.spawn(next.clone()).id();
@@ -142,15 +144,21 @@ impl ErrorPageAttachment {
 
 fn handle_page_open_requests(
     mut reader: MessageReader<PageOpenRequest>,
-    mut target: PageOpenTargetResolver,
+    target: PageOpenTargetResolver,
     time: Res<Time>,
     mut service_requests: MessageWriter<vmux_core::service::ServiceRequest>,
+    mut commands: Commands,
 ) {
     for request in reader.read() {
         let stack = match target.resolve(&request.target) {
-            Ok(stack) => stack,
+            Ok(PageOpenTargetResolution::Existing(stack)) => stack,
+            Ok(PageOpenTargetResolution::CreateIn(pane)) => commands
+                .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                .id(),
             Err(message) => {
-                send_page_open_response(&mut service_requests, request.request_id, Err(message));
+                if let Some(response) = page_open_response(request.request_id, Err(message)) {
+                    service_requests.write(response);
+                }
                 continue;
             }
         };
@@ -162,16 +170,21 @@ fn handle_page_open_requests(
             request_id: request.request_id,
         };
         if request.request_id.is_some() {
-            target.commands.spawn((
+            commands.spawn((
                 task,
                 PageOpenAwaitSnapshot {
                     started: time.elapsed(),
                 },
             ));
         } else {
-            target.commands.spawn(task);
+            commands.spawn(task);
         }
     }
+}
+
+enum PageOpenTargetResolution {
+    Existing(Entity),
+    CreateIn(Entity),
 }
 
 #[derive(SystemParam)]
@@ -181,47 +194,48 @@ struct PageOpenTargetResolver<'w, 's> {
     parents: Query<'w, 's, &'static ChildOf>,
     panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
     stacks: Query<'w, 's, Entity, With<Stack>>,
-    commands: Commands<'w, 's>,
 }
 
 impl PageOpenTargetResolver<'_, '_> {
-    fn resolve(&mut self, target: &PageOpenTarget) -> Result<Entity, String> {
+    fn resolve(&self, target: &PageOpenTarget) -> Result<PageOpenTargetResolution, String> {
         match *target {
             PageOpenTarget::ActiveStack => {
                 if let Some(stack) = self.focus.stack {
-                    return Ok(stack);
+                    return Ok(PageOpenTargetResolution::Existing(stack));
                 }
                 let Some(pane) = self.focus.pane.filter(|pane| self.panes.contains(*pane)) else {
                     return Err("page_open: no focused stack or pane".to_string());
                 };
-                Ok(self.spawn_stack(pane))
+                Ok(PageOpenTargetResolution::CreateIn(pane))
             }
             PageOpenTarget::NewStack => {
                 let Some(pane) = self.focus.pane.filter(|pane| self.panes.contains(*pane)) else {
                     return Err("page_open: no focused pane".to_string());
                 };
-                Ok(self.spawn_stack(pane))
+                Ok(PageOpenTargetResolution::CreateIn(pane))
             }
             PageOpenTarget::Stack(stack) => self
                 .stacks
                 .contains(stack)
-                .then_some(stack)
+                .then_some(PageOpenTargetResolution::Existing(stack))
                 .ok_or_else(|| "page_open: target stack does not exist".to_string()),
-            PageOpenTarget::ContainingStack(entity) => self.containing_stack(entity),
+            PageOpenTarget::ContainingStack(entity) => self
+                .containing_stack(entity)
+                .map(PageOpenTargetResolution::Existing),
             PageOpenTarget::ActiveStackInPane(pane) => {
                 if !self.panes.contains(pane) {
                     return Err("page_open: target pane does not exist".to_string());
                 }
-                Ok(self
-                    .layout
-                    .stack(pane)
-                    .unwrap_or_else(|| self.spawn_stack(pane)))
+                Ok(match self.layout.stack(pane) {
+                    Some(stack) => PageOpenTargetResolution::Existing(stack),
+                    None => PageOpenTargetResolution::CreateIn(pane),
+                })
             }
             PageOpenTarget::NewStackInPane(pane) => {
                 if !self.panes.contains(pane) {
                     return Err("page_open: target pane does not exist".to_string());
                 }
-                Ok(self.spawn_stack(pane))
+                Ok(PageOpenTargetResolution::CreateIn(pane))
             }
         }
     }
@@ -237,12 +251,6 @@ impl PageOpenTargetResolver<'_, '_> {
             };
             current = parent.parent();
         }
-    }
-
-    fn spawn_stack(&mut self, pane: Entity) -> Entity {
-        self.commands
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-            .id()
     }
 }
 
@@ -390,16 +398,17 @@ fn respond_page_open_tasks(
 ) {
     for (entity, task, error, await_snapshot) in &tasks {
         if let Some(error) = error {
-            send_page_open_response(
-                &mut service_requests,
-                task.request_id,
-                Err(error.message.clone()),
-            );
+            if let Some(response) = page_open_response(task.request_id, Err(error.message.clone()))
+            {
+                service_requests.write(response);
+            }
             commands.entity(entity).despawn();
             continue;
         }
         let Some(await_snapshot) = await_snapshot else {
-            send_page_open_response(&mut service_requests, task.request_id, Ok(()));
+            if let Some(response) = page_open_response(task.request_id, Ok(())) {
+                service_requests.write(response);
+            }
             commands.entity(entity).despawn();
             continue;
         };
@@ -425,11 +434,12 @@ fn respond_page_open_tasks(
             .as_secs_f32()
             > 10.0
         {
-            send_page_open_response(
-                &mut service_requests,
+            if let Some(response) = page_open_response(
                 task.request_id,
                 Err("page opened without a snapshot-capable webview".to_string()),
-            );
+            ) {
+                service_requests.write(response);
+            }
             commands.entity(entity).despawn();
         }
     }

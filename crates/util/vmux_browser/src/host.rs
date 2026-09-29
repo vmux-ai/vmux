@@ -477,24 +477,21 @@ pub(crate) struct PageOpenAwaitSnapshot {
     pub(crate) started: std::time::Duration,
 }
 
-pub(crate) fn send_page_open_response(
-    service_requests: &mut MessageWriter<vmux_core::service::ServiceRequest>,
+pub(crate) fn page_open_response(
     request_id: Option<[u8; 16]>,
     result: Result<(), String>,
-) {
+) -> Option<vmux_core::service::ServiceRequest> {
     use vmux_api::protocol::{AgentCommandResult, AgentRequestId, ClientMessage};
     use vmux_core::service::ServiceRequest;
-    let Some(request_id) = request_id else {
-        return;
-    };
+    let request_id = request_id?;
     let result = match result {
         Ok(()) => AgentCommandResult::Ok,
         Err(message) => AgentCommandResult::Error(message),
     };
-    service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
+    Some(ServiceRequest(ClientMessage::AgentCommandResponse {
         request_id: AgentRequestId(request_id),
         result,
-    }));
+    }))
 }
 
 #[derive(Component, Clone)]
