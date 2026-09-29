@@ -19,15 +19,16 @@ impl Plugin for VmuxCliPlugin {
             vmux_command::CommandToolPlugin,
             vmux_team::TeamToolPlugin,
             vmux_browser::BrowserToolPlugin,
+            vmux_capture::CapturePlugin,
             vmux_editor::FileToolPlugin,
             vmux_knowledge::KnowledgeToolPlugin,
+            vmux_vault::VaultToolPlugin,
             vmux_layout::tool::LayoutToolPlugin,
-            vmux_layout::bookmark_tool::BookmarkToolPlugin,
+            vmux_bookmark::BookmarkToolPlugin,
             vmux_setting::SettingToolPlugin,
             vmux_space::SpaceToolPlugin,
             vmux_terminal::TerminalToolPlugin,
             vmux_agent::WorkspaceToolPlugin,
-            vmux_agent::CaptureToolPlugin,
             vmux_simulator::SimulatorToolPlugin,
         ))
         .add_systems(Update, open_app);

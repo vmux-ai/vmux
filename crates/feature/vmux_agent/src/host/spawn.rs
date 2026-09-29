@@ -50,8 +50,7 @@ impl Plugin for SpawnPlugin {
                 Update,
                 detect_agent_session_process_exit
                     .in_set(WriteCommandRequests)
-                    .after(ServiceMessageSet)
-                    .after(super::query::AgentQuerySet),
+                    .after(ServiceMessageSet),
             )
             .add_systems(
                 Update,

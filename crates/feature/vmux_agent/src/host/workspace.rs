@@ -27,8 +27,8 @@ use vmux_terminal::BufferedAgentPrompt;
 use crate::event::AgentChoiceSelected;
 use crate::session::AgentSession;
 
-use super::run_terminal::ProjectsDirectory;
 use super::self_command::{ancestor_acp_stack, rebind_acp_workspace};
+use vmux_core::profile::ProjectsDirectory;
 
 pub(super) struct WorkspacePlugin;
 

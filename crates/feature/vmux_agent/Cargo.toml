@@ -47,7 +47,6 @@ app = [
     "dep:toml",
     "dep:url",
     "dep:uuid",
-    "dep:vmux_browser",
     "dep:vmux_chat",
     "dep:vmux_clipboard",
     "dep:vmux_command",
@@ -105,7 +104,6 @@ tempfile = { version = "3", optional = true }
 uuid = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 vmux_core = { path = "../../util/vmux_core", optional = true }
-vmux_browser = { path = "../../util/vmux_browser", optional = true }
 vmux_editor = { path = "../vmux_editor", optional = true }
 vmux_extension = { path = "../vmux_extension", optional = true }
 vmux_git = { path = "../vmux_git", optional = true }

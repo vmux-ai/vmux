@@ -3,13 +3,14 @@ use vmux_api::BinEvent;
 use vmux_api::protocol::{
     AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch,
     AgentBrowserInstallExtension, AgentBrowserNavigate, AgentBrowserScroll, AgentBrowserSnapshot,
-    AgentCommandResult, AgentOpenInNewStack, AgentRequestId, ClientMessage,
+    AgentCommandResult, AgentOpenInNewStack, AgentRequestId, AgentWorkingDirectory, ClientMessage,
 };
 use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput, CommandOrigin};
 use vmux_core::browser::{
     BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
     BrowserSnapshotRequest, BrowserSnapshotResponse,
 };
+use vmux_core::profile::ProjectsDirectory;
 use vmux_core::service::ServiceRequest;
 use vmux_extension::ExtensionInstallRequest;
 use vmux_history::HistoryOpenIntent;
@@ -43,12 +44,14 @@ impl Plugin for AgentBrowserPlugin {
             .add_message::<AgentBrowserGoForwardRequest>()
             .add_message::<AgentBrowserHistorySearchRequest>()
             .add_message::<AgentOpenInNewStackRequest>()
+            .add_message::<WorkingDirectoryRequest>()
             .add_message::<ExtensionInstallRequest>()
             .add_systems(Update, open_history)
             .add_systems(
                 Update,
                 (
                     route_browser_queries.in_set(ToolQueryRouteSet),
+                    answer_working_directory_queries.after(ToolQueryRouteSet),
                     forward_snapshot_responses,
                     forward_scroll_responses,
                     forward_navigation_snapshot_responses,
@@ -72,11 +75,18 @@ impl Plugin for AgentBrowserPlugin {
     }
 }
 
+#[derive(Message)]
+struct WorkingDirectoryRequest {
+    request_id: AgentRequestId,
+    anchor: vmux_core::ProcessId,
+}
+
 fn route_browser_queries(
     mut queries: MessageReader<ToolQueryRequest>,
     mut handled: MessageWriter<ToolQueryHandled>,
     mut snapshots: MessageWriter<BrowserSnapshotRequest>,
     mut scrolls: MessageWriter<BrowserScrollRequest>,
+    mut working_directories: MessageWriter<WorkingDirectoryRequest>,
     mut activate: MessageWriter<ActivatePane>,
     mut service_requests: MessageWriter<ServiceRequest>,
     browse: AgentBrowserResolve,
@@ -84,6 +94,7 @@ fn route_browser_queries(
     for request in queries.read() {
         if request.query.id != AgentBrowserSnapshot::id()
             && request.query.id != AgentBrowserScroll::id()
+            && request.query.id != AgentWorkingDirectory::id()
         {
             continue;
         }
@@ -131,6 +142,44 @@ fn route_browser_queries(
             }
             Ok(None) => {}
         }
+        match request.query.decode::<AgentWorkingDirectory>() {
+            Ok(Some(query)) => {
+                working_directories.write(WorkingDirectoryRequest {
+                    request_id: request.request_id,
+                    anchor: query.anchor,
+                });
+            }
+            Err(message) => {
+                service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
+                    request_id: request.request_id,
+                    message,
+                }));
+            }
+            Ok(None) => {}
+        }
+    }
+}
+
+fn answer_working_directory_queries(
+    mut requests: MessageReader<WorkingDirectoryRequest>,
+    browse: AgentBrowserResolve,
+    tabs: Query<&vmux_layout::tab::Tab>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for request in requests.read() {
+        let result = if browse.agent_pane(request.anchor).is_none() {
+            Err("agent pane not found".to_string())
+        } else if let Some(path) = browse.working_directory(request.anchor, &tabs) {
+            Ok(path.to_string_lossy().into_owned())
+        } else {
+            ProjectsDirectory::ensure()
+                .map(ProjectsDirectory::into_path)
+                .map(|path| path.to_string_lossy().into_owned())
+        };
+        service_requests.write(ServiceRequest(ClientMessage::AgentWorkingDirectoryResult {
+            request_id: request.request_id,
+            result,
+        }));
     }
 }
 

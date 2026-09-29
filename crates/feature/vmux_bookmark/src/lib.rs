@@ -2,5 +2,7 @@
 
 mod menu;
 mod persistence;
+mod tool;
 
 pub use menu::BookmarkPlugin;
+pub use tool::BookmarkToolPlugin;

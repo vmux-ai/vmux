@@ -8,10 +8,7 @@ use vmux_core::notify::{AgentAttention, BellReceived, OsNotify};
 use vmux_core::{HostSpawnRoute, PageOpenRequest};
 use vmux_terminal::TerminalStackSpawnRequest;
 
-use crate::event::{
-    AgentRequestInput, AgentToolCallRequest, RecordStartRequest, RecordStartResponse,
-    RecordStopRequest, RecordStopResponse, ScreenshotRequest, ScreenshotResponse,
-};
+use crate::event::{AgentRequestInput, AgentToolCallRequest};
 use crate::session;
 use vmux_tool::ToolQueryRequest;
 
@@ -23,7 +20,6 @@ impl Plugin for AgentPlugin {
             AgentSessionPlugin,
             AgentPagesPlugin,
             crate::WorkspaceToolPlugin,
-            crate::CaptureToolPlugin,
             crate::runtime::AgentRuntimePlugin,
         ));
     }
@@ -65,7 +61,6 @@ impl Plugin for AgentSessionPlugin {
             super::ingress::AgentIngressPlugin,
             super::page_open::PageOpenPlugin,
             super::provider::ProviderPlugin,
-            super::query::AgentQueryPlugin,
             super::self_command::SelfCommandPlugin,
             session::AgentSessionLifecyclePlugin,
             super::snapshot_updater::SnapshotPlugin,
@@ -74,12 +69,6 @@ impl Plugin for AgentSessionPlugin {
         ))
         .add_message::<AgentRequestInput>()
         .add_message::<ToolQueryRequest>()
-        .add_message::<ScreenshotRequest>()
-        .add_message::<ScreenshotResponse>()
-        .add_message::<RecordStartRequest>()
-        .add_message::<RecordStartResponse>()
-        .add_message::<RecordStopRequest>()
-        .add_message::<RecordStopResponse>()
         .add_message::<AgentToolCallRequest>()
         .add_message::<SpawnAgentInStackRequest>()
         .add_message::<PageAgentAttachRequest>()

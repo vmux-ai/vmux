@@ -145,7 +145,12 @@ fn fail_agent_tool_calls(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::protocol::{AgentRequest, AgentScreenshot};
+    use serde::Deserialize;
+    use vmux_api::protocol::AgentRequest;
+    use vmux_tool::{AddedTool, ToolAppExt, ToolDispatchSet, ToolManifestPlugin, ToolQuery};
+
+    #[derive(Component, Deserialize)]
+    struct TestQueryArgs {}
 
     #[derive(Resource, Default)]
     struct CapturedAgentQueries(Vec<AgentRequest>);
@@ -158,18 +163,40 @@ mod tests {
         }
     }
 
+    fn create_test_query(
+        mut commands: Commands,
+        requests: Query<Entity, AddedTool<TestQueryArgs>>,
+    ) {
+        for request in &requests {
+            commands.entity(request).insert(ToolQuery(Ok(AgentRequest {
+                id: "test_query@1".to_string(),
+                body: Vec::new(),
+            })));
+        }
+    }
+
     #[test]
     fn agent_tools_dispatch_through_the_owning_world() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, crate::CaptureToolPlugin, ToolCallPlugin))
-            .add_message::<AgentToolCallRequest>()
-            .add_message::<AgentRequestInput>()
-            .add_message::<ToolQueryRequest>()
-            .init_resource::<CapturedAgentQueries>()
-            .add_systems(
-                Update,
+        app.add_plugins((
+            MinimalPlugins,
+            ToolManifestPlugin::new(
+                r#"[(name: "test_query", description: "test", input_schema: (type: Object))]"#,
+            ),
+            ToolCallPlugin,
+        ))
+        .register_tool::<TestQueryArgs>("test_query")
+        .add_message::<AgentToolCallRequest>()
+        .add_message::<AgentRequestInput>()
+        .add_message::<ToolQueryRequest>()
+        .init_resource::<CapturedAgentQueries>()
+        .add_systems(
+            Update,
+            (
+                create_test_query.in_set(ToolDispatchSet),
                 CapturedAgentQueries::read.after(CommandSet::Commands),
-            );
+            ),
+        );
         app.update();
 
         app.world_mut()
@@ -177,16 +204,13 @@ mod tests {
             .write(AgentToolCallRequest {
                 request_id: AgentRequestId::new(),
                 sid: "agent".to_string(),
-                name: "screenshot".to_string(),
+                name: "test_query".to_string(),
                 args: vmux_api::json::JsonValue::from(serde_json::json!({})),
             });
         app.update();
 
         let captured = app.world().resource::<CapturedAgentQueries>();
         assert_eq!(captured.0.len(), 1);
-        assert_eq!(
-            captured.0[0].decode::<AgentScreenshot>().unwrap(),
-            Some(AgentScreenshot { pane: None })
-        );
+        assert_eq!(captured.0[0].id, "test_query@1");
     }
 }

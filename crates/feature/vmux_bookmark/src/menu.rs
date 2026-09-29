@@ -4,7 +4,10 @@ pub struct BookmarkPlugin;
 
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::persistence::BookmarkPersistencePlugin);
+        app.add_plugins((
+            crate::persistence::BookmarkPersistencePlugin,
+            crate::tool::BookmarkToolPlugin,
+        ));
 
         #[cfg(target_os = "macos")]
         macos::build(app);

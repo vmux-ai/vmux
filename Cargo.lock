@@ -10178,7 +10178,6 @@ dependencies = [
  "url",
  "uuid",
  "vmux_api",
- "vmux_browser",
  "vmux_chat",
  "vmux_clipboard",
  "vmux_command",
@@ -10224,6 +10223,7 @@ dependencies = [
  "vmux_agent",
  "vmux_bookmark",
  "vmux_browser",
+ "vmux_capture",
  "vmux_chat",
  "vmux_command",
  "vmux_core",
@@ -10257,6 +10257,7 @@ dependencies = [
  "bevy_world_serialization",
  "moonshine-save",
  "raw-window-handle 0.6.2",
+ "serde",
  "tempfile",
  "uuid",
  "vmux_api",
@@ -10265,6 +10266,7 @@ dependencies = [
  "vmux_native",
  "vmux_setting",
  "vmux_shortcut",
+ "vmux_tool",
  "vmux_ui",
 ]
 
@@ -10317,6 +10319,18 @@ dependencies = [
  "vmux_ui",
  "wry",
  "zip",
+]
+
+[[package]]
+name = "vmux_capture"
+version = "0.0.34"
+dependencies = [
+ "bevy",
+ "serde",
+ "serde_json",
+ "vmux_api",
+ "vmux_core",
+ "vmux_tool",
 ]
 
 [[package]]
@@ -10512,6 +10526,7 @@ dependencies = [
  "vmux_api",
  "vmux_app",
  "vmux_browser",
+ "vmux_capture",
  "vmux_command",
  "vmux_core",
  "vmux_editor",
@@ -11211,9 +11226,12 @@ dependencies = [
  "notify",
  "parking_lot",
  "rfd 0.15.4",
+ "serde",
+ "vmux_api",
  "vmux_core",
  "vmux_layout",
  "vmux_native",
+ "vmux_tool",
  "vmux_ui",
 ]
 

@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::Arc;
-use vmux_agent::{ScreenshotRequest, ScreenshotResponse};
+use vmux_capture::{ScreenshotRequest, ScreenshotResponse};
 use vmux_setting::AppSettings;
 
 use crate::capture_output::{CaptureOutput, CaptureSize, CaptureSource, CropRect};
@@ -161,7 +161,7 @@ mod capture {
     };
     use std::ffi::c_void;
     use std::path::PathBuf;
-    use vmux_agent::{ScreenshotImage, ScreenshotResponse};
+    use vmux_capture::{ScreenshotImage, ScreenshotResponse};
 
     unsafe extern "C" {
         fn CGPreflightScreenCaptureAccess() -> bool;
@@ -387,7 +387,7 @@ mod capture {
     use bevy::prelude::Entity;
     use crossbeam_channel::Sender;
     use std::path::PathBuf;
-    use vmux_agent::ScreenshotResponse;
+    use vmux_capture::ScreenshotResponse;
 
     pub(crate) fn capture(
         _window_entity: Entity,

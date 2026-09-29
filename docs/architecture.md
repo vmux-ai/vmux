@@ -865,6 +865,9 @@ matching tool-call components, validate typed arguments, and produce command or 
 Publication and execution query those entities directly; there is no separate runtime registry or
 central function-pointer table. Page agents install the same tool plugin into the application's
 world and submit tool-call entities there; they do not maintain a nested or thread-local Bevy app.
+`vmux_agent` carries only the generic query envelope. Browser, capture, bookmark, vault, simulator,
+and other feature plugins decode their own query contracts, emit their own ECS requests, and map
+their results back to the service boundary.
 
 Application commands follow the same ownership rule. Feature plugins spawn command-definition
 entities beside the parser for their typed Bevy request. Optional MCP metadata lives on that same

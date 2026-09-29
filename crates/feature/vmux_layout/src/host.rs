@@ -6,7 +6,6 @@ mod agent;
 pub mod apply;
 pub mod archive;
 pub mod bookmark;
-pub mod bookmark_tool;
 pub mod cef;
 mod command;
 pub mod contract;

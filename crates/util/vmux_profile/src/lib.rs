@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub mod mcp_credentials;
 pub mod safe_storage;
@@ -183,6 +183,36 @@ impl From<Profile> for String {
 pub struct ProfilePaths {
     build: &'static str,
     profile: Profile,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectsDirectory(PathBuf);
+
+impl ProjectsDirectory {
+    pub fn ensure() -> Result<Self, String> {
+        Self::ensure_at(ProfilePaths::current().projects())
+    }
+
+    pub fn ensure_at(path: PathBuf) -> Result<Self, String> {
+        std::fs::create_dir_all(&path)
+            .map_err(|error| format!("failed to create projects directory: {error}"))?;
+        let path = path
+            .canonicalize()
+            .map_err(|error| format!("failed to resolve projects directory: {error}"))?;
+        Ok(Self(path))
+    }
+
+    pub fn contains(&self, path: &Path) -> bool {
+        path.starts_with(&self.0)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+
+    pub fn into_path(self) -> PathBuf {
+        self.0
+    }
 }
 
 impl ProfilePaths {

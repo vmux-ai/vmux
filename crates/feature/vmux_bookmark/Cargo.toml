@@ -13,6 +13,7 @@ bevy = { workspace = true }
 bevy_world_serialization = { workspace = true }
 moonshine-save = { workspace = true }
 raw-window-handle = "0.6"
+serde = { workspace = true }
 uuid = { workspace = true }
 vmux_api = { path = "../../util/vmux_api" }
 vmux_core = { path = "../../util/vmux_core" }
@@ -20,6 +21,7 @@ vmux_layout = { path = "../vmux_layout" }
 vmux_native = { path = "../../util/vmux_native" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_shortcut = { path = "../vmux_shortcut" }
+vmux_tool = { path = "../vmux_tool" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 
 [dev-dependencies]

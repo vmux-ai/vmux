@@ -20,8 +20,8 @@ use crate::session::AgentSession;
 
 use super::run_terminal::{
     AgentCwd, AgentPane, AgentTerminalRegion, NextPaneSpawnSequence, PagerEnv,
-    PendingRunTerminalSpawn, PendingRunTerminalSpawns, ProjectsDirectory, RunCommand,
-    RunPlacementPolicy, RunTerminalBucketPanes, RunTerminals,
+    PendingRunTerminalSpawn, PendingRunTerminalSpawns, RunCommand, RunPlacementPolicy,
+    RunTerminalBucketPanes, RunTerminals,
 };
 use super::workspace::{
     AgentTabWorkspace, AgentWorkspacePicker, PendingAgentChoice, PendingWorkspacePicker,
@@ -30,6 +30,7 @@ use super::workspace::{
     ambiguous_worktree_message, existing_worktree_candidates, resolve_requested_worktree,
     workspace_path_task, workspace_picker_task,
 };
+use vmux_core::profile::ProjectsDirectory;
 
 pub(super) struct SelfCommandPlugin;
 

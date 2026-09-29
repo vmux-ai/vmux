@@ -7,6 +7,7 @@ use vmux_api::service::RUN_OSC;
 use vmux_api::terminal::CursorStyle;
 use vmux_command::open_target::PaneDirection;
 use vmux_core::PageMetadata;
+use vmux_core::profile::ProjectsDirectory;
 #[cfg(test)]
 use vmux_core::{LastActivatedAt, terminal::TerminalKind as CoreTerminalKind};
 use vmux_layout::pane::{
@@ -552,32 +553,6 @@ pub(crate) struct AgentCwd<'a> {
     tab_cwd: Option<&'a str>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ProjectsDirectory(PathBuf);
-
-impl ProjectsDirectory {
-    pub(crate) fn ensure() -> Result<Self, String> {
-        Self::ensure_at(vmux_core::profile::ProfilePaths::current().projects())
-    }
-
-    fn ensure_at(path: PathBuf) -> Result<Self, String> {
-        std::fs::create_dir_all(&path)
-            .map_err(|error| format!("failed to create projects directory: {error}"))?;
-        let path = path
-            .canonicalize()
-            .map_err(|error| format!("failed to resolve projects directory: {error}"))?;
-        Ok(Self(path))
-    }
-
-    pub(crate) fn contains(&self, path: &Path) -> bool {
-        path.starts_with(&self.0)
-    }
-
-    pub(crate) fn into_path(self) -> PathBuf {
-        self.0
-    }
-}
-
 impl<'a> AgentCwd<'a> {
     pub(crate) fn from_tab(tab_cwd: Option<&'a str>) -> Self {
         Self { tab_cwd }
@@ -636,7 +611,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let projects = ProjectsDirectory::ensure_at(root.path().join("projects")).unwrap();
 
-        assert!(projects.contains(&projects.0.join("github.com/vmux-ai/vmux")));
+        assert!(projects.contains(&projects.path().join("github.com/vmux-ai/vmux")));
         assert!(!projects.contains(root.path()));
         assert!(projects.into_path().is_dir());
     }

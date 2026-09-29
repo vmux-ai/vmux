@@ -9,7 +9,6 @@ pub mod acp_tool;
 pub(crate) mod approval;
 pub mod attach;
 pub mod attention;
-mod capture_tool;
 mod cli;
 pub mod command;
 pub mod command_bar;
@@ -25,7 +24,6 @@ pub mod mcp;
 pub(crate) mod model;
 pub mod page_open;
 pub mod provider;
-pub mod query;
 mod resume;
 pub mod run_state_kind;
 pub mod run_terminal;
@@ -46,7 +44,6 @@ pub mod test_support;
 
 pub(crate) mod tidy;
 
-pub use capture_tool::CaptureToolPlugin;
 pub use vmux_space::cwd::valid_cwd;
 
 pub(crate) use self::workspace::{
@@ -57,10 +54,6 @@ pub use vmux_api::room as message;
 
 pub use crate::stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
 pub use cli::CliSessionSource;
-pub use event::{
-    RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
-    ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
-};
 pub use mcp::McpServerConfig;
 pub use message::{AssistantBlock, Message};
 pub use run_state_kind::{AgentRunStateKind, LastRunStateKind};

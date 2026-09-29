@@ -45,6 +45,7 @@ impl Plugin for VaultPlugin {
         );
 
         app.add_plugins((
+            crate::agent::VaultAgentPlugin,
             UiStatePlugin::<VaultUiState>::default(),
             UiEventPlugin::<(
                 VaultCreateRequest,

@@ -65,7 +65,6 @@ impl Plugin for LayoutPlugin {
             .add_plugins((
                 apply::LayoutApplyPlugin,
                 crate::tool::LayoutToolPlugin,
-                crate::bookmark_tool::BookmarkToolPlugin,
                 LayoutUiProjectionPlugin,
                 LayoutOverlayPlugin,
                 SpaceLayoutPlugin,

@@ -1,13 +1,11 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::{
-    AgentOpenBeside, AgentReadKnowledge, AgentRequest, AgentSearchKnowledge,
-    AgentSetConversationTitle, AgentVaultStatus, AgentWriteKnowledge,
+    AgentReadKnowledge, AgentRequest, AgentSearchKnowledge, AgentSetConversationTitle,
+    AgentWriteKnowledge,
 };
 use vmux_core::ProcessAnchor;
-use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
-};
+use vmux_tool::{ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin};
 
 pub struct KnowledgeToolPlugin;
 
@@ -17,43 +15,15 @@ impl Plugin for KnowledgeToolPlugin {
             include_str!("feature.ron"),
             "default",
         ))
-        .register_tool::<VaultStatusArgs>("vault_status")
-        .register_tool::<OpenVaultArgs>("open_vault")
         .register_tool::<SetConversationTitleArgs>("set_conversation_title")
         .register_tool::<SearchKnowledgeArgs>("search_knowledge")
         .register_tool::<ReadKnowledgeArgs>("read_knowledge")
         .register_tool::<WriteKnowledgeArgs>("write_knowledge")
         .add_systems(
             Update,
-            (
-                vault_status,
-                open_vault,
-                set_conversation_title,
-                search,
-                read,
-                write,
-            )
-                .in_set(ToolDispatchSet),
+            (set_conversation_title, search, read, write).in_set(ToolDispatchSet),
         );
     }
-}
-
-#[derive(Component, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct VaultStatusArgs {}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum VaultProvider {
-    Overview,
-    Github,
-    CloudFolder,
-}
-
-#[derive(Component, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct OpenVaultArgs {
-    provider: Option<VaultProvider>,
 }
 
 #[derive(Component, Deserialize)]
@@ -83,44 +53,6 @@ struct WriteKnowledgeArgs {
     path: Option<String>,
     title: String,
     content: String,
-}
-
-fn vault_status(mut commands: Commands, calls: Query<Entity, AddedTool<VaultStatusArgs>>) {
-    for request in &calls {
-        commands
-            .entity(request)
-            .insert(ToolQuery(AgentRequest::encode(&AgentVaultStatus)));
-    }
-}
-
-fn open_vault(
-    mut commands: Commands,
-    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &OpenVaultArgs), Added<OpenVaultArgs>>,
-) {
-    for (entity, name, anchor, args) in &requests {
-        let command = anchor
-            .map(|anchor| anchor.0)
-            .ok_or_else(|| {
-                format!(
-                    "{} requires an agent anchor (not available to this client)",
-                    name.as_str()
-                )
-            })
-            .and_then(|anchor| {
-                let url = match args.provider.as_ref().unwrap_or(&VaultProvider::Overview) {
-                    VaultProvider::Overview => "vmux://vault/",
-                    VaultProvider::Github => "vmux://vault/?provider=github",
-                    VaultProvider::CloudFolder => "vmux://vault/?provider=cloud_folder",
-                };
-                AgentRequest::encode(&AgentOpenBeside {
-                    anchor,
-                    direction: None,
-                    url: url.to_string(),
-                    focus: true,
-                })
-            });
-        commands.entity(entity).insert(ToolCommand(command));
-    }
 }
 
 fn set_conversation_title(
