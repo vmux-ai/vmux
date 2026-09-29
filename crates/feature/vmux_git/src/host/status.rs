@@ -284,7 +284,7 @@ fn poll_status_refreshes(
         }
         let path = PathBuf::from(&file.state.path);
         if !GitRepository::has_repository(&path) {
-            file.apply_status(super::repository::non_repository_status(&path));
+            file.apply_status(GitRepository::non_repository_status(&path));
             commands.entity(entity).remove::<PendingGitStatus>();
             continue;
         }

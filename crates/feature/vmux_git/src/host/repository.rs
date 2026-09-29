@@ -22,7 +22,7 @@ impl GitRepository {
     }
 
     pub fn discover(file: &Path) -> Result<Self, GitError> {
-        let (stdout, stderr, ok) = git(&start_dir(file), &["rev-parse", "--show-toplevel"])?;
+        let (stdout, stderr, ok) = git(&Self::start_dir(file), &["rev-parse", "--show-toplevel"])?;
         if !ok {
             return Err(GitError(stderr.trim().to_string()));
         }
@@ -34,19 +34,62 @@ impl GitRepository {
     }
 
     pub fn has_repository(file: &Path) -> bool {
-        start_dir(file)
+        Self::start_dir(file)
             .ancestors()
             .any(|directory| directory.join(".git").exists())
     }
 
+    pub(crate) fn non_repository_status(path: &Path) -> GitFileStatus {
+        GitFileStatus {
+            path: path.to_string_lossy().into_owned(),
+            branch: String::new(),
+            ahead: 0,
+            behind: 0,
+            has_upstream: false,
+            file_status: FileStatus::Clean,
+            staged_count: 0,
+            repo_root: String::new(),
+        }
+    }
+
     pub fn status(&self, file: &Path) -> Result<GitFileStatus, GitError> {
-        statuses(&self.0, &[file.to_path_buf()])?
+        self.statuses(&[file.to_path_buf()])?
             .pop()
             .ok_or_else(|| GitError("missing git status result".into()))
     }
 
     pub(crate) fn statuses(&self, files: &[PathBuf]) -> Result<Vec<GitFileStatus>, GitError> {
-        statuses(&self.0, files)
+        let (stdout, stderr, ok) = git_read_bytes(
+            &self.0,
+            &[
+                "status",
+                "--porcelain=v2",
+                "-z",
+                "--branch",
+                "--untracked-files=all",
+            ],
+        )?;
+        if !ok {
+            return Err(GitError(stderr.trim().to_string()));
+        }
+        let repo_root = self.0.to_string_lossy().into_owned();
+        let parsed = parse::parse_porcelain_v2_statuses(&stdout);
+        Ok(files
+            .iter()
+            .map(|file| {
+                let target = self.relative_path(file);
+                GitFileStatus {
+                    path: file.to_string_lossy().into_owned(),
+                    branch: parsed.branch.clone(),
+                    ahead: parsed.ahead,
+                    behind: parsed.behind,
+                    has_upstream: parsed.has_upstream,
+                    file_status: parsed.file_status(&path_bytes(&target)),
+                    staged_count: parsed.staged_count,
+                    repo_root: repo_root.clone(),
+                }
+            })
+            .collect())
     }
 
     pub fn file_statuses(&self) -> Result<std::collections::HashMap<String, FileStatus>, GitError> {
@@ -102,31 +145,152 @@ impl GitRepository {
         file: &Path,
         content: &str,
     ) -> Result<Vec<DiffLine>, GitError> {
-        diff_lines_with_content(&self.0, file, content)
+        let target = self.relative_path(file);
+        let baseline = self.index_text(&target)?;
+        let staged = self.staged_lines(&target);
+        let new_spans = crate::host::highlight::highlight_file(content, file);
+        let mut old_no = 1u32;
+        let mut new_no = 1u32;
+        let mut lines = Vec::new();
+
+        for change in TextDiff::from_lines(baseline.as_str(), content).iter_all_changes() {
+            let text = change.value().trim_end_matches(['\n', '\r']);
+            match change.tag() {
+                ChangeTag::Equal => {
+                    lines.push(DiffLine {
+                        kind: if staged.contains(&old_no) {
+                            DiffKind::Staged
+                        } else {
+                            DiffKind::Context
+                        },
+                        old_no: Some(old_no),
+                        new_no: Some(new_no),
+                        hunk: None,
+                        spans: new_spans
+                            .get(new_no.saturating_sub(1) as usize)
+                            .cloned()
+                            .unwrap_or_else(|| crate::host::highlight::highlight_line(text, file)),
+                    });
+                    old_no += 1;
+                    new_no += 1;
+                }
+                ChangeTag::Delete => {
+                    lines.push(DiffLine {
+                        kind: DiffKind::Remove,
+                        old_no: Some(old_no),
+                        new_no: None,
+                        hunk: None,
+                        spans: crate::host::highlight::highlight_line(text, file),
+                    });
+                    old_no += 1;
+                }
+                ChangeTag::Insert => {
+                    lines.push(DiffLine {
+                        kind: DiffKind::Add,
+                        old_no: None,
+                        new_no: Some(new_no),
+                        hunk: None,
+                        spans: new_spans
+                            .get(new_no.saturating_sub(1) as usize)
+                            .cloned()
+                            .unwrap_or_else(|| crate::host::highlight::highlight_line(text, file)),
+                    });
+                    new_no += 1;
+                }
+            }
+        }
+        Ok(lines)
     }
 
     pub fn diff_lines(&self, file: &Path) -> Result<Vec<DiffLine>, GitError> {
-        diff_lines(&self.0, file)
+        let target = self.relative_path(file);
+        let staged = self.staged_lines(&target);
+
+        let unstaged = self.diff_text(&target, false, 100_000)?;
+        if unstaged.trim().is_empty() {
+            if self.status(file)?.file_status == FileStatus::Untracked {
+                let content = std::fs::read_to_string(file).unwrap_or_default();
+                return self.diff_lines_with_content(file, &content);
+            }
+            return self.staged_only_lines(file, &target, &staged);
+        }
+        let ranges = parse::hunk_ranges(&self.diff_text(&target, false, 0)?);
+
+        let new_spans = std::fs::read_to_string(file)
+            .map(|content| crate::host::highlight::highlight_file(&content, file))
+            .unwrap_or_default();
+
+        let lines = parse::parse_unified_diff(&unstaged)
+            .into_iter()
+            .filter(|line| !matches!(line.kind, DiffKind::Hunk))
+            .map(|mut line| {
+                line.hunk = Self::tag_hunk(&line, &ranges);
+                let text = line
+                    .spans
+                    .first()
+                    .map(|span| span.text.clone())
+                    .unwrap_or_default();
+                line.spans = match line.kind {
+                    DiffKind::Add | DiffKind::Context => line
+                        .new_no
+                        .and_then(|line| new_spans.get(line.saturating_sub(1) as usize))
+                        .cloned()
+                        .unwrap_or_else(|| crate::host::highlight::highlight_line(&text, file)),
+                    _ => crate::host::highlight::highlight_line(&text, file),
+                };
+                if matches!(line.kind, DiffKind::Context)
+                    && line.old_no.is_some_and(|line| staged.contains(&line))
+                {
+                    line.kind = DiffKind::Staged;
+                }
+                line
+            })
+            .collect();
+        Ok(lines)
     }
 
     pub fn commit_diff_lines(&self, reference: &str) -> Result<Vec<DiffLine>, GitError> {
-        commit_diff_lines(&self.0, reference)
+        let (stdout, stderr, ok) = git_read(
+            &self.0,
+            &[
+                "show",
+                "--format=",
+                "--find-renames",
+                "--find-copies",
+                "--unified=100000",
+                reference,
+            ],
+        )?;
+        if !ok {
+            return Err(git_err(&stdout, &stderr));
+        }
+        Ok(parse::parse_unified_diff(&stdout))
     }
 
     pub fn apply_hunk(&self, file: &Path, index: u32, accept: bool) -> Result<(), GitError> {
-        apply_hunk(&self.0, file, index, accept)
+        let target = self.relative_path(file);
+        let diff = self.diff_text(&target, false, 0)?;
+        if diff.trim().is_empty() {
+            return Err(GitError("no unstaged changes for this file".into()));
+        }
+        let (header, hunks) = parse::hunk_patches(&diff);
+        let body = hunks
+            .get(index as usize)
+            .ok_or_else(|| GitError("hunk index out of range".into()))?;
+        let patch = format!("{header}{body}");
+        self.apply_patch(&patch, !accept)
     }
 
     pub fn stage(&self, file: &Path) -> Result<(), GitError> {
-        simple(&self.0, file, &["add", "--"])
+        self.file_operation(file, &["add", "--"])
     }
 
     pub fn unstage(&self, file: &Path) -> Result<(), GitError> {
-        simple(&self.0, file, &["restore", "--staged", "--"])
+        self.file_operation(file, &["restore", "--staged", "--"])
     }
 
     pub fn discard(&self, file: &Path) -> Result<(), GitError> {
-        simple(&self.0, file, &["restore", "--"])
+        self.file_operation(file, &["restore", "--"])
     }
 
     pub fn commit(&self, message: &str) -> Result<(), GitError> {
@@ -227,6 +391,184 @@ impl GitRepository {
             message.to_string()
         })
     }
+
+    fn relative_path(&self, file: &Path) -> PathBuf {
+        let root = vmux_path::PathIdentity::resolve(&self.0).into_path_buf();
+        let file = vmux_path::PathIdentity::resolve(file).into_path_buf();
+        file.strip_prefix(&root).unwrap_or(&file).to_path_buf()
+    }
+
+    fn start_dir(file: &Path) -> PathBuf {
+        if file.is_dir() {
+            return file.to_path_buf();
+        }
+        file.parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    fn diff_text(&self, target: &Path, cached: bool, context: u32) -> Result<String, GitError> {
+        let unified = format!("--unified={context}");
+        let mut command = git_command(&self.0);
+        command.arg("diff");
+        if cached {
+            command.arg("--cached");
+        }
+        let output = command
+            .arg(&unified)
+            .arg("--")
+            .arg(target)
+            .output()
+            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        if output.status.success() {
+            return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+        }
+        Err(GitError(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ))
+    }
+
+    fn staged_lines(&self, target: &Path) -> HashSet<u32> {
+        self.diff_text(target, true, 0)
+            .map(|text| {
+                parse::hunk_ranges(&text)
+                    .iter()
+                    .flat_map(|range| range.new_start..range.new_start + range.new_count)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn tag_hunk(line: &DiffLine, ranges: &[parse::HunkRange]) -> Option<u32> {
+        match line.kind {
+            DiffKind::Add => {
+                let line = line.new_no?;
+                ranges
+                    .iter()
+                    .position(|range| {
+                        line >= range.new_start && line < range.new_start + range.new_count
+                    })
+                    .map(|index| index as u32)
+            }
+            DiffKind::Remove => {
+                let line = line.old_no?;
+                ranges
+                    .iter()
+                    .position(|range| {
+                        line >= range.old_start && line < range.old_start + range.old_count
+                    })
+                    .map(|index| index as u32)
+            }
+            _ => None,
+        }
+    }
+
+    fn staged_only_lines(
+        &self,
+        file: &Path,
+        target: &Path,
+        staged: &HashSet<u32>,
+    ) -> Result<Vec<DiffLine>, GitError> {
+        if self.diff_text(target, true, 100_000)?.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let content = std::fs::read_to_string(file).unwrap_or_default();
+        let spans = crate::host::highlight::highlight_file(&content, file);
+        let lines = content
+            .lines()
+            .enumerate()
+            .map(|(index, _)| {
+                let line = index as u32 + 1;
+                DiffLine {
+                    kind: if staged.contains(&line) {
+                        DiffKind::Staged
+                    } else {
+                        DiffKind::Context
+                    },
+                    old_no: Some(line),
+                    new_no: Some(line),
+                    hunk: None,
+                    spans: spans.get(index).cloned().unwrap_or_default(),
+                }
+            })
+            .collect();
+        Ok(lines)
+    }
+
+    fn index_text(&self, target: &Path) -> Result<String, GitError> {
+        #[cfg(unix)]
+        let spec = {
+            use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+            let mut bytes = vec![b':'];
+            bytes.extend_from_slice(target.as_os_str().as_bytes());
+            OsString::from_vec(bytes)
+        };
+        #[cfg(not(unix))]
+        let spec = OsString::from(format!(":{}", target.to_string_lossy()));
+
+        let output = git_command(&self.0)
+            .arg("show")
+            .arg(spec)
+            .output()
+            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        if output.status.success() {
+            return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+        }
+        Ok(String::new())
+    }
+
+    fn apply_patch(&self, patch: &str, reverse: bool) -> Result<(), GitError> {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let mut args = vec!["apply"];
+        if reverse {
+            args.push("-R");
+        } else {
+            args.push("--cached");
+        }
+        args.push("--unidiff-zero");
+        let mut child = git_command(&self.0)
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| GitError(format!("failed to run git apply: {error}")))?;
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| GitError("git apply: no stdin".into()))?
+            .write_all(patch.as_bytes())
+            .map_err(|error| GitError(format!("git apply write: {error}")))?;
+        let output = child
+            .wait_with_output()
+            .map_err(|error| GitError(format!("git apply wait: {error}")))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        Err(git_err(
+            &String::from_utf8_lossy(&output.stdout),
+            &String::from_utf8_lossy(&output.stderr),
+        ))
+    }
+
+    fn file_operation(&self, file: &Path, verb: &[&str]) -> Result<(), GitError> {
+        let target = self.relative_path(file);
+        let output = git_command(&self.0)
+            .args(verb)
+            .arg(&target)
+            .output()
+            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        Err(git_err(
+            &String::from_utf8_lossy(&output.stdout),
+            &String::from_utf8_lossy(&output.stderr),
+        ))
+    }
 }
 
 const FALLBACK_LOCAL_ENV_VARS: &[&str] = &[
@@ -319,35 +661,6 @@ pub(crate) fn git_err(stdout: &str, stderr: &str) -> GitError {
     } else {
         s.to_string()
     })
-}
-
-fn start_dir(file: &Path) -> PathBuf {
-    if file.is_dir() {
-        file.to_path_buf()
-    } else {
-        file.parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."))
-    }
-}
-
-pub(crate) fn non_repository_status(path: &Path) -> GitFileStatus {
-    GitFileStatus {
-        path: path.to_string_lossy().into_owned(),
-        branch: String::new(),
-        ahead: 0,
-        behind: 0,
-        has_upstream: false,
-        file_status: FileStatus::Clean,
-        staged_count: 0,
-        repo_root: String::new(),
-    }
-}
-
-fn rel(root: &Path, file: &Path) -> PathBuf {
-    let root = vmux_path::PathIdentity::resolve(root).into_path_buf();
-    let file = vmux_path::PathIdentity::resolve(file).into_path_buf();
-    file.strip_prefix(&root).unwrap_or(&file).to_path_buf()
 }
 
 #[cfg(unix)]
@@ -683,338 +996,6 @@ impl GitRepositorySnapshot {
             tags,
             stashes,
         })
-    }
-}
-
-fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitFileStatus>, GitError> {
-    let (stdout, stderr, ok) = git_read_bytes(
-        root,
-        &[
-            "status",
-            "--porcelain=v2",
-            "-z",
-            "--branch",
-            "--untracked-files=all",
-        ],
-    )?;
-    if !ok {
-        return Err(GitError(stderr.trim().to_string()));
-    }
-    let repo_root = root.to_string_lossy().into_owned();
-    let parsed = parse::parse_porcelain_v2_statuses(&stdout);
-    Ok(files
-        .iter()
-        .map(|file| {
-            let target = rel(root, file);
-            GitFileStatus {
-                path: file.to_string_lossy().into_owned(),
-                branch: parsed.branch.clone(),
-                ahead: parsed.ahead,
-                behind: parsed.behind,
-                has_upstream: parsed.has_upstream,
-                file_status: parsed.file_status(&path_bytes(&target)),
-                staged_count: parsed.staged_count,
-                repo_root: repo_root.clone(),
-            }
-        })
-        .collect())
-}
-
-fn diff_text(root: &Path, target: &Path, cached: bool, ctx: u32) -> Result<String, GitError> {
-    let uarg = format!("--unified={ctx}");
-    let mut command = git_command(root);
-    command.arg("diff");
-    if cached {
-        command.arg("--cached");
-    }
-    let output = command
-        .arg(&uarg)
-        .arg("--")
-        .arg(target)
-        .output()
-        .map_err(|error| GitError(format!("failed to run git: {error}")))?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-    } else {
-        Err(GitError(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ))
-    }
-}
-
-fn tag_hunk(line: &DiffLine, ranges: &[parse::HunkRange]) -> Option<u32> {
-    match line.kind {
-        DiffKind::Add => {
-            let n = line.new_no?;
-            ranges
-                .iter()
-                .position(|r| n >= r.new_start && n < r.new_start + r.new_count)
-                .map(|i| i as u32)
-        }
-        DiffKind::Remove => {
-            let o = line.old_no?;
-            ranges
-                .iter()
-                .position(|r| o >= r.old_start && o < r.old_start + r.old_count)
-                .map(|i| i as u32)
-        }
-        _ => None,
-    }
-}
-
-fn staged_lineset(root: &Path, target: &Path) -> HashSet<u32> {
-    diff_text(root, target, true, 0)
-        .map(|t| {
-            parse::hunk_ranges(&t)
-                .iter()
-                .flat_map(|r| r.new_start..r.new_start + r.new_count)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn staged_only_lines(
-    file: &Path,
-    root: &Path,
-    target: &Path,
-    staged: &HashSet<u32>,
-) -> Result<Vec<DiffLine>, GitError> {
-    if diff_text(root, target, true, 100_000)?.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    let content = std::fs::read_to_string(file).unwrap_or_default();
-    let spans = crate::host::highlight::highlight_file(&content, file);
-    let lines = content
-        .lines()
-        .enumerate()
-        .map(|(i, _)| {
-            let n = i as u32 + 1;
-            DiffLine {
-                kind: if staged.contains(&n) {
-                    DiffKind::Staged
-                } else {
-                    DiffKind::Context
-                },
-                old_no: Some(n),
-                new_no: Some(n),
-                hunk: None,
-                spans: spans.get(i).cloned().unwrap_or_default(),
-            }
-        })
-        .collect();
-    Ok(lines)
-}
-
-fn index_text(root: &Path, target: &Path) -> Result<String, GitError> {
-    #[cfg(unix)]
-    let spec = {
-        use std::os::unix::ffi::{OsStrExt, OsStringExt};
-
-        let mut bytes = vec![b':'];
-        bytes.extend_from_slice(target.as_os_str().as_bytes());
-        OsString::from_vec(bytes)
-    };
-    #[cfg(not(unix))]
-    let spec = OsString::from(format!(":{}", target.to_string_lossy()));
-
-    let output = git_command(root)
-        .arg("show")
-        .arg(spec)
-        .output()
-        .map_err(|error| GitError(format!("failed to run git: {error}")))?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-    } else {
-        Ok(String::new())
-    }
-}
-
-fn diff_lines_with_content(
-    root: &Path,
-    file: &Path,
-    content: &str,
-) -> Result<Vec<DiffLine>, GitError> {
-    let target = rel(root, file);
-    let baseline = index_text(root, &target)?;
-    let staged = staged_lineset(root, &target);
-    let new_spans = crate::host::highlight::highlight_file(content, file);
-    let mut old_no = 1u32;
-    let mut new_no = 1u32;
-    let mut lines = Vec::new();
-
-    for change in TextDiff::from_lines(baseline.as_str(), content).iter_all_changes() {
-        let text = change.value().trim_end_matches(['\n', '\r']);
-        match change.tag() {
-            ChangeTag::Equal => {
-                lines.push(DiffLine {
-                    kind: if staged.contains(&old_no) {
-                        DiffKind::Staged
-                    } else {
-                        DiffKind::Context
-                    },
-                    old_no: Some(old_no),
-                    new_no: Some(new_no),
-                    hunk: None,
-                    spans: new_spans
-                        .get(new_no.saturating_sub(1) as usize)
-                        .cloned()
-                        .unwrap_or_else(|| crate::host::highlight::highlight_line(text, file)),
-                });
-                old_no += 1;
-                new_no += 1;
-            }
-            ChangeTag::Delete => {
-                lines.push(DiffLine {
-                    kind: DiffKind::Remove,
-                    old_no: Some(old_no),
-                    new_no: None,
-                    hunk: None,
-                    spans: crate::host::highlight::highlight_line(text, file),
-                });
-                old_no += 1;
-            }
-            ChangeTag::Insert => {
-                lines.push(DiffLine {
-                    kind: DiffKind::Add,
-                    old_no: None,
-                    new_no: Some(new_no),
-                    hunk: None,
-                    spans: new_spans
-                        .get(new_no.saturating_sub(1) as usize)
-                        .cloned()
-                        .unwrap_or_else(|| crate::host::highlight::highlight_line(text, file)),
-                });
-                new_no += 1;
-            }
-        }
-    }
-    Ok(lines)
-}
-
-fn diff_lines(root: &Path, file: &Path) -> Result<Vec<DiffLine>, GitError> {
-    let target = rel(root, file);
-    let staged = staged_lineset(root, &target);
-
-    let unstaged = diff_text(root, &target, false, 100_000)?;
-    if unstaged.trim().is_empty() {
-        if GitRepository::at(root).status(file)?.file_status == FileStatus::Untracked {
-            let content = std::fs::read_to_string(file).unwrap_or_default();
-            return diff_lines_with_content(root, file, &content);
-        }
-        return staged_only_lines(file, root, &target, &staged);
-    }
-    let ranges = parse::hunk_ranges(&diff_text(root, &target, false, 0)?);
-
-    let new_spans = std::fs::read_to_string(file)
-        .map(|c| crate::host::highlight::highlight_file(&c, file))
-        .unwrap_or_default();
-
-    let lines = parse::parse_unified_diff(&unstaged)
-        .into_iter()
-        .filter(|l| !matches!(l.kind, DiffKind::Hunk))
-        .map(|mut l| {
-            l.hunk = tag_hunk(&l, &ranges);
-            let text = l.spans.first().map(|s| s.text.clone()).unwrap_or_default();
-            l.spans = match l.kind {
-                DiffKind::Add | DiffKind::Context => l
-                    .new_no
-                    .and_then(|n| new_spans.get(n.saturating_sub(1) as usize))
-                    .cloned()
-                    .unwrap_or_else(|| crate::host::highlight::highlight_line(&text, file)),
-                _ => crate::host::highlight::highlight_line(&text, file),
-            };
-            if matches!(l.kind, DiffKind::Context) && l.old_no.is_some_and(|o| staged.contains(&o))
-            {
-                l.kind = DiffKind::Staged;
-            }
-            l
-        })
-        .collect();
-    Ok(lines)
-}
-
-fn commit_diff_lines(root: &Path, reference: &str) -> Result<Vec<DiffLine>, GitError> {
-    let (stdout, stderr, ok) = git_read(
-        root,
-        &[
-            "show",
-            "--format=",
-            "--find-renames",
-            "--find-copies",
-            "--unified=100000",
-            reference,
-        ],
-    )?;
-    if !ok {
-        return Err(git_err(&stdout, &stderr));
-    }
-    Ok(parse::parse_unified_diff(&stdout))
-}
-
-fn git_apply(root: &Path, patch: &str, reverse: bool) -> Result<(), GitError> {
-    use std::io::Write;
-    use std::process::Stdio;
-    let mut args: Vec<&str> = vec!["apply"];
-    if reverse {
-        args.push("-R");
-    } else {
-        args.push("--cached");
-    }
-    args.push("--unidiff-zero");
-    let mut child = git_command(root)
-        .args(&args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| GitError(format!("failed to run git apply: {e}")))?;
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| GitError("git apply: no stdin".into()))?
-        .write_all(patch.as_bytes())
-        .map_err(|e| GitError(format!("git apply write: {e}")))?;
-    let out = child
-        .wait_with_output()
-        .map_err(|e| GitError(format!("git apply wait: {e}")))?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(git_err(
-            &String::from_utf8_lossy(&out.stdout),
-            &String::from_utf8_lossy(&out.stderr),
-        ))
-    }
-}
-
-fn apply_hunk(root: &Path, file: &Path, index: u32, accept: bool) -> Result<(), GitError> {
-    let target = rel(root, file);
-    let diff = diff_text(root, &target, false, 0)?;
-    if diff.trim().is_empty() {
-        return Err(GitError("no unstaged changes for this file".into()));
-    }
-    let (header, hunks) = parse::hunk_patches(&diff);
-    let body = hunks
-        .get(index as usize)
-        .ok_or_else(|| GitError("hunk index out of range".into()))?;
-    let patch = format!("{header}{body}");
-    git_apply(root, &patch, !accept)
-}
-
-fn simple(root: &Path, file: &Path, verb: &[&str]) -> Result<(), GitError> {
-    let target = rel(root, file);
-    let output = git_command(root)
-        .args(verb)
-        .arg(&target)
-        .output()
-        .map_err(|error| GitError(format!("failed to run git: {error}")))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(git_err(
-            &String::from_utf8_lossy(&output.stdout),
-            &String::from_utf8_lossy(&output.stderr),
-        ))
     }
 }
 
@@ -1647,7 +1628,7 @@ mod tests {
     fn commit_with_nothing_staged_errors() {
         let repo = test_repo::init();
         let repository = GitRepository::at(repo.path());
-        let file = test_repo::write(repo.path(), "a.txt", "one\n");
+        test_repo::write(repo.path(), "a.txt", "one\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         assert!(repository.commit("noop").is_err());
