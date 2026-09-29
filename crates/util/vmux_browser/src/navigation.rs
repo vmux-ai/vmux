@@ -17,8 +17,6 @@ use vmux_layout::{
     stack::Stack,
 };
 
-use vmux_terminal::{self as terminal, Terminal};
-
 use crate::host::{PendingNavigationUpdate, send_page_open_response};
 use crate::input::RecentBrowserInteraction;
 use crate::snapshot::BrowserTarget;
@@ -257,15 +255,11 @@ fn handle_open_in_new_stack_requests(
 fn handle_browser_navigate_requests(
     mut reader: MessageReader<vmux_layout::BrowserNavigateRequest>,
     focus: vmux_layout::stack::FocusedStack,
-    panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
-    browsers: Query<(Entity, &ChildOf), With<Browser>>,
+    targets: vmux_layout::target::BrowserTargets<Browser>,
     mut commands: Commands,
     mut page_open_writer: MessageWriter<PageOpenRequest>,
     mut pending_navigation: MessageWriter<PendingNavigationUpdate>,
     time: Res<Time>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &vmux_core::LastActivatedAt), With<vmux_layout::stack::Stack>>,
     stack_metadata: Query<&PageMetadata, With<Stack>>,
     recent_interactions: Query<&RecentBrowserInteraction>,
     mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
@@ -282,9 +276,8 @@ fn handle_browser_navigate_requests(
         let is_vmux_route = VmuxRoute::parse(&url).is_some();
 
         if let Some(s) = pane.as_deref() {
-            if let Some(target) = vmux_layout::target::parse_pane_target(s, &panes) {
-                let active_stack =
-                    vmux_layout::stack::active_stack_in_pane(target, &pane_children, &stack_ts);
+            if let Some(target) = targets.pane(s) {
+                let active_stack = targets.active_stack(target);
                 let replace_start = !new_stack
                     && active_stack.is_some_and(|stack| {
                         stack_metadata.get(stack).is_ok_and(|metadata| {
@@ -333,7 +326,7 @@ fn handle_browser_navigate_requests(
                 let in_place = if replace_start || is_vmux_route || url.starts_with("file:") {
                     None
                 } else {
-                    vmux_layout::target::active_webview_for_tab(active_stack, &browsers, &terminals)
+                    targets.active_webview(active_stack)
                 };
                 if let Some(webview) = in_place {
                     commands.trigger(RequestNavigate {
@@ -385,11 +378,9 @@ fn handle_browser_navigate_requests(
                 url,
                 request_id,
             });
-        } else if let Some(webview) =
-            vmux_layout::target::active_webview_for_tab(focus.stack, &browsers, &terminals)
-        {
+        } else if let Some(webview) = targets.active_webview(focus.stack) {
             if is_vmux_route || url.starts_with("file:") {
-                let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) else {
+                let Some(pane) = focus.pane.filter(|pane| targets.contains_pane(*pane)) else {
                     send_page_open_response(
                         &mut service_requests,
                         request_id,
@@ -421,7 +412,7 @@ fn handle_browser_navigate_requests(
                     send_page_open_response(&mut service_requests, None, Ok(()));
                 }
             }
-        } else if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {
+        } else if let Some(pane) = focus.pane.filter(|pane| targets.contains_pane(*pane)) {
             page_open_writer.write(PageOpenRequest {
                 target: PageOpenTarget::NewStackInPane(pane),
                 url,

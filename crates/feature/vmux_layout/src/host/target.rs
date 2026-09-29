@@ -1,4 +1,5 @@
 use bevy::ecs::relationship::Relationship;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_core::terminal::{ProcessExited, Terminal};
 
@@ -17,70 +18,95 @@ pub enum BrowserTarget {
     Stack(Entity),
 }
 
-#[allow(clippy::type_complexity)]
-pub fn parse_pane_target(
-    s: &str,
-    panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-) -> Option<Entity> {
-    let bits = match vmux_api::protocol::parse_id(s) {
-        Ok((vmux_api::protocol::NodeKind::Pane, bits)) => bits,
-        Ok(_) => return None,
-        Err(_) => s.parse::<u64>().ok()?,
-    };
-    let entity = Entity::try_from_bits(bits)?;
-    panes.contains(entity).then_some(entity)
+#[derive(SystemParam)]
+pub struct BrowserTargets<'w, 's, B: Component> {
+    panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+    stacks: Query<'w, 's, Entity, With<Stack>>,
+    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    stack_timestamps: Query<'w, 's, (Entity, &'static vmux_core::LastActivatedAt), With<Stack>>,
+    browsers: Query<'w, 's, (Entity, &'static ChildOf), With<B>>,
+    terminals: Query<'w, 's, (Entity, &'static ChildOf), (With<Terminal>, Without<ProcessExited>)>,
 }
 
-pub fn parse_browser_target(
-    value: &str,
-    panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    stacks: &Query<Entity, With<Stack>>,
-) -> Option<BrowserTarget> {
-    if let Ok((kind, bits)) = vmux_api::protocol::parse_id(value) {
-        let entity = Entity::try_from_bits(bits)?;
-        return match kind {
-            vmux_api::protocol::NodeKind::Pane if panes.contains(entity) => {
-                Some(BrowserTarget::Pane(entity))
-            }
-            vmux_api::protocol::NodeKind::Stack if stacks.contains(entity) => {
-                Some(BrowserTarget::Stack(entity))
-            }
-            _ => None,
-        };
+impl<B: Component> BrowserTargets<'_, '_, B> {
+    pub fn contains_pane(&self, pane: Entity) -> bool {
+        self.panes.contains(pane)
     }
-    parse_pane_target(value, panes).map(BrowserTarget::Pane)
-}
 
-pub fn webview_for_target<B: Component>(
-    target: BrowserTarget,
-    pane_children: &Query<&Children, With<Pane>>,
-    stack_ts: &Query<(Entity, &vmux_core::LastActivatedAt), With<Stack>>,
-    browsers: &Query<(Entity, &ChildOf), With<B>>,
-    terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-) -> Option<Entity> {
-    let stack = match target {
-        BrowserTarget::Pane(pane) => {
-            crate::stack::active_stack_in_pane(pane, pane_children, stack_ts)
-        }
-        BrowserTarget::Stack(stack) => Some(stack),
-    };
-    active_webview_for_tab(stack, browsers, terminals)
-}
+    pub fn contains_webview(&self, webview: Entity) -> bool {
+        self.browsers.contains(webview)
+    }
 
-#[allow(clippy::type_complexity)]
-pub fn active_webview_for_tab<B: Component>(
-    tab: Option<Entity>,
-    browsers: &Query<(Entity, &ChildOf), With<B>>,
-    terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-) -> Option<Entity> {
-    let tab = tab?;
-    browsers.iter().find_map(|(entity, child_of)| {
-        if child_of.get() != tab {
-            return None;
+    pub fn pane(&self, value: &str) -> Option<Entity> {
+        let bits = match vmux_api::protocol::parse_id(value) {
+            Ok((vmux_api::protocol::NodeKind::Pane, bits)) => bits,
+            Ok(_) => return None,
+            Err(_) => value.parse::<u64>().ok()?,
+        };
+        let entity = Entity::try_from_bits(bits)?;
+        self.panes.contains(entity).then_some(entity)
+    }
+
+    pub fn target(&self, value: &str) -> Option<BrowserTarget> {
+        if let Ok((kind, bits)) = vmux_api::protocol::parse_id(value) {
+            let entity = Entity::try_from_bits(bits)?;
+            return match kind {
+                vmux_api::protocol::NodeKind::Pane if self.panes.contains(entity) => {
+                    Some(BrowserTarget::Pane(entity))
+                }
+                vmux_api::protocol::NodeKind::Stack if self.stacks.contains(entity) => {
+                    Some(BrowserTarget::Stack(entity))
+                }
+                _ => None,
+            };
         }
-        if terminals.iter().any(|(t, _)| t == entity) {
-            return None;
-        }
-        Some(entity)
-    })
+        self.pane(value).map(BrowserTarget::Pane)
+    }
+
+    pub fn active_stack(&self, pane: Entity) -> Option<Entity> {
+        crate::stack::active_stack_in_pane(pane, &self.pane_children, &self.stack_timestamps)
+    }
+
+    pub fn webview(&self, target: BrowserTarget) -> Option<Entity> {
+        let stack = match target {
+            BrowserTarget::Pane(pane) => self.active_stack(pane),
+            BrowserTarget::Stack(stack) => Some(stack),
+        };
+        self.active_webview(stack)
+    }
+
+    pub fn active_webview(&self, stack: Option<Entity>) -> Option<Entity> {
+        let stack = stack?;
+        self.browsers.iter().find_map(|(entity, child_of)| {
+            if child_of.get() != stack {
+                return None;
+            }
+            if self
+                .terminals
+                .iter()
+                .any(|(terminal, _)| terminal == entity)
+            {
+                return None;
+            }
+            Some(entity)
+        })
+    }
+
+    pub fn most_recent_webview(&self) -> Option<Entity> {
+        self.browsers
+            .iter()
+            .filter_map(|(entity, child_of)| {
+                if self
+                    .terminals
+                    .iter()
+                    .any(|(terminal, _)| terminal == entity)
+                {
+                    return None;
+                }
+                let (_, timestamp) = self.stack_timestamps.get(child_of.get()).ok()?;
+                Some((entity, timestamp.0))
+            })
+            .max_by_key(|&(_, timestamp)| timestamp)
+            .map(|(entity, _)| entity)
+    }
 }
