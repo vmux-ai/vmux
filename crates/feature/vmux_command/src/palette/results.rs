@@ -1,5 +1,5 @@
 use vmux_api::PageIcon;
-use vmux_api::chat::{ResumableSessionEntry, SlashCommand};
+use vmux_api::chat::{ResumableSessionEntry, SlashCommand, SlashCommandEntry};
 use vmux_api::command_bar::{
     CommandBarCommandEntry, CommandBarPage, CommandBarPick, CommandBarPickRow, CommandBarPicker,
     CommandBarRecentFile, CommandBarSpace, CommandBarTab, CommandBarWorkDir, HistoryEntry,
@@ -19,7 +19,7 @@ impl SlashRows {
 
     pub fn for_query(
         query: &str,
-        commands: &[vmux_api::chat::SlashCommandEntry],
+        commands: &[SlashCommandEntry],
         sessions: &[ResumableSessionEntry],
         pending: bool,
     ) -> Vec<CommandBarResultItem> {

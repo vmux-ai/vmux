@@ -5,7 +5,19 @@ use super::event::{
     AgentInstallRunRequest, AgentSetupPrereqRequest, AgentSetupPrereqStatus, AgentSetupResult,
     AgentSetupUiState,
 };
+use vmux_api::VmuxRoute;
+use vmux_api::protocol::{CommandLifecycleKind, ProcessId};
 use vmux_core::agent::AgentKind;
+use vmux_core::agent_setup::{install_command_chained, requires_homebrew};
+use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_core::{PageMetadata, PageOpenId, PageOpenTask};
+use vmux_layout::pane::{ForcePaneClose, PanePlacement, PaneSplitDirection, split_or_extend};
+use vmux_layout::stack::{FocusedStack, Stack};
+use vmux_terminal::shell_input::shell_command_input;
+use vmux_terminal::{
+    CommandLifecycleEvent, RunShellRequest, ShellMode, TerminalReinputRequest,
+    TerminalStackSpawnRequest,
+};
 
 pub struct AgentSetupPlugin;
 
@@ -13,7 +25,7 @@ impl Plugin for AgentSetupPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             UiEventPlugin::<(AgentInstallRunRequest, AgentSetupPrereqRequest)>::default(),
-            vmux_core::host::UiStatePlugin::<AgentSetupUiState>::default(),
+            UiStatePlugin::<AgentSetupUiState>::default(),
         ))
         .add_observer(on_agent_install_run)
         .add_observer(on_agent_setup_prereq_request)
@@ -30,7 +42,7 @@ struct AgentInstallPane {
     setup_stack: Entity,
     setup_webview: Entity,
     agent: AgentKind,
-    process_id: vmux_api::protocol::ProcessId,
+    process_id: ProcessId,
     armed: bool,
 }
 
@@ -47,18 +59,18 @@ pub(crate) struct AgentSetupNavigated;
 #[require(AgentSetupUiStateUpdates)]
 pub(crate) struct AgentSetupView;
 
-type AgentSetupUiStateUpdates = vmux_core::host::UiState<AgentSetupUiState>;
+type AgentSetupUiStateUpdates = UiState<AgentSetupUiState>;
 
-fn run_install_in_new_tab(run: &mut MessageWriter<vmux_terminal::RunShellRequest>, command: &str) {
-    run.write(vmux_terminal::RunShellRequest {
+fn run_install_in_new_tab(run: &mut MessageWriter<RunShellRequest>, command: &str) {
+    run.write(RunShellRequest {
         command: command.to_string(),
         cwd: String::new(),
-        mode: vmux_terminal::ShellMode::NewTab,
+        mode: ShellMode::NewTab,
     });
 }
 
 fn prereq_needs_homebrew(segment: &str, brew_present: bool) -> bool {
-    cfg!(target_os = "macos") && vmux_core::agent_setup::requires_homebrew(segment) && !brew_present
+    cfg!(target_os = "macos") && requires_homebrew(segment) && !brew_present
 }
 
 fn on_agent_setup_prereq_request(
@@ -69,12 +81,10 @@ fn on_agent_setup_prereq_request(
     let segment = &trigger.event().payload.agent;
     let brew_present = crate::exec::find_executable("brew").is_some();
     let needs_homebrew = prereq_needs_homebrew(segment, brew_present);
-    commands.trigger(
-        vmux_core::host::UiStateWrite::<AgentSetupUiState>::from_event(
-            webview,
-            &AgentSetupPrereqStatus { needs_homebrew },
-        ),
-    );
+    commands.trigger(UiStateWrite::<AgentSetupUiState>::from_event(
+        webview,
+        &AgentSetupPrereqStatus { needs_homebrew },
+    ));
 }
 
 fn install_outcome(armed: bool, installed: bool) -> Option<bool> {
@@ -85,22 +95,21 @@ fn install_outcome(armed: bool, installed: bool) -> Option<bool> {
 }
 
 fn close_install_pane_after_success(url: &str) -> bool {
-    let Some(route) = vmux_api::VmuxRoute::parse(url) else {
+    let Some(route) = VmuxRoute::parse(url) else {
         return false;
     };
-    let Some(install) = vmux_api::VmuxRoute::parse("vmux://tools/acp") else {
+    let Some(install) = VmuxRoute::parse("vmux://tools/acp") else {
         return false;
     };
     route.same_page(&install)
 }
 
 fn detect_agent_install_outcome(
-    mut events: MessageReader<vmux_terminal::CommandLifecycleEvent>,
+    mut events: MessageReader<CommandLifecycleEvent>,
     mut install_panes: Query<(Entity, &mut AgentInstallPane)>,
-    setup_stacks: Query<&vmux_core::PageMetadata, With<vmux_layout::stack::Stack>>,
+    setup_stacks: Query<&PageMetadata, With<Stack>>,
     mut commands: Commands,
 ) {
-    use vmux_api::protocol::CommandLifecycleKind;
     for ev in events.read() {
         for (install_pane, mut pane) in &mut install_panes {
             if pane.process_id != ev.process_id {
@@ -138,29 +147,25 @@ fn publish_agent_install_outcome(
     mut commands: Commands,
 ) {
     for (entity, pane, completed) in &completed {
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<AgentSetupUiState>::from_event(
-                pane.setup_webview,
-                &completed.result,
-            ),
-        );
+        commands.trigger(UiStateWrite::<AgentSetupUiState>::from_event(
+            pane.setup_webview,
+            &completed.result,
+        ));
         if completed.close_pane {
-            commands
-                .entity(entity)
-                .insert(vmux_layout::pane::ForcePaneClose);
+            commands.entity(entity).insert(ForcePaneClose);
         }
     }
 }
 
 fn on_agent_install_run(
     trigger: On<UiInput<AgentInstallRunRequest>>,
-    focus: vmux_layout::stack::FocusedStack,
-    ctx: vmux_layout::pane::PanePlacement,
+    focus: FocusedStack,
+    ctx: PanePlacement,
     mut install_panes: Query<(Entity, &mut AgentInstallPane)>,
     mut commands: Commands,
-    mut spawn: MessageWriter<vmux_terminal::TerminalStackSpawnRequest>,
-    mut run: MessageWriter<vmux_terminal::RunShellRequest>,
-    mut reinput: MessageWriter<vmux_terminal::TerminalReinputRequest>,
+    mut spawn: MessageWriter<TerminalStackSpawnRequest>,
+    mut run: MessageWriter<RunShellRequest>,
+    mut reinput: MessageWriter<TerminalReinputRequest>,
 ) {
     let webview = trigger.event().webview;
     let segment = &trigger.event().payload.agent;
@@ -169,16 +174,15 @@ fn on_agent_install_run(
         return;
     };
     let brew_present = !cfg!(target_os = "macos") || crate::exec::find_executable("brew").is_some();
-    let Some(command) = vmux_core::agent_setup::install_command_chained(segment, brew_present)
-    else {
+    let Some(command) = install_command_chained(segment, brew_present) else {
         warn!("agent install run: unknown agent segment '{segment}'");
         return;
     };
-    let input = vmux_terminal::shell_input::shell_command_input(&command);
+    let input = shell_command_input(&command);
 
     for (entity, mut pane) in &mut install_panes {
         if pane.setup_webview == webview && pane.agent == kind {
-            reinput.write(vmux_terminal::TerminalReinputRequest {
+            reinput.write(TerminalReinputRequest {
                 process_id: pane.process_id,
                 data: input.clone(),
             });
@@ -202,15 +206,15 @@ fn on_agent_install_run(
         .map(|c| c.iter().filter(|&e| ctx.tab_filter.contains(e)).collect())
         .unwrap_or_default();
     let already_split = ctx.split_dir_q.contains(pane);
-    let install_pane = vmux_layout::pane::split_or_extend(
+    let install_pane = split_or_extend(
         &mut commands,
         pane,
-        vmux_layout::pane::PaneSplitDirection::Row,
+        PaneSplitDirection::Row,
         &existing_tabs,
         true,
         already_split,
     );
-    let process_id = vmux_api::protocol::ProcessId::new();
+    let process_id = ProcessId::new();
     commands.entity(install_pane).insert(AgentInstallPane {
         setup_stack,
         setup_webview: webview,
@@ -218,7 +222,7 @@ fn on_agent_install_run(
         process_id,
         armed: false,
     });
-    spawn.write(vmux_terminal::TerminalStackSpawnRequest {
+    spawn.write(TerminalStackSpawnRequest {
         pane: install_pane,
         cwd: None,
         shell: None,
@@ -232,13 +236,7 @@ fn on_agent_install_run(
 fn auto_redirect_agent_setup_when_installed(
     time: Res<Time>,
     mut throttle: Local<f32>,
-    setup_stacks: Query<
-        (Entity, &vmux_core::PageMetadata),
-        (
-            With<vmux_layout::stack::Stack>,
-            Without<AgentSetupNavigated>,
-        ),
-    >,
+    setup_stacks: Query<(Entity, &PageMetadata), (With<Stack>, Without<AgentSetupNavigated>)>,
     install_panes: Query<(Entity, &AgentInstallPane)>,
     mut commands: Commands,
 ) {
@@ -258,8 +256,8 @@ fn auto_redirect_agent_setup_when_installed(
         if crate::exec::find_executable(kind.executable()).is_none() {
             continue;
         }
-        commands.spawn(vmux_core::PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+        commands.spawn(PageOpenTask {
+            id: PageOpenId::new(),
             stack: setup_stack,
             url: format!("{}cli", kind.cli_url_prefix()),
             request_id: None,
@@ -267,9 +265,7 @@ fn auto_redirect_agent_setup_when_installed(
         commands.entity(setup_stack).insert(AgentSetupNavigated);
         for (install_pane, marker) in &install_panes {
             if marker.setup_stack == setup_stack {
-                commands
-                    .entity(install_pane)
-                    .insert(vmux_layout::pane::ForcePaneClose);
+                commands.entity(install_pane).insert(ForcePaneClose);
             }
         }
     }

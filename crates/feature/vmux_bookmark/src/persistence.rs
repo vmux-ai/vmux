@@ -4,8 +4,14 @@ use bevy_world_serialization::WorldFilter;
 use moonshine_save::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use vmux_core::{Bookmark, BookmarkOrder, Collapsed, Folder, Order, PageMetadata, Pin, Uuid};
+use vmux_core::profile::{is_test_session, profile_dir};
+use vmux_core::{
+    Bookmark, BookmarkOrder, Collapsed, Folder, Order, PageIcon, PageMetadata, Pin,
+    SmartBookmarkFolder, Uuid,
+};
 use vmux_layout::LayoutStartupSet;
+use vmux_setting::{AppSettings, BookmarkFolderSettings};
+use vmux_shortcut::{PAGE_URL, ShortcutUrl};
 
 pub(super) struct BookmarkPersistencePlugin;
 
@@ -56,7 +62,7 @@ struct BookmarkPersistencePath(PathBuf);
 
 impl Default for BookmarkPersistencePath {
     fn default() -> Self {
-        Self(vmux_core::profile::profile_dir().join("bookmarks.ron"))
+        Self(profile_dir().join("bookmarks.ron"))
     }
 }
 
@@ -68,7 +74,7 @@ fn bookmark_scene_filter() -> WorldFilter {
         .allow::<Pin>()
         .allow::<Bookmark>()
         .allow::<Folder>()
-        .allow::<vmux_core::SmartBookmarkFolder>()
+        .allow::<SmartBookmarkFolder>()
         .allow::<Collapsed>()
         .allow::<Uuid>()
         .allow::<BookmarkOrder>()
@@ -80,7 +86,7 @@ fn bookmark_resource_filter() -> WorldFilter {
 }
 
 fn save_bookmarks_to_path(commands: &mut Commands, path: PathBuf) {
-    if vmux_core::profile::is_test_session() {
+    if is_test_session() {
         return;
     }
     if let Some(parent) = path.parent() {
@@ -97,7 +103,7 @@ fn load_bookmarks_on_startup(
     path: Single<&BookmarkPersistencePath>,
     mut commands: Commands,
 ) {
-    if vmux_core::profile::is_test_session() {
+    if is_test_session() {
         return;
     }
     let path = path.0.clone();
@@ -156,10 +162,7 @@ impl OfferedBookmarkDefaults {
         claimed
     }
 
-    fn claim_new_folders(
-        &mut self,
-        defaults: &[vmux_setting::BookmarkFolderSettings],
-    ) -> Vec<String> {
+    fn claim_new_folders(&mut self, defaults: &[BookmarkFolderSettings]) -> Vec<String> {
         let mut offered = self
             .folders
             .iter()
@@ -180,16 +183,16 @@ impl OfferedBookmarkDefaults {
 
 struct BookmarkDefaults<'a> {
     urls: &'a [String],
-    folders: &'a [vmux_setting::BookmarkFolderSettings],
+    folders: &'a [BookmarkFolderSettings],
 }
 
 impl<'a> BookmarkDefaults<'a> {
-    fn new(urls: &'a [String], folders: &'a [vmux_setting::BookmarkFolderSettings]) -> Self {
+    fn new(urls: &'a [String], folders: &'a [BookmarkFolderSettings]) -> Self {
         Self { urls, folders }
     }
 
     fn key(url: &str) -> String {
-        if let Some(canonical) = vmux_shortcut::ShortcutUrl::canonical(url) {
+        if let Some(canonical) = ShortcutUrl::canonical(url) {
             return canonical.trim_end_matches('/').to_ascii_lowercase();
         }
         url.trim().trim_end_matches('/').to_ascii_lowercase()
@@ -210,16 +213,8 @@ struct BookmarkSeed<'w, 's> {
         ),
         With<Bookmark>,
     >,
-    folders: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static Name,
-            Option<&'static vmux_core::SmartBookmarkFolder>,
-        ),
-        With<Folder>,
-    >,
+    folders:
+        Query<'w, 's, (Entity, &'static Name, Option<&'static SmartBookmarkFolder>), With<Folder>>,
     orders: Query<'w, 's, &'static BookmarkOrder, BookmarkFilter>,
     offered: ResMut<'w, OfferedBookmarkDefaults>,
     auto: Single<'w, 's, &'static mut BookmarkAutoSave>,
@@ -228,7 +223,7 @@ struct BookmarkSeed<'w, 's> {
 
 fn seed_bookmark_defaults(
     _trigger: On<SeedBookmarkDefaults>,
-    settings: Res<vmux_setting::AppSettings>,
+    settings: Res<AppSettings>,
     mut seed: BookmarkSeed,
 ) {
     let defaults = BookmarkDefaults::new(
@@ -259,7 +254,7 @@ fn seed_bookmark_defaults(
             PageMetadata {
                 title: url.clone(),
                 url,
-                icon: vmux_core::PageIcon::None,
+                icon: PageIcon::None,
                 bg_color: None,
             },
             BookmarkOrder(next_order),
@@ -371,7 +366,7 @@ fn migrate_legacy_bookmark_order(
 }
 
 fn migrate_smart_bookmark_folders(
-    folders: Query<(Entity, Option<&Children>), With<vmux_core::SmartBookmarkFolder>>,
+    folders: Query<(Entity, Option<&Children>), With<SmartBookmarkFolder>>,
     mut offered: ResMut<OfferedBookmarkDefaults>,
     mut auto: Single<&mut BookmarkAutoSave>,
     mut commands: Commands,
@@ -415,9 +410,7 @@ fn migrate_shortcut_bookmark_aliases(
     let mut seen = HashSet::new();
     let mut normalized_urls = Vec::new();
     for url in &offered.urls {
-        let normalized = vmux_shortcut::ShortcutUrl::canonical(url)
-            .unwrap_or(url)
-            .to_string();
+        let normalized = ShortcutUrl::canonical(url).unwrap_or(url).to_string();
         if seen.insert(BookmarkDefaults::key(&normalized)) {
             normalized_urls.push(normalized);
         }
@@ -429,9 +422,7 @@ fn migrate_shortcut_bookmark_aliases(
 
     let mut aliases = items
         .iter()
-        .filter(|(_, metadata, _, _, _, _)| {
-            vmux_shortcut::ShortcutUrl::canonical(&metadata.url).is_some()
-        })
+        .filter(|(_, metadata, _, _, _, _)| ShortcutUrl::canonical(&metadata.url).is_some())
         .map(|(entity, metadata, pinned, bookmarked, parent, order)| {
             (
                 entity,
@@ -455,10 +446,10 @@ fn migrate_shortcut_bookmark_aliases(
     let original_metadata = metadata.clone();
     let original_url = metadata.url.clone();
     if metadata.title.trim() == original_url.trim() {
-        metadata.title = vmux_shortcut::PAGE_URL.to_string();
+        metadata.title = PAGE_URL.to_string();
     }
-    if metadata.url != vmux_shortcut::PAGE_URL {
-        metadata.url = vmux_shortcut::PAGE_URL.to_string();
+    if metadata.url != PAGE_URL {
+        metadata.url = PAGE_URL.to_string();
     }
     let pinned = aliases.iter().any(|(_, _, pinned, _, _, _)| *pinned);
     let bookmarked = aliases

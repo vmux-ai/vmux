@@ -8,16 +8,23 @@ use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::Duration;
 use vmux_api::protocol::{
-    AgentListCommands, AgentRequest, AgentRequestId, ClientMessage, ServiceMessage,
+    AgentCommandResult, AgentListCommands, AgentRequest, AgentRequestId, ClientMessage, ProcessId,
+    ServiceMessage,
 };
+use vmux_core::service::ServiceConnection;
 use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
+use vmux_tool::{
+    AcpSessionContext, AcpTerminalContext, ToolCall, ToolCatalog, ToolCatalogRequest, ToolCommand,
+    ToolCommandFallback, ToolDefinition, ToolDispatchError, ToolDispatchFlush, ToolDispatchSet,
+    ToolInvocation, ToolQuery, ToolRegistryPlugin, ToolRequestSet, ToolResolveSet,
+};
 
 pub struct McpPlugin;
 
 impl Plugin for McpPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_tool::ToolRegistryPlugin>() {
-            app.add_plugins(vmux_tool::ToolRegistryPlugin);
+        if !app.is_plugin_added::<ToolRegistryPlugin>() {
+            app.add_plugins(ToolRegistryPlugin);
         }
         app.add_message::<McpInput>()
             .add_message::<McpOutput>()
@@ -26,10 +33,10 @@ impl Plugin for McpPlugin {
                 (
                     McpSet::Input,
                     McpSet::Route,
-                    vmux_tool::ToolResolveSet,
-                    vmux_tool::ToolRequestSet,
-                    vmux_tool::ToolDispatchSet,
-                    vmux_tool::ToolDispatchFlush,
+                    ToolResolveSet,
+                    ToolRequestSet,
+                    ToolDispatchSet,
+                    ToolDispatchFlush,
                     McpSet::StartTasks,
                     McpSet::BuildResponses,
                     McpSet::Output,
@@ -75,7 +82,7 @@ pub struct McpServer {
 
 #[derive(Component, Clone)]
 pub(crate) struct McpConfig {
-    pub(crate) anchor: Option<vmux_api::protocol::ProcessId>,
+    pub(crate) anchor: Option<ProcessId>,
     pub(crate) acp_session: bool,
     pub(crate) acp_terminals: bool,
     pub(crate) run_block_timeout: Duration,
@@ -214,15 +221,12 @@ fn route_request(mut commands: Commands, requests: PendingRequests, configs: Que
         }
         "tools/list" => {
             let mut request = commands.entity(entity);
-            request.insert((
-                vmux_tool::ToolCatalogRequest,
-                HostShell(config.shell.clone()),
-            ));
+            request.insert((ToolCatalogRequest, HostShell(config.shell.clone())));
             if config.acp_session {
-                request.insert(vmux_tool::AcpSessionContext);
+                request.insert(AcpSessionContext);
             }
             if config.acp_terminals {
-                request.insert(vmux_tool::AcpTerminalContext);
+                request.insert(AcpTerminalContext);
             }
         }
         "tools/call" => {
@@ -242,17 +246,17 @@ fn route_request(mut commands: Commands, requests: PendingRequests, configs: Que
                 Name::new(name.to_string()),
                 JsonArguments(arguments),
                 HostShell(config.shell.clone()),
-                vmux_tool::ToolInvocation,
-                vmux_tool::ToolCommandFallback,
+                ToolInvocation,
+                ToolCommandFallback,
             ));
             if let Some(anchor) = config.anchor {
                 request.insert(ProcessAnchor(anchor));
             }
             if config.acp_session {
-                request.insert(vmux_tool::AcpSessionContext);
+                request.insert(AcpSessionContext);
             }
             if config.acp_terminals {
-                request.insert(vmux_tool::AcpTerminalContext);
+                request.insert(AcpTerminalContext);
             }
         }
         method => {
@@ -266,37 +270,37 @@ fn route_request(mut commands: Commands, requests: PendingRequests, configs: Que
 
 fn finish_tool_errors(
     mut commands: Commands,
-    errors: Query<(Entity, &vmux_tool::ToolDispatchError), Added<vmux_tool::ToolDispatchError>>,
+    errors: Query<(Entity, &ToolDispatchError), Added<ToolDispatchError>>,
 ) {
     for (entity, error) in &errors {
         commands
             .entity(entity)
-            .remove::<vmux_tool::ToolInvocation>()
-            .remove::<vmux_tool::ToolCall>()
-            .remove::<vmux_tool::ToolDispatchError>()
+            .remove::<ToolInvocation>()
+            .remove::<ToolCall>()
+            .remove::<ToolDispatchError>()
             .insert(McpReply::Result(Err(error.message().to_string())));
     }
 }
 
 fn start_list_tools(
     mut commands: Commands,
-    requests: Query<(Entity, &vmux_tool::ToolCatalog), Added<vmux_tool::ToolCatalog>>,
+    requests: Query<(Entity, &ToolCatalog), Added<ToolCatalog>>,
 ) {
     for (entity, request) in &requests {
         let mut definitions = request.0.clone();
         commands
             .entity(entity)
-            .remove::<vmux_tool::ToolCatalogRequest>()
-            .remove::<vmux_tool::ToolCatalog>()
+            .remove::<ToolCatalogRequest>()
+            .remove::<ToolCatalog>()
             .insert(McpExecution::new(async move {
-                if let Ok(connection) = vmux_core::service::ServiceConnection::connect().await
+                if let Ok(connection) = ServiceConnection::connect().await
                     && let Ok(ServiceMessage::AgentCommandsResult {
                         result: Ok(commands),
                         ..
                     }) =
                         agent_query(&connection, AgentRequest::encode(&AgentListCommands)?).await
                 {
-                    definitions = vmux_tool::ToolDefinition::merge_commands(definitions, commands)?;
+                    definitions = ToolDefinition::merge_commands(definitions, commands)?;
                 }
                 Ok(json!({ "tools": definitions }))
             }));
@@ -305,17 +309,14 @@ fn start_list_tools(
 
 fn start_tool_commands(
     mut commands: Commands,
-    requests: Query<
-        (Entity, Option<&ProcessAnchor>, &vmux_tool::ToolCommand),
-        Added<vmux_tool::ToolCommand>,
-    >,
+    requests: Query<(Entity, Option<&ProcessAnchor>, &ToolCommand), Added<ToolCommand>>,
 ) {
     for (entity, anchor, result) in &requests {
         let mut request = commands.entity(entity);
         request
-            .remove::<vmux_tool::ToolInvocation>()
-            .remove::<vmux_tool::ToolCall>()
-            .remove::<vmux_tool::ToolCommand>();
+            .remove::<ToolInvocation>()
+            .remove::<ToolCall>()
+            .remove::<ToolCommand>();
         let command = match result.0.clone() {
             Ok(command) => command,
             Err(message) => {
@@ -332,14 +333,14 @@ fn start_tool_commands(
 
 fn start_tool_queries(
     mut commands: Commands,
-    requests: Query<(Entity, &vmux_tool::ToolQuery), Added<vmux_tool::ToolQuery>>,
+    requests: Query<(Entity, &ToolQuery), Added<ToolQuery>>,
 ) {
     for (entity, result) in &requests {
         let mut request = commands.entity(entity);
         request
-            .remove::<vmux_tool::ToolInvocation>()
-            .remove::<vmux_tool::ToolCall>()
-            .remove::<vmux_tool::ToolQuery>();
+            .remove::<ToolInvocation>()
+            .remove::<ToolCall>()
+            .remove::<ToolQuery>();
         let query = match result.0.clone() {
             Ok(query) => query,
             Err(message) => {
@@ -443,10 +444,10 @@ fn initialize_result(params: &Value) -> Value {
 
 async fn run_agent_command(
     request: AgentRequest,
-    anchor: Option<vmux_api::protocol::ProcessId>,
+    anchor: Option<ProcessId>,
 ) -> Result<Value, String> {
-    let request_id = vmux_api::protocol::AgentRequestId::new();
-    let connection = vmux_core::service::ServiceConnection::connect()
+    let request_id = AgentRequestId::new();
+    let connection = ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
     connection
@@ -479,10 +480,7 @@ async fn run_agent_command(
     }
 }
 
-pub fn command_result_to_mcp_response(
-    result: vmux_api::protocol::AgentCommandResult,
-) -> Result<Value, String> {
-    use vmux_api::protocol::AgentCommandResult;
+pub fn command_result_to_mcp_response(result: AgentCommandResult) -> Result<Value, String> {
     match result {
         AgentCommandResult::Ok => Ok(json!({
             "content": [{"type": "text", "text": "ok"}]
@@ -501,7 +499,7 @@ pub fn command_result_to_mcp_response(
 }
 
 async fn agent_query(
-    connection: &vmux_core::service::ServiceConnection,
+    connection: &ServiceConnection,
     query: AgentRequest,
 ) -> Result<ServiceMessage, String> {
     let request_id = AgentRequestId::new();
@@ -552,7 +550,7 @@ fn query_response_request_id(message: &ServiceMessage) -> Option<AgentRequestId>
 }
 
 async fn run_agent_query(query: AgentRequest) -> Result<Value, String> {
-    let connection = vmux_core::service::ServiceConnection::connect()
+    let connection = ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
     let response = agent_query(&connection, query).await?;

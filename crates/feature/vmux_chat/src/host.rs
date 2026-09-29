@@ -8,11 +8,19 @@ use crate::activity::ActivityIcon;
 use crate::composer::ComposerState;
 use crate::event::{
     CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_HISTORY_PAGE_SIZE, ChatAttachment, ChatBranch,
-    ChatBranchesState, ChatItem, ChatMediaState, ChatResumeState, ChatSnapshot,
+    ChatBranchesState, ChatItem, ChatMediaState, ChatOpenPage, ChatResumeState, ChatSnapshot,
     ChatTranscriptState, ComposerContext, ResumableSessions,
 };
+use crate::state::ChatUiState;
+use vmux_core::chat::group_turns_tail;
+use vmux_core::chat_projection::{activity_counts, current_activity};
+use vmux_core::host::UiState;
+use vmux_core::team::Profile;
+use vmux_core::{PageIcon, PageIdentity};
+use vmux_layout::stack::OpenRequest;
+use vmux_session::{AgentConversationTitle, AgentMessages, AgentRunState, AgentSession};
 
-type ChatUiStateUpdates = vmux_core::host::UiState<crate::state::ChatUiState>;
+type ChatUiStateUpdates = UiState<ChatUiState>;
 
 #[cfg(host)]
 pub struct ChatPlugin;
@@ -26,22 +34,19 @@ impl Plugin for ChatPlugin {
             crate::ChatMediaPlugin,
             crate::composer::ChatComposerPlugin,
         ))
-        .add_plugins(UiEventPlugin::<(crate::event::ChatOpenPage,)>::default())
+        .add_plugins(UiEventPlugin::<(ChatOpenPage,)>::default())
         .add_observer(open_page)
         .add_systems(Update, report_tab_identity);
     }
 }
 
 #[cfg(host)]
-fn open_page(
-    trigger: On<UiInput<crate::event::ChatOpenPage>>,
-    mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
-) {
+fn open_page(trigger: On<UiInput<ChatOpenPage>>, mut requests: MessageWriter<OpenRequest>) {
     let url = trigger.event().payload.url.clone();
     if url.is_empty() {
         return;
     }
-    requests.write(vmux_layout::stack::OpenRequest { url: Some(url) });
+    requests.write(OpenRequest { url: Some(url) });
 }
 
 const TAB_ACTIVITY_TAIL_ITEMS: usize = 1;
@@ -50,20 +55,20 @@ fn report_tab_identity(
     sessions: Query<
         (
             &Children,
-            Option<&vmux_session::AgentConversationTitle>,
-            &vmux_session::AgentMessages,
-            &vmux_session::AgentRunState,
-            Option<&vmux_core::team::Profile>,
-            Option<&vmux_session::AgentSession>,
+            Option<&AgentConversationTitle>,
+            &AgentMessages,
+            &AgentRunState,
+            Option<&Profile>,
+            Option<&AgentSession>,
         ),
         Or<(
-            Changed<vmux_session::AgentConversationTitle>,
-            Changed<vmux_session::AgentMessages>,
-            Changed<vmux_session::AgentRunState>,
-            Changed<vmux_core::team::Profile>,
+            Changed<AgentConversationTitle>,
+            Changed<AgentMessages>,
+            Changed<AgentRunState>,
+            Changed<Profile>,
         )>,
     >,
-    views: Query<Option<&vmux_core::PageIdentity>, With<ChatView>>,
+    views: Query<Option<&PageIdentity>, With<ChatView>>,
     mut commands: Commands,
 ) {
     for (children, title, messages, state, profile, session) in &sessions {
@@ -82,21 +87,14 @@ fn report_tab_identity(
 }
 
 fn tab_activity_icon(
-    messages: &vmux_session::AgentMessages,
-    state: &vmux_session::AgentRunState,
-    profile: Option<&vmux_core::team::Profile>,
-    session: Option<&vmux_session::AgentSession>,
-) -> Option<vmux_core::PageIcon> {
-    let running = matches!(state, vmux_session::AgentRunState::Streaming);
-    let page = vmux_core::chat::group_turns_tail(
-        &[],
-        &messages.0,
-        &[],
-        &[],
-        running,
-        TAB_ACTIVITY_TAIL_ITEMS,
-    );
-    let activity = vmux_core::chat_projection::current_activity(&page.items, state.status())?;
+    messages: &AgentMessages,
+    state: &AgentRunState,
+    profile: Option<&Profile>,
+    session: Option<&AgentSession>,
+) -> Option<PageIcon> {
+    let running = matches!(state, AgentRunState::Streaming);
+    let page = group_turns_tail(&[], &messages.0, &[], &[], running, TAB_ACTIVITY_TAIL_ITEMS);
+    let activity = current_activity(&page.items, state.status())?;
     let provider = session
         .map(|session| session.provider.as_str())
         .unwrap_or_default();
@@ -106,7 +104,7 @@ fn tab_activity_icon(
             .unwrap_or_default(),
         provider,
     );
-    Some(vmux_core::PageIcon::favicon(
+    Some(PageIcon::favicon(
         ActivityIcon::from(activity).favicon(&accent.css),
     ))
 }
@@ -258,7 +256,7 @@ impl ChatTranscriptProjection {
     }
 
     fn refresh_activity(&mut self) {
-        let (subagents, tasks) = vmux_core::chat_projection::activity_counts(&self.state.items);
+        let (subagents, tasks) = activity_counts(&self.state.items);
         self.state.active_subagents = subagents;
         self.state.active_tasks = tasks;
     }

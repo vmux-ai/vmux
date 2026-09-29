@@ -7,17 +7,20 @@ use moonshine_save::prelude::*;
 use moonshine_save::save::EntityFilter;
 use std::path::{Path, PathBuf};
 
+use vmux_core::BuiltinIcon;
 #[cfg(test)]
 use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_core::host::persistence::{
     PersistenceDirty, WorkspaceRestore, WorkspaceSaveRequest, WorkspaceStoreValidators,
     persisted_components,
 };
+use vmux_core::profile::{is_test_session, store_dir};
 #[cfg(test)]
 use vmux_core::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
 use vmux_layout::space::Space;
 #[cfg(test)]
 use vmux_layout::space::SpaceId;
+use vmux_layout::window::host_window_of;
 use vmux_layout::{LayoutPersistenceSet, LayoutStartupSet};
 #[cfg(test)]
 use vmux_layout::{
@@ -137,7 +140,7 @@ impl SpaceSaveEntities<'_, '_> {
                 if self.windows.contains(*entity) {
                     return *entity != primary_window;
                 }
-                vmux_layout::window::host_window_of(*entity, &self.child_of, &self.host_windows)
+                host_window_of(*entity, &self.child_of, &self.host_windows)
                     .is_some_and(|window| window != primary_window)
             })
             .collect()
@@ -151,7 +154,7 @@ struct WorkspaceStorePath(PathBuf);
 
 impl Default for WorkspaceStorePath {
     fn default() -> Self {
-        Self(vmux_core::profile::store_dir().join("store.ron"))
+        Self(store_dir().join("store.ron"))
     }
 }
 
@@ -233,7 +236,7 @@ fn save_space_to_path_excluding(
     excluded: impl IntoIterator<Item = Entity>,
     components: WorldFilter,
 ) {
-    if vmux_core::profile::is_test_session() {
+    if is_test_session() {
         return;
     }
     if let Some(parent) = path.parent() {
@@ -253,7 +256,7 @@ fn load_space_on_startup(
     path: Single<&WorkspaceStorePath>,
     mut commands: Commands,
 ) {
-    if vmux_core::profile::is_test_session() {
+    if is_test_session() {
         restore.complete = true;
         restore.store_present = false;
         return;
@@ -309,7 +312,7 @@ fn normalized_store_icons(body: &str) -> Option<(String, Vec<String>)> {
             normalized.push_str(line);
             continue;
         };
-        if ron::from_str::<vmux_core::BuiltinIcon>(name).is_ok() {
+        if ron::from_str::<BuiltinIcon>(name).is_ok() {
             normalized.push_str(line);
             continue;
         }

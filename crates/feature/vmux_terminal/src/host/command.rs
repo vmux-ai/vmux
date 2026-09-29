@@ -1,10 +1,12 @@
+use vmux_command::CommandInvocation;
+
 #[derive(bevy::prelude::Message)]
 pub(super) struct TerminalCloseRequest;
 
-impl TryFrom<&vmux_command::CommandInvocation> for TerminalCloseRequest {
+impl TryFrom<&CommandInvocation> for TerminalCloseRequest {
     type Error = ();
 
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "terminal_close")
             .then_some(Self)
             .ok_or(())
@@ -14,10 +16,10 @@ impl TryFrom<&vmux_command::CommandInvocation> for TerminalCloseRequest {
 #[derive(bevy::prelude::Message)]
 pub(super) struct TerminalNextRequest;
 
-impl TryFrom<&vmux_command::CommandInvocation> for TerminalNextRequest {
+impl TryFrom<&CommandInvocation> for TerminalNextRequest {
     type Error = ();
 
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "terminal_next").then_some(Self).ok_or(())
     }
 }
@@ -25,10 +27,10 @@ impl TryFrom<&vmux_command::CommandInvocation> for TerminalNextRequest {
 #[derive(bevy::prelude::Message)]
 pub(super) struct TerminalPrevRequest;
 
-impl TryFrom<&vmux_command::CommandInvocation> for TerminalPrevRequest {
+impl TryFrom<&CommandInvocation> for TerminalPrevRequest {
     type Error = ();
 
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "terminal_prev").then_some(Self).ok_or(())
     }
 }
@@ -36,10 +38,10 @@ impl TryFrom<&vmux_command::CommandInvocation> for TerminalPrevRequest {
 #[derive(bevy::prelude::Message)]
 pub(super) struct TerminalClearRequest;
 
-impl TryFrom<&vmux_command::CommandInvocation> for TerminalClearRequest {
+impl TryFrom<&CommandInvocation> for TerminalClearRequest {
     type Error = ();
 
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "terminal_clear")
             .then_some(Self)
             .ok_or(())
@@ -49,10 +51,10 @@ impl TryFrom<&vmux_command::CommandInvocation> for TerminalClearRequest {
 #[derive(bevy::prelude::Message)]
 pub(super) struct CopyModeRequest;
 
-impl TryFrom<&vmux_command::CommandInvocation> for CopyModeRequest {
+impl TryFrom<&CommandInvocation> for CopyModeRequest {
     type Error = ();
 
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "terminal_copy_mode")
             .then_some(Self)
             .ok_or(())

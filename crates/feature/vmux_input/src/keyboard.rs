@@ -10,10 +10,13 @@ use crossbeam_channel::{Receiver, Sender};
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
 use parking_lot::Mutex;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
+use vmux_command::{CommandInvocation, WriteCommandRequests};
 use vmux_core::input::{
     ConsumesNativeKey, NativeKey, NativeKeyCapture, NativeKeyClaimSet, NativeKeyInput,
     NativeKeyInputSet, PassesNativeKey,
 };
+use vmux_core::team::User;
+use vmux_core::{Active, KeyModifiers, WindowFullscreen, WindowFullscreenSet, now_millis};
 
 use crate::{ExitFullscreenShortcut, HideWindowsShortcut, KeyboardContext, KeyboardContextSet};
 
@@ -41,14 +44,14 @@ impl Plugin for KeyboardPlugin {
                 dispatch_keyboard_input
                     .after(sync_keyboard_context)
                     .in_set(NativeKeyInputSet)
-                    .in_set(vmux_command::WriteCommandRequests),
+                    .in_set(WriteCommandRequests),
             )
             .add_systems(
                 Update,
                 sync_application_key_bindings
                     .in_set(NativeKeyClaimSet)
                     .after(KeyboardContextSet)
-                    .after(vmux_core::WindowFullscreenSet),
+                    .after(WindowFullscreenSet),
             )
             .add_systems(
                 Update,
@@ -105,13 +108,13 @@ fn spawn_application_key_bindings(mut commands: Commands) {
         HideWindowsKey,
         NativeKey {
             key: KeyCode::KeyQ,
-            modifiers: vmux_core::KeyModifiers {
+            modifiers: KeyModifiers {
                 super_key: true,
                 ..default()
             },
         },
         ConsumesNativeKey,
-        vmux_core::Active,
+        Active,
     ));
     for shift in [false, true] {
         commands.spawn((
@@ -119,7 +122,7 @@ fn spawn_application_key_bindings(mut commands: Commands) {
             ExitFullscreenKey,
             NativeKey {
                 key: KeyCode::Escape,
-                modifiers: vmux_core::KeyModifiers { shift, ..default() },
+                modifiers: KeyModifiers { shift, ..default() },
             },
             ConsumesNativeKey,
         ));
@@ -303,7 +306,7 @@ fn native_input(event: &NSEvent, native_code: u16, flags: NSEventModifierFlags) 
         repeat: event.isARepeat(),
         captured: false,
         claim: None,
-        pressed_at_ms: vmux_core::now_millis(),
+        pressed_at_ms: now_millis(),
     }
 }
 
@@ -455,7 +458,7 @@ fn sync_keyboard_context(
             Has<ConsumesNativeKey>,
             Has<PassesNativeKey>,
         ),
-        With<vmux_core::Active>,
+        With<Active>,
     >,
 ) {
     let mut context = keyboard.context.lock();
@@ -490,13 +493,13 @@ fn sync_keyboard_context(
 
 fn dispatch_keyboard_input(
     inbox: Single<&KeyboardInbox>,
-    mut invocations: MessageWriter<vmux_command::CommandInvocation>,
+    mut invocations: MessageWriter<CommandInvocation>,
     mut inputs: MessageWriter<NativeKeyInput>,
-    user: Query<Entity, With<vmux_core::team::User>>,
+    user: Query<Entity, With<User>>,
 ) {
     let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
     for command in inbox.commands.try_iter() {
-        invocations.write(vmux_command::CommandInvocation::new(caller, command));
+        invocations.write(CommandInvocation::new(caller, command));
     }
     for input in inbox.inputs.try_iter() {
         inputs.write(input);
@@ -505,8 +508,8 @@ fn dispatch_keyboard_input(
 
 fn sync_application_key_bindings(
     context: Query<&KeyboardContext>,
-    fullscreen: Query<&vmux_core::WindowFullscreen, (With<Window>, With<vmux_core::Active>)>,
-    bindings: Query<(Entity, Has<vmux_core::Active>), With<ExitFullscreenKey>>,
+    fullscreen: Query<&WindowFullscreen, (With<Window>, With<Active>)>,
+    bindings: Query<(Entity, Has<Active>), With<ExitFullscreenKey>>,
     mut commands: Commands,
 ) {
     let page_owns_escape = context
@@ -523,16 +526,16 @@ fn sync_application_key_bindings(
             continue;
         }
         if enabled {
-            commands.entity(entity).insert(vmux_core::Active);
+            commands.entity(entity).insert(Active);
         } else {
-            commands.entity(entity).remove::<vmux_core::Active>();
+            commands.entity(entity).remove::<Active>();
         }
     }
 }
 
 fn publish_application_key_shortcuts(
     mut inputs: MessageReader<NativeKeyInput>,
-    bindings: Query<(Has<ExitFullscreenKey>, Has<HideWindowsKey>), With<vmux_core::Active>>,
+    bindings: Query<(Has<ExitFullscreenKey>, Has<HideWindowsKey>), With<Active>>,
     mut exit_fullscreen: MessageWriter<ExitFullscreenShortcut>,
     mut hide_windows: MessageWriter<HideWindowsShortcut>,
 ) {

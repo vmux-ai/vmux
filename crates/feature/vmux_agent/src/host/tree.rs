@@ -1,11 +1,19 @@
 use bevy::prelude::*;
 use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
-    PageAgentSpawnStackRequest, RestartAgentPty, SpawnAgentInStackRequest,
+    PageAgentSpawnStackRequest, RestartAgentPty, SpawnAgentInStackRequest, SwapStackSession,
 };
 use vmux_core::browser::{
     BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
     BrowserSnapshotRequest, BrowserSnapshotResponse,
+};
+use vmux_core::host::persistence::WorkspaceStoreValidator;
+use vmux_core::notify::{AgentAttention, BellReceived, OsNotify};
+use vmux_core::{HostSpawnRoute, PageOpenRequest};
+use vmux_simulator::{
+    SimulatorButtonPressRequest, SimulatorControlResponse, SimulatorKeyPressRequest,
+    SimulatorScreenshotRequest, SimulatorScreenshotResponse, SimulatorSwipeRequest,
+    SimulatorTapRequest, SimulatorTypeTextRequest,
 };
 use vmux_terminal::TerminalStackSpawnRequest;
 
@@ -89,14 +97,14 @@ impl Plugin for AgentSessionPlugin {
         .add_message::<RecordStartResponse>()
         .add_message::<RecordStopRequest>()
         .add_message::<RecordStopResponse>()
-        .add_message::<vmux_simulator::SimulatorTapRequest>()
-        .add_message::<vmux_simulator::SimulatorSwipeRequest>()
-        .add_message::<vmux_simulator::SimulatorTypeTextRequest>()
-        .add_message::<vmux_simulator::SimulatorKeyPressRequest>()
-        .add_message::<vmux_simulator::SimulatorButtonPressRequest>()
-        .add_message::<vmux_simulator::SimulatorControlResponse>()
-        .add_message::<vmux_simulator::SimulatorScreenshotRequest>()
-        .add_message::<vmux_simulator::SimulatorScreenshotResponse>()
+        .add_message::<SimulatorTapRequest>()
+        .add_message::<SimulatorSwipeRequest>()
+        .add_message::<SimulatorTypeTextRequest>()
+        .add_message::<SimulatorKeyPressRequest>()
+        .add_message::<SimulatorButtonPressRequest>()
+        .add_message::<SimulatorControlResponse>()
+        .add_message::<SimulatorScreenshotRequest>()
+        .add_message::<SimulatorScreenshotResponse>()
         .add_message::<AgentToolCallRequest>()
         .add_message::<SpawnAgentInStackRequest>()
         .add_message::<PageAgentAttachRequest>()
@@ -105,18 +113,18 @@ impl Plugin for AgentSessionPlugin {
         .add_message::<PageAgentAttachDefaultRequest>()
         .add_message::<TerminalStackSpawnRequest>()
         .add_message::<RestartAgentPty>()
-        .add_message::<vmux_core::agent::SwapStackSession>()
-        .add_message::<vmux_core::notify::BellReceived>()
-        .add_message::<vmux_core::notify::AgentAttention>()
-        .add_message::<vmux_core::notify::OsNotify>()
-        .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>();
+        .add_message::<SwapStackSession>()
+        .add_message::<BellReceived>()
+        .add_message::<AgentAttention>()
+        .add_message::<OsNotify>()
+        .init_resource::<bevy::ecs::message::Messages<PageOpenRequest>>();
     }
 }
 
 fn spawn_agent_store_validator(mut commands: Commands) {
     commands.spawn((
         Name::new("Agent workspace-store validator"),
-        vmux_core::host::persistence::WorkspaceStoreValidator {
+        WorkspaceStoreValidator {
             name: "agent URL",
             rejects: crate::AgentUrl::rejects_persisted_store,
         },
@@ -130,7 +138,7 @@ fn spawn_agent_strategies(mut commands: Commands) {
 }
 
 fn register_agent_session_route(mut commands: Commands) {
-    commands.spawn(vmux_core::HostSpawnRoute::subtree("vmux://sessions/"));
+    commands.spawn(HostSpawnRoute::subtree("vmux://sessions/"));
 }
 
 #[cfg(test)]

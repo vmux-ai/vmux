@@ -4,17 +4,27 @@ use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use crate::event::AgentRequestInput;
 use crate::runtime::acp::{AcpModeState, AcpModelState};
 use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
+use vmux_api::command_bar::{AgentModels, AgentModes};
 use vmux_api::protocol::{
-    AgentCommandResult, AgentListModels, AgentSelectModel, AgentSetEffort, ClientMessage,
+    AcpModeOption, AgentCommandResult, AgentListModels, AgentSelectModel, AgentSetEffort,
+    ClientMessage,
 };
 use vmux_api::room::RemoteModelState;
 use vmux_chat::event::{
     ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort, SlashCommand,
     SlashCommandEntry, SlashCommands,
 };
+use vmux_chat::state::ChatUiState;
 use vmux_command::event::{StartSelectMode, StartSelectModel};
-use vmux_core::service::ServiceRequest;
+use vmux_command::snapshot::{AgentPromptTarget, CommandBarProjection};
+use vmux_core::agent::{default_effort, effort_levels};
+use vmux_core::host::UiStateWrite;
+use vmux_core::profile::profile_dir;
+use vmux_core::service::{ServiceMessageSet, ServiceRequest};
+use vmux_layout::Browser;
+use vmux_path::AtomicFile;
 use vmux_session::AcpSession;
+use vmux_setting::{AppSettings, SettingsWriteRequest};
 
 pub(super) struct ChatModelPlugin;
 
@@ -45,7 +55,7 @@ impl Plugin for ChatModelPlugin {
             .add_systems(
                 Update,
                 (
-                    answer_remote_model_commands.after(vmux_core::service::ServiceMessageSet),
+                    answer_remote_model_commands.after(ServiceMessageSet),
                     seed_cli_model_lists,
                     apply_model_selection,
                     apply_mode_selection,
@@ -85,7 +95,7 @@ struct EffortSetRequest {
 fn answer_remote_model_commands(
     mut reader: MessageReader<AgentRequestInput>,
     sessions: Query<(&AcpSession, &AcpModelState)>,
-    settings: Res<vmux_setting::AppSettings>,
+    settings: Res<AppSettings>,
     mut selects: MessageWriter<ModelSelectRequest>,
     mut efforts: MessageWriter<EffortSetRequest>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -139,7 +149,7 @@ fn answer_remote_model_commands(
 fn remote_model_state(
     sid: &str,
     sessions: &Query<(&AcpSession, &AcpModelState)>,
-    settings: &vmux_setting::AppSettings,
+    settings: &AppSettings,
 ) -> Option<RemoteModelState> {
     let (session, model_state) = sessions.iter().find(|(session, _)| session.sid == sid)?;
     let mut models = Vec::new();
@@ -151,7 +161,7 @@ fn remote_model_state(
         });
     }
     let mut effort_levels = Vec::new();
-    for level in vmux_core::agent::effort_levels(&session.agent_id) {
+    for level in effort_levels(&session.agent_id) {
         effort_levels.push((*level).to_string());
     }
     Some(RemoteModelState {
@@ -251,7 +261,7 @@ struct AgentModeMemory {
     url: String,
     selected: String,
     #[serde(default)]
-    modes: Vec<vmux_api::protocol::AcpModeOption>,
+    modes: Vec<AcpModeOption>,
 }
 
 struct AgentSelectionKey;
@@ -265,7 +275,7 @@ impl AgentSelectionKey {
     }
 
     fn acp_url(agent_id: &str) -> String {
-        vmux_command::snapshot::AgentPromptTarget::Acp {
+        AgentPromptTarget::Acp {
             id: Self::normalize(agent_id).to_string(),
         }
         .url()
@@ -293,11 +303,11 @@ impl SavedAgentModel {
 }
 
 fn agent_model_selections_path() -> std::path::PathBuf {
-    vmux_core::profile::profile_dir().join("agent-models.json")
+    profile_dir().join("agent-models.json")
 }
 
 fn agent_mode_selections_path() -> std::path::PathBuf {
-    vmux_core::profile::profile_dir().join("agent-modes.json")
+    profile_dir().join("agent-modes.json")
 }
 
 fn spawn_agent_model_registry(mut commands: Commands) {
@@ -355,7 +365,7 @@ fn save_agent_model_selections(mut models: Single<&mut AgentModelSelections>) {
     let Ok(bytes) = serde_json::to_vec_pretty(&models.by_agent) else {
         return;
     };
-    if vmux_path::AtomicFile::write(&path, &bytes).is_ok() {
+    if AtomicFile::write(&path, &bytes).is_ok() {
         models.dirty = false;
     }
 }
@@ -368,7 +378,7 @@ fn save_agent_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
     let Ok(bytes) = serde_json::to_vec_pretty(&modes.by_agent) else {
         return;
     };
-    if vmux_path::AtomicFile::write(&path, &bytes).is_ok() {
+    if AtomicFile::write(&path, &bytes).is_ok() {
         modes.dirty = false;
     }
 }
@@ -389,7 +399,7 @@ impl ModelProjection {
         model: Option<&AcpModelState>,
         cross_runtime: bool,
         agent_key: &str,
-        settings: Option<&vmux_setting::AppSettings>,
+        settings: Option<&AppSettings>,
     ) -> Self {
         let mut state = match model {
             Some(model) => ModelState {
@@ -406,8 +416,8 @@ impl ModelProjection {
             .and_then(|settings| settings.agent.effort_for(agent_key))
             .unwrap_or("")
             .to_string();
-        state.effort_default = vmux_core::agent::default_effort(agent_key).to_string();
-        state.effort_levels = vmux_core::agent::effort_levels(agent_key)
+        state.effort_default = default_effort(agent_key).to_string();
+        state.effort_levels = effort_levels(agent_key)
             .iter()
             .map(|level| level.to_string())
             .collect();
@@ -507,7 +517,7 @@ fn seed_cli_model_lists(
         }
         let kind = strategy.kind;
         let agent_key = format!("cli:{}", kind.as_url_segment());
-        let url = vmux_command::snapshot::AgentPromptTarget::Cli(kind).url();
+        let url = AgentPromptTarget::Cli(kind).url();
         selections.remember_catalog(&agent_key, &url, &catalog.selected, &catalog.models);
     }
 }
@@ -541,7 +551,7 @@ fn remember_acp_mode_lists(
 
 fn publish_agent_models(
     last_used: Single<Ref<AgentModelSelections>>,
-    mut state: Single<&mut vmux_command::snapshot::CommandBarProjection>,
+    mut state: Single<&mut CommandBarProjection>,
 ) {
     if !last_used.is_changed() {
         return;
@@ -551,7 +561,7 @@ fn publish_agent_models(
         if memory.url.is_empty() || memory.models.is_empty() {
             continue;
         }
-        next.push(vmux_api::command_bar::AgentModels {
+        next.push(AgentModels {
             agent_key: agent_key.clone(),
             url: memory.url.clone(),
             selected: memory.selected.clone(),
@@ -565,7 +575,7 @@ fn publish_agent_models(
 
 fn publish_agent_modes(
     last_used: Single<Ref<AgentModeSelections>>,
-    mut state: Single<&mut vmux_command::snapshot::CommandBarProjection>,
+    mut state: Single<&mut CommandBarProjection>,
 ) {
     if !last_used.is_changed() {
         return;
@@ -575,7 +585,7 @@ fn publish_agent_modes(
         if memory.url.is_empty() || memory.modes.is_empty() {
             continue;
         }
-        next.push(vmux_api::command_bar::AgentModes {
+        next.push(AgentModes {
             agent_key: agent_key.clone(),
             url: memory.url.clone(),
             selected: memory.selected.clone(),
@@ -590,8 +600,8 @@ fn publish_agent_modes(
 fn push_acp_model_state_to_page(
     sessions: Query<(Entity, &AcpSession, &AcpModelState), Changed<AcpModelState>>,
     children: Query<&Children>,
-    is_browser: Query<(), With<vmux_layout::Browser>>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
+    is_browser: Query<(), With<Browser>>,
+    settings: Option<Res<AppSettings>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -622,8 +632,8 @@ fn push_removed_acp_model_state_to_page(
     mut removed: RemovedComponents<AcpModelState>,
     sessions: Query<&AcpSession>,
     children: Query<&Children>,
-    is_browser: Query<(), With<vmux_layout::Browser>>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
+    is_browser: Query<(), With<Browser>>,
+    settings: Option<Res<AppSettings>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -651,7 +661,7 @@ fn push_removed_acp_model_state_to_page(
 fn push_acp_mode_state_to_page(
     sessions: Query<(Entity, &AcpModeState), Changed<AcpModeState>>,
     children: Query<&Children>,
-    is_browser: Query<(), With<vmux_layout::Browser>>,
+    is_browser: Query<(), With<Browser>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -675,7 +685,7 @@ fn push_acp_mode_state_to_page(
 fn push_removed_acp_mode_state_to_page(
     mut removed: RemovedComponents<AcpModeState>,
     children: Query<&Children>,
-    is_browser: Query<(), With<vmux_layout::Browser>>,
+    is_browser: Query<(), With<Browser>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -693,27 +703,21 @@ fn push_removed_acp_mode_state_to_page(
 }
 
 fn write_model_projection(webview: Entity, projection: ModelProjection, commands: &mut Commands) {
-    commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
-            webview,
-            &projection.state,
-        ),
-    );
-    commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
-            webview,
-            &projection.slash_commands,
-        ),
-    );
+    commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+        webview,
+        &projection.state,
+    ));
+    commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+        webview,
+        &projection.slash_commands,
+    ));
 }
 
 fn write_mode_projection(webview: Entity, projection: ModeProjection, commands: &mut Commands) {
-    commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
-            webview,
-            &projection.0,
-        ),
-    );
+    commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+        webview,
+        &projection.0,
+    ));
 }
 
 fn on_select_model(
@@ -799,15 +803,15 @@ fn on_set_agent_effort(
 
 fn apply_effort_setting(
     mut reader: MessageReader<EffortSetRequest>,
-    mut settings: ResMut<vmux_setting::AppSettings>,
-    mut writes: MessageWriter<vmux_setting::SettingsWriteRequest>,
+    mut settings: ResMut<AppSettings>,
+    mut writes: MessageWriter<SettingsWriteRequest>,
 ) {
     for request in reader.read() {
         let (agent_key, level) = (request.agent_key.as_str(), request.level.as_str());
         if agent_key.is_empty() {
             continue;
         }
-        if !level.is_empty() && !vmux_core::agent::effort_levels(agent_key).contains(&level) {
+        if !level.is_empty() && !effort_levels(agent_key).contains(&level) {
             continue;
         }
         let mut effort = settings.agent.effort.clone();
@@ -829,7 +833,7 @@ fn apply_effort_setting(
         };
         match settings.apply_update("agent.effort", value) {
             Ok(ron_bytes) => {
-                writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
+                writes.write(SettingsWriteRequest { ron_bytes });
             }
             Err(error) => bevy::log::warn!("effort: persist for {agent_key} failed: {error}"),
         }
@@ -985,7 +989,7 @@ impl AgentModeSelections {
         agent_id: &str,
         url: &str,
         selected: &str,
-        modes: &[vmux_api::protocol::AcpModeOption],
+        modes: &[AcpModeOption],
     ) {
         if modes.is_empty() {
             return;
