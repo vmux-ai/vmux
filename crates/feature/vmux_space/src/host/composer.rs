@@ -80,7 +80,7 @@ impl ComposerProjection<'_, '_> {
         } else {
             self.repo_info
                 .as_mut()
-                .and_then(|cache| cache.bypass_change_detection().get(&input.cwd))
+                .and_then(|cache| cache.bypass_change_detection().lookup(&input.cwd))
         };
         Some(input.context(info.as_ref()))
     }

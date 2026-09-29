@@ -19,6 +19,7 @@ impl Plugin for WatchPlugin {
                 Update,
                 (
                     drain_git_watch,
+                    start_repo_info_loads,
                     poll_repo_info_cache,
                     sync_repo_info_watches,
                 )
@@ -137,9 +138,8 @@ pub struct RepoInfoCache {
 }
 
 impl RepoInfoCache {
-    pub fn get(&mut self, path: &Path) -> Option<super::worktree::RepoInfo> {
+    pub fn lookup(&mut self, path: &Path) -> Option<super::worktree::RepoInfo> {
         let path = self.canonical_path(path);
-        let wake = self.wake.clone();
         let entry = self
             .entries
             .entry(path.clone())
@@ -153,7 +153,6 @@ impl RepoInfoCache {
                 ignore_events_until: None,
             });
         entry.idle_syncs = 0;
-        Self::poll_and_refresh(&path, entry, wake);
         entry.info.clone()
     }
 
@@ -178,53 +177,6 @@ impl RepoInfoCache {
         self.guessed.remove(path);
         self.canonical.insert(path.to_path_buf(), resolved.clone());
         resolved
-    }
-
-    fn poll_and_refresh(
-        path: &Path,
-        entry: &mut RepoInfoCacheEntry,
-        wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
-    ) -> bool {
-        let mut changed = false;
-        if let Some(task) = entry.pending.as_mut()
-            && let Some(info) = future::block_on(future::poll_once(task))
-        {
-            changed = entry.info != info;
-            entry.info = info;
-            entry.loaded = true;
-            entry.watched = false;
-            entry.idle_syncs = 0;
-            entry.pending = None;
-            entry.ignore_events_until = Some(Instant::now() + Duration::from_millis(500));
-        }
-        if entry.pending.is_none() && (entry.dirty || !entry.loaded) {
-            entry.dirty = false;
-            let path = path.to_path_buf();
-            let delay = entry
-                .ignore_events_until
-                .and_then(|deadline| deadline.checked_duration_since(Instant::now()))
-                .unwrap_or_default();
-            entry.pending = Some(IoTaskPool::get().spawn(async move {
-                if !delay.is_zero() {
-                    std::thread::sleep(delay);
-                }
-                let info = super::worktree::repo_info(&path);
-                if let Some(wake) = wake {
-                    let _ = wake.send_event(WinitUserEvent::WakeUp);
-                }
-                info
-            }));
-        }
-        changed
-    }
-
-    fn poll(&mut self) -> bool {
-        let wake = self.wake.clone();
-        let mut changed = false;
-        for (path, entry) in &mut self.entries {
-            changed |= Self::poll_and_refresh(path, entry, wake.clone());
-        }
-        changed
     }
 
     fn invalidate(&mut self, path: &Path) {
@@ -617,8 +569,54 @@ fn drain_git_watch(
     }
 }
 
+fn start_repo_info_loads(mut repo_info: Single<&mut RepoInfoCache>) {
+    let repo_info = repo_info.bypass_change_detection();
+    let wake = repo_info.wake.clone();
+    for (path, entry) in &mut repo_info.entries {
+        if entry.pending.is_some() || (!entry.dirty && entry.loaded) {
+            continue;
+        }
+        entry.dirty = false;
+        let path = path.clone();
+        let wake = wake.clone();
+        let delay = entry
+            .ignore_events_until
+            .and_then(|deadline| deadline.checked_duration_since(Instant::now()))
+            .unwrap_or_default();
+        entry.pending = Some(IoTaskPool::get().spawn(async move {
+            if !delay.is_zero() {
+                std::thread::sleep(delay);
+            }
+            let info = super::worktree::repo_info(&path);
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            info
+        }));
+    }
+}
+
 fn poll_repo_info_cache(mut repo_info: Single<&mut RepoInfoCache>) {
-    let changed = repo_info.bypass_change_detection().poll();
+    let changed = {
+        let repo_info = repo_info.bypass_change_detection();
+        let mut changed = false;
+        for entry in repo_info.entries.values_mut() {
+            let Some(task) = entry.pending.as_mut() else {
+                continue;
+            };
+            let Some(info) = future::block_on(future::poll_once(task)) else {
+                continue;
+            };
+            changed |= entry.info != info;
+            entry.info = info;
+            entry.loaded = true;
+            entry.watched = false;
+            entry.idle_syncs = 0;
+            entry.pending = None;
+            entry.ignore_events_until = Some(Instant::now() + Duration::from_millis(500));
+        }
+        changed
+    };
     if changed {
         repo_info.set_changed();
     }
@@ -810,9 +808,9 @@ mod tests {
         assert!(watch.subscribe_repo_info(&active_path, Some(&active_info)));
         assert!(watch.subscribe_repo_info(&stale_path, Some(&stale_info)));
 
-        assert!(cache.get(&active_path).is_some());
+        assert!(cache.lookup(&active_path).is_some());
         watch.evict_inactive_repo_info(&mut cache);
-        assert!(cache.get(&active_path).is_some());
+        assert!(cache.lookup(&active_path).is_some());
         watch.evict_inactive_repo_info(&mut cache);
 
         assert!(cache.entries.contains_key(&active_path));
@@ -911,15 +909,27 @@ mod tests {
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         let path = canonical(repo.path());
-        let mut cache = RepoInfoCache {
+        let cache = RepoInfoCache {
             entries: HashMap::new(),
             canonical: HashMap::new(),
             guessed: HashMap::new(),
             wake: None,
         };
-        let wait_for = |cache: &mut RepoInfoCache, expected| {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_systems(
+            Update,
+            (start_repo_info_loads, poll_repo_info_cache).chain(),
+        );
+        let cache = app.world_mut().spawn(cache).id();
+        let wait_for = |app: &mut App, expected| {
             for _ in 0..500 {
-                if let Some(info) = cache.get(&path)
+                let info = app
+                    .world_mut()
+                    .get_mut::<RepoInfoCache>(cache)
+                    .unwrap()
+                    .lookup(&path);
+                app.update();
+                if let Some(info) = info
                     && info.uncommitted == expected
                 {
                     return info;
@@ -929,11 +939,22 @@ mod tests {
             panic!("repo info did not reach uncommitted={expected}");
         };
 
-        assert_eq!(wait_for(&mut cache, 0).uncommitted, 0);
+        assert_eq!(wait_for(&mut app, 0).uncommitted, 0);
         test_repo::write(repo.path(), "a.txt", "two\n");
-        assert_eq!(cache.get(&path).unwrap().uncommitted, 0);
-        cache.invalidate(&path);
-        assert_eq!(wait_for(&mut cache, 1).uncommitted, 1);
+        assert_eq!(
+            app.world_mut()
+                .get_mut::<RepoInfoCache>(cache)
+                .unwrap()
+                .lookup(&path)
+                .unwrap()
+                .uncommitted,
+            0
+        );
+        app.world_mut()
+            .get_mut::<RepoInfoCache>(cache)
+            .unwrap()
+            .invalidate(&path);
+        assert_eq!(wait_for(&mut app, 1).uncommitted, 1);
     }
 
     #[test]
@@ -946,7 +967,7 @@ mod tests {
         let path = canonical(repo.path());
         let stale = super::super::worktree::repo_info(&path);
         test_repo::write(repo.path(), "a.txt", "two\n");
-        let mut cache = RepoInfoCache {
+        let cache = RepoInfoCache {
             canonical: HashMap::new(),
             guessed: HashMap::new(),
             entries: HashMap::from([(
@@ -963,10 +984,25 @@ mod tests {
             )]),
             wake: None,
         };
-
-        cache.invalidate(&path);
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_systems(
+            Update,
+            (start_repo_info_loads, poll_repo_info_cache).chain(),
+        );
+        let cache = app.world_mut().spawn(cache).id();
+        app.world_mut()
+            .get_mut::<RepoInfoCache>(cache)
+            .unwrap()
+            .invalidate(&path);
         for _ in 0..500 {
-            if cache.get(&path).is_some_and(|info| info.uncommitted == 1) {
+            app.update();
+            if app
+                .world_mut()
+                .get_mut::<RepoInfoCache>(cache)
+                .unwrap()
+                .lookup(&path)
+                .is_some_and(|info| info.uncommitted == 1)
+            {
                 return;
             }
             std::thread::sleep(Duration::from_millis(10));

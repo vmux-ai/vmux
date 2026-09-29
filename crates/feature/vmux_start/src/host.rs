@@ -524,7 +524,7 @@ fn sync_live_start_pages(
             repo_info.as_mut().and_then(|cache| {
                 cache
                     .bypass_change_detection()
-                    .get(std::path::Path::new(&cwd))
+                    .lookup(std::path::Path::new(&cwd))
             })
         })
         .flatten();
