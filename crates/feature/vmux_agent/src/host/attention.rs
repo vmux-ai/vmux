@@ -36,7 +36,7 @@ impl Plugin for AttentionPlugin {
             (mark_agent_done, clear_agent_done)
                 .chain()
                 .after(ComputeFocusSet)
-                .after(crate::tidy::TidySet),
+                .after(super::tidy::TidySet),
         );
     }
 }

@@ -8,17 +8,17 @@ use bevy_cef::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::event::*;
 
+use super::directory::list_dir;
 use super::editor::{Editor, FileView, ParkedEdits};
 use super::explorer::OutlineDirty;
 use super::explorer::{
     ExplorerPanelSent, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty, OpenEditorsDirty,
 };
 use super::keymap::KeymapConfig;
+use super::media::FileMedia;
 use super::note::NoteSent;
 use super::status::{FileInitialMetaSent, FileKeymapSent, FileThemeSent, FileViewModeSent};
-use crate::directory::list_dir;
 use crate::edit::{EditCore, highlight_cache::HighlightCache};
-use crate::media::FileMedia;
 
 pub(super) struct FileLifecyclePlugin;
 

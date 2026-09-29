@@ -31,4 +31,20 @@ pub use vmux_macro::service_message;
 #[cfg(host)]
 pub mod host;
 #[cfg(host)]
-pub use host::*;
+pub use host::{
+    ActivateRequest, Active, AgentAttention, AgentDoneUnseen, AgentWorkingDir, ArchivedPage,
+    ArchivedPagePosition, ArchivedTabPage, Bookmark, BookmarkOrder, CefPageAttachRequest,
+    Collapsed, ComputeFocusSet, ContributedCommandChosen, CorePlugin, CreatedAt,
+    EffectiveStartupUrl, EntityTarget, FileUiStateUpdates, FileUiStateWrite, Folder, HostShell,
+    HostSpawnRoute, HostsLauncher, InlineTransitionRequested, JsonArguments, KeyboardOwner,
+    LastActivatedAt, LastVisitedAt, LauncherDismissRequest, Order, OsNotify, OverlayShownInline,
+    OverlayState, OverlayStateQuery, PageArchiveRequest, PageOpenDeferred, PageOpenError,
+    PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask,
+    PaneStep, PendingPrompt, PendingPromptAttachments, Pin, ProcessAnchor, Ready,
+    RegistrationOrder, RendersLauncherPanel, RestoreKeyboardToStack, SplitAxis, StackCommandSet,
+    StackInPaneChosen, TabCommandSet, TransitionType, UiState, UiStatePlugin, UiStateWrite, Url,
+    Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen, WindowFullscreenSet, WindowOverlay,
+    agent, archive, browser, component, file_ui_state, host_spawn, launcher, manifest, notify,
+    now_millis, overlay, page, page_open, persistence, plugin, profile, team, terminal, ui_state,
+    wake, workspace,
+};

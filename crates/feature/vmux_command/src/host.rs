@@ -30,5 +30,12 @@ pub use payload::{
     command_list,
 };
 pub use settings::ResolvedLocale;
-pub use snapshot::*;
+pub use snapshot::{
+    AgentPromptTarget, AgentProviderSummary, AgentStrategySummary, ClaimedUrl, ClaimedUrls,
+    CommandBarAgentModels, CommandBarAgentModes, CommandBarAgentsSnapshot, CommandBarPagesSnapshot,
+    CommandBarProjectRoots, CommandBarProjection, CommandBarSpacesSnapshot,
+    CommandBarTerminalsSnapshot, CommandBarUiStateUpdates, CommandBarWorkSnapshot,
+    CommandBarWorkspaceSnapshot, ContributedCommand, ContributedPage, ContributedPages,
+    RegisteredPage, SpaceSummary, UiStatePlugin, WriteCommandBarSnapshots,
+};
 pub use tool::CommandToolPlugin;

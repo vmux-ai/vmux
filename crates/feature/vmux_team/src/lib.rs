@@ -6,7 +6,7 @@ pub mod ui;
 #[cfg(host)]
 mod host;
 #[cfg(host)]
-pub use host::*;
+pub use host::{ProfileSwitchRequested, TeamPlugin};
 
 mod projection;
 pub mod roster;

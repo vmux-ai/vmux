@@ -5,6 +5,7 @@ use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_core::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen};
 
+use super::media::FileMedia;
 use crate::edit::Selection;
 use crate::host::editor::{
     Editor, FileDocumentRevision, FileNavigateRequest, FileView, ParkedEdit, ParkedEdits,
@@ -14,7 +15,6 @@ use crate::host::note::NoteRevealLine;
 use crate::host::note::NoteSent;
 use crate::host::status::FileInitialMetaSent;
 use crate::host::viewport::{CursorRenderRequest, FileViewport, ViewportRenderRequest};
-use crate::media::FileMedia;
 
 pub(crate) struct NavigationPlugin;
 

@@ -1,6 +1,12 @@
 pub mod component;
 pub mod plugin;
-pub use component::*;
+pub use component::{
+    ActivateRequest, Active, AgentWorkingDir, Bookmark, BookmarkOrder, Collapsed, CreatedAt,
+    EffectiveStartupUrl, EntityTarget, Folder, HostShell, JsonArguments, KeyboardOwner,
+    LastActivatedAt, LastVisitedAt, Order, Pin, ProcessAnchor, Ready, RegistrationOrder,
+    TransitionType, Url, Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen,
+    WindowFullscreenSet, now_millis,
+};
 pub use plugin::CorePlugin;
 
 pub mod agent;

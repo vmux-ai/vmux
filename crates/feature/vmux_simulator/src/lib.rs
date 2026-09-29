@@ -7,4 +7,10 @@ pub mod ui;
 #[cfg(host)]
 mod host;
 #[cfg(host)]
-pub use host::*;
+pub use host::{
+    Axe, HardwareButtonRequest, SimulatorButtonPressRequest, SimulatorClipboardRequest,
+    SimulatorControlResponse, SimulatorDevice, SimulatorFocusSet, SimulatorInputSet,
+    SimulatorKeyPressRequest, SimulatorPlugin, SimulatorScreenshot, SimulatorScreenshotRequest,
+    SimulatorScreenshotResponse, SimulatorSoftwareKeyboardRequest, SimulatorSwipeRequest,
+    SimulatorTapRequest, SimulatorToolPlugin, SimulatorTypeTextRequest,
+};

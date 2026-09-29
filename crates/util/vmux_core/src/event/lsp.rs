@@ -3,8 +3,16 @@ mod ui;
 
 use super::FileLine;
 
-pub use host::*;
-pub use ui::*;
+pub use host::{
+    FileCodeActions, FileDiagnostics, FileEditFailure, FileHover, FileLspStatus, FilePanelContent,
+    FilePanelFocus, FilePanelFocusTarget, FilePanelState, FileRenamePrompt, LspCatalog,
+    LspInstallProgress, LspManagerUiState, LspPackageStatus,
+};
+pub use ui::{
+    FileCodeActionPick, FileCompletionRequest, FileDefinitionRequest, FileHoverRequest,
+    FilePanelPick, FileReferencesRequest, FileRenameRequest, LspCatalogRequest, LspInstallRequest,
+    LspUninstallRequest, LspUpdateRequest,
+};
 
 #[vmux_api::contract(Copy, Eq)]
 pub enum DiagSeverity {

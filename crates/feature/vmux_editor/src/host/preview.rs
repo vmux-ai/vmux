@@ -2,7 +2,7 @@ use std::path::Path;
 
 use vmux_core::event::{FileLine, PreviewKind};
 
-use crate::directory::list_dir;
+use super::directory::list_dir;
 use crate::highlight::{Highlighter, LoadError};
 
 pub const IMAGE_BYTES_CAP: u64 = 25 * 1024 * 1024;

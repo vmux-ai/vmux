@@ -196,7 +196,7 @@ mod tests {
 
     use super::super::explorer::{ExplorerState, TabsPlugin};
     use super::super::file_lifecycle::FileDir;
-    use crate::navigation::NavigationPlugin;
+    use crate::host::navigation::NavigationPlugin;
 
     fn app() -> App {
         let mut app = App::new();

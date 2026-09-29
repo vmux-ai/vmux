@@ -1018,7 +1018,7 @@ fn apply_viewport_updates(
         }
         let mut patch = update.patch.clone();
         for (_, line) in patch.changed_lines.iter_mut() {
-            crate::link::annotate_links(line, None);
+            super::link::annotate_links(line, None);
         }
         commands.trigger(UiStateWrite::<TerminalUiState>::from_event(entity, &patch));
     }

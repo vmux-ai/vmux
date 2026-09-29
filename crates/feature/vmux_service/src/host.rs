@@ -21,6 +21,6 @@ pub mod sm_app_service;
 pub mod supervisor;
 
 mod daemon;
-pub use daemon::*;
+pub use daemon::{DaemonBinary, DaemonIdentity};
 pub use launch_agent::LaunchAgent;
 pub use vmux_core::service::{RemotePaths, ServicePaths};

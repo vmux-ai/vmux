@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 
+use super::wrap::WrapView;
 use crate::host::edit::EditCore;
 use crate::host::edit::highlight_cache::HighlightCache;
 use crate::host::viewport::FileViewport;
-use crate::wrap::WrapView;
 
 #[derive(Component, Clone, Debug)]
 #[require(

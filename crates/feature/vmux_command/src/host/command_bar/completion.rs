@@ -69,7 +69,7 @@ fn on_path_complete_request(
         ProjectQuery::include(&mut wanted, &request.roots);
     }
     ProjectQuery::include(&mut wanted, &roots);
-    index.warm(&wanted, proxy.as_deref());
+    index.sync(&wanted, proxy.as_deref());
     let bias = RankBias::new(
         ProjectQuery::favoured(
             projects.active.as_deref(),
@@ -122,7 +122,7 @@ fn warm_project_index(
     if roots.is_empty() {
         return;
     }
-    index.warm(&roots, proxy.as_deref());
+    index.sync(&roots, proxy.as_deref());
 }
 
 fn answer_settled_project_index(
@@ -143,7 +143,7 @@ fn answer_settled_project_index(
     for (_, request) in pending.iter() {
         ProjectQuery::include(&mut wanted, &request.roots);
     }
-    index.warm(&wanted, proxy.as_deref());
+    index.sync(&wanted, proxy.as_deref());
     let bias = RankBias::new(
         ProjectQuery::favoured(
             projects.active.as_deref(),

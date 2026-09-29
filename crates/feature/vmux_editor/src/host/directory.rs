@@ -197,7 +197,7 @@ fn publish_directory(
             });
         }
         for entry in &state.entries {
-            if entry.is_dir || !crate::preview::is_image_path(Path::new(&entry.path)) {
+            if entry.is_dir || !super::preview::is_image_path(Path::new(&entry.path)) {
                 continue;
             }
             commands.trigger(FilePreviewLoad {

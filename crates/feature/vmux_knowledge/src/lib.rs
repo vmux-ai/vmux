@@ -5,6 +5,6 @@ pub mod store;
 #[cfg(host)]
 mod tool;
 #[cfg(host)]
-pub use host::*;
+pub use host::{ExpandedKnowledgeDirs, KnowledgePlugin};
 #[cfg(host)]
 pub use tool::KnowledgeToolPlugin;

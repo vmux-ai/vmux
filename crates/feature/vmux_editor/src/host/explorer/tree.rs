@@ -10,7 +10,7 @@ use super::{
     ExplorerPanelDefaults, ExplorerState, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty,
     ExplorerTreeUsers, IDLE_TREE_CAPACITY, RevealCurrent, UsesExplorerTree,
 };
-use crate::directory::{list_dir, project_root};
+use crate::host::directory::{list_dir, project_root};
 use crate::host::editor::FileView;
 
 #[derive(Component)]

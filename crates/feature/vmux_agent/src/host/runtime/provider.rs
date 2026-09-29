@@ -1,13 +1,13 @@
 use bevy::prelude::*;
 
 use crate::AgentVariant;
-use crate::approval;
 use crate::event::{AgentApprovalRequest, AgentDelta};
 use crate::event::{
     UiAgentApprovalResolved, UiAgentAwaitingApproval, UiAgentDelta, UiAgentRunStatus,
     UiAgentSnapshot,
 };
 use crate::handoff::{ImportedConversation, PendingHandoff, sanitize_replayed_messages};
+use crate::host::approval;
 use crate::run_state_kind::LastRunStateKind;
 use crate::toast::ToastPlugin;
 use vmux_api::protocol::{AgentRunStatus, ClientMessage, SharedMessage};
@@ -39,7 +39,7 @@ impl Plugin for ProviderAgentPlugin {
             .add_message::<AgentAttention>()
             .add_plugins(approval::ApprovalPlugin)
             .add_plugins(ToastPlugin)
-            .add_plugins(crate::tidy::TidyPlugin)
+            .add_plugins(crate::host::tidy::TidyPlugin)
             .add_observer(close_provider_session_on_remove)
             .add_systems(
                 Update,

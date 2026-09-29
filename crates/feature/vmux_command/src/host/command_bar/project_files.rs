@@ -64,10 +64,6 @@ impl ProjectIndex {
         self.rank(roots, query, bias)
     }
 
-    pub fn warm(&mut self, roots: &[PathBuf], proxy: Option<&EventLoopProxyWrapper>) {
-        self.sync(roots, proxy);
-    }
-
     pub fn generation(&self) -> u64 {
         self.generation
     }
@@ -115,7 +111,7 @@ impl ProjectIndex {
         })
     }
 
-    fn sync(&mut self, roots: &[PathBuf], proxy: Option<&EventLoopProxyWrapper>) {
+    pub fn sync(&mut self, roots: &[PathBuf], proxy: Option<&EventLoopProxyWrapper>) {
         let held = self.roots.len();
         self.roots.retain(|index| roots.contains(&index.root));
         if self.roots.len() != held {
@@ -1000,7 +996,7 @@ mod tests {
         ) -> ProjectCompletions {
             let bias = RankBias::after_visiting(&[]);
             for _ in 0..500 {
-                self.warm(roots, None);
+                self.sync(roots, None);
                 let requested = pending.roots.clone();
                 if let Some(answered) = self.settled_for(pending, &requested, &bias) {
                     return answered;
@@ -1024,7 +1020,7 @@ mod tests {
         let mut index = ProjectIndex::default();
         let mut roots = roots_one.clone();
         roots.extend(roots_two.clone());
-        index.warm(&roots, None);
+        index.sync(&roots, None);
         let mut first = PendingProjectCompletion {
             request_id: 1,
             query: "marker".to_string(),
