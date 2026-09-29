@@ -115,7 +115,9 @@ impl DirectoryListing {
             .as_deref()
             .map(Self::read_entries)
             .unwrap_or_default();
-        let repo_root = super::runner::repo_root(&path).ok();
+        let repo_root = super::runner::GitRepository::discover(&path)
+            .ok()
+            .map(|repository| repository.path().to_path_buf());
         Self {
             entries: Self::read_entries(&path),
             path,

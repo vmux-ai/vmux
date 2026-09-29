@@ -9,6 +9,7 @@ use crate::state::GitPanel;
 use super::GitUpdateSet;
 use super::job::DiffJob;
 use super::job_runner::GitJob;
+use super::runner::GitRepository;
 
 const DIFF_WINDOW_ROWS: u32 = 200_000;
 
@@ -217,8 +218,8 @@ fn start_diff_requests(
             });
         commands.spawn((
             GitJob::new(entity),
+            GitRepository::at(target.repo_root),
             DiffJob {
-                repo_root: target.repo_root,
                 path: target.path,
                 reference: target.reference,
                 generation,

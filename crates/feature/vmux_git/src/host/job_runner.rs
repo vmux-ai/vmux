@@ -16,6 +16,7 @@ use super::job::{
     PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob, StageJob, StashDropJob, StashPopJob,
     StashPushJob, UnstageJob,
 };
+use super::runner::GitRepository;
 
 pub(super) struct JobPlugin;
 
@@ -315,6 +316,7 @@ fn deliver_failure_outputs(
 struct GitJobStarter<'w, 's, J: Component> {
     queues: Query<'w, 's, &'static GitJobs>,
     pending: Query<'w, 's, &'static J>,
+    repositories: Query<'w, 's, &'static GitRepository>,
     running: Query<'w, 's, (), With<GitJobRunning>>,
     wake: Option<Res<'w, EventLoopProxyWrapper>>,
     commands: Commands<'w, 's>,
@@ -350,6 +352,40 @@ impl<J: Component + Clone> GitJobStarter<'_, '_, J> {
             ));
         }
     }
+
+    fn start_with_repository<O: Component>(&mut self, run: fn(J, GitRepository) -> O) {
+        let wake = self.wake.as_deref().map(|wake| (**wake).clone());
+        for queue in &self.queues {
+            let Some(entity) = queue.iter().next() else {
+                continue;
+            };
+            if self.running.contains(entity) {
+                continue;
+            }
+            let Ok(job) = self.pending.get(entity) else {
+                continue;
+            };
+            let Ok(repository) = self.repositories.get(entity) else {
+                continue;
+            };
+            let job = job.clone();
+            let repository = repository.clone();
+            let wake = wake.clone();
+            let thread = std::thread::spawn(move || {
+                let output = run(job, repository);
+                if let Some(wake) = wake {
+                    let _ = wake.send_event(WinitUserEvent::WakeUp);
+                }
+                output
+            });
+            self.commands.entity(entity).remove::<J>().insert((
+                GitJobRunning,
+                GitJobTask {
+                    thread: Some(thread),
+                },
+            ));
+        }
+    }
 }
 
 fn start_repository_jobs(mut jobs: GitJobStarter<RepositoryJob>) {
@@ -362,11 +398,11 @@ fn start_repository_jobs(mut jobs: GitJobStarter<RepositoryJob>) {
 }
 
 fn start_branch_log_jobs(mut jobs: GitJobStarter<BranchLogJob>) {
-    jobs.start(|job| {
+    jobs.start_with_repository(|job, repository| {
         BranchLogOutput(
-            crate::event::GitCommitEntry::for_reference(&job.repo_root, &job.branch)
+            crate::event::GitCommitEntry::for_reference(repository.path(), &job.branch)
                 .map(|commits| GitBranchLog {
-                    repo_root: job.repo_root.to_string_lossy().into_owned(),
+                    repo_root: repository.path().to_string_lossy().into_owned(),
                     branch: job.branch,
                     commits,
                 })
@@ -376,8 +412,8 @@ fn start_branch_log_jobs(mut jobs: GitJobStarter<BranchLogJob>) {
 }
 
 fn start_diff_jobs(mut jobs: GitJobStarter<DiffJob>) {
-    jobs.start(|job| {
-        if !super::runner::has_repository(&job.repo_root) {
+    jobs.start_with_repository(|job, repository| {
+        if !GitRepository::has_repository(repository.path()) {
             return DiffOutput(GitDiffViewport {
                 generation: job.generation,
                 first_line: job.top_line,
@@ -389,13 +425,11 @@ fn start_diff_jobs(mut jobs: GitJobStarter<DiffJob>) {
         }
         let result = if job.reference.is_empty() {
             match job.content.as_deref() {
-                Some(content) => {
-                    super::runner::diff_lines_with_content(&job.repo_root, &job.path, content)
-                }
-                None => super::runner::diff_lines(&job.repo_root, &job.path),
+                Some(content) => repository.diff_lines_with_content(&job.path, content),
+                None => repository.diff_lines(&job.path),
             }
         } else {
-            super::runner::commit_diff_lines(&job.repo_root, &job.reference)
+            repository.commit_diff_lines(&job.reference)
         };
         match result {
             Ok(all_lines) => {
@@ -423,57 +457,81 @@ fn start_diff_jobs(mut jobs: GitJobStarter<DiffJob>) {
 }
 
 fn start_stage_jobs(mut jobs: GitJobStarter<StageJob>) {
-    jobs.start(|job| mutate(&job.repo_root, &job.path, "stage", super::runner::stage));
+    jobs.start_with_repository(|job, repository| match repository.stage(&job.path) {
+        Ok(()) => result_then_status(&repository, &job.path, "stage", "ok"),
+        Err(error) => failed_operation("stage", error),
+    });
 }
 
 fn start_unstage_jobs(mut jobs: GitJobStarter<UnstageJob>) {
-    jobs.start(|job| mutate(&job.repo_root, &job.path, "unstage", super::runner::unstage));
+    jobs.start_with_repository(|job, repository| match repository.unstage(&job.path) {
+        Ok(()) => result_then_status(&repository, &job.path, "unstage", "ok"),
+        Err(error) => failed_operation("unstage", error),
+    });
 }
 
 fn start_discard_jobs(mut jobs: GitJobStarter<DiscardJob>) {
-    jobs.start(|job| mutate(&job.repo_root, &job.path, "discard", super::runner::discard));
+    jobs.start_with_repository(|job, repository| match repository.discard(&job.path) {
+        Ok(()) => result_then_status(&repository, &job.path, "discard", "ok"),
+        Err(error) => failed_operation("discard", error),
+    });
 }
 
 fn start_commit_jobs(mut jobs: GitJobStarter<CommitJob>) {
-    jobs.start(|job| match super::runner::commit(&job.path, &job.message) {
-        Ok(()) => result_then_status(&job.path, &job.path, "commit", "committed"),
+    jobs.start(|job| match GitRepository::discover(&job.path) {
+        Ok(repository) => match repository.commit(&job.message) {
+            Ok(()) => result_then_status(&repository, &job.path, "commit", "committed"),
+            Err(error) => failed_operation("commit", error),
+        },
         Err(error) => failed_operation("commit", error),
     });
 }
 
 fn start_fetch_jobs(mut jobs: GitJobStarter<FetchJob>) {
-    jobs.start(|job| match super::runner::fetch(&job.path) {
-        Ok(()) => result_then_status(&job.path, &job.path, "fetch", "fetched"),
+    jobs.start(|job| match GitRepository::discover(&job.path) {
+        Ok(repository) => match repository.fetch() {
+            Ok(()) => result_then_status(&repository, &job.path, "fetch", "fetched"),
+            Err(error) => failed_operation("fetch", error),
+        },
         Err(error) => failed_operation("fetch", error),
     });
 }
 
 fn start_pull_jobs(mut jobs: GitJobStarter<PullJob>) {
-    jobs.start(|job| match super::runner::pull(&job.path) {
-        Ok(()) => result_then_status(&job.path, &job.path, "pull", "pulled"),
+    jobs.start(|job| match GitRepository::discover(&job.path) {
+        Ok(repository) => match repository.pull() {
+            Ok(()) => result_then_status(&repository, &job.path, "pull", "pulled"),
+            Err(error) => failed_operation("pull", error),
+        },
         Err(error) => failed_operation("pull", error),
     });
 }
 
 fn start_push_jobs(mut jobs: GitJobStarter<PushJob>) {
-    jobs.start(|job| match super::runner::push(&job.path) {
-        Ok(()) => result_then_status(&job.path, &job.path, "push", "pushed"),
+    jobs.start(|job| match GitRepository::discover(&job.path) {
+        Ok(repository) => match repository.push() {
+            Ok(()) => result_then_status(&repository, &job.path, "push", "pushed"),
+            Err(error) => failed_operation("push", error),
+        },
         Err(error) => failed_operation("push", error),
     });
 }
 
 fn start_stage_all_jobs(mut jobs: GitJobStarter<StageAllJob>) {
-    jobs.start(|job| match super::runner::stage_all(&job.path) {
-        Ok(()) => result_then_status(&job.path, &job.path, "stage all", "staged"),
+    jobs.start(|job| match GitRepository::discover(&job.path) {
+        Ok(repository) => match repository.stage_all() {
+            Ok(()) => result_then_status(&repository, &job.path, "stage all", "staged"),
+            Err(error) => failed_operation("stage all", error),
+        },
         Err(error) => failed_operation("stage all", error),
     });
 }
 
 fn start_hunk_jobs(mut jobs: GitJobStarter<HunkJob>) {
-    jobs.start(|job| {
-        match super::runner::apply_hunk(&job.repo_root, &job.path, job.hunk, job.accept) {
+    jobs.start_with_repository(|job, repository| {
+        match repository.apply_hunk(&job.path, job.hunk, job.accept) {
             Ok(()) => result_then_status(
-                &job.repo_root,
+                &repository,
                 &job.path,
                 if job.accept { "accept" } else { "reject" },
                 "ok",
@@ -484,90 +542,76 @@ fn start_hunk_jobs(mut jobs: GitJobStarter<HunkJob>) {
 }
 
 fn start_amend_jobs(mut jobs: GitJobStarter<AmendJob>) {
-    jobs.start(|job| operation("amend", super::runner::amend(&job.repo_root)));
+    jobs.start_with_repository(|_, repository| operation("amend", repository.amend()));
 }
 
 fn start_checkout_commit_jobs(mut jobs: GitJobStarter<CheckoutCommitJob>) {
-    jobs.start(|job| {
-        operation(
-            "checkout commit",
-            super::runner::checkout_commit(&job.repo_root, &job.commit),
-        )
+    jobs.start_with_repository(|job, repository| {
+        operation("checkout commit", repository.checkout_commit(&job.commit))
     });
 }
 
 fn start_cherry_pick_jobs(mut jobs: GitJobStarter<CherryPickJob>) {
-    jobs.start(|job| {
-        operation(
-            "cherry-pick",
-            super::runner::cherry_pick(&job.repo_root, &job.commit),
-        )
+    jobs.start_with_repository(|job, repository| {
+        operation("cherry-pick", repository.cherry_pick(&job.commit))
     });
 }
 
 fn start_create_branch_jobs(mut jobs: GitJobStarter<CreateBranchJob>) {
-    jobs.start(|job| {
+    jobs.start_with_repository(|job, repository| {
         operation(
             "new branch",
-            super::runner::create_branch(&job.repo_root, &job.branch, &job.start_point),
+            repository.create_branch(&job.branch, &job.start_point),
         )
     });
 }
 
 fn start_delete_branch_jobs(mut jobs: GitJobStarter<DeleteBranchJob>) {
-    jobs.start(|job| {
-        operation(
-            "delete branch",
-            super::runner::delete_branch(&job.repo_root, &job.branch),
-        )
+    jobs.start_with_repository(|job, repository| {
+        operation("delete branch", repository.delete_branch(&job.branch))
     });
 }
 
 fn start_fast_forward_jobs(mut jobs: GitJobStarter<FastForwardJob>) {
-    jobs.start(|job| {
-        operation(
-            "fast-forward",
-            super::runner::fast_forward(&job.repo_root, &job.branch),
-        )
+    jobs.start_with_repository(|job, repository| {
+        operation("fast-forward", repository.fast_forward(&job.branch))
     });
 }
 
 fn start_merge_jobs(mut jobs: GitJobStarter<MergeJob>) {
-    jobs.start(|job| operation("merge", super::runner::merge(&job.repo_root, &job.branch)));
+    jobs.start_with_repository(|job, repository| operation("merge", repository.merge(&job.branch)));
 }
 
 fn start_rebase_jobs(mut jobs: GitJobStarter<RebaseJob>) {
-    jobs.start(|job| operation("rebase", super::runner::rebase(&job.repo_root, &job.branch)));
+    jobs.start_with_repository(|job, repository| {
+        operation("rebase", repository.rebase(&job.branch))
+    });
 }
 
 fn start_revert_jobs(mut jobs: GitJobStarter<RevertJob>) {
-    jobs.start(|job| operation("revert", super::runner::revert(&job.repo_root, &job.commit)));
+    jobs.start_with_repository(|job, repository| {
+        operation("revert", repository.revert(&job.commit))
+    });
 }
 
 fn start_stash_drop_jobs(mut jobs: GitJobStarter<StashDropJob>) {
-    jobs.start(|job| {
-        operation(
-            "stash drop",
-            super::runner::stash_drop(&job.repo_root, &job.reference),
-        )
+    jobs.start_with_repository(|job, repository| {
+        operation("stash drop", repository.stash_drop(&job.reference))
     });
 }
 
 fn start_stash_pop_jobs(mut jobs: GitJobStarter<StashPopJob>) {
-    jobs.start(|job| {
-        operation(
-            "stash pop",
-            super::runner::stash_pop(&job.repo_root, &job.reference),
-        )
+    jobs.start_with_repository(|job, repository| {
+        operation("stash pop", repository.stash_pop(&job.reference))
     });
 }
 
 fn start_stash_push_jobs(mut jobs: GitJobStarter<StashPushJob>) {
-    jobs.start(|job| operation("stash", super::runner::stash_push(&job.repo_root)));
+    jobs.start_with_repository(|_, repository| operation("stash", repository.stash_push()));
 }
 
 fn result_then_status(
-    repo_root: &Path,
+    repository: &GitRepository,
     path: &Path,
     operation: &str,
     message: &str,
@@ -579,21 +623,10 @@ fn result_then_status(
             message: message.to_string(),
         },
         status: Some(
-            super::runner::status_at(repo_root, path)
+            repository
+                .status(path)
                 .map_err(|error| GitOperationError { message: error.0 }),
         ),
-    }
-}
-
-fn mutate(
-    repo_root: &Path,
-    path: &Path,
-    operation: &str,
-    run: fn(&Path, &Path) -> Result<(), super::runner::GitError>,
-) -> OperationOutput {
-    match run(repo_root, path) {
-        Ok(()) => result_then_status(repo_root, path, operation, "ok"),
-        Err(error) => failed_operation(operation, error),
     }
 }
 
@@ -729,8 +762,8 @@ mod tests {
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((
             GitJob::new(webview),
+            GitRepository::at(repo.path()),
             DiffJob {
-                repo_root: repo.path().to_path_buf(),
                 path: file,
                 reference: String::new(),
                 generation: 7,
@@ -753,10 +786,8 @@ mod tests {
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((
             GitJob::new(webview),
-            StageJob {
-                repo_root: repo.path().to_path_buf(),
-                path: file,
-            },
+            GitRepository::at(repo.path()),
+            StageJob { path: file },
         ));
 
         let captured = captured(&mut app);
@@ -778,8 +809,8 @@ mod tests {
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((
             GitJob::new(webview),
+            GitRepository::at(dir.path()),
             DiffJob {
-                repo_root: dir.path().to_path_buf(),
                 path: file,
                 reference: String::new(),
                 generation: 7,

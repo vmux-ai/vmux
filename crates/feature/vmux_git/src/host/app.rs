@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
@@ -31,7 +29,9 @@ fn on_config_edit_request(
         .and_then(|stack| child_of.get(stack.parent()).ok())
         .map(|pane| PageOpenTarget::NewStackInPane(pane.parent()))
         .unwrap_or(PageOpenTarget::ActiveStack);
-    let Ok(path) = super::runner::config_path(Path::new(&trigger.event().payload.repo_root)) else {
+    let Ok(path) =
+        super::runner::GitRepository::at(trigger.event().payload.repo_root.clone()).config_path()
+    else {
         return;
     };
     let Ok(url) = url::Url::from_file_path(path) else {

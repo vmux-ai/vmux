@@ -17,6 +17,7 @@ use super::job::{
     RevertJob, StageAllJob, StageJob, StashDropJob, StashPopJob, StashPushJob, UnstageJob,
 };
 use super::job_runner::GitJob;
+use super::runner::GitRepository;
 
 pub(super) struct ChangesPlugin;
 
@@ -65,7 +66,8 @@ fn on_stage_request(trigger: On<UiInput<GitStageRequest>>, mut commands: Command
         super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
     commands.spawn((
         GitJob::new(trigger.event().webview),
-        StageJob { repo_root, path },
+        GitRepository::at(repo_root),
+        StageJob { path },
     ));
 }
 
@@ -76,7 +78,8 @@ fn on_unstage_request(trigger: On<UiInput<GitUnstageRequest>>, mut commands: Com
         super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
     commands.spawn((
         GitJob::new(trigger.event().webview),
-        UnstageJob { repo_root, path },
+        GitRepository::at(repo_root),
+        UnstageJob { path },
     ));
 }
 
@@ -87,7 +90,8 @@ fn on_discard_request(trigger: On<UiInput<GitDiscardRequest>>, mut commands: Com
         super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
     commands.spawn((
         GitJob::new(trigger.event().webview),
-        DiscardJob { repo_root, path },
+        GitRepository::at(repo_root),
+        DiscardJob { path },
     ));
 }
 
@@ -122,9 +126,8 @@ fn on_amend_request(trigger: On<UiInput<GitAmendRequest>>, mut commands: Command
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
-        AmendJob {
-            repo_root: request.repo_root.clone().into(),
-        },
+        GitRepository::at(request.repo_root.clone()),
+        AmendJob,
     ));
 }
 
@@ -135,8 +138,8 @@ fn on_checkout_commit_request(
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
+        GitRepository::at(request.repo_root.clone()),
         CheckoutCommitJob {
-            repo_root: request.repo_root.clone().into(),
             commit: request.commit.clone(),
         },
     ));
@@ -146,8 +149,8 @@ fn on_cherry_pick_request(trigger: On<UiInput<GitCherryPickRequest>>, mut comman
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
+        GitRepository::at(request.repo_root.clone()),
         CherryPickJob {
-            repo_root: request.repo_root.clone().into(),
             commit: request.commit.clone(),
         },
     ));
@@ -164,8 +167,8 @@ fn on_create_branch_request(
     }
     commands.spawn((
         GitJob::new(trigger.event().webview),
+        GitRepository::at(request.repo_root.clone()),
         CreateBranchJob {
-            repo_root: request.repo_root.clone().into(),
             branch: request.branch.clone(),
             start_point: request.start_point.clone(),
         },
@@ -192,8 +195,8 @@ fn on_delete_branch_request(
     }
     commands.spawn((
         GitJob::new(trigger.event().webview),
+        GitRepository::at(request.repo_root.clone()),
         DeleteBranchJob {
-            repo_root: request.repo_root.clone().into(),
             branch: request.branch.clone(),
         },
     ));
@@ -203,8 +206,8 @@ fn on_fast_forward_request(trigger: On<UiInput<GitFastForwardRequest>>, mut comm
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
+        GitRepository::at(request.repo_root.clone()),
         FastForwardJob {
-            repo_root: request.repo_root.clone().into(),
             branch: request.branch.clone(),
         },
     ));
@@ -214,8 +217,8 @@ fn on_merge_request(trigger: On<UiInput<GitMergeRequest>>, mut commands: Command
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
+        GitRepository::at(request.repo_root.clone()),
         MergeJob {
-            repo_root: request.repo_root.clone().into(),
             branch: request.branch.clone(),
         },
     ));
@@ -225,8 +228,8 @@ fn on_rebase_request(trigger: On<UiInput<GitRebaseRequest>>, mut commands: Comma
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
+        GitRepository::at(request.repo_root.clone()),
         RebaseJob {
-            repo_root: request.repo_root.clone().into(),
             branch: request.branch.clone(),
         },
     ));
@@ -252,8 +255,8 @@ fn on_revert_request(
     }
     commands.spawn((
         GitJob::new(trigger.event().webview),
+        GitRepository::at(request.repo_root.clone()),
         RevertJob {
-            repo_root: request.repo_root.clone().into(),
             commit: request.commit.clone(),
         },
     ));
@@ -279,8 +282,8 @@ fn on_stash_drop_request(
     }
     commands.spawn((
         GitJob::new(trigger.event().webview),
+        GitRepository::at(request.repo_root.clone()),
         StashDropJob {
-            repo_root: request.repo_root.clone().into(),
             reference: request.reference.clone(),
         },
     ));
@@ -290,8 +293,8 @@ fn on_stash_pop_request(trigger: On<UiInput<GitStashPopRequest>>, mut commands: 
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
+        GitRepository::at(request.repo_root.clone()),
         StashPopJob {
-            repo_root: request.repo_root.clone().into(),
             reference: request.reference.clone(),
         },
     ));
@@ -301,9 +304,8 @@ fn on_stash_push_request(trigger: On<UiInput<GitStashPushRequest>>, mut commands
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
-        StashPushJob {
-            repo_root: request.repo_root.clone().into(),
-        },
+        GitRepository::at(request.repo_root.clone()),
+        StashPushJob,
     ));
 }
 
@@ -341,8 +343,8 @@ fn on_hunk_request(trigger: On<UiInput<GitHunkRequest>>, mut commands: Commands)
         super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
     commands.spawn((
         GitJob::new(trigger.event().webview),
+        GitRepository::at(repo_root),
         HunkJob {
-            repo_root,
             path,
             hunk: request.hunk,
             accept: request.accept,

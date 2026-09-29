@@ -281,7 +281,8 @@ fn resolve_git_path(root: &Path, value: &str) -> PathBuf {
 fn git_watch_targets(
     file: &Path,
 ) -> Result<(PathBuf, Vec<GitWatchTarget>), super::runner::GitError> {
-    let root = super::runner::repo_root(file)?;
+    let repository = super::runner::GitRepository::discover(file)?;
+    let root = repository.path().to_path_buf();
     let (stdout, stderr, ok) = super::runner::git(
         &root,
         &["rev-parse", "--absolute-git-dir", "--git-common-dir"],

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+use bevy::prelude::Component;
 use similar::{ChangeTag, TextDiff};
 
 use crate::event::*;
@@ -11,6 +12,222 @@ use crate::host::parse;
 
 #[derive(Debug, Clone)]
 pub struct GitError(pub String);
+
+#[derive(Clone, Component, Debug)]
+pub struct GitRepository(PathBuf);
+
+impl GitRepository {
+    pub fn at(root: impl Into<PathBuf>) -> Self {
+        Self(root.into())
+    }
+
+    pub fn discover(file: &Path) -> Result<Self, GitError> {
+        let (stdout, stderr, ok) = git(&start_dir(file), &["rev-parse", "--show-toplevel"])?;
+        if !ok {
+            return Err(GitError(stderr.trim().to_string()));
+        }
+        Ok(Self(PathBuf::from(stdout.trim())))
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+
+    pub fn has_repository(file: &Path) -> bool {
+        start_dir(file)
+            .ancestors()
+            .any(|directory| directory.join(".git").exists())
+    }
+
+    pub fn status(&self, file: &Path) -> Result<GitFileStatus, GitError> {
+        statuses(&self.0, &[file.to_path_buf()])?
+            .pop()
+            .ok_or_else(|| GitError("missing git status result".into()))
+    }
+
+    pub(crate) fn statuses(&self, files: &[PathBuf]) -> Result<Vec<GitFileStatus>, GitError> {
+        statuses(&self.0, files)
+    }
+
+    pub fn file_statuses(&self) -> Result<std::collections::HashMap<String, FileStatus>, GitError> {
+        let (stdout, stderr, ok) = git_read_bytes(
+            &self.0,
+            &[
+                "status",
+                "--porcelain=v2",
+                "-z",
+                "--branch",
+                "--untracked-files=all",
+            ],
+        )?;
+        if !ok {
+            return Err(GitError(stderr.trim().to_string()));
+        }
+        Ok(parse::parse_porcelain_v2_statuses(&stdout).into_file_statuses())
+    }
+
+    pub fn dirty_paths(&self) -> Result<std::collections::HashSet<String>, GitError> {
+        let (stdout, stderr, ok) = git_read_bytes(
+            &self.0,
+            &["status", "--porcelain=v2", "-z", "--untracked-files=all"],
+        )?;
+        if !ok {
+            return Err(GitError(stderr.trim().to_string()));
+        }
+        Ok(parse::changed_paths(&stdout))
+    }
+
+    pub(crate) fn config_path(&self) -> Result<PathBuf, GitError> {
+        let (stdout, stderr, ok) = git_read(
+            &self.0,
+            &[
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-path",
+                "config",
+            ],
+        )?;
+        if !ok {
+            return Err(git_err(&stdout, &stderr));
+        }
+        let path = stdout.trim();
+        if path.is_empty() {
+            return Err(GitError("git config path is empty".to_string()));
+        }
+        Ok(PathBuf::from(path))
+    }
+
+    pub fn diff_lines_with_content(
+        &self,
+        file: &Path,
+        content: &str,
+    ) -> Result<Vec<DiffLine>, GitError> {
+        diff_lines_with_content(&self.0, file, content)
+    }
+
+    pub fn diff_lines(&self, file: &Path) -> Result<Vec<DiffLine>, GitError> {
+        diff_lines(&self.0, file)
+    }
+
+    pub fn commit_diff_lines(&self, reference: &str) -> Result<Vec<DiffLine>, GitError> {
+        commit_diff_lines(&self.0, reference)
+    }
+
+    pub fn apply_hunk(&self, file: &Path, index: u32, accept: bool) -> Result<(), GitError> {
+        apply_hunk(&self.0, file, index, accept)
+    }
+
+    pub fn stage(&self, file: &Path) -> Result<(), GitError> {
+        simple(&self.0, file, &["add", "--"])
+    }
+
+    pub fn unstage(&self, file: &Path) -> Result<(), GitError> {
+        simple(&self.0, file, &["restore", "--staged", "--"])
+    }
+
+    pub fn discard(&self, file: &Path) -> Result<(), GitError> {
+        simple(&self.0, file, &["restore", "--"])
+    }
+
+    pub fn commit(&self, message: &str) -> Result<(), GitError> {
+        self.run(&["commit", "-m", message]).map(drop)
+    }
+
+    pub fn fetch(&self) -> Result<(), GitError> {
+        self.run(&["fetch", "--prune"]).map(drop)
+    }
+
+    pub fn pull(&self) -> Result<(), GitError> {
+        self.run(&["pull", "--ff-only"]).map(drop)
+    }
+
+    pub fn push(&self) -> Result<(), GitError> {
+        self.run(&["push"]).map(drop)
+    }
+
+    pub fn stage_all(&self) -> Result<(), GitError> {
+        self.run(&["add", "--all"]).map(drop)
+    }
+
+    pub(crate) fn amend(&self) -> Result<String, GitError> {
+        self.operation(&["commit", "--amend", "--no-edit"])
+    }
+
+    pub(crate) fn checkout_commit(&self, commit: &str) -> Result<String, GitError> {
+        self.operation(&["switch", "--detach", commit])
+    }
+
+    pub(crate) fn cherry_pick(&self, commit: &str) -> Result<String, GitError> {
+        self.operation(&["cherry-pick", commit])
+    }
+
+    pub(crate) fn create_branch(
+        &self,
+        branch: &str,
+        start_point: &str,
+    ) -> Result<String, GitError> {
+        crate::host::worktree::validate_branch_name(&self.0, branch)?;
+        self.operation(&["branch", "--", branch, start_point])
+    }
+
+    pub(crate) fn delete_branch(&self, branch: &str) -> Result<String, GitError> {
+        self.operation(&["branch", "-d", "--", branch])
+    }
+
+    pub(crate) fn fast_forward(&self, branch: &str) -> Result<String, GitError> {
+        self.operation(&["merge", "--ff-only", branch])
+    }
+
+    pub(crate) fn merge(&self, branch: &str) -> Result<String, GitError> {
+        self.operation(&["merge", "--no-edit", branch])
+    }
+
+    pub(crate) fn rebase(&self, branch: &str) -> Result<String, GitError> {
+        self.operation(&["rebase", branch])
+    }
+
+    pub(crate) fn revert(&self, commit: &str) -> Result<String, GitError> {
+        self.operation(&["revert", "--no-edit", commit])
+    }
+
+    pub(crate) fn stash_drop(&self, reference: &str) -> Result<String, GitError> {
+        self.operation(&["stash", "drop", reference])
+    }
+
+    pub(crate) fn stash_pop(&self, reference: &str) -> Result<String, GitError> {
+        self.operation(&["stash", "pop", reference])
+    }
+
+    pub(crate) fn stash_push(&self) -> Result<String, GitError> {
+        self.operation(&["stash", "push", "--include-untracked"])
+    }
+
+    fn run(&self, args: &[&str]) -> Result<String, GitError> {
+        let (stdout, stderr, ok) = git(&self.0, args)?;
+        if ok {
+            Ok(stdout)
+        } else {
+            Err(git_err(&stdout, &stderr))
+        }
+    }
+
+    fn operation(&self, args: &[&str]) -> Result<String, GitError> {
+        let (stdout, stderr, ok) = git(&self.0, args)?;
+        if !ok {
+            return Err(git_err(&stdout, &stderr));
+        }
+        let message = if stdout.trim().is_empty() {
+            stderr.trim()
+        } else {
+            stdout.trim()
+        };
+        Ok(if message.is_empty() {
+            "ok".to_string()
+        } else {
+            message.to_string()
+        })
+    }
+}
 
 const FALLBACK_LOCAL_ENV_VARS: &[&str] = &[
     "GIT_ALTERNATE_OBJECT_DIRECTORIES",
@@ -114,12 +331,6 @@ fn start_dir(file: &Path) -> PathBuf {
     }
 }
 
-pub fn has_repository(file: &Path) -> bool {
-    start_dir(file)
-        .ancestors()
-        .any(|directory| directory.join(".git").exists())
-}
-
 pub(crate) fn non_repository_status(path: &Path) -> GitFileStatus {
     GitFileStatus {
         path: path.to_string_lossy().into_owned(),
@@ -131,14 +342,6 @@ pub(crate) fn non_repository_status(path: &Path) -> GitFileStatus {
         staged_count: 0,
         repo_root: String::new(),
     }
-}
-
-pub fn repo_root(file: &Path) -> Result<PathBuf, GitError> {
-    let (stdout, stderr, ok) = git(&start_dir(file), &["rev-parse", "--show-toplevel"])?;
-    if !ok {
-        return Err(GitError(stderr.trim().to_string()));
-    }
-    Ok(PathBuf::from(stdout.trim()))
 }
 
 fn canon(path: &Path) -> PathBuf {
@@ -191,36 +394,6 @@ impl<'a> RequestPath<'a> {
         }
         repo_root.join(path_from_bytes(self.bytes))
     }
-}
-
-pub fn status(file: &Path) -> Result<GitFileStatus, GitError> {
-    let root = repo_root(file)?;
-    status_at(&root, file)
-}
-
-pub fn status_at(root: &Path, file: &Path) -> Result<GitFileStatus, GitError> {
-    statuses(root, &[file.to_path_buf()])?
-        .pop()
-        .ok_or_else(|| GitError("missing git status result".into()))
-}
-
-pub fn file_statuses(
-    root: &Path,
-) -> Result<std::collections::HashMap<String, FileStatus>, GitError> {
-    let (stdout, stderr, ok) = git_read_bytes(
-        root,
-        &[
-            "status",
-            "--porcelain=v2",
-            "-z",
-            "--branch",
-            "--untracked-files=all",
-        ],
-    )?;
-    if !ok {
-        return Err(GitError(stderr.trim().to_string()));
-    }
-    Ok(parse::parse_porcelain_v2_statuses(&stdout).into_file_statuses())
 }
 
 impl GitCommitEntry {
@@ -465,82 +638,13 @@ impl GitStashEntry {
     }
 }
 
-fn run_operation(root: &Path, args: &[&str]) -> Result<String, GitError> {
-    let (stdout, stderr, ok) = git(root, args)?;
-    if !ok {
-        return Err(git_err(&stdout, &stderr));
-    }
-    let message = if stdout.trim().is_empty() {
-        stderr.trim()
-    } else {
-        stdout.trim()
-    };
-    Ok(if message.is_empty() {
-        "ok".to_string()
-    } else {
-        message.to_string()
-    })
-}
-
-pub(crate) fn amend(root: &Path) -> Result<String, GitError> {
-    run_operation(root, &["commit", "--amend", "--no-edit"])
-}
-
-pub(crate) fn checkout_commit(root: &Path, commit: &str) -> Result<String, GitError> {
-    run_operation(root, &["switch", "--detach", commit])
-}
-
-pub(crate) fn cherry_pick(root: &Path, commit: &str) -> Result<String, GitError> {
-    run_operation(root, &["cherry-pick", commit])
-}
-
-pub(crate) fn create_branch(
-    root: &Path,
-    branch: &str,
-    start_point: &str,
-) -> Result<String, GitError> {
-    crate::host::worktree::validate_branch_name(root, branch)?;
-    run_operation(root, &["branch", "--", branch, start_point])
-}
-
-pub(crate) fn delete_branch(root: &Path, branch: &str) -> Result<String, GitError> {
-    run_operation(root, &["branch", "-d", "--", branch])
-}
-
-pub(crate) fn fast_forward(root: &Path, branch: &str) -> Result<String, GitError> {
-    run_operation(root, &["merge", "--ff-only", branch])
-}
-
-pub(crate) fn merge(root: &Path, branch: &str) -> Result<String, GitError> {
-    run_operation(root, &["merge", "--no-edit", branch])
-}
-
-pub(crate) fn rebase(root: &Path, branch: &str) -> Result<String, GitError> {
-    run_operation(root, &["rebase", branch])
-}
-
-pub(crate) fn revert(root: &Path, commit: &str) -> Result<String, GitError> {
-    run_operation(root, &["revert", "--no-edit", commit])
-}
-
-pub(crate) fn stash_drop(root: &Path, reference: &str) -> Result<String, GitError> {
-    run_operation(root, &["stash", "drop", reference])
-}
-
-pub(crate) fn stash_pop(root: &Path, reference: &str) -> Result<String, GitError> {
-    run_operation(root, &["stash", "pop", reference])
-}
-
-pub(crate) fn stash_push(root: &Path) -> Result<String, GitError> {
-    run_operation(root, &["stash", "push", "--include-untracked"])
-}
-
 impl GitRepositorySnapshot {
     pub fn load(path: &Path) -> Result<Self, GitError> {
         let requested_path = path.to_string_lossy().into_owned();
-        let repo_root = repo_root(path)?;
+        let repository = GitRepository::discover(path)?;
+        let repo_root = repository.path();
         let (stdout, stderr, ok) = git_read_bytes(
-            &repo_root,
+            repo_root,
             &[
                 "status",
                 "--porcelain=v2",
@@ -563,11 +667,11 @@ impl GitRepositorySnapshot {
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| repo_root.to_string_lossy().to_string());
-        let commits = GitCommitEntry::recent(&repo_root)?;
-        let branches = GitBranchEntry::local(&repo_root, &branch)?;
-        let remote_branches = GitBranchEntry::remote(&repo_root)?;
-        let tags = GitTagEntry::list(&repo_root)?;
-        let stashes = GitStashEntry::list(&repo_root)?;
+        let commits = GitCommitEntry::recent(repo_root)?;
+        let branches = GitBranchEntry::local(repo_root, &branch)?;
+        let remote_branches = GitBranchEntry::remote(repo_root)?;
+        let tags = GitTagEntry::list(repo_root)?;
+        let stashes = GitStashEntry::list(repo_root)?;
         Ok(Self {
             path: requested_path,
             repo_root: repo_root.to_string_lossy().to_string(),
@@ -586,7 +690,7 @@ impl GitRepositorySnapshot {
     }
 }
 
-pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitFileStatus>, GitError> {
+fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitFileStatus>, GitError> {
     let (stdout, stderr, ok) = git_read_bytes(
         root,
         &[
@@ -618,38 +722,6 @@ pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitFileStat
             }
         })
         .collect())
-}
-
-pub(crate) fn config_path(root: &Path) -> Result<PathBuf, GitError> {
-    let (stdout, stderr, ok) = git_read(
-        root,
-        &[
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-path",
-            "config",
-        ],
-    )?;
-    if !ok {
-        return Err(git_err(&stdout, &stderr));
-    }
-    let path = stdout.trim();
-    if path.is_empty() {
-        return Err(GitError("git config path is empty".to_string()));
-    }
-    Ok(PathBuf::from(path))
-}
-
-pub fn dirty_set(file: &Path) -> Result<(PathBuf, std::collections::HashSet<String>), GitError> {
-    let root = repo_root(file)?;
-    let (stdout, stderr, ok) = git_read_bytes(
-        &root,
-        &["status", "--porcelain=v2", "-z", "--untracked-files=all"],
-    )?;
-    if !ok {
-        return Err(GitError(stderr.trim().to_string()));
-    }
-    Ok((root, parse::changed_paths(&stdout)))
 }
 
 fn diff_text(root: &Path, target: &Path, cached: bool, ctx: u32) -> Result<String, GitError> {
@@ -761,7 +833,7 @@ fn index_text(root: &Path, target: &Path) -> Result<String, GitError> {
     }
 }
 
-pub fn diff_lines_with_content(
+fn diff_lines_with_content(
     root: &Path,
     file: &Path,
     content: &str,
@@ -823,13 +895,13 @@ pub fn diff_lines_with_content(
     Ok(lines)
 }
 
-pub fn diff_lines(root: &Path, file: &Path) -> Result<Vec<DiffLine>, GitError> {
+fn diff_lines(root: &Path, file: &Path) -> Result<Vec<DiffLine>, GitError> {
     let target = rel(root, file);
     let staged = staged_lineset(root, &target);
 
     let unstaged = diff_text(root, &target, false, 100_000)?;
     if unstaged.trim().is_empty() {
-        if status_at(root, file)?.file_status == FileStatus::Untracked {
+        if GitRepository::at(root).status(file)?.file_status == FileStatus::Untracked {
             let content = std::fs::read_to_string(file).unwrap_or_default();
             return diff_lines_with_content(root, file, &content);
         }
@@ -865,7 +937,7 @@ pub fn diff_lines(root: &Path, file: &Path) -> Result<Vec<DiffLine>, GitError> {
     Ok(lines)
 }
 
-pub fn commit_diff_lines(root: &Path, reference: &str) -> Result<Vec<DiffLine>, GitError> {
+fn commit_diff_lines(root: &Path, reference: &str) -> Result<Vec<DiffLine>, GitError> {
     let (stdout, stderr, ok) = git_read(
         root,
         &[
@@ -919,7 +991,7 @@ fn git_apply(root: &Path, patch: &str, reverse: bool) -> Result<(), GitError> {
     }
 }
 
-pub fn apply_hunk(root: &Path, file: &Path, index: u32, accept: bool) -> Result<(), GitError> {
+fn apply_hunk(root: &Path, file: &Path, index: u32, accept: bool) -> Result<(), GitError> {
     let target = rel(root, file);
     let diff = diff_text(root, &target, false, 0)?;
     if diff.trim().is_empty() {
@@ -947,68 +1019,6 @@ fn simple(root: &Path, file: &Path, verb: &[&str]) -> Result<(), GitError> {
             &String::from_utf8_lossy(&output.stdout),
             &String::from_utf8_lossy(&output.stderr),
         ))
-    }
-}
-
-pub fn stage(root: &Path, file: &Path) -> Result<(), GitError> {
-    simple(root, file, &["add", "--"])
-}
-
-pub fn unstage(root: &Path, file: &Path) -> Result<(), GitError> {
-    simple(root, file, &["restore", "--staged", "--"])
-}
-
-pub fn discard(root: &Path, file: &Path) -> Result<(), GitError> {
-    simple(root, file, &["restore", "--"])
-}
-
-pub fn commit(file: &Path, message: &str) -> Result<(), GitError> {
-    let root = repo_root(file)?;
-    let (stdout, stderr, ok) = git(&root, &["commit", "-m", message])?;
-    if ok {
-        Ok(())
-    } else {
-        Err(git_err(&stdout, &stderr))
-    }
-}
-
-pub fn fetch(file: &Path) -> Result<(), GitError> {
-    let root = repo_root(file)?;
-    let (stdout, stderr, ok) = git(&root, &["fetch", "--prune"])?;
-    if ok {
-        Ok(())
-    } else {
-        Err(git_err(&stdout, &stderr))
-    }
-}
-
-pub fn pull(file: &Path) -> Result<(), GitError> {
-    let root = repo_root(file)?;
-    let (stdout, stderr, ok) = git(&root, &["pull", "--ff-only"])?;
-    if ok {
-        Ok(())
-    } else {
-        Err(git_err(&stdout, &stderr))
-    }
-}
-
-pub fn push(file: &Path) -> Result<(), GitError> {
-    let root = repo_root(file)?;
-    let (stdout, stderr, ok) = git(&root, &["push"])?;
-    if ok {
-        Ok(())
-    } else {
-        Err(git_err(&stdout, &stderr))
-    }
-}
-
-pub fn stage_all(file: &Path) -> Result<(), GitError> {
-    let root = repo_root(file)?;
-    let (stdout, stderr, ok) = git(&root, &["add", "--all"])?;
-    if ok {
-        Ok(())
-    } else {
-        Err(git_err(&stdout, &stderr))
     }
 }
 
@@ -1081,9 +1091,9 @@ mod tests {
     fn repo_root_resolves_toplevel() {
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "a.txt", "hi");
-        let root = repo_root(&file).unwrap();
+        let repository = GitRepository::discover(&file).unwrap();
         assert_eq!(
-            root.canonicalize().unwrap(),
+            repository.path().canonicalize().unwrap(),
             repo.path().canonicalize().unwrap()
         );
     }
@@ -1092,7 +1102,7 @@ mod tests {
     fn repo_root_errors_outside_repo() {
         let dir = tempfile::tempdir().unwrap();
         let file = test_repo::write(dir.path(), "loose.txt", "x");
-        assert!(repo_root(&file).is_err());
+        assert!(GitRepository::discover(&file).is_err());
     }
 
     #[test]
@@ -1101,10 +1111,12 @@ mod tests {
         let nested = repo.path().join("notes/projects");
         std::fs::create_dir_all(&nested).unwrap();
         let file = test_repo::write(&nested, "plan.md", "# Plan");
-        assert!(has_repository(&file));
+        assert!(GitRepository::has_repository(&file));
 
         let outside = tempfile::tempdir().unwrap();
-        assert!(!has_repository(&outside.path().join("note.md")));
+        assert!(!GitRepository::has_repository(
+            &outside.path().join("note.md")
+        ));
     }
 
     #[test]
@@ -1117,9 +1129,10 @@ mod tests {
         test_repo::write(repo.path(), "mod.txt", "two\n");
         test_repo::write(repo.path(), "new.txt", "n\n");
 
-        let (root, set) = dirty_set(&modified).unwrap();
+        let repository = GitRepository::discover(&modified).unwrap();
+        let set = repository.dirty_paths().unwrap();
         assert_eq!(
-            root.canonicalize().unwrap(),
+            repository.path().canonicalize().unwrap(),
             repo.path().canonicalize().unwrap()
         );
         assert!(set.contains("mod.txt"));
@@ -1188,7 +1201,9 @@ mod tests {
         test_repo::run(repo.path(), &["add", "."]);
         test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
 
-        let lines = commit_diff_lines(repo.path(), "HEAD").unwrap();
+        let lines = GitRepository::at(repo.path())
+            .commit_diff_lines("HEAD")
+            .unwrap();
         let files = lines
             .iter()
             .filter(|line| matches!(line.kind, DiffKind::Hunk))
@@ -1208,7 +1223,8 @@ mod tests {
         test_repo::run(repo.path(), &["add", "."]);
         test_repo::run(repo.path(), &["commit", "-qm", "initial"]);
 
-        create_branch(repo.path(), "feature", "main").unwrap();
+        let repository = GitRepository::at(repo.path());
+        repository.create_branch("feature", "main").unwrap();
         assert!(
             GitBranchEntry::local(repo.path(), "main")
                 .unwrap()
@@ -1216,7 +1232,7 @@ mod tests {
                 .any(|branch| branch.name == "feature")
         );
 
-        delete_branch(repo.path(), "feature").unwrap();
+        repository.delete_branch("feature").unwrap();
         assert!(
             GitBranchEntry::local(repo.path(), "main")
                 .unwrap()
@@ -1234,14 +1250,15 @@ mod tests {
         test_repo::write(repo.path(), "tracked.txt", "two\n");
         test_repo::write(repo.path(), "untracked.txt", "new\n");
 
-        stash_push(repo.path()).unwrap();
+        let git = GitRepository::at(repo.path());
+        git.stash_push().unwrap();
 
         let repository = GitRepositorySnapshot::load(repo.path()).unwrap();
         assert!(repository.files.is_empty());
         assert_eq!(repository.stashes.len(), 1);
         let reference = repository.stashes[0].reference.clone();
 
-        stash_pop(repo.path(), &reference).unwrap();
+        git.stash_pop(&reference).unwrap();
 
         assert_eq!(
             std::fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
@@ -1258,11 +1275,11 @@ mod tests {
                 .is_empty()
         );
 
-        stash_push(repo.path()).unwrap();
+        git.stash_push().unwrap();
         let reference = GitRepositorySnapshot::load(repo.path()).unwrap().stashes[0]
             .reference
             .clone();
-        stash_drop(repo.path(), &reference).unwrap();
+        git.stash_drop(&reference).unwrap();
         assert!(
             GitRepositorySnapshot::load(repo.path())
                 .unwrap()
@@ -1286,13 +1303,14 @@ mod tests {
         let commit = commit.trim().to_string();
         test_repo::run(repo.path(), &["switch", "main"]);
 
-        cherry_pick(repo.path(), &commit).unwrap();
+        let repository = GitRepository::at(repo.path());
+        repository.cherry_pick(&commit).unwrap();
         assert_eq!(
             std::fs::read_to_string(repo.path().join("feature.txt")).unwrap(),
             "feature\n"
         );
 
-        revert(repo.path(), &commit).unwrap();
+        repository.revert(&commit).unwrap();
         assert!(!repo.path().join("feature.txt").exists());
     }
 
@@ -1311,7 +1329,7 @@ mod tests {
         test_repo::run(repo.path(), &["add", "."]);
         test_repo::run(repo.path(), &["commit", "-qm", "feature"]);
 
-        rebase(repo.path(), "main").unwrap();
+        GitRepository::at(repo.path()).rebase("main").unwrap();
 
         let (_, _, ancestor) = git_read(
             repo.path(),
@@ -1335,7 +1353,9 @@ mod tests {
         test_repo::run(merge_repo.path(), &["commit", "-qm", "feature"]);
         test_repo::run(merge_repo.path(), &["switch", "main"]);
 
-        merge(merge_repo.path(), "feature").unwrap();
+        GitRepository::at(merge_repo.path())
+            .merge("feature")
+            .unwrap();
         assert!(merge_repo.path().join("feature.txt").exists());
 
         let ff_repo = test_repo::init();
@@ -1350,7 +1370,9 @@ mod tests {
         assert!(ok);
         test_repo::run(ff_repo.path(), &["switch", "main"]);
 
-        fast_forward(ff_repo.path(), "feature").unwrap();
+        GitRepository::at(ff_repo.path())
+            .fast_forward("feature")
+            .unwrap();
         let (head, _, ok) = git_read(ff_repo.path(), &["rev-parse", "HEAD"]).unwrap();
         assert!(ok);
         assert_eq!(head.trim(), feature_head.trim());
@@ -1359,23 +1381,34 @@ mod tests {
     #[test]
     fn status_reports_modified_then_staged() {
         let repo = test_repo::init();
+        let repository = GitRepository::at(repo.path());
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         test_repo::write(repo.path(), "a.txt", "two\n");
 
-        assert_eq!(status(&file).unwrap().file_status, FileStatus::Modified);
-        stage(repo.path(), &file).unwrap();
-        assert_eq!(status(&file).unwrap().file_status, FileStatus::Staged);
+        assert_eq!(
+            repository.status(&file).unwrap().file_status,
+            FileStatus::Modified
+        );
+        repository.stage(&file).unwrap();
+        assert_eq!(
+            repository.status(&file).unwrap().file_status,
+            FileStatus::Staged
+        );
     }
 
     #[test]
     fn status_reports_nested_untracked_file() {
         let repo = test_repo::init();
+        let repository = GitRepository::at(repo.path());
         std::fs::create_dir(repo.path().join("nested")).unwrap();
         let file = test_repo::write(repo.path(), "nested/new.txt", "new\n");
 
-        assert_eq!(status(&file).unwrap().file_status, FileStatus::Untracked);
+        assert_eq!(
+            repository.status(&file).unwrap().file_status,
+            FileStatus::Untracked
+        );
     }
 
     #[test]
@@ -1391,7 +1424,9 @@ mod tests {
         let modified_path = modified.to_string_lossy().into_owned();
         let staged_path = staged.to_string_lossy().into_owned();
 
-        let events = statuses(repo.path(), &[modified, staged]).unwrap();
+        let events = GitRepository::at(repo.path())
+            .statuses(&[modified, staged])
+            .unwrap();
 
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].path, modified_path);
@@ -1417,11 +1452,12 @@ mod tests {
         use std::os::unix::ffi::OsStringExt;
 
         let repo = test_repo::init();
+        let git = GitRepository::at(repo.path());
         let raw_path = b"invalid-\x80-name.txt".to_vec();
         let file = repo.path().join(OsString::from_vec(raw_path.clone()));
         std::fs::write(&file, "one\n").unwrap();
-        stage(repo.path(), &file).unwrap();
-        commit(&file, "initial").unwrap();
+        git.stage(&file).unwrap();
+        git.commit("initial").unwrap();
         std::fs::write(&file, "two\n").unwrap();
 
         let repository = GitRepositorySnapshot::load(repo.path()).unwrap();
@@ -1433,18 +1469,18 @@ mod tests {
         let request_path = RequestPath::new(&entry.path, &entry.path_bytes).resolve(repo.path());
 
         assert_eq!(request_path, file);
-        assert!(!diff_lines(repo.path(), &request_path).unwrap().is_empty());
-        stage(repo.path(), &request_path).unwrap();
+        assert!(!git.diff_lines(&request_path).unwrap().is_empty());
+        git.stage(&request_path).unwrap();
         assert_eq!(
-            status(&request_path).unwrap().file_status,
+            git.status(&request_path).unwrap().file_status,
             FileStatus::Staged
         );
-        unstage(repo.path(), &request_path).unwrap();
+        git.unstage(&request_path).unwrap();
         assert_eq!(
-            status(&request_path).unwrap().file_status,
+            git.status(&request_path).unwrap().file_status,
             FileStatus::Modified
         );
-        discard(repo.path(), &request_path).unwrap();
+        git.discard(&request_path).unwrap();
         assert_eq!(std::fs::read_to_string(request_path).unwrap(), "one\n");
     }
 
@@ -1466,7 +1502,13 @@ mod tests {
             .set_times(FileTimes::new().set_modified(SystemTime::now() + Duration::from_secs(3600)))
             .unwrap();
 
-        assert_eq!(status(&file).unwrap().file_status, FileStatus::Clean);
+        assert_eq!(
+            GitRepository::at(repo.path())
+                .status(&file)
+                .unwrap()
+                .file_status,
+            FileStatus::Clean
+        );
 
         assert_eq!(std::fs::read(index).unwrap(), before);
     }
@@ -1479,7 +1521,7 @@ mod tests {
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         test_repo::write(repo.path(), "a.txt", "two\n");
 
-        let lines = diff_lines(repo.path(), &file).unwrap();
+        let lines = GitRepository::at(repo.path()).diff_lines(&file).unwrap();
         assert!(lines.iter().any(|l| matches!(l.kind, DiffKind::Add)));
         assert!(lines.iter().any(|l| matches!(l.kind, DiffKind::Remove)));
     }
@@ -1489,7 +1531,7 @@ mod tests {
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "new.txt", "one\ntwo\n");
 
-        let lines = diff_lines(repo.path(), &file).unwrap();
+        let lines = GitRepository::at(repo.path()).diff_lines(&file).unwrap();
 
         assert_eq!(lines.len(), 2);
         assert!(lines.iter().all(|line| line.kind == DiffKind::Add));
@@ -1514,16 +1556,17 @@ mod tests {
         test_repo::run(&nested, &["add", "a.txt"]);
         test_repo::run(&nested, &["commit", "-qm", "advance client"]);
 
-        let lines = diff_lines(repo.path(), &nested).unwrap();
+        let repository = GitRepository::at(repo.path());
+        let lines = repository.diff_lines(&nested).unwrap();
         assert!(!lines.is_empty());
         assert_eq!(
-            status_at(repo.path(), &nested).unwrap().file_status,
+            repository.status(&nested).unwrap().file_status,
             FileStatus::Modified
         );
 
-        stage(repo.path(), &nested).unwrap();
+        repository.stage(&nested).unwrap();
         assert_eq!(
-            status_at(repo.path(), &nested).unwrap().file_status,
+            repository.status(&nested).unwrap().file_status,
             FileStatus::Staged
         );
     }
@@ -1535,7 +1578,9 @@ mod tests {
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
 
-        let lines = diff_lines_with_content(repo.path(), &file, "one\nchanged\nthree\n").unwrap();
+        let lines = GitRepository::at(repo.path())
+            .diff_lines_with_content(&file, "one\nchanged\nthree\n")
+            .unwrap();
 
         assert!(
             lines
@@ -1553,41 +1598,51 @@ mod tests {
     #[test]
     fn handles_path_with_spaces_and_metachars() {
         let repo = test_repo::init();
+        let repository = GitRepository::at(repo.path());
         let file = test_repo::write(repo.path(), "a b; rm.txt", "one\n");
-        stage(repo.path(), &file).unwrap();
-        assert_eq!(status(&file).unwrap().file_status, FileStatus::Staged);
+        repository.stage(&file).unwrap();
+        assert_eq!(
+            repository.status(&file).unwrap().file_status,
+            FileStatus::Staged
+        );
     }
 
     #[test]
     fn unstage_returns_to_modified() {
         let repo = test_repo::init();
+        let repository = GitRepository::at(repo.path());
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         test_repo::write(repo.path(), "a.txt", "two\n");
-        stage(repo.path(), &file).unwrap();
-        unstage(repo.path(), &file).unwrap();
-        assert_eq!(status(&file).unwrap().file_status, FileStatus::Modified);
+        repository.stage(&file).unwrap();
+        repository.unstage(&file).unwrap();
+        assert_eq!(
+            repository.status(&file).unwrap().file_status,
+            FileStatus::Modified
+        );
     }
 
     #[test]
     fn discard_reverts_working_tree() {
         let repo = test_repo::init();
+        let repository = GitRepository::at(repo.path());
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         test_repo::write(repo.path(), "a.txt", "two\n");
-        discard(repo.path(), &file).unwrap();
+        repository.discard(&file).unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\n");
     }
 
     #[test]
     fn commit_clears_staged_and_advances_head() {
         let repo = test_repo::init();
+        let repository = GitRepository::at(repo.path());
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
-        stage(repo.path(), &file).unwrap();
-        commit(&file, "add a").unwrap();
-        assert_eq!(status(&file).unwrap().staged_count, 0);
+        repository.stage(&file).unwrap();
+        repository.commit("add a").unwrap();
+        assert_eq!(repository.status(&file).unwrap().staged_count, 0);
         let (log, _, ok) = git(repo.path(), &["log", "--oneline"]).unwrap();
         assert!(ok && log.contains("add a"));
     }
@@ -1595,10 +1650,11 @@ mod tests {
     #[test]
     fn commit_with_nothing_staged_errors() {
         let repo = test_repo::init();
+        let repository = GitRepository::at(repo.path());
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
-        assert!(commit(&file, "noop").is_err());
+        assert!(repository.commit("noop").is_err());
     }
 
     #[test]
@@ -1606,9 +1662,10 @@ mod tests {
         let remote = tempfile::tempdir().unwrap();
         test_repo::run(remote.path(), &["init", "-q", "--bare"]);
         let repo = test_repo::init();
+        let repository = GitRepository::at(repo.path());
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
-        stage(repo.path(), &file).unwrap();
-        commit(&file, "init").unwrap();
+        repository.stage(&file).unwrap();
+        repository.commit("init").unwrap();
         test_repo::run(
             repo.path(),
             &["remote", "add", "origin", remote.path().to_str().unwrap()],
@@ -1616,9 +1673,9 @@ mod tests {
         test_repo::run(repo.path(), &["push", "-u", "origin", "main"]);
 
         test_repo::write(repo.path(), "a.txt", "two\n");
-        stage(repo.path(), &file).unwrap();
-        commit(&file, "second").unwrap();
-        push(&file).unwrap();
+        repository.stage(&file).unwrap();
+        repository.commit("second").unwrap();
+        repository.push().unwrap();
 
         let (log, _, ok) = git(remote.path(), &["log", "--oneline", "main"]).unwrap();
         assert!(ok && log.contains("second"));
@@ -1627,6 +1684,7 @@ mod tests {
     #[test]
     fn apply_hunk_accept_stages_then_reject_reverts() {
         let repo = test_repo::init();
+        let repository = GitRepository::at(repo.path());
         let file = test_repo::write(
             repo.path(),
             "a.txt",
@@ -1640,13 +1698,13 @@ mod tests {
             "L1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nL10\n",
         );
 
-        apply_hunk(repo.path(), &file, 0, true).unwrap();
+        repository.apply_hunk(&file, 0, true).unwrap();
         assert_eq!(
-            status(&file).unwrap().file_status,
+            repository.status(&file).unwrap().file_status,
             FileStatus::StagedModified
         );
 
-        apply_hunk(repo.path(), &file, 0, false).unwrap();
+        repository.apply_hunk(&file, 0, false).unwrap();
         let content = std::fs::read_to_string(&file).unwrap();
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(lines.first().copied(), Some("L1"));
@@ -1656,6 +1714,7 @@ mod tests {
     #[test]
     fn diff_lines_marks_accepted_hunk_staged_unstaged_remains() {
         let repo = test_repo::init();
+        let repository = GitRepository::at(repo.path());
         let body = "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\n";
         let file = test_repo::write(repo.path(), "a.txt", body);
         test_repo::run(repo.path(), &["add", "a.txt"]);
@@ -1666,8 +1725,8 @@ mod tests {
             "L1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nL12\n",
         );
 
-        apply_hunk(repo.path(), &file, 0, true).unwrap();
-        let lines = diff_lines(repo.path(), &file).unwrap();
+        repository.apply_hunk(&file, 0, true).unwrap();
+        let lines = repository.diff_lines(&file).unwrap();
         assert!(lines.iter().any(|l| matches!(l.kind, DiffKind::Staged)));
         assert!(
             lines
@@ -1679,20 +1738,23 @@ mod tests {
     #[test]
     fn close_changes_are_independent_hunks() {
         let repo = test_repo::init();
+        let repository = GitRepository::at(repo.path());
         let file = test_repo::write(repo.path(), "a.txt", "l1\nl2\nl3\nl4\nl5\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         test_repo::write(repo.path(), "a.txt", "X1\nl2\nX3\nl4\nl5\n");
 
-        let hunks: std::collections::HashSet<u32> = diff_lines(repo.path(), &file)
+        let hunks: std::collections::HashSet<u32> = repository
+            .diff_lines(&file)
             .unwrap()
             .iter()
             .filter_map(|l| l.hunk)
             .collect();
         assert_eq!(hunks.len(), 2, "expected 2 separate hunks, got {hunks:?}");
 
-        apply_hunk(repo.path(), &file, 0, true).unwrap();
-        let removes: Vec<_> = diff_lines(repo.path(), &file)
+        repository.apply_hunk(&file, 0, true).unwrap();
+        let removes: Vec<_> = repository
+            .diff_lines(&file)
             .unwrap()
             .into_iter()
             .filter(|l| matches!(l.kind, DiffKind::Remove))
@@ -1704,6 +1766,7 @@ mod tests {
     #[test]
     fn deny_hunk_restores_line_and_clears_its_highlight() {
         let repo = test_repo::init();
+        let repository = GitRepository::at(repo.path());
         let filler = "    f();\n".repeat(10);
         let head = format!("fn greet() {{\n    a();\n}}\n{filler}fn main() {{\n    done();\n}}\n");
         let file = test_repo::write(repo.path(), "a.rs", &head);
@@ -1712,10 +1775,10 @@ mod tests {
         let work = format!("fn greet() {{\n    B();\n}}\n{filler}fn main() {{\n}}\n");
         test_repo::write(repo.path(), "a.rs", &work);
 
-        apply_hunk(repo.path(), &file, 1, false).unwrap();
+        repository.apply_hunk(&file, 1, false).unwrap();
 
         assert!(std::fs::read_to_string(&file).unwrap().contains("done();"));
-        let after = diff_lines(repo.path(), &file).unwrap();
+        let after = repository.diff_lines(&file).unwrap();
         let removes: Vec<_> = after
             .iter()
             .filter(|l| matches!(l.kind, DiffKind::Remove))
@@ -1727,14 +1790,15 @@ mod tests {
     #[test]
     fn diff_lines_fully_staged_shows_code_without_signs() {
         let repo = test_repo::init();
+        let repository = GitRepository::at(repo.path());
         let body = "l1\nl2\nl3\nl4\nl5\n";
         let file = test_repo::write(repo.path(), "a.txt", body);
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         test_repo::write(repo.path(), "a.txt", "L1\nl2\nl3\nl4\nl5\n");
-        stage(repo.path(), &file).unwrap();
+        repository.stage(&file).unwrap();
 
-        let lines = diff_lines(repo.path(), &file).unwrap();
+        let lines = repository.diff_lines(&file).unwrap();
         assert_eq!(lines.len(), 5);
         assert!(lines.iter().any(|l| matches!(l.kind, DiffKind::Staged)));
         assert!(

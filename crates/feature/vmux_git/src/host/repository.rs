@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
@@ -7,6 +7,7 @@ use crate::event::{GitBranchLogRequest, GitRepositoryRequest};
 
 use super::job::{BranchLogJob, RepositoryJob};
 use super::job_runner::{GitJob, GitJobFailure};
+use super::runner::GitRepository;
 use super::watch::GitWatch;
 
 pub(super) struct RepositoryPlugin;
@@ -43,8 +44,8 @@ fn on_repository_request(
             }
         }
     } else {
-        match super::runner::repo_root(&path) {
-            Ok(repo_root) => repo_root,
+        match GitRepository::discover(&path) {
+            Ok(repository) => repository.path().to_path_buf(),
             Err(error) => {
                 commands.trigger(GitJobFailure {
                     webview,
@@ -67,8 +68,8 @@ fn on_branch_log_request(trigger: On<UiInput<GitBranchLogRequest>>, mut commands
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
+        GitRepository::at(request.repo_root.clone()),
         BranchLogJob {
-            repo_root: Path::new(&request.repo_root).to_path_buf(),
             branch: request.branch.clone(),
         },
     ));

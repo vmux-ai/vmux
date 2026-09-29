@@ -12,6 +12,7 @@ use crate::event::{FileGitState, FileStatus, GitDiffViewport, GitFileStatus, Git
 
 use super::GitDiffSource;
 use super::GitUpdateSet;
+use super::runner::GitRepository;
 use super::watch::GitWatch;
 
 const STATUS_DEBOUNCE: Duration = Duration::from_millis(120);
@@ -282,7 +283,7 @@ fn poll_status_refreshes(
             continue;
         }
         let path = PathBuf::from(&file.state.path);
-        if !super::runner::has_repository(&path) {
+        if !GitRepository::has_repository(&path) {
             file.apply_status(super::runner::non_repository_status(&path));
             commands.entity(entity).remove::<PendingGitStatus>();
             continue;
@@ -290,7 +291,7 @@ fn poll_status_refreshes(
         let repo_root = if let Some(watch) = watch.as_deref_mut() {
             watch.subscribe(entity, &path)
         } else {
-            super::runner::repo_root(&path)
+            GitRepository::discover(&path).map(|repository| repository.path().to_path_buf())
         };
         match repo_root {
             Ok(repo_root) => {
@@ -391,7 +392,7 @@ fn dispatch_status_requests(
                 .iter()
                 .map(|request| request.path.clone())
                 .collect::<Vec<_>>();
-            let results = match super::runner::statuses(&task_root, &paths) {
+            let results = match GitRepository::at(task_root).statuses(&paths) {
                 Ok(events) => requests
                     .into_iter()
                     .zip(events)
