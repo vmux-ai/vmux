@@ -106,6 +106,24 @@ struct GitJobTask<T: Send + Sync + 'static> {
     thread: Option<JoinHandle<T>>,
 }
 
+impl<T: Send + Sync + 'static> GitJobTask<T> {
+    fn spawn(
+        wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
+        run: impl FnOnce() -> T + Send + 'static,
+    ) -> Self {
+        let thread = std::thread::spawn(move || {
+            let output = run();
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            output
+        });
+        Self {
+            thread: Some(thread),
+        }
+    }
+}
+
 #[derive(Component)]
 struct RepositoryOutput(Result<GitRepositorySnapshot, GitOperationError>);
 
@@ -313,18 +331,24 @@ fn deliver_failure_outputs(
 }
 
 #[derive(SystemParam)]
-struct GitJobStarter<'w, 's, J: Component> {
+struct PendingGitJobs<'w, 's, J: Component> {
     queues: Query<'w, 's, &'static GitJobs>,
     pending: Query<'w, 's, &'static J>,
     repositories: Query<'w, 's, &'static GitRepository>,
     running: Query<'w, 's, (), With<GitJobRunning>>,
     wake: Option<Res<'w, EventLoopProxyWrapper>>,
-    commands: Commands<'w, 's>,
 }
 
-impl<J: Component + Clone> GitJobStarter<'_, '_, J> {
-    fn start<O: Component>(&mut self, run: fn(J) -> O) {
+impl<J: Component + Clone> PendingGitJobs<'_, '_, J> {
+    fn ready(
+        &self,
+    ) -> Vec<(
+        Entity,
+        J,
+        Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
+    )> {
         let wake = self.wake.as_deref().map(|wake| (**wake).clone());
+        let mut ready = Vec::new();
         for queue in &self.queues {
             let Some(entity) = queue.iter().next() else {
                 continue;
@@ -335,26 +359,21 @@ impl<J: Component + Clone> GitJobStarter<'_, '_, J> {
             let Ok(job) = self.pending.get(entity) else {
                 continue;
             };
-            let job = job.clone();
-            let wake = wake.clone();
-            let thread = std::thread::spawn(move || {
-                let output = run(job);
-                if let Some(wake) = wake {
-                    let _ = wake.send_event(WinitUserEvent::WakeUp);
-                }
-                output
-            });
-            self.commands.entity(entity).remove::<J>().insert((
-                GitJobRunning,
-                GitJobTask {
-                    thread: Some(thread),
-                },
-            ));
+            ready.push((entity, job.clone(), wake.clone()));
         }
+        ready
     }
 
-    fn start_with_repository<O: Component>(&mut self, run: fn(J, GitRepository) -> O) {
+    fn ready_with_repository(
+        &self,
+    ) -> Vec<(
+        Entity,
+        J,
+        GitRepository,
+        Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
+    )> {
         let wake = self.wake.as_deref().map(|wake| (**wake).clone());
+        let mut ready = Vec::new();
         for queue in &self.queues {
             let Some(entity) = queue.iter().next() else {
                 continue;
@@ -368,246 +387,379 @@ impl<J: Component + Clone> GitJobStarter<'_, '_, J> {
             let Ok(repository) = self.repositories.get(entity) else {
                 continue;
             };
-            let job = job.clone();
-            let repository = repository.clone();
-            let wake = wake.clone();
-            let thread = std::thread::spawn(move || {
-                let output = run(job, repository);
-                if let Some(wake) = wake {
-                    let _ = wake.send_event(WinitUserEvent::WakeUp);
-                }
-                output
-            });
-            self.commands.entity(entity).remove::<J>().insert((
-                GitJobRunning,
-                GitJobTask {
-                    thread: Some(thread),
-                },
-            ));
+            ready.push((entity, job.clone(), repository.clone(), wake.clone()));
         }
+        ready
     }
 }
 
-fn start_repository_jobs(mut jobs: GitJobStarter<RepositoryJob>) {
-    jobs.start(|job| {
-        RepositoryOutput(
-            GitRepositorySnapshot::load(&job.path)
-                .map_err(|error| GitOperationError { message: error.0 }),
-        )
-    });
+fn start_repository_jobs(jobs: PendingGitJobs<RepositoryJob>, mut commands: Commands) {
+    for (entity, job, wake) in jobs.ready() {
+        let task = GitJobTask::spawn(wake, move || {
+            RepositoryOutput(
+                GitRepositorySnapshot::load(&job.path)
+                    .map_err(|error| GitOperationError { message: error.0 }),
+            )
+        });
+        commands
+            .entity(entity)
+            .remove::<RepositoryJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_branch_log_jobs(mut jobs: GitJobStarter<BranchLogJob>) {
-    jobs.start_with_repository(|job, repository| {
-        BranchLogOutput(
-            crate::event::GitCommitEntry::for_reference(repository.path(), &job.branch)
-                .map(|commits| GitBranchLog {
-                    repo_root: repository.path().to_string_lossy().into_owned(),
-                    branch: job.branch,
-                    commits,
-                })
-                .map_err(|error| GitOperationError { message: error.0 }),
-        )
-    });
+fn start_branch_log_jobs(jobs: PendingGitJobs<BranchLogJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || {
+            BranchLogOutput(
+                crate::event::GitCommitEntry::for_reference(repository.path(), &job.branch)
+                    .map(|commits| GitBranchLog {
+                        repo_root: repository.path().to_string_lossy().into_owned(),
+                        branch: job.branch,
+                        commits,
+                    })
+                    .map_err(|error| GitOperationError { message: error.0 }),
+            )
+        });
+        commands
+            .entity(entity)
+            .remove::<BranchLogJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_diff_jobs(mut jobs: GitJobStarter<DiffJob>) {
-    jobs.start_with_repository(|job, repository| {
-        if !GitRepository::has_repository(repository.path()) {
-            return DiffOutput(GitDiffViewport {
-                generation: job.generation,
-                first_line: job.top_line,
-                total_lines: 0,
-                lines: Vec::new(),
-                markers: Vec::new(),
-                error: String::new(),
-            });
-        }
-        let result = if job.reference.is_empty() {
-            match job.content.as_deref() {
-                Some(content) => repository.diff_lines_with_content(&job.path, content),
-                None => repository.diff_lines(&job.path),
-            }
-        } else {
-            repository.commit_diff_lines(&job.reference)
-        };
-        match result {
-            Ok(all_lines) => {
-                let markers = super::diff::GitDiffMarkers::from_lines(&all_lines).into_inner();
-                let (total_lines, lines) = super::parse::window(&all_lines, job.top_line, job.rows);
-                DiffOutput(GitDiffViewport {
+fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || {
+            if !GitRepository::has_repository(repository.path()) {
+                return DiffOutput(GitDiffViewport {
                     generation: job.generation,
-                    first_line: job.top_line.min(total_lines),
-                    total_lines,
-                    lines,
-                    markers,
+                    first_line: job.top_line,
+                    total_lines: 0,
+                    lines: Vec::new(),
+                    markers: Vec::new(),
                     error: String::new(),
-                })
+                });
             }
-            Err(error) => DiffOutput(GitDiffViewport {
-                generation: job.generation,
-                first_line: job.top_line,
-                total_lines: 0,
-                lines: Vec::new(),
-                markers: Vec::new(),
-                error: error.0,
-            }),
-        }
-    });
+            let result = if job.reference.is_empty() {
+                match job.content.as_deref() {
+                    Some(content) => repository.diff_lines_with_content(&job.path, content),
+                    None => repository.diff_lines(&job.path),
+                }
+            } else {
+                repository.commit_diff_lines(&job.reference)
+            };
+            match result {
+                Ok(all_lines) => {
+                    let markers = super::diff::GitDiffMarkers::from_lines(&all_lines).into_inner();
+                    let (total_lines, lines) =
+                        super::parse::window(&all_lines, job.top_line, job.rows);
+                    DiffOutput(GitDiffViewport {
+                        generation: job.generation,
+                        first_line: job.top_line.min(total_lines),
+                        total_lines,
+                        lines,
+                        markers,
+                        error: String::new(),
+                    })
+                }
+                Err(error) => DiffOutput(GitDiffViewport {
+                    generation: job.generation,
+                    first_line: job.top_line,
+                    total_lines: 0,
+                    lines: Vec::new(),
+                    markers: Vec::new(),
+                    error: error.0,
+                }),
+            }
+        });
+        commands
+            .entity(entity)
+            .remove::<DiffJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_stage_jobs(mut jobs: GitJobStarter<StageJob>) {
-    jobs.start_with_repository(|job, repository| match repository.stage(&job.path) {
-        Ok(()) => result_then_status(&repository, &job.path, "stage", "ok"),
-        Err(error) => failed_operation("stage", error),
-    });
+fn start_stage_jobs(jobs: PendingGitJobs<StageJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || match repository.stage(&job.path) {
+            Ok(()) => result_then_status(&repository, &job.path, "stage", "ok"),
+            Err(error) => failed_operation("stage", error),
+        });
+        commands
+            .entity(entity)
+            .remove::<StageJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_unstage_jobs(mut jobs: GitJobStarter<UnstageJob>) {
-    jobs.start_with_repository(|job, repository| match repository.unstage(&job.path) {
-        Ok(()) => result_then_status(&repository, &job.path, "unstage", "ok"),
-        Err(error) => failed_operation("unstage", error),
-    });
+fn start_unstage_jobs(jobs: PendingGitJobs<UnstageJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || match repository.unstage(&job.path) {
+            Ok(()) => result_then_status(&repository, &job.path, "unstage", "ok"),
+            Err(error) => failed_operation("unstage", error),
+        });
+        commands
+            .entity(entity)
+            .remove::<UnstageJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_discard_jobs(mut jobs: GitJobStarter<DiscardJob>) {
-    jobs.start_with_repository(|job, repository| match repository.discard(&job.path) {
-        Ok(()) => result_then_status(&repository, &job.path, "discard", "ok"),
-        Err(error) => failed_operation("discard", error),
-    });
+fn start_discard_jobs(jobs: PendingGitJobs<DiscardJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || match repository.discard(&job.path) {
+            Ok(()) => result_then_status(&repository, &job.path, "discard", "ok"),
+            Err(error) => failed_operation("discard", error),
+        });
+        commands
+            .entity(entity)
+            .remove::<DiscardJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_commit_jobs(mut jobs: GitJobStarter<CommitJob>) {
-    jobs.start(|job| match GitRepository::discover(&job.path) {
-        Ok(repository) => match repository.commit(&job.message) {
-            Ok(()) => result_then_status(&repository, &job.path, "commit", "committed"),
+fn start_commit_jobs(jobs: PendingGitJobs<CommitJob>, mut commands: Commands) {
+    for (entity, job, wake) in jobs.ready() {
+        let task = GitJobTask::spawn(wake, move || match GitRepository::discover(&job.path) {
+            Ok(repository) => match repository.commit(&job.message) {
+                Ok(()) => result_then_status(&repository, &job.path, "commit", "committed"),
+                Err(error) => failed_operation("commit", error),
+            },
             Err(error) => failed_operation("commit", error),
-        },
-        Err(error) => failed_operation("commit", error),
-    });
+        });
+        commands
+            .entity(entity)
+            .remove::<CommitJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_fetch_jobs(mut jobs: GitJobStarter<FetchJob>) {
-    jobs.start(|job| match GitRepository::discover(&job.path) {
-        Ok(repository) => match repository.fetch() {
-            Ok(()) => result_then_status(&repository, &job.path, "fetch", "fetched"),
+fn start_fetch_jobs(jobs: PendingGitJobs<FetchJob>, mut commands: Commands) {
+    for (entity, job, wake) in jobs.ready() {
+        let task = GitJobTask::spawn(wake, move || match GitRepository::discover(&job.path) {
+            Ok(repository) => match repository.fetch() {
+                Ok(()) => result_then_status(&repository, &job.path, "fetch", "fetched"),
+                Err(error) => failed_operation("fetch", error),
+            },
             Err(error) => failed_operation("fetch", error),
-        },
-        Err(error) => failed_operation("fetch", error),
-    });
+        });
+        commands
+            .entity(entity)
+            .remove::<FetchJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_pull_jobs(mut jobs: GitJobStarter<PullJob>) {
-    jobs.start(|job| match GitRepository::discover(&job.path) {
-        Ok(repository) => match repository.pull() {
-            Ok(()) => result_then_status(&repository, &job.path, "pull", "pulled"),
+fn start_pull_jobs(jobs: PendingGitJobs<PullJob>, mut commands: Commands) {
+    for (entity, job, wake) in jobs.ready() {
+        let task = GitJobTask::spawn(wake, move || match GitRepository::discover(&job.path) {
+            Ok(repository) => match repository.pull() {
+                Ok(()) => result_then_status(&repository, &job.path, "pull", "pulled"),
+                Err(error) => failed_operation("pull", error),
+            },
             Err(error) => failed_operation("pull", error),
-        },
-        Err(error) => failed_operation("pull", error),
-    });
+        });
+        commands
+            .entity(entity)
+            .remove::<PullJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_push_jobs(mut jobs: GitJobStarter<PushJob>) {
-    jobs.start(|job| match GitRepository::discover(&job.path) {
-        Ok(repository) => match repository.push() {
-            Ok(()) => result_then_status(&repository, &job.path, "push", "pushed"),
+fn start_push_jobs(jobs: PendingGitJobs<PushJob>, mut commands: Commands) {
+    for (entity, job, wake) in jobs.ready() {
+        let task = GitJobTask::spawn(wake, move || match GitRepository::discover(&job.path) {
+            Ok(repository) => match repository.push() {
+                Ok(()) => result_then_status(&repository, &job.path, "push", "pushed"),
+                Err(error) => failed_operation("push", error),
+            },
             Err(error) => failed_operation("push", error),
-        },
-        Err(error) => failed_operation("push", error),
-    });
+        });
+        commands
+            .entity(entity)
+            .remove::<PushJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_stage_all_jobs(mut jobs: GitJobStarter<StageAllJob>) {
-    jobs.start(|job| match GitRepository::discover(&job.path) {
-        Ok(repository) => match repository.stage_all() {
-            Ok(()) => result_then_status(&repository, &job.path, "stage all", "staged"),
+fn start_stage_all_jobs(jobs: PendingGitJobs<StageAllJob>, mut commands: Commands) {
+    for (entity, job, wake) in jobs.ready() {
+        let task = GitJobTask::spawn(wake, move || match GitRepository::discover(&job.path) {
+            Ok(repository) => match repository.stage_all() {
+                Ok(()) => result_then_status(&repository, &job.path, "stage all", "staged"),
+                Err(error) => failed_operation("stage all", error),
+            },
             Err(error) => failed_operation("stage all", error),
-        },
-        Err(error) => failed_operation("stage all", error),
-    });
+        });
+        commands
+            .entity(entity)
+            .remove::<StageAllJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_hunk_jobs(mut jobs: GitJobStarter<HunkJob>) {
-    jobs.start_with_repository(|job, repository| {
-        match repository.apply_hunk(&job.path, job.hunk, job.accept) {
-            Ok(()) => result_then_status(
-                &repository,
-                &job.path,
-                if job.accept { "accept" } else { "reject" },
-                "ok",
-            ),
-            Err(error) => failed_operation("hunk", error),
-        }
-    });
+fn start_hunk_jobs(jobs: PendingGitJobs<HunkJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || {
+            match repository.apply_hunk(&job.path, job.hunk, job.accept) {
+                Ok(()) => result_then_status(
+                    &repository,
+                    &job.path,
+                    if job.accept { "accept" } else { "reject" },
+                    "ok",
+                ),
+                Err(error) => failed_operation("hunk", error),
+            }
+        });
+        commands
+            .entity(entity)
+            .remove::<HunkJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_amend_jobs(mut jobs: GitJobStarter<AmendJob>) {
-    jobs.start_with_repository(|_, repository| operation("amend", repository.amend()));
+fn start_amend_jobs(jobs: PendingGitJobs<AmendJob>, mut commands: Commands) {
+    for (entity, _, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || operation("amend", repository.amend()));
+        commands
+            .entity(entity)
+            .remove::<AmendJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_checkout_commit_jobs(mut jobs: GitJobStarter<CheckoutCommitJob>) {
-    jobs.start_with_repository(|job, repository| {
-        operation("checkout commit", repository.checkout_commit(&job.commit))
-    });
+fn start_checkout_commit_jobs(jobs: PendingGitJobs<CheckoutCommitJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || {
+            operation("checkout commit", repository.checkout_commit(&job.commit))
+        });
+        commands
+            .entity(entity)
+            .remove::<CheckoutCommitJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_cherry_pick_jobs(mut jobs: GitJobStarter<CherryPickJob>) {
-    jobs.start_with_repository(|job, repository| {
-        operation("cherry-pick", repository.cherry_pick(&job.commit))
-    });
+fn start_cherry_pick_jobs(jobs: PendingGitJobs<CherryPickJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || {
+            operation("cherry-pick", repository.cherry_pick(&job.commit))
+        });
+        commands
+            .entity(entity)
+            .remove::<CherryPickJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_create_branch_jobs(mut jobs: GitJobStarter<CreateBranchJob>) {
-    jobs.start_with_repository(|job, repository| {
-        operation(
-            "new branch",
-            repository.create_branch(&job.branch, &job.start_point),
-        )
-    });
+fn start_create_branch_jobs(jobs: PendingGitJobs<CreateBranchJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || {
+            operation(
+                "new branch",
+                repository.create_branch(&job.branch, &job.start_point),
+            )
+        });
+        commands
+            .entity(entity)
+            .remove::<CreateBranchJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_delete_branch_jobs(mut jobs: GitJobStarter<DeleteBranchJob>) {
-    jobs.start_with_repository(|job, repository| {
-        operation("delete branch", repository.delete_branch(&job.branch))
-    });
+fn start_delete_branch_jobs(jobs: PendingGitJobs<DeleteBranchJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || {
+            operation("delete branch", repository.delete_branch(&job.branch))
+        });
+        commands
+            .entity(entity)
+            .remove::<DeleteBranchJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_fast_forward_jobs(mut jobs: GitJobStarter<FastForwardJob>) {
-    jobs.start_with_repository(|job, repository| {
-        operation("fast-forward", repository.fast_forward(&job.branch))
-    });
+fn start_fast_forward_jobs(jobs: PendingGitJobs<FastForwardJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || {
+            operation("fast-forward", repository.fast_forward(&job.branch))
+        });
+        commands
+            .entity(entity)
+            .remove::<FastForwardJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_merge_jobs(mut jobs: GitJobStarter<MergeJob>) {
-    jobs.start_with_repository(|job, repository| operation("merge", repository.merge(&job.branch)));
+fn start_merge_jobs(jobs: PendingGitJobs<MergeJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || {
+            operation("merge", repository.merge(&job.branch))
+        });
+        commands
+            .entity(entity)
+            .remove::<MergeJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_rebase_jobs(mut jobs: GitJobStarter<RebaseJob>) {
-    jobs.start_with_repository(|job, repository| {
-        operation("rebase", repository.rebase(&job.branch))
-    });
+fn start_rebase_jobs(jobs: PendingGitJobs<RebaseJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || {
+            operation("rebase", repository.rebase(&job.branch))
+        });
+        commands
+            .entity(entity)
+            .remove::<RebaseJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_revert_jobs(mut jobs: GitJobStarter<RevertJob>) {
-    jobs.start_with_repository(|job, repository| {
-        operation("revert", repository.revert(&job.commit))
-    });
+fn start_revert_jobs(jobs: PendingGitJobs<RevertJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || {
+            operation("revert", repository.revert(&job.commit))
+        });
+        commands
+            .entity(entity)
+            .remove::<RevertJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_stash_drop_jobs(mut jobs: GitJobStarter<StashDropJob>) {
-    jobs.start_with_repository(|job, repository| {
-        operation("stash drop", repository.stash_drop(&job.reference))
-    });
+fn start_stash_drop_jobs(jobs: PendingGitJobs<StashDropJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || {
+            operation("stash drop", repository.stash_drop(&job.reference))
+        });
+        commands
+            .entity(entity)
+            .remove::<StashDropJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_stash_pop_jobs(mut jobs: GitJobStarter<StashPopJob>) {
-    jobs.start_with_repository(|job, repository| {
-        operation("stash pop", repository.stash_pop(&job.reference))
-    });
+fn start_stash_pop_jobs(jobs: PendingGitJobs<StashPopJob>, mut commands: Commands) {
+    for (entity, job, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || {
+            operation("stash pop", repository.stash_pop(&job.reference))
+        });
+        commands
+            .entity(entity)
+            .remove::<StashPopJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
-fn start_stash_push_jobs(mut jobs: GitJobStarter<StashPushJob>) {
-    jobs.start_with_repository(|_, repository| operation("stash", repository.stash_push()));
+fn start_stash_push_jobs(jobs: PendingGitJobs<StashPushJob>, mut commands: Commands) {
+    for (entity, _, repository, wake) in jobs.ready_with_repository() {
+        let task = GitJobTask::spawn(wake, move || operation("stash", repository.stash_push()));
+        commands
+            .entity(entity)
+            .remove::<StashPushJob>()
+            .insert((GitJobRunning, task));
+    }
 }
 
 fn result_then_status(
