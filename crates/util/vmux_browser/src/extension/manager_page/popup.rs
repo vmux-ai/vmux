@@ -25,7 +25,7 @@ impl Plugin for PopupPlugin {
             .add_observer(on_size)
             .add_systems(
                 Update,
-                inject_sizing.after(crate::page_life::drain_loading_state),
+                inject_sizing.after(crate::BrowserSystemSet::DrainLoadingState),
             );
     }
 }

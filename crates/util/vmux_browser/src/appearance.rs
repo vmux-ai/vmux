@@ -70,7 +70,7 @@ fn map_color_scheme(mode: vmux_setting::ColorScheme) -> bevy_cef::prelude::CefCo
     }
 }
 
-pub(crate) fn sync_appearance_to_cef(
+fn sync_appearance_to_cef(
     settings: Res<AppSettings>,
     mut scheme: ResMut<bevy_cef::prelude::CefColorScheme>,
     mut accept_language_list: Option<ResMut<bevy_cef::prelude::CefAcceptLanguageList>>,

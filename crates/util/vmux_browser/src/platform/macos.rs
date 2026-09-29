@@ -61,11 +61,11 @@ impl Plugin for MacosBrowserPlugin {
             PostUpdate,
             (place_native_pages, render_native_pages)
                 .chain()
-                .after(crate::present::sync_windowed_frames),
+                .after(crate::BrowserSystemSet::SyncWindowedFrames),
         )
         .add_systems(
             PostUpdate,
-            focus_native_page.after(crate::host_focus::apply_windowed_host_focus),
+            focus_native_page.after(crate::BrowserSystemSet::HostFocusApplied),
         )
         .add_observer(forward_host_emit);
     }

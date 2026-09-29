@@ -48,9 +48,10 @@ impl Plugin for PresentPlugin {
                 sync_keyboard_target,
                 sync_children_to_ui,
                 sync_windowed_layout,
-                sync_windowed_frames,
-                sync_windowed_command_bar,
-                sync_windowed_extension_popups,
+                sync_windowed_frames.in_set(crate::BrowserSystemSet::SyncWindowedFrames),
+                sync_windowed_command_bar.in_set(crate::BrowserSystemSet::SyncWindowedCommandBar),
+                sync_windowed_extension_popups
+                    .in_set(crate::BrowserSystemSet::SyncWindowedExtensionPopups),
                 flush_native_command_bar_pointer_events,
                 apply_repaint_nudge,
                 sync_cef_webview_resize_after_ui,
@@ -425,7 +426,7 @@ fn agent_brand_rgb(kind: vmux_core::agent::AgentKind) -> [f32; 3] {
     hex_to_rgb(&kind.avatar().color).unwrap_or([0.5, 0.5, 0.5])
 }
 
-pub(crate) fn sync_windowed_frames(
+fn sync_windowed_frames(
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
     hidden_windows: Query<(), With<vmux_layout::toggle::LayoutHidden>>,
@@ -929,7 +930,7 @@ fn command_bar_windowed_view_should_render_hidden(
     display != Display::None && visibility == Visibility::Hidden
 }
 
-pub(crate) fn sync_windowed_command_bar(
+fn sync_windowed_command_bar(
     browsers: NonSend<Browsers>,
     modal_q: Query<
         (
@@ -1082,7 +1083,7 @@ pub(crate) fn sync_windowed_command_bar(
     }
 }
 
-pub(crate) fn sync_windowed_extension_popups(
+fn sync_windowed_extension_popups(
     browsers: NonSend<Browsers>,
     popups: Query<
         (

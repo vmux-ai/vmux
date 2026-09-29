@@ -1,4 +1,4 @@
-use crate::host::{PendingNavigationSnapshot, apply_pending_navigation_updates};
+use crate::host::PendingNavigationSnapshot;
 use bevy::ecs::relationship::Relationship;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -31,14 +31,15 @@ impl Plugin for SnapshotPlugin {
             .add_systems(
                 Update,
                 drive_pending_nav_snapshots
-                    .after(apply_pending_navigation_updates)
+                    .in_set(crate::BrowserSystemSet::DrivePendingNavigationSnapshots)
+                    .after(crate::BrowserSystemSet::ApplyPendingNavigation)
                     .after(vmux_command::WriteCommandRequests),
             )
             .add_systems(
                 Update,
                 (start_snapshots, shape_snapshot_results)
                     .chain()
-                    .after(crate::scroll::run_scrolls)
+                    .after(crate::BrowserSystemSet::Scroll)
                     .after(vmux_command::WriteCommandRequests),
             );
     }
@@ -179,7 +180,7 @@ impl BrowserTarget<'_, '_> {
     }
 }
 
-pub(crate) fn drive_pending_nav_snapshots(
+fn drive_pending_nav_snapshots(
     time: Res<Time>,
     mut pending: Query<(Entity, &mut PendingNavigationSnapshot)>,
     loading_q: Query<(), With<Loading>>,

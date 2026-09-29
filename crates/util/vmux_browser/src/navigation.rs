@@ -32,6 +32,12 @@ impl Plugin for NavigationPlugin {
             app.add_plugins(CommandRuntimePlugin);
         }
         app.add_message::<OpenHistoryRequest>()
+            .configure_sets(
+                Update,
+                crate::BrowserSystemSet::Navigate
+                    .after(vmux_core::service::ServiceMessageSet)
+                    .before(vmux_core::PageOpenSet::ResolveTarget),
+            )
             .add_systems(
                 Startup,
                 spawn_history_command.in_set(RegisterCommandDefinitions),
@@ -41,7 +47,7 @@ impl Plugin for NavigationPlugin {
                 Update,
                 (
                     drain_committed_navigation,
-                    handle_browser_navigate_requests.after(vmux_core::service::ServiceMessageSet),
+                    handle_browser_navigate_requests.in_set(crate::BrowserSystemSet::Navigate),
                     handle_browser_go_back_requests,
                     handle_browser_go_forward_requests,
                     handle_open_in_new_stack_requests,
@@ -123,7 +129,7 @@ fn spawn_visit_on_navigation(
     }
 }
 
-pub(crate) fn sync_page_metadata_to_tab(
+fn sync_page_metadata_to_tab(
     browser_q: Query<
         (&PageMetadata, Option<&vmux_core::PageIdentity>, &ChildOf),
         (
@@ -248,7 +254,7 @@ fn handle_open_in_new_stack_requests(
     }
 }
 
-pub(crate) fn handle_browser_navigate_requests(
+fn handle_browser_navigate_requests(
     mut reader: MessageReader<vmux_layout::BrowserNavigateRequest>,
     focus: vmux_layout::stack::FocusedStack,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,

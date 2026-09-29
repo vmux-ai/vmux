@@ -29,9 +29,10 @@ impl Plugin for HostFocusPlugin {
                 PostUpdate,
                 (compute_host_focus_intent, apply_windowed_host_focus)
                     .chain()
-                    .after(crate::present::sync_windowed_frames)
-                    .after(crate::present::sync_windowed_command_bar)
-                    .after(crate::present::sync_windowed_extension_popups),
+                    .in_set(crate::BrowserSystemSet::HostFocusApplied)
+                    .after(crate::BrowserSystemSet::SyncWindowedFrames)
+                    .after(crate::BrowserSystemSet::SyncWindowedCommandBar)
+                    .after(crate::BrowserSystemSet::SyncWindowedExtensionPopups),
             )
             .add_plugins(platform::HostFocusPlatformPlugin);
     }
@@ -168,7 +169,7 @@ fn windowed_focus_target(
     }
 }
 
-pub(crate) fn apply_windowed_host_focus(
+fn apply_windowed_host_focus(
     intent: Single<&HostFocusIntent>,
     browsers: NonSend<Browsers>,
     mut focused: Local<Option<Entity>>,

@@ -1,7 +1,6 @@
 mod agent;
 mod agent_pane;
 
-use crate::page_life::spawn_popup_stacks;
 use crate::present::CommandBarWindowedFrame;
 use bevy::{ecs::relationship::Relationship, input::mouse::MouseButton, prelude::*};
 use bevy_cef::prelude::*;
@@ -34,22 +33,17 @@ pub(crate) struct WebviewLoadCompleted {
     pub(crate) webview: Entity,
 }
 
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-pub(crate) enum BrowserSystems {
-    SyncCefBackend,
-}
-
 pub(crate) fn configure_cef_backend_sync(app: &mut App) -> &mut App {
     app.configure_sets(
         Update,
-        BrowserSystems::SyncCefBackend.before(CefSystems::CreateAndResize),
+        crate::BrowserSystemSet::SyncCefBackend.before(CefSystems::CreateAndResize),
     )
     .add_systems(
         Update,
         sync_cef_backend
-            .in_set(BrowserSystems::SyncCefBackend)
+            .in_set(crate::BrowserSystemSet::SyncCefBackend)
             .after(PageOpenSet::Fallback)
-            .after(spawn_popup_stacks),
+            .after(crate::BrowserSystemSet::SpawnPopupStacks),
     )
 }
 
@@ -582,28 +576,6 @@ impl PendingNavigationUpdate {
         Self {
             webview,
             pending: None,
-        }
-    }
-}
-
-pub(crate) fn apply_pending_navigation_updates(
-    mut updates: MessageReader<PendingNavigationUpdate>,
-    existing: Query<(Entity, &PendingNavigationSnapshot)>,
-    mut commands: Commands,
-    mut service_requests: MessageWriter<vmux_core::service::ServiceRequest>,
-) {
-    let mut pending = existing
-        .iter()
-        .map(|(entity, operation)| (operation.webview, (entity, operation.clone())))
-        .collect::<bevy::ecs::entity::EntityHashMap<_>>();
-    for update in updates.read() {
-        if let Some((entity, displaced)) = pending.remove(&update.webview) {
-            commands.entity(entity).despawn();
-            send_page_open_response(&mut service_requests, Some(displaced.request_id), Ok(()));
-        }
-        if let Some(next) = update.pending.clone() {
-            let entity = commands.spawn(next.clone()).id();
-            pending.insert(update.webview, (entity, next));
         }
     }
 }

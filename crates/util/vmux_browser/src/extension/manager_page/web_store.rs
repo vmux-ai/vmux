@@ -20,7 +20,7 @@ impl Plugin for WebStorePlugin {
                 (
                     inject_on_navigation,
                     bevy::ecs::schedule::ApplyDeferred,
-                    inject_on_load.after(crate::page_life::drain_loading_state),
+                    inject_on_load.after(crate::BrowserSystemSet::DrainLoadingState),
                     emit_install_result,
                 )
                     .chain(),

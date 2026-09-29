@@ -1,5 +1,4 @@
 use super::*;
-use crate::appearance::sync_appearance_to_cef;
 use crate::host::*;
 use vmux_core::PageMetadata;
 use vmux_core::overlay::WindowOverlay;
@@ -10,9 +9,7 @@ use vmux_setting::AppSettings;
 #[test]
 fn pending_navigation_updates_keep_only_the_latest_request() {
     let mut app = App::new();
-    app.add_message::<vmux_core::service::ServiceRequest>()
-        .add_message::<PendingNavigationUpdate>()
-        .add_systems(Update, apply_pending_navigation_updates);
+    app.add_plugins((MinimalPlugins, crate::page::PagePlugin));
     let webview = app.world_mut().spawn_empty().id();
     app.world_mut()
         .resource_mut::<Messages<PendingNavigationUpdate>>()
@@ -76,7 +73,16 @@ fn reported_title_wins_unless_it_is_absent_or_blank() {
 #[test]
 fn agent_cli_url_redirects_tab_to_session_id() {
     let mut app = App::new();
-    app.add_systems(Update, crate::navigation::sync_page_metadata_to_tab);
+    let (_, receiver) = async_channel::unbounded();
+    app.add_plugins((
+        MinimalPlugins,
+        vmux_layout::LayoutContractPlugin,
+        crate::page::PagePlugin,
+        crate::navigation::NavigationPlugin,
+    ))
+    .insert_resource(bevy_cef::prelude::WebviewCommittedNavigationReceiver(
+        receiver,
+    ));
 
     let stack = app
         .world_mut()
@@ -186,10 +192,8 @@ fn appearance_change_updates_cef_color_scheme() {
     app.add_plugins(MinimalPlugins)
         .insert_resource(test_app_settings_with_radius(0.0))
         .init_resource::<CefColorScheme>()
-        .add_systems(
-            Update,
-            sync_appearance_to_cef.run_if(resource_changed::<AppSettings>),
-        );
+        .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
+        .add_plugins(crate::appearance::AppearancePlugin);
     app.update();
     app.world_mut()
         .resource_mut::<AppSettings>()
@@ -328,7 +332,11 @@ mod browser_navigate_flow {
                 vmux_layout::LayoutContractPlugin,
                 vmux_terminal::TerminalRequestPlugin,
                 crate::page::PagePlugin,
+                crate::navigation::NavigationPlugin,
                 crate::host::AgentBrowserPlugin,
+            ))
+            .insert_resource(bevy_cef::prelude::WebviewCommittedNavigationReceiver(
+                async_channel::unbounded().1,
             ))
             .add_message::<vmux_setting::SettingsWriteRequest>()
             .add_message::<vmux_space::SpaceAttachRequest>()
@@ -339,11 +347,7 @@ mod browser_navigate_flow {
             .add_message::<vmux_history::query::HistoryOpenIntent>()
             .add_systems(
                 Update,
-                (
-                    crate::navigation::handle_browser_navigate_requests
-                        .before(PageOpenSet::ResolveTarget),
-                    handle_test_known_page_open.in_set(PageOpenSet::HandleKnownPages),
-                ),
+                handle_test_known_page_open.in_set(PageOpenSet::HandleKnownPages),
             );
         }
     }

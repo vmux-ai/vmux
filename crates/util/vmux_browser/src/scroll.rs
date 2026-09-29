@@ -16,13 +16,14 @@ impl Plugin for ScrollPlugin {
         app.add_message::<BrowserScrollRequest>().add_systems(
             Update,
             run_scrolls
-                .after(crate::snapshot::drive_pending_nav_snapshots)
+                .in_set(crate::BrowserSystemSet::Scroll)
+                .after(crate::BrowserSystemSet::DrivePendingNavigationSnapshots)
                 .after(vmux_command::WriteCommandRequests),
         );
     }
 }
 
-pub(crate) fn run_scrolls(
+fn run_scrolls(
     mut reader: MessageReader<BrowserScrollRequest>,
     cef_browsers: NonSend<Browsers>,
     targets: BrowserTarget,

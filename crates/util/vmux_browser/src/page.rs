@@ -17,8 +17,8 @@ use vmux_layout::{
 };
 
 use crate::host::{
-    PageOpenAwaitSnapshot, PageOpenFallbackDeferred, PendingNavigationUpdate,
-    apply_pending_navigation_updates, send_page_open_response,
+    PageOpenAwaitSnapshot, PageOpenFallbackDeferred, PendingNavigationSnapshot,
+    PendingNavigationUpdate, send_page_open_response,
 };
 
 pub(crate) struct PagePlugin;
@@ -59,8 +59,9 @@ impl Plugin for PagePlugin {
             .add_systems(
                 Update,
                 apply_pending_navigation_updates
+                    .in_set(crate::BrowserSystemSet::ApplyPendingNavigation)
                     .after(PageOpenSet::Respond)
-                    .after(crate::navigation::handle_browser_navigate_requests),
+                    .after(crate::BrowserSystemSet::Navigate),
             );
     }
 }
@@ -88,6 +89,28 @@ impl From<&CefPageAttachRequest> for CefPageAttachment {
 struct ErrorPageAttachment {
     stack: Entity,
     failure: ErrorPageData,
+}
+
+fn apply_pending_navigation_updates(
+    mut updates: MessageReader<PendingNavigationUpdate>,
+    existing: Query<(Entity, &PendingNavigationSnapshot)>,
+    mut commands: Commands,
+    mut service_requests: MessageWriter<vmux_core::service::ServiceRequest>,
+) {
+    let mut pending = existing
+        .iter()
+        .map(|(entity, operation)| (operation.webview, (entity, operation.clone())))
+        .collect::<bevy::ecs::entity::EntityHashMap<_>>();
+    for update in updates.read() {
+        if let Some((entity, displaced)) = pending.remove(&update.webview) {
+            commands.entity(entity).despawn();
+            send_page_open_response(&mut service_requests, Some(displaced.request_id), Ok(()));
+        }
+        if let Some(next) = update.pending.clone() {
+            let entity = commands.spawn(next.clone()).id();
+            pending.insert(update.webview, (entity, next));
+        }
+    }
 }
 
 impl ErrorPageAttachment {

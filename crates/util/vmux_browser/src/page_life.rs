@@ -18,14 +18,14 @@ impl Plugin for PageLifePlugin {
             Update,
             (
                 apply_fallback_page_icons.after(vmux_layout::LayoutCefStateSet::Apply),
-                drain_loading_state,
-                spawn_popup_stacks,
+                drain_loading_state.in_set(crate::BrowserSystemSet::DrainLoadingState),
+                spawn_popup_stacks.in_set(crate::BrowserSystemSet::SpawnPopupStacks),
             ),
         );
     }
 }
 
-pub(crate) fn drain_loading_state(
+fn drain_loading_state(
     receiver: Res<WebviewLoadingStateReceiver>,
     mut commands: Commands,
     mut completed: MessageWriter<WebviewLoadCompleted>,
@@ -49,7 +49,7 @@ pub(crate) fn drain_loading_state(
     }
 }
 
-pub(crate) fn spawn_popup_stacks(
+fn spawn_popup_stacks(
     popup_rx: Res<WebviewPopupReceiver>,
     extension_popups: Query<(), With<crate::extension::ExtensionPopup>>,
     child_of_q: Query<&ChildOf>,

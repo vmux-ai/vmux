@@ -47,6 +47,21 @@ pub use vmux_layout::{Browser, Loading};
 
 use vmux_ui::i18n::Locale;
 
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub(crate) enum BrowserSystemSet {
+    ApplyPendingNavigation,
+    DrainLoadingState,
+    DrivePendingNavigationSnapshots,
+    HostFocusApplied,
+    Navigate,
+    Scroll,
+    SpawnPopupStacks,
+    SyncCefBackend,
+    SyncWindowedCommandBar,
+    SyncWindowedExtensionPopups,
+    SyncWindowedFrames,
+}
+
 pub struct BrowserPlugin;
 
 impl Plugin for BrowserPlugin {
