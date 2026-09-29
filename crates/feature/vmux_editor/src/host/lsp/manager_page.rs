@@ -1,10 +1,8 @@
-use std::collections::HashSet;
-use std::path::Path;
-
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use crossbeam_channel::{Receiver, Sender};
+use std::collections::HashSet;
 use vmux_core::event::{
     InstallPhase, LspCatalog, LspCatalogRequest, LspInstallProgress, LspInstallRequest,
     LspManagerUiState, LspPackage, LspPackageStatus, LspPkgStatus, LspUninstallRequest,
@@ -229,8 +227,8 @@ fn start_catalog_jobs(
         let target = pending.target;
         let request = pending.request.clone();
         let task = IoTaskPool::get().spawn(async move {
-            let root = store::default_root();
-            let packages = catalog::ensure_catalog(&root, request.refresh).unwrap_or_default();
+            let store = store::LspStore::current();
+            let packages = catalog::ensure_catalog(&store, request.refresh).unwrap_or_default();
             let mut packages = catalog::search(
                 &packages,
                 &request.query,
@@ -238,7 +236,7 @@ fn start_catalog_jobs(
                 &request.category,
             )
             .iter()
-            .map(|package| package.to_lsp_package(&root))
+            .map(|package| package.to_lsp_package(&store))
             .collect::<Vec<_>>();
             if request.installed_only {
                 packages.retain(|package| {
@@ -288,8 +286,8 @@ fn install_package(
     name: String,
     progress: Sender<LspInstallProgress>,
 ) -> Result<LspPackageStatus, LspInstallProgress> {
-    let root = store::default_root();
-    let packages = catalog::ensure_catalog(&root, false).unwrap_or_default();
+    let store = store::LspStore::current();
+    let packages = catalog::ensure_catalog(&store, false).unwrap_or_default();
     let Some(package) = packages
         .iter()
         .find(|package| package.name.as_str() == name)
@@ -304,7 +302,7 @@ fn install_package(
     };
     let target = target::host_target();
     let progress_name = name.clone();
-    let result = install::install(&package, &root, target, |phase, pct, message| {
+    let result = install::install(&package, &store, target, |phase, pct, message| {
         let _ = progress.send(LspInstallProgress {
             name: progress_name.clone(),
             phase,
@@ -328,7 +326,7 @@ fn install_package(
 }
 
 fn uninstall_package(name: String) -> Result<LspPackageStatus, LspInstallProgress> {
-    let root = store::default_root();
+    let store = store::LspStore::current();
     let Ok(package) = crate::lsp::package_path::PackageName::parse(&name) else {
         return Err(LspInstallProgress {
             name,
@@ -337,7 +335,7 @@ fn uninstall_package(name: String) -> Result<LspPackageStatus, LspInstallProgres
             message: "invalid package name".to_string(),
         });
     };
-    if let Err(error) = store::remove(&root, &package) {
+    if let Err(error) = store.remove(&package) {
         return Err(LspInstallProgress {
             name,
             phase: InstallPhase::Failed,
@@ -345,10 +343,7 @@ fn uninstall_package(name: String) -> Result<LspPackageStatus, LspInstallProgres
             message: format!("uninstall failed: {error}"),
         });
     }
-    let status = if matches!(
-        store::resolved_command(&root, &name),
-        store::Resolution::OnPath
-    ) {
+    let status = if matches!(store.resolve_command(&name), store::Resolution::OnPath) {
         LspPkgStatus::OnPath
     } else {
         LspPkgStatus::Available
@@ -424,19 +419,23 @@ fn start_uninstall_jobs(
 }
 
 impl Package {
-    fn to_lsp_package(&self, root: &Path) -> LspPackage {
+    fn to_lsp_package(&self, store: &store::LspStore) -> LspPackage {
         let kind = purl::parse(&self.source_id)
             .map(|source| source.kind)
             .unwrap_or_default();
-        let installed = store::is_installed(root, &self.name);
+        let installed = store.is_installed(&self.name);
         let on_path = !installed
             && matches!(
-                store::resolved_command(root, self.name.as_str()),
+                store.resolve_command(self.name.as_str()),
                 store::Resolution::OnPath
             );
         let catalog_version = purl::parse(&self.source_id).and_then(|source| source.version);
         let installed_version = installed
-            .then(|| store::read_receipt(root, &self.name).and_then(|receipt| receipt.version))
+            .then(|| {
+                store
+                    .read_receipt(&self.name)
+                    .and_then(|receipt| receipt.version)
+            })
             .flatten();
         let outdated = installed
             && installed_version.is_some()
@@ -745,18 +744,18 @@ mod tests {
     #[test]
     fn installability_by_source() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path();
-        let gh = pkg("zzz-fake-lsp", "pkg:github/x/zzz-fake-lsp@1").to_lsp_package(root);
+        let store = store::LspStore::at(tmp.path());
+        let gh = pkg("zzz-fake-lsp", "pkg:github/x/zzz-fake-lsp@1").to_lsp_package(&store);
         assert!(gh.installable);
         assert_eq!(gh.requires, None);
         assert_eq!(gh.status, LspPkgStatus::Available);
 
-        let np = pkg("zzz-fake-ts", "pkg:npm/zzz-fake-ts@1").to_lsp_package(root);
+        let np = pkg("zzz-fake-ts", "pkg:npm/zzz-fake-ts@1").to_lsp_package(&store);
         let npm_present = crate::lsp::registry::executable_on_path("npm");
         assert_eq!(np.installable, npm_present);
         assert_eq!(np.requires.is_some(), !npm_present);
 
-        let uk = pkg("weird", "pkg:weirdsrc/weird@1").to_lsp_package(root);
+        let uk = pkg("weird", "pkg:weirdsrc/weird@1").to_lsp_package(&store);
         assert!(!uk.installable);
         assert_eq!(uk.requires, None);
     }
@@ -764,26 +763,26 @@ mod tests {
     #[test]
     fn installed_with_newer_catalog_is_outdated() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path();
-        std::fs::create_dir_all(store::packages_dir(root).join("foo")).unwrap();
+        let store = store::LspStore::at(tmp.path());
+        std::fs::create_dir_all(store.packages_dir().join("foo")).unwrap();
         let mut bin = std::collections::BTreeMap::new();
         let name = crate::lsp::package_path::PackageName::parse("foo").unwrap();
         bin.insert(
             name.clone(),
             crate::lsp::package_path::PackagePath::parse("foo-bin").unwrap(),
         );
-        store::write_receipt(
-            root,
-            &name,
-            &store::Receipt {
-                name: name.clone(),
-                version: Some("1.0".into()),
-                source_id: "pkg:github/x/foo@1.0".into(),
-                bin,
-            },
-        )
-        .unwrap();
-        let lp = pkg("foo", "pkg:github/x/foo@2.0").to_lsp_package(root);
+        store
+            .write_receipt(
+                &name,
+                &store::Receipt {
+                    name: name.clone(),
+                    version: Some("1.0".into()),
+                    source_id: "pkg:github/x/foo@1.0".into(),
+                    bin,
+                },
+            )
+            .unwrap();
+        let lp = pkg("foo", "pkg:github/x/foo@2.0").to_lsp_package(&store);
         assert_eq!(lp.status, LspPkgStatus::Outdated);
         assert_eq!(lp.version.as_deref(), Some("1.0"));
     }

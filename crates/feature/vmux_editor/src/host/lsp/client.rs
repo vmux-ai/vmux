@@ -107,11 +107,11 @@ impl ServerClient {
         diagnostics: LspDiagnosticsSender,
         inputs: ServerInputSender,
     ) -> std::io::Result<Self> {
-        let store_root = crate::lsp::store::default_root();
+        let store = crate::lsp::store::LspStore::current();
         let mut child = Command::new(&spec.command)
             .args(&spec.args)
             .current_dir(root)
-            .env("PATH", crate::lsp::store::server_path_env(&store_root))
+            .env("PATH", store.server_path_env())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

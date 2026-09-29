@@ -36,7 +36,7 @@ pub fn install_from_url(
     asset: &Asset,
     url: &str,
     digest: &Sha256Digest,
-    store_root: &Path,
+    store: &store::LspStore,
     mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<store::Receipt, String> {
     let asset_bin = asset
@@ -44,7 +44,7 @@ pub fn install_from_url(
         .clone()
         .unwrap_or_else(|| PackagePath::from(&pkg.name));
 
-    let staging_root = store::staging_dir(store_root);
+    let staging_root = store.staging_dir();
     std::fs::create_dir_all(&staging_root).map_err(|e| e.to_string())?;
     let staging = tempfile::Builder::new()
         .prefix(pkg.name.as_str())
@@ -100,10 +100,14 @@ pub fn install_from_url(
         source_id: pkg.source_id.clone(),
         bin: links.clone(),
     };
-    store::write_receipt_in(&pkgdir, &receipt).map_err(|e| e.to_string())?;
-    store::activate_package(store_root, &pkg.name, &pkgdir).map_err(|e| e.to_string())?;
+    receipt.write_to(&pkgdir).map_err(|e| e.to_string())?;
+    store
+        .activate_package(&pkg.name, &pkgdir)
+        .map_err(|e| e.to_string())?;
     for (link_name, file) in &links {
-        store::link_bin(store_root, &pkg.name, file, link_name).map_err(|e| e.to_string())?;
+        store
+            .link_bin(&pkg.name, file, link_name)
+            .map_err(|e| e.to_string())?;
     }
     emit(InstallPhase::Done, Some(100), "installed");
     Ok(receipt)
@@ -111,7 +115,7 @@ pub fn install_from_url(
 
 pub fn install_github(
     pkg: &Package,
-    store_root: &Path,
+    store: &store::LspStore,
     target_id: &str,
     mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<store::Receipt, String> {
@@ -134,7 +138,7 @@ pub fn install_github(
     {
         return Err("catalog and GitHub asset digests disagree".to_string());
     }
-    install_from_url(pkg, &asset, &remote.url, &remote.sha256, store_root, emit)
+    install_from_url(pkg, &asset, &remote.url, &remote.sha256, store, emit)
 }
 
 pub fn toolchain_for(kind: &str) -> Option<&'static str> {
@@ -248,7 +252,7 @@ fn run(program: &str, args: &[String], envs: &[(&str, String)]) -> Result<(), St
 
 fn finalize_links(
     pkg: &Package,
-    store_root: &Path,
+    store: &store::LspStore,
     staged_package: &Path,
     kind: &str,
     p: &purl::Purl,
@@ -274,10 +278,16 @@ fn finalize_links(
         source_id: pkg.source_id.clone(),
         bin: links.clone(),
     };
-    store::write_receipt_in(staged_package, &receipt).map_err(|e| e.to_string())?;
-    store::activate_package(store_root, &pkg.name, staged_package).map_err(|e| e.to_string())?;
+    receipt
+        .write_to(staged_package)
+        .map_err(|e| e.to_string())?;
+    store
+        .activate_package(&pkg.name, staged_package)
+        .map_err(|e| e.to_string())?;
     for (link_name, file) in &links {
-        store::link_bin(store_root, &pkg.name, file, link_name).map_err(|e| e.to_string())?;
+        store
+            .link_bin(&pkg.name, file, link_name)
+            .map_err(|e| e.to_string())?;
     }
     emit(InstallPhase::Done, Some(100), "installed");
     Ok(receipt)
@@ -285,7 +295,7 @@ fn finalize_links(
 
 fn install_toolchain(
     pkg: &Package,
-    store_root: &Path,
+    store: &store::LspStore,
     p: &purl::Purl,
     mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<store::Receipt, String> {
@@ -293,7 +303,7 @@ fn install_toolchain(
     if !crate::lsp::registry::executable_on_path(tool) {
         return Err(format!("requires {tool}"));
     }
-    let staging_root = store::staging_dir(store_root);
+    let staging_root = store.staging_dir();
     std::fs::create_dir_all(&staging_root).map_err(|e| e.to_string())?;
     let staging = tempfile::Builder::new()
         .prefix(pkg.name.as_str())
@@ -339,19 +349,19 @@ fn install_toolchain(
         }
         other => return Err(format!("source '{other}' not supported")),
     }
-    finalize_links(pkg, store_root, &pkgdir, &p.kind, p, &mut emit)
+    finalize_links(pkg, store, &pkgdir, &p.kind, p, &mut emit)
 }
 
 pub fn install(
     pkg: &Package,
-    store_root: &Path,
+    store: &store::LspStore,
     target_id: &str,
     emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<store::Receipt, String> {
     let p = purl::parse(&pkg.source_id).ok_or("bad purl")?;
     match p.kind.as_str() {
-        "github" => install_github(pkg, store_root, target_id, emit),
-        "npm" | "pypi" | "cargo" | "golang" => install_toolchain(pkg, store_root, &p, emit),
+        "github" => install_github(pkg, store, target_id, emit),
+        "npm" | "pypi" | "cargo" | "golang" => install_toolchain(pkg, store, &p, emit),
         other => Err(format!("install source '{other}' not yet supported")),
     }
 }
@@ -416,7 +426,7 @@ mod tests {
     fn install_from_url_extracts_links_and_writes_receipt() {
         let (url, file, digest) = serve_gz_once(b"#!/bin/sh\necho hi\n");
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path();
+        let store = store::LspStore::at(tmp.path());
         let mut bin = BTreeMap::new();
         bin.insert(
             PackageName::parse("myserver").unwrap(),
@@ -438,15 +448,15 @@ mod tests {
             sha256: Some(digest.clone()),
         };
         let mut phases = Vec::new();
-        let receipt = install_from_url(&pkg, &asset, &url, &digest, root, |ph, _, _| {
+        let receipt = install_from_url(&pkg, &asset, &url, &digest, &store, |ph, _, _| {
             phases.push(ph)
         })
         .unwrap();
 
         assert_eq!(receipt.name.as_str(), "myserver");
         assert_eq!(receipt.version.as_deref(), Some("1.2.3"));
-        assert!(store::is_installed(root, &pkg.name));
-        let binp = store::bin_path(root, &pkg.name).unwrap();
+        assert!(store.is_installed(&pkg.name));
+        let binp = store.bin_path(&pkg.name).unwrap();
         assert_eq!(std::fs::read(&binp).unwrap(), b"#!/bin/sh\necho hi\n");
         assert!(phases.contains(&InstallPhase::Done));
     }

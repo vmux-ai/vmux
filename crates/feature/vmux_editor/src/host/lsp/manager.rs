@@ -328,7 +328,7 @@ impl LspManager {
         let Some(mut spec) = resolve_spec(ext, overrides) else {
             return true;
         };
-        match store::resolved_command(&store::default_root(), &spec.command) {
+        match store::LspStore::current().resolve_command(&spec.command) {
             store::Resolution::Managed(p) => spec.command = p.to_string_lossy().into_owned(),
             store::Resolution::OnPath => {}
             store::Resolution::Missing => {
@@ -1425,6 +1425,7 @@ fn lint_on_open(
     outbox: Single<&LintDiagnosticsSender>,
     mut commands: Commands,
 ) {
+    let store = store::LspStore::current();
     for (entity, fv, _edit) in &q {
         commands.entity(entity).insert(LintRan);
         let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
@@ -1434,7 +1435,7 @@ fn lint_on_open(
             continue;
         };
         if matches!(
-            store::resolved_command(&store::default_root(), &spec.command),
+            store.resolve_command(&spec.command),
             store::Resolution::Missing
         ) {
             continue;
@@ -1463,6 +1464,7 @@ fn lsp_status_system(
     mut commands: Commands,
 ) {
     let overrides = server_overrides(&settings);
+    let store = store::LspStore::current();
     for (entity, fv, sent) in &q {
         let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
             continue;
@@ -1470,7 +1472,7 @@ fn lsp_status_system(
         let Some(spec) = resolve_spec(ext, &overrides) else {
             continue;
         };
-        let desired = match store::resolved_command(&store::default_root(), &spec.command) {
+        let desired = match store.resolve_command(&spec.command) {
             store::Resolution::Missing => LspServerState::Missing,
             _ if manager.is_open(&fv.path) => LspServerState::Ready,
             _ => LspServerState::Starting,

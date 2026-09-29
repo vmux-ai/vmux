@@ -55,12 +55,12 @@ fn scan_tools(
     manifest: &mut ToolsManifest,
     refresh: bool,
 ) -> Result<ToolProviderSnapshot, String> {
-    let root = store::default_root();
+    let store = store::LspStore::current();
     let catalog = if refresh {
-        catalog::ensure_catalog(&root, true).unwrap_or_default()
-    } else if catalog::cached_path(&root).is_file() {
-        let source = std::fs::read_to_string(catalog::cached_path(&root))
-            .map_err(|error| error.to_string())?;
+        catalog::ensure_catalog(&store, true).unwrap_or_default()
+    } else if store.catalog_path().is_file() {
+        let source =
+            std::fs::read_to_string(store.catalog_path()).map_err(|error| error.to_string())?;
         catalog::parse_registry(&source).unwrap_or_default()
     } else {
         Vec::new()
@@ -69,7 +69,7 @@ fn scan_tools(
         .iter()
         .map(|package| (package.name.clone(), package))
         .collect::<BTreeMap<_, _>>();
-    let receipts = store::installed(&root);
+    let receipts = store.installed();
     let mut inventory = receipts
         .into_values()
         .map(|receipt| {
@@ -108,7 +108,7 @@ fn scan_tools(
         }
         let on_path = package.bin.keys().any(|command| {
             matches!(
-                store::resolved_command(&root, command.as_str()),
+                store.resolve_command(command.as_str()),
                 store::Resolution::OnPath
             )
         });
@@ -140,13 +140,13 @@ fn operate_tool(
             if id.is_empty() {
                 return Err("package name is required".to_string());
             }
-            let root = store::default_root();
-            let packages = catalog::ensure_catalog(&root, false)?;
+            let store = store::LspStore::current();
+            let packages = catalog::ensure_catalog(&store, false)?;
             let package = packages
                 .iter()
                 .find(|package| package.name.as_str() == id)
                 .ok_or_else(|| format!("language tool not found: {id}"))?;
-            install::install(package, &root, target::host_target(), |_, _, _| {})?;
+            install::install(package, &store, target::host_target(), |_, _, _| {})?;
             tool_store.set_managed_package(ToolProvider::Lsp, id, true)?;
             let operation = if operation.kind == ToolOperationKind::Install {
                 "installed"
@@ -160,7 +160,9 @@ fn operate_tool(
                 return Err("package name is required".to_string());
             }
             let name = package_path::PackageName::parse(id)?;
-            store::remove(&store::default_root(), &name).map_err(|error| error.to_string())?;
+            store::LspStore::current()
+                .remove(&name)
+                .map_err(|error| error.to_string())?;
             tool_store.set_managed_package(ToolProvider::Lsp, id, false)?;
             Ok(format!("{id} removed"))
         }

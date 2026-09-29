@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::Value;
 
@@ -183,15 +183,11 @@ pub fn search<'a>(
         .collect()
 }
 
-pub fn cached_path(store_root: &Path) -> PathBuf {
-    store::registries_dir(store_root).join("registry.json")
-}
-
 pub fn fetch_catalog(
     artifact: &download::RemoteArtifact,
-    store_root: &Path,
+    store: &store::LspStore,
 ) -> Result<Vec<Package>, String> {
-    let regdir = store::registries_dir(store_root);
+    let regdir = store.registries_dir();
     std::fs::create_dir_all(&regdir).map_err(|e| e.to_string())?;
     let staging = tempfile::tempdir_in(&regdir).map_err(|e| e.to_string())?;
     let zip = staging.path().join("registry.json.zip");
@@ -205,14 +201,14 @@ pub fn fetch_catalog(
     archive::extract(&zip, ArchiveKind::Zip, staging.path(), "registry.json")?;
     let source = CatalogSource::read(&staging.path().join("registry.json"))?;
     let parsed = source.packages()?;
-    vmux_path::AtomicFile::write(cached_path(store_root), source.bytes())
+    vmux_path::AtomicFile::write(store.catalog_path(), source.bytes())
         .map_err(|e| e.to_string())?;
     Ok(parsed)
 }
 
-pub fn ensure_catalog(store_root: &Path, refresh: bool) -> Result<Vec<Package>, String> {
-    if !refresh && cached_path(store_root).is_file() {
-        return CatalogSource::read(&cached_path(store_root))?.packages();
+pub fn ensure_catalog(store: &store::LspStore, refresh: bool) -> Result<Vec<Package>, String> {
+    if !refresh && store.catalog_path().is_file() {
+        return CatalogSource::read(&store.catalog_path())?.packages();
     }
     let artifact = download::github_release_asset(
         "mason-org",
@@ -221,7 +217,7 @@ pub fn ensure_catalog(store_root: &Path, refresh: bool) -> Result<Vec<Package>, 
         "registry.json.zip",
         download::CATALOG_MAX_BYTES,
     )?;
-    fetch_catalog(&artifact, store_root)
+    fetch_catalog(&artifact, store)
 }
 
 #[cfg(test)]
@@ -309,10 +305,10 @@ mod tests {
     #[test]
     fn ensure_catalog_reads_cache_without_network() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path();
-        std::fs::create_dir_all(store::registries_dir(root)).unwrap();
-        std::fs::write(cached_path(root), SAMPLE).unwrap();
-        let pkgs = ensure_catalog(root, false).unwrap();
+        let store = store::LspStore::at(tmp.path());
+        std::fs::create_dir_all(store.registries_dir()).unwrap();
+        std::fs::write(store.catalog_path(), SAMPLE).unwrap();
+        let pkgs = ensure_catalog(&store, false).unwrap();
         assert_eq!(pkgs.len(), 3);
     }
 
@@ -358,8 +354,9 @@ mod tests {
             url: format!("http://{addr}/registry.json.zip"),
             sha256: digest,
         };
-        let pkgs = fetch_catalog(&artifact, tmp.path()).unwrap();
+        let store = store::LspStore::at(tmp.path());
+        let pkgs = fetch_catalog(&artifact, &store).unwrap();
         assert_eq!(pkgs.len(), 3);
-        assert!(cached_path(tmp.path()).is_file());
+        assert!(store.catalog_path().is_file());
     }
 }
