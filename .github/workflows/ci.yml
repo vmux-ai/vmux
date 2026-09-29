@@ -585,7 +585,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp${{ env.CARGO_PACKAGER_VERSION }}-cef${{ env.CEF_VERSION }}-v3
+          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp${{ env.CARGO_PACKAGER_VERSION }}-cba${{ env.BEVY_CEF_BUNDLE_APP_VERSION }}-cef${{ env.CEF_VERSION }}-v3
 
       - name: Cache binaryen
         uses: actions/cache@v5

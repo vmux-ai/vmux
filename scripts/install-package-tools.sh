@@ -10,7 +10,7 @@ BEVY_CEF_BUNDLE_APP_BIN="${BEVY_CEF_BUNDLE_APP_BIN:-$(command -v bevy_cef_bundle
 
 packager_version="$("$CARGO_PACKAGER_BIN" --version 2>/dev/null | awk '{print $2}' || true)"
 if [[ "$packager_version" != "$CARGO_PACKAGER_VERSION" ]]; then
-    "$CARGO_BIN" install --path "$ROOT/patches/cargo-packager-0.11.8" --locked --force
+    "$CARGO_BIN" install --path "$ROOT/patches/cargo-packager" --locked --force
 fi
 
 bundle_version="$("$BEVY_CEF_BUNDLE_APP_BIN" --version 2>/dev/null | awk '{print $2}' || true)"
