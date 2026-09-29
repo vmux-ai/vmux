@@ -1,4 +1,3 @@
-mod app;
 mod changes;
 mod controller;
 mod diff;
@@ -16,15 +15,17 @@ mod repository;
 pub mod worktree;
 
 use bevy::prelude::*;
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_core::host::page::NativelyHosted;
+use vmux_core::{PageOpenRequest, PageOpenTarget};
 
-pub use app::GitCheckForUpdatesRequest;
+use crate::event::{GitConfigEditRequest, GitUpdateCheckRequest};
+
 pub use diff::GitDiffSource;
 pub use repository::{GitError, GitRepository};
 pub use status::FileGit;
 pub use watch::RepoInfoCache;
 
-use crate::host::app::AppPlugin;
 use crate::host::changes::ChangesPlugin;
 use crate::host::controller::ControllerPlugin;
 use crate::host::diff::DiffPlugin;
@@ -44,34 +45,37 @@ impl Plugin for GitPlugin {
             crate::ui::GitPage::plugin(),
             crate::ui::LegacyGitPage::plugin(),
         ));
-        app.configure_sets(
-            Update,
-            (
-                GitUpdateSet::Watch,
-                GitUpdateSet::Status,
-                GitUpdateSet::Diff,
-                GitUpdateSet::Jobs,
+        app.add_message::<GitCheckForUpdatesRequest>()
+            .add_plugins(UiEventPlugin::<(GitConfigEditRequest, GitUpdateCheckRequest)>::default())
+            .add_observer(on_config_edit_request)
+            .add_observer(on_update_check_request)
+            .configure_sets(
+                Update,
+                (
+                    GitUpdateSet::Watch,
+                    GitUpdateSet::Status,
+                    GitUpdateSet::Diff,
+                    GitUpdateSet::Jobs,
+                )
+                    .chain(),
             )
-                .chain(),
-        )
-        .add_plugins((
-            WatchPlugin,
-            StatusPlugin,
-            state::StatePlugin,
-            ControllerPlugin,
-            JobPlugin,
-            AppPlugin,
-            ChangesPlugin,
-            DiffPlugin,
-            DirectoryPlugin,
-            RepositoryPickerPlugin,
-        ))
-        .add_plugins(
-            Self::MANIFEST
-                .plugin()
-                .hosted(NativelyHosted::subtree(crate::GIT_PAGE_URL, "Git"))
-                .alias(NativelyHosted::page(crate::GIT_DOCUMENT_URL, "Git")),
-        );
+            .add_plugins((
+                WatchPlugin,
+                StatusPlugin,
+                state::StatePlugin,
+                ControllerPlugin,
+                JobPlugin,
+                ChangesPlugin,
+                DiffPlugin,
+                DirectoryPlugin,
+                RepositoryPickerPlugin,
+            ))
+            .add_plugins(
+                Self::MANIFEST
+                    .plugin()
+                    .hosted(NativelyHosted::subtree(crate::GIT_PAGE_URL, "Git"))
+                    .alias(NativelyHosted::page(crate::GIT_DOCUMENT_URL, "Git")),
+            );
     }
 }
 
@@ -81,4 +85,39 @@ enum GitUpdateSet {
     Status,
     Diff,
     Jobs,
+}
+
+#[derive(Message, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GitCheckForUpdatesRequest;
+
+fn on_config_edit_request(
+    trigger: On<UiInput<GitConfigEditRequest>>,
+    child_of: Query<&ChildOf>,
+    mut page_open: MessageWriter<PageOpenRequest>,
+) {
+    let target = child_of
+        .get(trigger.event().webview)
+        .ok()
+        .and_then(|stack| child_of.get(stack.parent()).ok())
+        .map(|pane| PageOpenTarget::NewStackInPane(pane.parent()))
+        .unwrap_or(PageOpenTarget::ActiveStack);
+    let Ok(path) = GitRepository::at(trigger.event().payload.repo_root.clone()).config_path()
+    else {
+        return;
+    };
+    let Ok(url) = url::Url::from_file_path(path) else {
+        return;
+    };
+    page_open.write(PageOpenRequest {
+        target,
+        url: url.to_string(),
+        request_id: None,
+    });
+}
+
+fn on_update_check_request(
+    _trigger: On<UiInput<GitUpdateCheckRequest>>,
+    mut requests: MessageWriter<GitCheckForUpdatesRequest>,
+) {
+    requests.write(GitCheckForUpdatesRequest);
 }
