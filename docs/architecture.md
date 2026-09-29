@@ -95,45 +95,66 @@ composition model. A boundary changes transport, not type. Web is a surface.**
 
 ---
 
-## One framework, many distributions
+## One platform, every runtime
 
-The shipped Vmux application is one plugin composition. It is the reference distribution of the
-framework, not a special monolith above it. `vmux_app` provides the shared composition boundary;
-application crates select feature plugins and add the adapters required by their platform and
-lifecycle.
-
-```mermaid
-flowchart TB
-    framework["Vmux framework<br/>typed contracts · ECS · feature plugins"]
-    official["official Vmux"]
-    personal["personal Vmux<br/>custom plugin composition"]
-    product["new product"]
-    desktop["desktop / mobile / web host"]
-    headless["CLI / service / MCP / tool"]
-    spatial["game / spatial application"]
-
-    framework --> official
-    framework --> personal
-    framework --> product
-    product --> desktop
-    product --> headless
-    product --> spatial
+```text
+Application = Plugin Graph
+Target      = Composition Profile
+Boundary    = Rust Type
 ```
 
-The same architecture supports two kinds of extensibility:
+The same feature is composed differently for each target.
 
-- **Customize the distribution.** Add, remove, or replace plugins to produce a Vmux with different
-  behavior without forking its application model.
-- **Build another application.** Start with the runtime and only the feature and adapter plugins
-  that product needs. A CLI, desktop app, mobile client, service, MCP server, tool, or game remains
-  the same kind of Bevy application.
+```text
+Feature
+├── Core systems
+├── UI plugin
+├── Service plugin
+├── Persistence plugin
+├── CLI plugin
+├── MCP plugin
+└── Platform adapters
+```
 
-Agents make compiled customization usable as a product feature. Instead of limiting users to a
-dynamic scripting API, Vmux can let an agent edit the real Rust composition, type-check it, and
-produce a complete application. A future custom build channel can select an immutable artifact for
-a profile and retain its source revision and previous artifact for inspection and rollback.
+Desktop, mobile, web, daemon, server, CLI, MCP, tools, and games are not separate architectures.
+They are different plugin compositions of the same kind of Bevy application. `vmux_app` provides
+the shared composition boundary; application crates select feature plugins and add the adapters
+required by their platform and lifecycle.
 
-> Neovim made the editor programmable. Vmux makes the application programmable.
+The IDE and agent harness are the platform's creation and control plane. They can inspect the
+running ECS, edit the real feature plugins, build another composition, and operate or test the
+result without switching to a separate application architecture.
+
+```text
+Vmux Platform
+├── Runtime
+├── Plugin framework
+├── Typed contracts
+├── Build and package system
+├── IDE
+└── Agent harness
+```
+
+This is broader than a self-hosting platform:
+
+> A composable application platform for every runtime.
+
+> One architecture, from pixels to servers.
+
+> Every executable is a plugin composition.
+
+> Build the whole product with one application model.
+
+The current repository already applies this model to desktop, mobile, the daemon, CLI, and MCP.
+Web hosts, games, and other application forms are possible composition targets, not claims about
+current packaging support; the current status is listed under Platforms.
+
+Self-hosting is a strong proof of the platform. Instead of limiting users to a dynamic scripting
+API, Vmux can let an agent edit the real Rust composition, type-check it, and produce a complete
+application. A future custom build channel can select an immutable artifact for a profile and
+retain its source revision and previous artifact for inspection and rollback.
+
+> Vmux can build itself because Vmux itself is just another composition.
 
 ---
 

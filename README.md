@@ -60,25 +60,55 @@ to know who extended them or be rewired around every new surface.
 
 > Electron is cross-platform UI. Vmux is cross-platform architecture.
 
-## One framework, many applications
-
-The Vmux binary is one distribution of the framework, not its boundary. The same feature plugins
-can compose a personal Vmux or a different desktop app, mobile app, CLI, service, MCP server, tool,
-game, or future web host.
+## One platform, every runtime
 
 ```text
-Vmux framework
-├── official Vmux
-├── your Vmux       selected plugins + your behavior
-└── a new product   different composition, same architecture
+Application = Plugin Graph
+Target      = Composition Profile
+Boundary    = Rust Type
 ```
 
-The intended self-hosting loop makes source-level customization practical: ask an agent inside
-Vmux to change Vmux, let it create or replace a plugin, build a personal distribution, and switch
-to that build through a custom channel. Edit, type-check, build, try, and roll back — without
-waiting for the official application to expose another setting or extension hook.
+The same feature is composed differently for each target.
 
-> Neovim made the editor programmable. Vmux makes the application programmable.
+```text
+Feature
+├── Core systems
+├── UI plugin
+├── Service plugin
+├── Persistence plugin
+├── CLI plugin
+├── MCP plugin
+└── Platform adapters
+```
+
+Desktop, mobile, web, daemon, server, CLI, MCP, tools, and games are not separate architectures.
+They are different plugin compositions of the same kind of Bevy application.
+
+The IDE and agent harness are the platform's creation and control plane.
+
+```text
+Vmux platform
+├── Runtime
+├── Plugin framework
+├── Typed contracts
+├── Build and package system
+├── IDE
+└── Agent harness
+```
+
+> A composable application platform for every runtime.
+
+> One architecture, from pixels to servers.
+
+> Every executable is a plugin composition.
+
+> Build the whole product with one application model.
+
+Self-hosting is one proof of the platform, not its definition. The intended customization loop lets
+an agent change Vmux, build a personal distribution, and switch to that build through a custom
+channel. The same environment can bootstrap an entirely new application from the framework.
+
+> Vmux can build itself because Vmux itself is just another composition.
 
 ## Product
 
