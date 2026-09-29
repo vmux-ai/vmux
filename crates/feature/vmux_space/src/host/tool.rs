@@ -1,11 +1,21 @@
 use bevy::prelude::*;
+use bevy_cef::prelude::HostWindow;
 use serde::Deserialize;
+use vmux_api::BinEvent;
 use vmux_api::protocol::{
-    AgentListSpaces, AgentRequest, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
+    AgentListSpaces, AgentRequest, AgentSpace, AgentSpaceCreate, AgentSpaceDelete,
+    AgentSpaceRename, ClientMessage,
 };
+use vmux_core::service::{ServiceMessageSet, ServiceRequest};
+use vmux_core::{Active, Order};
+use vmux_layout::space::{Space, SpaceId};
+use vmux_layout::window::{FocusedWindow, host_window_of};
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
+    ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
 };
+
+use crate::model::bootstrap_profile_name;
 
 pub struct SpaceToolPlugin;
 
@@ -19,10 +29,73 @@ impl Plugin for SpaceToolPlugin {
         .register_tool::<CreateSpaceArgs>("create_space")
         .register_tool::<RenameSpaceArgs>("rename_space")
         .register_tool::<DeleteSpaceArgs>("delete_space")
+        .add_message::<ToolQueryRequest>()
+        .add_message::<ToolQueryHandled>()
+        .add_message::<ServiceRequest>()
         .add_systems(
             Update,
             (list_spaces, create, rename, delete).in_set(ToolDispatchSet),
+        )
+        .add_systems(
+            Update,
+            answer_space_queries
+                .in_set(ToolQueryRouteSet)
+                .after(ServiceMessageSet),
         );
+    }
+}
+
+fn answer_space_queries(
+    mut queries: MessageReader<ToolQueryRequest>,
+    spaces: Query<(Entity, &SpaceId, &Name, Has<Active>, Option<&Order>), With<Space>>,
+    focused_window: FocusedWindow,
+    child_of: Query<&ChildOf>,
+    host_windows: Query<&HostWindow>,
+    mut handled: MessageWriter<ToolQueryHandled>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for request in queries.read() {
+        if request.query.id != AgentListSpaces::ID {
+            continue;
+        }
+        handled.write(ToolQueryHandled(request.request_id));
+        if let Err(error) = serde_json::from_slice::<AgentListSpaces>(&request.query.body) {
+            service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
+                request_id: request.request_id,
+                message: error.to_string(),
+            }));
+            continue;
+        }
+        let mut rows: Vec<(u32, AgentSpace)> = Vec::new();
+        for (entity, id, name, is_active, order) in &spaces {
+            let local = focused_window.entity().is_some_and(|focused| {
+                host_window_of(entity, &child_of, &host_windows) == Some(focused)
+            });
+            let order = order.map(|order| order.0).unwrap_or(u32::MAX);
+            if let Some((existing_order, row)) =
+                rows.iter_mut().find(|(_, existing)| existing.id == id.0)
+            {
+                *existing_order = (*existing_order).min(order);
+                if local {
+                    row.is_active = is_active;
+                }
+                continue;
+            }
+            rows.push((
+                order,
+                AgentSpace {
+                    id: id.0.clone(),
+                    name: name.to_string(),
+                    profile: bootstrap_profile_name(),
+                    is_active: local && is_active,
+                },
+            ));
+        }
+        rows.sort_by_key(|(order, _)| *order);
+        service_requests.write(ServiceRequest(ClientMessage::AgentSpacesResult {
+            request_id: request.request_id,
+            result: Ok(rows.into_iter().map(|(_, row)| row).collect()),
+        }));
     }
 }
 
@@ -103,5 +176,67 @@ fn delete(
             })
         };
         commands.entity(entity).insert(ToolCommand(command));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn listed_spaces_are_global_but_active_state_is_window_local() {
+        let mut app = App::new();
+        app.add_message::<ToolQueryRequest>()
+            .add_message::<ToolQueryHandled>()
+            .add_message::<ServiceRequest>()
+            .add_systems(Update, answer_space_queries);
+        let first_window = app.world_mut().spawn(Window::default()).id();
+        let second_window = app.world_mut().spawn((Window::default(), Active)).id();
+        let first_root = app.world_mut().spawn(HostWindow(first_window)).id();
+        let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
+        app.world_mut().spawn((
+            Space,
+            SpaceId("shared".to_string()),
+            Name::new("shared"),
+            Active,
+            ChildOf(first_root),
+        ));
+        app.world_mut().spawn((
+            Space,
+            SpaceId("shared".to_string()),
+            Name::new("shared"),
+            ChildOf(second_root),
+        ));
+        app.world_mut().spawn((
+            Space,
+            SpaceId("local".to_string()),
+            Name::new("local"),
+            Active,
+            ChildOf(second_root),
+        ));
+        let request_id = vmux_api::protocol::AgentRequestId([1; 16]);
+        app.world_mut().write_message(ToolQueryRequest {
+            request_id,
+            query: AgentRequest::encode(&AgentListSpaces).unwrap(),
+        });
+
+        app.update();
+
+        let requests = app.world().resource::<Messages<ServiceRequest>>();
+        let mut cursor = requests.get_cursor();
+        let response = cursor.read(requests).next().expect("space response");
+        let ClientMessage::AgentSpacesResult { result, .. } = &response.0 else {
+            panic!("expected spaces result");
+        };
+        let rows = result.as_ref().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(
+            !rows
+                .iter()
+                .find(|row| row.id == "shared")
+                .unwrap()
+                .is_active
+        );
+        assert!(rows.iter().find(|row| row.id == "local").unwrap().is_active);
     }
 }

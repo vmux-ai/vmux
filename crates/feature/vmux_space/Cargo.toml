@@ -27,6 +27,7 @@ bevy_reflect = { workspace = true }
 bevy_world_serialization = { workspace = true }
 moonshine-save = { workspace = true }
 ron = { workspace = true }
+serde_json = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_chat = { path = "../vmux_chat" }
 vmux_flex = { path = "../../util/vmux_flex" }
@@ -46,7 +47,6 @@ tempfile = "3"
 
 [target.'cfg(not(target_os = "ios"))'.dev-dependencies]
 bevy_cef_core = { workspace = true }
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

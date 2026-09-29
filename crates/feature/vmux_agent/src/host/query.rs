@@ -1,23 +1,16 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::HostWindow;
 use vmux_api::BinEvent;
 #[cfg(test)]
 use vmux_api::protocol::AgentRequest;
 use vmux_api::protocol::{
     AgentBookmark, AgentBookmarkList, AgentBookmarkNode, AgentBookmarks, AgentImage,
-    AgentListCommands, AgentListSpaces, AgentRecordStart, AgentRecordStop, AgentRecording,
-    AgentRequestId, AgentScreenshot, AgentSpace, AgentVaultStatus, AgentWorkingDirectory,
-    ClientMessage, ProcessId,
+    AgentListCommands, AgentRecordStart, AgentRecordStop, AgentRecording, AgentRequestId,
+    AgentScreenshot, AgentVaultStatus, AgentWorkingDirectory, ClientMessage, ProcessId,
 };
 use vmux_command::WriteCommandRequests;
 use vmux_core::service::ServiceRequest;
-use vmux_core::{
-    Active, Bookmark, BookmarkOrder, Collapsed, Folder, Order, PageMetadata, Pin, Uuid,
-};
-use vmux_layout::space::{Space, SpaceId};
+use vmux_core::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
 use vmux_layout::tab::Tab;
-use vmux_layout::window::{FocusedWindow, host_window_of};
-use vmux_space::model::bootstrap_profile_name;
 use vmux_tool::{ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet};
 
 use vmux_browser::AgentBrowserResolve;
@@ -39,11 +32,6 @@ struct WorkingDirectoryRequest {
 }
 
 #[derive(Message)]
-struct SpaceListRequest {
-    request_id: AgentRequestId,
-}
-
-#[derive(Message)]
 struct CommandListRequest {
     request_id: AgentRequestId,
 }
@@ -61,7 +49,6 @@ struct BookmarkListRequest {
 #[derive(bevy::ecs::system::SystemParam)]
 struct AgentQueryWriters<'w> {
     working_directory: MessageWriter<'w, WorkingDirectoryRequest>,
-    spaces: MessageWriter<'w, SpaceListRequest>,
     commands: MessageWriter<'w, CommandListRequest>,
     vault: MessageWriter<'w, VaultStatusRequest>,
     bookmarks: MessageWriter<'w, BookmarkListRequest>,
@@ -79,8 +66,7 @@ fn route_agent_queries(
     for request in requests.read() {
         let recognized = matches!(
             request.query.id.as_str(),
-            AgentListSpaces::ID
-                | AgentScreenshot::ID
+            AgentScreenshot::ID
                 | AgentRecordStart::ID
                 | AgentRecordStop::ID
                 | AgentBookmarkList::ID
@@ -93,13 +79,6 @@ fn route_agent_queries(
         }
         handled.write(ToolQueryHandled(request.request_id));
         let result = match request.query.id.as_str() {
-            AgentListSpaces::ID => serde_json::from_slice::<AgentListSpaces>(&request.query.body)
-                .map_err(|error| error.to_string())
-                .map(|_| {
-                    writers.spaces.write(SpaceListRequest {
-                        request_id: request.request_id,
-                    });
-                }),
             AgentScreenshot::ID => serde_json::from_slice::<AgentScreenshot>(&request.query.body)
                 .map_err(|error| error.to_string())
                 .map(|query| {
@@ -177,7 +156,6 @@ impl Plugin for AgentQueryPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ToolQueryRequest>()
             .add_message::<WorkingDirectoryRequest>()
-            .add_message::<SpaceListRequest>()
             .add_message::<CommandListRequest>()
             .add_message::<VaultStatusRequest>()
             .add_message::<BookmarkListRequest>()
@@ -191,7 +169,6 @@ impl Plugin for AgentQueryPlugin {
                 Update,
                 (
                     answer_working_directory_queries,
-                    answer_space_queries,
                     answer_command_queries,
                     answer_vault_queries,
                     answer_bookmark_queries,
@@ -208,45 +185,6 @@ impl Plugin for AgentQueryPlugin {
                     forward_record_stop_responses,
                 ),
             );
-    }
-}
-
-struct AgentSpaceCatalog(Vec<AgentSpace>);
-
-impl AgentSpaceCatalog {
-    fn collect(
-        spaces: &Query<(Entity, &SpaceId, &Name, Has<Active>, Option<&Order>), With<Space>>,
-        focused_window: Option<Entity>,
-        child_of: &Query<&ChildOf>,
-        host_windows: &Query<&HostWindow>,
-    ) -> Self {
-        let mut rows: Vec<(u32, AgentSpace)> = Vec::new();
-        for (entity, id, name, is_active, order) in spaces {
-            let local = focused_window.is_some_and(|focused| {
-                host_window_of(entity, child_of, host_windows) == Some(focused)
-            });
-            let order = order.map(|order| order.0).unwrap_or(u32::MAX);
-            if let Some((existing_order, row)) =
-                rows.iter_mut().find(|(_, existing)| existing.id == id.0)
-            {
-                *existing_order = (*existing_order).min(order);
-                if local {
-                    row.is_active = is_active;
-                }
-                continue;
-            }
-            rows.push((
-                order,
-                AgentSpace {
-                    id: id.0.clone(),
-                    name: name.to_string(),
-                    profile: bootstrap_profile_name(),
-                    is_active: local && is_active,
-                },
-            ));
-        }
-        rows.sort_by_key(|(order, _)| *order);
-        Self(rows.into_iter().map(|(_, row)| row).collect())
     }
 }
 
@@ -270,24 +208,6 @@ fn answer_working_directory_queries(
         service_requests.write(ServiceRequest(ClientMessage::AgentWorkingDirectoryResult {
             request_id: request.request_id,
             result,
-        }));
-    }
-}
-
-fn answer_space_queries(
-    mut reader: MessageReader<SpaceListRequest>,
-    spaces: Query<(Entity, &SpaceId, &Name, Has<Active>, Option<&Order>), With<Space>>,
-    focused_window: FocusedWindow,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    for request in reader.read() {
-        let rows =
-            AgentSpaceCatalog::collect(&spaces, focused_window.entity(), &child_of, &host_windows);
-        service_requests.write(ServiceRequest(ClientMessage::AgentSpacesResult {
-            request_id: request.request_id,
-            result: Ok(rows.0),
         }));
     }
 }
@@ -475,7 +395,6 @@ fn forward_record_stop_responses(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::system::RunSystemOnce;
 
     fn query_routing_app() -> App {
         let mut app = App::new();
@@ -483,7 +402,6 @@ mod tests {
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
             .add_message::<WorkingDirectoryRequest>()
-            .add_message::<SpaceListRequest>()
             .add_message::<CommandListRequest>()
             .add_message::<VaultStatusRequest>()
             .add_message::<BookmarkListRequest>()
@@ -532,56 +450,6 @@ mod tests {
             .next()
             .expect("expected vault request");
         assert_eq!(vault.request_id, vault_request_id);
-    }
-
-    fn collect_space_rows(
-        spaces: Query<(Entity, &SpaceId, &Name, Has<Active>, Option<&Order>), With<Space>>,
-        focused_window: FocusedWindow,
-        child_of: Query<&ChildOf>,
-        host_windows: Query<&HostWindow>,
-    ) -> Vec<AgentSpace> {
-        AgentSpaceCatalog::collect(&spaces, focused_window.entity(), &child_of, &host_windows).0
-    }
-
-    #[test]
-    fn listed_spaces_are_global_but_active_state_is_window_local() {
-        let mut app = App::new();
-        let first_window = app.world_mut().spawn(Window::default()).id();
-        let second_window = app.world_mut().spawn((Window::default(), Active)).id();
-        let first_root = app.world_mut().spawn(HostWindow(first_window)).id();
-        let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
-        app.world_mut().spawn((
-            Space,
-            SpaceId("shared".to_string()),
-            Name::new("shared"),
-            Active,
-            ChildOf(first_root),
-        ));
-        app.world_mut().spawn((
-            Space,
-            SpaceId("shared".to_string()),
-            Name::new("shared"),
-            ChildOf(second_root),
-        ));
-        app.world_mut().spawn((
-            Space,
-            SpaceId("local".to_string()),
-            Name::new("local"),
-            Active,
-            ChildOf(second_root),
-        ));
-
-        let rows = app.world_mut().run_system_once(collect_space_rows).unwrap();
-
-        assert_eq!(rows.len(), 2);
-        assert!(
-            !rows
-                .iter()
-                .find(|row| row.id == "shared")
-                .unwrap()
-                .is_active
-        );
-        assert!(rows.iter().find(|row| row.id == "local").unwrap().is_active);
     }
 
     #[test]
