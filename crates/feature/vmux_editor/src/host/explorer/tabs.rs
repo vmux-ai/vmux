@@ -112,7 +112,6 @@ impl EditorPageClose {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn on_explorer_close_editor(
     trigger: On<UiInput<ExplorerCloseEditor>>,
     mut states: Query<&mut ExplorerState>,

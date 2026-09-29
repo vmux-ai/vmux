@@ -289,7 +289,6 @@ fn open_find_in_files(
     mark_explorer_panel_unsent(&editors, &mut commands);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn on_explorer_panel_set_visible(
     trigger: On<UiInput<ExplorerPanelSetVisible>>,
     child_of: Query<&ChildOf>,

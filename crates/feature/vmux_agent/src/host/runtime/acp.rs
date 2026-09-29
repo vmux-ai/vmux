@@ -596,7 +596,6 @@ fn apply_acp_session_created(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn apply_acp_terminal_created(
     mut reader: MessageReader<crate::event::UiAgentAcpTerminalCreated>,
     sessions: Query<(Entity, &AcpSession)>,

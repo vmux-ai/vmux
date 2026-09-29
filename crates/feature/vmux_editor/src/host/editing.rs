@@ -278,7 +278,6 @@ fn reapply_keymap_on_change(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn apply_edit_request(
     trigger: On<EditRequest>,
     mut views: Query<(&mut Editor, &mut FileViewport, &mut vmux_git::GitDiffSource)>,
