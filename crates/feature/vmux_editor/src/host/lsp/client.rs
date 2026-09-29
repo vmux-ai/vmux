@@ -16,10 +16,10 @@ use std::time::Duration;
 
 use std::collections::HashMap;
 
+use crate::lsp::framing;
 use crate::lsp::reader::Reader;
 use crate::lsp::registry::ServerSpec;
 use crate::lsp::server_request::ServerInputSender;
-use crate::lsp::{ServerKey, framing};
 
 pub struct ServerClient {
     child: Child,
@@ -330,10 +330,6 @@ impl Drop for ServerClient {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
-}
-
-pub fn server_key(root: &std::path::Path, spec: &ServerSpec) -> ServerKey {
-    (root.to_path_buf(), spec.command.clone())
 }
 
 #[cfg(test)]

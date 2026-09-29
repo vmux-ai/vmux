@@ -24,7 +24,7 @@ fn diag(
     }
 }
 
-pub fn parse_ruff(stdout: &str) -> Vec<FileDiagnostic> {
+fn parse_ruff(stdout: &str) -> Vec<FileDiagnostic> {
     let Ok(arr) = serde_json::from_str::<Vec<Value>>(stdout) else {
         return vec![];
     };
@@ -58,7 +58,7 @@ pub fn parse_ruff(stdout: &str) -> Vec<FileDiagnostic> {
         .collect()
 }
 
-pub fn parse_eslint(stdout: &str) -> Vec<FileDiagnostic> {
+fn parse_eslint(stdout: &str) -> Vec<FileDiagnostic> {
     let Ok(files) = serde_json::from_str::<Vec<Value>>(stdout) else {
         return vec![];
     };
@@ -92,7 +92,7 @@ pub fn parse_eslint(stdout: &str) -> Vec<FileDiagnostic> {
     out
 }
 
-pub fn parse_shellcheck(stdout: &str) -> Vec<FileDiagnostic> {
+fn parse_shellcheck(stdout: &str) -> Vec<FileDiagnostic> {
     let Ok(arr) = serde_json::from_str::<Vec<Value>>(stdout) else {
         return vec![];
     };
@@ -121,38 +121,44 @@ pub fn parse_shellcheck(stdout: &str) -> Vec<FileDiagnostic> {
         .collect()
 }
 
-fn parse(format: LintFormat, stdout: &str) -> Vec<FileDiagnostic> {
-    match format {
-        LintFormat::Ruff => parse_ruff(stdout),
-        LintFormat::Eslint => parse_eslint(stdout),
-        LintFormat::Shellcheck => parse_shellcheck(stdout),
+impl LintFormat {
+    fn diagnostics(self, stdout: &str) -> Vec<FileDiagnostic> {
+        match self {
+            Self::Ruff => parse_ruff(stdout),
+            Self::Eslint => parse_eslint(stdout),
+            Self::Shellcheck => parse_shellcheck(stdout),
+        }
     }
 }
 
-pub fn run_linter(spec: &LinterSpec, path: &Path) -> Vec<FileDiagnostic> {
-    let output = std::process::Command::new(&spec.command)
-        .args(&spec.args)
-        .arg(path)
-        .output();
-    match output {
-        Ok(o) => {
-            let diags = parse(spec.format, &String::from_utf8_lossy(&o.stdout));
-            if diags.is_empty() && !o.status.success() {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                if !stderr.trim().is_empty() {
-                    tracing::debug!(
-                        linter = %spec.command,
-                        code = ?o.status.code(),
-                        "lint produced no diagnostics: {}",
-                        stderr.trim()
-                    );
+impl LinterSpec {
+    pub fn run(&self, path: &Path) -> Vec<FileDiagnostic> {
+        let output = std::process::Command::new(&self.command)
+            .args(&self.args)
+            .arg(path)
+            .output();
+        match output {
+            Ok(output) => {
+                let diagnostics = self
+                    .format
+                    .diagnostics(&String::from_utf8_lossy(&output.stdout));
+                if diagnostics.is_empty() && !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if !stderr.trim().is_empty() {
+                        tracing::debug!(
+                            linter = %self.command,
+                            code = ?output.status.code(),
+                            "lint produced no diagnostics: {}",
+                            stderr.trim()
+                        );
+                    }
                 }
+                diagnostics
             }
-            diags
-        }
-        Err(e) => {
-            tracing::debug!(linter = %spec.command, "lint run failed: {e}");
-            vec![]
+            Err(error) => {
+                tracing::debug!(linter = %self.command, "lint run failed: {error}");
+                Vec::new()
+            }
         }
     }
 }

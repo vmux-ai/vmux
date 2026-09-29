@@ -13,7 +13,7 @@ use vmux_core::page::PageReady;
 use vmux_layout::native_open::HostedUiPlugin;
 
 use crate::lsp::catalog::{Catalog, Package};
-use crate::lsp::{purl::Purl, store, target};
+use crate::lsp::{purl::Purl, store, target::PlatformTarget};
 
 #[vmux_native::page(page = "lsp")]
 pub struct ManagerPlugin;
@@ -292,7 +292,7 @@ fn install_package(
             message: "package not found in catalog".into(),
         });
     };
-    let target = target::host_target();
+    let target = PlatformTarget::current();
     let progress_name = name.clone();
     let result = package.install(&store, target, |phase, pct, message| {
         let _ = progress.send(LspInstallProgress {

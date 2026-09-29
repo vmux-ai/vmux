@@ -3,10 +3,13 @@ use std::path::Path;
 
 use vmux_core::event::InstallPhase;
 
-use crate::lsp::package_path::{PackageName, PackagePath, Sha256Digest};
+use crate::lsp::download::RemoteArtifact;
+#[cfg(test)]
+use crate::lsp::package_path::Sha256Digest;
+use crate::lsp::package_path::{PackageName, PackagePath};
 use crate::lsp::purl::Purl;
-use crate::lsp::target::Asset;
-use crate::lsp::{archive, catalog::Package, download, store, target};
+use crate::lsp::target::{Asset, PlatformTarget};
+use crate::lsp::{archive, catalog::Package, download, store};
 
 fn resolve_bin_template(tmpl: &str, asset_bin: &PackagePath) -> Result<PackagePath, String> {
     PackagePath::parse(
@@ -143,8 +146,7 @@ impl Package {
         &self,
         source: &Purl,
         asset: &Asset,
-        url: &str,
-        digest: &Sha256Digest,
+        artifact: &RemoteArtifact,
         store: &store::LspStore,
         mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
     ) -> Result<store::Receipt, String> {
@@ -160,12 +162,10 @@ impl Package {
             .map_err(|error| error.to_string())?;
         let download_path = staging.path().join(asset.file.as_path());
 
-        emit(InstallPhase::Downloading, Some(0), url);
-        download::download_to(
-            url,
+        emit(InstallPhase::Downloading, Some(0), &artifact.url);
+        artifact.download_to(
             &download_path,
             download::PACKAGE_MAX_BYTES,
-            digest,
             |downloaded, total| {
                 let percent =
                     total.and_then(|total| (total > 0).then(|| ((downloaded * 100) / total) as u8));
@@ -176,9 +176,8 @@ impl Package {
         let package_dir = staging.path().join("package");
         std::fs::create_dir_all(&package_dir).map_err(|error| error.to_string())?;
         emit(InstallPhase::Extracting, None, "extracting");
-        archive::extract(
+        archive::ArchiveKind::for_file(asset.file.as_str()).extract(
             &download_path,
-            archive::kind_for(asset.file.as_str()),
             &package_dir,
             asset_bin.as_str(),
         )?;
@@ -237,12 +236,13 @@ impl Package {
         &self,
         source: &Purl,
         store: &store::LspStore,
-        target_id: &str,
+        target: PlatformTarget,
         mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
     ) -> Result<store::Receipt, String> {
         emit(InstallPhase::Resolving, None, "selecting asset");
-        let asset = target::pick_asset(&self.assets, target_id)
-            .ok_or_else(|| format!("no prebuilt asset for {target_id}"))?
+        let asset = target
+            .select(&self.assets)
+            .ok_or_else(|| format!("no prebuilt asset for {}", target.as_str()))?
             .clone();
         let owner = source
             .namespace
@@ -252,7 +252,7 @@ impl Package {
             .version
             .as_deref()
             .ok_or("github purl missing version")?;
-        let remote = download::github_release_asset(
+        let artifact = RemoteArtifact::github_release(
             owner,
             &source.name,
             Some(version),
@@ -260,11 +260,11 @@ impl Package {
             download::PACKAGE_MAX_BYTES,
         )?;
         if let Some(expected) = asset.sha256.as_ref()
-            && expected != &remote.sha256
+            && expected != &artifact.sha256
         {
             return Err("catalog and GitHub asset digests disagree".to_string());
         }
-        self.install_from_url(source, &asset, &remote.url, &remote.sha256, store, emit)
+        self.install_from_url(source, &asset, &artifact, store, emit)
     }
 
     fn finalize_links(
@@ -337,12 +337,12 @@ impl Package {
     pub(crate) fn install(
         &self,
         store: &store::LspStore,
-        target_id: &str,
+        target: PlatformTarget,
         emit: impl FnMut(InstallPhase, Option<u8>, &str),
     ) -> Result<store::Receipt, String> {
         let source = self.source()?;
         match source.kind.as_str() {
-            "github" => self.install_github(&source, store, target_id, emit),
+            "github" => self.install_github(&source, store, target, emit),
             "npm" | "pypi" | "cargo" | "golang" => self.install_toolchain(&source, store, emit),
             other => Err(format!("install source '{other}' not yet supported")),
         }
@@ -409,8 +409,9 @@ mod tests {
         };
         let mut phases = Vec::new();
         let source = pkg.source().unwrap();
+        let artifact = RemoteArtifact::new(url, digest);
         let receipt = pkg
-            .install_from_url(&source, &asset, &url, &digest, &store, |phase, _, _| {
+            .install_from_url(&source, &asset, &artifact, &store, |phase, _, _| {
                 phases.push(phase)
             })
             .unwrap();

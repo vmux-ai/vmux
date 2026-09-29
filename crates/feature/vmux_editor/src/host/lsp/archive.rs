@@ -12,19 +12,6 @@ pub enum ArchiveKind {
     Raw,
 }
 
-pub fn kind_for(file: &str) -> ArchiveKind {
-    let f = file.to_ascii_lowercase();
-    if f.ends_with(".tar.gz") || f.ends_with(".tgz") {
-        ArchiveKind::TarGz
-    } else if f.ends_with(".gz") {
-        ArchiveKind::Gz
-    } else if f.ends_with(".zip") {
-        ArchiveKind::Zip
-    } else {
-        ArchiveKind::Raw
-    }
-}
-
 fn relative_path(path: &Path) -> Result<PathBuf, String> {
     let mut relative = PathBuf::new();
     for component in path.components() {
@@ -137,36 +124,47 @@ fn extract_zip(file: &Path, dest_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn extract(
-    file: &Path,
-    kind: ArchiveKind,
-    dest_dir: &Path,
-    single_name: &str,
-) -> Result<(), String> {
-    std::fs::create_dir_all(dest_dir).map_err(|error| error.to_string())?;
-    match kind {
-        ArchiveKind::Gz => {
-            let relative = relative_path(Path::new(single_name))?;
-            let file = std::fs::File::open(file).map_err(|error| error.to_string())?;
-            let decoder = flate2::read::GzDecoder::new(file);
-            let output = dest_dir.join(relative);
-            if let Some(parent) = output.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-            }
-            let output = std::fs::File::create(output).map_err(|error| error.to_string())?;
-            copy_bounded(decoder, output)
+impl ArchiveKind {
+    pub fn for_file(file: &str) -> Self {
+        let file = file.to_ascii_lowercase();
+        if file.ends_with(".tar.gz") || file.ends_with(".tgz") {
+            Self::TarGz
+        } else if file.ends_with(".gz") {
+            Self::Gz
+        } else if file.ends_with(".zip") {
+            Self::Zip
+        } else {
+            Self::Raw
         }
-        ArchiveKind::TarGz => extract_tar_gz(file, dest_dir),
-        ArchiveKind::Zip => extract_zip(file, dest_dir),
-        ArchiveKind::Raw => {
-            let relative = relative_path(Path::new(single_name))?;
-            let input = std::fs::File::open(file).map_err(|error| error.to_string())?;
-            let output_path = dest_dir.join(relative);
-            if let Some(parent) = output_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    pub fn extract(self, file: &Path, destination: &Path, single_name: &str) -> Result<(), String> {
+        std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+        match self {
+            Self::Gz => {
+                let relative = relative_path(Path::new(single_name))?;
+                let file = std::fs::File::open(file).map_err(|error| error.to_string())?;
+                let decoder = flate2::read::GzDecoder::new(file);
+                let output = destination.join(relative);
+                if let Some(parent) = output.parent() {
+                    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                }
+                let output = std::fs::File::create(output).map_err(|error| error.to_string())?;
+                copy_bounded(decoder, output)
             }
-            let output = std::fs::File::create(output_path).map_err(|error| error.to_string())?;
-            copy_bounded(input, output)
+            Self::TarGz => extract_tar_gz(file, destination),
+            Self::Zip => extract_zip(file, destination),
+            Self::Raw => {
+                let relative = relative_path(Path::new(single_name))?;
+                let input = std::fs::File::open(file).map_err(|error| error.to_string())?;
+                let output_path = destination.join(relative);
+                if let Some(parent) = output_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                }
+                let output =
+                    std::fs::File::create(output_path).map_err(|error| error.to_string())?;
+                copy_bounded(input, output)
+            }
         }
     }
 }
@@ -177,14 +175,14 @@ mod tests {
 
     #[test]
     fn kind_detection() {
-        assert_eq!(kind_for("x.tar.gz"), ArchiveKind::TarGz);
-        assert_eq!(kind_for("x.tgz"), ArchiveKind::TarGz);
+        assert_eq!(ArchiveKind::for_file("x.tar.gz"), ArchiveKind::TarGz);
+        assert_eq!(ArchiveKind::for_file("x.tgz"), ArchiveKind::TarGz);
         assert_eq!(
-            kind_for("rust-analyzer-aarch64-apple-darwin.gz"),
+            ArchiveKind::for_file("rust-analyzer-aarch64-apple-darwin.gz"),
             ArchiveKind::Gz
         );
-        assert_eq!(kind_for("x.zip"), ArchiveKind::Zip);
-        assert_eq!(kind_for("plain-binary"), ArchiveKind::Raw);
+        assert_eq!(ArchiveKind::for_file("x.zip"), ArchiveKind::Zip);
+        assert_eq!(ArchiveKind::for_file("plain-binary"), ArchiveKind::Raw);
     }
 
     #[test]
@@ -198,7 +196,7 @@ mod tests {
             encoder.finish().unwrap();
         }
         let dest = tmp.path().join("out");
-        extract(&gz, ArchiveKind::Gz, &dest, "server").unwrap();
+        ArchiveKind::Gz.extract(&gz, &dest, "server").unwrap();
         assert_eq!(
             std::fs::read(dest.join("server")).unwrap(),
             b"binary-contents"
@@ -218,7 +216,7 @@ mod tests {
             writer.finish().unwrap();
         }
         let dest = tmp.path().join("out");
-        extract(&zip_path, ArchiveKind::Zip, &dest, "_").unwrap();
+        ArchiveKind::Zip.extract(&zip_path, &dest, "_").unwrap();
         assert_eq!(std::fs::read(dest.join("inner.txt")).unwrap(), b"zipped");
     }
 
@@ -235,7 +233,7 @@ mod tests {
             writer.finish().unwrap();
         }
         let dest = tmp.path().join("out");
-        assert!(extract(&zip_path, ArchiveKind::Zip, &dest, "_").is_err());
+        assert!(ArchiveKind::Zip.extract(&zip_path, &dest, "_").is_err());
         assert!(!tmp.path().join("escape").exists());
     }
 
@@ -245,7 +243,7 @@ mod tests {
         let file = tmp.path().join("payload");
         std::fs::write(&file, b"payload").unwrap();
         let dest = tmp.path().join("out");
-        assert!(extract(&file, ArchiveKind::Raw, &dest, "../escape").is_err());
+        assert!(ArchiveKind::Raw.extract(&file, &dest, "../escape").is_err());
         assert!(!tmp.path().join("escape").exists());
     }
 }

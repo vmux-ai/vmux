@@ -11,6 +11,7 @@ use vmux_tool::{
 
 use crate::lsp::catalog::Catalog;
 use crate::lsp::purl::Purl;
+use crate::lsp::target::PlatformTarget;
 
 pub mod archive;
 pub mod catalog;
@@ -149,7 +150,7 @@ fn operate_tool(
             let package = catalog
                 .find(id)
                 .ok_or_else(|| format!("language tool not found: {id}"))?;
-            package.install(&store, target::host_target(), |_, _, _| {})?;
+            package.install(&store, PlatformTarget::current(), |_, _, _| {})?;
             tool_store.set_managed_package(ToolProvider::Lsp, id, true)?;
             let operation = if operation.kind == ToolOperationKind::Install {
                 "installed"
@@ -249,7 +250,24 @@ impl LintDiagnosticsInbox {
     }
 }
 
-pub type ServerKey = (PathBuf, String);
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ServerKey {
+    root: PathBuf,
+    command: String,
+}
+
+impl ServerKey {
+    pub fn new(root: impl Into<PathBuf>, command: impl Into<String>) -> Self {
+        Self {
+            root: root.into(),
+            command: command.into(),
+        }
+    }
+
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+}
 
 pub struct OpenDoc {
     pub key: ServerKey,

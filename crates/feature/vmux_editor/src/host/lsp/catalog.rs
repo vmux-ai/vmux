@@ -4,10 +4,11 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::lsp::archive::{self, ArchiveKind};
+use crate::lsp::archive::ArchiveKind;
+use crate::lsp::download::{self, RemoteArtifact};
 use crate::lsp::package_path::{PackageName, PackagePath, Sha256Digest};
+use crate::lsp::store;
 use crate::lsp::target::Asset;
-use crate::lsp::{download, store};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Package {
@@ -178,7 +179,7 @@ impl Catalog {
         if !refresh && store.catalog_path().is_file() {
             return CatalogSource::read(&store.catalog_path())?.catalog();
         }
-        let artifact = download::github_release_asset(
+        let artifact = RemoteArtifact::github_release(
             "mason-org",
             "mason-registry",
             None,
@@ -188,24 +189,13 @@ impl Catalog {
         Self::fetch(&artifact, store)
     }
 
-    fn fetch(artifact: &download::RemoteArtifact, store: &store::LspStore) -> Result<Self, String> {
+    fn fetch(artifact: &RemoteArtifact, store: &store::LspStore) -> Result<Self, String> {
         let registry_dir = store.registries_dir();
         std::fs::create_dir_all(&registry_dir).map_err(|error| error.to_string())?;
         let staging = tempfile::tempdir_in(&registry_dir).map_err(|error| error.to_string())?;
         let archive_path = staging.path().join("registry.json.zip");
-        download::download_to(
-            &artifact.url,
-            &archive_path,
-            download::CATALOG_MAX_BYTES,
-            &artifact.sha256,
-            |_, _| {},
-        )?;
-        archive::extract(
-            &archive_path,
-            ArchiveKind::Zip,
-            staging.path(),
-            "registry.json",
-        )?;
+        artifact.download_to(&archive_path, download::CATALOG_MAX_BYTES, |_, _| {})?;
+        ArchiveKind::Zip.extract(&archive_path, staging.path(), "registry.json")?;
         let source = CatalogSource::read(&staging.path().join("registry.json"))?;
         let catalog = source.catalog()?;
         vmux_path::AtomicFile::write(store.catalog_path(), source.bytes())

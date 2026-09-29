@@ -8,26 +8,35 @@ pub struct Asset {
     pub sha256: Option<Sha256Digest>,
 }
 
-pub fn host_target() -> &'static str {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", "aarch64") => "darwin_arm64",
-        ("macos", "x86_64") => "darwin_x64",
-        ("linux", "x86_64") => "linux_x64_gnu",
-        ("linux", "aarch64") => "linux_arm64_gnu",
-        ("windows", "x86_64") => "win_x64",
-        ("windows", "aarch64") => "win_arm64",
-        _ => "unsupported",
-    }
-}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlatformTarget(&'static str);
 
-pub fn pick_asset<'a>(assets: &'a [Asset], target: &str) -> Option<&'a Asset> {
-    if let Some(a) = assets.iter().find(|a| a.target == target) {
-        return Some(a);
+impl PlatformTarget {
+    pub fn current() -> Self {
+        Self(match (std::env::consts::OS, std::env::consts::ARCH) {
+            ("macos", "aarch64") => "darwin_arm64",
+            ("macos", "x86_64") => "darwin_x64",
+            ("linux", "x86_64") => "linux_x64_gnu",
+            ("linux", "aarch64") => "linux_arm64_gnu",
+            ("windows", "x86_64") => "win_x64",
+            ("windows", "aarch64") => "win_arm64",
+            _ => "unsupported",
+        })
     }
-    if target == "linux_x64_gnu" {
-        return assets.iter().find(|a| a.target == "linux_x64_musl");
+
+    pub fn as_str(self) -> &'static str {
+        self.0
     }
-    None
+
+    pub fn select(self, assets: &[Asset]) -> Option<&Asset> {
+        if let Some(asset) = assets.iter().find(|asset| asset.target == self.0) {
+            return Some(asset);
+        }
+        if self.0 == "linux_x64_gnu" {
+            return assets.iter().find(|asset| asset.target == "linux_x64_musl");
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -45,14 +54,17 @@ mod tests {
 
     #[test]
     fn host_target_is_known_on_this_machine() {
-        assert_ne!(host_target(), "unsupported");
+        assert_ne!(PlatformTarget::current().as_str(), "unsupported");
     }
 
     #[test]
     fn picks_exact_target() {
         let assets = vec![asset("darwin_arm64"), asset("linux_x64_gnu")];
         assert_eq!(
-            pick_asset(&assets, "darwin_arm64").unwrap().target,
+            PlatformTarget("darwin_arm64")
+                .select(&assets)
+                .unwrap()
+                .target,
             "darwin_arm64"
         );
     }
@@ -61,7 +73,10 @@ mod tests {
     fn linux_x64_falls_back_to_musl() {
         let assets = vec![asset("linux_x64_musl"), asset("darwin_arm64")];
         assert_eq!(
-            pick_asset(&assets, "linux_x64_gnu").unwrap().target,
+            PlatformTarget("linux_x64_gnu")
+                .select(&assets)
+                .unwrap()
+                .target,
             "linux_x64_musl"
         );
     }
@@ -69,6 +84,6 @@ mod tests {
     #[test]
     fn no_match_is_none() {
         let assets = vec![asset("win_x64")];
-        assert!(pick_asset(&assets, "darwin_arm64").is_none());
+        assert!(PlatformTarget("darwin_arm64").select(&assets).is_none());
     }
 }

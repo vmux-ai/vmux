@@ -15,7 +15,7 @@ use vmux_setting::AppSettings;
 
 use crate::host::editor::{Editor, FileView};
 use crate::host::viewport::ViewportRenderRequest;
-use crate::lsp::client::{ServerClient, server_key};
+use crate::lsp::client::ServerClient;
 use crate::lsp::registry::{ServerSpec, resolve_spec, workspace_root};
 use crate::lsp::server_request::ServerInputSender;
 use crate::lsp::{
@@ -272,7 +272,7 @@ impl LspManager {
         root: &Path,
         spec: &crate::lsp::registry::ServerSpec,
     ) -> ServerReadiness {
-        let key = server_key(root, spec);
+        let key = ServerKey::new(root, &spec.command);
         if self.servers.contains_key(&key) {
             return ServerReadiness::Ready(key);
         }
@@ -580,7 +580,7 @@ impl LspManager {
         path: &Path,
         chosen: lsp_types::CodeActionOrCommand,
     ) -> Option<(PathBuf, lsp_types::WorkspaceEdit)> {
-        let root = self.open_docs.get(path)?.key.0.clone();
+        let root = self.open_docs.get(path)?.key.root().to_path_buf();
         match chosen {
             lsp_types::CodeActionOrCommand::Command(command) => {
                 self.execute_command(path, &command);
@@ -683,7 +683,7 @@ impl LspManager {
         let doc = self.open_docs.get(path)?;
         let uri = uri_for(path)?;
         let client = self.servers.get(&doc.key)?;
-        let root = doc.key.0.clone();
+        let root = doc.key.root().to_path_buf();
         if !client.provides(method) {
             return None;
         }
@@ -725,7 +725,10 @@ impl LspManager {
         utf16_col: u32,
         new_name: &str,
     ) -> Option<LspRequestOperation> {
-        let root = self.open_docs.get(path).map(|doc| doc.key.0.clone())?;
+        let root = self
+            .open_docs
+            .get(path)
+            .map(|document| document.key.root().to_path_buf())?;
         self.send_doc_request(
             entity,
             path,
@@ -1443,7 +1446,7 @@ fn lint_on_open(
         let path = fv.path.clone();
         let sink = LintDiagnosticsSender::clone(&outbox);
         std::thread::spawn(move || {
-            let diags = crate::lsp::lint::run_linter(&spec, &path);
+            let diags = spec.run(&path);
             sink.send((path, diags));
         });
     }
