@@ -1016,24 +1016,14 @@ mod tests {
     #[test]
     fn closing_last_stack_preloads_fresh_tab_without_workspace_state() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<CloseRequest>()
-            .add_message::<CloseStackRequest>()
-            .add_message::<CloseTabRequest>()
+        app.add_plugins((MinimalPlugins, StackPlugin, crate::archive::ArchivePlugin))
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
             .insert_resource(test_settings())
             .add_systems(
                 Update,
-                (
-                    handle_close_requests,
-                    handle_close_stack_requests,
-                    crate::archive::handle_close_tab_requests,
-                    crate::window::spawn_requested_tab_layouts,
-                    compute_focused_stack,
-                )
-                    .chain(),
+                crate::window::spawn_requested_tab_layouts.after(LayoutRequestSet::Handle),
             );
         app.world_mut().spawn(ActiveStack::default().local_bundle());
 
@@ -1158,23 +1148,11 @@ mod tests {
     #[test]
     fn closing_last_stack_in_tab_closes_the_tab_when_another_tab_exists() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<CloseRequest>()
-            .add_message::<CloseStackRequest>()
-            .add_message::<CloseTabRequest>()
+        app.add_plugins((MinimalPlugins, StackPlugin, crate::archive::ArchivePlugin))
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
-            .insert_resource(test_settings())
-            .add_systems(
-                Update,
-                (
-                    handle_close_requests,
-                    handle_close_stack_requests,
-                    crate::archive::handle_close_tab_requests,
-                )
-                    .chain(),
-            );
+            .insert_resource(test_settings());
 
         app.world_mut().spawn(PrimaryWindow);
         let root = app.world_mut().spawn_empty().id();
@@ -1220,23 +1198,11 @@ mod tests {
     #[test]
     fn closing_last_stack_in_active_rightmost_tab_activates_left_neighbor_not_first() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<CloseRequest>()
-            .add_message::<CloseStackRequest>()
-            .add_message::<CloseTabRequest>()
+        app.add_plugins((MinimalPlugins, StackPlugin, crate::archive::ArchivePlugin))
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
-            .insert_resource(test_settings())
-            .add_systems(
-                Update,
-                (
-                    handle_close_requests,
-                    handle_close_stack_requests,
-                    crate::archive::handle_close_tab_requests,
-                )
-                    .chain(),
-            );
+            .insert_resource(test_settings());
 
         app.world_mut().spawn(PrimaryWindow);
         let root = app.world_mut().spawn_empty().id();

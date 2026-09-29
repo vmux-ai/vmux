@@ -60,13 +60,6 @@ impl Plugin for TabPlugin {
                     .after(crate::space::EffectiveStartupSet),
             )
             .add_systems(
-                Update,
-                crate::archive::handle_close_tab_requests
-                    .in_set(LayoutRequestSet::Handle)
-                    .after(TabCommandSet)
-                    .after(crate::stack::StackCommandSet),
-            )
-            .add_systems(
                 PostUpdate,
                 sync_tab_visibility.before(LayoutSystems::Layout),
             )
@@ -1241,11 +1234,16 @@ mod tests {
     #[test]
     fn tabs_close_event_emits_tab_closed() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, TabPlugin))
-            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-            .add_message::<crate::TabLayoutSpawnRequest>()
-            .init_resource::<ClosedTabs>()
-            .add_observer(record_closed_tab);
+        app.add_plugins((
+            MinimalPlugins,
+            CommandPlugin,
+            TabPlugin,
+            crate::archive::ArchivePlugin,
+        ))
+        .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+        .add_message::<crate::TabLayoutSpawnRequest>()
+        .init_resource::<ClosedTabs>()
+        .add_observer(record_closed_tab);
 
         let webview = app.world_mut().spawn_empty().id();
         let main = app.world_mut().spawn(MainNode).id();
@@ -1350,19 +1348,15 @@ mod tests {
     #[test]
     fn closing_active_rightmost_tab_activates_left_neighbor_not_first() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, crate::space::SpaceLayoutPlugin))
-            .add_message::<CloseRequest>()
-            .add_message::<crate::TabLayoutSpawnRequest>()
-            .add_message::<crate::NewTabRequest>()
-            .add_message::<CloseTabRequest>()
-            .add_systems(
-                Update,
-                (
-                    handle_close_requests,
-                    crate::archive::handle_close_tab_requests,
-                )
-                    .chain(),
-            );
+        app.add_plugins((
+            MinimalPlugins,
+            crate::space::SpaceLayoutPlugin,
+            crate::archive::ArchivePlugin,
+        ))
+        .add_message::<CloseRequest>()
+        .add_message::<crate::TabLayoutSpawnRequest>()
+        .add_message::<crate::NewTabRequest>()
+        .add_systems(Update, handle_close_requests.in_set(TabCommandSet));
 
         app.world_mut()
             .spawn((Window::default(), PrimaryWindow, vmux_core::Active));
@@ -1414,10 +1408,9 @@ mod tests {
     fn page_close_command_on_active_rightmost_activates_left_neighbor() {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
+        app.add_plugins((MinimalPlugins, CommandPlugin, crate::archive::ArchivePlugin))
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<CloseTabRequest>()
-            .add_systems(Update, crate::archive::handle_close_tab_requests)
             .add_observer(on_tab_close_request);
 
         let webview = app.world_mut().spawn_empty().id();

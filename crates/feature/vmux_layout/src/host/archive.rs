@@ -67,6 +67,7 @@ impl Plugin for ArchivePlugin {
         }
         app.add_message::<ReopenClosedPage>()
             .add_message::<PageArchiveRequest>()
+            .add_message::<CloseTabRequest>()
             .add_systems(
                 Startup,
                 spawn_reopen_closed_page_command.in_set(vmux_command::RegisterCommandDefinitions),
@@ -80,6 +81,9 @@ impl Plugin for ArchivePlugin {
                         .after(StackCommandSet)
                         .before(CloseStackSet),
                     handle_reopen_closed_page,
+                    handle_close_tab_requests
+                        .after(TabCommandSet)
+                        .after(StackCommandSet),
                 )
                     .in_set(LayoutRequestSet::Handle),
             );
@@ -303,32 +307,40 @@ impl TabArchiveLayout<'_, '_> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn handle_close_tab_requests(
+#[derive(SystemParam)]
+struct TabCloseLayout<'w, 's> {
+    active_tab: ActiveTabParam<'w, 's>,
+    tabs: Query<'w, 's, &'static Tab>,
+    tab_entities: Query<'w, 's, Entity, With<Tab>>,
+    archive: TabArchiveLayout<'w, 's>,
+    primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
+    layout_requests: MessageWriter<'w, TabLayoutSpawnRequest>,
+    commands: Commands<'w, 's>,
+}
+
+fn handle_close_tab_requests(
     mut reader: MessageReader<CloseTabRequest>,
-    active_tab_param: ActiveTabParam,
-    tab_data: Query<&Tab>,
-    tab_q: Query<Entity, With<Tab>>,
-    layout: TabArchiveLayout,
-    primary_window: Query<Entity, With<PrimaryWindow>>,
-    mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
-    mut commands: Commands,
+    mut layout: TabCloseLayout,
 ) {
     let mut seen = HashSet::new();
     let requests: Vec<Entity> = reader
         .read()
         .filter_map(|request| seen.insert(request.tab).then_some(request.tab))
-        .filter(|tab| tab_data.contains(*tab))
+        .filter(|tab| layout.tabs.contains(*tab))
         .collect();
     let closing: HashSet<Entity> = requests.iter().copied().collect();
     let mut replacement_spaces = HashSet::new();
     for requested_tab in requests {
         let request = CloseTabRequest { tab: requested_tab };
-        let Ok(tab) = tab_data.get(request.tab) else {
+        let Ok(tab) = layout.tabs.get(request.tab) else {
             continue;
         };
-        let siblings =
-            active_tab_siblings(request.tab, &layout.child_of, &layout.children_q, &tab_q);
+        let siblings = active_tab_siblings(
+            request.tab,
+            &layout.archive.child_of,
+            &layout.archive.children_q,
+            &layout.tab_entities,
+        );
         let surviving_siblings: Vec<Entity> = siblings
             .iter()
             .copied()
@@ -336,26 +348,28 @@ pub(crate) fn handle_close_tab_requests(
             .collect();
         if surviving_siblings.is_empty() {
             let Ok(tab_space) = layout
+                .archive
                 .child_of
                 .get(request.tab)
                 .map(|parent| parent.parent())
             else {
                 continue;
             };
-            let preferred_source = active_tab_param
+            let preferred_source = layout
+                .active_tab
                 .get()
                 .filter(|active| siblings.contains(active) && closing.contains(active))
                 .unwrap_or(request.tab);
             if request.tab == preferred_source && !replacement_spaces.contains(&tab_space) {
                 let Some(window) = crate::window::host_window_of(
                     request.tab,
-                    &layout.child_of,
-                    &layout.host_windows,
+                    &layout.archive.child_of,
+                    &layout.archive.host_windows,
                 )
-                .or_else(|| primary_window.single().ok()) else {
+                .or_else(|| layout.primary_window.single().ok()) else {
                     continue;
                 };
-                layout_requests.write(TabLayoutSpawnRequest {
+                layout.layout_requests.write(TabLayoutSpawnRequest {
                     space: tab_space,
                     primary_window: window,
                     name: Some("Tab 1".to_string()),
@@ -366,7 +380,7 @@ pub(crate) fn handle_close_tab_requests(
                 });
                 replacement_spaces.insert(tab_space);
             }
-        } else if active_tab_param.get() == Some(request.tab)
+        } else if layout.active_tab.get() == Some(request.tab)
             && let Some(next) = pick_after_close(
                 request.tab,
                 &siblings
@@ -376,14 +390,15 @@ pub(crate) fn handle_close_tab_requests(
                     .collect::<Vec<_>>(),
             )
         {
-            commands
+            layout
+                .commands
                 .entity(next)
                 .insert(vmux_history::LastActivatedAt::now());
         }
 
-        archive_tab(request.tab, tab, &layout, &mut commands);
-        commands.trigger(TabClosed);
-        commands.entity(request.tab).despawn();
+        archive_tab(request.tab, tab, &layout.archive, &mut layout.commands);
+        layout.commands.trigger(TabClosed);
+        layout.commands.entity(request.tab).despawn();
     }
 }
 
@@ -1585,9 +1600,8 @@ mod tests {
     #[test]
     fn close_tab_archives_every_stack_in_one_group() {
         let mut app = App::new();
-        app.add_message::<CloseTabRequest>()
-            .add_message::<TabLayoutSpawnRequest>()
-            .add_systems(Update, super::handle_close_tab_requests);
+        app.add_plugins(ArchivePlugin)
+            .add_message::<TabLayoutSpawnRequest>();
         app.world_mut()
             .spawn((bevy::window::Window::default(), PrimaryWindow));
         let space = app
@@ -1728,9 +1742,8 @@ mod tests {
     #[test]
     fn closing_last_two_tabs_same_frame_requests_one_replacement() {
         let mut app = App::new();
-        app.add_message::<CloseTabRequest>()
-            .add_message::<TabLayoutSpawnRequest>()
-            .add_systems(Update, super::handle_close_tab_requests);
+        app.add_plugins(ArchivePlugin)
+            .add_message::<TabLayoutSpawnRequest>();
         app.world_mut()
             .spawn((bevy::window::Window::default(), PrimaryWindow));
         let space = app
