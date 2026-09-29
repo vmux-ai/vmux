@@ -2,7 +2,10 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowPosition};
 use bevy_cef::prelude::HostWindow;
 use vmux_core::host::persistence::WorkspaceRestore;
-use vmux_layout::window::{FocusedWindow, NewWindowWorkspace, VmuxWindow, WindowGeometry};
+use vmux_layout::window::{
+    CloseFocusedWindowRequest, FocusedWindow, NewWindowRequest, NewWindowWorkspace, VmuxWindow,
+    WindowGeometry,
+};
 
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
 use bevy::window::{MonitorSelection, WindowMode};
@@ -11,17 +14,8 @@ pub(crate) struct DesktopWindowPlugin;
 
 impl Plugin for DesktopWindowPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
-            app.add_plugins(vmux_command::CommandRuntimePlugin);
-        }
-        app.add_message::<NewWindowRequest>()
-            .add_message::<CloseFocusedWindowRequest>()
-            .add_message::<CloseVmuxWindow>()
+        app.add_message::<CloseVmuxWindow>()
             .add_message::<ExitFullscreenRequest>()
-            .add_systems(
-                Startup,
-                spawn_window_commands.in_set(vmux_command::RegisterCommandDefinitions),
-            )
             .add_systems(PreUpdate, ensure_window_state)
             .add_systems(
                 Update,
@@ -71,39 +65,6 @@ pub(crate) struct PendingFullscreenRestore(pub bool);
 pub(crate) struct WindowRestoreComplete;
 
 const MIN_WINDOW_SIZE: f32 = 100.0;
-
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-struct NewWindowRequest;
-
-impl TryFrom<&vmux_command::CommandInvocation> for NewWindowRequest {
-    type Error = ();
-
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
-        (invocation.id == "new_window").then_some(Self).ok_or(())
-    }
-}
-
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-struct CloseFocusedWindowRequest;
-
-impl TryFrom<&vmux_command::CommandInvocation> for CloseFocusedWindowRequest {
-    type Error = ();
-
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
-        (invocation.id == "close_window").then_some(Self).ok_or(())
-    }
-}
-
-fn spawn_window_commands(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("window.ron"));
-    commands.spawn(definitions.take("new_window").message::<NewWindowRequest>());
-    commands.spawn(
-        definitions
-            .take("close_window")
-            .message::<CloseFocusedWindowRequest>(),
-    );
-    definitions.assert_all_registered();
-}
 
 fn open_windows(
     mut reader: MessageReader<NewWindowRequest>,

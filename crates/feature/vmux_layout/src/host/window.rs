@@ -29,6 +29,9 @@ impl Plugin for WindowLayoutPlugin {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
         app.add_message::<MinimizeWindowRequest>()
+            .add_message::<NewWindowRequest>()
+            .add_message::<CloseFocusedWindowRequest>()
+            .add_message::<ToggleFullscreenRequest>()
             .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
@@ -120,6 +123,41 @@ impl TryFrom<&vmux_command::CommandInvocation> for MinimizeWindowRequest {
     }
 }
 
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NewWindowRequest;
+
+impl TryFrom<&vmux_command::CommandInvocation> for NewWindowRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "new_window").then_some(Self).ok_or(())
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CloseFocusedWindowRequest;
+
+impl TryFrom<&vmux_command::CommandInvocation> for CloseFocusedWindowRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "close_window").then_some(Self).ok_or(())
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToggleFullscreenRequest;
+
+impl TryFrom<&vmux_command::CommandInvocation> for ToggleFullscreenRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "toggle_fullscreen")
+            .then_some(Self)
+            .ok_or(())
+    }
+}
+
 fn spawn_window_commands(mut commands: Commands) {
     let mut definitions = vmux_command::CommandDefinitions::from_feature_ron(
         include_str!("../feature.ron"),
@@ -129,6 +167,17 @@ fn spawn_window_commands(mut commands: Commands) {
         definitions
             .take("minimize_window")
             .message::<MinimizeWindowRequest>(),
+    );
+    commands.spawn(definitions.take("new_window").message::<NewWindowRequest>());
+    commands.spawn(
+        definitions
+            .take("close_window")
+            .message::<CloseFocusedWindowRequest>(),
+    );
+    commands.spawn(
+        definitions
+            .take("toggle_fullscreen")
+            .message::<ToggleFullscreenRequest>(),
     );
     definitions.assert_all_registered();
 }

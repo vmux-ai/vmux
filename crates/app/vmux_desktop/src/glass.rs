@@ -2,21 +2,13 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
+use vmux_layout::window::ToggleFullscreenRequest;
 
 pub(crate) struct GlassPlugin;
 
 impl Plugin for GlassPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
-            app.add_plugins(vmux_command::CommandRuntimePlugin);
-        }
-        app.add_message::<ToggleFullscreenRequest>()
-            .add_systems(
-                Startup,
-                spawn_toggle_fullscreen_command.in_set(vmux_command::RegisterCommandDefinitions),
-            )
-            .add_observer(issue_toggle_fullscreen)
-            .init_non_send::<GlassState>()
+        app.init_non_send::<GlassState>()
             .add_systems(PreUpdate, install_window_glass)
             .add_systems(
                 Update,
@@ -38,31 +30,6 @@ impl Plugin for GlassPlugin {
                 )
                     .chain(),
             );
-    }
-}
-
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-struct ToggleFullscreenRequest;
-
-#[derive(Component)]
-struct ToggleFullscreenBinding;
-
-fn spawn_toggle_fullscreen_command(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("glass.ron"));
-    commands.spawn((
-        definitions.take("toggle_fullscreen"),
-        ToggleFullscreenBinding,
-    ));
-    definitions.assert_all_registered();
-}
-
-fn issue_toggle_fullscreen(
-    trigger: On<vmux_command::CommandDispatch>,
-    registered: Query<(), With<ToggleFullscreenBinding>>,
-    mut requests: MessageWriter<ToggleFullscreenRequest>,
-) {
-    if registered.contains(trigger.event().command()) {
-        requests.write(ToggleFullscreenRequest);
     }
 }
 

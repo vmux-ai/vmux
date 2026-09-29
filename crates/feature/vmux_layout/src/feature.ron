@@ -680,6 +680,28 @@
                 group: "Layout > Window",
                 shortcuts: [(shortcut: Direct("Super+m"), when: None)],
             ),
+            (
+                id: "new_window",
+                label: "New Window",
+                group: "Layout > Window",
+                accelerator: Some("super+n"),
+                hidden: true,
+                shortcuts: [(shortcut: Direct("Super+N"), when: None)],
+            ),
+            (
+                id: "close_window",
+                label: "Close Window",
+                group: "Layout > Window",
+                accelerator: Some("super+shift+w"),
+                hidden: true,
+            ),
+            (
+                id: "toggle_fullscreen",
+                label: "Toggle Fullscreen",
+                group: "Layout > Window",
+                accelerator: Some("ctrl+super+f"),
+                hidden: true,
+            ),
         ]
         ,
     },
