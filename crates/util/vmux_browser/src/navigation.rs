@@ -64,7 +64,8 @@ pub struct OpenHistoryRequest;
 struct OpenHistoryBinding;
 
 fn spawn_history_command(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("history.ron"));
+    let mut definitions =
+        vmux_command::CommandDefinitions::from_feature_ron(include_str!("feature.ron"), "history");
     commands.spawn((definitions.take("browser_open_history"), OpenHistoryBinding));
     definitions.assert_all_registered();
 }

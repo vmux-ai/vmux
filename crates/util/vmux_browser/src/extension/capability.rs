@@ -1,7 +1,15 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-const EMBEDDED: &str = include_str!("capabilities.ron");
+#[derive(Deserialize)]
+struct BrowserFeatureManifest {
+    policy: BrowserFeaturePolicy,
+}
+
+#[derive(Deserialize)]
+struct BrowserFeaturePolicy {
+    extension: CapabilityMatrix,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CapabilityKind {
@@ -37,7 +45,9 @@ pub struct CapabilityMatrix {
 
 impl CapabilityMatrix {
     pub fn embedded() -> Result<Self, String> {
-        ron::from_str(EMBEDDED).map_err(|error| error.to_string())
+        ron::from_str::<BrowserFeatureManifest>(include_str!("../feature.ron"))
+            .map(|manifest| manifest.policy.extension)
+            .map_err(|error| error.to_string())
     }
 
     pub fn lookup(

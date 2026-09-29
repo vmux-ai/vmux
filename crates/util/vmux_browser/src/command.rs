@@ -161,16 +161,17 @@ impl TryFrom<&CommandInvocation> for ShowDevToolsRequest {
 }
 
 fn spawn_browser_commands(mut commands: Commands) {
-    for definition in CommandDefinitions::from_ron(include_str!("navigation.ron")).into_vec() {
+    let manifest = include_str!("feature.ron");
+    for definition in CommandDefinitions::from_feature_ron(manifest, "navigation").into_vec() {
         commands.spawn(definition.message::<NavigationRequest>());
     }
-    for definition in CommandDefinitions::from_ron(include_str!("open.ron")).into_vec() {
+    for definition in CommandDefinitions::from_feature_ron(manifest, "open").into_vec() {
         commands.spawn(definition.message::<OpenRequest>());
     }
-    for definition in CommandDefinitions::from_ron(include_str!("zoom.ron")).into_vec() {
+    for definition in CommandDefinitions::from_feature_ron(manifest, "zoom").into_vec() {
         commands.spawn(definition.message::<ZoomRequest>());
     }
-    for definition in CommandDefinitions::from_ron(include_str!("dev_tools.ron")).into_vec() {
+    for definition in CommandDefinitions::from_feature_ron(manifest, "dev_tools").into_vec() {
         commands.spawn(definition.message::<ShowDevToolsRequest>());
     }
 }
@@ -691,11 +692,12 @@ mod tests {
 
     #[test]
     fn browser_mcp_definitions_are_the_dispatchable_command_set() {
+        let manifest = include_str!("feature.ron");
         let mut definitions =
-            CommandDefinitions::from_ron(include_str!("navigation.ron")).into_vec();
-        definitions.extend(CommandDefinitions::from_ron(include_str!("open.ron")).into_vec());
-        definitions.extend(CommandDefinitions::from_ron(include_str!("zoom.ron")).into_vec());
-        definitions.extend(CommandDefinitions::from_ron(include_str!("dev_tools.ron")).into_vec());
+            CommandDefinitions::from_feature_ron(manifest, "navigation").into_vec();
+        definitions.extend(CommandDefinitions::from_feature_ron(manifest, "open").into_vec());
+        definitions.extend(CommandDefinitions::from_feature_ron(manifest, "zoom").into_vec());
+        definitions.extend(CommandDefinitions::from_feature_ron(manifest, "dev_tools").into_vec());
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)

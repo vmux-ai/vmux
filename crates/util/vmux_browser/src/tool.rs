@@ -15,27 +15,30 @@ pub struct BrowserToolPlugin;
 
 impl Plugin for BrowserToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
-            .register_tool::<BrowserNavigateArgs>("browser_navigate")
-            .register_tool::<BrowserBackArgs>("browser_go_back")
-            .register_tool::<BrowserForwardArgs>("browser_go_forward")
-            .register_tool::<BrowserHistorySearchArgs>("browser_history_search")
-            .register_tool::<BrowserInstallExtensionArgs>("browser_install_extension")
-            .register_tool::<BrowserSnapshotArgs>("browser_snapshot")
-            .register_tool::<BrowserScrollArgs>("browser_scroll")
-            .add_systems(
-                Update,
-                (
-                    navigate,
-                    go_back,
-                    go_forward,
-                    history_search,
-                    install_extension,
-                    snapshot,
-                    scroll,
-                )
-                    .in_set(ToolDispatchSet),
-            );
+        app.add_plugins(ToolManifestPlugin::from_feature(
+            include_str!("feature.ron"),
+            "default",
+        ))
+        .register_tool::<BrowserNavigateArgs>("browser_navigate")
+        .register_tool::<BrowserBackArgs>("browser_go_back")
+        .register_tool::<BrowserForwardArgs>("browser_go_forward")
+        .register_tool::<BrowserHistorySearchArgs>("browser_history_search")
+        .register_tool::<BrowserInstallExtensionArgs>("browser_install_extension")
+        .register_tool::<BrowserSnapshotArgs>("browser_snapshot")
+        .register_tool::<BrowserScrollArgs>("browser_scroll")
+        .add_systems(
+            Update,
+            (
+                navigate,
+                go_back,
+                go_forward,
+                history_search,
+                install_extension,
+                snapshot,
+                scroll,
+            )
+                .in_set(ToolDispatchSet),
+        );
     }
 }
 
