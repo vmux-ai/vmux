@@ -195,6 +195,7 @@ fn handle_spawn_agent_requests(
         let process_id = ProcessId::new();
         let effort_key = format!("cli:{}", req.kind.as_url_segment());
         let effort = settings.agent.effort_for(&effort_key).map(str::to_string);
+        let shell = crate::host::agent_terminal_shell(&settings);
         let model = models
             .as_deref()
             .map(|models| models.selected_for(&effort_key).to_string())
@@ -218,6 +219,7 @@ fn handle_spawn_agent_requests(
             let result = crate::build_agent_launch(
                 task_request.kind,
                 &task_request.cwd,
+                &shell,
                 task_request.session_id.as_deref(),
                 &strategy,
                 &exe_path,
@@ -486,14 +488,19 @@ fn respond_page_agent_attach_default(
 fn rebuilt_args_env_for_restart(
     launch: &TerminalLaunch,
     strategy: &crate::host::cli::CliStrategy,
+    shell: &str,
     session_id: Option<&str>,
     new_id: ProcessId,
 ) -> Result<(Vec<String>, Vec<(String, String)>, u64), String> {
     for _ in 0..3 {
         let mcp_revision =
             vmux_core::profile::mcp_credentials::McpCredentialAccess::stable_revision()?;
-        let mcp_cfg =
-            crate::mcp::resolve(std::path::Path::new(&launch.cwd), new_id, strategy.kind)?;
+        let mcp_cfg = crate::mcp::resolve(
+            std::path::Path::new(&launch.cwd),
+            new_id,
+            strategy.kind,
+            shell,
+        )?;
         let args = (strategy.build_args)(&mcp_cfg, session_id);
         let fresh = (strategy.build_env)(&mcp_cfg);
         let fresh_keys: std::collections::HashSet<String> =
@@ -518,6 +525,7 @@ fn rebuilt_args_env_for_restart(
 
 fn handle_restart_agent_pty(
     mut reader: MessageReader<RestartAgentPty>,
+    settings: Res<AppSettings>,
     q: Query<
         (Option<&TerminalLaunch>, &AgentSession, Option<&SessionId>),
         Without<PendingAgentRestart>,
@@ -540,6 +548,7 @@ fn handle_restart_agent_pty(
         let session_id = session_id.map(|session_id| session_id.0.clone());
         let new_id = ProcessId::new();
         let strategy = strategies.get_cli(kind);
+        let shell = crate::host::agent_terminal_shell(&settings);
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
             let result = match launch {
@@ -550,6 +559,7 @@ fn handle_restart_agent_pty(
                     let (args, env, mcp_revision) = rebuilt_args_env_for_restart(
                         &launch,
                         &strategy,
+                        &shell,
                         session_id.as_deref(),
                         new_id,
                     )?;
@@ -700,8 +710,14 @@ mod tests {
             kind: vmux_core::terminal::TerminalKind::Claude,
         };
         let new_id = ProcessId::new();
-        let (args, _env, _) =
-            rebuilt_args_env_for_restart(&launch, &crate::host::cli::CLAUDE, None, new_id).unwrap();
+        let (args, _env, _) = rebuilt_args_env_for_restart(
+            &launch,
+            &crate::host::cli::CLAUDE,
+            "/bin/zsh",
+            None,
+            new_id,
+        )
+        .unwrap();
         let _ = std::fs::remove_dir_all(&temp);
         let joined = args.join(" ");
         assert!(joined.contains("--anchor"), "args carry --anchor: {joined}");
@@ -727,9 +743,14 @@ mod tests {
             kind: vmux_core::terminal::TerminalKind::Codex,
         };
 
-        let (_, env, _) =
-            rebuilt_args_env_for_restart(&launch, &crate::host::cli::CODEX, None, ProcessId::new())
-                .unwrap();
+        let (_, env, _) = rebuilt_args_env_for_restart(
+            &launch,
+            &crate::host::cli::CODEX,
+            "/bin/zsh",
+            None,
+            ProcessId::new(),
+        )
+        .unwrap();
 
         let _ = std::fs::remove_dir_all(&temp);
         assert!(
@@ -752,6 +773,7 @@ mod tests {
             rebuilt_args_env_for_restart(
                 &launch,
                 &crate::host::cli::CODEX,
+                "/bin/zsh",
                 None,
                 ProcessId::new(),
             )

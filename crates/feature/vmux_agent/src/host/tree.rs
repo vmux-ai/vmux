@@ -109,8 +109,7 @@ impl Plugin for AgentSessionPlugin {
         .add_message::<vmux_core::notify::BellReceived>()
         .add_message::<vmux_core::notify::AgentAttention>()
         .add_message::<vmux_core::notify::OsNotify>()
-        .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>()
-        .add_systems(Update, super::run_terminal::remember_configured_shell);
+        .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>();
     }
 }
 

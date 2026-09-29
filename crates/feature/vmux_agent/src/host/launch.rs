@@ -25,6 +25,7 @@ pub(crate) struct PreparedAgentLaunch {
 pub(crate) fn build_agent_launch(
     kind: AgentKind,
     cwd: &Path,
+    shell: &str,
     session_id: Option<&str>,
     strategy: &CliStrategy,
     exe_path: &Path,
@@ -35,7 +36,7 @@ pub(crate) fn build_agent_launch(
     let _preparation = AgentLaunchPreparation::lock()?;
     for _ in 0..3 {
         let mcp_revision = McpCredentialAccess::stable_revision()?;
-        let mcp_cfg = mcp::resolve(cwd, anchor, kind)?;
+        let mcp_cfg = mcp::resolve(cwd, anchor, kind, shell)?;
         if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
             bevy::log::warn!("external agent Knowledge sync failed: {error}");
         }

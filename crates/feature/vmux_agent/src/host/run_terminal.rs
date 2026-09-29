@@ -462,19 +462,6 @@ fn command_with_marker(shell: &str, command: &str, token: &str, env: PagerEnv) -
 #[derive(Clone, Debug)]
 pub(crate) struct AgentTerminalShell(String);
 
-static CONFIGURED_SHELL: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
-
-pub fn configured_shell() -> String {
-    let held = CONFIGURED_SHELL
-        .lock()
-        .map(|held| held.clone())
-        .unwrap_or_default();
-    if !held.is_empty() {
-        return held;
-    }
-    std::env::var("SHELL").unwrap_or_default()
-}
-
 impl AgentTerminalShell {
     pub(crate) fn configured(settings: &AppSettings) -> Self {
         Self(
@@ -486,14 +473,6 @@ impl AgentTerminalShell {
                     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
                 }),
         )
-        .remembered()
-    }
-
-    fn remembered(self) -> Self {
-        if let Ok(mut held) = CONFIGURED_SHELL.lock() {
-            held.clone_from(&self.0);
-        }
-        self
     }
 
     fn as_str(&self) -> &str {
@@ -514,16 +493,6 @@ impl AgentTerminalShell {
             ))
         }
     }
-}
-
-pub(crate) fn remember_configured_shell(settings: Option<Res<AppSettings>>) {
-    let Some(settings) = settings else {
-        return;
-    };
-    if !settings.is_changed() && !configured_shell().is_empty() {
-        return;
-    }
-    AgentTerminalShell::configured(&settings);
 }
 
 pub(crate) fn agent_terminal_shell(settings: &AppSettings) -> String {

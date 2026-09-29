@@ -538,7 +538,10 @@ impl AcpInstallWaiter {
 
 impl AcpLaunch {
     fn message_for(&self, session: &AcpSession, settings: Option<&AppSettings>) -> ClientMessage {
-        let mcp = crate::mcp::resolve_acp(&session.cwd, session.anchor, &session.agent_id)
+        let shell = settings
+            .map(crate::host::agent_terminal_shell)
+            .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_default());
+        let mcp = crate::mcp::resolve_acp(&session.cwd, session.anchor, &session.agent_id, &shell)
             .inspect_err(|error| {
                 bevy::log::warn!(
                     "acp: vmux_mcp sidecar unresolved; agent runs without vmux tools: {error}"

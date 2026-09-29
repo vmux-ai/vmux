@@ -9,15 +9,19 @@ const DEFAULT_RUN_TIMEOUT_SECS: u64 = 50;
 pub(crate) const LONG_RUN_TIMEOUT_SECS: u64 = 600;
 pub(crate) const LONG_MCP_TOOL_TIMEOUT_SECS: u64 = LONG_RUN_TIMEOUT_SECS + 60;
 
-pub fn resolve(cwd: &Path, anchor: ProcessId, kind: AgentKind) -> Result<McpServerConfig, String> {
-    let shell = crate::run_terminal::configured_shell();
+pub fn resolve(
+    cwd: &Path,
+    anchor: ProcessId,
+    kind: AgentKind,
+    shell: &str,
+) -> Result<McpServerConfig, String> {
     resolve_inner(
         cwd,
         anchor,
         false,
         false,
         run_timeout_secs_for_kind(kind),
-        &shell,
+        shell,
     )
 }
 
@@ -25,6 +29,7 @@ pub fn resolve_acp(
     cwd: &Path,
     anchor: ProcessId,
     agent_id: &str,
+    shell: &str,
 ) -> Result<McpServerConfig, String> {
     resolve_inner(
         cwd,
@@ -32,7 +37,7 @@ pub fn resolve_acp(
         true,
         acp_uses_native_terminals(agent_id),
         run_timeout_secs_for_agent_id(agent_id),
-        &crate::run_terminal::configured_shell(),
+        shell,
     )
 }
 
