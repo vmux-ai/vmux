@@ -47,7 +47,7 @@ impl Plugin for EditorPlugin {
     }
 }
 
-#[vmux_native::page(file = "src/projects.ron")]
+#[vmux_native::page(page = "projects")]
 struct ProjectsPage;
 
 pub mod contract;

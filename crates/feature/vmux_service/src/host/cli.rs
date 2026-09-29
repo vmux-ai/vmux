@@ -15,11 +15,13 @@ pub struct ServiceCliPlugin;
 
 impl Plugin for ServiceCliPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(CliManifestPlugin::new(include_str!("cli.ron")))
-            .add_systems(
-                Update,
-                (route_service_cli, execute_service_cli, execute_remote_cli).chain(),
-            );
+        app.add_plugins(CliManifestPlugin::from_feature(include_str!(
+            "../feature.ron"
+        )))
+        .add_systems(
+            Update,
+            (route_service_cli, execute_service_cli, execute_remote_cli).chain(),
+        );
     }
 }
 

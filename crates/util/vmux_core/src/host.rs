@@ -9,6 +9,7 @@ pub mod browser;
 pub mod file_ui_state;
 pub mod host_spawn;
 pub mod launcher;
+pub mod manifest;
 pub mod notify;
 pub mod overlay;
 pub mod page;

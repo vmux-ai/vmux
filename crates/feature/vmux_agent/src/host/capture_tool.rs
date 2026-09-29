@@ -7,14 +7,17 @@ pub struct CaptureToolPlugin;
 
 impl Plugin for CaptureToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::new(include_str!("capture_tool.ron")))
-            .register_tool::<ScreenshotArgs>("screenshot")
-            .register_tool::<RecordStartArgs>("record_start")
-            .register_tool::<RecordStopArgs>("record_stop")
-            .add_systems(
-                Update,
-                (screenshot, record_start, record_stop).in_set(ToolDispatchSet),
-            );
+        app.add_plugins(ToolManifestPlugin::from_feature(
+            include_str!("../feature.ron"),
+            "capture",
+        ))
+        .register_tool::<ScreenshotArgs>("screenshot")
+        .register_tool::<RecordStartArgs>("record_start")
+        .register_tool::<RecordStopArgs>("record_stop")
+        .add_systems(
+            Update,
+            (screenshot, record_start, record_stop).in_set(ToolDispatchSet),
+        );
     }
 }
 

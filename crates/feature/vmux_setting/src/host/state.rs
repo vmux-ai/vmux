@@ -63,7 +63,8 @@ struct OpenSettingsRequest;
 struct OpenSettingsBinding;
 
 fn spawn_open_settings_command(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("state.ron"));
+    let mut definitions =
+        vmux_command::CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "state");
     commands.spawn((definitions.take("open_settings"), OpenSettingsBinding));
     definitions.assert_all_registered();
 }

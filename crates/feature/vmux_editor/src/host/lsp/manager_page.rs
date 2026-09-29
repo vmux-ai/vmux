@@ -17,7 +17,7 @@ use vmux_layout::native_open::HostedPage;
 use crate::lsp::catalog::{self, Package};
 use crate::lsp::{install, purl, store, target};
 
-#[vmux_native::page(file = "src/lsp.ron")]
+#[vmux_native::page(page = "lsp")]
 pub struct ManagerPlugin;
 
 impl Plugin for ManagerPlugin {

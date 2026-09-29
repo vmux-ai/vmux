@@ -15,10 +15,13 @@ pub struct FileToolPlugin;
 
 impl Plugin for FileToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
-            .register_tool::<ReadFileArgs>("read_file")
-            .register_tool::<GrepArgs>("grep")
-            .add_systems(Update, (read_file, grep).in_set(ToolDispatchSet));
+        app.add_plugins(ToolManifestPlugin::from_feature(
+            include_str!("../feature.ron"),
+            "default",
+        ))
+        .register_tool::<ReadFileArgs>("read_file")
+        .register_tool::<GrepArgs>("grep")
+        .add_systems(Update, (read_file, grep).in_set(ToolDispatchSet));
     }
 }
 

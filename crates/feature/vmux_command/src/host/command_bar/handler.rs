@@ -229,7 +229,8 @@ impl TryFrom<&CommandInvocation> for CommandBarPickerRequest {
 }
 
 fn spawn_command_bar_commands(mut commands: Commands) {
-    let mut definitions = crate::CommandDefinitions::from_ron(include_str!("handler.ron"));
+    let mut definitions =
+        crate::CommandDefinitions::from_feature_ron(include_str!("../../feature.ron"), "handler");
     commands.spawn(definitions.take("space_open").message::<SpaceOpenRequest>());
     commands.spawn(
         definitions
@@ -1328,8 +1329,11 @@ mod tests {
 
     #[test]
     fn command_bar_mcp_definitions_are_the_dispatchable_command_set() {
-        let definitions =
-            crate::CommandDefinitions::from_ron(include_str!("handler.ron")).into_vec();
+        let definitions = crate::CommandDefinitions::from_feature_ron(
+            include_str!("../../feature.ron"),
+            "handler",
+        )
+        .into_vec();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)

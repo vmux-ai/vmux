@@ -13,7 +13,7 @@ pub struct AgentCliPlugin;
 
 impl Plugin for AgentCliPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(CliManifestPlugin::new(include_str!("cli.ron")))
+        app.add_plugins(CliManifestPlugin::from_feature(include_str!("feature.ron")))
             .add_systems(
                 Update,
                 (

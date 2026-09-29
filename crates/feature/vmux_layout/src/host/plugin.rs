@@ -66,7 +66,6 @@ impl Plugin for LayoutPlugin {
                 crate::bookmark_tool::BookmarkToolPlugin,
                 ProfilePlugin,
                 LayoutUiProjectionPlugin,
-                LayoutPersistencePlugin,
                 LayoutOverlayPlugin,
                 SpaceLayoutPlugin,
                 WindowLayoutPlugin,
@@ -81,6 +80,7 @@ impl Plugin for LayoutPlugin {
             .add_plugins((
                 Self::MANIFEST.plugin(),
                 ErrorPage::MANIFEST.plugin(),
+                LayoutPersistencePlugin,
                 PageContextPlugin,
                 TogglePlugin,
                 WebviewRevealPlugin,
@@ -99,5 +99,5 @@ fn spawn_update_state(mut commands: Commands) {
     commands.spawn((Name::new("Update state"), crate::UpdateState::default()));
 }
 
-#[vmux_native::page(file = "src/error.ron")]
+#[vmux_native::page(page = "error")]
 struct ErrorPage;

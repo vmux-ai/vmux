@@ -121,7 +121,10 @@ impl TryFrom<&vmux_command::CommandInvocation> for MinimizeWindowRequest {
 }
 
 fn spawn_window_commands(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("window.ron"));
+    let mut definitions = vmux_command::CommandDefinitions::from_feature_ron(
+        include_str!("../feature.ron"),
+        "window",
+    );
     commands.spawn(
         definitions
             .take("minimize_window")

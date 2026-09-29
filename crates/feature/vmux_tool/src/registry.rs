@@ -3,8 +3,10 @@ use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use vmux_api::protocol::{AgentCommandTool, AgentInvokeCommand, AgentRequest, JsonValue};
+use vmux_core::host::manifest::FeatureManifestSource;
 use vmux_core::{HostShell, JsonArguments, RegistrationOrder};
 
 use vmux_api::InputSchema;
@@ -58,12 +60,23 @@ impl Plugin for ToolRegistryPlugin {
 }
 
 pub struct ToolManifestPlugin {
-    manifest: &'static str,
+    source: FeatureManifestSource,
+    section: Option<&'static str>,
 }
 
 impl ToolManifestPlugin {
     pub const fn new(manifest: &'static str) -> Self {
-        Self { manifest }
+        Self {
+            source: FeatureManifestSource::new(manifest),
+            section: None,
+        }
+    }
+
+    pub const fn from_feature(source: &'static str, section: &'static str) -> Self {
+        Self {
+            source: FeatureManifestSource::new(source),
+            section: Some(section),
+        }
     }
 }
 
@@ -72,11 +85,12 @@ impl Plugin for ToolManifestPlugin {
         if !app.is_plugin_added::<ToolRegistryPlugin>() {
             app.add_plugins(ToolRegistryPlugin);
         }
-        let manifest = self.manifest;
+        let source = self.source;
+        let section = self.section;
         app.add_systems(
             Startup,
             (move |mut commands: Commands| {
-                commands.spawn(ToolManifestSource(manifest));
+                commands.spawn(ToolManifestSource { source, section });
             })
             .in_set(ToolStartupSet::Registry),
         );
@@ -117,7 +131,10 @@ impl ToolAppExt for App {
 }
 
 #[derive(Component)]
-struct ToolManifestSource(&'static str);
+struct ToolManifestSource {
+    source: FeatureManifestSource,
+    section: Option<&'static str>,
+}
 
 fn spawn_tool_registry(mut commands: Commands) {
     commands.spawn((Name::new("Tool registry"), NextToolOrder::default()));
@@ -129,7 +146,7 @@ fn register_tool_manifests(
     mut next_order: Single<&mut NextToolOrder>,
 ) {
     for (source_entity, source) in &manifests {
-        let manifest = ToolManifest::from_ron(source.0);
+        let manifest = ToolManifest::from_ron(source.source.as_str(), source.section);
         for entry in manifest.0 {
             let seed = entry.into_seed();
             let order = next_order.0;
@@ -514,9 +531,15 @@ impl ToolEntry {
 struct ToolManifest(Vec<ToolEntry>);
 
 impl ToolManifest {
-    fn from_ron(source: &str) -> Self {
-        let entries: Vec<ToolEntry> =
-            ron::from_str(source).expect("embedded tool definitions must be valid RON");
+    fn from_ron(source: &str, section: Option<&str>) -> Self {
+        let entries = match section {
+            Some(section) => ron::from_str::<FeatureToolManifest>(source)
+                .expect("embedded feature manifest must contain valid tool metadata")
+                .tools
+                .remove(section)
+                .unwrap_or_else(|| panic!("feature manifest has no tool section {section}")),
+            None => ron::from_str(source).expect("embedded tool definitions must be valid RON"),
+        };
         for entry in &entries {
             entry
                 .input_schema
@@ -525,6 +548,11 @@ impl ToolManifest {
         }
         Self(entries)
     }
+}
+
+#[derive(Deserialize)]
+struct FeatureToolManifest {
+    tools: BTreeMap<String, Vec<ToolEntry>>,
 }
 
 pub fn canonical_tool_name(name: &str) -> &str {
@@ -562,5 +590,29 @@ impl ShellNote {
         format!(
             " The shell is {base}.{differences} To run a POSIX script instead, invoke `bash -c \"...\"` as the command."
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_tools_from_feature_manifest() {
+        let manifest = ToolManifest::from_ron(
+            r#"(
+                tools: {
+                    "test": [(
+                        name: "test",
+                        description: "Test",
+                        input_schema: (type: Object),
+                    )],
+                },
+                ignored: true,
+            )"#,
+            Some("test"),
+        );
+
+        assert_eq!(manifest.0[0].name, "test");
     }
 }

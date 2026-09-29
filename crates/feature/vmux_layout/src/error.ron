@@ -1,6 +1,0 @@
-(
-    url: "vmux://error/",
-    title: "Error",
-    asset_host: "error",
-    permissions: ["PageReady", "ThemeEvent"],
-)

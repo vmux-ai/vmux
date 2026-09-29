@@ -1,8 +1,0 @@
-[
-    (
-        id: "minimize_window",
-        label: "Minimize Window",
-        group: "Layout > Window",
-        shortcuts: [(shortcut: Direct("Super+m"), when: None)],
-    ),
-]

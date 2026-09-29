@@ -13,25 +13,28 @@ pub struct KnowledgeToolPlugin;
 
 impl Plugin for KnowledgeToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
-            .register_tool::<VaultStatusArgs>("vault_status")
-            .register_tool::<OpenVaultArgs>("open_vault")
-            .register_tool::<SetConversationTitleArgs>("set_conversation_title")
-            .register_tool::<SearchKnowledgeArgs>("search_knowledge")
-            .register_tool::<ReadKnowledgeArgs>("read_knowledge")
-            .register_tool::<WriteKnowledgeArgs>("write_knowledge")
-            .add_systems(
-                Update,
-                (
-                    vault_status,
-                    open_vault,
-                    set_conversation_title,
-                    search,
-                    read,
-                    write,
-                )
-                    .in_set(ToolDispatchSet),
-            );
+        app.add_plugins(ToolManifestPlugin::from_feature(
+            include_str!("feature.ron"),
+            "default",
+        ))
+        .register_tool::<VaultStatusArgs>("vault_status")
+        .register_tool::<OpenVaultArgs>("open_vault")
+        .register_tool::<SetConversationTitleArgs>("set_conversation_title")
+        .register_tool::<SearchKnowledgeArgs>("search_knowledge")
+        .register_tool::<ReadKnowledgeArgs>("read_knowledge")
+        .register_tool::<WriteKnowledgeArgs>("write_knowledge")
+        .add_systems(
+            Update,
+            (
+                vault_status,
+                open_vault,
+                set_conversation_title,
+                search,
+                read,
+                write,
+            )
+                .in_set(ToolDispatchSet),
+        );
     }
 }
 

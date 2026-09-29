@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
+#[cfg(test)]
+use agent_client_protocol::schema::v1::SessionConfigOptionCategory;
 use agent_client_protocol::schema::v1::{
     AudioContent, CancelNotification, ContentBlock, CreateTerminalRequest, CreateTerminalResponse,
     ImageContent, Implementation, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
@@ -18,10 +20,6 @@ use agent_client_protocol::schema::v1::{
     SetSessionConfigOptionRequest, SetSessionModeRequest, TerminalExitStatus, TerminalId,
     TerminalOutputRequest, TerminalOutputResponse, TextContent, WaitForTerminalExitRequest,
     WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
-};
-#[cfg(test)]
-use agent_client_protocol::schema::v1::{
-    SessionConfigKind, SessionConfigOptionCategory, SessionConfigSelectOptions,
 };
 use agent_client_protocol::{Client, Responder};
 use base64::Engine;

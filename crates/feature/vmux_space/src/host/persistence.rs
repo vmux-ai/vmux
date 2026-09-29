@@ -1,4 +1,3 @@
-use bevy::ecs::relationship::Relationship;
 use bevy::ecs::schedule::common_conditions::any_with_component;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -16,8 +15,9 @@ use vmux_core::host::persistence::{
 };
 #[cfg(test)]
 use vmux_core::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
-#[cfg(test)]
 use vmux_layout::space::Space;
+#[cfg(test)]
+use vmux_layout::space::SpaceId;
 use vmux_layout::{LayoutPersistenceSet, LayoutStartupSet};
 #[cfg(test)]
 use vmux_layout::{
@@ -25,9 +25,6 @@ use vmux_layout::{
     tab::{Tab, TabWorkspace, TabWorktree},
     window::WindowGeometry,
 };
-#[cfg(test)]
-use vmux_setting::AppSettings;
-
 pub(crate) struct WorkspacePersistencePlugin;
 
 impl Plugin for WorkspacePersistencePlugin {

@@ -213,7 +213,8 @@ impl TryFrom<&CommandInvocation> for ToggleZoomRequest {
 }
 
 fn spawn_pane_commands(mut commands: Commands) {
-    let mut definitions = CommandDefinitions::from_ron(include_str!("pane.ron"));
+    let mut definitions =
+        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "pane");
     for id in [
         "open_in_pane_top",
         "open_in_pane_right",

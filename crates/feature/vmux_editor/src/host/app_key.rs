@@ -68,7 +68,8 @@ struct FilePanelChooseKeyBinding;
 struct FilePanelDismissKeyBinding;
 
 fn spawn_commands(mut commands: Commands) {
-    let mut definitions = CommandDefinitions::from_ron(include_str!("app_key.ron"));
+    let mut definitions =
+        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "app_key");
     commands.spawn((
         definitions.take("file_toggle_explorer"),
         FileToggleExplorerKeyBinding,

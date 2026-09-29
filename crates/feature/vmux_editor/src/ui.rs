@@ -58,7 +58,7 @@ use vmux_ui::platform::sleep_ms;
 pub(crate) struct FilePage;
 
 #[vmux_native::page(
-    file = "src/projects.ron",
+    page = "projects",
     component = Page,
     dom_group = "editor",
     subtree
@@ -66,7 +66,7 @@ pub(crate) struct FilePage;
 pub(crate) struct ProjectsPage;
 
 #[vmux_native::page(
-    file = "../vmux_knowledge/src/page.ron",
+    file = "../vmux_knowledge/src/feature.ron",
     component = Page,
     dom_group = "editor",
     subtree

@@ -12,14 +12,17 @@ pub struct LayoutToolPlugin;
 
 impl Plugin for LayoutToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
-            .register_tool::<ReadLayoutArgs>("read_layout")
-            .register_tool::<UpdateLayoutArgs>("update_layout")
-            .register_tool::<SelectTabArgs>("select_tab")
-            .add_systems(
-                Update,
-                (read_layout, update_layout, select_tab).in_set(ToolDispatchSet),
-            );
+        app.add_plugins(ToolManifestPlugin::from_feature(
+            include_str!("../feature.ron"),
+            "default",
+        ))
+        .register_tool::<ReadLayoutArgs>("read_layout")
+        .register_tool::<UpdateLayoutArgs>("update_layout")
+        .register_tool::<SelectTabArgs>("select_tab")
+        .add_systems(
+            Update,
+            (read_layout, update_layout, select_tab).in_set(ToolDispatchSet),
+        );
     }
 }
 

@@ -10,17 +10,20 @@ pub struct SimulatorToolPlugin;
 
 impl Plugin for SimulatorToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
-            .register_tool::<SimulatorScreenshotArgs>("simulator_screenshot")
-            .register_tool::<TapArgs>("simulator_tap")
-            .register_tool::<SwipeArgs>("simulator_swipe")
-            .register_tool::<TypeArgs>("simulator_type")
-            .register_tool::<KeyArgs>("simulator_key")
-            .register_tool::<ButtonArgs>("simulator_button")
-            .add_systems(
-                Update,
-                (screenshot, tap, swipe, type_text, key, button).in_set(ToolDispatchSet),
-            );
+        app.add_plugins(ToolManifestPlugin::from_feature(
+            include_str!("../feature.ron"),
+            "default",
+        ))
+        .register_tool::<SimulatorScreenshotArgs>("simulator_screenshot")
+        .register_tool::<TapArgs>("simulator_tap")
+        .register_tool::<SwipeArgs>("simulator_swipe")
+        .register_tool::<TypeArgs>("simulator_type")
+        .register_tool::<KeyArgs>("simulator_key")
+        .register_tool::<ButtonArgs>("simulator_button")
+        .add_systems(
+            Update,
+            (screenshot, tap, swipe, type_text, key, button).in_set(ToolDispatchSet),
+        );
     }
 }
 

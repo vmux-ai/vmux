@@ -40,7 +40,10 @@ struct ReopenClosedPage;
 struct ReopenClosedPageBinding;
 
 fn spawn_reopen_closed_page_command(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("archive.ron"));
+    let mut definitions = vmux_command::CommandDefinitions::from_feature_ron(
+        include_str!("../feature.ron"),
+        "archive",
+    );
     commands.spawn((definitions.take("stack_reopen"), ReopenClosedPageBinding));
     definitions.assert_all_registered();
 }

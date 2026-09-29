@@ -114,10 +114,18 @@ struct AcpWorkspacePolicy {
     repository_needs_worktree: String,
 }
 
+#[derive(serde::Deserialize)]
+struct AgentFeatureManifest {
+    policies: std::collections::BTreeMap<String, AcpWorkspacePolicy>,
+}
+
 impl AcpWorkspacePolicy {
     fn bundled() -> Self {
-        ron::from_str(include_str!("acp/workspace_policy.ron"))
-            .expect("bundled ACP workspace policy is valid RON")
+        ron::from_str::<AgentFeatureManifest>(include_str!("../../feature.ron"))
+            .expect("agent feature manifest contains valid policies")
+            .policies
+            .remove("acp_workspace")
+            .expect("agent feature manifest defines acp_workspace policy")
     }
 
     fn context(&self, state: AcpWorkspaceState) -> Option<&str> {

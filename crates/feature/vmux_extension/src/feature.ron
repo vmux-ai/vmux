@@ -1,0 +1,29 @@
+(
+    pages: {
+        "default":
+        (
+            url: "vmux://extensions/",
+            title: "Extensions",
+            title_message_id: "extensions-title",
+            keywords: ["extension", "extensions", "addon", "install"],
+            icon: "Puzzle",
+            command_bar: true,
+            manifest: true,
+            permissions: [
+                "PageReady",
+                "ThemeEvent",
+                "ExtensionsEvent",
+                "ExtToggleRequest",
+                "ExtUninstallRequest",
+                "ExtensionPopupOpenRequest",
+                "ExtensionPopupBoundsRequest",
+                "ExtensionPopupCloseRequest",
+                "ExtPinRequest",
+                "ExtOpenManagerRequest",
+                "ExtBrowseStoreRequest",
+                "RelaunchRequest",
+            ],
+        )
+        ,
+    },
+)

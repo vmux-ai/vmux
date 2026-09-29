@@ -93,7 +93,8 @@ impl TryFrom<&CommandInvocation> for OpenServicesRequest {
 }
 
 fn spawn_process_monitor_commands(mut commands: Commands) {
-    let mut definitions = CommandDefinitions::from_ron(include_str!("process_monitor.ron"));
+    let mut definitions =
+        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "process_monitor");
     commands.spawn(
         definitions
             .take("service_open")

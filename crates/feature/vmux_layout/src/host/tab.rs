@@ -190,7 +190,8 @@ impl TryFrom<&CommandInvocation> for MoveRequest {
 }
 
 fn spawn_tab_commands(mut commands: Commands) {
-    let mut definitions = CommandDefinitions::from_ron(include_str!("tab.ron"));
+    let mut definitions =
+        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "tab");
     commands.spawn(definitions.take("open_in_new_tab").message::<OpenRequest>());
     commands.spawn(definitions.take("new_task").message::<CreateRequest>());
     commands.spawn(definitions.take("close_tab").message::<CloseRequest>());
@@ -687,7 +688,8 @@ mod tests {
 
     #[test]
     fn tab_mcp_definition_dispatches_to_the_typed_request() {
-        let definitions = CommandDefinitions::from_ron(include_str!("tab.ron")).into_vec();
+        let definitions =
+            CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "tab").into_vec();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)

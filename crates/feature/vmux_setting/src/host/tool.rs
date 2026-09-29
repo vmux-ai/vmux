@@ -9,13 +9,16 @@ pub struct SettingToolPlugin;
 
 impl Plugin for SettingToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
-            .register_tool::<GetSettingsArgs>("get_settings")
-            .register_tool::<UpdateSettingsArgs>("update_settings")
-            .add_systems(
-                Update,
-                (get_settings, update_settings).in_set(ToolDispatchSet),
-            );
+        app.add_plugins(ToolManifestPlugin::from_feature(
+            include_str!("../feature.ron"),
+            "default",
+        ))
+        .register_tool::<GetSettingsArgs>("get_settings")
+        .register_tool::<UpdateSettingsArgs>("update_settings")
+        .add_systems(
+            Update,
+            (get_settings, update_settings).in_set(ToolDispatchSet),
+        );
     }
 }
 

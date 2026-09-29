@@ -12,17 +12,20 @@ pub struct BookmarkToolPlugin;
 
 impl Plugin for BookmarkToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::new(include_str!("bookmark_tool.ron")))
-            .register_tool::<BookmarkListArgs>("bookmark_list")
-            .register_tool::<BookmarkAddArgs>("bookmark_add")
-            .register_tool::<BookmarkRemoveArgs>("bookmark_remove")
-            .register_tool::<BookmarkPinArgs>("bookmark_pin")
-            .register_tool::<BookmarkUnpinArgs>("bookmark_unpin")
-            .register_tool::<BookmarkFolderCreateArgs>("bookmark_folder_create")
-            .add_systems(
-                Update,
-                (list, add, remove, pin, unpin, create_folder).in_set(ToolDispatchSet),
-            );
+        app.add_plugins(ToolManifestPlugin::from_feature(
+            include_str!("../feature.ron"),
+            "bookmark",
+        ))
+        .register_tool::<BookmarkListArgs>("bookmark_list")
+        .register_tool::<BookmarkAddArgs>("bookmark_add")
+        .register_tool::<BookmarkRemoveArgs>("bookmark_remove")
+        .register_tool::<BookmarkPinArgs>("bookmark_pin")
+        .register_tool::<BookmarkUnpinArgs>("bookmark_unpin")
+        .register_tool::<BookmarkFolderCreateArgs>("bookmark_folder_create")
+        .add_systems(
+            Update,
+            (list, add, remove, pin, unpin, create_folder).in_set(ToolDispatchSet),
+        );
     }
 }
 

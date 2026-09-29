@@ -11,15 +11,18 @@ pub struct SpaceToolPlugin;
 
 impl Plugin for SpaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
-            .register_tool::<ListSpacesArgs>("list_spaces")
-            .register_tool::<CreateSpaceArgs>("create_space")
-            .register_tool::<RenameSpaceArgs>("rename_space")
-            .register_tool::<DeleteSpaceArgs>("delete_space")
-            .add_systems(
-                Update,
-                (list_spaces, create, rename, delete).in_set(ToolDispatchSet),
-            );
+        app.add_plugins(ToolManifestPlugin::from_feature(
+            include_str!("../feature.ron"),
+            "default",
+        ))
+        .register_tool::<ListSpacesArgs>("list_spaces")
+        .register_tool::<CreateSpaceArgs>("create_space")
+        .register_tool::<RenameSpaceArgs>("rename_space")
+        .register_tool::<DeleteSpaceArgs>("delete_space")
+        .add_systems(
+            Update,
+            (list_spaces, create, rename, delete).in_set(ToolDispatchSet),
+        );
     }
 }
 

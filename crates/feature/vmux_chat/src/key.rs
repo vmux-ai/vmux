@@ -64,7 +64,7 @@ struct InterruptBinding;
 struct CancelBinding;
 
 fn spawn_commands(mut commands: Commands) {
-    let mut definitions = CommandDefinitions::from_ron(include_str!("key.ron"));
+    let mut definitions = CommandDefinitions::from_feature_ron(include_str!("feature.ron"), "key");
     commands.spawn((definitions.take("chat_list_next"), ListNextBinding));
     commands.spawn((definitions.take("chat_list_previous"), ListPreviousBinding));
     commands.spawn((definitions.take("chat_list_choose"), ListChooseBinding));

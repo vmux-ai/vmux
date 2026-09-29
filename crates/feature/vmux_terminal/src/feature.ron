@@ -1,0 +1,113 @@
+(
+    pages: {
+        "default":
+        (
+            url: "vmux://terminal/",
+            title: "Terminal",
+            title_message_id: "command-terminal",
+            keywords: ["shell", "console"],
+            icon: "Terminal",
+            command_bar: true,
+            permissions: [
+                "PageReady",
+                "ThemeEvent",
+                "TerminalUiState",
+                "TermScrollEvent",
+                "TermMouseEvent",
+                "TermLinkOpenRequest",
+                "TermResizeEvent",
+                "UiKeyContext",
+                "KeyStroke",
+                "KeyClaims",
+            ],
+        )
+        ,
+        "process_monitor":
+        (
+            url: "vmux://services/",
+            title: "Services",
+            title_message_id: "services-title",
+            replaces_command: "service_open",
+            keywords: ["processes", "monitor"],
+            icon: "Activity",
+            command_bar: true,
+            manifest: true,
+            permissions: [
+                "PageReady",
+                "ThemeEvent",
+                "ProcessesUiState",
+                "ProcessNavigateEvent",
+                "ProcessKillEvent",
+                "ProcessKillAllEvent",
+            ],
+        )
+        ,
+    },
+    tools: {
+        "default":
+        [
+            (
+                name: "terminal_send",
+                description: "Send text to a terminal. Target by terminal process ID or omit it to use the active terminal. Set enter to true to append a carriage return.",
+                input_schema: (
+                    type: Object,
+                    required: ["text"],
+                    properties: {
+                        "text": (type: String),
+                        "terminal": (type: String),
+                        "enter": (type: Boolean),
+                    },
+                ),
+            ),
+        ]
+        ,
+    },
+    commands: {
+        "command":
+        [
+            (
+                id: "terminal_close",
+                label: "Close Terminal",
+                group: "Terminal",
+                mcp: Some((description: "Close Terminal", allow_agent: true)),
+            ),
+            (
+                id: "terminal_next",
+                label: "Next Terminal",
+                group: "Terminal",
+                mcp: Some((description: "Next Terminal")),
+            ),
+            (
+                id: "terminal_prev",
+                label: "Previous Terminal",
+                group: "Terminal",
+                mcp: Some((description: "Previous Terminal")),
+            ),
+            (
+                id: "terminal_clear",
+                label: "Clear Terminal",
+                group: "Terminal",
+                mcp: Some((description: "Clear Terminal", allow_agent: true)),
+            ),
+            (
+                id: "terminal_copy_mode",
+                label: "Visual Mode",
+                group: "Terminal",
+                hidden: true,
+                shortcuts: [(shortcut: Chord("Ctrl+b, ["), when: None)],
+                mcp: Some((description: "Visual Mode", allow_agent: true)),
+            ),
+        ]
+        ,
+        "process_monitor":
+        [
+            (
+                id: "service_open",
+                label: "Open Service Monitor",
+                group: "Service",
+                mcp: Some((description: "Open Service Monitor")),
+            ),
+        ]
+        ,
+    },
+)

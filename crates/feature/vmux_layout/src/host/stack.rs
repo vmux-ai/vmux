@@ -133,7 +133,8 @@ impl TryFrom<&CommandInvocation> for MoveRequest {
 }
 
 fn spawn_stack_commands(mut commands: Commands) {
-    let mut definitions = CommandDefinitions::from_ron(include_str!("stack.ron"));
+    let mut definitions =
+        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "stack");
     commands.spawn(
         definitions
             .take("open_in_new_stack")
@@ -764,7 +765,9 @@ mod tests {
 
     #[test]
     fn stack_mcp_definitions_are_the_dispatchable_command_set() {
-        let definitions = CommandDefinitions::from_ron(include_str!("stack.ron")).into_vec();
+        let definitions =
+            CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "stack")
+                .into_vec();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)

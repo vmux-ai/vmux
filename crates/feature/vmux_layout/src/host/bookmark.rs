@@ -178,7 +178,10 @@ impl TryFrom<&vmux_command::CommandInvocation> for CreateFolderRequest {
 }
 
 fn spawn_bookmark_commands(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("bookmark.ron"));
+    let mut definitions = vmux_command::CommandDefinitions::from_feature_ron(
+        include_str!("../feature.ron"),
+        "bookmark",
+    );
     commands.spawn(
         definitions
             .take("bookmark_toggle_active")

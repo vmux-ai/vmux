@@ -231,7 +231,8 @@ struct PaletteDecisionReady {
 }
 
 fn spawn_palette_commands(mut commands: Commands) {
-    let mut definitions = CommandDefinitions::from_ron(include_str!("palette.ron"));
+    let mut definitions =
+        CommandDefinitions::from_feature_ron(include_str!("../../feature.ron"), "palette");
     commands.spawn((
         definitions.take("command_bar_next"),
         PaletteKeyBinding(PaletteKey::Next),

@@ -26,7 +26,7 @@ pub use shared::{DiffView, GitFooter};
 pub(crate) struct GitPage;
 
 #[vmux_native::page(
-    file = "src/document.ron",
+    page = "document",
     component = Page
 )]
 pub(crate) struct LegacyGitPage;

@@ -1,6 +1,7 @@
 use proc_macro2::{TokenStream, TokenTree};
 use quote::quote;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use syn::parse::{Parse, ParseStream};
 use syn::{
@@ -36,8 +37,25 @@ struct PageManifestFile {
     permissions: Vec<String>,
 }
 
+#[derive(Deserialize)]
+struct FeatureManifestFile {
+    pages: BTreeMap<String, PageManifestFile>,
+}
+
+fn default_manifest_file() -> LitStr {
+    let path = std::env::var_os("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .map(|root| root.join("src/feature.ron"));
+    let file = if path.is_some_and(|path| path.exists()) {
+        "src/feature.ron"
+    } else {
+        "src/page.ron"
+    };
+    LitStr::new(file, proc_macro2::Span::call_site())
+}
+
 impl PageManifestFile {
-    fn read(file: &LitStr) -> syn::Result<Self> {
+    fn read(file: &LitStr, page: Option<&LitStr>) -> syn::Result<Self> {
         let crate_root = std::env::var_os("CARGO_MANIFEST_DIR")
             .map(PathBuf::from)
             .ok_or_else(|| syn::Error::new(file.span(), "CARGO_MANIFEST_DIR is not set"))?;
@@ -48,12 +66,34 @@ impl PageManifestFile {
                 format!("failed to read page manifest {}: {error}", path.display()),
             )
         })?;
-        ron::from_str(&source).map_err(|error| {
+        if let Ok(manifest) = ron::from_str(&source) {
+            return Ok(manifest);
+        }
+        let mut feature: FeatureManifestFile = ron::from_str(&source).map_err(|error| {
             syn::Error::new(
                 file.span(),
-                format!("failed to parse page manifest {}: {error}", path.display()),
+                format!(
+                    "failed to parse feature manifest {}: {error}",
+                    path.display()
+                ),
             )
-        })
+        })?;
+        let key = page
+            .map(LitStr::value)
+            .unwrap_or_else(|| "default".to_string());
+        if let Some(manifest) = feature.pages.remove(&key) {
+            return Ok(manifest);
+        }
+        if page.is_none() && feature.pages.len() == 1 {
+            return Ok(feature.pages.into_values().next().expect("one page"));
+        }
+        Err(syn::Error::new(
+            page.map(LitStr::span).unwrap_or_else(|| file.span()),
+            format!(
+                "feature manifest {} has no page named {key}",
+                path.display()
+            ),
+        ))
     }
 
     fn icon(&self, file: &LitStr) -> syn::Result<Option<Expr>> {
@@ -133,16 +173,19 @@ impl PageManifestFile {
 
 struct ManifestArgs {
     file: LitStr,
+    page: Option<LitStr>,
 }
 
 impl Parse for ManifestArgs {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut file = None;
+        let mut page = None;
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             input.parse::<Token![=]>()?;
             match key.to_string().as_str() {
                 "file" => file = Some(input.parse()?),
+                "page" => page = Some(input.parse()?),
                 _ => return Err(syn::Error::new_spanned(key, "unknown page manifest option")),
             }
             if !input.is_empty() {
@@ -150,15 +193,15 @@ impl Parse for ManifestArgs {
             }
         }
         Ok(Self {
-            file: file
-                .unwrap_or_else(|| LitStr::new("src/page.ron", proc_macro2::Span::call_site())),
+            file: file.unwrap_or_else(default_manifest_file),
+            page,
         })
     }
 }
 
 pub(crate) fn expand_manifest(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStream> {
     let args = syn::parse2::<ManifestArgs>(args)?;
-    let manifest = PageManifestFile::read(&args.file)?.manifest(&args.file)?;
+    let manifest = PageManifestFile::read(&args.file, args.page.as_ref())?.manifest(&args.file)?;
     let ident = &input.ident;
     let file = &args.file;
     Ok(quote! {
@@ -210,6 +253,7 @@ enum Placement {
 impl Parse for Args {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut file = None;
+        let mut page = None;
         let mut url = None;
         let mut title = None;
         let mut component = None;
@@ -247,6 +291,10 @@ impl Parse for Args {
                 "file" => {
                     input.parse::<Token![=]>()?;
                     file = Some(input.parse()?);
+                }
+                "page" => {
+                    input.parse::<Token![=]>()?;
+                    page = Some(input.parse()?);
                 }
                 "url" => {
                     input.parse::<Token![=]>()?;
@@ -335,26 +383,32 @@ impl Parse for Args {
         }
 
         if file.is_none() && url.is_none() {
-            file = Some(LitStr::new("src/page.ron", proc_macro2::Span::call_site()));
+            file = Some(default_manifest_file());
         }
 
         if let Some(manifest_file) = file.as_ref() {
-            let page = PageManifestFile::read(manifest_file)?;
+            let page_manifest = PageManifestFile::read(manifest_file, page.as_ref())?;
             if url.is_none() {
-                let value = LitStr::new(&page.url, manifest_file.span());
+                let value = LitStr::new(&page_manifest.url, manifest_file.span());
                 url = Some(parse_quote!(#value));
             }
             if title.is_none() {
-                title = Some(LitStr::new(&page.title, manifest_file.span()));
+                title = Some(LitStr::new(&page_manifest.title, manifest_file.span()));
             }
-            if title_message_id.is_none() && !page.title_message_id.is_empty() {
-                title_message_id = Some(LitStr::new(&page.title_message_id, manifest_file.span()));
+            if title_message_id.is_none() && !page_manifest.title_message_id.is_empty() {
+                title_message_id = Some(LitStr::new(
+                    &page_manifest.title_message_id,
+                    manifest_file.span(),
+                ));
             }
-            if replaces_command.is_none() && !page.replaces_command.is_empty() {
-                replaces_command = Some(LitStr::new(&page.replaces_command, manifest_file.span()));
+            if replaces_command.is_none() && !page_manifest.replaces_command.is_empty() {
+                replaces_command = Some(LitStr::new(
+                    &page_manifest.replaces_command,
+                    manifest_file.span(),
+                ));
             }
             if keywords.is_none() {
-                let values = page
+                let values = page_manifest
                     .keywords
                     .iter()
                     .map(|value| LitStr::new(value, manifest_file.span()))
@@ -362,11 +416,11 @@ impl Parse for Args {
                 keywords = Some(parse_quote!([#(#values),*]));
             }
             if icon.is_none() {
-                icon = page.icon(manifest_file)?;
+                icon = page_manifest.icon(manifest_file)?;
             }
-            command_bar |= page.command_bar;
-            manifest |= page.manifest;
-            permissions = page
+            command_bar |= page_manifest.command_bar;
+            manifest |= page_manifest.manifest;
+            permissions = page_manifest
                 .permissions
                 .iter()
                 .map(|permission| LitStr::new(permission, manifest_file.span()))
@@ -635,5 +689,21 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn feature_manifest_file_parses_named_pages() {
+        let manifest = ron::from_str::<FeatureManifestFile>(
+            r#"(
+                pages: {
+                    "default": (url: "vmux://tools/", title: "Tools"),
+                    "detail": (url: "vmux://tools/detail", title: "Detail"),
+                },
+            )"#,
+        )
+        .unwrap();
+
+        assert_eq!(manifest.pages["default"].title, "Tools");
+        assert_eq!(manifest.pages["detail"].title, "Detail");
     }
 }

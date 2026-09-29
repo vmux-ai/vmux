@@ -144,7 +144,10 @@ impl TryFrom<&vmux_command::CommandInvocation> for OpenRequest {
 }
 
 fn spawn_space_commands(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("plugin.ron"));
+    let mut definitions = vmux_command::CommandDefinitions::from_feature_ron(
+        include_str!("../feature.ron"),
+        "plugin",
+    );
     commands.spawn(
         definitions
             .take("open_in_new_space")
@@ -903,8 +906,11 @@ mod tests {
 
     #[test]
     fn space_mcp_definition_dispatches_to_the_typed_request() {
-        let definitions =
-            vmux_command::CommandDefinitions::from_ron(include_str!("plugin.ron")).into_vec();
+        let definitions = vmux_command::CommandDefinitions::from_feature_ron(
+            include_str!("../feature.ron"),
+            "plugin",
+        )
+        .into_vec();
         let tools = definitions
             .iter()
             .filter_map(vmux_command::CommandDefinition::agent_tool)

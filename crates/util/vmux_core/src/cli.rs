@@ -5,22 +5,42 @@ use bevy::app::{App, Plugin, Startup};
 use bevy_ecs::prelude::*;
 use serde::Deserialize;
 
+use crate::host::manifest::FeatureManifestSource;
+
 pub struct CliManifestPlugin {
-    source: &'static str,
+    source: FeatureManifestSource,
+    feature: bool,
 }
 
 impl CliManifestPlugin {
     pub const fn new(source: &'static str) -> Self {
-        Self { source }
+        Self {
+            source: FeatureManifestSource::new(source),
+            feature: false,
+        }
+    }
+
+    pub const fn from_feature(source: &'static str) -> Self {
+        Self {
+            source: FeatureManifestSource::new(source),
+            feature: true,
+        }
     }
 }
 
 impl Plugin for CliManifestPlugin {
     fn build(&self, app: &mut App) {
         let source = self.source;
+        let feature = self.feature;
         app.add_systems(Startup, move |mut commands: Commands| {
-            let manifest = ron::from_str::<CliManifest>(source)
-                .expect("embedded CLI manifest must be valid RON");
+            let manifest = if feature {
+                ron::from_str::<FeatureCliManifest>(source.as_str())
+                    .expect("embedded feature manifest must contain valid CLI metadata")
+                    .cli
+            } else {
+                ron::from_str::<CliManifest>(source.as_str())
+                    .expect("embedded CLI manifest must be valid RON")
+            };
             commands.spawn(manifest);
         });
     }
@@ -28,6 +48,11 @@ impl Plugin for CliManifestPlugin {
     fn is_unique(&self) -> bool {
         false
     }
+}
+
+#[derive(Deserialize)]
+struct FeatureCliManifest {
+    cli: CliManifest,
 }
 
 #[derive(Clone, Component, Debug, Deserialize, PartialEq, Eq)]
@@ -151,5 +176,20 @@ mod tests {
 
         assert_eq!(manifest.default.as_deref(), Some("app.open"));
         assert_eq!(manifest.commands[0].commands[0].id, "tool.import.npm");
+    }
+
+    #[test]
+    fn parses_cli_from_feature_manifest() {
+        let manifest = ron::from_str::<FeatureCliManifest>(
+            r#"(
+                cli: (
+                    commands: [(id: "tool", name: "tools")],
+                ),
+                ignored: true,
+            )"#,
+        )
+        .unwrap();
+
+        assert_eq!(manifest.cli.commands[0].id, "tool");
     }
 }

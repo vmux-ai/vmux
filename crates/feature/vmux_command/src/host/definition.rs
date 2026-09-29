@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use bevy::prelude::*;
 use vmux_ui::i18n::Locale;
@@ -118,10 +118,29 @@ impl<K> CommandDefinitionManifest<K> {
 
 pub struct CommandManifest<K>(Vec<CommandDefinitionManifest<K>>);
 
+#[derive(serde::Deserialize)]
+#[serde(bound(deserialize = "K: serde::Deserialize<'de>"))]
+struct FeatureCommandManifest<K = NoCommandKind> {
+    commands: BTreeMap<String, Vec<CommandDefinitionManifest<K>>>,
+}
+
 impl<K: serde::de::DeserializeOwned> CommandManifest<K> {
     pub fn from_ron(source: &str) -> Self {
         let entries: Vec<CommandDefinitionManifest<K>> =
             ron::from_str(source).expect("embedded command definitions must be valid RON");
+        for entry in &entries {
+            entry.validate();
+        }
+        Self(entries)
+    }
+
+    pub fn from_feature_ron(source: &str, section: &str) -> Self {
+        let mut manifest: FeatureCommandManifest<K> =
+            ron::from_str(source).expect("embedded feature manifest must contain valid commands");
+        let entries = manifest
+            .commands
+            .remove(section)
+            .unwrap_or_else(|| panic!("feature manifest has no command section {section}"));
         for entry in &entries {
             entry.validate();
         }
@@ -145,6 +164,19 @@ impl CommandDefinitions {
     pub fn from_ron(source: &str) -> Self {
         let definitions: Vec<CommandDefinitionManifest> =
             ron::from_str(source).expect("embedded command definitions must be valid RON");
+        for definition in &definitions {
+            definition.validate();
+        }
+        Self(definitions)
+    }
+
+    pub fn from_feature_ron(source: &str, section: &str) -> Self {
+        let mut manifest: FeatureCommandManifest =
+            ron::from_str(source).expect("embedded feature manifest must contain valid commands");
+        let definitions = manifest
+            .commands
+            .remove(section)
+            .unwrap_or_else(|| panic!("feature manifest has no command section {section}"));
         for definition in &definitions {
             definition.validate();
         }
@@ -749,6 +781,22 @@ impl KeyCombo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_commands_from_feature_manifest() {
+        let definitions = CommandDefinitions::from_feature_ron(
+            r#"(
+                commands: {
+                    "test": [(id: "test", label: "Test", group: "Test")],
+                },
+                ignored: true,
+            )"#,
+            "test",
+        )
+        .into_vec();
+
+        assert_eq!(definitions[0].id, "test");
+    }
 
     #[derive(Message)]
     struct TestToggleRequest;

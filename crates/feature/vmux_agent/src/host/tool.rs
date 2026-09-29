@@ -24,29 +24,32 @@ pub struct WorkspaceToolPlugin;
 
 impl Plugin for WorkspaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
-            .register_tool::<OpenPageArgs>("open_page")
-            .register_tool::<OpenFileArgs>("open_file")
-            .register_tool::<ResumeInAcpArgs>("resume_in_acp")
-            .register_tool::<RunArgs>("run")
-            .register_tool::<RequestUserChoiceArgs>("request_user_choice")
-            .register_tool::<SelectProjectArgs>("select_project")
-            .register_tool::<CreateWorktreeArgs>("create_worktree")
-            .register_tool::<ReadTerminalArgs>("read_terminal")
-            .add_systems(
-                Update,
-                (
-                    open_page,
-                    open_file,
-                    resume_in_acp,
-                    run,
-                    request_user_choice,
-                    select_project,
-                    create_worktree,
-                    read_terminal,
-                )
-                    .in_set(ToolDispatchSet),
-            );
+        app.add_plugins(ToolManifestPlugin::from_feature(
+            include_str!("../feature.ron"),
+            "default",
+        ))
+        .register_tool::<OpenPageArgs>("open_page")
+        .register_tool::<OpenFileArgs>("open_file")
+        .register_tool::<ResumeInAcpArgs>("resume_in_acp")
+        .register_tool::<RunArgs>("run")
+        .register_tool::<RequestUserChoiceArgs>("request_user_choice")
+        .register_tool::<SelectProjectArgs>("select_project")
+        .register_tool::<CreateWorktreeArgs>("create_worktree")
+        .register_tool::<ReadTerminalArgs>("read_terminal")
+        .add_systems(
+            Update,
+            (
+                open_page,
+                open_file,
+                resume_in_acp,
+                run,
+                request_user_choice,
+                select_project,
+                create_worktree,
+                read_terminal,
+            )
+                .in_set(ToolDispatchSet),
+        );
     }
 }
 

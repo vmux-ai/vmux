@@ -98,7 +98,10 @@ impl Plugin for TerminalPlugin {
 }
 
 fn spawn_terminal_commands(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("command.ron"));
+    let mut definitions = vmux_command::CommandDefinitions::from_feature_ron(
+        include_str!("../feature.ron"),
+        "command",
+    );
     commands.spawn(
         definitions
             .take("terminal_close")

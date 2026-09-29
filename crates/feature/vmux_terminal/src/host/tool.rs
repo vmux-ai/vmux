@@ -8,9 +8,12 @@ pub struct TerminalToolPlugin;
 
 impl Plugin for TerminalToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
-            .register_tool::<TerminalSendArgs>("terminal_send")
-            .add_systems(Update, dispatch.in_set(ToolDispatchSet));
+        app.add_plugins(ToolManifestPlugin::from_feature(
+            include_str!("../feature.ron"),
+            "default",
+        ))
+        .register_tool::<TerminalSendArgs>("terminal_send")
+        .add_systems(Update, dispatch.in_set(ToolDispatchSet));
     }
 }
 

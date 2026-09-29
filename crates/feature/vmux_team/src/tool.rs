@@ -7,9 +7,12 @@ pub struct TeamToolPlugin;
 
 impl Plugin for TeamToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
-            .register_tool::<RenameProfileArgs>("rename_profile")
-            .add_systems(Update, rename_profile.in_set(ToolDispatchSet));
+        app.add_plugins(ToolManifestPlugin::from_feature(
+            include_str!("feature.ron"),
+            "default",
+        ))
+        .register_tool::<RenameProfileArgs>("rename_profile")
+        .add_systems(Update, rename_profile.in_set(ToolDispatchSet));
     }
 }
 

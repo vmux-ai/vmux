@@ -44,7 +44,10 @@ impl TryFrom<&vmux_command::CommandInvocation> for ToggleLayoutRequest {
 }
 
 fn spawn_toggle_command(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("toggle.ron"));
+    let mut definitions = vmux_command::CommandDefinitions::from_feature_ron(
+        include_str!("../feature.ron"),
+        "toggle",
+    );
     commands.spawn(
         definitions
             .take("toggle_layout")

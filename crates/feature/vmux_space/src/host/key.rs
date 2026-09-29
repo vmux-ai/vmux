@@ -36,7 +36,8 @@ struct AttachSelectedSpace;
 struct DeleteSelectedSpace;
 
 fn spawn_commands(mut commands: Commands) {
-    let mut definitions = CommandDefinitions::from_ron(include_str!("key.ron"));
+    let mut definitions =
+        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "key");
     commands.spawn((definitions.take("space_next"), SelectNextSpace));
     commands.spawn((definitions.take("space_previous"), SelectPreviousSpace));
     commands.spawn((definitions.take("space_attach"), AttachSelectedSpace));
