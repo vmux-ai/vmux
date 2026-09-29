@@ -333,7 +333,7 @@ mod tests {
                 setup_stack: Entity::PLACEHOLDER,
                 setup_webview,
                 agent: AgentKind::Codex,
-                process_id: vmux_api::protocol::ProcessId::new(),
+                process_id: vmux_core::ProcessId::new(),
                 armed: false,
             },
             AgentInstallCompleted {

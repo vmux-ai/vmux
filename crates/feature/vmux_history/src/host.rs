@@ -7,7 +7,7 @@ pub mod transition;
 use bevy::prelude::*;
 use vmux_core::host::page::NativelyHosted;
 
-pub use vmux_core::{CreatedAt, LastActivatedAt, Visit, now_millis};
+pub use query::HistoryOpenIntent;
 
 #[vmux_native::page]
 pub struct HistoryPlugin;
@@ -22,10 +22,10 @@ impl Plugin for HistoryPlugin {
                 .hosted(NativelyHosted::page(crate::PAGE_URL, "History")),
         )
         .add_plugins((
-            crate::spawn::HistorySpawnPlugin,
-            crate::host::state::StatePlugin,
-            crate::query::HistoryQueryPlugin,
-            crate::prune::HistoryPrunePlugin,
+            spawn::HistorySpawnPlugin,
+            state::StatePlugin,
+            query::HistoryQueryPlugin,
+            prune::HistoryPrunePlugin,
         ));
     }
 }

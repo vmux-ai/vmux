@@ -6,7 +6,7 @@ use std::time::Duration;
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
-use vmux_api::protocol::ProcessId;
+use vmux_core::ProcessId;
 use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
 
 use crate::protocol::{McpConfig, McpInput, McpOutput, McpPlugin, McpRuntime, McpServer, McpSet};

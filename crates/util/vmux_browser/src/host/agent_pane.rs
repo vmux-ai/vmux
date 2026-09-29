@@ -9,7 +9,7 @@ pub struct AgentBrowserResolve<'w, 's> {
         's,
         (
             Entity,
-            &'static vmux_api::protocol::ProcessId,
+            &'static vmux_core::ProcessId,
             &'static ChildOf,
         ),
     >,
@@ -64,7 +64,7 @@ impl AgentBrowserResolve<'_, '_> {
             .unwrap_or(false)
     }
 
-    pub fn agent_pane(&self, anchor: vmux_api::protocol::ProcessId) -> Option<Entity> {
+    pub fn agent_pane(&self, anchor: vmux_core::ProcessId) -> Option<Entity> {
         use bevy::ecs::relationship::Relationship;
         let (_, _, term_co) = self
             .agent_terms
@@ -75,7 +75,7 @@ impl AgentBrowserResolve<'_, '_> {
 
     pub fn working_directory(
         &self,
-        anchor: vmux_api::protocol::ProcessId,
+        anchor: vmux_core::ProcessId,
         tabs: &Query<&vmux_layout::tab::Tab>,
     ) -> Option<std::path::PathBuf> {
         let pane = self.agent_pane(anchor)?;
@@ -85,7 +85,7 @@ impl AgentBrowserResolve<'_, '_> {
             .map(|dir| dir.path)
     }
 
-    fn agent_kind(&self, anchor: vmux_api::protocol::ProcessId) -> Option<AgentKind> {
+    fn agent_kind(&self, anchor: vmux_core::ProcessId) -> Option<AgentKind> {
         let (entity, _, _) = self
             .agent_terms
             .iter()
@@ -95,7 +95,7 @@ impl AgentBrowserResolve<'_, '_> {
 
     pub(super) fn claim_browser_pane(
         &self,
-        anchor: vmux_api::protocol::ProcessId,
+        anchor: vmux_core::ProcessId,
     ) -> Option<AgentBrowserPaneClaim> {
         let pane = self.browser_pane_for(self.agent_pane(anchor)?)?;
         let kind = self.agent_kind(anchor);
@@ -123,7 +123,7 @@ impl AgentBrowserResolve<'_, '_> {
     pub fn resolve_pane(
         &self,
         pane: &Option<String>,
-        anchor: &Option<vmux_api::protocol::ProcessId>,
+        anchor: &Option<vmux_core::ProcessId>,
     ) -> AgentBrowserPaneResolution {
         if let Some(pane) = pane {
             return AgentBrowserPaneResolution {

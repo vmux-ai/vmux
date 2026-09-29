@@ -17,8 +17,7 @@ use bevy_cef_core::prelude::{
 use vmux_api::UiEventPermissions;
 use vmux_core::host::page::HostsPage;
 use vmux_core::page::PageReady;
-use vmux_core::page_metadata::PageMetadata;
-use vmux_core::{PageIcon, PageOpenSet};
+use vmux_core::{PageIcon, PageMetadata, PageOpenSet};
 use vmux_layout::LayoutCef;
 use vmux_layout::window::FocusedWindow;
 use vmux_native::{

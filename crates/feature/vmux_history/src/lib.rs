@@ -5,8 +5,9 @@ pub mod state;
 pub mod ui;
 
 pub const PAGE_URL: &str = "vmux://history/";
+pub use vmux_core::{CreatedAt, LastActivatedAt, Visit, now_millis};
 
 #[cfg(host)]
 mod host;
 #[cfg(host)]
-pub use host::*;
+pub use host::{HistoryOpenIntent, HistoryPlugin};

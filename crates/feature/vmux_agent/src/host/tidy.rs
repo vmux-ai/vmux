@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_api::protocol::ProcessId;
+use vmux_core::ProcessId;
 use vmux_core::LastActivatedAt;
 use vmux_core::event::{FileTidyPromptEvent, FileTidyRequest, TidyChoice};
 use vmux_core::host::FileUiStateWrite;

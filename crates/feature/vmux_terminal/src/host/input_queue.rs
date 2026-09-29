@@ -181,7 +181,7 @@ fn flush_terminal_input(
     inputs: Query<(Entity, &TerminalInput, &TerminalInputTarget)>,
     terminals: Query<
         (
-            &vmux_api::protocol::ProcessId,
+            &vmux_core::ProcessId,
             Has<ShellOutputSeen>,
             Has<PendingServiceCreate>,
             Has<AwaitingProcessCreated>,

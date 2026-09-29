@@ -6,7 +6,7 @@ use vmux_api::protocol::{
 };
 use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput, CommandOrigin};
 use vmux_extension::ExtensionInstallRequest;
-use vmux_history::query::HistoryOpenIntent;
+use vmux_history::HistoryOpenIntent;
 use vmux_layout::active_pane::ActivatePane;
 use vmux_layout::{
     BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, OpenBesideRequest,

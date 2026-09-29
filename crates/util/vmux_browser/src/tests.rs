@@ -344,7 +344,7 @@ mod browser_navigate_flow {
             .add_message::<vmux_space::SpaceDeleteRequest>()
             .add_message::<vmux_space::SpaceOpenPageRequest>()
             .add_message::<vmux_space::SpaceRenameRequest>()
-            .add_message::<vmux_history::query::HistoryOpenIntent>()
+            .add_message::<vmux_history::HistoryOpenIntent>()
             .add_systems(
                 Update,
                 handle_test_known_page_open.in_set(PageOpenSet::HandleKnownPages),

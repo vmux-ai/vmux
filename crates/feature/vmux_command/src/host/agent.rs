@@ -21,7 +21,7 @@ fn invoke_command(
     agents: Query<(
         Entity,
         &vmux_core::team::Agent,
-        Option<&vmux_api::protocol::ProcessId>,
+        Option<&vmux_core::ProcessId>,
     )>,
     user: Query<Entity, With<vmux_core::team::User>>,
     mut responses: MessageWriter<AgentCommandResponse>,

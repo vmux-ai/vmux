@@ -611,7 +611,7 @@ mod tests {
     use super::*;
     use crate::host::run_terminal::AgentCwd;
     use crate::host::test_support::init_worktree_test_repo;
-    use vmux_api::protocol::ProcessId;
+    use vmux_core::ProcessId;
     use vmux_api::protocol::SharedMessage;
 
     #[test]

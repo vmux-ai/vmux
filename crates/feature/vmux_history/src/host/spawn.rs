@@ -37,7 +37,7 @@ fn spawn_visits(
             continue;
         }
         let now = now_millis();
-        let transition = crate::transition::map(ev.transition, ev.qualifiers);
+        let transition = super::transition::map(ev.transition, ev.qualifiers);
         record_visit(&mut commands, &mut urls, &ev.url, "", transition, now);
     }
 }
