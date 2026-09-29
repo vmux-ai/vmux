@@ -4,8 +4,8 @@ use vmux_api::BinEvent;
 use vmux_api::protocol::AgentRequest;
 use vmux_api::protocol::{
     AgentBookmark, AgentBookmarkList, AgentBookmarkNode, AgentBookmarks, AgentImage,
-    AgentListCommands, AgentRecordStart, AgentRecordStop, AgentRecording, AgentRequestId,
-    AgentScreenshot, AgentVaultStatus, AgentWorkingDirectory, ClientMessage, ProcessId,
+    AgentRecordStart, AgentRecordStop, AgentRecording, AgentRequestId, AgentScreenshot,
+    AgentVaultStatus, AgentWorkingDirectory, ClientMessage, ProcessId,
 };
 use vmux_command::WriteCommandRequests;
 use vmux_core::service::ServiceRequest;
@@ -32,11 +32,6 @@ struct WorkingDirectoryRequest {
 }
 
 #[derive(Message)]
-struct CommandListRequest {
-    request_id: AgentRequestId,
-}
-
-#[derive(Message)]
 struct VaultStatusRequest {
     request_id: AgentRequestId,
 }
@@ -49,7 +44,6 @@ struct BookmarkListRequest {
 #[derive(bevy::ecs::system::SystemParam)]
 struct AgentQueryWriters<'w> {
     working_directory: MessageWriter<'w, WorkingDirectoryRequest>,
-    commands: MessageWriter<'w, CommandListRequest>,
     vault: MessageWriter<'w, VaultStatusRequest>,
     bookmarks: MessageWriter<'w, BookmarkListRequest>,
     screenshot: MessageWriter<'w, ScreenshotRequest>,
@@ -72,7 +66,6 @@ fn route_agent_queries(
                 | AgentBookmarkList::ID
                 | AgentWorkingDirectory::ID
                 | AgentVaultStatus::ID
-                | AgentListCommands::ID
         );
         if !recognized {
             continue;
@@ -132,15 +125,6 @@ fn route_agent_queries(
                         request_id: request.request_id,
                     });
                 }),
-            AgentListCommands::ID => {
-                serde_json::from_slice::<AgentListCommands>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|_| {
-                        writers.commands.write(CommandListRequest {
-                            request_id: request.request_id,
-                        });
-                    })
-            }
             _ => unreachable!(),
         };
         if let Err(message) = result {
@@ -156,7 +140,6 @@ impl Plugin for AgentQueryPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ToolQueryRequest>()
             .add_message::<WorkingDirectoryRequest>()
-            .add_message::<CommandListRequest>()
             .add_message::<VaultStatusRequest>()
             .add_message::<BookmarkListRequest>()
             .add_systems(
@@ -169,7 +152,6 @@ impl Plugin for AgentQueryPlugin {
                 Update,
                 (
                     answer_working_directory_queries,
-                    answer_command_queries,
                     answer_vault_queries,
                     answer_bookmark_queries,
                 )
@@ -208,24 +190,6 @@ fn answer_working_directory_queries(
         service_requests.write(ServiceRequest(ClientMessage::AgentWorkingDirectoryResult {
             request_id: request.request_id,
             result,
-        }));
-    }
-}
-
-fn answer_command_queries(
-    mut reader: MessageReader<CommandListRequest>,
-    commands: Query<&vmux_command::CommandDefinition>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    for request in reader.read() {
-        let mut tools = commands
-            .iter()
-            .filter_map(vmux_command::CommandDefinition::agent_tool)
-            .collect::<Vec<_>>();
-        tools.sort_by(|left, right| left.name.cmp(&right.name));
-        service_requests.write(ServiceRequest(ClientMessage::AgentCommandsResult {
-            request_id: request.request_id,
-            result: Ok(tools),
         }));
     }
 }
@@ -402,7 +366,6 @@ mod tests {
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
             .add_message::<WorkingDirectoryRequest>()
-            .add_message::<CommandListRequest>()
             .add_message::<VaultStatusRequest>()
             .add_message::<BookmarkListRequest>()
             .add_message::<ScreenshotRequest>()

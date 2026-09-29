@@ -1,7 +1,14 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_api::protocol::{AgentInvokeCommand, AgentNotify, AgentRequest, JsonValue};
-use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin};
+use vmux_api::BinEvent;
+use vmux_api::protocol::{
+    AgentInvokeCommand, AgentListCommands, AgentNotify, AgentRequest, ClientMessage, JsonValue,
+};
+use vmux_core::service::{ServiceMessageSet, ServiceRequest};
+use vmux_tool::{
+    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQueryHandled,
+    ToolQueryRequest, ToolQueryRouteSet,
+};
 
 pub struct CommandToolPlugin;
 
@@ -13,7 +20,46 @@ impl Plugin for CommandToolPlugin {
         ))
         .register_tool::<OpenCommandBarArgs>("open_command_bar")
         .register_tool::<NotifyArgs>("notify")
-        .add_systems(Update, (open_command_bar, notify).in_set(ToolDispatchSet));
+        .add_message::<ToolQueryRequest>()
+        .add_message::<ToolQueryHandled>()
+        .add_message::<ServiceRequest>()
+        .add_systems(Update, (open_command_bar, notify).in_set(ToolDispatchSet))
+        .add_systems(
+            Update,
+            answer_command_queries
+                .in_set(ToolQueryRouteSet)
+                .after(ServiceMessageSet),
+        );
+    }
+}
+
+fn answer_command_queries(
+    mut queries: MessageReader<ToolQueryRequest>,
+    commands: Query<&crate::CommandDefinition>,
+    mut handled: MessageWriter<ToolQueryHandled>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for request in queries.read() {
+        if request.query.id != AgentListCommands::ID {
+            continue;
+        }
+        handled.write(ToolQueryHandled(request.request_id));
+        if let Err(error) = serde_json::from_slice::<AgentListCommands>(&request.query.body) {
+            service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
+                request_id: request.request_id,
+                message: error.to_string(),
+            }));
+            continue;
+        }
+        let mut tools = commands
+            .iter()
+            .filter_map(crate::CommandDefinition::agent_tool)
+            .collect::<Vec<_>>();
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandsResult {
+            request_id: request.request_id,
+            result: Ok(tools),
+        }));
     }
 }
 
