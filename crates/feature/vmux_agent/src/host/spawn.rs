@@ -618,14 +618,15 @@ mod tests {
             kind: vmux_core::terminal::TerminalKind::Claude,
         };
         let new_id = ProcessId::new();
-        let prepared = AgentRestartRequest {
+        let prepared = crate::host::cli::prepare_restart_for_test::<
+            crate::host::cli::claude::ClaudeLaunch,
+        >(&AgentRestartRequest {
             launch,
             shell: "/bin/zsh".to_string(),
             session_id: None,
             anchor: new_id,
             kind: crate::AgentKind::Claude,
-        }
-        .prepare::<crate::host::cli::claude::ClaudeLaunch>()
+        })
         .unwrap();
         let _ = std::fs::remove_dir_all(&temp);
         let args = prepared.launch.args;
@@ -653,14 +654,15 @@ mod tests {
             kind: vmux_core::terminal::TerminalKind::Codex,
         };
 
-        let prepared = AgentRestartRequest {
+        let prepared = crate::host::cli::prepare_restart_for_test::<
+            crate::host::cli::codex::CodexLaunch,
+        >(&AgentRestartRequest {
             launch,
             shell: "/bin/zsh".to_string(),
             session_id: None,
             anchor: ProcessId::new(),
             kind: crate::AgentKind::Codex,
-        }
-        .prepare::<crate::host::cli::codex::CodexLaunch>()
+        })
         .unwrap();
 
         let _ = std::fs::remove_dir_all(&temp);
@@ -682,14 +684,15 @@ mod tests {
         };
 
         assert!(
-            AgentRestartRequest {
-                launch,
-                shell: "/bin/zsh".to_string(),
-                session_id: None,
-                anchor: ProcessId::new(),
-                kind: crate::AgentKind::Codex,
-            }
-            .prepare::<crate::host::cli::codex::CodexLaunch>()
+            crate::host::cli::prepare_restart_for_test::<crate::host::cli::codex::CodexLaunch>(
+                &AgentRestartRequest {
+                    launch,
+                    shell: "/bin/zsh".to_string(),
+                    session_id: None,
+                    anchor: ProcessId::new(),
+                    kind: crate::AgentKind::Codex,
+                },
+            )
             .is_err()
         );
     }

@@ -11,6 +11,7 @@ pub(super) const VIBE: CliSessionSource = vibe::SESSIONS;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 
 use bevy::prelude::*;
@@ -18,8 +19,12 @@ use bevy::tasks::IoTaskPool;
 
 use crate::message::Message;
 use vmux_core::agent::AgentKind;
+use vmux_core::profile::mcp_credentials::McpCredentialAccess;
+use vmux_core::terminal::TerminalLaunch;
 
-use crate::host::launch::{AgentLaunchRequest, AgentRestartRequest, CliLaunchProvider};
+use crate::host::launch::{
+    AgentLaunchRequest, AgentRestartRequest, CliLaunchProvider, PreparedAgentLaunch,
+};
 use crate::host::spawn::{AgentLaunchTask, AgentRestartTask, PrepareAgentLaunchSet};
 
 pub(super) struct CliPlugin;
@@ -66,7 +71,7 @@ fn prepare_launches<P: CliLaunchProvider>(
         let request = request.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
-            let result = request.prepare::<P>();
+            let result = prepare_launch::<P>(&request);
             if let Some(wake) = wake {
                 let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
             }
@@ -74,6 +79,65 @@ fn prepare_launches<P: CliLaunchProvider>(
         });
         commands.entity(entity).insert(AgentLaunchTask(task));
     }
+}
+
+fn prepare_launch<P: CliLaunchProvider>(
+    request: &AgentLaunchRequest,
+) -> Result<PreparedAgentLaunch, String> {
+    if request.kind != P::KIND {
+        return Err(format!(
+            "CLI launch provider mismatch: requested {:?}, prepared {:?}",
+            request.kind,
+            P::KIND
+        ));
+    }
+    static ACCESS: OnceLock<Mutex<()>> = OnceLock::new();
+    let _preparation = ACCESS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|error| error.to_string())?;
+    for _ in 0..3 {
+        let mcp_revision = McpCredentialAccess::stable_revision()?;
+        let mcp_cfg =
+            crate::host::mcp::resolve(&request.cwd, request.anchor, P::KIND, &request.shell)?;
+        if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
+            bevy::log::warn!("external agent Knowledge sync failed: {error}");
+        }
+        P::prepare(&mcp_cfg);
+        let effort_key = format!("cli:{}", P::KIND.as_url_segment());
+        let mut args = match request
+            .effort
+            .as_deref()
+            .filter(|level| vmux_core::agent::effort_levels(&effort_key).contains(level))
+        {
+            Some(level) => P::effort_arguments(level),
+            None => Vec::new(),
+        };
+        if let Some(model) = request.model.as_deref().filter(|model| !model.is_empty()) {
+            args.extend(P::model_arguments(model));
+        }
+        args.extend(P::arguments(&mcp_cfg, request.session_id.as_deref()));
+        let mut env: Vec<(String, String)> = std::env::vars().collect();
+        env.extend(P::environment(&mcp_cfg));
+        if let Some(model) = request.model.as_deref().filter(|model| !model.is_empty()) {
+            env.extend(P::model_environment(model));
+        }
+        env.push(("VMUX_ANCHOR".to_string(), request.anchor.to_string()));
+        if McpCredentialAccess::revision() != mcp_revision {
+            continue;
+        }
+        return Ok(PreparedAgentLaunch {
+            launch: TerminalLaunch {
+                command: request.executable.to_string_lossy().to_string(),
+                args,
+                cwd: request.cwd.to_string_lossy().to_string(),
+                env,
+                kind: P::KIND.into(),
+            },
+            mcp_revision,
+        });
+    }
+    Err("MCP configuration changed repeatedly while preparing the agent".to_string())
 }
 
 fn prepare_restarts<P: CliLaunchProvider>(
@@ -88,7 +152,7 @@ fn prepare_restarts<P: CliLaunchProvider>(
         let request = request.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
-            let result = request.prepare::<P>();
+            let result = prepare_restart::<P>(&request);
             if let Some(wake) = wake {
                 let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
             }
@@ -96,6 +160,62 @@ fn prepare_restarts<P: CliLaunchProvider>(
         });
         commands.entity(entity).insert(AgentRestartTask(task));
     }
+}
+
+fn prepare_restart<P: CliLaunchProvider>(
+    request: &AgentRestartRequest,
+) -> Result<PreparedAgentLaunch, String> {
+    if request.kind != P::KIND {
+        return Err(format!(
+            "CLI restart provider mismatch: requested {:?}, prepared {:?}",
+            request.kind,
+            P::KIND
+        ));
+    }
+    for _ in 0..3 {
+        let mcp_revision = McpCredentialAccess::stable_revision()?;
+        let mcp_cfg = crate::host::mcp::resolve(
+            Path::new(&request.launch.cwd),
+            request.anchor,
+            P::KIND,
+            &request.shell,
+        )?;
+        let args = P::arguments(&mcp_cfg, request.session_id.as_deref());
+        let fresh = P::environment(&mcp_cfg);
+        let fresh_keys: HashSet<String> = fresh.iter().map(|(key, _)| key.clone()).collect();
+        let mut env: Vec<(String, String)> = request
+            .launch
+            .env
+            .iter()
+            .filter(|(key, _)| {
+                !fresh_keys.contains(key)
+                    && !crate::host::managed_mcp::McpAuthorization::is_environment_variable(key)
+            })
+            .cloned()
+            .collect();
+        env.extend(fresh);
+        if McpCredentialAccess::revision() != mcp_revision {
+            continue;
+        }
+        return Ok(PreparedAgentLaunch {
+            launch: TerminalLaunch {
+                command: request.launch.command.clone(),
+                args,
+                cwd: request.launch.cwd.clone(),
+                env,
+                kind: P::KIND.into(),
+            },
+            mcp_revision,
+        });
+    }
+    Err("MCP configuration changed repeatedly while preparing the agent restart".to_string())
+}
+
+#[cfg(test)]
+pub(super) fn prepare_restart_for_test<P: CliLaunchProvider>(
+    request: &AgentRestartRequest,
+) -> Result<PreparedAgentLaunch, String> {
+    prepare_restart::<P>(request)
 }
 
 #[derive(Component)]
