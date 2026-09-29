@@ -47,7 +47,7 @@ impl GitState {
         };
     }
 
-    pub(super) fn start_repository(&mut self, path: &Path) {
+    fn start_repository(&mut self, path: &Path) {
         self.snapshot.workspace = path.to_string_lossy().into_owned();
         self.snapshot.loading = true;
         self.snapshot.message.clear();

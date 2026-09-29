@@ -173,7 +173,7 @@ impl RegisteredDevice {
         Ok(Self { path })
     }
 
-    pub(super) fn release_stale() {
+    fn release_stale() {
         Self::remove(&RemotePaths::current().relay_registration());
     }
 

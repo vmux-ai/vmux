@@ -115,7 +115,7 @@ impl ChatMediaProjection {
 }
 
 impl ChatAttachmentProjection {
-    pub(super) fn merge_selected(&mut self, incoming: &ChatAttachments) -> bool {
+    fn merge_selected(&mut self, incoming: &ChatAttachments) -> bool {
         for attachment in &incoming.attachments {
             if attachment.preview_data_url.is_empty() {
                 continue;
@@ -128,7 +128,7 @@ impl ChatAttachmentProjection {
         self.hydrate_selected() || merged
     }
 
-    pub(super) fn remove_selected(&mut self, path: &str) -> bool {
+    fn remove_selected(&mut self, path: &str) -> bool {
         let previous = self.selected.len();
         self.selected.retain(|attachment| attachment.path != path);
         self.selected.len() != previous
@@ -148,7 +148,7 @@ impl ChatAttachmentProjection {
         }
     }
 
-    pub(super) fn start_hydration(&mut self, paths: &[String]) -> Vec<std::path::PathBuf> {
+    fn start_hydration(&mut self, paths: &[String]) -> Vec<std::path::PathBuf> {
         let mut started = Vec::new();
         for path in paths {
             if path.is_empty() || self.resolved.contains(path) || !self.pending.insert(path.clone())
@@ -160,11 +160,7 @@ impl ChatAttachmentProjection {
         started
     }
 
-    pub(super) fn finish_hydration(
-        &mut self,
-        requested: &[String],
-        attachments: &[ChatAttachment],
-    ) -> bool {
+    fn finish_hydration(&mut self, requested: &[String], attachments: &[ChatAttachment]) -> bool {
         for path in requested {
             self.pending.remove(path);
             self.resolved.insert(path.clone());

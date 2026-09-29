@@ -18,7 +18,7 @@ use super::update::UpdateNoticeFooter;
 use super::window_drag::WindowDragRegion;
 
 #[component]
-pub(super) fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
+fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
     let handle_class = if resizing() {
         "relative flex h-10 w-2 items-center justify-center rounded-full bg-primary/20 shadow-sm ring-1 ring-primary/50"
     } else {
@@ -51,13 +51,13 @@ pub(super) struct StackReveal {
 }
 
 impl StackReveal {
-    pub(super) fn forget(mut self) {
+    fn forget(mut self) {
         if (self.settled)().is_some() {
             self.settled.set(None);
         }
     }
 
-    pub(super) fn follow(mut self, target: StackRevealTarget) {
+    fn follow(mut self, target: StackRevealTarget) {
         if (self.settled)().is_some_and(|settled| settled.revision >= target.revision) {
             return;
         }

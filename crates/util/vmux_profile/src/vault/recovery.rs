@@ -211,7 +211,7 @@ pub(super) fn load_repository_key<K: KeyStore>(
     })
 }
 
-pub(super) fn derive_recovery_wrapping_key(
+fn derive_recovery_wrapping_key(
     recovery_key: &[u8],
     vault_id: &str,
 ) -> Result<[u8; KEY_LEN], String> {
@@ -229,7 +229,7 @@ pub(super) fn derive_recovery_wrapping_key(
     Ok(key)
 }
 
-pub(super) fn recovery_aad(vault_id: &str) -> Vec<u8> {
+fn recovery_aad(vault_id: &str) -> Vec<u8> {
     let mut aad = Vec::with_capacity(RECOVERY_AAD_PREFIX.len() + vault_id.len());
     aad.extend_from_slice(RECOVERY_AAD_PREFIX);
     aad.extend_from_slice(vault_id.as_bytes());

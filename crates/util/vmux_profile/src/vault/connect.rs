@@ -194,10 +194,7 @@ where
     }
 }
 
-pub(super) fn spawn_line_reader<R>(
-    reader: R,
-    sender: mpsc::Sender<String>,
-) -> thread::JoinHandle<()>
+fn spawn_line_reader<R>(reader: R, sender: mpsc::Sender<String>) -> thread::JoinHandle<()>
 where
     R: Read + Send + 'static,
 {
@@ -283,7 +280,7 @@ pub(super) fn connect_folder_paths<K: KeyStore>(
     Ok(remote.to_string_lossy().into_owned())
 }
 
-pub(super) fn create_remote_paths<K: KeyStore>(
+fn create_remote_paths<K: KeyStore>(
     root: &Path,
     vault_repository: &Path,
     repository: &str,
@@ -394,7 +391,7 @@ pub(super) fn connect_remote_paths<K: KeyStore>(
     Ok(url)
 }
 
-pub(super) fn resolve_remote_url(repository: &str) -> Result<String, String> {
+fn resolve_remote_url(repository: &str) -> Result<String, String> {
     if repository.contains("://")
         || repository.starts_with("git@")
         || Path::new(repository).is_absolute()
@@ -484,7 +481,7 @@ pub(super) fn github_owners_from_graphql(source: &str) -> Result<(String, Vec<St
     Ok((owner, owners))
 }
 
-pub(super) fn github_has_saved_account() -> Result<bool, String> {
+fn github_has_saved_account() -> Result<bool, String> {
     let output = GitHubCli::command()?
         .args([
             "auth",

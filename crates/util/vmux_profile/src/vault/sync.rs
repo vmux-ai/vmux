@@ -99,14 +99,14 @@ pub(super) fn sync_paths<K: KeyStore>(
     Err("Vault remote kept changing during sync".to_string())
 }
 
-pub(super) fn push_rejected_for_remote_change(error: &str) -> bool {
+fn push_rejected_for_remote_change(error: &str) -> bool {
     let error = error.to_ascii_lowercase();
     error.contains("non-fast-forward")
         || error.contains("fetch first")
         || error.contains("failed to push some refs")
 }
 
-pub(super) fn sync_message(outcome: &ReconcileOutcome) -> String {
+fn sync_message(outcome: &ReconcileOutcome) -> String {
     if outcome.conflict_copies > 0 {
         format!(
             "Vault synced with {} conflicted {}",
@@ -168,7 +168,7 @@ pub(super) fn collect_local_files(root: &Path) -> Result<BTreeMap<String, LocalE
     Ok(files)
 }
 
-pub(super) fn collect_directory(
+fn collect_directory(
     root: &Path,
     directory: &Path,
     files: &mut BTreeMap<String, LocalEntry>,
@@ -224,9 +224,7 @@ pub(super) fn collect_directory(
     Ok(())
 }
 
-pub(super) fn collect_local_fingerprints(
-    root: &Path,
-) -> Result<BTreeMap<String, LocalFingerprint>, String> {
+fn collect_local_fingerprints(root: &Path) -> Result<BTreeMap<String, LocalFingerprint>, String> {
     let mut files = BTreeMap::new();
     if root.exists() {
         collect_fingerprint_directory(root, root, &mut files)?;
@@ -234,7 +232,7 @@ pub(super) fn collect_local_fingerprints(
     Ok(files)
 }
 
-pub(super) fn collect_fingerprint_directory(
+fn collect_fingerprint_directory(
     root: &Path,
     directory: &Path,
     files: &mut BTreeMap<String, LocalFingerprint>,
@@ -278,7 +276,7 @@ pub(super) fn collect_fingerprint_directory(
     Ok(())
 }
 
-pub(super) fn ignored_path(relative: &Path) -> bool {
+fn ignored_path(relative: &Path) -> bool {
     if relative.file_name().is_some_and(|name| name == ".DS_Store") {
         return true;
     }
@@ -348,7 +346,7 @@ pub(super) fn reconcile_local(
     Ok(outcome)
 }
 
-pub(super) fn merge_changed_file(
+fn merge_changed_file(
     path: &str,
     baseline: Option<&LocalEntry>,
     local: Option<&LocalEntry>,
@@ -433,7 +431,7 @@ pub(super) fn merge_changed_file(
     Ok(Some(entry_with_data(local, data)))
 }
 
-pub(super) fn entry_with_data(template: &LocalEntry, data: Vec<u8>) -> LocalEntry {
+fn entry_with_data(template: &LocalEntry, data: Vec<u8>) -> LocalEntry {
     let mut entry = template.clone();
     entry.size = data.len() as u64;
     entry.modified_secs = 0;
@@ -443,7 +441,7 @@ pub(super) fn entry_with_data(template: &LocalEntry, data: Vec<u8>) -> LocalEntr
     entry
 }
 
-pub(super) fn merge_text(
+fn merge_text(
     baseline: &[u8],
     local: &[u8],
     remote: &[u8],
@@ -487,11 +485,7 @@ pub(super) fn merge_text(
     result
 }
 
-pub(super) fn merge_toml(
-    baseline: &[u8],
-    local: &[u8],
-    remote: &[u8],
-) -> Result<Option<Vec<u8>>, String> {
+fn merge_toml(baseline: &[u8], local: &[u8], remote: &[u8]) -> Result<Option<Vec<u8>>, String> {
     let Ok(baseline) = std::str::from_utf8(baseline) else {
         return Ok(None);
     };
@@ -520,11 +514,7 @@ pub(super) fn merge_toml(
     ))
 }
 
-pub(super) fn merge_ron(
-    baseline: &[u8],
-    local: &[u8],
-    remote: &[u8],
-) -> Result<Option<Vec<u8>>, String> {
+fn merge_ron(baseline: &[u8], local: &[u8], remote: &[u8]) -> Result<Option<Vec<u8>>, String> {
     let Ok(baseline) = ron::from_str::<ron::Value>(std::str::from_utf8(baseline).unwrap_or(""))
     else {
         return Ok(None);
@@ -545,7 +535,7 @@ pub(super) fn merge_ron(
     Ok(Some(output))
 }
 
-pub(super) fn merge_ron_value(
+fn merge_ron_value(
     baseline: Option<&ron::Value>,
     local: Option<&ron::Value>,
     remote: Option<&ron::Value>,
@@ -588,10 +578,7 @@ pub(super) fn merge_ron_value(
     }
 }
 
-pub(super) fn ron_value_options_equal(
-    left: Option<&ron::Value>,
-    right: Option<&ron::Value>,
-) -> bool {
+fn ron_value_options_equal(left: Option<&ron::Value>, right: Option<&ron::Value>) -> bool {
     match (left, right) {
         (Some(left), Some(right)) => ron_values_equal(left, right),
         (None, None) => true,
@@ -599,7 +586,7 @@ pub(super) fn ron_value_options_equal(
     }
 }
 
-pub(super) fn ron_values_equal(left: &ron::Value, right: &ron::Value) -> bool {
+fn ron_values_equal(left: &ron::Value, right: &ron::Value) -> bool {
     match (left, right) {
         (ron::Value::Map(left), ron::Value::Map(right)) => {
             left.len() == right.len()
@@ -629,7 +616,7 @@ pub(super) fn ron_map_get<'a>(
         .find_map(|(candidate, value)| (candidate == key).then_some(value))
 }
 
-pub(super) fn merge_toml_value(
+fn merge_toml_value(
     baseline: Option<&toml::Value>,
     local: Option<&toml::Value>,
     remote: Option<&toml::Value>,
@@ -668,11 +655,7 @@ pub(super) fn merge_toml_value(
     }
 }
 
-pub(super) fn merge_json(
-    baseline: &[u8],
-    local: &[u8],
-    remote: &[u8],
-) -> Result<Option<Vec<u8>>, String> {
+fn merge_json(baseline: &[u8], local: &[u8], remote: &[u8]) -> Result<Option<Vec<u8>>, String> {
     let Ok(baseline) = serde_json::from_slice::<serde_json::Value>(baseline) else {
         return Ok(None);
     };
@@ -690,7 +673,7 @@ pub(super) fn merge_json(
     Ok(Some(output))
 }
 
-pub(super) fn merge_json_value(
+fn merge_json_value(
     baseline: Option<&serde_json::Value>,
     local: Option<&serde_json::Value>,
     remote: Option<&serde_json::Value>,
@@ -729,10 +712,7 @@ pub(super) fn merge_json_value(
     }
 }
 
-pub(super) fn conflict_copy_path(
-    path: &str,
-    occupied: &mut BTreeSet<String>,
-) -> Result<String, String> {
+fn conflict_copy_path(path: &str, occupied: &mut BTreeSet<String>) -> Result<String, String> {
     let path = Path::new(path);
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
     let stem = path
@@ -762,7 +742,7 @@ pub(super) fn conflict_copy_path(
     Err("failed to allocate Vault conflict copy".to_string())
 }
 
-pub(super) fn conflict_copy_label() -> String {
+fn conflict_copy_label() -> String {
     let device = Command::new("/bin/hostname")
         .output()
         .ok()
@@ -789,7 +769,7 @@ pub(super) fn conflict_copy_label() -> String {
     )
 }
 
-pub(super) fn validate_file_tree(files: &BTreeMap<String, LocalEntry>) -> Result<(), String> {
+fn validate_file_tree(files: &BTreeMap<String, LocalEntry>) -> Result<(), String> {
     for path in files.keys() {
         let mut parent = Path::new(path).parent();
         while let Some(candidate) = parent {
@@ -816,7 +796,7 @@ pub(super) fn same_entry(left: Option<&LocalEntry>, right: Option<&LocalEntry>) 
     }
 }
 
-pub(super) fn apply_local_entry(
+fn apply_local_entry(
     root: &Path,
     relative: &str,
     entry: Option<&LocalEntry>,
@@ -857,7 +837,7 @@ pub(super) fn remove_existing_path(path: &Path) -> Result<(), String> {
     }
 }
 
-pub(super) fn prune_empty_parents(root: &Path, mut parent: Option<&Path>) {
+fn prune_empty_parents(root: &Path, mut parent: Option<&Path>) {
     while let Some(directory) = parent {
         if directory == root || !directory.starts_with(root) {
             break;
@@ -920,9 +900,7 @@ pub(super) fn local_change_count(root: &Path, repository: &Path) -> Result<u32, 
         .count() as u32)
 }
 
-pub(super) fn read_local_state(
-    repository: &Path,
-) -> Result<BTreeMap<String, LocalStateEntry>, String> {
+fn read_local_state(repository: &Path) -> Result<BTreeMap<String, LocalStateEntry>, String> {
     let source = std::fs::read(state_path(repository)).map_err(|error| error.to_string())?;
     let source = std::str::from_utf8(&source).map_err(|error| error.to_string())?;
     let state = ron::from_str::<LocalState>(source).map_err(|error| error.to_string())?;
@@ -936,7 +914,7 @@ pub(super) fn read_local_state(
         .collect())
 }
 
-pub(super) fn baseline_files(repository: &Path) -> Result<BTreeMap<String, LocalEntry>, String> {
+fn baseline_files(repository: &Path) -> Result<BTreeMap<String, LocalEntry>, String> {
     read_local_state(repository)?
         .into_iter()
         .map(|(path, entry)| {

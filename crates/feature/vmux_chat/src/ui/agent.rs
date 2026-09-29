@@ -45,7 +45,7 @@ pub(super) fn ChatHeader(chat: Chat) -> Element {
 }
 
 #[component]
-pub(super) fn AgentAvatar(chat: Chat, size_class: String) -> Element {
+fn AgentAvatar(chat: Chat, size_class: String) -> Element {
     let agent = chat.agent();
     let accent = (chat.identity.accent)();
     let src = favicon_src_for_url(

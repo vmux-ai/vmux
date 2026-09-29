@@ -162,10 +162,7 @@ pub(super) fn write_encrypted_snapshot(
     vault.validate_encrypted_worktree()
 }
 
-pub(super) fn same_files(
-    left: &BTreeMap<String, LocalEntry>,
-    right: &BTreeMap<String, LocalEntry>,
-) -> bool {
+fn same_files(left: &BTreeMap<String, LocalEntry>, right: &BTreeMap<String, LocalEntry>) -> bool {
     left.len() == right.len()
         && left
             .iter()
@@ -271,12 +268,12 @@ pub(super) fn decrypt_bytes(key: &[u8], aad: &[u8], encrypted: &[u8]) -> Result<
     Ok(plaintext.to_vec())
 }
 
-pub(super) fn object_id(key: &[u8], path: &str) -> String {
+fn object_id(key: &[u8], path: &str) -> String {
     let key = hmac::Key::new(hmac::HMAC_SHA256, key);
     hex(hmac::sign(&key, path.as_bytes()).as_ref())
 }
 
-pub(super) fn object_aad(path: &str) -> Vec<u8> {
+fn object_aad(path: &str) -> Vec<u8> {
     let mut aad = OBJECT_AAD_PREFIX.to_vec();
     aad.extend_from_slice(path.as_bytes());
     aad
@@ -360,7 +357,7 @@ pub(super) fn decode_hex(source: &str) -> Result<Vec<u8>, String> {
         .collect()
 }
 
-pub(super) fn decode_hex_digit(byte: u8) -> Result<u8, String> {
+fn decode_hex_digit(byte: u8) -> Result<u8, String> {
     match byte {
         b'0'..=b'9' => Ok(byte - b'0'),
         b'a'..=b'f' => Ok(byte - b'a' + 10),

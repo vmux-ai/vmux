@@ -22,7 +22,7 @@ impl CellMetrics {
         format!("--cw:{}px;--ch:{}px;", self.narrow, self.height)
     }
 
-    pub(super) fn wide_advance(self) -> f64 {
+    fn wide_advance(self) -> f64 {
         match self.wide > 0.0 {
             true => self.wide,
             false => self.narrow * 2.0,
@@ -48,12 +48,7 @@ impl<'a> ColumnRuler<'a> {
         Self { text, metrics }
     }
 
-    pub(super) fn wrapped_row(
-        text: &'a str,
-        metrics: CellMetrics,
-        wrap_columns: u16,
-        index: u32,
-    ) -> Self {
+    fn wrapped_row(text: &'a str, metrics: CellMetrics, wrap_columns: u16, index: u32) -> Self {
         if wrap_columns == 0
             || index == 0 && u32::from(wrap_columns) >= DisplayCells::from(text).width()
         {
@@ -128,7 +123,7 @@ impl<'a> ColumnRuler<'a> {
         self.metrics.narrow
     }
 
-    pub(super) fn col_at(&self, x: f64, snap: bool) -> u32 {
+    fn col_at(&self, x: f64, snap: bool) -> u32 {
         if x <= 0.0 || !self.metrics.measured() {
             return 0;
         }
