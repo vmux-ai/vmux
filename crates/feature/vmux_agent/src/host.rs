@@ -33,9 +33,9 @@ pub mod run_terminal;
 pub mod runtime;
 pub mod self_command;
 pub mod session;
+pub mod session_source;
 pub mod snapshot_updater;
 pub mod spawn;
-pub mod strategy;
 pub mod toast;
 mod tool;
 mod transcript;
@@ -57,12 +57,11 @@ pub(crate) use self::workspace::{
 pub use vmux_api::room as message;
 
 pub use crate::stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
-pub use cli::CliStrategy;
+pub use cli::CliSessionSource;
 pub use event::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
     ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
 };
-pub(crate) use launch::build_agent_launch;
 pub use mcp::McpServerConfig;
 pub use message::{AssistantBlock, Message};
 pub use run_state_kind::{AgentRunStateKind, LastRunStateKind};
