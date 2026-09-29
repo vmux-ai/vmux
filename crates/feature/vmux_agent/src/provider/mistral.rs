@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use crate::providers::openai_shared::{
+use crate::provider::openai_shared::{
     messages_to_chat_completions, parse_chat_completions_sse, tools_to_function_specs,
 };
 use crate::stream::{StreamEvent, ToolDef};

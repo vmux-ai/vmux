@@ -4,6 +4,13 @@ use bevy::prelude::*;
 use vmux_core::Ready;
 use vmux_core::agent::{AgentKind, AgentProviderTargetKind};
 
+pub mod anthropic;
+mod builtin;
+pub mod mistral;
+pub mod openai;
+
+pub use builtin::{BUILTIN_PROVIDERS, BuiltinProvider, ECHO_DEFAULT, resolve_default_app_provider};
+
 pub(super) struct ProviderPlugin;
 
 impl Plugin for ProviderPlugin {

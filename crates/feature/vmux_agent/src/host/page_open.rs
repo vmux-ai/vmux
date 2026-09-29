@@ -90,7 +90,7 @@ impl AgentChatTarget {
                 title: format!("{provider}/{model}"),
             }),
             crate::AgentUrl::PageDefault => {
-                let provider = crate::providers::resolve_default_app_provider()?;
+                let provider = crate::host::provider::resolve_default_app_provider()?;
                 Some(Self {
                     url: format!("vmux://sessions/{}", provider.provider),
                     title: format!("{}/{}", provider.provider, provider.default_model),
@@ -738,7 +738,7 @@ fn handle_agent_page_open_task(
             Ok(())
         }
         Some(crate::AgentUrl::PageDefault) => {
-            let provider = crate::providers::resolve_default_app_provider().ok_or_else(|| {
+            let provider = crate::host::provider::resolve_default_app_provider().ok_or_else(|| {
                 "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
                     .to_string()
             })?;

@@ -10,7 +10,7 @@ use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
 use vmux_core::agent::SessionId;
 use vmux_core::{AgentWorkingDir, CreatedAt};
 
-use crate::providers::{anthropic, mistral, openai};
+use crate::provider::{anthropic, mistral, openai};
 use crate::stream::{BuildRequest, ParseSse, StreamEvent, ToolDef};
 use vmux_api::BinEvent;
 use vmux_api::protocol::{

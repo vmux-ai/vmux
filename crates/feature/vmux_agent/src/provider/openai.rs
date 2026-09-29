@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::providers::openai_shared::tools_to_function_specs;
+use crate::provider::openai_shared::tools_to_function_specs;
 use crate::stream::{StopReason, StreamEvent, ToolDef};
 use vmux_api::room::{AssistantBlock, Message};
 

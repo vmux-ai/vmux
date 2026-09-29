@@ -22,12 +22,12 @@ fn register_openai_strategy(
     mut commands: Commands,
     strategies: Query<&StrategyKey, With<Strategy>>,
 ) {
-    if std::env::var(super::openai::ENV_VAR).is_err() {
+    if std::env::var(crate::provider::openai::ENV_VAR).is_err() {
         return;
     }
     let key = StrategyKey {
-        provider: super::openai::PROVIDER.to_string(),
-        model: super::openai::DEFAULT_MODEL.to_string(),
+        provider: crate::provider::openai::PROVIDER.to_string(),
+        model: crate::provider::openai::DEFAULT_MODEL.to_string(),
     };
     if strategies.iter().any(|registered| registered == &key) {
         return;
@@ -36,12 +36,12 @@ fn register_openai_strategy(
         Strategy,
         OpenAiProvider,
         key,
-        Endpoint(super::openai::ENDPOINT.to_string()),
-        EnvVarName(super::openai::ENV_VAR),
+        Endpoint(crate::provider::openai::ENDPOINT.to_string()),
+        EnvVarName(crate::provider::openai::ENV_VAR),
         StrategyKind(AgentKind::Codex),
         StrategyVariant(AgentVariant::Page),
-        BuildRequestFn(super::openai::build_request),
-        ParseSseFn(super::openai::parse_sse),
+        BuildRequestFn(crate::provider::openai::build_request),
+        ParseSseFn(crate::provider::openai::parse_sse),
     ));
 }
 
@@ -59,7 +59,7 @@ mod tests {
     #[test]
     #[serial]
     fn spawns_entity_when_env_var_set() {
-        unsafe { std::env::set_var(super::super::openai::ENV_VAR, "x") };
+        unsafe { std::env::set_var(crate::provider::openai::ENV_VAR, "x") };
         let mut app = test_app();
         app.update();
         let count = app
@@ -69,13 +69,13 @@ mod tests {
             .filter(|(key, _)| key.provider == "openai" && key.model == "gpt-5")
             .count();
         assert_eq!(count, 1);
-        unsafe { std::env::remove_var(super::super::openai::ENV_VAR) };
+        unsafe { std::env::remove_var(crate::provider::openai::ENV_VAR) };
     }
 
     #[test]
     #[serial]
     fn does_not_spawn_without_env_var() {
-        unsafe { std::env::remove_var(super::super::openai::ENV_VAR) };
+        unsafe { std::env::remove_var(crate::provider::openai::ENV_VAR) };
         let mut app = test_app();
         app.update();
         let count = app

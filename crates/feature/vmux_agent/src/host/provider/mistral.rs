@@ -7,41 +7,41 @@ use crate::runtime::strategy::{
 };
 use crate::{AgentKind, AgentVariant};
 
-pub struct AnthropicPlugin;
+pub struct MistralPlugin;
 
-impl Plugin for AnthropicPlugin {
+impl Plugin for MistralPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register_anthropic_strategy.after(SettingsLoadSet));
+        app.add_systems(Startup, register_mistral_strategy.after(SettingsLoadSet));
     }
 }
 
 #[derive(Component, Debug, Clone, Copy)]
-pub struct AnthropicProvider;
+pub struct MistralProvider;
 
-fn register_anthropic_strategy(
+fn register_mistral_strategy(
     mut commands: Commands,
     strategies: Query<&StrategyKey, With<Strategy>>,
 ) {
-    if std::env::var(super::anthropic::ENV_VAR).is_err() {
+    if std::env::var(crate::provider::mistral::ENV_VAR).is_err() {
         return;
     }
     let key = StrategyKey {
-        provider: super::anthropic::PROVIDER.to_string(),
-        model: super::anthropic::DEFAULT_MODEL.to_string(),
+        provider: crate::provider::mistral::PROVIDER.to_string(),
+        model: crate::provider::mistral::DEFAULT_MODEL.to_string(),
     };
     if strategies.iter().any(|registered| registered == &key) {
         return;
     }
     commands.spawn((
         Strategy,
-        AnthropicProvider,
+        MistralProvider,
         key,
-        Endpoint(super::anthropic::ENDPOINT.to_string()),
-        EnvVarName(super::anthropic::ENV_VAR),
-        StrategyKind(AgentKind::Claude),
+        Endpoint(crate::provider::mistral::ENDPOINT.to_string()),
+        EnvVarName(crate::provider::mistral::ENV_VAR),
+        StrategyKind(AgentKind::Vibe),
         StrategyVariant(AgentVariant::Page),
-        BuildRequestFn(super::anthropic::build_request),
-        ParseSseFn(super::anthropic::parse_sse),
+        BuildRequestFn(crate::provider::mistral::build_request),
+        ParseSseFn(crate::provider::mistral::parse_sse),
     ));
 }
 
@@ -52,35 +52,35 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(AnthropicPlugin);
+        app.add_plugins(MistralPlugin);
         app
     }
 
     #[test]
     #[serial]
     fn spawns_entity_when_env_var_set() {
-        unsafe { std::env::set_var(super::super::anthropic::ENV_VAR, "x") };
+        unsafe { std::env::set_var(crate::provider::mistral::ENV_VAR, "x") };
         let mut app = test_app();
         app.update();
         let count = app
             .world_mut()
-            .query::<(&StrategyKey, &AnthropicProvider)>()
+            .query::<(&StrategyKey, &MistralProvider)>()
             .iter(app.world())
-            .filter(|(key, _)| key.provider == "anthropic" && key.model == "claude-sonnet-4-6")
+            .filter(|(key, _)| key.provider == "mistral" && key.model == "devstral-2")
             .count();
         assert_eq!(count, 1);
-        unsafe { std::env::remove_var(super::super::anthropic::ENV_VAR) };
+        unsafe { std::env::remove_var(crate::provider::mistral::ENV_VAR) };
     }
 
     #[test]
     #[serial]
     fn does_not_spawn_without_env_var() {
-        unsafe { std::env::remove_var(super::super::anthropic::ENV_VAR) };
+        unsafe { std::env::remove_var(crate::provider::mistral::ENV_VAR) };
         let mut app = test_app();
         app.update();
         let count = app
             .world_mut()
-            .query::<&AnthropicProvider>()
+            .query::<&MistralProvider>()
             .iter(app.world())
             .count();
         assert_eq!(count, 0);

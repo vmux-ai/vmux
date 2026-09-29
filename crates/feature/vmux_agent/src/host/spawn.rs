@@ -414,7 +414,7 @@ fn respond_page_agent_spawn_default(
     >,
 ) {
     for req in reader.read() {
-        let Some(p) = crate::providers::resolve_default_app_provider() else {
+        let Some(p) = crate::host::provider::resolve_default_app_provider() else {
             bevy::log::warn!(
                 "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
             );
@@ -459,7 +459,7 @@ fn respond_page_agent_attach_default(
     >,
 ) {
     for req in reader.read() {
-        let Some(p) = crate::providers::resolve_default_app_provider() else {
+        let Some(p) = crate::host::provider::resolve_default_app_provider() else {
             bevy::log::warn!(
                 "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
             );
