@@ -4,31 +4,19 @@ use moonshine_save::prelude::*;
 use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
 
-use super::command::LayoutRequestSet;
-
 impl Plugin for SpaceLayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.register_persisted::<Space>()
+        app.add_plugins(crate::active::ActivePlugin)
+            .register_persisted::<Space>()
             .register_persisted::<SpaceId>()
             .add_systems(
                 Update,
                 (
-                    crate::active::ensure_active_space,
                     bevy::ecs::schedule::ApplyDeferred,
                     sync_current_space.in_set(CurrentSpaceSet),
                 )
                     .chain()
-                    .after(crate::window::WindowFocusSet),
-            )
-            .add_systems(
-                Update,
-                (
-                    crate::active::ensure_active_tab,
-                    crate::active::ensure_active_stack,
-                    crate::active::ensure_active_branch,
-                )
-                    .after(LayoutRequestSet::Handle)
-                    .after(crate::window::spawn_requested_tab_layouts),
+                    .after(crate::active::ActiveSystemSet::Space),
             )
             .add_systems(
                 PostUpdate,

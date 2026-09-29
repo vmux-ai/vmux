@@ -63,9 +63,7 @@ impl Plugin for StackPlugin {
                 compute_focused_stack
                     .in_set(ComputeFocusSet)
                     .after(LayoutRequestSet::Handle)
-                    .after(crate::active::ensure_active_tab)
-                    .after(crate::active::ensure_active_stack)
-                    .after(crate::active::ensure_active_branch),
+                    .after(crate::active::ActiveSystemSet::Descendants),
             );
     }
 }

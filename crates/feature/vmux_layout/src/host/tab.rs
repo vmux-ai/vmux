@@ -1406,12 +1406,16 @@ mod tests {
 
     #[test]
     fn page_close_command_on_active_rightmost_activates_left_neighbor() {
-        use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, crate::archive::ArchivePlugin))
-            .add_message::<crate::TabLayoutSpawnRequest>()
-            .add_message::<CloseTabRequest>()
-            .add_observer(on_tab_close_request);
+        app.add_plugins((
+            MinimalPlugins,
+            CommandPlugin,
+            crate::archive::ArchivePlugin,
+            crate::active::ActivePlugin,
+        ))
+        .add_message::<crate::TabLayoutSpawnRequest>()
+        .add_message::<CloseTabRequest>()
+        .add_observer(on_tab_close_request);
 
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut()
@@ -1446,9 +1450,6 @@ mod tests {
             },
         });
         app.update();
-        app.world_mut()
-            .run_system_once(crate::active::ensure_active_tab)
-            .ok();
 
         assert!(app.world().get_entity(d).is_err(), "active tab closed");
         assert!(

@@ -7,6 +7,34 @@ use crate::space::Space;
 use crate::stack::Stack;
 use crate::tab::Tab;
 
+use super::command::LayoutRequestSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum ActiveSystemSet {
+    Descendants,
+    Space,
+}
+
+pub(crate) struct ActivePlugin;
+
+impl Plugin for ActivePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            ensure_active_space
+                .in_set(ActiveSystemSet::Space)
+                .after(crate::window::WindowFocusSet),
+        )
+        .add_systems(
+            Update,
+            (ensure_active_tab, ensure_active_stack, ensure_active_branch)
+                .in_set(ActiveSystemSet::Descendants)
+                .after(LayoutRequestSet::Handle)
+                .after(crate::window::spawn_requested_tab_layouts),
+        );
+    }
+}
+
 fn apply_active(entries: &[(Entity, i64, bool)], commands: &mut Commands) {
     let Some(&(target, _, _)) = entries.iter().max_by_key(|(_, ts, _)| *ts) else {
         return;
@@ -20,7 +48,7 @@ fn apply_active(entries: &[(Entity, i64, bool)], commands: &mut Commands) {
     }
 }
 
-pub fn ensure_active_space(
+fn ensure_active_space(
     mains: Query<&Children, With<crate::window::Main>>,
     spaces: Query<(Entity, Option<&LastActivatedAt>, Has<Active>), With<Space>>,
     mut commands: Commands,
@@ -36,7 +64,7 @@ pub fn ensure_active_space(
     }
 }
 
-pub fn ensure_active_tab(
+fn ensure_active_tab(
     spaces: Query<&Children, With<Space>>,
     tabs: Query<(&LastActivatedAt, Has<Active>), With<Tab>>,
     mut commands: Commands,
@@ -52,7 +80,7 @@ pub fn ensure_active_tab(
     }
 }
 
-pub fn ensure_active_stack(
+fn ensure_active_stack(
     leaves: Query<&Children, (With<Pane>, Without<PaneSplit>)>,
     stacks: Query<(&LastActivatedAt, Has<Active>), With<Stack>>,
     mut commands: Commands,
@@ -68,7 +96,7 @@ pub fn ensure_active_stack(
     }
 }
 
-pub fn ensure_active_branch(
+fn ensure_active_branch(
     splits: Query<&Children, With<PaneSplit>>,
     branches: Query<(Option<&LastActivatedAt>, Has<Active>), With<Pane>>,
     mut commands: Commands,
