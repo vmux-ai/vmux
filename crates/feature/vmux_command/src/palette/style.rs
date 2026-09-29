@@ -6,22 +6,6 @@ pub(crate) fn result_item_class(is_selected: bool) -> &'static str {
     }
 }
 
-pub(crate) fn command_bar_root_class(native_windowed: bool) -> &'static str {
-    if native_windowed {
-        "flex w-full flex-col overflow-x-hidden"
-    } else {
-        "flex h-full w-full items-start justify-center overflow-x-hidden pt-[15%]"
-    }
-}
-
-pub(crate) fn command_bar_shell_class(native_windowed: bool) -> &'static str {
-    if native_windowed {
-        "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
-    } else {
-        "relative flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
-    }
-}
-
 pub(crate) const COMMAND_BAR_INPUT_ROW_CLASS: &str =
     "flex w-full min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg bg-foreground/5 px-3";
 pub(crate) const COMMAND_BAR_INPUT_WRAP_CLASS: &str = "relative min-w-0 flex-1 overflow-hidden";

@@ -28,16 +28,16 @@ fn spawn_screenshot_bridge(mut commands: Commands) {
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) const MAX_INLINE_EDGE: u32 = 1568;
+const MAX_INLINE_EDGE: u32 = 1568;
 
-pub(crate) type WakeFn = Arc<dyn Fn() + Send + Sync>;
+type WakeFn = Arc<dyn Fn() + Send + Sync>;
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const PERMISSION_MSG: &str = "Screen Recording permission required - grant it in System Settings > \
 Privacy & Security > Screen Recording, then call screenshot again.";
 
 #[derive(Component)]
-pub(crate) struct ScreenshotBridge {
+struct ScreenshotBridge {
     tx: Sender<ScreenshotResponse>,
     rx: Receiver<ScreenshotResponse>,
 }
@@ -158,15 +158,15 @@ fn drain_screenshots(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CropRect {
-    pub x: u32,
-    pub y: u32,
-    pub w: u32,
-    pub h: u32,
+struct CropRect {
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn downscale_dims(w: u32, h: u32, max_edge: u32) -> (u32, u32) {
+fn downscale_dims(w: u32, h: u32, max_edge: u32) -> (u32, u32) {
     let long = w.max(h);
     if long == 0 {
         return (1, 1);
@@ -182,7 +182,7 @@ pub(crate) fn downscale_dims(w: u32, h: u32, max_edge: u32) -> (u32, u32) {
 }
 
 impl CropRect {
-    pub(crate) fn from_node(rect: ComputedNode, img_w: u32, img_h: u32) -> Self {
+    fn from_node(rect: ComputedNode, img_w: u32, img_h: u32) -> Self {
         let min = rect.min();
         let left = (min.x.round().max(0.0) as u32).min(img_w.saturating_sub(1));
         let top = (min.y.round().max(0.0) as u32).min(img_h.saturating_sub(1));
@@ -198,7 +198,7 @@ impl CropRect {
 }
 
 #[cfg(any(target_os = "macos", test))]
-pub(crate) fn encode_downscaled_png(
+fn encode_downscaled_png(
     img: &image::RgbaImage,
     max_edge: u32,
 ) -> Result<(Vec<u8>, u32, u32), String> {

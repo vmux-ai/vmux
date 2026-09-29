@@ -451,7 +451,7 @@ mod tests {
     use vmux_layout::pane::PaneSplit;
 
     #[test]
-    pub(crate) fn file_touch_url_builds_goto_fragment() {
+    fn file_touch_url_builds_goto_fragment() {
         assert_eq!(
             vmux_core::file_url::FileUrl::from_path(
                 std::path::Path::new("/a/b.rs"),
@@ -559,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn file_read_replaces_clean_follow_stack() {
+    fn file_read_replaces_clean_follow_stack() {
         let mut app = file_touch_test_app();
         let (anchor, file_stack) = spawn_file_touch_layout(&mut app, "file:///repo/old.rs", false);
         send_file_read(&mut app, anchor, "/repo/new.rs");
@@ -586,7 +586,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn file_read_replaces_clean_follow_stack_across_nested_split() {
+    fn file_read_replaces_clean_follow_stack_across_nested_split() {
         let mut app = file_touch_test_app();
         let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
         let root = app
@@ -648,7 +648,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn file_search_forwards_results_to_editor() {
+    fn file_search_forwards_results_to_editor() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_editor::ContractPlugin))
             .add_message::<AgentRequestInput>()
@@ -713,7 +713,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn same_frame_file_reads_replace_once_with_last_touch() {
+    fn same_frame_file_reads_replace_once_with_last_touch() {
         let mut app = file_touch_test_app();
         let (anchor, file_stack) = spawn_file_touch_layout(&mut app, "file:///repo/old.rs", false);
         send_file_read(&mut app, anchor, "/repo/first.rs");
@@ -742,7 +742,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn same_frame_file_edits_open_each_distinct_file_as_tabs() {
+    fn same_frame_file_edits_open_each_distinct_file_as_tabs() {
         let mut app = file_touch_test_app();
         let (anchor, _) = spawn_file_touch_layout(&mut app, "file:///repo/old.rs", false);
         send_file_edit(&mut app, anchor, "/repo/first.rs");
@@ -779,7 +779,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn file_read_preserves_dirty_follow_stack() {
+    fn file_read_preserves_dirty_follow_stack() {
         let mut app = file_touch_test_app();
         let (anchor, _) = spawn_file_touch_layout(&mut app, "file:///repo/old.rs", true);
         send_file_read(&mut app, anchor, "/repo/new.rs");
@@ -802,7 +802,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn file_read_does_not_reload_matching_dirty_page() {
+    fn file_read_does_not_reload_matching_dirty_page() {
         let mut app = file_touch_test_app();
         let (anchor, _) = spawn_file_touch_layout(&mut app, "file:///repo/current.rs", true);
         send_file_read(&mut app, anchor, "/repo/current.rs");
@@ -823,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn skill_file_read_does_not_open_follow_pane() {
+    fn skill_file_read_does_not_open_follow_pane() {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -878,7 +878,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn file_touch_emits_tab_directory_observation_when_file_follow_is_disabled() {
+    fn file_touch_emits_tab_directory_observation_when_file_follow_is_disabled() {
         let mut settings = test_settings();
         settings.agent.follow_files = false;
         let mut app = App::new();
@@ -948,7 +948,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn file_touch_rejects_command_anchor_mismatched_with_origin() {
+    fn file_touch_rejects_command_anchor_mismatched_with_origin() {
         let mut settings = test_settings();
         settings.agent.follow_files = false;
         let mut app = App::new();
@@ -1002,7 +1002,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn edit_file_touch_rebinds_tab_in_same_frame() {
+    fn edit_file_touch_rebinds_tab_in_same_frame() {
         #[derive(Resource)]
         struct RunTab(Entity);
 

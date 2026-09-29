@@ -70,10 +70,7 @@ pub enum HostFocusIntent {
     WinitHost,
 }
 
-pub(crate) fn host_focus_intent(
-    active_webview: Option<Entity>,
-    is_native: bool,
-) -> HostFocusIntent {
+fn host_focus_intent(active_webview: Option<Entity>, is_native: bool) -> HostFocusIntent {
     match active_webview {
         Some(webview) if is_native => HostFocusIntent::NativePane(webview),
         Some(webview) => HostFocusIntent::Windowed(webview),
@@ -81,7 +78,7 @@ pub(crate) fn host_focus_intent(
     }
 }
 
-pub(crate) fn compute_host_focus_intent(
+fn compute_host_focus_intent(
     focus: FocusedStack,
     child_of_q: Query<&ChildOf>,
     content_q: Query<Entity, (With<Browser>, Without<Header>, Without<SideSheet>)>,

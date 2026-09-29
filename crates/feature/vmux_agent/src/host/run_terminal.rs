@@ -584,7 +584,7 @@ mod tests {
     use vmux_terminal::Terminal;
 
     #[test]
-    pub(crate) fn run_terminal_cwd_prefers_tab_dir() {
+    fn run_terminal_cwd_prefers_tab_dir() {
         let tab_dir = std::env::temp_dir().join(format!("vmux-tab-cwd-{}", std::process::id()));
         let agent_dir = std::env::temp_dir().join(format!("vmux-agent-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&tab_dir).unwrap();
@@ -601,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn projects_directory_is_created_and_contains_only_its_tree() {
+    fn projects_directory_is_created_and_contains_only_its_tree() {
         let root = tempfile::tempdir().unwrap();
         let projects = ProjectsDirectory::ensure_at(root.path().join("projects")).unwrap();
 
@@ -611,7 +611,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn run_terminal_launch_must_match_rebound_cwd_for_reuse() {
+    fn run_terminal_launch_must_match_rebound_cwd_for_reuse() {
         let current = std::env::temp_dir().join(format!("vmux-current-cwd-{}", std::process::id()));
         let stale = std::env::temp_dir().join(format!("vmux-stale-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&current).unwrap();
@@ -629,7 +629,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn run_terminal_cwd_inherits_agent_launch_dir() {
+    fn run_terminal_cwd_inherits_agent_launch_dir() {
         let dir = std::env::temp_dir().join(format!("vmux-run-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let got = AgentCwd::from_tab(None)
@@ -640,13 +640,13 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn run_terminal_cwd_requires_tab_or_agent_workspace() {
+    fn run_terminal_cwd_requires_tab_or_agent_workspace() {
         assert!(AgentCwd::from_tab(None).or_agent_launch(Some("")).is_err());
         assert!(AgentCwd::from_tab(None).or_agent_launch(None).is_err());
     }
 
     #[test]
-    pub(crate) fn run_terminal_cwd_rejects_invalid_stored_tab_directory() {
+    fn run_terminal_cwd_rejects_invalid_stored_tab_directory() {
         let agent_dir = std::env::temp_dir();
 
         assert!(
@@ -657,12 +657,12 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn run_terminal_cwd_rejects_relative_stored_tab_directory() {
+    fn run_terminal_cwd_rejects_relative_stored_tab_directory() {
         assert!(AgentCwd::from_tab(Some(".")).or_agent_launch(None).is_err());
     }
 
     #[test]
-    pub(crate) fn only_the_first_command_in_a_terminal_sets_the_pager() {
+    fn only_the_first_command_in_a_terminal_sets_the_pager() {
         let primed = command_with_marker("/opt/homebrew/bin/nu", "ls", "abc", PagerEnv::Set);
         let later = command_with_marker("/opt/homebrew/bin/nu", "ls", "abc", PagerEnv::Inherited);
 
@@ -676,7 +676,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn command_with_marker_is_shell_aware() {
+    fn command_with_marker_is_shell_aware() {
         assert_eq!(
             command_with_marker("/opt/homebrew/bin/nu", "ls", "abc", PagerEnv::Set),
             "$env.GIT_PAGER = \"cat\"; $env.PAGER = \"cat\"; $env.LESS = \"FRX\"; $env.LAST_EXIT_CODE = 0; let __vmux_status = try { ls; $env.LAST_EXIT_CODE } catch {|error| $error.exit_code? | default 1 }; print -rn $\"\\u{1b}]6973;abc;($__vmux_status)\\u{7}\""
@@ -696,7 +696,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn run_command_line_noop_when_token_absent() {
+    fn run_command_line_noop_when_token_absent() {
         assert_eq!(
             RunCommand::new("ls -la", None).line("/bin/zsh", PagerEnv::Set),
             "ls -la"
@@ -704,7 +704,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn run_command_line_embeds_marker_when_token_present() {
+    fn run_command_line_embeds_marker_when_token_present() {
         let out = RunCommand::new("ls -la", Some("tok9")).line("/bin/zsh", PagerEnv::Set);
         assert!(out.contains("ls -la"), "got: {out}");
         assert!(out.contains("]6973;tok9;"), "got: {out}");
@@ -715,7 +715,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn new_agent_run_terminal_uses_configured_shell_for_launch_and_input() {
+    fn new_agent_run_terminal_uses_configured_shell_for_launch_and_input() {
         let mut settings = test_settings();
         settings.terminal = Some(vmux_setting::TerminalSettings {
             default_theme: "default".to_string(),
@@ -748,7 +748,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn nushell_marker_shares_one_submission_with_a_stdin_command() {
+    fn nushell_marker_shares_one_submission_with_a_stdin_command() {
         let line = command_with_marker("/opt/homebrew/bin/nu", "input", "tok", PagerEnv::Inherited);
 
         assert_eq!(line.matches('\r').count(), 0);
@@ -757,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn new_agent_run_terminal_rejects_missing_configured_shell() {
+    fn new_agent_run_terminal_rejects_missing_configured_shell() {
         let shell = "/definitely/missing/vmux-terminal-shell";
 
         assert_eq!(
@@ -769,7 +769,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn existing_agent_run_terminal_uses_launch_shell_for_input() {
+    fn existing_agent_run_terminal_uses_launch_shell_for_input() {
         let launch = TerminalLaunch {
             command: "/usr/local/bin/fish".to_string(),
             args: vec![],
@@ -787,7 +787,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn explicit_run_terminal_errors_distinguish_missing_page_and_launch() {
+    fn explicit_run_terminal_errors_distinguish_missing_page_and_launch() {
         use bevy::ecs::system::RunSystemOnce;
 
         let mut app = App::new();
@@ -823,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn existing_agent_run_terminal_routes_input_through_terminal_queue() {
+    fn existing_agent_run_terminal_routes_input_through_terminal_queue() {
         #[derive(Resource)]
         struct Input {
             process_id: ProcessId,
@@ -914,7 +914,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn run_terminal_candidates_fail_closed_when_agent_tab_missing() {
+    fn run_terminal_candidates_fail_closed_when_agent_tab_missing() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalCandidateOutput>()
@@ -964,7 +964,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn run_terminal_candidates_require_agent_run_marker() {
+    fn run_terminal_candidates_require_agent_run_marker() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalCandidateOutput>()
@@ -1023,7 +1023,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn run_terminal_candidates_exclude_stale_launch_cwd() {
+    fn run_terminal_candidates_exclude_stale_launch_cwd() {
         let current =
             std::env::temp_dir().join(format!("vmux-current-candidate-{}", std::process::id()));
         let stale =
@@ -1131,7 +1131,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn run_terminal_bucket_panes_include_pure_terminal_layout_panes() {
+    fn run_terminal_bucket_panes_include_pure_terminal_layout_panes() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalBucketPaneOutput>()
@@ -1163,7 +1163,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn pending_run_terminal_spawn_uses_selected_shell() {
+    fn pending_run_terminal_spawn_uses_selected_shell() {
         let anchor = ProcessId::new();
         let terminal = ProcessId::new();
         let pane = Entity::from_bits(20);
@@ -1206,7 +1206,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn pending_run_terminal_spawn_rejects_changed_cwd() {
+    fn pending_run_terminal_spawn_rejects_changed_cwd() {
         let old_cwd = std::env::temp_dir().join(format!("vmux-old-cwd-{}", std::process::id()));
         let new_cwd = std::env::temp_dir().join(format!("vmux-new-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&old_cwd).unwrap();
@@ -1264,7 +1264,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn reusable_run_pane_touch_refreshes_spawn_seq() {
+    fn reusable_run_pane_touch_refreshes_spawn_seq() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_systems(Update, touch_reused_run_pane_spawn_seq_test_system);
@@ -1330,7 +1330,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn split_run_pane_becomes_newest_for_followup_placement() {
+    fn split_run_pane_becomes_newest_for_followup_placement() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .init_resource::<SplitRunPaneOutput>()
@@ -1370,7 +1370,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn run_reuses_existing_terminal_when_region_cache_is_empty() {
+    fn run_reuses_existing_terminal_when_region_cache_is_empty() {
         let terminal = ProcessId::new();
         let agent_pane = Entity::from_bits(10);
         let terminal_pane = Entity::from_bits(20);
@@ -1392,7 +1392,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn run_placement_policy_rejects_override_by_default() {
+    fn run_placement_policy_rejects_override_by_default() {
         let settings = test_settings();
         assert_eq!(
             RunPlacementPolicy::new(true).validate(&settings),
@@ -1401,20 +1401,20 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn run_placement_policy_allows_bare_run() {
+    fn run_placement_policy_allows_bare_run() {
         let settings = test_settings();
         assert_eq!(RunPlacementPolicy::new(false).validate(&settings), Ok(()));
     }
 
     #[test]
-    pub(crate) fn run_placement_policy_honors_user_opt_out() {
+    fn run_placement_policy_honors_user_opt_out() {
         let mut settings = test_settings();
         settings.agent.allow_run_placement_override = true;
         assert_eq!(RunPlacementPolicy::new(true).validate(&settings), Ok(()));
     }
 
     #[test]
-    pub(crate) fn run_reuses_cached_terminal_before_newer_terminal_candidates() {
+    fn run_reuses_cached_terminal_before_newer_terminal_candidates() {
         let cached = ProcessId::new();
         let newer = ProcessId::new();
         let agent_pane = Entity::from_bits(10);
@@ -1466,7 +1466,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn reused_run_terminal_focus_activates_stack_pane_and_tab() {
+    fn reused_run_terminal_focus_activates_stack_pane_and_tab() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, focus_reused_run_terminal_test_system);
@@ -1509,7 +1509,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn split_run_stacks_into_cached_terminal_bucket_pane() {
+    fn split_run_stacks_into_cached_terminal_bucket_pane() {
         let terminal = ProcessId::new();
         let agent_pane = Entity::from_bits(10);
         let terminal_pane = Entity::from_bits(20);
@@ -1532,7 +1532,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn split_run_keeps_cached_terminal_bucket_after_process_exits() {
+    fn split_run_keeps_cached_terminal_bucket_after_process_exits() {
         let agent_pane = Entity::from_bits(10);
         let terminal_pane = Entity::from_bits(20);
         let region = AgentTerminalRegion {

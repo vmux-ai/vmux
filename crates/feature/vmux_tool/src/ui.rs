@@ -104,7 +104,7 @@ impl ToolsRoute {
 }
 
 #[component]
-pub(crate) fn ToolsManagerTabs(mut active_route: Signal<ToolsRoute>) -> Element {
+fn ToolsManagerTabs(mut active_route: Signal<ToolsRoute>) -> Element {
     let routes = [
         (ToolsRoute::Acp, "tools-provider-acp-agents"),
         (ToolsRoute::Lsp, "tools-provider-lsp-servers"),

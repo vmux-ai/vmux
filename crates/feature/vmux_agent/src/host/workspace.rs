@@ -604,7 +604,7 @@ mod tests {
     use vmux_core::agent::AgentKind;
 
     #[test]
-    pub(crate) fn workspace_selection_continuations_resume_original_request() {
+    fn workspace_selection_continuations_resume_original_request() {
         let ready = git_workspace_ready_continuation(Path::new("/repo/dashboard"));
         let plain = plain_workspace_ready_continuation(Path::new("/tmp/demo"));
         let cancelled = failed_workspace_continuation("The user cancelled project selection");
@@ -619,7 +619,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn selected_agent_choice_resumes_session() {
+    fn selected_agent_choice_resumes_session() {
         let mut app = App::new();
         app.add_observer(resume_agent_choice)
             .add_observer(initialize_git_agent_choice);
@@ -649,7 +649,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn initialize_git_choice_uses_new_project_root_directly() {
+    fn initialize_git_choice_uses_new_project_root_directly() {
         let workspace = tempfile::tempdir().unwrap();
         let workspace_path = workspace.path().canonicalize().unwrap();
         let mut app = App::new();
@@ -697,7 +697,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn cli_workspace_continuation_queues_terminal_prompt_without_service_wait() {
+    fn cli_workspace_continuation_queues_terminal_prompt_without_service_wait() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<ServiceRequest>()
@@ -731,7 +731,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn chat_workspace_continuation_is_private_same_session_input() {
+    fn chat_workspace_continuation_is_private_same_session_input() {
         assert!(matches!(
             chat_agent_continuation_message("sid-1", "continue original request"),
             ClientMessage::Shared(SharedMessage::AgentInput {
@@ -747,7 +747,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn worktree_activation_rebinds_existing_acp_session_without_replacing_view() {
+    fn worktree_activation_rebinds_existing_acp_session_without_replacing_view() {
         use bevy::ecs::system::RunSystemOnce;
 
         let repo = init_worktree_test_repo();
@@ -866,7 +866,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn selected_workspace_binds_repository_without_eager_worktree_creation() {
+    fn selected_workspace_binds_repository_without_eager_worktree_creation() {
         use bevy::ecs::system::RunSystemOnce;
 
         let repo = init_worktree_test_repo();
@@ -993,7 +993,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn selected_workspace_binds_non_git_directory_without_worktree() {
+    fn selected_workspace_binds_non_git_directory_without_worktree() {
         use bevy::ecs::system::RunSystemOnce;
 
         let directory = tempfile::tempdir().unwrap();
@@ -1044,7 +1044,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn worktree_candidates_resolve_known_path_and_offer_create_when_ambiguous() {
+    fn worktree_candidates_resolve_known_path_and_offer_create_when_ambiguous() {
         let repo = init_worktree_test_repo();
         let project_dir = repo.path().canonicalize().unwrap();
         let roots = tempfile::tempdir().unwrap();

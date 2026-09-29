@@ -438,7 +438,7 @@ pub(crate) async fn accept_loop(
 }
 
 #[cfg(test)]
-pub(crate) fn spawn_with_identity(
+fn spawn_with_identity(
     state: super::server::RemoteState,
     address: std::net::SocketAddr,
     identity: SelfSignedIdentity,

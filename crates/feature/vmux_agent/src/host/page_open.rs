@@ -1012,7 +1012,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn invalid_swap_target_preserves_current_stack_child() {
+    fn invalid_swap_target_preserves_current_stack_child() {
         let mut app = swap_test_app();
         let (stack, child) = spawn_stack_child(&mut app);
         app.world_mut()
@@ -1030,7 +1030,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn unconfigured_acp_swap_target_preserves_current_stack_child() {
+    fn unconfigured_acp_swap_target_preserves_current_stack_child() {
         let mut app = swap_test_app();
         let (stack, child) = spawn_stack_child(&mut app);
         app.world_mut()
@@ -1048,7 +1048,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn cross_agent_swap_attaches_fresh_target_with_imported_history() {
+    fn cross_agent_swap_attaches_fresh_target_with_imported_history() {
         let mut app = swap_test_app();
         let (stack, _child) = spawn_stack_child(&mut app);
         let messages = vec![crate::Message::user("fix auth")];
@@ -1089,7 +1089,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn acp_swap_resets_install_marker() {
+    fn acp_swap_resets_install_marker() {
         let mut app = swap_test_app();
         let (stack, _child) = spawn_stack_child(&mut app);
         app.world_mut()
@@ -1116,7 +1116,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn missing_vibe_cli_shows_setup_page_at_vibe_url() {
+    fn missing_vibe_cli_shows_setup_page_at_vibe_url() {
         let mut app = App::new();
         app.world_mut().spawn(VIBE_CLI);
         app.world_mut()
@@ -1162,7 +1162,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn missing_claude_or_codex_cli_shows_setup_page() {
+    fn missing_claude_or_codex_cli_shows_setup_page() {
         for (kind, segment) in [(AgentKind::Claude, "claude"), (AgentKind::Codex, "codex")] {
             let mut settings = test_settings();
             settings.agent.acp.clear();
@@ -1207,7 +1207,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn legacy_registry_acp_url_opens_as_session() {
+    fn legacy_registry_acp_url_opens_as_session() {
         use crate::acp_registry::{Distribution, RegistryAgent};
 
         let mut settings = test_settings();
@@ -1255,7 +1255,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn canonical_and_legacy_setup_urls_attach_setup_page() {
+    fn canonical_and_legacy_setup_urls_attach_setup_page() {
         for url in ["vmux://sessions/codex/setup", "vmux://agent/codex/setup"] {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
@@ -1284,7 +1284,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn first_local_agent_open_starts_in_the_repository_without_a_worktree() {
+    fn first_local_agent_open_starts_in_the_repository_without_a_worktree() {
         let repo = init_worktree_test_repo();
         let mut settings = test_settings();
         settings.agent.acp.clear();
@@ -1374,7 +1374,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn inline_open_starts_agent_before_worktree_creation() {
+    fn inline_open_starts_agent_before_worktree_creation() {
         let repo = init_worktree_test_repo();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -1503,7 +1503,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn inline_transition_opens_chat_when_tab_worktree_is_already_pending() {
+    fn inline_transition_opens_chat_when_tab_worktree_is_already_pending() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
@@ -1584,7 +1584,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn explicit_work_here_decision_skips_managed_worktree() {
+    fn explicit_work_here_decision_skips_managed_worktree() {
         let repo = init_worktree_test_repo();
         let project_dir = repo.path().canonicalize().unwrap();
         let managed_root = tempfile::tempdir().unwrap();
@@ -1655,7 +1655,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn local_agent_open_preserves_existing_linked_worktree() {
+    fn local_agent_open_preserves_existing_linked_worktree() {
         let repo = init_worktree_test_repo();
         let linked = repo.path().join(".worktrees/existing");
         vmux_git::worktree::worktree_add(repo.path(), &linked, "existing", "main").unwrap();
@@ -1722,7 +1722,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn browser_only_tab_creates_no_worktree() {
+    fn browser_only_tab_creates_no_worktree() {
         let repo = init_worktree_test_repo();
         let managed_root = tempfile::tempdir().unwrap();
         let mut app = App::new();
@@ -1762,7 +1762,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn agent_tab_without_workspace_starts_in_projects_without_binding_tab() {
+    fn agent_tab_without_workspace_starts_in_projects_without_binding_tab() {
         let mut settings = test_settings();
         settings.agent.acp.clear();
         let mut app = App::new();
@@ -1817,7 +1817,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn acp_tab_without_workspace_attaches_once_without_setup_page() {
+    fn acp_tab_without_workspace_attaches_once_without_setup_page() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
@@ -1874,7 +1874,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn inline_start_transition_navigates_the_launcher_view_and_keeps_the_prompt() {
+    fn inline_start_transition_navigates_the_launcher_view_and_keeps_the_prompt() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
@@ -1957,7 +1957,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn acp_open_discards_missing_restored_tab_workspace() {
+    fn acp_open_discards_missing_restored_tab_workspace() {
         let missing = std::env::temp_dir().join(format!(
             "vmux-missing-restored-workspace-{}",
             uuid::Uuid::new_v4()
@@ -2026,7 +2026,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn fresh_claude_page_uses_space_startup_dir() {
+    fn fresh_claude_page_uses_space_startup_dir() {
         let dir = std::env::temp_dir().join(format!("vmux-startup-dir-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -2083,7 +2083,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn restored_agent_tab_uses_ancestor_space_startup_dir() {
+    fn restored_agent_tab_uses_ancestor_space_startup_dir() {
         let active_dir = tempfile::tempdir().unwrap();
         let restored_dir = tempfile::tempdir().unwrap();
         let mut settings = test_settings();
@@ -2157,7 +2157,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn fresh_cli_page_forwards_pending_prompt() {
+    fn fresh_cli_page_forwards_pending_prompt() {
         let mut settings = test_settings();
         settings.agent.acp.clear();
         let mut app = App::new();
@@ -2192,7 +2192,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn cli_initial_prompt_waits_for_terminal_readiness() {
+    fn cli_initial_prompt_waits_for_terminal_readiness() {
         let mut app = App::new();
         app.world_mut().spawn(crate::host::cli::CODEX);
         app.world_mut()
@@ -2253,7 +2253,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn cli_initial_prompt_keeps_media_paths() {
+    fn cli_initial_prompt_keeps_media_paths() {
         let attachments = vec![AgentAttachment {
             path: "/tmp/reference image.png".to_string(),
             name: "reference image.png".to_string(),
@@ -2272,7 +2272,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn fresh_acp_page_queues_pending_prompt() {
+    fn fresh_acp_page_queues_pending_prompt() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
@@ -2308,7 +2308,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn fresh_claude_page_prefers_ancestor_tab_startup_dir() {
+    fn fresh_claude_page_prefers_ancestor_tab_startup_dir() {
         let space_dir = std::env::temp_dir().join(format!("vmux-space-dir-{}", std::process::id()));
         let tab_dir = std::env::temp_dir().join(format!("vmux-tab-dir-{}", std::process::id()));
         std::fs::create_dir_all(&space_dir).unwrap();
@@ -2375,7 +2375,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn fresh_claude_page_rejects_invalid_stored_tab_startup_dir() {
+    fn fresh_claude_page_rejects_invalid_stored_tab_startup_dir() {
         let mut settings = test_settings();
         settings.agent.acp.clear();
         let mut app = App::new();
@@ -2416,7 +2416,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn bare_agent_open_skips_when_stack_already_has_same_agent() {
+    fn bare_agent_open_skips_when_stack_already_has_same_agent() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()

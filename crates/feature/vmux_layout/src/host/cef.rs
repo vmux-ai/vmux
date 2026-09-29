@@ -94,7 +94,7 @@ fn apply_cef_state_from_webview(
     }
 }
 
-pub(crate) fn apply_cef_state_to_meta(
+fn apply_cef_state_to_meta(
     meta: &mut vmux_core::PageMetadata,
     ev: bevy_cef_core::prelude::WebviewCefStateEvent,
 ) {

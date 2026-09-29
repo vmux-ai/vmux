@@ -260,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn turn_ended_resolves_to_agent_attention() {
+    fn turn_ended_resolves_to_agent_attention() {
         let mut app = turn_end_test_app();
         let pid = vmux_api::protocol::ProcessId::new();
         let agent = spawn_agent_with_pid(&mut app, pid);
@@ -270,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn turn_ended_unknown_anchor_emits_nothing() {
+    fn turn_ended_unknown_anchor_emits_nothing() {
         let mut app = turn_end_test_app();
         let _agent = spawn_agent_with_pid(&mut app, vmux_api::protocol::ProcessId::new());
         send_turn_ended(&mut app, vmux_api::protocol::ProcessId::new());
@@ -279,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn bell_resolves_to_agent_attention() {
+    fn bell_resolves_to_agent_attention() {
         use vmux_api::protocol::ProcessId;
         let mut app = bell_test_app();
         let pid = ProcessId::new();
@@ -292,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn bell_unknown_process_id_emits_nothing() {
+    fn bell_unknown_process_id_emits_nothing() {
         use vmux_api::protocol::ProcessId;
         let mut app = bell_test_app();
         let _agent = spawn_agent_with_pid(&mut app, ProcessId::new());
@@ -367,7 +367,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn done_notifies_and_marks_when_backgrounded() {
+    fn done_notifies_and_marks_when_backgrounded() {
         let mut app = done_test_app();
         let (agent, _stack) = spawn_agent_in_stack(&mut app);
         set_window(&mut app, false);
@@ -382,7 +382,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn focused_child_agent_does_not_notify_or_mark() {
+    fn focused_child_agent_does_not_notify_or_mark() {
         let mut app = done_test_app();
         let (agent, stack) = spawn_agent_in_stack(&mut app);
         set_window(&mut app, true);
@@ -400,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn focused_stack_agent_does_not_notify_or_mark() {
+    fn focused_stack_agent_does_not_notify_or_mark() {
         let mut app = done_test_app();
         let stack = app
             .world_mut()
@@ -424,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn clear_removes_marker_from_focused_stack_agent() {
+    fn clear_removes_marker_from_focused_stack_agent() {
         let mut app = done_test_app();
         let stack = app
             .world_mut()

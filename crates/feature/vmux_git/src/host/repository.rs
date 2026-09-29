@@ -344,13 +344,9 @@ pub(crate) fn non_repository_status(path: &Path) -> GitFileStatus {
     }
 }
 
-fn canon(path: &Path) -> PathBuf {
-    vmux_path::PathIdentity::resolve(path).into_path_buf()
-}
-
 fn rel(root: &Path, file: &Path) -> PathBuf {
-    let root = canon(root);
-    let file = canon(file);
+    let root = vmux_path::PathIdentity::resolve(root).into_path_buf();
+    let file = vmux_path::PathIdentity::resolve(file).into_path_buf();
     file.strip_prefix(&root).unwrap_or(&file).to_path_buf()
 }
 

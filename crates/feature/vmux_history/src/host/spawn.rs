@@ -42,7 +42,7 @@ fn spawn_visits(
     }
 }
 
-pub(crate) fn record_visit(
+fn record_visit(
     commands: &mut Commands,
     urls: &mut Query<(Entity, &PageMetadata, &mut VisitCount, &mut LastVisitedAt), With<Url>>,
     url: &str,

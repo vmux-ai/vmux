@@ -954,7 +954,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn screenshot_response_maps_ok_and_err() {
+    fn screenshot_response_maps_ok_and_err() {
         let ok = screenshot_result(&Ok(ScreenshotImage {
             path: "/tmp/a.png".into(),
             png: vec![9, 8, 7],
@@ -974,7 +974,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn record_stop_response_maps_ok_and_err() {
+    fn record_stop_response_maps_ok_and_err() {
         let ok = recording_result(&Ok(RecordingInfo {
             mp4_path: "/tmp/x.mp4".into(),
             gif_path: None,

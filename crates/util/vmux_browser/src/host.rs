@@ -66,7 +66,7 @@ pub(crate) fn cef_os_crypt_key_provider() -> Option<bevy_cef::CefOsCryptKeyProvi
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn cef_os_crypt_key() -> Result<bevy_cef::CefOsCryptKey, String> {
+fn cef_os_crypt_key() -> Result<bevy_cef::CefOsCryptKey, String> {
     let key = vmux_core::profile::safe_storage::SafeStorage::browser_key()
         .map_err(|error| error.to_string())?;
     Ok(bevy_cef::CefOsCryptKey::new(*key.as_bytes()))
@@ -97,7 +97,7 @@ pub(crate) fn browser_accept_language_list(locale: &str) -> String {
     }
 }
 
-pub(crate) fn external_locale_catalog(locale: &str) -> Option<String> {
+fn external_locale_catalog(locale: &str) -> Option<String> {
     let directory = vmux_core::profile::config_dir().join("locales");
     [locale, locale.split('-').next().unwrap_or(locale)]
         .into_iter()
@@ -154,7 +154,7 @@ pub(crate) struct CefPointerHitRect {
 pub(crate) static NATIVE_LAYOUT_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
 
 impl CefPointerHitRect {
-    pub(crate) fn from_row(row: CefPointerRegionRow<'_>) -> Self {
+    fn from_row(row: CefPointerRegionRow<'_>) -> Self {
         let (header, side_sheet, node, &rect, visibility, open) = row;
         let interactive = (header.is_some() || side_sheet.is_some())
             && open
@@ -285,7 +285,7 @@ pub(crate) fn agent_ring_rgb(key: &str) -> [f32; 3] {
     hsl_to_rgb((h % 360) as f32, 0.85, 0.62)
 }
 
-pub(crate) fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
     let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
     let hp = h / 60.0;
     let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
@@ -427,7 +427,7 @@ pub(crate) struct LayoutWindowPadding {
     pub(crate) left: f32,
 }
 
-pub(crate) fn val_px(value: Val) -> f32 {
+fn val_px(value: Val) -> f32 {
     match value {
         Val::Px(px) => px,
         _ => 0.0,

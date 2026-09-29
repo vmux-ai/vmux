@@ -1154,7 +1154,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn create_worktree_precedes_and_gates_sibling_self_commands() {
+    fn create_worktree_precedes_and_gates_sibling_self_commands() {
         let anchor = ProcessId::new();
         let create = AgentRequestInput {
             request_id: AgentRequestId::new(),

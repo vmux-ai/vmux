@@ -208,7 +208,7 @@ pub fn command_list(
     entries
 }
 
-pub(crate) fn command_shortcut(id: &str, definitions: &[CommandDefinition]) -> String {
+fn command_shortcut(id: &str, definitions: &[CommandDefinition]) -> String {
     definitions
         .iter()
         .find(|definition| definition.id == id)

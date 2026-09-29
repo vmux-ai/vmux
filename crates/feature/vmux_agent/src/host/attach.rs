@@ -355,7 +355,7 @@ mod tests {
     use vmux_terminal::Terminal;
 
     #[test]
-    pub(crate) fn acp_attach_gives_profile_agent_and_icon() {
+    fn acp_attach_gives_profile_agent_and_icon() {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
@@ -389,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn acp_icon_for_id_reads_catalog() {
+    fn acp_icon_for_id_reads_catalog() {
         use crate::acp_registry::{Distribution, RegistryAgent};
         let catalog = crate::runtime::acp::AcpCatalog {
             agents: vec![
@@ -426,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn acp_profile_name_prefers_registry_then_config_then_id() {
+    fn acp_profile_name_prefers_registry_then_config_then_id() {
         use crate::acp_registry::{Distribution, RegistryAgent};
         use vmux_setting::AcpAgentConfig;
 
@@ -467,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn acp_target_id_accepts_registry_alias_config() {
+    fn acp_target_id_accepts_registry_alias_config() {
         let config = vmux_setting::AcpAgentConfig {
             id: "claude-acp".into(),
             name: "Claude".into(),
@@ -485,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn resume_in_acp_command_swaps_current_cli_stack() {
+    fn resume_in_acp_command_swaps_current_cli_stack() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<AgentRequestInput>()

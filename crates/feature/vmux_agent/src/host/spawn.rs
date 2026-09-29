@@ -699,7 +699,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn restart_rebuilds_args_with_new_anchor() {
+    fn restart_rebuilds_args_with_new_anchor() {
         let temp = std::env::temp_dir().join(format!("vmux-restart-{}", std::process::id()));
         std::fs::create_dir_all(&temp).unwrap();
         std::fs::write(temp.join("Cargo.toml"), b"[workspace]\n").unwrap();
