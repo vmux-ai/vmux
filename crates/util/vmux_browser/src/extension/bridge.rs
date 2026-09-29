@@ -6,6 +6,7 @@ use std::io::ErrorKind;
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http::StatusCode;
@@ -135,32 +136,30 @@ pub struct ExtensionBridgeServer {
     sessions: Arc<Mutex<HashMap<String, BridgeSession>>>,
     shutdown: Arc<AtomicBool>,
     accept_poller: Arc<Poller>,
+    accept_worker: Option<JoinHandle<()>>,
+}
+
+#[derive(Component)]
+pub(super) struct ExtensionBridgeStartup {
+    pub(super) profile: String,
+    pub(super) registrations: Vec<BridgeRegistration>,
+}
+
+pub(super) fn start_extension_bridge(
+    mut commands: bevy::prelude::Commands,
+    startup: bevy::prelude::Single<(bevy::prelude::Entity, &ExtensionBridgeStartup)>,
+) {
+    let (entity, startup) = startup.into_inner();
+    let server = ExtensionBridgeServer::new(&startup.profile, startup.registrations.clone())
+        .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
+    commands
+        .entity(entity)
+        .remove::<ExtensionBridgeStartup>()
+        .insert(server);
 }
 
 impl ExtensionBridgeServer {
-    #[cfg(test)]
-    pub fn start<I, S>(profile: impl Into<String>, extension_ids: I) -> Result<Self, String>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        Self::start_registered(
-            profile,
-            extension_ids
-                .into_iter()
-                .map(|extension_id| BridgeRegistration {
-                    extension_id: extension_id.as_ref().to_string(),
-                    authorization: BridgeAuthorization::default(),
-                }),
-        )
-    }
-
-    pub fn start_registered<I>(profile: impl Into<String>, registrations: I) -> Result<Self, String>
-    where
-        I: IntoIterator<Item = BridgeRegistration>,
-    {
-        let profile = profile.into();
-        let registrations = registrations.into_iter().collect::<Vec<_>>();
+    fn new(profile: &str, registrations: Vec<BridgeRegistration>) -> Result<Self, String> {
         let identities = registrations
             .iter()
             .map(|registration| {
@@ -169,7 +168,7 @@ impl ExtensionBridgeServer {
                     extension_id.clone(),
                     BridgeIdentity {
                         extension_id,
-                        profile_id: profile.clone(),
+                        profile_id: profile.to_string(),
                         token: uuid::Uuid::new_v4().to_string(),
                     },
                 )
@@ -205,7 +204,7 @@ impl ExtensionBridgeServer {
         let thread_sessions = Arc::clone(&sessions);
         let thread_shutdown = Arc::clone(&shutdown);
         let thread_accept_poller = Arc::clone(&accept_poller);
-        std::thread::Builder::new()
+        let accept_worker = std::thread::Builder::new()
             .name("extension-bridge-accept".into())
             .spawn(move || {
                 accept_loop(
@@ -230,7 +229,34 @@ impl ExtensionBridgeServer {
             sessions,
             shutdown,
             accept_poller,
+            accept_worker: Some(accept_worker),
         })
+    }
+
+    #[cfg(test)]
+    pub fn start<I, S>(profile: impl Into<String>, extension_ids: I) -> Result<Self, String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self::start_registered(
+            profile,
+            extension_ids
+                .into_iter()
+                .map(|extension_id| BridgeRegistration {
+                    extension_id: extension_id.as_ref().to_string(),
+                    authorization: BridgeAuthorization::default(),
+                }),
+        )
+    }
+
+    #[cfg(test)]
+    pub fn start_registered<I>(profile: impl Into<String>, registrations: I) -> Result<Self, String>
+    where
+        I: IntoIterator<Item = BridgeRegistration>,
+    {
+        let profile = profile.into();
+        Self::new(&profile, registrations.into_iter().collect())
     }
 
     pub fn endpoint(&self) -> &str {
@@ -294,13 +320,18 @@ impl Drop for ExtensionBridgeServer {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Release);
         let _ = self.accept_poller.notify();
-        let sessions = self
-            .sessions
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        for session in sessions.values() {
-            session.cancelled.store(true, Ordering::Release);
-            let _ = session.poller.notify();
+        {
+            let sessions = self
+                .sessions
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            for session in sessions.values() {
+                session.cancelled.store(true, Ordering::Release);
+                let _ = session.poller.notify();
+            }
+        }
+        if let Some(worker) = self.accept_worker.take() {
+            let _ = worker.join();
         }
     }
 }

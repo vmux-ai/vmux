@@ -66,53 +66,16 @@ pub struct BrowserPlugin;
 
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
-        let profile = vmux_core::profile::Profile::current().into_id();
         let startup_settings = vmux_setting::AppSettings::from_disk();
         let startup_locale =
             Locale::requested(Some(&startup_settings.appearance.locale)).into_string();
         let startup_accept_language_list = host::browser_accept_language_list(&startup_locale);
-        let prepared_extensions = crate::extension::load::apply_env().unwrap_or_else(|error| {
-            bevy::log::error!(%error, "failed to prepare extensions; starting without them");
-            unsafe { std::env::remove_var("VMUX_LOAD_EXTENSIONS") };
-            Vec::new()
-        });
-        let conformance_extension = std::env::var("VMUX_EXTENSION_CONFORMANCE_ID").ok();
-        let extension_registrations = prepared_extensions
-            .iter()
-            .map(|runtime| crate::extension::bridge::BridgeRegistration {
-                extension_id: runtime.extension_id.clone(),
-                authorization: crate::extension::bridge::BridgeAuthorization {
-                    permissions: runtime.granted_permissions.iter().cloned().collect(),
-                    host_permissions: runtime
-                        .granted_host_permissions
-                        .iter()
-                        .map(|pattern| {
-                            vmux_extension::match_pattern::ExtensionMatchPattern::parse(pattern)
-                                .unwrap_or_else(|error| {
-                                    panic!("invalid stored host permission: {error}")
-                                })
-                        })
-                        .collect(),
-                    conformance: conformance_extension.as_deref()
-                        == Some(runtime.extension_id.as_str()),
-                },
-            })
-            .collect::<Vec<_>>();
-        let extension_bridge = crate::extension::bridge::ExtensionBridgeServer::start_registered(
-            &profile,
-            extension_registrations,
-        )
-        .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
         app.add_plugins((
             host::AgentBrowserPlugin,
             vmux_command::command_bar::CommandBarPlugin,
             BrowserToolPlugin,
             platform::BrowserPlatformPlugin,
-            extension::ExtensionBrowserPlugin,
-            extension::bridge_page::ExtensionBridgePagePlugin,
-            extension::broker::ExtensionBrokerPlugin,
-            extension::project::ExtensionProjectPlugin,
-            extension::windows::ExtensionWindowsPlugin,
+            extension::ExtensionPlugin,
         ));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(
@@ -122,11 +85,6 @@ impl Plugin for BrowserPlugin {
                 .collect(),
         );
         let cef_command_line = host::cef_command_line_config();
-        app.world_mut().spawn((
-            Name::new("Extension bridge"),
-            crate::extension::load::PreparedExtensions(prepared_extensions),
-            extension_bridge,
-        ));
         host::configure_cef_backend_sync(app)
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<host::WebviewLoadCompleted>()
