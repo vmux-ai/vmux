@@ -7,7 +7,7 @@ use vmux_api::space::ProjectBranch;
 use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    ClaimedUrl, CommandBarProjection, ContributedCommand, ContributedPage,
+    ClaimedUrl, CommandBarProjection, ContributedCommand, ContributedPage, ContributedPages,
 };
 use vmux_core::KeyboardOwner;
 use vmux_core::PageMetadata;
@@ -477,7 +477,7 @@ fn sync_live_start_pages(
     tab_gather: TabGather,
     mut prompt_context: StartPromptContext,
     contributions: (
-        Query<&ContributedPage>,
+        ContributedPages,
         Query<&ContributedCommand>,
         Query<
             (),
@@ -646,7 +646,7 @@ fn publish_command_bar_focus(
 fn build_start_payload(
     tab_gather: &TabGather,
     command_bar: &CommandBarProjection,
-    contributed_pages: &Query<&ContributedPage>,
+    contributed_pages: &ContributedPages,
     contributed_commands: &Query<&ContributedCommand>,
     prompt_context: &StartPromptContext,
     active_tab: Option<Entity>,

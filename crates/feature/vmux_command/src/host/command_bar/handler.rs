@@ -21,7 +21,8 @@ use crate::event::{
 };
 use crate::open_target::{OpenTarget, PaneDirection};
 use crate::snapshot::{
-    ClaimedUrl, CommandBarProjection, ContributedCommand, ContributedPage, WriteCommandBarSnapshots,
+    ClaimedUrls, CommandBarProjection, ContributedCommand, ContributedPages,
+    WriteCommandBarSnapshots,
 };
 use crate::{CommandInvocation, ReadCommandRequests};
 use bevy::{
@@ -633,7 +634,7 @@ fn handle_open_command_bar(
     browser_meta: Query<&PageMetadata, Or<(With<WebviewSource>, With<HostsPage>)>>,
     state: Single<&CommandBarProjection>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
-    contributed_pages: Query<&ContributedPage>,
+    contributed_pages: ContributedPages,
     contributed_commands: Query<&ContributedCommand>,
     definitions: Query<&crate::CommandDefinition>,
     locale: Option<Res<ResolvedLocale>>,
@@ -822,7 +823,7 @@ fn on_prompt_request(
     trigger: On<UiInput<PromptRequest>>,
     launcher_hosts: Query<(), With<HostsLauncher>>,
     child_of: Query<&ChildOf>,
-    contributed_pages: Query<&ContributedPage>,
+    contributed_pages: ContributedPages,
     command_bar: Single<&CommandBarProjection>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut inline_transition: MessageWriter<InlineTransitionRequested>,
@@ -850,8 +851,7 @@ fn on_prompt_request(
     let mut custom_keyboard_restore = false;
     if (!prompt.is_empty() || !attachments.is_empty())
         && let Some(stack) = command_bar.workspace.stack
-        && let Some(url) =
-            ContributedPage::prompt_url(&contributed_pages, request.target_url.as_deref())
+        && let Some(url) = contributed_pages.prompt_url(request.target_url.as_deref())
     {
         if inline_stack == Some(stack) && vmux_api::agent::supports_inline_agent_transition(&url) {
             inline_transition.write(InlineTransitionRequested { stack, webview });
@@ -884,7 +884,7 @@ fn on_page_open_request(
     search_engine: Option<Single<&SearchEngineSetting>>,
     child_of: Query<&ChildOf>,
     launcher_hosts: Query<(), With<HostsLauncher>>,
-    claimed_urls: Query<&ClaimedUrl>,
+    claimed_urls: ClaimedUrls,
     command_bar: Single<&CommandBarProjection>,
     locale: Option<Res<ResolvedLocale>>,
     mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
@@ -951,7 +951,7 @@ fn on_page_open_request(
         } else {
             false
         };
-        if !inline_transitioned && ClaimedUrl::contains(&claimed_urls, &url) {
+        if !inline_transitioned && claimed_urls.contains(&url) {
             if let Some(pane) = focus.pane {
                 chosen_writer.write(vmux_core::ContributedCommandChosen {
                     id: url,
@@ -1031,7 +1031,7 @@ fn on_terminal_request(
 
 fn on_invoke_request(
     trigger: On<UiInput<InvokeRequest>>,
-    contributed_pages: Query<&ContributedPage>,
+    contributed_pages: ContributedPages,
     contributed_commands: Query<&ContributedCommand>,
     command_bar: Single<&CommandBarProjection>,
     users: Query<Entity, With<vmux_core::team::User>>,
@@ -1055,7 +1055,7 @@ fn on_invoke_request(
             });
             custom_keyboard_restore = true;
         }
-    } else if let Some(url) = ContributedPage::page_url(&contributed_pages, &request.id) {
+    } else if let Some(url) = contributed_pages.page_url(&request.id) {
         invocations.write(open_invocation(caller, request.open, url));
         custom_keyboard_restore = true;
     } else {
@@ -1378,7 +1378,7 @@ mod tests {
         let mut world = World::new();
         let payload = world
             .run_system_once(
-                |pages: Query<&ContributedPage>, commands: Query<&ContributedCommand>| {
+                |pages: ContributedPages, commands: Query<&ContributedCommand>| {
                     let definitions = [crate::CommandDefinition {
                         id: "test_command".to_string(),
                         aliases: Vec::new(),

@@ -60,7 +60,7 @@ fn acknowledge_turn_ended(
 
 fn new_chat(
     mut requests: MessageReader<AgentRequestInput>,
-    contributed_pages: Query<&vmux_command::snapshot::ContributedPage>,
+    contributed_pages: vmux_command::snapshot::ContributedPages,
     mut new_tabs: MessageWriter<vmux_layout::NewTabRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
@@ -68,10 +68,7 @@ fn new_chat(
         let Ok(Some(payload)) = request.decode::<AgentNewChat>() else {
             continue;
         };
-        let result = match vmux_command::snapshot::ContributedPage::prompt_url(
-            &contributed_pages,
-            payload.agent_url.as_deref(),
-        ) {
+        let result = match contributed_pages.prompt_url(payload.agent_url.as_deref()) {
             Some(url) => {
                 new_tabs.write(vmux_layout::NewTabRequest {
                     url,

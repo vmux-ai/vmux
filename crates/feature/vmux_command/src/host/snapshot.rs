@@ -94,33 +94,43 @@ impl AgentPromptTarget {
     }
 }
 
-impl ContributedPage {
-    pub fn sorted(pages: &Query<&Self>) -> Vec<Self> {
-        let mut pages: Vec<Self> = pages.iter().cloned().collect();
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct ContributedPages<'w, 's> {
+    pages: Query<'w, 's, &'static ContributedPage>,
+}
+
+impl ContributedPages<'_, '_> {
+    pub fn sorted(&self) -> Vec<ContributedPage> {
+        let mut pages: Vec<ContributedPage> = self.pages.iter().cloned().collect();
         pages.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.id.cmp(&b.id)));
         pages
     }
 
-    pub fn prompt_url(pages: &Query<&Self>, requested: Option<&str>) -> Option<String> {
+    pub fn prompt_url(&self, requested: Option<&str>) -> Option<String> {
         if let Some(requested) = requested
-            && pages.iter().any(|entry| entry.page.url == requested)
+            && self.pages.iter().any(|entry| entry.page.url == requested)
         {
             return Some(requested.to_string());
         }
-        let pages = Self::sorted(pages);
+        let pages = self.sorted();
         let first = pages.first()?;
         Some(first.page.url.clone())
     }
 
-    pub fn page_url(pages: &Query<&Self>, id: &str) -> Option<String> {
-        let entry = pages.iter().find(|entry| entry.id == id)?;
+    pub fn page_url(&self, id: &str) -> Option<String> {
+        let entry = self.pages.iter().find(|entry| entry.id == id)?;
         Some(entry.page.url.clone())
     }
 }
 
-impl ClaimedUrl {
-    pub fn contains(claimed: &Query<&Self>, url: &str) -> bool {
-        claimed.iter().any(|claimed| claimed.0 == url)
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct ClaimedUrls<'w, 's> {
+    urls: Query<'w, 's, &'static ClaimedUrl>,
+}
+
+impl ClaimedUrls<'_, '_> {
+    pub fn contains(&self, url: &str) -> bool {
+        self.urls.iter().any(|claimed| claimed.0 == url)
     }
 }
 
@@ -287,8 +297,8 @@ mod tests {
             }
             let requested = requested.map(str::to_string);
             world
-                .run_system_once(move |pages: Query<&ContributedPage>| {
-                    ContributedPage::prompt_url(&pages, requested.as_deref())
+                .run_system_once(move |pages: ContributedPages| {
+                    pages.prompt_url(requested.as_deref())
                 })
                 .expect("prompt_url system runs")
         }

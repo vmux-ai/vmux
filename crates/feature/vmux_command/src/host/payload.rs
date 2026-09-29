@@ -2,7 +2,7 @@ use crate::definition::CommandDefinition;
 use crate::event::{CommandBarOpenEvent, OpenId};
 use crate::open_target::OpenTarget;
 use crate::snapshot::{
-    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, ContributedCommand, ContributedPage,
+    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, ContributedCommand, ContributedPages,
 };
 use bevy::prelude::{Query, default};
 use vmux_api::command_bar::{
@@ -100,7 +100,7 @@ pub fn build_command_bar_open_payload(
     space_name: String,
     url: String,
     spaces_snapshot: &CommandBarSpacesSnapshot,
-    contributed_pages: &Query<&ContributedPage>,
+    contributed_pages: &ContributedPages,
     contributed_commands: &Query<&ContributedCommand>,
     pages_snapshot: &CommandBarPagesSnapshot,
     work_snapshot: &crate::snapshot::CommandBarWorkSnapshot,
@@ -136,7 +136,7 @@ pub fn build_command_bar_open_payload(
         }
         pages.push(page);
     }
-    for entry in ContributedPage::sorted(contributed_pages) {
+    for entry in contributed_pages.sorted() {
         pages.push(entry.page);
     }
     let commands: Vec<CommandBarCommandEntry> =

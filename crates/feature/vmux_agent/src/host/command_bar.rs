@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_command::event::CommandBarPage;
 use vmux_command::snapshot::{
-    AgentPromptTarget, ClaimedUrl, CommandBarAgentsSnapshot, CommandBarProjection,
+    AgentPromptTarget, ClaimedUrl, ClaimedUrls, CommandBarAgentsSnapshot, CommandBarProjection,
     ContributedCommand, ContributedPage, WriteCommandBarSnapshots,
 };
 use vmux_core::agent::{
@@ -265,16 +265,16 @@ mod tests {
         }
 
         let claimed = world
-            .run_system_once(|claimed: Query<&ClaimedUrl>| {
+            .run_system_once(|claimed: ClaimedUrls| {
                 [
-                    ClaimedUrl::contains(&claimed, "vmux://sessions/"),
-                    ClaimedUrl::contains(&claimed, "vmux://sessions"),
-                    ClaimedUrl::contains(&claimed, "vmux://agent/"),
-                    ClaimedUrl::contains(&claimed, "vmux://agent"),
-                    ClaimedUrl::contains(&claimed, "vmux://sessions/codex"),
-                    ClaimedUrl::contains(&claimed, "vmux://sessions/codex/cli"),
-                    ClaimedUrl::contains(&claimed, "vmux://agent/codex"),
-                    ClaimedUrl::contains(&claimed, "vmux://agent/codex/cli"),
+                    claimed.contains("vmux://sessions/"),
+                    claimed.contains("vmux://sessions"),
+                    claimed.contains("vmux://agent/"),
+                    claimed.contains("vmux://agent"),
+                    claimed.contains("vmux://sessions/codex"),
+                    claimed.contains("vmux://sessions/codex/cli"),
+                    claimed.contains("vmux://agent/codex"),
+                    claimed.contains("vmux://agent/codex/cli"),
                 ]
             })
             .expect("claims_url system runs");
