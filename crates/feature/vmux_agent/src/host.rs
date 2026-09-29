@@ -46,9 +46,7 @@ pub(crate) mod tidy;
 
 pub use vmux_space::cwd::valid_cwd;
 
-pub(crate) use self::workspace::{
-    PendingAgentChoice, PendingAgentProject, RepositoryNeedsWorktree,
-};
+pub(crate) use self::workspace::{PendingAgentProject, RepositoryNeedsWorktree};
 
 pub use vmux_api::room as message;
 

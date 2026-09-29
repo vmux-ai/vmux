@@ -111,12 +111,6 @@ pub struct UiAgentAcpTerminalCreated {
     pub cwd: Option<String>,
 }
 
-#[derive(Event, Clone, Copy)]
-pub struct AgentChoiceSelected {
-    pub webview: Entity,
-    pub index: usize,
-}
-
 #[derive(Event, Clone, Debug)]
 pub struct AgentInput {
     pub session: Entity,

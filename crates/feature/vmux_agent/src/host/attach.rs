@@ -152,6 +152,7 @@ fn attach_page_agents(
             ..default()
         });
         commands.entity(entity).insert((
+            vmux_core::agent::AgentSessionRoot,
             vmux_session::AgentSession {
                 kind: *kind,
                 variant: AgentVariant::Page,
@@ -225,6 +226,7 @@ fn attach_acp_agents(
         });
         let anchor = ProcessId::new();
         commands.entity(entity).insert((
+            vmux_core::agent::AgentSessionRoot,
             vmux_session::AcpSession {
                 agent_id: agent_id.to_string(),
                 sid: sid.clone(),

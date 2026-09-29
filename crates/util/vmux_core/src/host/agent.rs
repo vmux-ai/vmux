@@ -13,6 +13,15 @@ pub struct AgentPromptContribution(pub String);
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct AgentDisabledSkillRoot(pub PathBuf);
 
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AgentSessionRoot;
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct AgentContinuationRequest {
+    pub session: Entity,
+    pub context: String,
+}
+
 #[derive(Clone, Debug, Default)]
 pub enum CommandOrigin {
     #[default]
@@ -168,6 +177,7 @@ impl From<AgentKind> for TerminalKind {
 pub struct AgentProviderTargetKind(pub AgentKind);
 
 #[derive(Component, Debug, Clone)]
+#[require(AgentSessionRoot)]
 pub struct AgentSession {
     pub kind: AgentKind,
 }

@@ -3,6 +3,7 @@ use bevy_app::{App, Plugin, Update};
 #[cfg(host)]
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
 
 use crate::activity::ActivityIcon;
 use crate::composer::ComposerState;
@@ -12,6 +13,12 @@ use crate::event::{
     ChatTranscriptState, ComposerContext, ResumableSessions,
 };
 use crate::state::ChatUiState;
+use vmux_api::ProcessId;
+use vmux_api::protocol::{AgentCommandResult, AgentRequestUserChoice, AgentSetConversationTitle};
+use vmux_core::agent::{
+    AgentCommandResponse, AgentContinuationRequest, AgentRequestAppExt, AgentRequestMessage,
+    AgentRequestRouteSet, AgentSessionRoot,
+};
 use vmux_core::chat::group_turns_tail;
 use vmux_core::chat_projection::{activity_counts, current_activity};
 use vmux_core::host::UiState;
@@ -29,6 +36,7 @@ pub struct ChatPlugin;
 impl Plugin for ChatPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            ChatAgentPlugin,
             crate::room::ChatRoomPlugin,
             crate::ChatKeyPlugin,
             crate::ChatMediaPlugin,
@@ -41,6 +49,149 @@ impl Plugin for ChatPlugin {
         .add_observer(open_page)
         .add_systems(Update, report_tab_identity);
     }
+}
+
+struct ChatAgentPlugin;
+
+impl Plugin for ChatAgentPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_agent_request::<AgentRequestUserChoice>()
+            .add_agent_request::<AgentSetConversationTitle>()
+            .add_message::<AgentContinuationRequest>()
+            .add_observer(resume_agent_choice)
+            .add_systems(
+                Update,
+                (request_user_choice, set_conversation_title).after(AgentRequestRouteSet),
+            );
+    }
+}
+
+pub const USER_CHOICE_REQUESTED: &str = "User choice requested. Stop this turn and wait. vmux will resume this same conversation with the selected option.";
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct PendingAgentChoice {
+    pub session_entity: Entity,
+    pub question: String,
+    pub options: Vec<String>,
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResumeAgentChoice;
+
+#[derive(SystemParam)]
+struct AgentChatTarget<'w, 's> {
+    anchors: Query<'w, 's, (Entity, &'static ProcessId)>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    session_roots: Query<'w, 's, (), With<AgentSessionRoot>>,
+}
+
+impl AgentChatTarget<'_, '_> {
+    fn resolve(&self, anchor: ProcessId) -> Option<(Entity, Entity)> {
+        let agent = self
+            .anchors
+            .iter()
+            .find_map(|(entity, process_id)| (*process_id == anchor).then_some(entity))?;
+        let mut current = agent;
+        loop {
+            if self.session_roots.contains(current) {
+                return Some((agent, current));
+            }
+            current = self.child_of.get(current).ok()?.parent();
+        }
+    }
+}
+
+fn request_user_choice(
+    mut requests: MessageReader<AgentRequestMessage<AgentRequestUserChoice>>,
+    targets: AgentChatTarget,
+    choices: Query<(), With<PendingAgentChoice>>,
+    views: Query<(), With<ChatView>>,
+    mut responses: MessageWriter<AgentCommandResponse>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let result = match targets.resolve(request.payload.anchor) {
+            None => AgentCommandResult::Error("agent pane not found".to_string()),
+            Some((agent, _)) if choices.contains(agent) => {
+                AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
+            }
+            Some((agent, session)) if views.contains(agent) => {
+                commands
+                    .entity(agent)
+                    .insert((
+                        PendingAgentChoice {
+                            session_entity: session,
+                            question: request.payload.question.clone(),
+                            options: request.payload.options.clone(),
+                        },
+                        ResumeAgentChoice,
+                    ))
+                    .remove::<ChatSynced>();
+                AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
+            }
+            Some(_) => AgentCommandResult::Error(
+                "Native choice prompts require the chat agent view; ask the user with the same numbered options in the current terminal session."
+                    .to_string(),
+            ),
+        };
+        responses.write(request.reply.response(result));
+    }
+}
+
+fn set_conversation_title(
+    mut requests: MessageReader<AgentRequestMessage<AgentSetConversationTitle>>,
+    targets: AgentChatTarget,
+    mut titles: Query<&mut AgentConversationTitle>,
+    mut responses: MessageWriter<AgentCommandResponse>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let title = request.payload.title.trim();
+        let result = if title.is_empty() {
+            AgentCommandResult::Error("conversation title is empty".to_string())
+        } else {
+            match targets.resolve(request.payload.anchor) {
+                None => AgentCommandResult::Error("agent pane not found".to_string()),
+                Some((_, session)) => {
+                    if let Ok(mut current) = titles.get_mut(session) {
+                        current.0 = title.to_string();
+                    } else {
+                        commands
+                            .entity(session)
+                            .insert(AgentConversationTitle(title.to_string()));
+                    }
+                    AgentCommandResult::Ok
+                }
+            }
+        };
+        responses.write(request.reply.response(result));
+    }
+}
+
+fn resume_agent_choice(
+    trigger: On<UiInput<crate::event::ChatChoiceSelected>>,
+    choices: Query<&PendingAgentChoice, With<ResumeAgentChoice>>,
+    mut continuations: MessageWriter<AgentContinuationRequest>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    let Ok(choice) = choices.get(event.webview) else {
+        return;
+    };
+    let Some(selected) = choice.options.get(event.payload.index as usize) else {
+        return;
+    };
+    continuations.write(AgentContinuationRequest {
+        session: choice.session_entity,
+        context: format!(
+            "VMUX USER CHOICE: For \"{}\", the user selected \"{}\". Continue the original request in this same conversation.",
+            choice.question, selected
+        ),
+    });
+    commands
+        .entity(event.webview)
+        .remove::<(PendingAgentChoice, ResumeAgentChoice)>()
+        .remove::<ChatSynced>();
 }
 
 #[cfg(host)]
@@ -325,6 +476,8 @@ pub struct ChatSynced;
 mod tests {
     use super::*;
     use vmux_api::chat::{ChatBlock, ChatTurn};
+    use vmux_api::protocol::{AgentRequest, AgentRequestId};
+    use vmux_core::agent::{AgentRequestInput, CommandOrigin};
 
     struct Conversation {
         view: Entity,
@@ -460,5 +613,78 @@ mod tests {
 
         assert_eq!(thinking, Some(ActivityIcon::Thinking));
         assert_eq!(writing, Some(ActivityIcon::Writing));
+    }
+
+    #[test]
+    fn agent_title_request_updates_the_session_root() {
+        let mut app = App::new();
+        app.add_plugins(ChatAgentPlugin);
+        let anchor = ProcessId::new();
+        let session = app.world_mut().spawn(AgentSessionRoot).id();
+        app.world_mut().spawn((anchor, ChatView, ChildOf(session)));
+        app.world_mut().write_message(AgentRequestInput {
+            request_id: AgentRequestId::new(),
+            origin: CommandOrigin::Agent {
+                sid: None,
+                anchor: Some(anchor),
+            },
+            request: AgentRequest::encode(&AgentSetConversationTitle {
+                anchor,
+                title: "Feature-owned title".to_string(),
+            })
+            .unwrap(),
+        });
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<AgentConversationTitle>(session),
+            Some(&AgentConversationTitle("Feature-owned title".to_string()))
+        );
+    }
+
+    #[test]
+    fn agent_choice_request_and_selection_emit_a_continuation() {
+        let mut app = App::new();
+        app.add_plugins(ChatAgentPlugin);
+        let anchor = ProcessId::new();
+        let session = app.world_mut().spawn(AgentSessionRoot).id();
+        let webview = app
+            .world_mut()
+            .spawn((anchor, ChatView, ChatSynced, ChildOf(session)))
+            .id();
+        app.world_mut().write_message(AgentRequestInput {
+            request_id: AgentRequestId::new(),
+            origin: CommandOrigin::Agent {
+                sid: None,
+                anchor: Some(anchor),
+            },
+            request: AgentRequest::encode(&AgentRequestUserChoice {
+                anchor,
+                question: "Mode?".to_string(),
+                options: vec!["Fast".to_string(), "Safe".to_string()],
+            })
+            .unwrap(),
+        });
+
+        app.update();
+        assert!(app.world().get::<PendingAgentChoice>(webview).is_some());
+        assert!(app.world().get::<ChatSynced>(webview).is_none());
+
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: crate::event::ChatChoiceSelected { index: 1 },
+        });
+        app.world_mut().flush();
+
+        let continuations = app
+            .world_mut()
+            .resource_mut::<Messages<AgentContinuationRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(continuations.len(), 1);
+        assert_eq!(continuations[0].session, session);
+        assert!(continuations[0].context.contains("Safe"));
+        assert!(app.world().get::<PendingAgentChoice>(webview).is_none());
     }
 }

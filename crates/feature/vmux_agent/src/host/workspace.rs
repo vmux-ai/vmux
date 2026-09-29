@@ -5,8 +5,9 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::UiInput;
 use vmux_api::protocol::ClientMessage;
 use vmux_chat::event::ChatChoiceSelected;
-use vmux_chat::host::{ChatSynced, ChatView};
+use vmux_chat::host::{ChatSynced, ChatView, PendingAgentChoice};
 use vmux_command::WriteCommandRequests;
+use vmux_core::agent::{AgentContinuationRequest, AgentSessionRoot};
 use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
 #[cfg(test)]
 use vmux_core::{AgentWorkingDir, agent::AgentKind};
@@ -19,12 +20,9 @@ use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktre
 use vmux_layout::worktree::{
     ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady, is_generated_tab_name,
 };
-use vmux_session::{
-    AcpSession, AgentConversationTitle, AgentRunState, AgentSession as PageAgentSession,
-};
+use vmux_session::{AcpSession, AgentRunState, AgentSession as PageAgentSession};
 use vmux_terminal::BufferedAgentPrompt;
 
-use crate::event::AgentChoiceSelected;
 use crate::session::AgentSession;
 
 use super::self_command::{ancestor_acp_stack, rebind_acp_workspace};
@@ -35,13 +33,13 @@ pub(super) struct WorkspacePlugin;
 impl Plugin for WorkspacePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
-            .add_observer(receive_chat_choice)
-            .add_observer(resume_agent_choice)
+            .add_message::<AgentContinuationRequest>()
             .add_observer(initialize_git_agent_choice)
             .add_systems(
                 Update,
                 (
                     drain_workspace_picker_tasks.after(super::self_command::SelfCommandSet),
+                    queue_agent_continuations,
                     send_pending_agent_continuations.in_set(super::AgentContinuationSet),
                 )
                     .chain()
@@ -51,16 +49,7 @@ impl Plugin for WorkspacePlugin {
     }
 }
 
-fn receive_chat_choice(trigger: On<UiInput<ChatChoiceSelected>>, mut commands: Commands) {
-    commands.trigger(AgentChoiceSelected {
-        webview: trigger.event().webview,
-        index: trigger.event().payload.index as usize,
-    });
-}
-
 pub(crate) const WORKSPACE_SELECTION_REQUESTED: &str = "Project selection requested. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
-
-pub(crate) const USER_CHOICE_REQUESTED: &str = "User choice requested. Stop this turn and wait. vmux will resume this same conversation with the selected option.";
 
 pub(crate) const WORKSPACE_SELECTION_PENDING: &str = "Project selection is already pending. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
 
@@ -73,16 +62,6 @@ pub(crate) struct PendingAgentProject(pub(crate) PathBuf);
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 struct PendingAgentContinuation(String);
-
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PendingAgentChoice {
-    pub(crate) session_entity: Entity,
-    pub(crate) question: String,
-    pub(crate) options: Vec<String>,
-}
-
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ResumeAgentChoice;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 struct InitializeGitAgentChoice {
@@ -105,41 +84,14 @@ pub(crate) struct PendingWorkspacePicker {
 pub(crate) struct AgentWorkspacePicker<'w, 's> {
     pub(crate) pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
     pub(crate) choices: Query<'w, 's, &'static PendingAgentChoice>,
-    pub(crate) chat_views: Query<'w, 's, (), With<ChatView>>,
-    pub(crate) page_sessions: Query<'w, 's, &'static PageAgentSession>,
-    pub(crate) cli_sessions: Query<'w, 's, &'static AgentSession>,
-    pub(crate) conversation_titles: Query<'w, 's, &'static mut AgentConversationTitle>,
+    pub(crate) session_roots: Query<'w, 's, (), With<AgentSessionRoot>>,
     pub(crate) proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
 }
 
-fn resume_agent_choice(
-    trigger: On<AgentChoiceSelected>,
-    choices: Query<&PendingAgentChoice, With<ResumeAgentChoice>>,
-    mut commands: Commands,
-) {
-    let event = trigger.event();
-    let Ok(choice) = choices.get(event.webview) else {
-        return;
-    };
-    let Some(selected) = choice.options.get(event.index) else {
-        return;
-    };
-    let continuation = format!(
-        "VMUX USER CHOICE: For \"{}\", the user selected \"{}\". Continue the original request in this same conversation.",
-        choice.question, selected
-    );
-    commands
-        .entity(choice.session_entity)
-        .insert(PendingAgentContinuation(continuation));
-    commands
-        .entity(event.webview)
-        .remove::<(PendingAgentChoice, ResumeAgentChoice)>()
-        .remove::<ChatSynced>();
-}
-
 fn initialize_git_agent_choice(
-    trigger: On<AgentChoiceSelected>,
-    choices: Query<(&PendingAgentChoice, &InitializeGitAgentChoice), Without<ResumeAgentChoice>>,
+    trigger: On<UiInput<ChatChoiceSelected>>,
+    choices: Query<(&PendingAgentChoice, &InitializeGitAgentChoice)>,
+    mut continuations: MessageWriter<AgentContinuationRequest>,
     tabs: Query<(), With<Tab>>,
     mut commands: Commands,
 ) {
@@ -147,12 +99,12 @@ fn initialize_git_agent_choice(
     let Ok((choice, initialize)) = choices.get(event.webview) else {
         return;
     };
-    if choice.options.get(event.index).is_none() {
+    if choice.options.get(event.payload.index as usize).is_none() {
         return;
     }
     let continuation = if !tabs.contains(initialize.tab_entity) {
         failed_workspace_continuation("The project tab no longer exists")
-    } else if event.index == 0 {
+    } else if event.payload.index == 0 {
         match repository_init(&initialize.workspace) {
             Ok(root) => new_git_workspace_ready_continuation(&root),
             Err(error) => git_initialization_failed_continuation(&initialize.workspace, &error.0),
@@ -160,13 +112,25 @@ fn initialize_git_agent_choice(
     } else {
         plain_workspace_ready_continuation(&initialize.workspace)
     };
-    commands
-        .entity(choice.session_entity)
-        .insert(PendingAgentContinuation(continuation));
+    continuations.write(AgentContinuationRequest {
+        session: choice.session_entity,
+        context: continuation,
+    });
     commands
         .entity(event.webview)
         .remove::<(PendingAgentChoice, InitializeGitAgentChoice)>()
         .remove::<ChatSynced>();
+}
+
+fn queue_agent_continuations(
+    mut requests: MessageReader<AgentContinuationRequest>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        commands
+            .entity(request.session)
+            .insert(PendingAgentContinuation(request.context.clone()));
+    }
 }
 
 pub(crate) fn workspace_picker_task(
@@ -640,42 +604,13 @@ mod tests {
     }
 
     #[test]
-    fn selected_agent_choice_resumes_session() {
-        let mut app = App::new();
-        app.add_observer(resume_agent_choice)
-            .add_observer(initialize_git_agent_choice);
-        let session = app.world_mut().spawn_empty().id();
-        let webview = app
-            .world_mut()
-            .spawn((
-                PendingAgentChoice {
-                    session_entity: session,
-                    question: "Mode?".into(),
-                    options: vec!["Fast".into(), "Safe".into()],
-                },
-                ResumeAgentChoice,
-            ))
-            .id();
-
-        app.world_mut()
-            .trigger(AgentChoiceSelected { webview, index: 1 });
-        app.update();
-
-        let continuation = app
-            .world()
-            .get::<PendingAgentContinuation>(session)
-            .unwrap();
-        assert!(continuation.0.contains("Safe"));
-        assert!(app.world().get::<PendingAgentChoice>(webview).is_none());
-    }
-
-    #[test]
     fn initialize_git_choice_uses_new_project_root_directly() {
         let workspace = tempfile::tempdir().unwrap();
         let workspace_path = workspace.path().canonicalize().unwrap();
         let mut app = App::new();
-        app.add_observer(resume_agent_choice)
-            .add_observer(initialize_git_agent_choice);
+        app.add_message::<AgentContinuationRequest>()
+            .add_observer(initialize_git_agent_choice)
+            .add_systems(Update, queue_agent_continuations);
         let session = app.world_mut().spawn_empty().id();
         let tab = app
             .world_mut()
@@ -702,8 +637,10 @@ mod tests {
             ))
             .id();
 
-        app.world_mut()
-            .trigger(AgentChoiceSelected { webview, index: 0 });
+        app.world_mut().trigger(UiInput {
+            webview,
+            payload: ChatChoiceSelected { index: 0 },
+        });
         app.update();
 
         assert!(workspace_path.join(".git").is_dir());

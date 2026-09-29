@@ -13,7 +13,8 @@ use vmux_chat::event::{
 };
 use vmux_chat::host::{
     ChatAttachmentProjection, ChatHistoryQuery, ChatHistoryResult, ChatSnapshotProjection,
-    ChatSynced, ChatTranscriptProjection, ChatView, TranscriptPage, TranscriptTail,
+    ChatSynced, ChatTranscriptProjection, ChatView, PendingAgentChoice, TranscriptPage,
+    TranscriptTail,
 };
 use vmux_chat::media::ChatAttachmentHydrationRequest;
 use vmux_core::PageMetadata;
@@ -94,7 +95,7 @@ fn push_chat_to_page(
         ),
         With<ChatView>,
     >,
-    choices: Query<&crate::host::PendingAgentChoice>,
+    choices: Query<&PendingAgentChoice>,
     user_profiles: Query<Ref<Profile>, With<User>>,
     browsers: NonSend<Browsers>,
     mut last_push: Local<std::collections::HashMap<Entity, std::time::Instant>>,
@@ -223,7 +224,7 @@ impl ChatProjection {
         queue: &PromptQueue,
         imported: Option<&ImportedConversation>,
         conversation_title: Option<&AgentConversationTitle>,
-        choice: Option<&crate::host::PendingAgentChoice>,
+        choice: Option<&PendingAgentChoice>,
     ) -> Self {
         let durations: &[u32] = turn_meta.map(|m| m.durations.as_slice()).unwrap_or(&[]);
         let running = matches!(state, AgentRunState::Streaming);
@@ -362,7 +363,7 @@ fn sync_chat_to_ready_views(
         Option<&AgentConversationTitle>,
     )>,
     acp_sessions: Query<(&AcpSession, Option<&AcpModelState>, Option<&AcpModeState>)>,
-    choices: Query<&crate::host::PendingAgentChoice>,
+    choices: Query<&PendingAgentChoice>,
     user_profiles: Query<&Profile, With<User>>,
     settings: Option<Res<vmux_setting::AppSettings>>,
     browsers: NonSend<Browsers>,

@@ -4,11 +4,12 @@ use bevy::prelude::*;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktree,
-    AgentCreateWorktreeOnBranch, AgentOpenBeside, AgentPrepareWorktree, AgentRequestUserChoice,
-    AgentRun, AgentRunWithPlacementOverride, AgentSetConversationTitle, ClientMessage, ProcessId,
+    AgentCreateWorktreeOnBranch, AgentOpenBeside, AgentPrepareWorktree, AgentRun,
+    AgentRunWithPlacementOverride, ClientMessage, ProcessId,
 };
 #[cfg(test)]
 use vmux_api::protocol::{AgentRequest, AgentRequestId};
+use vmux_chat::host::USER_CHOICE_REQUESTED;
 use vmux_command::WriteCommandRequests;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_layout::event::TERMINAL_PAGE_URL;
@@ -16,7 +17,6 @@ use vmux_setting::AppSettings;
 use vmux_terminal::{TerminalStackSpawnRequest, TerminalStackSpawnSet};
 
 use crate::event::AgentRequestInput;
-use crate::session::AgentSession;
 
 use super::run_terminal::{
     AgentCwd, AgentPane, AgentTerminalRegion, NextPaneSpawnSequence, PagerEnv,
@@ -24,8 +24,7 @@ use super::run_terminal::{
     RunTerminalBucketPanes, RunTerminals,
 };
 use super::workspace::{
-    AgentTabWorkspace, AgentWorkspacePicker, PendingAgentChoice, PendingWorkspacePicker,
-    ResumeAgentChoice, USER_CHOICE_REQUESTED, WORKSPACE_SELECTION_PENDING,
+    AgentTabWorkspace, AgentWorkspacePicker, PendingWorkspacePicker, WORKSPACE_SELECTION_PENDING,
     WORKSPACE_SELECTION_REQUESTED, activate_agent_directory, activate_agent_worktree,
     ambiguous_worktree_message, existing_worktree_candidates, resolve_requested_worktree,
     workspace_path_task, workspace_picker_task,
@@ -93,17 +92,12 @@ pub(crate) fn ancestor_acp_stack(
 
 fn ancestor_agent_session(
     entity: Entity,
-    acp_sessions: &Query<&mut vmux_session::AcpSession>,
-    page_sessions: &Query<&vmux_session::AgentSession>,
-    cli_sessions: &Query<&AgentSession>,
+    session_roots: &Query<(), With<vmux_core::agent::AgentSessionRoot>>,
     child_of: &Query<&ChildOf>,
 ) -> Option<Entity> {
     let mut current = entity;
     loop {
-        if acp_sessions.contains(current)
-            || page_sessions.contains(current)
-            || cli_sessions.contains(current)
-        {
+        if session_roots.contains(current) {
             return Some(current);
         }
         current = child_of.get(current).ok()?.parent();
@@ -141,10 +135,6 @@ fn self_command_anchor(request: &AgentRequestInput) -> Option<ProcessId> {
         Some(command.anchor)
     } else if let Ok(Some(command)) = request.decode::<AgentPrepareWorktree>() {
         Some(command.anchor)
-    } else if let Ok(Some(command)) = request.decode::<AgentRequestUserChoice>() {
-        Some(command.anchor)
-    } else if let Ok(Some(command)) = request.decode::<AgentSetConversationTitle>() {
-        Some(command.anchor)
     } else if let Ok(Some(command)) = request.decode::<AgentCreateWorktreeOnBranch>() {
         Some(command.anchor)
     } else {
@@ -175,8 +165,6 @@ fn is_worktree_setup_request(request: &AgentRequestInput) -> bool {
             | AgentChooseWorkspace::ID
             | AgentChooseWorkspaceAtPath::ID
             | AgentPrepareWorktree::ID
-            | AgentRequestUserChoice::ID
-            | AgentSetConversationTitle::ID
             | AgentCreateWorktreeOnBranch::ID
     )
 }
@@ -250,7 +238,7 @@ fn handle_agent_self_commands(
     settings: Res<AppSettings>,
     mut next_pane_sequence: NextPaneSpawnSequence,
     mut tab_worktree: AgentTabWorkspace,
-    mut workspace_picker: AgentWorkspacePicker,
+    workspace_picker: AgentWorkspacePicker,
 ) {
     use vmux_api::protocol::{AgentCommandResult, ClientMessage};
     let managed_root = tab_worktree
@@ -522,92 +510,6 @@ fn handle_agent_self_commands(
                     }
                 }
             }
-        } else if let Ok(Some(command)) = request.decode::<AgentRequestUserChoice>() {
-            let anchor = &command.anchor;
-            let question = &command.question;
-            let options = &command.options;
-            match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
-                None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((agent_entity, _, _)) => {
-                    let Some(session_entity) = ancestor_agent_session(
-                        agent_entity,
-                        &acp_sessions,
-                        &workspace_picker.page_sessions,
-                        &workspace_picker.cli_sessions,
-                        &ctx.child_of_q,
-                    ) else {
-                        service_requests.write(ServiceRequest(
-                            ClientMessage::AgentCommandResponse {
-                                request_id: request.request_id,
-                                result: AgentCommandResult::Error(
-                                    "agent session not found".to_string(),
-                                ),
-                            },
-                        ));
-                        continue;
-                    };
-                    if workspace_picker.choices.get(agent_entity).is_ok() {
-                        AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
-                    } else if workspace_picker.chat_views.contains(agent_entity) {
-                        commands
-                            .entity(agent_entity)
-                            .insert((
-                                PendingAgentChoice {
-                                    session_entity,
-                                    question: question.clone(),
-                                    options: options.clone(),
-                                },
-                                ResumeAgentChoice,
-                            ))
-                            .remove::<vmux_chat::host::ChatSynced>();
-                        AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
-                    } else {
-                        AgentCommandResult::Error(
-                            "Native choice prompts require the chat agent view; ask the user with the same numbered options in the current terminal session."
-                                .to_string(),
-                        )
-                    }
-                }
-            }
-        } else if let Ok(Some(command)) = request.decode::<AgentSetConversationTitle>() {
-            let anchor = &command.anchor;
-            let title = &command.title;
-            match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
-                None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((agent_entity, _, _)) => {
-                    let Some(session_entity) = ancestor_agent_session(
-                        agent_entity,
-                        &acp_sessions,
-                        &workspace_picker.page_sessions,
-                        &workspace_picker.cli_sessions,
-                        &ctx.child_of_q,
-                    ) else {
-                        service_requests.write(ServiceRequest(
-                            ClientMessage::AgentCommandResponse {
-                                request_id: request.request_id,
-                                result: AgentCommandResult::Error(
-                                    "agent session not found".to_string(),
-                                ),
-                            },
-                        ));
-                        continue;
-                    };
-                    let title = title.trim().to_string();
-                    if title.is_empty() {
-                        AgentCommandResult::Error("conversation title is empty".to_string())
-                    } else if let Ok(mut current) =
-                        workspace_picker.conversation_titles.get_mut(session_entity)
-                    {
-                        current.0 = title;
-                        AgentCommandResult::Ok
-                    } else {
-                        commands
-                            .entity(session_entity)
-                            .insert(vmux_session::AgentConversationTitle(title));
-                        AgentCommandResult::Ok
-                    }
-                }
-            }
         } else if let Some(command) = WorkspaceChoice::decode(request) {
             let anchor = command.anchor;
             match resolve_self_pane(anchor, &agent_terms, &ctx.child_of_q) {
@@ -626,9 +528,7 @@ fn handle_agent_self_commands(
                     };
                     let Some(session_entity) = ancestor_agent_session(
                         agent_entity,
-                        &acp_sessions,
-                        &workspace_picker.page_sessions,
-                        &workspace_picker.cli_sessions,
+                        &workspace_picker.session_roots,
                         &ctx.child_of_q,
                     ) else {
                         service_requests.write(ServiceRequest(
