@@ -745,7 +745,7 @@ fn forward_extension_model_events(
     }
 }
 
-pub fn fire_conformance_wake_timer(
+fn fire_conformance_wake_timer(
     timer: Option<Single<&mut ConformanceWakeTimer>>,
     model: Single<&ExtensionModel>,
     server: Single<&ExtensionBridgeServer>,

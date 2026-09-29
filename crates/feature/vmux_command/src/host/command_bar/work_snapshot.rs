@@ -11,6 +11,18 @@ use vmux_history::LastActivatedAt;
 const WORK_DIR_ENTRIES_CAP: usize = 40;
 const RECENT_FILES_CAP: usize = 20;
 
+pub(super) struct WorkSnapshotPlugin;
+
+impl Plugin for WorkSnapshotPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (update_work_dirs_snapshot, update_recent_files_snapshot)
+                .in_set(crate::snapshot::WriteCommandBarSnapshots),
+        );
+    }
+}
+
 fn frecency(visit_count: u32, last_visited_at: i64, now: i64) -> f32 {
     let age_hours = ((now - last_visited_at).max(0) as f32) / 3_600_000.0;
     let decay = 1.0 / (1.0 + age_hours / 24.0);
@@ -48,7 +60,7 @@ fn list_dir_entries(dir: &str) -> Vec<CommandBarWorkDir> {
         .collect()
 }
 
-pub fn update_work_dirs_snapshot(
+fn update_work_dirs_snapshot(
     terminals: Query<(&TerminalLaunch, Option<&LastActivatedAt>), With<Terminal>>,
     agent_dirs: Query<(&vmux_core::AgentWorkingDir, Option<&LastActivatedAt>)>,
     mut last_cwds: Local<Vec<String>>,
@@ -98,7 +110,7 @@ pub fn update_work_dirs_snapshot(
     }
 }
 
-pub fn update_recent_files_snapshot(
+fn update_recent_files_snapshot(
     changed: Query<(), Or<(Added<Url>, Changed<LastVisitedAt>)>>,
     urls: Query<(&PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
     mut initialized: Local<bool>,

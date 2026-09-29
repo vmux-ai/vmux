@@ -14,7 +14,7 @@ use vmux_core::launcher::{
 
 use crate::command_bar::CloseCommandBar;
 use crate::command_bar::panel::CommandBarPanelActive;
-use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
+use crate::command_bar::work_snapshot::WorkSnapshotPlugin;
 use crate::event::{
     CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent, OpenId, SearchEngine,
     SearchEngineSetting,
@@ -50,6 +50,7 @@ pub(crate) struct InputPlugin;
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CommandBarToggleRequest>()
+            .add_plugins(WorkSnapshotPlugin)
             .add_message::<CommandBarEditPageRequest>()
             .add_message::<CommandBarPathRequest>()
             .add_message::<CommandBarCommandsRequest>()
@@ -113,12 +114,7 @@ impl Plugin for InputPlugin {
             )
             .add_systems(
                 Update,
-                (
-                    update_work_dirs_snapshot,
-                    update_recent_files_snapshot,
-                    mirror_project_roots,
-                )
-                    .in_set(WriteCommandBarSnapshots),
+                mirror_project_roots.in_set(WriteCommandBarSnapshots),
             )
             .add_systems(
                 Update,
