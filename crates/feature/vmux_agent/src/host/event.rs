@@ -2,17 +2,11 @@ use bevy::prelude::*;
 use serde_json::Value;
 use vmux_api::ProcessId;
 use vmux_api::protocol::{
-    AcpModeOption, AcpModelOption, AgentRequest, AgentRequestId, AgentRunStatus, JsonValue,
+    AcpModeOption, AcpModelOption, AgentRequestId, AgentRunStatus, JsonValue,
 };
 
 pub use vmux_api::protocol::ApprovalDecision;
 pub use vmux_core::agent::{AgentRequestInput, CommandOrigin};
-
-#[vmux_core::service_message(AgentQuery)]
-pub struct AgentQueryRequest {
-    pub request_id: AgentRequestId,
-    pub query: AgentRequest,
-}
 
 #[vmux_core::service_message(AgentToolCall)]
 pub struct AgentToolCallRequest {

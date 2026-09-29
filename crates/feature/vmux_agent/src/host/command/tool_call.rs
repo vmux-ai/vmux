@@ -4,10 +4,10 @@ use vmux_core::JsonArguments;
 use vmux_core::service::ServiceRequest;
 use vmux_tool::{
     ToolCommand, ToolCommandFallback, ToolDispatchError, ToolDispatchFlush, ToolInvocation,
-    ToolQuery, ToolResolveSet,
+    ToolQuery, ToolQueryRequest, ToolResolveSet,
 };
 
-use crate::event::{AgentQueryRequest, AgentRequestInput, AgentToolCallRequest, CommandOrigin};
+use crate::event::{AgentRequestInput, AgentToolCallRequest, CommandOrigin};
 
 use super::CommandSet;
 
@@ -104,13 +104,13 @@ fn finish_agent_tool_commands(
 fn finish_agent_tool_queries(
     mut commands: Commands,
     calls: Query<(Entity, &PendingAgentToolCall, &ToolQuery), Added<ToolQuery>>,
-    mut query_writer: MessageWriter<AgentQueryRequest>,
+    mut query_writer: MessageWriter<ToolQueryRequest>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for (entity, pending, result) in &calls {
         match &result.0 {
             Ok(query) => {
-                query_writer.write(AgentQueryRequest {
+                query_writer.write(ToolQueryRequest {
                     request_id: pending.request_id,
                     query: query.clone(),
                 });
@@ -151,7 +151,7 @@ mod tests {
     struct CapturedAgentQueries(Vec<AgentRequest>);
 
     impl CapturedAgentQueries {
-        fn read(mut requests: MessageReader<AgentQueryRequest>, mut captured: ResMut<Self>) {
+        fn read(mut requests: MessageReader<ToolQueryRequest>, mut captured: ResMut<Self>) {
             for request in requests.read() {
                 captured.0.push(request.query.clone());
             }
@@ -164,7 +164,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, crate::CaptureToolPlugin, ToolCallPlugin))
             .add_message::<AgentToolCallRequest>()
             .add_message::<AgentRequestInput>()
-            .add_message::<AgentQueryRequest>()
+            .add_message::<ToolQueryRequest>()
             .init_resource::<CapturedAgentQueries>()
             .add_systems(
                 Update,

@@ -4,46 +4,32 @@ use vmux_api::BinEvent;
 #[cfg(test)]
 use vmux_api::protocol::AgentRequest;
 use vmux_api::protocol::{
-    AgentBookmark, AgentBookmarkList, AgentBookmarkNode, AgentBookmarks, AgentBrowserScroll,
-    AgentBrowserSnapshot, AgentCommandResult, AgentGetSettings, AgentImage, AgentListCommands,
-    AgentListSpaces, AgentReadLayout, AgentRecordStart, AgentRecordStop, AgentRecording,
-    AgentRequestId, AgentScreenshot, AgentSimulatorButtonPress, AgentSimulatorKeyPress,
-    AgentSimulatorScreenshot, AgentSimulatorSwipe, AgentSimulatorTap, AgentSimulatorTypeText,
-    AgentSpace, AgentVaultStatus, AgentWorkingDirectory, ClientMessage, JsonValue, ProcessId,
+    AgentBookmark, AgentBookmarkList, AgentBookmarkNode, AgentBookmarks, AgentCommandResult,
+    AgentGetSettings, AgentImage, AgentListCommands, AgentListSpaces, AgentReadLayout,
+    AgentRecordStart, AgentRecordStop, AgentRecording, AgentRequestId, AgentScreenshot, AgentSpace,
+    AgentVaultStatus, AgentWorkingDirectory, ClientMessage, JsonValue, ProcessId,
 };
 use vmux_command::WriteCommandRequests;
-use vmux_core::browser::{
-    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
-    BrowserSnapshotRequest, BrowserSnapshotResponse,
-};
-use vmux_core::service::{ServiceMessageSet, ServiceRequest};
+use vmux_core::service::ServiceRequest;
 use vmux_core::{
     Active, Bookmark, BookmarkOrder, Collapsed, Folder, Order, PageMetadata, Pin, Uuid,
 };
-use vmux_layout::active_pane::ActivatePane;
 use vmux_layout::apply::{LayoutApplyResponse, LayoutSnapshotRequest, LayoutSnapshotResponse};
 use vmux_layout::space::{Space, SpaceId};
 use vmux_layout::tab::Tab;
 use vmux_layout::window::{FocusedWindow, host_window_of};
 use vmux_setting::AppSettings;
-use vmux_simulator::{
-    SimulatorButtonPressRequest, SimulatorControlResponse, SimulatorKeyPressRequest,
-    SimulatorScreenshotRequest, SimulatorScreenshotResponse, SimulatorSwipeRequest,
-    SimulatorTapRequest, SimulatorTypeTextRequest,
-};
 use vmux_space::model::bootstrap_profile_name;
-
-use crate::event::{
-    AgentQueryRequest, RecordStartRequest, RecordStartResponse, RecordStopRequest,
-    RecordStopResponse, RecordingInfo, ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
-};
+use vmux_tool::{ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet};
 
 use vmux_browser::AgentBrowserResolve;
 
-pub(crate) struct AgentQueryPlugin;
+use crate::event::{
+    RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
+    ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
+};
 
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct AgentQueryRouteSet;
+pub(crate) struct AgentQueryPlugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct AgentQuerySet;
@@ -79,22 +65,6 @@ struct BookmarkListRequest {
     request_id: AgentRequestId,
 }
 
-#[derive(Message)]
-struct BrowserSnapshotResolveRequest {
-    request_id: AgentRequestId,
-    pane: Option<String>,
-    anchor: Option<ProcessId>,
-}
-
-#[derive(Message)]
-struct BrowserScrollResolveRequest {
-    request_id: AgentRequestId,
-    pane: Option<String>,
-    to: Option<String>,
-    delta: Option<i32>,
-    anchor: Option<ProcessId>,
-}
-
 #[derive(bevy::ecs::system::SystemParam)]
 struct AgentQueryWriters<'w> {
     layout: MessageWriter<'w, LayoutSnapshotRequest>,
@@ -105,24 +75,34 @@ struct AgentQueryWriters<'w> {
     vault: MessageWriter<'w, VaultStatusRequest>,
     bookmarks: MessageWriter<'w, BookmarkListRequest>,
     screenshot: MessageWriter<'w, ScreenshotRequest>,
-    browser_snapshot: MessageWriter<'w, BrowserSnapshotResolveRequest>,
-    browser_scroll: MessageWriter<'w, BrowserScrollResolveRequest>,
     record_start: MessageWriter<'w, RecordStartRequest>,
     record_stop: MessageWriter<'w, RecordStopRequest>,
-    simulator_screenshot: MessageWriter<'w, SimulatorScreenshotRequest>,
-    simulator_tap: MessageWriter<'w, SimulatorTapRequest>,
-    simulator_swipe: MessageWriter<'w, SimulatorSwipeRequest>,
-    simulator_type_text: MessageWriter<'w, SimulatorTypeTextRequest>,
-    simulator_key_press: MessageWriter<'w, SimulatorKeyPressRequest>,
-    simulator_button_press: MessageWriter<'w, SimulatorButtonPressRequest>,
 }
 
 fn route_agent_queries(
-    mut requests: MessageReader<AgentQueryRequest>,
+    mut requests: MessageReader<ToolQueryRequest>,
+    mut handled: MessageWriter<ToolQueryHandled>,
     mut writers: AgentQueryWriters,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in requests.read() {
+        let recognized = matches!(
+            request.query.id.as_str(),
+            AgentReadLayout::ID
+                | AgentGetSettings::ID
+                | AgentListSpaces::ID
+                | AgentScreenshot::ID
+                | AgentRecordStart::ID
+                | AgentRecordStop::ID
+                | AgentBookmarkList::ID
+                | AgentWorkingDirectory::ID
+                | AgentVaultStatus::ID
+                | AgentListCommands::ID
+        );
+        if !recognized {
+            continue;
+        }
+        handled.write(ToolQueryHandled(request.request_id));
         let result = match request.query.id.as_str() {
             AgentReadLayout::ID => serde_json::from_slice::<AgentReadLayout>(&request.query.body)
                 .map_err(|error| error.to_string())
@@ -154,32 +134,6 @@ fn route_agent_queries(
                         pane: query.pane,
                     });
                 }),
-            AgentBrowserSnapshot::ID => {
-                serde_json::from_slice::<AgentBrowserSnapshot>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|query| {
-                        writers
-                            .browser_snapshot
-                            .write(BrowserSnapshotResolveRequest {
-                                request_id: request.request_id,
-                                pane: query.pane,
-                                anchor: query.anchor,
-                            });
-                    })
-            }
-            AgentBrowserScroll::ID => {
-                serde_json::from_slice::<AgentBrowserScroll>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|query| {
-                        writers.browser_scroll.write(BrowserScrollResolveRequest {
-                            request_id: request.request_id,
-                            pane: query.pane,
-                            to: query.to,
-                            delta: query.delta,
-                            anchor: query.anchor,
-                        });
-                    })
-            }
             AgentRecordStart::ID => serde_json::from_slice::<AgentRecordStart>(&request.query.body)
                 .map_err(|error| error.to_string())
                 .map(|query| {
@@ -208,74 +162,6 @@ fn route_agent_queries(
                         });
                     })
             }
-            AgentSimulatorScreenshot::ID => {
-                serde_json::from_slice::<AgentSimulatorScreenshot>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|_| {
-                        writers
-                            .simulator_screenshot
-                            .write(SimulatorScreenshotRequest {
-                                request_id: request.request_id.0,
-                            });
-                    })
-            }
-            AgentSimulatorTap::ID => {
-                serde_json::from_slice::<AgentSimulatorTap>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|query| {
-                        writers.simulator_tap.write(SimulatorTapRequest {
-                            request_id: request.request_id.0,
-                            x: query.x,
-                            y: query.y,
-                        });
-                    })
-            }
-            AgentSimulatorSwipe::ID => {
-                serde_json::from_slice::<AgentSimulatorSwipe>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|query| {
-                        writers.simulator_swipe.write(SimulatorSwipeRequest {
-                            request_id: request.request_id.0,
-                            start_x: query.start_x,
-                            start_y: query.start_y,
-                            end_x: query.end_x,
-                            end_y: query.end_y,
-                            duration_ms: query.duration_ms,
-                        });
-                    })
-            }
-            AgentSimulatorTypeText::ID => {
-                serde_json::from_slice::<AgentSimulatorTypeText>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|query| {
-                        writers.simulator_type_text.write(SimulatorTypeTextRequest {
-                            request_id: request.request_id.0,
-                            text: query.text,
-                        });
-                    })
-            }
-            AgentSimulatorKeyPress::ID => {
-                serde_json::from_slice::<AgentSimulatorKeyPress>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|query| {
-                        writers.simulator_key_press.write(SimulatorKeyPressRequest {
-                            request_id: request.request_id.0,
-                            keycode: query.keycode,
-                        });
-                    })
-            }
-            AgentSimulatorButtonPress::ID => {
-                serde_json::from_slice::<AgentSimulatorButtonPress>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|query| {
-                        writers
-                            .simulator_button_press
-                            .write(SimulatorButtonPressRequest {
-                                request_id: request.request_id.0,
-                                button: query.button,
-                            });
-                    })
-            }
             AgentWorkingDirectory::ID => {
                 serde_json::from_slice::<AgentWorkingDirectory>(&request.query.body)
                     .map_err(|error| error.to_string())
@@ -302,13 +188,7 @@ fn route_agent_queries(
                         });
                     })
             }
-            _ => {
-                service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
-                    request_id: request.request_id,
-                    message: format!("unknown agent query: {}", request.query.id),
-                }));
-                continue;
-            }
+            _ => unreachable!(),
         };
         if let Err(message) = result {
             service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
@@ -321,20 +201,17 @@ fn route_agent_queries(
 
 impl Plugin for AgentQueryPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentQueryRequest>()
+        app.add_message::<ToolQueryRequest>()
             .add_message::<WorkingDirectoryRequest>()
             .add_message::<SettingsReadRequest>()
             .add_message::<SpaceListRequest>()
             .add_message::<CommandListRequest>()
             .add_message::<VaultStatusRequest>()
             .add_message::<BookmarkListRequest>()
-            .add_message::<BrowserSnapshotResolveRequest>()
-            .add_message::<BrowserScrollResolveRequest>()
             .add_systems(
                 Update,
                 route_agent_queries
-                    .in_set(AgentQueryRouteSet)
-                    .after(ServiceMessageSet)
+                    .in_set(ToolQueryRouteSet)
                     .after(super::AgentContinuationSet),
             )
             .add_systems(
@@ -346,11 +223,10 @@ impl Plugin for AgentQueryPlugin {
                     answer_command_queries,
                     answer_vault_queries,
                     answer_bookmark_queries,
-                    route_browser_queries,
                 )
                     .in_set(AgentQuerySet)
                     .in_set(WriteCommandRequests)
-                    .after(AgentQueryRouteSet),
+                    .after(ToolQueryRouteSet),
             )
             .add_systems(
                 Update,
@@ -358,13 +234,8 @@ impl Plugin for AgentQueryPlugin {
                     forward_layout_apply_responses,
                     forward_layout_snapshot_responses,
                     forward_screenshot_responses,
-                    forward_snapshot_responses,
-                    forward_browser_scroll_responses,
-                    forward_navigation_snapshot_responses,
                     forward_record_start_responses,
                     forward_record_stop_responses,
-                    forward_simulator_control_responses,
-                    forward_simulator_screenshot_responses,
                 ),
             );
     }
@@ -587,40 +458,6 @@ fn answer_bookmark_queries(
     }
 }
 
-fn route_browser_queries(
-    mut snapshots: MessageReader<BrowserSnapshotResolveRequest>,
-    mut scrolls: MessageReader<BrowserScrollResolveRequest>,
-    mut snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
-    mut scroll_writer: MessageWriter<BrowserScrollRequest>,
-    mut activate: MessageWriter<ActivatePane>,
-    browse: AgentBrowserResolve,
-) {
-    for request in snapshots.read() {
-        let resolved = browse.resolve_pane(&request.pane, &request.anchor);
-        if let Some(request) = resolved.activation {
-            activate.write(request);
-        }
-        snapshot_writer.write(BrowserSnapshotRequest {
-            request_id: request.request_id.0,
-            pane: resolved.pane,
-            webview: None,
-        });
-    }
-
-    for request in scrolls.read() {
-        let resolved = browse.resolve_pane(&request.pane, &request.anchor);
-        if let Some(request) = resolved.activation {
-            activate.write(request);
-        }
-        scroll_writer.write(BrowserScrollRequest {
-            request_id: request.request_id.0,
-            pane: resolved.pane,
-            to: request.to.clone(),
-            delta: request.delta,
-        });
-    }
-}
-
 fn forward_layout_apply_responses(
     mut reader: MessageReader<LayoutApplyResponse>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -673,46 +510,6 @@ fn forward_screenshot_responses(
     }
 }
 
-fn forward_snapshot_responses(
-    mut reader: MessageReader<BrowserSnapshotResponse>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    for response in reader.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentBrowserSnapshotResult {
-            request_id: AgentRequestId(response.request_id),
-            result: response.result.clone(),
-        }));
-    }
-}
-
-fn forward_browser_scroll_responses(
-    mut reader: MessageReader<BrowserScrollResponse>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    for response in reader.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentBrowserScrollResult {
-            request_id: AgentRequestId(response.request_id),
-            result: response.result.clone(),
-        }));
-    }
-}
-
-fn forward_navigation_snapshot_responses(
-    mut reader: MessageReader<BrowserNavigationSnapshotResponse>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    for response in reader.read() {
-        let result = match &response.result {
-            Ok(json) => AgentCommandResult::Text(json.clone()),
-            Err(message) => AgentCommandResult::Error(message.clone()),
-        };
-        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
-            request_id: AgentRequestId(response.request_id),
-            result,
-        }));
-    }
-}
-
 fn forward_record_start_responses(
     mut reader: MessageReader<RecordStartResponse>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -750,41 +547,6 @@ fn forward_record_stop_responses(
     }
 }
 
-fn forward_simulator_control_responses(
-    mut reader: MessageReader<SimulatorControlResponse>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    for response in reader.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentSimulatorControlResult {
-            request_id: AgentRequestId(response.request_id),
-            result: response.result.clone(),
-        }));
-    }
-}
-
-fn forward_simulator_screenshot_responses(
-    mut reader: MessageReader<SimulatorScreenshotResponse>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    for response in reader.read() {
-        let result = match &response.result {
-            Ok(image) => Ok(AgentImage {
-                path: image.path.clone(),
-                png: image.png.clone(),
-                width: image.width,
-                height: image.height,
-            }),
-            Err(message) => Err(message.clone()),
-        };
-        service_requests.write(ServiceRequest(
-            ClientMessage::AgentSimulatorScreenshotResult {
-                request_id: AgentRequestId(response.request_id),
-                result,
-            },
-        ));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -792,7 +554,8 @@ mod tests {
 
     fn query_routing_app() -> App {
         let mut app = App::new();
-        app.add_message::<AgentQueryRequest>()
+        app.add_message::<ToolQueryRequest>()
+            .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
             .add_message::<LayoutSnapshotRequest>()
             .add_message::<WorkingDirectoryRequest>()
@@ -802,16 +565,8 @@ mod tests {
             .add_message::<VaultStatusRequest>()
             .add_message::<BookmarkListRequest>()
             .add_message::<ScreenshotRequest>()
-            .add_message::<BrowserSnapshotResolveRequest>()
-            .add_message::<BrowserScrollResolveRequest>()
             .add_message::<RecordStartRequest>()
             .add_message::<RecordStopRequest>()
-            .add_message::<SimulatorScreenshotRequest>()
-            .add_message::<SimulatorTapRequest>()
-            .add_message::<SimulatorSwipeRequest>()
-            .add_message::<SimulatorTypeTextRequest>()
-            .add_message::<SimulatorKeyPressRequest>()
-            .add_message::<SimulatorButtonPressRequest>()
             .add_systems(Update, route_agent_queries);
         app
     }
@@ -830,14 +585,14 @@ mod tests {
             .resource::<Messages<VaultStatusRequest>>()
             .get_cursor();
 
-        app.world_mut().write_message(AgentQueryRequest {
+        app.world_mut().write_message(ToolQueryRequest {
             request_id: screenshot_request_id,
             query: AgentRequest::encode(&AgentScreenshot {
                 pane: Some("pane:7".to_string()),
             })
             .unwrap(),
         });
-        app.world_mut().write_message(AgentQueryRequest {
+        app.world_mut().write_message(ToolQueryRequest {
             request_id: vault_request_id,
             query: AgentRequest::encode(&AgentVaultStatus).unwrap(),
         });

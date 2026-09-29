@@ -10,19 +10,14 @@ use vmux_core::browser::{
 use vmux_core::host::persistence::WorkspaceStoreValidator;
 use vmux_core::notify::{AgentAttention, BellReceived, OsNotify};
 use vmux_core::{HostSpawnRoute, PageOpenRequest};
-use vmux_simulator::{
-    SimulatorButtonPressRequest, SimulatorControlResponse, SimulatorKeyPressRequest,
-    SimulatorScreenshotRequest, SimulatorScreenshotResponse, SimulatorSwipeRequest,
-    SimulatorTapRequest, SimulatorTypeTextRequest,
-};
 use vmux_terminal::TerminalStackSpawnRequest;
 
 use crate::event::{
-    AgentQueryRequest, AgentRequestInput, AgentToolCallRequest, RecordStartRequest,
-    RecordStartResponse, RecordStopRequest, RecordStopResponse, ScreenshotRequest,
-    ScreenshotResponse,
+    AgentRequestInput, AgentToolCallRequest, RecordStartRequest, RecordStartResponse,
+    RecordStopRequest, RecordStopResponse, ScreenshotRequest, ScreenshotResponse,
 };
 use crate::session;
+use vmux_tool::ToolQueryRequest;
 
 pub struct AgentPlugin;
 
@@ -82,7 +77,7 @@ impl Plugin for AgentSessionPlugin {
             super::workspace::WorkspacePlugin,
         ))
         .add_message::<AgentRequestInput>()
-        .add_message::<AgentQueryRequest>()
+        .add_message::<ToolQueryRequest>()
         .add_message::<ScreenshotRequest>()
         .add_message::<ScreenshotResponse>()
         .add_message::<BrowserSnapshotRequest>()
@@ -94,14 +89,6 @@ impl Plugin for AgentSessionPlugin {
         .add_message::<RecordStartResponse>()
         .add_message::<RecordStopRequest>()
         .add_message::<RecordStopResponse>()
-        .add_message::<SimulatorTapRequest>()
-        .add_message::<SimulatorSwipeRequest>()
-        .add_message::<SimulatorTypeTextRequest>()
-        .add_message::<SimulatorKeyPressRequest>()
-        .add_message::<SimulatorButtonPressRequest>()
-        .add_message::<SimulatorControlResponse>()
-        .add_message::<SimulatorScreenshotRequest>()
-        .add_message::<SimulatorScreenshotResponse>()
         .add_message::<AgentToolCallRequest>()
         .add_message::<SpawnAgentInStackRequest>()
         .add_message::<PageAgentAttachRequest>()

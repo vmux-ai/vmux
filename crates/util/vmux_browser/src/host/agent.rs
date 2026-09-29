@@ -1,10 +1,16 @@
 use bevy::prelude::*;
+use vmux_api::BinEvent;
 use vmux_api::protocol::{
     AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch,
-    AgentBrowserInstallExtension, AgentBrowserNavigate, AgentCommandResult, AgentOpenInNewStack,
-    AgentRequestId,
+    AgentBrowserInstallExtension, AgentBrowserNavigate, AgentBrowserScroll, AgentBrowserSnapshot,
+    AgentCommandResult, AgentOpenInNewStack, AgentRequestId, ClientMessage,
 };
 use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput, CommandOrigin};
+use vmux_core::browser::{
+    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
+    BrowserSnapshotRequest, BrowserSnapshotResponse,
+};
+use vmux_core::service::ServiceRequest;
 use vmux_extension::ExtensionInstallRequest;
 use vmux_history::HistoryOpenIntent;
 use vmux_layout::active_pane::ActivatePane;
@@ -12,6 +18,7 @@ use vmux_layout::{
     BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, OpenBesideRequest,
     OpenInNewStackRequest,
 };
+use vmux_tool::{ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet};
 
 use super::agent_pane::AgentBrowserResolve;
 
@@ -21,6 +28,15 @@ impl Plugin for AgentBrowserPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AgentRequestInput>()
             .add_message::<AgentCommandResponse>()
+            .add_message::<ToolQueryRequest>()
+            .add_message::<ToolQueryHandled>()
+            .add_message::<ServiceRequest>()
+            .add_message::<BrowserSnapshotRequest>()
+            .add_message::<BrowserSnapshotResponse>()
+            .add_message::<BrowserScrollRequest>()
+            .add_message::<BrowserScrollResponse>()
+            .add_message::<BrowserNavigationSnapshotResponse>()
+            .add_message::<ActivatePane>()
             .add_message::<AgentBrowserNavigateRequest>()
             .add_message::<AgentBrowserInstallExtensionRequest>()
             .add_message::<AgentBrowserGoBackRequest>()
@@ -29,6 +45,15 @@ impl Plugin for AgentBrowserPlugin {
             .add_message::<AgentOpenInNewStackRequest>()
             .add_message::<ExtensionInstallRequest>()
             .add_systems(Update, open_history)
+            .add_systems(
+                Update,
+                (
+                    route_browser_queries.in_set(ToolQueryRouteSet),
+                    forward_snapshot_responses,
+                    forward_scroll_responses,
+                    forward_navigation_snapshot_responses,
+                ),
+            )
             .add_systems(
                 Update,
                 (
@@ -44,6 +69,108 @@ impl Plugin for AgentBrowserPlugin {
                 )
                     .chain(),
             );
+    }
+}
+
+fn route_browser_queries(
+    mut queries: MessageReader<ToolQueryRequest>,
+    mut handled: MessageWriter<ToolQueryHandled>,
+    mut snapshots: MessageWriter<BrowserSnapshotRequest>,
+    mut scrolls: MessageWriter<BrowserScrollRequest>,
+    mut activate: MessageWriter<ActivatePane>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+    browse: AgentBrowserResolve,
+) {
+    for request in queries.read() {
+        if request.query.id != AgentBrowserSnapshot::id()
+            && request.query.id != AgentBrowserScroll::id()
+        {
+            continue;
+        }
+        handled.write(ToolQueryHandled(request.request_id));
+        match request.query.decode::<AgentBrowserSnapshot>() {
+            Ok(Some(query)) => {
+                let resolved = browse.resolve_pane(&query.pane, &query.anchor);
+                if let Some(request) = resolved.activation {
+                    activate.write(request);
+                }
+                snapshots.write(BrowserSnapshotRequest {
+                    request_id: request.request_id.0,
+                    pane: resolved.pane,
+                    webview: None,
+                });
+                continue;
+            }
+            Err(message) => {
+                service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
+                    request_id: request.request_id,
+                    message,
+                }));
+                continue;
+            }
+            Ok(None) => {}
+        }
+        match request.query.decode::<AgentBrowserScroll>() {
+            Ok(Some(query)) => {
+                let resolved = browse.resolve_pane(&query.pane, &query.anchor);
+                if let Some(request) = resolved.activation {
+                    activate.write(request);
+                }
+                scrolls.write(BrowserScrollRequest {
+                    request_id: request.request_id.0,
+                    pane: resolved.pane,
+                    to: query.to,
+                    delta: query.delta,
+                });
+            }
+            Err(message) => {
+                service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
+                    request_id: request.request_id,
+                    message,
+                }));
+            }
+            Ok(None) => {}
+        }
+    }
+}
+
+fn forward_snapshot_responses(
+    mut responses: MessageReader<BrowserSnapshotResponse>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for response in responses.read() {
+        service_requests.write(ServiceRequest(ClientMessage::AgentBrowserSnapshotResult {
+            request_id: AgentRequestId(response.request_id),
+            result: response.result.clone(),
+        }));
+    }
+}
+
+fn forward_scroll_responses(
+    mut responses: MessageReader<BrowserScrollResponse>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for response in responses.read() {
+        service_requests.write(ServiceRequest(ClientMessage::AgentBrowserScrollResult {
+            request_id: AgentRequestId(response.request_id),
+            result: response.result.clone(),
+        }));
+    }
+}
+
+fn forward_navigation_snapshot_responses(
+    mut responses: MessageReader<BrowserNavigationSnapshotResponse>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for response in responses.read() {
+        let result = match &response.result {
+            Ok(json) => AgentCommandResult::Text(json.clone()),
+            Err(message) => AgentCommandResult::Error(message.clone()),
+        };
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
+            request_id: AgentRequestId(response.request_id),
+            result,
+        }));
     }
 }
 

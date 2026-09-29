@@ -10193,7 +10193,6 @@ dependencies = [
  "vmux_process",
  "vmux_session",
  "vmux_setting",
- "vmux_simulator",
  "vmux_space",
  "vmux_start",
  "vmux_terminal",

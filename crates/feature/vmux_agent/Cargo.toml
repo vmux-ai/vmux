@@ -61,7 +61,6 @@ app = [
     "dep:vmux_path",
     "dep:vmux_session",
     "dep:vmux_setting",
-    "dep:vmux_simulator",
     "dep:vmux_space",
     "dep:vmux_start",
     "dep:vmux_terminal",
@@ -119,7 +118,6 @@ vmux_process = { path = "../../util/vmux_process", optional = true }
 vmux_transport = { path = "../../util/vmux_transport", optional = true }
 vmux_session = { path = "../../util/vmux_session", optional = true }
 vmux_setting = { path = "../vmux_setting", optional = true }
-vmux_simulator = { path = "../vmux_simulator", optional = true }
 vmux_space = { path = "../vmux_space", optional = true }
 vmux_terminal = { path = "../vmux_terminal", optional = true }
 vmux_tool = { path = "../vmux_tool", optional = true }

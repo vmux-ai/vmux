@@ -1,9 +1,8 @@
 use crate::event::{
-    AgentQueryRequest, AgentRequestInput, AgentToolCallRequest, CommandOrigin,
-    UiAgentAcpTerminalCreated, UiAgentApprovalResolved, UiAgentAwaitingApproval, UiAgentDelta,
-    UiAgentInfo, UiAgentModeInfo, UiAgentModeSelectionResult, UiAgentModelInfo,
-    UiAgentModelSelectionResult, UiAgentRunStatus, UiAgentSessionCreated, UiAgentSnapshot,
-    UiAgentWorkspaceChanged,
+    AgentRequestInput, AgentToolCallRequest, CommandOrigin, UiAgentAcpTerminalCreated,
+    UiAgentApprovalResolved, UiAgentAwaitingApproval, UiAgentDelta, UiAgentInfo, UiAgentModeInfo,
+    UiAgentModeSelectionResult, UiAgentModelInfo, UiAgentModelSelectionResult, UiAgentRunStatus,
+    UiAgentSessionCreated, UiAgentSnapshot, UiAgentWorkspaceChanged,
 };
 use bevy::prelude::*;
 use vmux_api::protocol::ClientMessage;
@@ -11,6 +10,7 @@ use vmux_core::agent::AgentCommandResponse;
 use vmux_core::service::{
     ServiceConnected, ServiceMessagePlugin, ServiceMessageSet, ServiceRequest,
 };
+use vmux_tool::ToolQueryRequest;
 
 #[vmux_core::service_message(AgentRequest)]
 struct InboundAgentRequest {
@@ -31,9 +31,12 @@ pub(crate) struct AgentIngressPlugin;
 
 impl Plugin for AgentIngressPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_tool::ToolQueryPlugin>() {
+            app.add_plugins(vmux_tool::ToolQueryPlugin);
+        }
         app.add_plugins((
             ServiceMessagePlugin::<InboundAgentRequest>::default(),
-            ServiceMessagePlugin::<AgentQueryRequest>::default(),
+            ServiceMessagePlugin::<ToolQueryRequest>::default(),
             ServiceMessagePlugin::<AgentToolCallRequest>::default(),
             ServiceMessagePlugin::<UiAgentDelta>::default(),
             ServiceMessagePlugin::<UiAgentRunStatus>::default(),
@@ -170,7 +173,7 @@ mod tests {
             .collect::<Vec<_>>();
         let queries = app
             .world_mut()
-            .resource_mut::<Messages<AgentQueryRequest>>()
+            .resource_mut::<Messages<ToolQueryRequest>>()
             .drain()
             .collect::<Vec<_>>();
         assert_eq!(commands.len(), 1);

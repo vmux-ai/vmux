@@ -13,6 +13,8 @@ mod mcp;
 mod npm;
 mod process;
 mod provider;
+#[cfg(host)]
+mod query;
 mod registry;
 #[cfg(ui)]
 mod ui;
@@ -35,6 +37,8 @@ pub use manifest::*;
 pub use mcp::*;
 pub use npm::*;
 pub use provider::*;
+#[cfg(host)]
+pub use query::*;
 pub use registry::*;
 
 pub struct ToolPlugin;
