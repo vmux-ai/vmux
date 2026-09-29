@@ -599,10 +599,6 @@ impl CommandMessage {
     {
         Self(write_command_message::<T>)
     }
-
-    fn write(&self, invocation: &CommandInvocation, commands: &mut Commands) {
-        (self.0)(invocation, commands);
-    }
 }
 
 fn write_command_message<T>(invocation: &CommandInvocation, commands: &mut Commands)
@@ -740,7 +736,7 @@ fn dispatch_command_invocations(
             continue;
         }
         if let Some(message) = message {
-            message.write(&invocation, &mut commands);
+            (message.0)(&invocation, &mut commands);
         }
         commands.trigger(CommandDispatch {
             command,

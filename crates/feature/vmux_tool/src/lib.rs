@@ -95,21 +95,21 @@ impl Plugin for ToolRuntimePlugin {
         .add_systems(
             Update,
             (
-                ToolOperationTask::<mcp::DiscoveredMcpServers>::finish,
-                ToolOperationTask::<mcp::ImportedMcpConfig>::finish,
-                ToolOperationTask::<mcp::ImportedMcpServer>::finish,
-                ToolOperationTask::<mcp::ForgottenMcpServer>::finish,
-                ToolOperationTask::<dotfiles::DiscoveredDotfilePackages>::finish,
-                ToolOperationTask::<dotfiles::DotfilePlan>::finish,
-                ToolOperationTask::<dotfiles::ImportedDotfiles>::finish,
-                ToolOperationTask::<dotfiles::ImportedAvailableDotfiles>::finish,
-                ToolOperationTask::<dotfiles::LinkedDotfilePackage>::finish,
-                ToolOperationTask::<dotfiles::DisabledDotfilePackage>::finish,
-                ToolOperationTask::<dotfiles::UnlinkedDotfilePackage>::finish,
-                ToolOperationTask::<dotfiles::AppliedEnabledDotfiles>::finish,
-                ToolOperationTask::<dotfiles::AdoptedDotfile>::finish,
-                ToolOperationTask::<homebrew::ImportedBrewfile>::finish,
-                ToolOperationTask::<npm::ImportedNpmManifest>::finish,
+                finish_tool_operation::<mcp::DiscoveredMcpServers>,
+                finish_tool_operation::<mcp::ImportedMcpConfig>,
+                finish_tool_operation::<mcp::ImportedMcpServer>,
+                finish_tool_operation::<mcp::ForgottenMcpServer>,
+                finish_tool_operation::<dotfiles::DiscoveredDotfilePackages>,
+                finish_tool_operation::<dotfiles::DotfilePlan>,
+                finish_tool_operation::<dotfiles::ImportedDotfiles>,
+                finish_tool_operation::<dotfiles::ImportedAvailableDotfiles>,
+                finish_tool_operation::<dotfiles::LinkedDotfilePackage>,
+                finish_tool_operation::<dotfiles::DisabledDotfilePackage>,
+                finish_tool_operation::<dotfiles::UnlinkedDotfilePackage>,
+                finish_tool_operation::<dotfiles::AppliedEnabledDotfiles>,
+                finish_tool_operation::<dotfiles::AdoptedDotfile>,
+                finish_tool_operation::<homebrew::ImportedBrewfile>,
+                finish_tool_operation::<npm::ImportedNpmManifest>,
             )
                 .after(ToolOperationRouteFlush),
         );
@@ -145,21 +145,22 @@ pub struct ToolOperationFailed(pub String);
 #[derive(Component)]
 pub(crate) struct ToolOperationTask<T: Component>(Task<Result<T, String>>);
 
-impl<T: Component> ToolOperationTask<T> {
-    fn finish(mut operations: Query<(Entity, &mut Self)>, mut commands: Commands) {
-        for (entity, mut operation) in &mut operations {
-            let Some(result) = future::block_on(future::poll_once(&mut operation.0)) else {
-                continue;
-            };
-            let mut entity = commands.entity(entity);
-            entity.remove::<Self>();
-            match result {
-                Ok(output) => {
-                    entity.insert(output);
-                }
-                Err(error) => {
-                    entity.insert((ToolOperationFinished, ToolOperationFailed(error)));
-                }
+fn finish_tool_operation<T: Component>(
+    mut operations: Query<(Entity, &mut ToolOperationTask<T>)>,
+    mut commands: Commands,
+) {
+    for (entity, mut operation) in &mut operations {
+        let Some(result) = future::block_on(future::poll_once(&mut operation.0)) else {
+            continue;
+        };
+        let mut entity = commands.entity(entity);
+        entity.remove::<ToolOperationTask<T>>();
+        match result {
+            Ok(output) => {
+                entity.insert(output);
+            }
+            Err(error) => {
+                entity.insert((ToolOperationFinished, ToolOperationFailed(error)));
             }
         }
     }
