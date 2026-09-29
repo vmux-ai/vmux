@@ -5,10 +5,11 @@ use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 
 use crate::DaemonBinary;
-use crate::client::{ServiceClient, ServiceHandle, ServiceWake};
 use crate::registry::Backend;
 use vmux_api::protocol::ClientMessage;
 use vmux_core::service::{ServiceConnected, ServiceInbound, ServiceRequest, ServiceUnavailable};
+
+use super::client::{ServiceClient, ServiceHandle, ServiceWake};
 
 #[derive(Component)]
 struct ServiceConnectRetry {

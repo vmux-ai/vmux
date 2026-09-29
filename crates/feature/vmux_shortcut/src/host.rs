@@ -1,7 +1,9 @@
+#[cfg(test)]
+use crate::PAGE_URL;
 use crate::{
-    PAGE_URL, ShortcutBinding, ShortcutCatalog, ShortcutEntry, ShortcutGroup,
-    ShortcutProbeClearRequest, ShortcutProbePress, ShortcutProbePressRequest, ShortcutProbeStatus,
-    ShortcutProbeView, ShortcutStroke, ShortcutUiState, ShortcutUiStateUpdates, ShortcutUrl,
+    ShortcutBinding, ShortcutCatalog, ShortcutEntry, ShortcutGroup, ShortcutProbeClearRequest,
+    ShortcutProbePress, ShortcutProbePressRequest, ShortcutProbeStatus, ShortcutProbeView,
+    ShortcutStroke, ShortcutUiState, ShortcutUiStateUpdates, ShortcutUrl,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;

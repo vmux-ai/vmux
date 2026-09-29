@@ -165,7 +165,7 @@ impl TitlebarClicks {
         2
     }
 
-    fn forget(&mut self) {
+    pub(super) fn forget(&mut self) {
         self.0 = None;
     }
 }

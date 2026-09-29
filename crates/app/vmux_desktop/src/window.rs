@@ -1,8 +1,10 @@
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowPosition};
 use bevy_cef::prelude::HostWindow;
+use vmux_core::WindowFullscreen;
+#[cfg(not(all(target_os = "macos", feature = "native-glass")))]
+use vmux_core::WindowFullscreenSet;
 use vmux_core::host::persistence::WorkspaceRestore;
-use vmux_core::{WindowFullscreen, WindowFullscreenSet};
 use vmux_layout::window::{
     CloseFocusedWindowRequest, FocusedWindow, NewWindowRequest, NewWindowWorkspace, VmuxWindow,
     WindowGeometry,
@@ -34,7 +36,8 @@ impl Plugin for DesktopWindowPlugin {
                     capture_window_geometry,
                 )
                     .chain(),
-            );
+            )
+            .add_systems(Update, crate::display::relocate_window_to_live_display);
         #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
         app.add_systems(
             Update,

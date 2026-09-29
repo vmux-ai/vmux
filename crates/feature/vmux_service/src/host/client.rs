@@ -6,17 +6,17 @@ use vmux_api::protocol::{ClientMessage, ServiceMessage};
 use vmux_core::service::ServiceConnection;
 
 #[derive(Component)]
-pub(crate) struct ServiceClient(pub ServiceHandle);
+pub(super) struct ServiceClient(pub(super) ServiceHandle);
 
 const MAX_SERVICE_MESSAGES_PER_DRAIN: usize = 128;
 
-struct ServiceDrain {
-    pub messages: Vec<ServiceMessage>,
-    pub disconnected: bool,
-    pub capped: bool,
+pub(super) struct ServiceDrain {
+    pub(super) messages: Vec<ServiceMessage>,
+    pub(super) disconnected: bool,
+    pub(super) capped: bool,
 }
 
-pub(crate) struct ServiceHandle {
+pub(super) struct ServiceHandle {
     cmd_tx: std::sync::mpsc::Sender<ClientMessage>,
     msg_rx: std::sync::Mutex<std::sync::mpsc::Receiver<ServiceMessage>>,
     disconnected: Arc<AtomicBool>,
@@ -24,7 +24,7 @@ pub(crate) struct ServiceHandle {
     _runtime: Arc<tokio::runtime::Runtime>,
 }
 
-pub(crate) type ServiceWake = Arc<dyn Fn() + Send + Sync + 'static>;
+pub(super) type ServiceWake = Arc<dyn Fn() + Send + Sync + 'static>;
 
 #[allow(clippy::result_large_err)]
 fn forward_service_message(
@@ -63,7 +63,7 @@ fn clean_service_files(sock: &std::path::Path) {
 }
 
 impl ServiceHandle {
-    pub fn service_running() -> bool {
+    pub(super) fn service_running() -> bool {
         let paths = ServicePaths::current();
         let sock = paths.socket();
         if !sock.exists() {
@@ -126,7 +126,7 @@ impl ServiceHandle {
         true
     }
 
-    pub fn connect_with_wake(wake: Option<ServiceWake>) -> Option<Self> {
+    pub(super) fn connect_with_wake(wake: Option<ServiceWake>) -> Option<Self> {
         if !Self::service_running() {
             return None;
         }
@@ -232,11 +232,11 @@ impl ServiceHandle {
         })
     }
 
-    pub fn send(&self, msg: ClientMessage) -> bool {
+    pub(super) fn send(&self, msg: ClientMessage) -> bool {
         self.cmd_tx.send(msg).is_ok()
     }
 
-    pub fn drain_with_status(&self) -> ServiceDrain {
+    pub(super) fn drain_with_status(&self) -> ServiceDrain {
         self.wake_pending.store(false, Ordering::Release);
         let rx = self.msg_rx.lock().unwrap();
         drain_service_messages_bounded(&rx, self.disconnected.swap(false, Ordering::AcqRel))

@@ -10,9 +10,19 @@ impl Plugin for RelaunchPlugin {
             bevy_cef::prelude::UiEventPlugin::<(RelaunchRequest,)>::default(),
             bevy_cef::prelude::JsEmitEventPlugin::<UiRelaunchRequest>::default(),
         ))
+        .add_message::<RelaunchApplication>()
+        .add_message::<LaunchProfile>()
         .add_observer(on_restart_request)
         .add_observer(on_page_relaunch)
-        .add_systems(Update, switch_profile);
+        .add_systems(
+            Update,
+            (
+                request_profile_launch,
+                relaunch_application,
+                launch_profiles,
+            )
+                .chain(),
+        );
     }
 }
 
@@ -88,13 +98,25 @@ fn relaunch_plan(
     }
 }
 
-fn relaunch_now(exit: &mut MessageWriter<AppExit>, profile: Option<&str>) {
+#[derive(Message)]
+struct RelaunchApplication;
+
+#[derive(Message)]
+struct LaunchProfile(String);
+
+fn relaunch_application(
+    mut requests: MessageReader<RelaunchApplication>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    if requests.read().next().is_none() {
+        return;
+    }
     let Ok(exe) = std::env::current_exe() else {
         bevy::log::error!("restart requested but current_exe() is unavailable");
         return;
     };
     let dyld = std::env::var("DYLD_LIBRARY_PATH").ok();
-    let args = relaunch_plan(&exe, std::process::id(), dyld.as_deref(), profile);
+    let args = relaunch_plan(&exe, std::process::id(), dyld.as_deref(), None);
     if let Err(error) = std::process::Command::new("sh").args(&args).spawn() {
         bevy::log::error!("failed to spawn relauncher: {error}");
         return;
@@ -138,7 +160,10 @@ fn profile_launch_plan(
     }
 }
 
-fn launch_profile(profile: &str) {
+fn launch_profiles(mut requests: MessageReader<LaunchProfile>) {
+    let Some(LaunchProfile(profile)) = requests.read().last() else {
+        return;
+    };
     let Ok(exe) = std::env::current_exe() else {
         bevy::log::error!("profile launch requested but current_exe() is unavailable");
         return;
@@ -152,21 +177,30 @@ fn launch_profile(profile: &str) {
     bevy::log::info!(profile, "launched profile window");
 }
 
-fn on_restart_request(_trigger: On<UiInput<RelaunchRequest>>, mut exit: MessageWriter<AppExit>) {
-    relaunch_now(&mut exit, None);
+fn on_restart_request(
+    _trigger: On<UiInput<RelaunchRequest>>,
+    mut requests: MessageWriter<RelaunchApplication>,
+) {
+    requests.write(RelaunchApplication);
 }
 
-fn on_page_relaunch(trigger: On<Receive<UiRelaunchRequest>>, mut exit: MessageWriter<AppExit>) {
+fn on_page_relaunch(
+    trigger: On<Receive<UiRelaunchRequest>>,
+    mut requests: MessageWriter<RelaunchApplication>,
+) {
     if trigger.payload.channel == "vmux-relaunch" {
-        relaunch_now(&mut exit, None);
+        requests.write(RelaunchApplication);
     }
 }
 
-fn switch_profile(mut requests: MessageReader<vmux_team::ProfileSwitchRequested>) {
+fn request_profile_launch(
+    mut requests: MessageReader<vmux_team::ProfileSwitchRequested>,
+    mut launches: MessageWriter<LaunchProfile>,
+) {
     let Some(request) = requests.read().last() else {
         return;
     };
-    launch_profile(&request.profile_id);
+    launches.write(LaunchProfile(request.profile_id.clone()));
 }
 
 #[cfg(test)]

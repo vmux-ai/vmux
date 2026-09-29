@@ -10,29 +10,6 @@ use vmux_setting::{
     event::{CheckForUpdatesRequest, CurrentUpdateCheckStatus, UpdateCheckStatus},
 };
 
-impl Plugin for UpdatePlugin {
-    fn build(&self, app: &mut App) {
-        let config = UpdateConfig {
-            stable_endpoint: self.updater.stable_endpoint.clone(),
-            preview_endpoint: self.updater.preview_endpoint.clone(),
-            pubkey: self.updater.pubkey.clone(),
-            initial_delay: self.updater.initial_delay,
-            poll_interval: self.updater.poll_interval,
-        };
-        let checker = UpdateChecker::new(config.initial_delay);
-        let startup = Mutex::new(Some((config, checker)));
-        app.add_systems(Startup, move |mut commands: Commands| {
-            let (config, checker) = startup
-                .lock()
-                .unwrap()
-                .take()
-                .expect("update checker can only start once");
-            commands.spawn((Name::new("Update checker"), config, checker));
-        })
-        .add_systems(Update, poll_update_result);
-    }
-}
-
 const DEFAULT_STABLE_ENDPOINT: &str = "https://vmux.ai/updates.json";
 const DEFAULT_PREVIEW_ENDPOINT: &str =
     "https://github.com/vmux-ai/vmux/releases/download/nightly/updates-preview.json";
@@ -51,7 +28,7 @@ fn default_pubkey_from_env(runtime: Option<String>, build_time: Option<&'static 
 }
 
 #[derive(Clone, Debug)]
-pub struct VmuxUpdater {
+pub(super) struct UpdatePlugin {
     stable_endpoint: String,
     preview_endpoint: String,
     pubkey: String,
@@ -59,26 +36,7 @@ pub struct VmuxUpdater {
     poll_interval: Duration,
 }
 
-impl VmuxUpdater {
-    pub fn builder() -> VmuxUpdaterBuilder {
-        VmuxUpdaterBuilder::default()
-    }
-
-    pub fn plugin(self) -> UpdatePlugin {
-        UpdatePlugin { updater: self }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct VmuxUpdaterBuilder {
-    stable_endpoint: String,
-    preview_endpoint: String,
-    pubkey: String,
-    initial_delay: Duration,
-    poll_interval: Duration,
-}
-
-impl Default for VmuxUpdaterBuilder {
+impl Default for UpdatePlugin {
     fn default() -> Self {
         Self {
             stable_endpoint: DEFAULT_STABLE_ENDPOINT.to_string(),
@@ -90,45 +48,27 @@ impl Default for VmuxUpdaterBuilder {
     }
 }
 
-impl VmuxUpdaterBuilder {
-    pub fn endpoint(mut self, url: &str) -> Self {
-        self.stable_endpoint = url.to_string();
-        self
-    }
-
-    pub fn preview_endpoint(mut self, url: &str) -> Self {
-        self.preview_endpoint = url.to_string();
-        self
-    }
-
-    pub fn pubkey(mut self, key: &str) -> Self {
-        self.pubkey = key.to_string();
-        self
-    }
-
-    pub fn initial_delay(mut self, delay: Duration) -> Self {
-        self.initial_delay = delay;
-        self
-    }
-
-    pub fn poll_interval(mut self, interval: Duration) -> Self {
-        self.poll_interval = interval;
-        self
-    }
-
-    pub fn build(self) -> VmuxUpdater {
-        VmuxUpdater {
-            stable_endpoint: self.stable_endpoint,
-            preview_endpoint: self.preview_endpoint,
-            pubkey: self.pubkey,
+impl Plugin for UpdatePlugin {
+    fn build(&self, app: &mut App) {
+        let config = UpdateConfig {
+            stable_endpoint: self.stable_endpoint.clone(),
+            preview_endpoint: self.preview_endpoint.clone(),
+            pubkey: self.pubkey.clone(),
             initial_delay: self.initial_delay,
             poll_interval: self.poll_interval,
-        }
+        };
+        let checker = UpdateChecker::new(config.initial_delay);
+        let startup = Mutex::new(Some((config, checker)));
+        app.add_systems(Startup, move |mut commands: Commands| {
+            let (config, checker) = startup
+                .lock()
+                .unwrap()
+                .take()
+                .expect("update checker can only start once");
+            commands.spawn((Name::new("Update checker"), config, checker));
+        })
+        .add_systems(Update, poll_update_result);
     }
-}
-
-pub struct UpdatePlugin {
-    updater: VmuxUpdater,
 }
 
 #[derive(Component)]
@@ -443,7 +383,7 @@ mod tests {
 
     #[test]
     fn default_endpoints_match_release_channels() {
-        let updater = VmuxUpdaterBuilder::default().build();
+        let updater = UpdatePlugin::default();
         let config = UpdateConfig {
             stable_endpoint: updater.stable_endpoint,
             preview_endpoint: updater.preview_endpoint,
@@ -464,7 +404,7 @@ mod tests {
 
     #[test]
     fn default_updater_checks_after_launch_and_hourly() {
-        let updater = VmuxUpdaterBuilder::default();
+        let updater = UpdatePlugin::default();
 
         assert_eq!(updater.initial_delay, Duration::from_secs(5));
         assert_eq!(updater.poll_interval, Duration::from_secs(3600));

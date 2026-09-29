@@ -1,14 +1,6 @@
 use bevy::prelude::*;
 use bevy::window::{Monitor, MonitorSelection, Window, WindowPosition};
 
-impl Plugin for DisplayPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Update, relocate_window_to_live_display);
-    }
-}
-
-pub(crate) struct DisplayPlugin;
-
 fn monitor_rect(monitor: &Monitor) -> IRect {
     let min = monitor.physical_position;
     let size = IVec2::new(
@@ -22,7 +14,7 @@ fn window_off_all_monitors(window: IRect, monitors: &[IRect]) -> bool {
     monitors.iter().all(|m| m.intersect(window).is_empty())
 }
 
-fn relocate_window_to_live_display(
+pub(super) fn relocate_window_to_live_display(
     monitors_added: Query<(), Added<Monitor>>,
     monitors_removed: RemovedComponents<Monitor>,
     monitors: Query<&Monitor>,

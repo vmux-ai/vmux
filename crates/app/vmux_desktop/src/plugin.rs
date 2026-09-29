@@ -1,7 +1,6 @@
 use crate::{
-    display::DisplayPlugin, os_menu::OsMenuPlugin, permission::PermissionsPlugin,
-    remote::RemotePlugin, runtime::RuntimePlugin, shortcut::ShortcutPlugin,
-    window::DesktopWindowPlugin,
+    os_menu::OsMenuPlugin, permission::PermissionsPlugin, remote::RemotePlugin,
+    runtime::RuntimePlugin, shortcut::ShortcutPlugin, window::DesktopWindowPlugin,
 };
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
@@ -46,7 +45,6 @@ impl Plugin for NativeWindowPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             DesktopWindowPlugin,
-            DisplayPlugin,
             crate::appearance::DesktopAppearancePlugin,
             crate::boot_status::BootStatusPlugin,
         ));
@@ -81,7 +79,7 @@ impl Plugin for UpdaterPlugin {
         app.add_plugins(crate::relaunch::RelaunchPlugin);
 
         #[cfg(feature = "updater")]
-        app.add_plugins(crate::updater::VmuxUpdater::builder().build().plugin());
+        app.add_plugins(crate::updater::UpdatePlugin::default());
 
         #[cfg(not(feature = "updater"))]
         app.add_plugins(crate::disabled_features::UpdaterDisabledPlugin);

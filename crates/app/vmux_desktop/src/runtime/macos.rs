@@ -5,6 +5,13 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use vmux_flex::prelude::*;
+
+use super::native::{
+    NativeWindowFrame, NativeWindowResizeDrag, TitlebarClick, TitlebarClicks,
+    WindowTitlebarGesture, WindowZoom, native_resize_edges, native_scroll_should_wake,
+    resized_native_window_frame, windowed_pointer_inside_after_event,
+};
 
 pub(super) struct RuntimePlatformPlugin;
 
@@ -22,13 +29,6 @@ impl Plugin for RuntimePlatformPlugin {
             );
     }
 }
-
-use super::native::{
-    NativeWindowFrame, NativeWindowResizeDrag, TitlebarClick, TitlebarClicks,
-    WindowTitlebarGesture, WindowZoom, native_resize_edges, native_scroll_should_wake,
-    resized_native_window_frame, windowed_pointer_inside_after_event,
-};
-use vmux_flex::prelude::*;
 
 const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 const NATIVE_MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);

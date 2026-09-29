@@ -8,7 +8,7 @@ pub mod bundle;
 pub mod cleanup;
 pub mod cli;
 pub use cli::ServiceCliPlugin;
-pub mod client;
+mod client;
 mod launch_agent;
 #[cfg(target_os = "macos")]
 pub mod launchd;
