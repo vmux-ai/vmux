@@ -1,9 +1,5 @@
-use std::collections::{HashMap, HashSet};
-
 use unicode_width::UnicodeWidthChar;
-use vmux_core::event::{
-    DiagSeverity, FileDiagnostic, LspPkgStatus, MdTableAlign, OpenEditorItem, StyledSpan, TreeRow,
-};
+use vmux_core::event::{DiagSeverity, FileDiagnostic, MdTableAlign, StyledSpan};
 
 pub fn editor_drag_started(origin: (i32, i32), current: (i32, i32)) -> bool {
     let dx = f64::from(current.0) - f64::from(origin.0);
@@ -305,113 +301,6 @@ pub fn note_source_position(source: &str, start_line: u32, offset: u32) -> (u32,
     (line, col)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PackageOperation {
-    Install,
-    Update,
-    Uninstall,
-    None,
-}
-
-pub fn merge_tree_motion_rows(current: &[TreeRow], next: &[TreeRow]) -> Vec<(TreeRow, bool)> {
-    let current_paths: HashSet<&str> = current.iter().map(|row| row.path.as_str()).collect();
-    let next_indices: HashMap<&str, usize> = next
-        .iter()
-        .enumerate()
-        .map(|(index, row)| (row.path.as_str(), index))
-        .collect();
-    let mut exiting_after = vec![Vec::new(); next.len() + 1];
-    let mut anchor = 0usize;
-    for row in current {
-        if let Some(index) = next_indices.get(row.path.as_str()) {
-            anchor = index + 1;
-        } else {
-            exiting_after[anchor].push(row.clone());
-        }
-    }
-    let exiting_count = exiting_after.iter().map(Vec::len).sum::<usize>();
-    let mut merged = Vec::with_capacity(next.len() + exiting_count);
-    merged.extend(exiting_after[0].drain(..).map(|row| (row, false)));
-    for (index, row) in next.iter().cloned().enumerate() {
-        let visible = current_paths.contains(row.path.as_str());
-        merged.push((row, visible));
-        merged.extend(exiting_after[index + 1].drain(..).map(|row| (row, false)));
-    }
-    merged
-}
-
-pub fn pkg_status_label(status: LspPkgStatus) -> &'static str {
-    match status {
-        LspPkgStatus::Available => "Available",
-        LspPkgStatus::OnPath => "On PATH",
-        LspPkgStatus::Installing => "Installing…",
-        LspPkgStatus::Installed => "Installed",
-        LspPkgStatus::Outdated => "Update available",
-        LspPkgStatus::Running => "Running",
-        LspPkgStatus::Failed => "Failed",
-    }
-}
-
-pub fn pkg_status_class(status: LspPkgStatus) -> &'static str {
-    match status {
-        LspPkgStatus::Installed => "text-ansi-2",
-        LspPkgStatus::Running => "text-primary",
-        LspPkgStatus::OnPath => "text-ansi-6",
-        LspPkgStatus::Installing => "text-ansi-4",
-        LspPkgStatus::Outdated => "text-ansi-3",
-        LspPkgStatus::Failed => "text-ansi-1",
-        LspPkgStatus::Available => "text-muted-foreground",
-    }
-}
-
-pub fn package_operation(status: LspPkgStatus, installable: bool) -> PackageOperation {
-    match status {
-        LspPkgStatus::Installed | LspPkgStatus::Running => PackageOperation::Uninstall,
-        LspPkgStatus::Outdated => PackageOperation::Update,
-        LspPkgStatus::Installing => PackageOperation::None,
-        LspPkgStatus::OnPath => PackageOperation::None,
-        LspPkgStatus::Available | LspPkgStatus::Failed => {
-            if installable {
-                PackageOperation::Install
-            } else {
-                PackageOperation::None
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ContentClass {
-    Dir,
-    Image { mime: String },
-    Text,
-    Other,
-}
-
-pub fn image_mime(path: &str) -> Option<&'static str> {
-    vmux_core::media::image_mime(path)
-}
-
-pub fn classify(path: &str, is_dir: bool) -> ContentClass {
-    if is_dir {
-        return ContentClass::Dir;
-    }
-    if let Some(mime) = image_mime(path) {
-        return ContentClass::Image {
-            mime: mime.to_string(),
-        };
-    }
-    if path.rsplit('/').next().is_some_and(|s| s.contains('.')) {
-        ContentClass::Text
-    } else {
-        ContentClass::Other
-    }
-}
-
-pub fn clamp_selection(idx: usize, len: usize) -> usize {
-    if len == 0 { 0 } else { idx.min(len - 1) }
-}
-
 pub fn centered_scroll_top(target_center: f64, viewport_height: f64) -> f64 {
     (target_center - viewport_height * 0.5).max(0.0)
 }
@@ -708,115 +597,6 @@ pub fn squiggle_style(left: f64, width: f64, color_rgb: &str) -> String {
     )
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct EditorTabItem {
-    pub name: String,
-    pub context: String,
-    pub path: String,
-    pub active: bool,
-    pub dirty: bool,
-    pub is_dir: bool,
-}
-
-impl EditorTabItem {
-    pub fn all(items: &[OpenEditorItem]) -> Vec<EditorTabItem> {
-        let mut seen: HashMap<&str, usize> = HashMap::new();
-        for item in items {
-            *seen.entry(item.name.as_str()).or_insert(0) += 1;
-        }
-        let mut tabs = Vec::with_capacity(items.len());
-        for item in items {
-            let shared = seen.get(item.name.as_str()).copied().unwrap_or(0) > 1;
-            let context = match shared {
-                true => Self::parent_of(&item.path),
-                false => String::new(),
-            };
-            tabs.push(EditorTabItem {
-                name: item.name.clone(),
-                context,
-                path: item.path.clone(),
-                active: item.active,
-                dirty: item.dirty,
-                is_dir: item.is_dir,
-            });
-        }
-        tabs
-    }
-
-    pub fn element_id(&self) -> String {
-        format!("editor-tab-{}", self.path)
-    }
-
-    fn parent_of(path: &str) -> String {
-        let Some((parent, _)) = path.trim_end_matches('/').rsplit_once('/') else {
-            return String::new();
-        };
-        match parent.rsplit('/').next() {
-            Some("") | None => "/".to_string(),
-            Some(name) => name.to_string(),
-        }
-    }
-}
-
-#[cfg(test)]
-mod editor_tab_tests {
-    use super::*;
-
-    fn open(name: &str, path: &str) -> OpenEditorItem {
-        OpenEditorItem {
-            name: name.to_string(),
-            path: path.to_string(),
-            active: false,
-            dirty: false,
-            is_dir: false,
-        }
-    }
-
-    #[test]
-    fn only_a_shared_basename_carries_its_directory() {
-        let tabs = EditorTabItem::all(&[
-            open("mod.rs", "/w/alpha/mod.rs"),
-            open("page.rs", "/w/beta/page.rs"),
-            open("mod.rs", "/w/beta/mod.rs"),
-        ]);
-        assert_eq!(tabs[0].context, "alpha");
-        assert_eq!(tabs[1].context, "");
-        assert_eq!(tabs[2].context, "beta");
-    }
-
-    #[test]
-    fn a_shared_basename_at_the_root_names_the_root() {
-        let tabs = EditorTabItem::all(&[open("a.rs", "/a.rs"), open("a.rs", "/w/a.rs")]);
-        assert_eq!(tabs[0].context, "/");
-        assert_eq!(tabs[1].context, "w");
-    }
-}
-
-#[cfg(test)]
-mod dir_browser_tests {
-    use super::*;
-
-    #[test]
-    fn classify_dir_and_image_and_text() {
-        assert_eq!(classify("/a/b", true), ContentClass::Dir);
-        assert_eq!(
-            classify("/a/p.PNG", false),
-            ContentClass::Image {
-                mime: "image/png".into()
-            }
-        );
-        assert_eq!(classify("/a/main.rs", false), ContentClass::Text);
-        assert_eq!(classify("/a/blob", false), ContentClass::Other);
-    }
-
-    #[test]
-    fn clamp_selection_bounds() {
-        assert_eq!(clamp_selection(5, 3), 2);
-        assert_eq!(clamp_selection(0, 0), 0);
-        assert_eq!(clamp_selection(1, 3), 1);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -913,41 +693,6 @@ mod tests {
     }
 
     #[test]
-    fn package_operation_by_status() {
-        assert_eq!(
-            package_operation(LspPkgStatus::Available, true),
-            PackageOperation::Install
-        );
-        assert_eq!(
-            package_operation(LspPkgStatus::Available, false),
-            PackageOperation::None
-        );
-        assert_eq!(
-            package_operation(LspPkgStatus::Installed, true),
-            PackageOperation::Uninstall
-        );
-        assert_eq!(
-            package_operation(LspPkgStatus::Outdated, true),
-            PackageOperation::Update
-        );
-        assert_eq!(
-            package_operation(LspPkgStatus::Installing, true),
-            PackageOperation::None
-        );
-        assert_eq!(
-            package_operation(LspPkgStatus::OnPath, true),
-            PackageOperation::None
-        );
-    }
-
-    #[test]
-    fn pkg_status_label_covers_states() {
-        assert_eq!(pkg_status_label(LspPkgStatus::OnPath), "On PATH");
-        assert_eq!(pkg_status_label(LspPkgStatus::Installed), "Installed");
-        assert_eq!(pkg_status_label(LspPkgStatus::Available), "Available");
-    }
-
-    #[test]
     fn cursor_centering_places_target_at_viewport_midpoint() {
         assert_eq!(centered_scroll_top(500.0, 400.0), 300.0);
         assert_eq!(centered_scroll_top(100.0, 400.0), 0.0);
@@ -1009,53 +754,6 @@ mod tests {
         assert_eq!(
             live_text(source, 10),
             "See [[projects/vmux|vmux project]] now"
-        );
-    }
-
-    #[test]
-    fn tree_motion_merge_is_linear_ordered_and_marks_entries() {
-        let row = |path: &str| TreeRow {
-            name: path.to_string(),
-            path: path.to_string(),
-            depth: 0,
-            is_dir: false,
-            expanded: false,
-            loading: false,
-        };
-        let current = vec![row("a"), row("b"), row("c"), row("d")];
-        let next = vec![row("a"), row("x"), row("d")];
-        let merged = merge_tree_motion_rows(&current, &next);
-        assert_eq!(
-            merged
-                .iter()
-                .map(|(row, visible)| (row.path.as_str(), *visible))
-                .collect::<Vec<_>>(),
-            vec![
-                ("a", true),
-                ("b", false),
-                ("c", false),
-                ("x", false),
-                ("d", true)
-            ]
-        );
-    }
-
-    #[test]
-    fn a_tree_arriving_into_nothing_is_entirely_hidden() {
-        let row = |path: &str| TreeRow {
-            name: path.to_string(),
-            path: path.to_string(),
-            depth: 0,
-            is_dir: false,
-            expanded: false,
-            loading: false,
-        };
-
-        let merged = merge_tree_motion_rows(&[], &[row("a"), row("b")]);
-
-        assert!(
-            merged.iter().all(|(_, visible)| !visible),
-            "nothing on screen to animate from, so every row is staged for entry"
         );
     }
 }

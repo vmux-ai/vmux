@@ -1,11 +1,10 @@
 #![allow(non_snake_case)]
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::rc::Rc;
 
 use super::state::use_file_ui;
-use crate::page_model::merge_tree_motion_rows;
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
@@ -433,7 +432,7 @@ impl TreeRows {
             );
             return;
         }
-        let merged = merge_tree_motion_rows(&current, &next)
+        let merged = Self::merge(&current, &next)
             .into_iter()
             .map(|(row, visible)| MotionRow { row, visible })
             .collect();
@@ -536,6 +535,33 @@ impl TreeRows {
             paths.push(motion.row.path.clone());
         }
         paths
+    }
+
+    fn merge(current: &[TreeRow], next: &[TreeRow]) -> Vec<(TreeRow, bool)> {
+        let current_paths: HashSet<&str> = current.iter().map(|row| row.path.as_str()).collect();
+        let next_indices: HashMap<&str, usize> = next
+            .iter()
+            .enumerate()
+            .map(|(index, row)| (row.path.as_str(), index))
+            .collect();
+        let mut exiting_after = vec![Vec::new(); next.len() + 1];
+        let mut anchor = 0usize;
+        for row in current {
+            if let Some(index) = next_indices.get(row.path.as_str()) {
+                anchor = index + 1;
+            } else {
+                exiting_after[anchor].push(row.clone());
+            }
+        }
+        let exiting_count = exiting_after.iter().map(Vec::len).sum::<usize>();
+        let mut merged = Vec::with_capacity(next.len() + exiting_count);
+        merged.extend(exiting_after[0].drain(..).map(|row| (row, false)));
+        for (index, row) in next.iter().cloned().enumerate() {
+            let visible = current_paths.contains(row.path.as_str());
+            merged.push((row, visible));
+            merged.extend(exiting_after[index + 1].drain(..).map(|row| (row, false)));
+        }
+        merged
     }
 }
 
@@ -2100,5 +2126,49 @@ mod tests {
         let chain = AncestorChain::from_depths(&depths, 11);
         assert_eq!(chain.len(), STICKY_DEPTH_MAX);
         assert_eq!(chain, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn tree_motion_merge_is_linear_ordered_and_marks_entries() {
+        let row = |path: &str| TreeRow {
+            name: path.to_string(),
+            path: path.to_string(),
+            depth: 0,
+            is_dir: false,
+            expanded: false,
+            loading: false,
+        };
+        let current = vec![row("a"), row("b"), row("c"), row("d")];
+        let next = vec![row("a"), row("x"), row("d")];
+        let merged = TreeRows::merge(&current, &next);
+        assert_eq!(
+            merged
+                .iter()
+                .map(|(row, visible)| (row.path.as_str(), *visible))
+                .collect::<Vec<_>>(),
+            vec![
+                ("a", true),
+                ("b", false),
+                ("c", false),
+                ("x", false),
+                ("d", true)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_tree_arriving_into_nothing_is_entirely_hidden() {
+        let row = |path: &str| TreeRow {
+            name: path.to_string(),
+            path: path.to_string(),
+            depth: 0,
+            is_dir: false,
+            expanded: false,
+            loading: false,
+        };
+
+        let merged = TreeRows::merge(&[], &[row("a"), row("b")]);
+
+        assert!(merged.iter().all(|(_, visible)| !visible));
     }
 }

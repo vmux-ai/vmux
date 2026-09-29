@@ -10,8 +10,6 @@ use vmux_ui::file_icon::{FileIcon, TypeIcon, file_icon_kind};
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-use crate::page_model::{PackageOperation, package_operation, pkg_status_class};
-
 #[vmux_native::page(page = "lsp", component = Page)]
 pub(crate) struct LspPage;
 
@@ -70,7 +68,7 @@ pub fn Page() -> Element {
 fn PackageRow(package: LspPackage, progress: Option<LspInstallProgress>) -> Element {
     let item = package.clone();
     let install_progress = progress;
-    let operation = package_operation(item.status, item.installable);
+    let operation = PackageOperation::for_status(item.status, item.installable);
     let action_name = item.name.clone();
     let mut subtitle = item.version.clone().unwrap_or_default();
     if let Some(progress) = install_progress.as_ref() {
@@ -105,9 +103,45 @@ fn PackageRow(package: LspPackage, progress: Option<LspInstallProgress>) -> Elem
                 }
             },
             actions: rsx! {
-                span { class: "shrink-0 text-xs {pkg_status_class(item.status)}", "{status_label}" }
+                span { class: "shrink-0 text-xs {PackageStatus(item.status).class()}", "{status_label}" }
                 PackageOperationButton { operation, name: action_name.clone(), requires: item.requires.clone() }
             },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PackageOperation {
+    Install,
+    Update,
+    Uninstall,
+    None,
+}
+
+impl PackageOperation {
+    fn for_status(status: LspPkgStatus, installable: bool) -> Self {
+        match status {
+            LspPkgStatus::Installed | LspPkgStatus::Running => Self::Uninstall,
+            LspPkgStatus::Outdated => Self::Update,
+            LspPkgStatus::Installing | LspPkgStatus::OnPath => Self::None,
+            LspPkgStatus::Available | LspPkgStatus::Failed if installable => Self::Install,
+            LspPkgStatus::Available | LspPkgStatus::Failed => Self::None,
+        }
+    }
+}
+
+struct PackageStatus(LspPkgStatus);
+
+impl PackageStatus {
+    fn class(self) -> &'static str {
+        match self.0 {
+            LspPkgStatus::Installed => "text-ansi-2",
+            LspPkgStatus::Running => "text-primary",
+            LspPkgStatus::OnPath => "text-ansi-6",
+            LspPkgStatus::Installing => "text-ansi-4",
+            LspPkgStatus::Outdated => "text-ansi-3",
+            LspPkgStatus::Failed => "text-ansi-1",
+            LspPkgStatus::Available => "text-muted-foreground",
         }
     }
 }
@@ -212,5 +246,38 @@ fn PackageOperationButton(
             }
             None => rsx! {},
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn package_operation_follows_status_and_installability() {
+        assert_eq!(
+            PackageOperation::for_status(LspPkgStatus::Available, true),
+            PackageOperation::Install
+        );
+        assert_eq!(
+            PackageOperation::for_status(LspPkgStatus::Available, false),
+            PackageOperation::None
+        );
+        assert_eq!(
+            PackageOperation::for_status(LspPkgStatus::Installed, true),
+            PackageOperation::Uninstall
+        );
+        assert_eq!(
+            PackageOperation::for_status(LspPkgStatus::Outdated, true),
+            PackageOperation::Update
+        );
+        assert_eq!(
+            PackageOperation::for_status(LspPkgStatus::Installing, true),
+            PackageOperation::None
+        );
+        assert_eq!(
+            PackageOperation::for_status(LspPkgStatus::OnPath, true),
+            PackageOperation::None
+        );
     }
 }

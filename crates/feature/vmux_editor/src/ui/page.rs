@@ -16,12 +16,12 @@ use super::sidebar::{ExplorerPane, ExplorerSidebar, ExplorerToggleButton, PaneWi
 use super::state::use_file_ui;
 use super::status::{EncodingRecovery, FileStatusInfo, FileStatusScope};
 use super::text_geometry::RowRuler;
-use super::toolbar::{EditorTabStrip, FindBar, VimStatus};
+use super::toolbar::{EditorTabItem, EditorTabStrip, FindBar, VimStatus};
 use std::collections::HashMap;
 
 use crate::page_model::{
-    CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, editor_drag_started,
-    gutter_width, note_cursor_activation, severity_color_class, span_style,
+    CellMetrics, ColumnRuler, NoteCursorActivation, editor_drag_started, gutter_width,
+    note_cursor_activation, severity_color_class, span_style,
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
