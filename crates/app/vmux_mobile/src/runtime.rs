@@ -27,7 +27,7 @@ struct MobileRuntime {
 #[derive(Default)]
 struct UiStateListeners(pub(crate) HashMap<String, BytesListener>);
 
-struct MobileRuntimePlugin;
+pub(super) struct MobileRuntimePlugin;
 
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 struct DeliverUiStateEmits;

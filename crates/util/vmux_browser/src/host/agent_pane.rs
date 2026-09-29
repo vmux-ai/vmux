@@ -4,15 +4,7 @@ use vmux_layout::pane::Pane;
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct AgentBrowserResolve<'w, 's> {
-    agent_terms: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static vmux_core::ProcessId,
-            &'static ChildOf,
-        ),
-    >,
+    agent_terms: Query<'w, 's, (Entity, &'static vmux_core::ProcessId, &'static ChildOf)>,
     kinds: Query<'w, 's, &'static AgentSession>,
     child_of: Query<'w, 's, &'static ChildOf>,
     pane_children: Query<'w, 's, &'static Children, With<Pane>>,

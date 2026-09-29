@@ -126,112 +126,6 @@ impl ServiceHandle {
         true
     }
 
-    pub(super) fn connect_with_wake(wake: Option<ServiceWake>) -> Option<Self> {
-        if !Self::service_running() {
-            return None;
-        }
-
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .build()
-            .ok()?;
-        let rt = Arc::new(rt);
-
-        let conn = {
-            let rt2 = Arc::clone(&rt);
-            let (tx, rx) = std::sync::mpsc::channel();
-            std::thread::Builder::new()
-                .name("service-connect".into())
-                .spawn(move || {
-                    let result = rt2.block_on(async { ServiceConnection::connect().await });
-                    let _ = tx.send(result);
-                })
-                .ok()?;
-            match rx.recv_timeout(std::time::Duration::from_secs(2)) {
-                Ok(Ok(c)) => Arc::new(c),
-                Ok(Err(e)) => {
-                    tracing::error!(error = %e, "service connect failed");
-                    return None;
-                }
-                Err(_) => {
-                    tracing::error!("service connect timed out");
-                    return None;
-                }
-            }
-        };
-
-        let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<ClientMessage>();
-        let (msg_tx, msg_rx) = std::sync::mpsc::channel::<ServiceMessage>();
-        let disconnected = Arc::new(AtomicBool::new(false));
-        let wake_pending = Arc::new(AtomicBool::new(false));
-
-        let conn_r = Arc::clone(&conn);
-        let rt2 = Arc::clone(&rt);
-        let reader_disconnected = Arc::clone(&disconnected);
-        let reader_wake_pending = Arc::clone(&wake_pending);
-        let reader_wake = wake.clone();
-        std::thread::Builder::new()
-            .name("service-reader".into())
-            .spawn(move || {
-                rt2.block_on(async move {
-                    loop {
-                        match conn_r.recv().await {
-                            Ok(Some(msg)) => {
-                                if forward_service_message(
-                                    &msg_tx,
-                                    reader_wake.as_ref(),
-                                    &reader_wake_pending,
-                                    msg,
-                                )
-                                .is_err()
-                                {
-                                    break;
-                                }
-                            }
-                            Ok(None) => break,
-                            Err(_) => break,
-                        }
-                    }
-                    report_service_disconnected(
-                        &reader_disconnected,
-                        reader_wake.as_ref(),
-                        &reader_wake_pending,
-                    );
-                });
-            })
-            .ok()?;
-
-        let rt3 = Arc::clone(&rt);
-        let writer_disconnected = Arc::clone(&disconnected);
-        let writer_wake_pending = Arc::clone(&wake_pending);
-        std::thread::Builder::new()
-            .name("service-writer".into())
-            .spawn(move || {
-                rt3.block_on(async move {
-                    while let Ok(msg) = cmd_rx.recv() {
-                        if conn.send(&msg).await.is_err() {
-                            report_service_disconnected(
-                                &writer_disconnected,
-                                wake.as_ref(),
-                                &writer_wake_pending,
-                            );
-                            break;
-                        }
-                    }
-                });
-            })
-            .ok()?;
-
-        Some(Self {
-            cmd_tx,
-            msg_rx: std::sync::Mutex::new(msg_rx),
-            disconnected,
-            wake_pending,
-            _runtime: rt,
-        })
-    }
-
     pub(super) fn send(&self, msg: ClientMessage) -> bool {
         self.cmd_tx.send(msg).is_ok()
     }
@@ -260,6 +154,112 @@ impl ServiceHandle {
             ),
         }
     }
+}
+
+pub(super) fn connect_service_handle(wake: Option<ServiceWake>) -> Option<ServiceHandle> {
+    if !ServiceHandle::service_running() {
+        return None;
+    }
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .ok()?;
+    let runtime = Arc::new(runtime);
+
+    let connection = {
+        let runtime = Arc::clone(&runtime);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("service-connect".into())
+            .spawn(move || {
+                let result = runtime.block_on(async { ServiceConnection::connect().await });
+                let _ = sender.send(result);
+            })
+            .ok()?;
+        match receiver.recv_timeout(std::time::Duration::from_secs(2)) {
+            Ok(Ok(connection)) => Arc::new(connection),
+            Ok(Err(error)) => {
+                tracing::error!(%error, "service connect failed");
+                return None;
+            }
+            Err(_) => {
+                tracing::error!("service connect timed out");
+                return None;
+            }
+        }
+    };
+
+    let (command_sender, command_receiver) = std::sync::mpsc::channel::<ClientMessage>();
+    let (message_sender, message_receiver) = std::sync::mpsc::channel::<ServiceMessage>();
+    let disconnected = Arc::new(AtomicBool::new(false));
+    let wake_pending = Arc::new(AtomicBool::new(false));
+
+    let read_connection = Arc::clone(&connection);
+    let read_runtime = Arc::clone(&runtime);
+    let reader_disconnected = Arc::clone(&disconnected);
+    let reader_wake_pending = Arc::clone(&wake_pending);
+    let reader_wake = wake.clone();
+    std::thread::Builder::new()
+        .name("service-reader".into())
+        .spawn(move || {
+            read_runtime.block_on(async move {
+                loop {
+                    match read_connection.recv().await {
+                        Ok(Some(message)) => {
+                            if forward_service_message(
+                                &message_sender,
+                                reader_wake.as_ref(),
+                                &reader_wake_pending,
+                                message,
+                            )
+                            .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Ok(None) => break,
+                        Err(_) => break,
+                    }
+                }
+                report_service_disconnected(
+                    &reader_disconnected,
+                    reader_wake.as_ref(),
+                    &reader_wake_pending,
+                );
+            });
+        })
+        .ok()?;
+
+    let write_runtime = Arc::clone(&runtime);
+    let writer_disconnected = Arc::clone(&disconnected);
+    let writer_wake_pending = Arc::clone(&wake_pending);
+    std::thread::Builder::new()
+        .name("service-writer".into())
+        .spawn(move || {
+            write_runtime.block_on(async move {
+                while let Ok(message) = command_receiver.recv() {
+                    if connection.send(&message).await.is_err() {
+                        report_service_disconnected(
+                            &writer_disconnected,
+                            wake.as_ref(),
+                            &writer_wake_pending,
+                        );
+                        break;
+                    }
+                }
+            });
+        })
+        .ok()?;
+
+    Some(ServiceHandle {
+        cmd_tx: command_sender,
+        msg_rx: std::sync::Mutex::new(message_receiver),
+        disconnected,
+        wake_pending,
+        _runtime: runtime,
+    })
 }
 
 fn drain_service_messages_bounded(

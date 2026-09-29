@@ -38,51 +38,6 @@ impl Backend {
             Self::Launchctl => &[RegistrationStep::EnsureLaunchAgent],
         }
     }
-
-    pub fn ensure_running(
-        &self,
-        profile: &str,
-        binary: &DaemonBinary,
-    ) -> Result<(), RegistrationError> {
-        #[cfg(target_os = "macos")]
-        for step in self.registration_steps() {
-            match step {
-                RegistrationStep::CleanupLegacy => {
-                    match crate::cleanup::cleanup_legacy_registrations() {
-                        Ok(0) => {}
-                        Ok(n) => tracing::info!(removed = n, "removed legacy launchd plists"),
-                        Err(e) => {
-                            tracing::warn!(error = %e, "legacy plist cleanup failed (continuing)")
-                        }
-                    }
-                }
-                RegistrationStep::UnregisterMainApp => {
-                    if let Err(e) = crate::sm_app_service::unregister_main_app() {
-                        tracing::debug!(error = %e, "unregister main app login item (ignored)");
-                    }
-                }
-                RegistrationStep::UnregisterEmbeddedAgent => {
-                    if let Err(e) =
-                        crate::sm_app_service::unregister_agent(bundle::EMBEDDED_AGENT_PLIST)
-                    {
-                        tracing::debug!(error = %e, "unregister embedded agent (ignored)");
-                    }
-                }
-                RegistrationStep::RegisterEmbeddedAgent => {
-                    crate::sm_app_service::register_agent(bundle::EMBEDDED_AGENT_PLIST)?;
-                }
-                RegistrationStep::KickstartEmbeddedAgent => {
-                    crate::launchd::kickstart(bundle::EMBEDDED_AGENT_LABEL)?;
-                }
-                RegistrationStep::EnsureLaunchAgent => {
-                    crate::LaunchAgent::for_profile(profile).ensure_running(binary.path())?;
-                }
-            }
-        }
-        #[cfg(not(target_os = "macos"))]
-        let _ = (profile, binary);
-        Ok(())
-    }
 }
 
 impl DaemonBinary {

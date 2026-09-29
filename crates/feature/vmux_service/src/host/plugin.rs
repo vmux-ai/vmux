@@ -5,11 +5,13 @@ use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 
 use crate::DaemonBinary;
-use crate::registry::Backend;
+#[cfg(target_os = "macos")]
+use crate::registry::RegistrationStep;
+use crate::registry::{Backend, RegistrationError};
 use vmux_api::protocol::ClientMessage;
 use vmux_core::service::{ServiceConnected, ServiceInbound, ServiceRequest, ServiceUnavailable};
 
-use super::client::{ServiceClient, ServiceHandle, ServiceWake};
+use super::client::{ServiceClient, ServiceHandle, ServiceWake, connect_service_handle};
 
 #[derive(Component)]
 struct ServiceConnectRetry {
@@ -30,8 +32,29 @@ impl Default for ServiceConnectRetry {
     }
 }
 
+impl ServiceConnectRetry {
+    fn failed(&mut self) -> Option<&'static str> {
+        self.remaining_attempts = self.remaining_attempts.saturating_sub(1);
+        let message = if self.remaining_attempts == 0 && !self.reported_unavailable {
+            self.reported_unavailable = true;
+            Some("vmux service unavailable — run `vmux service logs` for details.")
+        } else {
+            None
+        };
+        self.next_delay_ms = (self.next_delay_ms * 2).min(1600);
+        self.timer = Timer::new(
+            std::time::Duration::from_millis(self.next_delay_ms),
+            TimerMode::Once,
+        );
+        message
+    }
+}
+
 #[derive(Component)]
 struct ServiceWakeCallback(Option<ServiceWake>);
+
+#[derive(Component)]
+struct ServiceConnectTask(crossbeam_channel::Receiver<Option<ServiceHandle>>);
 
 #[derive(Component, Default)]
 struct PendingServiceRequests(VecDeque<ClientMessage>);
@@ -69,7 +92,8 @@ impl Plugin for ServicePlugin {
                 (
                     receive_service_messages,
                     reconnect_disconnected_service,
-                    connect_service,
+                    finish_service_connection,
+                    start_service_connection,
                 )
                     .chain(),
             )
@@ -118,9 +142,67 @@ fn register_service(
     mut commands: Commands,
 ) {
     for (entity, binary, registration) in &registrations {
-        let result = registration
-            .0
-            .ensure_running(crate::ServicePaths::build_profile(), binary);
+        #[cfg(target_os = "macos")]
+        let result = {
+            let mut result = Ok(());
+            for step in registration.0.registration_steps() {
+                let step_result = match step {
+                    RegistrationStep::CleanupLegacy => {
+                        match crate::cleanup::cleanup_legacy_registrations() {
+                            Ok(0) => {}
+                            Ok(count) => {
+                                tracing::info!(removed = count, "removed legacy launchd plists")
+                            }
+                            Err(error) => tracing::warn!(
+                                %error,
+                                "legacy plist cleanup failed (continuing)"
+                            ),
+                        }
+                        Ok(())
+                    }
+                    RegistrationStep::UnregisterMainApp => {
+                        if let Err(error) = crate::sm_app_service::unregister_main_app() {
+                            tracing::debug!(
+                                %error,
+                                "unregister main app login item (ignored)"
+                            );
+                        }
+                        Ok(())
+                    }
+                    RegistrationStep::UnregisterEmbeddedAgent => {
+                        if let Err(error) = crate::sm_app_service::unregister_agent(
+                            crate::bundle::EMBEDDED_AGENT_PLIST,
+                        ) {
+                            tracing::debug!(%error, "unregister embedded agent (ignored)");
+                        }
+                        Ok(())
+                    }
+                    RegistrationStep::RegisterEmbeddedAgent => {
+                        crate::sm_app_service::register_agent(crate::bundle::EMBEDDED_AGENT_PLIST)
+                            .map_err(RegistrationError::from)
+                    }
+                    RegistrationStep::KickstartEmbeddedAgent => {
+                        crate::launchd::kickstart(crate::bundle::EMBEDDED_AGENT_LABEL)
+                            .map_err(RegistrationError::from)
+                    }
+                    RegistrationStep::EnsureLaunchAgent => {
+                        crate::LaunchAgent::for_profile(crate::ServicePaths::build_profile())
+                            .ensure_running(binary.path())
+                            .map_err(RegistrationError::from)
+                    }
+                };
+                if step_result.is_err() {
+                    result = step_result;
+                    break;
+                }
+            }
+            result
+        };
+        #[cfg(not(target_os = "macos"))]
+        let result: Result<(), RegistrationError> = {
+            let _ = (binary, registration);
+            Ok(())
+        };
         let mut service = commands.entity(entity);
         service.remove::<ServiceRegistration>();
         match result {
@@ -161,10 +243,10 @@ fn launch_detached_service(
     }
 }
 
-fn connect_service(
+fn start_service_connection(
     mut runtimes: Query<
         (Entity, &mut ServiceConnectRetry, &ServiceWakeCallback),
-        Without<ServiceClient>,
+        (Without<ServiceClient>, Without<ServiceConnectTask>),
     >,
     time: Res<Time>,
     mut commands: Commands,
@@ -175,30 +257,52 @@ fn connect_service(
             continue;
         }
         let socket = crate::ServicePaths::current().socket();
-        if socket.exists()
-            && let Some(handle) = ServiceHandle::connect_with_wake(wake.0.clone())
-        {
-            commands
-                .entity(entity)
-                .remove::<ServiceConnectRetry>()
-                .remove::<ServiceUnavailable>()
-                .insert((ServiceClient(handle), ServiceConnected));
-            continue;
+        if socket.exists() {
+            let (sender, receiver) = crossbeam_channel::bounded(1);
+            let wake = wake.0.clone();
+            let started = std::thread::Builder::new()
+                .name("service-connect-worker".into())
+                .spawn(move || {
+                    let _ = sender.send(connect_service_handle(wake));
+                });
+            if started.is_ok() {
+                commands.entity(entity).insert(ServiceConnectTask(receiver));
+                continue;
+            }
         }
-        retry.remaining_attempts = retry.remaining_attempts.saturating_sub(1);
-        if retry.remaining_attempts == 0 && !retry.reported_unavailable {
-            let message = "vmux service unavailable — run `vmux service logs` for details.";
+        if let Some(message) = retry.failed() {
             tracing::error!(message);
-            retry.reported_unavailable = true;
             commands
                 .entity(entity)
                 .insert(ServiceUnavailable(message.to_string()));
         }
-        retry.next_delay_ms = (retry.next_delay_ms * 2).min(1600);
-        retry.timer = Timer::new(
-            std::time::Duration::from_millis(retry.next_delay_ms),
-            TimerMode::Once,
-        );
+    }
+}
+
+fn finish_service_connection(
+    mut tasks: Query<(Entity, &mut ServiceConnectRetry, &ServiceConnectTask)>,
+    mut commands: Commands,
+) {
+    for (entity, mut retry, task) in &mut tasks {
+        match task.0.try_recv() {
+            Ok(Some(handle)) => {
+                commands
+                    .entity(entity)
+                    .remove::<ServiceConnectTask>()
+                    .remove::<ServiceConnectRetry>()
+                    .remove::<ServiceUnavailable>()
+                    .insert((ServiceClient(handle), ServiceConnected));
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Ok(None) | Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                let mut service = commands.entity(entity);
+                service.remove::<ServiceConnectTask>();
+                if let Some(message) = retry.failed() {
+                    tracing::error!(message);
+                    service.insert(ServiceUnavailable(message.to_string()));
+                }
+            }
+        }
     }
 }
 
