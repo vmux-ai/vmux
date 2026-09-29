@@ -1022,7 +1022,17 @@ impl TerminalSettings {
     }
 }
 
-const DEFAULT_SETTINGS: &str = include_str!("../settings.ron");
+const FEATURE_MANIFEST: &str = include_str!("../feature.ron");
+
+#[derive(Deserialize)]
+struct SettingsFeatureManifest {
+    policy: SettingsFeaturePolicy,
+}
+
+#[derive(Deserialize)]
+struct SettingsFeaturePolicy {
+    defaults: AppSettings,
+}
 
 #[derive(Component)]
 pub(crate) struct SettingsWatcher {
@@ -1226,7 +1236,10 @@ fn reload_settings_on_change(
 }
 
 fn load_embedded_settings() -> AppSettings {
-    ron::de::from_str(DEFAULT_SETTINGS).expect("embedded settings.ron must parse")
+    ron::de::from_str::<SettingsFeatureManifest>(FEATURE_MANIFEST)
+        .expect("embedded feature settings must parse")
+        .policy
+        .defaults
 }
 
 fn sync_layout_resources(commands: &mut Commands, settings: &AppSettings) {
