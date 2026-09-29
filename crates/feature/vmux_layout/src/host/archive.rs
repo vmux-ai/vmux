@@ -7,12 +7,18 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
+use vmux_command::{
+    CommandDefinitions, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
+};
 use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
 use vmux_core::terminal::{TerminalLaunch, TerminalSpawnRequest, TerminalSpawnTarget};
+#[cfg(test)]
+use vmux_core::{Active, terminal::TerminalKind};
 use vmux_core::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
     PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, now_millis,
 };
+use vmux_history::LastActivatedAt;
 
 use super::command::LayoutRequestSet;
 use crate::event::TERMINAL_PAGE_URL;
@@ -40,16 +46,14 @@ struct ReopenClosedPage;
 struct ReopenClosedPageBinding;
 
 fn spawn_reopen_closed_page_command(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_feature_ron(
-        include_str!("../feature.ron"),
-        "archive",
-    );
+    let mut definitions =
+        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "archive");
     commands.spawn((definitions.take("stack_reopen"), ReopenClosedPageBinding));
     definitions.assert_all_registered();
 }
 
 fn issue_reopen_closed_page(
-    trigger: On<vmux_command::CommandDispatch>,
+    trigger: On<CommandDispatch>,
     registered: Query<(), With<ReopenClosedPageBinding>>,
     mut requests: MessageWriter<ReopenClosedPage>,
 ) {
@@ -62,15 +66,15 @@ pub struct ArchivePlugin;
 
 impl Plugin for ArchivePlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
-            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
         }
         app.add_message::<ReopenClosedPage>()
             .add_message::<PageArchiveRequest>()
             .add_message::<CloseTabRequest>()
             .add_systems(
                 Startup,
-                spawn_reopen_closed_page_command.in_set(vmux_command::RegisterCommandDefinitions),
+                spawn_reopen_closed_page_command.in_set(RegisterCommandDefinitions),
             )
             .add_observer(issue_reopen_closed_page)
             .add_systems(Update, (capture_archived_pages, maintain_archive))
@@ -215,7 +219,7 @@ pub(crate) struct TabArchiveLayout<'w, 's> {
             Entity,
             &'static PageMetadata,
             Option<&'static TerminalLaunch>,
-            Option<&'static vmux_history::LastActivatedAt>,
+            Option<&'static LastActivatedAt>,
         ),
         With<Stack>,
     >,
@@ -390,10 +394,7 @@ fn handle_close_tab_requests(
                     .collect::<Vec<_>>(),
             )
         {
-            layout
-                .commands
-                .entity(next)
-                .insert(vmux_history::LastActivatedAt::now());
+            layout.commands.entity(next).insert(LastActivatedAt::now());
         }
 
         archive_tab(request.tab, tab, &layout.archive, &mut layout.commands);
@@ -613,12 +614,8 @@ fn handle_reopen_closed_page(
         title: page.title.clone(),
         ..default()
     });
-    commands
-        .entity(target.space)
-        .insert(vmux_history::LastActivatedAt::now());
-    commands
-        .entity(stack)
-        .insert(vmux_history::LastActivatedAt::now());
+    commands.entity(target.space).insert(LastActivatedAt::now());
+    commands.entity(stack).insert(LastActivatedAt::now());
     focus_reopened_ancestors(focus_anchor, &layout, &mut commands);
 
     reopen_page_content(&page, stack, &mut commands);
@@ -719,7 +716,7 @@ fn restore_archived_tab(
     let tab = commands
         .spawn((
             tab_bundle(),
-            vmux_history::LastActivatedAt::now(),
+            LastActivatedAt::now(),
             CreatedAt::now(),
             ChildOf(space),
         ))
@@ -754,7 +751,7 @@ fn restore_archived_tab(
             .spawn((
                 split_root_bundle(PaneSplitDirection::Row),
                 PaneId(root_id.clone()),
-                vmux_history::LastActivatedAt(0),
+                LastActivatedAt(0),
                 HostWindow(primary_window),
                 ChildOf(tab),
             ))
@@ -765,7 +762,7 @@ fn restore_archived_tab(
             .spawn((
                 leaf_pane_bundle(),
                 PaneId(leaf_id.clone()),
-                vmux_history::LastActivatedAt(0),
+                LastActivatedAt(0),
                 ChildOf(root),
             ))
             .id();
@@ -797,7 +794,7 @@ fn restore_archived_tab(
         let stack = commands
             .spawn((
                 stack_bundle(),
-                vmux_history::LastActivatedAt(if active { now_millis() } else { 0 }),
+                LastActivatedAt(if active { now_millis() } else { 0 }),
                 CreatedAt::now(),
                 ChildOf(leaf),
             ))
@@ -808,15 +805,11 @@ fn restore_archived_tab(
             ..default()
         });
         if active {
-            commands
-                .entity(leaf)
-                .insert(vmux_history::LastActivatedAt::now());
+            commands.entity(leaf).insert(LastActivatedAt::now());
             if let Some(position) = entry.position.as_ref() {
                 for step in &position.pane_path {
                     if let Some(entity) = pane_entities.get(&step.split_id) {
-                        commands
-                            .entity(*entity)
-                            .insert(vmux_history::LastActivatedAt::now());
+                        commands.entity(*entity).insert(LastActivatedAt::now());
                     }
                 }
             }
@@ -893,7 +886,7 @@ fn spawn_archived_split(
         .spawn((
             split_root_bundle(direction),
             PaneId(id.to_string()),
-            vmux_history::LastActivatedAt(0),
+            LastActivatedAt(0),
             ChildOf(parent),
         ))
         .id();
@@ -926,7 +919,7 @@ fn spawn_archived_split(
                     .spawn((
                         leaf_pane_bundle(),
                         PaneId(child_id.clone()),
-                        vmux_history::LastActivatedAt(0),
+                        LastActivatedAt(0),
                         ChildOf(entity),
                     ))
                     .id();
@@ -997,11 +990,7 @@ fn spawn_stack_in_leaf(
     commands: &mut Commands,
 ) -> Entity {
     let stack = commands
-        .spawn((
-            stack_bundle(),
-            vmux_history::LastActivatedAt::now(),
-            ChildOf(leaf),
-        ))
+        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
         .id();
     let stack_count = layout
         .children_q
@@ -1014,15 +1003,11 @@ fn spawn_stack_in_leaf(
 }
 
 fn focus_reopened_ancestors(anchor: Entity, layout: &ReopenLayout, commands: &mut Commands) {
-    commands
-        .entity(anchor)
-        .insert(vmux_history::LastActivatedAt::now());
+    commands.entity(anchor).insert(LastActivatedAt::now());
     let mut cur = anchor;
     while let Ok(rel) = layout.child_of.get(cur) {
         let parent = rel.parent();
-        commands
-            .entity(parent)
-            .insert(vmux_history::LastActivatedAt::now());
+        commands.entity(parent).insert(LastActivatedAt::now());
         if layout.tabs.contains(parent) {
             break;
         }
@@ -1082,11 +1067,7 @@ fn reattach_along_path(
             leaf
         } else {
             commands
-                .spawn((
-                    leaf_pane_bundle(),
-                    vmux_history::LastActivatedAt::now(),
-                    ChildOf(parent),
-                ))
+                .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
                 .id()
         };
         return Some((leaf, anchor));
@@ -1110,7 +1091,7 @@ fn reattach_along_path(
                 .spawn((
                     leaf_pane_bundle(),
                     PaneId(child_id),
-                    vmux_history::LastActivatedAt::now(),
+                    LastActivatedAt::now(),
                     ChildOf(parent),
                 ))
                 .id()
@@ -1123,7 +1104,7 @@ fn reattach_along_path(
                 .spawn((
                     split_root_bundle(axis),
                     PaneId(child_id),
-                    vmux_history::LastActivatedAt::now(),
+                    LastActivatedAt::now(),
                     ChildOf(parent),
                 ))
                 .id()
@@ -1176,11 +1157,7 @@ fn promote_leaf_to_split(
         .map(|c| c.iter().filter(|&e| layout.stacks_q.contains(e)).collect())
         .unwrap_or_default();
     let survivor = commands
-        .spawn((
-            leaf_pane_bundle(),
-            vmux_history::LastActivatedAt::now(),
-            ChildOf(parent),
-        ))
+        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
         .id();
     for s in stacks {
         commands.entity(s).insert(ChildOf(survivor));
@@ -1192,7 +1169,6 @@ fn promote_leaf_to_split(
 mod tests {
     use super::*;
     use bevy::ecs::relationship::Relationship;
-    use vmux_core::terminal::TerminalKind;
 
     fn page(url: &str, closed_at: i64) -> ArchivedPage {
         ArchivedPage {
@@ -1266,9 +1242,9 @@ mod tests {
                 tab_index: Some(0),
                 leaf_pane_id: "leaf-1".to_string(),
                 stack_index: 2,
-                pane_path: vec![vmux_core::PaneStep {
+                pane_path: vec![PaneStep {
                     split_id: "root".to_string(),
-                    axis: vmux_core::SplitAxis::Row,
+                    axis: SplitAxis::Row,
                     child_index: 1,
                     flex_weights: vec![1.0, 2.0],
                 }],
@@ -1510,18 +1486,14 @@ mod tests {
             .id();
         let tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                vmux_history::LastActivatedAt(1),
-                ChildOf(space),
-            ))
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
             .id();
         let pane = app
             .world_mut()
             .spawn((
                 Pane,
                 PaneId("leaf".to_string()),
-                vmux_history::LastActivatedAt(1),
+                LastActivatedAt(1),
                 ChildOf(tab),
             ))
             .id();
@@ -1533,7 +1505,7 @@ mod tests {
                     url: "https://inactive.example".to_string(),
                     ..default()
                 },
-                vmux_history::LastActivatedAt(1),
+                LastActivatedAt(1),
                 ChildOf(pane),
             ))
             .id();
@@ -1545,7 +1517,7 @@ mod tests {
                     url: "https://active.example".to_string(),
                     ..default()
                 },
-                vmux_history::LastActivatedAt(2),
+                LastActivatedAt(2),
                 ChildOf(pane),
             ))
             .id();
@@ -1606,13 +1578,10 @@ mod tests {
             .spawn((bevy::window::Window::default(), PrimaryWindow));
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string()), vmux_core::Active))
+            .spawn((Space, SpaceId("s1".to_string()), Active))
             .id();
-        app.world_mut().spawn((
-            Tab::default(),
-            vmux_history::LastActivatedAt(1),
-            ChildOf(space),
-        ));
+        app.world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)));
         let tab = app
             .world_mut()
             .spawn((
@@ -1620,8 +1589,8 @@ mod tests {
                     name: "Work".to_string(),
                     startup_dir: Some("/tmp/work".to_string()),
                 },
-                vmux_history::LastActivatedAt(2),
-                vmux_core::Active,
+                LastActivatedAt(2),
+                Active,
                 ChildOf(space),
             ))
             .id();
@@ -1660,7 +1629,7 @@ mod tests {
                 url: "https://left.example".to_string(),
                 ..default()
             },
-            vmux_history::LastActivatedAt(3),
+            LastActivatedAt(3),
             ChildOf(left),
         ));
         app.world_mut().spawn((
@@ -1669,13 +1638,13 @@ mod tests {
                 url: "https://right.example".to_string(),
                 ..default()
             },
-            vmux_history::LastActivatedAt(4),
+            LastActivatedAt(4),
             ChildOf(right),
         ));
         app.world_mut().spawn((
             Stack::default(),
             PageMetadata::default(),
-            vmux_history::LastActivatedAt(2),
+            LastActivatedAt(2),
             ChildOf(left),
         ));
         app.world_mut()
@@ -1748,7 +1717,7 @@ mod tests {
             .spawn((bevy::window::Window::default(), PrimaryWindow));
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("s1".to_string()), vmux_core::Active))
+            .spawn((Space, SpaceId("s1".to_string()), Active))
             .id();
         app.world_mut()
             .entity_mut(space)
@@ -1757,20 +1726,11 @@ mod tests {
             ))));
         let first = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                vmux_history::LastActivatedAt(2),
-                vmux_core::Active,
-                ChildOf(space),
-            ))
+            .spawn((Tab::default(), LastActivatedAt(2), Active, ChildOf(space)))
             .id();
         let second = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                vmux_history::LastActivatedAt(1),
-                ChildOf(space),
-            ))
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(space)))
             .id();
         app.world_mut()
             .resource_mut::<Messages<CloseTabRequest>>()
@@ -1968,7 +1928,7 @@ mod tests {
         );
         assert!(
             app.world()
-                .get::<vmux_history::LastActivatedAt>(root)
+                .get::<LastActivatedAt>(root)
                 .is_some_and(|activated| activated.0 > 0)
         );
         for (leaf_id, expected_urls) in [
@@ -2006,7 +1966,7 @@ mod tests {
             if leaf_id == "right" {
                 assert!(
                     app.world()
-                        .get::<vmux_history::LastActivatedAt>(leaf)
+                        .get::<LastActivatedAt>(leaf)
                         .is_some_and(|activated| activated.0 > 0)
                 );
                 let active_stack = app
@@ -2022,14 +1982,14 @@ mod tests {
                     .expect("active stack");
                 assert!(
                     app.world()
-                        .get::<vmux_history::LastActivatedAt>(active_stack)
+                        .get::<LastActivatedAt>(active_stack)
                         .is_some_and(|activated| activated.0 > 0)
                 );
             }
         }
         assert_eq!(
             app.world_mut()
-                .query::<(&Stack, &vmux_history::LastActivatedAt)>()
+                .query::<(&Stack, &LastActivatedAt)>()
                 .iter(app.world())
                 .filter(|(_, activated)| activated.0 > 0)
                 .count(),
@@ -2085,9 +2045,7 @@ mod tests {
             .single(app.world())
             .unwrap();
         let secondary_window = app.world_mut().spawn(Window::default()).id();
-        app.world_mut()
-            .entity_mut(secondary_window)
-            .insert(vmux_core::Active);
+        app.world_mut().entity_mut(secondary_window).insert(Active);
         let primary_root = app.world_mut().spawn(HostWindow(primary_window)).id();
         let secondary_root = app.world_mut().spawn(HostWindow(secondary_window)).id();
         let primary_space = app
@@ -2549,18 +2507,8 @@ mod tests {
             },
         ));
         dispatch_reopen(&mut app);
-        assert!(
-            app.world()
-                .entity(leaf)
-                .get::<vmux_history::LastActivatedAt>()
-                .is_some()
-        );
-        assert!(
-            app.world()
-                .entity(tab)
-                .get::<vmux_history::LastActivatedAt>()
-                .is_some()
-        );
+        assert!(app.world().entity(leaf).get::<LastActivatedAt>().is_some());
+        assert!(app.world().entity(tab).get::<LastActivatedAt>().is_some());
     }
 
     #[test]
@@ -2622,10 +2570,7 @@ mod tests {
         ));
         dispatch_reopen(&mut app);
         assert!(
-            app.world()
-                .entity(mid)
-                .get::<vmux_history::LastActivatedAt>()
-                .is_some(),
+            app.world().entity(mid).get::<LastActivatedAt>().is_some(),
             "reattached intermediate split is activated through the restored chain"
         );
     }

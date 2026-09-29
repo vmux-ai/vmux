@@ -19,9 +19,14 @@ use bevy::{
 };
 use moonshine_save::prelude::*;
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
-use vmux_command::{CommandDefinitions, CommandInvocation};
+use vmux_command::{
+    CommandDefinitions, CommandInvocation, CommandRuntimePlugin, RegisterCommandDefinitions,
+};
 #[cfg(test)]
-use vmux_core::{PageOpenRequest, PageOpenTarget};
+use vmux_core::{
+    Active, EffectiveStartupUrl, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget,
+    PageOpenTask,
+};
 #[cfg(test)]
 use vmux_flex::prelude::*;
 #[cfg(test)]
@@ -280,8 +285,8 @@ pub struct PaneCommandPlugin;
 
 impl Plugin for PaneCommandPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
-            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
         }
         app.add_message::<OpenRequest>()
             .add_message::<CloseRequest>()
@@ -291,7 +296,7 @@ impl Plugin for PaneCommandPlugin {
             .add_message::<ToggleZoomRequest>()
             .add_systems(
                 Startup,
-                spawn_pane_commands.in_set(vmux_command::RegisterCommandDefinitions),
+                spawn_pane_commands.in_set(RegisterCommandDefinitions),
             );
     }
 }
@@ -449,12 +454,10 @@ mod tests {
             .world_mut()
             .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
-        app.world_mut()
-            .entity_mut(stack)
-            .insert(vmux_core::PageMetadata {
-                url: url.to_string(),
-                ..default()
-            });
+        app.world_mut().entity_mut(stack).insert(PageMetadata {
+            url: url.to_string(),
+            ..default()
+        });
         pane
     }
 
@@ -481,12 +484,10 @@ mod tests {
     fn materialize_page_metadata(app: &mut App) {
         for request in page_open_requests(app) {
             if let PageOpenTarget::Stack(stack) = request.target {
-                app.world_mut()
-                    .entity_mut(stack)
-                    .insert(vmux_core::PageMetadata {
-                        url: request.url,
-                        ..default()
-                    });
+                app.world_mut().entity_mut(stack).insert(PageMetadata {
+                    url: request.url,
+                    ..default()
+                });
             }
         }
     }
@@ -505,15 +506,12 @@ mod tests {
     #[test]
     fn auto_same_type_adds_tab_without_splitting() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -554,15 +552,12 @@ mod tests {
     #[test]
     fn auto_batched_files_stack_in_first_file_pane() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -617,15 +612,12 @@ mod tests {
     #[test]
     fn auto_batched_new_types_split_from_newest_target() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -712,15 +704,12 @@ mod tests {
     #[test]
     fn auto_batched_new_browser_stacks_in_existing_browser_bucket_after_other_work() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -782,15 +771,12 @@ mod tests {
     #[test]
     fn auto_batched_new_browser_stacks_after_nonbrowser_tab_reuse() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -851,15 +837,12 @@ mod tests {
     #[test]
     fn auto_file_bucket_stays_reusable_after_multiple_file_tabs() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -928,15 +911,12 @@ mod tests {
     #[test]
     fn auto_terminal_splits_current_file_tail_after_file_bucket_reuse() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1012,15 +992,12 @@ mod tests {
     #[test]
     fn auto_first_file_splits_terminal_when_terminal_is_newer() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1084,15 +1061,12 @@ mod tests {
     #[test]
     fn auto_browser_open_after_files_becomes_anchor_for_terminal() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1160,15 +1134,12 @@ mod tests {
     #[test]
     fn auto_file_after_terminal_stacks_in_existing_file_bucket() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1234,15 +1205,12 @@ mod tests {
     #[test]
     fn auto_duplicate_url_reuses_pending_open_in_same_batch() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1281,15 +1249,12 @@ mod tests {
     #[test]
     fn auto_duplicate_url_reuses_pending_page_open_task() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1324,8 +1289,8 @@ mod tests {
                 _ => None,
             })
             .unwrap();
-        app.world_mut().spawn(vmux_core::PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+        app.world_mut().spawn(PageOpenTask {
+            id: PageOpenId::new(),
             stack: first_stack,
             url: "https://github.com/vmux-ai/vmux/pull/221".into(),
             request_id: None,
@@ -1355,15 +1320,12 @@ mod tests {
     #[test]
     fn direction_batched_new_type_uses_split_target_size() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1427,15 +1389,12 @@ mod tests {
     #[test]
     fn auto_new_type_splits_anchor() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1468,15 +1427,12 @@ mod tests {
     #[test]
     fn auto_reuse_focuses_existing_url_without_new_stack() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1518,15 +1474,12 @@ mod tests {
     #[test]
     fn auto_reuse_focuses_existing_file_with_different_fragment() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1569,15 +1522,12 @@ mod tests {
     #[test]
     fn auto_reuse_file_with_different_fragment_navigates_existing_stack() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1620,15 +1570,12 @@ mod tests {
     #[test]
     fn explicit_direction_reuse_focuses_existing_file_with_different_fragment() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1675,18 +1622,10 @@ mod tests {
     #[test]
     fn reuse_with_focus_false_does_not_activate_existing_tab() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let old_tab = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                vmux_core::Active,
-                LastActivatedAt(1),
-                ChildOf(space),
-            ))
+            .spawn((Tab::default(), Active, LastActivatedAt(1), ChildOf(space)))
             .id();
         let active_tab = app
             .world_mut()
@@ -1728,15 +1667,12 @@ mod tests {
     #[test]
     fn auto_browser_reuses_bucket_before_terminal_splits_existing_tail() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1806,15 +1742,12 @@ mod tests {
     #[test]
     fn auto_browser_reuses_bucket_before_same_batch_terminal_splits_existing_tail() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1882,15 +1815,12 @@ mod tests {
     #[test]
     fn forced_split_anchor_keeps_current_tail_when_browser_reuses_bucket() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1941,15 +1871,12 @@ mod tests {
     #[test]
     fn forced_split_anchor_ignores_exact_reused_browser_page() {
         let mut app = open_beside_app();
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -2028,15 +1955,12 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<SpiralOut>()
             .add_systems(Update, spiral_test_sys);
-        let space = app
-            .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
-            .id();
+        let space = app.world_mut().spawn((crate::space::Space, Active)).id();
         let tab = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -2935,7 +2859,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             opened.iter().map(|r| r.url.as_str()).collect::<Vec<_>>(),
-            [vmux_core::EffectiveStartupUrl::START_PAGE]
+            [EffectiveStartupUrl::START_PAGE]
         );
     }
 

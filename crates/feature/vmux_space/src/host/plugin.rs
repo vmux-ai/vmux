@@ -12,16 +12,23 @@ use vmux_core::{
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::native_open::HostedUiPlugin;
+use vmux_layout::projection::SpacesProjection;
+#[cfg(test)]
+use vmux_layout::space::CurrentSpace;
 use vmux_layout::space::{
     CurrentSpaceSet, EffectiveStartupDir, EffectiveStartupSet, FocusedSpace, Space, SpaceId,
+    space_view_bundle,
 };
-use vmux_layout::stack::{FocusedStack, Stack};
+use vmux_layout::stack::{FocusedStack, Stack, stack_bundle};
+use vmux_layout::state::LayoutUiState;
 use vmux_layout::tab::Tab;
-use vmux_layout::window::{FocusedWindow, Main};
+use vmux_layout::window::{FocusedWindow, Main, host_window_of};
 use vmux_layout::{
     LayoutCef, LayoutContractPlugin, LayoutStartupSet, LayoutUiStateUpdates, TabLayoutSpawnContent,
     TabLayoutSpawnRequest,
 };
+#[cfg(test)]
+use vmux_setting::{AgentSettings, SpaceOverrides, SpaceProject, TerminalSettings};
 use vmux_setting::{AppSettings, SettingsLoadSet, SettingsSaveRequest};
 
 use super::SpacesUiStateUpdates;
@@ -335,10 +342,8 @@ fn broadcast_spaces_to_views(
         if layout_ui.contains(entity) {
             commands
                 .entity(entity)
-                .insert(vmux_layout::projection::SpacesProjection(payload.clone()));
-            commands.trigger(
-                UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(entity, &payload),
-            );
+                .insert(SpacesProjection(payload.clone()));
+            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(entity, &payload));
         }
         if spaces_ui.contains(entity) {
             commands.trigger(UiStateWrite::<SpacesUiState>::from_event(entity, &payload));
@@ -472,14 +477,13 @@ impl SpaceWindow<'_, '_> {
     }
 
     fn main(&self, window: Entity) -> Option<Entity> {
-        self.mains.iter().find(|main| {
-            vmux_layout::window::host_window_of(*main, &self.child_of, &self.host_windows)
-                == Some(window)
-        })
+        self.mains
+            .iter()
+            .find(|main| host_window_of(*main, &self.child_of, &self.host_windows) == Some(window))
     }
 
     fn window_of(&self, entity: Entity) -> Option<Entity> {
-        vmux_layout::window::host_window_of(entity, &self.child_of, &self.host_windows)
+        host_window_of(entity, &self.child_of, &self.host_windows)
     }
 }
 
@@ -523,7 +527,7 @@ impl SpaceViewTemplate {
             Order(self.order),
             Active,
             LastActivatedAt::now(),
-            vmux_layout::space::space_view_bundle(),
+            space_view_bundle(),
             ChildOf(main),
         )
     }
@@ -631,11 +635,7 @@ fn on_space_open_page(
         return;
     };
     let stack = commands
-        .spawn((
-            vmux_layout::stack::stack_bundle(),
-            LastActivatedAt::now(),
-            ChildOf(pane),
-        ))
+        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
         .id();
     spawn_requests.write(PageOpenRequest {
         target: PageOpenTarget::Stack(stack),
@@ -784,7 +784,7 @@ fn on_space_create(
             Order(order),
             Active,
             LastActivatedAt::now(),
-            vmux_layout::space::space_view_bundle(),
+            space_view_bundle(),
             ChildOf(main),
         ))
         .id();
@@ -847,7 +847,7 @@ fn handle_open_in_new_space(
                 Order(order),
                 Active,
                 LastActivatedAt::now(),
-                vmux_layout::space::space_view_bundle(),
+                space_view_bundle(),
                 ChildOf(main),
             ))
             .id();
@@ -951,7 +951,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             update_channel: Default::default(),
-            agent: vmux_setting::AgentSettings::default(),
+            agent: AgentSettings::default(),
             spaces: Default::default(),
             projects: Default::default(),
             recording: Default::default(),
@@ -1007,7 +1007,7 @@ mod tests {
         settings.browser.startup_url = "https://global.example".into();
         settings.spaces.insert(
             "work".into(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 startup_url: Some("https://work.example".into()),
                 startup_dir: None,
                 ..Default::default()
@@ -1020,10 +1020,7 @@ mod tests {
             .add_systems(Update, update_effective_startup);
         let space = app
             .world_mut()
-            .spawn((
-                space_profile_bundle(&work_space_record()),
-                vmux_layout::space::CurrentSpace,
-            ))
+            .spawn((space_profile_bundle(&work_space_record()), CurrentSpace))
             .id();
 
         app.update();
@@ -1055,7 +1052,7 @@ mod tests {
             Name::new("shared"),
             Order(0),
             Active,
-            vmux_layout::space::space_view_bundle(),
+            space_view_bundle(),
             ChildOf(first_main),
         ));
         let previous = app
@@ -1066,7 +1063,7 @@ mod tests {
                 Name::new("second"),
                 Order(0),
                 Active,
-                vmux_layout::space::space_view_bundle(),
+                space_view_bundle(),
                 ChildOf(second_main),
             ))
             .id();
@@ -1123,7 +1120,7 @@ mod tests {
                 Name::new("shared"),
                 Order(0),
                 Active,
-                vmux_layout::space::space_view_bundle(),
+                space_view_bundle(),
                 ChildOf(main),
             ));
         }
@@ -1132,7 +1129,7 @@ mod tests {
             SpaceId("fallback".to_string()),
             Name::new("fallback"),
             Order(1),
-            vmux_layout::space::space_view_bundle(),
+            space_view_bundle(),
             ChildOf(first_main),
         ));
         let webview = app.world_mut().spawn(HostWindow(second_window)).id();
@@ -1178,7 +1175,7 @@ mod tests {
         let mut settings = test_settings();
         settings.spaces.insert(
             "work".into(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(first.path().to_string_lossy().into_owned()),
                 ..Default::default()
@@ -1188,10 +1185,7 @@ mod tests {
         app.add_plugins(MinimalPlugins).insert_resource(settings);
         let space = app
             .world_mut()
-            .spawn((
-                space_profile_bundle(&work_space_record()),
-                vmux_layout::space::CurrentSpace,
-            ))
+            .spawn((space_profile_bundle(&work_space_record()), CurrentSpace))
             .id();
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
 
@@ -1223,7 +1217,7 @@ mod tests {
         let mut settings = test_settings();
         settings.spaces.insert(
             "active".into(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(active_dir.path().to_string_lossy().into_owned()),
                 ..Default::default()
@@ -1231,7 +1225,7 @@ mod tests {
         );
         settings.spaces.insert(
             "inactive".into(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(inactive_dir.path().to_string_lossy().into_owned()),
                 ..Default::default()
@@ -1262,11 +1256,11 @@ mod tests {
         );
     }
 
-    fn project_request_app(active: &str, projects: Vec<vmux_setting::SpaceProject>) -> App {
+    fn project_request_app(active: &str, projects: Vec<SpaceProject>) -> App {
         let mut settings = test_settings();
         settings.spaces.insert(
             "work".into(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 projects,
                 active_project: Some(active.to_string()),
                 ..Default::default()
@@ -1284,7 +1278,7 @@ mod tests {
                 name: "Work".into(),
                 profile: bootstrap_profile_name(),
             }),
-            vmux_layout::space::CurrentSpace,
+            CurrentSpace,
         ));
         app
     }
@@ -1315,8 +1309,8 @@ mod tests {
         let mut app = project_request_app(
             "/repo/alpha",
             vec![
-                vmux_setting::SpaceProject::at("/repo/alpha"),
-                vmux_setting::SpaceProject::at("/repo/beta"),
+                SpaceProject::at("/repo/alpha"),
+                SpaceProject::at("/repo/beta"),
             ],
         );
         let tabs: Vec<Entity> = ["/repo/alpha", "/repo/beta"]
@@ -1369,8 +1363,8 @@ mod tests {
         let mut app = project_request_app(
             "/repo/beta",
             vec![
-                vmux_setting::SpaceProject::at("/repo/alpha"),
-                vmux_setting::SpaceProject::at("/repo/beta"),
+                SpaceProject::at("/repo/alpha"),
+                SpaceProject::at("/repo/beta"),
             ],
         );
 
@@ -1389,10 +1383,7 @@ mod tests {
 
     #[test]
     fn activating_a_project_the_space_does_not_hold_is_ignored() {
-        let mut app = project_request_app(
-            "/repo/alpha",
-            vec![vmux_setting::SpaceProject::at("/repo/alpha")],
-        );
+        let mut app = project_request_app("/repo/alpha", vec![SpaceProject::at("/repo/alpha")]);
 
         run_project_request(
             &mut app,
@@ -1478,7 +1469,7 @@ mod tests {
         let mut settings = test_settings();
         settings.spaces.insert(
             "work".into(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(dir.path().to_string_lossy().into_owned()),
                 ..Default::default()
@@ -1510,13 +1501,13 @@ mod tests {
         let fallback = tempfile::tempdir().unwrap();
         let primary_path = primary.path().to_path_buf();
         let mut settings = test_settings();
-        settings.terminal = Some(vmux_setting::TerminalSettings {
+        settings.terminal = Some(TerminalSettings {
             startup_dir: Some(fallback.path().to_string_lossy().into_owned()),
             ..Default::default()
         });
         settings.spaces.insert(
             "work".into(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(primary_path.to_string_lossy().into_owned()),
                 ..Default::default()
@@ -1561,7 +1552,7 @@ mod tests {
                 SpaceId("rename-src-test".to_string()),
                 Name::new("rename-src-test"),
                 Active,
-                vmux_layout::space::CurrentSpace,
+                CurrentSpace,
                 ChildOf(main),
             ))
             .id();
@@ -1596,10 +1587,6 @@ mod tests {
             app.world().get::<SpaceId>(tab).map(|s| s.0.clone()),
             Some("vmux-ai/vmux".to_string())
         );
-        assert!(
-            app.world()
-                .get::<vmux_layout::space::CurrentSpace>(space)
-                .is_some()
-        );
+        assert!(app.world().get::<CurrentSpace>(space).is_some());
     }
 }
