@@ -47,9 +47,6 @@ pub mod test_support;
 
 pub(crate) mod tidy;
 
-pub use self::attach::{
-    attach_acp_agent_to_stack, attach_page_agent_to_stack, page_agent_placeholder_url,
-};
 pub use capture_tool::CaptureToolPlugin;
 pub use vmux_space::cwd::valid_cwd;
 

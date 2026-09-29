@@ -18,7 +18,7 @@ use vmux_terminal::{ProcessExited, TerminalGridSize, new_terminal_bundle_with_cw
 use crate::session::{AgentSession, AgentSessionExited, PendingAgentSession, SessionId};
 use crate::strategy::AgentStrategies;
 
-use super::attach::attach_page_agent_to_stack;
+use super::attach::{AgentStackAttachment, PageAgentAttachment};
 use super::page_open::{
     attach_agent_spawn_error_to_stack, attach_cli_setup_to_stack, cli_initial_prompt,
 };
@@ -351,37 +351,24 @@ fn drain_agent_launches(
 
 fn respond_page_agent_attach(
     mut reader: MessageReader<PageAgentAttachRequest>,
+    attachments: AgentStackAttachment,
     mut commands: Commands,
-    strategies: Query<
-        (
-            &crate::runtime::strategy::StrategyKey,
-            &crate::runtime::strategy::StrategyKind,
-        ),
-        With<crate::runtime::strategy::Strategy>,
-    >,
 ) {
     for req in reader.read() {
-        let _ = attach_page_agent_to_stack(
+        let request = PageAgentAttachment::new(
             req.stack,
-            &req.provider,
-            &req.model,
-            &req.sid,
-            &mut commands,
-            &strategies,
+            req.provider.clone(),
+            req.model.clone(),
+            req.sid.clone(),
         );
+        let _ = attachments.page(request, &mut commands);
     }
 }
 
 fn respond_page_agent_spawn_stack(
     mut reader: MessageReader<PageAgentSpawnStackRequest>,
+    attachments: AgentStackAttachment,
     mut commands: Commands,
-    strategies: Query<
-        (
-            &crate::runtime::strategy::StrategyKey,
-            &crate::runtime::strategy::StrategyKind,
-        ),
-        With<crate::runtime::strategy::Strategy>,
-    >,
 ) {
     for req in reader.read() {
         let stack = commands
@@ -391,27 +378,20 @@ fn respond_page_agent_spawn_stack(
                 ChildOf(req.pane),
             ))
             .id();
-        let _ = attach_page_agent_to_stack(
+        let request = PageAgentAttachment::new(
             stack,
-            &req.provider,
-            &req.model,
-            &req.sid,
-            &mut commands,
-            &strategies,
+            req.provider.clone(),
+            req.model.clone(),
+            req.sid.clone(),
         );
+        let _ = attachments.page(request, &mut commands);
     }
 }
 
 fn respond_page_agent_spawn_default(
     mut reader: MessageReader<PageAgentSpawnDefaultRequest>,
+    attachments: AgentStackAttachment,
     mut commands: Commands,
-    strategies: Query<
-        (
-            &crate::runtime::strategy::StrategyKey,
-            &crate::runtime::strategy::StrategyKind,
-        ),
-        With<crate::runtime::strategy::Strategy>,
-    >,
 ) {
     for req in reader.read() {
         let Some(p) = crate::host::provider::resolve_default_app_provider() else {
@@ -428,35 +408,17 @@ fn respond_page_agent_spawn_default(
                 ChildOf(req.pane),
             ))
             .id();
-        if attach_page_agent_to_stack(
-            stack,
-            p.provider,
-            p.default_model,
-            &sid,
-            &mut commands,
-            &strategies,
-        )
-        .is_none()
-        {
-            bevy::log::warn!(
-                "page agent stack spawn failed: no strategy registered for {}/{}",
-                p.provider,
-                p.default_model
-            );
+        let request = PageAgentAttachment::new(stack, p.provider, p.default_model, sid);
+        if let Err(error) = attachments.page(request, &mut commands) {
+            bevy::log::warn!("page agent stack spawn failed: {error}");
         }
     }
 }
 
 fn respond_page_agent_attach_default(
     mut reader: MessageReader<PageAgentAttachDefaultRequest>,
+    attachments: AgentStackAttachment,
     mut commands: Commands,
-    strategies: Query<
-        (
-            &crate::runtime::strategy::StrategyKey,
-            &crate::runtime::strategy::StrategyKind,
-        ),
-        With<crate::runtime::strategy::Strategy>,
-    >,
 ) {
     for req in reader.read() {
         let Some(p) = crate::host::provider::resolve_default_app_provider() else {
@@ -466,21 +428,9 @@ fn respond_page_agent_attach_default(
             continue;
         };
         let sid = uuid::Uuid::new_v4().to_string();
-        if attach_page_agent_to_stack(
-            req.stack,
-            p.provider,
-            p.default_model,
-            &sid,
-            &mut commands,
-            &strategies,
-        )
-        .is_none()
-        {
-            bevy::log::warn!(
-                "attach_page_agent_to_stack returned None: no strategy registered for {}/{}",
-                p.provider,
-                p.default_model
-            );
+        let request = PageAgentAttachment::new(req.stack, p.provider, p.default_model, sid);
+        if let Err(error) = attachments.page(request, &mut commands) {
+            bevy::log::warn!("page agent attach failed: {error}");
         }
     }
 }

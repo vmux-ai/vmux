@@ -32,175 +32,238 @@ impl Plugin for AttachPlugin {
     }
 }
 
-pub fn attach_page_agent_to_stack(
+pub(super) struct PageAgentAttachment {
     stack: Entity,
-    provider: &str,
-    model: &str,
-    sid: &str,
-    commands: &mut Commands,
-    strategies: &Query<(&StrategyKey, &StrategyKind), With<Strategy>>,
-) -> Option<()> {
-    attach_page_agent_to_stack_with_webview(stack, provider, model, sid, None, commands, strategies)
+    provider: String,
+    model: String,
+    sid: String,
+    webview: Option<Entity>,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn attach_page_agent_to_stack_with_webview(
+impl PageAgentAttachment {
+    pub(super) fn new(
+        stack: Entity,
+        provider: impl Into<String>,
+        model: impl Into<String>,
+        sid: impl Into<String>,
+    ) -> Self {
+        Self {
+            stack,
+            provider: provider.into(),
+            model: model.into(),
+            sid: sid.into(),
+            webview: None,
+        }
+    }
+
+    pub(super) fn with_webview(mut self, webview: Option<Entity>) -> Self {
+        self.webview = webview;
+        self
+    }
+}
+
+pub(super) struct AcpAgentAttachment {
     stack: Entity,
-    provider: &str,
-    model: &str,
-    sid: &str,
+    agent_id: String,
+    name: String,
+    sid: String,
+    cwd: std::path::PathBuf,
+    icon: Option<String>,
+    resume: Option<String>,
     webview: Option<Entity>,
-    commands: &mut Commands,
-    strategies: &Query<(&StrategyKey, &StrategyKind), With<Strategy>>,
-) -> Option<()> {
-    let (_, kind) = strategies
-        .iter()
-        .find(|(key, _)| key.provider == provider && key.model == model)?;
-    let kind = kind.0;
-    let url = format!("{}{sid}", crate::url::page_url_prefix(provider, model));
-    commands.entity(stack).insert(PageMetadata {
-        url: url.clone(),
-        title: format!("{provider}/{model}"),
-        bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
-        ..default()
-    });
-    commands.entity(stack).insert((
-        vmux_session::AgentSession {
-            kind,
-            variant: AgentVariant::Page,
-            sid: sid.to_string(),
-            provider: provider.to_string(),
-            model: model.to_string(),
-        },
-        crate::AgentMessages::default(),
-        crate::AgentApprovalPolicy::default(),
-        vmux_session::AgentRunState::default(),
-        vmux_core::team::Profile::agent(kind),
-        vmux_core::team::Agent {
-            sid: sid.to_string(),
-            kind: Some(kind),
-        },
-    ));
-    let url = format!("vmux://sessions/{provider}");
-    if let Some(webview) = webview {
-        commands
-            .entity(webview)
-            .insert((
-                PageMetadata {
-                    url,
-                    title: format!("{provider}/{model}"),
-                    bg_color: None,
-                    ..default()
-                },
+}
+
+impl AcpAgentAttachment {
+    pub(super) fn new(
+        stack: Entity,
+        agent_id: impl Into<String>,
+        name: impl Into<String>,
+        sid: impl Into<String>,
+        cwd: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            stack,
+            agent_id: agent_id.into(),
+            name: name.into(),
+            sid: sid.into(),
+            cwd: cwd.into(),
+            icon: None,
+            resume: None,
+            webview: None,
+        }
+    }
+
+    pub(super) fn icon(mut self, icon: Option<String>) -> Self {
+        self.icon = icon;
+        self
+    }
+
+    pub(super) fn resume(mut self, resume: Option<String>) -> Self {
+        self.resume = resume;
+        self
+    }
+
+    pub(super) fn webview(mut self, webview: Option<Entity>) -> Self {
+        self.webview = webview;
+        self
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct AgentStackAttachment<'w, 's> {
+    strategies: Query<'w, 's, (&'static StrategyKey, &'static StrategyKind), With<Strategy>>,
+}
+
+impl AgentStackAttachment<'_, '_> {
+    pub(super) fn page(
+        &self,
+        request: PageAgentAttachment,
+        commands: &mut Commands,
+    ) -> Result<(), String> {
+        let PageAgentAttachment {
+            stack,
+            provider,
+            model,
+            sid,
+            webview,
+        } = request;
+        let Some((_, kind)) = self
+            .strategies
+            .iter()
+            .find(|(key, _)| key.provider == provider && key.model == model)
+        else {
+            return Err(format!(
+                "no Page agent strategy registered for {}/{}",
+                provider, model
+            ));
+        };
+        let kind = kind.0;
+        let title = format!("{provider}/{model}");
+        let url = format!("{}{}", crate::url::page_url_prefix(&provider, &model), sid);
+        commands.entity(stack).insert(PageMetadata {
+            url: url.clone(),
+            title: title.clone(),
+            bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+            ..default()
+        });
+        commands.entity(stack).insert((
+            vmux_session::AgentSession {
+                kind,
+                variant: AgentVariant::Page,
+                sid: sid.clone(),
+                provider: provider.clone(),
+                model,
+            },
+            crate::AgentMessages::default(),
+            crate::AgentApprovalPolicy::default(),
+            vmux_session::AgentRunState::default(),
+            vmux_core::team::Profile::agent(kind),
+            vmux_core::team::Agent {
+                sid,
+                kind: Some(kind),
+            },
+        ));
+        let url = format!("vmux://sessions/{provider}");
+        if let Some(webview) = webview {
+            commands
+                .entity(webview)
+                .insert((
+                    PageMetadata {
+                        url,
+                        title,
+                        bg_color: None,
+                        ..default()
+                    },
+                    vmux_chat::host::ChatView,
+                ))
+                .remove::<(
+                    vmux_start::StartInlineTransitionView,
+                    vmux_core::launcher::HostsLauncher,
+                    vmux_core::page::PageReady,
+                )>();
+        } else {
+            commands.spawn((
+                vmux_layout::Browser::native_page(&url, &title),
                 vmux_chat::host::ChatView,
-            ))
-            .remove::<(
+                ChildOf(stack),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn acp(&self, request: AcpAgentAttachment, commands: &mut Commands) {
+        let AcpAgentAttachment {
+            stack,
+            agent_id,
+            name,
+            sid,
+            cwd,
+            icon,
+            resume,
+            webview,
+        } = request;
+        let agent_id = crate::acp_tool::agent_url_id(&agent_id);
+        let url = match resume.as_deref() {
+            Some(acp_sid) => format!("vmux://sessions/{agent_id}/{acp_sid}"),
+            None => format!("vmux://sessions/{agent_id}"),
+        };
+        let favicon = vmux_core::PageIcon::favicon(icon.as_deref().unwrap_or(""));
+        commands.entity(stack).insert(PageMetadata {
+            url: url.clone(),
+            title: name.clone(),
+            bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+            icon: favicon.clone(),
+        });
+        let anchor = ProcessId::new();
+        commands.entity(stack).insert((
+            vmux_session::AcpSession {
+                agent_id: agent_id.to_string(),
+                sid: sid.clone(),
+                cwd: cwd.clone(),
+                anchor,
+                resume: resume.clone(),
+            },
+            crate::AgentMessages::default(),
+            crate::AgentApprovalPolicy::default(),
+            vmux_session::AgentRunState::default(),
+            vmux_core::team::Profile::registry(&name, agent_id),
+            vmux_core::team::Agent { sid, kind: None },
+            vmux_core::AgentWorkingDir(cwd.to_string_lossy().to_string()),
+        ));
+        if let Some(resume) = resume.as_deref()
+            && let Some(imported) = crate::handoff::load(agent_id, resume)
+        {
+            commands.entity(stack).insert(imported);
+        }
+        let view = if let Some(webview) = webview {
+            webview
+        } else {
+            commands
+                .spawn((
+                    vmux_layout::Browser::native_page(&url, &name),
+                    vmux_chat::host::ChatView,
+                    ChildOf(stack),
+                    anchor,
+                ))
+                .id()
+        };
+        commands.entity(view).insert((
+            PageMetadata {
+                url,
+                title: name,
+                bg_color: None,
+                icon: favicon,
+            },
+            anchor,
+            vmux_chat::host::ChatView,
+        ));
+        if webview.is_some() {
+            commands.entity(view).remove::<(
                 vmux_start::StartInlineTransitionView,
                 vmux_core::launcher::HostsLauncher,
                 vmux_core::page::PageReady,
             )>();
-    } else {
-        commands.spawn((
-            vmux_layout::Browser::native_page(&url, &format!("{provider}/{model}")),
-            vmux_chat::host::ChatView,
-            ChildOf(stack),
-        ));
-    }
-
-    Some(())
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn attach_acp_agent_to_stack(
-    stack: Entity,
-    agent_id: &str,
-    name: &str,
-    sid: &str,
-    cwd: &std::path::Path,
-    icon: Option<&str>,
-    resume: Option<&str>,
-    commands: &mut Commands,
-) {
-    attach_acp_agent_to_stack_with_webview(
-        stack, agent_id, name, sid, cwd, icon, resume, None, commands,
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn attach_acp_agent_to_stack_with_webview(
-    stack: Entity,
-    agent_id: &str,
-    name: &str,
-    sid: &str,
-    cwd: &std::path::Path,
-    icon: Option<&str>,
-    resume: Option<&str>,
-    webview: Option<Entity>,
-    commands: &mut Commands,
-) {
-    let agent_id = crate::acp_tool::agent_url_id(agent_id);
-    let url = match resume {
-        Some(acp_sid) => format!("vmux://sessions/{agent_id}/{acp_sid}"),
-        None => format!("vmux://sessions/{agent_id}"),
-    };
-    commands.entity(stack).insert(PageMetadata {
-        url: url.clone(),
-        title: name.to_string(),
-        bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
-        icon: vmux_core::PageIcon::favicon(icon.unwrap_or("")),
-    });
-    let anchor = vmux_api::protocol::ProcessId::new();
-    commands.entity(stack).insert((
-        vmux_session::AcpSession {
-            agent_id: agent_id.to_string(),
-            sid: sid.to_string(),
-            cwd: cwd.to_path_buf(),
-            anchor,
-            resume: resume.map(str::to_string),
-        },
-        crate::AgentMessages::default(),
-        crate::AgentApprovalPolicy::default(),
-        vmux_session::AgentRunState::default(),
-        vmux_core::team::Profile::registry(name, agent_id),
-        vmux_core::team::Agent {
-            sid: sid.to_string(),
-            kind: None,
-        },
-        vmux_core::AgentWorkingDir(cwd.to_string_lossy().to_string()),
-    ));
-    if let Some(resume) = resume
-        && let Some(imported) = crate::handoff::load(agent_id, resume)
-    {
-        commands.entity(stack).insert(imported);
-    }
-    let view = if let Some(webview) = webview {
-        webview
-    } else {
-        commands
-            .spawn((
-                vmux_layout::Browser::native_page(&url, name),
-                vmux_chat::host::ChatView,
-                ChildOf(stack),
-                anchor,
-            ))
-            .id()
-    };
-    commands.entity(view).insert((
-        PageMetadata {
-            url,
-            title: name.to_string(),
-            bg_color: None,
-            icon: vmux_core::PageIcon::favicon(icon.unwrap_or("")),
-        },
-        anchor,
-        vmux_chat::host::ChatView,
-    ));
-    if webview.is_some() {
-        commands.entity(view).remove::<(
-            vmux_start::StartInlineTransitionView,
-            vmux_core::launcher::HostsLauncher,
-            vmux_core::page::PageReady,
-        )>();
+        }
     }
 }
 
@@ -252,23 +315,6 @@ fn acp_target_id_for_kind(
                 .is_some()
                 .then(|| id.to_string())
         })
-}
-
-#[allow(dead_code)]
-pub fn page_agent_placeholder_url(provider: &str, model: &str, sid: &str) -> String {
-    let html = format!(
-        "<!doctype html><html><head><meta charset='utf-8'><title>Page Agent</title><style>html,body{{height:100%;margin:0;background:#0c0c10;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center}}div{{text-align:center;padding:2rem}}h1{{margin:0 0 0.5rem;font-weight:600;color:#eee}}code{{background:#1a1a22;padding:0.15rem 0.4rem;border-radius:4px;color:#e0a050}}</style></head><body><div><h1>Page Agent</h1><p><code>{provider}</code> / <code>{model}</code></p><p>Session <code>{sid}</code></p><p style='opacity:0.6;margin-top:1rem'>Native chat UI ships in step 4 of the Page agent design.</p></div></body></html>"
-    );
-    let mut encoded = String::with_capacity(html.len() * 3);
-    for byte in html.as_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(*byte as char)
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    format!("data:text/html;charset=utf-8,{encoded}")
 }
 
 fn handle_resume_in_acp(
@@ -362,18 +408,19 @@ mod tests {
         let stack = app.world_mut().spawn_empty().id();
 
         app.world_mut()
-            .run_system_once(move |mut commands: Commands| {
-                attach_acp_agent_to_stack(
-                    stack,
-                    "mistral-vibe",
-                    "Mistral Vibe",
-                    "sid-1",
-                    std::path::Path::new("/tmp"),
-                    Some("https://cdn.example/vibe.svg"),
-                    None,
-                    &mut commands,
-                );
-            })
+            .run_system_once(
+                move |attachments: AgentStackAttachment, mut commands: Commands| {
+                    let request = AcpAgentAttachment::new(
+                        stack,
+                        "mistral-vibe",
+                        "Mistral Vibe",
+                        "sid-1",
+                        std::path::PathBuf::from("/tmp"),
+                    )
+                    .icon(Some("https://cdn.example/vibe.svg".to_string()));
+                    attachments.acp(request, &mut commands);
+                },
+            )
             .unwrap();
 
         let world = app.world();

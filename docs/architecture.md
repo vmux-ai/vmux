@@ -1,14 +1,46 @@
 # Vmux — Architecture
 
-An agent-first workspace that ships with a browser and an IDE.
+> The application is not the UI process.
 
-Vmux is a native **Rust** host. Its own UI runs as native Dioxus components in the host
-process; Chromium is embedded through **CEF** as a guest surface for the pages you browse.
-That inversion is the whole thesis: instead of the app living inside a web sandbox, the web
-lives inside a native host that reaches straight to the OS and the GPU.
+Electron's core abstraction is a window containing a web application. Vmux starts from a
+different model:
 
-The host runs on **Bevy**, a data-oriented ECS. Surfaces composite into a `tmux`-style
-tiling tree, and agents drive all of it over **MCP** — the workspace is an API.
+```text
+Application = Durable Work + Typed Commands + Composable Surfaces
+```
+
+The work survives every window. Desktop and mobile clients render it. Humans and agents
+operate it through the same typed commands. Web content remains available through full
+Chromium, but the browser is a guest surface rather than the application's process,
+security boundary, or state model.
+
+```mermaid
+flowchart LR
+    human["human"] --> api["typed commands"]
+    agent["agent"] --> api
+    remote["remote client"] --> api
+    api --> app["Rust application<br/>Bevy ECS + plugins"]
+    app --> durable["durable work<br/>PTYs · builds · agent sessions"]
+    app --> surfaces["composable surfaces<br/>native UI · browser · editor · terminal"]
+```
+
+Four properties fall out of that model:
+
+- **Durable.** `vmux_service` owns work that must continue after the UI exits. A window is
+  a client that can disconnect and rebuild its view from snapshots.
+- **Composable.** Components assemble entities; plugins assemble capabilities; surfaces
+  assemble the workspace. Features do not depend on inheritance or a central callback table.
+- **Predictable.** State is a component or resource, behavior is a system, coordination is
+  a typed message, a capability is a plugin, and presentation is a surface. Before a human
+  or agent writes a feature, its shape and ownership are already constrained.
+- **Cross-platform.** Electron carries the same browser runtime to every operating system.
+  Vmux shares the application itself: Rust types, behavior, protocols, and plugins compile
+  across targets while platform integration stays in adapter plugins.
+
+Vmux's own UI runs as native Dioxus components in the Rust host process. **Bevy** provides
+the data-oriented ECS and plugin graph. **CEF** supplies Chromium only for pages that need
+the open web. **MCP** exposes the same workspace model to agents. Features compose;
+architecture does not drift.
 
 ---
 
@@ -161,6 +193,12 @@ Capabilities **compose** rather than being inherited. A plain web-view entity *b
 shell the moment a `Terminal` component is added — no subclass, no base class. And because
 each system declares the data it touches, Bevy runs non-conflicting systems across cores
 for you.
+
+That vocabulary also narrows the implementation search space. A new feature cannot hide
+state in an arbitrary object graph or invent a private integration mechanism: its data,
+behavior, messages, ownership, and composition point have known forms. Code remains
+navigable as the number of features and authors grows, including when the author is an
+agent generating the implementation.
 
 A custom `SystemParam` names a coherent capability over the world. Use one when related
 queries, commands, or message access would exceed Bevy's system-parameter arity or when it
