@@ -13,7 +13,6 @@ mod capture_output;
     not(feature = "updater")
 ))]
 mod disabled_features;
-mod display;
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod glass;
 mod key_claim;

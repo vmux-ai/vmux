@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::window::{PrimaryWindow, WindowPosition};
+use bevy::window::{Monitor, MonitorSelection, PrimaryWindow, WindowPosition};
 use bevy_cef::prelude::HostWindow;
 use vmux_core::WindowFullscreen;
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
@@ -11,7 +11,7 @@ use vmux_layout::window::{
 };
 
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
-use bevy::window::{MonitorSelection, WindowMode};
+use bevy::window::WindowMode;
 
 pub(crate) struct WindowPlugin;
 
@@ -37,7 +37,7 @@ impl Plugin for WindowPlugin {
                 )
                     .chain(),
             )
-            .add_systems(Update, crate::display::relocate_window_to_live_display);
+            .add_systems(Update, relocate_window_to_live_display);
         #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
         app.add_systems(
             Update,
@@ -63,6 +63,46 @@ pub(crate) struct PendingFullscreenRestore(pub bool);
 pub(crate) struct WindowRestoreComplete;
 
 const MIN_WINDOW_SIZE: f32 = 100.0;
+
+fn monitor_rect(monitor: &Monitor) -> IRect {
+    let min = monitor.physical_position;
+    let size = IVec2::new(
+        monitor.physical_width as i32,
+        monitor.physical_height as i32,
+    );
+    IRect::from_corners(min, min + size)
+}
+
+fn window_off_all_monitors(window: IRect, monitors: &[IRect]) -> bool {
+    monitors
+        .iter()
+        .all(|monitor| monitor.intersect(window).is_empty())
+}
+
+fn relocate_window_to_live_display(
+    monitors_added: Query<(), Added<Monitor>>,
+    monitors_removed: RemovedComponents<Monitor>,
+    monitors: Query<&Monitor>,
+    mut windows: Query<&mut Window>,
+) {
+    if monitors_added.is_empty() && monitors_removed.is_empty() {
+        return;
+    }
+    if monitors.is_empty() {
+        return;
+    }
+    let monitor_rects: Vec<IRect> = monitors.iter().map(monitor_rect).collect();
+    for mut window in &mut windows {
+        let WindowPosition::At(position) = window.position else {
+            continue;
+        };
+        let size = window.resolution.physical_size().as_ivec2();
+        let window_rect = IRect::from_corners(position, position + size);
+        if window_off_all_monitors(window_rect, &monitor_rects) {
+            window.position = WindowPosition::Centered(MonitorSelection::Primary);
+        }
+    }
+}
 
 fn open_windows(
     mut reader: MessageReader<NewWindowRequest>,
@@ -239,6 +279,107 @@ fn restore_fullscreen_from_window_mode(
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
+    use bevy::window::OnMonitor;
+
+    fn test_monitor(x: i32, y: i32, width: u32, height: u32) -> Monitor {
+        Monitor {
+            name: Some("test".to_string()),
+            physical_height: height,
+            physical_width: width,
+            physical_position: IVec2::new(x, y),
+            refresh_rate_millihertz: Some(60_000),
+            scale_factor: 1.0,
+            video_modes: Vec::new(),
+        }
+    }
+
+    fn relocate_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, relocate_window_to_live_display);
+        app
+    }
+
+    fn spawn_primary_window(app: &mut App, position: IVec2) -> Entity {
+        app.world_mut()
+            .spawn((
+                Window {
+                    position: WindowPosition::At(position),
+                    ..default()
+                },
+                PrimaryWindow,
+            ))
+            .id()
+    }
+
+    #[test]
+    fn despawning_monitor_keeps_linked_window() {
+        let mut world = World::new();
+        let monitor = world.spawn(test_monitor(0, 0, 1920, 1080)).id();
+        let window = world.spawn(Window::default()).id();
+        world.entity_mut(window).insert(OnMonitor(monitor));
+
+        world.entity_mut(monitor).despawn();
+
+        assert!(world.get_entity(window).is_ok());
+    }
+
+    #[test]
+    fn off_all_monitors_detects_stranded_window() {
+        let monitor = IRect::from_corners(IVec2::ZERO, IVec2::new(1920, 1080));
+        let stranded = IRect::from_corners(IVec2::new(5000, 5000), IVec2::new(6280, 5720));
+        let overlapping = IRect::from_corners(IVec2::new(100, 100), IVec2::new(1380, 820));
+
+        assert!(window_off_all_monitors(stranded, &[monitor]));
+        assert!(!window_off_all_monitors(overlapping, &[monitor]));
+        assert!(window_off_all_monitors(stranded, &[]));
+    }
+
+    #[test]
+    fn stranded_window_is_recentered_on_primary() {
+        let mut app = relocate_app();
+        let window = spawn_primary_window(&mut app, IVec2::new(5000, 5000));
+        app.world_mut().spawn(test_monitor(0, 0, 1920, 1080));
+
+        app.update();
+
+        assert!(matches!(
+            app.world().get::<Window>(window).unwrap().position,
+            WindowPosition::Centered(MonitorSelection::Primary)
+        ));
+    }
+
+    #[test]
+    fn window_on_a_monitor_is_left_in_place() {
+        let mut app = relocate_app();
+        let window = spawn_primary_window(&mut app, IVec2::new(100, 100));
+        app.world_mut().spawn(test_monitor(0, 0, 1920, 1080));
+
+        app.update();
+
+        assert!(matches!(
+            app.world().get::<Window>(window).unwrap().position,
+            WindowPosition::At(position) if position == IVec2::new(100, 100)
+        ));
+    }
+
+    #[test]
+    fn zero_monitors_does_not_relocate() {
+        let mut app = relocate_app();
+        let window = spawn_primary_window(&mut app, IVec2::new(100, 100));
+        let monitor = app.world_mut().spawn(test_monitor(0, 0, 1920, 1080)).id();
+        app.update();
+
+        app.world_mut().get_mut::<Window>(window).unwrap().position =
+            WindowPosition::At(IVec2::new(5000, 5000));
+        app.world_mut().entity_mut(monitor).despawn();
+        app.update();
+
+        assert!(matches!(
+            app.world().get::<Window>(window).unwrap().position,
+            WindowPosition::At(position) if position == IVec2::new(5000, 5000)
+        ));
+    }
 
     #[test]
     fn new_window_command_spawns_a_full_window_request() {
