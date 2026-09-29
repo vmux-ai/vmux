@@ -9,7 +9,7 @@ pub struct VmuxCliPlugin;
 impl Plugin for VmuxCliPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            CliManifestPlugin::new(include_str!("cli.ron")),
+            CliManifestPlugin::from_feature(include_str!("feature.ron")),
             vmux_agent::AgentCliPlugin,
             vmux_service::ServiceCliPlugin,
             vmux_tool::ToolCliPlugin,

@@ -15,16 +15,19 @@ pub struct McpCliPlugin;
 
 impl Plugin for McpCliPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((CliManifestPlugin::new(include_str!("cli.ron")), McpPlugin))
-            .add_systems(
-                Update,
-                (start_stdio, receive_stdio).chain().in_set(McpSet::Input),
-            )
-            .add_systems(
-                Update,
-                (write_stdio, finish_stdio).chain().in_set(McpSet::Output),
-            )
-            .add_systems(Startup, spawn_mcp_runtime);
+        app.add_plugins((
+            CliManifestPlugin::from_feature(include_str!("feature.ron")),
+            McpPlugin,
+        ))
+        .add_systems(
+            Update,
+            (start_stdio, receive_stdio).chain().in_set(McpSet::Input),
+        )
+        .add_systems(
+            Update,
+            (write_stdio, finish_stdio).chain().in_set(McpSet::Output),
+        )
+        .add_systems(Startup, spawn_mcp_runtime);
     }
 }
 
