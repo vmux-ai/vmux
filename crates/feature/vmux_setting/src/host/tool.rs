@@ -1,8 +1,13 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_api::protocol::{AgentGetSettings, AgentRequest, AgentUpdateSettings, JsonValue};
+use vmux_api::BinEvent;
+use vmux_api::protocol::{
+    AgentGetSettings, AgentRequest, AgentUpdateSettings, ClientMessage, JsonValue,
+};
+use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
+    ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
 };
 
 pub struct SettingToolPlugin;
@@ -15,10 +20,44 @@ impl Plugin for SettingToolPlugin {
         ))
         .register_tool::<GetSettingsArgs>("get_settings")
         .register_tool::<UpdateSettingsArgs>("update_settings")
+        .add_message::<ToolQueryRequest>()
+        .add_message::<ToolQueryHandled>()
+        .add_message::<ServiceRequest>()
         .add_systems(
             Update,
             (get_settings, update_settings).in_set(ToolDispatchSet),
+        )
+        .add_systems(
+            Update,
+            answer_settings_queries
+                .in_set(ToolQueryRouteSet)
+                .after(ServiceMessageSet),
         );
+    }
+}
+
+fn answer_settings_queries(
+    mut queries: MessageReader<ToolQueryRequest>,
+    settings: Res<crate::AppSettings>,
+    mut handled: MessageWriter<ToolQueryHandled>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for request in queries.read() {
+        if request.query.id != AgentGetSettings::ID {
+            continue;
+        }
+        handled.write(ToolQueryHandled(request.request_id));
+        let result = serde_json::from_slice::<AgentGetSettings>(&request.query.body)
+            .map_err(|error| error.to_string())
+            .and_then(|_| {
+                serde_json::to_value(&*settings)
+                    .map(JsonValue::from)
+                    .map_err(|error| format!("failed to serialize settings: {error}"))
+            });
+        service_requests.write(ServiceRequest(ClientMessage::AgentSettingsResult {
+            request_id: request.request_id,
+            result,
+        }));
     }
 }
 

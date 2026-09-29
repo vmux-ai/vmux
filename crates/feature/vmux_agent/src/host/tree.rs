@@ -3,10 +3,6 @@ use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
     PageAgentSpawnStackRequest, RestartAgentPty, SpawnAgentInStackRequest, SwapStackSession,
 };
-use vmux_core::browser::{
-    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
-    BrowserSnapshotRequest, BrowserSnapshotResponse,
-};
 use vmux_core::host::persistence::WorkspaceStoreValidator;
 use vmux_core::notify::{AgentAttention, BellReceived, OsNotify};
 use vmux_core::{HostSpawnRoute, PageOpenRequest};
@@ -80,11 +76,6 @@ impl Plugin for AgentSessionPlugin {
         .add_message::<ToolQueryRequest>()
         .add_message::<ScreenshotRequest>()
         .add_message::<ScreenshotResponse>()
-        .add_message::<BrowserSnapshotRequest>()
-        .add_message::<BrowserSnapshotResponse>()
-        .add_message::<BrowserNavigationSnapshotResponse>()
-        .add_message::<BrowserScrollRequest>()
-        .add_message::<BrowserScrollResponse>()
         .add_message::<RecordStartRequest>()
         .add_message::<RecordStartResponse>()
         .add_message::<RecordStopRequest>()

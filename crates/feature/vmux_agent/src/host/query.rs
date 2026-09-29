@@ -4,21 +4,19 @@ use vmux_api::BinEvent;
 #[cfg(test)]
 use vmux_api::protocol::AgentRequest;
 use vmux_api::protocol::{
-    AgentBookmark, AgentBookmarkList, AgentBookmarkNode, AgentBookmarks, AgentCommandResult,
-    AgentGetSettings, AgentImage, AgentListCommands, AgentListSpaces, AgentReadLayout,
-    AgentRecordStart, AgentRecordStop, AgentRecording, AgentRequestId, AgentScreenshot, AgentSpace,
-    AgentVaultStatus, AgentWorkingDirectory, ClientMessage, JsonValue, ProcessId,
+    AgentBookmark, AgentBookmarkList, AgentBookmarkNode, AgentBookmarks, AgentImage,
+    AgentListCommands, AgentListSpaces, AgentRecordStart, AgentRecordStop, AgentRecording,
+    AgentRequestId, AgentScreenshot, AgentSpace, AgentVaultStatus, AgentWorkingDirectory,
+    ClientMessage, ProcessId,
 };
 use vmux_command::WriteCommandRequests;
 use vmux_core::service::ServiceRequest;
 use vmux_core::{
     Active, Bookmark, BookmarkOrder, Collapsed, Folder, Order, PageMetadata, Pin, Uuid,
 };
-use vmux_layout::apply::{LayoutApplyResponse, LayoutSnapshotRequest, LayoutSnapshotResponse};
 use vmux_layout::space::{Space, SpaceId};
 use vmux_layout::tab::Tab;
 use vmux_layout::window::{FocusedWindow, host_window_of};
-use vmux_setting::AppSettings;
 use vmux_space::model::bootstrap_profile_name;
 use vmux_tool::{ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet};
 
@@ -38,11 +36,6 @@ pub(crate) struct AgentQuerySet;
 struct WorkingDirectoryRequest {
     request_id: AgentRequestId,
     anchor: ProcessId,
-}
-
-#[derive(Message)]
-struct SettingsReadRequest {
-    request_id: AgentRequestId,
 }
 
 #[derive(Message)]
@@ -67,9 +60,7 @@ struct BookmarkListRequest {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct AgentQueryWriters<'w> {
-    layout: MessageWriter<'w, LayoutSnapshotRequest>,
     working_directory: MessageWriter<'w, WorkingDirectoryRequest>,
-    settings: MessageWriter<'w, SettingsReadRequest>,
     spaces: MessageWriter<'w, SpaceListRequest>,
     commands: MessageWriter<'w, CommandListRequest>,
     vault: MessageWriter<'w, VaultStatusRequest>,
@@ -88,9 +79,7 @@ fn route_agent_queries(
     for request in requests.read() {
         let recognized = matches!(
             request.query.id.as_str(),
-            AgentReadLayout::ID
-                | AgentGetSettings::ID
-                | AgentListSpaces::ID
+            AgentListSpaces::ID
                 | AgentScreenshot::ID
                 | AgentRecordStart::ID
                 | AgentRecordStop::ID
@@ -104,21 +93,6 @@ fn route_agent_queries(
         }
         handled.write(ToolQueryHandled(request.request_id));
         let result = match request.query.id.as_str() {
-            AgentReadLayout::ID => serde_json::from_slice::<AgentReadLayout>(&request.query.body)
-                .map_err(|error| error.to_string())
-                .map(|query| {
-                    writers.layout.write(LayoutSnapshotRequest {
-                        request_id: request.request_id.0,
-                        anchor: query.anchor,
-                    });
-                }),
-            AgentGetSettings::ID => serde_json::from_slice::<AgentGetSettings>(&request.query.body)
-                .map_err(|error| error.to_string())
-                .map(|_| {
-                    writers.settings.write(SettingsReadRequest {
-                        request_id: request.request_id,
-                    });
-                }),
             AgentListSpaces::ID => serde_json::from_slice::<AgentListSpaces>(&request.query.body)
                 .map_err(|error| error.to_string())
                 .map(|_| {
@@ -203,7 +177,6 @@ impl Plugin for AgentQueryPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ToolQueryRequest>()
             .add_message::<WorkingDirectoryRequest>()
-            .add_message::<SettingsReadRequest>()
             .add_message::<SpaceListRequest>()
             .add_message::<CommandListRequest>()
             .add_message::<VaultStatusRequest>()
@@ -218,7 +191,6 @@ impl Plugin for AgentQueryPlugin {
                 Update,
                 (
                     answer_working_directory_queries,
-                    answer_settings_queries,
                     answer_space_queries,
                     answer_command_queries,
                     answer_vault_queries,
@@ -231,8 +203,6 @@ impl Plugin for AgentQueryPlugin {
             .add_systems(
                 Update,
                 (
-                    forward_layout_apply_responses,
-                    forward_layout_snapshot_responses,
                     forward_screenshot_responses,
                     forward_record_start_responses,
                     forward_record_stop_responses,
@@ -298,23 +268,6 @@ fn answer_working_directory_queries(
             }
         };
         service_requests.write(ServiceRequest(ClientMessage::AgentWorkingDirectoryResult {
-            request_id: request.request_id,
-            result,
-        }));
-    }
-}
-
-fn answer_settings_queries(
-    mut reader: MessageReader<SettingsReadRequest>,
-    settings: Res<AppSettings>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    for request in reader.read() {
-        let result = match serde_json::to_value(&*settings) {
-            Ok(settings) => Ok(JsonValue::from(settings)),
-            Err(error) => Err(format!("failed to serialize settings: {error}")),
-        };
-        service_requests.write(ServiceRequest(ClientMessage::AgentSettingsResult {
             request_id: request.request_id,
             result,
         }));
@@ -458,34 +411,6 @@ fn answer_bookmark_queries(
     }
 }
 
-fn forward_layout_apply_responses(
-    mut reader: MessageReader<LayoutApplyResponse>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    for response in reader.read() {
-        let result = match response.result.clone() {
-            Ok(snapshot) => AgentCommandResult::Layout(snapshot),
-            Err(message) => AgentCommandResult::Error(message),
-        };
-        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
-            request_id: AgentRequestId(response.request_id),
-            result,
-        }));
-    }
-}
-
-fn forward_layout_snapshot_responses(
-    mut reader: MessageReader<LayoutSnapshotResponse>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    for response in reader.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentLayoutResult {
-            request_id: AgentRequestId(response.request_id),
-            result: Ok(response.snapshot.clone()),
-        }));
-    }
-}
-
 fn screenshot_result(result: &Result<ScreenshotImage, String>) -> Result<AgentImage, String> {
     match result {
         Ok(img) => Ok(AgentImage {
@@ -557,9 +482,7 @@ mod tests {
         app.add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
-            .add_message::<LayoutSnapshotRequest>()
             .add_message::<WorkingDirectoryRequest>()
-            .add_message::<SettingsReadRequest>()
             .add_message::<SpaceListRequest>()
             .add_message::<CommandListRequest>()
             .add_message::<VaultStatusRequest>()
