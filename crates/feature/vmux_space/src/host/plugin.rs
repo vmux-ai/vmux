@@ -417,6 +417,36 @@ type SpaceTabQuery<'w, 's> = Query<
 >;
 
 #[derive(bevy::ecs::system::SystemParam)]
+struct SpaceGraph<'w, 's> {
+    spaces: SpaceQuery<'w, 's>,
+    rows: SpaceListQuery<'w, 's>,
+    tabs: SpaceTabQuery<'w, 's>,
+}
+
+impl SpaceGraph<'_, '_> {
+    fn bump_tab(&self, space: Entity, commands: &mut Commands) {
+        if let Some((tab, _, _, _)) = self
+            .tabs
+            .iter()
+            .filter(|(_, _, _, parent)| parent.parent() == space)
+            .max_by_key(|(_, _, timestamp, _)| timestamp.0)
+        {
+            commands
+                .entity(tab)
+                .insert(vmux_history::LastActivatedAt::now());
+        }
+    }
+
+    fn deactivate_in_main(&self, main: Entity, commands: &mut Commands) {
+        for (entity, _, active, _, parent) in &self.spaces {
+            if parent.parent() == main && active {
+                commands.entity(entity).remove::<vmux_core::Active>();
+            }
+        }
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
 struct SpaceWindow<'w, 's> {
     mains: Query<'w, 's, Entity, With<vmux_layout::window::Main>>,
     host_windows: Query<'w, 's, &'static HostWindow>,
@@ -449,26 +479,6 @@ impl SpaceWindow<'_, '_> {
 
     fn window_of(&self, entity: Entity) -> Option<Entity> {
         vmux_layout::window::host_window_of(entity, &self.child_of, &self.host_windows)
-    }
-}
-
-fn bump_space_tab(tabs: &SpaceTabQuery, space: Entity, commands: &mut Commands) {
-    if let Some((tab, _, _, _)) = tabs
-        .iter()
-        .filter(|(_, _, _, parent)| parent.parent() == space)
-        .max_by_key(|(_, _, ts, _)| ts.0)
-    {
-        commands
-            .entity(tab)
-            .insert(vmux_history::LastActivatedAt::now());
-    }
-}
-
-fn deactivate_spaces_in_main(spaces: &SpaceQuery, main: Entity, commands: &mut Commands) {
-    for (entity, _, is_active, _, parent) in spaces.iter() {
-        if parent.parent() == main && is_active {
-            commands.entity(entity).remove::<vmux_core::Active>();
-        }
     }
 }
 
@@ -562,8 +572,7 @@ fn sync_space_name_to_id(
 
 fn on_space_rename(
     trigger: On<UiInput<SpaceRenameRequest>>,
-    spaces: SpaceQuery,
-    tabs: SpaceTabQuery,
+    graph: SpaceGraph,
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
@@ -571,19 +580,21 @@ fn on_space_rename(
     if name.is_empty() {
         return;
     }
-    if !spaces
+    if !graph
+        .spaces
         .iter()
         .any(|(_, id, _, _, _)| id.0 == request.space_id)
     {
         return;
     }
-    let existing: std::collections::HashSet<String> = spaces
+    let existing: std::collections::HashSet<String> = graph
+        .spaces
         .iter()
         .filter(|(_, id, _, _, _)| id.0 != request.space_id)
         .map(|(_, id, _, _, _)| id.0.clone())
         .collect();
     let new_id = crate::model::unique_space_id_among(&existing, name);
-    for (entity, id, _, _, _) in spaces.iter() {
+    for (entity, id, _, _, _) in &graph.spaces {
         if id.0 != request.space_id {
             continue;
         }
@@ -595,7 +606,7 @@ fn on_space_rename(
     if new_id == request.space_id {
         return;
     }
-    for (tab, id, _, _) in tabs.iter() {
+    for (tab, id, _, _) in &graph.tabs {
         if id.0 == request.space_id {
             commands
                 .entity(tab)
@@ -643,9 +654,7 @@ fn on_space_open_page(
 
 fn on_space_delete(
     trigger: On<UiInput<SpaceDeleteRequest>>,
-    spaces: SpaceQuery,
-    space_list: SpaceListQuery,
-    tabs: SpaceTabQuery,
+    graph: SpaceGraph,
     space_window: SpaceWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     settings: Option<Res<vmux_setting::AppSettings>>,
@@ -655,18 +664,19 @@ fn on_space_delete(
         return;
     }
     let id = trigger.event().payload.space_id.as_str();
-    let logical_ids: std::collections::HashSet<&str> = spaces
+    let logical_ids: std::collections::HashSet<&str> = graph
+        .spaces
         .iter()
         .map(|(_, id, _, _, _)| id.0.as_str())
         .collect();
     if logical_ids.len() <= 1 {
         return;
     }
-    let Some(fallback) = SpaceViewTemplate::first_other(&space_list, id) else {
+    let Some(fallback) = SpaceViewTemplate::first_other(&graph.rows, id) else {
         return;
     };
     let mut affected_mains = Vec::new();
-    for (entity, space_id, _, _, parent) in spaces.iter() {
+    for (entity, space_id, _, _, parent) in &graph.spaces {
         if space_id.0 != id {
             continue;
         }
@@ -679,8 +689,9 @@ fn on_space_delete(
         return;
     }
     for affected_main in affected_mains {
-        deactivate_spaces_in_main(&spaces, affected_main, &mut commands);
-        if let Some((target_entity, _, _, _, _)) = spaces
+        graph.deactivate_in_main(affected_main, &mut commands);
+        if let Some((target_entity, _, _, _, _)) = graph
+            .spaces
             .iter()
             .filter(|(_, space_id, _, _, parent)| {
                 space_id.0 != id && parent.parent() == affected_main
@@ -690,7 +701,7 @@ fn on_space_delete(
             commands
                 .entity(target_entity)
                 .insert((vmux_core::Active, vmux_history::LastActivatedAt::now()));
-            bump_space_tab(&tabs, target_entity, &mut commands);
+            graph.bump_tab(target_entity, &mut commands);
             continue;
         }
         let Some(affected_window) = space_window.window_of(affected_main) else {
@@ -703,9 +714,7 @@ fn on_space_delete(
 
 fn on_space_attach(
     trigger: On<UiInput<SpaceAttachRequest>>,
-    spaces: SpaceQuery,
-    space_list: SpaceListQuery,
-    tabs: SpaceTabQuery,
+    graph: SpaceGraph,
     space_window: SpaceWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     settings: Option<Res<vmux_setting::AppSettings>>,
@@ -715,14 +724,15 @@ fn on_space_attach(
         return;
     };
     let id = trigger.event().payload.space_id.as_str();
-    let local = spaces
+    let local = graph
+        .spaces
         .iter()
         .find(|(_, space_id, _, _, parent)| space_id.0 == id && parent.parent() == main);
     let Some((entity, _, is_active, _, _)) = local else {
-        let Some(template) = SpaceViewTemplate::find(&space_list, id) else {
+        let Some(template) = SpaceViewTemplate::find(&graph.rows, id) else {
             return;
         };
-        deactivate_spaces_in_main(&spaces, main, &mut commands);
+        graph.deactivate_in_main(main, &mut commands);
         let space = commands.spawn(template.bundle(main)).id();
         layout_requests.write(template.layout_request(space, window, settings.as_deref()));
         return;
@@ -730,16 +740,16 @@ fn on_space_attach(
     if is_active {
         return;
     }
-    deactivate_spaces_in_main(&spaces, main, &mut commands);
+    graph.deactivate_in_main(main, &mut commands);
     commands
         .entity(entity)
         .insert((vmux_core::Active, vmux_history::LastActivatedAt::now()));
-    bump_space_tab(&tabs, entity, &mut commands);
+    graph.bump_tab(entity, &mut commands);
 }
 
 fn on_space_create(
     trigger: On<UiInput<SpaceCreateRequest>>,
-    spaces: SpaceQuery,
+    graph: SpaceGraph,
     space_window: SpaceWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     settings: Option<Res<vmux_setting::AppSettings>>,
@@ -748,7 +758,8 @@ fn on_space_create(
     let Some((window, main)) = space_window.for_webview(trigger.event().webview) else {
         return;
     };
-    let count = spaces
+    let count = graph
+        .spaces
         .iter()
         .filter(|(_, _, _, _, parent)| parent.parent() == main)
         .count();
@@ -758,17 +769,21 @@ fn on_space_create(
     } else {
         requested_name.to_string()
     };
-    let existing: std::collections::HashSet<String> =
-        spaces.iter().map(|(_, id, _, _, _)| id.0.clone()).collect();
+    let existing: std::collections::HashSet<String> = graph
+        .spaces
+        .iter()
+        .map(|(_, id, _, _, _)| id.0.clone())
+        .collect();
     let id = crate::model::unique_space_id_among(&existing, &name);
-    let order = spaces
+    let order = graph
+        .spaces
         .iter()
         .filter(|(_, _, _, _, parent)| parent.parent() == main)
         .filter_map(|(_, _, _, order, _)| order.map(|order| order.0))
         .max()
         .map(|max| max + 1)
         .unwrap_or(0);
-    deactivate_spaces_in_main(&spaces, main, &mut commands);
+    graph.deactivate_in_main(main, &mut commands);
     let space = commands
         .spawn((
             vmux_layout::space::Space,
@@ -800,7 +815,7 @@ fn on_space_create(
 
 fn handle_open_in_new_space(
     mut reader: MessageReader<OpenRequest>,
-    spaces: SpaceQuery,
+    graph: SpaceGraph,
     space_window: SpaceWindow,
     settings: Option<Res<vmux_setting::AppSettings>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
@@ -811,24 +826,27 @@ fn handle_open_in_new_space(
             continue;
         };
 
-        let count = spaces
+        let count = graph
+            .spaces
             .iter()
             .filter(|(_, _, _, _, parent)| parent.parent() == main)
             .count();
         let name = format!("Space {}", count + 1);
-        let existing: std::collections::HashSet<String> = spaces
+        let existing: std::collections::HashSet<String> = graph
+            .spaces
             .iter()
             .map(|(_, sid, _, _, _)| sid.0.clone())
             .collect();
         let id = crate::model::unique_space_id_among(&existing, &name);
-        let order = spaces
+        let order = graph
+            .spaces
             .iter()
             .filter(|(_, _, _, _, parent)| parent.parent() == main)
             .filter_map(|(_, _, _, order, _)| order.map(|o| o.0))
             .max()
             .map(|max| max + 1)
             .unwrap_or(0);
-        deactivate_spaces_in_main(&spaces, main, &mut commands);
+        graph.deactivate_in_main(main, &mut commands);
         let space = commands
             .spawn((
                 vmux_layout::space::Space,
