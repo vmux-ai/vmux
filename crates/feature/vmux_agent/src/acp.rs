@@ -25,6 +25,30 @@ use vmux_api::protocol::{
 use vmux_api::room::{Message, RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_process::ProcessRuntime;
 
+pub struct AcpSessionPlugin;
+
+impl Plugin for AcpSessionPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                receive_acp_session_requests,
+                ApplyDeferred,
+                spawn_acp_sessions,
+                project_acp_sessions,
+                route_acp_session_inputs,
+                subscribe_acp_sessions,
+                read_acp_session_state,
+                list_acp_sessions,
+                rebind_acp_sessions,
+                close_acp_sessions,
+                reap_closed_acp_sessions,
+            )
+                .chain(),
+        );
+    }
+}
+
 enum AcpProjectionInput {
     BeginHistoryReplay,
     Update(agent_client_protocol::schema::v1::SessionUpdate),
@@ -224,30 +248,6 @@ impl AcpModeInfo {
 struct AcpSelectionSnapshot {
     model: Option<AcpModelInfo>,
     mode: Option<AcpModeInfo>,
-}
-
-pub struct AcpSessionPlugin;
-
-impl Plugin for AcpSessionPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                receive_acp_session_requests,
-                ApplyDeferred,
-                spawn_acp_sessions,
-                project_acp_sessions,
-                route_acp_session_inputs,
-                subscribe_acp_sessions,
-                read_acp_session_state,
-                list_acp_sessions,
-                rebind_acp_sessions,
-                close_acp_sessions,
-                reap_closed_acp_sessions,
-            )
-                .chain(),
-        );
-    }
 }
 
 struct AcpMcpServers(Vec<agent_client_protocol::schema::v1::McpServer>);

@@ -15,6 +15,35 @@ pub struct WriteCommandRequests;
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReadCommandRequests;
 
+pub struct CommandRuntimePlugin;
+
+impl Plugin for CommandRuntimePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<CommandInvocation>()
+            .add_systems(Startup, spawn_keymap.before(RegisterCommandDefinitions))
+            .configure_sets(
+                Update,
+                (
+                    WriteCommandRequests,
+                    DispatchCommandInvocations,
+                    crate::snapshot::WriteCommandBarSnapshots,
+                    ReadCommandRequests,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                (
+                    validate_command_definitions,
+                    dispatch_command_invocations,
+                    bevy::ecs::schedule::ApplyDeferred,
+                )
+                    .chain()
+                    .in_set(DispatchCommandInvocations),
+            );
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
 pub enum ShortcutDefinition {
     Direct(String),
@@ -635,35 +664,6 @@ pub struct DispatchCommandInvocations;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RegisterCommandDefinitions;
-
-pub struct CommandRuntimePlugin;
-
-impl Plugin for CommandRuntimePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_message::<CommandInvocation>()
-            .add_systems(Startup, spawn_keymap.before(RegisterCommandDefinitions))
-            .configure_sets(
-                Update,
-                (
-                    WriteCommandRequests,
-                    DispatchCommandInvocations,
-                    crate::snapshot::WriteCommandBarSnapshots,
-                    ReadCommandRequests,
-                )
-                    .chain(),
-            )
-            .add_systems(
-                Update,
-                (
-                    validate_command_definitions,
-                    dispatch_command_invocations,
-                    bevy::ecs::schedule::ApplyDeferred,
-                )
-                    .chain()
-                    .in_set(DispatchCommandInvocations),
-            );
-    }
-}
 
 fn spawn_keymap(mut commands: Commands) {
     commands.spawn((

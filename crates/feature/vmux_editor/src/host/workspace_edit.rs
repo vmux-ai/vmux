@@ -1,4 +1,3 @@
-use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 
@@ -26,11 +25,16 @@ fn apply_lsp_workspace_edit(
     browsers: NonSend<Browsers>,
     mut replies: MessageWriter<crate::lsp::server_request::ServerReply>,
     mut renames: MessageReader<crate::lsp::manager::LspRequestedEdit>,
-    mut edits: WorkspaceEdits,
+    views: Query<(Entity, &FileView, &Editor)>,
+    mut self_writes: NonSendMut<SelfWrites>,
+    manager: Single<&crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
     for (request, awaiting) in &requests {
         let refusal = match WorkspaceEditPlan::within(&awaiting.root, &awaiting.params.edit) {
-            Ok(plan) => edits.apply(plan),
+            Ok(plan) => {
+                apply_workspace_edit(plan, &views, &manager, &mut self_writes, &mut commands)
+            }
             Err(refusal) => Some(refusal.to_string()),
         };
         replies.write(crate::lsp::server_request::ServerReply {
@@ -48,7 +52,9 @@ fn apply_lsp_workspace_edit(
         let refusal = match &rename.result {
             Err(reason) => Some(reason.clone()),
             Ok(edit) => match WorkspaceEditPlan::within(&rename.root, edit) {
-                Ok(plan) => edits.apply(plan),
+                Ok(plan) => {
+                    apply_workspace_edit(plan, &views, &manager, &mut self_writes, &mut commands)
+                }
                 Err(refusal) => Some(refusal.to_string()),
             },
         };
@@ -56,32 +62,26 @@ fn apply_lsp_workspace_edit(
             continue;
         };
         if browsers.can_emit_to(&rename.entity) {
-            edits
-                .commands
-                .trigger(vmux_core::host::FileUiStateWrite::from_event(
-                    rename.entity,
-                    &vmux_core::event::FileEditFailure { reason },
-                ));
+            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                rename.entity,
+                &vmux_core::event::FileEditFailure { reason },
+            ));
         }
     }
 }
 
-#[derive(SystemParam)]
-struct WorkspaceEdits<'w, 's> {
-    views: Query<'w, 's, (Entity, &'static FileView, &'static Editor)>,
-    self_writes: NonSendMut<'w, SelfWrites>,
-    manager: Single<'w, 's, &'static crate::lsp::manager::LspManager>,
-    commands: Commands<'w, 's>,
-}
-
-impl WorkspaceEdits<'_, '_> {
-    fn apply(&mut self, plan: WorkspaceEditPlan) -> Option<String> {
-        let prepared = match PreparedWorkspaceEdit::new(plan, &self.views, &self.manager) {
-            Ok(prepared) => prepared,
-            Err(reason) => return Some(reason),
-        };
-        apply_prepared_workspace_edit(prepared, &mut self.self_writes, &mut self.commands).err()
-    }
+fn apply_workspace_edit(
+    plan: WorkspaceEditPlan,
+    views: &Query<(Entity, &FileView, &Editor)>,
+    manager: &crate::lsp::manager::LspManager,
+    self_writes: &mut SelfWrites,
+    commands: &mut Commands,
+) -> Option<String> {
+    let prepared = match PreparedWorkspaceEdit::new(plan, views, manager) {
+        Ok(prepared) => prepared,
+        Err(reason) => return Some(reason),
+    };
+    apply_prepared_workspace_edit(prepared, self_writes, commands).err()
 }
 
 struct PreparedWorkspaceEdit {

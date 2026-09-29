@@ -28,6 +28,29 @@ pub type AgentToolResponses = PendingRequests<AgentRequestId, (String, bool)>;
 
 const NO_AGENT_SUBSCRIBER: &str = "no desktop subscribed to agent commands";
 
+pub struct AgentSessionPlugin;
+
+impl Plugin for AgentSessionPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                receive_agent_session_requests,
+                ApplyDeferred,
+                spawn_agent_sessions,
+                route_agent_session_inputs,
+                subscribe_agent_sessions,
+                snapshot_agent_sessions,
+                read_agent_session_messages,
+                list_agent_sessions,
+                find_agent_sessions,
+                close_agent_sessions,
+            )
+                .chain(),
+        );
+    }
+}
+
 #[derive(Clone)]
 pub struct AgentBroker {
     outbound: broadcast::Sender<ServiceMessage>,
@@ -197,29 +220,6 @@ pub enum SessionInput {
     },
     Cancel,
     Close,
-}
-
-pub struct AgentSessionPlugin;
-
-impl Plugin for AgentSessionPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                receive_agent_session_requests,
-                ApplyDeferred,
-                spawn_agent_sessions,
-                route_agent_session_inputs,
-                subscribe_agent_sessions,
-                snapshot_agent_sessions,
-                read_agent_session_messages,
-                list_agent_sessions,
-                find_agent_sessions,
-                close_agent_sessions,
-            )
-                .chain(),
-        );
-    }
 }
 
 #[derive(Clone)]

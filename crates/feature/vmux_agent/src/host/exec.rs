@@ -1,9 +1,5 @@
 use std::path::{Path, PathBuf};
 
-pub fn is_executable_path(path: &Path) -> bool {
-    is_executable(path)
-}
-
 pub fn find_executable(command: &str) -> Option<PathBuf> {
     let from_path = std::env::var_os("PATH")
         .and_then(|path| path.into_string().ok())
@@ -16,7 +12,7 @@ fn find_executable_in_path(command: &str, path_env: &str) -> Option<PathBuf> {
         .split(':')
         .filter(|part| !part.is_empty())
         .map(|part| Path::new(part).join(command))
-        .find(|path| is_executable(path))
+        .find(|path| is_executable_path(path))
 }
 
 fn find_executable_in_fallback_dirs(command: &str) -> Option<PathBuf> {
@@ -30,11 +26,11 @@ fn find_executable_in_fallback_dirs(command: &str) -> Option<PathBuf> {
     dirs.push(PathBuf::from("/usr/local/bin"));
     dirs.into_iter()
         .map(|dir| dir.join(command))
-        .find(|path| is_executable(path))
+        .find(|path| is_executable_path(path))
 }
 
 #[cfg(unix)]
-fn is_executable(path: &Path) -> bool {
+pub fn is_executable_path(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     path.is_file()
         && path
@@ -44,7 +40,7 @@ fn is_executable(path: &Path) -> bool {
 }
 
 #[cfg(not(unix))]
-fn is_executable(path: &Path) -> bool {
+pub fn is_executable_path(path: &Path) -> bool {
     path.is_file()
 }
 

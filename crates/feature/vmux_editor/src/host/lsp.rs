@@ -29,6 +29,8 @@ pub mod target;
 pub mod wire;
 pub mod workspace_edit;
 
+pub struct LspPlugin;
+
 impl Plugin for LspPlugin {
     fn build(&self, app: &mut App) {
         let (diagnostics, inbox) = LspDiagnosticsSender::channel();
@@ -184,8 +186,6 @@ fn operate_tool(
         _ => Err(format!("LSP does not support {:?}", operation.kind)),
     }
 }
-
-pub struct LspPlugin;
 
 pub type PathDiagnostics = (PathBuf, Vec<lsp_types::Diagnostic>);
 

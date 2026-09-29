@@ -58,6 +58,25 @@ pub(crate) use tree::{set_split_direction, spawn_split_from_leaf};
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct ArrangementSet;
 
+pub struct PanePlugin;
+
+impl Plugin for PanePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(PaneCommandPlugin)
+            .register_type::<SideSheetCardCollapsed>()
+            .add_plugins((
+                TreePlugin,
+                IdentityPlugin,
+                ArrangementPlugin,
+                OpenPlugin,
+                PaneZoomPlugin,
+                FocusPlugin,
+                ResizePlugin,
+                ClosePlugin,
+            ));
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaneFocus {
     Next,
@@ -260,25 +279,6 @@ fn spawn_pane_commands(mut commands: Commands) {
     }
     commands.spawn(definitions.take("zoom_pane").message::<ToggleZoomRequest>());
     definitions.assert_all_registered();
-}
-
-pub struct PanePlugin;
-
-impl Plugin for PanePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins(PaneCommandPlugin)
-            .register_type::<SideSheetCardCollapsed>()
-            .add_plugins((
-                TreePlugin,
-                IdentityPlugin,
-                ArrangementPlugin,
-                OpenPlugin,
-                PaneZoomPlugin,
-                FocusPlugin,
-                ResizePlugin,
-                ClosePlugin,
-            ));
-    }
 }
 
 pub struct PaneCommandPlugin;
