@@ -17,10 +17,9 @@ use vmux_ui::list_nav::MenuDirection;
 use crate::search_engine::SearchEngines;
 
 use self::results::{
-    CommandBarResultItem, PickerRows, SlashRows, active_space_index, filter_results,
-    open_session_results, prepend_prompt_targets, prompt_target_matches_query,
-    prompt_target_results, prompt_target_url, space_switch_results, start_page_results,
-    terminal_matches_query,
+    CommandBarResultItem, PickerRows, SlashRows, filter_results, open_session_results,
+    prepend_prompt_targets, prompt_target_matches_query, prompt_target_results, prompt_target_url,
+    space_switch_results, start_page_results, terminal_matches_query,
 };
 
 pub mod keyboard;
@@ -970,7 +969,11 @@ impl PaletteState {
 
     pub fn opening_selection(state: &CommandBarOpenEvent) -> usize {
         if state.picker == Some(CommandBarPicker::Space) {
-            active_space_index(&state.spaces)
+            state
+                .spaces
+                .iter()
+                .position(|space| space.is_active)
+                .unwrap_or(0)
         } else {
             0
         }

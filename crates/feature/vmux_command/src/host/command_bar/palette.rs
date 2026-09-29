@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use crate::palette::results::active_space_index;
 use crate::palette::{
     PaletteDecision, PaletteDraft, PaletteQuery, PaletteRows, PaletteState, PaletteSurface,
 };
@@ -343,11 +342,7 @@ fn receive_palette_open(
     draft.open_id = opened.open_id;
     draft.query.clone_from(&opened.url);
     draft.target_url.clear();
-    draft.selected = if opened.picker == Some(vmux_api::command_bar::CommandBarPicker::Space) {
-        active_space_index(&opened.spaces)
-    } else {
-        0
-    };
+    draft.selected = PaletteState::opening_selection(opened);
     draft.navigating = false;
     draft.history_cursor = None;
     draft.history_scratch.clear();

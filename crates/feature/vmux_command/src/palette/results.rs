@@ -507,10 +507,6 @@ pub fn space_switch_results(
     items
 }
 
-pub fn active_space_index(spaces: &[CommandBarSpace]) -> usize {
-    spaces.iter().position(|s| s.is_active).unwrap_or(0)
-}
-
 fn query_targets_spaces_page(q: &str, pages: &[CommandBarPage]) -> bool {
     let Some(url) = pages
         .iter()
@@ -840,14 +836,6 @@ mod tests {
             results.last(),
             Some(CommandBarResultItem::Page { title, .. }) if title == "Manage spaces\u{2026}"
         ));
-    }
-
-    #[test]
-    fn active_space_index_finds_active_then_defaults_zero() {
-        let with_active = vec![space("space-1", "S1", false), space("work", "Work", true)];
-        assert_eq!(active_space_index(&with_active), 1);
-        let none_active = vec![space("space-1", "S1", false)];
-        assert_eq!(active_space_index(&none_active), 0);
     }
 
     #[test]
