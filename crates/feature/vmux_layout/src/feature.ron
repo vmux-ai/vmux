@@ -119,6 +119,19 @@
         "default":
         [
             (
+                name: "open_page",
+                description: r#"Open a page using vmux auto placement. Omit `direction` so vmux reuses the existing matching bucket first (terminal pages with terminals, browser pages with browsers) and otherwise spirals off the latest non-agent pane. url uses the same rules as browser_navigate (vmux://terminal/ opens a terminal; anything else loads as a browser). direction is an override for a forced adjacent open: right|left|top|bottom. focus defaults false."#,
+                input_schema: (
+                    type: Object,
+                    required: ["url"],
+                    properties: {
+                        "direction": (type: String, values: ["right", "left", "top", "bottom"]),
+                        "url": (type: String),
+                        "focus": (type: Boolean),
+                    },
+                ),
+            ),
+            (
                 name: "read_layout",
                 description: r#"Returns the full vmux layout (tabs, recursive pane tree, focused). Call this FIRST before update_layout - you need the current tree (with ids) to construct a valid update. Useful for: answering questions about what's open; finding the focused tab/pane/stack; reading a stack's url/kind so you can duplicate it elsewhere. Terminal stacks appear as stacks with kind="terminal"; browser stacks use kind="browser"."#,
                 input_schema: (type: Object),

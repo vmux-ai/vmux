@@ -32,6 +32,7 @@ impl Plugin for ChatPlugin {
             crate::room::ChatRoomPlugin,
             crate::ChatKeyPlugin,
             crate::ChatMediaPlugin,
+            crate::ChatToolPlugin,
             crate::composer::ChatComposerPlugin,
             crate::prompt::ChatPromptPlugin,
             crate::prompt::ChatPromptInputPlugin,

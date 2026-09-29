@@ -25,6 +25,7 @@ cli = [
     "tool",
     "vault",
     "dep:bevy_ecs",
+    "dep:vmux_chat",
     "dep:vmux_mcp",
 ]
 desktop = [

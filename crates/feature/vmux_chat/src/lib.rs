@@ -11,6 +11,8 @@ mod key;
 pub mod media;
 pub mod state;
 pub mod tab;
+#[cfg(host)]
+mod tool;
 pub mod transcript;
 
 pub mod model;
@@ -24,6 +26,8 @@ pub use host::ChatPlugin;
 pub use key::ChatKeyPlugin;
 #[cfg(host)]
 pub use media::ChatMediaPlugin;
+#[cfg(host)]
+pub use tool::ChatToolPlugin;
 
 #[cfg(any(test, ui))]
 pub mod format;

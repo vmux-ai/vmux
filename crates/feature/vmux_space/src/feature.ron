@@ -36,6 +36,28 @@
         "default":
         [
             (
+                name: "select_project",
+                aliases: ["select_workspace", "choose_workspace"],
+                description: r#"Select a project before accessing its files or running project commands. Pass a known path or omit it to open the native project picker rooted at ~/.vmux/projects. Paths inside ~/.vmux/projects are selected immediately. Paths outside it require explicit user approval in the native picker. For a new project, first use request_user_choice to offer a concrete suggested location and Choose existing project; do not ask the user to invent a folder. Use ~/.vmux/projects/<remote-host>/<organization>/<repository> when a remote is known and ~/.vmux/projects/local/<project> otherwise. When creation is selected, use run only to create the empty directory, then call this tool with that path. vmux offers Git initialization and uses the new project root directly without a linked worktree. For a previously existing Git project, call create_worktree immediately before the first mutation. The request returns immediately when user selection is needed: stop the current turn and do not call again while pending. Do not search the user's home directory. Do not call for general questions or self-contained terminal demonstrations."#,
+                input_schema: (
+                    type: Object,
+                    properties: {"path": (type: String)},
+                ),
+            ),
+            (
+                name: "create_worktree",
+                description: r#"Call immediately before the first edit, write, test, build, or other project mutation, after a Git project is selected. Never call for requests that only read, show, search, or explain existing files. vmux reuses the current linked worktree, accepts a known existing worktree path, automatically uses a single unambiguous existing worktree, or creates a managed worktree when none exists. If multiple existing worktrees are returned as ambiguous, ask the user with request_user_choice to choose an existing path or Create new worktree; call again with path or create=true. Never run git worktree add manually. Returns the absolute worktree path."#,
+                input_schema: (
+                    type: Object,
+                    properties: {
+                        "branch": (type: String),
+                        "path": (type: String),
+                        "task": (type: String),
+                        "create": (type: Boolean),
+                    },
+                ),
+            ),
+            (
                 name: "list_spaces",
                 description: "List all spaces as a JSON array of { id, name, profile, is_active }. Use the `id` with rename_space / delete_space.",
                 input_schema: (type: Object),

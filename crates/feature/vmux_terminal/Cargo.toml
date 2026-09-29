@@ -29,6 +29,7 @@ bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 portable-pty = { workspace = true }
 sysinfo = "0.38"
+tokio = { workspace = true }
 tracing = "0.1"
 url = { workspace = true }
 vmux_command = { path = "../vmux_command" }
@@ -36,6 +37,7 @@ vmux_api = { path = "../../util/vmux_api" }
 vmux_flex = { path = "../../util/vmux_flex" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_mcp = { path = "../../util/vmux_mcp" }
 vmux_tool = { path = "../vmux_tool" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }

@@ -3,13 +3,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use vmux_api::protocol::{
-    AgentFileSearch, AgentFileTouched, AgentRequest, AgentRequestId, AgentWorkingDirectory,
-    ClientMessage, FileTouchKind, ProcessId, ServiceMessage,
+    AgentFileSearch, AgentFileTouched, AgentOpenBeside, AgentPaneDirection, AgentRequest,
+    AgentRequestId, AgentWorkingDirectory, ClientMessage, FileTouchKind, ProcessId, ServiceMessage,
 };
 use vmux_core::ProcessAnchor;
 use vmux_core::service::ServiceConnection;
-use vmux_mcp::protocol::McpExecution;
-use vmux_tool::{ToolAppExt, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin};
+use vmux_mcp::protocol::{McpExecution, McpRequest};
+use vmux_tool::{ToolAppExt, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin};
 
 pub struct FileToolPlugin;
 
@@ -19,10 +19,40 @@ impl Plugin for FileToolPlugin {
             include_str!("../feature.ron"),
             "default",
         ))
+        .register_tool::<OpenFileArgs>("open_file")
         .register_tool::<ReadFileArgs>("read_file")
         .register_tool::<GrepArgs>("grep")
-        .add_systems(Update, (read_file, grep).in_set(ToolDispatchSet));
+        .add_systems(Update, (open_file, read_file, grep).in_set(ToolDispatchSet));
     }
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum PaneDirection {
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
+
+impl From<PaneDirection> for AgentPaneDirection {
+    fn from(value: PaneDirection) -> Self {
+        match value {
+            PaneDirection::Top => Self::Top,
+            PaneDirection::Right => Self::Right,
+            PaneDirection::Bottom => Self::Bottom,
+            PaneDirection::Left => Self::Left,
+        }
+    }
+}
+
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenFileArgs {
+    path: String,
+    direction: Option<PaneDirection>,
+    #[serde(default)]
+    focus: bool,
 }
 
 #[derive(Component, Deserialize, Serialize)]
@@ -38,6 +68,50 @@ struct ReadFileArgs {
 struct GrepArgs {
     query: String,
     path: Option<String>,
+}
+
+fn open_file(
+    mut commands: Commands,
+    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &OpenFileArgs), Added<OpenFileArgs>>,
+    protocol_requests: Query<&McpRequest>,
+) {
+    for (entity, name, anchor, args) in &requests {
+        let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| {
+            let path = args.path.trim();
+            if path.is_empty() {
+                return Err("open_file.path is empty".to_string());
+            }
+            let url = if path.starts_with("file:") {
+                path.to_string()
+            } else {
+                format!("file://{path}")
+            };
+            AgentRequest::encode(&AgentOpenBeside {
+                anchor,
+                direction: args.direction.map(Into::into),
+                url,
+                focus: args.focus,
+            })
+        });
+        match command {
+            Ok(command) if protocol_requests.contains(entity) => {
+                let requested = args.path.clone();
+                let anchor = anchor.map(|anchor| anchor.0);
+                commands
+                    .entity(entity)
+                    .insert(McpExecution::new(async move {
+                        if !Path::new(&requested).is_absolute() {
+                            return Err("open_file.path must be an absolute path".to_string());
+                        }
+                        scoped_existing_path(anchor, Path::new(&requested), "open_file").await?;
+                        run_agent_command(command, anchor).await
+                    }));
+            }
+            command => {
+                commands.entity(entity).insert(ToolCommand(command));
+            }
+        }
+    }
 }
 
 fn read_file(
@@ -389,7 +463,10 @@ fn byte_to_utf16(line: &str, byte: usize) -> u32 {
     line[..index].encode_utf16().count() as u32
 }
 
-async fn run_agent_command(request: AgentRequest, anchor: Option<ProcessId>) -> Result<(), String> {
+async fn run_agent_command(
+    request: AgentRequest,
+    anchor: Option<ProcessId>,
+) -> Result<Value, String> {
     let request_id = AgentRequestId::new();
     let connection = ServiceConnection::connect()
         .await
@@ -415,10 +492,7 @@ async fn run_agent_command(request: AgentRequest, anchor: Option<ProcessId>) -> 
                 request_id: received,
                 result,
             } if received == request_id => {
-                return match result {
-                    vmux_api::protocol::AgentCommandResult::Error(message) => Err(message),
-                    _ => Ok(()),
-                };
+                return vmux_mcp::protocol::command_result_to_mcp_response(result);
             }
             ServiceMessage::Error { message } => return Err(message),
             _ => {}

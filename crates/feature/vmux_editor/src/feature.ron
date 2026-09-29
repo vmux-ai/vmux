@@ -127,6 +127,19 @@
         "default":
         [
             (
+                name: "open_file",
+                description: r#"Open a local file (or directory) in the vmux editor using vmux auto placement. Omit `direction` so vmux focuses an already-open matching file first, then reuses the file pane bucket, and otherwise spirals off the latest non-agent pane. path is an absolute filesystem path, e.g. /Users/me/project/src/main.rs. Files render with syntax highlighting; directories show a listing. direction is an override for a forced adjacent open: right|left|top|bottom. focus defaults false. The path must be inside the selected project; call select_project first to request access elsewhere."#,
+                input_schema: (
+                    type: Object,
+                    required: ["path"],
+                    properties: {
+                        "path": (type: String),
+                        "direction": (type: String, values: ["right", "left", "top", "bottom"]),
+                        "focus": (type: Boolean),
+                    },
+                ),
+            ),
+            (
                 name: "read_file",
                 description: r#"Read a local file and show it in the vmux editor through auto placement, preferring an existing file page/bucket. Returns the file's text. USE THIS to read files - do NOT cat/sed/head/tail via run (that dumps into a terminal). path is an absolute filesystem path inside the selected project; call select_project first to request access elsewhere. offset is the 1-based line to start at; limit is the number of lines (default: the whole file)."#,
                 input_schema: (

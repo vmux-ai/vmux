@@ -47,6 +47,45 @@
         "default":
         [
             (
+                name: "run",
+                description: r#"Run a shell command in a visible terminal pane the user can watch live and take over. Blocks until the command finishes and returns its full output plus the exit code (`terminal: <id>`, `exit: <code>`, `output: ...`). If it reaches the configured wait limit, returns the output so far with a note to call read_terminal for the rest.
+
+        PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses ONE persistent terminal beside you — the SAME shell across calls, so its working directory and environment persist. Do NOT `cd` into your project on every run; the shell stays where it was. The first `run` opens it; later ones run in that same shell. Rule of thumb: don't open a new pane unless you actually need one. Placement overrides are disabled by default: omit `mode`, `direction`, and `beside`. If vmux rejects them, retry the bare run. Users can enable overrides with `agent.allow_run_placement_override`. When enabled, override only when you mean to:
+        - `mode`: `auto` (default, reuse your one persistent shell) | `split` (force a NEW pane) | `stack` (force a new stacked terminal in the anchor's pane).
+        - `beside`: anchor to a specific page — a terminal id a previous run returned, or "self" for your own pane. With `beside` set, `stack` tabs into that page's pane and `split` splits off it.
+        - `direction`: only for `split`; Omit `direction` in auto mode so vmux keeps terminal runs in the terminal bucket and spirals new panes predictably.
+        - `terminal: <id>`: instead of opening anything, run IN that existing terminal (best for dependent / sequential steps that share one shell, in order).
+
+        `focus` (default false = keep focus on your own pane) applies when opening a new terminal. The command is typed into an interactive shell, so the terminal stays usable afterwards.
+
+        `shell`: hand the command to a named interpreter instead of writing it in the user's shell — `bash`, `sh`, `python3`, `node`, `ruby`, anything on PATH. Name the program ALONE: vmux adds the flag that makes it read a script (`-c`, `-e`, `eval`) and quotes the script for the user's shell, so `command` is the script itself, newlines and all, and never carries `-c` or `-e` of its own. Omit `shell` to write in the user's own shell."#,
+                input_schema: (
+                    type: Object,
+                    required: ["command"],
+                    properties: {
+                        "command": (type: String),
+                        "shell": (type: String),
+                        "direction": (type: String, values: ["right", "left", "top", "bottom"]),
+                        "focus": (type: Boolean),
+                        "terminal": (type: String),
+                        "beside": (type: String),
+                        "mode": (type: String, values: ["auto", "split", "stack"]),
+                    },
+                ),
+                availability: without_acp_terminals,
+                shell_aware: true,
+            ),
+            (
+                name: "read_terminal",
+                description: r#"Return the current visible scrollback text of a terminal (the same text the user sees). Pass `terminal` = a terminal id returned by run, or a terminal stack's process_id from read_layout."#,
+                input_schema: (
+                    type: Object,
+                    required: ["terminal"],
+                    properties: {"terminal": (type: String)},
+                ),
+                availability: without_acp_terminals,
+            ),
+            (
                 name: "terminal_send",
                 description: "Send text to a terminal. Target by terminal process ID or omit it to use the active terminal. Set enter to true to append a carriage return.",
                 input_schema: (

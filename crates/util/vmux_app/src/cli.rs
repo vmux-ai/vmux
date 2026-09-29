@@ -20,6 +20,7 @@ impl Plugin for VmuxCliPlugin {
             vmux_team::TeamToolPlugin,
             vmux_browser::BrowserToolPlugin,
             vmux_capture::CapturePlugin,
+            vmux_chat::ChatToolPlugin,
             vmux_editor::FileToolPlugin,
             vmux_knowledge::KnowledgeToolPlugin,
             vmux_vault::VaultToolPlugin,
@@ -28,7 +29,7 @@ impl Plugin for VmuxCliPlugin {
             vmux_setting::SettingToolPlugin,
             vmux_space::SpaceToolPlugin,
             vmux_terminal::TerminalToolPlugin,
-            vmux_agent::WorkspaceToolPlugin,
+            vmux_agent::AgentToolPlugin,
             vmux_simulator::SimulatorToolPlugin,
         ))
         .add_systems(Update, open_app);

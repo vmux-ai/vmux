@@ -3,11 +3,12 @@ use bevy_cef::prelude::HostWindow;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{
-    AgentListSpaces, AgentRequest, AgentSpace, AgentSpaceCreate, AgentSpaceDelete,
+    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch, AgentListSpaces,
+    AgentPrepareWorktree, AgentRequest, AgentSpace, AgentSpaceCreate, AgentSpaceDelete,
     AgentSpaceRename, ClientMessage,
 };
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
-use vmux_core::{Active, Order};
+use vmux_core::{Active, Order, ProcessAnchor};
 use vmux_layout::space::{Space, SpaceId};
 use vmux_layout::window::{FocusedWindow, host_window_of};
 use vmux_tool::{
@@ -29,12 +30,22 @@ impl Plugin for SpaceToolPlugin {
         .register_tool::<CreateSpaceArgs>("create_space")
         .register_tool::<RenameSpaceArgs>("rename_space")
         .register_tool::<DeleteSpaceArgs>("delete_space")
+        .register_tool::<SelectProjectArgs>("select_project")
+        .register_tool::<CreateWorktreeArgs>("create_worktree")
         .add_message::<ToolQueryRequest>()
         .add_message::<ToolQueryHandled>()
         .add_message::<ServiceRequest>()
         .add_systems(
             Update,
-            (list_spaces, create, rename, delete).in_set(ToolDispatchSet),
+            (
+                list_spaces,
+                create,
+                rename,
+                delete,
+                select_project,
+                create_worktree,
+            )
+                .in_set(ToolDispatchSet),
         )
         .add_systems(
             Update,
@@ -122,6 +133,22 @@ struct DeleteSpaceArgs {
     space_id: String,
 }
 
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SelectProjectArgs {
+    path: Option<String>,
+}
+
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateWorktreeArgs {
+    branch: Option<String>,
+    path: Option<String>,
+    task: Option<String>,
+    #[serde(default)]
+    create: bool,
+}
+
 fn list_spaces(mut commands: Commands, calls: Query<Entity, AddedTool<ListSpacesArgs>>) {
     for request in &calls {
         commands
@@ -176,6 +203,63 @@ fn delete(
             })
         };
         commands.entity(entity).insert(ToolCommand(command));
+    }
+}
+
+fn select_project(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &Name, Option<&ProcessAnchor>, &SelectProjectArgs),
+        Added<SelectProjectArgs>,
+    >,
+) {
+    for (entity, name, anchor, args) in &requests {
+        let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| match args
+            .path
+            .clone()
+            .and_then(Trimmed::into_option)
+        {
+            Some(path) => AgentRequest::encode(&AgentChooseWorkspaceAtPath { anchor, path }),
+            None => AgentRequest::encode(&AgentChooseWorkspace { anchor }),
+        });
+        commands.entity(entity).insert(ToolCommand(command));
+    }
+}
+
+fn create_worktree(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &Name, Option<&ProcessAnchor>, &CreateWorktreeArgs),
+        Added<CreateWorktreeArgs>,
+    >,
+) {
+    for (entity, name, anchor, args) in &requests {
+        let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| {
+            if let Some(branch) = args.branch.clone().and_then(Trimmed::into_option) {
+                AgentRequest::encode(&AgentCreateWorktreeOnBranch {
+                    anchor,
+                    branch,
+                    project: None,
+                })
+            } else {
+                AgentRequest::encode(&AgentPrepareWorktree {
+                    anchor,
+                    path: args.path.clone().and_then(Trimmed::into_option),
+                    task: args.task.clone().and_then(Trimmed::into_option),
+                    create: args.create,
+                })
+            }
+        });
+        commands.entity(entity).insert(ToolCommand(command));
+    }
+}
+
+struct Trimmed;
+
+impl Trimmed {
+    fn into_option(value: String) -> Option<String> {
+        let value = value.trim();
+        (!value.is_empty()).then(|| value.to_string())
     }
 }
 

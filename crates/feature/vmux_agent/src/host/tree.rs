@@ -19,7 +19,7 @@ impl Plugin for AgentPlugin {
         app.add_plugins((
             AgentSessionPlugin,
             AgentPagesPlugin,
-            crate::WorkspaceToolPlugin,
+            crate::AgentToolPlugin,
             crate::runtime::AgentRuntimePlugin,
         ));
     }

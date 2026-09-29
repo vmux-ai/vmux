@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{
-    AgentCommandResult, AgentInvokeCommand, AgentReadLayout, AgentRequest, AgentRequestId,
-    AgentUpdateLayout, ClientMessage, JsonValue, layout,
+    AgentCommandResult, AgentInvokeCommand, AgentOpenBeside, AgentPaneDirection, AgentReadLayout,
+    AgentRequest, AgentRequestId, AgentUpdateLayout, ClientMessage, JsonValue, layout,
 };
 use vmux_core::ProcessAnchor;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
@@ -22,6 +22,7 @@ impl Plugin for LayoutToolPlugin {
             include_str!("../feature.ron"),
             "default",
         ))
+        .register_tool::<OpenPageArgs>("open_page")
         .register_tool::<ReadLayoutArgs>("read_layout")
         .register_tool::<UpdateLayoutArgs>("update_layout")
         .register_tool::<SelectTabArgs>("select_tab")
@@ -33,7 +34,7 @@ impl Plugin for LayoutToolPlugin {
         .add_message::<LayoutApplyResponse>()
         .add_systems(
             Update,
-            (read_layout, update_layout, select_tab).in_set(ToolDispatchSet),
+            (open_page, read_layout, update_layout, select_tab).in_set(ToolDispatchSet),
         )
         .add_systems(
             Update,
@@ -48,6 +49,55 @@ impl Plugin for LayoutToolPlugin {
                 forward_layout_snapshot_responses,
             ),
         );
+    }
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum PaneDirection {
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
+
+impl From<PaneDirection> for AgentPaneDirection {
+    fn from(value: PaneDirection) -> Self {
+        match value {
+            PaneDirection::Top => Self::Top,
+            PaneDirection::Right => Self::Right,
+            PaneDirection::Bottom => Self::Bottom,
+            PaneDirection::Left => Self::Left,
+        }
+    }
+}
+
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenPageArgs {
+    url: String,
+    direction: Option<PaneDirection>,
+    #[serde(default)]
+    focus: bool,
+}
+
+fn open_page(
+    mut commands: Commands,
+    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &OpenPageArgs), Added<OpenPageArgs>>,
+) {
+    for (entity, name, anchor, args) in &requests {
+        let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| {
+            if args.url.trim().is_empty() {
+                return Err("open_page.url is empty".to_string());
+            }
+            AgentRequest::encode(&AgentOpenBeside {
+                anchor,
+                direction: args.direction.map(Into::into),
+                url: args.url.clone(),
+                focus: args.focus,
+            })
+        });
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 

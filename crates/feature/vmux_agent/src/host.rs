@@ -58,7 +58,7 @@ pub use mcp::McpServerConfig;
 pub use message::{AssistantBlock, Message};
 pub use run_state_kind::{AgentRunStateKind, LastRunStateKind};
 pub use toast::{AgentToast, ToastLevel};
-pub use tool::WorkspaceToolPlugin;
+pub use tool::AgentToolPlugin;
 pub use url::{AgentKind, AgentUrl};
 pub use vmux_session::room::{
     ChatRoom, CollaborativeDocument, CrdtChangeReceived, DocumentKind, MaterializedRoomEvent,
