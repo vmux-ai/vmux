@@ -8,7 +8,7 @@ use vmux_core::tool::{
     ToolImportRequest, ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus,
 };
 
-use crate::manifest::{ToolStore, ToolsManifest, normalize_names};
+use crate::manifest::{ToolStore, ToolsManifest};
 use crate::process::ToolProcess;
 use crate::{
     ToolInventory, ToolInventoryItem, ToolOperationFailed, ToolOperationFinished,
@@ -287,7 +287,7 @@ pub fn parse_npm_manifest(source: &str) -> Result<Vec<String>, String> {
             packages.extend(entries.keys().cloned());
         }
     }
-    normalize_names(&mut packages);
+    ToolsManifest::normalize_names(&mut packages);
     Ok(packages)
 }
 

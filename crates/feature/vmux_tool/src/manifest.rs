@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use vmux_core::tool::ToolProvider;
 
 use crate::dotfiles::DotfilesManifest;
-use crate::homebrew::{sync_manifest_from_brewfile, write_managed_brewfile};
 use crate::mcp::McpManifest;
 
 const MANIFEST_VERSION: u32 = 1;
@@ -121,6 +120,12 @@ impl ToolsManifest {
         self.dotfiles.packages.dedup();
         self.mcp.servers.remove("vmux");
     }
+
+    pub(crate) fn normalize_names(names: &mut Vec<String>) {
+        names.retain(|name| !name.trim().is_empty());
+        names.sort_by_key(|name| name.to_ascii_lowercase());
+        names.dedup();
+    }
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -137,7 +142,10 @@ impl Default for ToolStore {
 
 impl ToolStore {
     pub fn current() -> Self {
-        Self::new(vmux_profile::config_dir(), home_dir())
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/"));
+        Self::new(vmux_profile::config_dir(), home)
     }
 
     pub fn new(config_dir: impl Into<PathBuf>, home: impl Into<PathBuf>) -> Self {
@@ -185,9 +193,9 @@ impl ToolStore {
         let mut manifest = ToolsManifest::read(&self.manifest_path())?;
         let brewfile = self.brewfile_path();
         if brewfile.is_file() {
-            sync_manifest_from_brewfile(&mut manifest, &brewfile)?;
+            manifest.sync_brewfile(&brewfile)?;
         } else {
-            write_managed_brewfile(self, &manifest)?;
+            self.write_brewfile(&manifest)?;
         }
         Ok(manifest)
     }
@@ -195,7 +203,7 @@ impl ToolStore {
     pub fn save(&self, manifest: &ToolsManifest) -> Result<(), String> {
         self.migrate_legacy_storage()?;
         manifest.write_to(&self.manifest_path())?;
-        write_managed_brewfile(self, manifest)
+        self.write_brewfile(manifest)
     }
 
     pub fn set_managed_package(
@@ -210,36 +218,32 @@ impl ToolStore {
     }
 
     pub(crate) fn migrate_legacy_storage(&self) -> Result<(), String> {
-        migrate_legacy_storage_in(&self.config_dir)
-    }
-}
-
-pub(crate) fn migrate_legacy_storage_in(config_dir: &Path) -> Result<(), String> {
-    let legacy_root = config_dir.join("registry");
-    let tools_root = config_dir.join("tools");
-    if legacy_root.symlink_metadata().is_ok() {
-        if tools_root.symlink_metadata().is_ok() {
-            return Err(format!(
-                "cannot migrate {} because {} already exists",
-                legacy_root.display(),
-                tools_root.display()
-            ));
+        let legacy_root = self.config_dir.join("registry");
+        let tools_root = self.config_dir.join("tools");
+        if legacy_root.symlink_metadata().is_ok() {
+            if tools_root.symlink_metadata().is_ok() {
+                return Err(format!(
+                    "cannot migrate {} because {} already exists",
+                    legacy_root.display(),
+                    tools_root.display()
+                ));
+            }
+            rename_for_migration(&legacy_root, &tools_root)?;
         }
-        rename_for_migration(&legacy_root, &tools_root)?;
-    }
-    let legacy_manifest = tools_root.join("registry.toml");
-    let tools_manifest = tools_root.join("tools.toml");
-    if legacy_manifest.symlink_metadata().is_ok() {
-        if tools_manifest.symlink_metadata().is_ok() {
-            return Err(format!(
-                "cannot migrate {} because {} already exists",
-                legacy_manifest.display(),
-                tools_manifest.display()
-            ));
+        let legacy_manifest = tools_root.join("registry.toml");
+        let tools_manifest = tools_root.join("tools.toml");
+        if legacy_manifest.symlink_metadata().is_ok() {
+            if tools_manifest.symlink_metadata().is_ok() {
+                return Err(format!(
+                    "cannot migrate {} because {} already exists",
+                    legacy_manifest.display(),
+                    tools_manifest.display()
+                ));
+            }
+            rename_for_migration(&legacy_manifest, &tools_manifest)?;
         }
-        rename_for_migration(&legacy_manifest, &tools_manifest)?;
+        Ok(())
     }
-    Ok(())
 }
 
 fn rename_for_migration(source: &Path, destination: &Path) -> Result<(), String> {
@@ -250,18 +254,6 @@ fn rename_for_migration(source: &Path, destination: &Path) -> Result<(), String>
         }
         Err(error) => Err(error.to_string()),
     }
-}
-
-pub(crate) fn normalize_names(names: &mut Vec<String>) {
-    names.retain(|name| !name.trim().is_empty());
-    names.sort_by_key(|name| name.to_ascii_lowercase());
-    names.dedup();
-}
-
-pub(crate) fn home_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"))
 }
 
 fn manifest_version() -> u32 {

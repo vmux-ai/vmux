@@ -8,7 +8,7 @@ use vmux_core::tool::{
     ToolImportRequest, ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus,
 };
 
-use crate::manifest::{ToolStore, ToolsManifest, normalize_names};
+use crate::manifest::{ToolStore, ToolsManifest};
 use crate::process::ToolProcess;
 use crate::{
     ToolInventory, ToolInventoryItem, ToolOperationFailed, ToolOperationFinished,
@@ -347,20 +347,9 @@ pub fn parse_brewfile(source: &str) -> BrewfileImport {
             import.casks.push(name);
         }
     }
-    normalize_names(&mut import.formulae);
-    normalize_names(&mut import.casks);
+    ToolsManifest::normalize_names(&mut import.formulae);
+    ToolsManifest::normalize_names(&mut import.casks);
     import
-}
-
-pub(crate) fn sync_manifest_from_brewfile(
-    manifest: &mut ToolsManifest,
-    path: &Path,
-) -> Result<(), String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let imported = parse_brewfile(&source);
-    set_packages(manifest, "homebrew-formula", imported.formulae);
-    set_packages(manifest, "homebrew-cask", imported.casks);
-    Ok(())
 }
 
 fn set_packages(manifest: &mut ToolsManifest, provider: &str, packages: Vec<String>) {
@@ -380,34 +369,43 @@ fn import_brewfile_in(store: &ToolStore, path: &Path) -> Result<(usize, usize), 
     vmux_path::AtomicFile::write(store.brewfile_path(), source.as_bytes())
         .map_err(|error| error.to_string())?;
     let manifest = ToolsManifest::read(&store.manifest_path())?;
-    write_managed_brewfile(store, &manifest)?;
+    store.write_brewfile(&manifest)?;
     Ok(imported)
 }
 
-pub(crate) fn write_managed_brewfile(
-    store: &ToolStore,
-    manifest: &ToolsManifest,
-) -> Result<(), String> {
-    write_brewfile_to(&store.brewfile_path(), manifest)
+impl ToolsManifest {
+    pub(crate) fn sync_brewfile(&mut self, path: &Path) -> Result<(), String> {
+        let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+        let imported = parse_brewfile(&source);
+        set_packages(self, "homebrew-formula", imported.formulae);
+        set_packages(self, "homebrew-cask", imported.casks);
+        Ok(())
+    }
+
+    pub(crate) fn write_brewfile_to(&self, path: &Path) -> Result<(), String> {
+        let formulae = self
+            .packages
+            .get("homebrew-formula")
+            .cloned()
+            .unwrap_or_default();
+        let casks = self
+            .packages
+            .get("homebrew-cask")
+            .cloned()
+            .unwrap_or_default();
+        if formulae.is_empty() && casks.is_empty() && !path.exists() {
+            return Ok(());
+        }
+        let existing = std::fs::read_to_string(path).unwrap_or_default();
+        let source = merge_brewfile(&existing, &formulae, &casks);
+        vmux_path::AtomicFile::write(path, source.as_bytes()).map_err(|error| error.to_string())
+    }
 }
 
-pub(crate) fn write_brewfile_to(path: &Path, manifest: &ToolsManifest) -> Result<(), String> {
-    let formulae = manifest
-        .packages
-        .get("homebrew-formula")
-        .cloned()
-        .unwrap_or_default();
-    let casks = manifest
-        .packages
-        .get("homebrew-cask")
-        .cloned()
-        .unwrap_or_default();
-    if formulae.is_empty() && casks.is_empty() && !path.exists() {
-        return Ok(());
+impl ToolStore {
+    pub(crate) fn write_brewfile(&self, manifest: &ToolsManifest) -> Result<(), String> {
+        manifest.write_brewfile_to(&self.brewfile_path())
     }
-    let existing = std::fs::read_to_string(path).unwrap_or_default();
-    let source = merge_brewfile(&existing, &formulae, &casks);
-    vmux_path::AtomicFile::write(path, source.as_bytes()).map_err(|error| error.to_string())
 }
 
 fn merge_brewfile(source: &str, formulae: &[String], casks: &[String]) -> String {

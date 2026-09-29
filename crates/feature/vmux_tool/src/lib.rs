@@ -182,11 +182,6 @@ fn route_external_tool_operation<R: Clone + Send + Sync + 'static>(
 }
 
 #[cfg(test)]
-use homebrew::{sync_manifest_from_brewfile, write_brewfile_to};
-#[cfg(test)]
-use manifest::migrate_legacy_storage_in;
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -233,7 +228,9 @@ mod tests {
         .unwrap();
         std::fs::write(legacy_root.join("dotfiles/shell/.zshrc"), "export VMUX=1").unwrap();
 
-        migrate_legacy_storage_in(temp.path()).unwrap();
+        ToolStore::new(temp.path(), temp.path())
+            .migrate_legacy_storage()
+            .unwrap();
 
         assert!(!legacy_root.exists());
         let tools_root = temp.path().join("tools");
@@ -291,14 +288,14 @@ brew "ripgrep"
         manifest.set_package("homebrew-formula", "fd", true);
         manifest.set_package("homebrew-cask", "ghostty", true);
 
-        write_brewfile_to(&path, &manifest).unwrap();
+        manifest.write_brewfile_to(&path).unwrap();
 
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "tap \"homebrew/cask-fonts\"\n# keep this\nbrew \"fd\", link: false\nmas \"Xcode\", id: 497799835\nbrew \"ripgrep\"\ncask \"ghostty\"\n"
         );
         let mut loaded = ToolsManifest::default();
-        sync_manifest_from_brewfile(&mut loaded, &path).unwrap();
+        loaded.sync_brewfile(&path).unwrap();
         assert_eq!(loaded.packages, manifest.packages);
     }
 
