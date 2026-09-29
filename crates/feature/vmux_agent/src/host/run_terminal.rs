@@ -1,12 +1,29 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use vmux_api::protocol::ProcessId;
+use vmux_api::protocol::{AgentPaneDirection, ProcessId};
+use vmux_api::service::RUN_OSC;
+#[cfg(test)]
+use vmux_api::terminal::CursorStyle;
+use vmux_command::open_target::PaneDirection;
 use vmux_core::PageMetadata;
-use vmux_layout::pane::{Pane, PaneSplit};
-use vmux_setting::AppSettings;
+#[cfg(test)]
+use vmux_core::{LastActivatedAt, terminal::TerminalKind as CoreTerminalKind};
+use vmux_layout::pane::{Pane, PaneSplit, PaneSplitDirection, SpawnCounter, SpawnSeq};
+use vmux_layout::placement::{PageKind, page_kind_for_url};
+use vmux_layout::stack::Stack;
+use vmux_layout::tab::Tab;
+#[cfg(test)]
+use vmux_layout::{LayoutContractPlugin, pane::split_or_extend, stack::stack_bundle};
+use vmux_setting::{AppSettings, StartupDir};
+#[cfg(test)]
+use vmux_setting::{TerminalSettings, TerminalTheme};
 use vmux_terminal::launch::TerminalLaunch;
-use vmux_terminal::{AgentRunTerminal, ProcessExited, Terminal, TerminalStackSpawnRequest};
+use vmux_terminal::{
+    AgentRunTerminal, ProcessExited, Terminal, TerminalReinputRequest, TerminalStackSpawnRequest,
+};
+#[cfg(test)]
+use vmux_terminal::{TerminalContractPlugin, launch::TerminalKind as LaunchTerminalKind};
 
 use crate::session::AgentSession;
 
@@ -76,8 +93,8 @@ impl RunTerminalCandidate {
             ),
         >,
         child_of_q: &Query<&ChildOf>,
-        tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
-        seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
+        tab_q: &Query<Entity, With<Tab>>,
+        seq_q: &Query<&SpawnSeq>,
         desired_cwd: &Path,
     ) -> Vec<Self> {
         use bevy::ecs::relationship::Relationship;
@@ -118,7 +135,7 @@ impl RunTerminalCandidate {
     pub(crate) fn activation_entities(
         &self,
         child_of_q: &Query<&ChildOf>,
-        tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
+        tab_q: &Query<Entity, With<Tab>>,
     ) -> Vec<Entity> {
         let mut entities = vec![self.stack, self.pane];
         if let Some(tab) = AgentPane::new(self.pane).tab(child_of_q, tab_q) {
@@ -155,7 +172,7 @@ impl AgentPane {
     fn tab(
         &self,
         child_of_q: &Query<&ChildOf>,
-        tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
+        tab_q: &Query<Entity, With<Tab>>,
     ) -> Option<Entity> {
         use bevy::ecs::relationship::Relationship;
         let mut cur = self.0;
@@ -171,10 +188,10 @@ impl AgentPane {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn split(
         &self,
-        direction: &vmux_api::protocol::AgentPaneDirection,
+        direction: &AgentPaneDirection,
         focus: bool,
         pane_children: &Query<&Children, With<Pane>>,
-        tab_filter: &Query<Entity, With<vmux_layout::stack::Stack>>,
+        tab_filter: &Query<Entity, With<Stack>>,
         split_dir_q: &Query<&PaneSplit>,
         split_this_batch: &mut std::collections::HashSet<Entity>,
     ) -> AgentPaneSplit {
@@ -182,7 +199,7 @@ impl AgentPane {
             .get(self.0)
             .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
             .unwrap_or_default();
-        let split_dir = vmux_layout::pane::direction_to_split(&Self::direction(direction));
+        let split_dir = direction_to_split(&Self::direction(direction));
         let already_split = !split_this_batch.insert(self.0) || split_dir_q.contains(self.0);
         AgentPaneSplit {
             pane: self.0,
@@ -193,11 +210,8 @@ impl AgentPane {
         }
     }
 
-    pub(crate) fn direction(
-        d: &vmux_api::protocol::AgentPaneDirection,
-    ) -> vmux_command::open_target::PaneDirection {
-        use vmux_api::protocol::AgentPaneDirection as D;
-        use vmux_command::open_target::PaneDirection;
+    pub(crate) fn direction(d: &AgentPaneDirection) -> PaneDirection {
+        use AgentPaneDirection as D;
         match d {
             D::Top => PaneDirection::Top,
             D::Right => PaneDirection::Right,
@@ -209,7 +223,7 @@ impl AgentPane {
 
 pub(crate) struct AgentPaneSplit {
     pub(crate) pane: Entity,
-    pub(crate) direction: vmux_layout::pane::PaneSplitDirection,
+    pub(crate) direction: PaneSplitDirection,
     pub(crate) existing_tabs: Vec<Entity>,
     pub(crate) focus: bool,
     pub(crate) already_split: bool,
@@ -218,16 +232,13 @@ pub(crate) struct AgentPaneSplit {
 pub(crate) struct NextPaneSpawnSequence;
 
 impl NextPaneSpawnSequence {
-    pub(crate) fn take(
-        spawn_counter: &mut vmux_layout::pane::SpawnCounter,
-        seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
-    ) -> vmux_layout::pane::SpawnSeq {
+    pub(crate) fn take(spawn_counter: &mut SpawnCounter, seq_q: &Query<&SpawnSeq>) -> SpawnSeq {
         let max_existing = seq_q.iter().map(|sequence| sequence.0).max().unwrap_or(0);
         if spawn_counter.0 <= max_existing {
             spawn_counter.0 = max_existing;
         }
         spawn_counter.0 += 1;
-        vmux_layout::pane::SpawnSeq(spawn_counter.0)
+        SpawnSeq(spawn_counter.0)
     }
 }
 
@@ -243,12 +254,12 @@ impl RunTerminalBucketPanes {
     pub(crate) fn collect(
         agent_pane: Entity,
         child_of_q: &Query<&ChildOf>,
-        tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
+        tab_q: &Query<Entity, With<Tab>>,
         leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
         pane_children: &Query<&Children, With<Pane>>,
-        stack_q: &Query<Entity, With<vmux_layout::stack::Stack>>,
-        page_q: &Query<&PageMetadata, With<vmux_layout::stack::Stack>>,
-        seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
+        stack_q: &Query<Entity, With<Stack>>,
+        page_q: &Query<&PageMetadata, With<Stack>>,
+        seq_q: &Query<&SpawnSeq>,
     ) -> Self {
         let Some(agent_tab) = AgentPane::new(agent_pane).tab(child_of_q, tab_q) else {
             return Self(Vec::new());
@@ -268,9 +279,7 @@ impl RunTerminalBucketPanes {
                     for stack in children.iter().filter(|&child| stack_q.contains(child)) {
                         has_stack = true;
                         let meta = page_q.get(stack).ok()?;
-                        if vmux_layout::placement::page_kind_for_url(&meta.url)
-                            != vmux_layout::placement::PageKind::Terminal
-                        {
+                        if page_kind_for_url(&meta.url) != PageKind::Terminal {
                             return None;
                         }
                     }
@@ -404,8 +413,8 @@ impl<'a> RunCommand<'a> {
         process_id: ProcessId,
         launch: &TerminalLaunch,
         pager: PagerEnv,
-    ) -> vmux_terminal::TerminalReinputRequest {
-        vmux_terminal::TerminalReinputRequest {
+    ) -> TerminalReinputRequest {
+        TerminalReinputRequest {
             process_id,
             data: self.input(&launch.command, pager),
         }
@@ -445,7 +454,7 @@ fn command_with_marker(shell: &str, command: &str, token: &str, env: PagerEnv) -
         .and_then(|s| s.to_str())
         .unwrap_or(shell);
     let pager = env.prefix(base);
-    let osc = vmux_api::service::RUN_OSC;
+    let osc = RUN_OSC;
     match base {
         "nu" | "nushell" => format!(
             "{pager}$env.LAST_EXIT_CODE = 0; let __vmux_status = try {{ {command}; $env.LAST_EXIT_CODE }} catch {{|error| $error.exit_code? | default 1 }}; print -rn $\"\\u{{1b}}]{osc};{token};($__vmux_status)\\u{{7}}\""
@@ -555,7 +564,7 @@ impl<'a> AgentCwd<'a> {
         let Some(tab_cwd) = self.tab_cwd else {
             return Ok(None);
         };
-        vmux_setting::StartupDir::from_tab(tab_cwd).map(|dir| Some(dir.path))
+        StartupDir::from_tab(tab_cwd).map(|dir| Some(dir.path))
     }
 
     pub(crate) fn or_agent_launch(
@@ -580,7 +589,6 @@ impl<'a> AgentCwd<'a> {
 mod tests {
     use super::*;
     use crate::host::test_support::{spawn_stack_in_pane, test_settings};
-    use vmux_core::LastActivatedAt;
     use vmux_terminal::Terminal;
 
     #[test]
@@ -717,16 +725,16 @@ mod tests {
     #[test]
     fn new_agent_run_terminal_uses_configured_shell_for_launch_and_input() {
         let mut settings = test_settings();
-        settings.terminal = Some(vmux_setting::TerminalSettings {
+        settings.terminal = Some(TerminalSettings {
             default_theme: "default".to_string(),
-            themes: vec![vmux_setting::TerminalTheme {
+            themes: vec![TerminalTheme {
                 name: "default".to_string(),
                 color_scheme: "catppuccin-mocha".to_string(),
                 font_family: "JetBrainsMono Nerd Font".to_string(),
                 font_size: 14.0,
                 line_height: 1.2,
                 padding: 4.0,
-                cursor_style: vmux_api::terminal::CursorStyle::Block,
+                cursor_style: CursorStyle::Block,
                 cursor_blink: true,
                 shell: "/opt/homebrew/bin/nu".to_string(),
             }],
@@ -775,7 +783,7 @@ mod tests {
             args: vec![],
             cwd: String::new(),
             env: vec![],
-            kind: vmux_terminal::launch::TerminalKind::Plain,
+            kind: LaunchTerminalKind::Plain,
         };
 
         let input = RunCommand::new("pwd", Some("tok2")).input(&launch.command, PagerEnv::Set);
@@ -831,12 +839,9 @@ mod tests {
         }
 
         #[derive(Resource, Default)]
-        struct Captured(Vec<vmux_terminal::TerminalReinputRequest>);
+        struct Captured(Vec<TerminalReinputRequest>);
 
-        fn emit(
-            input: Res<Input>,
-            mut writer: MessageWriter<vmux_terminal::TerminalReinputRequest>,
-        ) {
+        fn emit(input: Res<Input>, mut writer: MessageWriter<TerminalReinputRequest>) {
             writer.write(RunCommand::new("pwd", Some("tok4")).reinput(
                 input.process_id,
                 &input.launch,
@@ -845,7 +850,7 @@ mod tests {
         }
 
         fn capture(
-            mut reader: MessageReader<vmux_terminal::TerminalReinputRequest>,
+            mut reader: MessageReader<TerminalReinputRequest>,
             mut captured: ResMut<Captured>,
         ) {
             captured.0.extend(reader.read().cloned());
@@ -853,7 +858,7 @@ mod tests {
 
         let process_id = ProcessId::new();
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_terminal::TerminalContractPlugin))
+        app.add_plugins((MinimalPlugins, TerminalContractPlugin))
             .insert_resource(Input {
                 process_id,
                 launch: TerminalLaunch {
@@ -861,7 +866,7 @@ mod tests {
                     args: vec![],
                     cwd: String::new(),
                     env: vec![],
-                    kind: vmux_terminal::launch::TerminalKind::Plain,
+                    kind: LaunchTerminalKind::Plain,
                 },
             })
             .init_resource::<Captured>()
@@ -899,8 +904,8 @@ mod tests {
             ),
         >,
         child_of_q: Query<&ChildOf>,
-        tab_q: Query<Entity, With<vmux_layout::tab::Tab>>,
-        seq_q: Query<&vmux_layout::pane::SpawnSeq>,
+        tab_q: Query<Entity, With<Tab>>,
+        seq_q: Query<&SpawnSeq>,
         mut out: ResMut<RunTerminalCandidateOutput>,
     ) {
         out.0 = RunTerminalCandidate::collect(
@@ -920,14 +925,14 @@ mod tests {
             .init_resource::<RunTerminalCandidateOutput>()
             .add_systems(Update, collect_run_terminal_candidates);
 
-        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab::default()).id();
         let terminal_pane = app
             .world_mut()
-            .spawn((Pane, vmux_layout::pane::SpawnSeq(7), ChildOf(tab)))
+            .spawn((Pane, SpawnSeq(7), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
-            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(terminal_pane)))
+            .spawn((stack_bundle(), ChildOf(terminal_pane)))
             .id();
         let desired_cwd = std::env::temp_dir();
         app.world_mut().spawn((
@@ -939,14 +944,11 @@ mod tests {
                 args: vec![],
                 cwd: desired_cwd.to_string_lossy().into_owned(),
                 env: vec![],
-                kind: vmux_terminal::launch::TerminalKind::Plain,
+                kind: LaunchTerminalKind::Plain,
             },
             ChildOf(stack),
         ));
-        let agent_pane = app
-            .world_mut()
-            .spawn((Pane, vmux_layout::pane::SpawnSeq(9)))
-            .id();
+        let agent_pane = app.world_mut().spawn((Pane, SpawnSeq(9))).id();
 
         app.insert_resource(RunTerminalCandidateInput {
             agent_pane,
@@ -969,10 +971,10 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalCandidateOutput>()
             .add_systems(Update, collect_run_terminal_candidates);
-        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab::default()).id();
         let agent_pane = app
             .world_mut()
-            .spawn((Pane, vmux_layout::pane::SpawnSeq(1), ChildOf(tab)))
+            .spawn((Pane, SpawnSeq(1), ChildOf(tab)))
             .id();
         let desired_cwd = std::env::temp_dir();
         let agent_pid = ProcessId::new();
@@ -981,12 +983,9 @@ mod tests {
         for (sequence, pid, agent_run) in [(2, agent_pid, true), (3, user_pid, false)] {
             let pane = app
                 .world_mut()
-                .spawn((Pane, vmux_layout::pane::SpawnSeq(sequence), ChildOf(tab)))
+                .spawn((Pane, SpawnSeq(sequence), ChildOf(tab)))
                 .id();
-            let stack = app
-                .world_mut()
-                .spawn((vmux_layout::stack::stack_bundle(), ChildOf(pane)))
-                .id();
+            let stack = app.world_mut().spawn((stack_bundle(), ChildOf(pane))).id();
             let terminal = app
                 .world_mut()
                 .spawn((
@@ -997,7 +996,7 @@ mod tests {
                         args: vec![],
                         cwd: desired_cwd.to_string_lossy().into_owned(),
                         env: vec![],
-                        kind: vmux_terminal::launch::TerminalKind::Plain,
+                        kind: LaunchTerminalKind::Plain,
                     },
                     ChildOf(stack),
                 ))
@@ -1034,18 +1033,18 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalCandidateOutput>()
             .add_systems(Update, collect_run_terminal_candidates);
-        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab::default()).id();
         let agent_pane = app
             .world_mut()
-            .spawn((Pane, vmux_layout::pane::SpawnSeq(1), ChildOf(tab)))
+            .spawn((Pane, SpawnSeq(1), ChildOf(tab)))
             .id();
         let current_pane = app
             .world_mut()
-            .spawn((Pane, vmux_layout::pane::SpawnSeq(2), ChildOf(tab)))
+            .spawn((Pane, SpawnSeq(2), ChildOf(tab)))
             .id();
         let current_stack = app
             .world_mut()
-            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(current_pane)))
+            .spawn((stack_bundle(), ChildOf(current_pane)))
             .id();
         let current_pid = ProcessId::new();
         app.world_mut().spawn((
@@ -1057,17 +1056,17 @@ mod tests {
                 args: vec![],
                 cwd: current.to_string_lossy().into_owned(),
                 env: vec![],
-                kind: vmux_core::terminal::TerminalKind::Plain,
+                kind: CoreTerminalKind::Plain,
             },
             ChildOf(current_stack),
         ));
         let stale_pane = app
             .world_mut()
-            .spawn((Pane, vmux_layout::pane::SpawnSeq(3), ChildOf(tab)))
+            .spawn((Pane, SpawnSeq(3), ChildOf(tab)))
             .id();
         let stale_stack = app
             .world_mut()
-            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(stale_pane)))
+            .spawn((stack_bundle(), ChildOf(stale_pane)))
             .id();
         app.world_mut().spawn((
             Terminal,
@@ -1078,7 +1077,7 @@ mod tests {
                 args: vec![],
                 cwd: stale.to_string_lossy().into_owned(),
                 env: vec![],
-                kind: vmux_core::terminal::TerminalKind::Plain,
+                kind: CoreTerminalKind::Plain,
             },
             ChildOf(stale_stack),
         ));
@@ -1106,12 +1105,12 @@ mod tests {
     fn collect_run_terminal_bucket_panes(
         input: Res<RunTerminalBucketPaneInput>,
         child_of_q: Query<&ChildOf>,
-        tab_q: Query<Entity, With<vmux_layout::tab::Tab>>,
+        tab_q: Query<Entity, With<Tab>>,
         leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
         pane_children: Query<&Children, With<Pane>>,
-        stack_q: Query<Entity, With<vmux_layout::stack::Stack>>,
-        page_q: Query<&PageMetadata, With<vmux_layout::stack::Stack>>,
-        seq_q: Query<&vmux_layout::pane::SpawnSeq>,
+        stack_q: Query<Entity, With<Stack>>,
+        page_q: Query<&PageMetadata, With<Stack>>,
+        seq_q: Query<&SpawnSeq>,
         mut out: ResMut<RunTerminalBucketPaneOutput>,
     ) {
         out.0 = RunTerminalBucketPanes::collect(
@@ -1137,19 +1136,19 @@ mod tests {
             .init_resource::<RunTerminalBucketPaneOutput>()
             .add_systems(Update, collect_run_terminal_bucket_panes);
 
-        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
+        let tab = app.world_mut().spawn(Tab::default()).id();
         let agent_pane = app
             .world_mut()
-            .spawn((Pane, vmux_layout::pane::SpawnSeq(1), ChildOf(tab)))
+            .spawn((Pane, SpawnSeq(1), ChildOf(tab)))
             .id();
         let terminal_pane = app
             .world_mut()
-            .spawn((Pane, vmux_layout::pane::SpawnSeq(3), ChildOf(tab)))
+            .spawn((Pane, SpawnSeq(3), ChildOf(tab)))
             .id();
         spawn_stack_in_pane(&mut app, terminal_pane, "vmux://terminal/68001");
         let file_pane = app
             .world_mut()
-            .spawn((Pane, vmux_layout::pane::SpawnSeq(9), ChildOf(tab)))
+            .spawn((Pane, SpawnSeq(9), ChildOf(tab)))
             .id();
         spawn_stack_in_pane(&mut app, file_pane, "file:///repo/src/plugin.rs");
 
@@ -1256,8 +1255,8 @@ mod tests {
     fn touch_reused_run_pane_spawn_seq_test_system(
         input: Res<ReusedRunPaneTouchInput>,
         mut commands: Commands,
-        mut spawn_counter: Single<&mut vmux_layout::pane::SpawnCounter>,
-        seq_q: Query<&vmux_layout::pane::SpawnSeq>,
+        mut spawn_counter: Single<&mut SpawnCounter>,
+        seq_q: Query<&SpawnSeq>,
     ) {
         let sequence = NextPaneSpawnSequence::take(&mut spawn_counter, &seq_q);
         commands.entity(input.pane).insert(sequence);
@@ -1266,27 +1265,16 @@ mod tests {
     #[test]
     fn reusable_run_pane_touch_refreshes_spawn_seq() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
+        app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .add_systems(Update, touch_reused_run_pane_spawn_seq_test_system);
 
-        let reused = app
-            .world_mut()
-            .spawn((Pane, vmux_layout::pane::SpawnSeq(2)))
-            .id();
-        app.world_mut()
-            .spawn(vmux_layout::pane::SpawnCounter::default());
-        app.world_mut()
-            .spawn((Pane, vmux_layout::pane::SpawnSeq(10)));
+        let reused = app.world_mut().spawn((Pane, SpawnSeq(2))).id();
+        app.world_mut().spawn(SpawnCounter::default());
+        app.world_mut().spawn((Pane, SpawnSeq(10)));
         app.insert_resource(ReusedRunPaneTouchInput { pane: reused });
         app.update();
 
-        assert_eq!(
-            app.world()
-                .get::<vmux_layout::pane::SpawnSeq>(reused)
-                .unwrap()
-                .0,
-            11
-        );
+        assert_eq!(app.world().get::<SpawnSeq>(reused).unwrap().0, 11);
     }
 
     #[derive(Resource)]
@@ -1301,22 +1289,22 @@ mod tests {
         input: Res<SplitRunPaneInput>,
         mut out: ResMut<SplitRunPaneOutput>,
         mut commands: Commands,
-        mut spawn_counter: Single<&mut vmux_layout::pane::SpawnCounter>,
+        mut spawn_counter: Single<&mut SpawnCounter>,
         pane_children: Query<&Children, With<Pane>>,
-        tab_filter: Query<Entity, With<vmux_layout::stack::Stack>>,
+        tab_filter: Query<Entity, With<Stack>>,
         split_dir_q: Query<&PaneSplit>,
-        seq_q: Query<&vmux_layout::pane::SpawnSeq>,
+        seq_q: Query<&SpawnSeq>,
     ) {
         let mut split_batch = std::collections::HashSet::new();
         let split = AgentPane::new(input.pane).split(
-            &vmux_api::protocol::AgentPaneDirection::Bottom,
+            &AgentPaneDirection::Bottom,
             false,
             &pane_children,
             &tab_filter,
             &split_dir_q,
             &mut split_batch,
         );
-        let target = vmux_layout::pane::split_or_extend(
+        let target = split_or_extend(
             &mut commands,
             split.pane,
             split.direction,
@@ -1332,23 +1320,22 @@ mod tests {
     #[test]
     fn split_run_pane_becomes_newest_for_followup_placement() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
+        app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .init_resource::<SplitRunPaneOutput>()
             .add_systems(Update, split_run_pane_test_system);
 
         let tab = app
             .world_mut()
-            .spawn((vmux_layout::tab::Tab::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt(1)))
             .id();
         let browser_pane = app
             .world_mut()
-            .spawn((Pane, vmux_layout::pane::SpawnSeq(10), ChildOf(tab)))
+            .spawn((Pane, SpawnSeq(10), ChildOf(tab)))
             .id();
-        app.world_mut()
-            .spawn(vmux_layout::pane::SpawnCounter::default());
+        app.world_mut().spawn(SpawnCounter::default());
         let browser_stack = app
             .world_mut()
-            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(browser_pane)))
+            .spawn((stack_bundle(), ChildOf(browser_pane)))
             .id();
         app.world_mut()
             .entity_mut(browser_stack)
@@ -1363,7 +1350,7 @@ mod tests {
         let terminal_pane = app.world().resource::<SplitRunPaneOutput>().0.unwrap();
         let seq = app
             .world()
-            .get::<vmux_layout::pane::SpawnSeq>(terminal_pane)
+            .get::<SpawnSeq>(terminal_pane)
             .expect("split run target gets fresh spawn seq")
             .0;
         assert!(seq > 10, "split run target must become newest");
@@ -1458,7 +1445,7 @@ mod tests {
         input: Res<ReusedRunTerminalFocusInput>,
         mut commands: Commands,
         child_of_q: Query<&ChildOf>,
-        tab_q: Query<Entity, With<vmux_layout::tab::Tab>>,
+        tab_q: Query<Entity, With<Tab>>,
     ) {
         for entity in input.candidate.activation_entities(&child_of_q, &tab_q) {
             commands.entity(entity).insert(LastActivatedAt::now());
@@ -1472,24 +1459,15 @@ mod tests {
             .add_systems(Update, focus_reused_run_terminal_test_system);
         let tab = app
             .world_mut()
-            .spawn((vmux_layout::tab::Tab::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt(1)))
             .id();
         let pane = app
             .world_mut()
-            .spawn((
-                Pane,
-                vmux_layout::pane::SpawnSeq(7),
-                LastActivatedAt(2),
-                ChildOf(tab),
-            ))
+            .spawn((Pane, SpawnSeq(7), LastActivatedAt(2), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
-            .spawn((
-                vmux_layout::stack::stack_bundle(),
-                LastActivatedAt(3),
-                ChildOf(pane),
-            ))
+            .spawn((stack_bundle(), LastActivatedAt(3), ChildOf(pane)))
             .id();
         app.insert_resource(ReusedRunTerminalFocusInput {
             candidate: RunTerminalCandidate {
