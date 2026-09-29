@@ -152,107 +152,128 @@ fn emit_explorer_panel(
     }
 }
 
-fn persist_explorer_width(
-    width: u32,
-    settings: Option<ResMut<AppSettings>>,
-    saves: Option<ResMut<Messages<SettingsSaveRequest>>>,
-) {
-    let Some(mut settings) = settings else {
-        return;
-    };
-    settings.editor.explorer.width = Some(width);
-    if let Some(mut saves) = saves {
-        saves.write(SettingsSaveRequest);
-    }
+#[derive(bevy::ecs::system::SystemParam)]
+struct ExplorerPanelMutation<'w, 's> {
+    child_of: Query<'w, 's, &'static ChildOf>,
+    visibility: Query<'w, 's, &'static mut StackExplorerVisibility>,
+    revisions: Query<'w, 's, &'static mut StackExplorerRevision>,
+    panel_views: Query<'w, 's, &'static mut StackExplorerView>,
+    editors: Query<'w, 's, (Entity, Option<&'static ChildOf>), With<FileView>>,
+    commands: Commands<'w, 's>,
 }
 
-fn mark_explorer_panel_unsent(views: &Query<Entity, With<FileView>>, commands: &mut Commands) {
-    for entity in views {
-        commands.entity(entity).remove::<ExplorerPanelSent>();
+impl ExplorerPanelMutation<'_, '_> {
+    fn scope(&self, entity: Entity) -> Entity {
+        self.child_of
+            .get(entity)
+            .map(ChildOf::parent)
+            .unwrap_or(entity)
     }
-}
 
-fn apply_stack_explorer_panel(
-    scope: Entity,
-    visibility: StackExplorerVisibility,
-    revision: StackExplorerRevision,
-    visibilities: &mut Query<&mut StackExplorerVisibility>,
-    revisions: &mut Query<&mut StackExplorerRevision>,
-    commands: &mut Commands,
-) {
-    if let Ok(mut state) = visibilities.get_mut(scope) {
-        *state = visibility;
-    } else {
-        commands.entity(scope).insert(visibility);
+    fn visible(&self, scope: Entity, fallback: bool) -> bool {
+        self.visibility
+            .get(scope)
+            .map(|state| state.visible)
+            .unwrap_or(fallback)
     }
-    if let Ok(mut state) = revisions.get_mut(scope) {
-        *state = revision;
-    } else {
-        commands.entity(scope).insert(revision);
+
+    fn next_request_id(&self, scope: Entity) -> u64 {
+        self.revisions
+            .get(scope)
+            .map(|revision| revision.request_id)
+            .unwrap_or_default()
+            .wrapping_add(1)
+            .max(1)
+    }
+
+    fn set_panel(
+        &mut self,
+        scope: Entity,
+        visibility: StackExplorerVisibility,
+        revision: StackExplorerRevision,
+    ) {
+        if let Ok(mut state) = self.visibility.get_mut(scope) {
+            *state = visibility;
+        } else {
+            self.commands.entity(scope).insert(visibility);
+        }
+        if let Ok(mut state) = self.revisions.get_mut(scope) {
+            *state = revision;
+        } else {
+            self.commands.entity(scope).insert(revision);
+        }
+    }
+
+    fn set_view(&mut self, scope: Entity, search: bool) {
+        if let Ok(mut view) = self.panel_views.get_mut(scope) {
+            view.search = search;
+            if search {
+                view.search_focus_revision = view.search_focus_revision.wrapping_add(1).max(1);
+            }
+        } else {
+            self.commands.entity(scope).insert(StackExplorerView {
+                search,
+                search_focus_revision: u64::from(search),
+            });
+        }
+    }
+
+    fn mark_unsent(&mut self) {
+        for (entity, _) in &self.editors {
+            self.commands.entity(entity).remove::<ExplorerPanelSent>();
+        }
+    }
+
+    fn mark_scope_sent(&mut self, source: Entity, scope: Entity) {
+        for (view, parent) in &self.editors {
+            let view_scope = parent.map(ChildOf::parent).unwrap_or(view);
+            if view_scope != scope {
+                continue;
+            }
+            if view == source {
+                self.commands.entity(view).insert(ExplorerPanelSent);
+            } else {
+                self.commands.entity(view).remove::<ExplorerPanelSent>();
+            }
+        }
     }
 }
 
 fn toggle_explorer(
     trigger: On<ExplorerToggleRequest>,
-    child_of: Query<&ChildOf>,
-    visibility: Query<&StackExplorerVisibility>,
-    revisions: Query<&StackExplorerRevision>,
     panel: Single<&ExplorerPanelDefaults>,
-    editors: Query<Entity, With<FileView>>,
-    mut commands: Commands,
+    mut mutation: ExplorerPanelMutation,
 ) {
     let entity = trigger.event_target();
-    let scope = child_of.get(entity).map(ChildOf::parent).unwrap_or(entity);
-    let visible = visibility
-        .get(scope)
-        .map(|state| state.visible)
-        .unwrap_or(panel.default_visible);
-    let request_id = revisions
-        .get(scope)
-        .map(|revision| revision.request_id)
-        .unwrap_or_default()
-        .wrapping_add(1)
-        .max(1);
-    commands.entity(scope).insert((
+    let scope = mutation.scope(entity);
+    let visible = mutation.visible(scope, panel.default_visible);
+    let request_id = mutation.next_request_id(scope);
+    mutation.set_panel(
+        scope,
         StackExplorerVisibility { visible: !visible },
         StackExplorerRevision {
             client_id: 0,
             request_id,
         },
-    ));
-    mark_explorer_panel_unsent(&editors, &mut commands);
+    );
+    mutation.mark_unsent();
 }
 
-fn reveal_in_explorer(
-    trigger: On<ExplorerRevealRequest>,
-    child_of: Query<&ChildOf>,
-    revisions: Query<&StackExplorerRevision>,
-    mut views: Query<&mut StackExplorerView>,
-    editors: Query<Entity, With<FileView>>,
-    mut commands: Commands,
-) {
+fn reveal_in_explorer(trigger: On<ExplorerRevealRequest>, mut mutation: ExplorerPanelMutation) {
     let entity = trigger.event_target();
-    let scope = child_of.get(entity).map(ChildOf::parent).unwrap_or(entity);
-    let request_id = revisions
-        .get(scope)
-        .map(|revision| revision.request_id)
-        .unwrap_or_default()
-        .wrapping_add(1)
-        .max(1);
-    commands.entity(scope).insert((
+    let scope = mutation.scope(entity);
+    let request_id = mutation.next_request_id(scope);
+    mutation.set_panel(
+        scope,
         StackExplorerVisibility { visible: true },
         StackExplorerRevision {
             client_id: 0,
             request_id,
         },
-    ));
-    if let Ok(mut view) = views.get_mut(scope) {
-        view.search = false;
-    } else {
-        commands.entity(scope).insert(StackExplorerView::default());
-    }
-    mark_explorer_panel_unsent(&editors, &mut commands);
-    commands.trigger(RevealCurrent {
+    );
+    mutation.set_view(scope, false);
+    mutation.mark_unsent();
+    mutation.commands.trigger(RevealCurrent {
         entity,
         reveal: ExplorerReveal::Requested,
     });
@@ -260,49 +281,29 @@ fn reveal_in_explorer(
 
 fn open_find_in_files(
     trigger: On<ExplorerFindInFilesRequest>,
-    child_of: Query<&ChildOf>,
-    revisions: Query<&StackExplorerRevision>,
-    mut views: Query<&mut StackExplorerView>,
-    editors: Query<Entity, With<FileView>>,
-    mut commands: Commands,
+    mut mutation: ExplorerPanelMutation,
 ) {
     let entity = trigger.event_target();
-    let scope = child_of.get(entity).map(ChildOf::parent).unwrap_or(entity);
-    let request_id = revisions
-        .get(scope)
-        .map(|revision| revision.request_id)
-        .unwrap_or_default()
-        .wrapping_add(1)
-        .max(1);
-    commands.entity(scope).insert((
+    let scope = mutation.scope(entity);
+    let request_id = mutation.next_request_id(scope);
+    mutation.set_panel(
+        scope,
         StackExplorerVisibility { visible: true },
         StackExplorerRevision {
             client_id: 0,
             request_id,
         },
-    ));
-    if let Ok(mut view) = views.get_mut(scope) {
-        view.search = true;
-        view.search_focus_revision = view.search_focus_revision.wrapping_add(1).max(1);
-    } else {
-        commands.entity(scope).insert(StackExplorerView {
-            search: true,
-            search_focus_revision: 1,
-        });
-    }
-    mark_explorer_panel_unsent(&editors, &mut commands);
+    );
+    mutation.set_view(scope, true);
+    mutation.mark_unsent();
 }
 
 fn on_explorer_panel_set_visible(
     trigger: On<UiInput<ExplorerPanelSetVisible>>,
-    child_of: Query<&ChildOf>,
-    mut visibility: Query<&mut StackExplorerVisibility>,
-    mut revisions: Query<&mut StackExplorerRevision>,
-    editors: Query<(Entity, Option<&ChildOf>), With<FileView>>,
-    mut commands: Commands,
+    mut mutation: ExplorerPanelMutation,
 ) {
     let entity = trigger.event().webview;
-    let scope = child_of.get(entity).map(ChildOf::parent).unwrap_or(entity);
+    let scope = mutation.scope(entity);
     let next_visibility = StackExplorerVisibility {
         visible: trigger.event().payload.visible,
     };
@@ -310,27 +311,10 @@ fn on_explorer_panel_set_visible(
         client_id: trigger.event().payload.client_id,
         request_id: trigger.event().payload.request_id,
     };
-    apply_stack_explorer_panel(
-        scope,
-        next_visibility,
-        next_revision,
-        &mut visibility,
-        &mut revisions,
-        &mut commands,
-    );
-    for (view, parent) in &editors {
-        let view_scope = parent.map(ChildOf::parent).unwrap_or(view);
-        if view_scope != scope {
-            continue;
-        }
-        if view == entity {
-            commands.entity(view).insert(ExplorerPanelSent);
-        } else {
-            commands.entity(view).remove::<ExplorerPanelSent>();
-        }
-    }
+    mutation.set_panel(scope, next_visibility, next_revision);
+    mutation.mark_scope_sent(entity, scope);
     if next_visibility.visible {
-        commands.trigger(RevealCurrent {
+        mutation.commands.trigger(RevealCurrent {
             entity,
             reveal: ExplorerReveal::Followed,
         });
@@ -339,26 +323,12 @@ fn on_explorer_panel_set_visible(
 
 fn on_explorer_panel_view_set(
     trigger: On<UiInput<ExplorerPanelViewSet>>,
-    child_of: Query<&ChildOf>,
-    mut views: Query<&mut StackExplorerView>,
-    editors: Query<Entity, With<FileView>>,
-    mut commands: Commands,
+    mut mutation: ExplorerPanelMutation,
 ) {
     let entity = trigger.event().webview;
-    let scope = child_of.get(entity).map(ChildOf::parent).unwrap_or(entity);
-    let search = trigger.event().payload.search;
-    if let Ok(mut view) = views.get_mut(scope) {
-        view.search = search;
-        if search {
-            view.search_focus_revision = view.search_focus_revision.wrapping_add(1).max(1);
-        }
-    } else {
-        commands.entity(scope).insert(StackExplorerView {
-            search,
-            search_focus_revision: u64::from(search),
-        });
-    }
-    mark_explorer_panel_unsent(&editors, &mut commands);
+    let scope = mutation.scope(entity);
+    mutation.set_view(scope, trigger.event().payload.search);
+    mutation.mark_unsent();
 }
 
 fn on_explorer_panel_width(
@@ -366,14 +336,18 @@ fn on_explorer_panel_width(
     mut panel: Single<&mut ExplorerPanelDefaults>,
     settings: Option<ResMut<AppSettings>>,
     saves: Option<ResMut<Messages<SettingsSaveRequest>>>,
-    views: Query<Entity, With<FileView>>,
-    mut commands: Commands,
+    mut mutation: ExplorerPanelMutation,
 ) {
     panel.width = trigger
         .event()
         .payload
         .px
         .clamp(EXPLORER_MIN_WIDTH, EXPLORER_MAX_WIDTH);
-    persist_explorer_width(panel.width, settings, saves);
-    mark_explorer_panel_unsent(&views, &mut commands);
+    if let Some(mut settings) = settings {
+        settings.editor.explorer.width = Some(panel.width);
+        if let Some(mut saves) = saves {
+            saves.write(SettingsSaveRequest);
+        }
+    }
+    mutation.mark_unsent();
 }
