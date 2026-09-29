@@ -46,9 +46,25 @@ impl Plugin for RemotePlugin {
 fn spawn_remote_runtime(mut commands: Commands) {
     let authorizations = RemoteAuthorizationStore::current();
     let devices = authorizations.devices().unwrap_or_default();
+    let persisted = std::fs::read_to_string(RemotePaths::current().state()).ok();
+    let enabled = persisted.as_deref().map(str::trim) == Some("enabled");
+    let reconcile_on_startup = persisted.is_some();
     commands.spawn((
         Name::new("Remote runtime"),
-        RemoteState::new(devices),
+        RemoteState {
+            enabled,
+            phase: if reconcile_on_startup {
+                RemotePhase::Starting
+            } else {
+                RemotePhase::Disabled
+            },
+            paired: !devices.is_empty(),
+            devices,
+            error: String::new(),
+            operation_generation: 0,
+            authorization_checked_at: Instant::now(),
+            reconcile_on_startup,
+        },
         PairingVisibility::default(),
         authorizations,
     ));
@@ -134,34 +150,6 @@ struct RemoteState {
     operation_generation: u64,
     authorization_checked_at: Instant,
     reconcile_on_startup: bool,
-}
-
-impl Default for RemoteState {
-    fn default() -> Self {
-        Self::new(Vec::new())
-    }
-}
-
-impl RemoteState {
-    fn new(devices: Vec<vmux_service::AuthorizedDevice>) -> Self {
-        let persisted = std::fs::read_to_string(RemotePaths::current().state()).ok();
-        let enabled = persisted.as_deref().map(str::trim) == Some("enabled");
-        let reconcile_on_startup = persisted.is_some();
-        Self {
-            enabled,
-            phase: if reconcile_on_startup {
-                RemotePhase::Starting
-            } else {
-                RemotePhase::Disabled
-            },
-            paired: !devices.is_empty(),
-            devices,
-            error: String::new(),
-            operation_generation: 0,
-            authorization_checked_at: Instant::now(),
-            reconcile_on_startup,
-        }
-    }
 }
 
 fn reconcile_remote_on_startup(

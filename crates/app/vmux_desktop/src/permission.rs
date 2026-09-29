@@ -9,7 +9,10 @@ pub struct PermissionsPlugin;
 impl Plugin for PermissionsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_media_permission_store)
-            .add_systems(Update, drain_media_permission_requests);
+            .add_systems(
+                Update,
+                (drain_media_permission_requests, persist_media_permissions).chain(),
+            );
     }
 }
 
@@ -35,8 +38,15 @@ pub struct MediaPermissionStore {
     origins: HashMap<String, OriginPermissions>,
 }
 
+#[derive(Component)]
+struct MediaPermissionDirty;
+
 fn spawn_media_permission_store(mut commands: Commands) {
-    commands.spawn((Name::new("Media permissions"), MediaPermissionStore::load()));
+    let store: MediaPermissionStore = std::fs::read_to_string(store_path())
+        .ok()
+        .and_then(|text| ron::from_str(&text).ok())
+        .unwrap_or_default();
+    commands.spawn((Name::new("Media permissions"), store));
 }
 
 fn store_path() -> PathBuf {
@@ -44,23 +54,6 @@ fn store_path() -> PathBuf {
 }
 
 impl MediaPermissionStore {
-    fn load() -> Self {
-        let Ok(text) = std::fs::read_to_string(store_path()) else {
-            return Self::default();
-        };
-        ron::from_str(&text).unwrap_or_default()
-    }
-
-    fn save(&self) {
-        let path = store_path();
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(text) = ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default()) {
-            let _ = std::fs::write(path, text);
-        }
-    }
-
     fn decision_for(&self, origin: &str, categories: RequestCategories) -> Resolution {
         let entry = self.origins.get(origin);
         let states = [
@@ -99,7 +92,6 @@ impl MediaPermissionStore {
         if categories.screen {
             entry.screen = Some(decision);
         }
-        self.save();
     }
 }
 
@@ -170,9 +162,11 @@ enum Resolution {
 
 fn drain_media_permission_requests(
     receiver: Res<MediaPermissionReceiver>,
-    mut store: Single<&mut MediaPermissionStore>,
+    mut store: Single<(Entity, &mut MediaPermissionStore)>,
+    mut commands: Commands,
     _main_thread: NonSend<Browsers>,
 ) {
+    let (entity, store) = &mut *store;
     while let Ok(request) = receiver.0.try_recv() {
         let categories = RequestCategories {
             camera: request.wants_camera,
@@ -185,12 +179,34 @@ fn drain_media_permission_requests(
             Resolution::Prompt => match prompt_native(&request.origin, categories) {
                 Some(decision) => {
                     store.record(&request.origin, categories, decision);
+                    commands.entity(*entity).insert(MediaPermissionDirty);
                     decision
                 }
                 None => false,
             },
         };
         resolve_media_permission(request.request_id, allow);
+    }
+}
+
+fn persist_media_permissions(
+    stores: Query<(Entity, &MediaPermissionStore), With<MediaPermissionDirty>>,
+    mut commands: Commands,
+) {
+    for (entity, store) in &stores {
+        let path = store_path();
+        let Some(parent) = path.parent() else {
+            continue;
+        };
+        if std::fs::create_dir_all(parent).is_err() {
+            continue;
+        }
+        let Ok(text) = ron::ser::to_string_pretty(store, ron::ser::PrettyConfig::default()) else {
+            continue;
+        };
+        if std::fs::write(path, text).is_ok() {
+            commands.entity(entity).remove::<MediaPermissionDirty>();
+        }
     }
 }
 

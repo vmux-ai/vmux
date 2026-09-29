@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
 use vmux_git::GitCheckForUpdatesRequest;
@@ -57,21 +56,16 @@ impl Plugin for UpdatePlugin {
             initial_delay: self.initial_delay,
             poll_interval: self.poll_interval,
         };
-        let checker = UpdateChecker::new(config.initial_delay);
-        let startup = Mutex::new(Some((config, checker)));
         app.add_systems(Startup, move |mut commands: Commands| {
-            let (config, checker) = startup
-                .lock()
-                .unwrap()
-                .take()
-                .expect("update checker can only start once");
+            let checker = UpdateChecker::new(config.initial_delay);
+            let config = config.clone();
             commands.spawn((Name::new("Update checker"), config, checker));
         })
         .add_systems(Update, poll_update_result);
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 struct UpdateConfig {
     stable_endpoint: String,
     preview_endpoint: String,
@@ -91,8 +85,8 @@ impl UpdateConfig {
 
 #[derive(Component)]
 struct UpdateChecker {
-    rx: Mutex<mpsc::Receiver<UpdateResult>>,
-    tx: mpsc::Sender<UpdateResult>,
+    rx: crossbeam_channel::Receiver<UpdateResult>,
+    tx: crossbeam_channel::Sender<UpdateResult>,
     timer: Timer,
     done: bool,
     in_flight: bool,
@@ -117,9 +111,9 @@ enum UpdateResult {
 
 impl UpdateChecker {
     fn new(initial_delay: Duration) -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = crossbeam_channel::unbounded();
         Self {
-            rx: Mutex::new(rx),
+            rx,
             tx,
             timer: Timer::from_seconds(initial_delay.as_secs_f32(), TimerMode::Once),
             done: false,
@@ -143,10 +137,8 @@ fn poll_update_result(
     let manual_requested =
         (manual_requests.read().count() + git_requests.read().count()) > 0 && !checker.in_flight;
     let mut results = Vec::new();
-    if let Ok(rx) = checker.rx.lock() {
-        while let Ok(result) = rx.try_recv() {
-            results.push(result);
-        }
+    while let Ok(result) = checker.rx.try_recv() {
+        results.push(result);
     }
     for result in results {
         match result {
@@ -278,7 +270,7 @@ fn progress_step(downloaded: u64, total: u64, last_marker: u64) -> Option<u64> {
 fn run_update_check(
     endpoint: &str,
     pubkey: &str,
-    tx: &mpsc::Sender<UpdateResult>,
+    tx: &crossbeam_channel::Sender<UpdateResult>,
     wake: &(dyn Fn() + Send),
 ) {
     let current: semver::Version = match env!("CARGO_PKG_VERSION").parse() {
