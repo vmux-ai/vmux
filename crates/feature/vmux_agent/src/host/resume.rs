@@ -305,7 +305,7 @@ fn on_prompt_history_request(
         let cwd = std::path::PathBuf::from(&asked.cwd);
         PromptHistory {
             prompts: strategy
-                .map(|strategy| (strategy.prompt_history)(&cwd))
+                .map(|strategy| strategy.prompt_history(&cwd))
                 .unwrap_or_default(),
         }
     });

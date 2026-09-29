@@ -124,32 +124,48 @@ pub struct CliStrategy {
     pub sessions_root: fn() -> PathBuf,
     pub build_args: fn(&McpServerConfig, Option<&str>) -> Vec<String>,
     pub model_catalog: fn() -> CliModelCatalog,
-    pub model_args: fn(&str) -> Vec<String>,
-    pub model_env: fn(&str) -> Vec<(String, String)>,
-    pub effort_args: fn(&str) -> Vec<String>,
+    pub model_args: Option<fn(&str) -> Vec<String>>,
+    pub model_env: Option<fn(&str) -> Vec<(String, String)>>,
+    pub effort_args: Option<fn(&str) -> Vec<String>>,
     pub build_env: fn(&McpServerConfig) -> Vec<(String, String)>,
-    pub prepare_launch: fn(&McpServerConfig),
+    pub prepare_launch: Option<fn(&McpServerConfig)>,
     pub discover_session:
         fn(cwd: &Path, spawn_time: SystemTime, claimed: &HashSet<String>) -> Option<String>,
     pub detect_end_time: fn(&str) -> bool,
     pub list_sessions: fn() -> Vec<ResumableSession>,
     pub latest_message: fn(&Path) -> String,
-    pub prompt_history: fn(&Path) -> Vec<String>,
+    pub prompt_history: Option<fn(&Path) -> Vec<String>>,
     pub load_transcript: fn(&str) -> Result<Vec<Message>, String>,
 }
 
-pub(super) fn empty_args(_: &str) -> Vec<String> {
-    Vec::new()
-}
+impl CliStrategy {
+    pub fn model_args(&self, model: &str) -> Vec<String> {
+        self.model_args
+            .map(|build| build(model))
+            .unwrap_or_default()
+    }
 
-pub(super) fn empty_env(_: &str) -> Vec<(String, String)> {
-    Vec::new()
-}
+    pub fn model_env(&self, model: &str) -> Vec<(String, String)> {
+        self.model_env.map(|build| build(model)).unwrap_or_default()
+    }
 
-pub(super) fn skip_prepare(_: &McpServerConfig) {}
+    pub fn effort_args(&self, effort: &str) -> Vec<String> {
+        self.effort_args
+            .map(|build| build(effort))
+            .unwrap_or_default()
+    }
 
-pub(super) fn empty_prompt_history(_: &Path) -> Vec<String> {
-    Vec::new()
+    pub fn prepare_launch(&self, mcp: &McpServerConfig) {
+        if let Some(prepare) = self.prepare_launch {
+            prepare(mcp);
+        }
+    }
+
+    pub fn prompt_history(&self, cwd: &Path) -> Vec<String> {
+        self.prompt_history
+            .map(|load| load(cwd))
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(test)]

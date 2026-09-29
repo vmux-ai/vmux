@@ -6,8 +6,7 @@ use std::sync::{OnceLock, mpsc};
 use std::time::{Duration, Instant, SystemTime};
 
 use super::{
-    CliModelCatalog, CliStrategy, PromptHistory, ResumableSession, empty_env,
-    lines_skipping_invalid_utf8, skip_prepare,
+    CliModelCatalog, CliStrategy, PromptHistory, ResumableSession, lines_skipping_invalid_utf8,
 };
 use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
 
@@ -47,16 +46,16 @@ pub(super) const CLI: CliStrategy = CliStrategy {
     sessions_root,
     build_args,
     model_catalog: CodexModels::load,
-    model_args,
-    model_env: empty_env,
-    effort_args,
+    model_args: Some(model_args),
+    model_env: None,
+    effort_args: Some(effort_args),
     build_env,
-    prepare_launch: skip_prepare,
+    prepare_launch: None,
     discover_session,
     detect_end_time,
     list_sessions,
     latest_message: codex_latest_message,
-    prompt_history,
+    prompt_history: Some(prompt_history),
     load_transcript,
 };
 
@@ -856,7 +855,7 @@ mod tests {
 
         assert_eq!(models.selected, "gpt-next");
         assert_eq!(models.models[0].name, "GPT Next");
-        assert_eq!((CLI.model_args)("gpt-next"), ["--model", "gpt-next"]);
+        assert_eq!(CLI.model_args("gpt-next"), ["--model", "gpt-next"]);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -922,7 +921,7 @@ mod tests {
     #[test]
     fn effort_args_pass_codex_reasoning_override() {
         assert_eq!(
-            (CLI.effort_args)("high"),
+            CLI.effort_args("high"),
             ["-c", "model_reasoning_effort=high"]
         );
     }

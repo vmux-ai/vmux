@@ -2,10 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use super::{
-    CliModelCatalog, CliStrategy, ResumableSession, empty_args, empty_prompt_history,
-    lines_skipping_invalid_utf8,
-};
+use super::{CliModelCatalog, CliStrategy, ResumableSession, lines_skipping_invalid_utf8};
 use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
 
 fn vibe_home() -> PathBuf {
@@ -22,16 +19,16 @@ pub(super) const CLI: CliStrategy = CliStrategy {
     sessions_root,
     build_args,
     model_catalog: VibeModels::load,
-    model_args: empty_args,
-    model_env,
-    effort_args: empty_args,
+    model_args: None,
+    model_env: Some(model_env),
+    effort_args: None,
     build_env,
-    prepare_launch,
+    prepare_launch: Some(prepare_launch),
     discover_session,
     detect_end_time,
     list_sessions,
     latest_message: vibe_latest_message,
-    prompt_history: empty_prompt_history,
+    prompt_history: None,
     load_transcript,
 };
 
@@ -559,7 +556,7 @@ mod tests {
         assert_eq!(models.models[0].id, "opus");
         assert_eq!(models.models[0].description, "anthropic");
         assert_eq!(
-            (CLI.model_env)("opus"),
+            CLI.model_env("opus"),
             [("VIBE_ACTIVE_MODEL".to_string(), "opus".to_string())]
         );
         let _ = std::fs::remove_dir_all(&tmp);

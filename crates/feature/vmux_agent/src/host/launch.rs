@@ -40,22 +40,22 @@ pub(crate) fn build_agent_launch(
         if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
             bevy::log::warn!("external agent Knowledge sync failed: {error}");
         }
-        (strategy.prepare_launch)(&mcp_cfg);
+        strategy.prepare_launch(&mcp_cfg);
         let effort_key = format!("cli:{}", kind.as_url_segment());
         let mut args = match effort
             .filter(|level| vmux_core::agent::effort_levels(&effort_key).contains(level))
         {
-            Some(level) => (strategy.effort_args)(level),
+            Some(level) => strategy.effort_args(level),
             None => Vec::new(),
         };
         if let Some(model) = model.filter(|model| !model.is_empty()) {
-            args.extend((strategy.model_args)(model));
+            args.extend(strategy.model_args(model));
         }
         args.extend((strategy.build_args)(&mcp_cfg, session_id));
         let mut env: Vec<(String, String)> = std::env::vars().collect();
         env.extend((strategy.build_env)(&mcp_cfg));
         if let Some(model) = model.filter(|model| !model.is_empty()) {
-            env.extend((strategy.model_env)(model));
+            env.extend(strategy.model_env(model));
         }
         env.push(("VMUX_ANCHOR".to_string(), anchor.to_string()));
         if McpCredentialAccess::revision() != mcp_revision {
