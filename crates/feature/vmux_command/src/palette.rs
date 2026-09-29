@@ -28,7 +28,7 @@ mod query;
 pub mod results;
 #[cfg(ui)]
 pub mod row;
-pub mod style;
+pub(crate) mod style;
 
 pub(crate) use query::PaletteQuery;
 pub use query::{is_data_uri, looks_like_path, looks_like_url};

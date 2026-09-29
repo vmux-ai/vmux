@@ -5,8 +5,8 @@ use crate::event::{
 };
 use crate::palette::row::ResultRow;
 use crate::palette::style::{
-    command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
-    command_bar_row_overlay_class, result_list_class,
+    COMMAND_BAR_INPUT_ROW_CLASS, COMMAND_BAR_INPUT_WRAP_CLASS, COMMAND_BAR_ROW_OVERLAY_CLASS,
+    RESULT_LIST_CLASS, command_bar_input_class,
 };
 use crate::palette::{PaletteGlyph, PaletteMode, PaletteRows, PaletteState, PaletteSurface};
 use crate::prompt_media::{ChatPasteMedia, ChatPickFiles, inline_media_query};
@@ -603,7 +603,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 PromptBox {
                     glass: false,
                     class: "p-2",
-                    div { class: command_bar_input_row_class(),
+                    div { class: COMMAND_BAR_INPUT_ROW_CLASS,
                         if !palette.space_name.is_empty() {
                             span {
                                 title: "{palette.space_name}",
@@ -615,13 +615,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         if let Some(glyph) = palette.glyph {
                             PaletteGlyphIcon { glyph }
                         }
-                        div { class: command_bar_input_wrap_class(),
+                        div { class: COMMAND_BAR_INPUT_WRAP_CLASS,
                             if let Some(row_text) = palette.row_text.clone() {
-                                div { class: command_bar_row_overlay_class(),
+                                div { class: COMMAND_BAR_ROW_OVERLAY_CLASS,
                                     span { class: "truncate text-base text-foreground", "{row_text}" }
                                 }
                             } else if !ghost_text.is_empty() {
-                                div { class: command_bar_row_overlay_class(),
+                                div { class: COMMAND_BAR_ROW_OVERLAY_CLASS,
                                     span { class: "invisible text-base", "{q}" }
                                     span { class: "text-base text-muted-foreground/40", "{ghost_text}" }
                                 }
@@ -679,7 +679,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 PromptPopup {
                     placement: if is_start { PromptPopupPlacement::Downward } else { PromptPopupPlacement::Inline },
                     id: "command-bar-results",
-                    class: if is_start { "" } else { result_list_class() },
+                    class: if is_start { "" } else { RESULT_LIST_CLASS },
                 for (i, item) in palette.rows.iter().enumerate() {
                     ResultRow {
                         key: "{i}",
