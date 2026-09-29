@@ -2,7 +2,7 @@ use super::{KnowledgePropertyKind, markdown_metadata};
 use bevy::prelude::Component;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component as PathComponent, Path, PathBuf};
 
 const MAX_SKILLS: usize = 64;
 const MAX_EMBEDDED_BYTES: usize = 24 * 1024;
@@ -148,7 +148,7 @@ impl NotePath {
         }
         let mut components = Vec::new();
         for component in relative.components() {
-            let Component::Normal(value) = component else {
+            let PathComponent::Normal(value) = component else {
                 return Err("knowledge path contains an invalid component".to_string());
             };
             components.push(value.to_os_string());

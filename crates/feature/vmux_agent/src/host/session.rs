@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::{Mutex, mpsc};
@@ -14,51 +13,38 @@ pub use vmux_core::agent::{AgentSession, PendingAgentSession, SessionId};
 use crate::AgentKind;
 use crate::strategy::AgentStrategies;
 
+use super::cli::CliSessionRoot;
+
 #[derive(Message, Debug, Clone, Copy)]
 pub struct AgentSessionExited {
     pub entity: Entity,
 }
 
-#[derive(Component, Default)]
-struct AgentSessionDiscovery {
-    dirty: bool,
-}
+#[derive(Message)]
+pub(super) struct DiscoverAgentSessions;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct DiscoverAgentSessionsSet;
 
 pub(crate) struct AgentSessionLifecyclePlugin;
 
 impl Plugin for AgentSessionLifecyclePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AgentSessionExited>()
-            .add_systems(Startup, spawn_agent_session_discovery)
+            .add_message::<DiscoverAgentSessions>()
+            .configure_sets(Update, DiscoverAgentSessionsSet)
             .add_systems(
                 Update,
                 (
                     start_agent_session_watchers,
-                    mark_dirty_on_fs_change,
-                    mark_dirty_on_pending_added,
-                ),
-            )
-            .add_systems(
-                Update,
-                (
-                    discover_pending_agent_sessions,
-                    detect_file_end_time_exit,
-                    clear_agent_session_dirty,
+                    request_discovery_for_fs_change,
+                    request_discovery_for_pending,
                 )
                     .chain()
-                    .after(mark_dirty_on_fs_change)
-                    .after(mark_dirty_on_pending_added)
-                    .run_if(agent_session_dirty_run_condition),
+                    .before(DiscoverAgentSessionsSet),
             )
             .add_systems(Update, format_agent_url);
     }
-}
-
-fn spawn_agent_session_discovery(mut commands: Commands) {
-    commands.spawn((
-        Name::new("Agent session discovery"),
-        AgentSessionDiscovery::default(),
-    ));
 }
 
 #[allow(clippy::type_complexity)]
@@ -289,50 +275,13 @@ mod url_tests {
     }
 }
 
-fn mark_dirty_on_pending_added(
+fn request_discovery_for_pending(
     added_pending: Query<(), Added<PendingAgentSession>>,
     added_session: Query<(), Added<SessionId>>,
-    mut discovery: Single<&mut AgentSessionDiscovery>,
+    mut requests: MessageWriter<DiscoverAgentSessions>,
 ) {
     if !added_pending.is_empty() || !added_session.is_empty() {
-        discovery.dirty = true;
-    }
-}
-
-fn agent_session_dirty_run_condition(discovery: Single<&AgentSessionDiscovery>) -> bool {
-    discovery.dirty
-}
-
-fn clear_agent_session_dirty(mut discovery: Single<&mut AgentSessionDiscovery>) {
-    discovery.dirty = false;
-}
-
-fn discover_pending_agent_sessions(
-    mut commands: Commands,
-    strategies: AgentStrategies,
-    pending_sessions: Query<(Entity, &PendingAgentSession)>,
-    sessions: Query<(&AgentSession, &SessionId)>,
-) {
-    for (entity, pending) in &pending_sessions {
-        let Some(strategy) = strategies.get_cli(pending.kind) else {
-            continue;
-        };
-        let claimed = sessions
-            .iter()
-            .filter_map(|(session, id)| {
-                if session.kind == pending.kind {
-                    Some(id.0.clone())
-                } else {
-                    None
-                }
-            })
-            .collect::<HashSet<_>>();
-        if let Some(id) = (strategy.discover_session)(&pending.cwd, pending.spawn_time, &claimed) {
-            commands
-                .entity(entity)
-                .insert(SessionId(id))
-                .remove::<PendingAgentSession>();
-        }
+        requests.write(DiscoverAgentSessions);
     }
 }
 
@@ -343,11 +292,11 @@ struct AgentSessionWatcher {
 }
 
 fn start_agent_session_watchers(
-    strategies: Query<&crate::CliStrategy, Added<crate::CliStrategy>>,
+    roots: Query<&CliSessionRoot, Added<CliSessionRoot>>,
     mut commands: Commands,
 ) {
-    for strategy in &strategies {
-        let root = (strategy.sessions_root)();
+    for root in &roots {
+        let root = root.0.clone();
         if std::fs::create_dir_all(&root).is_err() {
             continue;
         }
@@ -371,113 +320,20 @@ fn start_agent_session_watchers(
     }
 }
 
-fn mark_dirty_on_fs_change(
+fn request_discovery_for_fs_change(
     watchers: Query<&AgentSessionWatcher>,
-    mut discovery: Single<&mut AgentSessionDiscovery>,
+    mut requests: MessageWriter<DiscoverAgentSessions>,
 ) {
+    let mut changed = false;
     for watcher in &watchers {
         let Ok(rx) = watcher.receiver.lock() else {
             continue;
         };
         while rx.try_recv().is_ok() {
-            discovery.dirty = true;
+            changed = true;
         }
     }
-}
-
-fn detect_file_end_time_exit(
-    mut commands: Commands,
-    mut exited_writer: MessageWriter<AgentSessionExited>,
-    strategies: AgentStrategies,
-    sessioned: Query<(Entity, &AgentSession, &SessionId)>,
-) {
-    for (entity, agent, sid) in &sessioned {
-        let Some(strategy) = strategies.get_cli(agent.kind) else {
-            continue;
-        };
-        if !(strategy.detect_end_time)(&sid.0) {
-            continue;
-        }
-        commands
-            .entity(entity)
-            .remove::<AgentSession>()
-            .remove::<SessionId>()
-            .remove::<PendingAgentSession>();
-        exited_writer.write(AgentSessionExited { entity });
-    }
-}
-
-#[cfg(test)]
-mod discovery_tests {
-    use super::*;
-    use crate::host::cli::VIBE as VIBE_CLI;
-
-    #[test]
-    fn pending_with_no_match_keeps_pending() {
-        let mut app = App::new();
-        app.world_mut().spawn(VIBE_CLI);
-        app.add_systems(Update, discover_pending_agent_sessions);
-
-        let pending = PendingAgentSession {
-            kind: AgentKind::Vibe,
-            spawn_time: std::time::SystemTime::now(),
-            cwd: PathBuf::from("/this/path/does/not/exist"),
-        };
-        let entity = app.world_mut().spawn(pending).id();
-        app.update();
-        assert!(app.world().get::<PendingAgentSession>(entity).is_some());
-        assert!(app.world().get::<SessionId>(entity).is_none());
-    }
-
-    #[test]
-    fn pending_is_retained_long_after_spawn_for_late_session_dir() {
-        let mut app = App::new();
-        app.world_mut().spawn(crate::CliStrategy {
-            discover_session: |_, _, _| None,
-            ..VIBE_CLI
-        });
-        app.add_systems(Update, discover_pending_agent_sessions);
-
-        let pending = PendingAgentSession {
-            kind: AgentKind::Vibe,
-            spawn_time: SystemTime::UNIX_EPOCH,
-            cwd: PathBuf::from("/this/path/does/not/exist"),
-        };
-        let entity = app.world_mut().spawn(pending).id();
-        app.update();
-        assert!(
-            app.world().get::<PendingAgentSession>(entity).is_some(),
-            "pending must survive long after spawn so a vibe session dir written mid-session is still discovered"
-        );
-    }
-}
-
-#[cfg(test)]
-mod exit_tests {
-    use super::*;
-    use crate::host::cli::VIBE as VIBE_CLI;
-
-    #[test]
-    fn detect_file_end_time_exit_strips_components_when_strategy_says_ended() {
-        let mut app = App::new();
-        app.world_mut().spawn(crate::CliStrategy {
-            detect_end_time: |_| true,
-            ..VIBE_CLI
-        });
-        app.add_message::<AgentSessionExited>()
-            .add_systems(Update, detect_file_end_time_exit);
-
-        let entity = app
-            .world_mut()
-            .spawn((
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                SessionId("x".into()),
-            ))
-            .id();
-        app.update();
-        assert!(app.world().get::<AgentSession>(entity).is_none());
-        assert!(app.world().get::<SessionId>(entity).is_none());
+    if changed {
+        requests.write(DiscoverAgentSessions);
     }
 }

@@ -2,13 +2,81 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use bevy::prelude::*;
 use serde_json::{Map, Value};
 
 use super::{
-    CliModelCatalog, CliStrategy, PromptHistory, ResumableSession, SameProject,
-    lines_skipping_invalid_utf8,
+    ClaudeCli, CliModelCatalog, CliSessionRoot, CliStrategy, PromptHistory, ResumableSession,
+    SameProject, lines_skipping_invalid_utf8,
 };
+use crate::session::{AgentSession, PendingAgentSession, SessionId};
 use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
+
+use super::super::session::{DiscoverAgentSessions, DiscoverAgentSessionsSet};
+
+pub(super) struct ClaudeCliPlugin;
+
+impl Plugin for ClaudeCliPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, spawn_claude_cli)
+            .add_systems(Update, discover_sessions.in_set(DiscoverAgentSessionsSet));
+    }
+}
+
+fn spawn_claude_cli(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Claude CLI strategy"),
+        ClaudeCli,
+        CLI,
+        CliSessionRoot(sessions_root()),
+        ClaudeModels::load(),
+    ));
+}
+
+fn discover_sessions(
+    mut requests: MessageReader<DiscoverAgentSessions>,
+    root: Single<&CliSessionRoot, With<ClaudeCli>>,
+    pending_sessions: Query<(Entity, &PendingAgentSession)>,
+    sessions: Query<(&AgentSession, &SessionId)>,
+    mut commands: Commands,
+) {
+    if requests.read().next().is_none() {
+        return;
+    }
+    for (entity, pending) in &pending_sessions {
+        if pending.kind != AgentKind::Claude {
+            continue;
+        }
+        let claimed = sessions
+            .iter()
+            .filter_map(|(session, id)| {
+                if session.kind == pending.kind {
+                    Some(id.0.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<HashSet<_>>();
+        if let Some(id) = ClaudeCli::discover(&root.0, &pending.cwd, pending.spawn_time, &claimed) {
+            commands
+                .entity(entity)
+                .insert(SessionId(id))
+                .remove::<PendingAgentSession>();
+        }
+    }
+}
+
+impl ClaudeCli {
+    fn discover(
+        sessions_root: &Path,
+        cwd: &Path,
+        spawn_time: SystemTime,
+        claimed: &HashSet<String>,
+    ) -> Option<String> {
+        let directory = sessions_root.join(project_dir_name(cwd));
+        discover_claude_session_id(&directory, spawn_time, claimed)
+    }
+}
 
 const DISALLOWED_TOOLS: &str = "Bash,Monitor,WebSearch,WebFetch";
 const HOST_ALLOWED_TOOLS: &str = "mcp__vmux__run,mcp__vmux__read_terminal,\
@@ -41,16 +109,12 @@ const FILE_TOUCH_MATCHER: &str = "Read|Edit|Write|MultiEdit";
 
 pub(super) const CLI: CliStrategy = CliStrategy {
     kind: AgentKind::Claude,
-    sessions_root,
     build_args,
-    model_catalog: ClaudeModels::load,
     model_args: Some(model_args),
     model_env: None,
     effort_args: Some(effort_args),
     build_env,
     prepare_launch: None,
-    discover_session,
-    detect_end_time,
     list_sessions,
     latest_message: claude_latest_message,
     prompt_history: Some(prompt_history),
@@ -119,19 +183,6 @@ fn build_env(_mcp: &McpServerConfig) -> Vec<(String, String)> {
     )];
     env.extend(crate::managed_mcp::McpAuthorization::environment());
     env
-}
-
-fn discover_session(
-    cwd: &Path,
-    spawn_time: SystemTime,
-    claimed: &HashSet<String>,
-) -> Option<String> {
-    let dir = sessions_root().join(project_dir_name(cwd));
-    discover_claude_session_id(&dir, spawn_time, claimed)
-}
-
-fn detect_end_time(_session_id: &str) -> bool {
-    false
 }
 
 fn list_sessions() -> Vec<ResumableSession> {
@@ -738,11 +789,6 @@ mod tests {
             .collect();
         assert_eq!(stop_args, vec!["notify-turn-end", "--anchor", "42"]);
         assert_eq!(stop["async"].as_bool(), Some(true));
-    }
-
-    #[test]
-    fn detect_end_time_always_false() {
-        assert!(!(CLI.detect_end_time)("anything"));
     }
 
     #[test]

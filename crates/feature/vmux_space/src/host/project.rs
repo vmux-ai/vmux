@@ -6,12 +6,15 @@ use vmux_command::snapshot::{
 use vmux_core::event::{ProjectRow, ProjectRowKind, ProjectTreeToggle};
 use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_git::worktree::LinkedRepoRoot;
+#[cfg(test)]
 use vmux_layout::pane::Pane;
 use vmux_layout::space::{
     EffectiveStartupSet, FocusedSpace, Space, SpaceId, SpaceOfPane, space_id_of, space_of,
 };
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
-use vmux_setting::{AppSettings, SettingsSaveRequest, SpaceOverrides, SpaceProject};
+#[cfg(test)]
+use vmux_setting::SpaceOverrides;
+use vmux_setting::{AppSettings, SettingsSaveRequest, SpaceProject};
 
 pub struct SpaceProjectPlugin;
 

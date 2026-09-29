@@ -81,14 +81,14 @@ impl TabWorkspaceSelection {
                 worktree: None,
             });
         }
-        let source =
-            vmux_git::worktree::CheckoutInfo::try_from(&project_dir).map_err(|error| error.0)?;
+        let source = vmux_git::worktree::CheckoutInfo::try_from(project_dir.as_path())
+            .map_err(|error| error.0)?;
         let project_dir = info
             .project_root()
             .canonicalize()
             .map_err(|error| format!("invalid project directory: {error}"))?;
-        let checkout =
-            vmux_git::worktree::CheckoutInfo::try_from(&checkout_dir).map_err(|error| error.0)?;
+        let checkout = vmux_git::worktree::CheckoutInfo::try_from(checkout_dir.as_path())
+            .map_err(|error| error.0)?;
         if source.common_dir != checkout.common_dir {
             return Err("worktree belongs to a different repository".to_string());
         }

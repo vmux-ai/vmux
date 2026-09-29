@@ -21,10 +21,10 @@ pub struct AgentBrowserResolve<'w, 's> {
     active: vmux_layout::active_pane::ActivePaneQuery<'w, 's>,
 }
 
-struct AgentBrowserPaneClaim {
-    pub(crate) pane: Entity,
-    pub(crate) stack: Option<Entity>,
-    pub(crate) activation: vmux_layout::active_pane::ActivatePane,
+pub(super) struct AgentBrowserPaneClaim {
+    pub(super) pane: Entity,
+    pub(super) stack: Option<Entity>,
+    pub(super) activation: vmux_layout::active_pane::ActivatePane,
 }
 
 pub struct AgentBrowserPaneResolution {
@@ -93,7 +93,7 @@ impl AgentBrowserResolve<'_, '_> {
         self.kinds.get(entity).ok().map(|session| session.kind)
     }
 
-    pub(crate) fn claim_browser_pane(
+    pub(super) fn claim_browser_pane(
         &self,
         anchor: vmux_api::protocol::ProcessId,
     ) -> Option<AgentBrowserPaneClaim> {

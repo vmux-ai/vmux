@@ -160,14 +160,14 @@ fn remote_model_state(
             description: option.description.clone().unwrap_or_default(),
         });
     }
-    let mut effort_levels = Vec::new();
+    let mut available_effort_levels = Vec::new();
     for level in effort_levels(&session.agent_id) {
-        effort_levels.push((*level).to_string());
+        available_effort_levels.push((*level).to_string());
     }
     Some(RemoteModelState {
         models,
         selected_id: model_state.display_model_id().to_string(),
-        effort_levels,
+        effort_levels: available_effort_levels,
         effort: settings
             .agent
             .effort
@@ -507,11 +507,13 @@ fn on_start_select_mode(
 }
 
 fn seed_cli_model_lists(
-    strategies: Query<&crate::CliStrategy, Added<crate::CliStrategy>>,
+    strategies: Query<
+        (&crate::CliStrategy, &crate::host::cli::CliModelCatalog),
+        Added<crate::host::cli::CliModelCatalog>,
+    >,
     mut selections: Single<&mut AgentModelSelections>,
 ) {
-    for strategy in &strategies {
-        let catalog = (strategy.model_catalog)();
+    for (strategy, catalog) in &strategies {
         if catalog.models.is_empty() {
             continue;
         }

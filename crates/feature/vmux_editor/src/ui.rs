@@ -21,7 +21,7 @@ mod text_geometry;
 mod text_style;
 mod toolbar;
 
-pub(crate) use input::{FIND_INPUT_ID, focus_file_input, focus_find_input};
+pub(crate) use input::{FIND_INPUT_ID, focus_file_input};
 pub(super) use input::{INPUT_ID, focus_container};
 pub(crate) use lsp::LspPage;
 pub use page::Page;
@@ -29,7 +29,6 @@ pub(super) use page::{
     HOVER_DELAY_MS, Mode, SCROLL_ID, diff_marker_row_class, diff_marker_sign,
     diff_marker_text_class, diff_tone,
 };
-pub(crate) use sidebar::ExplorerPane;
 
 #[vmux_native::page(
     component = Page,

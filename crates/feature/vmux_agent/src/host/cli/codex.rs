@@ -5,10 +5,79 @@ use std::process::{Command, Stdio};
 use std::sync::{OnceLock, mpsc};
 use std::time::{Duration, Instant, SystemTime};
 
+use bevy::prelude::*;
+
 use super::{
-    CliModelCatalog, CliStrategy, PromptHistory, ResumableSession, lines_skipping_invalid_utf8,
+    CliModelCatalog, CliSessionRoot, CliStrategy, CodexCli, PromptHistory, ResumableSession,
+    lines_skipping_invalid_utf8,
 };
+use crate::session::{AgentSession, PendingAgentSession, SessionId};
 use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
+
+use super::super::session::{DiscoverAgentSessions, DiscoverAgentSessionsSet};
+
+pub(super) struct CodexCliPlugin;
+
+impl Plugin for CodexCliPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, spawn_codex_cli)
+            .add_systems(Update, discover_sessions.in_set(DiscoverAgentSessionsSet));
+    }
+}
+
+fn spawn_codex_cli(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Codex CLI strategy"),
+        CodexCli,
+        CLI,
+        CliSessionRoot(sessions_root()),
+        CodexModels::load(),
+    ));
+}
+
+fn discover_sessions(
+    mut requests: MessageReader<DiscoverAgentSessions>,
+    root: Single<&CliSessionRoot, With<CodexCli>>,
+    pending_sessions: Query<(Entity, &PendingAgentSession)>,
+    sessions: Query<(&AgentSession, &SessionId)>,
+    mut commands: Commands,
+) {
+    if requests.read().next().is_none() {
+        return;
+    }
+    for (entity, pending) in &pending_sessions {
+        if pending.kind != AgentKind::Codex {
+            continue;
+        }
+        let claimed = sessions
+            .iter()
+            .filter_map(|(session, id)| {
+                if session.kind == pending.kind {
+                    Some(id.0.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<HashSet<_>>();
+        if let Some(id) = CodexCli::discover(&root.0, &pending.cwd, pending.spawn_time, &claimed) {
+            commands
+                .entity(entity)
+                .insert(SessionId(id))
+                .remove::<PendingAgentSession>();
+        }
+    }
+}
+
+impl CodexCli {
+    fn discover(
+        sessions_root: &Path,
+        cwd: &Path,
+        spawn_time: SystemTime,
+        claimed: &HashSet<String>,
+    ) -> Option<String> {
+        discover_codex_session_id(sessions_root, cwd, spawn_time, claimed)
+    }
+}
 
 const DISABLED_FEATURES: &[&str] = &["shell_tool", "unified_exec"];
 const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(2);
@@ -43,16 +112,12 @@ const FILE_TOUCH_MATCHER: &str = "apply_patch|Edit|Write";
 
 pub(super) const CLI: CliStrategy = CliStrategy {
     kind: AgentKind::Codex,
-    sessions_root,
     build_args,
-    model_catalog: CodexModels::load,
     model_args: Some(model_args),
     model_env: None,
     effort_args: Some(effort_args),
     build_env,
     prepare_launch: None,
-    discover_session,
-    detect_end_time,
     list_sessions,
     latest_message: codex_latest_message,
     prompt_history: Some(prompt_history),
@@ -143,18 +208,6 @@ fn effort_args(level: &str) -> Vec<String> {
 
 fn build_env(_mcp: &McpServerConfig) -> Vec<(String, String)> {
     crate::managed_mcp::McpAuthorization::environment()
-}
-
-fn discover_session(
-    cwd: &Path,
-    spawn_time: SystemTime,
-    claimed: &HashSet<String>,
-) -> Option<String> {
-    discover_codex_session_id(&sessions_root(), cwd, spawn_time, claimed)
-}
-
-fn detect_end_time(_session_id: &str) -> bool {
-    false
 }
 
 fn list_sessions() -> Vec<ResumableSession> {
@@ -1179,11 +1232,6 @@ mod tests {
         let result = discover_codex_session_id(&sessions, Path::new(cwd), spawn, &claimed);
         assert_eq!(result.as_deref(), Some("id-a"));
         let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn detect_end_time_always_false() {
-        assert!(!(CLI.detect_end_time)("anything"));
     }
 
     #[test]

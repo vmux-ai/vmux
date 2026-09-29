@@ -58,10 +58,8 @@ pub struct AgentSessionPlugin;
 impl Plugin for AgentSessionPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PreStartup, spawn_agent_store_validator);
-        app.add_systems(
-            Startup,
-            (spawn_agent_strategies, register_agent_session_route).chain(),
-        );
+        app.add_systems(Startup, register_agent_session_route);
+        app.add_plugins(super::cli::CliPlugin);
         app.add_plugins((
             vmux_layout::LayoutContractPlugin,
             vmux_editor::ContractPlugin,
@@ -129,12 +127,6 @@ fn spawn_agent_store_validator(mut commands: Commands) {
             rejects: crate::AgentUrl::rejects_persisted_store,
         },
     ));
-}
-
-fn spawn_agent_strategies(mut commands: Commands) {
-    commands.spawn((Name::new("Vibe CLI strategy"), super::cli::VIBE));
-    commands.spawn((Name::new("Claude CLI strategy"), super::cli::CLAUDE));
-    commands.spawn((Name::new("Codex CLI strategy"), super::cli::CODEX));
 }
 
 fn register_agent_session_route(mut commands: Commands) {

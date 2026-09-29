@@ -2,26 +2,53 @@ pub mod claude;
 pub mod codex;
 pub mod vibe;
 
+#[cfg(test)]
 pub(super) const CLAUDE: CliStrategy = claude::CLI;
+#[cfg(test)]
 pub(super) const CODEX: CliStrategy = codex::CLI;
+#[cfg(test)]
 pub(super) const VIBE: CliStrategy = vibe::CLI;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use bevy::prelude::Component;
+use bevy::prelude::{App, Component, Plugin};
 
 use crate::message::Message;
 use vmux_core::agent::AgentKind;
 
 use crate::McpServerConfig;
 
-#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct CliPlugin;
+
+impl Plugin for CliPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            vibe::VibeCliPlugin,
+            claude::ClaudeCliPlugin,
+            codex::CodexCliPlugin,
+        ));
+    }
+}
+
+#[derive(Component)]
+pub(super) struct VibeCli;
+
+#[derive(Component)]
+pub(super) struct ClaudeCli;
+
+#[derive(Component)]
+pub(super) struct CodexCli;
+
+#[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct CliModelCatalog {
     pub selected: String,
     pub models: Vec<vmux_api::room::ModelOptionEntry>,
 }
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub(super) struct CliSessionRoot(pub(super) PathBuf);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResumableSession {
@@ -121,17 +148,12 @@ pub(crate) fn lines_skipping_invalid_utf8<R: std::io::BufRead>(
 #[derive(Component, Clone, Copy)]
 pub struct CliStrategy {
     pub kind: AgentKind,
-    pub sessions_root: fn() -> PathBuf,
     pub build_args: fn(&McpServerConfig, Option<&str>) -> Vec<String>,
-    pub model_catalog: fn() -> CliModelCatalog,
     pub model_args: Option<fn(&str) -> Vec<String>>,
     pub model_env: Option<fn(&str) -> Vec<(String, String)>>,
     pub effort_args: Option<fn(&str) -> Vec<String>>,
     pub build_env: fn(&McpServerConfig) -> Vec<(String, String)>,
     pub prepare_launch: Option<fn(&McpServerConfig)>,
-    pub discover_session:
-        fn(cwd: &Path, spawn_time: SystemTime, claimed: &HashSet<String>) -> Option<String>,
-    pub detect_end_time: fn(&str) -> bool,
     pub list_sessions: fn() -> Vec<ResumableSession>,
     pub latest_message: fn(&Path) -> String,
     pub prompt_history: Option<fn(&Path) -> Vec<String>>,

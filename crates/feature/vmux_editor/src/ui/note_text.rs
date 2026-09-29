@@ -27,12 +27,6 @@ pub(super) enum NoteInlineNode {
 }
 
 impl NoteInlineNode {
-    pub(super) fn start(&self) -> u32 {
-        match self {
-            Self::Text { start, .. } | Self::Syntax { start, .. } => *start,
-        }
-    }
-
     pub(super) fn end(&self) -> u32 {
         match self {
             Self::Text { end, .. } | Self::Syntax { end, .. } => *end,

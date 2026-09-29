@@ -1,7 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-struct ListenerGuard {
+pub(crate) struct ListenerGuard {
     active: Rc<Cell<bool>>,
 }
 

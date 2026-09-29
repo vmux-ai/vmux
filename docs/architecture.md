@@ -1,46 +1,139 @@
 # Vmux — Architecture
 
-> The application is not the UI process.
+> Cross-platform should mean the same architecture, not just the same language.
 
-Electron's core abstraction is a window containing a web application. Vmux starts from a
-different model:
+A common cross-platform stack uses Electron for desktop, React Native for mobile, Next.js for the
+web, a separate service for background work, and another API for automation. The pieces may share
+TypeScript packages and visual components, but each has its own state model, lifecycle, routing,
+permissions, extension points, and application architecture.
+
+That fragmentation appears every time a feature crosses a surface. A small change can require a
+renderer implementation, preload bridge, IPC handler, main-process service, daemon protocol, CLI
+command, mobile implementation, and agent schema. Each boundary can be engineered well. The cost
+is recreating and synchronizing the same feature across several applications.
+
+Vmux gives the feature one owner and gives every runtime the same composition model. The desktop
+app, mobile app, background service, CLI, and MCP server are all Rust programs composed as Bevy
+apps. They share the same ECS vocabulary, typed contracts, feature plugins, and scheduling model.
+They differ by composition, not architecture.
 
 ```text
-Application = Durable Work + Typed Commands + Composable Surfaces
+Typical cross-platform stack = Shared types + Separate applications
+Vmux                         = Shared application architecture + Platform adapters
 ```
 
-The work survives every window. Desktop and mobile clients render it. Humans and agents
-operate it through the same typed commands. Web content remains available through full
-Chromium, but the browser is a guest surface rather than the application's process,
-security boundary, or state model.
+```text
+Feature = State + Systems + UI + Commands + Tools + Protocol
+Runtime = Shared Feature Plugins + Platform Adapters
+Boundary = One Rust Type + Transport Adapter
+```
+
+One feature crate owns the complete vertical slice. Its state is components and resources. Its
+behavior is systems. Its interfaces are typed messages, commands, MCP tools, pages, and wire
+contracts. A protocol change, new command, or new agent tool lands beside the behavior it exposes
+instead of creating another parallel implementation in an application-wide registry.
+
+For each contract, one Rust type is the source of truth across every boundary it crosses. That
+type can enter the ECS as a message, leave a page as a UI event, cross a process over rkyv, cross a
+network over QUIC, or back a CLI or MCP operation. Attributes derive the required serialization,
+wire identity, and boundary metadata. The transport adapter changes; the domain type and meaning do
+not. There is no mirror DTO, second request enum, or hand-maintained schema for each hop.
+
+ECS turns integration from dependencies into data. A system declares the components and messages
+it reads and writes; it does not need to know who created an entity or which other systems may act
+on it. Adding a component gives an existing entity another capability. Installing a plugin adds a
+whole set of capabilities. Removing or replacing either does not require rewiring the rest of the
+application.
+
+Features therefore meet in the world, not in each other's internals. Their dependencies are typed
+data, messages, and explicit schedule constraints rather than imported callbacks or shared service
+objects. New UI, automation, persistence, or platform behavior can attach to an existing feature
+without turning that feature into the integration point for everything around it.
 
 ```mermaid
-flowchart LR
-    human["human"] --> api["typed commands"]
-    agent["agent"] --> api
-    remote["remote client"] --> api
-    api --> app["Rust application<br/>Bevy ECS + plugins"]
-    app --> durable["durable work<br/>PTYs · builds · agent sessions"]
-    app --> surfaces["composable surfaces<br/>native UI · browser · editor · terminal"]
+flowchart TB
+    features["typed feature plugins<br/>state · systems · pages · commands · tools · contracts"]
+    profiles["composition profiles"]
+    adapters["platform adapter plugins"]
+    desktop["desktop"]
+    mobile["mobile"]
+    service["daemon / service"]
+    cli["CLI"]
+    mcp["MCP / headless"]
+
+    features --> profiles
+    adapters --> profiles
+    profiles --> desktop
+    profiles --> mobile
+    profiles --> service
+    profiles --> cli
+    profiles --> mcp
 ```
 
-Four properties fall out of that model:
+The promise is not zero platform-specific code. The promise is that platform code ends at
+an adapter. Product semantics remain in reusable Rust plugins.
 
-- **Durable.** `vmux_service` owns work that must continue after the UI exits. A window is
-  a client that can disconnect and rebuild its view from snapshots.
-- **Composable.** Components assemble entities; plugins assemble capabilities; surfaces
-  assemble the workspace. Features do not depend on inheritance or a central callback table.
-- **Predictable.** State is a component or resource, behavior is a system, coordination is
-  a typed message, a capability is a plugin, and presentation is a surface. Before a human
-  or agent writes a feature, its shape and ownership are already constrained.
-- **Cross-platform.** Electron carries the same browser runtime to every operating system.
-  Vmux shares the application itself: Rust types, behavior, protocols, and plugins compile
-  across targets while platform integration stays in adapter plugins.
+That changes what scales:
 
-Vmux's own UI runs as native Dioxus components in the Rust host process. **Bevy** provides
-the data-oriented ECS and plugin graph. **CEF** supplies Chromium only for pages that need
-the open web. **MCP** exposes the same workspace model to agents. Features compose;
-architecture does not drift.
+- **Across features.** A plugin can add behavior to entities created by another plugin by matching
+  typed components and messages. Neither side needs to know the other's implementation.
+- **Across platforms.** Desktop and mobile select from the same feature graph and add only
+  their window, input, notification, persistence, and lifecycle adapters.
+- **Across processes.** GUI, daemon, CLI, and MCP are different Bevy app compositions. Typed
+  contracts cross process and network boundaries without creating another domain model or DTO
+  layer.
+- **Across interfaces.** A human gesture, CLI command, or agent tool converges on the same
+  feature-owned request and systems instead of three implementations of the operation.
+- **Across teams and agents.** New code has a constrained destination. State is a component
+  or resource, behavior is a system, coordination is a message, capability is a plugin, and
+  presentation is a surface. The implementation shape is predictable before code is written.
+
+Electron applications can build daemons, mobile companions, CLIs, and automation APIs. Vmux's
+difference is that these are not parallel architectures assembled around the desktop app. They
+are consumers of the same typed feature plugins. **Rust is the application. Bevy is the
+composition model. A boundary changes transport, not type. Web is a surface.**
+
+---
+
+## One framework, many distributions
+
+The shipped Vmux application is one plugin composition. It is the reference distribution of the
+framework, not a special monolith above it. `vmux_app` provides the shared composition boundary;
+application crates select feature plugins and add the adapters required by their platform and
+lifecycle.
+
+```mermaid
+flowchart TB
+    framework["Vmux framework<br/>typed contracts · ECS · feature plugins"]
+    official["official Vmux"]
+    personal["personal Vmux<br/>custom plugin composition"]
+    product["new product"]
+    desktop["desktop / mobile / web host"]
+    headless["CLI / service / MCP / tool"]
+    spatial["game / spatial application"]
+
+    framework --> official
+    framework --> personal
+    framework --> product
+    product --> desktop
+    product --> headless
+    product --> spatial
+```
+
+The same architecture supports two kinds of extensibility:
+
+- **Customize the distribution.** Add, remove, or replace plugins to produce a Vmux with different
+  behavior without forking its application model.
+- **Build another application.** Start with the runtime and only the feature and adapter plugins
+  that product needs. A CLI, desktop app, mobile client, service, MCP server, tool, or game remains
+  the same kind of Bevy application.
+
+Agents make compiled customization usable as a product feature. Instead of limiting users to a
+dynamic scripting API, Vmux can let an agent edit the real Rust composition, type-check it, and
+produce a complete application. A future custom build channel can select an immutable artifact for
+a profile and retain its source revision and previous artifact for inspection and rollback.
+
+> Neovim made the editor programmable. Vmux makes the application programmable.
 
 ---
 
@@ -193,6 +286,11 @@ Capabilities **compose** rather than being inherited. A plain web-view entity *b
 shell the moment a `Terminal` component is added — no subclass, no base class. And because
 each system declares the data it touches, Bevy runs non-conflicting systems across cores
 for you.
+
+The entity's creator does not need to predict every behavior it may gain. The system adding that
+behavior does not need a reference back to the creator. Components are the contract between them,
+so either side can be reused, replaced, or omitted independently. Composition changes by changing
+data and plugins, not by editing a growing call graph.
 
 That vocabulary also narrows the implementation search space. A new feature cannot hide
 state in an arbitrary object graph or invent a private integration mechanism: its data,

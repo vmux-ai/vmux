@@ -1,31 +1,84 @@
 <h1 align="center">Vmux</h1>
-<p align="center"><b>Applications that outlive their windows.</b></p>
-<p align="center">The agent-first browser and IDE with a durable Rust core, composable surfaces, and one typed interface for humans, agents, and every client.</p>
+<p align="center"><b>One architecture. Every platform. Every process.</b></p>
+<p align="center">The same Rust, ECS, plugins, and types from UI to service to agent.</p>
 
 <p align="center">
   <img src="icon.png" alt="Vmux icon" width="256" />
 </p>
 
-Electron made websites installable by making the browser the application. Vmux inverts that
-model: the application is a native Rust runtime, and the browser is one surface inside it.
+Most "cross-platform" products are several applications wearing the same design system: Electron
+on desktop, React Native on mobile, Next.js on the web, another service behind them, and another
+API for agents. They may share TypeScript and domain types, but not state, lifecycle, routing,
+permissions, extension points, or architecture.
+
+That is why "add one feature" becomes changing the renderer, preload bridge, IPC handlers,
+main-process services, daemon protocol, CLI, mobile app, and automation API.
 
 ```text
-Application = Durable Work + Typed Commands + Composable Surfaces
+Typical cross-platform stack = Shared types + Separate applications
+Vmux                         = Shared application architecture + Platform adapters
+
+Typical boundary = Domain model → UI DTO → IPC DTO → RPC DTO → tool schema
+Vmux boundary    = One Rust type → UI · ECS · IPC · QUIC · CLI · MCP
 ```
+
+```text
+Electron product                  Vmux feature plugin
+├── renderer state + UI           ├── state
+├── preload API                   ├── systems
+├── IPC handlers                  ├── UI
+├── main-process service          ├── commands
+├── daemon protocol               ├── tools
+├── CLI + automation schema       └── wire contracts
+└── mobile implementation
+```
+
+Vmux gives that feature one home. The feature owns its state, behavior, UI, commands, agent tools,
+and protocol together. Desktop, mobile, the background service, the CLI, and the MCP server compose
+the parts they need instead of rebuilding the feature behind another interface. For each contract,
+one Rust type is the source of truth across every boundary it crosses; transport changes, meaning
+does not.
+
+**ECS turns integration from dependencies into data.** Attach a component to add behavior. Install
+a plugin to add a capability. Swap an adapter to change platforms. Existing features do not need
+to know who extended them or be rewired around every new surface.
+
+> Electron gets you to the first window. Vmux keeps every next surface from becoming another app.
 
 ## Why it is different
 
 | | Vmux |
 |---|---|
-| **Durable** | Terminals, builds, and agents keep running after every window closes. |
-| **Composable** | Browser, editor, terminal, native UI, and new capabilities assemble as ECS plugins and surfaces. |
-| **Predictable** | State, behavior, messages, and feature ownership have fixed typed shapes, so humans and agents know where new code belongs before writing it. |
-| **Agent-native** | People and agents use the same commands and operate the same workspace through MCP. |
-| **Cross-platform** | Rust shares the application itself across targets; platform-specific code stays in adapter plugins. |
+| **One model everywhere** | Desktop, mobile, daemon, CLI, and MCP are Bevy apps composed from the same typed feature plugins. |
+| **One feature, every interface** | A feature owns its state, systems, page, commands, tools, and wire contracts together. Each runtime selects what it needs. |
+| **One contract end to end** | The same Rust type can be an ECS message, UI event, process payload, network request, CLI operation, or agent tool contract. |
+| **Composition over integration** | Attach a component to add behavior, install a plugin to add a capability, or swap an adapter to change platforms. Existing features need no rewiring. |
+| **Decoupled by construction** | Features meet in the ECS world through typed data and messages, not inside each other's APIs. |
+| **Predictable for agents** | Before code exists, its owner, state, behavior, messages, and composition point already have a known shape. |
+| **UI-independent** | Long-running work has stable identity, snapshots, subscriptions, and a reconnect protocol. Every UI is disposable. |
+| **Native without losing the web** | Rust is the application. Dioxus, Chromium, terminals, and editors are composable surfaces. |
 
-> Electron makes the browser portable. Rust makes the application portable.
+> Electron is cross-platform UI. Vmux is cross-platform architecture.
 
-Web remains fully supported through embedded Chromium. It is a renderer, not the architecture.
+## One framework, many applications
+
+The Vmux binary is one distribution of the framework, not its boundary. The same feature plugins
+can compose a personal Vmux or a different desktop app, mobile app, CLI, service, MCP server, tool,
+game, or future web host.
+
+```text
+Vmux framework
+├── official Vmux
+├── your Vmux       selected plugins + your behavior
+└── a new product   different composition, same architecture
+```
+
+The intended self-hosting loop makes source-level customization practical: ask an agent inside
+Vmux to change Vmux, let it create or replace a plugin, build a personal distribution, and switch
+to that build through a custom channel. Edit, type-check, build, try, and roll back — without
+waiting for the official application to expose another setting or extension hook.
+
+> Neovim made the editor programmable. Vmux makes the application programmable.
 
 ## Product
 

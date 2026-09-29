@@ -50,12 +50,12 @@ impl IntoIterator for ManagedMcpServers {
     }
 }
 
-struct PreparedManagedMcpServers {
-    pub(crate) servers: Vec<ManagedMcpServer>,
-    pub(crate) revision: u64,
+pub(super) struct PreparedManagedMcpServers {
+    pub(super) servers: Vec<ManagedMcpServer>,
+    pub(super) revision: u64,
 }
 
-pub(crate) fn acp_servers(agent_id: &str) -> Result<PreparedManagedMcpServers, String> {
+pub(super) fn acp_servers(agent_id: &str) -> Result<PreparedManagedMcpServers, String> {
     for _ in 0..3 {
         let revision = McpCredentialAccess::stable_revision()?;
         let mut servers = Vec::new();

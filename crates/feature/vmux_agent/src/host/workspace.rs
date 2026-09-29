@@ -5,13 +5,14 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use vmux_api::protocol::ClientMessage;
 use vmux_chat::host::{ChatSynced, ChatView};
 use vmux_command::WriteCommandRequests;
+#[cfg(test)]
 use vmux_core::AgentWorkingDir;
-use vmux_core::agent::AgentKind as CoreAgentKind;
 use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
 use vmux_git::worktree::{
-    CheckoutInfo, create_worktree_for_branch_blocking, is_linked_worktree, repository_init,
-    worktree_add, worktree_list, worktree_registrations,
+    CheckoutInfo, is_linked_worktree, repository_init, worktree_registrations,
 };
+#[cfg(test)]
+use vmux_git::worktree::{worktree_add, worktree_list};
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::{
     ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady, is_generated_tab_name,
@@ -381,19 +382,20 @@ enum SelectedWorkspaceKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ExistingWorktreeCandidate {
-    pub(crate) checkout_dir: PathBuf,
-    pub(crate) execution_dir: PathBuf,
-    pub(crate) branch: String,
+pub(super) struct ExistingWorktreeCandidate {
+    pub(super) checkout_dir: PathBuf,
+    pub(super) execution_dir: PathBuf,
+    pub(super) branch: String,
 }
 
-pub(crate) fn existing_worktree_candidates(
+pub(super) fn existing_worktree_candidates(
     project_dir: &Path,
 ) -> Result<Vec<ExistingWorktreeCandidate>, String> {
     let project_dir = project_dir
         .canonicalize()
         .map_err(|error| format!("invalid project directory: {error}"))?;
-    let project_checkout = CheckoutInfo::try_from(&project_dir).map_err(|error| error.0)?;
+    let project_checkout =
+        CheckoutInfo::try_from(project_dir.as_path()).map_err(|error| error.0)?;
     let relative_dir = project_dir
         .strip_prefix(&project_checkout.root)
         .map_err(|_| "project directory is outside its checkout".to_string())?;
@@ -402,7 +404,7 @@ pub(crate) fn existing_worktree_candidates(
         .into_iter()
         .filter_map(|registration| {
             let branch = registration.branch?;
-            let checkout = CheckoutInfo::try_from(&registration.path).ok()?;
+            let checkout = CheckoutInfo::try_from(registration.path.as_path()).ok()?;
             if checkout.common_dir != project_checkout.common_dir
                 || !is_linked_worktree(&checkout.root)
             {
@@ -421,7 +423,7 @@ pub(crate) fn existing_worktree_candidates(
     Ok(candidates)
 }
 
-pub(crate) fn resolve_requested_worktree(
+pub(super) fn resolve_requested_worktree(
     project_dir: &Path,
     requested: &Path,
 ) -> Result<ExistingWorktreeCandidate, String> {
@@ -444,7 +446,7 @@ pub(crate) fn resolve_requested_worktree(
         })
 }
 
-pub(crate) fn ambiguous_worktree_message(candidates: &[ExistingWorktreeCandidate]) -> String {
+pub(super) fn ambiguous_worktree_message(candidates: &[ExistingWorktreeCandidate]) -> String {
     let existing = candidates
         .iter()
         .enumerate()

@@ -5,10 +5,10 @@ use vmux_ui::hooks::{PressedKey, send};
 use vmux_ui::ime::ImeGuard;
 
 pub(super) const CONTAINER_ID: &str = "file-container";
-pub(super) const INPUT_ID: &str = "file-input";
+pub(crate) const INPUT_ID: &str = "file-input";
 pub(crate) const FIND_INPUT_ID: &str = "file-find-input";
 
-pub(super) fn focus_container() {
+pub(crate) fn focus_container() {
     FocusClaim::new(CONTAINER_ID).request();
 }
 

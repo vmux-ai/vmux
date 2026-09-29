@@ -816,8 +816,8 @@ pub fn validate_linked_workspace(
     let workspace_cwd = workspace_cwd
         .canonicalize()
         .map_err(|error| format!("invalid project directory: {error}"))?;
-    let checkout = CheckoutInfo::try_from(&cwd).map_err(|error| error.0)?;
-    let workspace = CheckoutInfo::try_from(&workspace_cwd).map_err(|error| error.0)?;
+    let checkout = CheckoutInfo::try_from(cwd.as_path()).map_err(|error| error.0)?;
+    let workspace = CheckoutInfo::try_from(workspace_cwd.as_path()).map_err(|error| error.0)?;
     if checkout.common_dir != workspace.common_dir {
         return Err("worktree belongs to a different repository".to_string());
     }
@@ -1295,7 +1295,7 @@ mod tests {
         worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
 
         let main = CheckoutInfo::try_from(repo.path()).unwrap();
-        let linked = CheckoutInfo::try_from(&wt).unwrap();
+        let linked = CheckoutInfo::try_from(wt.as_path()).unwrap();
 
         assert_eq!(main.root, repo.path().canonicalize().unwrap());
         assert_eq!(linked.root, wt.canonicalize().unwrap());

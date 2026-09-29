@@ -16,7 +16,7 @@ use vmux_core::terminal::{TerminalLaunch, TerminalSpawnRequest, TerminalSpawnTar
 use vmux_core::{Active, terminal::TerminalKind};
 use vmux_core::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
-    PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, now_millis,
+    PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, TabCommandSet, now_millis,
 };
 use vmux_history::LastActivatedAt;
 

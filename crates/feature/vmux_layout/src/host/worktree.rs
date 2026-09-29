@@ -261,7 +261,7 @@ fn activate_added_worktree(
     relative_dir: &Path,
     info: &worktree::WorktreeInfo,
 ) -> Result<TabWorktreeActivation, String> {
-    let managed_checkout = CheckoutInfo::try_from(&info.path).map_err(|error| error.0)?;
+    let managed_checkout = CheckoutInfo::try_from(info.path.as_path()).map_err(|error| error.0)?;
     if managed_checkout.common_dir != checkout.common_dir {
         return Err("managed worktree belongs to a different repository".to_string());
     }
@@ -310,7 +310,7 @@ pub fn create_worktree_blocking(
     let base_dir = base_dir
         .canonicalize()
         .map_err(|error| format!("invalid project directory: {error}"))?;
-    let checkout = CheckoutInfo::try_from(&base_dir).map_err(|error| error.0)?;
+    let checkout = CheckoutInfo::try_from(base_dir.as_path()).map_err(|error| error.0)?;
     worktree::ensure_initial_commit(&checkout.root).map_err(|error| error.0)?;
     let relative_dir = base_dir
         .strip_prefix(&checkout.root)
@@ -336,7 +336,7 @@ pub fn create_worktree_for_branch_blocking(
     let base_dir = base_dir
         .canonicalize()
         .map_err(|error| format!("invalid project directory: {error}"))?;
-    let checkout = CheckoutInfo::try_from(&base_dir).map_err(|error| error.0)?;
+    let checkout = CheckoutInfo::try_from(base_dir.as_path()).map_err(|error| error.0)?;
     worktree::validate_branch_name(&checkout.root, branch).map_err(|error| error.0)?;
     worktree::ensure_initial_commit(&checkout.root).map_err(|error| error.0)?;
     if let Some(registration) = worktree::worktree_registrations(&checkout.root)
@@ -381,7 +381,7 @@ pub fn create_worktree_for_existing_branch_blocking(
     let base_dir = base_dir
         .canonicalize()
         .map_err(|error| format!("invalid project directory: {error}"))?;
-    let checkout = CheckoutInfo::try_from(&base_dir).map_err(|error| error.0)?;
+    let checkout = CheckoutInfo::try_from(base_dir.as_path()).map_err(|error| error.0)?;
     worktree::validate_branch_name(&checkout.root, branch).map_err(|error| error.0)?;
     let relative_dir = base_dir
         .strip_prefix(&checkout.root)
@@ -420,7 +420,7 @@ pub fn ensure_tab_worktree_available(
     let project_dir = Path::new(&workspace.project_dir)
         .canonicalize()
         .map_err(|error| format!("project directory unavailable: {error}"))?;
-    let source = CheckoutInfo::try_from(&project_dir).map_err(|error| error.0)?;
+    let source = CheckoutInfo::try_from(project_dir.as_path()).map_err(|error| error.0)?;
     let relative_dir = project_dir
         .strip_prefix(&source.root)
         .map_err(|_| "project directory is outside its checkout".to_string())?;
@@ -452,7 +452,7 @@ pub fn ensure_tab_worktree_available(
         )
         .map_err(|error| format!("failed to recover managed worktree: {}", error.0))?;
     }
-    let checkout = CheckoutInfo::try_from(&checkout_dir).map_err(|error| error.0)?;
+    let checkout = CheckoutInfo::try_from(checkout_dir.as_path()).map_err(|error| error.0)?;
     if checkout.common_dir != source.common_dir {
         return Err("managed worktree belongs to a different repository".to_string());
     }
@@ -750,7 +750,7 @@ fn rebind_tab_directories(
         if is_within_checkout_without_nested_git_boundary(&current_dir, &observed_dir) {
             continue;
         }
-        let Ok(observed_info) = CheckoutInfo::try_from(&observed_dir) else {
+        let Ok(observed_info) = CheckoutInfo::try_from(observed_dir.as_path()) else {
             continue;
         };
         let current_info =

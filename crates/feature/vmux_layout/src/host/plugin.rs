@@ -24,10 +24,7 @@ use crate::toggle::TogglePlugin;
 use crate::warm_page::PrewarmPagesPlugin;
 use crate::window::WindowLayoutPlugin;
 use crate::worktree::WorktreePlugin;
-use crate::{
-    Header, LayoutStartupSet, Open, TabLayoutSpawnRequest, TerminalLayoutSpawnRequest, apply,
-    settings,
-};
+use crate::{Header, LayoutStartupSet, Open, TerminalLayoutSpawnRequest, apply, settings};
 
 #[vmux_native::page]
 pub struct LayoutPlugin;

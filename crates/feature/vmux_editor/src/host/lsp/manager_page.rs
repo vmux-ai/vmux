@@ -72,7 +72,7 @@ fn on_page_ready(
     let Ok(page) = pages.get(target) else {
         return;
     };
-    if page.url.trim_end_matches('/') != LspManagerPage::URL {
+    if page.url.trim_end_matches('/') != ManagerPlugin::MANIFEST.url.trim_end_matches('/') {
         return;
     }
     commands.spawn((

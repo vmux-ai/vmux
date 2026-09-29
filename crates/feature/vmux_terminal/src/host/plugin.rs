@@ -12,8 +12,10 @@ use vmux_api::protocol::{ClientMessage, CopyModeKey, ProcessId};
 use vmux_clipboard::Clipboard;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_command::{
-    CommandDefinition, CommandRuntimePlugin, ReadCommandRequests, WriteCommandRequests,
+    CommandDefinitions, CommandRuntimePlugin, ReadCommandRequests, WriteCommandRequests,
 };
+#[cfg(test)]
+use vmux_core::PageOpenId;
 use vmux_core::agent::{
     AgentKind as CoreAgentKind, AgentSession as CoreAgentSession, RestartAgentPty,
 };
@@ -26,7 +28,7 @@ use vmux_core::service::{ServiceConnected, ServiceRequest, ServiceUnavailable};
 use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_core::{
     KeyboardOwner, PageIcon, PageIdentity, PageMetadata, PageOpenError, PageOpenHandled,
-    PageOpenId, PageOpenSet, PageOpenTask,
+    PageOpenSet, PageOpenTask,
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
@@ -37,8 +39,13 @@ use vmux_layout::stack::{
 };
 use vmux_layout::tab::{Tab, ancestor_tab_startup_dir};
 use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
-use vmux_setting::{AppSettings, SpaceOverrides};
-use vmux_space::model::{BOOTSTRAP_SPACE_ID, SpaceRecord, bootstrap_space_record};
+use vmux_setting::AppSettings;
+#[cfg(test)]
+use vmux_setting::SpaceOverrides;
+use vmux_space::model::BOOTSTRAP_SPACE_ID;
+#[cfg(test)]
+use vmux_space::model::{SpaceRecord, bootstrap_space_record};
+#[cfg(test)]
 use vmux_space::spaces::space_profile_bundle;
 
 #[cfg(test)]

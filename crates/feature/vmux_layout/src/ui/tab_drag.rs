@@ -26,7 +26,7 @@ struct TabClickBlock {
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
-struct TabDragVisual {
+pub(super) struct TabDragVisual {
     offset_x: f64,
     source: bool,
     active: bool,
@@ -81,7 +81,7 @@ impl TabDragVisual {
         }
     }
 
-    pub(crate) fn style(self) -> String {
+    pub(super) fn style(self) -> String {
         if !self.active || (!self.source && self.offset_x.abs() < f64::EPSILON) {
             return "transform:none;z-index:auto;pointer-events:auto;transition:transform 140ms ease;"
                 .to_string();
@@ -98,7 +98,7 @@ impl TabDragVisual {
         )
     }
 
-    pub(crate) fn active(self) -> bool {
+    pub(super) fn active(self) -> bool {
         self.active
     }
 }
@@ -240,7 +240,7 @@ impl TabDrag {
         true
     }
 
-    pub(crate) fn visual(self, tab_id: &str, index: usize) -> TabDragVisual {
+    pub(super) fn visual(self, tab_id: &str, index: usize) -> TabDragVisual {
         let state = (self.state)();
         TabDragVisual::resolve(state.as_deref(), tab_id, index)
     }

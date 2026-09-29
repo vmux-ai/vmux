@@ -11,7 +11,7 @@ use crate::event::{
 use crate::state::{LayoutUiState, LayoutUiStatePatch};
 
 #[derive(Clone, Default)]
-struct LayoutPageState {
+pub(super) struct LayoutPageState {
     pub layout: Option<LayoutGeometry>,
     pub stacks: Option<StackNavigationState>,
     pub tab_strip: Option<TabStripState>,
@@ -92,7 +92,7 @@ impl LayoutPageState {
         }
     }
 
-    pub(crate) fn overlay_ready(&self, error: &Option<String>) -> bool {
+    pub(super) fn overlay_ready(&self, error: &Option<String>) -> bool {
         let received = |ready| ready || error.is_some();
         let layout_ready = received(self.layout.is_some());
         let stacks_ready = received(self.stacks.is_some());
@@ -132,7 +132,7 @@ impl LayoutUi {
         use_context::<Self>()
     }
 
-    pub(crate) fn value(self) -> LayoutPageState {
+    pub(super) fn value(self) -> LayoutPageState {
         (self.state)()
     }
 

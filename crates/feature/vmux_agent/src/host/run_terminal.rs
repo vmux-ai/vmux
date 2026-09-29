@@ -9,7 +9,9 @@ use vmux_command::open_target::PaneDirection;
 use vmux_core::PageMetadata;
 #[cfg(test)]
 use vmux_core::{LastActivatedAt, terminal::TerminalKind as CoreTerminalKind};
-use vmux_layout::pane::{Pane, PaneSplit, PaneSplitDirection, SpawnCounter, SpawnSeq};
+use vmux_layout::pane::{
+    Pane, PaneSplit, PaneSplitDirection, SpawnCounter, SpawnSeq, direction_to_split,
+};
 use vmux_layout::placement::{PageKind, page_kind_for_url};
 use vmux_layout::stack::Stack;
 use vmux_layout::tab::Tab;
@@ -162,10 +164,10 @@ impl RunTerminalCandidate {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct AgentPane(Entity);
+pub(super) struct AgentPane(Entity);
 
 impl AgentPane {
-    pub(crate) fn new(pane: Entity) -> Self {
+    pub(super) fn new(pane: Entity) -> Self {
         Self(pane)
     }
 
@@ -186,7 +188,7 @@ impl AgentPane {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn split(
+    pub(super) fn split(
         &self,
         direction: &AgentPaneDirection,
         focus: bool,
@@ -210,7 +212,7 @@ impl AgentPane {
         }
     }
 
-    pub(crate) fn direction(d: &AgentPaneDirection) -> PaneDirection {
+    pub(super) fn direction(d: &AgentPaneDirection) -> PaneDirection {
         use AgentPaneDirection as D;
         match d {
             D::Top => PaneDirection::Top,
@@ -221,18 +223,18 @@ impl AgentPane {
     }
 }
 
-struct AgentPaneSplit {
-    pub(crate) pane: Entity,
-    pub(crate) direction: PaneSplitDirection,
-    pub(crate) existing_tabs: Vec<Entity>,
-    pub(crate) focus: bool,
-    pub(crate) already_split: bool,
+pub(super) struct AgentPaneSplit {
+    pub(super) pane: Entity,
+    pub(super) direction: PaneSplitDirection,
+    pub(super) existing_tabs: Vec<Entity>,
+    pub(super) focus: bool,
+    pub(super) already_split: bool,
 }
 
-pub(crate) struct NextPaneSpawnSequence;
+pub(super) struct NextPaneSpawnSequence;
 
 impl NextPaneSpawnSequence {
-    pub(crate) fn take(spawn_counter: &mut SpawnCounter, seq_q: &Query<&SpawnSeq>) -> SpawnSeq {
+    pub(super) fn take(spawn_counter: &mut SpawnCounter, seq_q: &Query<&SpawnSeq>) -> SpawnSeq {
         let max_existing = seq_q.iter().map(|sequence| sequence.0).max().unwrap_or(0);
         if spawn_counter.0 <= max_existing {
             spawn_counter.0 = max_existing;

@@ -2,8 +2,127 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use super::{CliModelCatalog, CliStrategy, ResumableSession, lines_skipping_invalid_utf8};
+use bevy::prelude::*;
+
+use super::{
+    CliModelCatalog, CliSessionRoot, CliStrategy, ResumableSession, VibeCli,
+    lines_skipping_invalid_utf8,
+};
+use crate::session::{AgentSession, AgentSessionExited, PendingAgentSession, SessionId};
 use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
+
+use super::super::session::{DiscoverAgentSessions, DiscoverAgentSessionsSet};
+
+pub(super) struct VibeCliPlugin;
+
+impl Plugin for VibeCliPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, spawn_vibe_cli).add_systems(
+            Update,
+            (discover_sessions, detect_ended_sessions).in_set(DiscoverAgentSessionsSet),
+        );
+    }
+}
+
+fn spawn_vibe_cli(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Vibe CLI strategy"),
+        VibeCli,
+        CLI,
+        CliSessionRoot(sessions_root()),
+        VibeModels::load(),
+    ));
+}
+
+fn discover_sessions(
+    mut requests: MessageReader<DiscoverAgentSessions>,
+    root: Single<&CliSessionRoot, With<VibeCli>>,
+    pending_sessions: Query<(Entity, &PendingAgentSession)>,
+    sessions: Query<(&AgentSession, &SessionId)>,
+    mut commands: Commands,
+) {
+    if requests.read().next().is_none() {
+        return;
+    }
+    for (entity, pending) in &pending_sessions {
+        if pending.kind != AgentKind::Vibe {
+            continue;
+        }
+        let claimed = sessions
+            .iter()
+            .filter_map(|(session, id)| {
+                if session.kind == pending.kind {
+                    Some(id.0.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<HashSet<_>>();
+        if let Some(id) = VibeCli::discover(&root.0, &pending.cwd, pending.spawn_time, &claimed) {
+            commands
+                .entity(entity)
+                .insert(SessionId(id))
+                .remove::<PendingAgentSession>();
+        }
+    }
+}
+
+fn detect_ended_sessions(
+    mut requests: MessageReader<DiscoverAgentSessions>,
+    root: Single<&CliSessionRoot, With<VibeCli>>,
+    sessions: Query<(Entity, &AgentSession, &SessionId)>,
+    mut exited: MessageWriter<AgentSessionExited>,
+    mut commands: Commands,
+) {
+    if requests.read().next().is_none() {
+        return;
+    }
+    for (entity, session, sid) in &sessions {
+        if session.kind != AgentKind::Vibe || !VibeCli::ended(&root.0, &sid.0) {
+            continue;
+        }
+        commands
+            .entity(entity)
+            .remove::<AgentSession>()
+            .remove::<SessionId>()
+            .remove::<PendingAgentSession>();
+        exited.write(AgentSessionExited { entity });
+    }
+}
+
+impl VibeCli {
+    fn discover(
+        sessions_root: &Path,
+        cwd: &Path,
+        spawn_time: SystemTime,
+        claimed: &HashSet<String>,
+    ) -> Option<String> {
+        discover_vibe_session_id(sessions_root, cwd, spawn_time, claimed)
+    }
+
+    fn ended(sessions_root: &Path, session_id: &str) -> bool {
+        let Ok(entries) = std::fs::read_dir(sessions_root) else {
+            return false;
+        };
+        for entry in entries.flatten() {
+            let meta_path = entry.path().join("meta.json");
+            let Ok(text) = std::fs::read_to_string(&meta_path) else {
+                continue;
+            };
+            let Ok(head) = serde_json::from_str::<MetaJsonHead>(&text) else {
+                continue;
+            };
+            if head.session_id != session_id {
+                continue;
+            }
+            let Ok(exit) = serde_json::from_str::<MetaJsonExit>(&text) else {
+                continue;
+            };
+            return exit.end_time.is_some();
+        }
+        false
+    }
+}
 
 fn vibe_home() -> PathBuf {
     std::env::var("VIBE_HOME")
@@ -16,16 +135,12 @@ fn vibe_home() -> PathBuf {
 
 pub(super) const CLI: CliStrategy = CliStrategy {
     kind: AgentKind::Vibe,
-    sessions_root,
     build_args,
-    model_catalog: VibeModels::load,
     model_args: None,
     model_env: Some(model_env),
     effort_args: None,
     build_env,
     prepare_launch: Some(prepare_launch),
-    discover_session,
-    detect_end_time,
     list_sessions,
     latest_message: vibe_latest_message,
     prompt_history: None,
@@ -80,38 +195,6 @@ fn build_env(mcp: &McpServerConfig) -> Vec<(String, String)> {
 
 fn prepare_launch(mcp: &McpServerConfig) {
     ensure_vibe_hooks(&mcp.command);
-}
-
-fn discover_session(
-    cwd: &Path,
-    spawn_time: SystemTime,
-    claimed: &HashSet<String>,
-) -> Option<String> {
-    discover_vibe_session_id(&sessions_root(), cwd, spawn_time, claimed)
-}
-
-fn detect_end_time(session_id: &str) -> bool {
-    let root = sessions_root();
-    let Ok(entries) = std::fs::read_dir(&root) else {
-        return false;
-    };
-    for entry in entries.flatten() {
-        let meta_path = entry.path().join("meta.json");
-        let Ok(text) = std::fs::read_to_string(&meta_path) else {
-            continue;
-        };
-        let Ok(head) = serde_json::from_str::<MetaJsonHead>(&text) else {
-            continue;
-        };
-        if head.session_id != session_id {
-            continue;
-        }
-        let Ok(exit) = serde_json::from_str::<MetaJsonExit>(&text) else {
-            continue;
-        };
-        return exit.end_time.is_some();
-    }
-    false
 }
 
 fn list_sessions() -> Vec<ResumableSession> {

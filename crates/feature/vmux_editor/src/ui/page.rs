@@ -1834,8 +1834,8 @@ const MEASURE_COLS: usize = 80;
 const MEASURE_ROWS: usize = 8;
 const MEASURE_WIDE_GLYPH: &str = "\u{6f22}";
 const RENAME_NOTICE_MS: u32 = 2400;
-pub(super) const HOVER_DELAY_MS: u32 = 300;
-pub(super) const SCROLL_ID: &str = "file-scroll";
+pub(crate) const HOVER_DELAY_MS: u32 = 300;
+pub(crate) const SCROLL_ID: &str = "file-scroll";
 const LSP_NOTICE_DONE_MS: u32 = 2_500;
 const LSP_NOTICE_FAILED_MS: u32 = 6_000;
 
@@ -1882,19 +1882,19 @@ impl NoteCursorActivation {
     }
 }
 
-pub(super) fn diff_marker_sign(marker: GitLineStatus) -> &'static str {
+pub(crate) fn diff_marker_sign(marker: GitLineStatus) -> &'static str {
     diff_tone(marker).sign()
 }
 
-pub(super) fn diff_marker_text_class(marker: GitLineStatus) -> &'static str {
+pub(crate) fn diff_marker_text_class(marker: GitLineStatus) -> &'static str {
     diff_tone(marker).text_class()
 }
 
-pub(super) fn diff_marker_row_class(marker: GitLineStatus) -> &'static str {
+pub(crate) fn diff_marker_row_class(marker: GitLineStatus) -> &'static str {
     diff_tone(marker).row_class()
 }
 
-pub(super) fn diff_tone(marker: GitLineStatus) -> DiffTone {
+pub(crate) fn diff_tone(marker: GitLineStatus) -> DiffTone {
     match marker {
         GitLineStatus::Added => DiffTone::Added,
         GitLineStatus::Modified => DiffTone::Modified,
