@@ -54,7 +54,6 @@ pub use self::attach::{
 pub use capture_tool::CaptureToolPlugin;
 pub use vmux_space::cwd::valid_cwd;
 
-pub(crate) use self::run_terminal::agent_terminal_shell;
 pub(crate) use self::workspace::{
     PendingAgentChoice, PendingAgentProject, RepositoryNeedsWorktree,
 };

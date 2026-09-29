@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 use vmux_api::protocol::{SharedEvent, SharedFailure, SharedMessage, SharedResponse};
 use vmux_transport::framing::{Frame, FrameStream};
 use vmux_transport::quic::endpoint::Trust;
-use vmux_transport::quic::tunnel::{DESKTOP_TAG, TunnelSocket, relayed_peer};
+use vmux_transport::quic::tunnel::TunnelSocket;
 use vmux_transport::quic::{
     Accepted, ClientSetup, CloseCode, MessageType, RelaySetup, SessionAccepted,
 };
@@ -198,7 +198,10 @@ impl QuicApi {
         .endpoint_on(tunnel)
         .map_err(QuicError::Transport)?;
         let connection = inner_endpoint
-            .connect(relayed_peer(DESKTOP_TAG), "desktop")
+            .connect(
+                TunnelSocket::relayed_peer(TunnelSocket::DESKTOP_TAG),
+                "desktop",
+            )
             .map_err(|error| QuicError::Transport(error.to_string()))?
             .await
             .map_err(|error| QuicError::from_connection_error(&error))?;

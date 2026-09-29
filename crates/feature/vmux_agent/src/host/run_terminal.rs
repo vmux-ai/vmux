@@ -495,10 +495,6 @@ impl AgentTerminalShell {
     }
 }
 
-pub(crate) fn agent_terminal_shell(settings: &AppSettings) -> String {
-    AgentTerminalShell::configured(settings).into_string()
-}
-
 pub(crate) struct RunPlacementPolicy {
     placement_override: bool,
 }

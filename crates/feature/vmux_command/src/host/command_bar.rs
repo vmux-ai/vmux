@@ -7,7 +7,6 @@ pub mod handler;
 mod palette;
 pub mod panel;
 pub mod project_files;
-pub mod state;
 pub mod wake;
 pub mod work_snapshot;
 

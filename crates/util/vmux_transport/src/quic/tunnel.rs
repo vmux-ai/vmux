@@ -10,15 +10,6 @@ use quinn::{AsyncUdpSocket, UdpPoller};
 
 const TAG_BYTES: usize = 2;
 
-pub const DESKTOP_TAG: u16 = 1;
-
-pub fn relayed_peer(tag: u16) -> SocketAddr {
-    SocketAddr::new(
-        std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1)),
-        tag,
-    )
-}
-
 const TUNNEL_LOCAL: SocketAddr = SocketAddr::new(
     std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 2)),
     443,
@@ -33,6 +24,8 @@ pub struct TunnelSocket {
 }
 
 impl TunnelSocket {
+    pub const DESKTOP_TAG: u16 = 1;
+
     pub fn new(control: quinn::Connection) -> Arc<Self> {
         let (tx, rx) = tokio::sync::mpsc::channel(INBOX_DEPTH);
         let pump = control.clone();
@@ -51,6 +44,13 @@ impl TunnelSocket {
 
     pub fn usable_mtu(&self) -> Option<usize> {
         self.control.max_datagram_size()?.checked_sub(TAG_BYTES)
+    }
+
+    pub fn relayed_peer(tag: u16) -> SocketAddr {
+        SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1)),
+            tag,
+        )
     }
 }
 
@@ -101,7 +101,7 @@ impl AsyncUdpSocket for TunnelSocket {
         let len = payload.len().min(buffer.len());
         buffer[..len].copy_from_slice(&payload[..len]);
         meta[0] = RecvMeta {
-            addr: relayed_peer(tag),
+            addr: Self::relayed_peer(tag),
             len,
             stride: len,
             ecn: None,

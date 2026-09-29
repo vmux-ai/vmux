@@ -14,7 +14,6 @@ use vmux_core::launcher::{
 
 use crate::command_bar::CloseCommandBar;
 use crate::command_bar::panel::CommandBarPanelActive;
-use crate::command_bar::state::{CommandBarStateQuery, command_bar_state};
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
 use crate::event::{
     CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent, OpenId, SearchEngine,
@@ -310,14 +309,6 @@ const COMMAND_BAR_REVEAL_FRAMES: u8 = 2;
 const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
 const COMMAND_BAR_NATIVE_REVEAL_TIMEOUT: Duration = Duration::from_secs(2);
 const COMMAND_BAR_OPEN_RETRY_INTERVAL: Duration = Duration::from_millis(100);
-
-pub fn is_command_bar_open(modal_q: &CommandBarStateQuery) -> bool {
-    command_bar_state(modal_q).owns_input()
-}
-
-pub fn is_command_bar_visible(modal_q: &CommandBarStateQuery) -> bool {
-    command_bar_state(modal_q).is_shown()
-}
 
 fn prepare_command_bar_surface(
     modal_node: &mut Node,
@@ -1475,10 +1466,18 @@ mod tests {
     struct CapturedCommandBarOpen(bool);
 
     fn capture_command_bar_open(
-        modal_q: CommandBarStateQuery,
+        modal_q: Query<
+            (
+                &Node,
+                &Visibility,
+                Has<KeyboardOwner>,
+                Has<vmux_core::overlay::OverlayShownInline>,
+            ),
+            With<CommandBar>,
+        >,
         mut captured: ResMut<CapturedCommandBarOpen>,
     ) {
-        captured.0 = is_command_bar_open(&modal_q);
+        captured.0 = OverlayState::from_surfaces(modal_q.iter()).owns_input();
     }
 
     #[test]
