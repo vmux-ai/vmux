@@ -34,9 +34,16 @@ impl Plugin for StackPlugin {
             .add_message::<CloseRequest>()
             .add_message::<FocusRequest>()
             .add_message::<MoveRequest>()
+            .add_message::<PageOpenRequest>()
             .add_systems(
                 Startup,
                 spawn_stack_commands.in_set(vmux_command::RegisterCommandDefinitions),
+            )
+            .add_systems(
+                Startup,
+                open_startup_url_if_no_stacks
+                    .in_set(crate::LayoutStartupSet::Post)
+                    .in_set(OpenStartupPageSet),
             )
             .register_persisted::<Stack>()
             .add_message::<CloseStackRequest>()
@@ -64,12 +71,22 @@ impl Plugin for StackPlugin {
                     .in_set(ComputeFocusSet)
                     .after(LayoutRequestSet::Handle)
                     .after(crate::active::ActiveSystemSet::Descendants),
+            )
+            .add_systems(
+                Update,
+                open_startup_url_if_no_stacks
+                    .in_set(OpenStartupPageSet)
+                    .after(crate::window::WindowShellSet)
+                    .before(vmux_core::PageOpenSet::ResolveTarget),
             );
     }
 }
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CloseStackSet;
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct OpenStartupPageSet;
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct OpenRequest {
@@ -699,7 +716,7 @@ fn entity_tree_contains_stack_other_than(
         })
 }
 
-pub fn open_startup_url_if_no_stacks(
+fn open_startup_url_if_no_stacks(
     active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -1014,15 +1031,15 @@ mod tests {
     #[test]
     fn closing_last_stack_preloads_fresh_tab_without_workspace_state() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, StackPlugin, crate::archive::ArchivePlugin))
-            .add_message::<crate::TabLayoutSpawnRequest>()
-            .add_message::<PageOpenRequest>()
-            .add_message::<LauncherDismissRequest>()
-            .insert_resource(test_settings())
-            .add_systems(
-                Update,
-                crate::window::spawn_requested_tab_layouts.after(LayoutRequestSet::Handle),
-            );
+        app.add_plugins((
+            MinimalPlugins,
+            StackPlugin,
+            crate::archive::ArchivePlugin,
+            crate::window::LayoutSpawnPlugin,
+        ))
+        .add_message::<PageOpenRequest>()
+        .add_message::<LauncherDismissRequest>()
+        .insert_resource(test_settings());
         app.world_mut().spawn(ActiveStack::default().local_bundle());
 
         app.world_mut()

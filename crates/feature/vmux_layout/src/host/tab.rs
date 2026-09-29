@@ -918,14 +918,13 @@ mod tests {
 
     fn build_app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, crate::window::LayoutSpawnPlugin))
             .add_message::<OpenRequest>()
             .add_message::<CreateRequest>()
             .add_message::<CloseRequest>()
             .add_message::<FocusRequest>()
             .add_message::<MoveRequest>()
             .add_message::<crate::TerminalLayoutSpawnRequest>()
-            .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<crate::NewTabRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
@@ -942,10 +941,13 @@ mod tests {
                     handle_focus_requests,
                     handle_move_requests,
                     handle_new_tab_requests,
-                    crate::window::spawn_requested_tab_layouts,
-                    collect_spawn_requests,
                 )
-                    .chain(),
+                    .chain()
+                    .before(crate::window::TabLayoutSpawnSet),
+            )
+            .add_systems(
+                Update,
+                collect_spawn_requests.after(crate::window::TabLayoutSpawnSet),
             );
         app
     }

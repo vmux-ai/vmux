@@ -30,7 +30,7 @@ impl Plugin for ActivePlugin {
             (ensure_active_tab, ensure_active_stack, ensure_active_branch)
                 .in_set(ActiveSystemSet::Descendants)
                 .after(LayoutRequestSet::Handle)
-                .after(crate::window::spawn_requested_tab_layouts),
+                .after(crate::window::TabLayoutSpawnSet),
         );
     }
 }

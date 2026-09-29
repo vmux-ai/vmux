@@ -28,7 +28,8 @@ impl Plugin for WindowLayoutPlugin {
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
-        app.add_message::<MinimizeWindowRequest>()
+        app.add_plugins(LayoutSpawnPlugin)
+            .add_message::<MinimizeWindowRequest>()
             .add_message::<NewWindowRequest>()
             .add_message::<CloseFocusedWindowRequest>()
             .add_message::<ToggleFullscreenRequest>()
@@ -51,12 +52,9 @@ impl Plugin for WindowLayoutPlugin {
             )
             .add_systems(
                 Startup,
-                (
-                    crate::stack::open_startup_url_if_no_stacks,
-                    fit_window_to_screen,
-                )
-                    .chain()
-                    .in_set(LayoutStartupSet::Post),
+                fit_window_to_screen
+                    .in_set(LayoutStartupSet::Post)
+                    .after(crate::stack::OpenStartupPageSet),
             )
             .add_systems(
                 PostUpdate,
@@ -74,15 +72,9 @@ impl Plugin for WindowLayoutPlugin {
             )
             .add_systems(
                 Update,
-                (
-                    setup_window_shells,
-                    bevy::ecs::schedule::ApplyDeferred,
-                    crate::stack::open_startup_url_if_no_stacks.before(PageOpenSet::ResolveTarget),
-                    spawn_requested_tab_layouts
-                        .after(LayoutRequestSet::Handle)
-                        .before(PageOpenSet::ResolveTarget),
-                )
+                (setup_window_shells, bevy::ecs::schedule::ApplyDeferred)
                     .chain()
+                    .in_set(WindowShellSet)
                     .after(WindowFocusSet),
             )
             .add_systems(
@@ -92,6 +84,26 @@ impl Plugin for WindowLayoutPlugin {
 
         app.init_resource::<Assets<WindowMaterial>>()
             .init_resource::<WindowBackground>();
+    }
+}
+
+pub(crate) struct LayoutSpawnPlugin;
+
+impl Plugin for LayoutSpawnPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<crate::LauncherDismissRequest>()
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+            .add_systems(
+                Update,
+                spawn_requested_tab_layouts
+                    .in_set(TabLayoutSpawnSet)
+                    .after(LayoutRequestSet::Handle)
+                    .after(crate::stack::OpenStartupPageSet)
+                    .after(WindowShellSet)
+                    .before(PageOpenSet::ResolveTarget),
+            );
     }
 }
 
@@ -184,6 +196,12 @@ fn spawn_window_commands(mut commands: Commands) {
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct WindowFocusSet;
+
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct WindowShellSet;
+
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct TabLayoutSpawnSet;
 
 #[derive(Component)]
 pub struct NewWindowWorkspace;
@@ -624,7 +642,7 @@ pub fn spawn_tab_scaffold_in_space(
     TabScaffold { tab, pane, stack }
 }
 
-pub fn spawn_requested_tab_layouts(
+fn spawn_requested_tab_layouts(
     mut reader: MessageReader<TabLayoutSpawnRequest>,
     settings: Res<LayoutSettings>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
@@ -1029,9 +1047,8 @@ mod tests {
         let _home = HomeEnvGuard::use_temp_home("default-tab");
         let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, LayoutSpawnPlugin))
             .add_message::<crate::LauncherDismissRequest>()
-            .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(LayoutSettings {
@@ -1041,10 +1058,7 @@ mod tests {
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
-            .add_systems(
-                Update,
-                (request_default_layout, spawn_requested_tab_layouts).chain(),
-            );
+            .add_systems(Update, request_default_layout.before(TabLayoutSpawnSet));
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
@@ -1077,16 +1091,12 @@ mod tests {
         let _home = HomeEnvGuard::use_temp_home("default-tab-workspace");
         let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, LayoutSpawnPlugin))
             .add_message::<crate::LauncherDismissRequest>()
-            .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(test_settings(0.0))
-            .add_systems(
-                Update,
-                (request_default_layout, spawn_requested_tab_layouts).chain(),
-            );
+            .add_systems(Update, request_default_layout.before(TabLayoutSpawnSet));
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
@@ -1113,16 +1123,12 @@ mod tests {
     fn default_tab_without_configured_startup_dir_has_no_workspace() {
         let _home = HomeEnvGuard::use_temp_home("default-tab-no-workspace");
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, LayoutSpawnPlugin))
             .add_message::<crate::LauncherDismissRequest>()
-            .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(test_settings(0.0))
-            .add_systems(
-                Update,
-                (request_default_layout, spawn_requested_tab_layouts).chain(),
-            );
+            .add_systems(Update, request_default_layout.before(TabLayoutSpawnSet));
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
@@ -1144,13 +1150,11 @@ mod tests {
     fn tab_request_with_missing_startup_dir_spawns_without_workspace() {
         let root = tempfile::tempdir().unwrap();
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, LayoutSpawnPlugin))
             .add_message::<crate::LauncherDismissRequest>()
-            .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .insert_resource(test_settings(0.0))
-            .add_systems(Update, spawn_requested_tab_layouts);
+            .insert_resource(test_settings(0.0));
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let main = app.world_mut().spawn(Main).id();
         let space = app
@@ -1179,13 +1183,11 @@ mod tests {
     fn tab_request_keeps_space_active_when_request_was_created() {
         let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, LayoutSpawnPlugin))
             .add_message::<crate::LauncherDismissRequest>()
-            .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .insert_resource(test_settings(0.0))
-            .add_systems(Update, spawn_requested_tab_layouts);
+            .insert_resource(test_settings(0.0));
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let main = app.world_mut().spawn(Main).id();
         let requested_space = app
@@ -1234,9 +1236,8 @@ mod tests {
         let _home = HomeEnvGuard::use_temp_home("cold-start-one-tab");
         let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, LayoutSpawnPlugin))
             .add_message::<crate::LauncherDismissRequest>()
-            .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(LayoutSettings {
@@ -1246,8 +1247,7 @@ mod tests {
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
-            .add_systems(Startup, request_default_layout)
-            .add_systems(Update, spawn_requested_tab_layouts);
+            .add_systems(Startup, request_default_layout);
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
@@ -1276,9 +1276,8 @@ mod tests {
         let _home = HomeEnvGuard::use_temp_home("default-tab-adopts-space");
         let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, LayoutSpawnPlugin))
             .add_message::<crate::LauncherDismissRequest>()
-            .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(LayoutSettings {
@@ -1288,10 +1287,7 @@ mod tests {
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
-            .add_systems(
-                Startup,
-                (request_default_layout, spawn_requested_tab_layouts).chain(),
-            );
+            .add_systems(Startup, request_default_layout);
 
         app.world_mut().spawn(Main);
         app.world_mut().spawn(PrimaryWindow);
