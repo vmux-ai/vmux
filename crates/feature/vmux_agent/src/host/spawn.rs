@@ -22,7 +22,7 @@ use super::attach::attach_page_agent_to_stack;
 use super::page_open::{
     attach_agent_spawn_error_to_stack, attach_cli_setup_to_stack, cli_initial_prompt,
 };
-use super::provider::{AgentExecutableOverride, resolve_agent_executable};
+use super::provider::AgentExecutables;
 
 pub(super) struct SpawnPlugin;
 
@@ -175,7 +175,7 @@ fn handle_spawn_agent_requests(
     settings: Res<AppSettings>,
     strategies: AgentStrategies,
     models: Option<Single<&crate::host::model::AgentModelSelections>>,
-    exec_override: Option<Single<&AgentExecutableOverride>>,
+    executables: AgentExecutables,
     mut metadata: Query<&mut PageMetadata>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -187,8 +187,7 @@ fn handle_spawn_agent_requests(
             attach_agent_spawn_error_to_stack(req.stack, req.kind, message, &mut commands);
             continue;
         };
-        let exec_override = exec_override.as_ref().map(|override_| **override_);
-        let Some(exe_path) = resolve_agent_executable(req.kind, exec_override) else {
+        let Some(exe_path) = executables.resolve(req.kind) else {
             attach_cli_setup_to_stack(req.kind, req.stack, &mut commands);
             continue;
         };

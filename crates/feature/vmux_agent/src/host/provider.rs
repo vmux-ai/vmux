@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_core::Ready;
 use vmux_core::agent::{AgentKind, AgentProviderTargetKind};
@@ -76,14 +77,22 @@ pub(crate) const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
 #[derive(Component, Clone, Default)]
 pub(crate) struct AgentExecutableOverride(pub std::collections::HashMap<AgentKind, bool>);
 
-pub(crate) fn resolve_agent_executable(
-    kind: AgentKind,
-    override_: Option<&AgentExecutableOverride>,
-) -> Option<PathBuf> {
-    if let Some(forced) = override_.and_then(|o| o.0.get(&kind).copied()) {
-        return forced.then(|| PathBuf::from(kind.executable()));
+#[derive(SystemParam)]
+pub(crate) struct AgentExecutables<'w, 's> {
+    override_: Option<Single<'w, 's, &'static AgentExecutableOverride>>,
+}
+
+impl AgentExecutables<'_, '_> {
+    pub(crate) fn resolve(&self, kind: AgentKind) -> Option<PathBuf> {
+        if let Some(forced) = self
+            .override_
+            .as_deref()
+            .and_then(|override_| override_.0.get(&kind).copied())
+        {
+            return forced.then(|| PathBuf::from(kind.executable()));
+        }
+        crate::exec::find_executable(kind.executable())
     }
-    crate::exec::find_executable(kind.executable())
 }
 
 fn spawn_builtin_agent_providers(mut commands: Commands) {
