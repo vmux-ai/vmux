@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, AgentUpdateSettings};
-use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
+use vmux_core::agent::{
+    AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
+};
 
 use super::{AppSettings, SettingsWriteRequest};
 
@@ -8,32 +10,28 @@ pub(super) struct AgentSettingsPlugin;
 
 impl Plugin for AgentSettingsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentRequestInput>()
-            .add_message::<AgentCommandResponse>()
-            .add_systems(Update, update_settings);
+        app.add_agent_request::<AgentUpdateSettings>()
+            .add_systems(Update, update_settings.after(AgentRequestRouteSet));
     }
 }
 
 fn update_settings(
-    mut requests: MessageReader<AgentRequestInput>,
+    mut requests: MessageReader<AgentRequestMessage<AgentUpdateSettings>>,
     mut settings: ResMut<AppSettings>,
     mut write: MessageWriter<SettingsWriteRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        let Ok(Some(payload)) = request.decode::<AgentUpdateSettings>() else {
-            continue;
-        };
-        if payload.path.trim().is_empty() {
-            responses.write(AgentReply::new(request.request_id).response(
-                AgentCommandResult::Error("update_settings.path is empty".to_string()),
-            ));
+        if request.payload.path.trim().is_empty() {
+            responses.write(request.reply.response(AgentCommandResult::Error(
+                "update_settings.path is empty".to_string(),
+            )));
             continue;
         }
-        let result = match serde_json::Value::try_from(&payload.value) {
+        let result = match serde_json::Value::try_from(&request.payload.value) {
             Ok(value) => {
                 let mut updated = (*settings).clone();
-                match updated.apply_update(&payload.path, value) {
+                match updated.apply_update(&request.payload.path, value) {
                     Ok(ron_bytes) => {
                         if request.origin.is_agent()
                             && updated.agent.allow_run_placement_override
@@ -56,6 +54,6 @@ fn update_settings(
                 AgentCommandResult::Error(format!("update_settings: invalid JSON value: {error}"))
             }
         };
-        responses.write(AgentReply::new(request.request_id).response(result));
+        responses.write(request.reply.response(result));
     }
 }

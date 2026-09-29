@@ -2,29 +2,29 @@ use bevy::prelude::*;
 use vmux_api::protocol::{
     AgentRenameProfile, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
 };
-use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
+use vmux_core::agent::{
+    AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
+};
 
 pub(super) struct SpaceAgentPlugin;
 
 impl Plugin for SpaceAgentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentRequestInput>()
-            .add_message::<AgentCommandResponse>()
-            .add_message::<AgentSpaceCreateRequest>()
-            .add_message::<AgentSpaceRenameRequest>()
-            .add_message::<AgentSpaceDeleteRequest>()
-            .add_message::<AgentRenameProfileRequest>()
+        app.add_agent_request::<AgentSpaceCreate>()
+            .add_agent_request::<AgentSpaceRename>()
+            .add_agent_request::<AgentSpaceDelete>()
+            .add_agent_request::<AgentRenameProfile>()
             .add_message::<RenameProfileRequest>()
             .add_systems(
                 Update,
                 (
-                    route_space_commands,
                     (
                         create_space,
                         rename_space,
                         delete_space,
                         request_profile_rename,
-                    ),
+                    )
+                        .after(AgentRequestRouteSet),
                     rename_profile,
                 )
                     .chain(),
@@ -33,57 +33,12 @@ impl Plugin for SpaceAgentPlugin {
 }
 
 #[derive(Message, Clone)]
-struct AgentSpaceCreateRequest {
-    reply: AgentReply,
-    payload: AgentSpaceCreate,
-}
-
-#[derive(Message, Clone)]
-struct AgentSpaceRenameRequest {
-    reply: AgentReply,
-    payload: AgentSpaceRename,
-}
-
-#[derive(Message, Clone)]
-struct AgentSpaceDeleteRequest {
-    reply: AgentReply,
-    payload: AgentSpaceDelete,
-}
-
-#[derive(Message, Clone)]
-struct AgentRenameProfileRequest {
-    reply: AgentReply,
-    payload: AgentRenameProfile,
-}
-
-#[derive(Message, Clone)]
 struct RenameProfileRequest {
     name: String,
 }
 
-fn route_space_commands(
-    mut commands: MessageReader<AgentRequestInput>,
-    mut create: MessageWriter<AgentSpaceCreateRequest>,
-    mut rename: MessageWriter<AgentSpaceRenameRequest>,
-    mut delete: MessageWriter<AgentSpaceDeleteRequest>,
-    mut rename_profile: MessageWriter<AgentRenameProfileRequest>,
-) {
-    for request in commands.read() {
-        let reply = AgentReply::new(request.request_id);
-        if let Ok(Some(payload)) = request.decode::<AgentSpaceCreate>() {
-            create.write(AgentSpaceCreateRequest { reply, payload });
-        } else if let Ok(Some(payload)) = request.decode::<AgentSpaceRename>() {
-            rename.write(AgentSpaceRenameRequest { reply, payload });
-        } else if let Ok(Some(payload)) = request.decode::<AgentSpaceDelete>() {
-            delete.write(AgentSpaceDeleteRequest { reply, payload });
-        } else if let Ok(Some(payload)) = request.decode::<AgentRenameProfile>() {
-            rename_profile.write(AgentRenameProfileRequest { reply, payload });
-        }
-    }
-}
-
 fn create_space(
-    mut requests: MessageReader<AgentSpaceCreateRequest>,
+    mut requests: MessageReader<AgentRequestMessage<AgentSpaceCreate>>,
     mut create: MessageWriter<crate::SpaceCreateRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
@@ -96,7 +51,7 @@ fn create_space(
 }
 
 fn rename_space(
-    mut requests: MessageReader<AgentSpaceRenameRequest>,
+    mut requests: MessageReader<AgentRequestMessage<AgentSpaceRename>>,
     mut rename: MessageWriter<crate::SpaceRenameRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
@@ -110,7 +65,7 @@ fn rename_space(
 }
 
 fn delete_space(
-    mut requests: MessageReader<AgentSpaceDeleteRequest>,
+    mut requests: MessageReader<AgentRequestMessage<AgentSpaceDelete>>,
     mut delete: MessageWriter<crate::SpaceDeleteRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
@@ -123,7 +78,7 @@ fn delete_space(
 }
 
 fn request_profile_rename(
-    mut requests: MessageReader<AgentRenameProfileRequest>,
+    mut requests: MessageReader<AgentRequestMessage<AgentRenameProfile>>,
     mut rename: MessageWriter<RenameProfileRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {

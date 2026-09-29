@@ -4,7 +4,9 @@ use bevy::prelude::*;
 use vmux_api::protocol::{
     AgentCommandResult, AgentNewTerminalTab, AgentRunShell, AgentTerminalSend,
 };
-use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
+use vmux_core::agent::{
+    AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
+};
 use vmux_core::{KeyboardOwner, LastActivatedAt, PageMetadata};
 use vmux_layout::pane::{Pane, PaneSplit};
 use vmux_layout::stack::FocusedStack;
@@ -14,20 +16,15 @@ pub(super) struct AgentTerminalPlugin;
 
 impl Plugin for AgentTerminalPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentRequestInput>()
-            .add_message::<AgentCommandResponse>()
-            .add_message::<AgentNewTerminalTabRequest>()
-            .add_message::<AgentRunShellRequest>()
-            .add_message::<AgentTerminalSendRequest>()
+        app.add_agent_request::<AgentNewTerminalTab>()
+            .add_agent_request::<AgentRunShell>()
+            .add_agent_request::<AgentTerminalSend>()
             .add_message::<ProcessStackSpawnRequest>()
             .add_systems(
                 Update,
-                (
-                    route_terminal_commands,
-                    (open_terminal_tab, run_shell, send_to_terminal),
-                    respond_process_stack_spawn,
-                )
-                    .chain(),
+                (open_terminal_tab, run_shell, send_to_terminal)
+                    .after(AgentRequestRouteSet)
+                    .before(respond_process_stack_spawn),
             );
     }
 }
@@ -42,49 +39,8 @@ struct ProcessStackSpawnRequest {
     activate: bool,
 }
 
-#[derive(Message, Clone)]
-struct AgentNewTerminalTabRequest {
-    reply: AgentReply,
-    activate: bool,
-    payload: AgentNewTerminalTab,
-}
-
-#[derive(Message, Clone)]
-struct AgentRunShellRequest {
-    reply: AgentReply,
-    payload: AgentRunShell,
-}
-
-#[derive(Message, Clone)]
-struct AgentTerminalSendRequest {
-    reply: AgentReply,
-    payload: AgentTerminalSend,
-}
-
-fn route_terminal_commands(
-    mut commands: MessageReader<AgentRequestInput>,
-    mut new_terminal_tab: MessageWriter<AgentNewTerminalTabRequest>,
-    mut run_shell: MessageWriter<AgentRunShellRequest>,
-    mut terminal_send: MessageWriter<AgentTerminalSendRequest>,
-) {
-    for request in commands.read() {
-        let reply = AgentReply::new(request.request_id);
-        if let Ok(Some(payload)) = request.decode::<AgentNewTerminalTab>() {
-            new_terminal_tab.write(AgentNewTerminalTabRequest {
-                reply,
-                activate: !request.origin.is_agent(),
-                payload,
-            });
-        } else if let Ok(Some(payload)) = request.decode::<AgentRunShell>() {
-            run_shell.write(AgentRunShellRequest { reply, payload });
-        } else if let Ok(Some(payload)) = request.decode::<AgentTerminalSend>() {
-            terminal_send.write(AgentTerminalSendRequest { reply, payload });
-        }
-    }
-}
-
 fn open_terminal_tab(
-    mut requests: MessageReader<AgentNewTerminalTabRequest>,
+    mut requests: MessageReader<AgentRequestMessage<AgentNewTerminalTab>>,
     focus: FocusedStack,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     active_space: vmux_layout::space::FocusedSpace,
@@ -94,6 +50,7 @@ fn open_terminal_tab(
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
+        let activate = !request.origin.is_agent();
         let result = match focus.pane.filter(|pane| panes.contains(*pane)) {
             None => AgentCommandResult::Error("no active pane".to_string()),
             Some(pane) => match vmux_space::cwd::valid_cwd(&request.payload.cwd) {
@@ -112,7 +69,7 @@ fn open_terminal_tab(
                             agent_run: false,
                             pending_input: None,
                             process_id: None,
-                            activate: request.activate,
+                            activate,
                         });
                         AgentCommandResult::Ok
                     } else if let Some(cwd) = cwd {
@@ -122,7 +79,7 @@ fn open_terminal_tab(
                             args: request.payload.args.clone(),
                             cwd,
                             env: request.payload.env.clone(),
-                            activate: request.activate,
+                            activate,
                         });
                         AgentCommandResult::Ok
                     } else {
@@ -138,7 +95,7 @@ fn open_terminal_tab(
 }
 
 fn run_shell(
-    mut requests: MessageReader<AgentRunShellRequest>,
+    mut requests: MessageReader<AgentRequestMessage<AgentRunShell>>,
     mut run: MessageWriter<super::RunShellRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
@@ -157,7 +114,7 @@ fn run_shell(
 }
 
 fn send_to_terminal(
-    mut requests: MessageReader<AgentTerminalSendRequest>,
+    mut requests: MessageReader<AgentRequestMessage<AgentTerminalSend>>,
     mut send: MessageWriter<super::TerminalSendRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {

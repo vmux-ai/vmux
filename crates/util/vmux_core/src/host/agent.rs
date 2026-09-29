@@ -43,6 +43,68 @@ impl AgentRequestInput {
     }
 }
 
+#[derive(Message)]
+pub struct AgentRequestMessage<T> {
+    pub reply: AgentReply,
+    pub origin: CommandOrigin,
+    pub payload: T,
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct AgentRequestRouteSet;
+
+pub trait AgentRequestAppExt {
+    fn add_agent_request<T>(&mut self) -> &mut Self
+    where
+        T: vmux_api::AgentRequestContract + serde::de::DeserializeOwned + Send + Sync;
+}
+
+impl AgentRequestAppExt for App {
+    fn add_agent_request<T>(&mut self) -> &mut Self
+    where
+        T: vmux_api::AgentRequestContract + serde::de::DeserializeOwned + Send + Sync,
+    {
+        self.add_message::<AgentRequestInput>()
+            .add_message::<AgentRequestMessage<T>>()
+            .add_message::<AgentCommandResponse>()
+            .configure_sets(
+                Update,
+                AgentRequestRouteSet.after(crate::service::ServiceMessageSet),
+            )
+            .add_systems(
+                Update,
+                route_agent_requests::<T>.in_set(AgentRequestRouteSet),
+            )
+    }
+}
+
+fn route_agent_requests<T>(
+    mut requests: MessageReader<AgentRequestInput>,
+    mut routed: MessageWriter<AgentRequestMessage<T>>,
+    mut responses: MessageWriter<AgentCommandResponse>,
+) where
+    T: vmux_api::AgentRequestContract + serde::de::DeserializeOwned + Send + Sync,
+{
+    for request in requests.read() {
+        match request.decode::<T>() {
+            Ok(Some(payload)) => {
+                routed.write(AgentRequestMessage {
+                    reply: AgentReply::new(request.request_id),
+                    origin: request.origin.clone(),
+                    payload,
+                });
+            }
+            Ok(None) => {}
+            Err(message) => {
+                responses.write(
+                    AgentReply::new(request.request_id)
+                        .response(AgentCommandResult::Error(message)),
+                );
+            }
+        }
+    }
+}
+
 #[derive(Clone, Message)]
 pub struct AgentCommandResponse {
     pub request_id: AgentRequestId,

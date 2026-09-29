@@ -1,10 +1,11 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
 
-use vmux_agent::event::AgentRequestInput;
 use vmux_api::avatar::hash_color;
 use vmux_api::protocol::{AgentCommandResult, AgentListTeam};
-use vmux_core::agent::{AgentCommandResponse, AgentReply, SessionId};
+use vmux_core::agent::{
+    AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet, SessionId,
+};
 use vmux_core::event::team::{
     ProfileRow, TEAM_PAGE_URL, TeamEvent, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest,
     TeamProfileCreateRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest,
@@ -48,15 +49,14 @@ struct TeamProjectionPlugin;
 
 impl Plugin for TeamProjectionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentRequestInput>()
-            .add_message::<AgentCommandResponse>()
+        app.add_agent_request::<AgentListTeam>()
             .add_plugins(UiStatePlugin::<TeamEvent>::default())
             .add_observer(replay_team)
             .add_systems(
                 Update,
                 (sync_user_profile_name, project_team, publish_team).chain(),
             )
-            .add_systems(Update, answer_list_team);
+            .add_systems(Update, answer_list_team.after(AgentRequestRouteSet));
     }
 }
 
@@ -267,7 +267,7 @@ fn build_profiles(
 }
 
 fn answer_list_team(
-    mut reader: MessageReader<AgentRequestInput>,
+    mut reader: MessageReader<AgentRequestMessage<AgentListTeam>>,
     current_space: Query<Entity, With<CurrentSpace>>,
     user_q: Query<(Entity, &Profile), With<User>>,
     agent_q: Query<(
@@ -285,9 +285,6 @@ fn answer_list_team(
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in reader.read() {
-        let Ok(Some(AgentListTeam)) = request.decode::<AgentListTeam>() else {
-            continue;
-        };
         let members = build_team_members(
             current_space.iter().next(),
             &user_q,
@@ -301,7 +298,7 @@ fn answer_list_team(
             Ok(json) => AgentCommandResult::Text(json),
             Err(error) => AgentCommandResult::Error(format!("list_team: {error}")),
         };
-        responses.write(AgentReply::new(request.request_id).response(result));
+        responses.write(request.reply.response(result));
     }
 }
 
@@ -565,8 +562,7 @@ mod tests {
     #[test]
     fn team_view_owns_active_profile_and_agent_presentation() {
         let mut app = App::new();
-        app.add_message::<AgentRequestInput>()
-            .add_plugins(TeamProjectionPlugin);
+        app.add_plugins(TeamProjectionPlugin);
         let space = app
             .world_mut()
             .spawn((Space, vmux_core::Active, CurrentSpace))

@@ -26,7 +26,6 @@ vmux_core = { path = "../../util/vmux_core" }
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 ron = { workspace = true }
-vmux_agent = { path = "../vmux_agent" }
 vmux_command = { path = "../vmux_command" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_session = { path = "../../util/vmux_session" }

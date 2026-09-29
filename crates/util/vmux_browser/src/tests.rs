@@ -345,6 +345,8 @@ mod browser_navigate_flow {
             .add_message::<vmux_space::SpaceOpenPageRequest>()
             .add_message::<vmux_space::SpaceRenameRequest>()
             .add_message::<vmux_history::HistoryOpenIntent>()
+            .add_message::<vmux_core::page::HostHistoryStep>()
+            .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_systems(
                 Update,
                 handle_test_known_page_open.in_set(PageOpenSet::HandleKnownPages),

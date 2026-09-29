@@ -11093,7 +11093,6 @@ dependencies = [
  "ron 0.8.1",
  "serde",
  "serde_json",
- "vmux_agent",
  "vmux_api",
  "vmux_command",
  "vmux_core",

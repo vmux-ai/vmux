@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, AgentInvokeCommand};
-use vmux_core::agent::{AgentCommandResponse, AgentRequestInput, CommandOrigin};
+use vmux_core::agent::{
+    AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
+    CommandOrigin,
+};
 
 use crate::{CommandDefinition, CommandInvocation};
 
@@ -8,14 +11,13 @@ pub(super) struct AgentCommandPlugin;
 
 impl Plugin for AgentCommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentRequestInput>()
-            .add_message::<AgentCommandResponse>()
-            .add_systems(Update, invoke_command);
+        app.add_agent_request::<AgentInvokeCommand>()
+            .add_systems(Update, invoke_command.after(AgentRequestRouteSet));
     }
 }
 
 fn invoke_command(
-    mut requests: MessageReader<AgentRequestInput>,
+    mut requests: MessageReader<AgentRequestMessage<AgentInvokeCommand>>,
     definitions: Query<&CommandDefinition>,
     mut invocations: MessageWriter<CommandInvocation>,
     agents: Query<(
@@ -27,16 +29,10 @@ fn invoke_command(
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        let Ok(Some(payload)) = request.decode::<AgentInvokeCommand>() else {
-            continue;
-        };
-        let args = match vmux_core::JsonArguments::try_from(&payload.args) {
+        let args = match vmux_core::JsonArguments::try_from(&request.payload.args) {
             Ok(args) => args.0,
             Err(message) => {
-                responses.write(AgentCommandResponse {
-                    request_id: request.request_id,
-                    result: AgentCommandResult::Error(message),
-                });
+                responses.write(request.reply.response(AgentCommandResult::Error(message)));
                 continue;
             }
         };
@@ -57,12 +53,12 @@ fn invoke_command(
         .unwrap_or(Entity::PLACEHOLDER);
         let Some(definition) = definitions
             .iter()
-            .find(|definition| definition.matches(&payload.id))
+            .find(|definition| definition.matches(&request.payload.id))
         else {
-            responses.write(AgentCommandResponse {
-                request_id: request.request_id,
-                result: AgentCommandResult::Error(format!("unknown app command: {}", payload.id)),
-            });
+            responses.write(request.reply.response(AgentCommandResult::Error(format!(
+                "unknown app command: {}",
+                request.payload.id
+            ))));
             continue;
         };
         let result = if request.origin.is_agent() {
@@ -73,16 +69,10 @@ fn invoke_command(
         match result {
             Ok(invocation) => {
                 invocations.write(invocation);
-                responses.write(AgentCommandResponse {
-                    request_id: request.request_id,
-                    result: AgentCommandResult::Ok,
-                });
+                responses.write(request.reply.ok());
             }
             Err(message) => {
-                responses.write(AgentCommandResponse {
-                    request_id: request.request_id,
-                    result: AgentCommandResult::Error(message),
-                });
+                responses.write(request.reply.response(AgentCommandResult::Error(message)));
             }
         }
     }

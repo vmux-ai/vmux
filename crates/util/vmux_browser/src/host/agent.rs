@@ -5,7 +5,10 @@ use vmux_api::protocol::{
     AgentBrowserInstallExtension, AgentBrowserNavigate, AgentBrowserScroll, AgentBrowserSnapshot,
     AgentCommandResult, AgentOpenInNewStack, AgentRequestId, AgentWorkingDirectory, ClientMessage,
 };
-use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput, CommandOrigin};
+use vmux_core::agent::{
+    AgentCommandResponse, AgentReply, AgentRequestAppExt, AgentRequestMessage,
+    AgentRequestRouteSet, CommandOrigin,
+};
 use vmux_core::browser::{
     BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
     BrowserSnapshotRequest, BrowserSnapshotResponse,
@@ -27,8 +30,12 @@ pub(crate) struct AgentBrowserPlugin;
 
 impl Plugin for AgentBrowserPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentRequestInput>()
-            .add_message::<AgentCommandResponse>()
+        app.add_agent_request::<AgentBrowserNavigate>()
+            .add_agent_request::<AgentBrowserInstallExtension>()
+            .add_agent_request::<AgentBrowserGoBack>()
+            .add_agent_request::<AgentBrowserGoForward>()
+            .add_agent_request::<AgentBrowserHistorySearch>()
+            .add_agent_request::<AgentOpenInNewStack>()
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
@@ -38,12 +45,6 @@ impl Plugin for AgentBrowserPlugin {
             .add_message::<BrowserScrollResponse>()
             .add_message::<BrowserNavigationSnapshotResponse>()
             .add_message::<ActivatePane>()
-            .add_message::<AgentBrowserNavigateRequest>()
-            .add_message::<AgentBrowserInstallExtensionRequest>()
-            .add_message::<AgentBrowserGoBackRequest>()
-            .add_message::<AgentBrowserGoForwardRequest>()
-            .add_message::<AgentBrowserHistorySearchRequest>()
-            .add_message::<AgentOpenInNewStackRequest>()
             .add_message::<WorkingDirectoryRequest>()
             .add_message::<ExtensionInstallRequest>()
             .add_systems(Update, open_history)
@@ -59,17 +60,15 @@ impl Plugin for AgentBrowserPlugin {
             )
             .add_systems(
                 Update,
-                (
-                    route_browser_commands,
-                    (
-                        navigate,
-                        install_extension,
-                        go_back,
-                        go_forward,
-                        search_history,
-                        open_in_new_stack,
-                    ),
+                ((
+                    navigate,
+                    install_extension,
+                    go_back,
+                    go_forward,
+                    search_history,
+                    open_in_new_stack,
                 )
+                    .after(AgentRequestRouteSet),)
                     .chain(),
             );
     }
@@ -223,100 +222,23 @@ fn forward_navigation_snapshot_responses(
     }
 }
 
-#[derive(Message, Clone)]
-struct AgentBrowserNavigateRequest {
-    reply: AgentReply,
-    origin: CommandOrigin,
-    payload: AgentBrowserNavigate,
-}
-
-#[derive(Message, Clone)]
-struct AgentBrowserInstallExtensionRequest {
-    reply: AgentReply,
-    payload: AgentBrowserInstallExtension,
-}
-
-#[derive(Message, Clone)]
-struct AgentBrowserGoBackRequest {
-    reply: AgentReply,
-    origin: CommandOrigin,
-    payload: AgentBrowserGoBack,
-}
-
-#[derive(Message, Clone)]
-struct AgentBrowserGoForwardRequest {
-    reply: AgentReply,
-    origin: CommandOrigin,
-    payload: AgentBrowserGoForward,
-}
-
-#[derive(Message, Clone)]
-struct AgentBrowserHistorySearchRequest {
-    reply: AgentReply,
-    payload: AgentBrowserHistorySearch,
-}
-
-#[derive(Message, Clone)]
-struct AgentOpenInNewStackRequest {
-    reply: AgentReply,
-    payload: AgentOpenInNewStack,
-}
-
-fn route_browser_commands(
-    mut commands: MessageReader<AgentRequestInput>,
-    mut navigate: MessageWriter<AgentBrowserNavigateRequest>,
-    mut install_extension: MessageWriter<AgentBrowserInstallExtensionRequest>,
-    mut go_back: MessageWriter<AgentBrowserGoBackRequest>,
-    mut go_forward: MessageWriter<AgentBrowserGoForwardRequest>,
-    mut search_history: MessageWriter<AgentBrowserHistorySearchRequest>,
-    mut open_in_new_stack: MessageWriter<AgentOpenInNewStackRequest>,
-) {
-    for request in commands.read() {
-        let reply = AgentReply::new(request.request_id);
-        if let Ok(Some(payload)) = request.decode::<AgentBrowserNavigate>() {
-            navigate.write(AgentBrowserNavigateRequest {
-                reply,
-                origin: request.origin.clone(),
-                payload,
-            });
-        } else if let Ok(Some(payload)) = request.decode::<AgentBrowserInstallExtension>() {
-            install_extension.write(AgentBrowserInstallExtensionRequest { reply, payload });
-        } else if let Ok(Some(payload)) = request.decode::<AgentBrowserGoBack>() {
-            go_back.write(AgentBrowserGoBackRequest {
-                reply,
-                origin: request.origin.clone(),
-                payload,
-            });
-        } else if let Ok(Some(payload)) = request.decode::<AgentBrowserGoForward>() {
-            go_forward.write(AgentBrowserGoForwardRequest {
-                reply,
-                origin: request.origin.clone(),
-                payload,
-            });
-        } else if let Ok(Some(payload)) = request.decode::<AgentBrowserHistorySearch>() {
-            search_history.write(AgentBrowserHistorySearchRequest { reply, payload });
-        } else if let Ok(Some(payload)) = request.decode::<AgentOpenInNewStack>() {
-            open_in_new_stack.write(AgentOpenInNewStackRequest { reply, payload });
-        }
-    }
-}
-
 fn open_history(
     mut intents: MessageReader<HistoryOpenIntent>,
-    mut navigate: MessageWriter<AgentBrowserNavigateRequest>,
-    mut open_in_new_stack: MessageWriter<AgentOpenInNewStackRequest>,
+    mut navigate: MessageWriter<AgentRequestMessage<AgentBrowserNavigate>>,
+    mut open_in_new_stack: MessageWriter<AgentRequestMessage<AgentOpenInNewStack>>,
 ) {
     for intent in intents.read() {
         let reply = AgentReply::new(AgentRequestId::new());
         if intent.in_new_stack {
-            open_in_new_stack.write(AgentOpenInNewStackRequest {
+            open_in_new_stack.write(AgentRequestMessage {
                 reply,
+                origin: CommandOrigin::User,
                 payload: AgentOpenInNewStack {
                     url: intent.url.clone(),
                 },
             });
         } else {
-            navigate.write(AgentBrowserNavigateRequest {
+            navigate.write(AgentRequestMessage {
                 reply,
                 origin: CommandOrigin::User,
                 payload: AgentBrowserNavigate {
@@ -329,7 +251,7 @@ fn open_history(
 }
 
 fn navigate(
-    mut requests: MessageReader<AgentBrowserNavigateRequest>,
+    mut requests: MessageReader<AgentRequestMessage<AgentBrowserNavigate>>,
     mut navigate: MessageWriter<BrowserNavigateRequest>,
     mut open_beside: MessageWriter<OpenBesideRequest>,
     mut activate: MessageWriter<ActivatePane>,
@@ -378,7 +300,7 @@ fn navigate(
 }
 
 fn install_extension(
-    mut requests: MessageReader<AgentBrowserInstallExtensionRequest>,
+    mut requests: MessageReader<AgentRequestMessage<AgentBrowserInstallExtension>>,
     mut install: MessageWriter<ExtensionInstallRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
@@ -392,7 +314,7 @@ fn install_extension(
 }
 
 fn go_back(
-    mut requests: MessageReader<AgentBrowserGoBackRequest>,
+    mut requests: MessageReader<AgentRequestMessage<AgentBrowserGoBack>>,
     mut go_back: MessageWriter<BrowserGoBackRequest>,
     mut activate: MessageWriter<ActivatePane>,
     browse: AgentBrowserResolve,
@@ -411,7 +333,7 @@ fn go_back(
 }
 
 fn go_forward(
-    mut requests: MessageReader<AgentBrowserGoForwardRequest>,
+    mut requests: MessageReader<AgentRequestMessage<AgentBrowserGoForward>>,
     mut go_forward: MessageWriter<BrowserGoForwardRequest>,
     mut activate: MessageWriter<ActivatePane>,
     browse: AgentBrowserResolve,
@@ -430,7 +352,7 @@ fn go_forward(
 }
 
 fn search_history(
-    mut requests: MessageReader<AgentBrowserHistorySearchRequest>,
+    mut requests: MessageReader<AgentRequestMessage<AgentBrowserHistorySearch>>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
@@ -444,7 +366,7 @@ fn search_history(
 }
 
 fn open_in_new_stack(
-    mut requests: MessageReader<AgentOpenInNewStackRequest>,
+    mut requests: MessageReader<AgentRequestMessage<AgentOpenInNewStack>>,
     mut open: MessageWriter<OpenInNewStackRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {

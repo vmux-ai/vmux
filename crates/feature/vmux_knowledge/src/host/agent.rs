@@ -2,16 +2,23 @@ use bevy::prelude::*;
 use vmux_api::protocol::{
     AgentCommandResult, AgentReadKnowledge, AgentSearchKnowledge, AgentWriteKnowledge, ProcessId,
 };
-use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput, AgentSession};
+use vmux_core::agent::{
+    AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
+    AgentSession,
+};
 use vmux_core::knowledge::{KnowledgeIndex, KnowledgeVault};
 
 pub(super) struct KnowledgeAgentPlugin;
 
 impl Plugin for KnowledgeAgentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentRequestInput>()
-            .add_message::<AgentCommandResponse>()
-            .add_systems(Update, (search_knowledge, read_knowledge, write_knowledge));
+        app.add_agent_request::<AgentSearchKnowledge>()
+            .add_agent_request::<AgentReadKnowledge>()
+            .add_agent_request::<AgentWriteKnowledge>()
+            .add_systems(
+                Update,
+                (search_knowledge, read_knowledge, write_knowledge).after(AgentRequestRouteSet),
+            );
     }
 }
 
@@ -29,16 +36,14 @@ impl AgentPaneQuery<'_, '_> {
 }
 
 fn search_knowledge(
-    mut requests: MessageReader<AgentRequestInput>,
+    mut requests: MessageReader<AgentRequestMessage<AgentSearchKnowledge>>,
     agents: AgentPaneQuery,
     indexes: Query<&KnowledgeIndex>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     let index = indexes.single().ok();
     for request in requests.read() {
-        let Ok(Some(command)) = request.decode::<AgentSearchKnowledge>() else {
-            continue;
-        };
+        let command = &request.payload;
         let result = if agents.find(command.anchor).is_none() {
             AgentCommandResult::Error("agent pane not found".to_string())
         } else {
@@ -79,21 +84,19 @@ fn search_knowledge(
                 ),
             }
         };
-        responses.write(AgentReply::new(request.request_id).response(result));
+        responses.write(request.reply.response(result));
     }
 }
 
 fn read_knowledge(
-    mut requests: MessageReader<AgentRequestInput>,
+    mut requests: MessageReader<AgentRequestMessage<AgentReadKnowledge>>,
     agents: AgentPaneQuery,
     indexes: Query<&KnowledgeIndex>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     let index = indexes.single().ok();
     for request in requests.read() {
-        let Ok(Some(command)) = request.decode::<AgentReadKnowledge>() else {
-            continue;
-        };
+        let command = &request.payload;
         let result = if agents.find(command.anchor).is_none() {
             AgentCommandResult::Error("agent pane not found".to_string())
         } else {
@@ -142,20 +145,18 @@ fn read_knowledge(
                 ),
             }
         };
-        responses.write(AgentReply::new(request.request_id).response(result));
+        responses.write(request.reply.response(result));
     }
 }
 
 fn write_knowledge(
-    mut requests: MessageReader<AgentRequestInput>,
+    mut requests: MessageReader<AgentRequestMessage<AgentWriteKnowledge>>,
     agents: AgentPaneQuery,
     mut open: MessageWriter<vmux_layout::OpenBesideRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        let Ok(Some(command)) = request.decode::<AgentWriteKnowledge>() else {
-            continue;
-        };
+        let command = &request.payload;
         let result = match agents.find(command.anchor) {
             None => AgentCommandResult::Error("agent pane not found".to_string()),
             Some(pane) => match KnowledgeVault::user().write_note(
@@ -168,7 +169,7 @@ fn write_knowledge(
                         pane,
                         direction: None,
                         url: vmux_core::file_url::FileUrl::from_path(&path, None, None, None),
-                        request_id: request.request_id.0,
+                        request_id: request.reply.request_id.0,
                         focus: false,
                     });
                     AgentCommandResult::Text(format!("Knowledge saved: {}", path.display()))
@@ -176,6 +177,6 @@ fn write_knowledge(
                 Err(error) => AgentCommandResult::Error(error),
             },
         };
-        responses.write(AgentReply::new(request.request_id).response(result));
+        responses.write(request.reply.response(result));
     }
 }
