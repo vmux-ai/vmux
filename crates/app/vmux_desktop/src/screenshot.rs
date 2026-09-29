@@ -1,13 +1,12 @@
-use bevy::ecs::relationship::Relationship;
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::HostWindow;
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::Arc;
 use vmux_agent::{ScreenshotRequest, ScreenshotResponse};
-use vmux_flex::prelude::*;
 use vmux_setting::AppSettings;
+
+use crate::capture_output::{CaptureOutput, CaptureSize, CaptureSource, CropRect};
 
 pub(crate) struct ScreenshotPlugin;
 
@@ -56,73 +55,25 @@ fn err_response(request_id: [u8; 16], message: impl Into<String>) -> ScreenshotR
     }
 }
 
-fn resolve_crop(
-    id: &str,
-    node_q: &Query<&ComputedNode>,
-    child_of_q: &Query<&ChildOf>,
-    img_w: u32,
-    img_h: u32,
-) -> Option<CropRect> {
-    let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
-    let mut entity = Entity::from_bits(bits);
-    for _ in 0..8 {
-        if let Ok(&computed) = node_q.get(entity) {
-            return Some(CropRect::from_node(computed, img_w, img_h));
-        }
-        entity = child_of_q.get(entity).ok()?.get();
-    }
-    None
-}
-
 fn start_screenshots(
     _non_send: NonSendMarker,
     mut reader: MessageReader<ScreenshotRequest>,
     bridge: Query<&ScreenshotBridge>,
     settings: Res<AppSettings>,
-    focused_window: vmux_layout::window::FocusedWindow,
-    window_q: Query<(Entity, &Window)>,
-    host_windows: Query<&HostWindow>,
-    node_q: Query<&ComputedNode>,
-    child_of_q: Query<&ChildOf>,
+    source: CaptureSource,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
     let Ok(bridge) = bridge.single() else {
         return;
     };
-    let base_dir = crate::capture_output::output_dir(&settings);
+    let base_dir = CaptureOutput::directory(&settings);
     for req in reader.read() {
-        let pane_window = req.pane.as_deref().and_then(|id| {
-            let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
-            vmux_layout::window::host_window_of(Entity::from_bits(bits), &child_of_q, &host_windows)
-        });
-        let Some(window_entity) = pane_window.or(focused_window.entity()) else {
-            let _ = bridge
-                .tx
-                .send(err_response(req.request_id, "no focused vmux window"));
-            continue;
-        };
-        let Ok((_, window)) = window_q.get(window_entity) else {
-            let _ = bridge.tx.send(err_response(
-                req.request_id,
-                "focused vmux window not found",
-            ));
-            continue;
-        };
-        let img_w = window.resolution.physical_width();
-        let img_h = window.resolution.physical_height();
-
-        let crop = match &req.pane {
-            Some(id) => match resolve_crop(id, &node_q, &child_of_q, img_w, img_h) {
-                Some(rect) => Some(rect),
-                None => {
-                    let _ = bridge.tx.send(err_response(
-                        req.request_id,
-                        format!("pane not found: {id}"),
-                    ));
-                    continue;
-                }
-            },
-            None => None,
+        let capture = match source.resolve(req.pane.as_deref()) {
+            Ok(capture) => capture,
+            Err(message) => {
+                let _ = bridge.tx.send(err_response(req.request_id, message));
+                continue;
+            }
         };
 
         let tx = bridge.tx.clone();
@@ -133,10 +84,10 @@ fn start_screenshots(
             }) as WakeFn
         });
         capture::capture(
-            window_entity,
-            img_w,
-            img_h,
-            crop,
+            capture.window,
+            capture.size.width,
+            capture.size.height,
+            capture.crop,
             req.request_id,
             base_dir.clone(),
             tx,
@@ -157,121 +108,32 @@ fn drain_screenshots(
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct CropRect {
-    x: u32,
-    y: u32,
-    w: u32,
-    h: u32,
-}
-
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn downscale_dims(w: u32, h: u32, max_edge: u32) -> (u32, u32) {
-    let long = w.max(h);
-    if long == 0 {
-        return (1, 1);
-    }
-    if long <= max_edge {
-        return (w.max(1), h.max(1));
-    }
-    let scale = max_edge as f64 / long as f64;
-    (
-        ((w as f64 * scale).round() as u32).max(1),
-        ((h as f64 * scale).round() as u32).max(1),
-    )
-}
-
-impl CropRect {
-    fn from_node(rect: ComputedNode, img_w: u32, img_h: u32) -> Self {
-        let min = rect.min();
-        let left = (min.x.round().max(0.0) as u32).min(img_w.saturating_sub(1));
-        let top = (min.y.round().max(0.0) as u32).min(img_h.saturating_sub(1));
-        let w = (rect.size.x.round().max(1.0) as u32).min(img_w - left);
-        let h = (rect.size.y.round().max(1.0) as u32).min(img_h - top);
-        Self {
-            x: left,
-            y: top,
-            w,
-            h,
-        }
-    }
-}
-
 #[cfg(any(target_os = "macos", test))]
 fn encode_downscaled_png(
     img: &image::RgbaImage,
     max_edge: u32,
 ) -> Result<(Vec<u8>, u32, u32), String> {
-    let (dw, dh) = downscale_dims(img.width(), img.height(), max_edge);
+    let size = CaptureSize::new(img.width(), img.height()).downscaled(max_edge);
     let dynimg = image::DynamicImage::ImageRgba8(img.clone());
-    let scaled = if (dw, dh) == (img.width(), img.height()) {
+    let scaled = if (size.width, size.height) == (img.width(), img.height()) {
         dynimg
     } else {
-        dynimg.resize_exact(dw, dh, image::imageops::FilterType::Lanczos3)
+        dynimg.resize_exact(
+            size.width,
+            size.height,
+            image::imageops::FilterType::Lanczos3,
+        )
     };
     let mut buf = std::io::Cursor::new(Vec::new());
     scaled
         .write_to(&mut buf, image::ImageFormat::Png)
         .map_err(|e| format!("png encode failed: {e}"))?;
-    Ok((buf.into_inner(), dw, dh))
+    Ok((buf.into_inner(), size.width, size.height))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn downscale_never_upscales() {
-        assert_eq!(downscale_dims(800, 600, 1568), (800, 600));
-        assert_eq!(downscale_dims(0, 0, 1568), (1, 1));
-    }
-
-    #[test]
-    fn downscale_caps_long_edge() {
-        assert_eq!(downscale_dims(3136, 1568, 1568), (1568, 784));
-        assert_eq!(downscale_dims(1568, 3136, 1568), (784, 1568));
-    }
-
-    #[test]
-    fn crop_rect_clamps_to_image() {
-        let r = CropRect::from_node(
-            ComputedNode {
-                size: Vec2::new(80.0, 60.0),
-                center: Vec2::new(100.0, 100.0),
-                ..default()
-            },
-            1000,
-            1000,
-        );
-        assert_eq!(
-            r,
-            CropRect {
-                x: 60,
-                y: 70,
-                w: 80,
-                h: 60
-            }
-        );
-
-        let r = CropRect::from_node(
-            ComputedNode {
-                size: Vec2::splat(40.0),
-                center: Vec2::splat(990.0),
-                ..default()
-            },
-            1000,
-            1000,
-        );
-        assert_eq!(
-            r,
-            CropRect {
-                x: 970,
-                y: 970,
-                w: 30,
-                h: 30
-            }
-        );
-    }
 
     #[test]
     fn encode_downscaled_png_emits_png_header() {

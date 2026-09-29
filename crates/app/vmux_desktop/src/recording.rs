@@ -1,15 +1,14 @@
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::HostWindow;
 use crossbeam_channel::{Receiver, Sender};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use vmux_agent::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
 };
-use vmux_flex::prelude::*;
 use vmux_setting::AppSettings;
+
+use crate::capture_output::{CaptureOutput, CaptureSource};
 
 pub(crate) struct RecordingPlugin;
 
@@ -119,25 +118,6 @@ fn start_err(request_id: [u8; 16], message: impl Into<String>) -> RecordStartRes
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn resolve_output_paths(
-    dir: Option<&str>,
-    name: Option<&str>,
-    gif: bool,
-    timestamp: &str,
-    default_dir: &Path,
-) -> (PathBuf, Option<PathBuf>) {
-    let base_dir = dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| default_dir.to_path_buf());
-    let base_name = name
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| format!("vmux-{timestamp}"));
-    let mp4 = base_dir.join(format!("{base_name}.mp4"));
-    let gif_path = gif.then(|| base_dir.join(format!("{base_name}.gif")));
-    (mp4, gif_path)
-}
-
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn should_sample_gif_frame(
     elapsed_ms: u64,
     last_sampled_ms: Option<u64>,
@@ -169,67 +149,6 @@ pub(crate) const RECORDING_MAX_EDGE: u32 = 1280;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) const RECORDING_BITRATE_BPS: i32 = 800_000;
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn downscale_to(w: u32, h: u32, max_edge: u32) -> (u32, u32) {
-    let long = w.max(h);
-    if long == 0 {
-        return (1, 1);
-    }
-    if long <= max_edge {
-        return (w.max(1), h.max(1));
-    }
-    let scale = max_edge as f64 / long as f64;
-    (
-        ((w as f64 * scale).round() as u32).max(1),
-        ((h as f64 * scale).round() as u32).max(1),
-    )
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) struct CropRect {
-    pub x: u32,
-    pub y: u32,
-    pub w: u32,
-    pub h: u32,
-}
-
-impl CropRect {
-    pub(crate) fn from_node(rect: ComputedNode, img_w: u32, img_h: u32) -> Self {
-        let min = rect.min();
-        let left = (min.x.round().max(0.0) as u32).min(img_w.saturating_sub(1));
-        let top = (min.y.round().max(0.0) as u32).min(img_h.saturating_sub(1));
-        let w = (rect.size.x.round().max(1.0) as u32).min(img_w - left);
-        let h = (rect.size.y.round().max(1.0) as u32).min(img_h - top);
-        Self {
-            x: left,
-            y: top,
-            w,
-            h,
-        }
-    }
-}
-
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn resolve_crop(
-    id: &str,
-    node_q: &Query<&ComputedNode>,
-    child_of_q: &Query<&ChildOf>,
-    img_w: u32,
-    img_h: u32,
-) -> Option<CropRect> {
-    use bevy::ecs::relationship::Relationship;
-    let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
-    let mut entity = Entity::from_bits(bits);
-    for _ in 0..8 {
-        if let Ok(&computed) = node_q.get(entity) {
-            return Some(CropRect::from_node(computed, img_w, img_h));
-        }
-        entity = child_of_q.get(entity).ok()?.get();
-    }
-    None
-}
-
 fn start_recording(
     _non_send: NonSendMarker,
     mut start_reader: MessageReader<RecordStartRequest>,
@@ -237,43 +156,20 @@ fn start_recording(
     mut start_responses: MessageWriter<RecordStartResponse>,
     mut runtime: Query<(&RecordingBridge, &mut RecordingStatus)>,
     settings: Res<AppSettings>,
-    focused_window: vmux_layout::window::FocusedWindow,
-    window_q: Query<(Entity, &Window)>,
-    host_windows: Query<&HostWindow>,
-    node_q: Query<&ComputedNode>,
-    child_of_q: Query<&ChildOf>,
+    source: CaptureSource,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
     let Ok((bridge, mut status)) = runtime.single_mut() else {
         return;
     };
-    let default_dir = crate::capture_output::output_dir(&settings);
+    let default_dir = CaptureOutput::directory(&settings);
     for req in start_reader.read() {
-        let pane_window = req.pane.as_deref().and_then(|id| {
-            let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
-            vmux_layout::window::host_window_of(Entity::from_bits(bits), &child_of_q, &host_windows)
-        });
-        let Some(window_entity) = pane_window.or(focused_window.entity()) else {
-            start_responses.write(start_err(req.request_id, "no focused vmux window"));
-            continue;
-        };
-        let Ok((_, window)) = window_q.get(window_entity) else {
-            start_responses.write(start_err(req.request_id, "focused vmux window not found"));
-            continue;
-        };
-        let img_w = window.resolution.physical_width();
-        let img_h = window.resolution.physical_height();
-        let scale = window.resolution.scale_factor() as f64;
-        let crop = match &req.pane {
-            Some(id) => match resolve_crop(id, &node_q, &child_of_q, img_w, img_h) {
-                Some(rect) => Some(rect),
-                None => {
-                    start_responses
-                        .write(start_err(req.request_id, format!("pane not found: {id}")));
-                    continue;
-                }
-            },
-            None => None,
+        let capture = match source.resolve(req.pane.as_deref()) {
+            Ok(capture) => capture,
+            Err(message) => {
+                start_responses.write(start_err(req.request_id, message));
+                continue;
+            }
         };
         let wake: Option<WakeFn> = proxy.as_ref().map(|p| {
             let proxy = (***p).clone();
@@ -282,15 +178,15 @@ fn start_recording(
             }) as WakeFn
         });
         let resp = capture::start(
-            window_entity,
-            img_w,
-            img_h,
-            crop,
+            capture.window,
+            capture.size.width,
+            capture.size.height,
+            capture.crop,
             req.request_id,
             req.gif,
             req.max_secs,
             default_dir.clone(),
-            scale,
+            capture.scale,
             bridge.tx.clone(),
             wake,
         );
@@ -341,28 +237,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn output_paths_default_dir_and_name() {
-        let default_dir = Path::new("/tmp/def");
-        let (mp4, gif) =
-            resolve_output_paths(None, None, false, "20260623-101010-001", default_dir);
-        assert_eq!(mp4, PathBuf::from("/tmp/def/vmux-20260623-101010-001.mp4"));
-        assert!(gif.is_none());
-    }
-
-    #[test]
-    fn output_paths_custom_dir_name_and_gif() {
-        let (mp4, gif) = resolve_output_paths(
-            Some("/tmp/out"),
-            Some("feature-x"),
-            true,
-            "ts",
-            Path::new("/tmp/def"),
-        );
-        assert_eq!(mp4, PathBuf::from("/tmp/out/feature-x.mp4"));
-        assert_eq!(gif, Some(PathBuf::from("/tmp/out/feature-x.gif")));
-    }
-
-    #[test]
     fn gif_sampling_respects_fps() {
         assert!(should_sample_gif_frame(0, None, 12));
         assert!(!should_sample_gif_frame(40, Some(0), 12));
@@ -374,40 +248,12 @@ mod tests {
         let bgra = vec![1u8, 2, 3, 4];
         assert_eq!(bgra_to_rgba(&bgra), vec![3, 2, 1, 4]);
     }
-
-    #[test]
-    fn crop_rect_clamps_to_image() {
-        let r = CropRect::from_node(
-            ComputedNode {
-                size: Vec2::new(80.0, 60.0),
-                center: Vec2::new(100.0, 100.0),
-                ..default()
-            },
-            1000,
-            1000,
-        );
-        assert_eq!(
-            r,
-            CropRect {
-                x: 60,
-                y: 70,
-                w: 80,
-                h: 60
-            }
-        );
-    }
-
-    #[test]
-    fn downscale_caps_long_edge_without_upscaling() {
-        assert_eq!(downscale_to(800, 600, 800), (800, 600));
-        assert_eq!(downscale_to(1600, 800, 800), (800, 400));
-        assert_eq!(downscale_to(0, 0, 800), (1, 1));
-    }
 }
 
 #[cfg(not(target_os = "macos"))]
 mod capture {
-    use super::{CropRect, RecordOutcome, WakeFn};
+    use super::{RecordOutcome, WakeFn};
+    use crate::capture_output::CropRect;
     use bevy::prelude::Entity;
     use crossbeam_channel::Sender;
     use std::path::PathBuf;

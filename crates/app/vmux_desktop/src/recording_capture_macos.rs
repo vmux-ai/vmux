@@ -1,7 +1,8 @@
 use super::{
-    CropRect, GIF_FPS, GIF_MAX_EDGE, PERMISSION_MSG, RecordOutcome, RecordingInfo, WakeFn,
-    bgra_to_rgba, downscale_to, resolve_output_paths, should_sample_gif_frame,
+    GIF_FPS, GIF_MAX_EDGE, PERMISSION_MSG, RecordOutcome, RecordingInfo, WakeFn, bgra_to_rgba,
+    should_sample_gif_frame,
 };
+use crate::capture_output::{CaptureOutput, CaptureSize, CropRect};
 use bevy::prelude::Entity;
 use block2::RcBlock;
 use crossbeam_channel::Sender;
@@ -189,11 +190,16 @@ fn pixel_buffer_to_downscaled_rgba(pb: &CVPixelBuffer) -> Option<(Vec<u8>, u32, 
 
         let rgba = bgra_to_rgba(&bgra);
         let img = image::RgbaImage::from_raw(w, h, rgba)?;
-        let (dw, dh) = downscale_to(img.width(), img.height(), GIF_MAX_EDGE);
-        let scaled = if (dw, dh) == img.dimensions() {
+        let size = CaptureSize::new(img.width(), img.height()).downscaled(GIF_MAX_EDGE);
+        let scaled = if (size.width, size.height) == img.dimensions() {
             img
         } else {
-            image::imageops::resize(&img, dw, dh, image::imageops::FilterType::Triangle)
+            image::imageops::resize(
+                &img,
+                size.width,
+                size.height,
+                image::imageops::FilterType::Triangle,
+            )
         };
         let (fw, fh) = scaled.dimensions();
         Some((scaled.into_raw(), fw, fh))
@@ -439,11 +445,11 @@ fn setup_stream(
     let filter = unsafe {
         SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &window)
     };
-    let (enc_w, enc_h) = super::downscale_to(out_w, out_h, super::RECORDING_MAX_EDGE);
+    let size = CaptureSize::new(out_w, out_h).downscaled(super::RECORDING_MAX_EDGE);
     let config = unsafe { SCStreamConfiguration::new() };
     unsafe {
-        config.setWidth(enc_w as usize);
-        config.setHeight(enc_h as usize);
+        config.setWidth(size.width as usize);
+        config.setHeight(size.height as usize);
         config.setPixelFormat(PIXEL_FORMAT_BGRA);
         config.setMinimumFrameInterval(CMTime::new(1, 60));
         config.setShowsCursor(true);
@@ -456,14 +462,18 @@ fn setup_stream(
         }
     }
 
-    let (writer, input, adaptor) =
-        match build_writer(temp_mp4, enc_w, enc_h, super::RECORDING_BITRATE_BPS) {
-            Ok(t) => t,
-            Err(e) => {
-                let _ = done_tx.send(Err(e));
-                return;
-            }
-        };
+    let (writer, input, adaptor) = match build_writer(
+        temp_mp4,
+        size.width,
+        size.height,
+        super::RECORDING_BITRATE_BPS,
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            let _ = done_tx.send(Err(e));
+            return;
+        }
+    };
 
     let (gif_tx, gif_join) = if let Some(path) = temp_gif.clone() {
         let (s, r) = crossbeam_channel::bounded::<GifMsg>(8);
@@ -640,7 +650,7 @@ fn finish_writer(state: Arc<RecordingState>) {
 fn deliver(state: Arc<RecordingState>, finish_result: Result<(), String>) {
     let target = state.out.lock().unwrap().clone();
     let ts = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
-    let (final_mp4, final_gif) = resolve_output_paths(
+    let (final_mp4, final_gif) = CaptureOutput::paths(
         target.dir.as_deref(),
         target.name.as_deref(),
         state.gif,
