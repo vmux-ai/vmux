@@ -12,7 +12,7 @@ use super::{
 use crate::session::{AgentSession, PendingAgentSession, SessionId};
 use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
 
-use super::super::launch::CliLaunchProvider;
+use super::super::launch::{AgentLaunchPolicy, CliLaunchProvider};
 use super::super::session::{DiscoverAgentSessions, DiscoverAgentSessionsSet};
 
 pub(super) struct ClaudeCliPlugin;
@@ -71,11 +71,10 @@ fn discover_sessions(
 
 const DISALLOWED_TOOLS: &str = "Bash,Monitor,WebSearch,WebFetch";
 const HOST_ALLOWED_TOOLS: &str = "mcp__vmux__*";
-const RUN_STEER_PROMPT: &str = "The native Bash, WebSearch, and WebFetch tools are disabled. Run \
+const RUN_STEER_PROMPT: &str = "The native shell and web tools are disabled. Run \
 ALL shell commands via the mcp__vmux__run tool (a visible terminal the user can watch and take \
 over). Use the output returned by run directly; call read_terminal only when run says the command \
-is still running. Use the available vmux MCP tools for web access and follow their descriptions; \
-do not look for a built-in web search. An unbound tab starts in ~/.vmux/projects. Before accessing project files or \
+is still running. An unbound tab starts in ~/.vmux/projects. Before accessing project files or \
 running project commands, call mcp__vmux__select_project with the known project path or omit it to \
 open the picker. Paths inside ~/.vmux/projects are selected immediately; paths outside it require \
 explicit user approval in the native picker. For a \
@@ -106,6 +105,13 @@ impl CliLaunchProvider for ClaudeLaunch {
 
     fn arguments(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
         build_args(mcp, session_id)
+    }
+
+    fn policy_arguments(policy: &AgentLaunchPolicy) -> Vec<String> {
+        vec![
+            "--append-system-prompt".to_string(),
+            policy.prompt(RUN_STEER_PROMPT),
+        ]
     }
 
     fn model_arguments(model: &str) -> Vec<String> {
@@ -158,8 +164,6 @@ fn build_args(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
         DISALLOWED_TOOLS.to_string(),
         "--allowedTools".to_string(),
         allowed_tools(crate::managed_mcp::ManagedMcpServers::current().into_names()),
-        "--append-system-prompt".to_string(),
-        vmux_core::knowledge::AgentPrompt::from(RUN_STEER_PROMPT).into_string(),
     ];
     if let Some(sid) = session_id {
         args.push("--resume".to_string());
@@ -701,7 +705,8 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = ClaudeLaunch::arguments(&mcp, None);
+        let mut args = ClaudeLaunch::policy_arguments(&AgentLaunchPolicy::default());
+        args.extend(ClaudeLaunch::arguments(&mcp, None));
 
         let disallowed = args.iter().position(|a| a == "--disallowedTools").unwrap();
         assert_eq!(args[disallowed + 1], "Bash,Monitor,WebSearch,WebFetch");

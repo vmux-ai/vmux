@@ -21,6 +21,7 @@ use vmux_tool::{
 };
 
 use crate::acp_registry::{self, BinaryTarget, RegistryAgent};
+use crate::host::launch::{AgentLaunchPolicy, AgentLaunchPolicyQuery};
 use vmux_session::AgentRunState;
 
 pub(crate) struct AcpToolPlugin;
@@ -176,6 +177,7 @@ struct AcpInstallKey {
     fallback_args: Vec<String>,
     fallback_env: Vec<(String, String)>,
     shell: String,
+    policy: AgentLaunchPolicy,
 }
 
 #[derive(Component)]
@@ -195,6 +197,7 @@ struct AcpInstallRequest {
     agent_id: String,
     fallback: Option<AcpAgentConfig>,
     shell: String,
+    policy: AgentLaunchPolicy,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -231,6 +234,7 @@ fn start_acp_installs(
     jobs: Query<(Entity, &AcpInstallKey)>,
     focused: vmux_layout::stack::FocusedStack,
     settings: Option<Res<AppSettings>>,
+    policy: AgentLaunchPolicyQuery,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
 ) {
     let Some(settings) = settings else {
@@ -240,6 +244,7 @@ fn start_acp_installs(
         return;
     };
     let shell = crate::host::run_terminal::AgentTerminalShell::configured(&settings).into_string();
+    let policy = policy.snapshot();
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let mut active_jobs: Vec<(AcpInstallKey, Entity)> = jobs
         .iter()
@@ -259,6 +264,7 @@ fn start_acp_installs(
             agent_id: session.agent_id.clone(),
             fallback,
             shell: shell.clone(),
+            policy: policy.clone(),
         };
         let key = request.key();
         let job = match active_jobs
@@ -488,7 +494,7 @@ fn resolve_acp_install(
             command: resolved.command,
             args: resolved.args,
             env: AcpEnvironment::build(resolved.env, login_env, resolved.path_prepend)
-                .for_agent(&request.agent_id)
+                .for_agent(&request.agent_id, &request.policy)
                 .into_inner(),
             managed_mcp_servers: managed_mcp.servers,
             mcp_revision: managed_mcp.revision,
@@ -498,7 +504,7 @@ fn resolve_acp_install(
                 command: config.command,
                 args: config.args,
                 env: AcpEnvironment::build(config.env, login_env, None)
-                    .for_agent(&request.agent_id)
+                    .for_agent(&request.agent_id, &request.policy)
                     .into_inner(),
                 managed_mcp_servers: managed_mcp.servers,
                 mcp_revision: managed_mcp.revision,
@@ -528,6 +534,7 @@ impl AcpInstallRequest {
                 .map(|config| config.env.clone())
                 .unwrap_or_default(),
             shell: self.shell.clone(),
+            policy: self.policy.clone(),
         }
     }
 }
@@ -663,10 +670,10 @@ impl AcpEnvironment {
         environment
     }
 
-    fn for_agent(mut self, agent_id: &str) -> Self {
+    fn for_agent(mut self, agent_id: &str, policy: &AgentLaunchPolicy) -> Self {
         match registry_id_alias(agent_id) {
             "mistral-vibe" => self.apply_vibe(),
-            "codex-acp" => self.apply_codex(),
+            "codex-acp" => self.apply_codex(policy),
             "claude-acp" => self.apply_claude(),
             _ => {}
         }
@@ -832,7 +839,7 @@ impl AcpEnvironment {
         }
     }
 
-    fn apply_codex(&mut self) {
+    fn apply_codex(&mut self, policy: &AgentLaunchPolicy) {
         self.0
             .retain(|(key, _)| key != "DISABLE_MCP_CONFIG_FILTERING");
         let existing = self
@@ -880,7 +887,7 @@ impl AcpEnvironment {
             .insert("web_search".to_string(), serde_json::Value::Bool(false));
         Self::disable_codex_skills(
             &mut config,
-            &crate::host::cli::codex::codex_disabled_skill_files(),
+            &crate::host::cli::codex::codex_disabled_skill_files(policy.disabled_skill_roots()),
         );
         let mcp_servers = config
             .entry("mcp_servers")
@@ -914,8 +921,7 @@ impl AcpEnvironment {
                 crate::host::cli::codex::RUN_STEER_PROMPT
             )
         };
-        let instructions =
-            vmux_core::knowledge::AgentPrompt::from(instructions.as_str()).into_string();
+        let instructions = policy.prompt(&instructions);
         let instructions = if instructions.contains("mcp__vmux__set_conversation_title") {
             instructions
         } else {
@@ -1631,6 +1637,7 @@ mod tests {
             agent_id: agent_id.to_string(),
             fallback: None,
             shell: String::new(),
+            policy: AgentLaunchPolicy::default(),
         }
         .key()
     }
@@ -1944,10 +1951,14 @@ mod tests {
     }
 
     #[test]
-    fn codex_environment_routes_shell_commands_through_vmux() {
+    fn codex_environment_applies_feature_policy_and_routes_shell_commands_through_vmux() {
+        let policy = AgentLaunchPolicy::new(
+            vec!["Feature-owned agent instruction.".to_string()],
+            Vec::new(),
+        );
         for agent_id in ["codex", "codex-acp"] {
             let environment = AcpEnvironment::from(Vec::new())
-                .for_agent(agent_id)
+                .for_agent(agent_id, &policy)
                 .into_inner();
             let config = environment
                 .iter()
@@ -1977,14 +1988,14 @@ mod tests {
             assert!(instructions.contains("topic materially changes"));
             assert!(instructions.contains("same-topic follow-ups"));
             assert!(instructions.contains("never needs user permission"));
-            assert!(instructions.contains("available vmux MCP tools for web access"));
+            assert!(instructions.contains("Feature-owned agent instruction."));
         }
     }
 
     #[test]
     fn codex_environment_exposes_managed_namespaces() {
         let environment = AcpEnvironment::from(Vec::new())
-            .for_agent("codex-acp")
+            .for_agent("codex-acp", &AgentLaunchPolicy::default())
             .with_managed_servers(
                 "codex-acp",
                 ["vmux_linear".to_string(), "vmux_notion".to_string()],
@@ -2035,7 +2046,7 @@ mod tests {
     fn claude_environment_extends_mcp_timeout() {
         for agent_id in ["claude", "claude-acp"] {
             let environment = AcpEnvironment::from(vec![env("MCP_TOOL_TIMEOUT", "60000")])
-                .for_agent(agent_id)
+                .for_agent(agent_id, &AgentLaunchPolicy::default())
                 .into_inner();
             assert_eq!(
                 environment
@@ -2056,7 +2067,7 @@ mod tests {
                 r#"[{"name":"from-env","transport":"stdio","command":"env-command"}]"#,
             ),
         ])
-        .for_agent("mistral-vibe")
+        .for_agent("mistral-vibe", &AgentLaunchPolicy::default())
         .into_inner();
         let disabled = environment
             .iter()
@@ -2076,7 +2087,7 @@ mod tests {
     #[test]
     fn vibe_environment_discards_invalid_mcp_configuration() {
         let environment = AcpEnvironment::from(vec![env("VIBE_MCP_SERVERS", "not-json")])
-            .for_agent("mistral-vibe")
+            .for_agent("mistral-vibe", &AgentLaunchPolicy::default())
             .into_inner();
 
         assert!(environment.iter().all(|(key, _)| key != "VIBE_MCP_SERVERS"));
@@ -2088,7 +2099,7 @@ mod tests {
             "CODEX_CONFIG",
             r#"{"model":"gpt-test","features":{"custom_feature":true,"code_mode":{"custom_setting":"keep"}}}"#,
         )])
-        .for_agent("codex")
+        .for_agent("codex", &AgentLaunchPolicy::default())
         .into_inner();
         let config = environment
             .iter()

@@ -19,6 +19,7 @@ impl Plugin for BrowserToolPlugin {
             include_str!("feature.ron"),
             "default",
         ))
+        .add_systems(Startup, register_agent_policy)
         .register_tool::<BrowserNavigateArgs>("browser_navigate")
         .register_tool::<BrowserBackArgs>("browser_go_back")
         .register_tool::<BrowserForwardArgs>("browser_go_forward")
@@ -40,6 +41,25 @@ impl Plugin for BrowserToolPlugin {
                 .in_set(ToolDispatchSet),
         );
     }
+}
+
+fn register_agent_policy(mut commands: Commands) {
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("/"));
+    let codex_home = std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".codex"));
+    commands.spawn((
+        Name::new("Browser agent policy"),
+        vmux_core::agent::AgentPromptContribution(
+            "Use the available vmux browser tools for web access and follow their descriptions. Do not look for a built-in web search or connector discovery. For website visuals, use code-native design or available project assets when no image tool is available."
+                .to_string(),
+        ),
+        vmux_core::agent::AgentDisabledSkillRoot(
+            codex_home.join("plugins/cache/openai-bundled/browser"),
+        ),
+    ));
 }
 
 #[derive(Component, Deserialize)]
@@ -246,5 +266,31 @@ fn scroll(
                 delta,
                 anchor: anchor.map(|anchor| anchor.0),
             })));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_registers_its_agent_policy() {
+        let mut app = App::new();
+        app.add_plugins(BrowserToolPlugin);
+        app.update();
+
+        let mut policies = app.world_mut().query::<(
+            &vmux_core::agent::AgentPromptContribution,
+            &vmux_core::agent::AgentDisabledSkillRoot,
+        )>();
+        let policies = policies.iter(app.world()).collect::<Vec<_>>();
+        assert_eq!(policies.len(), 1);
+        assert!(policies[0].0.0.contains("vmux browser tools"));
+        assert!(
+            policies[0]
+                .1
+                .0
+                .ends_with("plugins/cache/openai-bundled/browser")
+        );
     }
 }

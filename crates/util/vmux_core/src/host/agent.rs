@@ -7,6 +7,12 @@ use crate::terminal::TerminalKind;
 pub use vmux_api::agent::AgentKind;
 use vmux_api::protocol::{AgentCommandResult, AgentRequest, AgentRequestId};
 
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct AgentPromptContribution(pub String);
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct AgentDisabledSkillRoot(pub PathBuf);
+
 #[derive(Clone, Debug, Default)]
 pub enum CommandOrigin {
     #[default]

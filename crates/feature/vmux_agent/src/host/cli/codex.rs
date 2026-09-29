@@ -14,7 +14,7 @@ use super::{
 use crate::session::{AgentSession, PendingAgentSession, SessionId};
 use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
 
-use super::super::launch::CliLaunchProvider;
+use super::super::launch::{AgentLaunchPolicy, CliLaunchProvider};
 use super::super::session::{DiscoverAgentSessions, DiscoverAgentSessionsSet};
 
 pub(super) struct CodexCliPlugin;
@@ -75,14 +75,12 @@ fn discover_sessions(
 const DISABLED_FEATURES: &[&str] = &["shell_tool", "unified_exec"];
 const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const DIRECT_ONLY_NAMESPACE: &str = "mcp__vmux";
-pub(crate) const RUN_STEER_PROMPT: &str = "The native shell and web search tools are disabled. Run ALL shell \
+pub(crate) const RUN_STEER_PROMPT: &str = "The native shell and web tools are disabled. Run ALL shell \
 commands via the mcp__vmux__run tool (a visible terminal the user can watch and take over). Use the \
 output returned by run directly; call read_terminal only when run says the command is still running. To READ \
 a file, use the mcp__vmux__read_file tool (it shows the file in a pane beside you and returns its \
 text) - do NOT cat/sed/head/tail a file via run. To SEARCH code, use the mcp__vmux__grep tool (it \
-opens each matching file in a pane and returns the matches) - do NOT run rg/grep/ag via run. Use the \
-available vmux MCP tools for web access and follow their descriptions. Do not look for a built-in \
-web search or connector discovery. An unbound tab starts in ~/.vmux/projects. Before accessing \
+opens each matching file in a pane and returns the matches) - do NOT run rg/grep/ag via run. An unbound tab starts in ~/.vmux/projects. Before accessing \
 project files or running project commands, call mcp__vmux__select_project, passing its known path \
 or omitting it to open the picker. Paths inside ~/.vmux/projects are selected immediately; paths \
 outside it require explicit user approval in the native picker. For a new project, first use mcp__vmux__request_user_choice to offer \
@@ -97,8 +95,7 @@ worktrees, ask whether to create or choose an existing path, then call mcp__vmux
 create=true or the selected path. Never \
 run git worktree add yourself. After project or worktree setup succeeds, continue the original \
 request immediately. Never enumerate tool registries or wait for optional tools. If a skill requires \
-an unavailable tool, continue with the available tools; for website visuals, use code-native design \
-or available project assets.";
+an unavailable tool, continue with the available tools.";
 const FILE_TOUCH_MATCHER: &str = "apply_patch|Edit|Write";
 
 pub(super) const SESSIONS: CliSessionSource = CliSessionSource {
@@ -114,6 +111,22 @@ impl CliLaunchProvider for CodexLaunch {
 
     fn arguments(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
         build_args(mcp, session_id)
+    }
+
+    fn policy_arguments(policy: &AgentLaunchPolicy) -> Vec<String> {
+        let mut args = Vec::new();
+        if let Some(skills) =
+            build_skills_config_override(&codex_disabled_skill_files(policy.disabled_skill_roots()))
+        {
+            args.push("-c".to_string());
+            args.push(skills);
+        }
+        args.push("-c".to_string());
+        args.push(format!(
+            "developer_instructions={}",
+            quote_toml(&policy.prompt(RUN_STEER_PROMPT))
+        ));
+        args
     }
 
     fn model_arguments(model: &str) -> Vec<String> {
@@ -177,15 +190,6 @@ fn build_args(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
     ));
     args.push("-c".into());
     args.push("tools.web_search=false".to_string());
-    if let Some(skills) = build_skills_config_override(&codex_disabled_skill_files()) {
-        args.push("-c".into());
-        args.push(skills);
-    }
-    args.push("-c".into());
-    args.push(format!(
-        "developer_instructions={}",
-        quote_toml(&vmux_core::knowledge::AgentPrompt::from(RUN_STEER_PROMPT).into_string())
-    ));
     args.push("-c".into());
     args.push("features.hooks=true".into());
     args.push("-c".into());
@@ -499,20 +503,13 @@ fn build_skills_config_override(skill_files: &[PathBuf]) -> Option<String> {
     Some(format!("skills.config=[{}]", entries.join(",")))
 }
 
-pub(crate) fn codex_disabled_skill_files() -> Vec<PathBuf> {
+pub(crate) fn codex_disabled_skill_files(roots: &[PathBuf]) -> Vec<PathBuf> {
     let mut files = vmux_core::knowledge::KnowledgeVault::user()
         .skills()
         .skill_files();
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"));
-    let codex_home = std::env::var_os("CODEX_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".codex"));
-    collect_skill_files(
-        &codex_home.join("plugins/cache/openai-bundled/browser"),
-        &mut files,
-    );
+    for root in roots {
+        collect_skill_files(root, &mut files);
+    }
     files.sort();
     files.dedup();
     files
@@ -1174,34 +1171,35 @@ mod tests {
     }
 
     #[test]
-    fn bundled_browser_skill_discovery_finds_versioned_skill_files() {
+    fn policy_arguments_disable_contributed_skill_roots() {
         let temp = tempfile::tempdir().unwrap();
-        let skill = temp
-            .path()
-            .join("26.1/skills/control-in-app-browser/SKILL.md");
+        let skill = temp.path().join("26.1/skills/feature/SKILL.md");
         std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
-        std::fs::write(&skill, "browser").unwrap();
+        std::fs::write(&skill, "feature").unwrap();
         std::fs::write(temp.path().join("ignored.md"), "ignored").unwrap();
 
-        let mut files = Vec::new();
-        collect_skill_files(temp.path(), &mut files);
-        assert_eq!(files, vec![skill]);
+        let policy = AgentLaunchPolicy::new(Vec::new(), vec![temp.path().to_path_buf()]);
+        let args = CodexLaunch::policy_arguments(&policy);
+        let skills = args
+            .iter()
+            .find(|argument| argument.starts_with("skills.config="))
+            .unwrap();
+        assert!(skills.contains(&skill.to_string_lossy().to_string()));
     }
 
     #[test]
-    fn build_args_steers_web_access_to_registered_vmux_tools() {
-        let mcp = McpServerConfig {
-            command: "/bin/vmux".into(),
-            args: vec!["mcp".into()],
-            cwd: None,
-        };
-        let args = CodexLaunch::arguments(&mcp, None);
+    fn policy_arguments_include_feature_instructions() {
+        let policy = AgentLaunchPolicy::new(
+            vec!["Feature-owned agent instruction.".to_string()],
+            Vec::new(),
+        );
+        let args = CodexLaunch::policy_arguments(&policy);
         let steer = args
             .iter()
             .find(|a| a.starts_with("developer_instructions="))
             .expect("developer_instructions override present");
         assert!(steer.contains("mcp__vmux__run"));
-        assert!(steer.contains("available vmux MCP tools for web access"));
+        assert!(steer.contains("Feature-owned agent instruction."));
     }
 
     #[test]
