@@ -1,6 +1,11 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentRequestId, ClientMessage};
+use vmux_core::JsonArguments;
 use vmux_core::service::ServiceRequest;
+use vmux_tool::{
+    ToolCommand, ToolCommandFallback, ToolDispatchError, ToolDispatchFlush, ToolInvocation,
+    ToolQuery, ToolResolveSet,
+};
 
 use crate::event::{AgentQueryRequest, AgentRequestInput, AgentToolCallRequest, CommandOrigin};
 
@@ -15,7 +20,7 @@ impl Plugin for ToolCallPlugin {
                 Update,
                 handle_agent_tool_calls
                     .in_set(CommandSet::ToolCalls)
-                    .before(vmux_tool::ToolResolveSet),
+                    .before(ToolResolveSet),
             )
             .add_systems(
                 Update,
@@ -24,7 +29,7 @@ impl Plugin for ToolCallPlugin {
                     finish_agent_tool_queries,
                     fail_agent_tool_calls,
                 )
-                    .after(vmux_tool::ToolDispatchFlush)
+                    .after(ToolDispatchFlush)
                     .before(CommandSet::Commands),
             );
     }
@@ -42,7 +47,7 @@ fn handle_agent_tool_calls(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
-        let arguments = match vmux_core::JsonArguments::try_from(&request.args) {
+        let arguments = match JsonArguments::try_from(&request.args) {
             Ok(arguments) => arguments,
             Err(message) => {
                 service_requests.write(ServiceRequest(ClientMessage::AgentToolResult {
@@ -56,8 +61,8 @@ fn handle_agent_tool_calls(
         commands.spawn((
             Name::new(request.name.clone()),
             arguments,
-            vmux_tool::ToolInvocation,
-            vmux_tool::ToolCommandFallback,
+            ToolInvocation,
+            ToolCommandFallback,
             PendingAgentToolCall {
                 request_id: request.request_id,
                 sid: request.sid.clone(),
@@ -68,10 +73,7 @@ fn handle_agent_tool_calls(
 
 fn finish_agent_tool_commands(
     mut commands: Commands,
-    calls: Query<
-        (Entity, &PendingAgentToolCall, &vmux_tool::ToolCommand),
-        Added<vmux_tool::ToolCommand>,
-    >,
+    calls: Query<(Entity, &PendingAgentToolCall, &ToolCommand), Added<ToolCommand>>,
     mut request_writer: MessageWriter<AgentRequestInput>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -101,10 +103,7 @@ fn finish_agent_tool_commands(
 
 fn finish_agent_tool_queries(
     mut commands: Commands,
-    calls: Query<
-        (Entity, &PendingAgentToolCall, &vmux_tool::ToolQuery),
-        Added<vmux_tool::ToolQuery>,
-    >,
+    calls: Query<(Entity, &PendingAgentToolCall, &ToolQuery), Added<ToolQuery>>,
     mut query_writer: MessageWriter<AgentQueryRequest>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -130,10 +129,7 @@ fn finish_agent_tool_queries(
 
 fn fail_agent_tool_calls(
     mut commands: Commands,
-    calls: Query<
-        (Entity, &PendingAgentToolCall, &vmux_tool::ToolDispatchError),
-        Added<vmux_tool::ToolDispatchError>,
-    >,
+    calls: Query<(Entity, &PendingAgentToolCall, &ToolDispatchError), Added<ToolDispatchError>>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for (entity, pending, error) in &calls {

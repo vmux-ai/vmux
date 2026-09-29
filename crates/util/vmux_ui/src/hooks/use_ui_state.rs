@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use std::cell::Cell;
 use std::marker::PhantomData;
 use std::rc::Rc;
+use vmux_api::{BatchedUiState, UiState, UiStatePatch};
 
 struct UiStateListener {
     error: Signal<Option<String>>,
@@ -42,7 +43,7 @@ pub struct UiStateRoot<T> {
 
 fn use_ui_state_listener<T, F>(on_state: F) -> UiStateListener
 where
-    T: vmux_api::UiState + rkyv::Archive + 'static,
+    T: UiState + rkyv::Archive + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
     F: FnMut(T) + 'static,
@@ -106,8 +107,8 @@ impl<S, T> Copy for UiStatePatchBatch<S, T> {}
 
 impl<S, T> UiStatePatchBatch<S, T>
 where
-    S: vmux_api::BatchedUiState,
-    S::Patch: vmux_api::UiStatePatch<T>,
+    S: BatchedUiState,
+    S::Patch: UiStatePatch<T>,
     T: Clone + 'static,
 {
     pub fn take(mut self) -> Vec<T> {
@@ -120,7 +121,7 @@ where
             let payloads = event
                 .patches()
                 .iter()
-                .filter_map(<S::Patch as vmux_api::UiStatePatch<T>>::payload)
+                .filter_map(<S::Patch as UiStatePatch<T>>::payload)
                 .cloned()
                 .collect();
             (sequence, payloads)
@@ -138,7 +139,7 @@ where
 
 pub fn use_ui_state<T>() -> Signal<T>
 where
-    T: vmux_api::UiState + rkyv::Archive + Default + 'static,
+    T: UiState + rkyv::Archive + Default + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
@@ -149,7 +150,7 @@ where
 
 pub fn use_ui_state_root<T>() -> UiStateRoot<T>
 where
-    T: vmux_api::BatchedUiState + rkyv::Archive + Default + 'static,
+    T: BatchedUiState + rkyv::Archive + Default + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
@@ -164,7 +165,7 @@ where
 
 fn use_ui_state_batch<S>(mut callback: impl FnMut(&[S::Patch]) + 'static) -> Signal<Option<String>>
 where
-    S: vmux_api::BatchedUiState + rkyv::Archive + Default + 'static,
+    S: BatchedUiState + rkyv::Archive + Default + 'static,
     S::Archived: rkyv::Deserialize<S, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
@@ -186,7 +187,7 @@ pub fn use_ui_state_patches<S>(
     mut callback: impl FnMut(&S::Patch) + 'static,
 ) -> Signal<Option<String>>
 where
-    S: vmux_api::BatchedUiState + rkyv::Archive + Default + 'static,
+    S: BatchedUiState + rkyv::Archive + Default + 'static,
     S::Archived: rkyv::Deserialize<S, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
@@ -201,7 +202,7 @@ pub fn use_ui_state_projection<S, T>(
     mut apply: impl FnMut(&mut T, &S::Patch) + 'static,
 ) -> UiStateRoot<T>
 where
-    S: vmux_api::BatchedUiState + rkyv::Archive + Default + 'static,
+    S: BatchedUiState + rkyv::Archive + Default + 'static,
     S::Archived: rkyv::Deserialize<S, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
     T: Default + 'static,
@@ -219,8 +220,8 @@ where
 
 pub fn use_ui_state_patch<S, T>() -> UiStatePatchBatch<S, T>
 where
-    S: vmux_api::BatchedUiState,
-    S::Patch: vmux_api::UiStatePatch<T>,
+    S: BatchedUiState,
+    S::Patch: UiStatePatch<T>,
     T: Clone + 'static,
 {
     let state = use_context::<Signal<S>>();

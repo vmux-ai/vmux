@@ -1,4 +1,27 @@
-use vmux_core::event::{DiagSeverity, FileDiagnostic, FileLine};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+
+use bevy::prelude::*;
+use bevy_cef::prelude::Browsers;
+use vmux_core::event::{
+    CompletionItem, DiagSeverity, EditorCapability, FileCodeActions, FileDiagnostic,
+    FileDiagnostics, FileEditFailure, FileHover, FileLine, FileLspStatus, HoverBlock,
+    LspServerState, OutlineEvent, RefItem,
+};
+use vmux_core::host::FileUiStateWrite;
+use vmux_core::page::PageReady;
+use vmux_path::PathIdentity;
+use vmux_setting::AppSettings;
+
+use crate::host::editor::{Editor, FileView};
+use crate::host::viewport::ViewportRenderRequest;
+use crate::lsp::client::{ServerClient, server_key};
+use crate::lsp::registry::{ServerSpec, resolve_spec, workspace_root};
+use crate::lsp::server_request::ServerInputSender;
+use crate::lsp::{
+    LintDiagnosticsInbox, LintDiagnosticsSender, LspDiagnosticsInbox, LspDiagnosticsSender,
+    OpenDoc, ServerKey, store,
+};
 
 pub fn line_text(line: &FileLine) -> String {
     line.spans.iter().map(|s| s.text.as_str()).collect()
@@ -79,16 +102,6 @@ fn rope_line_text(rope: &ropey::Rope, line: u32) -> String {
         .filter(|c| *c != '\n' && *c != '\r')
         .collect()
 }
-
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-
-use bevy::prelude::*;
-
-use crate::lsp::client::{ServerClient, server_key};
-use crate::lsp::registry::{ServerSpec, resolve_spec, workspace_root};
-use crate::lsp::server_request::ServerInputSender;
-use crate::lsp::{LspDiagnosticsInbox, LspDiagnosticsSender, OpenDoc, ServerKey, store};
 
 type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
 
@@ -217,8 +230,7 @@ impl LspManager {
         self.open_docs.get(path).map(|doc| doc.version)
     }
 
-    fn menu_capabilities(&self, path: &Path) -> Vec<vmux_core::event::EditorCapability> {
-        use vmux_core::event::EditorCapability;
+    fn menu_capabilities(&self, path: &Path) -> Vec<EditorCapability> {
         let Some(doc) = self.open_docs.get(path) else {
             return Vec::new();
         };
@@ -840,7 +852,7 @@ fn hover_contents_to_string(c: lsp_types::HoverContents) -> String {
     }
 }
 
-fn parse_hover(value: &serde_json::Value) -> Vec<vmux_core::event::HoverBlock> {
+fn parse_hover(value: &serde_json::Value) -> Vec<HoverBlock> {
     let Some(result) = value.get("result") else {
         return Vec::new();
     };
@@ -853,8 +865,7 @@ fn parse_hover(value: &serde_json::Value) -> Vec<vmux_core::event::HoverBlock> {
     markdown_to_hover_blocks(&md)
 }
 
-fn markdown_to_hover_blocks(md: &str) -> Vec<vmux_core::event::HoverBlock> {
-    use vmux_core::event::HoverBlock;
+fn markdown_to_hover_blocks(md: &str) -> Vec<HoverBlock> {
     let mut blocks = Vec::new();
     let mut in_code = false;
     let mut lang = String::new();
@@ -938,7 +949,7 @@ fn parse_references(value: &serde_json::Value) -> Vec<(PathBuf, u32, u32)> {
         .unwrap_or_default()
 }
 
-fn parse_completion(value: &serde_json::Value) -> Vec<vmux_core::event::CompletionItem> {
+fn parse_completion(value: &serde_json::Value) -> Vec<CompletionItem> {
     let Some(result) = value.get("result") else {
         return Vec::new();
     };
@@ -955,7 +966,7 @@ fn parse_completion(value: &serde_json::Value) -> Vec<vmux_core::event::Completi
         .take(200)
         .map(|it| {
             let insert_text = it.insert_text.clone().unwrap_or_else(|| it.label.clone());
-            vmux_core::event::CompletionItem {
+            CompletionItem {
                 label: it.label.clone(),
                 insert_text,
                 detail: it.detail.clone().unwrap_or_default(),
@@ -987,10 +998,7 @@ fn ref_display(path: &Path, line: u32) -> String {
 #[derive(Component)]
 pub struct LspOpened;
 
-use crate::host::editor::{Editor, FileView};
-use crate::host::viewport::ViewportRenderRequest;
-
-fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
+fn server_overrides(settings: &AppSettings) -> ServerOverrides {
     settings
         .editor
         .lsp
@@ -1012,7 +1020,7 @@ fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
 
 fn lsp_open_documents(
     q: Query<(Entity, &FileView, &Editor), Without<LspOpened>>,
-    settings: Res<vmux_setting::AppSettings>,
+    settings: Res<AppSettings>,
     mut manager: Single<&mut LspManager>,
     mut commands: Commands,
 ) {
@@ -1052,7 +1060,6 @@ fn drain_lsp_requests(
     mut writers: LspResponseWriters,
     mut commands: Commands,
 ) {
-    use vmux_core::event::{FileHover, OutlineEvent, RefItem};
     for (request_entity, request) in &requests {
         let value = match request.rx.try_recv() {
             Ok(v) => v,
@@ -1068,7 +1075,7 @@ fn drain_lsp_requests(
             ReqKind::Hover { line, col } => {
                 let blocks = parse_hover(&value);
                 if !blocks.is_empty() && ready {
-                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                    commands.trigger(FileUiStateWrite::from_event(
                         request.target,
                         &FileHover {
                             line: *line,
@@ -1118,17 +1125,17 @@ fn drain_lsp_requests(
                     continue;
                 }
                 if titles.is_empty() {
-                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                    commands.trigger(FileUiStateWrite::from_event(
                         request.target,
-                        &vmux_core::event::FileEditFailure {
+                        &FileEditFailure {
                             reason: "no code actions here".to_string(),
                         },
                     ));
                     continue;
                 }
-                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                commands.trigger(FileUiStateWrite::from_event(
                     request.target,
-                    &vmux_core::event::FileCodeActions { titles },
+                    &FileCodeActions { titles },
                 ));
             }
             ReqKind::Formatting { path, root } => {
@@ -1186,7 +1193,7 @@ fn drain_lsp_requests(
             ReqKind::DocumentSymbol => {
                 let items = crate::explorer_model::flatten_symbols(&value);
                 if ready {
-                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                    commands.trigger(FileUiStateWrite::from_event(
                         request.target,
                         &OutlineEvent { items },
                     ));
@@ -1236,9 +1243,7 @@ fn apply_semantic_tokens(
         let Ok((mut edit, view)) = views.get_mut(message.entity) else {
             continue;
         };
-        if vmux_path::PathIdentity::resolve(&view.path)
-            != vmux_path::PathIdentity::resolve(&message.path)
-        {
+        if PathIdentity::resolve(&view.path) != PathIdentity::resolve(&message.path) {
             continue;
         }
         edit.hl
@@ -1294,11 +1299,6 @@ pub fn build(
     );
 }
 
-use bevy_cef::prelude::Browsers;
-use vmux_core::event::FileDiagnostics;
-
-use crate::lsp::{LintDiagnosticsInbox, LintDiagnosticsSender};
-
 #[derive(Component, Default)]
 struct LspDiagnostics {
     mapped: Vec<FileDiagnostic>,
@@ -1315,7 +1315,7 @@ pub(crate) struct OfferedCodeActions(pub(crate) Vec<lsp_types::CodeActionOrComma
 pub struct DiagSent(Vec<FileDiagnostic>);
 
 fn emit_diagnostics_system(
-    q: Query<(Entity, &FileView, Option<&DiagSent>), With<vmux_core::page::PageReady>>,
+    q: Query<(Entity, &FileView, Option<&DiagSent>), With<PageReady>>,
     lsp_diagnostics: Query<&LspDiagnostics>,
     lint_diagnostics: Query<&LintDiagnostics>,
     browsers: NonSend<Browsers>,
@@ -1337,7 +1337,7 @@ fn emit_diagnostics_system(
             None if merged.is_empty() => continue,
             _ => {}
         }
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        commands.trigger(FileUiStateWrite::from_event(
             entity,
             &FileDiagnostics {
                 path: fv.path.to_string_lossy().into_owned(),
@@ -1354,9 +1354,9 @@ fn drain_lsp_diagnostics(
     mut commands: Commands,
 ) {
     for (path, diags) in inbox.drain() {
-        let target = vmux_path::PathIdentity::resolve(&path);
+        let target = PathIdentity::resolve(&path);
         for (entity, view, edit) in &views {
-            if vmux_path::PathIdentity::resolve(&view.path) != target {
+            if PathIdentity::resolve(&view.path) != target {
                 continue;
             }
             let mapped = map_diags(&diags, |line| rope_line_text(&edit.core.buffer.rope, line));
@@ -1374,9 +1374,9 @@ fn drain_lint(
     mut commands: Commands,
 ) {
     for (path, diags) in inbox.drain() {
-        let target = vmux_path::PathIdentity::resolve(&path);
+        let target = PathIdentity::resolve(&path);
         for (entity, view) in &views {
-            if vmux_path::PathIdentity::resolve(&view.path) == target {
+            if PathIdentity::resolve(&view.path) == target {
                 commands
                     .entity(entity)
                     .insert(LintDiagnostics(diags.clone()));
@@ -1450,19 +1450,18 @@ fn lint_on_open(
 
 #[derive(Component)]
 pub struct LspStatusSent {
-    state: vmux_core::event::LspServerState,
+    state: LspServerState,
     path: PathBuf,
 }
 
 fn lsp_status_system(
-    q: Query<(Entity, &FileView, Option<&LspStatusSent>), With<vmux_core::page::PageReady>>,
-    settings: Res<vmux_setting::AppSettings>,
+    q: Query<(Entity, &FileView, Option<&LspStatusSent>), With<PageReady>>,
+    settings: Res<AppSettings>,
     manager: Single<&LspManager>,
     browsers: NonSend<Browsers>,
     mut installs: MessageWriter<crate::lsp::manager_page::PackageInstallRequest>,
     mut commands: Commands,
 ) {
-    use vmux_core::event::{FileLspStatus, LspServerState};
     let overrides = server_overrides(&settings);
     for (entity, fv, sent) in &q {
         let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
@@ -1486,7 +1485,7 @@ fn lsp_status_system(
             .then(|| crate::lsp::registry::preferred_package(ext))
             .flatten()
             .map(str::to_string);
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        commands.trigger(FileUiStateWrite::from_event(
             entity,
             &FileLspStatus {
                 path: fv.path.to_string_lossy().into_owned(),

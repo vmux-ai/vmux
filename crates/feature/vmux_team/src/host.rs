@@ -2,22 +2,31 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
 
 use vmux_agent::event::AgentRequestInput;
+use vmux_api::avatar::hash_color;
 use vmux_api::protocol::{AgentCommandResult, AgentListTeam};
-use vmux_core::PageMetadata;
 use vmux_core::agent::{AgentCommandResponse, AgentReply, SessionId};
 use vmux_core::event::team::{
     ProfileRow, TEAM_PAGE_URL, TeamEvent, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest,
     TeamProfileCreateRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest,
 };
 use vmux_core::host::{UiStatePlugin, UiStateWrite};
-use vmux_core::profile::{ProfileId, ProfileLabel};
-use vmux_core::team::{Agent, Profile, User};
+use vmux_core::notify::AgentDoneUnseen;
+use vmux_core::page::PageReady;
+use vmux_core::profile::{
+    ProfileId, ProfileLabel, active_profile_name, create_profile, is_test_session,
+    profile_display_name, profile_exists, profile_ids, sanitize_profile, set_profile_display_name,
+};
+use vmux_core::team::{Agent, Profile, Tester, User};
+use vmux_core::{ActivateRequest, Active, PageMetadata};
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::native_open::HostedUiPlugin;
+use vmux_layout::profile::Profile as SpaceProfile;
 use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
-use vmux_layout::space::{CurrentSpace, Space, space_of};
-use vmux_layout::stack::Stack;
+use vmux_layout::space::{CurrentSpace, FocusedSpace, Space, space_of};
+use vmux_layout::stack::{OpenRequest, Stack};
+use vmux_layout::window::host_window_of;
 use vmux_session::AgentRunState;
+use vmux_space::Spaces;
 
 use crate::projection::TeamStateProjection;
 
@@ -87,26 +96,23 @@ struct TeamPresentation(TeamEvent);
 
 fn spawn_user_profile(mut commands: Commands) {
     let mut identity = commands.spawn((Profile::user(), User, Name::new("Profile: User")));
-    if vmux_core::profile::is_test_session() {
-        identity.insert(vmux_core::team::Tester);
+    if is_test_session() {
+        identity.insert(Tester);
     }
 }
 
 fn spawn_profile_labels(mut commands: Commands) {
-    let active = vmux_core::profile::active_profile_name();
-    for id in vmux_core::profile::profile_ids() {
-        let name = vmux_core::profile::profile_display_name(&id);
+    let active = active_profile_name();
+    for id in profile_ids() {
+        let name = profile_display_name(&id);
         let mut entity = commands.spawn((ProfileLabel, ProfileId(id.clone()), Name::new(name)));
         if id == active {
-            entity.insert(vmux_core::Active);
+            entity.insert(Active);
         }
     }
 }
 
-fn sync_user_profile_name(
-    active_space: vmux_layout::space::FocusedSpace,
-    mut user: Query<&mut Profile, With<User>>,
-) {
+fn sync_user_profile_name(active_space: FocusedSpace, mut user: Query<&mut Profile, With<User>>) {
     let Some(name) = active_space.profile() else {
         return;
     };
@@ -186,7 +192,7 @@ fn build_team_members(
         &Agent,
         Option<&AgentRunState>,
         Option<&SessionId>,
-        Option<&vmux_core::notify::AgentDoneUnseen>,
+        Option<&AgentDoneUnseen>,
     )>,
     child_of: &Query<&ChildOf>,
     space_marker: &Query<(), With<Space>>,
@@ -241,14 +247,14 @@ fn build_team_members(
 }
 
 fn build_profiles(
-    labels: &Query<(&ProfileId, &Name, Has<vmux_core::Active>), With<ProfileLabel>>,
+    labels: &Query<(&ProfileId, &Name, Has<Active>), With<ProfileLabel>>,
 ) -> Vec<ProfileRow> {
     let mut profiles = Vec::new();
     for (id, name, is_active) in labels {
         profiles.push(ProfileRow {
             id: id.0.clone(),
             name: name.as_str().to_string(),
-            color: vmux_api::avatar::hash_color(&id.0),
+            color: hash_color(&id.0),
             is_active,
         });
     }
@@ -272,7 +278,7 @@ fn answer_list_team(
         &Agent,
         Option<&AgentRunState>,
         Option<&SessionId>,
-        Option<&vmux_core::notify::AgentDoneUnseen>,
+        Option<&AgentDoneUnseen>,
     )>,
     child_of: Query<&ChildOf>,
     space_marker: Query<(), With<Space>>,
@@ -302,10 +308,10 @@ fn answer_list_team(
 }
 
 fn project_team(
-    views: Query<Entity, Or<(With<LayoutCef>, With<Team>, With<vmux_space::Spaces>)>>,
+    views: Query<Entity, Or<(With<LayoutCef>, With<Team>, With<Spaces>)>>,
     presentations: Query<&TeamPresentation>,
     current_space: Query<Entity, With<CurrentSpace>>,
-    active_spaces: Query<Entity, (With<Space>, With<vmux_core::Active>)>,
+    active_spaces: Query<Entity, (With<Space>, With<Active>)>,
     user_q: Query<(Entity, &Profile), With<User>>,
     agent_q: Query<(
         Entity,
@@ -313,23 +319,22 @@ fn project_team(
         &Agent,
         Option<&AgentRunState>,
         Option<&SessionId>,
-        Option<&vmux_core::notify::AgentDoneUnseen>,
+        Option<&AgentDoneUnseen>,
     )>,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     space_marker: Query<(), With<Space>>,
     meta_q: Query<&PageMetadata>,
     children_q: Query<&Children>,
-    profile_labels: Query<(&ProfileId, &Name, Has<vmux_core::Active>), With<ProfileLabel>>,
+    profile_labels: Query<(&ProfileId, &Name, Has<Active>), With<ProfileLabel>>,
     mut commands: Commands,
 ) {
     for entity in &views {
         let target_space = space_of(entity, &child_of, &space_marker).or_else(|| {
-            let window = vmux_layout::window::host_window_of(entity, &child_of, &host_windows)?;
-            active_spaces.iter().find(|space| {
-                vmux_layout::window::host_window_of(*space, &child_of, &host_windows)
-                    == Some(window)
-            })
+            let window = host_window_of(entity, &child_of, &host_windows)?;
+            active_spaces
+                .iter()
+                .find(|space| host_window_of(*space, &child_of, &host_windows) == Some(window))
         });
         let presentation = TeamPresentation(TeamStateProjection::build(
             build_team_members(
@@ -355,7 +360,7 @@ fn project_team(
 
 fn publish_team(
     presentations: Query<(Entity, &TeamPresentation), Changed<TeamPresentation>>,
-    direct_views: Query<(), Or<(With<Team>, With<vmux_space::Spaces>)>>,
+    direct_views: Query<(), Or<(With<Team>, With<Spaces>)>>,
     layout_cefs: Query<(), With<LayoutCef>>,
     mut commands: Commands,
 ) {
@@ -375,9 +380,9 @@ fn publish_team(
 }
 
 fn replay_team(
-    trigger: On<UiInput<vmux_core::page::PageReady>>,
+    trigger: On<UiInput<PageReady>>,
     presentations: Query<&TeamPresentation>,
-    direct_views: Query<(), Or<(With<Team>, With<vmux_space::Spaces>)>>,
+    direct_views: Query<(), Or<(With<Team>, With<Spaces>)>>,
     layout_cefs: Query<(), With<LayoutCef>>,
     mut commands: Commands,
 ) {
@@ -417,7 +422,7 @@ fn parse_member_entity(member_id: &str) -> Option<Entity> {
 
 fn on_team_open_request(
     _trigger: On<UiInput<TeamOpenRequest>>,
-    mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
+    mut stack_requests: MessageWriter<OpenRequest>,
     current_space: Query<Entity, With<CurrentSpace>>,
     stacks: Query<(Entity, &PageMetadata), With<Stack>>,
     child_of: Query<&ChildOf>,
@@ -427,11 +432,11 @@ fn on_team_open_request(
     if let Some(space) = current_space.iter().next()
         && let Some(stack) = open_team_stack_in_space(space, &stacks, &child_of, &spaces)
     {
-        commands.trigger(vmux_core::ActivateRequest { entity: stack });
+        commands.trigger(ActivateRequest { entity: stack });
         return;
     }
 
-    stack_requests.write(vmux_layout::stack::OpenRequest {
+    stack_requests.write(OpenRequest {
         url: Some(TEAM_PAGE_URL.to_string()),
     });
 }
@@ -445,7 +450,7 @@ fn on_team_member_focus_request(
         return;
     };
     if agents.get(entity).is_ok() {
-        commands.trigger(vmux_core::ActivateRequest { entity });
+        commands.trigger(ActivateRequest { entity });
     }
 }
 
@@ -455,7 +460,7 @@ fn on_team_profile_create_request(
     mut commands: Commands,
 ) {
     let name = trigger.event().payload.name.trim().to_string();
-    match vmux_core::profile::create_profile(&name) {
+    match create_profile(&name) {
         Ok(profile_id) => {
             commands.spawn((ProfileLabel, ProfileId(profile_id.clone()), Name::new(name)));
             profile_switches.write(ProfileSwitchRequested { profile_id });
@@ -469,10 +474,8 @@ fn on_team_profile_switch_request(
     profile_labels: Query<&ProfileId, With<ProfileLabel>>,
     mut profile_switches: MessageWriter<ProfileSwitchRequested>,
 ) {
-    let profile_id = vmux_core::profile::sanitize_profile(&trigger.event().payload.profile_id);
-    if profile_id == vmux_core::profile::active_profile_name()
-        || !vmux_core::profile::profile_exists(&profile_id)
-    {
+    let profile_id = sanitize_profile(&trigger.event().payload.profile_id);
+    if profile_id == active_profile_name() || !profile_exists(&profile_id) {
         return;
     }
     if profile_labels.iter().any(|id| id.0 == profile_id) {
@@ -483,13 +486,13 @@ fn on_team_profile_switch_request(
 fn on_team_profile_update_request(
     trigger: On<UiInput<TeamProfileUpdateRequest>>,
     user: Query<Entity, With<User>>,
-    mut space_profiles: Query<&mut vmux_layout::profile::Profile, With<Space>>,
+    mut space_profiles: Query<&mut SpaceProfile, With<Space>>,
     mut profile_labels: Query<(&ProfileId, &mut Name), With<ProfileLabel>>,
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
-    let profile_id = vmux_core::profile::sanitize_profile(&request.profile_id);
-    if let Err(error) = vmux_core::profile::set_profile_display_name(&profile_id, &request.name) {
+    let profile_id = sanitize_profile(&request.profile_id);
+    if let Err(error) = set_profile_display_name(&profile_id, &request.name) {
         bevy::log::warn!("profile update failed: {error}");
         return;
     }
@@ -499,7 +502,7 @@ fn on_team_profile_update_request(
             *label = Name::new(name.clone());
         }
     }
-    if profile_id != vmux_core::profile::active_profile_name() {
+    if profile_id != active_profile_name() {
         return;
     }
     for mut profile in &mut space_profiles {

@@ -14,13 +14,21 @@ use objc2_app_kit::{NSApplication, NSMenuItem};
 use objc2_foundation::MainThreadMarker;
 #[cfg(target_os = "macos")]
 use vmux_browser::HostFocusIntent;
+use vmux_browser::OpenRequest;
 #[cfg(target_os = "macos")]
 use vmux_command::ReadCommandRequests;
-use vmux_command::{CommandDefinition, CommandInvocation, WriteCommandRequests};
+use vmux_command::{
+    CommandDefinition, CommandInvocation, DispatchCommandInvocations, RegisterCommandDefinitions,
+    WriteCommandRequests,
+};
+use vmux_core::host::page::BindsEditingChords;
+use vmux_core::team::User;
 use vmux_layout::stack::CloseRequest;
+use vmux_layout::tab::TabClosed;
 use vmux_native::menu::{
     OsContextMenu, OsMenuEntry, OsMenuSelection, OsMenuSeparator, OsMenuSet, TransientOsMenuEntry,
 };
+use vmux_setting::{AppSettings, SettingsLoadSet};
 use vmux_ui::i18n::{DEFAULT_LOCALE, Locale};
 
 pub struct OsMenuPlugin;
@@ -39,7 +47,7 @@ impl Plugin for OsMenuPlugin {
         .add_message::<OsMenuSelection>()
         .add_message::<crate::window::CloseVmuxWindow>()
         .add_message::<CloseRequest>()
-        .add_message::<vmux_browser::OpenRequest>()
+        .add_message::<OpenRequest>()
         .add_observer(remember_tab_close)
         .configure_sets(
             Update,
@@ -51,15 +59,15 @@ impl Plugin for OsMenuPlugin {
             Startup,
             (spawn_runtime, setup)
                 .chain()
-                .after(vmux_setting::SettingsLoadSet)
-                .after(vmux_command::RegisterCommandDefinitions),
+                .after(SettingsLoadSet)
+                .after(RegisterCommandDefinitions),
         )
         .add_systems(
             Update,
             (
                 sync_menu_locale,
-                remember_stack_close_commands.after(vmux_command::DispatchCommandInvocations),
-                remember_native_page_open_requests.after(vmux_command::DispatchCommandInvocations),
+                remember_stack_close_commands.after(DispatchCommandInvocations),
+                remember_native_page_open_requests.after(DispatchCommandInvocations),
                 hide_window_on_close_request
                     .after(remember_stack_close_commands)
                     .after(remember_native_page_open_requests),
@@ -129,7 +137,7 @@ fn spawn_runtime(mut commands: Commands) {
 fn setup(
     mut commands: Commands,
     definitions: Query<(Entity, &CommandDefinition)>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
+    settings: Option<Res<AppSettings>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     runtime: Single<Entity, With<OsMenuState>>,
     mut menu_resource: NonSendMut<OsMenuResource>,
@@ -229,7 +237,7 @@ fn present_context_menus(
 }
 
 fn sync_menu_locale(
-    settings: Option<Res<vmux_setting::AppSettings>>,
+    settings: Option<Res<AppSettings>>,
     menu: Option<NonSendMut<OsMenuResource>>,
     definitions: Query<&CommandDefinition>,
 ) {
@@ -431,7 +439,7 @@ fn edit_menu_items_enabled(intent: HostFocusIntent, binds_chords: bool) -> bool 
 fn sync_edit_menu_items(
     menu: Option<NonSend<OsMenuResource>>,
     intent: Query<Ref<HostFocusIntent>>,
-    chord_panes: Query<(), With<vmux_core::host::page::BindsEditingChords>>,
+    chord_panes: Query<(), With<BindsEditingChords>>,
 ) {
     let Ok(intent) = intent.single() else {
         return;
@@ -513,7 +521,7 @@ fn forward_menu_events(
 fn dispatch_command_menu_selection(
     mut selections: MessageReader<OsMenuSelection>,
     definitions: Query<&CommandDefinition>,
-    users: Query<Entity, With<vmux_core::team::User>>,
+    users: Query<Entity, With<User>>,
     mut invocations: MessageWriter<CommandInvocation>,
 ) {
     let caller = users.iter().next().unwrap_or(Entity::PLACEHOLDER);
@@ -558,15 +566,12 @@ fn remember_stack_close_commands(
     }
 }
 
-fn remember_tab_close(
-    _trigger: On<vmux_layout::tab::TabClosed>,
-    mut state: Single<&mut OsMenuState>,
-) {
+fn remember_tab_close(_trigger: On<TabClosed>, mut state: Single<&mut OsMenuState>) {
     state.last_tab_close_at = Some(std::time::Instant::now());
 }
 
 fn remember_native_page_open_requests(
-    mut reader: MessageReader<vmux_browser::OpenRequest>,
+    mut reader: MessageReader<OpenRequest>,
     mut state: Single<&mut OsMenuState>,
 ) {
     for request in reader.read() {

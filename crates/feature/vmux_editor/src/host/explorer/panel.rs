@@ -1,9 +1,17 @@
+use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::event::{
     ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPanelViewSet, ExplorerPanelWidth,
+    ExplorerReveal,
 };
+use vmux_core::host::FileUiStateWrite;
 use vmux_core::host::persistence::PersistenceAppExt;
+use vmux_core::page::PageReady;
+use vmux_setting::{
+    AppSettings, EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH, EXPLORER_MIN_WIDTH,
+    SettingsSaveRequest,
+};
 
 use super::{ExplorerPanelDefaults, ExplorerPanelSent, RevealCurrent, StackExplorerRevision};
 use crate::host::editor::FileView;
@@ -29,7 +37,7 @@ fn spawn_explorer_panel_defaults(mut commands: Commands) {
         Name::new("Explorer panel defaults"),
         ExplorerPanelDefaults {
             default_visible: false,
-            width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
+            width: EXPLORER_DEFAULT_WIDTH,
             loaded: false,
         },
     ));
@@ -84,14 +92,10 @@ impl From<Entity> for ExplorerFindInFilesRequest {
     }
 }
 
-type PanelUnsentReady = (
-    With<FileView>,
-    Without<ExplorerPanelSent>,
-    With<vmux_core::page::PageReady>,
-);
+type PanelUnsentReady = (With<FileView>, Without<ExplorerPanelSent>, With<PageReady>);
 
 fn load_explorer_panel_defaults(
-    settings: Option<Res<vmux_setting::AppSettings>>,
+    settings: Option<Res<AppSettings>>,
     mut panel: Single<&mut ExplorerPanelDefaults>,
     views: Query<Entity, With<FileView>>,
     mut commands: Commands,
@@ -133,7 +137,7 @@ fn emit_explorer_panel(
             .unwrap_or(panel.default_visible);
         let revision = revisions.get(scope).copied().unwrap_or_default();
         let view = panel_views.get(scope).copied().unwrap_or_default();
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        commands.trigger(FileUiStateWrite::from_event(
             entity,
             &ExplorerPanelEvent {
                 visible,
@@ -150,15 +154,15 @@ fn emit_explorer_panel(
 
 fn persist_explorer_width(
     width: u32,
-    settings: Option<ResMut<vmux_setting::AppSettings>>,
-    saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
+    settings: Option<ResMut<AppSettings>>,
+    saves: Option<ResMut<Messages<SettingsSaveRequest>>>,
 ) {
     let Some(mut settings) = settings else {
         return;
     };
     settings.editor.explorer.width = Some(width);
     if let Some(mut saves) = saves {
-        saves.write(vmux_setting::SettingsSaveRequest);
+        saves.write(SettingsSaveRequest);
     }
 }
 
@@ -250,7 +254,7 @@ fn reveal_in_explorer(
     mark_explorer_panel_unsent(&editors, &mut commands);
     commands.trigger(RevealCurrent {
         entity,
-        reveal: vmux_core::event::ExplorerReveal::Requested,
+        reveal: ExplorerReveal::Requested,
     });
 }
 
@@ -328,7 +332,7 @@ fn on_explorer_panel_set_visible(
     if next_visibility.visible {
         commands.trigger(RevealCurrent {
             entity,
-            reveal: vmux_core::event::ExplorerReveal::Followed,
+            reveal: ExplorerReveal::Followed,
         });
     }
 }
@@ -360,15 +364,16 @@ fn on_explorer_panel_view_set(
 fn on_explorer_panel_width(
     trigger: On<UiInput<ExplorerPanelWidth>>,
     mut panel: Single<&mut ExplorerPanelDefaults>,
-    settings: Option<ResMut<vmux_setting::AppSettings>>,
-    saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
+    settings: Option<ResMut<AppSettings>>,
+    saves: Option<ResMut<Messages<SettingsSaveRequest>>>,
     views: Query<Entity, With<FileView>>,
     mut commands: Commands,
 ) {
-    panel.width = trigger.event().payload.px.clamp(
-        vmux_setting::EXPLORER_MIN_WIDTH,
-        vmux_setting::EXPLORER_MAX_WIDTH,
-    );
+    panel.width = trigger
+        .event()
+        .payload
+        .px
+        .clamp(EXPLORER_MIN_WIDTH, EXPLORER_MAX_WIDTH);
     persist_explorer_width(panel.width, settings, saves);
     mark_explorer_panel_unsent(&views, &mut commands);
 }
