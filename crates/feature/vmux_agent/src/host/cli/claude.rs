@@ -93,7 +93,7 @@ fn build_args(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
         "--disallowedTools".to_string(),
         DISALLOWED_TOOLS.to_string(),
         "--allowedTools".to_string(),
-        allowed_tools(crate::managed_mcp::load().into_keys()),
+        allowed_tools(crate::managed_mcp::ManagedMcpServers::current().into_names()),
         "--append-system-prompt".to_string(),
         vmux_core::knowledge::AgentPrompt::from(RUN_STEER_PROMPT).into_string(),
     ];
@@ -273,7 +273,7 @@ fn build_mcp_config_json(mcp: &McpServerConfig) -> String {
     }
     let mut servers = Map::new();
     servers.insert("vmux".into(), Value::Object(server));
-    for (name, server) in crate::managed_mcp::load() {
+    for (name, server) in crate::managed_mcp::ManagedMcpServers::current() {
         servers.insert(
             name.clone(),
             crate::managed_mcp::claude_value(&name, &server),

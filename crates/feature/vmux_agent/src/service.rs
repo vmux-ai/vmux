@@ -169,17 +169,17 @@ pub fn resolve_provider(provider: &str) -> Option<PageProvider> {
     match provider {
         "anthropic" => Some(PageProvider {
             build_request: anthropic::build_request,
-            parse_sse: anthropic::parse_sse,
+            parse_sse: anthropic::parse_messages_sse,
             env_var: "ANTHROPIC_API_KEY",
         }),
         "openai" => Some(PageProvider {
             build_request: openai::build_request,
-            parse_sse: openai::parse_sse,
+            parse_sse: openai::parse_responses_sse,
             env_var: "OPENAI_API_KEY",
         }),
         "mistral" => Some(PageProvider {
             build_request: mistral::build_request,
-            parse_sse: mistral::parse_sse,
+            parse_sse: crate::provider::openai_shared::parse_chat_completions_sse,
             env_var: "MISTRAL_API_KEY",
         }),
         _ => None,

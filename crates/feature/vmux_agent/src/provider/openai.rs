@@ -34,10 +34,6 @@ pub fn build_request(
         .expect("openai: build_request")
 }
 
-pub fn parse_sse(payload: &str) -> Option<StreamEvent> {
-    parse_responses_sse(payload)
-}
-
 fn messages_to_responses_input(messages: &[Message]) -> Vec<Value> {
     let mut out = Vec::new();
     for msg in messages {

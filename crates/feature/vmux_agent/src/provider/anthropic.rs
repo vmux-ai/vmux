@@ -35,10 +35,6 @@ pub fn build_request(
         .expect("anthropic: build_request")
 }
 
-pub fn parse_sse(payload: &str) -> Option<StreamEvent> {
-    parse_messages_sse(payload)
-}
-
 fn messages_to_anthropic_blocks(messages: &[Message]) -> Vec<Value> {
     let mut out = Vec::new();
     for msg in messages {

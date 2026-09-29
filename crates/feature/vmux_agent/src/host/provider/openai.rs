@@ -41,7 +41,7 @@ fn register_openai_strategy(
         StrategyKind(AgentKind::Codex),
         StrategyVariant(AgentVariant::Page),
         BuildRequestFn(crate::provider::openai::build_request),
-        ParseSseFn(crate::provider::openai::parse_sse),
+        ParseSseFn(crate::provider::openai::parse_responses_sse),
     ));
 }
 

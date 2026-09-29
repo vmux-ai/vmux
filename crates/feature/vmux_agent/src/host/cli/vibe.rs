@@ -221,7 +221,7 @@ fn serialize_vibe_mcp_env(mcp: &McpServerConfig) -> String {
     }
     let mut servers = vec![serde_json::Value::Object(vmux)];
     servers.extend(
-        crate::managed_mcp::load()
+        crate::managed_mcp::ManagedMcpServers::current()
             .iter()
             .map(|(name, server)| crate::managed_mcp::vibe_value(name, server)),
     );

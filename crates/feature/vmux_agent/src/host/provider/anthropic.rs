@@ -41,7 +41,7 @@ fn register_anthropic_strategy(
         StrategyKind(AgentKind::Claude),
         StrategyVariant(AgentVariant::Page),
         BuildRequestFn(crate::provider::anthropic::build_request),
-        ParseSseFn(crate::provider::anthropic::parse_sse),
+        ParseSseFn(crate::provider::anthropic::parse_messages_sse),
     ));
 }
 

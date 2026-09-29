@@ -7,20 +7,47 @@ use vmux_core::profile::mcp_credentials::McpCredentialAccess;
 use vmux_core::profile::mcp_credentials::McpCredentialStorage;
 use vmux_tool::{McpServerManifest, McpTransport};
 
-#[cfg(not(test))]
-pub fn load() -> BTreeMap<String, McpServerManifest> {
-    match vmux_tool::ToolStore::current().load() {
-        Ok(manifest) => manifest.mcp.servers,
-        Err(error) => {
-            bevy::log::warn!("managed MCP servers unavailable: {error}");
-            BTreeMap::new()
+pub(crate) struct ManagedMcpServers(BTreeMap<String, McpServerManifest>);
+
+impl ManagedMcpServers {
+    pub(crate) fn current() -> Self {
+        #[cfg(test)]
+        {
+            Self(BTreeMap::new())
         }
+
+        #[cfg(not(test))]
+        {
+            match vmux_tool::ToolStore::current().load() {
+                Ok(manifest) => Self(manifest.mcp.servers),
+                Err(error) => {
+                    bevy::log::warn!("managed MCP servers unavailable: {error}");
+                    Self(BTreeMap::new())
+                }
+            }
+        }
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &McpServerManifest)> {
+        self.0.iter()
+    }
+
+    pub(crate) fn into_names(self) -> impl Iterator<Item = String> {
+        self.0.into_keys()
+    }
+
+    fn into_inner(self) -> BTreeMap<String, McpServerManifest> {
+        self.0
     }
 }
 
-#[cfg(test)]
-pub fn load() -> BTreeMap<String, McpServerManifest> {
-    BTreeMap::new()
+impl IntoIterator for ManagedMcpServers {
+    type Item = (String, McpServerManifest);
+    type IntoIter = std::collections::btree_map::IntoIter<String, McpServerManifest>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
 }
 
 pub(crate) struct PreparedManagedMcpServers {
@@ -32,7 +59,7 @@ pub(crate) fn acp_servers(agent_id: &str) -> Result<PreparedManagedMcpServers, S
     for _ in 0..3 {
         let revision = McpCredentialAccess::stable_revision()?;
         let mut servers = Vec::new();
-        for (name, server) in load() {
+        for (name, server) in ManagedMcpServers::current() {
             if crate::acp_tool::registry_id_alias(agent_id) == "codex-acp"
                 && server.transport == McpTransport::Sse
             {
@@ -257,7 +284,7 @@ impl McpAuthorization {
 
     pub(crate) fn environment() -> Vec<(String, String)> {
         let mut env = Vec::new();
-        for (name, server) in load() {
+        for (name, server) in ManagedMcpServers::current() {
             let Some(variable) = Self::environment_variable(&name, &server) else {
                 continue;
             };
@@ -397,7 +424,7 @@ pub(crate) struct CodexMcp;
 
 impl CodexMcp {
     pub(crate) fn servers() -> BTreeMap<String, McpServerManifest> {
-        let mut servers = load();
+        let mut servers = ManagedMcpServers::current().into_inner();
         servers.retain(|name, server| {
             if server.transport == McpTransport::Sse {
                 bevy::log::warn!(

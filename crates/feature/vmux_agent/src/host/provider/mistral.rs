@@ -41,7 +41,7 @@ fn register_mistral_strategy(
         StrategyKind(AgentKind::Vibe),
         StrategyVariant(AgentVariant::Page),
         BuildRequestFn(crate::provider::mistral::build_request),
-        ParseSseFn(crate::provider::mistral::parse_sse),
+        ParseSseFn(crate::provider::openai_shared::parse_chat_completions_sse),
     ));
 }
 

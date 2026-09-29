@@ -3,7 +3,7 @@ use serde_json::json;
 use crate::provider::openai_shared::{
     messages_to_chat_completions, parse_chat_completions_sse, tools_to_function_specs,
 };
-use crate::stream::{StreamEvent, ToolDef};
+use crate::stream::ToolDef;
 use vmux_api::room::Message;
 
 pub const PROVIDER: &str = "mistral";
@@ -36,13 +36,10 @@ pub fn build_request(
         .expect("mistral: build_request")
 }
 
-pub fn parse_sse(payload: &str) -> Option<StreamEvent> {
-    parse_chat_completions_sse(payload)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stream::StreamEvent;
 
     #[test]
     fn build_request_sets_headers_and_url() {
@@ -65,6 +62,9 @@ mod tests {
     #[test]
     fn parse_sse_event_delegates_to_shared_parser() {
         let frame = r#"data: {"id":"c1","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}"#;
-        assert_eq!(parse_sse(frame), Some(StreamEvent::TextDelta("hi".into())));
+        assert_eq!(
+            parse_chat_completions_sse(frame),
+            Some(StreamEvent::TextDelta("hi".into()))
+        );
     }
 }
