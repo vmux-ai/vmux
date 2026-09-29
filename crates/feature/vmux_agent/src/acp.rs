@@ -1326,7 +1326,10 @@ fn list_acp_sessions(
             result.push(RemoteSession {
                 sid: sid.0.clone(),
                 room_id: vmux_api::room::RoomId::for_session(&sid.0),
-                title: Message::conversation_title(projector.messages(), &name),
+                title: vmux_core::room::ConversationTitle::from_messages(
+                    projector.messages(),
+                    &name,
+                ),
                 name,
                 runtime: "acp".to_string(),
                 model: model
@@ -1354,7 +1357,10 @@ fn list_acp_sessions(
                 result = Some(RemoteSession {
                     sid: sid.0.clone(),
                     room_id: vmux_api::room::RoomId::for_session(&sid.0),
-                    title: Message::conversation_title(projector.messages(), &name),
+                    title: vmux_core::room::ConversationTitle::from_messages(
+                        projector.messages(),
+                        &name,
+                    ),
                     name,
                     runtime: "acp".to_string(),
                     model: model

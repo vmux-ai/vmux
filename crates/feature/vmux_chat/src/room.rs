@@ -389,7 +389,11 @@ mod tests {
             RemoteEvent::Snapshot {
                 room_id: RoomId::from("r"),
                 through_seq: seq,
-                events: RoomEvent::from_messages("s", seq, &[RoomMessage::user(text)]),
+                events: vmux_core::room::RoomEvents::from_messages(
+                    "s",
+                    seq,
+                    &[RoomMessage::user(text)],
+                ),
             }
         }
     }
@@ -434,7 +438,7 @@ mod tests {
             Self {
                 room_id: None,
                 through_seq: 0,
-                events: RoomEvent::from_messages(
+                events: vmux_core::room::RoomEvents::from_messages(
                     "s",
                     0,
                     &[
@@ -488,7 +492,11 @@ mod tests {
         let log = Log {
             room_id: None,
             through_seq: 0,
-            events: RoomEvent::from_messages("s", 100, &[RoomMessage::user("hello")]),
+            events: vmux_core::room::RoomEvents::from_messages(
+                "s",
+                100,
+                &[RoomMessage::user("hello")],
+            ),
         };
 
         let items = log.chat_items("partial", true);

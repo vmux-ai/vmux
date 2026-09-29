@@ -115,7 +115,8 @@ async fn sessions(state: &RemoteState) -> Vec<RemoteSession> {
     sessions.extend(state.acp.remote_sessions().await);
     for session in &mut sessions {
         if let Some(messages) = super::super::server::session_messages(state, &session.sid).await {
-            session.title = vmux_api::room::Message::conversation_title(&messages, &session.name);
+            session.title =
+                vmux_core::room::ConversationTitle::from_messages(&messages, &session.name);
         }
     }
     sessions.sort_by_key(|session| std::cmp::Reverse(session.created_at_ms));

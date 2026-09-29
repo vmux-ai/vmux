@@ -216,7 +216,7 @@ pub(crate) async fn current_session(state: &RemoteState, sid: &str) -> Option<Re
         state.agents.remote_session(sid.to_string()).await?
     };
     if let Some(messages) = session_messages(state, sid).await {
-        session.title = vmux_api::room::Message::conversation_title(&messages, &session.name);
+        session.title = vmux_core::room::ConversationTitle::from_messages(&messages, &session.name);
     }
     Some(session)
 }

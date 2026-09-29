@@ -41,6 +41,7 @@ vmux_transport = { path = "../../util/vmux_transport" }
 vmux_app = { path = "../../util/vmux_app", features = ["mobile"] }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
+vmux_core = { path = "../../util/vmux_core" }
 vmux_chat = { path = "../../feature/vmux_chat" }
 vmux_start = { path = "../../feature/vmux_start" }
 vmux_team = { path = "../../feature/vmux_team" }

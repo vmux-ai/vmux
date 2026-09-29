@@ -228,7 +228,7 @@ pub(crate) fn remote_event_from_shared(
         Shared::AgentApprovalResolved { .. } => Some(RemoteEvent::Approval { approval: None }),
         Shared::AgentMessagesSnapshot { sid, messages } => {
             let room_id = vmux_api::room::RoomId::for_session(&sid);
-            let events = vmux_api::room::RoomEvent::from_messages(&sid, 0, &messages);
+            let events = vmux_core::room::RoomEvents::from_messages(&sid, 0, &messages);
             Some(RemoteEvent::Snapshot {
                 room_id,
                 through_seq: events.len() as u64,

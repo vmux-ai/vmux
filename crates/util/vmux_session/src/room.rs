@@ -248,7 +248,7 @@ fn materialize_events(
     messages: &[Message],
     event_index: &mut HashMap<EventId, Entity>,
 ) {
-    for event in RoomEvent::from_messages(sid, 0, messages) {
+    for event in vmux_core::room::RoomEvents::from_messages(sid, 0, messages) {
         let event_entity = commands
             .spawn((
                 MaterializedRoomEvent,
@@ -291,7 +291,7 @@ fn sync_room_messages(
         let Some(&room_entity) = registry.rooms.get(&binding.room_id) else {
             continue;
         };
-        let events = RoomEvent::from_messages(sid, 0, &messages.0);
+        let events = vmux_core::room::RoomEvents::from_messages(sid, 0, &messages.0);
         let mut stale = existing
             .iter()
             .filter(|(_, _, child_of)| child_of.parent() == room_entity)
