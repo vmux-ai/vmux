@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 use super::breadcrumb::EditorBreadcrumbs;
+use super::diagnostic::DiagnosticPresentation;
 use super::directory::{Preview, PreviewPane, clear_preview, image_data_url, toggle_video};
 use super::dom::{EditorDom, ScrolledLineHeight};
 use super::editor::{EditorLines, StickyScope};
@@ -15,14 +16,11 @@ use super::note::{NoteBlankLine, NoteBlockView, NoteBlocks, NoteCursor, NoteProp
 use super::sidebar::{ExplorerPane, ExplorerSidebar, ExplorerToggleButton, PaneWidth};
 use super::state::use_file_ui;
 use super::status::{EncodingRecovery, FileStatusInfo, FileStatusScope};
-use super::text_geometry::RowRuler;
+use super::text_geometry::{CellMetrics, ColumnRuler, GutterWidth, RowRuler};
+use super::text_style::StyledSpanStyle;
 use super::toolbar::{EditorTabItem, EditorTabStrip, FindBar, VimStatus};
 use std::collections::HashMap;
 
-use crate::page_model::{
-    CellMetrics, ColumnRuler, NoteCursorActivation, editor_drag_started, gutter_width,
-    note_cursor_activation, severity_color_class, span_style,
-};
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -457,7 +455,7 @@ pub fn Page() -> Element {
                 title
             };
             doc_title.set(title.clone());
-            let activation = note_cursor_activation(
+            let activation = NoteCursorActivation::resolve(
                 reveal_line,
                 keymap() == vmux_core::KeymapKind::Vim && file_view_mode() == FileViewMode::Note,
                 source_cursor().line,
@@ -710,7 +708,7 @@ pub fn Page() -> Element {
         dom.announce(cell_dims(), total_lines(), last_resize);
     });
 
-    let gw = gutter_width(total_lines());
+    let gw = GutterWidth::for_lines(total_lines());
     let editor_tabs = EditorTabItem::all(&open_editors.read());
     let breadcrumb_path = match error().is_empty() {
         true => git_path(),
@@ -1386,7 +1384,7 @@ pub fn Page() -> Element {
                                             return;
                                         }
                                         if !editor_dragging()
-                                            && editor_drag_started(origin, (at.x as i32, at.y as i32))
+                                            && PointerDrag::started(origin, (at.x as i32, at.y as i32))
                                         {
                                             editor_dragging.set(true);
                                         }
@@ -1631,7 +1629,7 @@ pub fn Page() -> Element {
                                                                     for line in b.lines.iter() {
                                                                         div { key: "{line.line_no}",
                                                                             for (si, s) in line.spans.iter().enumerate() {
-                                                                                span { key: "{si}", style: "{span_style(s)}", "{s.text}" }
+                                                                                span { key: "{si}", style: "{StyledSpanStyle::of(s)}", "{s.text}" }
                                                                             }
                                                                         }
                                                                     }
@@ -1748,7 +1746,7 @@ pub fn Page() -> Element {
                     div {
                         class: "pointer-events-none absolute right-4 bottom-5 z-50 max-w-md rounded-xl bg-foreground/[0.04] px-3 py-2 text-xs text-foreground/90 ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                         div { class: "flex items-center gap-2",
-                            span { class: "{severity_color_class(d.severity)}", "●" }
+                            span { class: "{DiagnosticPresentation::color_class(d.severity)}", "●" }
                             span { class: "whitespace-pre-wrap", "{d.message}" }
                         }
                         if let Some(src) = d.source.as_ref() {
@@ -1852,6 +1850,34 @@ pub enum Mode {
     Media(MediaKind),
 }
 
+struct PointerDrag;
+
+impl PointerDrag {
+    fn started(origin: (i32, i32), current: (i32, i32)) -> bool {
+        let dx = f64::from(current.0) - f64::from(origin.0);
+        let dy = f64::from(current.1) - f64::from(origin.1);
+        dx * dx + dy * dy >= 16.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NoteCursorActivation {
+    Center(u32),
+    PreserveViewport(u32),
+}
+
+impl NoteCursorActivation {
+    fn resolve(
+        reveal_line: Option<u32>,
+        restore_vim_cursor: bool,
+        cursor_line: u32,
+    ) -> Option<Self> {
+        reveal_line
+            .map(Self::Center)
+            .or_else(|| restore_vim_cursor.then_some(Self::PreserveViewport(cursor_line)))
+    }
+}
+
 pub(super) fn diff_marker_sign(marker: GitLineStatus) -> &'static str {
     diff_tone(marker).sign()
 }
@@ -1886,4 +1912,29 @@ fn schedule_lsp_notice_clear(
             notice.set(None);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drag_requires_deliberate_pointer_movement() {
+        assert!(!PointerDrag::started((100, 100), (103, 102)));
+        assert!(PointerDrag::started((100, 100), (104, 100)));
+        assert!(PointerDrag::started((100, 100), (96, 96)));
+    }
+
+    #[test]
+    fn cursor_restore_preserves_viewport_until_explicit_reveal() {
+        assert_eq!(
+            NoteCursorActivation::resolve(Some(12), true, 8),
+            Some(NoteCursorActivation::Center(12))
+        );
+        assert_eq!(
+            NoteCursorActivation::resolve(None, true, 8),
+            Some(NoteCursorActivation::PreserveViewport(8))
+        );
+        assert_eq!(NoteCursorActivation::resolve(None, false, 8), None);
+    }
 }

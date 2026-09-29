@@ -6,7 +6,7 @@ use vmux_core::event::{FileDirEntry, FileLine};
 use vmux_ui::i18n::translate;
 use vmux_ui::media::MediaElement;
 
-use crate::page_model::span_style;
+use super::text_style::StyledSpanStyle;
 
 #[derive(Clone, PartialEq)]
 pub(super) enum Preview {
@@ -103,7 +103,7 @@ pub(super) fn PreviewPane(preview: Preview) -> Element {
                 for line in lines.iter() {
                     div { key: "{line.line_no}", class: "whitespace-pre",
                         for (index, span) in line.spans.iter().enumerate() {
-                            span { key: "{index}", style: "{span_style(span)}", "{span.text}" }
+                            span { key: "{index}", style: "{StyledSpanStyle::of(span)}", "{span.text}" }
                         }
                     }
                 }

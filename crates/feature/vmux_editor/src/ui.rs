@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 mod breadcrumb;
+mod diagnostic;
 mod directory;
 mod dom;
 mod editor;
@@ -11,11 +12,13 @@ mod lsp;
 mod markdown;
 mod menu;
 mod note;
+mod note_text;
 mod page;
 mod sidebar;
 mod state;
 mod status;
 mod text_geometry;
+mod text_style;
 mod toolbar;
 
 pub(crate) use input::{FIND_INPUT_ID, focus_file_input, focus_find_input};

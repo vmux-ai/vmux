@@ -5,9 +5,8 @@ use vmux_core::event::{FileDocumentKind, FileResizeEvent, FileViewMode};
 use vmux_ui::hooks::send;
 use vmux_ui::scroll::ScrollIntoView;
 
-use super::text_geometry::gutter_px;
+use super::text_geometry::{CellMetrics, gutter_px};
 use super::{INPUT_ID, SCROLL_ID};
-use crate::page_model::{CellMetrics, centered_scroll_top};
 
 pub(super) struct ScrolledLineHeight;
 
@@ -24,6 +23,14 @@ impl ScrolledLineHeight {
             false => cell_height,
         };
         (height > 0.0).then_some(height)
+    }
+}
+
+struct ScrollPosition;
+
+impl ScrollPosition {
+    fn centered(target_center: f64, viewport_height: f64) -> f64 {
+        (target_center - viewport_height * 0.5).max(0.0)
     }
 }
 
@@ -143,7 +150,7 @@ impl EditorDom {
         if char_height <= 0.0 || geometry.size.1 <= 0.0 {
             return;
         }
-        self.scroll_to(centered_scroll_top(
+        self.scroll_to(ScrollPosition::centered(
             row as f64 * char_height + char_height * 0.5,
             geometry.size.1,
         ));
@@ -176,5 +183,11 @@ mod tests {
             ScrolledLineHeight::resolve(FileViewMode::Note, FileDocumentKind::Text, 0.0),
             None
         );
+    }
+
+    #[test]
+    fn centering_places_the_target_at_the_viewport_midpoint() {
+        assert_eq!(ScrollPosition::centered(500.0, 400.0), 300.0);
+        assert_eq!(ScrollPosition::centered(100.0, 400.0), 0.0);
     }
 }

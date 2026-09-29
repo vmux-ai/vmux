@@ -10,13 +10,12 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::platform::sleep_ms;
 
-use super::text_geometry::{column_in_line, gutter_px};
+use super::diagnostic::DiagnosticPresentation;
+use super::text_geometry::{CellMetrics, ColumnRuler, column_in_line, gutter_px};
+use super::text_style::StyledSpanStyle;
 use super::{
     HOVER_DELAY_MS, diff_marker_row_class, diff_marker_sign, diff_marker_text_class,
     focus_file_input,
-};
-use crate::page_model::{
-    CellMetrics, ColumnRuler, line_severity, severity_color_class, span_style, squiggle_style,
 };
 
 #[component]
@@ -135,7 +134,7 @@ fn EditorLineChunk(
                         key: "{ln}",
                         line: line.clone(),
                         layout: *layout,
-                        severity: line_severity(&diagnostics, ln),
+                        severity: DiagnosticPresentation::severity(&diagnostics, ln),
                         diff_marker: markers.get(&(ln + 1)).copied(),
                         diagnostics: line_diags,
                         cell_height,
@@ -296,7 +295,7 @@ fn EditorLineRow(
                 class: "sticky left-0 z-[1] relative flex shrink-0 select-none items-center justify-end bg-background pl-4 pr-5 tabular-nums",
                 style: "min-width:calc(var(--cw, 1ch) * {gw} + 3rem);height:{ch}px;",
                 if let Some(s) = severity {
-                    span { class: "pointer-events-none absolute left-1 {severity_color_class(s)}", "●" }
+                    span { class: "pointer-events-none absolute left-1 {DiagnosticPresentation::color_class(s)}", "●" }
                 }
                 span {
                     class: if let Some(marker) = diff_marker { "shrink-0 text-right opacity-90 {diff_marker_text_class(marker)}" } else { "shrink-0 text-right opacity-40 group-hover:opacity-90" },
@@ -323,7 +322,7 @@ fn EditorLineRow(
             span { class: "{text_class}", style: "{text_style}",
                 IndentGuides { levels: line.indent_levels }
                 for (i, s) in line.spans.iter().enumerate() {
-                    span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                    span { key: "{i}", style: "{StyledSpanStyle::of(s)}", "{s.text}" }
                 }
                 for (di, d) in diagnostics.iter().enumerate() {
                     {
@@ -338,7 +337,7 @@ fn EditorLineRow(
                         rsx! {
                             span {
                                 key: "d{di}",
-                                style: squiggle_style(
+                                style: DiagnosticPresentation::squiggle(
                                     marks.x_of(d.start_col),
                                     marks.width_between(d.start_col, d.end_col),
                                     color,
@@ -410,7 +409,7 @@ fn StickyScopeRow(
             span { class: "pointer-events-none relative whitespace-pre pr-8",
                 IndentGuides { levels: line.indent_levels }
                 for (i, s) in line.spans.iter().enumerate() {
-                    span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                    span { key: "{i}", style: "{StyledSpanStyle::of(s)}", "{s.text}" }
                 }
             }
         }

@@ -16,12 +16,11 @@ use vmux_ui::platform::sleep_ms;
 use vmux_ui::scroll::ScrollIntoView;
 use vmux_ui::text_run::TextRun;
 
-use super::markdown::{ListEditLine, ListLineHit, MdBlockView, NoteLineChunk, NoteSourceLine};
-use super::{diff_tone, focus_file_input};
-use crate::page_model::{
-    NoteInlineKind, NoteInlineNode, heading_class, note_inline_nodes, note_list_marker_prefix_len,
-    note_source_offset, note_source_position,
+use super::markdown::{
+    HeadingStyle, ListEditLine, ListLineHit, MdBlockView, NoteLineChunk, NoteSourceLine,
 };
+use super::note_text::{NoteInlineKind, NoteInlineNode, NoteText};
+use super::{diff_tone, focus_file_input};
 
 const NOTE_CARET_ID: &str = "note-caret";
 
@@ -131,7 +130,7 @@ fn note_pointer_line(
 
 fn note_edit_block_class(block: &MdBlock) -> &'static str {
     match block {
-        MdBlock::Heading { level, .. } => heading_class(*level),
+        MdBlock::Heading { level, .. } => HeadingStyle::class(*level),
         MdBlock::Paragraph { .. } => "my-3",
         MdBlock::List { .. } => "my-3 pl-6",
         MdBlock::CodeBlock { .. } => {
@@ -232,7 +231,7 @@ fn place_note_block_caret(index: usize, start_line: u32, source: String, at: Cli
             .offset_at(at.x, at.y)
             .await
             .unwrap_or_default();
-        let (line, col) = note_source_position(&source, start_line, offset);
+        let (line, col) = NoteText::new(&source).position(start_line, offset);
         let _ = send(&FilePointerEvent {
             line,
             col,
@@ -420,10 +419,11 @@ fn note_selection_ranges(
     start_line: u32,
     selections: &[vmux_core::editor::SelSpan],
 ) -> Vec<(u32, u32)> {
+    let text = NoteText::new(source);
     selections
         .iter()
         .map(|selection| {
-            let start = note_source_offset(source, start_line, selection.line, selection.start);
+            let start = text.offset(start_line, selection.line, selection.start);
             let end_col = if selection.end == u32::MAX {
                 source
                     .split('\n')
@@ -432,7 +432,7 @@ fn note_selection_ranges(
             } else {
                 selection.end
             };
-            let end = note_source_offset(source, start_line, selection.line, end_col);
+            let end = text.offset(start_line, selection.line, end_col);
             (start.min(end), start.max(end))
         })
         .filter(|(start, end)| start < end)
@@ -624,7 +624,7 @@ pub(super) fn NoteBlockView(
             .lines()
             .nth(active_edit_line.saturating_sub(start) as usize)
             .unwrap_or_default();
-        let prefix = note_list_marker_prefix_len(raw).map_or(0, |(_, prefix)| prefix);
+        let prefix = NoteText::list_marker_prefix_len(raw).map_or(0, |(_, prefix)| prefix);
         vec![(
             active_edit_line,
             raw.chars().skip(prefix).collect::<String>(),
@@ -646,9 +646,9 @@ pub(super) fn NoteBlockView(
     };
     let (live_nodes, live_source, live_caret, live_selections) = if editing && is_live_inline {
         (
-            note_inline_nodes(&source, heading_level),
+            NoteText::new(&source).inline_nodes(heading_level),
             source.chars().collect::<Vec<_>>(),
-            note_source_offset(&source, start, current.line, current.col),
+            NoteText::new(&source).offset(start, current.line, current.col),
             note_selection_ranges(&source, start, &selections),
         )
     } else {
@@ -695,7 +695,7 @@ pub(super) fn NoteBlockView(
             .nth(line.saturating_sub(start) as usize)
             .unwrap_or_default();
         if is_list {
-            note_list_marker_prefix_len(raw).map_or(0, |(_, prefix)| prefix as u32)
+            NoteText::list_marker_prefix_len(raw).map_or(0, |(_, prefix)| prefix as u32)
         } else {
             0
         }

@@ -7,9 +7,39 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::util::cn;
 
-use crate::page_model::{heading_class, span_style, table_align_style};
+use super::text_style::StyledSpanStyle;
 
 pub const NOTE_CARET_ID: &str = "note-caret";
+
+pub(super) struct HeadingStyle;
+
+impl HeadingStyle {
+    pub(super) fn class(level: u8) -> &'static str {
+        match level {
+            1 => "mb-3 mt-6 text-3xl font-bold tracking-tight text-foreground",
+            2 => {
+                "mb-2 mt-5 border-b border-border pb-2 text-2xl font-semibold tracking-tight text-foreground"
+            }
+            3 => "mb-2 mt-4 text-xl font-semibold text-foreground/95",
+            4 => "mb-1 mt-3 text-lg font-semibold text-foreground/90",
+            5 => "mb-1 mt-3 text-base font-semibold text-foreground/85",
+            _ => "mb-1 mt-3 text-sm font-semibold uppercase tracking-wide text-foreground/70",
+        }
+    }
+}
+
+struct TableAlignmentStyle;
+
+impl TableAlignmentStyle {
+    fn of(align: MdTableAlign) -> &'static str {
+        match align {
+            MdTableAlign::Left => "text-align:left",
+            MdTableAlign::Center => "text-align:center",
+            MdTableAlign::Right => "text-align:right",
+            MdTableAlign::None => "",
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct ListLineHit(pub Signal<Option<u32>>);
@@ -118,7 +148,7 @@ pub fn MdBlockView(
     let block = &block;
     match block {
         MdBlock::Heading { level, inlines } => rsx! {
-            div { key: "{key}", class: hidden_class(heading_class(*level), hidden), MdInlines { inlines: inlines.clone() } }
+            div { key: "{key}", class: hidden_class(HeadingStyle::class(*level), hidden), MdInlines { inlines: inlines.clone() } }
         },
         MdBlock::Paragraph { inlines } => rsx! {
             p { key: "{key}", class: hidden_class("my-3", hidden), MdInlines { inlines: inlines.clone() } }
@@ -146,7 +176,7 @@ pub fn MdBlockView(
                 for (line_index, line) in lines.iter().enumerate() {
                     div { key: "{line_index}",
                         for (span_index, span) in line.spans.iter().enumerate() {
-                            span { key: "{span_index}", style: span_style(span), "{span.text}" }
+                            span { key: "{span_index}", style: StyledSpanStyle::of(span), "{span.text}" }
                         }
                     }
                 }
@@ -305,7 +335,7 @@ fn MdTable(
     let col_style = |column: usize| {
         aligns
             .get(column)
-            .map(|alignment| table_align_style(*alignment))
+            .map(|alignment| TableAlignmentStyle::of(*alignment))
             .unwrap_or_default()
             .to_string()
     };

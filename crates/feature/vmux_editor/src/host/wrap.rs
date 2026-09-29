@@ -3,7 +3,7 @@ use vmux_core::editor::{SelSpan, WordWrap};
 use vmux_core::event::FileLineLayout;
 
 use crate::fold::FoldView;
-use crate::page_model::DisplayCells;
+use crate::text::DisplayCells;
 
 pub struct WrapView {
     columns: u16,

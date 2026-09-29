@@ -1,5 +1,5 @@
 pub(crate) mod event;
-pub mod page_model;
+mod text;
 
 #[cfg(ui)]
 pub mod ui;

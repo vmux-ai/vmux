@@ -6,7 +6,7 @@ use crate::edit::EditCommand;
 use crate::event::*;
 use crate::host::editing::EditRequest;
 use crate::host::editor::{Editor, FileView};
-use crate::page_model::DisplayCells;
+use crate::text::DisplayCells;
 
 pub(super) struct LanguagePlugin;
 

@@ -8,7 +8,7 @@ use crate::edit::command::{
 use crate::edit::motion::MotionResolver;
 use crate::edit::register::{RegisterKind, RegisterValue, Registers};
 use crate::edit::text_object::char_class;
-use crate::page_model::DisplayCells;
+use crate::text::DisplayCells;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Group {
