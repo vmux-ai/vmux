@@ -82,7 +82,7 @@ fn apply_file_navigation(
         &mut FileViewport,
         &mut PageMetadata,
     )>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    mut lsp_closes: Option<MessageWriter<crate::lsp::manager::LspDocumentCloseRequest>>,
     mut commands: Commands,
 ) {
     let request = trigger.event();
@@ -91,7 +91,11 @@ fn apply_file_navigation(
         return;
     };
     let previous = view.replace_path(request.path.clone(), &mut revision);
-    manager.close(&previous);
+    if let Some(lsp_closes) = lsp_closes.as_mut() {
+        lsp_closes.write(crate::lsp::manager::LspDocumentCloseRequest {
+            path: previous.clone(),
+        });
+    }
     metadata.title = view
         .path
         .file_name()
@@ -267,7 +271,7 @@ fn apply_goto(
         &mut FileView,
         &mut PageMetadata,
     )>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    mut lsp_closes: Option<MessageWriter<crate::lsp::manager::LspDocumentCloseRequest>>,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
@@ -295,7 +299,11 @@ fn apply_goto(
             commands.trigger(CursorRenderRequest::new(goto.entity));
             continue;
         }
-        manager.close(&view.path);
+        if let Some(lsp_closes) = lsp_closes.as_mut() {
+            lsp_closes.write(crate::lsp::manager::LspDocumentCloseRequest {
+                path: view.path.clone(),
+            });
+        }
         metadata.title = goto
             .path
             .file_name()

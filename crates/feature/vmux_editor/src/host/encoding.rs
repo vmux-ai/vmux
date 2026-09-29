@@ -28,7 +28,7 @@ impl Plugin for EncodingPlugin {
 fn reopen_with_encoding(
     trigger: On<UiInput<FileEncodingReopenRequest>>,
     views: Query<&FileView>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    mut lsp_changes: Option<MessageWriter<crate::lsp::manager::LspDocumentChangeRequest>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -48,7 +48,12 @@ fn reopen_with_encoding(
         .remove::<FileLoadTask>()
         .remove::<FileInitialMetaSent>()
         .remove::<crate::lsp::manager::LintRan>();
-    manager.change(&view.path);
+    if let Some(lsp_changes) = lsp_changes.as_mut() {
+        lsp_changes.write(crate::lsp::manager::LspDocumentChangeRequest {
+            path: view.path.clone(),
+            text: None,
+        });
+    }
 }
 
 fn save_with_encoding(

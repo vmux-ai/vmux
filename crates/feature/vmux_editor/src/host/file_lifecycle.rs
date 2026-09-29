@@ -532,7 +532,7 @@ fn drain_file_changes(
 fn reload_changed_files(
     files: Query<(Entity, &FileView, Option<&Editor>), With<FileReloadRequested>>,
     browsers: NonSend<Browsers>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    mut lsp_changes: Option<MessageWriter<crate::lsp::manager::LspDocumentChangeRequest>>,
     mut commands: Commands,
 ) {
     for (entity, file, edit) in &files {
@@ -584,7 +584,12 @@ fn reload_changed_files(
             .remove::<FileLoadTask>()
             .remove::<FileInitialMetaSent>()
             .remove::<crate::lsp::manager::LintRan>();
-        manager.change(&file.path);
+        if let Some(lsp_changes) = lsp_changes.as_mut() {
+            lsp_changes.write(crate::lsp::manager::LspDocumentChangeRequest {
+                path: file.path.clone(),
+                text: None,
+            });
+        }
     }
 }
 

@@ -48,7 +48,6 @@ impl Plugin for LanguagePlugin {
             .add_observer(on_file_editor_cut_request)
             .add_observer(on_file_editor_paste_request)
             .add_observer(on_file_editor_change_all_occurrences_request)
-            .add_observer(on_file_code_action_pick)
             .add_observer(on_file_completion_request)
             .add_observer(on_wiki_completion_request)
             .add_systems(Update, flush_lsp_changes);
@@ -686,34 +685,6 @@ fn on_file_editor_change_all_occurrences_request(
     ));
 }
 
-fn on_file_code_action_pick(
-    trigger: On<UiInput<FileCodeActionPick>>,
-    views: Query<(&Editor, &crate::lsp::manager::OfferedCodeActions)>,
-    mut manager: Single<&mut crate::lsp::manager::LspManager>,
-    mut edits: MessageWriter<crate::lsp::manager::LspRequestedEdit>,
-) {
-    let entity = trigger.event().webview;
-    let Ok((edit, actions)) = views.get(entity) else {
-        return;
-    };
-    let path = edit.core.buffer.path.clone();
-    let Some(action) = actions
-        .0
-        .get(trigger.event().payload.index as usize)
-        .cloned()
-    else {
-        return;
-    };
-    let Some((root, workspace_edit)) = manager.run_code_action(&path, action) else {
-        return;
-    };
-    edits.write(crate::lsp::manager::LspRequestedEdit {
-        entity,
-        root,
-        result: Ok(workspace_edit),
-    });
-}
-
 fn on_file_rename_request(
     trigger: On<UiInput<FileRenameRequest>>,
     views: Query<&Editor>,
@@ -800,6 +771,7 @@ fn flush_lsp_changes(
     mut elapsed: Local<f32>,
     views: Query<(Entity, &FileView, &Editor), With<LspEditDirty>>,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
+    mut lsp_changes: Option<MessageWriter<crate::lsp::manager::LspDocumentChangeRequest>>,
     mut commands: Commands,
 ) {
     if views.is_empty() {
@@ -811,7 +783,12 @@ fn flush_lsp_changes(
     }
     *elapsed = 0.0;
     for (entity, view, edit) in &views {
-        manager.change_with_text(&view.path, &edit.core.buffer.text());
+        if let Some(lsp_changes) = lsp_changes.as_mut() {
+            lsp_changes.write(crate::lsp::manager::LspDocumentChangeRequest {
+                path: view.path.clone(),
+                text: Some(edit.core.buffer.text()),
+            });
+        }
         if let Some(request) = manager.folding_range(entity, &view.path) {
             commands.spawn(request);
         }

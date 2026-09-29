@@ -2,11 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::Browsers;
+use bevy_cef::prelude::{Browsers, UiInput};
 use vmux_core::event::{
-    CompletionItem, DiagSeverity, EditorCapability, FileCodeActions, FileDiagnostic,
-    FileDiagnostics, FileEditFailure, FileHover, FileLine, FileLspStatus, HoverBlock,
-    LspServerState, OutlineEvent, RefItem,
+    CompletionItem, DiagSeverity, EditorCapability, FileCodeActionPick, FileCodeActions,
+    FileDiagnostic, FileDiagnostics, FileEditFailure, FileHover, FileLine, FileLspStatus,
+    HoverBlock, LspServerState, OutlineEvent, RefItem,
 };
 use vmux_core::host::FileUiStateWrite;
 use vmux_core::page::PageReady;
@@ -166,22 +166,30 @@ pub fn parse_folding_ranges(value: &serde_json::Value) -> Vec<crate::fold::FoldR
 #[derive(Component)]
 pub struct LspManager {
     servers: HashMap<ServerKey, ServerClient>,
-    starting: HashMap<ServerKey, StartingServer>,
     open_docs: HashMap<PathBuf, OpenDoc>,
-    failed: HashSet<ServerKey>,
     diagnostics: LspDiagnosticsSender,
     inputs: ServerInputSender,
 }
 
-struct StartingServer {
+#[derive(Component)]
+struct LspServerStartTask {
+    key: ServerKey,
     command: String,
     task: bevy::tasks::Task<std::io::Result<ServerClient>>,
 }
 
-enum ServerReadiness {
-    Ready(ServerKey),
-    Starting,
-    Unavailable,
+#[derive(Component)]
+struct LspServerFailed(ServerKey);
+
+#[derive(Message)]
+pub(crate) struct LspDocumentChangeRequest {
+    pub(crate) path: PathBuf,
+    pub(crate) text: Option<String>,
+}
+
+#[derive(Message)]
+pub(crate) struct LspDocumentCloseRequest {
+    pub(crate) path: PathBuf,
 }
 
 fn uri_for(path: &Path) -> Option<String> {
@@ -214,9 +222,7 @@ impl LspManager {
     pub(crate) fn new(diagnostics: LspDiagnosticsSender, inputs: ServerInputSender) -> Self {
         Self {
             servers: HashMap::new(),
-            starting: HashMap::new(),
             open_docs: HashMap::new(),
-            failed: HashSet::new(),
             diagnostics,
             inputs,
         }
@@ -265,145 +271,6 @@ impl LspManager {
             }
         }
         operations
-    }
-
-    fn ensure_server(
-        &mut self,
-        root: &Path,
-        spec: &crate::lsp::registry::ServerSpec,
-    ) -> ServerReadiness {
-        let key = ServerKey::new(root, &spec.command);
-        if self.servers.contains_key(&key) {
-            return ServerReadiness::Ready(key);
-        }
-        if self.failed.contains(&key) {
-            return ServerReadiness::Unavailable;
-        }
-        if self.starting.contains_key(&key) {
-            return ServerReadiness::Starting;
-        }
-        let spec = spec.clone();
-        let root = root.to_path_buf();
-        let diagnostics = self.diagnostics.clone();
-        let inputs = self.inputs.clone();
-        let command = spec.command.clone();
-        let task = bevy::tasks::IoTaskPool::get()
-            .spawn(async move { ServerClient::spawn(&spec, &root, diagnostics, inputs) });
-        self.starting.insert(key, StartingServer { command, task });
-        ServerReadiness::Starting
-    }
-
-    fn settle_starting_servers(&mut self) {
-        use bevy::tasks::futures_lite::future;
-
-        let mut settled = Vec::new();
-        for (key, starting) in &mut self.starting {
-            let Some(result) = future::block_on(future::poll_once(&mut starting.task)) else {
-                continue;
-            };
-            settled.push((key.clone(), starting.command.clone(), result));
-        }
-        for (key, command, result) in settled {
-            self.starting.remove(&key);
-            match result {
-                Ok(client) => {
-                    self.servers.insert(key, client);
-                }
-                Err(error) => {
-                    tracing::warn!(server = %command, "lsp spawn/init failed: {error}");
-                    self.failed.insert(key);
-                }
-            }
-        }
-    }
-
-    pub fn open(&mut self, path: &Path, overrides: &ServerOverrides) -> bool {
-        if let Some(doc) = self.open_docs.get_mut(path) {
-            doc.refs += 1;
-            return true;
-        }
-        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
-            return true;
-        };
-        let Some(mut spec) = resolve_spec(ext, overrides) else {
-            return true;
-        };
-        match store::PackageStore::lsp().resolve_command(&spec.command) {
-            store::Resolution::Managed(p) => spec.command = p.to_string_lossy().into_owned(),
-            store::Resolution::OnPath => {}
-            store::Resolution::Missing => {
-                tracing::info!(server = %spec.command, "lsp server not installed/on PATH; skipping {ext}");
-                return true;
-            }
-        }
-        let dir = path.parent().unwrap_or(path);
-        let root = workspace_root(dir, &spec.root_markers);
-        let key = match self.ensure_server(&root, &spec) {
-            ServerReadiness::Ready(key) => key,
-            ServerReadiness::Starting => return false,
-            ServerReadiness::Unavailable => return true,
-        };
-        let (Some(uri), Some(text)) = (uri_for(path), read_text(path)) else {
-            return true;
-        };
-        if let Some(client) = self.servers.get(&key) {
-            client.did_open(&uri, &spec.language_id, 1, &text);
-            self.open_docs.insert(
-                path.to_path_buf(),
-                OpenDoc {
-                    key,
-                    version: 1,
-                    refs: 1,
-                },
-            );
-        }
-        true
-    }
-
-    pub fn change(&mut self, path: &Path) {
-        let Some(doc) = self.open_docs.get_mut(path) else {
-            return;
-        };
-        let (Some(uri), Some(text)) = (uri_for(path), read_text(path)) else {
-            return;
-        };
-        doc.version += 1;
-        let version = doc.version;
-        let key = doc.key.clone();
-        if let Some(client) = self.servers.get(&key) {
-            client.did_change(&uri, version, &text);
-        }
-    }
-
-    pub fn change_with_text(&mut self, path: &Path, text: &str) {
-        let Some(doc) = self.open_docs.get_mut(path) else {
-            return;
-        };
-        let Some(uri) = uri_for(path) else {
-            return;
-        };
-        doc.version += 1;
-        let version = doc.version;
-        let key = doc.key.clone();
-        if let Some(client) = self.servers.get(&key) {
-            client.did_change(&uri, version, text);
-        }
-    }
-
-    pub fn close(&mut self, path: &Path) {
-        let Some(doc) = self.open_docs.get_mut(path) else {
-            return;
-        };
-        doc.refs = doc.refs.saturating_sub(1);
-        if doc.refs > 0 {
-            return;
-        }
-        let Some(doc) = self.open_docs.remove(path) else {
-            return;
-        };
-        if let (Some(uri), Some(client)) = (uri_for(path), self.servers.get(&doc.key)) {
-            client.did_close(&uri);
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -573,42 +440,6 @@ impl LspManager {
             }),
             ReqKind::CodeAction,
         )
-    }
-
-    pub fn run_code_action(
-        &mut self,
-        path: &Path,
-        chosen: lsp_types::CodeActionOrCommand,
-    ) -> Option<(PathBuf, lsp_types::WorkspaceEdit)> {
-        let root = self.open_docs.get(path)?.key.root().to_path_buf();
-        match chosen {
-            lsp_types::CodeActionOrCommand::Command(command) => {
-                self.execute_command(path, &command);
-                None
-            }
-            lsp_types::CodeActionOrCommand::CodeAction(action) => {
-                if let Some(command) = &action.command {
-                    self.execute_command(path, command);
-                }
-                action.edit.map(|edit| (root, edit))
-            }
-        }
-    }
-
-    fn execute_command(&self, path: &Path, command: &lsp_types::Command) {
-        let Some(doc) = self.open_docs.get(path) else {
-            return;
-        };
-        let Some(client) = self.servers.get(&doc.key) else {
-            return;
-        };
-        let (_, _rx) = client.send_request(
-            "workspace/executeCommand",
-            serde_json::json!({
-                "command": command.command,
-                "arguments": command.arguments.clone().unwrap_or_default(),
-            }),
-        );
     }
 
     fn send_doc_request_at(
@@ -1021,17 +852,162 @@ fn server_overrides(settings: &AppSettings) -> ServerOverrides {
         .collect()
 }
 
+fn finish_lsp_server_starts(
+    mut starts: Query<(Entity, &mut LspServerStartTask)>,
+    mut manager: Single<&mut LspManager>,
+    mut commands: Commands,
+) {
+    use bevy::tasks::futures_lite::future;
+
+    for (entity, mut start) in &mut starts {
+        let Some(result) = future::block_on(future::poll_once(&mut start.task)) else {
+            continue;
+        };
+        let key = start.key.clone();
+        let command = start.command.clone();
+        match result {
+            Ok(client) => {
+                manager.servers.insert(key, client);
+                commands.entity(entity).despawn();
+            }
+            Err(error) => {
+                tracing::warn!(server = %command, "lsp spawn/init failed: {error}");
+                commands
+                    .entity(entity)
+                    .insert((
+                        Name::new(format!("Failed LSP server {command}")),
+                        LspServerFailed(key),
+                    ))
+                    .remove::<LspServerStartTask>();
+            }
+        }
+    }
+}
+
+fn change_lsp_documents(
+    mut requests: MessageReader<LspDocumentChangeRequest>,
+    mut manager: Single<&mut LspManager>,
+) {
+    for request in requests.read() {
+        let Some(document) = manager.open_docs.get_mut(&request.path) else {
+            continue;
+        };
+        let Some(uri) = uri_for(&request.path) else {
+            continue;
+        };
+        let text = match &request.text {
+            Some(text) => text.clone(),
+            None => {
+                let Some(text) = read_text(&request.path) else {
+                    continue;
+                };
+                text
+            }
+        };
+        document.version += 1;
+        let version = document.version;
+        let key = document.key.clone();
+        if let Some(client) = manager.servers.get(&key) {
+            client.did_change(&uri, version, &text);
+        }
+    }
+}
+
+fn close_lsp_documents(
+    mut requests: MessageReader<LspDocumentCloseRequest>,
+    mut manager: Single<&mut LspManager>,
+) {
+    for request in requests.read() {
+        let Some(document) = manager.open_docs.get_mut(&request.path) else {
+            continue;
+        };
+        document.refs = document.refs.saturating_sub(1);
+        if document.refs > 0 {
+            continue;
+        }
+        let Some(document) = manager.open_docs.remove(&request.path) else {
+            continue;
+        };
+        let Some(uri) = uri_for(&request.path) else {
+            continue;
+        };
+        if let Some(client) = manager.servers.get(&document.key) {
+            client.did_close(&uri);
+        }
+    }
+}
+
 fn lsp_open_documents(
     q: Query<(Entity, &FileView, &Editor), Without<LspOpened>>,
+    starts: Query<&LspServerStartTask>,
+    failures: Query<&LspServerFailed>,
     settings: Res<AppSettings>,
     mut manager: Single<&mut LspManager>,
     mut commands: Commands,
 ) {
-    manager.settle_starting_servers();
     let overrides = server_overrides(&settings);
+    let mut starting = starts
+        .iter()
+        .map(|start| start.key.clone())
+        .collect::<HashSet<_>>();
+    let failed = failures
+        .iter()
+        .map(|failure| failure.0.clone())
+        .collect::<HashSet<_>>();
     for (entity, fv, _edit) in &q {
-        if !manager.open(&fv.path, &overrides) {
-            continue;
+        if let Some(document) = manager.open_docs.get_mut(&fv.path) {
+            document.refs += 1;
+        } else if let Some(ext) = fv.path.extension().and_then(|extension| extension.to_str())
+            && let Some(mut spec) = resolve_spec(ext, &overrides)
+        {
+            match store::PackageStore::lsp().resolve_command(&spec.command) {
+                store::Resolution::Managed(path) => {
+                    spec.command = path.to_string_lossy().into_owned();
+                }
+                store::Resolution::OnPath => {}
+                store::Resolution::Missing => {
+                    tracing::info!(server = %spec.command, "lsp server not installed/on PATH; skipping {ext}");
+                    commands.entity(entity).insert(LspOpened);
+                    continue;
+                }
+            }
+            let directory = fv.path.parent().unwrap_or(&fv.path);
+            let root = workspace_root(directory, &spec.root_markers);
+            let key = ServerKey::new(&root, &spec.command);
+            if failed.contains(&key) {
+                commands.entity(entity).insert(LspOpened);
+                continue;
+            }
+            if !manager.servers.contains_key(&key) {
+                if starting.insert(key.clone()) {
+                    let diagnostics = manager.diagnostics.clone();
+                    let inputs = manager.inputs.clone();
+                    let command = spec.command.clone();
+                    let task = bevy::tasks::IoTaskPool::get().spawn(async move {
+                        ServerClient::spawn(&spec, &root, diagnostics, inputs)
+                    });
+                    commands.spawn((
+                        Name::new(format!("Starting LSP server {command}")),
+                        LspServerStartTask { key, command, task },
+                    ));
+                }
+                continue;
+            }
+            let (Some(uri), Some(text)) = (uri_for(&fv.path), read_text(&fv.path)) else {
+                commands.entity(entity).insert(LspOpened);
+                continue;
+            };
+            if let Some(client) = manager.servers.get(&key) {
+                client.did_open(&uri, &spec.language_id, 1, &text);
+                manager.open_docs.insert(
+                    fv.path.clone(),
+                    OpenDoc {
+                        key,
+                        version: 1,
+                        refs: 1,
+                    },
+                );
+            }
         }
         if let Some(request) = manager.folding_range(entity, &fv.path) {
             commands.spawn(request);
@@ -1285,9 +1261,15 @@ pub fn build(
     .add_message::<LspSemantic>()
     .add_message::<LspRequestedEdit>()
     .add_message::<LspCodeActionRequest>()
+    .add_message::<LspDocumentChangeRequest>()
+    .add_message::<LspDocumentCloseRequest>()
+    .add_observer(on_file_code_action_pick)
     .add_systems(
         Update,
         (
+            finish_lsp_server_starts,
+            close_lsp_documents,
+            change_lsp_documents,
             lsp_open_documents,
             lint_on_open,
             drain_lsp_diagnostics,
@@ -1300,6 +1282,53 @@ pub fn build(
         )
             .chain(),
     );
+}
+
+fn on_file_code_action_pick(
+    trigger: On<UiInput<FileCodeActionPick>>,
+    views: Query<(&Editor, &OfferedCodeActions)>,
+    manager: Single<&LspManager>,
+    mut edits: MessageWriter<LspRequestedEdit>,
+) {
+    let entity = trigger.event().webview;
+    let Ok((editor, actions)) = views.get(entity) else {
+        return;
+    };
+    let Some(action) = actions
+        .0
+        .get(trigger.event().payload.index as usize)
+        .cloned()
+    else {
+        return;
+    };
+    let path = &editor.core.buffer.path;
+    let Some(document) = manager.open_docs.get(path) else {
+        return;
+    };
+    let Some(client) = manager.servers.get(&document.key) else {
+        return;
+    };
+    let root = document.key.root().to_path_buf();
+    let (command, edit) = match action {
+        lsp_types::CodeActionOrCommand::Command(command) => (Some(command), None),
+        lsp_types::CodeActionOrCommand::CodeAction(action) => (action.command, action.edit),
+    };
+    if let Some(command) = command {
+        let (_, _response) = client.send_request(
+            "workspace/executeCommand",
+            serde_json::json!({
+                "command": command.command,
+                "arguments": command.arguments.unwrap_or_default(),
+            }),
+        );
+    }
+    if let Some(edit) = edit {
+        edits.write(LspRequestedEdit {
+            entity,
+            root,
+            result: Ok(edit),
+        });
+    }
 }
 
 #[derive(Component, Default)]
