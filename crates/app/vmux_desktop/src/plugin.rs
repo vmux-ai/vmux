@@ -1,6 +1,6 @@
 use crate::{
     os_menu::OsMenuPlugin, permission::PermissionsPlugin, remote::RemotePlugin,
-    runtime::RuntimePlugin, shortcut::ShortcutPlugin, window::DesktopWindowPlugin,
+    runtime::RuntimePlugin, shortcut::ShortcutPlugin,
 };
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
@@ -11,7 +11,9 @@ impl PluginGroup for DesktopPluginGroup {
     fn build(self) -> PluginGroupBuilder {
         #[allow(unused_mut)]
         let mut builder = PluginGroupBuilder::start::<Self>()
-            .add(NativeWindowPlugin)
+            .add(crate::window::WindowPlugin)
+            .add(crate::appearance::DesktopAppearancePlugin)
+            .add(crate::boot_status::BootStatusPlugin)
             .add(RuntimePlugin)
             .add(PermissionsPlugin)
             .add(OsMenuPlugin)
@@ -25,6 +27,13 @@ impl PluginGroup for DesktopPluginGroup {
             builder = builder.add(vmux_input::KeyboardPlugin);
         }
 
+        #[cfg(all(target_os = "macos", feature = "native-glass"))]
+        {
+            builder = builder
+                .add(crate::glass::GlassPlugin)
+                .add(crate::splash::SplashPlugin);
+        }
+
         #[cfg(feature = "native-notifications")]
         {
             builder = builder.add(crate::notify::NotificationPlugin);
@@ -36,21 +45,6 @@ impl PluginGroup for DesktopPluginGroup {
         }
 
         builder
-    }
-}
-
-pub(crate) struct NativeWindowPlugin;
-
-impl Plugin for NativeWindowPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins((
-            DesktopWindowPlugin,
-            crate::appearance::DesktopAppearancePlugin,
-            crate::boot_status::BootStatusPlugin,
-        ));
-
-        #[cfg(all(target_os = "macos", feature = "native-glass"))]
-        app.add_plugins((crate::glass::GlassPlugin, crate::splash::SplashPlugin));
     }
 }
 

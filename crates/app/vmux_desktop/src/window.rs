@@ -13,9 +13,9 @@ use vmux_layout::window::{
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
 use bevy::window::{MonitorSelection, WindowMode};
 
-pub(crate) struct DesktopWindowPlugin;
+pub(crate) struct WindowPlugin;
 
-impl Plugin for DesktopWindowPlugin {
+impl Plugin for WindowPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CloseVmuxWindow>()
             .add_message::<ExitFullscreenRequest>()
