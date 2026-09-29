@@ -64,7 +64,7 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-pub(super) const VIDEO_HOST_ID: &str = "vmux-video-host";
+const VIDEO_HOST_ID: &str = "vmux-video-host";
 
 #[component]
 pub(super) fn PreviewPane(preview: Preview) -> Element {

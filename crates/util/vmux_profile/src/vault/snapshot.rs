@@ -53,18 +53,18 @@ pub(super) struct RemoteManifest {
     pub(super) index: String,
 }
 #[derive(Debug, Deserialize, Serialize)]
-pub(super) struct EncryptedIndex {
-    pub(super) version: u32,
-    pub(super) files: Vec<EncryptedIndexEntry>,
+struct EncryptedIndex {
+    version: u32,
+    files: Vec<EncryptedIndexEntry>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub(super) struct EncryptedIndexEntry {
-    pub(super) path: String,
-    pub(super) object: String,
-    pub(super) digest: String,
-    pub(super) kind: EntryKind,
-    pub(super) mode: u32,
+struct EncryptedIndexEntry {
+    path: String,
+    object: String,
+    digest: String,
+    kind: EntryKind,
+    mode: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

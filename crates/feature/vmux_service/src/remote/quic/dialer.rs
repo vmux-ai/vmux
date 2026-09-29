@@ -162,7 +162,7 @@ impl Backoff {
     }
 }
 
-pub(super) struct RegisteredDevice {
+struct RegisteredDevice {
     path: PathBuf,
 }
 

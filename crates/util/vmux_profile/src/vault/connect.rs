@@ -32,49 +32,49 @@ pub enum RepositoryVisibility {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct GhRepository {
-    pub(super) name_with_owner: String,
-    pub(super) is_private: bool,
-    pub(super) url: String,
-    pub(super) is_empty: bool,
+struct GhRepository {
+    name_with_owner: String,
+    is_private: bool,
+    url: String,
+    is_empty: bool,
 }
 
 #[derive(Deserialize)]
-pub(super) struct GhAuthStatus {
-    pub(super) hosts: HashMap<String, Vec<GhAuthAccount>>,
+struct GhAuthStatus {
+    hosts: HashMap<String, Vec<GhAuthAccount>>,
 }
 
 #[derive(Deserialize)]
-pub(super) struct GhAuthAccount {
-    pub(super) login: String,
+struct GhAuthAccount {
+    login: String,
 }
 
 #[derive(Deserialize)]
-pub(super) struct GhViewerResponse {
-    pub(super) data: GhViewerData,
+struct GhViewerResponse {
+    data: GhViewerData,
 }
 
 #[derive(Deserialize)]
-pub(super) struct GhViewerData {
-    pub(super) viewer: GhViewer,
+struct GhViewerData {
+    viewer: GhViewer,
 }
 
 #[derive(Deserialize)]
-pub(super) struct GhViewer {
-    pub(super) login: String,
-    pub(super) organizations: GhOrganizations,
+struct GhViewer {
+    login: String,
+    organizations: GhOrganizations,
 }
 
 #[derive(Deserialize)]
-pub(super) struct GhOrganizations {
-    pub(super) nodes: Vec<GhOrganization>,
+struct GhOrganizations {
+    nodes: Vec<GhOrganization>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct GhOrganization {
-    pub(super) login: String,
-    pub(super) viewer_can_create_repositories: bool,
+struct GhOrganization {
+    login: String,
+    viewer_can_create_repositories: bool,
 }
 
 pub fn connect_github_with_progress<F, C>(mut progress: F, canceled: C) -> Result<String, String>

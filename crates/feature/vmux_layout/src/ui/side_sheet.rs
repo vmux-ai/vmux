@@ -46,7 +46,7 @@ fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct StackReveal {
+struct StackReveal {
     settled: Signal<Option<StackRevealTarget>>,
 }
 

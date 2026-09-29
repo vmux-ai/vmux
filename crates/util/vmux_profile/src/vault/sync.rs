@@ -33,7 +33,7 @@ pub(super) struct ReconcileOutcome {
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum TextMergeStrategy {
+enum TextMergeStrategy {
     Local,
     Union,
 }

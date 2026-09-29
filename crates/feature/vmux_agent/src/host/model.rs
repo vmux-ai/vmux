@@ -71,15 +71,15 @@ impl Plugin for ChatModelPlugin {
 }
 
 #[derive(Message)]
-pub(super) struct ModelSelectRequest {
-    pub sid: String,
-    pub model_id: String,
+struct ModelSelectRequest {
+    sid: String,
+    model_id: String,
 }
 
 #[derive(Message)]
-pub(super) struct EffortSetRequest {
-    pub agent_key: String,
-    pub level: String,
+struct EffortSetRequest {
+    agent_key: String,
+    level: String,
 }
 
 fn answer_remote_model_commands(

@@ -27,7 +27,7 @@ pub(super) struct RecoveryEnvelope {
     pub(super) wrapped_key: Vec<u8>,
 }
 
-pub(super) struct RecoveryKeyLength;
+struct RecoveryKeyLength;
 
 #[derive(Debug)]
 pub struct RecoveryKeyCreation {

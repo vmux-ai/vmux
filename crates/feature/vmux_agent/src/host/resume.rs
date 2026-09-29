@@ -68,7 +68,7 @@ impl ResumeListAnswer {
 }
 
 #[derive(EntityEvent)]
-pub(super) struct ChatResumeQuery {
+struct ChatResumeQuery {
     #[event_target]
     webview: Entity,
     active: bool,
@@ -76,7 +76,7 @@ pub(super) struct ChatResumeQuery {
 }
 
 impl ChatResumeQuery {
-    pub(super) fn new(webview: Entity, active: bool, query: String) -> Self {
+    fn new(webview: Entity, active: bool, query: String) -> Self {
         Self {
             webview,
             active,

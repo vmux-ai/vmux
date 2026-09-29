@@ -261,7 +261,7 @@ impl ForcedEncoding {
 }
 
 #[derive(Component)]
-pub(super) struct MissingFileView;
+struct MissingFileView;
 
 struct FileWatch {
     watcher: RecommendedWatcher,
