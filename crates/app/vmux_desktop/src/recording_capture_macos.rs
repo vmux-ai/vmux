@@ -28,7 +28,7 @@ use objc2_screen_capture_kit::{
     SCStreamOutputType,
 };
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, Weak, mpsc};
+use std::sync::{Arc, Mutex, Weak, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use vmux_agent::RecordStartResponse;
@@ -84,9 +84,9 @@ struct FinalizeTarget {
     finalizing: bool,
 }
 
-fn active() -> &'static Mutex<Option<Arc<RecordingState>>> {
-    static ACTIVE: OnceLock<Mutex<Option<Arc<RecordingState>>>> = OnceLock::new();
-    ACTIVE.get_or_init(|| Mutex::new(None))
+#[derive(Default)]
+pub(crate) struct CaptureRuntime {
+    active: Option<Arc<RecordingState>>,
 }
 
 define_class!(
@@ -337,77 +337,149 @@ fn build_writer(
     Ok((writer, input, adaptor))
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn start(
-    window_entity: Entity,
-    img_w: u32,
-    img_h: u32,
-    crop: Option<CropRect>,
-    request_id: [u8; 16],
-    gif: bool,
-    max_secs: u32,
-    default_dir: PathBuf,
-    scale: f64,
-    tx: Sender<RecordOutcome>,
-    wake: Option<WakeFn>,
-) -> RecordStartResponse {
-    let err = |m: String| RecordStartResponse {
-        request_id,
-        result: Err(m),
-    };
-
-    if active().lock().unwrap().is_some() {
-        return err("a recording is already in progress; stop it first".into());
-    }
-    if !os_at_least_14() {
-        return err("recording requires macOS 14 or later".into());
-    }
-    if !unsafe { CGPreflightScreenCaptureAccess() } {
-        unsafe { CGRequestScreenCaptureAccess() };
-        return err(PERMISSION_MSG.into());
-    }
-    let Some(window_id) = window_number(window_entity) else {
-        return err("cannot resolve native window".into());
-    };
-
-    let (out_w, out_h) = crop.map_or((img_w, img_h), |c| (c.w, c.h));
-    let ts = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
-    let rid: String = request_id[..4].iter().map(|b| format!("{b:02x}")).collect();
-    let tmp_dir = vmux_core::profile::ProfilePaths::current().recording();
-    if let Err(e) = std::fs::create_dir_all(&tmp_dir) {
-        return err(format!("cannot create {}: {e}", tmp_dir.display()));
-    }
-    let temp_mp4 = tmp_dir.join(format!(".vmux-rec-{ts}-{rid}.mp4"));
-    let temp_gif = gif.then(|| tmp_dir.join(format!(".vmux-rec-{ts}-{rid}.gif")));
-
-    let (done_tx, done_rx) = mpsc::channel::<Result<(), String>>();
-    let handler = RcBlock::new(move |content: *mut SCShareableContent, _e: *mut NSError| {
-        setup_stream(
-            content,
-            window_id,
-            out_w,
-            out_h,
-            crop,
-            scale,
-            gif,
-            max_secs,
-            &temp_mp4,
-            &temp_gif,
-            &default_dir,
-            &tx,
-            &wake,
-            done_tx.clone(),
-        );
-    });
-    unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&handler) };
-
-    match done_rx.recv_timeout(Duration::from_secs(8)) {
-        Ok(Ok(())) => RecordStartResponse {
+impl CaptureRuntime {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn start(
+        &mut self,
+        window_entity: Entity,
+        img_w: u32,
+        img_h: u32,
+        crop: Option<CropRect>,
+        request_id: [u8; 16],
+        gif: bool,
+        max_secs: u32,
+        default_dir: PathBuf,
+        scale: f64,
+        tx: Sender<RecordOutcome>,
+        wake: Option<WakeFn>,
+    ) -> RecordStartResponse {
+        let err = |m: String| RecordStartResponse {
             request_id,
-            result: Ok(max_secs),
-        },
-        Ok(Err(m)) => err(m),
-        Err(_) => err("timed out preparing capture".into()),
+            result: Err(m),
+        };
+
+        if self.active.is_some() {
+            return err("a recording is already in progress; stop it first".into());
+        }
+        if !os_at_least_14() {
+            return err("recording requires macOS 14 or later".into());
+        }
+        if !unsafe { CGPreflightScreenCaptureAccess() } {
+            unsafe { CGRequestScreenCaptureAccess() };
+            return err(PERMISSION_MSG.into());
+        }
+        let Some(window_id) = window_number(window_entity) else {
+            return err("cannot resolve native window".into());
+        };
+
+        let (out_w, out_h) = crop.map_or((img_w, img_h), |c| (c.w, c.h));
+        let ts = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
+        let rid: String = request_id[..4].iter().map(|b| format!("{b:02x}")).collect();
+        let tmp_dir = vmux_core::profile::ProfilePaths::current().recording();
+        if let Err(e) = std::fs::create_dir_all(&tmp_dir) {
+            return err(format!("cannot create {}: {e}", tmp_dir.display()));
+        }
+        let temp_mp4 = tmp_dir.join(format!(".vmux-rec-{ts}-{rid}.mp4"));
+        let temp_gif = gif.then(|| tmp_dir.join(format!(".vmux-rec-{ts}-{rid}.gif")));
+
+        let (done_tx, done_rx) = mpsc::channel::<Result<Arc<RecordingState>, String>>();
+        let handler = RcBlock::new(move |content: *mut SCShareableContent, _e: *mut NSError| {
+            setup_stream(
+                content,
+                window_id,
+                out_w,
+                out_h,
+                crop,
+                scale,
+                gif,
+                max_secs,
+                &temp_mp4,
+                &temp_gif,
+                &default_dir,
+                &tx,
+                &wake,
+                done_tx.clone(),
+            );
+        });
+        unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&handler) };
+
+        match done_rx.recv_timeout(Duration::from_secs(8)) {
+            Ok(Ok(state)) => {
+                self.active = Some(state);
+                RecordStartResponse {
+                    request_id,
+                    result: Ok(max_secs),
+                }
+            }
+            Ok(Err(m)) => err(m),
+            Err(_) => err("timed out preparing capture".into()),
+        }
+    }
+
+    pub(crate) fn stop(&mut self, request_id: [u8; 16], dir: Option<String>, name: Option<String>) {
+        let Some(state) = self.active.clone() else {
+            return;
+        };
+        {
+            let mut out = state.out.lock().unwrap();
+            if out.finalizing {
+                return;
+            }
+            out.dir = dir;
+            out.name = name;
+            out.request_id = Some(request_id);
+            out.finalizing = true;
+        }
+        finalize(state);
+    }
+
+    pub(crate) fn poll_auto_stop(&mut self) {
+        let Some(state) = self.active.clone() else {
+            return;
+        };
+        if Instant::now() < state.deadline {
+            return;
+        }
+        {
+            let mut out = state.out.lock().unwrap();
+            if out.finalizing {
+                return;
+            }
+            out.request_id = None;
+            out.finalizing = true;
+        }
+        finalize(state);
+    }
+
+    pub(crate) fn pause(&mut self) {
+        if let Some(state) = &self.active {
+            state.encode.lock().unwrap().paused = true;
+        }
+    }
+
+    pub(crate) fn resume(&mut self) {
+        if let Some(state) = &self.active {
+            state.encode.lock().unwrap().paused = false;
+        }
+    }
+
+    pub(crate) fn done(&mut self) {
+        let Some(state) = self.active.clone() else {
+            return;
+        };
+        {
+            let mut out = state.out.lock().unwrap();
+            if out.finalizing {
+                return;
+            }
+            out.request_id = None;
+            out.finalizing = true;
+        }
+        finalize(state);
+    }
+
+    pub(crate) fn complete(&mut self) {
+        self.active = None;
     }
 }
 
@@ -426,7 +498,7 @@ fn setup_stream(
     default_dir: &Path,
     tx: &Sender<RecordOutcome>,
     wake: &Option<WakeFn>,
-    done_tx: mpsc::Sender<Result<(), String>>,
+    done_tx: mpsc::Sender<Result<Arc<RecordingState>, String>>,
 ) {
     if content.is_null() {
         let _ = done_tx.send(Err("SCShareableContent unavailable".into()));
@@ -533,76 +605,13 @@ fn setup_stream(
     let start_state = state.clone();
     let start_block = RcBlock::new(move |e: *mut NSError| {
         if e.is_null() {
-            *active().lock().unwrap() = Some(start_state.clone());
-            let _ = done_tx.send(Ok(()));
+            let _ = done_tx.send(Ok(start_state.clone()));
         } else {
             let desc = unsafe { (*e).localizedDescription() };
             let _ = done_tx.send(Err(format!("startCapture failed: {desc}")));
         }
     });
     unsafe { stream.startCaptureWithCompletionHandler(Some(&start_block)) };
-}
-
-pub(crate) fn stop(request_id: [u8; 16], dir: Option<String>, name: Option<String>) {
-    let Some(state) = active().lock().unwrap().clone() else {
-        return;
-    };
-    {
-        let mut out = state.out.lock().unwrap();
-        if out.finalizing {
-            return;
-        }
-        out.dir = dir;
-        out.name = name;
-        out.request_id = Some(request_id);
-        out.finalizing = true;
-    }
-    finalize(state);
-}
-
-pub(crate) fn poll_auto_stop() {
-    let Some(state) = active().lock().unwrap().clone() else {
-        return;
-    };
-    if Instant::now() < state.deadline {
-        return;
-    }
-    {
-        let mut out = state.out.lock().unwrap();
-        if out.finalizing {
-            return;
-        }
-        out.request_id = None;
-        out.finalizing = true;
-    }
-    finalize(state);
-}
-
-pub(crate) fn pause() {
-    if let Some(state) = active().lock().unwrap().clone() {
-        state.encode.lock().unwrap().paused = true;
-    }
-}
-
-pub(crate) fn resume() {
-    if let Some(state) = active().lock().unwrap().clone() {
-        state.encode.lock().unwrap().paused = false;
-    }
-}
-
-pub(crate) fn done() {
-    let Some(state) = active().lock().unwrap().clone() else {
-        return;
-    };
-    {
-        let mut out = state.out.lock().unwrap();
-        if out.finalizing {
-            return;
-        }
-        out.request_id = None;
-        out.finalizing = true;
-    }
-    finalize(state);
 }
 
 fn finalize(state: Arc<RecordingState>) {
@@ -690,7 +699,6 @@ fn deliver(state: Arc<RecordingState>, finish_result: Result<(), String>) {
         }
     }
 
-    *active().lock().unwrap() = None;
     let _ = state.tx.send(RecordOutcome {
         request_id: target.request_id,
         result,

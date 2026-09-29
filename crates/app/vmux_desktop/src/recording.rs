@@ -60,12 +60,17 @@ pub(crate) struct RecordOutcome {
 struct RecordingBridge {
     pub(crate) tx: Sender<RecordOutcome>,
     rx: Receiver<RecordOutcome>,
+    capture: capture::CaptureRuntime,
 }
 
 impl Default for RecordingBridge {
     fn default() -> Self {
         let (tx, rx) = crossbeam_channel::unbounded();
-        Self { tx, rx }
+        Self {
+            tx,
+            rx,
+            capture: capture::CaptureRuntime::default(),
+        }
     }
 }
 
@@ -87,23 +92,23 @@ pub(crate) enum RecordingControl {
 fn handle_recording_control(
     _non_send: NonSendMarker,
     mut reader: MessageReader<RecordingControl>,
-    mut status: Query<&mut RecordingStatus>,
+    mut runtime: Query<(&mut RecordingBridge, &mut RecordingStatus)>,
 ) {
-    let Ok(mut status) = status.single_mut() else {
+    let Ok((mut bridge, mut status)) = runtime.single_mut() else {
         return;
     };
     for ctrl in reader.read() {
         match ctrl {
             RecordingControl::Pause => {
-                capture::pause();
+                bridge.capture.pause();
                 *status = RecordingStatus::Paused;
             }
             RecordingControl::Resume => {
-                capture::resume();
+                bridge.capture.resume();
                 *status = RecordingStatus::Recording;
             }
             RecordingControl::Done => {
-                capture::done();
+                bridge.capture.done();
             }
         }
     }
@@ -154,12 +159,12 @@ fn start_recording(
     mut start_reader: MessageReader<RecordStartRequest>,
     mut stop_reader: MessageReader<RecordStopRequest>,
     mut start_responses: MessageWriter<RecordStartResponse>,
-    mut runtime: Query<(&RecordingBridge, &mut RecordingStatus)>,
+    mut runtime: Query<(&mut RecordingBridge, &mut RecordingStatus)>,
     settings: Res<AppSettings>,
     source: CaptureSource,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
-    let Ok((bridge, mut status)) = runtime.single_mut() else {
+    let Ok((mut bridge, mut status)) = runtime.single_mut() else {
         return;
     };
     let default_dir = CaptureOutput::directory(&settings);
@@ -177,7 +182,8 @@ fn start_recording(
                 let _ = proxy.send_event(WinitUserEvent::WakeUp);
             }) as WakeFn
         });
-        let resp = capture::start(
+        let tx = bridge.tx.clone();
+        let resp = bridge.capture.start(
             capture.window,
             capture.size.width,
             capture.size.height,
@@ -187,7 +193,7 @@ fn start_recording(
             req.max_secs,
             default_dir.clone(),
             capture.scale,
-            bridge.tx.clone(),
+            tx,
             wake,
         );
         if resp.result.is_ok() {
@@ -197,23 +203,29 @@ fn start_recording(
     }
 
     for req in stop_reader.read() {
-        capture::stop(req.request_id, req.dir.clone(), req.name.clone());
+        bridge
+            .capture
+            .stop(req.request_id, req.dir.clone(), req.name.clone());
     }
 }
 
-fn auto_stop_recordings(_non_send: NonSendMarker) {
-    capture::poll_auto_stop();
+fn auto_stop_recordings(_non_send: NonSendMarker, mut runtime: Query<&mut RecordingBridge>) {
+    let Ok(mut bridge) = runtime.single_mut() else {
+        return;
+    };
+    bridge.capture.poll_auto_stop();
 }
 
 fn drain_recordings(
-    mut runtime: Query<(&RecordingBridge, &mut RecordingStatus)>,
+    mut runtime: Query<(&mut RecordingBridge, &mut RecordingStatus)>,
     mut last_auto: Local<Option<RecordingInfo>>,
     mut stop_responses: MessageWriter<RecordStopResponse>,
 ) {
-    let Ok((bridge, mut status)) = runtime.single_mut() else {
+    let Ok((mut bridge, mut status)) = runtime.single_mut() else {
         return;
     };
     while let Ok(outcome) = bridge.rx.try_recv() {
+        bridge.capture.complete();
         *status = RecordingStatus::Idle;
         match outcome.request_id {
             Some(request_id) => {
@@ -259,35 +271,49 @@ mod capture {
     use std::path::PathBuf;
     use vmux_agent::RecordStartResponse;
 
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn start(
-        _window_entity: Entity,
-        _img_w: u32,
-        _img_h: u32,
-        _crop: Option<CropRect>,
-        request_id: [u8; 16],
-        _gif: bool,
-        _max_secs: u32,
-        _default_dir: PathBuf,
-        _scale: f64,
-        _tx: Sender<RecordOutcome>,
-        _wake: Option<WakeFn>,
-    ) -> RecordStartResponse {
-        RecordStartResponse {
-            request_id,
-            result: Err("recording is only supported on macOS".to_string()),
+    #[derive(Default)]
+    pub(crate) struct CaptureRuntime;
+
+    impl CaptureRuntime {
+        #[allow(clippy::too_many_arguments)]
+        pub(crate) fn start(
+            &mut self,
+            _window_entity: Entity,
+            _img_w: u32,
+            _img_h: u32,
+            _crop: Option<CropRect>,
+            request_id: [u8; 16],
+            _gif: bool,
+            _max_secs: u32,
+            _default_dir: PathBuf,
+            _scale: f64,
+            _tx: Sender<RecordOutcome>,
+            _wake: Option<WakeFn>,
+        ) -> RecordStartResponse {
+            RecordStartResponse {
+                request_id,
+                result: Err("recording is only supported on macOS".to_string()),
+            }
         }
+
+        pub(crate) fn stop(
+            &mut self,
+            _request_id: [u8; 16],
+            _dir: Option<String>,
+            _name: Option<String>,
+        ) {
+        }
+
+        pub(crate) fn poll_auto_stop(&mut self) {}
+
+        pub(crate) fn pause(&mut self) {}
+
+        pub(crate) fn resume(&mut self) {}
+
+        pub(crate) fn done(&mut self) {}
+
+        pub(crate) fn complete(&mut self) {}
     }
-
-    pub(crate) fn stop(_request_id: [u8; 16], _dir: Option<String>, _name: Option<String>) {}
-
-    pub(crate) fn poll_auto_stop() {}
-
-    pub(crate) fn pause() {}
-
-    pub(crate) fn resume() {}
-
-    pub(crate) fn done() {}
 }
 
 #[cfg(target_os = "macos")]
