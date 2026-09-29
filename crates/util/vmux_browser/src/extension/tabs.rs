@@ -1,5 +1,5 @@
 use serde_json::Value;
-use vmux_extension::match_pattern::ChromeMatchPattern;
+use vmux_extension::match_pattern::ExtensionMatchPattern;
 use vmux_extension::protocol::{ApiRequest, ExtensionApiError};
 
 use super::bridge::BridgeAuthorization;
@@ -126,7 +126,7 @@ impl From<&Value> for UrlFilter {
 impl UrlFilter {
     fn matches(&self, url: &str) -> bool {
         for pattern in &self.patterns {
-            if let Ok(parsed) = ChromeMatchPattern::parse(pattern) {
+            if let Ok(parsed) = ExtensionMatchPattern::parse(pattern) {
                 if url::Url::parse(url).is_ok_and(|url| parsed.matches(&url)) {
                     return true;
                 }

@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::path::Path;
 
-use crate::match_pattern::{ChromeMatchPattern, is_match_pattern_candidate};
+use crate::match_pattern::{ExtensionMatchPattern, is_match_pattern_candidate};
 
 const MAX_PERMISSION_COUNT: usize = 256;
 const MAX_PERMISSION_LENGTH: usize = 1024;
@@ -162,7 +162,7 @@ pub fn parse(json: &str) -> Result<ExtManifest, String> {
         .iter()
         .chain(optional_host_permissions.iter())
     {
-        ChromeMatchPattern::parse(pattern)?;
+        ExtensionMatchPattern::parse(pattern)?;
     }
     host_permissions.sort();
     host_permissions.dedup();

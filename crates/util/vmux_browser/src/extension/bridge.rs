@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http::StatusCode;
 use tungstenite::{Message, WebSocket, protocol::WebSocketConfig};
-use vmux_extension::match_pattern::ChromeMatchPattern;
+use vmux_extension::match_pattern::ExtensionMatchPattern;
 use vmux_extension::protocol::{
     BRIDGE_CONTEXT_ID, BRIDGE_MAX_FRAME_SIZE, BRIDGE_MAX_MESSAGE_SIZE, BRIDGE_PROTOCOL_VERSION,
     BridgeClientMessage, BridgeServerMessage, ExtensionApiError, ExtensionContextKind,
@@ -40,7 +40,7 @@ pub struct BridgeIdentity {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BridgeAuthorization {
     pub permissions: HashSet<String>,
-    pub host_permissions: Vec<ChromeMatchPattern>,
+    pub host_permissions: Vec<ExtensionMatchPattern>,
     pub conformance: bool,
 }
 

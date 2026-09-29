@@ -1404,7 +1404,7 @@ mod tests {
                 authorization: BridgeAuthorization {
                     permissions: ["storage".into(), "scripting".into()].into_iter().collect(),
                     host_permissions: vec![
-                        vmux_extension::match_pattern::ChromeMatchPattern::parse(
+                        vmux_extension::match_pattern::ExtensionMatchPattern::parse(
                             "https://*.example.com/*",
                         )
                         .unwrap(),

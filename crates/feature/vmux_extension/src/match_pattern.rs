@@ -1,5 +1,5 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ChromeMatchPattern {
+pub struct ExtensionMatchPattern {
     scheme: Scheme,
     host: Host,
     path: String,
@@ -20,7 +20,7 @@ enum Host {
     Empty,
 }
 
-impl ChromeMatchPattern {
+impl ExtensionMatchPattern {
     pub fn parse(pattern: &str) -> Result<Self, String> {
         if pattern == "<all_urls>" {
             return Ok(Self {
@@ -31,19 +31,19 @@ impl ChromeMatchPattern {
         }
         let (scheme, remainder) = pattern
             .split_once("://")
-            .ok_or_else(|| format!("invalid Chrome match pattern: {pattern}"))?;
+            .ok_or_else(|| format!("invalid extension match pattern: {pattern}"))?;
         let scheme = match scheme {
             "*" => Scheme::HttpAndHttps,
             "http" | "https" | "file" | "ftp" => Scheme::Exact(scheme.into()),
-            _ => return Err(format!("invalid Chrome match pattern scheme: {pattern}")),
+            _ => return Err(format!("invalid extension match pattern scheme: {pattern}")),
         };
         let slash = remainder
             .find('/')
-            .ok_or_else(|| format!("Chrome match pattern has no path: {pattern}"))?;
+            .ok_or_else(|| format!("extension match pattern has no path: {pattern}"))?;
         let host = &remainder[..slash];
         let path = &remainder[slash..];
         if path.is_empty() || !path.starts_with('/') {
-            return Err(format!("invalid Chrome match pattern path: {pattern}"));
+            return Err(format!("invalid extension match pattern path: {pattern}"));
         }
         let host = match &scheme {
             Scheme::Exact(value) if value == "file" => {
@@ -57,7 +57,7 @@ impl ChromeMatchPattern {
                 Host::DomainAndSubdomains(host[2..].to_ascii_lowercase())
             }
             _ if !host.is_empty() && !host.contains('*') => Host::Domain(host.to_ascii_lowercase()),
-            _ => return Err(format!("invalid Chrome match pattern host: {pattern}")),
+            _ => return Err(format!("invalid extension match pattern host: {pattern}")),
         };
         Ok(Self {
             scheme,
@@ -129,13 +129,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn validates_and_matches_chrome_patterns() {
-        let pattern = ChromeMatchPattern::parse("https://*.example.com/path/*").unwrap();
+    fn validates_and_matches_extension_patterns() {
+        let pattern = ExtensionMatchPattern::parse("https://*.example.com/path/*").unwrap();
         assert!(pattern.matches(&url::Url::parse("https://login.example.com/path/x").unwrap()));
         assert!(!pattern.matches(&url::Url::parse("https://example.org/path/x").unwrap()));
-        assert!(ChromeMatchPattern::parse("<all_urls>").is_ok());
-        assert!(ChromeMatchPattern::parse("https://*evil.com/*").is_err());
-        assert!(ChromeMatchPattern::parse("javascript://example.com/*").is_err());
-        assert!(ChromeMatchPattern::parse("https://example.com").is_err());
+        assert!(ExtensionMatchPattern::parse("<all_urls>").is_ok());
+        assert!(ExtensionMatchPattern::parse("https://*evil.com/*").is_err());
+        assert!(ExtensionMatchPattern::parse("javascript://example.com/*").is_err());
+        assert!(ExtensionMatchPattern::parse("https://example.com").is_err());
     }
 }
