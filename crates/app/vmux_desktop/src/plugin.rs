@@ -1,6 +1,6 @@
 use crate::{
-    os_menu::OsMenuPlugin, permission::PermissionsPlugin, remote::RemotePlugin,
-    runtime::RuntimePlugin, shortcut::ShortcutPlugin,
+    os_menu::OsMenuPlugin, permission::PermissionsPlugin, runtime::RuntimePlugin,
+    shortcut::ShortcutPlugin,
 };
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
@@ -17,7 +17,6 @@ impl PluginGroup for DesktopPluginGroup {
             .add(PermissionsPlugin)
             .add(OsMenuPlugin)
             .add(ShortcutPlugin)
-            .add(RemotePlugin)
             .add(crate::relaunch::RelaunchPlugin);
 
         #[cfg(target_os = "macos")]

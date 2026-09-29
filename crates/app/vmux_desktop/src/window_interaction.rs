@@ -271,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn native_scroll_wakes_bevy_only_for_layout_or_non_windowed_content() {
+    fn scroll_wakes_bevy_only_for_layout_or_non_windowed_content() {
         assert!(!WindowPointerPolicy::scroll_should_wake(false, true));
         assert!(WindowPointerPolicy::scroll_should_wake(true, true));
         assert!(WindowPointerPolicy::scroll_should_wake(false, false));

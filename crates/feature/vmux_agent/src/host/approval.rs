@@ -1,10 +1,12 @@
 use bevy::prelude::*;
+use bevy_cef::prelude::UiInput;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::event::{AgentApprovalReply, ApprovalDecision};
 use vmux_api::protocol::{ClientMessage, SharedMessage};
+use vmux_chat::event::ChatApproval;
 use vmux_core::service::ServiceRequest;
 use vmux_session::AcpSession;
 use vmux_session::AgentRunState;
@@ -19,12 +21,30 @@ impl Plugin for ApprovalPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
             .add_systems(Startup, spawn_agent_approval_store)
+            .add_observer(receive_chat_approval)
             .add_observer(handle_approval_reply)
             .add_systems(
                 Update,
                 sync_persisted_acp_approval_policy.in_set(ApprovalSyncSet),
             );
     }
+}
+
+fn receive_chat_approval(
+    trigger: On<UiInput<ChatApproval>>,
+    child_of: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let payload = &trigger.event().payload;
+    let Ok(parent) = child_of.get(webview) else {
+        return;
+    };
+    commands.trigger(AgentApprovalReply {
+        session: parent.parent(),
+        call_id: payload.call_id.clone(),
+        decision: payload.decision,
+    });
 }
 
 fn spawn_agent_approval_store(mut commands: Commands) {

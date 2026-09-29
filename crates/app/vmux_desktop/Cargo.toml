@@ -88,12 +88,10 @@ tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 tray-icon = { version = "0.24", optional = true }
 url = { workspace = true }
-uuid = { workspace = true }
 vmux_agent = { path = "../../feature/vmux_agent" }
 vmux_app = { path = "../../util/vmux_app", features = ["desktop"] }
 vmux_browser = { path = "../../util/vmux_browser" }
 vmux_shortcut = { path = "../../feature/vmux_shortcut" }
-vmux_clipboard = { path = "../../util/vmux_clipboard" }
 vmux_command = { path = "../../feature/vmux_command" }
 vmux_core = { path = "../../util/vmux_core" }
 vmux_editor = { path = "../../feature/vmux_editor" }
@@ -104,7 +102,6 @@ vmux_input = { path = "../../feature/vmux_input" }
 vmux_knowledge = { path = "../../feature/vmux_knowledge" }
 vmux_layout = { path = "../../feature/vmux_layout" }
 vmux_native = { path = "../../util/vmux_native" }
-vmux_service = { path = "../../feature/vmux_service" }
 vmux_setting = { path = "../../feature/vmux_setting" }
 vmux_start = { path = "../../feature/vmux_start" }
 vmux_space = { path = "../../feature/vmux_space" }

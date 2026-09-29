@@ -42,6 +42,8 @@ pub enum VmuxPlugin {
     Space(vmux_space::SpacePlugin),
     #[plugin(feature = "service", desktop, requires(core))]
     Service(vmux_service::plugin::ServicePlugin),
+    #[plugin(feature = "remote", desktop, requires(layout, service))]
+    Remote(vmux_remote::RemotePlugin),
     #[plugin(feature = "start", desktop, requires(core))]
     Start(vmux_start::StartPlugin),
     #[plugin(feature = "tool", desktop, requires(layout))]

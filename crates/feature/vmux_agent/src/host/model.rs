@@ -626,7 +626,14 @@ fn push_acp_model_state_to_page(
             &session.agent_id,
             settings.as_deref(),
         );
-        write_model_projection(webview, projection, &mut commands);
+        commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+            webview,
+            &projection.state,
+        ));
+        commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+            webview,
+            &projection.slash_commands,
+        ));
     }
 }
 
@@ -656,7 +663,14 @@ fn push_removed_acp_model_state_to_page(
             .map(kind_supports_cross_runtime)
             .unwrap_or(false);
         let projection = ModelProjection::new(None, cross, &session.agent_id, settings.as_deref());
-        write_model_projection(webview, projection, &mut commands);
+        commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+            webview,
+            &projection.state,
+        ));
+        commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+            webview,
+            &projection.slash_commands,
+        ));
     }
 }
 
@@ -675,11 +689,11 @@ fn push_acp_mode_state_to_page(
             continue;
         };
         if browsers.can_emit_to(&webview) {
-            write_mode_projection(
+            let projection = ModeProjection::from(Some(mode_state));
+            commands.trigger(UiStateWrite::<ChatUiState>::from_event(
                 webview,
-                ModeProjection::from(Some(mode_state)),
-                &mut commands,
-            );
+                &projection.0,
+            ));
         }
     }
 }
@@ -699,27 +713,13 @@ fn push_removed_acp_mode_state_to_page(
             continue;
         };
         if browsers.can_emit_to(&webview) {
-            write_mode_projection(webview, ModeProjection::from(None), &mut commands);
+            let projection = ModeProjection::from(None);
+            commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+                webview,
+                &projection.0,
+            ));
         }
     }
-}
-
-fn write_model_projection(webview: Entity, projection: ModelProjection, commands: &mut Commands) {
-    commands.trigger(UiStateWrite::<ChatUiState>::from_event(
-        webview,
-        &projection.state,
-    ));
-    commands.trigger(UiStateWrite::<ChatUiState>::from_event(
-        webview,
-        &projection.slash_commands,
-    ));
-}
-
-fn write_mode_projection(webview: Entity, projection: ModeProjection, commands: &mut Commands) {
-    commands.trigger(UiStateWrite::<ChatUiState>::from_event(
-        webview,
-        &projection.0,
-    ));
 }
 
 fn on_select_model(

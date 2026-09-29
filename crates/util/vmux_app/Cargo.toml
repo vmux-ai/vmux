@@ -34,6 +34,7 @@ desktop = [
     "history",
     "knowledge",
     "layout",
+    "remote",
     "tool",
     "service",
     "shortcut",
@@ -75,6 +76,7 @@ shortcut = ["core", "dep:vmux_shortcut"]
 team = ["core", "dep:vmux_team"]
 space = ["layout", "dep:vmux_space"]
 service = ["core", "dep:vmux_service"]
+remote = ["layout", "service", "dep:vmux_remote"]
 start = ["core", "dep:vmux_start"]
 vault = ["layout", "dep:vmux_vault"]
 
@@ -96,6 +98,7 @@ vmux_knowledge = { path = "../../feature/vmux_knowledge", optional = true }
 vmux_layout = { path = "../../feature/vmux_layout", optional = true }
 vmux_mcp = { path = "../vmux_mcp", optional = true }
 vmux_macro = { path = "../vmux_macro" }
+vmux_remote = { path = "../../feature/vmux_remote", optional = true }
 vmux_service = { path = "../../feature/vmux_service", optional = true }
 vmux_setting = { path = "../../feature/vmux_setting", optional = true }
 vmux_shortcut = { path = "../../feature/vmux_shortcut", optional = true }

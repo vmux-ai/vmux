@@ -17,6 +17,8 @@ mod disabled_features;
 mod glass;
 mod key_claim;
 mod log_forward;
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(feature = "native-notifications")]
 mod notify;
 mod os_menu;
@@ -26,7 +28,6 @@ mod plugin;
 #[cfg(feature = "recording")]
 mod recording;
 mod relaunch;
-mod remote;
 mod runtime;
 #[cfg(feature = "screenshots")]
 mod screenshot;
@@ -40,6 +41,8 @@ mod tray;
 #[cfg(feature = "updater")]
 pub mod updater;
 mod window;
+#[cfg(any(target_os = "macos", test))]
+mod window_interaction;
 use bevy::prelude::*;
 use bevy::window::{
     CompositeAlphaMode, ExitCondition, MonitorSelection, Window as NativeWindow, WindowPlugin,
@@ -52,7 +55,7 @@ pub struct VmuxPlugin;
 
 impl Plugin for VmuxPlugin {
     fn build(&self, app: &mut App) {
-        let winit_settings = runtime::foreground_winit_settings(false, false);
+        let winit_settings = runtime::WakePolicy::foreground(false, false);
         app.insert_resource(winit_settings).add_plugins((
             DefaultPlugins
                 .set(Self::window())

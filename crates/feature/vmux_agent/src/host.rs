@@ -24,7 +24,6 @@ pub mod managed_mcp;
 pub mod mcp;
 pub(crate) mod model;
 pub mod page_open;
-mod prompt;
 pub mod provider;
 pub mod query;
 mod resume;

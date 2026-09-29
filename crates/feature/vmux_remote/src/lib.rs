@@ -14,7 +14,7 @@ use vmux_layout::event::{
 use vmux_layout::{LayoutCef, state::LayoutUiState};
 use vmux_service::{RelayToken, RemoteAuthorizationStore};
 
-pub(crate) struct RemotePlugin;
+pub struct RemotePlugin;
 
 impl Plugin for RemotePlugin {
     fn build(&self, app: &mut App) {

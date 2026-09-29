@@ -45,7 +45,6 @@ impl Plugin for AgentPagesPlugin {
         app.add_plugins((
             vmux_chat::ChatPlugin,
             super::model::ChatModelPlugin,
-            super::prompt::ChatPromptPlugin,
             super::resume::ChatResumePlugin,
             super::transcript::ChatTranscriptPlugin,
             crate::setup::AgentSetupPlugin,

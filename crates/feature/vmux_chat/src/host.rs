@@ -33,6 +33,8 @@ impl Plugin for ChatPlugin {
             crate::ChatKeyPlugin,
             crate::ChatMediaPlugin,
             crate::composer::ChatComposerPlugin,
+            crate::prompt::ChatPromptPlugin,
+            crate::prompt::ChatPromptInputPlugin,
         ))
         .add_plugins(UiEventPlugin::<(ChatOpenPage,)>::default())
         .add_observer(open_page)

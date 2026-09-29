@@ -8,7 +8,7 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use vmux_flex::prelude::*;
 use vmux_setting::{ResolvedScheme, SystemAppearance};
 
-use super::window_interaction::{
+use crate::window_interaction::{
     TitlebarClick, TitlebarClicks, WindowFrame, WindowPointerPolicy, WindowResizeDrag,
     WindowTitlebarGesture, WindowZoom,
 };
@@ -67,7 +67,7 @@ fn activate_primary_window_on_startup(
     if !window.visible {
         return;
     }
-    activate_native_window(window_entity);
+    activate_window(window_entity);
 }
 
 fn grab_key_window_on_pane_hover(
@@ -109,7 +109,7 @@ fn grab_key_window_on_pane_hover(
     if !window.visible {
         return;
     }
-    ensure_native_window_active(window_entity);
+    ensure_key_window(window_entity);
 }
 
 fn app_is_frontmost() -> bool {
@@ -121,7 +121,7 @@ fn app_is_frontmost() -> bool {
     NSApp(mtm).isActive()
 }
 
-fn activate_native_window(window_entity: Entity) {
+fn activate_window(window_entity: Entity) {
     use bevy::winit::WINIT_WINDOWS;
     use objc2_app_kit::{NSApp, NSView};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -150,7 +150,7 @@ fn activate_native_window(window_entity: Entity) {
     });
 }
 
-pub(crate) fn ensure_native_window_active(window_entity: Entity) -> bool {
+pub(crate) fn ensure_key_window(window_entity: Entity) -> bool {
     use bevy::winit::WINIT_WINDOWS;
     use objc2_app_kit::{NSApp, NSView};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};

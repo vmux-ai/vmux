@@ -1,13 +1,8 @@
 #[cfg(target_os = "macos")]
-mod macos;
-#[cfg(any(target_os = "macos", test))]
-mod window_interaction;
+use crate::macos::{live_resize_active, pointer_inside_windowed_page};
 
 #[cfg(target_os = "macos")]
-use macos::{live_resize_active, pointer_inside_windowed_page};
-
-#[cfg(target_os = "macos")]
-pub(crate) use macos::ensure_native_window_active;
+pub(crate) use crate::macos::ensure_key_window;
 
 #[cfg(not(target_os = "macos"))]
 fn live_resize_active() -> bool {
@@ -37,7 +32,7 @@ pub struct RuntimePlugin;
 impl Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(target_os = "macos")]
-        app.add_plugins(macos::RuntimePlatformPlugin);
+        app.add_plugins(crate::macos::RuntimePlatformPlugin);
 
         app.add_message::<HideAllWindowsRequest>()
             .add_message::<vmux_input::HideWindowsShortcut>()
@@ -116,35 +111,59 @@ fn start_quit_confirmation(
     }
 }
 
-pub(crate) fn foreground_winit_settings(
-    live_resize: bool,
-    pointer_inside_windowed_page: bool,
-) -> WinitSettings {
-    let focused_mode = if live_resize {
-        UpdateMode::Reactive {
-            wait: Duration::from_millis(16),
-            react_to_device_events: false,
-            react_to_user_events: true,
-            react_to_window_events: false,
-        }
-    } else {
-        UpdateMode::Reactive {
-            wait: FOCUSED_FRAME_INTERVAL,
-            react_to_device_events: false,
-            react_to_user_events: true,
-            react_to_window_events: !pointer_inside_windowed_page,
-        }
-    };
-    WinitSettings {
-        focused_mode,
-        unfocused_mode: UpdateMode::reactive_low_power(UNFOCUSED_FRAME_INTERVAL),
-    }
-}
+pub(crate) struct WakePolicy;
 
-fn hidden_winit_settings() -> WinitSettings {
-    WinitSettings {
-        focused_mode: UpdateMode::reactive_low_power(HIDDEN_FRAME_INTERVAL),
-        unfocused_mode: UpdateMode::reactive_low_power(HIDDEN_FRAME_INTERVAL),
+impl WakePolicy {
+    pub(crate) fn foreground(
+        live_resize: bool,
+        pointer_inside_windowed_page: bool,
+    ) -> WinitSettings {
+        let focused_mode = if live_resize {
+            UpdateMode::Reactive {
+                wait: Duration::from_millis(16),
+                react_to_device_events: false,
+                react_to_user_events: true,
+                react_to_window_events: false,
+            }
+        } else {
+            UpdateMode::Reactive {
+                wait: FOCUSED_FRAME_INTERVAL,
+                react_to_device_events: false,
+                react_to_user_events: true,
+                react_to_window_events: !pointer_inside_windowed_page,
+            }
+        };
+        WinitSettings {
+            focused_mode,
+            unfocused_mode: UpdateMode::reactive_low_power(UNFOCUSED_FRAME_INTERVAL),
+        }
+    }
+
+    fn hidden() -> WinitSettings {
+        WinitSettings {
+            focused_mode: UpdateMode::reactive_low_power(HIDDEN_FRAME_INTERVAL),
+            unfocused_mode: UpdateMode::reactive_low_power(HIDDEN_FRAME_INTERVAL),
+        }
+    }
+
+    fn foreground_cef(refresh_rates: impl IntoIterator<Item = Option<u32>>) -> Duration {
+        let display = windowless_frame_interval_from_refresh_millihertz(
+            refresh_rates.into_iter().flatten().max(),
+        );
+        display.max(MIN_FOREGROUND_CEF_WAKE_INTERVAL)
+    }
+
+    fn cef(
+        all_hidden: bool,
+        any_visible: bool,
+        any_focused: bool,
+        foreground_interval: Duration,
+    ) -> Duration {
+        if all_hidden || !any_visible || !any_focused {
+            BACKGROUND_CEF_WAKE_INTERVAL
+        } else {
+            foreground_interval
+        }
     }
 }
 
@@ -160,45 +179,25 @@ fn sync_winit_power_mode(
     let live_resize = live_resize_active();
     let pointer_inside_windowed_page = pointer_inside_windowed_page();
     let next = if all_hidden {
-        hidden_winit_settings()
+        WakePolicy::hidden()
     } else {
-        foreground_winit_settings(live_resize, pointer_inside_windowed_page)
+        WakePolicy::foreground(live_resize, pointer_inside_windowed_page)
     };
     if settings.focused_mode != next.focused_mode || settings.unfocused_mode != next.unfocused_mode
     {
         *settings = next;
     }
     if let Some(policy) = wake_policy {
-        policy.set_min_wake_interval(cef_wake_interval(
+        policy.set_min_wake_interval(WakePolicy::cef(
             all_hidden,
             any_visible,
             any_focused,
-            foreground_cef_wake_interval(monitors.iter().map(|m| m.refresh_rate_millihertz)),
+            WakePolicy::foreground_cef(monitors.iter().map(|m| m.refresh_rate_millihertz)),
         ));
     }
 }
 
 const MIN_FOREGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_nanos(16_666_666);
-
-fn foreground_cef_wake_interval(refresh_rates: impl IntoIterator<Item = Option<u32>>) -> Duration {
-    let display = windowless_frame_interval_from_refresh_millihertz(
-        refresh_rates.into_iter().flatten().max(),
-    );
-    display.max(MIN_FOREGROUND_CEF_WAKE_INTERVAL)
-}
-
-fn cef_wake_interval(
-    all_hidden: bool,
-    any_visible: bool,
-    any_focused: bool,
-    foreground_interval: Duration,
-) -> Duration {
-    if all_hidden || !any_visible || !any_focused {
-        BACKGROUND_CEF_WAKE_INTERVAL
-    } else {
-        foreground_interval
-    }
-}
 
 fn keep_awake_while_revealing(
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -369,7 +368,7 @@ mod tests {
 
     #[test]
     fn foreground_power_mode_is_reactive_when_focused() {
-        let settings = foreground_winit_settings(false, false);
+        let settings = WakePolicy::foreground(false, false);
 
         let UpdateMode::Reactive {
             wait,
@@ -396,14 +395,14 @@ mod tests {
             wait: resize_wait,
             react_to_window_events: resize_window,
             ..
-        } = foreground_winit_settings(true, false).focused_mode
+        } = WakePolicy::foreground(true, false).focused_mode
         else {
             panic!("focused mode must be Reactive");
         };
         assert_eq!(resize_wait, Duration::from_millis(16));
         assert!(!resize_window);
 
-        let layout_hover = foreground_winit_settings(false, true);
+        let layout_hover = WakePolicy::foreground(false, true);
         let UpdateMode::Reactive {
             react_to_window_events: layout_window,
             ..
@@ -419,7 +418,7 @@ mod tests {
         use bevy::ecs::schedule::{NodeId, Schedules};
 
         let mut app = App::new();
-        app.add_plugins(macos::RuntimePlatformPlugin);
+        app.add_plugins(crate::macos::RuntimePlatformPlugin);
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
         let Some(mut schedule) = schedules.remove(label) else {
             return Vec::new();
@@ -471,7 +470,7 @@ mod tests {
 
     #[test]
     fn hidden_power_mode_ignores_stale_window_focus() {
-        let settings = hidden_winit_settings();
+        let settings = WakePolicy::hidden();
 
         assert_eq!(
             settings.focused_mode,
@@ -486,20 +485,20 @@ mod tests {
     #[test]
     fn cef_wake_policy_follows_display_refresh_but_not_past_60hz() {
         assert_eq!(
-            foreground_cef_wake_interval([Some(60_000)]),
+            WakePolicy::foreground_cef([Some(60_000)]),
             MIN_FOREGROUND_CEF_WAKE_INTERVAL
         );
         assert_eq!(
-            foreground_cef_wake_interval([Some(144_000)]),
+            WakePolicy::foreground_cef([Some(144_000)]),
             MIN_FOREGROUND_CEF_WAKE_INTERVAL,
             "a faster panel must not make the app wake faster"
         );
         assert!(
-            foreground_cef_wake_interval([Some(30_000)]) > MIN_FOREGROUND_CEF_WAKE_INTERVAL,
+            WakePolicy::foreground_cef([Some(30_000)]) > MIN_FOREGROUND_CEF_WAKE_INTERVAL,
             "a slower panel still wakes less often"
         );
         assert_eq!(
-            cef_wake_interval(false, true, true, Duration::from_millis(7)),
+            WakePolicy::cef(false, true, true, Duration::from_millis(7)),
             Duration::from_millis(7)
         );
     }
@@ -507,7 +506,7 @@ mod tests {
     #[test]
     fn cef_wake_policy_throttles_visible_unfocused() {
         assert_eq!(
-            cef_wake_interval(false, true, false, Duration::from_millis(7)),
+            WakePolicy::cef(false, true, false, Duration::from_millis(7)),
             Duration::from_secs(1)
         );
     }
@@ -515,11 +514,11 @@ mod tests {
     #[test]
     fn cef_wake_policy_throttles_hidden() {
         assert_eq!(
-            cef_wake_interval(false, false, true, Duration::from_millis(7)),
+            WakePolicy::cef(false, false, true, Duration::from_millis(7)),
             Duration::from_secs(1)
         );
         assert_eq!(
-            cef_wake_interval(true, true, true, Duration::from_millis(7)),
+            WakePolicy::cef(true, true, true, Duration::from_millis(7)),
             Duration::from_secs(1)
         );
     }

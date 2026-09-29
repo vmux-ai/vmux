@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy_cef::prelude::UiInput;
 use vmux_api::protocol::ClientMessage;
+use vmux_chat::event::ChatChoiceSelected;
 use vmux_chat::host::{ChatSynced, ChatView};
 use vmux_command::WriteCommandRequests;
 use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
@@ -33,6 +35,7 @@ pub(super) struct WorkspacePlugin;
 impl Plugin for WorkspacePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
+            .add_observer(receive_chat_choice)
             .add_observer(resume_agent_choice)
             .add_observer(initialize_git_agent_choice)
             .add_systems(
@@ -46,6 +49,13 @@ impl Plugin for WorkspacePlugin {
                     .after(ServiceMessageSet),
             );
     }
+}
+
+fn receive_chat_choice(trigger: On<UiInput<ChatChoiceSelected>>, mut commands: Commands) {
+    commands.trigger(AgentChoiceSelected {
+        webview: trigger.event().webview,
+        index: trigger.event().payload.index as usize,
+    });
 }
 
 pub(crate) const WORKSPACE_SELECTION_REQUESTED: &str = "Project selection requested. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";

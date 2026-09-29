@@ -266,7 +266,7 @@ fn ensure_window_active_after_reveal(
         if !should_attempt_activation(glass.revealed, glass.active_confirmed, elapsed) {
             continue;
         }
-        if crate::runtime::ensure_native_window_active(entity) {
+        if crate::runtime::ensure_key_window(entity) {
             glass.active_confirmed = true;
         } else if let Some(proxy) = proxy.as_ref() {
             let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
