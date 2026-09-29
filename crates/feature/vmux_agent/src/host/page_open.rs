@@ -3,14 +3,29 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use vmux_api::protocol::AgentAttachment;
+use vmux_chat::host::ChatView;
 use vmux_core::KeyboardOwner;
-use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
+use vmux_core::agent::{
+    AgentKind, AgentSession as CoreAgentSession, SessionId as CoreSessionId,
+    SpawnAgentInStackRequest, SwapStackSession,
+};
 use vmux_core::host::persistence::PageRestore;
 use vmux_core::terminal::TerminalLaunch;
 use vmux_core::{
-    PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
+    PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenId, PageOpenSet,
+    PageOpenTask, PendingPrompt, PendingPromptAttachments,
 };
-use vmux_setting::AppSettings;
+use vmux_git::worktree::worktree_list;
+use vmux_layout::Browser as LayoutBrowser;
+use vmux_layout::space::{CurrentSpace, FocusedSpace, Space, SpaceId};
+use vmux_layout::stack::stack_bundle;
+use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
+use vmux_layout::worktree::{ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady};
+use vmux_session::{AcpSession, AgentConversationTitle, PromptQueue};
+use vmux_setting::{AppSettings, SpaceOverrides};
+use vmux_space::model::SpaceRecord;
+use vmux_space::spaces::space_profile_bundle;
+use vmux_start::{StartInlineTransition, StartInlineTransitionView};
 
 use super::attach::{
     acp_icon_for_id, acp_profile_name_for_id, acp_registry_agent_for_id, attach_acp_agent_to_stack,
@@ -45,10 +60,10 @@ impl Plugin for PageOpenPlugin {
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentPageOpenWorkspace<'w, 's> {
-    active_space: vmux_layout::space::FocusedSpace<'w, 's>,
-    tabs: Query<'w, 's, &'static vmux_layout::tab::Tab>,
-    spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
-    space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
+    active_space: FocusedSpace<'w, 's>,
+    tabs: Query<'w, 's, &'static Tab>,
+    spaces: Query<'w, 's, (), With<Space>>,
+    space_ids: Query<'w, 's, &'static SpaceId>,
 }
 
 #[derive(Component)]
@@ -56,13 +71,13 @@ struct PendingAgentWorktree {
     tab: Entity,
     tab_name: String,
     startup_dir: Option<String>,
-    workspace: vmux_layout::tab::TabWorkspace,
-    metadata: vmux_layout::tab::TabWorktree,
+    workspace: TabWorkspace,
+    metadata: TabWorktree,
     managed_root: PathBuf,
 }
 
 #[derive(Component)]
-struct AgentWorktreeTask(Task<Result<vmux_layout::worktree::TabWorktreeActivation, String>>);
+struct AgentWorktreeTask(Task<Result<TabWorktreeActivation, String>>);
 
 #[derive(Component, Clone, Copy)]
 struct AwaitingAgentWorktree {
@@ -127,11 +142,11 @@ fn ancestor_tab_entity(
     child_of: &Query<&ChildOf>,
     tabs: &Query<(
         Entity,
-        &mut vmux_layout::tab::Tab,
-        Option<&vmux_layout::tab::TabWorkspace>,
-        Option<&vmux_layout::tab::TabWorktree>,
-        Option<&vmux_layout::worktree::TabWorktreeReady>,
-        Option<&vmux_layout::tab::TabDirDecided>,
+        &mut Tab,
+        Option<&TabWorkspace>,
+        Option<&TabWorktree>,
+        Option<&TabWorktreeReady>,
+        Option<&TabDirDecided>,
     )>,
 ) -> Option<Entity> {
     let mut current = entity;
@@ -146,7 +161,7 @@ fn ancestor_tab_entity(
 fn ancestor_agent_tab(
     entity: Entity,
     child_of: &Query<&ChildOf>,
-    tabs: &Query<&vmux_layout::tab::Tab>,
+    tabs: &Query<&Tab>,
 ) -> Option<(Entity, Option<String>)> {
     let mut current = entity;
     loop {
@@ -160,10 +175,10 @@ fn ancestor_agent_tab(
 fn resolved_space_startup_dir(
     entity: Entity,
     child_of: &Query<&ChildOf>,
-    spaces: &Query<(), With<vmux_layout::space::Space>>,
-    space_ids: &Query<&vmux_layout::space::SpaceId>,
+    spaces: &Query<(), With<Space>>,
+    space_ids: &Query<&SpaceId>,
     settings: &AppSettings,
-    active_space: &vmux_layout::space::FocusedSpace,
+    active_space: &FocusedSpace,
 ) -> Option<vmux_setting::StartupDir> {
     let space_id = vmux_layout::space::space_id_of(entity, child_of, spaces, space_ids)
         .map(|space_id| space_id.to_string())
@@ -174,22 +189,22 @@ fn resolved_space_startup_dir(
 fn prepare_agent_tab_worktrees(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     pending: Query<(Entity, &PendingAgentWorktree)>,
-    transitions: Query<&vmux_start::StartInlineTransition>,
+    transitions: Query<&StartInlineTransition>,
     preparing_views: Query<(Entity, &ChildOf), With<PreparingAgentChatView>>,
     child_of: Query<&ChildOf>,
-    spaces: Query<(), With<vmux_layout::space::Space>>,
-    space_ids: Query<&vmux_layout::space::SpaceId>,
+    spaces: Query<(), With<Space>>,
+    space_ids: Query<&SpaceId>,
     mut tabs: Query<(
         Entity,
-        &mut vmux_layout::tab::Tab,
-        Option<&vmux_layout::tab::TabWorkspace>,
-        Option<&vmux_layout::tab::TabWorktree>,
-        Option<&vmux_layout::worktree::TabWorktreeReady>,
-        Option<&vmux_layout::tab::TabDirDecided>,
+        &mut Tab,
+        Option<&TabWorkspace>,
+        Option<&TabWorktree>,
+        Option<&TabWorktreeReady>,
+        Option<&TabDirDecided>,
     )>,
     settings: Option<Res<AppSettings>>,
-    active_space: vmux_layout::space::FocusedSpace,
-    managed_root: Option<Res<vmux_layout::worktree::ManagedWorktreeRoot>>,
+    active_space: FocusedSpace,
+    managed_root: Option<Res<ManagedWorktreeRoot>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -225,17 +240,17 @@ fn prepare_agent_tab_worktrees(
                         bg_color: None,
                         ..default()
                     },
-                    vmux_chat::host::ChatView,
+                    ChatView,
                     PreparingAgentChatView,
                 ))
                 .remove::<(
-                    vmux_start::StartInlineTransitionView,
+                    StartInlineTransitionView,
                     vmux_core::launcher::HostsLauncher,
                     vmux_core::page::PageReady,
                 )>();
             commands
                 .entity(task.stack)
-                .insert(vmux_start::StartInlineTransition { webview: view });
+                .insert(StartInlineTransition { webview: view });
             preparing_by_stack.insert(task.stack, view);
             if let Some(wake) = wake.as_ref() {
                 let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
@@ -276,7 +291,7 @@ fn prepare_agent_tab_worktrees(
                 .or_else(|| tab.startup_dir.clone())
                 .or_else(|| configured_project_dir.clone())
                 .unwrap_or_default();
-            vmux_layout::tab::TabWorkspace { project_dir }
+            TabWorkspace { project_dir }
         });
         if workspace.project_dir.is_empty() {
             continue;
@@ -296,9 +311,9 @@ fn prepare_agent_tab_worktrees(
             tab.startup_dir = None;
             commands
                 .entity(tab_entity)
-                .remove::<vmux_layout::tab::TabWorkspace>()
-                .remove::<vmux_layout::tab::TabDirDecided>()
-                .remove::<vmux_layout::tab::TabWorktreeUnavailable>()
+                .remove::<TabWorkspace>()
+                .remove::<TabDirDecided>()
+                .remove::<TabWorktreeUnavailable>()
                 .remove::<crate::host::RepositoryNeedsWorktree>();
             continue;
         }
@@ -344,7 +359,7 @@ fn prepare_agent_tab_worktrees(
         let Some(pending_worktree) = pending_worktree else {
             commands
                 .entity(tab_entity)
-                .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
+                .remove::<TabWorktreeUnavailable>();
             continue;
         };
         let pending = commands.spawn(pending_worktree).id();
@@ -361,7 +376,7 @@ fn start_agent_tab_worktrees(
     mut commands: Commands,
 ) {
     for (entity, pending) in &pending {
-        let tab = vmux_layout::tab::Tab {
+        let tab = Tab {
             name: pending.tab_name.clone(),
             startup_dir: pending.startup_dir.clone(),
         };
@@ -398,11 +413,7 @@ fn release_agent_transition_paint(
 
 fn drain_agent_tab_worktrees(
     mut pending: Query<(Entity, &PendingAgentWorktree, &mut AgentWorktreeTask)>,
-    mut tabs: Query<(
-        &mut vmux_layout::tab::Tab,
-        Option<&vmux_layout::tab::TabWorkspace>,
-        Option<&vmux_layout::tab::TabWorktree>,
-    )>,
+    mut tabs: Query<(&mut Tab, Option<&TabWorkspace>, Option<&TabWorktree>)>,
     waiting: Query<(Entity, &AwaitingAgentWorktree, &PageOpenTask)>,
     mut commands: Commands,
 ) {
@@ -428,16 +439,16 @@ fn drain_agent_tab_worktrees(
                     }
                     entity
                         .insert(activation.ready)
-                        .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
+                        .remove::<TabWorktreeUnavailable>();
                     Some(Ok(()))
                 }
                 Err(message) => {
                     commands
                         .entity(pending.tab)
-                        .insert(vmux_layout::tab::TabWorktreeUnavailable {
+                        .insert(TabWorktreeUnavailable {
                             message: message.clone(),
                         })
-                        .remove::<vmux_layout::worktree::TabWorktreeReady>();
+                        .remove::<TabWorktreeReady>();
                     Some(Err(message))
                 }
             },
@@ -466,19 +477,12 @@ fn drain_agent_tab_worktrees(
 fn handle_agent_page_open(
     mut open_q: ParamSet<(
         Query<(Entity, &PageOpenTask, Has<PageRestore>), PendingPageOpen>,
-        Query<(
-            &vmux_core::PendingPrompt,
-            Option<&vmux_core::PendingPromptAttachments>,
-        )>,
+        Query<(&PendingPrompt, Option<&PendingPromptAttachments>)>,
     )>,
     children_q: Query<&Children>,
-    agents: Query<&vmux_core::agent::AgentSession>,
-    cli_sessions: Query<(
-        Entity,
-        &vmux_core::agent::AgentSession,
-        &vmux_core::agent::SessionId,
-    )>,
-    acp_sessions: Query<&vmux_session::AcpSession>,
+    agents: Query<&CoreAgentSession>,
+    cli_sessions: Query<(Entity, &CoreAgentSession, &CoreSessionId)>,
+    acp_sessions: Query<&AcpSession>,
     child_of_q: Query<&ChildOf>,
     strategies: Query<(&StrategyKey, &StrategyKind), With<Strategy>>,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
@@ -486,7 +490,7 @@ fn handle_agent_page_open(
     settings: Res<AppSettings>,
     workspace: AgentPageOpenWorkspace,
     catalog: Option<Single<&crate::runtime::acp::AcpCatalog>>,
-    transitions: Query<&vmux_start::StartInlineTransition>,
+    transitions: Query<&StartInlineTransition>,
     launches: Query<&TerminalLaunch>,
 ) {
     let catalog = catalog.as_ref().map(|catalog| **catalog);
@@ -576,7 +580,7 @@ fn handle_agent_page_open(
                 }
                 commands
                     .entity(task.stack)
-                    .remove::<vmux_start::StartInlineTransition>();
+                    .remove::<StartInlineTransition>();
             }
             Err(message) => {
                 commands.entity(entity).insert(PageOpenError { message });
@@ -586,7 +590,7 @@ fn handle_agent_page_open(
 }
 
 fn handle_swap_stack_session(
-    mut reader: MessageReader<vmux_core::agent::SwapStackSession>,
+    mut reader: MessageReader<SwapStackSession>,
     settings: Res<AppSettings>,
     catalog: Option<Single<&crate::runtime::acp::AcpCatalog>>,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
@@ -636,7 +640,7 @@ fn handle_swap_stack_session(
 
         commands
             .entity(ev.stack)
-            .remove::<vmux_session::AcpSession>()
+            .remove::<AcpSession>()
             .remove::<crate::acp_tool::AcpLaunchStarted>()
             .remove::<vmux_session::AgentSession>()
             .remove::<crate::AgentMessages>()
@@ -695,13 +699,9 @@ fn handle_agent_page_open_task(
     initial_attachments: Vec<AgentAttachment>,
     transition_webview: Option<Entity>,
     children_q: &Query<&Children>,
-    agents: &Query<&vmux_core::agent::AgentSession>,
-    cli_sessions: &Query<(
-        Entity,
-        &vmux_core::agent::AgentSession,
-        &vmux_core::agent::SessionId,
-    )>,
-    acp_sessions: &Query<&vmux_session::AcpSession>,
+    agents: &Query<&CoreAgentSession>,
+    cli_sessions: &Query<(Entity, &CoreAgentSession, &CoreSessionId)>,
+    acp_sessions: &Query<&AcpSession>,
     strategies: &Query<(&StrategyKey, &StrategyKind), With<Strategy>>,
     spawn_agent: &mut MessageWriter<SpawnAgentInStackRequest>,
     commands: &mut Commands,
@@ -859,16 +859,14 @@ fn insert_initial_prompt_queue(
         return;
     }
     if let Some(title) = vmux_session::provisional_conversation_title(&prompt) {
-        commands
-            .entity(stack)
-            .insert(vmux_session::AgentConversationTitle(title));
+        commands.entity(stack).insert(AgentConversationTitle(title));
     }
-    let mut queue = vmux_session::PromptQueue::default();
+    let mut queue = PromptQueue::default();
     queue.enqueue_with_attachments(prompt, initial_attachments);
-    commands.entity(stack).insert(queue).remove::<(
-        vmux_core::PendingPrompt,
-        vmux_core::PendingPromptAttachments,
-    )>();
+    commands
+        .entity(stack)
+        .insert(queue)
+        .remove::<(PendingPrompt, PendingPromptAttachments)>();
 }
 
 pub(crate) fn cli_initial_prompt(
@@ -898,7 +896,7 @@ fn stack_has_agent_of_kind(
     stack: Entity,
     kind: AgentKind,
     children_q: &Query<&Children>,
-    agents: &Query<&vmux_core::agent::AgentSession>,
+    agents: &Query<&CoreAgentSession>,
 ) -> bool {
     children_q
         .get(stack)
@@ -934,7 +932,7 @@ pub(crate) fn attach_agent_spawn_error_to_stack(
     });
     let browser = commands
         .spawn((
-            vmux_layout::Browser::new_with_title(&data_url, title),
+            LayoutBrowser::new_with_title(&data_url, title),
             ChildOf(stack),
         ))
         .id();
@@ -956,7 +954,7 @@ pub(crate) fn attach_cli_setup_to_stack(kind: AgentKind, stack: Entity, commands
     });
     let browser = commands
         .spawn((
-            vmux_layout::Browser::new_with_title(&url, &title),
+            LayoutBrowser::new_with_title(&url, &title),
             crate::setup::AgentSetupView,
             ChildOf(stack),
         ))
@@ -998,7 +996,7 @@ mod tests {
     pub(crate) fn swap_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<vmux_core::agent::SwapStackSession>()
+            .add_message::<SwapStackSession>()
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(test_settings())
             .add_systems(Update, handle_swap_stack_session);
@@ -1016,8 +1014,8 @@ mod tests {
         let mut app = swap_test_app();
         let (stack, child) = spawn_stack_child(&mut app);
         app.world_mut()
-            .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
-            .write(vmux_core::agent::SwapStackSession {
+            .resource_mut::<Messages<SwapStackSession>>()
+            .write(SwapStackSession {
                 stack,
                 target_url: "not-an-agent-url".to_string(),
                 cwd: std::path::PathBuf::from("/work"),
@@ -1034,8 +1032,8 @@ mod tests {
         let mut app = swap_test_app();
         let (stack, child) = spawn_stack_child(&mut app);
         app.world_mut()
-            .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
-            .write(vmux_core::agent::SwapStackSession {
+            .resource_mut::<Messages<SwapStackSession>>()
+            .write(SwapStackSession {
                 stack,
                 target_url: "vmux://sessions/not-configured/sid-1".to_string(),
                 cwd: std::path::PathBuf::from("/work"),
@@ -1053,8 +1051,8 @@ mod tests {
         let (stack, _child) = spawn_stack_child(&mut app);
         let messages = vec![crate::Message::user("fix auth")];
         app.world_mut()
-            .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
-            .write(vmux_core::agent::SwapStackSession {
+            .resource_mut::<Messages<SwapStackSession>>()
+            .write(SwapStackSession {
                 stack,
                 target_url: "vmux://sessions/claude".to_string(),
                 cwd: std::path::PathBuf::from("/source/work"),
@@ -1070,7 +1068,7 @@ mod tests {
 
         app.update();
 
-        let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();
+        let session = app.world().get::<AcpSession>(stack).unwrap();
         assert_eq!(session.agent_id, "claude");
         assert_eq!(session.cwd, std::path::PathBuf::from("/source/work"));
         assert!(session.resume.is_none());
@@ -1096,8 +1094,8 @@ mod tests {
             .entity_mut(stack)
             .insert(crate::acp_tool::AcpLaunchStarted);
         app.world_mut()
-            .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
-            .write(vmux_core::agent::SwapStackSession {
+            .resource_mut::<Messages<SwapStackSession>>()
+            .write(SwapStackSession {
                 stack,
                 target_url: "vmux://sessions/codex/session-2".to_string(),
                 cwd: std::path::PathBuf::from("/work"),
@@ -1111,7 +1109,7 @@ mod tests {
                 .get::<crate::acp_tool::AcpLaunchStarted>(stack)
                 .is_none()
         );
-        let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();
+        let session = app.world().get::<AcpSession>(stack).unwrap();
         assert_eq!(session.resume.as_deref(), Some("session-2"));
     }
 
@@ -1129,13 +1127,10 @@ mod tests {
             .insert_resource(test_settings())
             .add_systems(Update, handle_agent_page_open.before(SpawnRequestSet));
 
-        let stack = app
-            .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
-            .id();
+        let stack = app.world_mut().spawn(stack_bundle()).id();
         let child = app.world_mut().spawn(ChildOf(stack)).id();
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "vmux://sessions/vibe/".to_string(),
             request_id: None,
@@ -1150,7 +1145,7 @@ mod tests {
         assert_eq!(stack_meta.title, "Set up Vibe CLI");
         let mut browsers = app
             .world_mut()
-            .query_filtered::<(&PageMetadata, &ChildOf), With<vmux_layout::Browser>>();
+            .query_filtered::<(&PageMetadata, &ChildOf), With<LayoutBrowser>>();
         let metas: Vec<PageMetadata> = browsers
             .iter(app.world())
             .filter(|(_, child_of)| child_of.parent() == stack)
@@ -1183,12 +1178,9 @@ mod tests {
                 .insert_resource(settings)
                 .add_systems(Update, handle_agent_page_open.before(SpawnRequestSet));
 
-            let stack = app
-                .world_mut()
-                .spawn(vmux_layout::stack::stack_bundle())
-                .id();
+            let stack = app.world_mut().spawn(stack_bundle()).id();
             app.world_mut().spawn(PageOpenTask {
-                id: vmux_core::PageOpenId::new(),
+                id: PageOpenId::new(),
                 stack,
                 url: format!("vmux://sessions/{segment}/"),
                 request_id: None,
@@ -1229,14 +1221,11 @@ mod tests {
             .insert_resource(settings)
             .add_systems(Update, handle_agent_page_open);
 
-        let stack = app
-            .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
-            .id();
+        let stack = app.world_mut().spawn(stack_bundle()).id();
         let task = app
             .world_mut()
             .spawn(PageOpenTask {
-                id: vmux_core::PageOpenId::new(),
+                id: PageOpenId::new(),
                 stack,
                 url: "vmux://agent/custom".to_string(),
                 request_id: None,
@@ -1246,7 +1235,7 @@ mod tests {
         app.update();
 
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
-        let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();
+        let session = app.world().get::<AcpSession>(stack).unwrap();
         assert_eq!(session.agent_id, "custom");
         let meta = app.world().get::<PageMetadata>(stack).unwrap();
         assert_eq!(meta.url, "vmux://sessions/custom");
@@ -1263,12 +1252,9 @@ mod tests {
                 .insert_resource(test_settings())
                 .add_systems(Update, handle_agent_page_open);
 
-            let stack = app
-                .world_mut()
-                .spawn(vmux_layout::stack::stack_bundle())
-                .id();
+            let stack = app.world_mut().spawn(stack_bundle()).id();
             app.world_mut().spawn(PageOpenTask {
-                id: vmux_core::PageOpenId::new(),
+                id: PageOpenId::new(),
                 stack,
                 url: url.to_string(),
                 request_id: None,
@@ -1305,7 +1291,7 @@ mod tests {
         let project_dir = repo.path().canonicalize().unwrap();
         let tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "Feature".into(),
                 startup_dir: Some(project_dir.to_string_lossy().into_owned()),
             })
@@ -1314,7 +1300,7 @@ mod tests {
         let first_task = app
             .world_mut()
             .spawn(PageOpenTask {
-                id: vmux_core::PageOpenId::new(),
+                id: PageOpenId::new(),
                 stack: first_stack,
                 url: "vmux://sessions/claude/cli".to_string(),
                 request_id: None,
@@ -1325,24 +1311,12 @@ mod tests {
 
         assert!(app.world().get::<PageOpenDeferred>(first_task).is_none());
         assert!(app.world().get::<PageOpenHandled>(first_task).is_some());
-        assert!(
-            app.world()
-                .get::<vmux_layout::tab::TabWorktree>(tab)
-                .is_none()
-        );
+        assert!(app.world().get::<TabWorktree>(tab).is_none());
         assert_eq!(
-            app.world()
-                .get::<vmux_layout::tab::TabWorkspace>(tab)
-                .unwrap()
-                .project_dir,
+            app.world().get::<TabWorkspace>(tab).unwrap().project_dir,
             project_dir.to_string_lossy()
         );
-        assert_eq!(
-            vmux_git::worktree::worktree_list(repo.path())
-                .unwrap()
-                .len(),
-            1
-        );
+        assert_eq!(worktree_list(repo.path()).unwrap().len(), 1);
         assert!(
             app.world()
                 .get::<crate::host::RepositoryNeedsWorktree>(tab)
@@ -1358,19 +1332,14 @@ mod tests {
 
         let second_stack = app.world_mut().spawn(ChildOf(tab)).id();
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack: second_stack,
             url: "vmux://sessions/codex/cli".to_string(),
             request_id: None,
         });
         app.update();
 
-        assert_eq!(
-            vmux_git::worktree::worktree_list(repo.path())
-                .unwrap()
-                .len(),
-            1
-        );
+        assert_eq!(worktree_list(repo.path()).unwrap().len(), 1);
     }
 
     #[test]
@@ -1393,7 +1362,7 @@ mod tests {
         let project_dir = repo.path().canonicalize().unwrap();
         let tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "Feature".into(),
                 startup_dir: Some(project_dir.to_string_lossy().into_owned()),
             })
@@ -1401,26 +1370,26 @@ mod tests {
         let stack = app
             .world_mut()
             .spawn((
-                vmux_layout::stack::stack_bundle(),
-                vmux_core::PendingPrompt("yo".to_string()),
+                stack_bundle(),
+                PendingPrompt("yo".to_string()),
                 ChildOf(tab),
             ))
             .id();
         let start = app
             .world_mut()
             .spawn((
-                vmux_layout::Browser::native_page("vmux://start/", "Start"),
-                vmux_start::StartInlineTransitionView,
+                LayoutBrowser::native_page("vmux://start/", "Start"),
+                StartInlineTransitionView,
                 ChildOf(stack),
             ))
             .id();
         app.world_mut()
             .entity_mut(stack)
-            .insert(vmux_start::StartInlineTransition { webview: start });
+            .insert(StartInlineTransition { webview: start });
         let first = app
             .world_mut()
             .spawn(PageOpenTask {
-                id: vmux_core::PageOpenId::new(),
+                id: PageOpenId::new(),
                 stack,
                 url: "vmux://sessions/claude".to_string(),
                 request_id: None,
@@ -1429,7 +1398,7 @@ mod tests {
         let second = app
             .world_mut()
             .spawn(PageOpenTask {
-                id: vmux_core::PageOpenId::new(),
+                id: PageOpenId::new(),
                 stack,
                 url: "vmux://sessions/claude".to_string(),
                 request_id: None,
@@ -1451,7 +1420,7 @@ mod tests {
                 .get::<AwaitingAgentTransitionPaint>(second)
                 .is_some()
         );
-        assert!(app.world().get::<vmux_session::AcpSession>(stack).is_none());
+        assert!(app.world().get::<AcpSession>(stack).is_none());
         assert!(
             app.world()
                 .get::<crate::host::RepositoryNeedsWorktree>(tab)
@@ -1459,10 +1428,7 @@ mod tests {
         );
         assert_eq!(
             app.world_mut()
-                .query_filtered::<Entity, (
-                    With<vmux_chat::host::ChatView>,
-                    With<PreparingAgentChatView>,
-                )>()
+                .query_filtered::<Entity, (With<ChatView>, With<PreparingAgentChatView>,)>()
                 .iter(app.world())
                 .collect::<Vec<_>>(),
             [start]
@@ -1474,21 +1440,16 @@ mod tests {
         assert!(app.world().get::<PageOpenDeferred>(second).is_none());
         assert!(app.world().get::<PageOpenHandled>(first).is_some());
         assert!(app.world().get::<PageOpenHandled>(second).is_some());
-        assert!(app.world().get::<vmux_session::AcpSession>(stack).is_some());
+        assert!(app.world().get::<AcpSession>(stack).is_some());
         assert!(
             app.world()
                 .get::<crate::host::RepositoryNeedsWorktree>(tab)
                 .is_some()
         );
-        assert_eq!(
-            vmux_git::worktree::worktree_list(repo.path())
-                .unwrap()
-                .len(),
-            1
-        );
+        assert_eq!(worktree_list(repo.path()).unwrap().len(), 1);
         assert_eq!(
             app.world_mut()
-                .query_filtered::<Entity, With<vmux_chat::host::ChatView>>()
+                .query_filtered::<Entity, With<ChatView>>()
                 .iter(app.world())
                 .collect::<Vec<_>>(),
             [start]
@@ -1508,10 +1469,10 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .add_systems(Update, prepare_agent_tab_worktrees);
-        let workspace = vmux_layout::tab::TabWorkspace {
+        let workspace = TabWorkspace {
             project_dir: "/project".to_string(),
         };
-        let metadata = vmux_layout::tab::TabWorktree {
+        let metadata = TabWorktree {
             repo_root: "/project".to_string(),
             checkout_dir: "/project/.worktrees/feature".to_string(),
             branch: "feature".to_string(),
@@ -1520,7 +1481,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                vmux_layout::tab::Tab {
+                Tab {
                     name: "Feature".into(),
                     startup_dir: Some(metadata.checkout_dir.clone()),
                 },
@@ -1528,21 +1489,18 @@ mod tests {
                 metadata.clone(),
             ))
             .id();
-        let stack = app
-            .world_mut()
-            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
-            .id();
+        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(tab))).id();
         let start = app
             .world_mut()
             .spawn((
-                vmux_layout::Browser::native_page("vmux://start/", "Start"),
-                vmux_start::StartInlineTransitionView,
+                LayoutBrowser::native_page("vmux://start/", "Start"),
+                StartInlineTransitionView,
                 ChildOf(stack),
             ))
             .id();
         app.world_mut()
             .entity_mut(stack)
-            .insert(vmux_start::StartInlineTransition { webview: start });
+            .insert(StartInlineTransition { webview: start });
         app.world_mut().spawn((
             PendingAgentWorktree {
                 tab,
@@ -1552,15 +1510,16 @@ mod tests {
                 metadata,
                 managed_root: PathBuf::from("/project/.worktrees"),
             },
-            AgentWorktreeTask(IoTaskPool::get().spawn(async {
-                future::pending::<Result<vmux_layout::worktree::TabWorktreeActivation, String>>()
-                    .await
-            })),
+            AgentWorktreeTask(
+                IoTaskPool::get().spawn(async {
+                    future::pending::<Result<TabWorktreeActivation, String>>().await
+                }),
+            ),
         ));
         let task = app
             .world_mut()
             .spawn(PageOpenTask {
-                id: vmux_core::PageOpenId::new(),
+                id: PageOpenId::new(),
                 stack,
                 url: "vmux://sessions/claude".to_string(),
                 request_id: None,
@@ -1573,10 +1532,7 @@ mod tests {
         assert!(app.world().get::<PageOpenDeferred>(task).is_some());
         assert_eq!(
             app.world_mut()
-                .query_filtered::<Entity, (
-                    With<vmux_chat::host::ChatView>,
-                    With<PreparingAgentChatView>,
-                )>()
+                .query_filtered::<Entity, (With<ChatView>, With<PreparingAgentChatView>,)>()
                 .iter(app.world())
                 .collect::<Vec<_>>(),
             [start]
@@ -1594,9 +1550,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(settings)
-            .insert_resource(vmux_layout::worktree::ManagedWorktreeRoot(
-                managed_root.path().to_path_buf(),
-            ))
+            .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
             .add_systems(
                 Update,
                 (
@@ -1609,19 +1563,19 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                vmux_layout::tab::Tab {
+                Tab {
                     name: "Dashboard".into(),
                     startup_dir: Some(project_dir.to_string_lossy().into_owned()),
                 },
-                vmux_layout::tab::TabWorkspace {
+                TabWorkspace {
                     project_dir: project_dir.to_string_lossy().into_owned(),
                 },
-                vmux_layout::tab::TabDirDecided,
+                TabDirDecided,
             ))
             .id();
         let stack = app.world_mut().spawn(ChildOf(tab)).id();
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "vmux://sessions/claude/cli".to_string(),
             request_id: None,
@@ -1629,17 +1583,8 @@ mod tests {
 
         app.update();
 
-        assert_eq!(
-            vmux_git::worktree::worktree_list(repo.path())
-                .unwrap()
-                .len(),
-            1
-        );
-        assert!(
-            app.world()
-                .get::<vmux_layout::tab::TabWorktree>(tab)
-                .is_none()
-        );
+        assert_eq!(worktree_list(repo.path()).unwrap().len(), 1);
+        assert!(app.world().get::<TabWorktree>(tab).is_none());
         assert!(
             app.world()
                 .get::<crate::host::RepositoryNeedsWorktree>(tab)
@@ -1667,9 +1612,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(settings)
-            .insert_resource(vmux_layout::worktree::ManagedWorktreeRoot(
-                managed_root.path().to_path_buf(),
-            ))
+            .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
             .add_systems(
                 Update,
                 (
@@ -1681,14 +1624,14 @@ mod tests {
             );
         let tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "Existing".into(),
                 startup_dir: Some(linked.to_string_lossy().into_owned()),
             })
             .id();
         let stack = app.world_mut().spawn(ChildOf(tab)).id();
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "vmux://sessions/claude/cli".to_string(),
             request_id: None,
@@ -1696,17 +1639,8 @@ mod tests {
 
         app.update();
 
-        assert_eq!(
-            vmux_git::worktree::worktree_list(repo.path())
-                .unwrap()
-                .len(),
-            2
-        );
-        assert!(
-            app.world()
-                .get::<vmux_layout::tab::TabWorktree>(tab)
-                .is_none()
-        );
+        assert_eq!(worktree_list(repo.path()).unwrap().len(), 2);
+        assert!(app.world().get::<TabWorktree>(tab).is_none());
         assert!(
             app.world()
                 .get::<crate::host::RepositoryNeedsWorktree>(tab)
@@ -1727,20 +1661,18 @@ mod tests {
         let managed_root = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(vmux_layout::worktree::ManagedWorktreeRoot(
-                managed_root.path().to_path_buf(),
-            ))
+            .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
             .add_systems(Update, prepare_agent_tab_worktrees);
         let tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "Browser".into(),
                 startup_dir: Some(repo.path().to_string_lossy().into_owned()),
             })
             .id();
         let stack = app.world_mut().spawn(ChildOf(tab)).id();
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "https://example.com".to_string(),
             request_id: None,
@@ -1748,17 +1680,8 @@ mod tests {
 
         app.update();
 
-        assert_eq!(
-            vmux_git::worktree::worktree_list(repo.path())
-                .unwrap()
-                .len(),
-            1
-        );
-        assert!(
-            app.world()
-                .get::<vmux_layout::tab::TabWorktree>(tab)
-                .is_none()
-        );
+        assert_eq!(worktree_list(repo.path()).unwrap().len(), 1);
+        assert!(app.world().get::<TabWorktree>(tab).is_none());
     }
 
     #[test]
@@ -1772,7 +1695,7 @@ mod tests {
             .add_systems(Update, handle_agent_page_open);
         let tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "Tab 1".into(),
                 startup_dir: None,
             })
@@ -1780,15 +1703,15 @@ mod tests {
         let stack = app
             .world_mut()
             .spawn((
-                vmux_layout::stack::stack_bundle(),
-                vmux_core::PendingPrompt("Show me something fun in terminal".into()),
+                stack_bundle(),
+                PendingPrompt("Show me something fun in terminal".into()),
                 ChildOf(tab),
             ))
             .id();
         let task = app
             .world_mut()
             .spawn(PageOpenTask {
-                id: vmux_core::PageOpenId::new(),
+                id: PageOpenId::new(),
                 stack,
                 url: "vmux://sessions/codex/cli".to_string(),
                 request_id: None,
@@ -1809,11 +1732,7 @@ mod tests {
             spawns[0].initial_prompt.as_deref(),
             Some("Show me something fun in terminal")
         );
-        assert!(
-            app.world()
-                .get::<vmux_layout::tab::TabWorkspace>(tab)
-                .is_none()
-        );
+        assert!(app.world().get::<TabWorkspace>(tab).is_none());
     }
 
     #[test]
@@ -1825,7 +1744,7 @@ mod tests {
             .add_systems(Update, handle_agent_page_open);
         let tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "Tab 1".into(),
                 startup_dir: None,
             })
@@ -1833,13 +1752,13 @@ mod tests {
         let stack = app
             .world_mut()
             .spawn((
-                vmux_layout::stack::stack_bundle(),
-                vmux_core::PendingPrompt("Show me something fun in terminal".into()),
+                stack_bundle(),
+                PendingPrompt("Show me something fun in terminal".into()),
                 ChildOf(tab),
             ))
             .id();
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "vmux://sessions/claude".to_string(),
             request_id: None,
@@ -1847,25 +1766,21 @@ mod tests {
 
         app.update();
 
-        let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();
+        let session = app.world().get::<AcpSession>(stack).unwrap();
         assert_eq!(session.cwd, AgentCwd::projects().unwrap());
         assert_eq!(
             app.world()
-                .get::<vmux_session::PromptQueue>(stack)
+                .get::<PromptQueue>(stack)
                 .unwrap()
                 .items
                 .front()
                 .map(|item| item.text.as_str()),
             Some("Show me something fun in terminal")
         );
-        assert!(
-            app.world()
-                .get::<vmux_layout::tab::TabWorkspace>(tab)
-                .is_none()
-        );
+        assert!(app.world().get::<TabWorkspace>(tab).is_none());
         assert_eq!(
             app.world_mut()
-                .query_filtered::<&ChildOf, With<vmux_chat::host::ChatView>>()
+                .query_filtered::<&ChildOf, With<ChatView>>()
                 .iter(app.world())
                 .filter(|child_of| child_of.parent() == stack)
                 .count(),
@@ -1883,9 +1798,9 @@ mod tests {
         let stack = app
             .world_mut()
             .spawn((
-                vmux_layout::stack::stack_bundle(),
-                vmux_core::PendingPrompt("keep this prompt".to_string()),
-                vmux_core::PendingPromptAttachments(vec![AgentAttachment {
+                stack_bundle(),
+                PendingPrompt("keep this prompt".to_string()),
+                PendingPromptAttachments(vec![AgentAttachment {
                     path: "/tmp/reference.png".to_string(),
                     name: "reference.png".to_string(),
                     mime_type: "image/png".to_string(),
@@ -1896,22 +1811,22 @@ mod tests {
         let webview = app
             .world_mut()
             .spawn((
-                vmux_layout::Browser,
+                LayoutBrowser,
                 bevy_cef::prelude::WebviewSource::new("vmux://start/"),
                 PageMetadata {
                     url: "vmux://start/".to_string(),
                     title: "Start".to_string(),
                     ..default()
                 },
-                vmux_start::StartInlineTransitionView,
+                StartInlineTransitionView,
                 ChildOf(stack),
             ))
             .id();
         app.world_mut()
             .entity_mut(stack)
-            .insert(vmux_start::StartInlineTransition { webview });
+            .insert(StartInlineTransition { webview });
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "vmux://sessions/claude".to_string(),
             request_id: None,
@@ -1922,7 +1837,7 @@ mod tests {
         assert!(app.world().get_entity(webview).is_ok());
         let mut views = app
             .world_mut()
-            .query_filtered::<(Entity, &PageMetadata, &ChildOf), With<vmux_chat::host::ChatView>>();
+            .query_filtered::<(Entity, &PageMetadata, &ChildOf), With<ChatView>>();
         let opened: Vec<_> = views.iter(app.world()).collect();
         let [(entity, meta, parent)] = opened.as_slice() else {
             panic!("expected exactly one chat view, got {}", opened.len());
@@ -1930,7 +1845,7 @@ mod tests {
         assert_eq!(*entity, webview);
         assert_eq!(meta.url, "vmux://sessions/claude");
         assert_eq!(parent.parent(), stack);
-        let queue = app.world().get::<vmux_session::PromptQueue>(stack).unwrap();
+        let queue = app.world().get::<PromptQueue>(stack).unwrap();
         assert_eq!(
             queue.items.front().map(|item| item.text.as_str()),
             Some("keep this prompt")
@@ -1943,17 +1858,9 @@ mod tests {
                 .map(|attachment| attachment.path.as_str()),
             Some("/tmp/reference.png")
         );
-        assert!(app.world().get::<vmux_core::PendingPrompt>(stack).is_none());
-        assert!(
-            app.world()
-                .get::<vmux_core::PendingPromptAttachments>(stack)
-                .is_none()
-        );
-        assert!(
-            app.world()
-                .get::<vmux_start::StartInlineTransition>(stack)
-                .is_none()
-        );
+        assert!(app.world().get::<PendingPrompt>(stack).is_none());
+        assert!(app.world().get::<PendingPromptAttachments>(stack).is_none());
+        assert!(app.world().get::<StartInlineTransition>(stack).is_none());
     }
 
     #[test]
@@ -1979,21 +1886,18 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                vmux_layout::tab::Tab {
+                Tab {
                     name: "Tab 1".into(),
                     startup_dir: Some(stale.clone()),
                 },
-                vmux_layout::tab::TabWorkspace { project_dir: stale },
+                TabWorkspace { project_dir: stale },
             ))
             .id();
-        let stack = app
-            .world_mut()
-            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
-            .id();
+        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(tab))).id();
         let task = app
             .world_mut()
             .spawn(PageOpenTask {
-                id: vmux_core::PageOpenId::new(),
+                id: PageOpenId::new(),
                 stack,
                 url: "vmux://sessions/codex".to_string(),
                 request_id: None,
@@ -2005,24 +1909,11 @@ mod tests {
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
         assert!(app.world().get::<PageOpenError>(task).is_none());
         assert_eq!(
-            app.world()
-                .get::<vmux_session::AcpSession>(stack)
-                .unwrap()
-                .cwd,
+            app.world().get::<AcpSession>(stack).unwrap().cwd,
             AgentCwd::projects().unwrap()
         );
-        assert_eq!(
-            app.world()
-                .get::<vmux_layout::tab::Tab>(tab)
-                .unwrap()
-                .startup_dir,
-            None
-        );
-        assert!(
-            app.world()
-                .get::<vmux_layout::tab::TabWorkspace>(tab)
-                .is_none()
-        );
+        assert_eq!(app.world().get::<Tab>(tab).unwrap().startup_dir, None);
+        assert!(app.world().get::<TabWorkspace>(tab).is_none());
     }
 
     #[test]
@@ -2034,7 +1925,7 @@ mod tests {
         settings.agent.acp.clear();
         settings.spaces.insert(
             "space-1".into(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(dir.to_string_lossy().into()),
                 ..Default::default()
@@ -2047,20 +1938,17 @@ mod tests {
             .insert_resource(settings)
             .add_systems(Update, handle_agent_page_open);
         app.world_mut().spawn((
-            vmux_space::spaces::space_profile_bundle(&vmux_space::model::SpaceRecord {
+            space_profile_bundle(&SpaceRecord {
                 id: "space-1".into(),
                 name: "Space 1".into(),
                 profile: "Personal".into(),
             }),
-            vmux_layout::space::CurrentSpace,
+            CurrentSpace,
         ));
 
-        let stack = app
-            .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
-            .id();
+        let stack = app.world_mut().spawn(stack_bundle()).id();
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "vmux://sessions/claude/".to_string(),
             request_id: None,
@@ -2090,7 +1978,7 @@ mod tests {
         settings.agent.acp.clear();
         settings.spaces.insert(
             "active".into(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(active_dir.path().to_string_lossy().into()),
                 ..Default::default()
@@ -2098,7 +1986,7 @@ mod tests {
         );
         settings.spaces.insert(
             "restored".into(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(restored_dir.path().to_string_lossy().into()),
                 ..Default::default()
@@ -2110,36 +1998,30 @@ mod tests {
             .insert_resource(settings)
             .add_systems(Update, handle_agent_page_open);
         app.world_mut().spawn((
-            vmux_space::spaces::space_profile_bundle(&vmux_space::model::SpaceRecord {
+            space_profile_bundle(&SpaceRecord {
                 id: "active".into(),
                 name: "Active".into(),
                 profile: "Personal".into(),
             }),
-            vmux_layout::space::CurrentSpace,
+            CurrentSpace,
         ));
         let space = app
             .world_mut()
-            .spawn((
-                vmux_layout::space::Space,
-                vmux_layout::space::SpaceId("restored".into()),
-            ))
+            .spawn((Space, SpaceId("restored".into())))
             .id();
         let tab = app
             .world_mut()
             .spawn((
-                vmux_layout::tab::Tab {
+                Tab {
                     name: "Legacy".into(),
                     startup_dir: None,
                 },
                 ChildOf(space),
             ))
             .id();
-        let stack = app
-            .world_mut()
-            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
-            .id();
+        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(tab))).id();
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "vmux://sessions/claude/cli".to_string(),
             request_id: None,
@@ -2167,13 +2049,10 @@ mod tests {
             .add_systems(Update, handle_agent_page_open);
         let stack = app
             .world_mut()
-            .spawn((
-                vmux_layout::stack::stack_bundle(),
-                vmux_core::PendingPrompt("fix the tests".to_string()),
-            ))
+            .spawn((stack_bundle(), PendingPrompt("fix the tests".to_string())))
             .id();
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "vmux://sessions/codex/cli".to_string(),
             request_id: None,
@@ -2208,10 +2087,7 @@ mod tests {
             .add_message::<vmux_core::agent::PageAgentSpawnDefaultRequest>()
             .add_message::<vmux_core::agent::PageAgentAttachDefaultRequest>()
             .insert_resource(test_settings());
-        let stack = app
-            .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
-            .id();
+        let stack = app.world_mut().spawn(stack_bundle()).id();
         app.world_mut()
             .entity_mut(stack)
             .get_mut::<PageMetadata>()
@@ -2280,13 +2156,10 @@ mod tests {
             .add_systems(Update, handle_agent_page_open);
         let stack = app
             .world_mut()
-            .spawn((
-                vmux_layout::stack::stack_bundle(),
-                vmux_core::PendingPrompt("ship it".to_string()),
-            ))
+            .spawn((stack_bundle(), PendingPrompt("ship it".to_string())))
             .id();
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "vmux://sessions/claude".to_string(),
             request_id: None,
@@ -2294,17 +2167,16 @@ mod tests {
 
         app.update();
 
-        let queue = app.world().get::<vmux_session::PromptQueue>(stack).unwrap();
+        let queue = app.world().get::<PromptQueue>(stack).unwrap();
         assert_eq!(
             queue.items.front().map(|item| item.text.as_str()),
             Some("ship it")
         );
         assert_eq!(
-            app.world()
-                .get::<vmux_session::AgentConversationTitle>(stack),
-            Some(&vmux_session::AgentConversationTitle("ship it".into()))
+            app.world().get::<AgentConversationTitle>(stack),
+            Some(&AgentConversationTitle("ship it".into()))
         );
-        assert!(app.world().get::<vmux_core::PendingPrompt>(stack).is_none());
+        assert!(app.world().get::<PendingPrompt>(stack).is_none());
     }
 
     #[test]
@@ -2318,7 +2190,7 @@ mod tests {
         settings.agent.acp.clear();
         settings.spaces.insert(
             "space-1".into(),
-            vmux_setting::SpaceOverrides {
+            SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(space_dir.to_string_lossy().into()),
                 ..Default::default()
@@ -2331,27 +2203,24 @@ mod tests {
             .insert_resource(settings)
             .add_systems(Update, handle_agent_page_open);
         app.world_mut().spawn((
-            vmux_space::spaces::space_profile_bundle(&vmux_space::model::SpaceRecord {
+            space_profile_bundle(&SpaceRecord {
                 id: "space-1".into(),
                 name: "Space 1".into(),
                 profile: "Personal".into(),
             }),
-            vmux_layout::space::CurrentSpace,
+            CurrentSpace,
         ));
 
         let tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "t".into(),
                 startup_dir: Some(tab_dir.to_string_lossy().into()),
             })
             .id();
-        let stack = app
-            .world_mut()
-            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
-            .id();
+        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(tab))).id();
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "vmux://sessions/claude/".to_string(),
             request_id: None,
@@ -2385,19 +2254,16 @@ mod tests {
             .add_systems(Update, handle_agent_page_open);
         let tab = app
             .world_mut()
-            .spawn(vmux_layout::tab::Tab {
+            .spawn(Tab {
                 name: "t".into(),
                 startup_dir: Some("/no/such/vmux-tab-workspace".into()),
             })
             .id();
-        let stack = app
-            .world_mut()
-            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
-            .id();
+        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(tab))).id();
         let task = app
             .world_mut()
             .spawn(PageOpenTask {
-                id: vmux_core::PageOpenId::new(),
+                id: PageOpenId::new(),
                 stack,
                 url: "vmux://sessions/claude/".to_string(),
                 request_id: None,
@@ -2423,18 +2289,15 @@ mod tests {
             .insert_resource(test_settings())
             .add_systems(Update, handle_agent_page_open);
 
-        let stack = app
-            .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
-            .id();
+        let stack = app.world_mut().spawn(stack_bundle()).id();
         app.world_mut().spawn((
             ChildOf(stack),
-            vmux_core::agent::AgentSession {
+            CoreAgentSession {
                 kind: AgentKind::Vibe,
             },
         ));
         app.world_mut().spawn(PageOpenTask {
-            id: vmux_core::PageOpenId::new(),
+            id: PageOpenId::new(),
             stack,
             url: "vmux://sessions/vibe/".to_string(),
             request_id: None,
