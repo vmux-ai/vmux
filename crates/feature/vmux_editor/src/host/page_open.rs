@@ -115,7 +115,11 @@ fn handle_file_page_open(
             });
         }
         let pending = PendingGoto::from_url(&task.url);
-        let view = match FileView::in_stack(task.stack, &children, &views) {
+        let view = match children
+            .get(task.stack)
+            .ok()
+            .and_then(|children| children.iter().find(|&child| views.contains(child)))
+        {
             Some(view) => {
                 if let Ok((file_view, mut metadata)) = views.get_mut(view) {
                     if file_view.path != path {

@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::num::NonZero;
 use std::time::Duration;
@@ -10,7 +11,7 @@ use vmux_core::cli::{CliInvocation, CliResult};
 mod catalog;
 mod parser;
 
-use catalog::{CliCatalog, collect_cli_catalog};
+use catalog::CliCatalog;
 use parser::CliParser;
 
 pub struct CliRuntimePlugin;
@@ -44,6 +45,41 @@ impl CliRunner {
 
 #[derive(Component)]
 struct CliArguments(Vec<OsString>);
+
+fn collect_cli_catalog(
+    processes: Query<Entity, (With<CliArguments>, Without<CliCatalog>)>,
+    manifests: Query<&vmux_core::cli::CliManifest>,
+    mut commands: Commands,
+) {
+    let mut default = None;
+    let mut registered = Vec::new();
+    for manifest in &manifests {
+        if let Some(candidate) = &manifest.default {
+            assert!(
+                default.is_none(),
+                "only one default CLI command may be registered"
+            );
+            default = Some(candidate.clone());
+        }
+        registered.extend(manifest.commands.iter().cloned());
+    }
+    registered.sort_by(|left, right| left.name.cmp(&right.name));
+    let mut names = BTreeSet::new();
+    for command in &registered {
+        assert!(
+            names.insert(command.name.clone()),
+            "duplicate CLI command: {}",
+            command.name
+        );
+    }
+    let default = default.expect("one default CLI command must be registered");
+    for entity in &processes {
+        commands.entity(entity).insert(CliCatalog {
+            default: default.clone(),
+            commands: registered.clone(),
+        });
+    }
+}
 
 fn parse_cli_arguments(
     processes: Query<(Entity, &CliArguments, &CliCatalog), Without<CliInvocation>>,

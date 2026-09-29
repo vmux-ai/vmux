@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use vmux_core::PageMetadata;
 
 use crate::host::edit::EditCore;
 use crate::host::edit::highlight_cache::HighlightCache;
@@ -66,17 +65,6 @@ impl FileDocumentRevision {
 }
 
 impl FileView {
-    pub(super) fn in_stack(
-        stack: Entity,
-        children_q: &Query<&Children>,
-        views: &Query<(&FileView, &mut PageMetadata)>,
-    ) -> Option<Entity> {
-        let Ok(children) = children_q.get(stack) else {
-            return None;
-        };
-        children.iter().find(|&child| views.contains(child))
-    }
-
     pub(super) fn url(&self) -> String {
         url::Url::from_file_path(&self.path)
             .map(|url| url.to_string())
