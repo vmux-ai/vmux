@@ -5,6 +5,13 @@ use vmux_api::protocol::{
     AgentRequestId,
 };
 use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput, CommandOrigin};
+use vmux_extension::ExtensionInstallRequest;
+use vmux_history::query::HistoryOpenIntent;
+use vmux_layout::active_pane::ActivatePane;
+use vmux_layout::{
+    BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, OpenBesideRequest,
+    OpenInNewStackRequest,
+};
 
 use super::agent_pane::AgentBrowserResolve;
 
@@ -20,7 +27,7 @@ impl Plugin for AgentBrowserPlugin {
             .add_message::<AgentBrowserGoForwardRequest>()
             .add_message::<AgentBrowserHistorySearchRequest>()
             .add_message::<AgentOpenInNewStackRequest>()
-            .add_message::<vmux_extension::ExtensionInstallRequest>()
+            .add_message::<ExtensionInstallRequest>()
             .add_systems(Update, open_history)
             .add_systems(
                 Update,
@@ -119,7 +126,7 @@ fn route_browser_commands(
 }
 
 fn open_history(
-    mut intents: MessageReader<vmux_history::query::HistoryOpenIntent>,
+    mut intents: MessageReader<HistoryOpenIntent>,
     mut navigate: MessageWriter<AgentBrowserNavigateRequest>,
     mut open_in_new_stack: MessageWriter<AgentOpenInNewStackRequest>,
 ) {
@@ -147,9 +154,9 @@ fn open_history(
 
 fn navigate(
     mut requests: MessageReader<AgentBrowserNavigateRequest>,
-    mut navigate: MessageWriter<vmux_layout::BrowserNavigateRequest>,
-    mut open_beside: MessageWriter<vmux_layout::OpenBesideRequest>,
-    mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
+    mut navigate: MessageWriter<BrowserNavigateRequest>,
+    mut open_beside: MessageWriter<OpenBesideRequest>,
+    mut activate: MessageWriter<ActivatePane>,
     browse: AgentBrowserResolve,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
@@ -169,7 +176,7 @@ fn navigate(
                 new_stack = true;
                 activate.write(claim.activation);
             } else if let Some(agent_pane) = browse.agent_pane(*anchor) {
-                open_beside.write(vmux_layout::OpenBesideRequest {
+                open_beside.write(OpenBesideRequest {
                     pane: agent_pane,
                     direction: None,
                     url: request.payload.url.clone(),
@@ -184,7 +191,7 @@ fn navigate(
                 continue;
             }
         }
-        navigate.write(vmux_layout::BrowserNavigateRequest {
+        navigate.write(BrowserNavigateRequest {
             url: request.payload.url.clone(),
             pane,
             request_id: Some(request.reply.request_id.0),
@@ -196,11 +203,11 @@ fn navigate(
 
 fn install_extension(
     mut requests: MessageReader<AgentBrowserInstallExtensionRequest>,
-    mut install: MessageWriter<vmux_extension::ExtensionInstallRequest>,
+    mut install: MessageWriter<ExtensionInstallRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        install.write(vmux_extension::ExtensionInstallRequest {
+        install.write(ExtensionInstallRequest {
             source: request.payload.source.clone(),
             requester: None,
         });
@@ -210,8 +217,8 @@ fn install_extension(
 
 fn go_back(
     mut requests: MessageReader<AgentBrowserGoBackRequest>,
-    mut go_back: MessageWriter<vmux_layout::BrowserGoBackRequest>,
-    mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
+    mut go_back: MessageWriter<BrowserGoBackRequest>,
+    mut activate: MessageWriter<ActivatePane>,
     browse: AgentBrowserResolve,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
@@ -220,7 +227,7 @@ fn go_back(
         if let Some(activation) = resolved.activation {
             activate.write(activation);
         }
-        go_back.write(vmux_layout::BrowserGoBackRequest {
+        go_back.write(BrowserGoBackRequest {
             pane: resolved.pane,
         });
         responses.write(request.reply.ok());
@@ -229,8 +236,8 @@ fn go_back(
 
 fn go_forward(
     mut requests: MessageReader<AgentBrowserGoForwardRequest>,
-    mut go_forward: MessageWriter<vmux_layout::BrowserGoForwardRequest>,
-    mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
+    mut go_forward: MessageWriter<BrowserGoForwardRequest>,
+    mut activate: MessageWriter<ActivatePane>,
     browse: AgentBrowserResolve,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
@@ -239,7 +246,7 @@ fn go_forward(
         if let Some(activation) = resolved.activation {
             activate.write(activation);
         }
-        go_forward.write(vmux_layout::BrowserGoForwardRequest {
+        go_forward.write(BrowserGoForwardRequest {
             pane: resolved.pane,
         });
         responses.write(request.reply.ok());
@@ -262,11 +269,11 @@ fn search_history(
 
 fn open_in_new_stack(
     mut requests: MessageReader<AgentOpenInNewStackRequest>,
-    mut open: MessageWriter<vmux_layout::OpenInNewStackRequest>,
+    mut open: MessageWriter<OpenInNewStackRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        open.write(vmux_layout::OpenInNewStackRequest {
+        open.write(OpenInNewStackRequest {
             url: request.payload.url.clone(),
         });
         responses.write(request.reply.ok());

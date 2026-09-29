@@ -1,6 +1,11 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
+use vmux_command::{
+    CommandDefinitions, CommandDispatch, CommandRuntimePlugin, ReadCommandRequests,
+    RegisterCommandDefinitions, WriteCommandRequests,
+};
+use vmux_core::host::UiState;
+use vmux_core::{PageIcon, PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_layout::{
     Browser,
     native_open::HostedUiPlugin,
@@ -21,13 +26,13 @@ pub(super) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
-            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
         }
         app.add_message::<OpenSettingsRequest>()
             .add_systems(
                 Startup,
-                spawn_open_settings_command.in_set(vmux_command::RegisterCommandDefinitions),
+                spawn_open_settings_command.in_set(RegisterCommandDefinitions),
             )
             .add_observer(issue_open_settings)
             .add_message::<CheckForUpdatesRequest>()
@@ -40,8 +45,8 @@ impl Plugin for StatePlugin {
             .add_systems(
                 Update,
                 handle_open_settings_command
-                    .in_set(vmux_command::ReadCommandRequests)
-                    .after(vmux_command::WriteCommandRequests),
+                    .in_set(ReadCommandRequests)
+                    .after(WriteCommandRequests),
             );
     }
 }
@@ -54,7 +59,7 @@ impl Plugin for StatePlugin {
 )]
 pub struct Settings;
 
-type SettingsUiStateUpdates = vmux_core::host::UiState<SettingsUiState>;
+type SettingsUiStateUpdates = UiState<SettingsUiState>;
 
 #[derive(Message)]
 struct OpenSettingsRequest;
@@ -64,13 +69,13 @@ struct OpenSettingsBinding;
 
 fn spawn_open_settings_command(mut commands: Commands) {
     let mut definitions =
-        vmux_command::CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "state");
+        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "state");
     commands.spawn((definitions.take("open_settings"), OpenSettingsBinding));
     definitions.assert_all_registered();
 }
 
 fn issue_open_settings(
-    trigger: On<vmux_command::CommandDispatch>,
+    trigger: On<CommandDispatch>,
     registered: Query<(), With<OpenSettingsBinding>>,
     mut requests: MessageWriter<OpenSettingsRequest>,
 ) {
@@ -90,7 +95,7 @@ impl Settings {
                 PageMetadata {
                     title: "Settings".to_string(),
                     url: SETTINGS_PAGE_URL.to_string(),
-                    icon: vmux_core::PageIcon::None,
+                    icon: PageIcon::None,
                     bg_color: None,
                 },
             ),

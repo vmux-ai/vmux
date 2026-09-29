@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
 use moonshine_save::prelude::*;
 use vmux_core::host::persistence::PersistenceAppExt;
+use vmux_core::{Active, EffectiveStartupUrl};
 use vmux_flex::prelude::*;
 
 impl Plugin for SpaceLayoutPlugin {
@@ -37,7 +38,7 @@ pub struct CurrentSpaceSet;
     Save,
     SpaceId,
     EffectiveStartupDir,
-    vmux_core::EffectiveStartupUrl,
+    EffectiveStartupUrl,
     crate::profile::Profile
 )]
 pub struct Space;
@@ -66,10 +67,10 @@ pub struct FocusedSpace<'w, 's> {
             Entity,
             &'static SpaceId,
             &'static EffectiveStartupDir,
-            &'static vmux_core::EffectiveStartupUrl,
+            &'static EffectiveStartupUrl,
             &'static crate::profile::Profile,
             Has<CurrentSpace>,
-            Has<vmux_core::Active>,
+            Has<Active>,
         ),
         With<Space>,
     >,
@@ -82,7 +83,7 @@ impl FocusedSpace<'_, '_> {
         Entity,
         &SpaceId,
         &EffectiveStartupDir,
-        &vmux_core::EffectiveStartupUrl,
+        &EffectiveStartupUrl,
         &crate::profile::Profile,
     )> {
         self.spaces
@@ -130,13 +131,13 @@ impl FocusedSpace<'_, '_> {
 
     pub fn resolved_startup_url(&self) -> String {
         self.startup_url()
-            .unwrap_or(vmux_core::EffectiveStartupUrl::START_PAGE)
+            .unwrap_or(EffectiveStartupUrl::START_PAGE)
             .to_string()
     }
 }
 
 fn sync_current_space(
-    spaces: Query<(Entity, Has<vmux_core::Active>, Has<CurrentSpace>), With<Space>>,
+    spaces: Query<(Entity, Has<Active>, Has<CurrentSpace>), With<Space>>,
     focused_window: crate::window::FocusedWindow,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
@@ -232,7 +233,7 @@ pub fn space_view_bundle() -> impl Bundle {
 }
 
 fn sync_space_container_visibility(
-    mut spaces: Query<(&mut Node, &mut Visibility, Has<vmux_core::Active>), With<Space>>,
+    mut spaces: Query<(&mut Node, &mut Visibility, Has<Active>), With<Space>>,
 ) {
     for (mut node, mut vis, active) in &mut spaces {
         let target_display = if active { Display::Flex } else { Display::None };

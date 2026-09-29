@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::event::*;
+use vmux_core::host::FileUiStateWrite;
+use vmux_core::page::PageReady;
+use vmux_setting::{AppSettings, SettingsWriteRequest};
 
 use crate::host::editor::{Editor, FileDocumentRevision, FileView};
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileBuffer};
@@ -13,7 +16,7 @@ pub(crate) struct StatusPlugin;
 impl Plugin for StatusPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_shared_file_view_mode)
-            .add_message::<vmux_setting::SettingsWriteRequest>()
+            .add_message::<SettingsWriteRequest>()
             .add_plugins(UiEventPlugin::<(FileViewModeSet, FileKeymapSet)>::default())
             .add_systems(
                 Update,
@@ -74,35 +77,12 @@ pub(crate) struct FileViewModeSent;
 #[derive(Component)]
 pub(crate) struct FileKeymapSent;
 
-type ReadyUnsentMeta = (
-    Without<FileInitialMetaSent>,
-    With<vmux_core::page::PageReady>,
-);
-type ReadyUnsentTheme = (
-    With<FileView>,
-    Without<FileThemeSent>,
-    With<vmux_core::page::PageReady>,
-);
-type ReadyUnsentViewMode = (
-    With<FileView>,
-    Without<FileViewModeSent>,
-    With<vmux_core::page::PageReady>,
-);
-type ReadySentViewMode = (
-    With<FileView>,
-    With<FileViewModeSent>,
-    With<vmux_core::page::PageReady>,
-);
-type ReadyUnsentKeymap = (
-    With<FileView>,
-    Without<FileKeymapSent>,
-    With<vmux_core::page::PageReady>,
-);
-type ReadySentKeymap = (
-    With<FileView>,
-    With<FileKeymapSent>,
-    With<vmux_core::page::PageReady>,
-);
+type ReadyUnsentMeta = (Without<FileInitialMetaSent>, With<PageReady>);
+type ReadyUnsentTheme = (With<FileView>, Without<FileThemeSent>, With<PageReady>);
+type ReadyUnsentViewMode = (With<FileView>, Without<FileViewModeSent>, With<PageReady>);
+type ReadySentViewMode = (With<FileView>, With<FileViewModeSent>, With<PageReady>);
+type ReadyUnsentKeymap = (With<FileView>, Without<FileKeymapSent>, With<PageReady>);
+type ReadySentKeymap = (With<FileView>, With<FileKeymapSent>, With<PageReady>);
 
 fn send_initial_meta(
     buffers: Query<(Entity, &FileBuffer), ReadyUnsentMeta>,
@@ -114,7 +94,7 @@ fn send_initial_meta(
             continue;
         }
         if let Some((undecodable, message)) = buffer.load_error() {
-            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+            commands.trigger(FileUiStateWrite::from_event(
                 entity,
                 &FileErrorEvent {
                     message: message.to_string(),
@@ -145,7 +125,7 @@ fn send_initial_text_meta(
             continue;
         }
         let shape = crate::shape::BufferShape::detect(&edit.core.buffer.rope);
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        commands.trigger(FileUiStateWrite::from_event(
             entity,
             &FileMetaEvent {
                 revision: revision.get(),
@@ -169,7 +149,7 @@ fn send_initial_text_meta(
 
 fn resend_file_theme_on_change(
     sent: Query<Entity, With<FileThemeSent>>,
-    settings: Res<vmux_setting::AppSettings>,
+    settings: Res<AppSettings>,
     mut commands: Commands,
 ) {
     if !settings.is_changed() || settings.is_added() {
@@ -182,7 +162,7 @@ fn resend_file_theme_on_change(
 
 fn send_file_theme(
     pending: Query<Entity, ReadyUnsentTheme>,
-    settings: Res<vmux_setting::AppSettings>,
+    settings: Res<AppSettings>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -202,7 +182,7 @@ fn send_file_theme(
                 )
             })
             .unwrap_or_else(|| (String::new(), 0.0, 0.0));
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        commands.trigger(FileUiStateWrite::from_event(
             entity,
             &FileThemeEvent {
                 font_family,
@@ -230,9 +210,7 @@ fn send_file_view_mode(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-            entity, &event,
-        ));
+        commands.trigger(FileUiStateWrite::from_event(entity, &event));
         commands.entity(entity).insert(FileViewModeSent);
     }
     if mode.is_changed() || revision.is_changed() {
@@ -240,15 +218,13 @@ fn send_file_view_mode(
             if !browsers.can_emit_to(&entity) {
                 continue;
             }
-            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-                entity, &event,
-            ));
+            commands.trigger(FileUiStateWrite::from_event(entity, &event));
         }
     }
 }
 
 fn send_file_keymap(
-    settings: Option<Res<vmux_setting::AppSettings>>,
+    settings: Option<Res<AppSettings>>,
     pending: Query<Entity, ReadyUnsentKeymap>,
     sent: Query<Entity, ReadySentKeymap>,
     browsers: NonSend<Browsers>,
@@ -261,9 +237,7 @@ fn send_file_keymap(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-            entity, &event,
-        ));
+        commands.trigger(FileUiStateWrite::from_event(entity, &event));
         commands.entity(entity).insert(FileKeymapSent);
     }
     if settings
@@ -274,9 +248,7 @@ fn send_file_keymap(
             if !browsers.can_emit_to(&entity) {
                 continue;
             }
-            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-                entity, &event,
-            ));
+            commands.trigger(FileUiStateWrite::from_event(entity, &event));
         }
     }
 }
@@ -319,8 +291,8 @@ fn on_file_view_mode_set(
 fn on_file_keymap_set(
     trigger: On<UiInput<FileKeymapSet>>,
     views: Query<(), With<FileView>>,
-    mut settings: ResMut<vmux_setting::AppSettings>,
-    mut writes: MessageWriter<vmux_setting::SettingsWriteRequest>,
+    mut settings: ResMut<AppSettings>,
+    mut writes: MessageWriter<SettingsWriteRequest>,
 ) {
     if !views.contains(trigger.event().webview) {
         return;
@@ -334,7 +306,7 @@ fn on_file_keymap_set(
         serde_json::to_value(keymap).unwrap_or_default(),
     ) {
         Ok(ron_bytes) => {
-            writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
+            writes.write(SettingsWriteRequest { ron_bytes });
         }
         Err(error) => bevy::log::warn!("editor: keymap update rejected: {error}"),
     }

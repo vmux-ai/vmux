@@ -3,8 +3,9 @@ use crate::{
     tab::Tab,
 };
 use bevy::{ecs::relationship::Relationship, prelude::*};
+use vmux_api::VmuxRoute;
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
-use vmux_core::{PageOpenRequest, PageOpenTarget, PageOpenTask};
+use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget, PageOpenTask};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -61,7 +62,7 @@ struct PaneOpenResolver<'w, 's> {
     all_children: Query<'w, 's, &'static Children>,
     seq_q: Query<'w, 's, &'static SpawnSeq>,
     node_q: Query<'w, 's, &'static ComputedNode>,
-    page_q: Query<'w, 's, &'static vmux_core::PageMetadata, With<Stack>>,
+    page_q: Query<'w, 's, &'static PageMetadata, With<Stack>>,
     open_task_q: Query<'w, 's, &'static PageOpenTask>,
     spaces: Query<'w, 's, (), With<crate::space::Space>>,
     tab_q: Query<'w, 's, Entity, With<Tab>>,
@@ -493,7 +494,7 @@ fn spawn_beside_stack(
     let new_stack = commands
         .spawn((stack_bundle(), stack_ts, ChildOf(target_pane)))
         .id();
-    commands.entity(new_stack).insert(vmux_core::PageMetadata {
+    commands.entity(new_stack).insert(PageMetadata {
         url: req.url.clone(),
         ..default()
     });
@@ -504,7 +505,7 @@ fn spawn_beside_stack(
     open_stack(
         new_stack,
         req.url.clone(),
-        (!req.url.starts_with("file:") && vmux_api::VmuxRoute::parse(&req.url).is_none())
+        (!req.url.starts_with("file:") && VmuxRoute::parse(&req.url).is_none())
             .then_some(req.request_id),
         page_open_requests,
     );
@@ -598,7 +599,7 @@ fn leaf_info_for_pane(
     pane_children: &Query<&Children, With<Pane>>,
     seq_q: &Query<&SpawnSeq>,
     node_q: &Query<&ComputedNode>,
-    page_q: &Query<&vmux_core::PageMetadata, With<Stack>>,
+    page_q: &Query<&PageMetadata, With<Stack>>,
     spawn_seq_overrides: &std::collections::HashMap<Entity, u64>,
 ) -> Option<crate::placement::LeafInfo> {
     let kinds = unique_page_kinds(
@@ -643,7 +644,7 @@ fn collect_leaf_infos(
     pane_children: &Query<&Children, With<Pane>>,
     seq_q: &Query<&SpawnSeq>,
     node_q: &Query<&ComputedNode>,
-    page_q: &Query<&vmux_core::PageMetadata, With<Stack>>,
+    page_q: &Query<&PageMetadata, With<Stack>>,
     spawn_seq_overrides: &std::collections::HashMap<Entity, u64>,
 ) -> Vec<crate::placement::LeafInfo> {
     let mut panes = Vec::new();
@@ -691,7 +692,7 @@ fn find_reuse_in_space(
     space: Entity,
     tab_q: &Query<Entity, With<Tab>>,
     all_children: &Query<&Children>,
-    page_q: &Query<&vmux_core::PageMetadata, With<Stack>>,
+    page_q: &Query<&PageMetadata, With<Stack>>,
     open_task_q: &Query<&PageOpenTask>,
     child_of_q: &Query<&ChildOf>,
 ) -> Option<crate::placement::ReuseHit> {
@@ -757,7 +758,7 @@ pub struct PanePlacement<'w, 's> {
     pub tab_filter: Query<'w, 's, Entity, With<Stack>>,
     pub seq_q: Query<'w, 's, &'static SpawnSeq>,
     pub node_q: Query<'w, 's, &'static ComputedNode>,
-    pub page_q: Query<'w, 's, &'static vmux_core::PageMetadata, With<Stack>>,
+    pub page_q: Query<'w, 's, &'static PageMetadata, With<Stack>>,
 }
 
 impl PanePlacement<'_, '_> {

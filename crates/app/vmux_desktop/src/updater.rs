@@ -3,6 +3,8 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
+use vmux_git::GitCheckForUpdatesRequest;
+use vmux_layout::UpdateState;
 use vmux_setting::{
     AppSettings, UpdateChannel,
     event::{CheckForUpdatesRequest, CurrentUpdateCheckStatus, UpdateCheckStatus},
@@ -192,10 +194,10 @@ fn poll_update_result(
     config: Single<&UpdateConfig>,
     settings: Res<AppSettings>,
     time: Res<Time>,
-    mut state: Single<&mut vmux_layout::UpdateState>,
+    mut state: Single<&mut UpdateState>,
     mut status: Single<&mut CurrentUpdateCheckStatus>,
     mut manual_requests: MessageReader<CheckForUpdatesRequest>,
-    mut git_requests: MessageReader<vmux_git::GitCheckForUpdatesRequest>,
+    mut git_requests: MessageReader<GitCheckForUpdatesRequest>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
     let manual_requested =
@@ -221,7 +223,7 @@ fn poll_update_result(
                 status.0 = UpdateCheckStatus::Downloading {
                     version: version.clone(),
                 };
-                **state = vmux_layout::UpdateState::Downloading {
+                **state = UpdateState::Downloading {
                     version,
                     downloaded,
                     total,
@@ -231,7 +233,7 @@ fn poll_update_result(
                 status.0 = UpdateCheckStatus::Installing {
                     version: version.clone(),
                 };
-                **state = vmux_layout::UpdateState::Installing { version };
+                **state = UpdateState::Installing { version };
             }
             UpdateResult::Installed { version } => {
                 checker.in_flight = false;
@@ -239,18 +241,15 @@ fn poll_update_result(
                 status.0 = UpdateCheckStatus::Ready {
                     version: version.clone(),
                 };
-                **state = vmux_layout::UpdateState::Ready { version };
+                **state = UpdateState::Ready { version };
                 checker.done = true;
             }
             UpdateResult::Failed(e) => {
                 checker.in_flight = false;
                 status.0 = UpdateCheckStatus::Failed;
                 bevy::log::debug!("update check failed: {e}");
-                if !matches!(
-                    **state,
-                    vmux_layout::UpdateState::Idle | vmux_layout::UpdateState::Ready { .. }
-                ) {
-                    **state = vmux_layout::UpdateState::Idle;
+                if !matches!(**state, UpdateState::Idle | UpdateState::Ready { .. }) {
+                    **state = UpdateState::Idle;
                 }
             }
         }
