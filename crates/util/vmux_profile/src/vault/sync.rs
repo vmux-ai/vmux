@@ -7,9 +7,8 @@ use super::keys::{KeyStore, SystemKeyStore};
 use super::recovery::load_repository_key;
 use super::repository::VaultRepositoryPath;
 use super::snapshot::{
-    EntryKind, LocalEntry, LocalFingerprint, LocalState, LocalStateEntry, entry_digest,
-    load_encrypted_snapshot, modified_time, random_hex, state_path, validate_relative_path,
-    write_encrypted_snapshot,
+    EntryKind, LocalEntry, LocalFingerprint, LocalState, LocalStateEntry, modified_time,
+    random_hex, validate_relative_path,
 };
 use super::{repository_dir, root_dir};
 
@@ -30,6 +29,34 @@ const FORMAT_VERSION: u32 = 1;
 pub(super) struct ReconcileOutcome {
     pub(super) automatic_merges: usize,
     pub(super) conflict_copies: usize,
+}
+
+impl ReconcileOutcome {
+    fn message(&self) -> String {
+        if self.conflict_copies > 0 {
+            return format!(
+                "Vault synced with {} conflicted {}",
+                self.conflict_copies,
+                if self.conflict_copies == 1 {
+                    "copy"
+                } else {
+                    "copies"
+                }
+            );
+        }
+        if self.automatic_merges > 0 {
+            return format!(
+                "Vault synced with {} automatic {}",
+                self.automatic_merges,
+                if self.automatic_merges == 1 {
+                    "merge"
+                } else {
+                    "merges"
+                }
+            );
+        }
+        "Vault synced".to_string()
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -62,7 +89,8 @@ pub(super) fn sync_paths<K: KeyStore>(
     let manifest = vault.manifest()?;
     let key = load_repository_key(repository, keys, &manifest.vault_id)?;
     let baseline = baseline_files(repository).unwrap_or_else(|_| {
-        load_encrypted_snapshot(repository, &key)
+        vault
+            .load_encrypted_snapshot(&key)
             .map(|(_, files)| files)
             .unwrap_or_default()
     });
@@ -76,21 +104,15 @@ pub(super) fn sync_paths<K: KeyStore>(
             }
             git.run(&["reset", "--hard", &remote_branch])?;
         }
-        let (_, remote_files) = load_encrypted_snapshot(repository, &key)?;
+        let (_, remote_files) = vault.load_encrypted_snapshot(&key)?;
         let outcome = reconcile_local(root, &baseline, &remote_files)?;
         let files = collect_local_files(root)?;
-        write_encrypted_snapshot(
-            repository,
-            &manifest.vault_id,
-            &key,
-            &files,
-            Some(&remote_files),
-        )?;
+        vault.write_encrypted_snapshot(&manifest.vault_id, &key, &files, Some(&remote_files))?;
         git.commit("Sync vmux Vault")?;
         match git.run(&["push", "-u", "origin", &branch]) {
             Ok(_) => {
                 write_local_state(root, repository)?;
-                return Ok(sync_message(&outcome));
+                return Ok(outcome.message());
             }
             Err(error) if attempt < 2 && push_rejected_for_remote_change(&error) => {}
             Err(error) => return Err(error),
@@ -106,32 +128,6 @@ fn push_rejected_for_remote_change(error: &str) -> bool {
         || error.contains("failed to push some refs")
 }
 
-fn sync_message(outcome: &ReconcileOutcome) -> String {
-    if outcome.conflict_copies > 0 {
-        format!(
-            "Vault synced with {} conflicted {}",
-            outcome.conflict_copies,
-            if outcome.conflict_copies == 1 {
-                "copy"
-            } else {
-                "copies"
-            }
-        )
-    } else if outcome.automatic_merges > 0 {
-        format!(
-            "Vault synced with {} automatic {}",
-            outcome.automatic_merges,
-            if outcome.automatic_merges == 1 {
-                "merge"
-            } else {
-                "merges"
-            }
-        )
-    } else {
-        "Vault synced".to_string()
-    }
-}
-
 pub(super) fn initialize_paths<K: KeyStore>(
     root: &Path,
     repository: &Path,
@@ -142,7 +138,8 @@ pub(super) fn initialize_paths<K: KeyStore>(
     let (vault_id, key, previous) = match vault.manifest() {
         Ok(manifest) => {
             let key = load_repository_key(repository, keys, &manifest.vault_id)?;
-            let previous = load_encrypted_snapshot(repository, &key)
+            let previous = vault
+                .load_encrypted_snapshot(&key)
                 .ok()
                 .map(|(_, files)| files);
             (manifest.vault_id, key, previous)
@@ -155,7 +152,7 @@ pub(super) fn initialize_paths<K: KeyStore>(
         }
     };
     let files = collect_local_files(root)?;
-    write_encrypted_snapshot(repository, &vault_id, &key, &files, previous.as_ref())?;
+    vault.write_encrypted_snapshot(&vault_id, &key, &files, previous.as_ref())?;
     vault.git().commit("Initialize vmux Vault")
 }
 
@@ -207,7 +204,7 @@ fn collect_directory(
         };
         let mode = FileAttributes::mode(&metadata);
         let (modified_secs, modified_nanos) = modified_time(&metadata);
-        let digest = entry_digest(kind, mode, &data);
+        let digest = kind.digest(mode, &data);
         files.insert(
             relative,
             LocalEntry {
@@ -428,17 +425,7 @@ fn merge_changed_file(
         }
         _ => return Ok(None),
     };
-    Ok(Some(entry_with_data(local, data)))
-}
-
-fn entry_with_data(template: &LocalEntry, data: Vec<u8>) -> LocalEntry {
-    let mut entry = template.clone();
-    entry.size = data.len() as u64;
-    entry.modified_secs = 0;
-    entry.modified_nanos = 0;
-    entry.digest = entry_digest(entry.kind, entry.mode, &data);
-    entry.data = data;
-    entry
+    Ok(Some(local.with_data(data)))
 }
 
 fn merge_text(
@@ -868,8 +855,11 @@ pub(super) fn write_local_state(root: &Path, repository: &Path) -> Result<(), St
             .collect(),
     };
     let source = ron::ser::to_string(&state).map_err(|error| error.to_string())?;
-    vmux_path::AtomicFile::write(state_path(repository), source.as_bytes())
-        .map_err(|error| error.to_string())
+    vmux_path::AtomicFile::write(
+        VaultRepositoryPath::at(repository).state_path(),
+        source.as_bytes(),
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub(super) fn local_change_count(root: &Path, repository: &Path) -> Result<u32, String> {
@@ -901,7 +891,8 @@ pub(super) fn local_change_count(root: &Path, repository: &Path) -> Result<u32, 
 }
 
 fn read_local_state(repository: &Path) -> Result<BTreeMap<String, LocalStateEntry>, String> {
-    let source = std::fs::read(state_path(repository)).map_err(|error| error.to_string())?;
+    let source = std::fs::read(VaultRepositoryPath::at(repository).state_path())
+        .map_err(|error| error.to_string())?;
     let source = std::str::from_utf8(&source).map_err(|error| error.to_string())?;
     let state = ron::from_str::<LocalState>(source).map_err(|error| error.to_string())?;
     if state.version != FORMAT_VERSION {

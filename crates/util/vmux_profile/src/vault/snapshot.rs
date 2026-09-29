@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
 
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::{aead, digest, hmac};
@@ -25,6 +25,19 @@ pub(super) enum EntryKind {
     Symlink,
 }
 
+impl EntryKind {
+    pub(super) fn digest(self, mode: u32, data: &[u8]) -> String {
+        let mut context = digest::Context::new(&digest::SHA256);
+        context.update(match self {
+            Self::File => b"file\0",
+            Self::Symlink => b"symlink\0",
+        });
+        context.update(&mode.to_be_bytes());
+        context.update(data);
+        hex(context.finish().as_ref())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct LocalEntry {
     pub(super) kind: EntryKind,
@@ -34,6 +47,18 @@ pub(super) struct LocalEntry {
     pub(super) modified_nanos: u32,
     pub(super) data: Vec<u8>,
     pub(super) digest: String,
+}
+
+impl LocalEntry {
+    pub(super) fn with_data(&self, data: Vec<u8>) -> Self {
+        let mut entry = self.clone();
+        entry.size = data.len() as u64;
+        entry.modified_secs = 0;
+        entry.modified_nanos = 0;
+        entry.digest = entry.kind.digest(entry.mode, &data);
+        entry.data = data;
+        entry
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -89,77 +114,137 @@ pub(super) struct LocalStateEntry {
     pub(super) modified_nanos: u32,
 }
 
-pub(super) fn write_encrypted_snapshot(
-    repository: &Path,
-    vault_id: &str,
-    key: &[u8],
-    files: &BTreeMap<String, LocalEntry>,
-    previous: Option<&BTreeMap<String, LocalEntry>>,
-) -> Result<(), String> {
-    let vault = VaultRepositoryPath::at(repository);
-    validate_key(key)?;
-    if previous.is_some_and(|previous| same_files(previous, files))
-        && repository.join(MANIFEST_FILE).is_file()
-        && repository.join(INDEX_FILE).is_file()
-        && vault
-            .manifest()
-            .is_ok_and(|manifest| manifest.version == MANIFEST_VERSION)
-    {
-        return vault.validate_encrypted_worktree();
-    }
-    let objects = repository.join(OBJECTS_DIR);
-    std::fs::create_dir_all(&objects).map_err(|error| error.to_string())?;
-    let mut index_files = Vec::with_capacity(files.len());
-    let mut retained = BTreeSet::new();
-    for (path, entry) in files {
-        validate_relative_path(path)?;
-        let object = object_id(key, path);
-        retained.insert(object.clone());
-        let object_path = objects.join(&object);
-        let unchanged = previous
-            .and_then(|files| files.get(path))
-            .is_some_and(|old| same_entry(Some(old), Some(entry)))
-            && object_path.is_file();
-        if !unchanged {
-            let encrypted = encrypt_bytes(key, &object_aad(path), &entry.data)?;
-            vmux_path::AtomicFile::write(&object_path, &encrypted)
-                .map_err(|error| error.to_string())?;
+impl VaultRepositoryPath {
+    pub(super) fn write_encrypted_snapshot(
+        &self,
+        vault_id: &str,
+        key: &[u8],
+        files: &BTreeMap<String, LocalEntry>,
+        previous: Option<&BTreeMap<String, LocalEntry>>,
+    ) -> Result<(), String> {
+        let repository = self.path();
+        validate_key(key)?;
+        if previous.is_some_and(|previous| same_files(previous, files))
+            && repository.join(MANIFEST_FILE).is_file()
+            && repository.join(INDEX_FILE).is_file()
+            && self
+                .manifest()
+                .is_ok_and(|manifest| manifest.version == MANIFEST_VERSION)
+        {
+            return self.validate_encrypted_worktree();
         }
-        index_files.push(EncryptedIndexEntry {
-            path: path.clone(),
-            object,
-            digest: entry.digest.clone(),
-            kind: entry.kind,
-            mode: entry.mode,
-        });
-    }
-    for entry in std::fs::read_dir(&objects)
-        .map_err(|error| error.to_string())?
-        .flatten()
-    {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !retained.contains(&name) {
-            remove_existing_path(&entry.path())?;
+        let objects = repository.join(OBJECTS_DIR);
+        std::fs::create_dir_all(&objects).map_err(|error| error.to_string())?;
+        let mut index_files = Vec::with_capacity(files.len());
+        let mut retained = BTreeSet::new();
+        for (path, entry) in files {
+            validate_relative_path(path)?;
+            let object = object_id(key, path);
+            retained.insert(object.clone());
+            let object_path = objects.join(&object);
+            let unchanged = previous
+                .and_then(|files| files.get(path))
+                .is_some_and(|old| same_entry(Some(old), Some(entry)))
+                && object_path.is_file();
+            if !unchanged {
+                let encrypted = encrypt_bytes(key, &object_aad(path), &entry.data)?;
+                vmux_path::AtomicFile::write(&object_path, &encrypted)
+                    .map_err(|error| error.to_string())?;
+            }
+            index_files.push(EncryptedIndexEntry {
+                path: path.clone(),
+                object,
+                digest: entry.digest.clone(),
+                kind: entry.kind,
+                mode: entry.mode,
+            });
         }
+        for entry in std::fs::read_dir(&objects)
+            .map_err(|error| error.to_string())?
+            .flatten()
+        {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !retained.contains(&name) {
+                remove_existing_path(&entry.path())?;
+            }
+        }
+        let index = EncryptedIndex {
+            version: FORMAT_VERSION,
+            files: index_files,
+        };
+        let index_source = ron::ser::to_string(&index)
+            .map_err(|error| error.to_string())?
+            .into_bytes();
+        let encrypted_index = encrypt_bytes(key, INDEX_AAD, &index_source)?;
+        vmux_path::AtomicFile::write(repository.join(INDEX_FILE), &encrypted_index)
+            .map_err(|error| error.to_string())?;
+        let manifest = RemoteManifest {
+            version: MANIFEST_VERSION,
+            cipher: "AES-256-GCM".to_string(),
+            vault_id: vault_id.to_string(),
+            index: INDEX_FILE.to_string(),
+        };
+        self.write_manifest(&manifest)?;
+        self.validate_encrypted_worktree()
     }
-    let index = EncryptedIndex {
-        version: FORMAT_VERSION,
-        files: index_files,
-    };
-    let index_source = ron::ser::to_string(&index)
-        .map_err(|error| error.to_string())?
-        .into_bytes();
-    let encrypted_index = encrypt_bytes(key, INDEX_AAD, &index_source)?;
-    vmux_path::AtomicFile::write(repository.join(INDEX_FILE), &encrypted_index)
-        .map_err(|error| error.to_string())?;
-    let manifest = RemoteManifest {
-        version: MANIFEST_VERSION,
-        cipher: "AES-256-GCM".to_string(),
-        vault_id: vault_id.to_string(),
-        index: INDEX_FILE.to_string(),
-    };
-    vault.write_manifest(&manifest)?;
-    vault.validate_encrypted_worktree()
+
+    pub(super) fn load_encrypted_snapshot(
+        &self,
+        key: &[u8],
+    ) -> Result<(RemoteManifest, BTreeMap<String, LocalEntry>), String> {
+        let repository = self.path();
+        validate_key(key)?;
+        let manifest = self.manifest()?;
+        let encrypted_index = std::fs::read(repository.join(&manifest.index))
+            .map_err(|error| format!("failed to read encrypted Vault index: {error}"))?;
+        let index_source = decrypt_bytes(key, INDEX_AAD, &encrypted_index)?;
+        let index_source = std::str::from_utf8(&index_source)
+            .map_err(|error| format!("invalid encrypted Vault index: {error}"))?;
+        let index = ron::from_str::<EncryptedIndex>(index_source)
+            .map_err(|error| format!("invalid encrypted Vault index: {error}"))?;
+        if index.version != FORMAT_VERSION {
+            return Err(format!(
+                "unsupported encrypted Vault index {}",
+                index.version
+            ));
+        }
+        let mut files = BTreeMap::new();
+        for file in index.files {
+            validate_relative_path(&file.path)?;
+            let expected_object = object_id(key, &file.path);
+            if file.object != expected_object {
+                return Err(format!("encrypted Vault object mismatch for {}", file.path));
+            }
+            let encrypted = std::fs::read(repository.join(OBJECTS_DIR).join(&file.object))
+                .map_err(|error| format!("missing encrypted Vault object: {error}"))?;
+            let data = decrypt_bytes(key, &object_aad(&file.path), &encrypted)?;
+            let actual_digest = file.kind.digest(file.mode, &data);
+            if actual_digest != file.digest {
+                return Err(format!(
+                    "encrypted Vault object failed integrity check: {}",
+                    file.path
+                ));
+            }
+            if files
+                .insert(
+                    file.path.clone(),
+                    LocalEntry {
+                        kind: file.kind,
+                        mode: file.mode,
+                        size: data.len() as u64,
+                        modified_secs: 0,
+                        modified_nanos: 0,
+                        data,
+                        digest: file.digest,
+                    },
+                )
+                .is_some()
+            {
+                return Err(format!("duplicate encrypted Vault path: {}", file.path));
+            }
+        }
+        Ok((manifest, files))
+    }
 }
 
 fn same_files(left: &BTreeMap<String, LocalEntry>, right: &BTreeMap<String, LocalEntry>) -> bool {
@@ -167,63 +252,6 @@ fn same_files(left: &BTreeMap<String, LocalEntry>, right: &BTreeMap<String, Loca
         && left
             .iter()
             .all(|(path, entry)| same_entry(Some(entry), right.get(path)))
-}
-
-pub(super) fn load_encrypted_snapshot(
-    repository: &Path,
-    key: &[u8],
-) -> Result<(RemoteManifest, BTreeMap<String, LocalEntry>), String> {
-    validate_key(key)?;
-    let manifest = VaultRepositoryPath::at(repository).manifest()?;
-    let encrypted_index = std::fs::read(repository.join(&manifest.index))
-        .map_err(|error| format!("failed to read encrypted Vault index: {error}"))?;
-    let index_source = decrypt_bytes(key, INDEX_AAD, &encrypted_index)?;
-    let index_source = std::str::from_utf8(&index_source)
-        .map_err(|error| format!("invalid encrypted Vault index: {error}"))?;
-    let index = ron::from_str::<EncryptedIndex>(index_source)
-        .map_err(|error| format!("invalid encrypted Vault index: {error}"))?;
-    if index.version != FORMAT_VERSION {
-        return Err(format!(
-            "unsupported encrypted Vault index {}",
-            index.version
-        ));
-    }
-    let mut files = BTreeMap::new();
-    for file in index.files {
-        validate_relative_path(&file.path)?;
-        let expected_object = object_id(key, &file.path);
-        if file.object != expected_object {
-            return Err(format!("encrypted Vault object mismatch for {}", file.path));
-        }
-        let encrypted = std::fs::read(repository.join(OBJECTS_DIR).join(&file.object))
-            .map_err(|error| format!("missing encrypted Vault object: {error}"))?;
-        let data = decrypt_bytes(key, &object_aad(&file.path), &encrypted)?;
-        let actual_digest = entry_digest(file.kind, file.mode, &data);
-        if actual_digest != file.digest {
-            return Err(format!(
-                "encrypted Vault object failed integrity check: {}",
-                file.path
-            ));
-        }
-        if files
-            .insert(
-                file.path.clone(),
-                LocalEntry {
-                    kind: file.kind,
-                    mode: file.mode,
-                    size: data.len() as u64,
-                    modified_secs: 0,
-                    modified_nanos: 0,
-                    data,
-                    digest: file.digest,
-                },
-            )
-            .is_some()
-        {
-            return Err(format!("duplicate encrypted Vault path: {}", file.path));
-        }
-    }
-    Ok((manifest, files))
 }
 
 pub(super) fn encrypt_bytes(key: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, String> {
@@ -279,17 +307,6 @@ fn object_aad(path: &str) -> Vec<u8> {
     aad
 }
 
-pub(super) fn entry_digest(kind: EntryKind, mode: u32, data: &[u8]) -> String {
-    let mut context = digest::Context::new(&digest::SHA256);
-    context.update(match kind {
-        EntryKind::File => b"file\0",
-        EntryKind::Symlink => b"symlink\0",
-    });
-    context.update(&mode.to_be_bytes());
-    context.update(data);
-    hex(context.finish().as_ref())
-}
-
 pub(super) fn validate_key(key: &[u8]) -> Result<(), String> {
     if key.len() == KEY_LEN {
         Ok(())
@@ -309,10 +326,6 @@ pub(super) fn validate_relative_path(path: &str) -> Result<(), String> {
         return Err("encrypted Vault contains an unsafe path".to_string());
     }
     Ok(())
-}
-
-pub(super) fn state_path(repository: &Path) -> PathBuf {
-    repository.join(".git").join("vmux-state.ron")
 }
 
 pub(super) fn random_hex(bytes: usize) -> Result<String, String> {

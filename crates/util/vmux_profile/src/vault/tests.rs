@@ -214,8 +214,8 @@ fn vault_status_requires_an_accessible_encryption_key() {
     initialize_paths(root.path(), &repository, &keys).unwrap();
     write_local_state(root.path(), &repository).unwrap();
 
-    assert!(status_paths(root.path(), &repository, &keys).unlocked);
-    assert!(!status_paths(root.path(), &repository, &MemoryKeyStore::default()).unlocked);
+    assert!(VaultStatus::at(root.path(), &repository, &keys).unlocked);
+    assert!(!VaultStatus::at(root.path(), &repository, &MemoryKeyStore::default()).unlocked);
 }
 
 fn repository(root: &Path) -> PathBuf {
@@ -481,9 +481,10 @@ fn initialization_commits_only_encrypted_paths_and_content() {
             .windows(7)
             .any(|window| window == b"Private")
     );
-    let manifest = VaultRepositoryPath::at(&repository).manifest().unwrap();
+    let vault = VaultRepositoryPath::at(&repository);
+    let manifest = vault.manifest().unwrap();
     let key = keys.load(&manifest.vault_id).unwrap();
-    let (_, files) = load_encrypted_snapshot(&repository, &key).unwrap();
+    let (_, files) = vault.load_encrypted_snapshot(&key).unwrap();
     assert_eq!(files["settings.ron"].data, b"(secret: true)\n");
     assert_eq!(files["knowledge/private.md"].data, b"# Private\n");
     assert!(!files.contains_key("workspace/project/secret.txt"));
@@ -577,9 +578,10 @@ fn stale_encrypted_commit_is_discarded_and_regenerated_from_plaintext() {
 
     sync_paths(root.path(), &repository, &keys).unwrap();
 
-    let manifest = VaultRepositoryPath::at(&repository).manifest().unwrap();
+    let vault = VaultRepositoryPath::at(&repository);
+    let manifest = vault.manifest().unwrap();
     let key = keys.load(&manifest.vault_id).unwrap();
-    let (_, files) = load_encrypted_snapshot(&repository, &key).unwrap();
+    let (_, files) = vault.load_encrypted_snapshot(&key).unwrap();
     assert_eq!(files["settings.ron"].data, b"(value: 2)\n");
     assert_eq!(git.run(&["status", "--short"]).unwrap(), "");
 }
@@ -617,9 +619,10 @@ fn existing_encrypted_vault_merges_non_conflicting_local_files() {
         std::fs::read_to_string(root.path().join("settings.ron")).unwrap(),
         "(remote: true)\n"
     );
-    let manifest = VaultRepositoryPath::at(&repository).manifest().unwrap();
+    let vault = VaultRepositoryPath::at(&repository);
+    let manifest = vault.manifest().unwrap();
     let key = keys.load(&manifest.vault_id).unwrap();
-    let (_, files) = load_encrypted_snapshot(&repository, &key).unwrap();
+    let (_, files) = vault.load_encrypted_snapshot(&key).unwrap();
     assert!(files.contains_key("settings.ron"));
     assert!(files.contains_key("knowledge/local.md"));
 }

@@ -4,7 +4,6 @@ use super::connect::{VaultRepository, github_identity_and_repositories};
 use super::keys::{KeyStore, SilentSystemKeyStore};
 use super::recovery::read_recovery_envelope;
 use super::repository::VaultRepositoryPath;
-use super::snapshot::state_path;
 use super::sync::local_change_count;
 use super::{repository_dir, root_dir};
 
@@ -28,6 +27,74 @@ pub struct VaultStatus {
 }
 
 impl VaultStatus {
+    pub fn current() -> Self {
+        Self::at(&root_dir(), &repository_dir(), &SilentSystemKeyStore)
+    }
+
+    pub fn current_with_repositories() -> Self {
+        let mut status = Self::current();
+        if !status.initialized || status.remote.is_empty() {
+            match github_identity_and_repositories() {
+                Ok((owner, owners, repositories)) => {
+                    status.github_owner = owner;
+                    status.github_owners = owners;
+                    status.repositories = repositories;
+                }
+                Err(error) => status.error = error,
+            }
+        }
+        status
+    }
+
+    pub(super) fn at<K: KeyStore>(root: &Path, repository: &Path, keys: &K) -> Self {
+        let vault = VaultRepositoryPath::at(repository);
+        let git = vault.git();
+        let initialized = repository.join(".git").is_dir();
+        let manifest = initialized
+            .then(|| vault.manifest())
+            .transpose()
+            .ok()
+            .flatten();
+        let unlocked = manifest.as_ref().is_some_and(|manifest| {
+            vault.state_path().is_file() && keys.load(&manifest.vault_id).is_ok()
+        });
+        let mut status = Self {
+            root: root.to_path_buf(),
+            initialized,
+            encrypted: manifest.is_some(),
+            unlocked,
+            ..Self::default()
+        };
+        if let Some(manifest) = manifest {
+            status.vault_id = manifest.vault_id.clone();
+            match read_recovery_envelope(repository) {
+                Ok(envelope) => status.recovery_enabled = envelope.is_some(),
+                Err(error) => status.error = error,
+            }
+        }
+        if initialized {
+            status.remote = git.optional(&["remote", "get-url", "origin"]);
+            status.branch = git.optional(&["branch", "--show-current"]);
+            status.dirty = local_change_count(root, repository).unwrap_or(0);
+            if !status.remote.is_empty() {
+                let counts =
+                    git.optional(&["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]);
+                let mut values = counts.split_whitespace();
+                status.ahead = values
+                    .next()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(0);
+                status.behind = values
+                    .next()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(0);
+            }
+        } else if root.join(".git").is_dir() {
+            status.error = "A legacy plaintext Vault was found. Create a new encrypted repository; reusing its remote would leave plaintext in Git history.".to_string();
+        }
+        status
+    }
+
     pub fn snapshot(&self) -> vmux_api::vault::VaultStatusSnapshot {
         use vmux_api::vault::VaultStatusSnapshot;
 
@@ -110,72 +177,4 @@ impl VaultStatus {
             .map_or(authority, |(_, host)| host);
         host.eq_ignore_ascii_case("github.com")
     }
-}
-
-pub fn status() -> VaultStatus {
-    status_paths(&root_dir(), &repository_dir(), &SilentSystemKeyStore)
-}
-
-pub fn status_with_repositories() -> VaultStatus {
-    let mut status = status();
-    if !status.initialized || status.remote.is_empty() {
-        match github_identity_and_repositories() {
-            Ok((owner, owners, repositories)) => {
-                status.github_owner = owner;
-                status.github_owners = owners;
-                status.repositories = repositories;
-            }
-            Err(error) => status.error = error,
-        }
-    }
-    status
-}
-
-pub(super) fn status_paths<K: KeyStore>(root: &Path, repository: &Path, keys: &K) -> VaultStatus {
-    let vault = VaultRepositoryPath::at(repository);
-    let git = vault.git();
-    let initialized = repository.join(".git").is_dir();
-    let manifest = initialized
-        .then(|| vault.manifest())
-        .transpose()
-        .ok()
-        .flatten();
-    let unlocked = manifest.as_ref().is_some_and(|manifest| {
-        state_path(repository).is_file() && keys.load(&manifest.vault_id).is_ok()
-    });
-    let mut status = VaultStatus {
-        root: root.to_path_buf(),
-        initialized,
-        encrypted: manifest.is_some(),
-        unlocked,
-        ..VaultStatus::default()
-    };
-    if let Some(manifest) = manifest {
-        status.vault_id = manifest.vault_id.clone();
-        match read_recovery_envelope(repository) {
-            Ok(envelope) => status.recovery_enabled = envelope.is_some(),
-            Err(error) => status.error = error,
-        }
-    }
-    if initialized {
-        status.remote = git.optional(&["remote", "get-url", "origin"]);
-        status.branch = git.optional(&["branch", "--show-current"]);
-        status.dirty = local_change_count(root, repository).unwrap_or(0);
-        if !status.remote.is_empty() {
-            let counts =
-                git.optional(&["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]);
-            let mut values = counts.split_whitespace();
-            status.ahead = values
-                .next()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(0);
-            status.behind = values
-                .next()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(0);
-        }
-    } else if root.join(".git").is_dir() {
-        status.error = "A legacy plaintext Vault was found. Create a new encrypted repository; reusing its remote would leave plaintext in Git history.".to_string();
-    }
-    status
 }

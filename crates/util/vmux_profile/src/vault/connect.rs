@@ -10,7 +10,6 @@ use serde::Deserialize;
 
 use super::keys::{KeyStore, SystemKeyStore};
 use super::repository::{GitHubCli, OutputText, VaultRepositoryPath};
-use super::snapshot::{load_encrypted_snapshot, write_encrypted_snapshot};
 use super::sync::{collect_local_files, initialize_paths, reconcile_local, write_local_state};
 use super::{repository_dir, root_dir};
 
@@ -359,11 +358,10 @@ pub(super) fn connect_remote_paths<K: KeyStore>(
                 let Some(key) = key else {
                     return Ok(());
                 };
-                let (_, remote_files) = load_encrypted_snapshot(vault_repository, &key)?;
+                let (_, remote_files) = vault.load_encrypted_snapshot(&key)?;
                 reconcile_local(root, &BTreeMap::new(), &remote_files)?;
                 let files = collect_local_files(root)?;
-                write_encrypted_snapshot(
-                    vault_repository,
+                vault.write_encrypted_snapshot(
                     &manifest.vault_id,
                     &key,
                     &files,

@@ -493,7 +493,7 @@ fn answer_vault_queries(
     for request in reader.read() {
         service_requests.write(ServiceRequest(ClientMessage::AgentVaultStatusResult {
             request_id: request.request_id,
-            result: Ok(vmux_core::profile::vault::status().snapshot()),
+            result: Ok(vmux_core::profile::vault::VaultStatus::current().snapshot()),
         }));
     }
 }

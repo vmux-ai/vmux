@@ -16,7 +16,7 @@ pub use connect::{
     connect_remote, create_remote,
 };
 pub use recovery::{GeneratedRecoveryKey, RecoveryKeyCreation, VaultRecovery};
-pub use status::{VaultStatus, status, status_with_repositories};
+pub use status::VaultStatus;
 pub use sync::{initialize, sync};
 
 pub fn root_dir() -> PathBuf {

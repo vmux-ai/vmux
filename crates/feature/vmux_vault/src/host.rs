@@ -1874,9 +1874,9 @@ fn emit_vault_state(
 
 fn scan_vault(load_repositories: bool, previous: VaultSnapshot) -> VaultSnapshot {
     let status = if load_repositories {
-        vmux_core::profile::vault::status_with_repositories()
+        vmux_core::profile::vault::VaultStatus::current_with_repositories()
     } else {
-        vmux_core::profile::vault::status()
+        vmux_core::profile::vault::VaultStatus::current()
     };
     let mut snapshot = VaultSnapshot {
         root: status.root.to_string_lossy().into_owned(),

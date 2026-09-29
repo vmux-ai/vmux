@@ -34,6 +34,14 @@ impl VaultRepositoryPath {
         GitRepository::at(&self.root)
     }
 
+    pub(super) fn path(&self) -> &Path {
+        &self.root
+    }
+
+    pub(super) fn state_path(&self) -> PathBuf {
+        self.root.join(".git").join("vmux-state.ron")
+    }
+
     pub(super) fn ensure(&self) -> Result<(), String> {
         std::fs::create_dir_all(&self.root).map_err(|error| error.to_string())?;
         if !self.root.join(".git").is_dir() {

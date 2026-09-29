@@ -8,9 +8,7 @@ use zeroize::Zeroizing;
 
 use super::keys::{KeyStore, SystemKeyStore};
 use super::repository::VaultRepositoryPath;
-use super::snapshot::{
-    KEY_LEN, decode_hex, decrypt_bytes, encrypt_bytes, hex, load_encrypted_snapshot, validate_key,
-};
+use super::snapshot::{KEY_LEN, decode_hex, decrypt_bytes, encrypt_bytes, hex, validate_key};
 use super::sync::{reconcile_local, write_local_state};
 use super::{repository_dir, root_dir};
 
@@ -150,7 +148,8 @@ impl VaultRecovery {
         recovery_key: &str,
     ) -> Result<String, String> {
         let recovery_key = parse_recovery_key(recovery_key)?;
-        let manifest = VaultRepositoryPath::at(&self.repository).manifest()?;
+        let vault = VaultRepositoryPath::at(&self.repository);
+        let manifest = vault.manifest()?;
         let envelope = read_recovery_envelope(&self.repository)?
             .ok_or_else(|| "This Vault has no Recovery Key".to_string())?;
         let wrapping_key = derive_recovery_wrapping_key(&recovery_key, &manifest.vault_id)?;
@@ -160,7 +159,7 @@ impl VaultRecovery {
             &envelope.wrapped_key,
         )?);
         validate_key(&key)?;
-        let (_, remote_files) = load_encrypted_snapshot(&self.repository, &key)?;
+        let (_, remote_files) = vault.load_encrypted_snapshot(&key)?;
         keys.store(&manifest.vault_id, &key)?;
         reconcile_local(&self.root, &BTreeMap::new(), &remote_files)?;
         write_local_state(&self.root, &self.repository)?;
