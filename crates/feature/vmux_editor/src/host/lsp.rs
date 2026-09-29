@@ -9,12 +9,15 @@ use vmux_tool::{
     ToolScanner, ToolStore, ToolsManifest,
 };
 
+use crate::lsp::catalog::Catalog;
+use crate::lsp::purl::Purl;
+
 pub mod archive;
 pub mod catalog;
 pub mod client;
 pub mod download;
 pub mod framing;
-pub mod install;
+mod install;
 pub mod lint;
 pub mod manager;
 pub mod manager_page;
@@ -57,15 +60,16 @@ fn scan_tools(
 ) -> Result<ToolProviderSnapshot, String> {
     let store = store::LspStore::current();
     let catalog = if refresh {
-        catalog::ensure_catalog(&store, true).unwrap_or_default()
+        Catalog::load(&store, true).unwrap_or_default()
     } else if store.catalog_path().is_file() {
         let source =
             std::fs::read_to_string(store.catalog_path()).map_err(|error| error.to_string())?;
-        catalog::parse_registry(&source).unwrap_or_default()
+        Catalog::parse(&source).unwrap_or_default()
     } else {
-        Vec::new()
+        Catalog::default()
     };
     let catalog_by_name = catalog
+        .packages()
         .iter()
         .map(|package| (package.name.clone(), package))
         .collect::<BTreeMap<_, _>>();
@@ -75,7 +79,7 @@ fn scan_tools(
         .map(|receipt| {
             let package = catalog_by_name.get(&receipt.name).copied();
             let latest = package
-                .and_then(|package| purl::parse(&package.source_id))
+                .and_then(|package| Purl::parse(&package.source_id))
                 .and_then(|purl| purl.version);
             ToolInventoryItem {
                 id: receipt.name.as_str().to_string(),
@@ -102,7 +106,7 @@ fn scan_tools(
         .iter()
         .map(|item| item.id.clone())
         .collect::<BTreeSet<_>>();
-    for package in catalog {
+    for package in catalog.packages() {
         if installed.contains(package.name.as_str()) {
             continue;
         }
@@ -141,12 +145,11 @@ fn operate_tool(
                 return Err("package name is required".to_string());
             }
             let store = store::LspStore::current();
-            let packages = catalog::ensure_catalog(&store, false)?;
-            let package = packages
-                .iter()
-                .find(|package| package.name.as_str() == id)
+            let catalog = Catalog::load(&store, false)?;
+            let package = catalog
+                .find(id)
                 .ok_or_else(|| format!("language tool not found: {id}"))?;
-            install::install(package, &store, target::host_target(), |_, _, _| {})?;
+            package.install(&store, target::host_target(), |_, _, _| {})?;
             tool_store.set_managed_package(ToolProvider::Lsp, id, true)?;
             let operation = if operation.kind == ToolOperationKind::Install {
                 "installed"

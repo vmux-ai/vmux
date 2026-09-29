@@ -12,8 +12,8 @@ use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_core::page::PageReady;
 use vmux_layout::native_open::HostedUiPlugin;
 
-use crate::lsp::catalog::{self, Package};
-use crate::lsp::{install, purl, store, target};
+use crate::lsp::catalog::{Catalog, Package};
+use crate::lsp::{purl::Purl, store, target};
 
 #[vmux_native::page(page = "lsp")]
 pub struct ManagerPlugin;
@@ -228,16 +228,12 @@ fn start_catalog_jobs(
         let request = pending.request.clone();
         let task = IoTaskPool::get().spawn(async move {
             let store = store::LspStore::current();
-            let packages = catalog::ensure_catalog(&store, request.refresh).unwrap_or_default();
-            let mut packages = catalog::search(
-                &packages,
-                &request.query,
-                &request.language,
-                &request.category,
-            )
-            .iter()
-            .map(|package| package.to_lsp_package(&store))
-            .collect::<Vec<_>>();
+            let catalog = Catalog::load(&store, request.refresh).unwrap_or_default();
+            let mut packages = catalog
+                .search(&request.query, &request.language, &request.category)
+                .iter()
+                .map(|package| package.to_lsp_package(&store))
+                .collect::<Vec<_>>();
             if request.installed_only {
                 packages.retain(|package| {
                     matches!(
@@ -287,12 +283,8 @@ fn install_package(
     progress: Sender<LspInstallProgress>,
 ) -> Result<LspPackageStatus, LspInstallProgress> {
     let store = store::LspStore::current();
-    let packages = catalog::ensure_catalog(&store, false).unwrap_or_default();
-    let Some(package) = packages
-        .iter()
-        .find(|package| package.name.as_str() == name)
-        .cloned()
-    else {
+    let catalog = Catalog::load(&store, false).unwrap_or_default();
+    let Some(package) = catalog.find(&name).cloned() else {
         return Err(LspInstallProgress {
             name,
             phase: InstallPhase::Failed,
@@ -302,7 +294,7 @@ fn install_package(
     };
     let target = target::host_target();
     let progress_name = name.clone();
-    let result = install::install(&package, &store, target, |phase, pct, message| {
+    let result = package.install(&store, target, |phase, pct, message| {
         let _ = progress.send(LspInstallProgress {
             name: progress_name.clone(),
             phase,
@@ -420,8 +412,10 @@ fn start_uninstall_jobs(
 
 impl Package {
     fn to_lsp_package(&self, store: &store::LspStore) -> LspPackage {
-        let kind = purl::parse(&self.source_id)
-            .map(|source| source.kind)
+        let source = Purl::parse(&self.source_id);
+        let kind = source
+            .as_ref()
+            .map(|source| source.kind.as_str())
             .unwrap_or_default();
         let installed = store.is_installed(&self.name);
         let on_path = !installed
@@ -429,7 +423,7 @@ impl Package {
                 store.resolve_command(self.name.as_str()),
                 store::Resolution::OnPath
             );
-        let catalog_version = purl::parse(&self.source_id).and_then(|source| source.version);
+        let catalog_version = source.as_ref().and_then(|source| source.version.clone());
         let installed_version = installed
             .then(|| {
                 store
@@ -450,12 +444,13 @@ impl Package {
         } else {
             LspPkgStatus::Available
         };
-        let installable = kind == "github"
-            || install::toolchain_for(&kind).is_some_and(crate::lsp::registry::executable_on_path);
+        let toolchain = source.as_ref().and_then(Purl::toolchain);
+        let installable =
+            kind == "github" || toolchain.is_some_and(crate::lsp::registry::executable_on_path);
         let requires = if installable {
             None
         } else {
-            install::toolchain_for(&kind).map(String::from)
+            toolchain.map(String::from)
         };
         let version = if installed {
             installed_version

@@ -20,6 +20,11 @@ pub struct Package {
     pub bin: BTreeMap<PackageName, String>,
 }
 
+#[derive(Default)]
+pub struct Catalog {
+    packages: Vec<Package>,
+}
+
 fn str_array(v: Option<&Value>) -> Vec<String> {
     match v {
         Some(Value::Array(a)) => a
@@ -126,11 +131,6 @@ fn parse_one(v: &Value) -> Result<Package, String> {
     })
 }
 
-pub fn parse_registry(json: &str) -> Result<Vec<Package>, String> {
-    let arr: Vec<Value> = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    arr.iter().map(parse_one).collect()
-}
-
 struct CatalogSource(Vec<u8>);
 
 impl CatalogSource {
@@ -153,9 +153,9 @@ impl CatalogSource {
         Ok(Self(bytes))
     }
 
-    fn packages(&self) -> Result<Vec<Package>, String> {
+    fn catalog(&self) -> Result<Catalog, String> {
         let source = std::str::from_utf8(&self.0).map_err(|error| error.to_string())?;
-        parse_registry(source)
+        Catalog::parse(source)
     }
 
     fn bytes(&self) -> &[u8] {
@@ -163,61 +163,89 @@ impl CatalogSource {
     }
 }
 
-pub fn search<'a>(
-    pkgs: &'a [Package],
-    query: &str,
-    language: &str,
-    category: &str,
-) -> Vec<&'a Package> {
-    let q = query.to_ascii_lowercase();
-    let lang = language.to_ascii_lowercase();
-    let cat = category.to_ascii_lowercase();
-    pkgs.iter()
-        .filter(|p| {
-            (q.is_empty()
-                || p.name.as_str().to_ascii_lowercase().contains(&q)
-                || p.description.to_ascii_lowercase().contains(&q))
-                && (lang.is_empty() || p.languages.iter().any(|l| l.to_ascii_lowercase() == lang))
-                && (cat.is_empty() || p.categories.iter().any(|c| c.to_ascii_lowercase() == cat))
-        })
-        .collect()
-}
-
-pub fn fetch_catalog(
-    artifact: &download::RemoteArtifact,
-    store: &store::LspStore,
-) -> Result<Vec<Package>, String> {
-    let regdir = store.registries_dir();
-    std::fs::create_dir_all(&regdir).map_err(|e| e.to_string())?;
-    let staging = tempfile::tempdir_in(&regdir).map_err(|e| e.to_string())?;
-    let zip = staging.path().join("registry.json.zip");
-    download::download_to(
-        &artifact.url,
-        &zip,
-        download::CATALOG_MAX_BYTES,
-        &artifact.sha256,
-        |_, _| {},
-    )?;
-    archive::extract(&zip, ArchiveKind::Zip, staging.path(), "registry.json")?;
-    let source = CatalogSource::read(&staging.path().join("registry.json"))?;
-    let parsed = source.packages()?;
-    vmux_path::AtomicFile::write(store.catalog_path(), source.bytes())
-        .map_err(|e| e.to_string())?;
-    Ok(parsed)
-}
-
-pub fn ensure_catalog(store: &store::LspStore, refresh: bool) -> Result<Vec<Package>, String> {
-    if !refresh && store.catalog_path().is_file() {
-        return CatalogSource::read(&store.catalog_path())?.packages();
+impl Catalog {
+    pub fn parse(source: &str) -> Result<Self, String> {
+        let entries: Vec<Value> =
+            serde_json::from_str(source).map_err(|error| error.to_string())?;
+        let packages = entries
+            .iter()
+            .map(parse_one)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { packages })
     }
-    let artifact = download::github_release_asset(
-        "mason-org",
-        "mason-registry",
-        None,
-        "registry.json.zip",
-        download::CATALOG_MAX_BYTES,
-    )?;
-    fetch_catalog(&artifact, store)
+
+    pub fn load(store: &store::LspStore, refresh: bool) -> Result<Self, String> {
+        if !refresh && store.catalog_path().is_file() {
+            return CatalogSource::read(&store.catalog_path())?.catalog();
+        }
+        let artifact = download::github_release_asset(
+            "mason-org",
+            "mason-registry",
+            None,
+            "registry.json.zip",
+            download::CATALOG_MAX_BYTES,
+        )?;
+        Self::fetch(&artifact, store)
+    }
+
+    fn fetch(artifact: &download::RemoteArtifact, store: &store::LspStore) -> Result<Self, String> {
+        let registry_dir = store.registries_dir();
+        std::fs::create_dir_all(&registry_dir).map_err(|error| error.to_string())?;
+        let staging = tempfile::tempdir_in(&registry_dir).map_err(|error| error.to_string())?;
+        let archive_path = staging.path().join("registry.json.zip");
+        download::download_to(
+            &artifact.url,
+            &archive_path,
+            download::CATALOG_MAX_BYTES,
+            &artifact.sha256,
+            |_, _| {},
+        )?;
+        archive::extract(
+            &archive_path,
+            ArchiveKind::Zip,
+            staging.path(),
+            "registry.json",
+        )?;
+        let source = CatalogSource::read(&staging.path().join("registry.json"))?;
+        let catalog = source.catalog()?;
+        vmux_path::AtomicFile::write(store.catalog_path(), source.bytes())
+            .map_err(|error| error.to_string())?;
+        Ok(catalog)
+    }
+
+    pub fn packages(&self) -> &[Package] {
+        &self.packages
+    }
+
+    pub fn find(&self, name: &str) -> Option<&Package> {
+        self.packages
+            .iter()
+            .find(|package| package.name.as_str() == name)
+    }
+
+    pub fn search(&self, query: &str, language: &str, category: &str) -> Vec<&Package> {
+        let query = query.to_ascii_lowercase();
+        let language = language.to_ascii_lowercase();
+        let category = category.to_ascii_lowercase();
+        self.packages
+            .iter()
+            .filter(|package| {
+                (query.is_empty()
+                    || package.name.as_str().to_ascii_lowercase().contains(&query)
+                    || package.description.to_ascii_lowercase().contains(&query))
+                    && (language.is_empty()
+                        || package
+                            .languages
+                            .iter()
+                            .any(|item| item.to_ascii_lowercase() == language))
+                    && (category.is_empty()
+                        || package
+                            .categories
+                            .iter()
+                            .any(|item| item.to_ascii_lowercase() == category))
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -258,12 +286,9 @@ mod tests {
 
     #[test]
     fn parses_three_packages() {
-        let pkgs = parse_registry(SAMPLE).unwrap();
-        assert_eq!(pkgs.len(), 3);
-        let ra = pkgs
-            .iter()
-            .find(|p| p.name.as_str() == "rust-analyzer")
-            .unwrap();
+        let catalog = Catalog::parse(SAMPLE).unwrap();
+        assert_eq!(catalog.packages().len(), 3);
+        let ra = catalog.find("rust-analyzer").unwrap();
         assert_eq!(ra.description, "Rust LSP");
         assert!(ra.categories.contains(&"LSP".to_string()));
         assert_eq!(ra.assets.len(), 3);
@@ -281,25 +306,22 @@ mod tests {
 
     #[test]
     fn npm_and_pypi_have_no_github_assets() {
-        let pkgs = parse_registry(SAMPLE).unwrap();
-        let ts = pkgs
-            .iter()
-            .find(|p| p.name.as_str() == "typescript-language-server")
-            .unwrap();
+        let catalog = Catalog::parse(SAMPLE).unwrap();
+        let ts = catalog.find("typescript-language-server").unwrap();
         assert!(ts.assets.is_empty());
         assert!(ts.source_id.starts_with("pkg:npm/"));
     }
 
     #[test]
     fn search_filters() {
-        let pkgs = parse_registry(SAMPLE).unwrap();
-        assert_eq!(search(&pkgs, "rust", "", "").len(), 1);
-        assert_eq!(search(&pkgs, "", "python", "").len(), 1);
-        assert_eq!(search(&pkgs, "", "", "lsp").len(), 2);
-        assert_eq!(search(&pkgs, "", "", "formatter").len(), 1);
-        assert_eq!(search(&pkgs, "lsp", "", "").len(), 2);
-        assert_eq!(search(&pkgs, "linter", "", "").len(), 1);
-        assert_eq!(search(&pkgs, "zzz", "", "").len(), 0);
+        let catalog = Catalog::parse(SAMPLE).unwrap();
+        assert_eq!(catalog.search("rust", "", "").len(), 1);
+        assert_eq!(catalog.search("", "python", "").len(), 1);
+        assert_eq!(catalog.search("", "", "lsp").len(), 2);
+        assert_eq!(catalog.search("", "", "formatter").len(), 1);
+        assert_eq!(catalog.search("lsp", "", "").len(), 2);
+        assert_eq!(catalog.search("linter", "", "").len(), 1);
+        assert_eq!(catalog.search("zzz", "", "").len(), 0);
     }
 
     #[test]
@@ -308,8 +330,8 @@ mod tests {
         let store = store::LspStore::at(tmp.path());
         std::fs::create_dir_all(store.registries_dir()).unwrap();
         std::fs::write(store.catalog_path(), SAMPLE).unwrap();
-        let pkgs = ensure_catalog(&store, false).unwrap();
-        assert_eq!(pkgs.len(), 3);
+        let catalog = Catalog::load(&store, false).unwrap();
+        assert_eq!(catalog.packages().len(), 3);
     }
 
     #[test]
@@ -355,8 +377,8 @@ mod tests {
             sha256: digest,
         };
         let store = store::LspStore::at(tmp.path());
-        let pkgs = fetch_catalog(&artifact, &store).unwrap();
-        assert_eq!(pkgs.len(), 3);
+        let catalog = Catalog::fetch(&artifact, &store).unwrap();
+        assert_eq!(catalog.packages().len(), 3);
         assert!(store.catalog_path().is_file());
     }
 }
