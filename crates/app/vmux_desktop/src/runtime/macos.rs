@@ -9,9 +9,8 @@ use vmux_flex::prelude::*;
 use vmux_setting::{ResolvedScheme, SystemAppearance};
 
 use super::native::{
-    NativeWindowFrame, NativeWindowResizeDrag, TitlebarClick, TitlebarClicks,
-    WindowTitlebarGesture, WindowZoom, native_resize_edges, native_scroll_should_wake,
-    resized_native_window_frame, windowed_pointer_inside_after_event,
+    NativePointerPolicy, NativeWindowFrame, NativeWindowResizeDrag, TitlebarClick, TitlebarClicks,
+    WindowTitlebarGesture, WindowZoom,
 };
 
 pub(super) struct RuntimePlatformPlugin;
@@ -301,7 +300,7 @@ fn begin_native_window_resize(event: &objc2_app_kit::NSEvent) -> Option<NativeWi
     }
     let cursor = NSEvent::mouseLocation();
     let frame = NativeWindowFrame::from(window.frame());
-    let edges = native_resize_edges(frame, cursor.x, cursor.y, 8.0);
+    let edges = frame.resize_edges(cursor.x, cursor.y, 8.0);
     if !edges.any() {
         return None;
     }
@@ -326,7 +325,7 @@ fn update_native_window_resize(event: &objc2_app_kit::NSEvent, drag: NativeWindo
         return;
     };
     let cursor = NSEvent::mouseLocation();
-    let frame = resized_native_window_frame(drag, cursor.x, cursor.y);
+    let frame = drag.resized_frame(cursor.x, cursor.y);
     window.setFrame_display(frame.into(), true);
 }
 
@@ -503,7 +502,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         let was_over_windowed_page = NATIVE_WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed);
         let sampled_over_windowed_page = location
             .is_some_and(|(x, y)| vmux_browser::NativeBridge::windowed_page_contains_point(x, y));
-        let over_windowed_page = windowed_pointer_inside_after_event(
+        let over_windowed_page = NativePointerPolicy::windowed_presence(
             pointer_position_changed,
             was_over_windowed_page,
             sampled_over_windowed_page,
@@ -526,7 +525,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 local_wake(interval);
             }
         } else if scroll {
-            let wake_for_scroll = native_scroll_should_wake(
+            let wake_for_scroll = NativePointerPolicy::scroll_should_wake(
                 vmux_browser::NativeLayout::pointer_is_inside(),
                 sampled_over_windowed_page,
             );
