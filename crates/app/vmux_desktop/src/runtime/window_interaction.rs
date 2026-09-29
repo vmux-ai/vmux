@@ -1,6 +1,6 @@
-pub(super) struct NativePointerPolicy;
+pub(super) struct WindowPointerPolicy;
 
-impl NativePointerPolicy {
+impl WindowPointerPolicy {
     pub(super) fn windowed_presence(
         pointer_position_changed: bool,
         previous: bool,
@@ -22,14 +22,14 @@ impl NativePointerPolicy {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(super) struct NativeWindowFrame {
+pub(super) struct WindowFrame {
     pub(super) x: f64,
     pub(super) y: f64,
     pub(super) width: f64,
     pub(super) height: f64,
 }
 
-impl NativeWindowFrame {
+impl WindowFrame {
     fn matches(self, other: Self) -> bool {
         const SLOP: f64 = 1.0;
 
@@ -39,12 +39,12 @@ impl NativeWindowFrame {
             && (self.height - other.height).abs() <= SLOP
     }
 
-    pub(super) fn resize_edges(self, cursor_x: f64, cursor_y: f64, grip: f64) -> NativeResizeEdges {
+    pub(super) fn resize_edges(self, cursor_x: f64, cursor_y: f64, grip: f64) -> ResizeEdges {
         let right = self.x + self.width;
         let top = self.y + self.height;
         let within_x = cursor_x >= self.x - grip && cursor_x <= right + grip;
         let within_y = cursor_y >= self.y - grip && cursor_y <= top + grip;
-        NativeResizeEdges {
+        ResizeEdges {
             left: within_y && (cursor_x - self.x).abs() <= grip,
             right: within_y && (cursor_x - right).abs() <= grip,
             bottom: within_x && (cursor_y - self.y).abs() <= grip,
@@ -54,31 +54,31 @@ impl NativeWindowFrame {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct NativeResizeEdges {
+pub(super) struct ResizeEdges {
     pub(super) left: bool,
     pub(super) right: bool,
     pub(super) bottom: bool,
     pub(super) top: bool,
 }
 
-impl NativeResizeEdges {
+impl ResizeEdges {
     pub(super) fn any(self) -> bool {
         self.left || self.right || self.bottom || self.top
     }
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct NativeWindowResizeDrag {
-    pub(super) frame: NativeWindowFrame,
+pub(super) struct WindowResizeDrag {
+    pub(super) frame: WindowFrame,
     pub(super) cursor_x: f64,
     pub(super) cursor_y: f64,
     pub(super) min_width: f64,
     pub(super) min_height: f64,
-    pub(super) edges: NativeResizeEdges,
+    pub(super) edges: ResizeEdges,
 }
 
-impl NativeWindowResizeDrag {
-    pub(super) fn resized_frame(self, cursor_x: f64, cursor_y: f64) -> NativeWindowFrame {
+impl WindowResizeDrag {
+    pub(super) fn resized_frame(self, cursor_x: f64, cursor_y: f64) -> WindowFrame {
         let mut frame = self.frame;
         let delta_x = cursor_x - self.cursor_x;
         let delta_y = cursor_y - self.cursor_y;
@@ -168,14 +168,10 @@ impl TitlebarClicks {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(super) struct WindowZoom(Option<NativeWindowFrame>);
+pub(super) struct WindowZoom(Option<WindowFrame>);
 
 impl WindowZoom {
-    pub(super) fn toggled(
-        &mut self,
-        current: NativeWindowFrame,
-        zoomed: NativeWindowFrame,
-    ) -> NativeWindowFrame {
+    pub(super) fn toggled(&mut self, current: WindowFrame, zoomed: WindowFrame) -> WindowFrame {
         if let Some(restore) = self.0
             && current.matches(zoomed)
         {
@@ -192,8 +188,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn native_window_resize_detects_edges_and_corners() {
-        let frame = NativeWindowFrame {
+    fn window_resize_detects_edges_and_corners() {
+        let frame = WindowFrame {
             x: 100.0,
             y: 100.0,
             width: 800.0,
@@ -202,7 +198,7 @@ mod tests {
 
         assert_eq!(
             frame.resize_edges(100.0, 100.0, 8.0),
-            NativeResizeEdges {
+            ResizeEdges {
                 left: true,
                 bottom: true,
                 ..Default::default()
@@ -210,7 +206,7 @@ mod tests {
         );
         assert_eq!(
             frame.resize_edges(900.0, 700.0, 8.0),
-            NativeResizeEdges {
+            ResizeEdges {
                 right: true,
                 top: true,
                 ..Default::default()
@@ -218,7 +214,7 @@ mod tests {
         );
         assert_eq!(
             frame.resize_edges(500.0, 100.0, 8.0),
-            NativeResizeEdges {
+            ResizeEdges {
                 bottom: true,
                 ..Default::default()
             }
@@ -227,9 +223,9 @@ mod tests {
     }
 
     #[test]
-    fn native_corner_resize_updates_both_axes_and_clamps_minimum() {
-        let drag = NativeWindowResizeDrag {
-            frame: NativeWindowFrame {
+    fn corner_resize_updates_both_axes_and_clamps_minimum() {
+        let drag = WindowResizeDrag {
+            frame: WindowFrame {
                 x: 100.0,
                 y: 100.0,
                 width: 800.0,
@@ -239,7 +235,7 @@ mod tests {
             cursor_y: 100.0,
             min_width: 200.0,
             min_height: 120.0,
-            edges: NativeResizeEdges {
+            edges: ResizeEdges {
                 left: true,
                 bottom: true,
                 ..Default::default()
@@ -248,7 +244,7 @@ mod tests {
 
         assert_eq!(
             drag.resized_frame(150.0, 150.0),
-            NativeWindowFrame {
+            WindowFrame {
                 x: 150.0,
                 y: 150.0,
                 width: 750.0,
@@ -257,7 +253,7 @@ mod tests {
         );
         assert_eq!(
             drag.resized_frame(850.0, 650.0),
-            NativeWindowFrame {
+            WindowFrame {
                 x: 700.0,
                 y: 580.0,
                 width: 200.0,
@@ -268,17 +264,17 @@ mod tests {
 
     #[test]
     fn scroll_preserves_windowed_page_pointer_ownership() {
-        assert!(NativePointerPolicy::windowed_presence(false, true, false));
-        assert!(!NativePointerPolicy::windowed_presence(false, false, true));
-        assert!(!NativePointerPolicy::windowed_presence(true, true, false));
-        assert!(NativePointerPolicy::windowed_presence(true, false, true));
+        assert!(WindowPointerPolicy::windowed_presence(false, true, false));
+        assert!(!WindowPointerPolicy::windowed_presence(false, false, true));
+        assert!(!WindowPointerPolicy::windowed_presence(true, true, false));
+        assert!(WindowPointerPolicy::windowed_presence(true, false, true));
     }
 
     #[test]
     fn native_scroll_wakes_bevy_only_for_layout_or_non_windowed_content() {
-        assert!(!NativePointerPolicy::scroll_should_wake(false, true));
-        assert!(NativePointerPolicy::scroll_should_wake(true, true));
-        assert!(NativePointerPolicy::scroll_should_wake(false, false));
+        assert!(!WindowPointerPolicy::scroll_should_wake(false, true));
+        assert!(WindowPointerPolicy::scroll_should_wake(true, true));
+        assert!(WindowPointerPolicy::scroll_should_wake(false, false));
     }
 
     #[test]
@@ -374,13 +370,13 @@ mod tests {
         );
     }
 
-    const WINDOWED: NativeWindowFrame = NativeWindowFrame {
+    const WINDOWED: WindowFrame = WindowFrame {
         x: 240.0,
         y: 180.0,
         width: 900.0,
         height: 600.0,
     };
-    const VISIBLE: NativeWindowFrame = NativeWindowFrame {
+    const VISIBLE: WindowFrame = WindowFrame {
         x: 0.0,
         y: 0.0,
         width: 1512.0,
@@ -401,7 +397,7 @@ mod tests {
     #[test]
     fn moving_a_zoomed_window_makes_the_next_zoom_remember_where_it_was_moved_to() {
         let mut zoom = WindowZoom::default();
-        let moved = NativeWindowFrame {
+        let moved = WindowFrame {
             x: 40.0,
             y: 60.0,
             ..VISIBLE

@@ -8,8 +8,8 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use vmux_flex::prelude::*;
 use vmux_setting::{ResolvedScheme, SystemAppearance};
 
-use super::native::{
-    NativePointerPolicy, NativeWindowFrame, NativeWindowResizeDrag, TitlebarClick, TitlebarClicks,
+use super::window_interaction::{
+    TitlebarClick, TitlebarClicks, WindowFrame, WindowPointerPolicy, WindowResizeDrag,
     WindowTitlebarGesture, WindowZoom,
 };
 
@@ -23,7 +23,7 @@ impl Plugin for RuntimePlatformPlugin {
             .add_systems(
                 Startup,
                 (
-                    install_native_mouse_wake_monitor,
+                    install_mouse_wake_monitor,
                     install_live_resize_monitor,
                     activate_primary_window_on_startup,
                 ),
@@ -49,14 +49,14 @@ fn seed_system_appearance(
     });
 }
 
-const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
-const NATIVE_MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
+const MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
+const MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
 
-static NATIVE_MOUSE_WAKE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
+static MOUSE_WAKE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 static IN_LIVE_RESIZE: AtomicBool = AtomicBool::new(false);
 static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 static HOVER_OVER_PANE: AtomicBool = AtomicBool::new(false);
-static NATIVE_WINDOWED_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
+static WINDOWED_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
 
 fn activate_primary_window_on_startup(
     primary_window: Query<(Entity, &Window), With<bevy::window::PrimaryWindow>>,
@@ -215,9 +215,9 @@ fn activate_app_during_boot(
     }
 }
 
-type NativeThrottle = Arc<dyn Fn(Duration) + Send + Sync>;
+type WakeThrottle = Arc<dyn Fn(Duration) + Send + Sync>;
 
-fn native_throttle(name: &'static str, callback: impl Fn() + Send + 'static) -> NativeThrottle {
+fn wake_throttle(name: &'static str, callback: impl Fn() + Send + 'static) -> WakeThrottle {
     let pending_interval_ns = Arc::new(AtomicU64::new(u64::MAX));
     let thread_pending_interval_ns = Arc::clone(&pending_interval_ns);
     let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
@@ -264,7 +264,7 @@ fn native_throttle(name: &'static str, callback: impl Fn() + Send + 'static) -> 
     })
 }
 
-impl From<objc2_foundation::NSRect> for NativeWindowFrame {
+impl From<objc2_foundation::NSRect> for WindowFrame {
     fn from(rect: objc2_foundation::NSRect) -> Self {
         Self {
             x: rect.origin.x,
@@ -275,8 +275,8 @@ impl From<objc2_foundation::NSRect> for NativeWindowFrame {
     }
 }
 
-impl From<NativeWindowFrame> for objc2_foundation::NSRect {
-    fn from(frame: NativeWindowFrame) -> Self {
+impl From<WindowFrame> for objc2_foundation::NSRect {
+    fn from(frame: WindowFrame) -> Self {
         use objc2_foundation::{NSPoint, NSRect, NSSize};
 
         NSRect::new(
@@ -286,7 +286,7 @@ impl From<NativeWindowFrame> for objc2_foundation::NSRect {
     }
 }
 
-fn begin_native_window_resize(event: &objc2_app_kit::NSEvent) -> Option<NativeWindowResizeDrag> {
+fn begin_window_resize(event: &objc2_app_kit::NSEvent) -> Option<WindowResizeDrag> {
     use objc2_app_kit::{NSEvent, NSWindowStyleMask};
 
     let mtm = objc2::MainThreadMarker::new()?;
@@ -299,13 +299,13 @@ fn begin_native_window_resize(event: &objc2_app_kit::NSEvent) -> Option<NativeWi
         window.setStyleMask(style | NSWindowStyleMask::Resizable);
     }
     let cursor = NSEvent::mouseLocation();
-    let frame = NativeWindowFrame::from(window.frame());
+    let frame = WindowFrame::from(window.frame());
     let edges = frame.resize_edges(cursor.x, cursor.y, 8.0);
     if !edges.any() {
         return None;
     }
     let min_size = window.minSize();
-    Some(NativeWindowResizeDrag {
+    Some(WindowResizeDrag {
         frame,
         cursor_x: cursor.x,
         cursor_y: cursor.y,
@@ -315,7 +315,7 @@ fn begin_native_window_resize(event: &objc2_app_kit::NSEvent) -> Option<NativeWi
     })
 }
 
-fn update_native_window_resize(event: &objc2_app_kit::NSEvent, drag: NativeWindowResizeDrag) {
+fn update_window_resize(event: &objc2_app_kit::NSEvent, drag: WindowResizeDrag) {
     use objc2_app_kit::NSEvent;
 
     let Some(mtm) = objc2::MainThreadMarker::new() else {
@@ -383,8 +383,8 @@ impl WindowZoom {
             return;
         };
         let target = self.toggled(
-            NativeWindowFrame::from(window.frame()),
-            NativeWindowFrame::from(screen.visibleFrame()),
+            WindowFrame::from(window.frame()),
+            WindowFrame::from(screen.visibleFrame()),
         );
         let target = target.into();
         let duration = window.animationResizeTime(target);
@@ -396,20 +396,20 @@ impl WindowZoom {
     }
 }
 
-fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
+fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 
     let Some(proxy) = proxy else {
         return;
     };
-    if NATIVE_MOUSE_WAKE_MONITOR_INSTALLED.load(Ordering::Relaxed) {
+    if MOUSE_WAKE_MONITOR_INSTALLED.load(Ordering::Relaxed) {
         return;
     }
     let proxy = (**proxy).clone();
-    let wake = native_throttle("native-mouse-wake-throttle", move || {
+    let wake = wake_throttle("mouse-wake-throttle", move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     });
-    let resize_drag = Arc::new(Mutex::new(None::<NativeWindowResizeDrag>));
+    let resize_drag = Arc::new(Mutex::new(None::<WindowResizeDrag>));
     let local_resize_drag = Arc::clone(&resize_drag);
     let titlebar_clicks = Arc::new(Mutex::new(TitlebarClicks::default()));
     let window_zoom = Arc::new(Mutex::new(WindowZoom::default()));
@@ -427,7 +427,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 false
             }
             NSEventType::LeftMouseDown => {
-                let drag = begin_native_window_resize(ev);
+                let drag = begin_window_resize(ev);
                 *local_resize_drag
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner()) = drag;
@@ -450,7 +450,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 if let Some(drag) = drag {
-                    update_native_window_resize(ev, drag);
+                    update_window_resize(ev, drag);
                     true
                 } else {
                     false
@@ -462,7 +462,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .take();
                 if let Some(drag) = drag {
-                    update_native_window_resize(ev, drag);
+                    update_window_resize(ev, drag);
                     IN_LIVE_RESIZE.store(false, Ordering::Relaxed);
                     true
                 } else {
@@ -499,41 +499,41 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         let scroll = event_type == NSEventType::ScrollWheel;
         let location = event_location_in_window_physical_px(ev);
         let pointer_position_changed = motion || button_event;
-        let was_over_windowed_page = NATIVE_WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed);
+        let was_over_windowed_page = WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed);
         let sampled_over_windowed_page = location
             .is_some_and(|(x, y)| vmux_browser::NativeBridge::windowed_page_contains_point(x, y));
-        let over_windowed_page = NativePointerPolicy::windowed_presence(
+        let over_windowed_page = WindowPointerPolicy::windowed_presence(
             pointer_position_changed,
             was_over_windowed_page,
             sampled_over_windowed_page,
         );
         if pointer_position_changed {
-            NATIVE_WINDOWED_POINTER_INSIDE.store(over_windowed_page, Ordering::Relaxed);
+            WINDOWED_POINTER_INSIDE.store(over_windowed_page, Ordering::Relaxed);
         }
-        let buttons = native_mouse_buttons();
+        let buttons = mouse_buttons();
         if pointer_position_changed && let Some((x, y)) = location {
             vmux_input::pointer::publish(Vec2::new(x, y), buttons, motion);
         }
         if motion && event_belongs_to_main_window {
             let interval = if event_type == NSEventType::MouseMoved {
-                NATIVE_MOUSE_MOVE_WAKE_INTERVAL
+                MOUSE_MOVE_WAKE_INTERVAL
             } else {
-                NATIVE_MOUSE_DRAG_WAKE_INTERVAL
+                MOUSE_DRAG_WAKE_INTERVAL
             };
             if !over_windowed_page || !was_over_windowed_page || !event_window_is_key(ev) {
                 HOVER_OVER_PANE.store(true, Ordering::Relaxed);
                 local_wake(interval);
             }
         } else if scroll {
-            let wake_for_scroll = NativePointerPolicy::scroll_should_wake(
+            let wake_for_scroll = WindowPointerPolicy::scroll_should_wake(
                 vmux_browser::NativeLayout::pointer_is_inside(),
                 sampled_over_windowed_page,
             );
             if wake_for_scroll {
-                local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
+                local_wake(MOUSE_DRAG_WAKE_INTERVAL);
             }
         } else {
-            local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
+            local_wake(MOUSE_DRAG_WAKE_INTERVAL);
         }
         if capture_window_gesture {
             return std::ptr::null_mut();
@@ -554,8 +554,8 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 .take();
             IN_LIVE_RESIZE.store(false, Ordering::Relaxed);
         }
-        vmux_input::pointer::publish_buttons(native_mouse_buttons());
-        global_wake(NATIVE_MOUSE_MOVE_WAKE_INTERVAL);
+        vmux_input::pointer::publish_buttons(mouse_buttons());
+        global_wake(MOUSE_MOVE_WAKE_INTERVAL);
     });
     let mouse_mask = NSEventMask::MouseMoved
         | NSEventMask::LeftMouseDown
@@ -579,7 +579,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
     let global_token =
         NSEvent::addGlobalMonitorForEventsMatchingMask_handler(global_mask, &global_block);
     if local_token.is_some() || global_token.is_some() {
-        NATIVE_MOUSE_WAKE_MONITOR_INSTALLED.store(true, Ordering::Relaxed);
+        MOUSE_WAKE_MONITOR_INSTALLED.store(true, Ordering::Relaxed);
         if let Some(token) = local_token {
             std::mem::forget(token);
         }
@@ -665,7 +665,7 @@ fn event_belongs_to_main_window_frame(event: &objc2_app_kit::NSEvent) -> bool {
         .is_some_and(|window| window.canBecomeMainWindow())
 }
 
-fn native_mouse_buttons() -> bevy_cef_core::prelude::NativeMouseButtons {
+fn mouse_buttons() -> bevy_cef_core::prelude::NativeMouseButtons {
     let pressed = objc2_app_kit::NSEvent::pressedMouseButtons();
     bevy_cef_core::prelude::NativeMouseButtons {
         left: pressed & 1 != 0,
@@ -678,7 +678,7 @@ pub(super) fn live_resize_active() -> bool {
     IN_LIVE_RESIZE.load(Ordering::Relaxed)
 }
 
-pub(super) fn native_pointer_inside() -> bool {
+pub(super) fn pointer_inside_windowed_page() -> bool {
     vmux_browser::NativeLayout::pointer_is_inside()
-        || NATIVE_WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed)
+        || WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed)
 }

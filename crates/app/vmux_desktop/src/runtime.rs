@@ -1,10 +1,10 @@
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(any(target_os = "macos", test))]
-mod native;
+mod window_interaction;
 
 #[cfg(target_os = "macos")]
-use macos::{live_resize_active, native_pointer_inside};
+use macos::{live_resize_active, pointer_inside_windowed_page};
 
 #[cfg(target_os = "macos")]
 pub(crate) use macos::ensure_native_window_active;
@@ -15,7 +15,7 @@ fn live_resize_active() -> bool {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn native_pointer_inside() -> bool {
+fn pointer_inside_windowed_page() -> bool {
     false
 }
 
@@ -118,7 +118,7 @@ fn start_quit_confirmation(
 
 pub(crate) fn foreground_winit_settings(
     live_resize: bool,
-    native_pointer_inside: bool,
+    pointer_inside_windowed_page: bool,
 ) -> WinitSettings {
     let focused_mode = if live_resize {
         UpdateMode::Reactive {
@@ -132,7 +132,7 @@ pub(crate) fn foreground_winit_settings(
             wait: FOCUSED_FRAME_INTERVAL,
             react_to_device_events: false,
             react_to_user_events: true,
-            react_to_window_events: !native_pointer_inside,
+            react_to_window_events: !pointer_inside_windowed_page,
         }
     };
     WinitSettings {
@@ -158,11 +158,11 @@ fn sync_winit_power_mode(
     let any_visible = windows.iter().any(|w| w.visible);
     let any_focused = windows.iter().any(|w| w.visible && w.focused);
     let live_resize = live_resize_active();
-    let native_pointer_inside = native_pointer_inside();
+    let pointer_inside_windowed_page = pointer_inside_windowed_page();
     let next = if all_hidden {
         hidden_winit_settings()
     } else {
-        foreground_winit_settings(live_resize, native_pointer_inside)
+        foreground_winit_settings(live_resize, pointer_inside_windowed_page)
     };
     if settings.focused_mode != next.focused_mode || settings.unfocused_mode != next.unfocused_mode
     {
@@ -450,7 +450,7 @@ mod tests {
     fn startup_installs_the_mouse_wake_monitor_and_activates_the_window() {
         let startup = platform_systems(Startup);
         assert!(
-            startup.contains(&"install_native_mouse_wake_monitor".to_string()),
+            startup.contains(&"install_mouse_wake_monitor".to_string()),
             "startup systems: {startup:?}"
         );
         assert!(
