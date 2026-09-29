@@ -302,29 +302,6 @@ pub struct RemoteMediaEntry {
     pub preview_data_url: String,
 }
 
-impl RemoteMediaEntry {
-    pub fn reference(&self) -> String {
-        let encode = |value: &str| value.replace('%', "%25").replace(' ', "%20");
-        if self.parent == "~" {
-            format!("~/{name}", name = encode(&self.name))
-        } else {
-            format!(
-                "{parent}/{name}",
-                parent = encode(&self.parent),
-                name = encode(&self.name)
-            )
-        }
-    }
-
-    pub fn display_path(&self) -> String {
-        if self.parent == "~" {
-            format!("~/{}", self.name)
-        } else {
-            format!("{}/{}", self.parent.trim_end_matches('/'), self.name)
-        }
-    }
-}
-
 #[vmux_api::contract]
 pub struct RemoteSession {
     pub sid: String,

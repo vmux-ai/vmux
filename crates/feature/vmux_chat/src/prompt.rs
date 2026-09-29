@@ -3,6 +3,7 @@ use bevy_ecs::prelude::*;
 use std::collections::HashMap;
 use vmux_api::prompt_media::{ChatAttachment, ChatAttachments, ChatMediaEntry};
 use vmux_api::room::RemoteMediaEntry;
+use vmux_core::prompt_media::AttachmentSelection;
 
 use crate::event::{ChatMediaState, ChatPromptFocusEffect};
 use crate::room::Submitted;
@@ -191,10 +192,9 @@ fn fold_attachments(
                 .0
                 .insert(attachment.path.clone(), attachment.clone());
         }
-        changed |= ChatAttachments {
+        changed |= AttachmentSelection::new(&mut attachments.0).merge(&ChatAttachments {
             attachments: added.clone(),
-        }
-        .merge_into(&mut attachments.0);
+        });
     }
     if changed {
         focus.next();

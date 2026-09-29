@@ -11,6 +11,7 @@ use vmux_api::prompt_media::{
 };
 use vmux_core::host::UiStateWrite;
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
+use vmux_core::prompt_media::AttachmentSelection;
 
 use super::{OpenVersion, PaletteSnapshot, PendingPaletteRequest, RequestDelay, RequestGeneration};
 
@@ -129,7 +130,7 @@ fn receive_palette_attachments(
     if !media.start {
         return;
     }
-    if response.merge_into(&mut snapshot.0.attachments) {
+    if AttachmentSelection::new(&mut snapshot.0.attachments).merge(response) {
         snapshot.0.attachment_sequence = snapshot.0.attachment_sequence.wrapping_add(1).max(1);
     }
 }

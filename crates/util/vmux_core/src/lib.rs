@@ -13,6 +13,7 @@ pub mod knowledge;
 pub mod media;
 pub mod page_metadata;
 pub mod process_id;
+pub mod prompt_media;
 pub mod scroll;
 pub mod service;
 pub mod smart_bookmark_folder;

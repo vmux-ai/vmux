@@ -3,6 +3,7 @@ use crate::prompt_media::{
     ChatAttachPaths, ChatAttachment, ChatMediaEntry, inline_media_query, replace_inline_media_query,
 };
 use dioxus::prelude::*;
+use vmux_core::prompt_media::MediaPath;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerAttachment, focus_prompt_end};
 use vmux_ui::components::prompt_media_options::PromptMediaOption;
 use vmux_ui::file_icon::FilePath;
@@ -59,7 +60,7 @@ impl PromptMedia {
             options.push(PromptMediaOption {
                 key: format!("media-{}", entry.path),
                 name: entry.name.clone(),
-                display_path: entry.display_path(),
+                display_path: MediaPath::new(entry).display(),
                 preview_data_url: entry.preview_data_url.clone(),
                 label: FilePath(&entry.name).extension_label(),
                 is_dir: entry.is_dir,
@@ -163,7 +164,7 @@ impl PromptMedia {
         let Some(media_query) = inline_media_query(&value) else {
             return;
         };
-        let reference = entry.reference();
+        let reference = MediaPath::new(entry).reference();
         let replacement = if entry.is_dir {
             format!("@{reference}/")
         } else {

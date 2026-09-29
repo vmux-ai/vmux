@@ -2,6 +2,7 @@ use base64::Engine;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_core::prompt_media::AttachmentSelection;
 
 use crate as vmux_chat;
 use crate::event::{
@@ -123,7 +124,7 @@ impl ChatAttachmentProjection {
             self.previews
                 .insert(attachment.path.clone(), attachment.clone());
         }
-        let merged = incoming.merge_into(&mut self.selected);
+        let merged = AttachmentSelection::new(&mut self.selected).merge(incoming);
         self.hydrate_selected() || merged
     }
 
