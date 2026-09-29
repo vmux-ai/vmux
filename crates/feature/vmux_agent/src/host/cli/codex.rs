@@ -59,23 +59,14 @@ fn discover_sessions(
                 }
             })
             .collect::<HashSet<_>>();
-        if let Some(id) = CodexCli::discover(&root.0, &pending.cwd, pending.spawn_time, &claimed) {
+        if let Some(id) =
+            discover_codex_session_id(&root.0, &pending.cwd, pending.spawn_time, &claimed)
+        {
             commands
                 .entity(entity)
                 .insert(SessionId(id))
                 .remove::<PendingAgentSession>();
         }
-    }
-}
-
-impl CodexCli {
-    fn discover(
-        sessions_root: &Path,
-        cwd: &Path,
-        spawn_time: SystemTime,
-        claimed: &HashSet<String>,
-    ) -> Option<String> {
-        discover_codex_session_id(sessions_root, cwd, spawn_time, claimed)
     }
 }
 

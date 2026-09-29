@@ -2,10 +2,12 @@ use bevy::prelude::*;
 use crossbeam_channel::Receiver;
 use vmux_api::protocol::{AcpModeOption, AcpModelOption, ClientMessage, SharedMessage};
 use vmux_chat::composer::ChatCliRequest;
+#[cfg(test)]
+use vmux_core::ProcessId;
 use vmux_core::agent::SwapStackSession;
 use vmux_core::service::ServiceRequest;
 use vmux_core::team::Profile;
-use vmux_core::{LastActivatedAt, PageMetadata, ProcessId};
+use vmux_core::{LastActivatedAt, PageMetadata};
 use vmux_layout::Browser;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::pane::PanePlacement;

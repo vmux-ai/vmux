@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use vmux_command::event::CommandBarPage;
+#[cfg(test)]
+use vmux_command::snapshot::ClaimedUrls;
 use vmux_command::snapshot::{
-    AgentPromptTarget, ClaimedUrl, ClaimedUrls, CommandBarAgentsSnapshot, CommandBarProjection,
+    AgentPromptTarget, ClaimedUrl, CommandBarAgentsSnapshot, CommandBarProjection,
     ContributedCommand, ContributedPage, WriteCommandBarSnapshots,
 };
 use vmux_core::agent::{

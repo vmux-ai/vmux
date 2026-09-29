@@ -57,24 +57,13 @@ fn discover_sessions(
                 }
             })
             .collect::<HashSet<_>>();
-        if let Some(id) = ClaudeCli::discover(&root.0, &pending.cwd, pending.spawn_time, &claimed) {
+        let directory = root.0.join(project_dir_name(&pending.cwd));
+        if let Some(id) = discover_claude_session_id(&directory, pending.spawn_time, &claimed) {
             commands
                 .entity(entity)
                 .insert(SessionId(id))
                 .remove::<PendingAgentSession>();
         }
-    }
-}
-
-impl ClaudeCli {
-    fn discover(
-        sessions_root: &Path,
-        cwd: &Path,
-        spawn_time: SystemTime,
-        claimed: &HashSet<String>,
-    ) -> Option<String> {
-        let directory = sessions_root.join(project_dir_name(cwd));
-        discover_claude_session_id(&directory, spawn_time, claimed)
     }
 }
 

@@ -5,6 +5,8 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use vmux_api::protocol::AgentAttachment;
 use vmux_chat::host::ChatView;
 use vmux_core::KeyboardOwner;
+#[cfg(test)]
+use vmux_core::PageOpenId;
 use vmux_core::agent::{
     AgentKind, AgentSession as CoreAgentSession, SessionId as CoreSessionId,
     SpawnAgentInStackRequest, SwapStackSession,
@@ -12,18 +14,26 @@ use vmux_core::agent::{
 use vmux_core::host::persistence::PageRestore;
 use vmux_core::terminal::TerminalLaunch;
 use vmux_core::{
-    PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenId, PageOpenSet,
-    PageOpenTask, PendingPrompt, PendingPromptAttachments,
+    PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
+    PendingPrompt, PendingPromptAttachments,
 };
+#[cfg(test)]
 use vmux_git::worktree::worktree_list;
 use vmux_layout::Browser as LayoutBrowser;
-use vmux_layout::space::{CurrentSpace, FocusedSpace, Space, SpaceId};
+#[cfg(test)]
+use vmux_layout::space::CurrentSpace;
+use vmux_layout::space::{FocusedSpace, Space, SpaceId};
+#[cfg(test)]
 use vmux_layout::stack::stack_bundle;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::{ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady};
 use vmux_session::{AcpSession, AgentConversationTitle, PromptQueue};
-use vmux_setting::{AppSettings, SpaceOverrides};
+use vmux_setting::AppSettings;
+#[cfg(test)]
+use vmux_setting::SpaceOverrides;
+#[cfg(test)]
 use vmux_space::model::SpaceRecord;
+#[cfg(test)]
 use vmux_space::spaces::space_profile_bundle;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
 

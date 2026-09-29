@@ -58,7 +58,9 @@ fn discover_sessions(
                 }
             })
             .collect::<HashSet<_>>();
-        if let Some(id) = VibeCli::discover(&root.0, &pending.cwd, pending.spawn_time, &claimed) {
+        if let Some(id) =
+            discover_vibe_session_id(&root.0, &pending.cwd, pending.spawn_time, &claimed)
+        {
             commands
                 .entity(entity)
                 .insert(SessionId(id))
@@ -78,7 +80,7 @@ fn detect_ended_sessions(
         return;
     }
     for (entity, session, sid) in &sessions {
-        if session.kind != AgentKind::Vibe || !VibeCli::ended(&root.0, &sid.0) {
+        if session.kind != AgentKind::Vibe || !vibe_session_ended(&root.0, &sid.0) {
             continue;
         }
         commands
@@ -87,40 +89,6 @@ fn detect_ended_sessions(
             .remove::<SessionId>()
             .remove::<PendingAgentSession>();
         exited.write(AgentSessionExited { entity });
-    }
-}
-
-impl VibeCli {
-    fn discover(
-        sessions_root: &Path,
-        cwd: &Path,
-        spawn_time: SystemTime,
-        claimed: &HashSet<String>,
-    ) -> Option<String> {
-        discover_vibe_session_id(sessions_root, cwd, spawn_time, claimed)
-    }
-
-    fn ended(sessions_root: &Path, session_id: &str) -> bool {
-        let Ok(entries) = std::fs::read_dir(sessions_root) else {
-            return false;
-        };
-        for entry in entries.flatten() {
-            let meta_path = entry.path().join("meta.json");
-            let Ok(text) = std::fs::read_to_string(&meta_path) else {
-                continue;
-            };
-            let Ok(head) = serde_json::from_str::<MetaJsonHead>(&text) else {
-                continue;
-            };
-            if head.session_id != session_id {
-                continue;
-            }
-            let Ok(exit) = serde_json::from_str::<MetaJsonExit>(&text) else {
-                continue;
-            };
-            return exit.end_time.is_some();
-        }
-        false
     }
 }
 
@@ -467,6 +435,29 @@ fn discover_vibe_session_id(
         }
     }
     best.map(|(_, id)| id)
+}
+
+fn vibe_session_ended(sessions_root: &Path, session_id: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(sessions_root) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let meta_path = entry.path().join("meta.json");
+        let Ok(text) = std::fs::read_to_string(&meta_path) else {
+            continue;
+        };
+        let Ok(head) = serde_json::from_str::<MetaJsonHead>(&text) else {
+            continue;
+        };
+        if head.session_id != session_id {
+            continue;
+        }
+        let Ok(exit) = serde_json::from_str::<MetaJsonExit>(&text) else {
+            continue;
+        };
+        return exit.end_time.is_some();
+    }
+    false
 }
 
 fn list_vibe_sessions(root: &Path) -> Vec<ResumableSession> {

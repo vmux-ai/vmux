@@ -13,19 +13,23 @@ use vmux_core::event::{ExplorerSearchFile, ExplorerSearchMatch, FileViewMode};
 use vmux_core::file_url::FileUrl;
 use vmux_core::service::ServiceMessageSet;
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
-use vmux_editor::{
-    ContractPlugin as EditorContractPlugin, FileViewModeRequest, GlobalSearchRequest,
-};
+#[cfg(test)]
+use vmux_editor::ContractPlugin as EditorContractPlugin;
+use vmux_editor::{FileViewModeRequest, GlobalSearchRequest};
 use vmux_git::GitDiffSource;
+#[cfg(test)]
+use vmux_layout::LayoutContractPlugin;
+use vmux_layout::OpenBesideRequest;
 use vmux_layout::active_pane::ActivatePane;
 use vmux_layout::pane::Pane;
 use vmux_layout::placement::reusable_page_match;
-use vmux_layout::stack::{Stack, stack_bundle};
+use vmux_layout::stack::Stack;
+#[cfg(test)]
+use vmux_layout::stack::stack_bundle;
 use vmux_layout::tab::Tab;
 use vmux_layout::worktree::{
     TabDirectoryObservationKind, TabDirectoryObserved, TabDirectoryRebindSet,
 };
-use vmux_layout::{LayoutContractPlugin, OpenBesideRequest};
 use vmux_setting::AppSettings;
 
 use crate::event::{AgentRequestInput, CommandOrigin};

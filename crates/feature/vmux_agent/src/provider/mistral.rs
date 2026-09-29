@@ -1,8 +1,8 @@
 use serde_json::json;
 
-use crate::provider::openai_shared::{
-    messages_to_chat_completions, parse_chat_completions_sse, tools_to_function_specs,
-};
+#[cfg(test)]
+use crate::provider::openai_shared::parse_chat_completions_sse;
+use crate::provider::openai_shared::{messages_to_chat_completions, tools_to_function_specs};
 use crate::stream::ToolDef;
 use vmux_api::room::Message;
 
