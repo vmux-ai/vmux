@@ -1,35 +1,5 @@
-use super::SimulatorButton;
+use super::AgentRequestId;
 use crate::{ProcessId, json::JsonValue};
-
-#[vmux_api::agent(Copy, Eq)]
-pub struct AgentSimulatorTap {
-    pub x: u32,
-    pub y: u32,
-}
-
-#[vmux_api::agent(Copy, Eq)]
-pub struct AgentSimulatorSwipe {
-    pub start_x: u32,
-    pub start_y: u32,
-    pub end_x: u32,
-    pub end_y: u32,
-    pub duration_ms: u32,
-}
-
-#[vmux_api::agent(Eq)]
-pub struct AgentSimulatorTypeText {
-    pub text: String,
-}
-
-#[vmux_api::agent(Copy, Eq)]
-pub struct AgentSimulatorKeyPress {
-    pub keycode: u8,
-}
-
-#[vmux_api::agent(Copy, Eq)]
-pub struct AgentSimulatorButtonPress {
-    pub button: SimulatorButton,
-}
 
 #[vmux_api::agent(Copy, Eq)]
 pub struct AgentReadLayout {
@@ -68,20 +38,6 @@ pub struct AgentScreenshot {
 }
 
 #[vmux_api::agent(Eq)]
-pub struct AgentBrowserSnapshot {
-    pub pane: Option<String>,
-    pub anchor: Option<ProcessId>,
-}
-
-#[vmux_api::agent(Eq)]
-pub struct AgentBrowserScroll {
-    pub pane: Option<String>,
-    pub to: Option<String>,
-    pub delta: Option<i32>,
-    pub anchor: Option<ProcessId>,
-}
-
-#[vmux_api::agent(Eq)]
 pub struct AgentRecordStart {
     pub gif: bool,
     pub max_secs: u32,
@@ -96,9 +52,6 @@ pub struct AgentRecordStop {
 
 #[vmux_api::agent(Copy, Eq)]
 pub struct AgentBookmarkList;
-
-#[vmux_api::agent(Copy, Eq)]
-pub struct AgentSimulatorScreenshot;
 
 #[vmux_api::agent(Copy, Eq)]
 pub struct AgentWorkingDirectory {
@@ -189,6 +142,14 @@ pub struct AgentImage {
     pub png: Vec<u8>,
     pub width: u32,
     pub height: u32,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct AgentQueryResult {
+    pub request_id: AgentRequestId,
+    pub content: String,
+    pub is_error: bool,
+    pub image: Option<AgentImage>,
 }
 
 #[vmux_api::contract(Eq)]

@@ -1,11 +1,12 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_api::protocol::{
+use vmux_api::protocol::AgentRequest;
+use vmux_core::ProcessAnchor;
+
+use crate::host::{
     AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch,
     AgentBrowserInstallExtension, AgentBrowserNavigate, AgentBrowserScroll, AgentBrowserSnapshot,
-    AgentRequest,
 };
-use vmux_core::ProcessAnchor;
 
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,

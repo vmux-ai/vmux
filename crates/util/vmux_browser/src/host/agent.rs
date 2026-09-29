@@ -1,9 +1,8 @@
 use bevy::prelude::*;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{
-    AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch,
-    AgentBrowserInstallExtension, AgentBrowserNavigate, AgentBrowserScroll, AgentBrowserSnapshot,
-    AgentCommandResult, AgentOpenInNewStack, AgentRequestId, AgentWorkingDirectory, ClientMessage,
+    AgentCommandResult, AgentOpenInNewStack, AgentQueryResult, AgentRequestId,
+    AgentWorkingDirectory, ClientMessage,
 };
 use vmux_core::agent::{
     AgentCommandResponse, AgentReply, AgentRequestAppExt, AgentRequestMessage,
@@ -25,6 +24,47 @@ use vmux_layout::{
 use vmux_tool::{ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet};
 
 use super::agent_pane::AgentBrowserResolve;
+
+#[vmux_api::agent]
+pub(crate) struct AgentBrowserNavigate {
+    pub url: String,
+    pub pane: Option<String>,
+}
+
+#[vmux_api::agent]
+pub(crate) struct AgentBrowserInstallExtension {
+    pub source: String,
+}
+
+#[vmux_api::agent]
+pub(crate) struct AgentBrowserGoBack {
+    pub pane: Option<String>,
+}
+
+#[vmux_api::agent]
+pub(crate) struct AgentBrowserGoForward {
+    pub pane: Option<String>,
+}
+
+#[vmux_api::agent]
+pub(crate) struct AgentBrowserHistorySearch {
+    pub query: String,
+    pub limit: u32,
+}
+
+#[vmux_api::agent(Eq)]
+pub(crate) struct AgentBrowserSnapshot {
+    pub pane: Option<String>,
+    pub anchor: Option<vmux_core::ProcessId>,
+}
+
+#[vmux_api::agent(Eq)]
+pub(crate) struct AgentBrowserScroll {
+    pub pane: Option<String>,
+    pub to: Option<String>,
+    pub delta: Option<i32>,
+    pub anchor: Option<vmux_core::ProcessId>,
+}
 
 pub(crate) struct AgentBrowserPlugin;
 
@@ -187,10 +227,18 @@ fn forward_snapshot_responses(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in responses.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentBrowserSnapshotResult {
-            request_id: AgentRequestId(response.request_id),
-            result: response.result.clone(),
-        }));
+        let (content, is_error) = match &response.result {
+            Ok(content) => (content.clone(), false),
+            Err(message) => (message.clone(), true),
+        };
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult {
+                request_id: AgentRequestId(response.request_id),
+                content,
+                is_error,
+                image: None,
+            },
+        )));
     }
 }
 
@@ -199,10 +247,18 @@ fn forward_scroll_responses(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in responses.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentBrowserScrollResult {
-            request_id: AgentRequestId(response.request_id),
-            result: response.result.clone(),
-        }));
+        let (content, is_error) = match &response.result {
+            Ok(content) => (content.clone(), false),
+            Err(message) => (message.clone(), true),
+        };
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult {
+                request_id: AgentRequestId(response.request_id),
+                content,
+                is_error,
+                image: None,
+            },
+        )));
     }
 }
 

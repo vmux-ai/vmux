@@ -93,13 +93,6 @@ pub enum FileTouchKind {
     Edit,
 }
 
-#[vmux_api::contract(Copy, Eq)]
-pub enum SimulatorButton {
-    Home,
-    Lock,
-    Siri,
-}
-
 #[vmux_api::contract(Eq)]
 pub struct FileSearchMatch {
     pub path: String,
@@ -139,17 +132,6 @@ pub struct AgentRunShell {
 }
 
 #[vmux_api::agent]
-pub struct AgentBrowserNavigate {
-    pub url: String,
-    pub pane: Option<String>,
-}
-
-#[vmux_api::agent]
-pub struct AgentBrowserInstallExtension {
-    pub source: String,
-}
-
-#[vmux_api::agent]
 pub struct AgentTerminalSend {
     pub text: String,
     pub terminal: Option<String>,
@@ -174,22 +156,6 @@ pub struct AgentUpdateSettings {
 #[vmux_api::agent]
 pub struct AgentUpdateLayout {
     pub layout: crate::protocol::layout::LayoutSnapshot,
-}
-
-#[vmux_api::agent]
-pub struct AgentBrowserGoBack {
-    pub pane: Option<String>,
-}
-
-#[vmux_api::agent]
-pub struct AgentBrowserGoForward {
-    pub pane: Option<String>,
-}
-
-#[vmux_api::agent]
-pub struct AgentBrowserHistorySearch {
-    pub query: String,
-    pub limit: u32,
 }
 
 #[vmux_api::agent]

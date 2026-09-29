@@ -228,22 +228,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_simulator_control_routes_and_decodes() {
-        let query = AgentSimulatorSwipe {
-            start_x: 120,
-            start_y: 700,
-            end_x: 120,
-            end_y: 200,
-            duration_ms: 300,
-        };
-
-        let request = AgentRequest::encode(&query).unwrap();
-        let recovered = request.decode::<AgentSimulatorSwipe>().unwrap();
-
-        assert_eq!(recovered, Some(query));
-    }
-
-    #[test]
     fn agent_image_rkyv_round_trip() {
         let image = AgentImage {
             path: "/tmp/x.png".into(),
@@ -255,6 +239,32 @@ mod tests {
         let recovered: AgentImage =
             rkyv::from_bytes::<AgentImage, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(recovered, image);
+    }
+
+    #[test]
+    fn generic_agent_query_result_round_trips() {
+        let request_id = AgentRequestId::new();
+        let response = ServiceMessage::AgentQueryResult(AgentQueryResult {
+            request_id,
+            content: "saved /tmp/frame.png (320×200)".to_string(),
+            is_error: false,
+            image: Some(AgentImage {
+                path: "/tmp/frame.png".to_string(),
+                png: vec![1, 2, 3, 4],
+                width: 320,
+                height: 200,
+            }),
+        });
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response).unwrap();
+        let recovered: ServiceMessage =
+            rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
+        let ServiceMessage::AgentQueryResult(result) = recovered else {
+            panic!("unexpected response");
+        };
+
+        assert_eq!(result.request_id, request_id);
+        assert_eq!(result.content, "saved /tmp/frame.png (320×200)");
+        assert_eq!(result.image.unwrap().width, 320);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use super::{
     AgentBookmarks, AgentCommandExit, AgentCommandResult, AgentCommandTool, AgentImage,
-    AgentRecording, AgentRequest, AgentRequestId, AgentRunCompletion, AgentSpace,
+    AgentQueryResult, AgentRecording, AgentRequest, AgentRequestId, AgentRunCompletion, AgentSpace,
     CommandLifecycleKind, CopyModeKey, JsonValue, ManagedMcpServer, ProcessInfo, SharedEvent,
     SharedMessage,
 };
@@ -129,14 +129,7 @@ pub enum ClientMessage {
         request_id: AgentRequestId,
         result: Result<AgentImage, String>,
     },
-    AgentBrowserSnapshotResult {
-        request_id: AgentRequestId,
-        result: Result<String, String>,
-    },
-    AgentBrowserScrollResult {
-        request_id: AgentRequestId,
-        result: Result<String, String>,
-    },
+    AgentQueryResult(AgentQueryResult),
     AgentRecordStartResult {
         request_id: AgentRequestId,
         result: Result<u32, String>,
@@ -148,14 +141,6 @@ pub enum ClientMessage {
     AgentBookmarksResult {
         request_id: AgentRequestId,
         result: Result<AgentBookmarks, String>,
-    },
-    AgentSimulatorScreenshotResult {
-        request_id: AgentRequestId,
-        result: Result<AgentImage, String>,
-    },
-    AgentSimulatorControlResult {
-        request_id: AgentRequestId,
-        result: Result<String, String>,
     },
     AgentWorkingDirectoryResult {
         request_id: AgentRequestId,
@@ -336,14 +321,7 @@ pub enum ServiceMessage {
         request_id: AgentRequestId,
         result: Result<AgentImage, String>,
     },
-    AgentBrowserSnapshotResult {
-        request_id: AgentRequestId,
-        result: Result<String, String>,
-    },
-    AgentBrowserScrollResult {
-        request_id: AgentRequestId,
-        result: Result<String, String>,
-    },
+    AgentQueryResult(AgentQueryResult),
     AgentRecordStartResult {
         request_id: AgentRequestId,
         result: Result<u32, String>,
@@ -355,14 +333,6 @@ pub enum ServiceMessage {
     AgentBookmarksResult {
         request_id: AgentRequestId,
         result: Result<AgentBookmarks, String>,
-    },
-    AgentSimulatorScreenshotResult {
-        request_id: AgentRequestId,
-        result: Result<AgentImage, String>,
-    },
-    AgentSimulatorControlResult {
-        request_id: AgentRequestId,
-        result: Result<String, String>,
     },
     AgentWorkingDirectoryResult {
         request_id: AgentRequestId,

@@ -267,9 +267,9 @@ another ALPN version.
 
 Agent commands and queries use the same routed `AgentRequest` envelope. Each operation is a
 separate `#[vmux_api::agent]` payload identified by its typed protocol ID; there is no aggregate
-query enum. Replies use operation-specific `ServiceMessage` variants with typed
-`Result<T, String>` payloads. Browser snapshot and scroll replies remain separate typed messages
-before crossing that transport boundary.
+query enum. Feature crates define those payloads beside their handlers and return the generic
+`AgentQueryResult` transport envelope. The service and MCP runtime route that envelope without
+knowing which browser, simulator, or other feature produced it.
 
 The hellos are JSON and everything after is rkyv, deliberately. rkyv encodes enum variants
 **positionally** — a peer one release behind does not fail to decode a reordered variant,

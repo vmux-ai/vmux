@@ -1,7 +1,7 @@
 use super::device::{Axe, SimulatorDevice};
 use super::hid::{HidBroker, HidRequest};
 use super::{
-    ActiveSimulatorView, DevicePixels, DevicePoints, HardwareButtonRequest,
+    ActiveSimulatorView, DevicePixels, DevicePoints, HardwareButtonRequest, SimulatorButton,
     SimulatorButtonPressRequest, SimulatorClipboardRequest, SimulatorControlResponse,
     SimulatorInputSet, SimulatorKeyPressRequest, SimulatorSoftwareKeyboardRequest,
     SimulatorSwipeRequest, SimulatorTapRequest, SimulatorTypeTextRequest,
@@ -19,7 +19,6 @@ use std::io;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use vmux_api::protocol::SimulatorButton;
 use vmux_core::input::{
     ConsumesNativeKey, NativeKey, NativeKeyClaimSet, NativeKeyInput, NativeKeyInputSet,
     PassesNativeKey,

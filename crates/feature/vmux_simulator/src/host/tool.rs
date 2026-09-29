@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_api::protocol::{
-    AgentRequest, AgentSimulatorButtonPress, AgentSimulatorKeyPress, AgentSimulatorScreenshot,
+use vmux_api::protocol::AgentRequest;
+
+use super::{
+    AgentSimulatorButtonPress, AgentSimulatorKeyPress, AgentSimulatorScreenshot,
     AgentSimulatorSwipe, AgentSimulatorTap, AgentSimulatorTypeText, SimulatorButton,
 };
 use vmux_tool::{AddedTool, ToolAppExt, ToolDispatchSet, ToolManifestPlugin, ToolQuery};

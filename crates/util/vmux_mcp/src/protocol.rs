@@ -526,6 +526,7 @@ async fn agent_query(
 
 fn query_response_request_id(message: &ServiceMessage) -> Option<AgentRequestId> {
     match message {
+        ServiceMessage::AgentQueryResult(result) => Some(result.request_id),
         ServiceMessage::AgentLayoutResult { request_id, .. }
         | ServiceMessage::AgentQueryError { request_id, .. }
         | ServiceMessage::ProcessOutputResult { request_id, .. }
@@ -535,13 +536,9 @@ fn query_response_request_id(message: &ServiceMessage) -> Option<AgentRequestId>
         | ServiceMessage::AgentSettingsResult { request_id, .. }
         | ServiceMessage::AgentSpacesResult { request_id, .. }
         | ServiceMessage::AgentScreenshotResult { request_id, .. }
-        | ServiceMessage::AgentBrowserSnapshotResult { request_id, .. }
-        | ServiceMessage::AgentBrowserScrollResult { request_id, .. }
         | ServiceMessage::AgentRecordStartResult { request_id, .. }
         | ServiceMessage::AgentRecordStopResult { request_id, .. }
         | ServiceMessage::AgentBookmarksResult { request_id, .. }
-        | ServiceMessage::AgentSimulatorScreenshotResult { request_id, .. }
-        | ServiceMessage::AgentSimulatorControlResult { request_id, .. }
         | ServiceMessage::AgentWorkingDirectoryResult { request_id, .. }
         | ServiceMessage::AgentVaultStatusResult { request_id, .. }
         | ServiceMessage::AgentCommandsResult { request_id, .. } => Some(*request_id),
@@ -560,6 +557,22 @@ async fn run_agent_query(query: AgentRequest) -> Result<Value, String> {
 pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
     match response {
         ServiceMessage::AgentQueryError { message, .. } => tool_error(&message),
+        ServiceMessage::AgentQueryResult(result) => {
+            if result.is_error {
+                return tool_error(&result.content);
+            }
+            let mut content = vec![json!({"type": "text", "text": result.content})];
+            if let Some(image) = result.image {
+                use base64::Engine;
+                let data = base64::engine::general_purpose::STANDARD.encode(&image.png);
+                content.push(json!({
+                    "type": "image",
+                    "data": data,
+                    "mimeType": "image/png"
+                }));
+            }
+            json!({"content": content})
+        }
         ServiceMessage::AgentLayoutResult {
             result: Ok(snapshot),
             ..
@@ -582,15 +595,6 @@ pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
             result: Ok(text), ..
         }
         | ServiceMessage::ProcessTranscriptResult {
-            result: Ok(text), ..
-        }
-        | ServiceMessage::AgentBrowserSnapshotResult {
-            result: Ok(text), ..
-        }
-        | ServiceMessage::AgentBrowserScrollResult {
-            result: Ok(text), ..
-        }
-        | ServiceMessage::AgentSimulatorControlResult {
             result: Ok(text), ..
         }
         | ServiceMessage::AgentWorkingDirectoryResult {
@@ -661,9 +665,6 @@ pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
         }
         ServiceMessage::AgentScreenshotResult {
             result: Ok(image), ..
-        }
-        | ServiceMessage::AgentSimulatorScreenshotResult {
-            result: Ok(image), ..
         } => {
             use base64::Engine;
             let data = base64::engine::general_purpose::STANDARD.encode(&image.png);
@@ -731,14 +732,6 @@ pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
             result: Err(message),
             ..
         }
-        | ServiceMessage::AgentBrowserSnapshotResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::AgentBrowserScrollResult {
-            result: Err(message),
-            ..
-        }
         | ServiceMessage::AgentRecordStartResult {
             result: Err(message),
             ..
@@ -748,14 +741,6 @@ pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
             ..
         }
         | ServiceMessage::AgentBookmarksResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::AgentSimulatorScreenshotResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::AgentSimulatorControlResult {
             result: Err(message),
             ..
         }
@@ -801,15 +786,19 @@ mod tests {
 
     #[test]
     fn image_query_result_maps_to_text_and_image_blocks() {
-        let resp = query_response_to_mcp_response(ServiceMessage::AgentScreenshotResult {
-            request_id: AgentRequestId::new(),
-            result: Ok(vmux_api::protocol::AgentImage {
-                path: "/tmp/shot.png".into(),
-                png: vec![137, 80, 78, 71],
-                width: 800,
-                height: 600,
-            }),
-        });
+        let resp = query_response_to_mcp_response(ServiceMessage::AgentQueryResult(
+            vmux_api::protocol::AgentQueryResult {
+                request_id: AgentRequestId::new(),
+                content: "saved /tmp/shot.png (800×600)".to_string(),
+                is_error: false,
+                image: Some(vmux_api::protocol::AgentImage {
+                    path: "/tmp/shot.png".into(),
+                    png: vec![137, 80, 78, 71],
+                    width: 800,
+                    height: 600,
+                }),
+            },
+        ));
         let content = resp["content"].as_array().unwrap();
         assert_eq!(content.len(), 2);
         assert_eq!(content[0]["type"], "text");

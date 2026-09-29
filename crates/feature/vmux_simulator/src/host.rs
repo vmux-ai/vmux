@@ -14,11 +14,7 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use hid::HidBroker;
 use stream::StreamServer;
 use vmux_api::BinEvent;
-use vmux_api::protocol::{
-    AgentImage, AgentRequestId, AgentSimulatorButtonPress, AgentSimulatorKeyPress,
-    AgentSimulatorScreenshot, AgentSimulatorSwipe, AgentSimulatorTap, AgentSimulatorTypeText,
-    ClientMessage,
-};
+use vmux_api::protocol::{AgentImage, AgentQueryResult, AgentRequestId, ClientMessage};
 use vmux_core::PageMetadata;
 use vmux_core::host::page::{NativelyHosted, PageReady};
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
@@ -29,6 +25,46 @@ use vmux_tool::{ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet};
 
 pub use device::{Axe, SimulatorDevice};
 pub use tool::SimulatorToolPlugin;
+
+#[vmux_api::contract(Copy, Eq)]
+pub enum SimulatorButton {
+    Home,
+    Lock,
+    Siri,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+struct AgentSimulatorTap {
+    x: u32,
+    y: u32,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+struct AgentSimulatorSwipe {
+    start_x: u32,
+    start_y: u32,
+    end_x: u32,
+    end_y: u32,
+    duration_ms: u32,
+}
+
+#[vmux_api::agent(Eq)]
+struct AgentSimulatorTypeText {
+    text: String,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+struct AgentSimulatorKeyPress {
+    keycode: u8,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+struct AgentSimulatorButtonPress {
+    button: SimulatorButton,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+struct AgentSimulatorScreenshot;
 
 #[vmux_native::page]
 pub struct SimulatorPlugin;
@@ -214,10 +250,18 @@ fn forward_control_responses(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in responses.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentSimulatorControlResult {
-            request_id: AgentRequestId(response.request_id),
-            result: response.result.clone(),
-        }));
+        let (content, is_error) = match &response.result {
+            Ok(content) => (content.clone(), false),
+            Err(message) => (message.clone(), true),
+        };
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult {
+                request_id: AgentRequestId(response.request_id),
+                content,
+                is_error,
+                image: None,
+            },
+        )));
     }
 }
 
@@ -226,21 +270,27 @@ fn forward_screenshot_responses(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in responses.read() {
-        let result = match &response.result {
-            Ok(image) => Ok(AgentImage {
-                path: image.path.clone(),
-                png: image.png.clone(),
-                width: image.width,
-                height: image.height,
-            }),
-            Err(message) => Err(message.clone()),
+        let (content, is_error, image) = match &response.result {
+            Ok(image) => (
+                format!("saved {} ({}×{})", image.path, image.width, image.height),
+                false,
+                Some(AgentImage {
+                    path: image.path.clone(),
+                    png: image.png.clone(),
+                    width: image.width,
+                    height: image.height,
+                }),
+            ),
+            Err(message) => (message.clone(), true, None),
         };
-        service_requests.write(ServiceRequest(
-            ClientMessage::AgentSimulatorScreenshotResult {
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult {
                 request_id: AgentRequestId(response.request_id),
-                result,
+                content,
+                is_error,
+                image,
             },
-        ));
+        )));
     }
 }
 
@@ -293,7 +343,7 @@ pub struct SimulatorKeyPressRequest {
 #[derive(Message, Clone, Copy)]
 pub struct SimulatorButtonPressRequest {
     pub request_id: [u8; 16],
-    pub button: vmux_api::protocol::SimulatorButton,
+    pub button: SimulatorButton,
 }
 
 #[derive(Message, Clone)]

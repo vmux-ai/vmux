@@ -19,7 +19,11 @@ use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
 use vmux_ui::theme::ThemeEvent;
 
-pub(crate) use agent::AgentBrowserPlugin;
+pub(crate) use agent::{
+    AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch,
+    AgentBrowserInstallExtension, AgentBrowserNavigate, AgentBrowserPlugin, AgentBrowserScroll,
+    AgentBrowserSnapshot,
+};
 pub use agent_pane::AgentBrowserResolve;
 
 #[derive(Clone, Copy, Debug, Message)]

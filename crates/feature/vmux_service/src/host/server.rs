@@ -325,6 +325,7 @@ fn command_result_to_content(result: vmux_api::protocol::AgentCommandResult) -> 
 fn query_response_to_content(response: ServiceMessage) -> Option<(String, bool)> {
     let content = match response {
         ServiceMessage::AgentQueryError { message, .. } => (message, true),
+        ServiceMessage::AgentQueryResult(result) => (result.content, result.is_error),
         ServiceMessage::AgentLayoutResult { result, .. } => match result {
             Ok(snapshot) => (serde_json::to_string(&snapshot).unwrap_or_default(), false),
             Err(message) => (message, true),
@@ -338,9 +339,6 @@ fn query_response_to_content(response: ServiceMessage) -> Option<(String, bool)>
         },
         ServiceMessage::ProcessOutputResult { result, .. }
         | ServiceMessage::ProcessTranscriptResult { result, .. }
-        | ServiceMessage::AgentBrowserSnapshotResult { result, .. }
-        | ServiceMessage::AgentBrowserScrollResult { result, .. }
-        | ServiceMessage::AgentSimulatorControlResult { result, .. }
         | ServiceMessage::AgentWorkingDirectoryResult { result, .. } => match result {
             Ok(text) => (text, false),
             Err(message) => (message, true),
@@ -389,8 +387,7 @@ fn query_response_to_content(response: ServiceMessage) -> Option<(String, bool)>
             }
             Err(message) => (message, true),
         },
-        ServiceMessage::AgentScreenshotResult { result, .. }
-        | ServiceMessage::AgentSimulatorScreenshotResult { result, .. } => match result {
+        ServiceMessage::AgentScreenshotResult { result, .. } => match result {
             Ok(image) => (
                 format!("saved {} ({}×{})", image.path, image.width, image.height),
                 false,
@@ -858,18 +855,11 @@ async fn handle_client(
                 )
                 .await;
             }
-            ClientMessage::AgentBrowserSnapshotResult { request_id, result } => {
+            ClientMessage::AgentQueryResult(result) => {
+                let request_id = result.request_id;
                 route_agent_query_response(
                     request_id,
-                    ServiceMessage::AgentBrowserSnapshotResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::AgentBrowserScrollResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::AgentBrowserScrollResult { request_id, result },
+                    ServiceMessage::AgentQueryResult(result),
                     &broker,
                 )
                 .await;
@@ -894,22 +884,6 @@ async fn handle_client(
                 route_agent_query_response(
                     request_id,
                     ServiceMessage::AgentBookmarksResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::AgentSimulatorScreenshotResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::AgentSimulatorScreenshotResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::AgentSimulatorControlResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::AgentSimulatorControlResult { request_id, result },
                     &broker,
                 )
                 .await;

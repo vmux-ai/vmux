@@ -264,13 +264,14 @@ fn layout_state_padding_reads_effective_window_node_padding() {
 
 mod browser_navigate_flow {
     use crate::Browser;
+    use crate::host::AgentBrowserNavigate;
     use crate::host::PendingNavigationSnapshot;
     use crate::input::RecentBrowserInteraction;
     use bevy::ecs::relationship::Relationship;
     use bevy::prelude::*;
     use vmux_agent::event::AgentRequestInput;
     use vmux_agent::host::AgentSessionPlugin;
-    use vmux_api::protocol::{AgentBrowserNavigate, AgentRequest, AgentRequestId};
+    use vmux_api::protocol::{AgentRequest, AgentRequestId};
     use vmux_core::{
         LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
         PageOpenId, PageOpenSet, PageOpenTask,
