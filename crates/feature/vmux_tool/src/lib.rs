@@ -530,23 +530,18 @@ command = "vmux"
     fn plan_apply_and_unlink_dotfile_package() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("home");
-        let dotfiles = temp.path().join("tools/dotfiles");
+        let store = ToolStore::new(temp.path(), &home);
+        let dotfiles = store.dotfiles_dir();
         std::fs::create_dir_all(dotfiles.join("shell/.config/nushell")).unwrap();
         std::fs::write(dotfiles.join("shell/.config/nushell/config.nu"), "echo hi").unwrap();
 
-        let plan = plan_dotfile_package_in(&dotfiles, &home, "shell").unwrap();
+        let plan = store.plan_dotfile_package("shell").unwrap();
         assert_eq!(plan.missing(), 1);
-        assert_eq!(
-            apply_dotfile_package_in(&dotfiles, &home, "shell").unwrap(),
-            1
-        );
+        assert_eq!(store.apply_dotfile_package("shell").unwrap(), 1);
         let target = home.join(".config/nushell/config.nu");
         assert!(target.symlink_metadata().unwrap().file_type().is_symlink());
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "echo hi");
-        assert_eq!(
-            unlink_dotfile_package_in(&dotfiles, &home, "shell").unwrap(),
-            1
-        );
+        assert_eq!(store.unlink_dotfile_package("shell").unwrap(), 1);
         assert!(!target.exists());
     }
 
@@ -555,18 +550,18 @@ command = "vmux"
     fn disable_and_unlink_dotfile_package_updates_links_and_manifest() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("home");
-        let dotfiles = temp.path().join("tools/dotfiles");
-        let manifest_path = temp.path().join("tools/tools.toml");
+        let store = ToolStore::new(temp.path(), &home);
+        let dotfiles = store.dotfiles_dir();
+        let manifest_path = store.manifest_path();
         std::fs::create_dir_all(dotfiles.join("shell")).unwrap();
         std::fs::write(dotfiles.join("shell/.zshrc"), "managed").unwrap();
         let mut manifest = ToolsManifest::default();
         manifest.set_dotfile_package("shell", true);
         manifest.write_to(&manifest_path).unwrap();
-        apply_dotfile_package_in(&dotfiles, &home, "shell").unwrap();
+        store.apply_dotfile_package("shell").unwrap();
 
         assert_eq!(
-            disable_and_unlink_dotfile_package_in(&manifest_path, &dotfiles, &home, "shell")
-                .unwrap(),
+            store.disable_and_unlink_dotfile_package("shell").unwrap(),
             1
         );
         assert!(!home.join(".zshrc").exists());
@@ -584,13 +579,14 @@ command = "vmux"
     fn conflicts_block_the_entire_apply() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("home");
-        let dotfiles = temp.path().join("tools/dotfiles");
+        let store = ToolStore::new(temp.path(), &home);
+        let dotfiles = store.dotfiles_dir();
         std::fs::create_dir_all(dotfiles.join("git")).unwrap();
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(dotfiles.join("git/.gitconfig"), "managed").unwrap();
         std::fs::write(home.join(".gitconfig"), "existing").unwrap();
 
-        let error = apply_dotfile_package_in(&dotfiles, &home, "git").unwrap_err();
+        let error = store.apply_dotfile_package("git").unwrap_err();
         assert!(error.contains("1 conflict"));
         assert_eq!(
             std::fs::read_to_string(home.join(".gitconfig")).unwrap(),
@@ -603,7 +599,8 @@ command = "vmux"
     fn enabled_packages_are_preflighted_before_any_links_are_created() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("home");
-        let dotfiles = temp.path().join("tools/dotfiles");
+        let store = ToolStore::new(temp.path(), &home);
+        let dotfiles = store.dotfiles_dir();
         std::fs::create_dir_all(dotfiles.join("git")).unwrap();
         std::fs::create_dir_all(dotfiles.join("shell/.config/nushell")).unwrap();
         std::fs::create_dir_all(&home).unwrap();
@@ -614,7 +611,7 @@ command = "vmux"
         manifest.set_dotfile_package("shell", true);
         manifest.set_dotfile_package("git", true);
 
-        let result = apply_enabled_dotfiles_in(&manifest, &dotfiles, &home);
+        let result = store.apply_enabled_dotfiles(&manifest);
 
         assert!(result.unwrap_err().contains("git"));
         assert!(!home.join(".config/nushell/config.nu").exists());
@@ -625,13 +622,14 @@ command = "vmux"
     fn adopt_moves_file_links_it_and_updates_manifest() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("home");
-        let dotfiles = temp.path().join("tools/dotfiles");
-        let manifest = temp.path().join("tools/tools.toml");
+        let store = ToolStore::new(temp.path(), &home);
+        let dotfiles = store.dotfiles_dir();
+        let manifest = store.manifest_path();
         std::fs::create_dir_all(home.join(".config/nushell")).unwrap();
         let source = home.join(".config/nushell/config.nu");
         std::fs::write(&source, "echo hi").unwrap();
 
-        let destination = adopt_dotfile_in(&dotfiles, &home, &manifest, &source, "shell").unwrap();
+        let destination = store.adopt_dotfile(&source, "shell").unwrap();
         assert_eq!(
             destination,
             dotfiles.join("shell/.config/nushell/config.nu")
@@ -648,17 +646,15 @@ command = "vmux"
     fn dotfile_import_copies_stow_packages_and_enables_them() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("stow");
-        let dotfiles = temp.path().join("tools/dotfiles");
-        let manifest = temp.path().join("tools/tools.toml");
+        let store = ToolStore::new(temp.path(), temp.path().join("home"));
+        let dotfiles = store.dotfiles_dir();
+        let manifest = store.manifest_path();
         std::fs::create_dir_all(source.join("git")).unwrap();
         std::fs::create_dir_all(source.join("shell/.config/nushell")).unwrap();
         std::fs::write(source.join("git/.gitconfig"), "git").unwrap();
         std::fs::write(source.join("shell/.config/nushell/config.nu"), "nu").unwrap();
 
-        assert_eq!(
-            import_dotfiles_to(&source, &dotfiles, &manifest).unwrap(),
-            2
-        );
+        assert_eq!(store.import_dotfiles(&source).unwrap(), 2);
         assert_eq!(
             std::fs::read_to_string(dotfiles.join("git/.gitconfig")).unwrap(),
             "git"

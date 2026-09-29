@@ -85,7 +85,7 @@ fn scan(
     manifest: &mut ToolsManifest,
     _refresh: bool,
 ) -> Result<ToolProviderSnapshot, String> {
-    let discovered = dotfile_packages_in(&store.dotfiles_dir());
+    let discovered = store.dotfile_packages()?;
     for package in &discovered {
         manifest.set_dotfile_package(package, true);
     }
@@ -94,43 +94,42 @@ fn scan(
     let mut items = Vec::new();
     for package in package_names {
         let managed = manifest.dotfiles.packages.contains(&package);
-        let (status, detail, operations) =
-            match plan_dotfile_package_in(&store.dotfiles_dir(), store.home(), &package) {
-                Ok(plan) => {
-                    let detail = format!(
-                        "{} linked · {} missing · {} conflicts",
-                        plan.linked(),
-                        plan.missing(),
-                        plan.conflicts()
-                    );
-                    let status = if plan.conflicts() > 0 {
-                        ToolStatus::Conflict
-                    } else if plan.missing() > 0 {
-                        if managed {
-                            ToolStatus::Missing
-                        } else {
-                            ToolStatus::Available
-                        }
-                    } else {
-                        ToolStatus::Installed
-                    };
-                    let operations = if managed {
-                        vec![ToolOperationKind::Link, ToolOperationKind::Unlink]
-                    } else {
-                        vec![ToolOperationKind::Link]
-                    };
-                    (status, detail, operations)
-                }
-                Err(error) => (
-                    ToolStatus::Missing,
-                    error,
+        let (status, detail, operations) = match store.plan_dotfile_package(&package) {
+            Ok(plan) => {
+                let detail = format!(
+                    "{} linked · {} missing · {} conflicts",
+                    plan.linked(),
+                    plan.missing(),
+                    plan.conflicts()
+                );
+                let status = if plan.conflicts() > 0 {
+                    ToolStatus::Conflict
+                } else if plan.missing() > 0 {
                     if managed {
-                        vec![ToolOperationKind::Unlink]
+                        ToolStatus::Missing
                     } else {
-                        Vec::new()
-                    },
-                ),
-            };
+                        ToolStatus::Available
+                    }
+                } else {
+                    ToolStatus::Installed
+                };
+                let operations = if managed {
+                    vec![ToolOperationKind::Link, ToolOperationKind::Unlink]
+                } else {
+                    vec![ToolOperationKind::Link]
+                };
+                (status, detail, operations)
+            }
+            Err(error) => (
+                ToolStatus::Missing,
+                error,
+                if managed {
+                    vec![ToolOperationKind::Unlink]
+                } else {
+                    Vec::new()
+                },
+            ),
+        };
         items.push(ToolItem {
             provider: ToolProvider::Dotfiles,
             id: package.clone(),
@@ -372,7 +371,7 @@ fn discover_dotfile_packages_system(
             .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 store.migrate_legacy_storage()?;
                 Ok(DiscoveredDotfilePackages {
-                    packages: dotfile_packages_in(&store.dotfiles_dir()),
+                    packages: store.dotfile_packages()?,
                 })
             })));
     }
@@ -416,7 +415,7 @@ fn plan_dotfile_package_system(
             .entity(entity)
             .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 store.migrate_legacy_storage()?;
-                plan_dotfile_package_in(&store.dotfiles_dir(), store.home(), &package)
+                store.plan_dotfile_package(&package)
             })));
     }
 }
@@ -463,8 +462,7 @@ fn import_dotfiles_system(
             .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 store.migrate_legacy_storage()?;
                 let path = store.expand_user_path(&path)?;
-                let packages =
-                    import_dotfiles_to(&path, &store.dotfiles_dir(), &store.manifest_path())?;
+                let packages = store.import_dotfiles(&path)?;
                 Ok(ImportedDotfiles { packages })
             })));
     }
@@ -503,7 +501,7 @@ fn import_available_dotfiles_system(
             .entity(entity)
             .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 store.migrate_legacy_storage()?;
-                let packages = dotfile_packages_in(&store.dotfiles_dir());
+                let packages = store.dotfile_packages()?;
                 let mut manifest = store.load()?;
                 let mut imported = 0;
                 for package in packages {
@@ -561,8 +559,7 @@ fn link_dotfile_package_system(
                 let mut manifest = store.load()?;
                 manifest.set_dotfile_package(&package, true);
                 store.save(&manifest)?;
-                let files =
-                    apply_dotfile_package_in(&store.dotfiles_dir(), store.home(), &package)?;
+                let files = store.apply_dotfile_package(&package)?;
                 Ok(LinkedDotfilePackage { files })
             })));
     }
@@ -611,12 +608,7 @@ fn disable_dotfile_package_system(
             .entity(entity)
             .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 store.migrate_legacy_storage()?;
-                let files = disable_and_unlink_dotfile_package_in(
-                    &store.manifest_path(),
-                    &store.dotfiles_dir(),
-                    store.home(),
-                    &package,
-                )?;
+                let files = store.disable_and_unlink_dotfile_package(&package)?;
                 Ok(DisabledDotfilePackage { files })
             })));
     }
@@ -665,8 +657,7 @@ fn unlink_dotfile_package_system(
             .entity(entity)
             .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 store.migrate_legacy_storage()?;
-                let files =
-                    unlink_dotfile_package_in(&store.dotfiles_dir(), store.home(), &package)?;
+                let files = store.unlink_dotfile_package(&package)?;
                 Ok(UnlinkedDotfilePackage { files })
             })));
     }
@@ -705,8 +696,7 @@ fn apply_enabled_dotfiles_system(
             .entity(entity)
             .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 let manifest = store.load()?;
-                let files =
-                    apply_enabled_dotfiles_in(&manifest, &store.dotfiles_dir(), store.home())?;
+                let files = store.apply_enabled_dotfiles(&manifest)?;
                 Ok(AppliedEnabledDotfiles { files })
             })));
     }
@@ -758,13 +748,7 @@ fn adopt_dotfile_system(
             .entity(entity)
             .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 store.migrate_legacy_storage()?;
-                let path = adopt_dotfile_in(
-                    &store.dotfiles_dir(),
-                    store.home(),
-                    &store.manifest_path(),
-                    &path,
-                    &package,
-                )?;
+                let path = store.adopt_dotfile(&path, &package)?;
                 Ok(AdoptedDotfile { path })
             })));
     }
@@ -823,384 +807,307 @@ impl DotfilePlan {
             .filter(|link| link.state == DotfileLinkState::Conflict)
             .count()
     }
+
+    fn apply(&self) -> Result<Vec<PathBuf>, String> {
+        if self.conflicts() > 0 {
+            return Err(format!(
+                "dotfile package {} has {} conflict(s)",
+                self.package,
+                self.conflicts()
+            ));
+        }
+        let mut created = Vec::new();
+        for link in self
+            .links
+            .iter()
+            .filter(|link| link.state == DotfileLinkState::Missing)
+        {
+            let result = (|| -> io::Result<()> {
+                if let Some(parent) = link.target.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                create_relative_symlink(&link.source, &link.target)
+            })();
+            if let Err(error) = result {
+                for target in created.iter().rev() {
+                    let _ = std::fs::remove_file(target);
+                }
+                return Err(error.to_string());
+            }
+            created.push(link.target.clone());
+        }
+        Ok(created)
+    }
+
+    fn restore(links: &[DotfileLink]) -> Result<(), String> {
+        let mut errors = Vec::new();
+        for link in links.iter().rev() {
+            if let Err(error) = create_relative_symlink(&link.source, &link.target) {
+                errors.push(format!("{}: {error}", link.target.display()));
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join(", "))
+        }
+    }
 }
 
 impl ToolStore {
     pub fn import_dotfiles(&self, path: &Path) -> Result<usize, String> {
         self.migrate_legacy_storage()?;
-        let path = self.expand_user_path(path)?;
-        import_dotfiles_to(&path, &self.dotfiles_dir(), &self.manifest_path())
+        let source = self.expand_user_path(path)?;
+        let dotfiles_root = self.dotfiles_dir();
+        if !source.is_dir() {
+            return Err(format!(
+                "dotfile root is not a directory: {}",
+                source.display()
+            ));
+        }
+        if source.starts_with(&dotfiles_root) || dotfiles_root.starts_with(&source) {
+            return Err("dotfile import source overlaps the Tools root".to_string());
+        }
+        let mut packages = std::fs::read_dir(&source)
+            .map_err(|error| error.to_string())?
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+            .filter_map(|entry| {
+                entry
+                    .file_name()
+                    .into_string()
+                    .ok()
+                    .map(|name| (name, entry.path()))
+            })
+            .filter(|(name, _)| valid_package_name(name))
+            .collect::<Vec<_>>();
+        packages.sort_by(|left, right| left.0.cmp(&right.0));
+        if packages.is_empty() {
+            return Err(format!("no Stow packages found in {}", source.display()));
+        }
+        for (name, _) in &packages {
+            if dotfiles_root.join(name).symlink_metadata().is_ok() {
+                return Err(format!("Tools dotfile package already exists: {name}"));
+            }
+        }
+        let manifest_path = self.manifest_path();
+        let mut manifest = ToolsManifest::read(&manifest_path)?;
+        std::fs::create_dir_all(&dotfiles_root).map_err(|error| error.to_string())?;
+        let mut staged = Vec::new();
+        for (name, package_source) in &packages {
+            let temporary = dotfiles_root.join(format!(".{name}.import-{}", std::process::id()));
+            if temporary.symlink_metadata().is_ok() {
+                std::fs::remove_dir_all(&temporary).map_err(|error| error.to_string())?;
+            }
+            if let Err(error) = copy_directory(package_source, &temporary) {
+                for path in &staged {
+                    let _ = std::fs::remove_dir_all(path);
+                }
+                let _ = std::fs::remove_dir_all(&temporary);
+                return Err(error);
+            }
+            staged.push(temporary);
+        }
+        let mut installed = Vec::new();
+        for ((name, _), temporary) in packages.iter().zip(&staged) {
+            let destination = dotfiles_root.join(name);
+            if let Err(error) = std::fs::rename(temporary, &destination) {
+                for path in &staged {
+                    let _ = std::fs::remove_dir_all(path);
+                }
+                for path in &installed {
+                    let _ = std::fs::remove_dir_all(path);
+                }
+                return Err(error.to_string());
+            }
+            installed.push(destination);
+        }
+        for (name, _) in &packages {
+            manifest.set_dotfile_package(name, true);
+        }
+        if let Err(error) = manifest.write_to(&manifest_path) {
+            for path in &installed {
+                let _ = std::fs::remove_dir_all(path);
+            }
+            return Err(error);
+        }
+        Ok(packages.len())
     }
 
     pub fn dotfile_packages(&self) -> Result<Vec<String>, String> {
         self.migrate_legacy_storage()?;
-        Ok(dotfile_packages_in(&self.dotfiles_dir()))
+        let mut packages = std::fs::read_dir(self.dotfiles_dir())
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_dir()))
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|name| valid_package_name(name))
+            .collect::<Vec<_>>();
+        packages.sort_by_key(|package| package.to_ascii_lowercase());
+        Ok(packages)
     }
 
     pub fn plan_dotfile_package(&self, package: &str) -> Result<DotfilePlan, String> {
         self.migrate_legacy_storage()?;
-        plan_dotfile_package_in(&self.dotfiles_dir(), self.home(), package)
+        validate_package_name(package)?;
+        let package_root = self.dotfiles_dir().join(package);
+        if !package_root.is_dir() {
+            return Err(format!("dotfile package does not exist: {package}"));
+        }
+        let mut sources = Vec::new();
+        collect_files(&package_root, &mut sources).map_err(|error| error.to_string())?;
+        sources.sort();
+        let links = sources
+            .into_iter()
+            .filter_map(|source| {
+                let relative = source.strip_prefix(&package_root).ok()?;
+                let target = self.home().join(relative);
+                let state = link_state(&source, &target);
+                Some(DotfileLink {
+                    source,
+                    target,
+                    state,
+                })
+            })
+            .collect();
+        Ok(DotfilePlan {
+            package: package.to_string(),
+            links,
+        })
     }
 
     pub fn apply_dotfile_package(&self, package: &str) -> Result<usize, String> {
-        self.migrate_legacy_storage()?;
-        apply_dotfile_package_in(&self.dotfiles_dir(), self.home(), package)
+        self.plan_dotfile_package(package)?
+            .apply()
+            .map(|created| created.len())
     }
 
     pub fn unlink_dotfile_package(&self, package: &str) -> Result<usize, String> {
-        self.migrate_legacy_storage()?;
-        unlink_dotfile_package_in(&self.dotfiles_dir(), self.home(), package)
+        let plan = self.plan_dotfile_package(package)?;
+        let mut removed = 0;
+        for link in plan
+            .links
+            .iter()
+            .filter(|link| link.state == DotfileLinkState::Linked)
+        {
+            std::fs::remove_file(&link.target).map_err(|error| error.to_string())?;
+            removed += 1;
+        }
+        Ok(removed)
     }
 
     pub fn disable_and_unlink_dotfile_package(&self, package: &str) -> Result<usize, String> {
         self.migrate_legacy_storage()?;
-        disable_and_unlink_dotfile_package_in(
-            &self.manifest_path(),
-            &self.dotfiles_dir(),
-            self.home(),
-            package,
-        )
+        validate_package_name(package)?;
+        let manifest_path = self.manifest_path();
+        let mut manifest = ToolsManifest::read(&manifest_path)?;
+        let links = if self.dotfiles_dir().join(package).is_dir() {
+            self.plan_dotfile_package(package)?
+                .links
+                .into_iter()
+                .filter(|link| link.state == DotfileLinkState::Linked)
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let mut removed = Vec::new();
+        for link in links {
+            if let Err(error) = std::fs::remove_file(&link.target) {
+                let rollback = DotfilePlan::restore(&removed);
+                return Err(match rollback {
+                    Ok(()) => error.to_string(),
+                    Err(rollback) => {
+                        format!("{error}; failed to restore dotfile links: {rollback}")
+                    }
+                });
+            }
+            removed.push(link);
+        }
+        manifest.set_dotfile_package(package, false);
+        if let Err(error) = manifest.write_to(&manifest_path) {
+            let rollback = DotfilePlan::restore(&removed);
+            return Err(match rollback {
+                Ok(()) => error,
+                Err(rollback) => format!("{error}; failed to restore dotfile links: {rollback}"),
+            });
+        }
+        Ok(removed.len())
     }
 
     pub fn apply_enabled_dotfiles(&self, manifest: &ToolsManifest) -> Result<usize, String> {
         self.migrate_legacy_storage()?;
-        apply_enabled_dotfiles_in(manifest, &self.dotfiles_dir(), self.home())
+        let mut plans = Vec::new();
+        for package in &manifest.dotfiles.packages {
+            plans.push(self.plan_dotfile_package(package)?);
+        }
+        if let Some(plan) = plans.iter().find(|plan| plan.conflicts() > 0) {
+            return Err(format!(
+                "dotfile package {} has {} conflict(s)",
+                plan.package,
+                plan.conflicts()
+            ));
+        }
+        let mut created = Vec::new();
+        for plan in &plans {
+            match plan.apply() {
+                Ok(links) => created.extend(links),
+                Err(error) => {
+                    for target in created.iter().rev() {
+                        let _ = std::fs::remove_file(target);
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        Ok(created.len())
     }
 
     pub fn adopt_dotfile(&self, path: &Path, package: &str) -> Result<PathBuf, String> {
         self.migrate_legacy_storage()?;
-        adopt_dotfile_in(
-            &self.dotfiles_dir(),
-            self.home(),
-            &self.manifest_path(),
-            path,
-            package,
-        )
-    }
-}
-
-pub fn import_dotfiles_to(
-    path: &Path,
-    dotfiles_root: &Path,
-    manifest_path: &Path,
-) -> Result<usize, String> {
-    let source = ToolStore::current().expand_user_path(path)?;
-    if !source.is_dir() {
-        return Err(format!(
-            "dotfile root is not a directory: {}",
-            source.display()
-        ));
-    }
-    if source.starts_with(dotfiles_root) || dotfiles_root.starts_with(&source) {
-        return Err("dotfile import source overlaps the Tools root".to_string());
-    }
-    let mut packages = std::fs::read_dir(&source)
-        .map_err(|error| error.to_string())?
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-        .filter_map(|entry| {
-            entry
-                .file_name()
-                .into_string()
-                .ok()
-                .map(|name| (name, entry.path()))
-        })
-        .filter(|(name, _)| valid_package_name(name))
-        .collect::<Vec<_>>();
-    packages.sort_by(|left, right| left.0.cmp(&right.0));
-    if packages.is_empty() {
-        return Err(format!("no Stow packages found in {}", source.display()));
-    }
-    for (name, _) in &packages {
-        if dotfiles_root.join(name).symlink_metadata().is_ok() {
-            return Err(format!("Tools dotfile package already exists: {name}"));
+        validate_package_name(package)?;
+        let path = self.expand_user_path(path)?;
+        if !path
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.file_type().is_file())
+        {
+            return Err(format!("dotfile is not a file: {}", path.display()));
         }
-    }
-    let mut manifest = ToolsManifest::read(manifest_path)?;
-    std::fs::create_dir_all(dotfiles_root).map_err(|error| error.to_string())?;
-    let mut staged = Vec::new();
-    for (name, package_source) in &packages {
-        let temporary = dotfiles_root.join(format!(".{name}.import-{}", std::process::id()));
-        if temporary.symlink_metadata().is_ok() {
-            std::fs::remove_dir_all(&temporary).map_err(|error| error.to_string())?;
+        let dotfiles_root = self.dotfiles_dir();
+        if path.starts_with(&dotfiles_root) {
+            return Err("dotfile is already inside the Tools directory".to_string());
         }
-        if let Err(error) = copy_directory(package_source, &temporary) {
-            for path in &staged {
-                let _ = std::fs::remove_dir_all(path);
-            }
-            let _ = std::fs::remove_dir_all(&temporary);
+        let relative = path
+            .strip_prefix(self.home())
+            .map_err(|_| format!("dotfile must be inside {}", self.home().display()))?;
+        if relative.as_os_str().is_empty() || contains_parent_component(relative) {
+            return Err("invalid dotfile path".to_string());
+        }
+        let destination = dotfiles_root.join(package).join(relative);
+        if destination.exists() || destination.symlink_metadata().is_ok() {
+            return Err(format!(
+                "Tools dotfile already exists: {}",
+                destination.display()
+            ));
+        }
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        std::fs::rename(&path, &destination).map_err(|error| error.to_string())?;
+        if let Err(error) = create_relative_symlink(&destination, &path) {
+            let _ = std::fs::rename(&destination, &path);
+            return Err(error.to_string());
+        }
+        let manifest_path = self.manifest_path();
+        let mut manifest = ToolsManifest::read(&manifest_path)?;
+        manifest.set_dotfile_package(package, true);
+        if let Err(error) = manifest.write_to(&manifest_path) {
+            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::rename(&destination, &path);
             return Err(error);
         }
-        staged.push(temporary);
+        Ok(destination)
     }
-    let mut installed = Vec::new();
-    for ((name, _), temporary) in packages.iter().zip(&staged) {
-        let destination = dotfiles_root.join(name);
-        if let Err(error) = std::fs::rename(temporary, &destination) {
-            for path in &staged {
-                let _ = std::fs::remove_dir_all(path);
-            }
-            for path in &installed {
-                let _ = std::fs::remove_dir_all(path);
-            }
-            return Err(error.to_string());
-        }
-        installed.push(destination);
-    }
-    for (name, _) in &packages {
-        manifest.set_dotfile_package(name, true);
-    }
-    if let Err(error) = manifest.write_to(manifest_path) {
-        for path in &installed {
-            let _ = std::fs::remove_dir_all(path);
-        }
-        return Err(error);
-    }
-    Ok(packages.len())
-}
-
-pub fn dotfile_packages_in(root: &Path) -> Vec<String> {
-    let mut packages = std::fs::read_dir(root)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_dir()))
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|name| valid_package_name(name))
-        .collect::<Vec<_>>();
-    packages.sort_by_key(|package| package.to_ascii_lowercase());
-    packages
-}
-
-pub fn plan_dotfile_package_in(
-    dotfiles_root: &Path,
-    home: &Path,
-    package: &str,
-) -> Result<DotfilePlan, String> {
-    validate_package_name(package)?;
-    let package_root = dotfiles_root.join(package);
-    if !package_root.is_dir() {
-        return Err(format!("dotfile package does not exist: {package}"));
-    }
-    let mut sources = Vec::new();
-    collect_files(&package_root, &mut sources).map_err(|error| error.to_string())?;
-    sources.sort();
-    let links = sources
-        .into_iter()
-        .filter_map(|source| {
-            let relative = source.strip_prefix(&package_root).ok()?;
-            let target = home.join(relative);
-            let state = link_state(&source, &target);
-            Some(DotfileLink {
-                source,
-                target,
-                state,
-            })
-        })
-        .collect();
-    Ok(DotfilePlan {
-        package: package.to_string(),
-        links,
-    })
-}
-
-pub fn apply_dotfile_package_in(
-    dotfiles_root: &Path,
-    home: &Path,
-    package: &str,
-) -> Result<usize, String> {
-    let plan = plan_dotfile_package_in(dotfiles_root, home, package)?;
-    apply_dotfile_plan(&plan).map(|created| created.len())
-}
-
-fn apply_dotfile_plan(plan: &DotfilePlan) -> Result<Vec<PathBuf>, String> {
-    if plan.conflicts() > 0 {
-        return Err(format!(
-            "dotfile package {} has {} conflict(s)",
-            plan.package,
-            plan.conflicts()
-        ));
-    }
-    let mut created = Vec::new();
-    for link in plan
-        .links
-        .iter()
-        .filter(|link| link.state == DotfileLinkState::Missing)
-    {
-        let result = (|| -> io::Result<()> {
-            if let Some(parent) = link.target.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            create_relative_symlink(&link.source, &link.target)
-        })();
-        if let Err(error) = result {
-            for target in created.iter().rev() {
-                let _ = std::fs::remove_file(target);
-            }
-            return Err(error.to_string());
-        }
-        created.push(link.target.clone());
-    }
-    Ok(created)
-}
-
-pub fn disable_and_unlink_dotfile_package_in(
-    manifest_path: &Path,
-    dotfiles_root: &Path,
-    home: &Path,
-    package: &str,
-) -> Result<usize, String> {
-    validate_package_name(package)?;
-    let mut manifest = ToolsManifest::read(manifest_path)?;
-    let links = if dotfiles_root.join(package).is_dir() {
-        plan_dotfile_package_in(dotfiles_root, home, package)?
-            .links
-            .into_iter()
-            .filter(|link| link.state == DotfileLinkState::Linked)
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
-    let mut removed = Vec::new();
-    for link in links {
-        if let Err(error) = std::fs::remove_file(&link.target) {
-            let rollback = restore_dotfile_links(&removed);
-            return Err(match rollback {
-                Ok(()) => error.to_string(),
-                Err(rollback) => format!("{error}; failed to restore dotfile links: {rollback}"),
-            });
-        }
-        removed.push(link);
-    }
-    manifest.set_dotfile_package(package, false);
-    if let Err(error) = manifest.write_to(manifest_path) {
-        let rollback = restore_dotfile_links(&removed);
-        return Err(match rollback {
-            Ok(()) => error,
-            Err(rollback) => format!("{error}; failed to restore dotfile links: {rollback}"),
-        });
-    }
-    Ok(removed.len())
-}
-
-fn restore_dotfile_links(links: &[DotfileLink]) -> Result<(), String> {
-    let mut errors = Vec::new();
-    for link in links.iter().rev() {
-        if let Err(error) = create_relative_symlink(&link.source, &link.target) {
-            errors.push(format!("{}: {error}", link.target.display()));
-        }
-    }
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors.join(", "))
-    }
-}
-
-pub fn unlink_dotfile_package_in(
-    dotfiles_root: &Path,
-    home: &Path,
-    package: &str,
-) -> Result<usize, String> {
-    let plan = plan_dotfile_package_in(dotfiles_root, home, package)?;
-    let mut removed = 0;
-    for link in plan
-        .links
-        .iter()
-        .filter(|link| link.state == DotfileLinkState::Linked)
-    {
-        std::fs::remove_file(&link.target).map_err(|error| error.to_string())?;
-        removed += 1;
-    }
-    Ok(removed)
-}
-
-pub fn apply_enabled_dotfiles_in(
-    manifest: &ToolsManifest,
-    dotfiles_root: &Path,
-    home: &Path,
-) -> Result<usize, String> {
-    let mut plans = Vec::new();
-    for package in &manifest.dotfiles.packages {
-        plans.push(plan_dotfile_package_in(dotfiles_root, home, package)?);
-    }
-    if let Some(plan) = plans.iter().find(|plan| plan.conflicts() > 0) {
-        return Err(format!(
-            "dotfile package {} has {} conflict(s)",
-            plan.package,
-            plan.conflicts()
-        ));
-    }
-    let mut created = Vec::new();
-    for plan in &plans {
-        match apply_dotfile_plan(plan) {
-            Ok(links) => created.extend(links),
-            Err(error) => {
-                for target in created.iter().rev() {
-                    let _ = std::fs::remove_file(target);
-                }
-                return Err(error);
-            }
-        }
-    }
-    Ok(created.len())
-}
-
-pub fn adopt_dotfile_in(
-    dotfiles_root: &Path,
-    home: &Path,
-    manifest_path: &Path,
-    path: &Path,
-    package: &str,
-) -> Result<PathBuf, String> {
-    validate_package_name(package)?;
-    let path = if let Ok(relative) = path.strip_prefix("~") {
-        home.join(relative)
-    } else if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|error| error.to_string())?
-            .join(path)
-    };
-    if !path
-        .symlink_metadata()
-        .is_ok_and(|metadata| metadata.file_type().is_file())
-    {
-        return Err(format!("dotfile is not a file: {}", path.display()));
-    }
-    if path.starts_with(dotfiles_root) {
-        return Err("dotfile is already inside the Tools directory".to_string());
-    }
-    let relative = path
-        .strip_prefix(home)
-        .map_err(|_| format!("dotfile must be inside {}", home.display()))?;
-    if relative.as_os_str().is_empty() || contains_parent_component(relative) {
-        return Err("invalid dotfile path".to_string());
-    }
-    let destination = dotfiles_root.join(package).join(relative);
-    if destination.exists() || destination.symlink_metadata().is_ok() {
-        return Err(format!(
-            "Tools dotfile already exists: {}",
-            destination.display()
-        ));
-    }
-    if let Some(parent) = destination.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    std::fs::rename(&path, &destination).map_err(|error| error.to_string())?;
-    if let Err(error) = create_relative_symlink(&destination, &path) {
-        let _ = std::fs::rename(&destination, &path);
-        return Err(error.to_string());
-    }
-    let mut manifest = ToolsManifest::read(manifest_path)?;
-    manifest.set_dotfile_package(package, true);
-    if let Err(error) = manifest.write_to(manifest_path) {
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::rename(&destination, &path);
-        return Err(error);
-    }
-    Ok(destination)
 }
 
 fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
