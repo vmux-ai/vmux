@@ -13,9 +13,15 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
+use vmux_command::{
+    CommandDefinitions, CommandInvocation, CommandRuntimePlugin, RegisterCommandDefinitions,
+};
+use vmux_core::agent::SpawnAgentInStackRequest;
 use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_core::page::PageEmbedSet;
-use vmux_core::{PageOpenRequest, PageOpenSet, PageOpenTarget};
+use vmux_core::{
+    Active, EffectiveStartupUrl, Order, PageOpenRequest, PageOpenSet, PageOpenTarget, PendingPrompt,
+};
 use vmux_flex::prelude::*;
 use vmux_history::{CreatedAt, LastActivatedAt};
 
@@ -25,8 +31,8 @@ pub struct WindowLayoutPlugin;
 
 impl Plugin for WindowLayoutPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
-            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
         }
         app.add_plugins(LayoutSpawnPlugin)
             .add_message::<MinimizeWindowRequest>()
@@ -48,7 +54,7 @@ impl Plugin for WindowLayoutPlugin {
             )
             .add_systems(
                 Startup,
-                spawn_window_commands.in_set(vmux_command::RegisterCommandDefinitions),
+                spawn_window_commands.in_set(RegisterCommandDefinitions),
             )
             .add_systems(
                 Startup,
@@ -94,7 +100,7 @@ impl Plugin for LayoutSpawnPlugin {
         app.add_message::<crate::LauncherDismissRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+            .add_message::<SpawnAgentInStackRequest>()
             .add_systems(
                 Update,
                 spawn_requested_tab_layouts
@@ -109,7 +115,7 @@ impl Plugin for LayoutSpawnPlugin {
 
 #[derive(SystemParam)]
 pub struct FocusedWindow<'w, 's> {
-    windows: Query<'w, 's, (Entity, Ref<'static, vmux_core::Active>), With<Window>>,
+    windows: Query<'w, 's, (Entity, Ref<'static, Active>), With<Window>>,
 }
 
 impl FocusedWindow<'_, '_> {
@@ -125,10 +131,10 @@ impl FocusedWindow<'_, '_> {
 #[derive(Message)]
 struct MinimizeWindowRequest;
 
-impl TryFrom<&vmux_command::CommandInvocation> for MinimizeWindowRequest {
+impl TryFrom<&CommandInvocation> for MinimizeWindowRequest {
     type Error = ();
 
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "minimize_window")
             .then_some(Self)
             .ok_or(())
@@ -138,10 +144,10 @@ impl TryFrom<&vmux_command::CommandInvocation> for MinimizeWindowRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NewWindowRequest;
 
-impl TryFrom<&vmux_command::CommandInvocation> for NewWindowRequest {
+impl TryFrom<&CommandInvocation> for NewWindowRequest {
     type Error = ();
 
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "new_window").then_some(Self).ok_or(())
     }
 }
@@ -149,10 +155,10 @@ impl TryFrom<&vmux_command::CommandInvocation> for NewWindowRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CloseFocusedWindowRequest;
 
-impl TryFrom<&vmux_command::CommandInvocation> for CloseFocusedWindowRequest {
+impl TryFrom<&CommandInvocation> for CloseFocusedWindowRequest {
     type Error = ();
 
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "close_window").then_some(Self).ok_or(())
     }
 }
@@ -160,10 +166,10 @@ impl TryFrom<&vmux_command::CommandInvocation> for CloseFocusedWindowRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ToggleFullscreenRequest;
 
-impl TryFrom<&vmux_command::CommandInvocation> for ToggleFullscreenRequest {
+impl TryFrom<&CommandInvocation> for ToggleFullscreenRequest {
     type Error = ();
 
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "toggle_fullscreen")
             .then_some(Self)
             .ok_or(())
@@ -171,10 +177,8 @@ impl TryFrom<&vmux_command::CommandInvocation> for ToggleFullscreenRequest {
 }
 
 fn spawn_window_commands(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_feature_ron(
-        include_str!("../feature.ron"),
-        "window",
-    );
+    let mut definitions =
+        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "window");
     commands.spawn(
         definitions
             .take("minimize_window")
@@ -293,7 +297,7 @@ pub struct WindowGeometry {
 }
 
 fn sync_focused_window(
-    windows: Query<(Entity, &Window, Has<PrimaryWindow>, Has<vmux_core::Active>)>,
+    windows: Query<(Entity, &Window, Has<PrimaryWindow>, Has<Active>)>,
     mut commands: Commands,
 ) {
     let next = windows
@@ -317,9 +321,9 @@ fn sync_focused_window(
         .or_else(|| windows.iter().next().map(|(entity, _, _, _)| entity));
     for (entity, _, _, active) in &windows {
         if next == Some(entity) && !active {
-            commands.entity(entity).insert(vmux_core::Active);
+            commands.entity(entity).insert(Active);
         } else if next != Some(entity) && active {
-            commands.entity(entity).remove::<vmux_core::Active>();
+            commands.entity(entity).remove::<Active>();
         }
     }
 }
@@ -527,9 +531,9 @@ fn spawn_new_window_workspace(
             crate::space::Space,
             crate::space::SpaceId(id.clone()),
             Name::new(name),
-            vmux_core::Order(0),
-            vmux_core::Active,
-            vmux_core::EffectiveStartupUrl(startup_url.clone().unwrap_or_default()),
+            Order(0),
+            Active,
+            EffectiveStartupUrl(startup_url.clone().unwrap_or_default()),
             LastActivatedAt::now(),
             crate::space::space_view_bundle(),
             ChildOf(main),
@@ -646,7 +650,7 @@ fn spawn_requested_tab_layouts(
     mut reader: MessageReader<TabLayoutSpawnRequest>,
     settings: Res<LayoutSettings>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    spaces: Query<&vmux_core::EffectiveStartupUrl, With<crate::space::Space>>,
+    spaces: Query<&EffectiveStartupUrl, With<crate::space::Space>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -682,7 +686,7 @@ fn spawn_requested_tab_layouts(
             TabLayoutSpawnContent::StartupUrlOrPrompt => {
                 page_open_requests.write(PageOpenRequest {
                     target: PageOpenTarget::Stack(stack),
-                    url: vmux_core::EffectiveStartupUrl::resolve(Some(startup_url)),
+                    url: EffectiveStartupUrl::resolve(Some(startup_url)),
                     request_id: None,
                 });
             }
@@ -691,9 +695,7 @@ fn spawn_requested_tab_layouts(
                 pending_prompt,
             } => {
                 if let Some(prompt) = pending_prompt {
-                    commands
-                        .entity(stack)
-                        .insert(vmux_core::PendingPrompt(prompt.clone()));
+                    commands.entity(stack).insert(PendingPrompt(prompt.clone()));
                 }
                 page_open_requests.write(PageOpenRequest {
                     target: PageOpenTarget::Stack(stack),

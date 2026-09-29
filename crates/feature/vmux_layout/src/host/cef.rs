@@ -1,5 +1,9 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
+use vmux_api::VmuxRoute;
+use vmux_core::host::page::HostsPage;
+use vmux_core::launcher::RendersLauncherPanel;
+use vmux_core::{PageIcon, PageMetadata, Url};
 use vmux_flex::prelude::*;
 
 #[derive(Component)]
@@ -55,11 +59,8 @@ impl Plugin for LayoutCefPlugin {
 }
 
 fn mirror_metadata_to_url(
-    cef_q: Query<
-        &vmux_core::PageMetadata,
-        (Without<vmux_core::Url>, Changed<vmux_core::PageMetadata>),
-    >,
-    mut urls: Query<&mut vmux_core::PageMetadata, With<vmux_core::Url>>,
+    cef_q: Query<&PageMetadata, (Without<Url>, Changed<PageMetadata>)>,
+    mut urls: Query<&mut PageMetadata, With<Url>>,
 ) {
     for tab_meta in cef_q.iter() {
         if tab_meta.url.is_empty() {
@@ -84,7 +85,7 @@ fn mirror_metadata_to_url(
 
 fn apply_cef_state_from_webview(
     cef_rx: Res<WebviewCefStateReceiver>,
-    mut browser_meta: Query<&mut vmux_core::PageMetadata>,
+    mut browser_meta: Query<&mut PageMetadata>,
 ) {
     while let Ok(ev) = cef_rx.0.try_recv() {
         let Ok(mut meta) = browser_meta.get_mut(ev.webview) else {
@@ -95,16 +96,16 @@ fn apply_cef_state_from_webview(
 }
 
 fn apply_cef_state_to_meta(
-    meta: &mut vmux_core::PageMetadata,
+    meta: &mut PageMetadata,
     ev: bevy_cef_core::prelude::WebviewCefStateEvent,
 ) {
-    let route = vmux_api::VmuxRoute::parse(&meta.url);
+    let route = VmuxRoute::parse(&meta.url);
     let on_native_view = route.is_some();
     let accepts_dynamic_title = route.is_some_and(|route| route.is_agent());
     let navigating_away = ev
         .url
         .as_deref()
-        .is_some_and(|url| vmux_api::VmuxRoute::parse(url).is_none());
+        .is_some_and(|url| VmuxRoute::parse(url).is_none());
     if on_native_view && !navigating_away {
         if accepts_dynamic_title && let Some(title) = ev.title {
             meta.title = title;
@@ -113,13 +114,13 @@ fn apply_cef_state_to_meta(
     }
     if let Some(url) = ev.url {
         meta.url = url;
-        meta.icon = vmux_core::PageIcon::None;
+        meta.icon = PageIcon::None;
     }
     if let Some(title) = ev.title {
         meta.title = title;
     }
     if let Some(favicon) = ev.favicon_url {
-        meta.icon = vmux_core::PageIcon::favicon(favicon);
+        meta.icon = PageIcon::favicon(favicon);
     }
 }
 
@@ -130,10 +131,10 @@ impl Browser {
             WebviewWindowed,
             WebviewWindowedNativeFocus,
             WebviewOpaqueWindowedBackground,
-            vmux_core::PageMetadata {
+            PageMetadata {
                 title: url.to_string(),
                 url: url.to_string(),
-                icon: vmux_core::PageIcon::None,
+                icon: PageIcon::None,
                 bg_color: None,
             },
             WebviewSource::new(url),
@@ -158,10 +159,10 @@ impl Browser {
             WebviewWindowed,
             WebviewWindowedNativeFocus,
             WebviewOpaqueWindowedBackground,
-            vmux_core::PageMetadata {
+            PageMetadata {
                 title: title.to_string(),
                 url: url.to_string(),
-                icon: vmux_core::PageIcon::None,
+                icon: PageIcon::None,
                 bg_color: None,
             },
             WebviewSource::new(url),
@@ -184,11 +185,11 @@ impl Browser {
         (
             Self,
             WebviewWindowed,
-            vmux_core::host::page::HostsPage,
-            vmux_core::PageMetadata {
+            HostsPage,
+            PageMetadata {
                 title: title.to_string(),
                 url: url.to_string(),
-                icon: vmux_core::PageIcon::None,
+                icon: PageIcon::None,
                 bg_color: None,
             },
             WebviewSize(Vec2::new(1280.0, 720.0)),
@@ -209,8 +210,8 @@ impl Browser {
 pub fn layout_cef_bundle(host_window: Entity) -> impl Bundle {
     (
         LayoutCef,
-        vmux_core::host::page::HostsPage,
-        vmux_core::launcher::RendersLauncherPanel,
+        HostsPage,
+        RendersLauncherPanel,
         HostWindow(host_window),
         Node {
             width: Val::Percent(100.0),

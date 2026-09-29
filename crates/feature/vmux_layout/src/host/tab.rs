@@ -12,10 +12,13 @@ use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
-use vmux_command::{CommandDefinitions, CommandInvocation};
-use vmux_core::Order;
+use vmux_command::{
+    CommandDefinitions, CommandInvocation, CommandRuntimePlugin, RegisterCommandDefinitions,
+};
 use vmux_core::host::persistence::PersistenceAppExt;
+use vmux_core::launcher::LauncherDismissRequest;
 pub use vmux_core::workspace::TabCommandSet;
+use vmux_core::{Active, Order};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -33,7 +36,7 @@ impl Plugin for TabPlugin {
             .register_persisted::<TabDirDecided>()
             .add_message::<CloseTabRequest>()
             .add_message::<crate::NewTabRequest>()
-            .add_message::<vmux_core::launcher::LauncherDismissRequest>()
+            .add_message::<LauncherDismissRequest>()
             .add_plugins(UiEventPlugin::<(
                 TabCreateRequest,
                 TabCloseRequest,
@@ -72,8 +75,8 @@ pub struct TabCommandPlugin;
 
 impl Plugin for TabCommandPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
-            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
         }
         app.add_message::<OpenRequest>()
             .add_message::<CreateRequest>()
@@ -82,7 +85,7 @@ impl Plugin for TabCommandPlugin {
             .add_message::<MoveRequest>()
             .add_systems(
                 Startup,
-                spawn_tab_commands.in_set(vmux_command::RegisterCommandDefinitions),
+                spawn_tab_commands.in_set(RegisterCommandDefinitions),
             );
     }
 }
@@ -96,10 +99,10 @@ fn dismiss_launcher_over_new_surfaces(
             Added<crate::stack::Stack>,
         )>,
     >,
-    mut dismiss_launcher: MessageWriter<vmux_core::launcher::LauncherDismissRequest>,
+    mut dismiss_launcher: MessageWriter<LauncherDismissRequest>,
 ) {
     if !opened.is_empty() {
-        dismiss_launcher.write(vmux_core::launcher::LauncherDismissRequest);
+        dismiss_launcher.write(LauncherDismissRequest);
     }
 }
 
@@ -518,9 +521,7 @@ pub fn pick_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
     if target == active { None } else { Some(target) }
 }
 
-fn sync_tab_visibility(
-    mut tabs: Query<(&mut Node, &mut Visibility, Has<vmux_core::Active>), With<Tab>>,
-) {
+fn sync_tab_visibility(mut tabs: Query<(&mut Node, &mut Visibility, Has<Active>), With<Tab>>) {
     for (mut node, mut vis, active) in &mut tabs {
         let target_display = if active { Display::Flex } else { Display::None };
         if node.display != target_display {

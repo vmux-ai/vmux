@@ -3,7 +3,17 @@ use std::path::PathBuf;
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_setting::AppSettings;
+use vmux_api::protocol::ProcessId;
+use vmux_core::LastActivatedAt;
+use vmux_core::event::{FileTidyPromptEvent, FileTidyRequest, TidyChoice};
+use vmux_core::host::FileUiStateWrite;
+use vmux_core::notify::AgentAttention;
+use vmux_core::team::Agent;
+use vmux_git::GitRepository;
+use vmux_layout::CloseStackRequest;
+use vmux_layout::stack::ComputeFocusSet;
+use vmux_session::{AcpSession, AgentRunState, AgentSession};
+use vmux_setting::{AppSettings, SettingsSaveRequest};
 
 use crate::follow::AgentFileLayout;
 
@@ -14,21 +24,21 @@ pub(crate) struct TidySet;
 
 impl Plugin for TidyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<vmux_core::notify::AgentAttention>()
-            .add_message::<vmux_layout::CloseStackRequest>()
-            .add_message::<vmux_setting::SettingsSaveRequest>()
-            .add_plugins(UiEventPlugin::<(vmux_core::event::FileTidyRequest,)>::default())
+        app.add_message::<AgentAttention>()
+            .add_message::<CloseStackRequest>()
+            .add_message::<SettingsSaveRequest>()
+            .add_plugins(UiEventPlugin::<(FileTidyRequest,)>::default())
             .add_observer(on_tidy_request)
             .add_systems(
                 Update,
                 tidy_on_agent_attention
                     .in_set(TidySet)
-                    .after(vmux_layout::stack::ComputeFocusSet)
+                    .after(ComputeFocusSet)
                     .after(crate::attention::TurnEndedSet),
             )
             .add_systems(
                 Update,
-                (tidy_acp_on_idle, tidy_page_on_idle).after(vmux_layout::stack::ComputeFocusSet),
+                (tidy_acp_on_idle, tidy_page_on_idle).after(ComputeFocusSet),
             );
     }
 }
@@ -39,12 +49,12 @@ struct PendingTidy {
 }
 
 fn on_tidy_request(
-    trigger: On<UiInput<vmux_core::event::FileTidyRequest>>,
+    trigger: On<UiInput<FileTidyRequest>>,
     child_of: Query<&ChildOf>,
     pending: Query<&PendingTidy>,
-    settings: Option<ResMut<vmux_setting::AppSettings>>,
-    mut save: MessageWriter<vmux_setting::SettingsSaveRequest>,
-    mut close: MessageWriter<vmux_layout::CloseStackRequest>,
+    settings: Option<ResMut<AppSettings>>,
+    mut save: MessageWriter<SettingsSaveRequest>,
+    mut close: MessageWriter<CloseStackRequest>,
     mut commands: Commands,
 ) {
     let Some(mut settings) = settings else {
@@ -63,17 +73,17 @@ fn on_tidy_request(
     let closable = pending_tidy.closable.clone();
     commands.entity(pane).remove::<PendingTidy>();
     match trigger.event().payload.choice {
-        vmux_core::event::TidyChoice::Dismiss => {}
-        vmux_core::event::TidyChoice::Always => {
+        TidyChoice::Dismiss => {}
+        TidyChoice::Always => {
             settings.agent.tidy_files_auto = true;
-            save.write(vmux_setting::SettingsSaveRequest);
+            save.write(SettingsSaveRequest);
             for stack in closable {
-                close.write(vmux_layout::CloseStackRequest::tidying(stack));
+                close.write(CloseStackRequest::tidying(stack));
             }
         }
-        vmux_core::event::TidyChoice::Tidy => {
+        TidyChoice::Tidy => {
             for stack in closable {
-                close.write(vmux_layout::CloseStackRequest::tidying(stack));
+                close.write(CloseStackRequest::tidying(stack));
             }
         }
     }
@@ -142,7 +152,7 @@ fn is_changed(
     if let Some((root, set)) = repos.iter().find(|(r, _)| abs.starts_with(r)) {
         return set.contains(&rel_str(root, &abs));
     }
-    match vmux_git::GitRepository::discover(&abs)
+    match GitRepository::discover(&abs)
         .and_then(|repository| repository.dirty_paths().map(|set| (repository, set)))
     {
         Ok((repository, set)) => {
@@ -166,9 +176,9 @@ fn tidy_follow_pane(
     agent_pane: Entity,
     settings: &AppSettings,
     layout: &AgentFileLayout,
-    last_activated: &Query<&vmux_core::LastActivatedAt>,
+    last_activated: &Query<&LastActivatedAt>,
     pending: &Query<(), With<PendingTidy>>,
-    close: &mut MessageWriter<vmux_layout::CloseStackRequest>,
+    close: &mut MessageWriter<CloseStackRequest>,
     commands: &mut Commands,
 ) {
     let Some((follow_pane, stacks)) = layout.file_stacks_for(agent_pane) else {
@@ -197,7 +207,7 @@ fn tidy_follow_pane(
     }
     if settings.agent.tidy_files_auto {
         for stack in closable {
-            close.write(vmux_layout::CloseStackRequest::tidying(stack));
+            close.write(CloseStackRequest::tidying(stack));
         }
         return;
     }
@@ -212,9 +222,9 @@ fn tidy_follow_pane(
         })
         .map(|(_, page, _)| *page);
     if let Some(page) = active_page {
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        commands.trigger(FileUiStateWrite::from_event(
             page,
-            &vmux_core::event::FileTidyPromptEvent { count },
+            &FileTidyPromptEvent { count },
         ));
         commands
             .entity(follow_pane)
@@ -223,13 +233,13 @@ fn tidy_follow_pane(
 }
 
 fn tidy_on_agent_attention(
-    mut reader: MessageReader<vmux_core::notify::AgentAttention>,
+    mut reader: MessageReader<AgentAttention>,
     settings: Option<Res<AppSettings>>,
-    agents: Query<&vmux_api::protocol::ProcessId, With<vmux_core::team::Agent>>,
+    agents: Query<&ProcessId, With<Agent>>,
     layout: AgentFileLayout,
-    last_activated: Query<&vmux_core::LastActivatedAt>,
+    last_activated: Query<&LastActivatedAt>,
     pending: Query<(), With<PendingTidy>>,
-    mut close: MessageWriter<vmux_layout::CloseStackRequest>,
+    mut close: MessageWriter<CloseStackRequest>,
     mut commands: Commands,
 ) {
     let Some(settings) = settings else {
@@ -261,14 +271,11 @@ fn tidy_on_agent_attention(
 
 fn tidy_acp_on_idle(
     settings: Option<Res<AppSettings>>,
-    sessions: Query<
-        (&vmux_session::AcpSession, &vmux_session::AgentRunState),
-        Changed<vmux_session::AgentRunState>,
-    >,
+    sessions: Query<(&AcpSession, &AgentRunState), Changed<AgentRunState>>,
     layout: AgentFileLayout,
-    last_activated: Query<&vmux_core::LastActivatedAt>,
+    last_activated: Query<&LastActivatedAt>,
     pending: Query<(), With<PendingTidy>>,
-    mut close: MessageWriter<vmux_layout::CloseStackRequest>,
+    mut close: MessageWriter<CloseStackRequest>,
     mut commands: Commands,
 ) {
     let Some(settings) = settings else {
@@ -278,7 +285,7 @@ fn tidy_acp_on_idle(
         return;
     }
     for (session, state) in &sessions {
-        if !matches!(state, vmux_session::AgentRunState::Idle) {
+        if !matches!(state, AgentRunState::Idle) {
             continue;
         }
         let Some(agent_pane) = layout.agent_pane(session.anchor) else {
@@ -298,17 +305,11 @@ fn tidy_acp_on_idle(
 
 fn tidy_page_on_idle(
     settings: Option<Res<AppSettings>>,
-    sessions: Query<
-        (&ChildOf, &vmux_session::AgentRunState),
-        (
-            With<vmux_session::AgentSession>,
-            Changed<vmux_session::AgentRunState>,
-        ),
-    >,
+    sessions: Query<(&ChildOf, &AgentRunState), (With<AgentSession>, Changed<AgentRunState>)>,
     layout: AgentFileLayout,
-    last_activated: Query<&vmux_core::LastActivatedAt>,
+    last_activated: Query<&LastActivatedAt>,
     pending: Query<(), With<PendingTidy>>,
-    mut close: MessageWriter<vmux_layout::CloseStackRequest>,
+    mut close: MessageWriter<CloseStackRequest>,
     mut commands: Commands,
 ) {
     let Some(settings) = settings else {
@@ -318,7 +319,7 @@ fn tidy_page_on_idle(
         return;
     }
     for (parent, state) in &sessions {
-        if !matches!(state, vmux_session::AgentRunState::Idle) {
+        if !matches!(state, AgentRunState::Idle) {
             continue;
         }
         tidy_follow_pane(

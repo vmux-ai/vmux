@@ -18,9 +18,12 @@ use vmux_api::bookmark::{
     BookmarkRenameRequest as BookmarkRenameUiRequest, BookmarkTextInputRequest,
     BookmarkToggleRequest, BookmarkUnpinRequest as BookmarkUnpinUiRequest,
 };
+use vmux_command::{
+    CommandDefinitions, CommandInvocation, CommandRuntimePlugin, RegisterCommandDefinitions,
+};
 use vmux_core::host::page::PageManifest;
 use vmux_core::{
-    Bookmark, BookmarkOrder, Collapsed, Folder, LastActivatedAt, PageMetadata, Pin, Uuid,
+    Bookmark, BookmarkOrder, Collapsed, Folder, LastActivatedAt, PageIcon, PageMetadata, Pin, Uuid,
 };
 
 use super::{command::LayoutRequestSet, stack::OpenRequest};
@@ -32,15 +35,15 @@ pub struct BookmarkRequestSet;
 
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
-            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
         }
         app.add_message::<BookmarkToggleActiveRequest>()
             .add_message::<BookmarkPinActiveRequest>()
             .add_message::<CreateFolderRequest>()
             .add_systems(
                 Startup,
-                spawn_bookmark_commands.in_set(vmux_command::RegisterCommandDefinitions),
+                spawn_bookmark_commands.in_set(RegisterCommandDefinitions),
             )
             .add_message::<ShowBookmarkMenuRequest>()
             .add_plugins(UiEventPlugin::<(
@@ -122,10 +125,10 @@ impl Plugin for BookmarkPlugin {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct BookmarkToggleActiveRequest;
 
-impl TryFrom<&vmux_command::CommandInvocation> for BookmarkToggleActiveRequest {
+impl TryFrom<&CommandInvocation> for BookmarkToggleActiveRequest {
     type Error = ();
 
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "bookmark_toggle_active")
             .then_some(Self)
             .ok_or(())
@@ -135,10 +138,10 @@ impl TryFrom<&vmux_command::CommandInvocation> for BookmarkToggleActiveRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct BookmarkPinActiveRequest;
 
-impl TryFrom<&vmux_command::CommandInvocation> for BookmarkPinActiveRequest {
+impl TryFrom<&CommandInvocation> for BookmarkPinActiveRequest {
     type Error = ();
 
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "bookmark_pin_active")
             .then_some(Self)
             .ok_or(())
@@ -167,10 +170,10 @@ impl CreateFolderRequest {
     }
 }
 
-impl TryFrom<&vmux_command::CommandInvocation> for CreateFolderRequest {
+impl TryFrom<&CommandInvocation> for CreateFolderRequest {
     type Error = ();
 
-    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "bookmark_new_folder")
             .then(|| Self::root("New Folder"))
             .ok_or(())
@@ -178,10 +181,8 @@ impl TryFrom<&vmux_command::CommandInvocation> for CreateFolderRequest {
 }
 
 fn spawn_bookmark_commands(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_feature_ron(
-        include_str!("../feature.ron"),
-        "bookmark",
-    );
+    let mut definitions =
+        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "bookmark");
     commands.spawn(
         definitions
             .take("bookmark_toggle_active")
@@ -818,9 +819,9 @@ fn sync_bookmark_metadata(
             metadata.title = manifest.title.to_string();
         }
         if let Some(icon) = manifest.icon
-            && metadata.icon != vmux_core::PageIcon::Builtin(icon)
+            && metadata.icon != PageIcon::Builtin(icon)
         {
-            metadata.icon = vmux_core::PageIcon::Builtin(icon);
+            metadata.icon = PageIcon::Builtin(icon);
         }
         if metadata != *bookmark {
             commands.entity(entity).insert(metadata);

@@ -11,19 +11,23 @@ use crate::handoff::{ImportedConversation, PendingHandoff, sanitize_replayed_mes
 use crate::run_state_kind::LastRunStateKind;
 use crate::toast::ToastPlugin;
 use vmux_api::protocol::{AgentRunStatus, ClientMessage, SharedMessage};
-use vmux_core::service::ServiceConnected;
-use vmux_core::service::ServiceRequest;
+use vmux_command::CommandDefinition;
+use vmux_core::notify::AgentAttention;
+use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
 use vmux_session::AcpSession;
 use vmux_session::AgentRunState;
 use vmux_session::{
     AgentApprovalPolicy, AgentMessageTimes, AgentMessages, AgentSession, PromptQueue,
 };
+use vmux_tool::{
+    ToolCatalog, ToolCatalogRequest, ToolDefinition, ToolRegistryPlugin, ToolResolveSet,
+};
 
 impl Plugin for ProviderAgentPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>();
-        if !app.is_plugin_added::<vmux_tool::ToolRegistryPlugin>() {
-            app.add_plugins(vmux_tool::ToolRegistryPlugin);
+        if !app.is_plugin_added::<ToolRegistryPlugin>() {
+            app.add_plugins(ToolRegistryPlugin);
         }
         app.register_type::<AgentSession>()
             .register_type::<AgentApprovalPolicy>()
@@ -32,7 +36,7 @@ impl Plugin for ProviderAgentPlugin {
             .add_message::<UiAgentAwaitingApproval>()
             .add_message::<UiAgentApprovalResolved>()
             .add_message::<UiAgentSnapshot>()
-            .add_message::<vmux_core::notify::AgentAttention>()
+            .add_message::<AgentAttention>()
             .add_plugins(approval::ApprovalPlugin)
             .add_plugins(ToastPlugin)
             .add_plugins(crate::tidy::TidyPlugin)
@@ -41,11 +45,11 @@ impl Plugin for ProviderAgentPlugin {
                 Update,
                 (
                     ensure_prompt_queue,
-                    request_provider_session_spawn.before(vmux_tool::ToolResolveSet),
-                    spawn_provider_session.after(vmux_tool::ToolResolveSet),
+                    request_provider_session_spawn.before(ToolResolveSet),
+                    spawn_provider_session.after(ToolResolveSet),
                     send_provider_agent_input,
                     consume_provider_agent_stream
-                        .after(vmux_core::service::ServiceMessageSet)
+                        .after(ServiceMessageSet)
                         .after(approval::ApprovalSyncSet),
                     attach_last_run_state_kind,
                 ),
@@ -72,9 +76,7 @@ fn attach_last_run_state_kind(
 
 fn request_provider_session_spawn(q: Query<Entity, Added<AgentSession>>, mut commands: Commands) {
     for entity in &q {
-        commands
-            .entity(entity)
-            .insert(vmux_tool::ToolCatalogRequest);
+        commands.entity(entity).insert(ToolCatalogRequest);
     }
 }
 
@@ -84,11 +86,11 @@ fn spawn_provider_session(
             Entity,
             &AgentSession,
             Option<&AgentApprovalPolicy>,
-            &vmux_tool::ToolCatalog,
+            &ToolCatalog,
         ),
-        Added<vmux_tool::ToolCatalog>,
+        Added<ToolCatalog>,
     >,
-    commands: Query<&vmux_command::CommandDefinition>,
+    commands: Query<&CommandDefinition>,
     mut ecs: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -101,16 +103,15 @@ fn spawn_provider_session(
             .unwrap_or_default();
         let command_tools = commands
             .iter()
-            .filter_map(vmux_command::CommandDefinition::agent_tool)
+            .filter_map(CommandDefinition::agent_tool)
             .collect();
-        let definitions =
-            match vmux_tool::ToolDefinition::merge_commands(catalog.0.clone(), command_tools) {
-                Ok(definitions) => definitions,
-                Err(error) => {
-                    bevy::log::error!("provider agent tool catalog is invalid: {error}");
-                    continue;
-                }
-            };
+        let definitions = match ToolDefinition::merge_commands(catalog.0.clone(), command_tools) {
+            Ok(definitions) => definitions,
+            Err(error) => {
+                bevy::log::error!("provider agent tool catalog is invalid: {error}");
+                continue;
+            }
+        };
         let definitions = definitions
             .into_iter()
             .map(|definition| crate::stream::ToolDef {
@@ -135,8 +136,8 @@ fn spawn_provider_session(
             },
         )));
         ecs.entity(entity)
-            .remove::<vmux_tool::ToolCatalogRequest>()
-            .remove::<vmux_tool::ToolCatalog>();
+            .remove::<ToolCatalogRequest>()
+            .remove::<ToolCatalog>();
     }
 }
 
@@ -155,7 +156,7 @@ fn send_provider_agent_input(
             continue;
         };
         service_requests.write(ServiceRequest(
-            vmux_api::protocol::SharedMessage::AgentInput {
+            SharedMessage::AgentInput {
                 sid: session.sid.clone(),
                 text: prompt.text,
                 context: None,
@@ -221,7 +222,7 @@ fn consume_provider_agent_stream(
         Option<&mut PendingHandoff>,
         Option<&ImportedConversation>,
     )>,
-    mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
+    mut attention: MessageWriter<AgentAttention>,
     connected: Option<Single<(), With<ServiceConnected>>>,
     mut commands: Commands,
 ) {
@@ -290,7 +291,7 @@ fn consume_provider_agent_stream(
                 }
             }
             if was_streaming && matches!(status.status, AgentRunStatus::Idle) {
-                attention.write(vmux_core::notify::AgentAttention {
+                attention.write(AgentAttention {
                     entity,
                     title: None,
                     body: None,
