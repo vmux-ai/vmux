@@ -10211,7 +10211,6 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
- "unicode-segmentation",
  "url",
  "uuid",
  "vmux_macro",
@@ -10452,6 +10451,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "unicode-segmentation",
  "url",
  "uuid",
  "vmux_api",
@@ -10795,6 +10795,7 @@ dependencies = [
  "vmux_api",
  "vmux_app",
  "vmux_chat",
+ "vmux_core",
  "vmux_path",
  "vmux_start",
  "vmux_team",
@@ -10937,6 +10938,7 @@ dependencies = [
  "serde",
  "serde_json",
  "vmux_api",
+ "vmux_core",
 ]
 
 [[package]]
