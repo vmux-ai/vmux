@@ -84,56 +84,6 @@ pub(crate) struct RunTerminalCandidate {
 }
 
 impl RunTerminalCandidate {
-    pub(crate) fn collect(
-        agent_pane: Entity,
-        terminals: &Query<
-            (Entity, &ProcessId, &TerminalLaunch, Has<AgentRunTerminal>),
-            (
-                With<Terminal>,
-                Without<AgentSession>,
-                Without<ProcessExited>,
-            ),
-        >,
-        child_of_q: &Query<&ChildOf>,
-        tab_q: &Query<Entity, With<Tab>>,
-        seq_q: &Query<&SpawnSeq>,
-        desired_cwd: &Path,
-    ) -> Vec<Self> {
-        use bevy::ecs::relationship::Relationship;
-        let Some(agent_tab) = AgentPane::new(agent_pane).tab(child_of_q, tab_q) else {
-            return Vec::new();
-        };
-        let desired_cwd = desired_cwd
-            .canonicalize()
-            .unwrap_or_else(|_| desired_cwd.to_path_buf());
-        terminals
-            .iter()
-            .filter_map(|(terminal, pid, launch, agent_run)| {
-                if !agent_run {
-                    return None;
-                }
-                let stack = child_of_q.get(terminal).ok()?.get();
-                let pane = child_of_q.get(stack).ok()?.get();
-                if pane == agent_pane {
-                    return None;
-                }
-                if AgentPane::new(pane).tab(child_of_q, tab_q) != Some(agent_tab) {
-                    return None;
-                }
-                if !Self::launch_matches_canonical_cwd(&launch.cwd, &desired_cwd) {
-                    return None;
-                }
-                Some(Self {
-                    terminal,
-                    pid: *pid,
-                    stack,
-                    pane,
-                    pane_spawn_seq: seq_q.get(pane).map(|s| s.0).unwrap_or(0),
-                })
-            })
-            .collect()
-    }
-
     pub(crate) fn activation_entities(
         &self,
         child_of_q: &Query<&ChildOf>,
@@ -160,6 +110,107 @@ impl RunTerminalCandidate {
             .canonicalize()
             .unwrap_or_else(|_| desired_cwd.to_path_buf());
         Self::launch_matches_canonical_cwd(launch_cwd, &desired_cwd)
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct RunTerminals<'w, 's> {
+    candidates: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static ProcessId,
+            &'static TerminalLaunch,
+            Has<AgentRunTerminal>,
+        ),
+        (
+            With<Terminal>,
+            Without<AgentSession>,
+            Without<ProcessExited>,
+        ),
+    >,
+    terminals: Query<'w, 's, (Entity, &'static ProcessId), With<Terminal>>,
+    launches: Query<'w, 's, &'static TerminalLaunch>,
+}
+
+impl RunTerminals<'_, '_> {
+    pub(super) fn candidates(
+        &self,
+        agent_pane: Entity,
+        child_of_q: &Query<&ChildOf>,
+        tab_q: &Query<Entity, With<Tab>>,
+        seq_q: &Query<&SpawnSeq>,
+        desired_cwd: &Path,
+    ) -> Vec<RunTerminalCandidate> {
+        use bevy::ecs::relationship::Relationship;
+        let Some(agent_tab) = AgentPane::new(agent_pane).tab(child_of_q, tab_q) else {
+            return Vec::new();
+        };
+        let desired_cwd = desired_cwd
+            .canonicalize()
+            .unwrap_or_else(|_| desired_cwd.to_path_buf());
+        self.candidates
+            .iter()
+            .filter_map(|(terminal, pid, launch, agent_run)| {
+                if !agent_run {
+                    return None;
+                }
+                let stack = child_of_q.get(terminal).ok()?.get();
+                let pane = child_of_q.get(stack).ok()?.get();
+                if pane == agent_pane {
+                    return None;
+                }
+                if AgentPane::new(pane).tab(child_of_q, tab_q) != Some(agent_tab) {
+                    return None;
+                }
+                if !RunTerminalCandidate::launch_matches_canonical_cwd(&launch.cwd, &desired_cwd) {
+                    return None;
+                }
+                Some(RunTerminalCandidate {
+                    terminal,
+                    pid: *pid,
+                    stack,
+                    pane,
+                    pane_spawn_seq: seq_q.get(pane).map(|s| s.0).unwrap_or(0),
+                })
+            })
+            .collect()
+    }
+
+    pub(super) fn pane(
+        &self,
+        process_id: ProcessId,
+        child_of_q: &Query<&ChildOf>,
+    ) -> Option<Entity> {
+        use bevy::ecs::relationship::Relationship;
+        let (terminal, _) = self
+            .terminals
+            .iter()
+            .find(|(_, candidate)| **candidate == process_id)?;
+        let stack = child_of_q.get(terminal).ok()?.get();
+        child_of_q.get(stack).ok().map(Relationship::get)
+    }
+
+    pub(super) fn launch(&self, process_id: ProcessId) -> Result<TerminalLaunch, String> {
+        let Some(entity) = self
+            .terminals
+            .iter()
+            .find_map(|(entity, candidate)| (*candidate == process_id).then_some(entity))
+        else {
+            return Err(format!("run.terminal page not found: {process_id}"));
+        };
+        self.launches
+            .get(entity)
+            .cloned()
+            .map_err(|_| format!("run terminal launch not found: {process_id}"))
+    }
+
+    pub(super) fn cwd(&self, entity: Entity) -> Option<String> {
+        self.launches
+            .get(entity)
+            .ok()
+            .map(|launch| launch.cwd.clone())
     }
 }
 
@@ -231,16 +282,25 @@ pub(super) struct AgentPaneSplit {
     pub(super) already_split: bool,
 }
 
-pub(super) struct NextPaneSpawnSequence;
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct NextPaneSpawnSequence<'w, 's> {
+    counter: Single<'w, 's, &'static mut SpawnCounter>,
+    sequences: Query<'w, 's, &'static SpawnSeq>,
+}
 
-impl NextPaneSpawnSequence {
-    pub(super) fn take(spawn_counter: &mut SpawnCounter, seq_q: &Query<&SpawnSeq>) -> SpawnSeq {
-        let max_existing = seq_q.iter().map(|sequence| sequence.0).max().unwrap_or(0);
-        if spawn_counter.0 <= max_existing {
-            spawn_counter.0 = max_existing;
+impl NextPaneSpawnSequence<'_, '_> {
+    pub(super) fn take(&mut self) -> SpawnSeq {
+        let max_existing = self
+            .sequences
+            .iter()
+            .map(|sequence| sequence.0)
+            .max()
+            .unwrap_or(0);
+        if self.counter.0 <= max_existing {
+            self.counter.0 = max_existing;
         }
-        spawn_counter.0 += 1;
-        SpawnSeq(spawn_counter.0)
+        self.counter.0 += 1;
+        SpawnSeq(self.counter.0)
     }
 }
 
@@ -344,45 +404,6 @@ impl PendingRunTerminalSpawns {
             None => request.pending_input = Some(data),
         }
         Some(pending.pid)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct RunTerminal(ProcessId);
-
-impl RunTerminal {
-    pub(crate) fn new(process_id: ProcessId) -> Self {
-        Self(process_id)
-    }
-
-    pub(crate) fn pane(
-        &self,
-        term_pids: &Query<(Entity, &ProcessId), With<Terminal>>,
-        child_of_q: &Query<&ChildOf>,
-    ) -> Option<Entity> {
-        use bevy::ecs::relationship::Relationship;
-        let (term, _) = term_pids.iter().find(|(_, p)| **p == self.0)?;
-        let stack = child_of_q.get(term).ok()?.get();
-        let pane = child_of_q.get(stack).ok()?.get();
-        Some(pane)
-    }
-
-    pub(crate) fn launch(
-        &self,
-        terminals: &Query<(Entity, &ProcessId), With<Terminal>>,
-        launches: &Query<&TerminalLaunch>,
-    ) -> Result<TerminalLaunch, String> {
-        let process_id = self.0;
-        let Some(entity) = terminals
-            .iter()
-            .find_map(|(entity, candidate)| (*candidate == process_id).then_some(entity))
-        else {
-            return Err(format!("run.terminal page not found: {process_id}"));
-        };
-        launches
-            .get(entity)
-            .cloned()
-            .map_err(|_| format!("run terminal launch not found: {process_id}"))
     }
 }
 
@@ -807,19 +828,12 @@ mod tests {
 
         let (missing_page, missing_launch) = app
             .world_mut()
-            .run_system_once(
-                move |terminals: Query<(Entity, &ProcessId), With<Terminal>>,
-                      launches: Query<&TerminalLaunch>| {
-                    (
-                        RunTerminal::new(missing_pid)
-                            .launch(&terminals, &launches)
-                            .unwrap_err(),
-                        RunTerminal::new(terminal_pid)
-                            .launch(&terminals, &launches)
-                            .unwrap_err(),
-                    )
-                },
-            )
+            .run_system_once(move |terminals: RunTerminals| {
+                (
+                    terminals.launch(missing_pid).unwrap_err(),
+                    terminals.launch(terminal_pid).unwrap_err(),
+                )
+            })
             .unwrap();
 
         assert_eq!(
@@ -897,22 +911,14 @@ mod tests {
 
     fn collect_run_terminal_candidates(
         input: Res<RunTerminalCandidateInput>,
-        terminals: Query<
-            (Entity, &ProcessId, &TerminalLaunch, Has<AgentRunTerminal>),
-            (
-                With<Terminal>,
-                Without<AgentSession>,
-                Without<ProcessExited>,
-            ),
-        >,
+        terminals: RunTerminals,
         child_of_q: Query<&ChildOf>,
         tab_q: Query<Entity, With<Tab>>,
         seq_q: Query<&SpawnSeq>,
         mut out: ResMut<RunTerminalCandidateOutput>,
     ) {
-        out.0 = RunTerminalCandidate::collect(
+        out.0 = terminals.candidates(
             input.agent_pane,
-            &terminals,
             &child_of_q,
             &tab_q,
             &seq_q,
@@ -1257,10 +1263,9 @@ mod tests {
     fn touch_reused_run_pane_spawn_seq_test_system(
         input: Res<ReusedRunPaneTouchInput>,
         mut commands: Commands,
-        mut spawn_counter: Single<&mut SpawnCounter>,
-        seq_q: Query<&SpawnSeq>,
+        mut next_sequence: NextPaneSpawnSequence,
     ) {
-        let sequence = NextPaneSpawnSequence::take(&mut spawn_counter, &seq_q);
+        let sequence = next_sequence.take();
         commands.entity(input.pane).insert(sequence);
     }
 
@@ -1291,11 +1296,10 @@ mod tests {
         input: Res<SplitRunPaneInput>,
         mut out: ResMut<SplitRunPaneOutput>,
         mut commands: Commands,
-        mut spawn_counter: Single<&mut SpawnCounter>,
+        mut next_sequence: NextPaneSpawnSequence,
         pane_children: Query<&Children, With<Pane>>,
         tab_filter: Query<Entity, With<Stack>>,
         split_dir_q: Query<&PaneSplit>,
-        seq_q: Query<&SpawnSeq>,
     ) {
         let mut split_batch = std::collections::HashSet::new();
         let split = AgentPane::new(input.pane).split(
@@ -1314,7 +1318,7 @@ mod tests {
             split.focus,
             split.already_split,
         );
-        let sequence = NextPaneSpawnSequence::take(&mut spawn_counter, &seq_q);
+        let sequence = next_sequence.take();
         commands.entity(target).insert(sequence);
         out.0 = Some(target);
     }

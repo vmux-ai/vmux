@@ -13,10 +13,7 @@ use vmux_command::WriteCommandRequests;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_setting::AppSettings;
-use vmux_terminal::launch::TerminalLaunch;
-use vmux_terminal::{
-    AgentRunTerminal, ProcessExited, Terminal, TerminalStackSpawnRequest, TerminalStackSpawnSet,
-};
+use vmux_terminal::{TerminalStackSpawnRequest, TerminalStackSpawnSet};
 
 use crate::event::AgentRequestInput;
 use crate::session::AgentSession;
@@ -24,7 +21,7 @@ use crate::session::AgentSession;
 use super::run_terminal::{
     AgentCwd, AgentPane, AgentTerminalRegion, NextPaneSpawnSequence, PagerEnv,
     PendingRunTerminalSpawn, PendingRunTerminalSpawns, ProjectsDirectory, RunCommand,
-    RunPlacementPolicy, RunTerminal, RunTerminalBucketPanes, RunTerminalCandidate,
+    RunPlacementPolicy, RunTerminalBucketPanes, RunTerminals,
 };
 use super::workspace::{
     AgentTabWorkspace, AgentWorkspacePicker, PendingAgentChoice, PendingWorkspacePicker,
@@ -242,16 +239,7 @@ struct AgentSelfCommandWriters<'w> {
 fn handle_agent_self_commands(
     mut reader: MessageReader<AgentRequestInput>,
     agent_terms: Query<(Entity, &ProcessId, &ChildOf, Option<&AgentTerminalRegion>)>,
-    term_pids: Query<(Entity, &ProcessId), With<Terminal>>,
-    run_terms: Query<
-        (Entity, &ProcessId, &TerminalLaunch, Has<AgentRunTerminal>),
-        (
-            With<Terminal>,
-            Without<AgentSession>,
-            Without<ProcessExited>,
-        ),
-    >,
-    launch_q: Query<&TerminalLaunch>,
+    run_terminals: RunTerminals,
     mut acp_sessions: Query<&mut vmux_session::AcpSession>,
     ctx: vmux_layout::pane::PanePlacement,
     mut writers: AgentSelfCommandWriters,
@@ -259,7 +247,7 @@ fn handle_agent_self_commands(
     mut service_requests: MessageWriter<ServiceRequest>,
     active_space: vmux_layout::space::FocusedSpace,
     settings: Res<AppSettings>,
-    mut spawn_counter: Single<&mut vmux_layout::pane::SpawnCounter>,
+    mut next_pane_sequence: NextPaneSpawnSequence,
     mut tab_worktree: AgentTabWorkspace,
     mut workspace_picker: AgentWorkspacePicker,
 ) {
@@ -336,7 +324,7 @@ fn handle_agent_self_commands(
                 let focus = request.origin.allows_focus(*focus);
                 let run = RunCommand::new(command, done_marker.as_deref());
                 match terminal {
-                    Some(pid) => match RunTerminal::new(*pid).launch(&term_pids, &launch_q) {
+                    Some(pid) => match run_terminals.launch(*pid) {
                         Ok(launch) => {
                             writers.terminal_reinput.write(run.reinput(
                                 *pid,
@@ -367,27 +355,22 @@ fn handle_agent_self_commands(
                                 }
                             }
                         };
-                        let agent_cwd = launch_q
-                            .get(agent_term)
-                            .ok()
-                            .map(|launch| launch.cwd.clone())
-                            .or_else(|| {
-                                let stack =
-                                    ancestor_acp_stack(agent_term, &acp_sessions, &ctx.child_of_q)?;
-                                acp_sessions
-                                    .get(stack)
-                                    .ok()
-                                    .map(|session| session.cwd.to_string_lossy().into_owned())
-                            });
+                        let agent_cwd = run_terminals.cwd(agent_term).or_else(|| {
+                            let stack =
+                                ancestor_acp_stack(agent_term, &acp_sessions, &ctx.child_of_q)?;
+                            acp_sessions
+                                .get(stack)
+                                .ok()
+                                .map(|session| session.cwd.to_string_lossy().into_owned())
+                        });
                         let cwd = match AgentCwd::from_tab(tab_cwd.as_deref())
                             .or_agent_launch(agent_cwd.as_deref())
                         {
                             Ok(cwd) => cwd,
                             Err(message) => break 'spawn AgentCommandResult::Error(message),
                         };
-                        let candidates = RunTerminalCandidate::collect(
+                        let candidates = run_terminals.candidates(
                             self_pane,
-                            &run_terms,
                             &ctx.child_of_q,
                             &ctx.tab_q,
                             &ctx.seq_q,
@@ -422,7 +405,7 @@ fn handle_agent_self_commands(
                             && let Some(candidate) =
                                 region.1.choose_reusable_terminal(self_pane, &candidates)
                         {
-                            let Ok(launch) = launch_q.get(candidate.terminal) else {
+                            let Ok(launch) = run_terminals.launch(candidate.pid) else {
                                 break 'spawn AgentCommandResult::Error(format!(
                                     "run terminal launch not found: {}",
                                     candidate.pid
@@ -430,13 +413,12 @@ fn handle_agent_self_commands(
                             };
                             writers.terminal_reinput.write(run.reinput(
                                 candidate.pid,
-                                launch,
+                                &launch,
                                 PagerEnv::Set,
                             ));
                             region.1.run_terminal = Some(candidate.pid);
                             region.1.run_pane = Some(candidate.pane);
-                            let sequence =
-                                NextPaneSpawnSequence::take(&mut spawn_counter, &ctx.seq_q);
+                            let sequence = next_pane_sequence.take();
                             commands.entity(candidate.pane).insert(sequence);
                             if focus {
                                 for entity in
@@ -450,16 +432,14 @@ fn handle_agent_self_commands(
                             break 'spawn AgentCommandResult::Text(candidate.pid.to_string());
                         }
                         let beside_pane = match beside {
-                            Some(pid) => {
-                                match RunTerminal::new(*pid).pane(&term_pids, &ctx.child_of_q) {
-                                    Some(pane) => Some(pane),
-                                    None => {
-                                        break 'spawn AgentCommandResult::Error(format!(
-                                            "run.beside page not found: {pid}"
-                                        ));
-                                    }
+                            Some(pid) => match run_terminals.pane(*pid, &ctx.child_of_q) {
+                                Some(pane) => Some(pane),
+                                None => {
+                                    break 'spawn AgentCommandResult::Error(format!(
+                                        "run.beside page not found: {pid}"
+                                    ));
                                 }
-                            }
+                            },
                             None => None,
                         };
                         let (shell, data) = run.for_new_terminal(&settings);
@@ -512,7 +492,7 @@ fn handle_agent_self_commands(
                                 &mut split_this_batch,
                             ),
                         };
-                        let sequence = NextPaneSpawnSequence::take(&mut spawn_counter, &ctx.seq_q);
+                        let sequence = next_pane_sequence.take();
                         commands.entity(target_pane).insert(sequence);
                         let new_pid = ProcessId::new();
                         let request_index = terminal_spawns.len();
