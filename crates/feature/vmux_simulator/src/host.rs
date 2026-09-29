@@ -294,7 +294,7 @@ fn start_device_attachments(
         let wake = wake.as_ref().map(|wrapper| (**wrapper).clone());
         let attached_route = route.clone();
         let task = IoTaskPool::get().spawn(async move {
-            let result = AttachedDevice::start(&route);
+            let result = attach_device(&route);
             if let Some(proxy) = wake {
                 let _ = proxy.send_event(WinitUserEvent::WakeUp);
             }
@@ -304,6 +304,41 @@ fn start_device_attachments(
             .entity(entity)
             .insert((AttachedRoute(attached_route), DeviceAttachment(task)));
     }
+}
+
+fn attach_device(route: &SimulatorRoute) -> Result<AttachedDevice, String> {
+    let axe = Axe::locate().ok_or_else(|| {
+        format!(
+            "`{}` not found; install it with `brew install cameroncooke/axe/axe`",
+            Axe::BIN
+        )
+    })?;
+    info!(
+        "axe {} at {}",
+        axe.version().unwrap_or_default(),
+        axe.path().display()
+    );
+    let device = SimulatorDevice::booted_or_boot(route.version(), route.device_name())?;
+    let points = device.point_size(&axe);
+    let pixels = device.pixel_size(&axe);
+    let hid = HidBroker::start(&axe, &device)
+        .map_err(|error| format!("could not start simulator input: {error}"))?;
+    let clipboard = input::SimulatorClipboard::start(&axe, &device)
+        .map_err(|error| format!("could not start simulator clipboard: {error}"))?;
+    let keyboard = input::SimulatorKeyboard::start(&axe, &device)
+        .map_err(|error| format!("could not start simulator keyboard: {error}"))?;
+    let server = StreamServer::start(&axe, device.clone(), pixels)
+        .map_err(|error| format!("could not serve the simulator stream: {error}"))?;
+    Ok(AttachedDevice {
+        axe,
+        clipboard,
+        hid,
+        keyboard,
+        device,
+        points,
+        pixels,
+        server,
+    })
 }
 
 fn finish_device_attachments(
@@ -458,43 +493,6 @@ impl SimulatorScreenshot {
             png,
             width,
             height,
-        })
-    }
-}
-
-impl AttachedDevice {
-    fn start(route: &SimulatorRoute) -> Result<Self, String> {
-        let axe = Axe::locate().ok_or_else(|| {
-            format!(
-                "`{}` not found; install it with `brew install cameroncooke/axe/axe`",
-                Axe::BIN
-            )
-        })?;
-        info!(
-            "axe {} at {}",
-            axe.version().unwrap_or_default(),
-            axe.path().display()
-        );
-        let device = SimulatorDevice::booted_or_boot(route.version(), route.device_name())?;
-        let points = device.point_size(&axe);
-        let pixels = device.pixel_size(&axe);
-        let hid = HidBroker::start(&axe, &device)
-            .map_err(|error| format!("could not start simulator input: {error}"))?;
-        let clipboard = input::SimulatorClipboard::start(&axe, &device)
-            .map_err(|error| format!("could not start simulator clipboard: {error}"))?;
-        let keyboard = input::SimulatorKeyboard::start(&axe, &device)
-            .map_err(|error| format!("could not start simulator keyboard: {error}"))?;
-        let server = StreamServer::start(&axe, device.clone(), pixels)
-            .map_err(|error| format!("could not serve the simulator stream: {error}"))?;
-        Ok(Self {
-            axe,
-            clipboard,
-            hid,
-            keyboard,
-            device,
-            points,
-            pixels,
-            server,
         })
     }
 }

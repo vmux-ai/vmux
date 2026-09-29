@@ -336,7 +336,17 @@ fn poll_acp_installs(
                 progress.apply(&mut state);
             }
         }
-        job.poll();
+        if job
+            .thread
+            .as_ref()
+            .is_some_and(std::thread::JoinHandle::is_finished)
+        {
+            let thread = job.thread.take().unwrap();
+            job.outcome = Some(thread.join().unwrap_or_else(|_| AcpInstallOutcome {
+                package_added: false,
+                launch: Err("agent installation failed unexpectedly".to_string()),
+            }));
+        }
         let Some((package_added, launch_ready)) = job
             .outcome
             .as_ref()
@@ -423,20 +433,6 @@ impl AcpInstallJob {
             Err(poisoned) => poisoned.into_inner().take(),
         }
     }
-
-    fn poll(&mut self) {
-        let Some(thread) = self.thread.as_ref() else {
-            return;
-        };
-        if !thread.is_finished() {
-            return;
-        }
-        let thread = self.thread.take().unwrap();
-        self.outcome = Some(thread.join().unwrap_or_else(|_| AcpInstallOutcome {
-            package_added: false,
-            launch: Err("agent installation failed unexpectedly".to_string()),
-        }));
-    }
 }
 
 fn start_acp_install_job(
@@ -449,7 +445,7 @@ fn start_acp_install_job(
         wake,
     };
     let thread = std::thread::spawn(move || {
-        let outcome = request.resolve(&sink);
+        let outcome = resolve_acp_install(request, &sink);
         sink.notify();
         outcome
     });
@@ -458,6 +454,61 @@ fn start_acp_install_job(
         thread: Some(thread),
         outcome: None,
         package_reported: false,
+    }
+}
+
+fn resolve_acp_install(
+    request: AcpInstallRequest,
+    progress: &AcpInstallProgressSink,
+) -> AcpInstallOutcome {
+    let pinned_version = request
+        .fallback
+        .as_ref()
+        .and_then(|config| config.version.as_deref());
+    let resolved =
+        resolve_from_registry(&request.agent_id, pinned_version, |phase, pct, message| {
+            progress.publish(AcpInstallProgress::from_phase(phase, pct, message));
+        });
+    let package_added = resolved
+        .as_ref()
+        .map(|resolved| resolved.package_added)
+        .unwrap_or(false);
+    let login_env = vmux_terminal::shell_env::login_shell_env(&request.shell);
+    let managed_mcp = match crate::managed_mcp::acp_servers(&request.agent_id) {
+        Ok(managed_mcp) => managed_mcp,
+        Err(message) => {
+            return AcpInstallOutcome {
+                package_added,
+                launch: Err(message),
+            };
+        }
+    };
+    let launch = match resolved {
+        Ok(resolved) => Ok(AcpLaunch {
+            command: resolved.command,
+            args: resolved.args,
+            env: AcpEnvironment::build(resolved.env, login_env, resolved.path_prepend)
+                .for_agent(&request.agent_id)
+                .into_inner(),
+            managed_mcp_servers: managed_mcp.servers,
+            mcp_revision: managed_mcp.revision,
+        }),
+        Err(registry_error) => match request.fallback {
+            Some(config) if !config.command.is_empty() => Ok(AcpLaunch {
+                command: config.command,
+                args: config.args,
+                env: AcpEnvironment::build(config.env, login_env, None)
+                    .for_agent(&request.agent_id)
+                    .into_inner(),
+                managed_mcp_servers: managed_mcp.servers,
+                mcp_revision: managed_mcp.revision,
+            }),
+            _ => Err(registry_error),
+        },
+    };
+    AcpInstallOutcome {
+        package_added,
+        launch,
     }
 }
 
@@ -477,58 +528,6 @@ impl AcpInstallRequest {
                 .map(|config| config.env.clone())
                 .unwrap_or_default(),
             shell: self.shell.clone(),
-        }
-    }
-
-    fn resolve(self, progress: &AcpInstallProgressSink) -> AcpInstallOutcome {
-        let pinned_version = self
-            .fallback
-            .as_ref()
-            .and_then(|config| config.version.as_deref());
-        let resolved =
-            resolve_from_registry(&self.agent_id, pinned_version, |phase, pct, message| {
-                progress.publish(AcpInstallProgress::from_phase(phase, pct, message));
-            });
-        let package_added = resolved
-            .as_ref()
-            .map(|resolved| resolved.package_added)
-            .unwrap_or(false);
-        let login_env = vmux_terminal::shell_env::login_shell_env(&self.shell);
-        let managed_mcp = match crate::managed_mcp::acp_servers(&self.agent_id) {
-            Ok(managed_mcp) => managed_mcp,
-            Err(message) => {
-                return AcpInstallOutcome {
-                    package_added,
-                    launch: Err(message),
-                };
-            }
-        };
-        let launch = match resolved {
-            Ok(resolved) => Ok(AcpLaunch {
-                command: resolved.command,
-                args: resolved.args,
-                env: AcpEnvironment::build(resolved.env, login_env, resolved.path_prepend)
-                    .for_agent(&self.agent_id)
-                    .into_inner(),
-                managed_mcp_servers: managed_mcp.servers,
-                mcp_revision: managed_mcp.revision,
-            }),
-            Err(registry_error) => match self.fallback {
-                Some(config) if !config.command.is_empty() => Ok(AcpLaunch {
-                    command: config.command,
-                    args: config.args,
-                    env: AcpEnvironment::build(config.env, login_env, None)
-                        .for_agent(&self.agent_id)
-                        .into_inner(),
-                    managed_mcp_servers: managed_mcp.servers,
-                    mcp_revision: managed_mcp.revision,
-                }),
-                _ => Err(registry_error),
-            },
-        };
-        AcpInstallOutcome {
-            package_added,
-            launch,
         }
     }
 }
