@@ -29,7 +29,7 @@ use vmux_layout::{
     pane::{Pane, PaneSplit, SideSheetCardCollapsed, Zoomed},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetSections, SideSheetSectionsExpanded},
     space::{CurrentSpace, Space, SpaceId},
-    stack::{ActiveTabParam, FocusedStack, Stack, active_stack_in_pane, collect_leaf_panes},
+    stack::{ActiveTabParam, FocusedStack, LayoutFocus, Stack},
     state::LayoutUiState,
     tab::{Tab, active_tab_siblings},
     window::{FocusedWindow, VmuxWindow, host_window_of},
@@ -62,8 +62,7 @@ struct TabProjectionData<'w, 's> {
     active_tab: ActiveTabParam<'w, 's>,
     child_of: Query<'w, 's, &'static ChildOf>,
     all_children: Query<'w, 's, &'static Children>,
-    leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    focus: LayoutFocus<'w, 's>,
     stack_timestamps: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
     stack_children: Query<'w, 's, &'static Children>,
     browser_metadata:
@@ -84,13 +83,10 @@ impl TabProjectionData<'_, '_> {
     }
 
     fn active_stack(&self, tab: Entity) -> Option<Entity> {
-        let mut leaves = Vec::new();
-        collect_leaf_panes(tab, &self.all_children, &self.leaf_panes, &mut leaves);
-        leaves
+        self.focus
+            .leaves(tab)
             .into_iter()
-            .filter_map(|pane| {
-                active_stack_in_pane(pane, &self.pane_children, &self.stack_timestamps)
-            })
+            .filter_map(|pane| self.focus.stack(pane))
             .filter_map(|stack| self.stack_timestamps.get(stack).ok())
             .max_by_key(|(_, timestamp)| timestamp.0)
             .map(|(entity, _)| entity)
@@ -749,13 +745,10 @@ fn push_stacks_host_emit(
 fn push_pane_tree_emit(
     mut projection: LayoutProjection,
     focus: FocusedStack,
+    layout_focus: LayoutFocus,
     tab_q: Query<(), With<Tab>>,
     sections_of: SideSheetSections,
-    all_children: Query<&Children>,
-    leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     collapsed_panes: Query<(), With<SideSheetCardCollapsed>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
     stack_children: Query<&Children>,
     browser_meta: Query<
@@ -783,15 +776,14 @@ fn push_pane_tree_emit(
         return;
     }
     let sections = sections_of.under(tab_e);
-    let mut tab_leaf_panes = Vec::new();
-    collect_leaf_panes(tab_e, &all_children, &leaf_pane_q, &mut tab_leaf_panes);
+    let tab_leaf_panes = layout_focus.leaves(tab_e);
 
     let mut panes: Vec<PaneNode> = Vec::new();
     for &pane_entity in &tab_leaf_panes {
         let is_active = active_pane == Some(pane_entity);
-        let active_stack = active_stack_in_pane(pane_entity, &pane_children, &stack_ts);
+        let active_stack = layout_focus.stack(pane_entity);
         let mut stacks: Vec<StackNode> = Vec::new();
-        if let Ok(children) = pane_children.get(pane_entity) {
+        if let Ok(children) = stack_children.get(pane_entity) {
             for child in children.iter() {
                 if !stack_q.contains(child) {
                     continue;

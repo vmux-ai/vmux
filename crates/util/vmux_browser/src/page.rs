@@ -1,4 +1,7 @@
-use bevy::{ecs::relationship::Relationship, prelude::*};
+use bevy::{
+    ecs::{relationship::Relationship, system::SystemParam},
+    prelude::*,
+};
 use vmux_api::{
     VmuxRoute,
     error::{ErrorPageData, FAILED_TO_LOAD, NOT_FOUND},
@@ -12,8 +15,8 @@ use vmux_core::{
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::{
-    pane::{Pane, PaneSplit, first_stack_in_pane},
-    stack::{Stack, active_stack_in_pane, stack_bundle},
+    pane::{Pane, PaneSplit},
+    stack::{LayoutFocus, Stack, stack_bundle},
 };
 
 use crate::host::{
@@ -139,27 +142,12 @@ impl ErrorPageAttachment {
 
 fn handle_page_open_requests(
     mut reader: MessageReader<PageOpenRequest>,
-    focus: vmux_layout::stack::FocusedStack,
-    parents: Query<&ChildOf>,
-    panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    stack_filter: Query<Entity, With<Stack>>,
+    mut target: PageOpenTargetResolver,
     time: Res<Time>,
-    mut commands: Commands,
     mut service_requests: MessageWriter<vmux_core::service::ServiceRequest>,
 ) {
     for request in reader.read() {
-        let stack = match resolve_page_open_target(
-            &request.target,
-            &focus,
-            &parents,
-            &panes,
-            &pane_children,
-            &stack_ts,
-            &stack_filter,
-            &mut commands,
-        ) {
+        let stack = match target.resolve(&request.target) {
             Ok(stack) => stack,
             Err(message) => {
                 send_page_open_response(&mut service_requests, request.request_id, Err(message));
@@ -174,88 +162,87 @@ fn handle_page_open_requests(
             request_id: request.request_id,
         };
         if request.request_id.is_some() {
-            commands.spawn((
+            target.commands.spawn((
                 task,
                 PageOpenAwaitSnapshot {
                     started: time.elapsed(),
                 },
             ));
         } else {
-            commands.spawn(task);
+            target.commands.spawn(task);
         }
     }
 }
 
-fn resolve_page_open_target(
-    target: &PageOpenTarget,
-    focus: &vmux_layout::active_pane::ActiveStack,
-    parents: &Query<&ChildOf>,
-    panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_children: &Query<&Children, With<Pane>>,
-    stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
-    stack_filter: &Query<Entity, With<Stack>>,
-    commands: &mut Commands,
-) -> Result<Entity, String> {
-    match *target {
-        PageOpenTarget::ActiveStack => focus
-            .stack
-            .or_else(|| {
-                focus.pane.filter(|pane| panes.contains(*pane)).map(|pane| {
-                    commands
-                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                        .id()
-                })
-            })
-            .ok_or_else(|| "page_open: no focused stack or pane".to_string()),
-        PageOpenTarget::NewStack => focus
-            .pane
-            .filter(|pane| panes.contains(*pane))
-            .map(|pane| {
-                commands
-                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                    .id()
-            })
-            .ok_or_else(|| "page_open: no focused pane".to_string()),
-        PageOpenTarget::Stack(stack) => {
-            if stack_filter.contains(stack) {
-                Ok(stack)
-            } else {
-                Err("page_open: target stack does not exist".to_string())
-            }
-        }
-        PageOpenTarget::ContainingStack(entity) => {
-            let mut current = entity;
-            loop {
-                if stack_filter.contains(current) {
-                    break Ok(current);
+#[derive(SystemParam)]
+struct PageOpenTargetResolver<'w, 's> {
+    focus: vmux_layout::stack::FocusedStack<'w, 's>,
+    layout: LayoutFocus<'w, 's>,
+    parents: Query<'w, 's, &'static ChildOf>,
+    panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+    stacks: Query<'w, 's, Entity, With<Stack>>,
+    commands: Commands<'w, 's>,
+}
+
+impl PageOpenTargetResolver<'_, '_> {
+    fn resolve(&mut self, target: &PageOpenTarget) -> Result<Entity, String> {
+        match *target {
+            PageOpenTarget::ActiveStack => {
+                if let Some(stack) = self.focus.stack {
+                    return Ok(stack);
                 }
-                let Ok(parent) = parents.get(current) else {
-                    break Err("page_open: target has no containing stack".to_string());
+                let Some(pane) = self.focus.pane.filter(|pane| self.panes.contains(*pane)) else {
+                    return Err("page_open: no focused stack or pane".to_string());
                 };
-                current = parent.parent();
+                Ok(self.spawn_stack(pane))
+            }
+            PageOpenTarget::NewStack => {
+                let Some(pane) = self.focus.pane.filter(|pane| self.panes.contains(*pane)) else {
+                    return Err("page_open: no focused pane".to_string());
+                };
+                Ok(self.spawn_stack(pane))
+            }
+            PageOpenTarget::Stack(stack) => self
+                .stacks
+                .contains(stack)
+                .then_some(stack)
+                .ok_or_else(|| "page_open: target stack does not exist".to_string()),
+            PageOpenTarget::ContainingStack(entity) => self.containing_stack(entity),
+            PageOpenTarget::ActiveStackInPane(pane) => {
+                if !self.panes.contains(pane) {
+                    return Err("page_open: target pane does not exist".to_string());
+                }
+                Ok(self
+                    .layout
+                    .stack(pane)
+                    .unwrap_or_else(|| self.spawn_stack(pane)))
+            }
+            PageOpenTarget::NewStackInPane(pane) => {
+                if !self.panes.contains(pane) {
+                    return Err("page_open: target pane does not exist".to_string());
+                }
+                Ok(self.spawn_stack(pane))
             }
         }
-        PageOpenTarget::ActiveStackInPane(pane) => {
-            if !panes.contains(pane) {
-                return Err("page_open: target pane does not exist".to_string());
+    }
+
+    fn containing_stack(&self, entity: Entity) -> Result<Entity, String> {
+        let mut current = entity;
+        loop {
+            if self.stacks.contains(current) {
+                return Ok(current);
             }
-            Ok(active_stack_in_pane(pane, pane_children, stack_ts)
-                .or_else(|| first_stack_in_pane(pane, pane_children, stack_filter))
-                .unwrap_or_else(|| {
-                    commands
-                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                        .id()
-                }))
+            let Ok(parent) = self.parents.get(current) else {
+                return Err("page_open: target has no containing stack".to_string());
+            };
+            current = parent.parent();
         }
-        PageOpenTarget::NewStackInPane(pane) => {
-            if panes.contains(pane) {
-                Ok(commands
-                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                    .id())
-            } else {
-                Err("page_open: target pane does not exist".to_string())
-            }
-        }
+    }
+
+    fn spawn_stack(&mut self, pane: Entity) -> Entity {
+        self.commands
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+            .id()
     }
 }
 

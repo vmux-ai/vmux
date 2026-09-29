@@ -478,6 +478,14 @@ pub struct LayoutFocus<'w, 's> {
 }
 
 impl LayoutFocus<'_, '_> {
+    pub fn is_leaf(&self, entity: Entity) -> bool {
+        self.leaf_panes.contains(entity)
+    }
+
+    pub fn leaf_count(&self) -> usize {
+        self.leaf_panes.iter().count()
+    }
+
     pub fn leaves(&self, root: Entity) -> Vec<Entity> {
         let mut panes = Vec::new();
         collect_leaf_panes(root, &self.all_children, &self.leaf_panes, &mut panes);

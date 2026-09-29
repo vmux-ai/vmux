@@ -15,9 +15,9 @@ use vmux_layout::Browser;
 use vmux_layout::{
     Header, LayoutCef, Open, PendingWebviewReveal,
     bookmark::{BookmarkContextMenuActive, BookmarkTextInputActive},
-    pane::{Pane, PaneSplit},
+    pane::Pane,
     side_sheet::SideSheet,
-    stack::{Stack, active_stack_in_pane, collect_leaf_panes},
+    stack::{LayoutFocus, Stack},
     tab::Tab,
     window::{
         VmuxWindow, WEBVIEW_Z_BASE, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL,
@@ -104,13 +104,11 @@ impl WindowHierarchy<'_, '_> {
 #[derive(bevy::ecs::system::SystemParam)]
 struct WindowFrameQueries<'w, 's> {
     hierarchy: WindowHierarchy<'w, 's>,
+    focus: LayoutFocus<'w, 's>,
     pane_rect: Query<'w, 's, &'static ComputedNode, With<Pane>>,
     header_rect: Query<'w, 's, (Entity, &'static ComputedNode), (With<Header>, With<Open>)>,
     tabs: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Tab>>,
-    stacks: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
-    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
     all_children: Query<'w, 's, &'static Children>,
-    leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
 }
 
 fn sync_keyboard_target(
@@ -210,10 +208,9 @@ fn sync_children_to_ui(
         With<Browser>,
     >,
     hierarchy: WindowHierarchy,
+    layout_focus: LayoutFocus,
     pane_rect: Query<&ComputedNode, With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
     all_children: Query<&Children>,
-    tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     tabs_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
     roots: Query<(Entity, &HostWindow, &ComputedNode), With<VmuxWindow>>,
 ) {
@@ -293,10 +290,7 @@ fn sync_children_to_ui(
         }
 
         let is_active_stack = if parent != glass_entity && !is_cef_ui {
-            active_candidate(
-                active_stack_in_pane(pane_entity, &pane_children, &tab_ts),
-                parent,
-            )
+            active_candidate(layout_focus.stack(pane_entity), parent)
         } else {
             true
         };
@@ -478,10 +472,7 @@ fn sync_windowed_frames(
             &queries.all_children,
             &queries.tabs,
         );
-        let stack_active = active_candidate(
-            active_stack_in_pane(pane_entity, &queries.pane_children, &queries.stacks),
-            parent,
-        );
+        let stack_active = active_candidate(queries.focus.stack(pane_entity), parent);
         let focused_stack = focus.stack == Some(parent);
         let renderable = computed.size.x > 0.0 && computed.size.y > 0.0;
         let state = (
@@ -528,8 +519,10 @@ fn sync_windowed_frames(
                 }
             })
         });
-        let visible_pane_count =
-            visible_pane_count_for_windowed_sync(tab, &queries.all_children, &queries.leaf_panes);
+        let visible_pane_count = tab
+            .map(|tab| queries.focus.leaves(tab).len())
+            .filter(|count| *count > 0)
+            .unwrap_or_else(|| queries.focus.leaf_count().max(1));
         let Some(pane_frame) = WindowedFrameRect::from_node(computed) else {
             commands
                 .entity(entity)
@@ -767,21 +760,6 @@ fn windowed_page_frame_rect(
         width: right - left,
         height: bottom - top,
     }
-}
-
-fn visible_pane_count_for_windowed_sync(
-    focused_tab: Option<Entity>,
-    all_children: &Query<&Children>,
-    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-) -> usize {
-    if let Some(tab) = focused_tab {
-        let mut leaves = Vec::new();
-        collect_leaf_panes(tab, all_children, leaf_panes, &mut leaves);
-        if !leaves.is_empty() {
-            return leaves.len();
-        }
-    }
-    leaf_panes.iter().count().max(1)
 }
 
 fn windowed_pages_to_hide(
@@ -1274,9 +1252,8 @@ fn sync_osr_webview_focus(
     host_windows: Query<&HostWindow>,
     focused_window: vmux_layout::window::FocusedWindow,
     focus: vmux_layout::stack::FocusedStack,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_children_q: Query<&Children, With<Pane>>,
-    tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    layout_focus: LayoutFocus,
+    stacks: Query<(), With<Stack>>,
     child_of_q: Query<&ChildOf>,
 
     mut ready: Local<Vec<Entity>>,
@@ -1384,14 +1361,11 @@ fn sync_osr_webview_focus(
         let is_prev = false;
 
         if let Ok(parent) = child_of_q.get(e).map(|co| co.get()) {
-            parent_is_stack = tab_ts.get(parent).is_ok();
+            parent_is_stack = stacks.contains(parent);
             if parent_is_stack && let Ok(pane) = child_of_q.get(parent).map(|co| co.get()) {
-                pane_is_leaf = leaf_panes.contains(pane);
+                pane_is_leaf = layout_focus.is_leaf(pane);
                 if pane_is_leaf {
-                    is_active = active_candidate(
-                        active_stack_in_pane(pane, &pane_children_q, &tab_ts),
-                        parent,
-                    );
+                    is_active = active_candidate(layout_focus.stack(pane), parent);
                 }
             }
         }

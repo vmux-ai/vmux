@@ -26,7 +26,7 @@ use vmux_layout::{
     },
     pane::{Pane, PaneHoverCooldown, PaneSplit, SideSheetCardCollapsed},
     side_sheet::{SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded},
-    stack::{ActiveTabParam, CloseStackRequest, Stack, focused_stack},
+    stack::{CloseStackRequest, FocusedStack, Stack},
     state::LayoutUiState,
 };
 
@@ -178,7 +178,7 @@ fn spawn_browser_commands(mut commands: Commands) {
 
 fn handle_navigation_requests(
     mut navigation_requests: MessageReader<NavigationRequest>,
-    active_stack: ActiveStack,
+    focus: FocusedStack,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
     host_histories: Query<(), With<HostHistory>>,
@@ -186,7 +186,7 @@ fn handle_navigation_requests(
     mut commands: Commands,
 ) {
     for request in navigation_requests.read() {
-        let Some(active) = active_stack.get() else {
+        let Some(active) = focus.stack else {
             continue;
         };
         let Some(webview) = browsers
@@ -245,7 +245,7 @@ fn handle_navigation_requests(
 
 #[derive(SystemParam)]
 struct BrowserOpen<'w, 's> {
-    active_stack: ActiveStack<'w, 's>,
+    focus: FocusedStack<'w, 's>,
     browsers: Query<
         'w,
         's,
@@ -261,7 +261,7 @@ struct BrowserOpen<'w, 's> {
 
 impl BrowserOpen<'_, '_> {
     fn target(&self) -> Option<(Entity, Entity, bool)> {
-        let stack = self.active_stack.get()?;
+        let stack = self.focus.stack?;
         let webview = self
             .browsers
             .iter()
@@ -327,14 +327,14 @@ fn handle_open_requests(
 
 fn handle_zoom_requests(
     mut requests: MessageReader<ZoomRequest>,
-    active_stack: ActiveStack,
+    focus: FocusedStack,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     mut font_size_writer: MessageWriter<vmux_terminal::TerminalFontSizeCommand>,
 ) {
     for request in requests.read() {
-        let Some(active) = active_stack.get() else {
+        let Some(active) = focus.stack else {
             continue;
         };
         let Some(webview) = browsers
@@ -374,12 +374,12 @@ fn handle_zoom_requests(
 
 fn show_dev_tools(
     mut requests: MessageReader<ShowDevToolsRequest>,
-    active_stack: ActiveStack,
+    focus: FocusedStack,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut commands: Commands,
 ) {
     for _ in requests.read() {
-        let Some(active) = active_stack.get() else {
+        let Some(active) = focus.stack else {
             continue;
         };
         let Some(webview) = browsers
@@ -390,30 +390,6 @@ fn show_dev_tools(
             continue;
         };
         commands.trigger(RequestShowDevTool { webview });
-    }
-}
-
-#[derive(SystemParam)]
-struct ActiveStack<'w, 's> {
-    active_tab: ActiveTabParam<'w, 's>,
-    all_children: Query<'w, 's, &'static Children>,
-    leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
-    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
-    stack_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
-}
-
-impl ActiveStack<'_, '_> {
-    fn get(&self) -> Option<Entity> {
-        let (_, _, stack) = focused_stack(
-            self.active_tab.get(),
-            &self.all_children,
-            &self.leaf_panes,
-            &self.pane_ts,
-            &self.pane_children,
-            &self.stack_ts,
-        );
-        stack
     }
 }
 
