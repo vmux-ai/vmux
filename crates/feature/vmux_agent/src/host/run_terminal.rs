@@ -880,15 +880,15 @@ mod tests {
     }
 
     #[derive(Resource)]
-    pub(crate) struct RunTerminalCandidateInput {
+    struct RunTerminalCandidateInput {
         agent_pane: Entity,
         desired_cwd: PathBuf,
     }
 
     #[derive(Resource, Default)]
-    pub(crate) struct RunTerminalCandidateOutput(Vec<RunTerminalCandidate>);
+    struct RunTerminalCandidateOutput(Vec<RunTerminalCandidate>);
 
-    pub(crate) fn collect_run_terminal_candidates(
+    fn collect_run_terminal_candidates(
         input: Res<RunTerminalCandidateInput>,
         terminals: Query<
             (Entity, &ProcessId, &TerminalLaunch, Has<AgentRunTerminal>),
@@ -1096,14 +1096,14 @@ mod tests {
     }
 
     #[derive(Resource)]
-    pub(crate) struct RunTerminalBucketPaneInput {
+    struct RunTerminalBucketPaneInput {
         agent_pane: Entity,
     }
 
     #[derive(Resource, Default)]
-    pub(crate) struct RunTerminalBucketPaneOutput(Vec<Entity>);
+    struct RunTerminalBucketPaneOutput(Vec<Entity>);
 
-    pub(crate) fn collect_run_terminal_bucket_panes(
+    fn collect_run_terminal_bucket_panes(
         input: Res<RunTerminalBucketPaneInput>,
         child_of_q: Query<&ChildOf>,
         tab_q: Query<Entity, With<vmux_layout::tab::Tab>>,
@@ -1249,11 +1249,11 @@ mod tests {
     }
 
     #[derive(Resource)]
-    pub(crate) struct ReusedRunPaneTouchInput {
+    struct ReusedRunPaneTouchInput {
         pane: Entity,
     }
 
-    pub(crate) fn touch_reused_run_pane_spawn_seq_test_system(
+    fn touch_reused_run_pane_spawn_seq_test_system(
         input: Res<ReusedRunPaneTouchInput>,
         mut commands: Commands,
         mut spawn_counter: Single<&mut vmux_layout::pane::SpawnCounter>,
@@ -1290,14 +1290,14 @@ mod tests {
     }
 
     #[derive(Resource)]
-    pub(crate) struct SplitRunPaneInput {
+    struct SplitRunPaneInput {
         pane: Entity,
     }
 
     #[derive(Resource, Default)]
-    pub(crate) struct SplitRunPaneOutput(Option<Entity>);
+    struct SplitRunPaneOutput(Option<Entity>);
 
-    pub(crate) fn split_run_pane_test_system(
+    fn split_run_pane_test_system(
         input: Res<SplitRunPaneInput>,
         mut out: ResMut<SplitRunPaneOutput>,
         mut commands: Commands,
@@ -1450,11 +1450,11 @@ mod tests {
     }
 
     #[derive(Resource)]
-    pub(crate) struct ReusedRunTerminalFocusInput {
+    struct ReusedRunTerminalFocusInput {
         candidate: RunTerminalCandidate,
     }
 
-    pub(crate) fn focus_reused_run_terminal_test_system(
+    fn focus_reused_run_terminal_test_system(
         input: Res<ReusedRunTerminalFocusInput>,
         mut commands: Commands,
         child_of_q: Query<&ChildOf>,
