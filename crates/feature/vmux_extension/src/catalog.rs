@@ -1,7 +1,6 @@
-use std::sync::{Arc, Mutex};
-
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use crossbeam_channel::{Receiver, Sender};
 use vmux_api::extension::{
     ExtInstallPhase, ExtInstallProgress, ExtOpenManagerRequest, ExtPinRequest, ExtToggleRequest,
     ExtUninstallRequest, ExtensionsEvent,
@@ -76,8 +75,75 @@ enum OutMsg {
     },
 }
 
-#[derive(Component, Clone, Default)]
-struct ExtensionOutbox(Arc<Mutex<Vec<OutMsg>>>);
+#[derive(Component, Clone)]
+struct ExtensionOutbox {
+    sender: Sender<OutMsg>,
+    receiver: Receiver<OutMsg>,
+}
+
+impl Default for ExtensionOutbox {
+    fn default() -> Self {
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        Self { sender, receiver }
+    }
+}
+
+impl ExtensionOutbox {
+    fn push(&self, message: OutMsg) {
+        let _ = self.sender.send(message);
+    }
+
+    fn queue_snapshot(&self) {
+        self.push(OutMsg::List(ExtensionCatalog::load()));
+    }
+
+    fn install(&self, request: ExtensionInstallRequest) {
+        let sink = self.clone();
+        std::thread::spawn(move || {
+            let key = request.source.clone();
+            let progress_sink = sink.clone();
+            let result = install::install(
+                &request.source,
+                install::DEFAULT_PRODVERSION,
+                |phase, pct, message| {
+                    progress_sink.push(OutMsg::Progress(ExtInstallProgress {
+                        key: key.clone(),
+                        phase,
+                        pct,
+                        message: message.to_string(),
+                    }));
+                },
+            );
+            match result {
+                Ok(entry) => {
+                    if let Some(entity) = request.requester {
+                        sink.push(OutMsg::InstallCompleted {
+                            entity,
+                            id: entry.id,
+                            success: true,
+                        });
+                    }
+                }
+                Err(error) => {
+                    sink.push(OutMsg::Progress(ExtInstallProgress {
+                        key: key.clone(),
+                        phase: ExtInstallPhase::Failed,
+                        pct: None,
+                        message: error,
+                    }));
+                    if let Some(entity) = request.requester {
+                        sink.push(OutMsg::InstallCompleted {
+                            entity,
+                            id: key,
+                            success: false,
+                        });
+                    }
+                }
+            }
+            sink.queue_snapshot();
+        });
+    }
+}
 
 #[derive(Component, Default)]
 struct ExtensionCatalog {
@@ -86,6 +152,14 @@ struct ExtensionCatalog {
 }
 
 impl ExtensionCatalog {
+    fn load() -> ExtensionsEvent {
+        let store = store::ExtensionStore::current();
+        let profile = vmux_core::profile::Profile::current().into_id();
+        let index = store.load_index().unwrap_or_default();
+        let loaded = store.loaded_ids(&profile);
+        index.snapshot(&profile, &loaded)
+    }
+
     fn replace(&mut self, mut snapshot: ExtensionsEvent) {
         snapshot.loaded = true;
         snapshot.installing = std::mem::take(&mut self.snapshot.installing);
@@ -123,83 +197,8 @@ struct ExtensionSubscriber {
 fn spawn_extension_catalog(mut commands: Commands) {
     let outbox = ExtensionOutbox::default();
     let loader = outbox.clone();
-    std::thread::spawn(move || queue_snapshot(&loader));
+    std::thread::spawn(move || loader.queue_snapshot());
     commands.spawn((ExtensionCatalog::default(), outbox));
-}
-
-fn push(outbox: &ExtensionOutbox, msg: OutMsg) {
-    outbox.0.lock().unwrap_or_else(|e| e.into_inner()).push(msg);
-}
-
-fn snapshot() -> ExtensionsEvent {
-    let store = store::ExtensionStore::current();
-    let profile = vmux_core::profile::Profile::current().into_id();
-    let index = store.load_index().unwrap_or_default();
-    let loaded = store.loaded_ids(&profile);
-    index.snapshot(&profile, &loaded)
-}
-
-fn queue_snapshot(outbox: &ExtensionOutbox) {
-    push(outbox, OutMsg::List(snapshot()));
-}
-
-fn spawn_install(outbox: &ExtensionOutbox, request: ExtensionInstallRequest) {
-    let sink = outbox.clone();
-    std::thread::spawn(move || {
-        let key = request.source.clone();
-        let progress_sink = sink.clone();
-        let result = install::install(
-            &request.source,
-            install::DEFAULT_PRODVERSION,
-            |phase, pct, message| {
-                push(
-                    &progress_sink,
-                    OutMsg::Progress(ExtInstallProgress {
-                        key: key.clone(),
-                        phase,
-                        pct,
-                        message: message.to_string(),
-                    }),
-                );
-            },
-        );
-        match result {
-            Ok(entry) => {
-                if let Some(entity) = request.requester {
-                    push(
-                        &sink,
-                        OutMsg::InstallCompleted {
-                            entity,
-                            id: entry.id,
-                            success: true,
-                        },
-                    );
-                }
-            }
-            Err(error) => {
-                push(
-                    &sink,
-                    OutMsg::Progress(ExtInstallProgress {
-                        key: key.clone(),
-                        phase: ExtInstallPhase::Failed,
-                        pct: None,
-                        message: error,
-                    }),
-                );
-                if let Some(entity) = request.requester {
-                    push(
-                        &sink,
-                        OutMsg::InstallCompleted {
-                            entity,
-                            id: key,
-                            success: false,
-                        },
-                    );
-                }
-            }
-        }
-        push(&sink, OutMsg::List(snapshot()));
-    });
 }
 
 fn on_page_ready(
@@ -235,7 +234,7 @@ fn on_toggle_request(trigger: On<UiInput<ExtToggleRequest>>, runtime: Single<&Ex
             request.approve_permissions,
         );
     });
-    queue_snapshot(&runtime);
+    runtime.queue_snapshot();
 }
 
 fn on_uninstall_request(
@@ -245,7 +244,7 @@ fn on_uninstall_request(
     let profile = vmux_core::profile::Profile::current().into_id();
     let _ = store::ExtensionStore::current()
         .uninstall_for_profile(&profile, &trigger.event().payload.id);
-    queue_snapshot(&runtime);
+    runtime.queue_snapshot();
 }
 
 fn on_pin_request(trigger: On<UiInput<ExtPinRequest>>, runtime: Single<&ExtensionOutbox>) {
@@ -261,22 +260,19 @@ fn on_pin_request(trigger: On<UiInput<ExtPinRequest>>, runtime: Single<&Extensio
                 .then(|| index.snapshot(&profile, &loaded))
         });
         match result {
-            Ok(Some(snapshot)) => push(&outbox, OutMsg::List(snapshot)),
+            Ok(Some(snapshot)) => outbox.push(OutMsg::List(snapshot)),
             Ok(None) => {}
             Err(error) => {
                 bevy::log::warn!(
                     extension = request.id,
                     "extension pin update failed: {error}"
                 );
-                push(
-                    &outbox,
-                    OutMsg::Progress(ExtInstallProgress {
-                        key: request.id,
-                        phase: ExtInstallPhase::Failed,
-                        pct: None,
-                        message: error,
-                    }),
-                );
+                outbox.push(OutMsg::Progress(ExtInstallProgress {
+                    key: request.id,
+                    phase: ExtInstallPhase::Failed,
+                    pct: None,
+                    message: error,
+                }));
             }
         }
     });
@@ -306,13 +302,10 @@ fn start_installs(
     runtime: Single<&ExtensionOutbox>,
 ) {
     for request in requests.read() {
-        spawn_install(
-            &runtime,
-            ExtensionInstallRequest {
-                source: request.source.clone(),
-                requester: request.requester,
-            },
-        );
+        runtime.install(ExtensionInstallRequest {
+            source: request.source.clone(),
+            requester: request.requester,
+        });
     }
 }
 
@@ -321,14 +314,10 @@ fn drain_outbox(
     mut catalog: Query<&mut ExtensionCatalog>,
     mut completed: MessageWriter<ExtensionInstallCompleted>,
 ) {
-    let drained: Vec<OutMsg> = {
-        let mut queue = runtime.0.lock().unwrap_or_else(|error| error.into_inner());
-        queue.drain(..).collect()
-    };
     let Ok(mut catalog) = catalog.single_mut() else {
         return;
     };
-    for message in drained {
+    for message in runtime.receiver.try_iter() {
         match message {
             OutMsg::List(snapshot) => catalog.replace(snapshot),
             OutMsg::Progress(progress) => catalog.update_progress(progress),

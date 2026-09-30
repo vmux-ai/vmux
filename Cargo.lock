@@ -10613,6 +10613,7 @@ dependencies = [
  "bevy",
  "bevy_cef",
  "bevy_ecs",
+ "crossbeam-channel",
  "dioxus",
  "reqwest",
  "serde",
