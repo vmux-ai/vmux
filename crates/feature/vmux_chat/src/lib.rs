@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 
+pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
+
 pub mod activity;
 pub mod event;
 pub mod host;

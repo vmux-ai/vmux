@@ -1,3 +1,5 @@
+pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
+
 pub(crate) mod event;
 mod text;
 

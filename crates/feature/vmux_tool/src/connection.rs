@@ -30,7 +30,7 @@ pub struct McpConnectionPlugin;
 impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            FeatureManifestPlugin::new(include_str!("feature.ron")),
+            FeatureManifestPlugin::new(crate::FEATURE_MANIFEST),
             UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default(),
             UiStatePlugin::<McpServers>::default(),
         ))

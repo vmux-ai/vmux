@@ -4,6 +4,8 @@
     clippy::new_ret_no_self
 )]
 
+pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
+
 pub mod event;
 pub mod schema;
 pub mod state;

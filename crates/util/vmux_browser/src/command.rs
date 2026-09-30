@@ -42,7 +42,7 @@ impl Plugin for CommandPlugin {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            include_str!("feature.ron"),
+            crate::FEATURE_MANIFEST,
         ))
         .add_message::<NavigationRequest>()
         .add_message::<OpenRequest>()
@@ -671,7 +671,7 @@ mod tests {
 
     #[test]
     fn browser_mcp_definitions_are_the_dispatchable_command_set() {
-        let definitions = CommandManifest::from_feature_ron(include_str!("feature.ron"));
+        let definitions = CommandManifest::from_feature_ron(crate::FEATURE_MANIFEST);
         let mut definitions = definitions.into_vec();
         definitions.retain(|definition| definition.id != "browser_open_history");
         let tools = definitions
@@ -776,7 +776,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_core::host::manifest::FeatureManifestPlugin::new(include_str!("feature.ron")),
+            vmux_core::host::manifest::FeatureManifestPlugin::new(crate::FEATURE_MANIFEST),
             vmux_command::CommandRuntimePlugin,
         ))
         .add_message::<NavigationRequest>()

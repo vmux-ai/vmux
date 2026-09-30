@@ -30,7 +30,7 @@ impl Plugin for StatePlugin {
             app.add_plugins(CommandRuntimePlugin);
         }
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            include_str!("../feature.ron"),
+            crate::FEATURE_MANIFEST,
         ))
         .add_message::<OpenSettingsRequest>()
         .add_systems(Startup, bind_command.in_set(BindCommands))

@@ -2,6 +2,8 @@
 
 extern crate self as vmux_tool;
 
+pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
+
 #[cfg(host)]
 mod cli;
 #[cfg(not(target_os = "ios"))]

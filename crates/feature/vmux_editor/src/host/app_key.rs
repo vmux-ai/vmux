@@ -28,7 +28,7 @@ impl Plugin for KeyPlugin {
             app.add_plugins(CommandRuntimePlugin);
         }
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            include_str!("../feature.ron"),
+            crate::FEATURE_MANIFEST,
         ))
         .add_plugins(UiEventPlugin::<(FileStatusPickerOpen,)>::default())
         .add_systems(Startup, bind_commands.in_set(BindCommands))

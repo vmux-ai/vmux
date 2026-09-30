@@ -34,9 +34,7 @@ impl Plugin for ChatKeyPlugin {
         }
         app.add_plugins(
             (
-                vmux_core::host::manifest::FeatureManifestPlugin::new(include_str!(
-                    "../feature.ron"
-                )),
+                vmux_core::host::manifest::FeatureManifestPlugin::new(crate::FEATURE_MANIFEST),
                 bevy_cef::prelude::UiEventPlugin::<(
                     ChatListSelectionChanged,
                     ChatComposerMenuChanged,

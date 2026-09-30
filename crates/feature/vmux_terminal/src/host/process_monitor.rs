@@ -30,7 +30,7 @@ impl Plugin for ProcessMonitorPlugin {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            include_str!("../feature.ron"),
+            crate::FEATURE_MANIFEST,
         ))
         .add_message::<ServiceProcessSnapshot>()
         .add_message::<OpenServicesRequest>()

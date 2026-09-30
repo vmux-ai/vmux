@@ -68,8 +68,7 @@ mod tests {
     #[test]
     fn terminal_mcp_definitions_are_the_dispatchable_command_set() {
         let definitions =
-            vmux_command::CommandManifest::from_feature_ron(include_str!("../feature.ron"))
-                .into_vec();
+            vmux_command::CommandManifest::from_feature_ron(crate::FEATURE_MANIFEST).into_vec();
         let tools = definitions
             .iter()
             .filter_map(vmux_command::CommandDefinition::agent_tool)

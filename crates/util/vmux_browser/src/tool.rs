@@ -15,7 +15,7 @@ pub struct BrowserToolPlugin;
 
 impl Plugin for BrowserToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::new(include_str!("feature.ron")))
+        app.add_plugins(FeatureManifestPlugin::new(crate::FEATURE_MANIFEST))
             .add_systems(Startup, register_agent_policy)
             .register_tool::<BrowserNavigateArgs>()
             .register_tool::<BrowserGoBackArgs>()

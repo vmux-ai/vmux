@@ -83,7 +83,7 @@ impl Plugin for TerminalPlugin {
             app.add_plugins(CommandRuntimePlugin);
         }
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            include_str!("../feature.ron"),
+            crate::FEATURE_MANIFEST,
         ))
         .add_plugins(
             Self::MANIFEST

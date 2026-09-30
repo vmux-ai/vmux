@@ -35,7 +35,7 @@ impl Plugin for BookmarkPlugin {
             app.add_plugins(CommandRuntimePlugin);
         }
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            include_str!("../feature.ron"),
+            crate::FEATURE_MANIFEST,
         ))
         .add_message::<BookmarkToggleActiveRequest>()
         .add_message::<BookmarkPinActiveRequest>()
@@ -1122,7 +1122,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_core::host::manifest::FeatureManifestPlugin::new(include_str!("../feature.ron")),
+            vmux_core::host::manifest::FeatureManifestPlugin::new(crate::FEATURE_MANIFEST),
             vmux_command::CommandRuntimePlugin,
         ))
         .add_message::<BookmarkToggleActiveRequest>()

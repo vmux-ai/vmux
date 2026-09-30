@@ -53,7 +53,7 @@ impl Plugin for SpacePlugin {
             app.add_plugins(CommandRuntimePlugin);
         }
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            include_str!("../feature.ron"),
+            crate::FEATURE_MANIFEST,
         ))
         .add_plugins((
             SpaceAgentPlugin,
@@ -907,8 +907,7 @@ mod tests {
 
     #[test]
     fn space_mcp_definition_dispatches_to_the_typed_request() {
-        let definitions =
-            CommandManifest::from_feature_ron(include_str!("../feature.ron")).into_vec();
+        let definitions = CommandManifest::from_feature_ron(crate::FEATURE_MANIFEST).into_vec();
         let tools = definitions
             .iter()
             .filter_map(vmux_command::CommandDefinition::agent_tool)

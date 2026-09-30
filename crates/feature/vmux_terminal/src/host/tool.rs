@@ -23,7 +23,7 @@ pub struct TerminalToolPlugin;
 
 impl Plugin for TerminalToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::new(include_str!("../feature.ron")))
+        app.add_plugins(FeatureManifestPlugin::new(crate::FEATURE_MANIFEST))
             .register_tool::<RunArgs>()
             .register_tool::<ReadTerminalArgs>()
             .register_tool::<TerminalSendArgs>()

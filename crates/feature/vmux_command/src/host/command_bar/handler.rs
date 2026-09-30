@@ -50,7 +50,7 @@ pub(crate) struct InputPlugin;
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            include_str!("../../feature.ron"),
+            crate::FEATURE_MANIFEST,
         ))
         .add_message::<CommandBarToggleRequest>()
         .add_plugins(WorkSnapshotPlugin)
@@ -1295,7 +1295,7 @@ mod tests {
     #[test]
     fn command_bar_mcp_definitions_are_the_dispatchable_command_set() {
         let definitions =
-            crate::CommandManifest::from_feature_ron(include_str!("../../feature.ron")).into_vec();
+            crate::CommandManifest::from_feature_ron(crate::FEATURE_MANIFEST).into_vec();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)

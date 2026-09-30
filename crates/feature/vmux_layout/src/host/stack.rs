@@ -33,7 +33,7 @@ impl Plugin for StackPlugin {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            include_str!("../feature.ron"),
+            crate::FEATURE_MANIFEST,
         ))
         .add_message::<OpenRequest>()
         .add_message::<CloseRequest>()
@@ -750,8 +750,7 @@ mod tests {
 
     #[test]
     fn stack_mcp_definitions_are_the_dispatchable_command_set() {
-        let definitions =
-            CommandManifest::from_feature_ron(include_str!("../feature.ron")).into_vec();
+        let definitions = CommandManifest::from_feature_ron(crate::FEATURE_MANIFEST).into_vec();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)

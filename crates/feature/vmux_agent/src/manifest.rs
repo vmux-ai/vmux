@@ -10,7 +10,7 @@ pub(crate) struct AgentManifestPlugin;
 
 impl Plugin for AgentManifestPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::new(include_str!("feature.ron")))
+        app.add_plugins(FeatureManifestPlugin::new(crate::FEATURE_MANIFEST))
             .add_systems(Startup, load);
     }
 }
@@ -45,7 +45,7 @@ impl CliProviderManifests {
 #[cfg(test)]
 impl CliProviderManifest {
     pub(crate) fn bundled(kind: AgentKind) -> Self {
-        let manifest = FeatureManifest::parse(include_str!("feature.ron"));
+        let manifest = FeatureManifest::parse(crate::FEATURE_MANIFEST);
         let mut providers = manifest
             .cli
             .unwrap()
@@ -66,7 +66,7 @@ pub(crate) struct AcpWorkspacePolicy {
 #[cfg(test)]
 impl AcpWorkspacePolicy {
     pub(crate) fn bundled() -> Self {
-        let manifest = FeatureManifest::parse(include_str!("feature.ron"));
+        let manifest = FeatureManifest::parse(crate::FEATURE_MANIFEST);
         manifest
             .policies::<BTreeMap<String, Self>>()
             .unwrap()

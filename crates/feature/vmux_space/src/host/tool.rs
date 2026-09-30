@@ -24,7 +24,7 @@ pub struct SpaceToolPlugin;
 
 impl Plugin for SpaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::new(include_str!("../feature.ron")))
+        app.add_plugins(FeatureManifestPlugin::new(crate::FEATURE_MANIFEST))
             .register_tool::<ListSpacesArgs>()
             .register_tool::<CreateSpaceArgs>()
             .register_tool::<RenameSpaceArgs>()
