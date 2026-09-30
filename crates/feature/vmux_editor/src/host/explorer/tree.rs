@@ -50,7 +50,7 @@ impl Plugin for TreePlugin {
                 .chain(),
         )
         .add_observer(mark_explorer_tree_dirty)
-        .add_observer(on_explorer_reveal_current_input)
+        .add_observer(request_reveal)
         .add_observer(reveal_current)
         .add_observer(on_explorer_collapse_all)
         .add_observer(on_explorer_tree_toggle)
@@ -433,10 +433,7 @@ fn on_explorer_tree_refresh(
     }
 }
 
-fn on_explorer_reveal_current_input(
-    trigger: On<UiInput<ExplorerRevealCurrent>>,
-    mut commands: Commands,
-) {
+fn request_reveal(trigger: On<UiInput<ExplorerRevealCurrent>>, mut commands: Commands) {
     commands.trigger(RevealCurrent {
         entity: trigger.event().webview,
         reveal: ExplorerReveal::Requested,

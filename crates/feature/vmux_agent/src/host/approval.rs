@@ -23,10 +23,7 @@ impl Plugin for ApprovalPlugin {
             .add_systems(Startup, spawn_agent_approval_store)
             .add_observer(receive_chat_approval)
             .add_observer(handle_approval_reply)
-            .add_systems(
-                Update,
-                sync_persisted_acp_approval_policy.in_set(ApprovalSyncSet),
-            );
+            .add_systems(Update, sync_policy.in_set(ApprovalSyncSet));
     }
 }
 
@@ -138,7 +135,7 @@ fn canonical_agent_id(agent: &str) -> String {
     }
 }
 
-fn sync_persisted_acp_approval_policy(
+fn sync_policy(
     store: Single<&AgentApprovalStore>,
     mut sessions: Query<(&AcpSession, &mut AgentApprovalPolicy), Changed<AcpSession>>,
 ) {

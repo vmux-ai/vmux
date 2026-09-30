@@ -35,7 +35,7 @@ impl Plugin for ChatMediaPlugin {
             .add_observer(on_chat_media_list_request)
             .add_observer(on_chat_attach_paths)
             .add_observer(on_chat_remove_attachment)
-            .add_observer(on_chat_attachment_hydration_request)
+            .add_observer(hydrate_attachments)
             .add_systems(
                 Update,
                 (
@@ -641,7 +641,7 @@ fn on_chat_attach_paths(
     );
 }
 
-fn on_chat_attachment_hydration_request(
+fn hydrate_attachments(
     trigger: On<ChatAttachmentHydrationRequest>,
     mut projections: Query<&mut ChatAttachmentProjection, With<ChatView>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,

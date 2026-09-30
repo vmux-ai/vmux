@@ -56,9 +56,9 @@ impl Plugin for ChatModelPlugin {
                     apply_mode_selection,
                     apply_effort_setting,
                     push_acp_model_state_to_page,
-                    push_removed_acp_model_state_to_page,
+                    remove_model_state,
                     push_acp_mode_state_to_page,
-                    push_removed_acp_mode_state_to_page,
+                    remove_mode_state,
                     apply_last_used_acp_model.after(crate::runtime::acp::AcpModelInfoSet),
                     send_acp_model_requests,
                     send_acp_mode_requests,
@@ -469,7 +469,7 @@ fn push_acp_model_state_to_page(
     }
 }
 
-fn push_removed_acp_model_state_to_page(
+fn remove_model_state(
     mut removed: RemovedComponents<AcpModelState>,
     sessions: Query<&AcpSession>,
     children: Query<&Children>,
@@ -523,7 +523,7 @@ fn push_acp_mode_state_to_page(
     }
 }
 
-fn push_removed_acp_mode_state_to_page(
+fn remove_mode_state(
     mut removed: RemovedComponents<AcpModeState>,
     children: Query<&Children>,
     chat_views: Query<(), With<ChatView>>,

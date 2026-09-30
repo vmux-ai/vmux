@@ -49,7 +49,7 @@ impl Plugin for AcpAgentPlugin {
                         apply_acp_workspace_changed,
                         (
                             apply_acp_model_info.in_set(AcpModelInfoSet),
-                            apply_acp_model_selection_result,
+                            apply_model_selection,
                             apply_acp_mode_info,
                             apply_acp_mode_selection_result,
                         )
@@ -448,7 +448,7 @@ fn apply_acp_model_info(
     }
 }
 
-fn apply_acp_model_selection_result(
+fn apply_model_selection(
     mut reader: MessageReader<crate::event::UiAgentModelSelectionResult>,
     mut sessions: Query<(&AcpSession, &mut AcpModelState)>,
 ) {
@@ -1162,7 +1162,7 @@ mod tests {
             .add_message::<UiAgentModelSelectionResult>()
             .add_systems(
                 Update,
-                (apply_acp_model_info, apply_acp_model_selection_result).chain(),
+                (apply_acp_model_info, apply_model_selection).chain(),
             );
         let entity = app
             .world_mut()

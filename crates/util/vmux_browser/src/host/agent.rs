@@ -96,12 +96,12 @@ impl Plugin for AgentBrowserPlugin {
                     (
                         route_snapshot_queries,
                         route_scroll_queries,
-                        answer_working_directory_queries,
+                        answer_working_directory,
                     )
                         .after(ToolQueryRouteSet),
                     forward_snapshot_responses,
                     forward_scroll_responses,
-                    forward_navigation_snapshot_responses,
+                    forward_snapshots,
                 ),
             )
             .add_systems(
@@ -159,7 +159,7 @@ fn route_scroll_queries(
     }
 }
 
-fn answer_working_directory_queries(
+fn answer_working_directory(
     mut requests: MessageReader<ToolQueryMessage<AgentWorkingDirectory>>,
     browse: AgentBrowserResolve,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -220,7 +220,7 @@ fn forward_scroll_responses(
     }
 }
 
-fn forward_navigation_snapshot_responses(
+fn forward_snapshots(
     mut responses: MessageReader<BrowserNavigationSnapshotResponse>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {

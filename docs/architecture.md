@@ -328,6 +328,11 @@ lifecycle transitions, asynchronous task boundaries, cross-feature dispatch, and
 ordering. A miscellaneous parameter bundle or a large hidden `run`/`dispatch` workflow is not
 a capability and stays as ordinary system logic.
 
+System names use their module as context. Prefer `open`, `refresh`, `bind`, `project`, or
+`request_definition` inside the owning module over names that repeat the feature, module,
+transport, and request type. Keep a longer name only when two systems in the same module would
+otherwise be ambiguous.
+
 Not every Rust value is ECS state. Use a component when a value has identity, lifecycle,
 independent mutation, observation, or scheduling significance. Use a message when ordering or
 cross-system delivery matters. Keep immutable specifications, parsed manifests, serialization

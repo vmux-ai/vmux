@@ -32,7 +32,7 @@ impl Plugin for McpToolPlugin {
                     locate_mcp_configs,
                     discover_mcp_servers_system,
                     import_mcp_config_system,
-                    import_default_mcp_configs_system,
+                    import_defaults,
                     import_mcp_server_system,
                     forget_mcp_server_system,
                 )
@@ -353,7 +353,7 @@ fn import_mcp_config_system(
     }
 }
 
-fn import_default_mcp_configs_system(
+fn import_defaults(
     operations: Query<
         (Entity, &DiscoveredMcpServers, &ToolStoreTarget),
         (

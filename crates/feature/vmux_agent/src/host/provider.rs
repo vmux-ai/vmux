@@ -18,11 +18,7 @@ impl Plugin for ProviderPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Startup,
-            (
-                spawn_builtin_agent_providers,
-                detect_agent_provider_availability,
-            )
-                .chain(),
+            (spawn_builtin_agent_providers, detect_availability).chain(),
         )
         .add_systems(Startup, register_page_strategies.after(SettingsLoadSet));
     }
@@ -104,7 +100,7 @@ fn spawn_builtin_agent_providers(mut commands: Commands) {
     }
 }
 
-fn detect_agent_provider_availability(
+fn detect_availability(
     mut commands: Commands,
     providers: Query<(Entity, &AgentProviderTargetKind), Without<Ready>>,
 ) {

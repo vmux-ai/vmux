@@ -36,7 +36,7 @@ impl Plugin for DirectoryPlugin {
             .add_observer(on_directory_descend_request)
             .add_observer(on_directory_activate_request)
             .add_observer(on_directory_parent_request)
-            .add_observer(on_directory_toggle_hidden_request)
+            .add_observer(toggle_hidden)
             .add_observer(load_directory);
     }
 }
@@ -334,7 +334,7 @@ fn on_directory_parent_request(
     });
 }
 
-fn on_directory_toggle_hidden_request(
+fn toggle_hidden(
     trigger: On<UiInput<GitDirectoryToggleHiddenRequest>>,
     mut navigation: Query<&mut GitDirectoryNavigation>,
 ) {

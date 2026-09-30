@@ -21,11 +21,11 @@ impl Plugin for AppearancePlugin {
                     .before(CefSystems::CreateAndResize)
                     .run_if(resource_changed::<AppSettings>),
             )
-            .add_systems(Update, reassert_color_scheme_on_navigation);
+            .add_systems(Update, reassert_color_scheme);
     }
 }
 
-fn reassert_color_scheme_on_navigation(
+fn reassert_color_scheme(
     mut committed: MessageReader<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>,
     settings: Res<AppSettings>,
     mut browsers: Option<NonSendMut<Browsers>>,

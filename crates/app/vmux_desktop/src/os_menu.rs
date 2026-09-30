@@ -67,10 +67,10 @@ impl Plugin for OsMenuPlugin {
             (
                 sync_menu_locale,
                 remember_stack_close_commands.after(DispatchCommandInvocations),
-                remember_native_page_open_requests.after(DispatchCommandInvocations),
+                remember_page_open.after(DispatchCommandInvocations),
                 hide_window_on_close_request
                     .after(remember_stack_close_commands)
-                    .after(remember_native_page_open_requests),
+                    .after(remember_page_open),
                 sync_close_menu_item.after(hide_window_on_close_request),
             ),
         )
@@ -570,10 +570,7 @@ fn remember_tab_close(_trigger: On<TabClosed>, mut state: Single<&mut OsMenuStat
     state.last_tab_close_at = Some(std::time::Instant::now());
 }
 
-fn remember_native_page_open_requests(
-    mut reader: MessageReader<OpenRequest>,
-    mut state: Single<&mut OsMenuState>,
-) {
+fn remember_page_open(mut reader: MessageReader<OpenRequest>, mut state: Single<&mut OsMenuState>) {
     for request in reader.read() {
         if request
             .url

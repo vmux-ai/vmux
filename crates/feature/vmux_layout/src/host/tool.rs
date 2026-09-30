@@ -42,13 +42,7 @@ impl Plugin for LayoutToolPlugin {
                     .in_set(ToolQueryRouteSet)
                     .after(ServiceMessageSet),
             )
-            .add_systems(
-                Update,
-                (
-                    forward_layout_apply_responses,
-                    forward_layout_snapshot_responses,
-                ),
-            );
+            .add_systems(Update, (forward_layout_apply_responses, forward_snapshots));
     }
 }
 
@@ -148,7 +142,7 @@ fn forward_layout_apply_responses(
     }
 }
 
-fn forward_layout_snapshot_responses(
+fn forward_snapshots(
     mut responses: MessageReader<LayoutSnapshotResponse>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {

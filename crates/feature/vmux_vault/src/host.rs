@@ -74,29 +74,29 @@ impl Plugin for VaultPlugin {
                 VaultRecoveryInputRequest,
             )>::default(),
         ))
-        .add_observer(on_vault_page_ready)
-        .add_observer(on_vault_create_request)
-        .add_observer(on_vault_connect_request)
-        .add_observer(on_vault_sync_request)
-        .add_observer(on_vault_connect_github_request)
-        .add_observer(on_vault_connect_folder_request)
-        .add_observer(on_vault_generate_recovery_key_request)
-        .add_observer(on_vault_create_recovery_key_request)
-        .add_observer(on_vault_unlock_recovery_key_request)
-        .add_observer(on_vault_connect_cloud_request)
-        .add_observer(on_vault_create_cloud_folder_request)
-        .add_observer(on_vault_choose_cloud_folder_request)
-        .add_observer(on_vault_refresh_request)
-        .add_observer(on_vault_provider_select_request)
-        .add_observer(on_vault_destination_select_request)
-        .add_observer(on_vault_owner_select_request)
-        .add_observer(on_vault_repository_name_request)
-        .add_observer(on_vault_repository_select_request)
-        .add_observer(on_vault_privacy_request)
-        .add_observer(on_vault_workflow_create_request)
-        .add_observer(on_vault_workflow_connect_request)
-        .add_observer(on_vault_recovery_confirmation_request)
-        .add_observer(on_vault_recovery_input_request)
+        .add_observer(page_ready)
+        .add_observer(create)
+        .add_observer(connect)
+        .add_observer(sync)
+        .add_observer(connect_github)
+        .add_observer(connect_folder)
+        .add_observer(generate_recovery_key)
+        .add_observer(create_recovery_key)
+        .add_observer(unlock_recovery_key)
+        .add_observer(connect_cloud)
+        .add_observer(create_cloud_folder)
+        .add_observer(choose_cloud_folder)
+        .add_observer(refresh)
+        .add_observer(select_provider)
+        .add_observer(select_destination)
+        .add_observer(select_owner)
+        .add_observer(set_repository_name)
+        .add_observer(select_repository)
+        .add_observer(set_privacy)
+        .add_observer(create_workflow)
+        .add_observer(connect_workflow)
+        .add_observer(confirm_recovery)
+        .add_observer(set_recovery_input)
         .add_systems(Startup, spawn_vault_runtime)
         .add_systems(
             Update,
@@ -119,7 +119,7 @@ impl Plugin for VaultPlugin {
     }
 }
 
-fn on_vault_page_ready(
+fn page_ready(
     trigger: On<UiInput<PageReady>>,
     pages: Query<&vmux_core::PageMetadata>,
     mut registry: Query<&mut VaultRegistry>,
@@ -956,10 +956,7 @@ impl VaultOperationQueue<'_, '_> {
     }
 }
 
-fn on_vault_create_request(
-    trigger: On<UiInput<VaultCreateRequest>>,
-    mut queue: VaultOperationQueue,
-) {
+fn create(trigger: On<UiInput<VaultCreateRequest>>, mut queue: VaultOperationQueue) {
     queue.push(
         trigger.event().webview,
         trigger.event().payload.clone(),
@@ -967,10 +964,7 @@ fn on_vault_create_request(
     );
 }
 
-fn on_vault_connect_request(
-    trigger: On<UiInput<VaultConnectRequest>>,
-    mut queue: VaultOperationQueue,
-) {
+fn connect(trigger: On<UiInput<VaultConnectRequest>>, mut queue: VaultOperationQueue) {
     queue.push(
         trigger.event().webview,
         trigger.event().payload.clone(),
@@ -978,7 +972,7 @@ fn on_vault_connect_request(
     );
 }
 
-fn on_vault_sync_request(trigger: On<UiInput<VaultSyncRequest>>, mut queue: VaultOperationQueue) {
+fn sync(trigger: On<UiInput<VaultSyncRequest>>, mut queue: VaultOperationQueue) {
     queue.push(
         trigger.event().webview,
         trigger.event().payload,
@@ -986,10 +980,7 @@ fn on_vault_sync_request(trigger: On<UiInput<VaultSyncRequest>>, mut queue: Vaul
     );
 }
 
-fn on_vault_connect_github_request(
-    trigger: On<UiInput<VaultConnectGithubRequest>>,
-    mut queue: VaultOperationQueue,
-) {
+fn connect_github(trigger: On<UiInput<VaultConnectGithubRequest>>, mut queue: VaultOperationQueue) {
     queue.push(
         trigger.event().webview,
         trigger.event().payload,
@@ -997,10 +988,7 @@ fn on_vault_connect_github_request(
     );
 }
 
-fn on_vault_connect_folder_request(
-    trigger: On<UiInput<VaultConnectFolderRequest>>,
-    mut queue: VaultOperationQueue,
-) {
+fn connect_folder(trigger: On<UiInput<VaultConnectFolderRequest>>, mut queue: VaultOperationQueue) {
     queue.push(
         trigger.event().webview,
         trigger.event().payload,
@@ -1008,7 +996,7 @@ fn on_vault_connect_folder_request(
     );
 }
 
-fn on_vault_generate_recovery_key_request(
+fn generate_recovery_key(
     trigger: On<UiInput<VaultGenerateRecoveryKeyRequest>>,
     mut queue: VaultOperationQueue,
 ) {
@@ -1019,7 +1007,7 @@ fn on_vault_generate_recovery_key_request(
     );
 }
 
-fn on_vault_create_recovery_key_request(
+fn create_recovery_key(
     trigger: On<UiInput<VaultCreateRecoveryKeyRequest>>,
     mut queue: VaultOperationQueue,
 ) {
@@ -1030,7 +1018,7 @@ fn on_vault_create_recovery_key_request(
     );
 }
 
-fn on_vault_unlock_recovery_key_request(
+fn unlock_recovery_key(
     trigger: On<UiInput<VaultUnlockRecoveryKeyRequest>>,
     mut queue: VaultOperationQueue,
 ) {
@@ -1041,10 +1029,7 @@ fn on_vault_unlock_recovery_key_request(
     );
 }
 
-fn on_vault_connect_cloud_request(
-    trigger: On<UiInput<VaultConnectCloudRequest>>,
-    mut queue: VaultOperationQueue,
-) {
+fn connect_cloud(trigger: On<UiInput<VaultConnectCloudRequest>>, mut queue: VaultOperationQueue) {
     queue.push(
         trigger.event().webview,
         trigger.event().payload.clone(),
@@ -1052,7 +1037,7 @@ fn on_vault_connect_cloud_request(
     );
 }
 
-fn on_vault_create_cloud_folder_request(
+fn create_cloud_folder(
     trigger: On<UiInput<VaultCreateCloudFolderRequest>>,
     mut queue: VaultOperationQueue,
 ) {
@@ -1063,7 +1048,7 @@ fn on_vault_create_cloud_folder_request(
     );
 }
 
-fn on_vault_choose_cloud_folder_request(
+fn choose_cloud_folder(
     trigger: On<UiInput<VaultChooseCloudFolderRequest>>,
     mut queue: VaultOperationQueue,
 ) {
@@ -1074,7 +1059,7 @@ fn on_vault_choose_cloud_folder_request(
     );
 }
 
-fn on_vault_refresh_request(
+fn refresh(
     trigger: On<UiInput<VaultRefreshRequest>>,
     mut registry: Query<&mut VaultRegistry>,
     pages: Query<&vmux_core::PageMetadata>,
@@ -1105,7 +1090,7 @@ fn on_vault_refresh_request(
     state.revision = state.revision.wrapping_add(1);
 }
 
-fn on_vault_provider_select_request(
+fn select_provider(
     trigger: On<UiInput<VaultProviderSelectRequest>>,
     mut subscribers: Query<(&VaultSubscriber, &mut VaultWorkflow)>,
     mut commands: Commands,
@@ -1136,7 +1121,7 @@ fn on_vault_provider_select_request(
     });
 }
 
-fn on_vault_destination_select_request(
+fn select_destination(
     trigger: On<UiInput<VaultDestinationSelectRequest>>,
     mut workflows: Query<&mut VaultWorkflow>,
 ) {
@@ -1146,7 +1131,7 @@ fn on_vault_destination_select_request(
     workflow.state.destination = trigger.event().payload.destination;
 }
 
-fn on_vault_owner_select_request(
+fn select_owner(
     trigger: On<UiInput<VaultOwnerSelectRequest>>,
     mut subscribers: Query<(&VaultSubscriber, &mut VaultWorkflow)>,
 ) {
@@ -1163,7 +1148,7 @@ fn on_vault_owner_select_request(
     workflow.state.selected_repository.clear();
 }
 
-fn on_vault_repository_name_request(
+fn set_repository_name(
     trigger: On<UiInput<VaultRepositoryNameRequest>>,
     mut workflows: Query<&mut VaultWorkflow>,
 ) {
@@ -1176,7 +1161,7 @@ fn on_vault_repository_name_request(
         .clone_from(&trigger.event().payload.name);
 }
 
-fn on_vault_repository_select_request(
+fn select_repository(
     trigger: On<UiInput<VaultRepositorySelectRequest>>,
     mut workflows: Query<&mut VaultWorkflow>,
 ) {
@@ -1189,7 +1174,7 @@ fn on_vault_repository_select_request(
         .clone_from(&trigger.event().payload.repository);
 }
 
-fn on_vault_privacy_request(
+fn set_privacy(
     trigger: On<UiInput<VaultPrivacyRequest>>,
     mut workflows: Query<&mut VaultWorkflow>,
 ) {
@@ -1199,7 +1184,7 @@ fn on_vault_privacy_request(
     workflow.state.private = trigger.event().payload.private;
 }
 
-fn on_vault_workflow_create_request(
+fn create_workflow(
     trigger: On<UiInput<VaultWorkflowCreateRequest>>,
     workflows: Query<(&VaultSubscriber, &VaultWorkflow)>,
     mut commands: Commands,
@@ -1243,7 +1228,7 @@ fn on_vault_workflow_create_request(
     }
 }
 
-fn on_vault_workflow_connect_request(
+fn connect_workflow(
     trigger: On<UiInput<VaultWorkflowConnectRequest>>,
     workflows: Query<(&VaultSubscriber, &VaultWorkflow)>,
     mut commands: Commands,
@@ -1281,7 +1266,7 @@ fn on_vault_workflow_connect_request(
     }
 }
 
-fn on_vault_recovery_confirmation_request(
+fn confirm_recovery(
     trigger: On<UiInput<VaultRecoveryConfirmationRequest>>,
     mut subscribers: Query<(&VaultSubscriber, &mut VaultWorkflow)>,
     mut commands: Commands,
@@ -1313,7 +1298,7 @@ fn on_vault_recovery_confirmation_request(
     }
 }
 
-fn on_vault_recovery_input_request(
+fn set_recovery_input(
     trigger: On<UiInput<VaultRecoveryInputRequest>>,
     mut subscribers: Query<(&VaultSubscriber, &mut VaultWorkflow)>,
     mut commands: Commands,
@@ -1997,7 +1982,7 @@ mod tests {
     #[test]
     fn vault_page_ready_registers_state_subscriber() {
         let mut app = App::new();
-        app.add_observer(on_vault_page_ready);
+        app.add_observer(page_ready);
         app.world_mut().spawn(VaultRegistry::default());
         let webview = app
             .world_mut()

@@ -67,7 +67,7 @@ impl Plugin for TabPlugin {
                 sync_tab_visibility.before(LayoutSystems::Layout),
             )
             .add_systems(PostUpdate, sync_tab_order)
-            .add_systems(Update, dismiss_launcher_over_new_surfaces);
+            .add_systems(Update, dismiss_launcher);
     }
 }
 
@@ -90,7 +90,7 @@ impl Plugin for TabCommandPlugin {
     }
 }
 
-fn dismiss_launcher_over_new_surfaces(
+fn dismiss_launcher(
     opened: Query<
         Entity,
         Or<(

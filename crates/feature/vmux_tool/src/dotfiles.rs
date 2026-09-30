@@ -41,10 +41,10 @@ impl Plugin for DotfileToolPlugin {
             .add_systems(
                 Update,
                 (
-                    discover_dotfile_packages_system,
+                    discover_packages,
                     plan_dotfile_package_system,
                     import_dotfiles_system,
-                    import_available_dotfiles_system,
+                    import_available,
                     link_dotfile_package_system,
                     disable_dotfile_package_system,
                     unlink_dotfile_package_system,
@@ -345,7 +345,7 @@ pub(super) struct DiscoveredDotfilePackages {
     packages: Vec<String>,
 }
 
-fn discover_dotfile_packages_system(
+fn discover_packages(
     operations: Query<
         (Entity, &ToolStoreTarget),
         (
@@ -476,7 +476,7 @@ pub(super) struct ImportedAvailableDotfiles {
     packages: usize,
 }
 
-fn import_available_dotfiles_system(
+fn import_available(
     operations: Query<
         (Entity, &ToolStoreTarget),
         (

@@ -125,7 +125,7 @@ impl Plugin for SpacePlugin {
         .add_observer(on_space_rename)
         .add_observer(on_project_activate)
         .add_observer(on_project_forget)
-        .add_observer(reset_spaces_sent_marker_on_page_ready)
+        .add_observer(reset_sent)
         .add_systems(Update, handle_open_in_new_space.in_set(ReadCommandRequests))
         .add_systems(Update, broadcast_spaces_to_views);
     }
@@ -204,7 +204,7 @@ fn update_effective_startup(
 #[derive(Component)]
 struct SpacesListSent;
 
-fn reset_spaces_sent_marker_on_page_ready(
+fn reset_sent(
     trigger: On<UiInput<PageReady>>,
     spaces_views: Query<(), With<Spaces>>,
     cef_views: Query<(), With<LayoutCef>>,

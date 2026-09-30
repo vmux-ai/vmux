@@ -32,13 +32,7 @@ impl Plugin for StartPlugin {
             vmux_core::host::page::NativelyHosted::page(START_PAGE_URL, "Start"),
         ))
         .add_message::<InlineTransitionRequested>()
-        .add_systems(
-            Update,
-            (
-                mark_start_pages_as_launcher_hosts,
-                begin_requested_inline_transition,
-            ),
-        );
+        .add_systems(Update, (mark_launcher_hosts, begin_inline_transition));
         app.add_plugins(UiEventPlugin::<(
             StartSelectWorkspace,
             vmux_api::command_bar::StartBranchesRequest,
@@ -683,7 +677,7 @@ fn build_start_payload(
     payload
 }
 
-fn mark_start_pages_as_launcher_hosts(
+fn mark_launcher_hosts(
     starts: Query<(Entity, &PageMetadata), Without<HostsLauncher>>,
     mut commands: Commands,
 ) {
@@ -697,7 +691,7 @@ fn mark_start_pages_as_launcher_hosts(
     }
 }
 
-fn begin_requested_inline_transition(
+fn begin_inline_transition(
     mut requests: MessageReader<InlineTransitionRequested>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -771,7 +765,7 @@ mod tests {
     fn a_transition_whose_page_already_closed_is_skipped() {
         let mut app = App::new();
         app.add_message::<InlineTransitionRequested>()
-            .add_systems(Update, begin_requested_inline_transition);
+            .add_systems(Update, begin_inline_transition);
         let stack = app.world_mut().spawn_empty().id();
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().entity_mut(webview).despawn();

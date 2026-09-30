@@ -41,11 +41,7 @@ impl Plugin for WindowPlugin {
         #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
         app.add_systems(
             Update,
-            (
-                sync_fullscreen_signal_from_mode,
-                restore_fullscreen_from_window_mode,
-            )
-                .in_set(WindowFullscreenSet),
+            (sync_fullscreen, restore_fullscreen).in_set(WindowFullscreenSet),
         );
     }
 }
@@ -246,7 +242,7 @@ fn capture_window_geometry(
 }
 
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
-fn sync_fullscreen_signal_from_mode(mut windows: Query<(&Window, &mut WindowFullscreen)>) {
+fn sync_fullscreen(mut windows: Query<(&Window, &mut WindowFullscreen)>) {
     for (window, mut fullscreen) in &mut windows {
         let is_fullscreen = matches!(
             window.mode,
@@ -259,7 +255,7 @@ fn sync_fullscreen_signal_from_mode(mut windows: Query<(&Window, &mut WindowFull
 }
 
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
-fn restore_fullscreen_from_window_mode(
+fn restore_fullscreen(
     mut window: Query<(Entity, &mut Window, &PendingFullscreenRestore), With<PrimaryWindow>>,
     mut commands: Commands,
 ) {
@@ -595,7 +591,7 @@ mod tests {
         app.world_mut()
             .entity_mut(primary)
             .insert(PendingFullscreenRestore(false));
-        app.add_systems(Update, restore_fullscreen_from_window_mode);
+        app.add_systems(Update, restore_fullscreen);
         app.update();
 
         assert!(

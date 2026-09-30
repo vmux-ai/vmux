@@ -235,9 +235,9 @@ impl Plugin for TerminalUpdatePlugin {
                 )
                     .after(ServiceMessageSet)
                     .in_set(WriteCommandRequests),
-                handle_terminal_navigation_commands.in_set(ReadCommandRequests),
-                handle_terminal_clear_command.in_set(ReadCommandRequests),
-                handle_terminal_copy_mode_command.in_set(ReadCommandRequests),
+                navigate_terminals.in_set(ReadCommandRequests),
+                clear.in_set(ReadCommandRequests),
+                enter_copy_mode.in_set(ReadCommandRequests),
             )
                 .chain(),
         );
@@ -1867,7 +1867,7 @@ fn on_restart_pty(
     }
 }
 
-fn handle_terminal_copy_mode_command(
+fn enter_copy_mode(
     mut requests: MessageReader<super::command::CopyModeRequest>,
     targeted_terminals: Query<
         (&ProcessId, &ChildOf),
@@ -1903,7 +1903,7 @@ fn handle_terminal_copy_mode_command(
     }
 }
 
-fn handle_terminal_navigation_commands(
+fn navigate_terminals(
     mut close_requests: MessageReader<super::command::TerminalCloseRequest>,
     mut next_requests: MessageReader<super::command::TerminalNextRequest>,
     mut previous_requests: MessageReader<super::command::TerminalPrevRequest>,
@@ -1934,7 +1934,7 @@ fn handle_terminal_navigation_commands(
     }
 }
 
-fn handle_terminal_clear_command(
+fn clear(
     mut requests: MessageReader<super::command::TerminalClearRequest>,
     focus: FocusedStack,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,

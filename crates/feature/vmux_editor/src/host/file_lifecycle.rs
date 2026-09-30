@@ -64,7 +64,7 @@ impl Plugin for FileLifecyclePlugin {
                 )
                     .chain(),
             )
-            .add_observer(reset_file_sent_markers_on_page_ready);
+            .add_observer(reset_sent);
     }
 }
 
@@ -407,7 +407,7 @@ fn apply_loaded_file_buffers(
     }
 }
 
-fn reset_file_sent_markers_on_page_ready(
+fn reset_sent(
     trigger: On<UiInput<vmux_core::page::PageReady>>,
     file_views: Query<&FileView>,
     mut commands: Commands,

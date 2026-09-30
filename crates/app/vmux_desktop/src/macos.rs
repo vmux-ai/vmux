@@ -25,7 +25,7 @@ impl Plugin for RuntimePlatformPlugin {
                 (
                     install_mouse_wake_monitor,
                     install_live_resize_monitor,
-                    activate_primary_window_on_startup,
+                    activate_primary_window,
                 ),
             );
     }
@@ -58,7 +58,7 @@ static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 static HOVER_OVER_PANE: AtomicBool = AtomicBool::new(false);
 static WINDOWED_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
 
-fn activate_primary_window_on_startup(
+fn activate_primary_window(
     primary_window: Query<(Entity, &Window), With<bevy::window::PrimaryWindow>>,
 ) {
     let Ok((window_entity, window)) = primary_window.single() else {

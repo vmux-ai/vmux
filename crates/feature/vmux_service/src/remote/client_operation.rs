@@ -11,7 +11,7 @@ impl Plugin for ClientOperationPlugin {
         app.add_systems(
             Update,
             (
-                receive_client_operation_requests,
+                receive_requests,
                 ApplyDeferred,
                 release_client_operations,
                 ApplyDeferred,
@@ -121,10 +121,7 @@ struct ClientOperationId(ClientOpId);
 #[derive(Component, Clone, Copy)]
 struct ClientOperationSequence(u64);
 
-fn receive_client_operation_requests(
-    mut inbox: Single<&mut ClientOperationInbox>,
-    mut commands: Commands,
-) {
+fn receive_requests(mut inbox: Single<&mut ClientOperationInbox>, mut commands: Commands) {
     while let Ok(request) = inbox.0.releases.try_recv() {
         commands.spawn(request);
     }

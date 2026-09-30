@@ -80,13 +80,13 @@ impl Plugin for BookmarkPlugin {
         .add_observer(on_bookmark_move_request)
         .add_observer(on_bookmark_pin_request)
         .add_observer(on_bookmark_unpin_request)
-        .add_observer(on_bookmark_folder_toggle_request)
-        .add_observer(on_bookmark_folder_create_request)
+        .add_observer(toggle_folder)
+        .add_observer(create_folder)
         .add_observer(on_bookmark_folder_move_request)
-        .add_observer(on_bookmark_folder_rename_request)
-        .add_observer(on_bookmark_folder_remove_request)
+        .add_observer(rename_folder)
+        .add_observer(remove_folder)
         .add_observer(on_bookmark_text_input_request)
-        .add_observer(on_bookmark_context_menu_request)
+        .add_observer(open_context_menu)
         .add_observer(on_bookmark_drop_request)
         .add_systems(
             Update,
@@ -286,10 +286,7 @@ pub struct BookmarkTextInputActive;
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BookmarkContextMenuActive;
 
-fn on_bookmark_context_menu_request(
-    trigger: On<UiInput<BookmarkContextMenuRequest>>,
-    mut commands: Commands,
-) {
+fn open_context_menu(trigger: On<UiInput<BookmarkContextMenuRequest>>, mut commands: Commands) {
     let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
         return;
     };
@@ -992,7 +989,7 @@ fn on_bookmark_unpin_request(
     });
 }
 
-fn on_bookmark_folder_toggle_request(
+fn toggle_folder(
     trigger: On<UiInput<BookmarkFolderToggleUiRequest>>,
     mut requests: MessageWriter<ToggleFolderRequest>,
 ) {
@@ -1001,7 +998,7 @@ fn on_bookmark_folder_toggle_request(
     });
 }
 
-fn on_bookmark_folder_create_request(
+fn create_folder(
     trigger: On<UiInput<BookmarkFolderCreateUiRequest>>,
     mut requests: MessageWriter<CreateFolderRequest>,
 ) {
@@ -1025,7 +1022,7 @@ fn on_bookmark_folder_move_request(
     });
 }
 
-fn on_bookmark_folder_rename_request(
+fn rename_folder(
     trigger: On<UiInput<BookmarkFolderRenameUiRequest>>,
     mut rename_requests: MessageWriter<RenameFolderRequest>,
     mut remove_requests: MessageWriter<RemoveFolderRequest>,
@@ -1044,7 +1041,7 @@ fn on_bookmark_folder_rename_request(
     });
 }
 
-fn on_bookmark_folder_remove_request(
+fn remove_folder(
     trigger: On<UiInput<BookmarkFolderRemoveUiRequest>>,
     mut requests: MessageWriter<RemoveFolderRequest>,
 ) {
@@ -1362,7 +1359,7 @@ mod tests {
     fn context_menu_event_toggles_layout_pointer_marker() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_observer(on_bookmark_context_menu_request);
+            .add_observer(open_context_menu);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut()
             .trigger(UiInput::<BookmarkContextMenuRequest> {

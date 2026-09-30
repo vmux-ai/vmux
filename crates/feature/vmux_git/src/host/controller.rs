@@ -44,7 +44,7 @@ impl Plugin for ControllerPlugin {
             .add_observer(on_panel_select_request)
             .add_observer(on_shortcut_help_request)
             .add_observer(on_file_select_request)
-            .add_observer(on_branch_collection_select_request)
+            .add_observer(select_branch_collection)
             .add_observer(on_branch_select_request)
             .add_observer(on_commit_select_request)
             .add_observer(on_stash_select_request)
@@ -826,7 +826,7 @@ fn on_file_select_request(
     controller.select_file(&trigger.event().payload.path_bytes, repository);
 }
 
-fn on_branch_collection_select_request(
+fn select_branch_collection(
     trigger: On<UiInput<GitBranchCollectionSelectRequest>>,
     mut pages: Query<(&GitState, &mut GitController)>,
     mut commands: Commands,

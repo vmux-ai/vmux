@@ -48,7 +48,7 @@ impl Plugin for SpawnPlugin {
             )
             .add_systems(
                 Update,
-                detect_agent_session_process_exit
+                detect_exit
                     .in_set(WriteCommandRequests)
                     .after(ServiceMessageSet),
             )
@@ -63,8 +63,8 @@ impl Plugin for SpawnPlugin {
                         .before(ServiceMessageSet),
                     respond_page_agent_attach,
                     respond_page_agent_spawn_stack,
-                    respond_page_agent_spawn_default,
-                    respond_page_agent_attach_default,
+                    spawn_default,
+                    attach_default,
                 ),
             );
     }
@@ -79,7 +79,7 @@ impl Plugin for SpawnRequestsPlugin {
 }
 
 #[allow(clippy::type_complexity)]
-fn detect_agent_session_process_exit(
+fn detect_exit(
     mut commands: Commands,
     mut writer: MessageWriter<AgentSessionExited>,
     mut q: Query<
@@ -389,7 +389,7 @@ fn respond_page_agent_spawn_stack(
     }
 }
 
-fn respond_page_agent_spawn_default(
+fn spawn_default(
     mut reader: MessageReader<PageAgentSpawnDefaultRequest>,
     strategies: AgentStrategies,
     mut commands: Commands,
@@ -417,7 +417,7 @@ fn respond_page_agent_spawn_default(
     }
 }
 
-fn respond_page_agent_attach_default(
+fn attach_default(
     mut reader: MessageReader<PageAgentAttachDefaultRequest>,
     strategies: AgentStrategies,
     mut commands: Commands,

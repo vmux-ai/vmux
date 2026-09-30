@@ -53,10 +53,7 @@ impl Plugin for KeyboardPlugin {
                     .after(KeyboardContextSet)
                     .after(WindowFullscreenSet),
             )
-            .add_systems(
-                Update,
-                publish_application_key_shortcuts.after(NativeKeyInputSet),
-            );
+            .add_systems(Update, publish_shortcuts.after(NativeKeyInputSet));
     }
 }
 
@@ -537,7 +534,7 @@ fn sync_application_key_bindings(
     }
 }
 
-fn publish_application_key_shortcuts(
+fn publish_shortcuts(
     mut inputs: MessageReader<NativeKeyInput>,
     bindings: Query<(Has<ExitFullscreenKey>, Has<HideWindowsKey>), With<Active>>,
     mut exit_fullscreen: MessageWriter<ExitFullscreenShortcut>,
@@ -762,11 +759,7 @@ mod tests {
             .add_systems(Startup, spawn_application_key_bindings)
             .add_systems(
                 Update,
-                (
-                    sync_application_key_bindings,
-                    publish_application_key_shortcuts,
-                )
-                    .chain(),
+                (sync_application_key_bindings, publish_shortcuts).chain(),
             );
         app.world_mut().spawn((
             Window::default(),

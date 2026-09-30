@@ -40,7 +40,7 @@ impl Plugin for ProviderAgentPlugin {
             .add_plugins(approval::ApprovalPlugin)
             .add_plugins(ToastPlugin)
             .add_plugins(crate::host::tidy::TidyPlugin)
-            .add_observer(close_provider_session_on_remove)
+            .add_observer(close_removed_sessions)
             .add_systems(
                 Update,
                 (
@@ -184,7 +184,7 @@ fn ensure_prompt_queue(
     }
 }
 
-fn close_provider_session_on_remove(
+fn close_removed_sessions(
     trigger: On<Remove, AgentSession>,
     sessions: Query<&AgentSession>,
     mut service_requests: MessageWriter<ServiceRequest>,

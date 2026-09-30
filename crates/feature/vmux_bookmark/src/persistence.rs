@@ -21,7 +21,7 @@ impl Plugin for BookmarkPersistencePlugin {
             .init_resource::<OfferedBookmarkDefaults>()
             .add_observer(save_on::<SaveWorld<BookmarkFilter>>)
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
-            .add_observer(seed_default_bookmarks_after_load)
+            .add_observer(seed_defaults)
             .add_observer(seed_bookmark_defaults)
             .add_systems(
                 Startup,
@@ -38,7 +38,7 @@ impl Plugin for BookmarkPersistencePlugin {
                 (
                     migrate_legacy_bookmark_order,
                     migrate_smart_bookmark_folders,
-                    migrate_shortcut_bookmark_aliases,
+                    migrate_shortcut_aliases,
                     migrate_tool_page_bookmarks,
                     mark_bookmarks_dirty,
                     autosave_bookmarks,
@@ -117,7 +117,7 @@ fn load_bookmarks_on_startup(
     commands.trigger_load(LoadWorld::<BookmarkFilter>::from_file(path));
 }
 
-fn seed_default_bookmarks_after_load(
+fn seed_defaults(
     _trigger: On<Loaded>,
     pending: Option<Single<Entity, With<BookmarkLoadPending>>>,
     mut commands: Commands,
@@ -392,7 +392,7 @@ fn migrate_smart_bookmark_folders(
     }
 }
 
-fn migrate_shortcut_bookmark_aliases(
+fn migrate_shortcut_aliases(
     items: Query<
         (
             Entity,
@@ -760,7 +760,7 @@ mod tests {
             urls: vec!["vmux://cheatsheet/".into(), vmux_shortcut::PAGE_URL.into()],
             ..default()
         })
-        .add_systems(Update, migrate_shortcut_bookmark_aliases);
+        .add_systems(Update, migrate_shortcut_aliases);
         let survivor = app
             .world_mut()
             .spawn((
@@ -976,7 +976,7 @@ mod tests {
             .register_type::<OfferedBookmarkDefaults>()
             .init_resource::<OfferedBookmarkDefaults>()
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
-            .add_observer(seed_default_bookmarks_after_load)
+            .add_observer(seed_defaults)
             .add_observer(seed_bookmark_defaults);
         load_app
             .world_mut()

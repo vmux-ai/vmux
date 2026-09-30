@@ -369,7 +369,7 @@ fn next_command_bar_reveal_frames(
     }
 }
 
-fn next_command_bar_reveal_frames_for_backend(
+fn next_reveal(
     native_windowed: bool,
     native_overlay: bool,
     frames: u8,
@@ -1210,7 +1210,7 @@ fn reveal_command_bar(
             });
             continue;
         }
-        match next_command_bar_reveal_frames_for_backend(
+        match next_reveal(
             native_windowed,
             native_overlay,
             pending.frames,
@@ -1592,29 +1592,15 @@ mod tests {
     #[test]
     fn native_command_bar_waits_for_size_and_rendered_ack() {
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, false, 10, OpenId(7), None, true),
+            next_reveal(true, false, 10, OpenId(7), None, true),
             Some(11)
         );
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(
-                true,
-                false,
-                10,
-                OpenId(7),
-                Some(OpenId(7)),
-                false
-            ),
+            next_reveal(true, false, 10, OpenId(7), Some(OpenId(7)), false),
             Some(11)
         );
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(
-                true,
-                false,
-                2,
-                OpenId(7),
-                Some(OpenId(7)),
-                true
-            ),
+            next_reveal(true, false, 2, OpenId(7), Some(OpenId(7)), true),
             None
         );
     }
@@ -1666,18 +1652,11 @@ mod tests {
     #[test]
     fn native_overlay_waits_for_rendered_ack() {
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(false, true, 10, OpenId(7), None, false),
+            next_reveal(false, true, 10, OpenId(7), None, false),
             Some(11)
         );
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(
-                false,
-                true,
-                2,
-                OpenId(7),
-                Some(OpenId(7)),
-                false
-            ),
+            next_reveal(false, true, 2, OpenId(7), Some(OpenId(7)), false),
             None
         );
     }
@@ -1770,10 +1749,7 @@ mod tests {
             Visibility::Hidden,
             Some(&pending)
         ));
-        assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, false, 0, OpenId(7), None, true),
-            Some(1)
-        );
+        assert_eq!(next_reveal(true, false, 0, OpenId(7), None, true), Some(1));
     }
 
     #[test]

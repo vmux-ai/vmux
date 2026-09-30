@@ -12,7 +12,7 @@ impl Plugin for IdentityPlugin {
     fn build(&self, app: &mut App) {
         app.register_persisted::<PaneId>()
             .register_type::<SpawnSeq>()
-            .add_systems(Update, repair_stacks_parented_to_splits)
+            .add_systems(Update, repair_stack_parents)
             .add_systems(Update, stamp_spawn_seq)
             .add_systems(Update, assign_pane_ids)
             .add_systems(
@@ -69,7 +69,7 @@ fn reseed_spawn_counter(seqs: Query<&SpawnSeq>, mut counter: Single<&mut SpawnCo
     }
 }
 
-fn repair_stacks_parented_to_splits(
+fn repair_stack_parents(
     splits: Query<
         (Entity, &Children),
         (With<PaneSplit>, Or<(Added<PaneSplit>, Changed<Children>)>),
@@ -114,7 +114,7 @@ mod tests {
     fn repair_direct_stack_child_of_split_moves_it_to_leaf() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, repair_stacks_parented_to_splits);
+            .add_systems(Update, repair_stack_parents);
         let split = app
             .world_mut()
             .spawn((

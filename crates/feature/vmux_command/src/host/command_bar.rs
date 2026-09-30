@@ -36,14 +36,11 @@ impl Plugin for CommandBarPlugin {
             palette::PalettePlugin,
             panel::PanelPlugin,
         ))
-        .add_systems(
-            Update,
-            keep_awake_while_command_bar_opening.after(crate::ReadCommandRequests),
-        );
+        .add_systems(Update, keep_awake.after(crate::ReadCommandRequests));
     }
 }
 
-fn keep_awake_while_command_bar_opening(
+fn keep_awake(
     proxy: Option<Res<EventLoopProxyWrapper>>,
     pending: Query<&handler::PendingCommandBarReveal>,
 ) {

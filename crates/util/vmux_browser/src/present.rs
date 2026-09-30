@@ -52,9 +52,9 @@ impl Plugin for PresentPlugin {
                 sync_windowed_command_bar.in_set(crate::BrowserSystemSet::SyncWindowedCommandBar),
                 sync_windowed_extension_popups
                     .in_set(crate::BrowserSystemSet::SyncWindowedExtensionPopups),
-                flush_native_command_bar_pointer_events,
+                flush_command_bar_pointer,
                 apply_repaint_nudge,
-                sync_cef_webview_resize_after_ui,
+                sync_webview_resize,
                 sync_osr_webview_focus,
             )
                 .chain()
@@ -805,11 +805,7 @@ pub(crate) struct CommandBarWindowedFrame {
 }
 
 const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0;
-fn publish_native_command_bar_route(
-    owns_input: bool,
-    frame: Option<CommandBarWindowedFrame>,
-    scale: f32,
-) {
+fn publish_command_bar_route(owns_input: bool, frame: Option<CommandBarWindowedFrame>, scale: f32) {
     let mut stored = NATIVE_COMMAND_BAR_ROUTE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -920,7 +916,7 @@ fn sync_windowed_command_bar(
         native_size,
     )) = matched
     else {
-        publish_native_command_bar_route(false, None, 1.0);
+        publish_command_bar_route(false, None, 1.0);
         *was_open = false;
         return;
     };
@@ -929,7 +925,7 @@ fn sync_windowed_command_bar(
     let owns_input = state.owns_input();
     let render_hidden = command_bar_windowed_view_should_render_hidden(node.display, *visibility);
     if !open && !render_hidden {
-        publish_native_command_bar_route(owns_input, None, 1.0);
+        publish_command_bar_route(owns_input, None, 1.0);
         if is_windowed {
             browsers.set_windowed_focus(&entity, false);
             hide_windowed_command_bar(&browsers, entity);
@@ -938,19 +934,19 @@ fn sync_windowed_command_bar(
         return;
     }
     if !browsers.has_browser(entity) {
-        publish_native_command_bar_route(owns_input, None, 1.0);
+        publish_command_bar_route(owns_input, None, 1.0);
         return;
     }
     let window_entity = host_window.map(|h| h.0).or(focused_window.entity());
     let Some(window_entity) = window_entity else {
-        publish_native_command_bar_route(owns_input, None, 1.0);
+        publish_command_bar_route(owns_input, None, 1.0);
         if is_windowed {
             hide_windowed_command_bar(&browsers, entity);
         }
         return;
     };
     let Ok(window) = windows.get(window_entity) else {
-        publish_native_command_bar_route(owns_input, None, 1.0);
+        publish_command_bar_route(owns_input, None, 1.0);
         if is_windowed {
             hide_windowed_command_bar(&browsers, entity);
         }
@@ -968,12 +964,12 @@ fn sync_windowed_command_bar(
         } else {
             None
         };
-        publish_native_command_bar_route(owns_input, frame, scale);
+        publish_command_bar_route(owns_input, frame, scale);
         *was_open = open;
         return;
     }
     if render_hidden {
-        publish_native_command_bar_route(owns_input, None, scale);
+        publish_command_bar_route(owns_input, None, scale);
         let Some(frame) = command_bar_windowed_frame(
             window.resolution.physical_width() as f32,
             window.resolution.physical_height() as f32,
@@ -1012,11 +1008,11 @@ fn sync_windowed_command_bar(
         measured,
         NativeBridge::windowed_page_bounds(),
     ) else {
-        publish_native_command_bar_route(owns_input, None, scale);
+        publish_command_bar_route(owns_input, None, scale);
         hide_windowed_command_bar(&browsers, entity);
         return;
     };
-    publish_native_command_bar_route(owns_input, Some(frame), scale);
+    publish_command_bar_route(owns_input, Some(frame), scale);
 
     browsers.set_windowed_frame(
         &entity,
@@ -1104,7 +1100,7 @@ fn sync_windowed_extension_popups(
 }
 
 #[cfg(target_os = "macos")]
-fn flush_native_command_bar_pointer_events(
+fn flush_command_bar_pointer(
     browsers: NonSend<Browsers>,
     modal_q: Query<Entity, (With<WindowOverlay>, With<WebviewWindowed>, With<CommandBar>)>,
 ) {
@@ -1135,14 +1131,14 @@ fn flush_native_command_bar_pointer_events(
 }
 
 #[cfg(not(target_os = "macos"))]
-fn flush_native_command_bar_pointer_events() {}
+fn flush_command_bar_pointer() {}
 fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Changed<PageReady>>) {
     for entity in &ready {
         browsers.nudge_windowed_repaint(&entity);
     }
 }
 
-fn sync_cef_webview_resize_after_ui(
+fn sync_webview_resize(
     browsers: NonSend<Browsers>,
     webviews: Query<(Entity, &WebviewSize), (With<Browser>, Without<WindowOverlay>)>,
     host_window: Query<&HostWindow>,
@@ -1936,12 +1932,12 @@ mod tests {
         };
 
         let before = native_command_bar_route().generation;
-        publish_native_command_bar_route(true, Some(frame), 2.0);
+        publish_command_bar_route(true, Some(frame), 2.0);
         let published = native_command_bar_route();
         assert_eq!(published.generation, before.wrapping_add(1));
         assert_eq!(published.scale, 2.0);
 
-        publish_native_command_bar_route(false, Some(frame), 1.0);
+        publish_command_bar_route(false, Some(frame), 1.0);
         assert!(!native_command_bar_route().owns_input);
     }
 

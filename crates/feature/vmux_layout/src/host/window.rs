@@ -65,7 +65,7 @@ impl Plugin for WindowLayoutPlugin {
             (
                 fit_window_to_screen,
                 sync_window_layout_to_settings,
-                sync_main_column_gap_to_pane_count,
+                sync_main_column_gap,
             ),
         )
         .add_systems(
@@ -755,7 +755,7 @@ fn sync_window_layout_to_settings(
     }
 }
 
-fn sync_main_column_gap_to_pane_count(
+fn sync_main_column_gap(
     focus: crate::stack::FocusedStack,
     layout_focus: crate::stack::LayoutFocus,
     mut main_column_q: Query<&mut Node, With<MainColumn>>,

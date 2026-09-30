@@ -453,7 +453,7 @@ mod tests {
             "startup systems: {startup:?}"
         );
         assert!(
-            startup.contains(&"activate_primary_window_on_startup".to_string()),
+            startup.contains(&"activate_primary_window".to_string()),
             "startup systems: {startup:?}"
         );
     }

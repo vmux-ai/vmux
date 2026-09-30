@@ -15,19 +15,19 @@ impl Plugin for GlassPlugin {
                 Update,
                 (
                     sync_window_glass_visibility.in_set(vmux_core::WindowFullscreenSet),
-                    keep_window_surface_layer_transparent,
+                    keep_surface_transparent,
                 ),
             )
             .add_systems(
                 Update,
-                handle_toggle_fullscreen_command.in_set(vmux_command::ReadCommandRequests),
+                toggle_fullscreen.in_set(vmux_command::ReadCommandRequests),
             )
             .add_systems(
                 Last,
                 (
-                    reveal_window_after_layout_ready,
+                    reveal_window,
                     restore_fullscreen_after_reveal,
-                    ensure_window_active_after_reveal,
+                    activate_revealed_window,
                 )
                     .chain(),
             );
@@ -185,7 +185,7 @@ fn install_window_glass(mut state: NonSendMut<GlassState>, windows: Query<(Entit
     }
 }
 
-fn reveal_window_after_layout_ready(
+fn reveal_window(
     mut state: NonSendMut<GlassState>,
     mut windows: Query<(Entity, &mut Window)>,
     status: Single<&crate::boot_status::SplashStatus>,
@@ -253,7 +253,7 @@ fn should_attempt_activation(
     }
 }
 
-fn ensure_window_active_after_reveal(
+fn activate_revealed_window(
     mut state: NonSendMut<GlassState>,
     windows: Query<Entity, With<Window>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -274,7 +274,7 @@ fn ensure_window_active_after_reveal(
     }
 }
 
-fn handle_toggle_fullscreen_command(
+fn toggle_fullscreen(
     state: NonSend<GlassState>,
     focused_window: vmux_layout::window::FocusedWindow,
     mut reader: MessageReader<ToggleFullscreenRequest>,
@@ -395,7 +395,7 @@ fn content_view_ptr(entity: Entity) -> Option<*mut core::ffi::c_void> {
     })
 }
 
-fn keep_window_surface_layer_transparent(windows: Query<Entity, With<Window>>) {
+fn keep_surface_transparent(windows: Query<Entity, With<Window>>) {
     use objc2::MainThreadMarker;
     use objc2_app_kit::{NSColor, NSView};
 
@@ -423,7 +423,7 @@ mod tests {
 
     fn reveal_test_app(reveal_ready: bool) -> App {
         let mut app = App::new();
-        app.add_systems(Update, reveal_window_after_layout_ready);
+        app.add_systems(Update, reveal_window);
         let window = app
             .world_mut()
             .spawn((

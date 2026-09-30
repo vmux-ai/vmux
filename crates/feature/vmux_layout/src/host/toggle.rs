@@ -27,7 +27,7 @@ impl Plugin for TogglePlugin {
         )
         .add_systems(
             PostUpdate,
-            sync_window_padding_to_layout_hidden.before(LayoutSystems::Layout),
+            sync_window_padding.before(LayoutSystems::Layout),
         );
     }
 }
@@ -50,7 +50,7 @@ fn bind_command(registry: vmux_command::CommandRegistry, mut commands: Commands)
 #[derive(Component, Default, Debug)]
 pub struct LayoutHidden;
 
-fn sync_window_padding_to_layout_hidden(
+fn sync_window_padding(
     settings: Res<LayoutSettings>,
     hidden_windows: Query<(), With<LayoutHidden>>,
     mut window_q: Query<(&HostWindow, &mut Node), With<VmuxWindow>>,
@@ -132,7 +132,7 @@ mod tests {
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
             })
-            .add_systems(Update, sync_window_padding_to_layout_hidden);
+            .add_systems(Update, sync_window_padding);
         let window = app
             .world_mut()
             .spawn((
@@ -166,7 +166,7 @@ mod tests {
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
             })
-            .add_systems(Update, sync_window_padding_to_layout_hidden);
+            .add_systems(Update, sync_window_padding);
         let window = app
             .world_mut()
             .spawn((
@@ -209,7 +209,7 @@ mod tests {
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
             })
-            .add_systems(Update, sync_window_padding_to_layout_hidden);
+            .add_systems(Update, sync_window_padding);
         let window = app
             .world_mut()
             .spawn((

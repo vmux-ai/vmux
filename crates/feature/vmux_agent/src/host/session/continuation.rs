@@ -16,7 +16,7 @@ impl Plugin for AgentContinuationPlugin {
             .add_message::<ServiceRequest>()
             .add_systems(
                 Update,
-                (queue_agent_continuations, send_pending_agent_continuations)
+                (queue_agent_continuations, send_continuations)
                     .chain()
                     .in_set(WriteCommandRequests)
                     .after(ServiceMessageSet),
@@ -38,7 +38,7 @@ fn queue_agent_continuations(
     }
 }
 
-fn send_pending_agent_continuations(
+fn send_continuations(
     mut sessions: Query<(
         Entity,
         &PendingAgentContinuation,
@@ -99,7 +99,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<ServiceRequest>()
-            .add_systems(Update, send_pending_agent_continuations);
+            .add_systems(Update, send_continuations);
         let entity = app
             .world_mut()
             .spawn((

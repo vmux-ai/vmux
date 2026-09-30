@@ -51,7 +51,7 @@ impl Plugin for PagePlugin {
                 Update,
                 (
                     queue_cef_page_attach_requests,
-                    classify_unclaimed_page_open_tasks,
+                    classify_unclaimed,
                     attach_cef_pages,
                     attach_error_pages,
                 )
@@ -61,7 +61,7 @@ impl Plugin for PagePlugin {
             .add_systems(Update, respond_page_open_tasks.in_set(PageOpenSet::Respond))
             .add_systems(
                 Update,
-                apply_pending_navigation_updates
+                apply_pending_navigation
                     .in_set(crate::BrowserSystemSet::ApplyPendingNavigation)
                     .after(PageOpenSet::Respond)
                     .after(crate::BrowserSystemSet::Navigate),
@@ -94,7 +94,7 @@ struct ErrorPageAttachment {
     failure: ErrorPageData,
 }
 
-fn apply_pending_navigation_updates(
+fn apply_pending_navigation(
     mut updates: MessageReader<PendingNavigationUpdate>,
     existing: Query<(Entity, &PendingNavigationSnapshot)>,
     mut commands: Commands,
@@ -263,7 +263,7 @@ fn queue_cef_page_attach_requests(
     }
 }
 
-fn classify_unclaimed_page_open_tasks(
+fn classify_unclaimed(
     tasks: Query<
         (
             Entity,

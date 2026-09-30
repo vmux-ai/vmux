@@ -23,7 +23,7 @@ impl Plugin for LoadingPlugin {
                 arm_agent_loading_on_restart,
                 announce_slow_shell_boot.after(ServiceMessageSet),
                 clear_agent_loading.after(ServiceMessageSet),
-                reset_terminal_title_on_agent_removed,
+                reset_title,
                 set_terminal_shell_icon,
             ),
         );
@@ -252,7 +252,7 @@ fn clear_agent_loading(
     }
 }
 
-fn reset_terminal_title_on_agent_removed(
+fn reset_title(
     mut removed: RemovedComponents<vmux_core::agent::AgentSession>,
     mut terminals: Query<(&ProcessId, &mut vmux_core::PageMetadata), With<Terminal>>,
 ) {

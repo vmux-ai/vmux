@@ -21,35 +21,35 @@ impl Plugin for LanguagePlugin {
             FileCompletionRequest,
         )>::default())
             .add_plugins(UiEventPlugin::<FileEditorOperationRequests>::default())
-            .add_observer(on_editor_hover)
-            .add_observer(on_editor_definition)
-            .add_observer(on_editor_references)
-            .add_observer(on_editor_rename)
-            .add_observer(on_editor_completion)
-            .add_observer(on_editor_declaration)
-            .add_observer(on_editor_type_definition)
-            .add_observer(on_editor_implementation)
-            .add_observer(on_editor_format_document)
-            .add_observer(on_editor_format_selection)
-            .add_observer(on_editor_code_action)
-            .add_observer(on_file_hover_request)
-            .add_observer(on_file_definition_request)
-            .add_observer(on_file_references_request)
-            .add_observer(on_file_rename_request)
-            .add_observer(on_file_editor_command_palette_request)
-            .add_observer(on_file_editor_code_action_request)
-            .add_observer(on_file_editor_goto_declaration_request)
-            .add_observer(on_file_editor_goto_type_definition_request)
-            .add_observer(on_file_editor_goto_implementation_request)
-            .add_observer(on_file_editor_format_document_request)
-            .add_observer(on_file_editor_format_selection_request)
-            .add_observer(on_file_editor_rename_request)
-            .add_observer(on_file_editor_copy_request)
-            .add_observer(on_file_editor_cut_request)
-            .add_observer(on_file_editor_paste_request)
-            .add_observer(on_file_editor_change_all_occurrences_request)
-            .add_observer(on_file_completion_request)
-            .add_observer(on_wiki_completion_request)
+            .add_observer(hover)
+            .add_observer(definition)
+            .add_observer(references)
+            .add_observer(rename)
+            .add_observer(completion)
+            .add_observer(declaration)
+            .add_observer(type_definition)
+            .add_observer(implementation)
+            .add_observer(format_document)
+            .add_observer(format_selection)
+            .add_observer(code_action)
+            .add_observer(request_hover)
+            .add_observer(request_definition)
+            .add_observer(request_references)
+            .add_observer(request_rename)
+            .add_observer(open_command_palette)
+            .add_observer(request_code_action)
+            .add_observer(request_declaration)
+            .add_observer(request_type_definition)
+            .add_observer(request_implementation)
+            .add_observer(request_format_document)
+            .add_observer(request_format_selection)
+            .add_observer(request_editor_rename)
+            .add_observer(copy_selection)
+            .add_observer(cut_selection)
+            .add_observer(paste)
+            .add_observer(select_occurrences)
+            .add_observer(request_completion)
+            .add_observer(wiki_completion)
             .add_systems(Update, flush_lsp_changes);
     }
 }
@@ -285,7 +285,7 @@ impl WikiCompletion {
     }
 }
 
-fn on_editor_hover(
+fn hover(
     trigger: On<EditorHoverRequest>,
     views: Query<&Editor>,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
@@ -308,7 +308,7 @@ fn on_editor_hover(
     }
 }
 
-fn on_editor_definition(
+fn definition(
     trigger: On<EditorDefinitionRequest>,
     views: Query<&Editor>,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
@@ -330,7 +330,7 @@ fn on_editor_definition(
     }
 }
 
-fn on_editor_references(
+fn references(
     trigger: On<EditorReferencesRequest>,
     views: Query<&Editor>,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
@@ -352,7 +352,7 @@ fn on_editor_references(
     }
 }
 
-fn on_editor_rename(
+fn rename(
     trigger: On<EditorRenameRequest>,
     views: Query<&Editor>,
     browsers: NonSend<Browsers>,
@@ -377,7 +377,7 @@ fn on_editor_rename(
     ));
 }
 
-fn on_editor_completion(
+fn completion(
     trigger: On<EditorCompletionRequest>,
     views: Query<&Editor>,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
@@ -400,7 +400,7 @@ fn on_editor_completion(
     }
 }
 
-fn on_editor_declaration(
+fn declaration(
     trigger: On<EditorDeclarationRequest>,
     views: Query<&Editor>,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
@@ -422,7 +422,7 @@ fn on_editor_declaration(
     }
 }
 
-fn on_editor_type_definition(
+fn type_definition(
     trigger: On<EditorTypeDefinitionRequest>,
     views: Query<&Editor>,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
@@ -444,7 +444,7 @@ fn on_editor_type_definition(
     }
 }
 
-fn on_editor_implementation(
+fn implementation(
     trigger: On<EditorImplementationRequest>,
     views: Query<&Editor>,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
@@ -466,7 +466,7 @@ fn on_editor_implementation(
     }
 }
 
-fn on_editor_format_document(
+fn format_document(
     trigger: On<EditorFormatDocumentRequest>,
     views: Query<&Editor>,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
@@ -481,7 +481,7 @@ fn on_editor_format_document(
     }
 }
 
-fn on_editor_format_selection(
+fn format_selection(
     trigger: On<EditorFormatSelectionRequest>,
     views: Query<&Editor>,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
@@ -497,7 +497,7 @@ fn on_editor_format_selection(
     }
 }
 
-fn on_editor_code_action(
+fn code_action(
     trigger: On<EditorCodeActionRequest>,
     views: Query<&Editor>,
     mut requests: MessageWriter<crate::lsp::manager::LspCodeActionRequest>,
@@ -515,7 +515,7 @@ fn on_editor_code_action(
     });
 }
 
-fn on_wiki_completion_request(
+fn wiki_completion(
     trigger: On<WikiCompletionRequest>,
     views: Query<&Editor>,
     indexes: Query<&vmux_core::knowledge::KnowledgeIndex>,
@@ -534,7 +534,7 @@ fn on_wiki_completion_request(
     commands.trigger(completion.result(entity, index));
 }
 
-fn on_file_hover_request(
+fn request_hover(
     trigger: On<UiInput<FileHoverRequest>>,
     views: Query<&Editor>,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
@@ -558,7 +558,7 @@ fn on_file_hover_request(
     }
 }
 
-fn on_file_definition_request(
+fn request_definition(
     trigger: On<UiInput<FileDefinitionRequest>>,
     views: Query<&Editor>,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
@@ -581,7 +581,7 @@ fn on_file_definition_request(
     }
 }
 
-fn on_file_editor_command_palette_request(
+fn open_command_palette(
     trigger: On<UiInput<FileEditorCommandPaletteRequest>>,
     mut command_invocations: MessageWriter<vmux_command::CommandInvocation>,
 ) {
@@ -591,59 +591,50 @@ fn on_file_editor_command_palette_request(
     ));
 }
 
-fn on_file_editor_code_action_request(
-    trigger: On<UiInput<FileEditorCodeActionRequest>>,
-    mut commands: Commands,
-) {
+fn request_code_action(trigger: On<UiInput<FileEditorCodeActionRequest>>, mut commands: Commands) {
     commands.trigger(EditorCodeActionRequest::from(trigger.event().webview));
 }
 
-fn on_file_editor_goto_declaration_request(
+fn request_declaration(
     trigger: On<UiInput<FileEditorGotoDeclarationRequest>>,
     mut commands: Commands,
 ) {
     commands.trigger(EditorDeclarationRequest::from(trigger.event().webview));
 }
 
-fn on_file_editor_goto_type_definition_request(
+fn request_type_definition(
     trigger: On<UiInput<FileEditorGotoTypeDefinitionRequest>>,
     mut commands: Commands,
 ) {
     commands.trigger(EditorTypeDefinitionRequest::from(trigger.event().webview));
 }
 
-fn on_file_editor_goto_implementation_request(
+fn request_implementation(
     trigger: On<UiInput<FileEditorGotoImplementationRequest>>,
     mut commands: Commands,
 ) {
     commands.trigger(EditorImplementationRequest::from(trigger.event().webview));
 }
 
-fn on_file_editor_format_document_request(
+fn request_format_document(
     trigger: On<UiInput<FileEditorFormatDocumentRequest>>,
     mut commands: Commands,
 ) {
     commands.trigger(EditorFormatDocumentRequest::from(trigger.event().webview));
 }
 
-fn on_file_editor_format_selection_request(
+fn request_format_selection(
     trigger: On<UiInput<FileEditorFormatSelectionRequest>>,
     mut commands: Commands,
 ) {
     commands.trigger(EditorFormatSelectionRequest::from(trigger.event().webview));
 }
 
-fn on_file_editor_rename_request(
-    trigger: On<UiInput<FileEditorRenameRequest>>,
-    mut commands: Commands,
-) {
+fn request_editor_rename(trigger: On<UiInput<FileEditorRenameRequest>>, mut commands: Commands) {
     commands.trigger(EditorRenameRequest::from(trigger.event().webview));
 }
 
-fn on_file_editor_copy_request(
-    trigger: On<UiInput<FileEditorCopyRequest>>,
-    mut commands: Commands,
-) {
+fn copy_selection(trigger: On<UiInput<FileEditorCopyRequest>>, mut commands: Commands) {
     commands.trigger(EditRequest::new(
         trigger.event().webview,
         vec![EditCommand::Op {
@@ -654,7 +645,7 @@ fn on_file_editor_copy_request(
     ));
 }
 
-fn on_file_editor_cut_request(trigger: On<UiInput<FileEditorCutRequest>>, mut commands: Commands) {
+fn cut_selection(trigger: On<UiInput<FileEditorCutRequest>>, mut commands: Commands) {
     commands.trigger(EditRequest::new(
         trigger.event().webview,
         vec![EditCommand::Op {
@@ -665,17 +656,14 @@ fn on_file_editor_cut_request(trigger: On<UiInput<FileEditorCutRequest>>, mut co
     ));
 }
 
-fn on_file_editor_paste_request(
-    trigger: On<UiInput<FileEditorPasteRequest>>,
-    mut commands: Commands,
-) {
+fn paste(trigger: On<UiInput<FileEditorPasteRequest>>, mut commands: Commands) {
     commands.trigger(EditRequest::new(
         trigger.event().webview,
         vec![EditCommand::Paste],
     ));
 }
 
-fn on_file_editor_change_all_occurrences_request(
+fn select_occurrences(
     trigger: On<UiInput<FileEditorChangeAllOccurrencesRequest>>,
     mut commands: Commands,
 ) {
@@ -685,7 +673,7 @@ fn on_file_editor_change_all_occurrences_request(
     ));
 }
 
-fn on_file_rename_request(
+fn request_rename(
     trigger: On<UiInput<FileRenameRequest>>,
     views: Query<&Editor>,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
@@ -712,7 +700,7 @@ fn on_file_rename_request(
     }
 }
 
-fn on_file_references_request(
+fn request_references(
     trigger: On<UiInput<FileReferencesRequest>>,
     views: Query<&Editor>,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
@@ -735,7 +723,7 @@ fn on_file_references_request(
     }
 }
 
-fn on_file_completion_request(
+fn request_completion(
     trigger: On<UiInput<FileCompletionRequest>>,
     views: Query<&Editor>,
     indexes: Query<&vmux_core::knowledge::KnowledgeIndex>,

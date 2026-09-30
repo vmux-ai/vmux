@@ -29,7 +29,7 @@ impl Plugin for AgentSetupPlugin {
         ))
         .add_observer(on_agent_install_run)
         .add_observer(on_agent_setup_prereq_request)
-        .add_systems(Update, auto_redirect_agent_setup_when_installed)
+        .add_systems(Update, redirect_when_installed)
         .add_systems(
             Update,
             (detect_agent_install_outcome, publish_agent_install_outcome).chain(),
@@ -233,7 +233,7 @@ fn on_agent_install_run(
     });
 }
 
-fn auto_redirect_agent_setup_when_installed(
+fn redirect_when_installed(
     time: Res<Time>,
     mut throttle: Local<f32>,
     setup_stacks: Query<(Entity, &PageMetadata), (With<Stack>, Without<AgentSetupNavigated>)>,

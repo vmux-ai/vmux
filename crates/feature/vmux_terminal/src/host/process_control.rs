@@ -13,10 +13,7 @@ impl Plugin for ProcessControlPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
             .add_plugins(UiEventPlugin::<(TermResizeEvent, TermScrollEvent)>::default())
-            .add_systems(
-                Update,
-                request_pending_terminal_snapshot.after(ServiceMessageSet),
-            )
+            .add_systems(Update, request_snapshot.after(ServiceMessageSet))
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
             .add_observer(on_term_scroll);
@@ -58,7 +55,7 @@ fn on_term_ready(
     }));
 }
 
-fn request_pending_terminal_snapshot(
+fn request_snapshot(
     pending: Query<(Entity, &ProcessId), (With<Terminal>, With<PendingTerminalSnapshot>)>,
     browsers: NonSend<Browsers>,
     connected: Option<Single<(), With<ServiceConnected>>>,

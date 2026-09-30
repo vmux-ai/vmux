@@ -45,16 +45,16 @@ impl Plugin for NavigationPlugin {
             Update,
             (
                 drain_committed_navigation,
-                handle_browser_navigate_requests.in_set(crate::BrowserSystemSet::Navigate),
-                handle_browser_go_back_requests,
-                handle_browser_go_forward_requests,
-                handle_open_in_new_stack_requests,
-                handle_browser_open_history.in_set(ReadCommandRequests),
+                navigate.in_set(crate::BrowserSystemSet::Navigate),
+                go_back,
+                go_forward,
+                open_in_new_stack,
+                open_history.in_set(ReadCommandRequests),
             ),
         )
         .add_systems(
             Update,
-            (sync_page_metadata_to_tab, spawn_visit_on_navigation)
+            (sync_tab_metadata, record_visits)
                 .chain()
                 .after(vmux_layout::LayoutCefStateSet::Apply),
         );
@@ -101,7 +101,7 @@ fn drain_committed_navigation(
     }
 }
 
-fn spawn_visit_on_navigation(
+fn record_visits(
     changed_tabs: Query<(Entity, &PageMetadata), (With<Stack>, Changed<PageMetadata>)>,
     mut last_urls: Local<std::collections::HashMap<u64, String>>,
     mut commands: Commands,
@@ -124,7 +124,7 @@ fn spawn_visit_on_navigation(
     }
 }
 
-fn sync_page_metadata_to_tab(
+fn sync_tab_metadata(
     browser_q: Query<
         (&PageMetadata, Option<&vmux_core::PageIdentity>, &ChildOf),
         (
@@ -170,7 +170,7 @@ fn sync_page_metadata_to_tab(
     }
 }
 
-fn handle_browser_go_back_requests(
+fn go_back(
     mut reader: MessageReader<vmux_layout::BrowserGoBackRequest>,
     targets: BrowserTarget,
     host_histories: Query<(), With<HostHistory>>,
@@ -192,7 +192,7 @@ fn handle_browser_go_back_requests(
     }
 }
 
-fn handle_browser_go_forward_requests(
+fn go_forward(
     mut reader: MessageReader<vmux_layout::BrowserGoForwardRequest>,
     targets: BrowserTarget,
     host_histories: Query<(), With<HostHistory>>,
@@ -214,7 +214,7 @@ fn handle_browser_go_forward_requests(
     }
 }
 
-fn handle_browser_open_history(
+fn open_history(
     mut reader: MessageReader<OpenHistoryRequest>,
     focus: vmux_layout::stack::FocusedStack,
     mut writer: MessageWriter<PageOpenRequest>,
@@ -231,7 +231,7 @@ fn handle_browser_open_history(
     }
 }
 
-fn handle_open_in_new_stack_requests(
+fn open_in_new_stack(
     mut reader: MessageReader<vmux_layout::OpenInNewStackRequest>,
     focus: vmux_layout::stack::FocusedStack,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -249,7 +249,7 @@ fn handle_open_in_new_stack_requests(
     }
 }
 
-fn handle_browser_navigate_requests(
+fn navigate(
     mut reader: MessageReader<vmux_layout::BrowserNavigateRequest>,
     focus: vmux_layout::stack::FocusedStack,
     targets: vmux_layout::target::BrowserTargets<Browser>,
