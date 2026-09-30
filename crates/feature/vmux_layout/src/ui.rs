@@ -2,7 +2,10 @@
 
 mod active_session;
 mod bookmark;
+mod error;
+mod extension;
 mod header;
+mod remote;
 mod side_sheet;
 mod stack;
 mod state;
@@ -10,13 +13,15 @@ mod tab_drag;
 mod update;
 mod window_drag;
 
+use self::extension::ExtensionPopupModal;
 use self::header::HeaderView;
 use self::side_sheet::SideSheetView;
 use self::state::LayoutUi;
-use crate::extension::ExtensionPopupModal;
 use dioxus::prelude::*;
 use vmux_command::panel::CommandBarPanel;
 use vmux_ui::hooks::use_theme;
+
+pub(crate) use error::ErrorPage;
 
 #[vmux_native::page(
     component = Page,

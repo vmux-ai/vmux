@@ -1,12 +1,13 @@
 #![allow(non_snake_case)]
 
+mod activity;
 use self::agent::ChatHeader;
 use self::approval::ChatApprovalDock;
 use self::composer::ChatDock;
+use self::item::MD_CSS;
 use self::keys::use_chat_keys;
 use self::state::use_chat;
 use self::transcript::ChatTranscript;
-use crate::transcript::MD_CSS;
 use dioxus::prelude::*;
 
 #[vmux_native::page(
@@ -44,6 +45,7 @@ pub mod agent;
 pub mod approval;
 pub mod composer;
 mod error;
+mod item;
 mod keys;
 mod scroll;
 mod state;

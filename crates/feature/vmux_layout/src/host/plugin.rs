@@ -35,7 +35,7 @@ impl Plugin for LayoutPlugin {
         {
             app.add_plugins((
                 crate::ui::LayoutPage::plugin(),
-                crate::error_page::ErrorPage::plugin(),
+                crate::ui::ErrorPage::plugin(),
             ));
         }
         app.add_systems(Startup, spawn_update_state)

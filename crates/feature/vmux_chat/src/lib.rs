@@ -13,7 +13,6 @@ pub mod state;
 pub mod tab;
 #[cfg(host)]
 mod tool;
-pub mod transcript;
 
 pub mod model;
 pub mod prompt;

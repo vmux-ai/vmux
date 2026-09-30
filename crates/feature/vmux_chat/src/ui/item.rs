@@ -10,9 +10,8 @@ use vmux_ui::file_icon::{FilePath, TypeIcon};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 
-use crate::activity::{
-    ActivityIcon, ActivityIconView, FileActivityIcon, ToolActivityIcon, ToolPresentation,
-};
+use super::activity::{ActivityIconView, FileActivityIcon, ToolActivityIcon};
+use crate::activity::{ActivityIcon, ToolPresentation};
 use vmux_ui::clipboard::Clipboard;
 use vmux_ui::platform::{random_index, sleep_ms};
 

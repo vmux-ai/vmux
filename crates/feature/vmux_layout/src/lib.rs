@@ -12,14 +12,6 @@ pub mod state;
 #[cfg(ui)]
 pub mod ui;
 
-#[cfg(ui)]
-mod extension;
-
-#[cfg(ui)]
-mod remote;
-
-#[cfg(ui)]
-pub mod error_page;
 #[cfg(host)]
 pub mod host;
 #[cfg(host)]

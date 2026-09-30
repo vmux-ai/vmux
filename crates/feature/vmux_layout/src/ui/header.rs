@@ -14,6 +14,8 @@ use vmux_ui::i18n::translate;
 use vmux_ui::util::cn;
 
 use super::bookmark::LayoutContextMenu;
+use super::extension::ExtensionBar;
+use super::remote::RemoteControl;
 use super::stack::{StackIcon, StackTitle};
 use super::state::LayoutUi;
 use super::tab_drag::TabDrag;
@@ -22,8 +24,6 @@ use crate::event::{
     HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
     StackNavigationState, StackRow, TabCloseRequest, TabCreateRequest, TabStripRow, TabStripState,
 };
-use crate::extension::ExtensionBar;
-use crate::remote::RemoteControl;
 
 #[component]
 pub(crate) fn HeaderView() -> Element {
