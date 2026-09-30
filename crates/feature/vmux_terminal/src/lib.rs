@@ -26,7 +26,8 @@ pub use host::{
     TerminalFontSizeCommand, TerminalGridSize, TerminalPlugin, TerminalReinputRequest,
     TerminalRequestPlugin, TerminalRestartRequest, TerminalSendRequest, TerminalStackSpawnRequest,
     TerminalStackSpawnSet, TerminalThemePlugin, TerminalToolPlugin, TerminalUiStateUpdates,
-    component, contract, has_live_terminal, image_path_payload, launch, new_terminal_bundle,
-    new_terminal_bundle_with_cwd, pid, plugin, process_monitor, reattach_terminal_bundle,
-    shell_env, shell_input, should_confirm_close, snapshot_updater, theme,
+    agent_run, component, contract, has_live_terminal, image_path_payload, launch,
+    new_terminal_bundle, new_terminal_bundle_with_cwd, pid, plugin, process_monitor,
+    reattach_terminal_bundle, shell_env, shell_input, should_confirm_close, snapshot_updater,
+    theme,
 };

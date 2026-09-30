@@ -441,10 +441,10 @@ impl SearchGrouping {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::run_terminal::AgentCwd;
     use crate::host::test_support::test_settings;
     use vmux_api::protocol::{AgentFileSearch, AgentFileTouched, AgentRequestId, ProcessId};
     use vmux_layout::pane::PaneSplit;
+    use vmux_terminal::agent_run::AgentCwd;
     use vmux_terminal::{AgentRun, PlacementMode};
 
     #[test]

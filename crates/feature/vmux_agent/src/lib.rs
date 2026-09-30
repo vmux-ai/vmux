@@ -31,7 +31,7 @@ pub use host::{
     RoomAgentBinding, RoomEventIdentity, RoomMember, RoomMessageContent, RoomMetadata,
     RoomOpCommitted, RoomOpReceived, RoomPlugin, RoomProjection, StopReason, StreamEvent,
     StreamingMessage, ToastLevel, ToolDef, acp_registry, acp_tool, attach, attention, command,
-    command_bar, echo, event, exec, follow, handoff, launch, managed_mcp, mcp, message, page_open,
-    run_state_kind, run_terminal, runtime, self_command, session, session_source, snapshot_updater,
-    spawn, toast, url, valid_cwd, workspace,
+    command_bar, echo, event, follow, handoff, launch, managed_mcp, mcp, message, page_open,
+    run_state_kind, runtime, self_command, session, session_source, snapshot_updater, spawn, toast,
+    url, valid_cwd, workspace,
 };

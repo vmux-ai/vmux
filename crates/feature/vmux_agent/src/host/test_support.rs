@@ -55,18 +55,6 @@ pub(crate) fn test_settings() -> AppSettings {
     }
 }
 
-pub(crate) fn spawn_stack_in_pane(app: &mut App, pane: Entity, url: &str) -> Entity {
-    let stack = app
-        .world_mut()
-        .spawn((vmux_layout::stack::stack_bundle(), ChildOf(pane)))
-        .id();
-    app.world_mut().entity_mut(stack).insert(PageMetadata {
-        url: url.to_string(),
-        ..default()
-    });
-    stack
-}
-
 pub(crate) fn close_stack_requests(app: &App) -> Vec<Entity> {
     let messages = app
         .world()

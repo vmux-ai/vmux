@@ -11132,6 +11132,7 @@ dependencies = [
  "vmux_layout",
  "vmux_mcp",
  "vmux_native",
+ "vmux_session",
  "vmux_setting",
  "vmux_space",
  "vmux_tool",

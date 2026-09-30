@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use vmux_core::ProcessId;
 pub use vmux_core::agent::McpServerConfig;
 
-use crate::{AgentKind, exec};
+use crate::AgentKind;
 
 const DEFAULT_RUN_TIMEOUT_SECS: u64 = 50;
 const LONG_RUN_TIMEOUT_SECS: u64 = 600;
@@ -94,7 +94,7 @@ fn resolve_with_sidecar(
     run_timeout_secs: u64,
     shell: &str,
 ) -> Result<McpServerConfig, String> {
-    if exec::is_executable_path(sidecar) {
+    if vmux_core::Executable::at(sidecar).is_some() {
         return Ok(McpServerConfig {
             command: sidecar.to_string_lossy().to_string(),
             args: mcp_subcommand_args(

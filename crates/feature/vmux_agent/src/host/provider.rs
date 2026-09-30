@@ -91,7 +91,7 @@ impl AgentExecutables<'_, '_> {
         {
             return forced.then(|| PathBuf::from(kind.executable()));
         }
-        crate::exec::find_executable(kind.executable())
+        vmux_core::Executable::find(kind.executable()).map(vmux_core::Executable::into_path)
     }
 }
 
@@ -109,7 +109,7 @@ fn detect_agent_provider_availability(
     providers: Query<(Entity, &AgentProviderTargetKind), Without<Ready>>,
 ) {
     for (entity, kind) in &providers {
-        if crate::exec::find_executable(kind.0.executable()).is_some() {
+        if vmux_core::Executable::find(kind.0.executable()).is_some() {
             commands.entity(entity).insert(Ready);
         }
     }

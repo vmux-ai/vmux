@@ -41,8 +41,8 @@ use super::attach::{
     AcpAgentAttachment, AgentStrategies, PageAgentAttachment, acp_icon_for_id,
     acp_profile_name_for_id, acp_registry_agent_for_id,
 };
-use super::run_terminal::AgentCwd;
 use super::spawn::PendingPageOpen;
+use vmux_terminal::agent_run::AgentCwd;
 
 pub(super) struct PageOpenPlugin;
 

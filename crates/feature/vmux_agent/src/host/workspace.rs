@@ -583,10 +583,10 @@ fn send_pending_agent_continuations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::run_terminal::AgentCwd;
     use crate::host::test_support::init_worktree_test_repo;
     use vmux_api::protocol::SharedMessage;
     use vmux_core::ProcessId;
+    use vmux_terminal::agent_run::AgentCwd;
 
     #[test]
     fn workspace_selection_continuations_resume_original_request() {

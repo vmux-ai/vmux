@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, ProcessId};
 use vmux_core::agent::{
-    AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
+    AgentCommandResponse, AgentRequestAppExt, AgentRequestApplySet, AgentRequestBlocked,
+    AgentRequestInput, AgentRequestMessage, AgentRequestRouteSet,
 };
 use vmux_core::{KeyboardOwner, LastActivatedAt, PageMetadata};
 use vmux_layout::pane::{Pane, PaneSplit};
@@ -66,12 +67,20 @@ impl Plugin for AgentTerminalPlugin {
         app.add_agent_request::<AgentNewTerminalTab>()
             .add_agent_request::<AgentRunShell>()
             .add_agent_request::<AgentTerminalSend>()
+            .add_message::<AgentRequestInput>()
+            .add_message::<AgentRequestBlocked>()
             .add_message::<ProcessStackSpawnRequest>()
             .add_systems(
                 Update,
                 (open_terminal_tab, run_shell, send_to_terminal)
                     .after(AgentRequestRouteSet)
                     .before(respond_process_stack_spawn),
+            )
+            .add_systems(
+                Update,
+                super::agent_run::run_agent_commands
+                    .in_set(AgentRequestApplySet)
+                    .before(super::TerminalStackSpawnSet),
             );
     }
 }

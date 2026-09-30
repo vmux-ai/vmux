@@ -2,31 +2,21 @@ use std::path::Path;
 
 use bevy::prelude::*;
 use vmux_api::BinEvent;
-use vmux_api::protocol::{ClientMessage, ProcessId};
 #[cfg(test)]
 use vmux_api::protocol::{AgentRequest, AgentRequestId};
+use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_chat::host::USER_CHOICE_REQUESTED;
 use vmux_command::WriteCommandRequests;
 use vmux_core::agent::{AgentRequestBlocked, AgentRequestPrerequisiteSet};
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
-use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_setting::AppSettings;
 use vmux_space::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktree,
     AgentCreateWorktreeOnBranch, AgentPrepareWorktree,
 };
-use vmux_terminal::{
-    AgentRun, AgentRunWithPlacementOverride, PlacementMode, TerminalStackSpawnRequest,
-    TerminalStackSpawnSet,
-};
 
 use crate::event::AgentRequestInput;
 
-use super::run_terminal::{
-    AgentCwd, AgentPane, AgentTerminalRegion, NextPaneSpawnSequence, PagerEnv,
-    PendingRunTerminalSpawn, PendingRunTerminalSpawns, RunCommand, RunPlacementPolicy,
-    RunTerminalBucketPanes, RunTerminals,
-};
 use super::workspace::{
     AgentTabWorkspace, AgentWorkspacePicker, PendingWorkspacePicker, WORKSPACE_SELECTION_PENDING,
     WORKSPACE_SELECTION_REQUESTED, activate_agent_directory, activate_agent_worktree,
@@ -34,6 +24,7 @@ use super::workspace::{
     workspace_path_task, workspace_picker_task,
 };
 use vmux_core::profile::ProjectsDirectory;
+use vmux_terminal::agent_run::AgentCwd;
 
 pub(super) struct SelfCommandPlugin;
 
@@ -49,22 +40,21 @@ impl Plugin for SelfCommandPlugin {
                 .in_set(AgentRequestPrerequisiteSet)
                 .in_set(WriteCommandRequests)
                 .after(ServiceMessageSet)
-                .after(vmux_layout::worktree::TabDirectoryRebindSet)
-                .before(TerminalStackSpawnSet),
+                .after(vmux_layout::worktree::TabDirectoryRebindSet),
         );
     }
 }
 
 fn resolve_self_pane(
     anchor: ProcessId,
-    agent_terms: &Query<(Entity, &ProcessId, &ChildOf, Option<&AgentTerminalRegion>)>,
+    agent_terms: &Query<(Entity, &ProcessId, &ChildOf)>,
     child_of_q: &Query<&ChildOf>,
-) -> Option<(Entity, Entity, AgentTerminalRegion)> {
+) -> Option<(Entity, Entity)> {
     use bevy::ecs::relationship::Relationship;
-    let (term, _, term_co, region) = agent_terms.iter().find(|(_, pid, _, _)| **pid == anchor)?;
+    let (term, _, term_co) = agent_terms.iter().find(|(_, pid, _)| **pid == anchor)?;
     let stack = term_co.get();
     let pane = child_of_q.get(stack).ok()?.get();
-    Some((term, pane, region.copied().unwrap_or_default()))
+    Some((term, pane))
 }
 
 fn ancestor_self_tab(
@@ -130,9 +120,7 @@ pub(crate) fn rebind_acp_workspace(
 }
 
 fn self_command_anchor(request: &AgentRequestInput) -> Option<ProcessId> {
-    if let Some(run) = SelfRun::decode(request) {
-        Some(run.payload.anchor)
-    } else if let Ok(Some(command)) = request.decode::<AgentCreateWorktree>() {
+    if let Ok(Some(command)) = request.decode::<AgentCreateWorktree>() {
         Some(command.anchor)
     } else if let Some(command) = WorkspaceChoice::decode(request) {
         Some(command.anchor)
@@ -142,57 +130,6 @@ fn self_command_anchor(request: &AgentRequestInput) -> Option<ProcessId> {
         Some(command.anchor)
     } else {
         None
-    }
-}
-
-fn self_command_priority(request: &AgentRequestInput) -> u8 {
-    if is_worktree_setup_request(request) {
-        0
-    } else {
-        1
-    }
-}
-
-fn self_command_blocked_by_worktree_failure(
-    request: &AgentRequestInput,
-    failed: &std::collections::HashSet<ProcessId>,
-) -> bool {
-    !is_worktree_setup_request(request)
-        && self_command_anchor(request).is_some_and(|anchor| failed.contains(&anchor))
-}
-
-fn is_worktree_setup_request(request: &AgentRequestInput) -> bool {
-    matches!(
-        request.request.id.as_str(),
-        AgentCreateWorktree::ID
-            | AgentChooseWorkspace::ID
-            | AgentChooseWorkspaceAtPath::ID
-            | AgentPrepareWorktree::ID
-            | AgentCreateWorktreeOnBranch::ID
-    )
-}
-
-struct SelfRun {
-    payload: AgentRun,
-    placement_override: bool,
-}
-
-impl SelfRun {
-    fn decode(request: &AgentRequestInput) -> Option<Self> {
-        if let Ok(Some(payload)) = request.decode::<AgentRun>() {
-            return Some(Self {
-                payload,
-                placement_override: false,
-            });
-        }
-        let payload = request
-            .decode::<AgentRunWithPlacementOverride>()
-            .ok()
-            .flatten()?;
-        Some(Self {
-            payload: payload.0,
-            placement_override: true,
-        })
     }
 }
 
@@ -220,26 +157,17 @@ impl WorkspaceChoice {
     }
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
-struct AgentSelfCommandWriters<'w> {
-    terminal_stack_spawn: MessageWriter<'w, TerminalStackSpawnRequest>,
-    terminal_reinput: MessageWriter<'w, vmux_terminal::TerminalReinputRequest>,
-}
-
 #[allow(clippy::too_many_arguments)]
 fn handle_agent_self_commands(
     mut reader: MessageReader<AgentRequestInput>,
-    agent_terms: Query<(Entity, &ProcessId, &ChildOf, Option<&AgentTerminalRegion>)>,
-    run_terminals: RunTerminals,
+    agent_terms: Query<(Entity, &ProcessId, &ChildOf)>,
     mut acp_sessions: Query<&mut vmux_session::AcpSession>,
     ctx: vmux_layout::pane::PanePlacement,
-    mut writers: AgentSelfCommandWriters,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
     mut blocked_requests: MessageWriter<AgentRequestBlocked>,
     active_space: vmux_layout::space::FocusedSpace,
     settings: Res<AppSettings>,
-    mut next_pane_sequence: NextPaneSpawnSequence,
     mut tab_worktree: AgentTabWorkspace,
     workspace_picker: AgentWorkspacePicker,
 ) {
@@ -250,254 +178,20 @@ fn handle_agent_self_commands(
         .cloned()
         .unwrap_or_default()
         .0;
-    let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     let mut worktree_created_this_batch: std::collections::HashMap<Entity, String> =
         std::collections::HashMap::new();
-    let mut terminal_spawns: Vec<TerminalStackSpawnRequest> = Vec::new();
-    let mut pending_run_spawns = PendingRunTerminalSpawns::default();
-    let mut failed_worktree_anchors = std::collections::HashSet::new();
-    let mut terminal_regions = std::collections::HashMap::new();
     let mut workspace_picker_tabs: std::collections::HashSet<Entity> = workspace_picker
         .pickers
         .iter()
         .map(|picker| picker.tab_entity)
         .collect();
-    let mut requests: Vec<_> = reader.read().collect();
-    requests.sort_by_key(|request| self_command_priority(request));
-    for request in requests {
+    for request in reader.read() {
         let request_anchor = self_command_anchor(request);
-        if self_command_blocked_by_worktree_failure(request, &failed_worktree_anchors) {
-            service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
-                request_id: request.request_id,
-                result: AgentCommandResult::Error(
-                    "Skipped because worktree activation did not complete.".to_string(),
-                ),
-            }));
-            continue;
-        }
-        let result = if let Some(decoded) = SelfRun::decode(request) {
-            'run: {
-                let run = &decoded.payload;
-                let anchor = &run.anchor;
-                let command = &run.command;
-                let direction = &run.direction;
-                let focus = &run.focus;
-                let beside = &run.beside;
-                let mode = &run.mode;
-                let terminal = &run.terminal;
-                let done_marker = &run.done_marker;
-                let placement_override = decoded.placement_override
-                    || beside.is_some()
-                    || *mode != PlacementMode::Auto
-                    || *direction != vmux_layout::AgentPaneDirection::Right;
-                if let Err(error) = RunPlacementPolicy::new(placement_override).validate(&settings)
-                {
-                    break 'run AgentCommandResult::Error(error.to_string());
-                }
-                let focus = request.origin.allows_focus(*focus);
-                let run = RunCommand::new(command, done_marker.as_deref());
-                match terminal {
-                    Some(pid) => match run_terminals.launch(*pid) {
-                        Ok(launch) => {
-                            writers.terminal_reinput.write(run.reinput(
-                                *pid,
-                                &launch,
-                                PagerEnv::Inherited,
-                            ));
-                            AgentCommandResult::Text(pid.to_string())
-                        }
-                        Err(error) => AgentCommandResult::Error(error),
-                    },
-                    None => 'spawn: {
-                        let Some((agent_term, self_pane, stored_region)) =
-                            resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q)
-                        else {
-                            break 'spawn AgentCommandResult::Error(
-                                "self process not found".to_string(),
-                            );
-                        };
-                        let tab_cwd = {
-                            let mut current = self_pane;
-                            loop {
-                                if let Ok(tab) = tab_worktree.tabs.get(current) {
-                                    break tab.startup_dir.clone();
-                                }
-                                match ctx.child_of_q.get(current) {
-                                    Ok(child_of) => current = child_of.parent(),
-                                    Err(_) => break None,
-                                }
-                            }
-                        };
-                        let agent_cwd = run_terminals.cwd(agent_term).or_else(|| {
-                            let stack =
-                                ancestor_acp_stack(agent_term, &acp_sessions, &ctx.child_of_q)?;
-                            acp_sessions
-                                .get(stack)
-                                .ok()
-                                .map(|session| session.cwd.to_string_lossy().into_owned())
-                        });
-                        let cwd = match AgentCwd::from_tab(tab_cwd.as_deref())
-                            .or_agent_launch(agent_cwd.as_deref())
-                        {
-                            Ok(cwd) => cwd,
-                            Err(message) => break 'spawn AgentCommandResult::Error(message),
-                        };
-                        let candidates = run_terminals.candidates(
-                            self_pane,
-                            &ctx.child_of_q,
-                            &ctx.tab_q,
-                            &ctx.seq_q,
-                            &cwd,
-                        );
-                        let terminal_bucket_panes = RunTerminalBucketPanes::collect(
-                            self_pane,
-                            &ctx.child_of_q,
-                            &ctx.tab_q,
-                            &ctx.leaf_panes,
-                            &ctx.pane_children,
-                            &ctx.tab_filter,
-                            &ctx.page_q,
-                            &ctx.seq_q,
-                        );
-                        if beside.is_none()
-                            && *mode == PlacementMode::Auto
-                            && let Some(pid) = pending_run_spawns.append_input(
-                                *anchor,
-                                &mut terminal_spawns,
-                                &cwd,
-                                run,
-                            )
-                        {
-                            break 'spawn AgentCommandResult::Text(pid.to_string());
-                        }
-                        let region = terminal_regions
-                            .entry(*anchor)
-                            .or_insert((agent_term, stored_region));
-                        if beside.is_none()
-                            && *mode == PlacementMode::Auto
-                            && let Some(candidate) =
-                                region.1.choose_reusable_terminal(self_pane, &candidates)
-                        {
-                            let Ok(launch) = run_terminals.launch(candidate.pid) else {
-                                break 'spawn AgentCommandResult::Error(format!(
-                                    "run terminal launch not found: {}",
-                                    candidate.pid
-                                ));
-                            };
-                            writers.terminal_reinput.write(run.reinput(
-                                candidate.pid,
-                                &launch,
-                                PagerEnv::Set,
-                            ));
-                            region.1.run_terminal = Some(candidate.pid);
-                            region.1.run_pane = Some(candidate.pane);
-                            let sequence = next_pane_sequence.take();
-                            commands.entity(candidate.pane).insert(sequence);
-                            if focus {
-                                for entity in
-                                    candidate.activation_entities(&ctx.child_of_q, &ctx.tab_q)
-                                {
-                                    commands
-                                        .entity(entity)
-                                        .insert(vmux_core::LastActivatedAt::now());
-                                }
-                            }
-                            break 'spawn AgentCommandResult::Text(candidate.pid.to_string());
-                        }
-                        let beside_pane = match beside {
-                            Some(pid) => match run_terminals.pane(*pid, &ctx.child_of_q) {
-                                Some(pane) => Some(pane),
-                                None => {
-                                    break 'spawn AgentCommandResult::Error(format!(
-                                        "run.beside page not found: {pid}"
-                                    ));
-                                }
-                            },
-                            None => None,
-                        };
-                        let (shell, data) = run.for_new_terminal(&settings);
-                        if let Err(error) = shell.validate() {
-                            break 'spawn AgentCommandResult::Error(error);
-                        }
-                        let shell = shell.into_string();
-
-                        let target_pane = match (beside_pane, *mode) {
-                            (anchor_pane, PlacementMode::Split) => {
-                                let bucket_pane = if anchor_pane.is_none() {
-                                    region
-                                        .1
-                                        .choose_bucket_pane(self_pane, &candidates)
-                                        .filter(|pane| terminal_bucket_panes.contains(*pane))
-                                        .or_else(|| terminal_bucket_panes.newest(self_pane))
-                                } else {
-                                    None
-                                };
-                                if let Some(pane) = bucket_pane {
-                                    pane
-                                } else {
-                                    let anchor_pane =
-                                        anchor_pane.unwrap_or_else(|| ctx.split_anchor(self_pane));
-                                    let split = AgentPane::new(anchor_pane).split(
-                                        direction,
-                                        focus,
-                                        &ctx.pane_children,
-                                        &ctx.tab_filter,
-                                        &ctx.split_dir_q,
-                                        &mut split_this_batch,
-                                    );
-                                    vmux_layout::pane::split_or_extend(
-                                        &mut commands,
-                                        split.pane,
-                                        split.direction,
-                                        &split.existing_tabs,
-                                        split.focus,
-                                        split.already_split,
-                                    )
-                                }
-                            }
-                            (Some(pane), _) => pane,
-                            (None, _) => ctx.resolve_spiral(
-                                &mut commands,
-                                self_pane,
-                                TERMINAL_PAGE_URL,
-                                focus,
-                                &mut split_this_batch,
-                            ),
-                        };
-                        let sequence = next_pane_sequence.take();
-                        commands.entity(target_pane).insert(sequence);
-                        let new_pid = ProcessId::new();
-                        let request_index = terminal_spawns.len();
-                        terminal_spawns.push(TerminalStackSpawnRequest {
-                            pane: target_pane,
-                            cwd: Some(cwd),
-                            shell: Some(shell.clone()),
-                            agent_run: true,
-                            pending_input: Some(data),
-                            process_id: Some(new_pid),
-                            activate: focus,
-                        });
-                        region.1.run_pane = Some(target_pane);
-                        if beside.is_none() && *mode != PlacementMode::Split {
-                            region.1.run_terminal = Some(new_pid);
-                            pending_run_spawns.insert(
-                                *anchor,
-                                PendingRunTerminalSpawn {
-                                    pid: new_pid,
-                                    request_index,
-                                    shell,
-                                },
-                            );
-                        }
-                        AgentCommandResult::Text(new_pid.to_string())
-                    }
-                }
-            }
-        } else if let Some(command) = WorkspaceChoice::decode(request) {
+        let result = if let Some(command) = WorkspaceChoice::decode(request) {
             let anchor = command.anchor;
             match resolve_self_pane(anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((agent_entity, pane, _)) => {
+                Some((agent_entity, pane)) => {
                     let Some(tab_entity) =
                         ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
                     else {
@@ -564,7 +258,7 @@ fn handle_agent_self_commands(
             let create = &command.create;
             match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((agent_entity, pane, _)) => {
+                Some((agent_entity, pane)) => {
                     let Some(tab_entity) =
                         ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
                     else {
@@ -723,7 +417,7 @@ fn handle_agent_self_commands(
             let anchor = &command.anchor;
             match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((_, pane, _)) => {
+                Some((_, pane)) => {
                     let mut cur = pane;
                     let tab_e = loop {
                         if tab_worktree.tabs.get(cur).is_ok() {
@@ -850,11 +544,15 @@ fn handle_agent_self_commands(
             let project = &command.project;
             match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((agent_entity, pane, _)) => {
+                Some((agent_entity, pane)) => {
                     let Some(tab_entity) =
                         ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
                     else {
-                        failed_worktree_anchors.insert(*anchor);
+                        blocked_requests.write(AgentRequestBlocked {
+                            anchor: *anchor,
+                            reason: "Skipped because worktree activation did not complete."
+                                .to_string(),
+                        });
                         service_requests.write(ServiceRequest(
                             ClientMessage::AgentCommandResponse {
                                 request_id: request.request_id,
@@ -912,7 +610,11 @@ fn handle_agent_self_commands(
                                     )
                                 });
                         let Some(base_dir) = base_dir else {
-                            failed_worktree_anchors.insert(*anchor);
+                            blocked_requests.write(AgentRequestBlocked {
+                                anchor: *anchor,
+                                reason: "Skipped because worktree activation did not complete."
+                                    .to_string(),
+                            });
                             service_requests.write(ServiceRequest(
                                 ClientMessage::AgentCommandResponse {
                                     request_id: request.request_id,
@@ -968,7 +670,6 @@ fn handle_agent_self_commands(
             )
             && let Some(anchor) = request_anchor
         {
-            failed_worktree_anchors.insert(anchor);
             blocked_requests.write(AgentRequestBlocked {
                 anchor,
                 reason: "Skipped because worktree activation did not complete.".to_string(),
@@ -979,51 +680,13 @@ fn handle_agent_self_commands(
             result,
         }));
     }
-    for spawn in terminal_spawns {
-        writers.terminal_stack_spawn.write(spawn);
-    }
-    for (_, (entity, region)) in terminal_regions {
-        commands.entity(entity).insert(region);
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
-
     #[test]
-    fn agent_run_spawns_terminal_before_next_agent_command_frame() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, SelfCommandPlugin));
-
-        let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
-        let mut update = schedules.remove(Update).unwrap();
-        update.initialize(app.world_mut()).unwrap();
-        let graph = update.graph();
-
-        let self_commands = graph
-            .systems_in_set(SelfCommandSet.intern())
-            .expect("handle_agent_self_commands is registered")
-            .first()
-            .copied()
-            .expect("handle_agent_self_commands is registered");
-        let terminal_spawn = graph
-            .system_sets
-            .get_key(TerminalStackSpawnSet.intern())
-            .expect("the terminal spawn ordering set is registered");
-
-        assert!(
-            graph
-                .dependency()
-                .graph()
-                .contains_edge(NodeId::System(self_commands), NodeId::Set(terminal_spawn)),
-            "run terminal spawn requests must materialize before the next agent command frame"
-        );
-    }
-
-    #[test]
-    fn create_worktree_precedes_and_gates_sibling_self_commands() {
+    fn worktree_failures_publish_the_anchor_gate() {
         let anchor = ProcessId::new();
         let create = AgentRequestInput {
             request_id: AgentRequestId::new(),
@@ -1035,24 +698,6 @@ mod tests {
             })
             .unwrap(),
         };
-        let sibling = AgentRequestInput {
-            request_id: AgentRequestId::new(),
-            origin: crate::event::CommandOrigin::User,
-            request: AgentRequest::encode(&AgentRun {
-                anchor,
-                command: "pwd".to_string(),
-                direction: vmux_layout::AgentPaneDirection::Right,
-                focus: false,
-                beside: None,
-                mode: PlacementMode::Auto,
-                terminal: None,
-                done_marker: None,
-            })
-            .unwrap(),
-        };
-        assert!(self_command_priority(&create) < self_command_priority(&sibling));
-        let failed = std::collections::HashSet::from([anchor]);
-        assert!(!self_command_blocked_by_worktree_failure(&create, &failed));
-        assert!(self_command_blocked_by_worktree_failure(&sibling, &failed));
+        assert_eq!(self_command_anchor(&create), Some(anchor));
     }
 }

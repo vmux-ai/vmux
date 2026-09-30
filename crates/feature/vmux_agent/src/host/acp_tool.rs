@@ -243,7 +243,7 @@ fn start_acp_installs(
     let Some(focused) = focused.as_ref() else {
         return;
     };
-    let shell = crate::host::run_terminal::AgentTerminalShell::configured(&settings).into_string();
+    let shell = vmux_terminal::agent_run::AgentTerminalShell::configured(&settings).into_string();
     let policy = policy.snapshot();
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let mut active_jobs: Vec<(AcpInstallKey, Entity)> = jobs
@@ -549,7 +549,7 @@ impl AcpLaunch {
     fn message_for(&self, session: &AcpSession, settings: Option<&AppSettings>) -> ClientMessage {
         let shell = settings
             .map(|settings| {
-                crate::host::run_terminal::AgentTerminalShell::configured(settings).into_string()
+                vmux_terminal::agent_run::AgentTerminalShell::configured(settings).into_string()
             })
             .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_default());
         let mcp = crate::mcp::resolve_acp(&session.cwd, session.anchor, &session.agent_id, &shell)

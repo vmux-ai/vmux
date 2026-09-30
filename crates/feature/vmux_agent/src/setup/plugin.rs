@@ -79,7 +79,7 @@ fn on_agent_setup_prereq_request(
 ) {
     let webview = trigger.event().webview;
     let segment = &trigger.event().payload.agent;
-    let brew_present = crate::exec::find_executable("brew").is_some();
+    let brew_present = vmux_core::Executable::find("brew").is_some();
     let needs_homebrew = prereq_needs_homebrew(segment, brew_present);
     commands.trigger(UiStateWrite::<AgentSetupUiState>::from_event(
         webview,
@@ -118,7 +118,7 @@ fn detect_agent_install_outcome(
             match ev.kind {
                 CommandLifecycleKind::Started => pane.armed = true,
                 CommandLifecycleKind::Ended { .. } => {
-                    let installed = crate::exec::find_executable(pane.agent.executable()).is_some();
+                    let installed = vmux_core::Executable::find(pane.agent.executable()).is_some();
                     if let Some(ok) = install_outcome(pane.armed, installed) {
                         let close_pane = ok
                             && setup_stacks
@@ -173,7 +173,7 @@ fn on_agent_install_run(
         warn!("agent install run: unknown agent segment '{segment}'");
         return;
     };
-    let brew_present = !cfg!(target_os = "macos") || crate::exec::find_executable("brew").is_some();
+    let brew_present = !cfg!(target_os = "macos") || vmux_core::Executable::find("brew").is_some();
     let Some(command) = install_command_chained(segment, brew_present) else {
         warn!("agent install run: unknown agent segment '{segment}'");
         return;
@@ -253,7 +253,7 @@ fn auto_redirect_agent_setup_when_installed(
         else {
             continue;
         };
-        if crate::exec::find_executable(kind.executable()).is_none() {
+        if vmux_core::Executable::find(kind.executable()).is_none() {
             continue;
         }
         commands.spawn(PageOpenTask {

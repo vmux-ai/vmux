@@ -13,8 +13,8 @@ use vmux_tool::{
 };
 
 use super::{
-    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch,
-    AgentListSpaces, AgentPrepareWorktree, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
+    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch, AgentListSpaces,
+    AgentPrepareWorktree, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
 };
 use crate::model::bootstrap_profile_name;
 

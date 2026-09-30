@@ -129,8 +129,8 @@ mod tests {
     use vmux_api::protocol::{
         AgentRequest, AgentRequestId, AgentVaultStatus, ServiceMessage, SharedEvent,
     };
-    use vmux_space::AgentRenameProfile;
     use vmux_core::service::ServiceInbound;
+    use vmux_space::AgentRenameProfile;
 
     #[test]
     fn routes_agent_messages_without_terminal_ownership() {

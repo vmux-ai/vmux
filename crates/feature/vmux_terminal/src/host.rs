@@ -1,4 +1,5 @@
 mod agent;
+pub mod agent_run;
 mod command;
 pub mod component;
 pub mod contract;

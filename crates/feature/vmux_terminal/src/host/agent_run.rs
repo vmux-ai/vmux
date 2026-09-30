@@ -1,12 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use vmux_api::protocol::ProcessId;
+use vmux_api::protocol::{AgentCommandResult, ProcessId};
 use vmux_api::service::RUN_OSC;
 #[cfg(test)]
 use vmux_api::terminal::CursorStyle;
 use vmux_command::open_target::PaneDirection;
 use vmux_core::PageMetadata;
+use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestBlocked, AgentRequestInput};
 use vmux_core::profile::ProjectsDirectory;
 #[cfg(test)]
 use vmux_core::{LastActivatedAt, terminal::TerminalKind as CoreTerminalKind};
@@ -19,28 +20,29 @@ use vmux_layout::stack::Stack;
 use vmux_layout::tab::Tab;
 #[cfg(test)]
 use vmux_layout::{LayoutContractPlugin, pane::split_or_extend, stack::stack_bundle};
+use vmux_session::AgentSession;
 use vmux_setting::{AppSettings, StartupDir};
 #[cfg(test)]
 use vmux_setting::{TerminalSettings, TerminalTheme};
-use vmux_terminal::launch::TerminalLaunch;
-use vmux_terminal::{
+
+use crate::launch::TerminalLaunch;
+use crate::{
     AgentRunTerminal, ProcessExited, Terminal, TerminalReinputRequest, TerminalStackSpawnRequest,
 };
 #[cfg(test)]
-use vmux_terminal::{TerminalContractPlugin, launch::TerminalKind as LaunchTerminalKind};
+use crate::{TerminalContractPlugin, launch::TerminalKind as LaunchTerminalKind};
+use vmux_space::cwd::valid_cwd;
 
-use crate::session::AgentSession;
-
-use super::valid_cwd;
+use super::{AgentRun, AgentRunWithPlacementOverride, PlacementMode};
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct AgentTerminalRegion {
-    pub(crate) run_terminal: Option<ProcessId>,
-    pub(crate) run_pane: Option<Entity>,
+struct AgentTerminalRegion {
+    run_terminal: Option<ProcessId>,
+    run_pane: Option<Entity>,
 }
 
 impl AgentTerminalRegion {
-    pub(crate) fn choose_reusable_terminal(
+    fn choose_reusable_terminal(
         &self,
         agent_pane: Entity,
         candidates: &[RunTerminalCandidate],
@@ -65,7 +67,7 @@ impl AgentTerminalRegion {
             .copied()
     }
 
-    pub(crate) fn choose_bucket_pane(
+    fn choose_bucket_pane(
         &self,
         agent_pane: Entity,
         candidates: &[RunTerminalCandidate],
@@ -77,16 +79,16 @@ impl AgentTerminalRegion {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct RunTerminalCandidate {
-    pub(crate) terminal: Entity,
-    pub(crate) pid: ProcessId,
-    pub(crate) stack: Entity,
-    pub(crate) pane: Entity,
-    pub(crate) pane_spawn_seq: u64,
+struct RunTerminalCandidate {
+    terminal: Entity,
+    pid: ProcessId,
+    stack: Entity,
+    pane: Entity,
+    pane_spawn_seq: u64,
 }
 
 impl RunTerminalCandidate {
-    pub(crate) fn activation_entities(
+    fn activation_entities(
         &self,
         child_of_q: &Query<&ChildOf>,
         tab_q: &Query<Entity, With<Tab>>,
@@ -116,7 +118,7 @@ impl RunTerminalCandidate {
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub(super) struct RunTerminals<'w, 's> {
+struct RunTerminals<'w, 's> {
     candidates: Query<
         'w,
         's,
@@ -137,7 +139,7 @@ pub(super) struct RunTerminals<'w, 's> {
 }
 
 impl RunTerminals<'_, '_> {
-    pub(super) fn candidates(
+    fn candidates(
         &self,
         agent_pane: Entity,
         child_of_q: &Query<&ChildOf>,
@@ -180,11 +182,7 @@ impl RunTerminals<'_, '_> {
             .collect()
     }
 
-    pub(super) fn pane(
-        &self,
-        process_id: ProcessId,
-        child_of_q: &Query<&ChildOf>,
-    ) -> Option<Entity> {
+    fn pane(&self, process_id: ProcessId, child_of_q: &Query<&ChildOf>) -> Option<Entity> {
         use bevy::ecs::relationship::Relationship;
         let (terminal, _) = self
             .terminals
@@ -194,7 +192,7 @@ impl RunTerminals<'_, '_> {
         child_of_q.get(stack).ok().map(Relationship::get)
     }
 
-    pub(super) fn launch(&self, process_id: ProcessId) -> Result<TerminalLaunch, String> {
+    fn launch(&self, process_id: ProcessId) -> Result<TerminalLaunch, String> {
         let Some(entity) = self
             .terminals
             .iter()
@@ -208,7 +206,7 @@ impl RunTerminals<'_, '_> {
             .map_err(|_| format!("run terminal launch not found: {process_id}"))
     }
 
-    pub(super) fn cwd(&self, entity: Entity) -> Option<String> {
+    fn cwd(&self, entity: Entity) -> Option<String> {
         self.launches
             .get(entity)
             .ok()
@@ -217,10 +215,10 @@ impl RunTerminals<'_, '_> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct AgentPane(Entity);
+struct AgentPane(Entity);
 
 impl AgentPane {
-    pub(super) fn new(pane: Entity) -> Self {
+    fn new(pane: Entity) -> Self {
         Self(pane)
     }
 
@@ -241,7 +239,7 @@ impl AgentPane {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn split(
+    fn split(
         &self,
         direction: &AgentPaneDirection,
         focus: bool,
@@ -265,7 +263,7 @@ impl AgentPane {
         }
     }
 
-    pub(super) fn direction(d: &AgentPaneDirection) -> PaneDirection {
+    fn direction(d: &AgentPaneDirection) -> PaneDirection {
         use AgentPaneDirection as D;
         match d {
             D::Top => PaneDirection::Top,
@@ -276,22 +274,22 @@ impl AgentPane {
     }
 }
 
-pub(super) struct AgentPaneSplit {
-    pub(super) pane: Entity,
-    pub(super) direction: PaneSplitDirection,
-    pub(super) existing_tabs: Vec<Entity>,
-    pub(super) focus: bool,
-    pub(super) already_split: bool,
+struct AgentPaneSplit {
+    pane: Entity,
+    direction: PaneSplitDirection,
+    existing_tabs: Vec<Entity>,
+    focus: bool,
+    already_split: bool,
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub(super) struct NextPaneSpawnSequence<'w, 's> {
+struct NextPaneSpawnSequence<'w, 's> {
     counter: Single<'w, 's, &'static mut SpawnCounter>,
     sequences: Query<'w, 's, &'static SpawnSeq>,
 }
 
 impl NextPaneSpawnSequence<'_, '_> {
-    pub(super) fn take(&mut self) -> SpawnSeq {
+    fn take(&mut self) -> SpawnSeq {
         let max_existing = self
             .sequences
             .iter()
@@ -312,10 +310,10 @@ struct RunTerminalBucketPaneCandidate {
     pane_spawn_seq: u64,
 }
 
-pub(crate) struct RunTerminalBucketPanes(Vec<RunTerminalBucketPaneCandidate>);
+struct RunTerminalBucketPanes(Vec<RunTerminalBucketPaneCandidate>);
 
 impl RunTerminalBucketPanes {
-    pub(crate) fn collect(
+    fn collect(
         agent_pane: Entity,
         child_of_q: &Query<&ChildOf>,
         tab_q: &Query<Entity, With<Tab>>,
@@ -356,7 +354,7 @@ impl RunTerminalBucketPanes {
         )
     }
 
-    pub(crate) fn newest(&self, agent_pane: Entity) -> Option<Entity> {
+    fn newest(&self, agent_pane: Entity) -> Option<Entity> {
         self.0
             .iter()
             .filter(|c| c.pane != agent_pane)
@@ -364,29 +362,27 @@ impl RunTerminalBucketPanes {
             .map(|c| c.pane)
     }
 
-    pub(crate) fn contains(&self, pane: Entity) -> bool {
+    fn contains(&self, pane: Entity) -> bool {
         self.0.iter().any(|c| c.pane == pane)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PendingRunTerminalSpawn {
-    pub(crate) pid: ProcessId,
-    pub(crate) request_index: usize,
-    pub(crate) shell: String,
+struct PendingRunTerminalSpawn {
+    pid: ProcessId,
+    request_index: usize,
+    shell: String,
 }
 
 #[derive(Default)]
-pub(crate) struct PendingRunTerminalSpawns(
-    std::collections::HashMap<ProcessId, PendingRunTerminalSpawn>,
-);
+struct PendingRunTerminalSpawns(std::collections::HashMap<ProcessId, PendingRunTerminalSpawn>);
 
 impl PendingRunTerminalSpawns {
-    pub(crate) fn insert(&mut self, anchor: ProcessId, spawn: PendingRunTerminalSpawn) {
+    fn insert(&mut self, anchor: ProcessId, spawn: PendingRunTerminalSpawn) {
         self.0.insert(anchor, spawn);
     }
 
-    pub(crate) fn append_input(
+    fn append_input(
         &self,
         anchor: ProcessId,
         terminal_spawns: &mut [TerminalStackSpawnRequest],
@@ -410,13 +406,13 @@ impl PendingRunTerminalSpawns {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct RunCommand<'a> {
+struct RunCommand<'a> {
     command: &'a str,
     token: Option<&'a str>,
 }
 
 impl<'a> RunCommand<'a> {
-    pub(crate) fn new(command: &'a str, token: Option<&'a str>) -> Self {
+    fn new(command: &'a str, token: Option<&'a str>) -> Self {
         Self { command, token }
     }
 
@@ -433,7 +429,7 @@ impl<'a> RunCommand<'a> {
         data
     }
 
-    pub(crate) fn reinput(
+    fn reinput(
         &self,
         process_id: ProcessId,
         launch: &TerminalLaunch,
@@ -445,7 +441,7 @@ impl<'a> RunCommand<'a> {
         }
     }
 
-    pub(crate) fn for_new_terminal(&self, settings: &AppSettings) -> (AgentTerminalShell, Vec<u8>) {
+    fn for_new_terminal(&self, settings: &AppSettings) -> (AgentTerminalShell, Vec<u8>) {
         let shell = AgentTerminalShell::configured(settings);
         let input = self.input(shell.as_str(), PagerEnv::Set);
         (shell, input)
@@ -453,7 +449,7 @@ impl<'a> RunCommand<'a> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PagerEnv {
+enum PagerEnv {
     Set,
     Inherited,
 }
@@ -494,10 +490,10 @@ fn command_with_marker(shell: &str, command: &str, token: &str, env: PagerEnv) -
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct AgentTerminalShell(String);
+pub struct AgentTerminalShell(String);
 
 impl AgentTerminalShell {
-    pub(crate) fn configured(settings: &AppSettings) -> Self {
+    pub fn configured(settings: &AppSettings) -> Self {
         Self(
             settings
                 .terminal
@@ -513,13 +509,13 @@ impl AgentTerminalShell {
         &self.0
     }
 
-    pub(crate) fn into_string(self) -> String {
+    pub fn into_string(self) -> String {
         self.0
     }
 
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), String> {
         let shell = &self.0;
-        if crate::exec::find_executable(shell).is_some() {
+        if vmux_core::Executable::find(shell).is_some() {
             Ok(())
         } else {
             Err(format!(
@@ -529,19 +525,19 @@ impl AgentTerminalShell {
     }
 }
 
-pub(crate) struct RunPlacementPolicy {
+struct RunPlacementPolicy {
     placement_override: bool,
 }
 
 impl RunPlacementPolicy {
-    pub(crate) const OVERRIDE_DISABLED: &'static str =
+    const OVERRIDE_DISABLED: &'static str =
         "run placement overrides are disabled; omit mode, direction, and beside and retry";
 
-    pub(crate) fn new(placement_override: bool) -> Self {
+    fn new(placement_override: bool) -> Self {
         Self { placement_override }
     }
 
-    pub(crate) fn validate(&self, settings: &AppSettings) -> Result<(), &'static str> {
+    fn validate(&self, settings: &AppSettings) -> Result<(), &'static str> {
         if self.placement_override && !settings.agent.allow_run_placement_override {
             Err(Self::OVERRIDE_DISABLED)
         } else {
@@ -550,26 +546,23 @@ impl RunPlacementPolicy {
     }
 }
 
-pub(crate) struct AgentCwd<'a> {
+pub struct AgentCwd<'a> {
     tab_cwd: Option<&'a str>,
 }
 
 impl<'a> AgentCwd<'a> {
-    pub(crate) fn from_tab(tab_cwd: Option<&'a str>) -> Self {
+    pub fn from_tab(tab_cwd: Option<&'a str>) -> Self {
         Self { tab_cwd }
     }
 
-    pub(crate) fn stored(&self) -> Result<Option<PathBuf>, String> {
+    pub fn stored(&self) -> Result<Option<PathBuf>, String> {
         let Some(tab_cwd) = self.tab_cwd else {
             return Ok(None);
         };
         StartupDir::from_tab(tab_cwd).map(|dir| Some(dir.path))
     }
 
-    pub(crate) fn or_agent_launch(
-        &self,
-        agent_launch_cwd: Option<&str>,
-    ) -> Result<PathBuf, String> {
+    pub fn or_agent_launch(&self, agent_launch_cwd: Option<&str>) -> Result<PathBuf, String> {
         if let Some(path) = self.stored()? {
             return Ok(path);
         }
@@ -579,16 +572,414 @@ impl<'a> AgentCwd<'a> {
         Err("tab and agent project directories are missing".to_string())
     }
 
-    pub(crate) fn projects() -> Result<PathBuf, String> {
+    pub fn projects() -> Result<PathBuf, String> {
         ProjectsDirectory::ensure().map(ProjectsDirectory::into_path)
+    }
+}
+
+struct DecodedAgentRun {
+    payload: AgentRun,
+    placement_override: bool,
+}
+
+impl DecodedAgentRun {
+    fn from_request(request: &AgentRequestInput) -> Option<Self> {
+        if let Ok(Some(payload)) = request.decode::<AgentRun>() {
+            return Some(Self {
+                payload,
+                placement_override: false,
+            });
+        }
+        let payload = request
+            .decode::<AgentRunWithPlacementOverride>()
+            .ok()
+            .flatten()?;
+        Some(Self {
+            payload: payload.0,
+            placement_override: true,
+        })
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct AgentRunContext<'w, 's> {
+    agent_terminals: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static ProcessId,
+            &'static ChildOf,
+            Option<&'static AgentTerminalRegion>,
+        ),
+    >,
+    terminals: RunTerminals<'w, 's>,
+    acp_sessions: Query<'w, 's, &'static vmux_session::AcpSession>,
+    panes: vmux_layout::pane::PanePlacement<'w, 's>,
+    tabs: Query<'w, 's, &'static Tab>,
+    next_pane_sequence: NextPaneSpawnSequence<'w, 's>,
+}
+
+impl AgentRunContext<'_, '_> {
+    fn resolve_pane(&self, anchor: ProcessId) -> Option<(Entity, Entity, AgentTerminalRegion)> {
+        use bevy::ecs::relationship::Relationship;
+        let (terminal, _, terminal_parent, region) = self
+            .agent_terminals
+            .iter()
+            .find(|(_, process_id, _, _)| **process_id == anchor)?;
+        let stack = terminal_parent.get();
+        let pane = self.panes.child_of_q.get(stack).ok()?.get();
+        Some((terminal, pane, region.copied().unwrap_or_default()))
+    }
+
+    fn tab_cwd(&self, pane: Entity) -> Option<String> {
+        let mut current = pane;
+        loop {
+            if let Ok(tab) = self.tabs.get(current) {
+                return tab.startup_dir.clone();
+            }
+            current = self.panes.child_of_q.get(current).ok()?.parent();
+        }
+    }
+
+    fn agent_cwd(&self, terminal: Entity) -> Option<String> {
+        self.terminals.cwd(terminal).or_else(|| {
+            let mut current = terminal;
+            loop {
+                if let Ok(session) = self.acp_sessions.get(current) {
+                    return Some(session.cwd.to_string_lossy().into_owned());
+                }
+                current = self.panes.child_of_q.get(current).ok()?.parent();
+            }
+        })
+    }
+}
+
+pub(super) fn run_agent_commands(
+    mut requests: MessageReader<AgentRequestInput>,
+    mut blocked: MessageReader<AgentRequestBlocked>,
+    mut context: AgentRunContext,
+    settings: Res<AppSettings>,
+    mut commands: Commands,
+    mut terminal_spawns: MessageWriter<TerminalStackSpawnRequest>,
+    mut terminal_reinput: MessageWriter<TerminalReinputRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
+) {
+    let blocked = blocked
+        .read()
+        .map(|blocked| (blocked.anchor, blocked.reason.clone()))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut split_this_batch = std::collections::HashSet::new();
+    let mut pending_spawns = PendingRunTerminalSpawns::default();
+    let mut queued_spawns = Vec::new();
+    let mut regions = std::collections::HashMap::new();
+
+    for request in requests.read() {
+        let Some(decoded) = DecodedAgentRun::from_request(request) else {
+            continue;
+        };
+        let run = &decoded.payload;
+        if let Some(reason) = blocked.get(&run.anchor) {
+            responses.write(
+                AgentReply::new(request.request_id)
+                    .response(AgentCommandResult::Error(reason.clone())),
+            );
+            continue;
+        }
+        let result = 'run: {
+            let placement_override = decoded.placement_override
+                || run.beside.is_some()
+                || run.mode != PlacementMode::Auto
+                || run.direction != AgentPaneDirection::Right;
+            if let Err(error) = RunPlacementPolicy::new(placement_override).validate(&settings) {
+                break 'run AgentCommandResult::Error(error.to_string());
+            }
+            let focus = request.origin.allows_focus(run.focus);
+            let command = RunCommand::new(&run.command, run.done_marker.as_deref());
+            if let Some(process_id) = run.terminal {
+                break 'run match context.terminals.launch(process_id) {
+                    Ok(launch) => {
+                        terminal_reinput.write(command.reinput(
+                            process_id,
+                            &launch,
+                            PagerEnv::Inherited,
+                        ));
+                        AgentCommandResult::Text(process_id.to_string())
+                    }
+                    Err(error) => AgentCommandResult::Error(error),
+                };
+            }
+            let Some((agent_terminal, agent_pane, stored_region)) =
+                context.resolve_pane(run.anchor)
+            else {
+                break 'run AgentCommandResult::Error("self process not found".to_string());
+            };
+            let tab_cwd = context.tab_cwd(agent_pane);
+            let agent_cwd = context.agent_cwd(agent_terminal);
+            let cwd = match AgentCwd::from_tab(tab_cwd.as_deref())
+                .or_agent_launch(agent_cwd.as_deref())
+            {
+                Ok(cwd) => cwd,
+                Err(message) => break 'run AgentCommandResult::Error(message),
+            };
+            let candidates = context.terminals.candidates(
+                agent_pane,
+                &context.panes.child_of_q,
+                &context.panes.tab_q,
+                &context.panes.seq_q,
+                &cwd,
+            );
+            let terminal_bucket_panes = RunTerminalBucketPanes::collect(
+                agent_pane,
+                &context.panes.child_of_q,
+                &context.panes.tab_q,
+                &context.panes.leaf_panes,
+                &context.panes.pane_children,
+                &context.panes.tab_filter,
+                &context.panes.page_q,
+                &context.panes.seq_q,
+            );
+            if run.beside.is_none()
+                && run.mode == PlacementMode::Auto
+                && let Some(process_id) =
+                    pending_spawns.append_input(run.anchor, &mut queued_spawns, &cwd, command)
+            {
+                break 'run AgentCommandResult::Text(process_id.to_string());
+            }
+            let region = regions
+                .entry(run.anchor)
+                .or_insert((agent_terminal, stored_region));
+            if run.beside.is_none()
+                && run.mode == PlacementMode::Auto
+                && let Some(candidate) = region.1.choose_reusable_terminal(agent_pane, &candidates)
+            {
+                let Ok(launch) = context.terminals.launch(candidate.pid) else {
+                    break 'run AgentCommandResult::Error(format!(
+                        "run terminal launch not found: {}",
+                        candidate.pid
+                    ));
+                };
+                terminal_reinput.write(command.reinput(candidate.pid, &launch, PagerEnv::Set));
+                region.1.run_terminal = Some(candidate.pid);
+                region.1.run_pane = Some(candidate.pane);
+                let sequence = context.next_pane_sequence.take();
+                commands.entity(candidate.pane).insert(sequence);
+                if focus {
+                    for entity in candidate
+                        .activation_entities(&context.panes.child_of_q, &context.panes.tab_q)
+                    {
+                        commands
+                            .entity(entity)
+                            .insert(vmux_core::LastActivatedAt::now());
+                    }
+                }
+                break 'run AgentCommandResult::Text(candidate.pid.to_string());
+            }
+            let beside_pane = match run.beside {
+                Some(process_id) => match context
+                    .terminals
+                    .pane(process_id, &context.panes.child_of_q)
+                {
+                    Some(pane) => Some(pane),
+                    None => {
+                        break 'run AgentCommandResult::Error(format!(
+                            "run.beside page not found: {process_id}"
+                        ));
+                    }
+                },
+                None => None,
+            };
+            let (shell, data) = command.for_new_terminal(&settings);
+            if let Err(error) = shell.validate() {
+                break 'run AgentCommandResult::Error(error);
+            }
+            let shell = shell.into_string();
+            let target_pane = match (beside_pane, run.mode) {
+                (anchor_pane, PlacementMode::Split) => {
+                    let bucket_pane = if anchor_pane.is_none() {
+                        region
+                            .1
+                            .choose_bucket_pane(agent_pane, &candidates)
+                            .filter(|pane| terminal_bucket_panes.contains(*pane))
+                            .or_else(|| terminal_bucket_panes.newest(agent_pane))
+                    } else {
+                        None
+                    };
+                    if let Some(pane) = bucket_pane {
+                        pane
+                    } else {
+                        let anchor_pane =
+                            anchor_pane.unwrap_or_else(|| context.panes.split_anchor(agent_pane));
+                        let split = AgentPane::new(anchor_pane).split(
+                            &run.direction,
+                            focus,
+                            &context.panes.pane_children,
+                            &context.panes.tab_filter,
+                            &context.panes.split_dir_q,
+                            &mut split_this_batch,
+                        );
+                        vmux_layout::pane::split_or_extend(
+                            &mut commands,
+                            split.pane,
+                            split.direction,
+                            &split.existing_tabs,
+                            split.focus,
+                            split.already_split,
+                        )
+                    }
+                }
+                (Some(pane), _) => pane,
+                (None, _) => context.panes.resolve_spiral(
+                    &mut commands,
+                    agent_pane,
+                    crate::event::TERMINAL_PAGE_URL,
+                    focus,
+                    &mut split_this_batch,
+                ),
+            };
+            let sequence = context.next_pane_sequence.take();
+            commands.entity(target_pane).insert(sequence);
+            let process_id = ProcessId::new();
+            let request_index = queued_spawns.len();
+            queued_spawns.push(TerminalStackSpawnRequest {
+                pane: target_pane,
+                cwd: Some(cwd),
+                shell: Some(shell.clone()),
+                agent_run: true,
+                pending_input: Some(data),
+                process_id: Some(process_id),
+                activate: focus,
+            });
+            region.1.run_pane = Some(target_pane);
+            if run.beside.is_none() && run.mode != PlacementMode::Split {
+                region.1.run_terminal = Some(process_id);
+                pending_spawns.insert(
+                    run.anchor,
+                    PendingRunTerminalSpawn {
+                        pid: process_id,
+                        request_index,
+                        shell,
+                    },
+                );
+            }
+            AgentCommandResult::Text(process_id.to_string())
+        };
+        responses.write(AgentReply::new(request.request_id).response(result));
+    }
+    for spawn in queued_spawns {
+        terminal_spawns.write(spawn);
+    }
+    for (_, (entity, region)) in regions {
+        commands.entity(entity).insert(region);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::test_support::{spawn_stack_in_pane, test_settings};
-    use vmux_terminal::Terminal;
+    use vmux_layout::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+    };
+    use vmux_setting::{BrowserSettings, ShortcutSettings};
+
+    fn test_settings() -> AppSettings {
+        AppSettings {
+            browser: BrowserSettings {
+                startup_url: "about:blank".to_string(),
+                ..Default::default()
+            },
+            layout: LayoutSettings {
+                radius: 0.0,
+                window: WindowSettings { padding: 0.0 },
+                pane: PaneSettings { gap: 0.0 },
+                side_sheet: SideSheetSettings::default(),
+                focus_ring: FocusRingSettings::default(),
+            },
+            shortcuts: ShortcutSettings::default(),
+            terminal: None,
+            auto_update: false,
+            update_channel: Default::default(),
+            agent: vmux_setting::AgentSettings::default(),
+            spaces: Default::default(),
+            projects: Default::default(),
+            recording: Default::default(),
+            editor: Default::default(),
+            appearance: Default::default(),
+        }
+    }
+
+    fn spawn_stack_in_pane(app: &mut App, pane: Entity, url: &str) -> Entity {
+        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(pane))).id();
+        app.world_mut().entity_mut(stack).insert(PageMetadata {
+            url: url.to_string(),
+            ..default()
+        });
+        stack
+    }
+
+    #[test]
+    fn agent_run_is_handled_by_the_terminal_feature() {
+        let mut app = App::new();
+        app.add_message::<AgentRequestInput>()
+            .add_message::<AgentRequestBlocked>()
+            .add_message::<AgentCommandResponse>()
+            .add_message::<TerminalStackSpawnRequest>()
+            .add_message::<TerminalReinputRequest>()
+            .insert_resource(test_settings())
+            .add_systems(Update, run_agent_commands);
+        let process_id = ProcessId::new();
+        app.world_mut().spawn(SpawnCounter::default());
+        app.world_mut().spawn((
+            Terminal,
+            process_id,
+            TerminalLaunch {
+                command: "/bin/zsh".to_string(),
+                args: Vec::new(),
+                cwd: std::env::temp_dir().to_string_lossy().into_owned(),
+                env: Vec::new(),
+                kind: crate::launch::TerminalKind::Plain,
+            },
+        ));
+        app.update();
+        let request_id = vmux_api::protocol::AgentRequestId::new();
+        app.world_mut().write_message(AgentRequestInput {
+            request_id,
+            origin: vmux_core::agent::CommandOrigin::User,
+            request: vmux_api::protocol::AgentRequest::encode(&AgentRun {
+                anchor: ProcessId::new(),
+                command: "pwd".to_string(),
+                direction: AgentPaneDirection::Right,
+                focus: false,
+                beside: None,
+                mode: PlacementMode::Auto,
+                terminal: Some(process_id),
+                done_marker: None,
+            })
+            .unwrap(),
+        });
+
+        app.update();
+
+        let reinputs = app
+            .world_mut()
+            .resource_mut::<Messages<TerminalReinputRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(reinputs.len(), 1);
+        assert_eq!(reinputs[0].process_id, process_id);
+        assert!(String::from_utf8_lossy(&reinputs[0].data).contains("pwd"));
+        let responses = app
+            .world_mut()
+            .resource_mut::<Messages<AgentCommandResponse>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0].request_id, request_id);
+        assert_eq!(
+            responses[0].result,
+            AgentCommandResult::Text(process_id.to_string())
+        );
+    }
 
     #[test]
     fn run_terminal_cwd_prefers_tab_dir() {

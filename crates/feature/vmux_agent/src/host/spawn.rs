@@ -198,7 +198,7 @@ fn handle_spawn_agent_requests(
         let effort_key = format!("cli:{}", req.kind.as_url_segment());
         let effort = settings.agent.effort_for(&effort_key).map(str::to_string);
         let shell =
-            crate::host::run_terminal::AgentTerminalShell::configured(&settings).into_string();
+            vmux_terminal::agent_run::AgentTerminalShell::configured(&settings).into_string();
         let model = models
             .as_deref()
             .map(|models| models.selected_for(&effort_key).to_string())
@@ -461,7 +461,7 @@ fn handle_restart_agent_pty(
         let session_id = session_id.map(|session_id| session_id.0.clone());
         let new_id = ProcessId::new();
         let shell =
-            crate::host::run_terminal::AgentTerminalShell::configured(&settings).into_string();
+            vmux_terminal::agent_run::AgentTerminalShell::configured(&settings).into_string();
         let Some(launch) = launch else {
             bevy::log::warn!("agent launch configuration is unavailable");
             continue;

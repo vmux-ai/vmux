@@ -307,10 +307,10 @@ impl CodexModels {
     }
 
     fn discover_bundled_catalog() -> Vec<vmux_api::room::ModelOptionEntry> {
-        let Some(codex) = crate::exec::find_executable("codex") else {
+        let Some(codex) = vmux_core::Executable::find("codex") else {
             return Vec::new();
         };
-        let mut command = Command::new(codex);
+        let mut command = Command::new(codex.as_path());
         command.args([
             "-c",
             "model_catalog_json=null",
