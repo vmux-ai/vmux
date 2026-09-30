@@ -5,7 +5,7 @@ use vmux_api::InputSchema;
 use vmux_api::json::JsonValue;
 use vmux_api::protocol::AgentCommandTool;
 use vmux_core::JsonArguments;
-use vmux_core::host::manifest::FeatureManifestSource;
+use vmux_core::host::manifest::{self, FeatureManifest};
 use vmux_ui::i18n::Locale;
 
 use crate::shortcut::{Binding, KeyCombo, Modifiers, Shortcut, Source, When, resolve_key};
@@ -61,120 +61,45 @@ impl Plugin for CommandRuntimePlugin {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ShortcutDefinition {
     Direct(String),
     Chord(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+impl From<manifest::ShortcutKind> for ShortcutDefinition {
+    fn from(shortcut: manifest::ShortcutKind) -> Self {
+        match shortcut {
+            manifest::ShortcutKind::Direct(value) => Self::Direct(value),
+            manifest::ShortcutKind::Chord(value) => Self::Chord(value),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandShortcut {
     pub shortcut: ShortcutDefinition,
     pub when: Option<String>,
 }
 
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CommandMcpManifest {
-    description: String,
-    #[serde(default)]
-    input_schema: Option<InputSchema>,
-    #[serde(default)]
-    allow_agent: bool,
-}
-
-impl CommandMcpManifest {
-    fn into_mcp(self) -> CommandMcp {
-        let input_schema = self.input_schema.unwrap_or_else(InputSchema::object);
-        let definition = CommandMcp::new(self.description, input_schema);
-        if self.allow_agent {
-            return definition.allow_agent();
-        }
-        definition
-    }
-}
-
-struct CommandDefinitionDefaults;
-
-impl CommandDefinitionDefaults {
-    fn native_menu() -> bool {
-        true
-    }
-}
-
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CommandDefinitionManifest {
-    id: String,
-    #[serde(default)]
-    aliases: Vec<String>,
-    label: String,
-    group: String,
-    #[serde(default)]
-    accelerator: Option<String>,
-    #[serde(default)]
-    hidden: bool,
-    #[serde(default = "CommandDefinitionDefaults::native_menu")]
-    native_menu: bool,
-    #[serde(default)]
-    shortcut_label: Option<String>,
-    #[serde(default)]
-    shortcuts: Vec<CommandShortcut>,
-    #[serde(default)]
-    mcp: Option<CommandMcpManifest>,
-}
-
-impl CommandDefinitionManifest {
-    fn into_definition(self) -> CommandDefinition {
-        CommandDefinition {
-            id: self.id,
-            aliases: self.aliases,
-            label: self.label,
-            group: self.group,
-            accelerator: self.accelerator,
-            hidden: self.hidden,
-            native_menu: self.native_menu,
-            shortcut_label: self.shortcut_label,
-            shortcuts: self.shortcuts,
-            mcp: self.mcp.map(CommandMcpManifest::into_mcp),
-        }
-    }
-
-    fn validate(&self) {
-        if let Some(mcp) = &self.mcp
-            && let Some(input_schema) = &mcp.input_schema
-        {
-            input_schema
-                .validate()
-                .expect("embedded command input schemas must be valid");
+impl From<manifest::Shortcut> for CommandShortcut {
+    fn from(shortcut: manifest::Shortcut) -> Self {
+        Self {
+            shortcut: shortcut.shortcut.into(),
+            when: shortcut.when,
         }
     }
 }
 
-#[derive(serde::Deserialize)]
-struct FeatureCommandManifest {
-    #[serde(default)]
-    commands: Vec<CommandDefinitionManifest>,
-}
-
-pub struct CommandManifest(Vec<CommandDefinitionManifest>);
+pub struct CommandManifest(Vec<manifest::Command>);
 
 impl CommandManifest {
     pub fn from_feature_ron(source: &str) -> Self {
-        let manifest: FeatureCommandManifest =
-            ron::from_str(source).expect("embedded feature manifest must contain valid commands");
-        let definitions = manifest.commands;
-        for definition in &definitions {
-            definition.validate();
-        }
-        Self(definitions)
+        Self(FeatureManifest::parse(source).commands)
     }
 
     pub fn into_vec(self) -> Vec<CommandDefinition> {
-        self.0
-            .into_iter()
-            .map(CommandDefinitionManifest::into_definition)
-            .collect()
+        self.0.into_iter().map(CommandDefinition::from).collect()
     }
 }
 
@@ -189,6 +114,19 @@ pub struct CommandMcp {
     pub description: String,
     pub input_schema: InputSchema,
     pub agent_access: AgentAccess,
+}
+
+impl From<manifest::CommandMcp> for CommandMcp {
+    fn from(mcp: manifest::CommandMcp) -> Self {
+        let definition = Self::new(
+            mcp.description,
+            mcp.input_schema.unwrap_or_else(InputSchema::object),
+        );
+        if mcp.allow_agent {
+            return definition.allow_agent();
+        }
+        definition
+    }
 }
 
 impl CommandMcp {
@@ -218,6 +156,23 @@ pub struct CommandDefinition {
     pub shortcut_label: Option<String>,
     pub shortcuts: Vec<CommandShortcut>,
     pub mcp: Option<CommandMcp>,
+}
+
+impl From<manifest::Command> for CommandDefinition {
+    fn from(command: manifest::Command) -> Self {
+        Self {
+            id: command.id,
+            aliases: command.aliases,
+            label: command.label,
+            group: command.group,
+            accelerator: command.accelerator,
+            hidden: command.hidden,
+            native_menu: command.native_menu,
+            shortcut_label: command.shortcut_label,
+            shortcuts: command.shortcuts.into_iter().map(Into::into).collect(),
+            mcp: command.mcp.map(Into::into),
+        }
+    }
 }
 
 impl CommandDefinition {
@@ -643,14 +598,14 @@ fn spawn_keymap(mut commands: Commands) {
     ));
 }
 
-fn register_command_manifests(sources: Query<&FeatureManifestSource>, mut commands: Commands) {
-    let mut seen = HashSet::new();
-    for source in &sources {
-        if !seen.insert(source.as_str()) {
-            continue;
-        }
-        let definitions = CommandManifest::from_feature_ron(source.as_str());
-        for definition in definitions.into_vec() {
+fn register_command_manifests(manifests: Query<&FeatureManifest>, mut commands: Commands) {
+    for manifest in &manifests {
+        for definition in manifest
+            .commands
+            .iter()
+            .cloned()
+            .map(CommandDefinition::from)
+        {
             commands.spawn(definition);
         }
     }

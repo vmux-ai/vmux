@@ -389,9 +389,11 @@ initializes. Runtime page state and behavior still initialize through ECS schedu
 
 Each feature keeps one `src/feature.ron`. `pages`, `tools`, and application `commands` are flat
 lists; `cli` is the optional command tree. String-keyed pseudo-sections are not namespaces. A
-`FeatureManifestPlugin` registers the source as an ECS component, and page, tool, command, and CLI
-consumers read only the metadata they own. Feature plugins bind typed behavior without reparsing a
-named subsection or teaching an application crate which features exist.
+`FeatureManifestPlugin` parses the runtime sections once and registers one ECS component containing
+their typed metadata. Tool, command, CLI, and MCP catalog consumers read only the metadata they own
+from that entity. Page attributes read the same file at compile time. Repeated plugin composition
+is deduplicated by the embedded manifest identity, so feature plugins bind typed behavior without
+reparsing a named subsection or teaching an application crate which features exist.
 
 `vmux_app::extension` exposes the stable integration pieces: page manifests and hosted-page
 plugins, command-bar contributions and their chosen message, and typed MCP tool plugins. A custom

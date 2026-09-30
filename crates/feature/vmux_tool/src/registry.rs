@@ -1,12 +1,11 @@
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashSet;
 use std::marker::PhantomData;
 use vmux_api::protocol::{AgentCommandTool, AgentRequest};
-use vmux_core::host::manifest::FeatureManifestSource;
+use vmux_core::host::manifest::{FeatureManifest, Tool as ToolEntry, ToolAvailability};
 use vmux_core::{HostShell, JsonArguments, RegistrationOrder};
 
 use vmux_api::InputSchema;
@@ -90,36 +89,13 @@ fn spawn_tool_registry(mut commands: Commands) {
 }
 
 fn register_tool_manifests(
-    features: Query<&FeatureManifestSource>,
+    features: Query<&FeatureManifest>,
     mut commands: Commands,
     mut next_order: Single<&mut NextToolOrder>,
 ) {
-    let mut seen = HashSet::new();
-    for source in &features {
-        if seen.insert(source.as_str()) {
-            ToolManifest::from_feature_ron(source.as_str()).spawn(&mut commands, &mut next_order);
-        }
-    }
-}
-
-impl ToolManifest {
-    fn spawn(self, commands: &mut Commands, next_order: &mut NextToolOrder) {
-        for entry in self.0 {
-            let seed = entry.into_seed();
-            let order = next_order.0;
-            next_order.0 += 1;
-            let mut entity = commands.spawn((
-                RegisteredTool,
-                Name::new(seed.name),
-                ToolAliases(seed.aliases),
-                ToolDescription(seed.description),
-                ToolInputSchema(seed.input_schema),
-                ToolAccess(seed.availability),
-                RegistrationOrder(order),
-            ));
-            if seed.shell_aware {
-                entity.insert(ShellAware);
-            }
+    for feature in &features {
+        for entry in feature.tools.iter().cloned() {
+            ToolSeed::from(entry).spawn(&mut commands, &mut next_order);
         }
     }
 }
@@ -373,25 +349,6 @@ pub struct ToolCommand(pub Result<AgentRequest, String>);
 #[derive(Component, Clone, Debug)]
 pub struct ToolQuery(pub Result<AgentRequest, String>);
 
-#[derive(Clone, Copy, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-enum ToolAvailability {
-    #[default]
-    Always,
-    OutsideAcpSession,
-    WithoutAcpTerminals,
-}
-
-impl ToolAvailability {
-    pub(crate) fn allows(self, acp_session: bool, acp_terminals: bool) -> bool {
-        match self {
-            Self::Always => true,
-            Self::OutsideAcpSession => !acp_session,
-            Self::WithoutAcpTerminals => !acp_terminals,
-        }
-    }
-}
-
 #[derive(Component)]
 struct RegisteredTool;
 
@@ -442,54 +399,36 @@ struct ToolSeed {
     shell_aware: bool,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ToolEntry {
-    name: String,
-    #[serde(default)]
-    aliases: Vec<String>,
-    description: String,
-    input_schema: InputSchema,
-    #[serde(default)]
-    availability: ToolAvailability,
-    #[serde(default)]
-    shell_aware: bool,
+impl ToolSeed {
+    fn spawn(self, commands: &mut Commands, next_order: &mut NextToolOrder) {
+        let order = next_order.0;
+        next_order.0 += 1;
+        let mut entity = commands.spawn((
+            RegisteredTool,
+            Name::new(self.name),
+            ToolAliases(self.aliases),
+            ToolDescription(self.description),
+            ToolInputSchema(self.input_schema),
+            ToolAccess(self.availability),
+            RegistrationOrder(order),
+        ));
+        if self.shell_aware {
+            entity.insert(ShellAware);
+        }
+    }
 }
 
-impl ToolEntry {
-    fn into_seed(self) -> ToolSeed {
+impl From<ToolEntry> for ToolSeed {
+    fn from(entry: ToolEntry) -> Self {
         ToolSeed {
-            name: self.name,
-            aliases: self.aliases,
-            description: self.description,
-            input_schema: self.input_schema,
-            availability: self.availability,
-            shell_aware: self.shell_aware,
+            name: entry.name,
+            aliases: entry.aliases,
+            description: entry.description,
+            input_schema: entry.input_schema,
+            availability: entry.availability,
+            shell_aware: entry.shell_aware,
         }
     }
-}
-
-struct ToolManifest(Vec<ToolEntry>);
-
-impl ToolManifest {
-    fn from_feature_ron(source: &str) -> Self {
-        let entries = ron::from_str::<FeatureToolManifest>(source)
-            .expect("embedded feature manifest must contain valid tool metadata")
-            .tools;
-        for entry in &entries {
-            entry
-                .input_schema
-                .validate()
-                .expect("embedded tool input schemas must be valid");
-        }
-        Self(entries)
-    }
-}
-
-#[derive(Deserialize)]
-struct FeatureToolManifest {
-    #[serde(default)]
-    tools: Vec<ToolEntry>,
 }
 
 pub fn canonical_tool_name(name: &str) -> &str {
@@ -536,7 +475,7 @@ mod tests {
 
     #[test]
     fn parses_tools_from_feature_manifest() {
-        let manifest = ToolManifest::from_feature_ron(
+        let manifest = FeatureManifest::parse(
             r#"(
                 tools: [(
                         name: "test",
@@ -547,6 +486,6 @@ mod tests {
             )"#,
         );
 
-        assert_eq!(manifest.0[0].name, "test");
+        assert_eq!(manifest.tools[0].name, "test");
     }
 }

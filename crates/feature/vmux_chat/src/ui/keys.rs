@@ -1,9 +1,9 @@
 use super::composer::options::ChatMenuSet;
-use super::state::Chat;
-use crate::event::ChatItem;
-use crate::format::{
+use super::format::{
     PromptEdit, PromptHistoryDirection, move_prompt_history, prompt_history_direction,
 };
+use super::state::Chat;
+use crate::event::ChatItem;
 use dioxus::prelude::*;
 use vmux_core::input::{KeyStroke, UiKeyContext, Unclaimed};
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};

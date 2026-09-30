@@ -10,8 +10,5 @@ pub mod selector;
 #[cfg(host)]
 pub use host::ChatPlugin;
 
-#[cfg(any(test, ui))]
-pub mod format;
-
 #[cfg(ui)]
 pub mod ui;

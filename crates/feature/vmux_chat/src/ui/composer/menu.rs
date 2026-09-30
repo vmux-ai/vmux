@@ -1,4 +1,4 @@
-use crate::format::ResumeMenuState;
+use crate::ui::format::ResumeMenuState;
 use crate::ui::state::Chat;
 use dioxus::prelude::*;
 use vmux_command::palette::results::{CommandBarResultItem, ResumeRows};

@@ -1,11 +1,11 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 
 use bevy::app::{App, Plugin, Startup};
 use bevy_ecs::prelude::*;
 use serde::Deserialize;
 
-use crate::host::manifest::FeatureManifestSource;
+use crate::host::manifest::FeatureManifest;
 
 pub struct CliManifestPlugin;
 
@@ -15,24 +15,12 @@ impl Plugin for CliManifestPlugin {
     }
 }
 
-fn register_feature_cli_manifests(sources: Query<&FeatureManifestSource>, mut commands: Commands) {
-    let mut seen = HashSet::new();
-    for source in &sources {
-        if !seen.insert(source.as_str()) {
-            continue;
-        }
-        let feature = ron::from_str::<FeatureCliManifest>(source.as_str())
-            .expect("embedded feature manifest must contain valid CLI metadata");
-        if let Some(manifest) = feature.cli {
-            commands.spawn(manifest);
+fn register_feature_cli_manifests(manifests: Query<&FeatureManifest>, mut commands: Commands) {
+    for feature in &manifests {
+        if let Some(manifest) = &feature.cli {
+            commands.spawn(manifest.clone());
         }
     }
-}
-
-#[derive(Deserialize)]
-struct FeatureCliManifest {
-    #[serde(default)]
-    cli: Option<CliManifest>,
 }
 
 #[derive(Clone, Component, Debug, Deserialize, PartialEq, Eq)]
@@ -160,15 +148,14 @@ mod tests {
 
     #[test]
     fn parses_cli_from_feature_manifest() {
-        let manifest = ron::from_str::<FeatureCliManifest>(
+        let manifest = FeatureManifest::parse(
             r#"(
                 cli: (
                     commands: [(id: "tool", name: "tools")],
                 ),
                 ignored: true,
             )"#,
-        )
-        .unwrap();
+        );
 
         assert_eq!(manifest.cli.unwrap().commands[0].id, "tool");
     }

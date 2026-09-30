@@ -1,5 +1,5 @@
 use crate::event::ModelOptionEntry;
-pub(crate) use crate::selector::{SelectorMode, selector_mode};
+pub(crate) use crate::selector::SelectorMode;
 use unicode_segmentation::UnicodeSegmentation;
 #[cfg(ui)]
 pub(crate) use vmux_ui::prompt_recall::{
@@ -210,19 +210,37 @@ mod tests {
 
     #[test]
     fn selector_mode_distinguishes_mcp_and_other_selector_arguments() {
-        assert_eq!(selector_mode("hello"), SelectorMode::None);
-        assert_eq!(selector_mode("/res"), SelectorMode::Commands("res"));
-        assert_eq!(selector_mode("/resume"), SelectorMode::Commands("resume"));
-        assert_eq!(selector_mode("/resume "), SelectorMode::Resume(""));
-        assert_eq!(selector_mode("/model"), SelectorMode::Commands("model"));
-        assert_eq!(selector_mode("/model son"), SelectorMode::Models("son"));
-        assert_eq!(selector_mode("/mcp"), SelectorMode::Mcp(""));
-        assert_eq!(selector_mode("/mcp lin"), SelectorMode::Mcp("lin"));
+        assert_eq!(SelectorMode::from_draft("hello"), SelectorMode::None);
         assert_eq!(
-            selector_mode("/resume  SID-9"),
+            SelectorMode::from_draft("/res"),
+            SelectorMode::Commands("res")
+        );
+        assert_eq!(
+            SelectorMode::from_draft("/resume"),
+            SelectorMode::Commands("resume")
+        );
+        assert_eq!(
+            SelectorMode::from_draft("/resume "),
+            SelectorMode::Resume("")
+        );
+        assert_eq!(
+            SelectorMode::from_draft("/model"),
+            SelectorMode::Commands("model")
+        );
+        assert_eq!(
+            SelectorMode::from_draft("/model son"),
+            SelectorMode::Models("son")
+        );
+        assert_eq!(SelectorMode::from_draft("/mcp"), SelectorMode::Mcp(""));
+        assert_eq!(
+            SelectorMode::from_draft("/mcp lin"),
+            SelectorMode::Mcp("lin")
+        );
+        assert_eq!(
+            SelectorMode::from_draft("/resume  SID-9"),
             SelectorMode::Resume("SID-9")
         );
-        assert_eq!(selector_mode("/unknown arg"), SelectorMode::None);
+        assert_eq!(SelectorMode::from_draft("/unknown arg"), SelectorMode::None);
     }
 
     #[test]

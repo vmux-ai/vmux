@@ -14,7 +14,7 @@ use crate::event::ChatComposerEffect;
 use crate::event::ChatDraftChanged;
 #[cfg(host)]
 use crate::event::{ChatPickFiles, ChatResumeQueryRequest, ChatSlashCommandRequest};
-use crate::selector::{SelectorMode, selector_mode};
+use crate::selector::SelectorMode;
 
 #[derive(Component, Default)]
 pub struct ComposerState {
@@ -32,7 +32,7 @@ impl ComposerState {
         let media_query = inline_media_query(&self.draft)
             .map(|query| query.query.to_string())
             .unwrap_or_default();
-        let (resume_active, resume_query) = match selector_mode(&self.draft) {
+        let (resume_active, resume_query) = match SelectorMode::from_draft(&self.draft) {
             SelectorMode::Resume(query) => (true, query.to_string()),
             SelectorMode::Commands(query)
                 if !query.is_empty() && "resume".starts_with(&query.to_lowercase()) =>
@@ -41,7 +41,7 @@ impl ComposerState {
             }
             _ => (false, String::new()),
         };
-        let mcp_open = matches!(selector_mode(&self.draft), SelectorMode::Mcp(_));
+        let mcp_open = matches!(SelectorMode::from_draft(&self.draft), SelectorMode::Mcp(_));
         let changes = ComposerQueryChanges {
             media: (self.media_query != media_query).then_some(media_query.clone()),
             resume: (self.resume_active != resume_active || self.resume_query != resume_query)

@@ -1,3 +1,7 @@
+use super::format::{
+    ChatPageTitle, ImportedMessages, ModelOptions, PromptHistoryDirection, ResumeMenuState,
+    SelectorMode,
+};
 use super::scroll;
 use crate::event::ChatResumeState;
 use crate::event::{
@@ -8,10 +12,6 @@ use crate::event::{
     ChatSelectorDismissEffect, ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit,
     ChatTranscriptState, ComposerContext, ModelOptionEntry, QueuedPromptSnapshot,
     ResumableSessionEntry, ResumeSession, SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
-};
-use crate::format::{
-    ChatPageTitle, ImportedMessages, ModelOptions, PromptHistoryDirection, ResumeMenuState,
-    SelectorMode, selector_mode,
 };
 use crate::host::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
@@ -382,7 +382,7 @@ impl Chat {
 
     pub fn filtered_commands(&self) -> Vec<SlashCommandEntry> {
         let draft = self.draft();
-        let SelectorMode::Commands(query) = selector_mode(&draft) else {
+        let SelectorMode::Commands(query) = SelectorMode::from_draft(&draft) else {
             return Vec::new();
         };
         let query = query.to_lowercase();
@@ -401,7 +401,7 @@ impl Chat {
 
     pub fn filtered_models(&self) -> Vec<ModelOptionEntry> {
         let draft = self.draft();
-        let SelectorMode::Models(query) = selector_mode(&draft) else {
+        let SelectorMode::Models(query) = SelectorMode::from_draft(&draft) else {
             return Vec::new();
         };
         self.models.filtered(query)
@@ -409,7 +409,7 @@ impl Chat {
 
     pub fn filtered_mcp_servers(&self) -> Vec<vmux_api::mcp::McpServerEntry> {
         let draft = self.draft();
-        let SelectorMode::Mcp(query) = selector_mode(&draft) else {
+        let SelectorMode::Mcp(query) = SelectorMode::from_draft(&draft) else {
             return Vec::new();
         };
         self.mcp.filtered(query)
@@ -420,17 +420,26 @@ impl Chat {
     }
 
     pub fn resume_menu_open(&self) -> bool {
-        matches!(selector_mode(&self.draft()), SelectorMode::Resume(_))
+        matches!(
+            SelectorMode::from_draft(&self.draft()),
+            SelectorMode::Resume(_)
+        )
     }
 
     pub fn model_menu_open(&self) -> bool {
-        matches!(selector_mode(&self.draft()), SelectorMode::Models(_))
+        matches!(
+            SelectorMode::from_draft(&self.draft()),
+            SelectorMode::Models(_)
+        )
     }
 
     pub fn mcp_menu_open(&self) -> bool {
         #[cfg(host)]
         {
-            matches!(selector_mode(&self.draft()), SelectorMode::Mcp(_))
+            matches!(
+                SelectorMode::from_draft(&self.draft()),
+                SelectorMode::Mcp(_)
+            )
         }
         #[cfg(not(host))]
         {

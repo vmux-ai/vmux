@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 mod activity;
+mod format;
 use self::agent::ChatHeader;
 use self::approval::ChatApprovalDock;
 use self::composer::ChatDock;

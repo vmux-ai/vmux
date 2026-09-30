@@ -18,6 +18,7 @@ use vmux_api::mcp::{
     McpServerEntry, McpServerOperation, McpServerPending, McpServerRequest, McpServerResult,
     McpServerStatus, McpServers, McpServersRequest,
 };
+use vmux_core::host::manifest::{FeatureManifest, FeatureManifestPlugin};
 use vmux_core::host::{UiStatePlugin, UiStateWrite};
 use vmux_core::profile::mcp_credentials::{
     McpCredentialAccess, McpCredentialStorage, McpOauthCredentials,
@@ -29,6 +30,7 @@ pub struct McpConnectionPlugin;
 impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            FeatureManifestPlugin::new(include_str!("feature.ron")),
             UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default(),
             UiStatePlugin::<McpServers>::default(),
         ))
@@ -320,19 +322,6 @@ struct McpSnapshotTask {
     task: Task<McpServers>,
 }
 
-#[derive(Deserialize)]
-struct McpFeatureManifest {
-    mcp_servers: Vec<McpCatalogManifest>,
-}
-
-#[derive(Deserialize)]
-struct McpCatalogManifest {
-    id: String,
-    name: String,
-    url: String,
-    scopes: Vec<String>,
-}
-
 #[derive(Component, Clone)]
 struct McpCatalogServer {
     id: String,
@@ -360,18 +349,16 @@ impl McpCatalogServer {
     }
 }
 
-fn spawn_mcp_catalog(mut commands: Commands) {
-    let manifest: McpFeatureManifest = ron::from_str(include_str!("feature.ron"))
-        .expect("tool feature manifest must be valid RON");
+fn spawn_mcp_catalog(features: Query<&FeatureManifest>, mut commands: Commands) {
     let mut ids = BTreeSet::new();
-    for server in manifest.mcp_servers {
+    for server in features.iter().flat_map(|feature| &feature.mcp_servers) {
         assert!(ids.insert(server.id.clone()), "duplicate MCP server ID");
         commands.spawn((
-            Name::new(server.name),
+            Name::new(server.name.clone()),
             McpCatalogServer {
-                id: server.id,
-                url: server.url,
-                scopes: server.scopes,
+                id: server.id.clone(),
+                url: server.url.clone(),
+                scopes: server.scopes.clone(),
             },
         ));
     }
