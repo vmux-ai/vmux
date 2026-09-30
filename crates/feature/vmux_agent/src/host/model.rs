@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::event::AgentRequestInput;
 use crate::runtime::acp::{AcpModeState, AcpModelState};
@@ -14,6 +14,7 @@ use vmux_chat::event::{
     ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort, SlashCommand,
     SlashCommandEntry, SlashCommands,
 };
+use vmux_chat::host::ChatView;
 use vmux_chat::state::ChatUiState;
 use vmux_command::event::{StartSelectMode, StartSelectModel};
 use vmux_command::snapshot::{AgentPromptTarget, CommandBarProjection};
@@ -21,7 +22,6 @@ use vmux_core::agent::{default_effort, effort_levels};
 use vmux_core::host::UiStateWrite;
 use vmux_core::profile::ProfilePaths;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
-use vmux_layout::Browser;
 use vmux_path::AtomicFile;
 use vmux_session::AcpSession;
 use vmux_setting::{AppSettings, SettingsWriteRequest};
@@ -602,21 +602,17 @@ fn publish_agent_modes(
 fn push_acp_model_state_to_page(
     sessions: Query<(Entity, &AcpSession, &AcpModelState), Changed<AcpModelState>>,
     children: Query<&Children>,
-    is_browser: Query<(), With<Browser>>,
+    chat_views: Query<(), With<ChatView>>,
     settings: Option<Res<AppSettings>>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     for (stack, session, model_state) in &sessions {
         let Ok(kids) = children.get(stack) else {
             continue;
         };
-        let Some(webview) = kids.iter().find(|&entity| is_browser.contains(entity)) else {
+        let Some(webview) = kids.iter().find(|&entity| chat_views.contains(entity)) else {
             continue;
         };
-        if !browsers.can_emit_to(&webview) {
-            continue;
-        }
         let cross = acp_agent_kind(&session.agent_id)
             .map(kind_supports_cross_runtime)
             .unwrap_or(false);
@@ -641,9 +637,8 @@ fn push_removed_acp_model_state_to_page(
     mut removed: RemovedComponents<AcpModelState>,
     sessions: Query<&AcpSession>,
     children: Query<&Children>,
-    is_browser: Query<(), With<Browser>>,
+    chat_views: Query<(), With<ChatView>>,
     settings: Option<Res<AppSettings>>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     for stack in removed.read() {
@@ -653,12 +648,9 @@ fn push_removed_acp_model_state_to_page(
         let Ok(kids) = children.get(stack) else {
             continue;
         };
-        let Some(webview) = kids.iter().find(|&entity| is_browser.contains(entity)) else {
+        let Some(webview) = kids.iter().find(|&entity| chat_views.contains(entity)) else {
             continue;
         };
-        if !browsers.can_emit_to(&webview) {
-            continue;
-        }
         let cross = acp_agent_kind(&session.agent_id)
             .map(kind_supports_cross_runtime)
             .unwrap_or(false);
@@ -677,48 +669,42 @@ fn push_removed_acp_model_state_to_page(
 fn push_acp_mode_state_to_page(
     sessions: Query<(Entity, &AcpModeState), Changed<AcpModeState>>,
     children: Query<&Children>,
-    is_browser: Query<(), With<Browser>>,
-    browsers: NonSend<Browsers>,
+    chat_views: Query<(), With<ChatView>>,
     mut commands: Commands,
 ) {
     for (stack, mode_state) in &sessions {
         let Ok(kids) = children.get(stack) else {
             continue;
         };
-        let Some(webview) = kids.iter().find(|&entity| is_browser.contains(entity)) else {
+        let Some(webview) = kids.iter().find(|&entity| chat_views.contains(entity)) else {
             continue;
         };
-        if browsers.can_emit_to(&webview) {
-            let projection = ModeProjection::from(Some(mode_state));
-            commands.trigger(UiStateWrite::<ChatUiState>::from_event(
-                webview,
-                &projection.0,
-            ));
-        }
+        let projection = ModeProjection::from(Some(mode_state));
+        commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+            webview,
+            &projection.0,
+        ));
     }
 }
 
 fn push_removed_acp_mode_state_to_page(
     mut removed: RemovedComponents<AcpModeState>,
     children: Query<&Children>,
-    is_browser: Query<(), With<Browser>>,
-    browsers: NonSend<Browsers>,
+    chat_views: Query<(), With<ChatView>>,
     mut commands: Commands,
 ) {
     for stack in removed.read() {
         let Ok(kids) = children.get(stack) else {
             continue;
         };
-        let Some(webview) = kids.iter().find(|&entity| is_browser.contains(entity)) else {
+        let Some(webview) = kids.iter().find(|&entity| chat_views.contains(entity)) else {
             continue;
         };
-        if browsers.can_emit_to(&webview) {
-            let projection = ModeProjection::from(None);
-            commands.trigger(UiStateWrite::<ChatUiState>::from_event(
-                webview,
-                &projection.0,
-            ));
-        }
+        let projection = ModeProjection::from(None);
+        commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+            webview,
+            &projection.0,
+        ));
     }
 }
 

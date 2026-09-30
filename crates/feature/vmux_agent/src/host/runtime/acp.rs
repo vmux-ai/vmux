@@ -8,7 +8,6 @@ use vmux_core::agent::SwapStackSession;
 use vmux_core::service::ServiceRequest;
 use vmux_core::team::Profile;
 use vmux_core::{LastActivatedAt, PageMetadata};
-use vmux_layout::Browser;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::pane::PanePlacement;
 use vmux_layout::stack::stack_bundle;
@@ -18,6 +17,7 @@ use vmux_terminal::reattach_terminal_bundle;
 
 use crate::event::AgentApprovalRequest;
 use crate::handoff::{ImportedConversation, PendingHandoff};
+use vmux_chat::host::ChatView;
 use vmux_session::AgentRunState;
 use vmux_session::{AcpSession, AgentApprovalPolicy, PromptQueue};
 
@@ -563,10 +563,10 @@ fn apply_acp_session_created(
             &mut PageMetadata,
             Option<&ImportedConversation>,
         ),
-        Without<Browser>,
+        Without<ChatView>,
     >,
     children: Query<&Children>,
-    mut browser_meta: Query<&mut PageMetadata, With<Browser>>,
+    mut page_meta: Query<&mut PageMetadata, With<ChatView>>,
 ) {
     for ev in reader.read() {
         for (stack, mut session, mut stack_meta, imported) in &mut sessions {
@@ -587,7 +587,7 @@ fn apply_acp_session_created(
             }
             if let Ok(kids) = children.get(stack) {
                 for kid in kids.iter() {
-                    if let Ok(mut meta) = browser_meta.get_mut(kid)
+                    if let Ok(mut meta) = page_meta.get_mut(kid)
                         && meta.url != url
                     {
                         meta.url = url.clone();

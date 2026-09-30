@@ -973,6 +973,12 @@ Directory placement follows ownership, not dependency depth. A feature owns its 
 UI, host ECS, and domain behavior. Utilities may provide transport, rendering, shared types, or
 application composition without owning a user-facing page. The `host` cfg alias describes compiled
 code and has no directory counterpart.
+
+Agent requests follow the same boundary. `#[vmux_api::agent]` generates only the opaque contract
+for the type declared in a feature crate. That feature owns its manifest, registration, ECS routing,
+handling, and result projection. `vmux_agent`, `vmux_mcp`, and `vmux_tool` transport and dispatch
+opaque requests; they never enumerate browser, simulator, vault, layout, or other feature requests.
+Only the application composition root knows which feature plugins are installed.
 And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated code while
 staying flat.
 

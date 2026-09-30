@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use super::model::{ModeProjection, ModelProjection};
 use crate::handoff::ImportedConversation;
@@ -97,7 +97,6 @@ fn push_chat_to_page(
     >,
     choices: Query<&PendingAgentChoice>,
     user_profiles: Query<Ref<Profile>, With<User>>,
-    browsers: NonSend<Browsers>,
     mut last_push: Local<std::collections::HashMap<Entity, std::time::Instant>>,
     mut owed: Local<std::collections::HashSet<Entity>>,
     mut removed_messages: RemovedComponents<AgentMessages>,
@@ -135,15 +134,6 @@ fn push_chat_to_page(
             owed.insert(stack);
             continue;
         };
-        if !browsers.can_emit_to(&webview) {
-            if owed.insert(stack) {
-                warn!(
-                    ?stack,
-                    "chat snapshot owed: its view cannot receive one yet"
-                );
-            }
-            continue;
-        }
         let now = std::time::Instant::now();
         let elapsed = last_push
             .get(&stack)
@@ -366,7 +356,6 @@ fn sync_chat_to_ready_views(
     choices: Query<&PendingAgentChoice>,
     user_profiles: Query<&Profile, With<User>>,
     settings: Option<Res<vmux_setting::AppSettings>>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let user_profile = user_profiles.single().ok();
@@ -380,9 +369,6 @@ fn sync_chat_to_ready_views(
         else {
             continue;
         };
-        if !browsers.can_emit_to(&webview) {
-            continue;
-        }
         let mut projection = ChatProjection::new(
             messages,
             message_times,
@@ -473,13 +459,9 @@ fn reset_chat_synced_on_page_ready(
 fn on_chat_history_more_request(
     trigger: On<UiInput<ChatHistoryMoreRequest>>,
     mut views: Query<(&ChildOf, &mut ChatTranscriptProjection), With<ChatView>>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    if !browsers.can_emit_to(&webview) {
-        return;
-    }
     let Ok((parent, mut transcript)) = views.get_mut(webview) else {
         return;
     };
