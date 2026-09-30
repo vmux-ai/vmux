@@ -6,6 +6,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
 use super::composer::{ComposerSelectors, ComposerState};
+use super::key::ChatListSelection;
 use super::state::ChatUiState;
 use crate::activity::ActivityIcon;
 use crate::event::{
@@ -289,7 +290,8 @@ fn tab_activity_icon(
     ComposerState,
     ComposerSelectors,
     super::prompt::ChatPromptFocusRevision,
-    super::key::ChatKeyEffectRevision
+    super::key::ChatKeyEffectRevision,
+    ChatListSelection
 )]
 pub struct ChatView;
 

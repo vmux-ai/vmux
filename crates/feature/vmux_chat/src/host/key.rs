@@ -3,13 +3,15 @@ use super::session::{
     ChatSnapshotProjection, ChatTranscriptProjection, ChatView, PendingAgentChoice,
 };
 use crate::event::{
-    ApprovalDecision, ChatApproval, ChatCancel, ChatChoiceSelected, ChatEscape,
-    ChatListChooseEffect, ChatListMoveEffect, ChatSelectorDismissEffect, ChatSubmit,
+    ApprovalDecision, ChatApproval, ChatApprovalSelectionChanged, ChatApprovalSelectionEffect,
+    ChatCancel, ChatChoiceSelected, ChatChoiceSelectionChanged, ChatChoiceSelectionEffect,
+    ChatEscape, ChatListChooseEffect, ChatListMoveEffect, ChatSelectorDismissEffect, ChatSubmit,
 };
 use bevy_app::{App, Plugin, Startup};
 use bevy_cef::prelude::UiInput;
 use bevy_ecs::prelude::*;
 use vmux_command::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
+use vmux_ui::hooks::{MenuDirection, move_selection};
 use vmux_ui::prompt_recall::PromptHistoryDirection;
 
 pub struct ChatKeyPlugin;
@@ -19,13 +21,19 @@ impl Plugin for ChatKeyPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            include_str!("../feature.ron"),
+        app.add_plugins((
+            vmux_core::host::manifest::FeatureManifestPlugin::new(include_str!("../feature.ron")),
+            bevy_cef::prelude::UiEventPlugin::<(
+                ChatApprovalSelectionChanged,
+                ChatChoiceSelectionChanged,
+            )>::default(),
         ))
         .add_systems(Startup, bind_commands.in_set(BindCommands))
         .add_observer(move_list)
         .add_observer(choose_list)
         .add_observer(choose_number)
+        .add_observer(select_approval)
+        .add_observer(select_choice)
         .add_observer(move_history)
         .add_observer(submit)
         .add_observer(dismiss_selector)
@@ -36,6 +44,36 @@ impl Plugin for ChatKeyPlugin {
 
 #[derive(Component, Default)]
 pub(crate) struct ChatKeyEffectRevision(u64);
+
+#[derive(Component, Default)]
+pub(super) struct ChatListSelection {
+    approval_call_id: String,
+    approval: usize,
+    choice_question: String,
+    choice_options: Vec<String>,
+    choice: usize,
+}
+
+impl ChatListSelection {
+    fn approval(&mut self, call_id: &str, len: usize) -> &mut usize {
+        if self.approval_call_id != call_id {
+            self.approval_call_id = call_id.to_string();
+            self.approval = 0;
+        }
+        self.approval = self.approval.min(len.saturating_sub(1));
+        &mut self.approval
+    }
+
+    fn choice(&mut self, choice: &PendingAgentChoice) -> &mut usize {
+        if self.choice_question != choice.question || self.choice_options != choice.options {
+            self.choice_question.clone_from(&choice.question);
+            self.choice_options.clone_from(&choice.options);
+            self.choice = 0;
+        }
+        self.choice = self.choice.min(choice.options.len().saturating_sub(1));
+        &mut self.choice
+    }
+}
 
 #[derive(Component)]
 struct ListNextBinding;
@@ -90,6 +128,9 @@ fn move_list(
     trigger: On<CommandDispatch>,
     next: Query<(), With<ListNextBinding>>,
     previous: Query<(), With<ListPreviousBinding>>,
+    choices: Query<&PendingAgentChoice>,
+    snapshots: Query<&ChatSnapshotProjection>,
+    mut selections: Query<&mut ChatListSelection>,
     mut revisions: Query<&mut ChatKeyEffectRevision>,
     mut commands: Commands,
 ) {
@@ -101,11 +142,48 @@ fn move_list(
     } else {
         return;
     };
+    let direction = match next {
+        true => MenuDirection::Next,
+        false => MenuDirection::Previous,
+    };
     let caller = trigger.event().invocation().caller;
+    let Ok(mut selection) = selections.get_mut(caller) else {
+        return;
+    };
     let Ok(mut revision) = revisions.get_mut(caller) else {
         return;
     };
     revision.0 = revision.0.wrapping_add(1).max(1);
+    if let Ok(snapshot) = snapshots.get(caller)
+        && let Some(approval) = &snapshot.0.approval
+    {
+        let selected = selection.approval(&approval.call_id, 3);
+        *selected = move_selection(*selected, 3, direction);
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+                caller,
+                &ChatApprovalSelectionEffect {
+                    revision: revision.0,
+                    index: *selected as u32,
+                },
+            ),
+        );
+        return;
+    }
+    if let Ok(choice) = choices.get(caller) {
+        let selected = selection.choice(choice);
+        *selected = move_selection(*selected, choice.options.len(), direction);
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+                caller,
+                &ChatChoiceSelectionEffect {
+                    revision: revision.0,
+                    index: *selected as u32,
+                },
+            ),
+        );
+        return;
+    }
     commands.trigger(
         vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
             caller,
@@ -120,6 +198,9 @@ fn move_list(
 fn choose_list(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<ListChooseBinding>>,
+    choices: Query<&PendingAgentChoice>,
+    snapshots: Query<&ChatSnapshotProjection>,
+    mut selections: Query<&mut ChatListSelection>,
     mut revisions: Query<&mut ChatKeyEffectRevision>,
     mut commands: Commands,
 ) {
@@ -127,6 +208,38 @@ fn choose_list(
         return;
     }
     let caller = trigger.event().invocation().caller;
+    let Ok(mut selection) = selections.get_mut(caller) else {
+        return;
+    };
+    if let Ok(snapshot) = snapshots.get(caller)
+        && let Some(approval) = &snapshot.0.approval
+    {
+        let selected = *selection.approval(&approval.call_id, 3);
+        let decision = match selected {
+            0 => ApprovalDecision::Allow,
+            1 => ApprovalDecision::AllowAlways,
+            2 => ApprovalDecision::Deny,
+            _ => return,
+        };
+        commands.trigger(UiInput {
+            webview: caller,
+            payload: ChatApproval {
+                call_id: approval.call_id.clone(),
+                decision,
+            },
+        });
+        return;
+    }
+    if let Ok(choice) = choices.get(caller) {
+        let selected = *selection.choice(choice);
+        commands.trigger(UiInput {
+            webview: caller,
+            payload: ChatChoiceSelected {
+                index: selected as u32,
+            },
+        });
+        return;
+    }
     let Ok(mut revision) = revisions.get_mut(caller) else {
         return;
     };
@@ -139,6 +252,40 @@ fn choose_list(
             },
         ),
     );
+}
+
+fn select_approval(
+    trigger: On<UiInput<ChatApprovalSelectionChanged>>,
+    snapshots: Query<&ChatSnapshotProjection>,
+    mut selections: Query<&mut ChatListSelection>,
+) {
+    let webview = trigger.event().webview;
+    let Ok(snapshot) = snapshots.get(webview) else {
+        return;
+    };
+    let Some(approval) = &snapshot.0.approval else {
+        return;
+    };
+    let Ok(mut selection) = selections.get_mut(webview) else {
+        return;
+    };
+    *selection.approval(&approval.call_id, 3) = (trigger.event().payload.index as usize).min(2);
+}
+
+fn select_choice(
+    trigger: On<UiInput<ChatChoiceSelectionChanged>>,
+    choices: Query<&PendingAgentChoice>,
+    mut selections: Query<&mut ChatListSelection>,
+) {
+    let webview = trigger.event().webview;
+    let Ok(choice) = choices.get(webview) else {
+        return;
+    };
+    let Ok(mut selection) = selections.get_mut(webview) else {
+        return;
+    };
+    *selection.choice(choice) =
+        (trigger.event().payload.index as usize).min(choice.options.len().saturating_sub(1));
 }
 
 fn choose_number(
@@ -357,8 +504,20 @@ mod tests {
     #[test]
     fn a_resolved_key_reaches_only_the_page_that_sent_it() {
         let mut app = Echo::app();
-        let pressed = app.world_mut().spawn(ChatKeyEffectRevision::default()).id();
-        let other = app.world_mut().spawn(ChatKeyEffectRevision::default()).id();
+        let pressed = app
+            .world_mut()
+            .spawn((
+                ChatKeyEffectRevision::default(),
+                ChatListSelection::default(),
+            ))
+            .id();
+        let other = app
+            .world_mut()
+            .spawn((
+                ChatKeyEffectRevision::default(),
+                ChatListSelection::default(),
+            ))
+            .id();
 
         Echo::issue(&mut app, pressed, "chat_list_choose");
 
@@ -379,6 +538,7 @@ mod tests {
             .world_mut()
             .spawn((
                 ChatKeyEffectRevision::default(),
+                ChatListSelection::default(),
                 PendingAgentChoice {
                     session_entity: Entity::PLACEHOLDER,
                     question: "pick".to_string(),
@@ -388,6 +548,28 @@ mod tests {
             .id();
 
         Echo::issue(&mut app, page, "chat_choice_2");
+
+        assert_eq!(app.world().resource::<ChoiceNumbers>().0, vec![(page, 1)]);
+    }
+
+    #[test]
+    fn choice_arrows_and_enter_are_resolved_in_host_ecs() {
+        let mut app = Echo::app();
+        let page = app
+            .world_mut()
+            .spawn((
+                ChatKeyEffectRevision::default(),
+                ChatListSelection::default(),
+                PendingAgentChoice {
+                    session_entity: Entity::PLACEHOLDER,
+                    question: "pick".to_string(),
+                    options: vec!["one".to_string(), "two".to_string()],
+                },
+            ))
+            .id();
+
+        Echo::issue(&mut app, page, "chat_list_next");
+        Echo::issue(&mut app, page, "chat_list_choose");
 
         assert_eq!(app.world().resource::<ChoiceNumbers>().0, vec![(page, 1)]);
     }

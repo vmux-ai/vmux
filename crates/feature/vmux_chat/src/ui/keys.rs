@@ -8,8 +8,6 @@ use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::components::composer_bar::ComposerMenuKind;
 use vmux_ui::hooks::{KeyClaim, MenuDirection, move_selection, send, use_key_claim};
 
-const APPROVAL_OPTION_COUNT: usize = 3;
-
 #[derive(Clone, Copy)]
 pub struct ChatKeys {
     handler: ChatKeyHandler,
@@ -192,8 +190,7 @@ impl ChatList {
 
     fn len(self, chat: Chat) -> usize {
         match self {
-            Self::Approval => APPROVAL_OPTION_COUNT,
-            Self::Choice => chat.run.choice_options.read().len(),
+            Self::Approval | Self::Choice => 0,
             Self::ComposerMenu(kind) => ChatMenuSet::from(chat).rows(kind),
             Self::Media => chat.media.entries.read().len(),
             Self::Mcp => chat.filtered_mcp_servers().len(),
@@ -204,13 +201,13 @@ impl ChatList {
     }
 
     fn selection(self, chat: Chat) -> Signal<usize> {
-        match self {
-            Self::Approval => chat.run.approval_sel,
-            _ => chat.slash.menu_sel,
-        }
+        chat.slash.menu_sel
     }
 
     fn move_by(self, chat: Chat, direction: MenuDirection) {
+        if matches!(self, Self::Approval | Self::Choice) {
+            return;
+        }
         if let Self::ComposerMenu(kind) = self {
             chat.menu
                 .step(direction, ChatMenuSet::from(chat).rows(kind));
@@ -223,20 +220,7 @@ impl ChatList {
 
     fn choose(self, chat: Chat, index: usize) {
         match self {
-            Self::Approval => {
-                let Some(approval) = chat.run.approval.peek().clone() else {
-                    return;
-                };
-                let Some(decision) = super::approval::APPROVAL_DECISIONS.get(index).copied() else {
-                    return;
-                };
-                chat.answer_approval(approval.call_id, decision);
-            }
-            Self::Choice => {
-                if index < chat.run.choice_options.peek().len() {
-                    chat.answer_choice(index);
-                }
-            }
+            Self::Approval | Self::Choice => {}
             Self::ComposerMenu(kind) => {
                 if ChatMenuSet::from(chat).choose(kind, index) {
                     chat.menu.close();

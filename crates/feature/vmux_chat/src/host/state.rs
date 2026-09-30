@@ -2,10 +2,10 @@ use super::model::{Models, Picker};
 use super::prompt::{AttachmentPreviews, Attachments, Browsed, Media};
 use super::room::{Agents, Conversation, LiveTurn, Log, RoomTranscript, Snapshot};
 use crate::event::{
-    ChatAttachments, ChatBranchesState, ChatComposerEffect, ChatListChooseEffect,
-    ChatListMoveEffect, ChatMediaState, ChatPromptFocusEffect, ChatResumeState,
-    ChatSelectorDismissEffect, ChatSnapshot, ChatTranscriptState, ComposerContext, ModeState,
-    ModelState, SlashCommands,
+    ChatApprovalSelectionEffect, ChatAttachments, ChatBranchesState, ChatChoiceSelectionEffect,
+    ChatComposerEffect, ChatListChooseEffect, ChatListMoveEffect, ChatMediaState,
+    ChatPromptFocusEffect, ChatResumeState, ChatSelectorDismissEffect, ChatSnapshot,
+    ChatTranscriptState, ComposerContext, ModeState, ModelState, SlashCommands,
 };
 use bevy_app::{App, Last, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -42,6 +42,8 @@ pub struct ChatUiStatePatch {
     pub slash_commands: Option<SlashCommands>,
     pub list_move: Option<ChatListMoveEffect>,
     pub list_choose: Option<ChatListChooseEffect>,
+    pub choice_selection: Option<ChatChoiceSelectionEffect>,
+    pub approval_selection: Option<ChatApprovalSelectionEffect>,
     pub selector_dismiss: Option<ChatSelectorDismissEffect>,
     pub transcript: Option<Box<ChatTranscriptState>>,
     pub attachments: Option<Box<ChatAttachments>>,

@@ -2,13 +2,14 @@ use super::format::{ChatPageTitle, ImportedMessages, ModelOptions, ResumeMenuSta
 use super::scroll;
 use crate::event::ChatResumeState;
 use crate::event::{
-    ApprovalDecision, ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachments, ChatBranch,
-    ChatBranchesRequest, ChatBranchesState, ChatChoiceSelected, ChatComposerEffect,
-    ChatDraftChanged, ChatHistoryMoreRequest, ChatItem, ChatListChooseEffect, ChatListMoveEffect,
-    ChatMediaEntry, ChatMediaState, ChatRemoveAttachment, ChatSelectorDismissEffect,
-    ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit, ChatTranscriptState,
-    ComposerContext, ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry, ResumeSession,
-    SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
+    ApprovalDecision, ChatApproval, ChatApprovalSelectionChanged, ChatApprovalSelectionEffect,
+    ChatAttachPaths, ChatAttachment, ChatAttachments, ChatBranch, ChatBranchesRequest,
+    ChatBranchesState, ChatChoiceSelected, ChatChoiceSelectionChanged, ChatChoiceSelectionEffect,
+    ChatComposerEffect, ChatDraftChanged, ChatHistoryMoreRequest, ChatItem, ChatListChooseEffect,
+    ChatListMoveEffect, ChatMediaEntry, ChatMediaState, ChatRemoveAttachment,
+    ChatSelectorDismissEffect, ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit,
+    ChatTranscriptState, ComposerContext, ModelOptionEntry, QueuedPromptSnapshot,
+    ResumableSessionEntry, ResumeSession, SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
 };
 use crate::host::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
@@ -165,6 +166,16 @@ impl Chat {
             && self.accepts_input_effect(revision)
         {
             self.choose_active_list();
+        }
+        if let Some(ChatChoiceSelectionEffect { revision, index }) = patch.choice_selection
+            && self.accepts_input_effect(revision)
+        {
+            set_if_changed(self.slash.menu_sel, index as usize);
+        }
+        if let Some(ChatApprovalSelectionEffect { revision, index }) = patch.approval_selection
+            && self.accepts_input_effect(revision)
+        {
+            set_if_changed(self.run.approval_sel, index as usize);
         }
         if let Some(ChatSelectorDismissEffect { revision }) = patch.selector_dismiss
             && self.accepts_input_effect(revision)
@@ -755,6 +766,13 @@ impl Chat {
         }
     }
 
+    pub fn point_at_choice(&self, index: usize) {
+        set_if_changed(self.slash.menu_sel, index);
+        let _ = send(&ChatChoiceSelectionChanged {
+            index: index as u32,
+        });
+    }
+
     pub fn answer_approval(&self, call_id: String, decision: ApprovalDecision) {
         let mut approval = self.run.approval;
         let mut approval_sel = self.run.approval_sel;
@@ -762,6 +780,13 @@ impl Chat {
             approval.set(None);
             approval_sel.set(0);
         }
+    }
+
+    pub fn point_at_approval(&self, index: usize) {
+        set_if_changed(self.run.approval_sel, index);
+        let _ = send(&ChatApprovalSelectionChanged {
+            index: index as u32,
+        });
     }
 
     pub fn open_menu(&self, kind: ComposerMenuKind) {

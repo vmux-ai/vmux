@@ -200,9 +200,19 @@ pub struct ChatChoiceSelected {
 }
 
 #[vmux_api::ui_event(Default)]
+pub struct ChatChoiceSelectionChanged {
+    pub index: u32,
+}
+
+#[vmux_api::ui_event(Default)]
 pub struct ChatApproval {
     pub call_id: String,
     pub decision: ApprovalDecision,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct ChatApprovalSelectionChanged {
+    pub index: u32,
 }
 
 #[vmux_api::ui_event]
@@ -251,6 +261,18 @@ pub struct ChatListMoveEffect {
 #[vmux_api::contract(Copy, Eq)]
 pub struct ChatListChooseEffect {
     pub revision: u64,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct ChatChoiceSelectionEffect {
+    pub revision: u64,
+    pub index: u32,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct ChatApprovalSelectionEffect {
+    pub revision: u64,
+    pub index: u32,
 }
 
 #[vmux_api::contract(Copy, Eq)]

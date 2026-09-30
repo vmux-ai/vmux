@@ -23,6 +23,7 @@ pub(super) fn ChatApprovalDock(chat: Chat) -> Element {
             details: approval.details,
             selected: Some((chat.run.approval_sel)()),
             on_answer: move |decision| chat.answer_approval(approval.call_id.clone(), decision),
+            on_hover: move |index| chat.point_at_approval(index),
         }
     }
 }
@@ -33,6 +34,7 @@ pub fn ApprovalPanel(
     details: Vec<ApprovalDetail>,
     #[props(default)] selected: Option<usize>,
     on_answer: EventHandler<ApprovalDecision>,
+    on_hover: EventHandler<usize>,
 ) -> Element {
     rsx! {
         div { class: "border-t border-foreground/10 bg-foreground/[0.04] px-4 py-3",
@@ -61,6 +63,7 @@ pub fn ApprovalPanel(
                     for (index , decision) in APPROVAL_DECISIONS.into_iter().enumerate() {
                         button {
                             key: "approval-option-{index}",
+                            onmouseenter: move |_| on_hover.call(index),
                             class: if selected == Some(index) { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
                             onclick: move |_| on_answer.call(decision),
                             span { class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-current/20 font-mono text-[10px]", "{index + 1}" }
@@ -117,7 +120,6 @@ pub(super) fn ChoiceList(chat: Chat) -> Element {
     if options.is_empty() {
         return rsx! {};
     }
-    let mut menu_sel = chat.slash.menu_sel;
     let question = (chat.run.choice_question)();
     rsx! {
         div { class: "border-l-2 border-foreground/15 py-2 pl-3.5",
@@ -127,8 +129,8 @@ pub(super) fn ChoiceList(chat: Chat) -> Element {
                     button {
                         key: "choice-{index}",
                         id: "agent-choice-item-{index}",
-                        onmouseenter: move |_| menu_sel.set(index),
-                        class: if index == menu_sel() { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
+                        onmouseenter: move |_| chat.point_at_choice(index),
+                        class: if index == (chat.slash.menu_sel)() { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
                         onclick: move |_| chat.answer_choice(index),
                         span { class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-current/20 font-mono text-[10px]", "{index + 1}" }
                         span { class: "min-w-0 flex-1", "{option}" }
