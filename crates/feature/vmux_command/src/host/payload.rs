@@ -225,7 +225,7 @@ pub fn command_bar_open_payload(
     spaces: Vec<CommandBarSpace>,
     tabs: Vec<CommandBarTab>,
     commands: Vec<CommandBarCommandEntry>,
-    target: Option<crate::open_target::OpenTarget>,
+    target: Option<OpenTarget>,
     pages: Vec<CommandBarPage>,
     work_dirs: Vec<vmux_api::command_bar::CommandBarWorkDir>,
     recent_files: Vec<vmux_api::command_bar::CommandBarRecentFile>,

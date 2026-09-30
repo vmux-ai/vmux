@@ -13,9 +13,9 @@ impl Plugin for EditorPlugin {
             crate::ui::KnowledgePage::plugin(),
         ));
         app.add_plugins((
-            contract::ContractPlugin,
-            tool::FileToolPlugin,
-            lsp::LspPlugin,
+            ContractPlugin,
+            FileToolPlugin,
+            LspPlugin,
             app_key::KeyPlugin,
             search::SearchPlugin,
             directory::DirectoryPlugin,

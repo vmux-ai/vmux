@@ -94,7 +94,7 @@ impl From<manifest::Shortcut> for CommandShortcut {
 pub struct CommandManifest(Vec<manifest::Command>);
 
 impl CommandManifest {
-    pub fn for_feature<M: vmux_core::host::manifest::FeatureManifestSource>() -> Self {
+    pub fn for_feature<M: manifest::FeatureManifestSource>() -> Self {
         Self(FeatureManifest::of::<M>().commands)
     }
 

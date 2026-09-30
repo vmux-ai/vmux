@@ -67,11 +67,11 @@ type ReadyMedia = (
 );
 
 fn sync_media_allowlist(media: Query<&FileView, With<FileMedia>>, dirs: Query<&FileDir>) {
-    let mut paths: std::collections::HashSet<std::path::PathBuf> =
+    let mut paths: std::collections::HashSet<PathBuf> =
         media.iter().map(|file| file.path.clone()).collect();
     for dir in &dirs {
         for entry in &dir.entries {
-            paths.insert(std::path::PathBuf::from(&entry.path));
+            paths.insert(PathBuf::from(&entry.path));
         }
     }
     set_media_allowlist(paths);

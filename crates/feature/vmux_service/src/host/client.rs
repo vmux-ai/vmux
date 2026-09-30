@@ -222,7 +222,7 @@ impl ServiceHandle {
                 let mut stream = stream;
                 vmux_core::service::write_client_message_blocking(
                     &mut stream,
-                    &vmux_api::protocol::ClientMessage::Shutdown,
+                    &ClientMessage::Shutdown,
                 )
             });
             tracing::info!(?outcome, "replaced running daemon");

@@ -537,7 +537,7 @@ impl Credentials {
             credential,
             client_id: self.client_id.clone(),
             fingerprint: self.fingerprint.clone(),
-            desktop: vmux_transport::DeviceId::new(&self.device),
+            desktop: DeviceId::new(&self.device),
         })
     }
 

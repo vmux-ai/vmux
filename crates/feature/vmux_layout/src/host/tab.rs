@@ -1044,7 +1044,7 @@ mod tests {
 
         let opened = app
             .world_mut()
-            .resource_mut::<Messages<vmux_core::PageOpenRequest>>()
+            .resource_mut::<Messages<PageOpenRequest>>()
             .drain()
             .collect::<Vec<_>>();
         assert_eq!(

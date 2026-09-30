@@ -106,7 +106,7 @@ impl Plugin for TerminalPlugin {
         .add_message::<TerminalStackSpawnRequest>()
         .add_message::<TerminalSpawnRequest>()
         .add_plugins((
-            crate::pid::PidPlugin,
+            pid::PidPlugin,
             crate::host::request::TerminalRequestPlugin,
             TerminalServicePlugin,
             TerminalInputPlugin,
@@ -1611,7 +1611,7 @@ fn on_term_key(
         With<Terminal>,
     >,
     keymap: Single<&Keymap>,
-    mut command_invocations: MessageWriter<vmux_command::CommandInvocation>,
+    mut command_invocations: MessageWriter<CommandInvocation>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -1624,7 +1624,7 @@ fn on_term_key(
     match resolve_terminal_web_shortcut(event, &keymap, &mut shortcuts) {
         TerminalWebShortcutResolution::Command(id) => {
             let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
-            command_invocations.write(vmux_command::CommandInvocation::new(caller, id));
+            command_invocations.write(CommandInvocation::new(caller, id));
             if let Some(proxy) = proxy.as_ref() {
                 let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
             }
@@ -2835,9 +2835,9 @@ mod tests {
         }
 
         let world = app.world();
-        assert_eq!(world.get::<crate::pid::Pid>(e1).map(|p| p.0), Some(111));
-        assert_eq!(world.get::<crate::pid::Pid>(e2).map(|p| p.0), Some(222));
-        assert_eq!(world.get::<crate::pid::Pid>(e3).map(|p| p.0), Some(333));
+        assert_eq!(world.get::<pid::Pid>(e1).map(|p| p.0), Some(111));
+        assert_eq!(world.get::<pid::Pid>(e2).map(|p| p.0), Some(222));
+        assert_eq!(world.get::<pid::Pid>(e3).map(|p| p.0), Some(333));
     }
 
     #[test]

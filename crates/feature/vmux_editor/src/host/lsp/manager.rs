@@ -202,7 +202,7 @@ fn one_document_edit(
     edits: Vec<lsp_types::TextEdit>,
 ) -> Option<lsp_types::WorkspaceEdit> {
     let uri: lsp_types::Uri = uri_for(path)?.parse().ok()?;
-    let mut changes = std::collections::HashMap::new();
+    let mut changes = HashMap::new();
     changes.insert(uri, edits);
     Some(lsp_types::WorkspaceEdit {
         changes: Some(changes),
@@ -1238,7 +1238,7 @@ pub fn build(
     diagnostics: LspDiagnosticsSender,
     diagnostics_inbox: LspDiagnosticsInbox,
 ) {
-    let (lint, lint_inbox) = crate::lsp::LintDiagnosticsSender::channel();
+    let (lint, lint_inbox) = LintDiagnosticsSender::channel();
     let startup = std::sync::Mutex::new(Some((diagnostics, diagnostics_inbox, lint, lint_inbox)));
     app.add_systems(
         Startup,

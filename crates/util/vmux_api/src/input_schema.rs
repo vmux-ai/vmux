@@ -116,7 +116,7 @@ impl InputSchema {
     }
 
     pub fn to_json(&self) -> Value {
-        let mut object = serde_json::Map::new();
+        let mut object = Map::new();
         if let Some(schema_type) = self.schema_type {
             object.insert(
                 "type".to_string(),

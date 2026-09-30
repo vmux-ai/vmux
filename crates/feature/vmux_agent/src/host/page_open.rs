@@ -615,7 +615,7 @@ fn handle_agent_page_open_task(
     transition_webview: Option<Entity>,
     acp_sessions: &Query<&AcpSession>,
     commands: &mut Commands,
-    default_cwd: &std::path::Path,
+    default_cwd: &Path,
     acp_configs: &[vmux_setting::AcpAgentConfig],
     catalog: Option<&crate::runtime::acp::AcpCatalog>,
 ) -> Result<(), String> {

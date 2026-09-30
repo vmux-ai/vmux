@@ -341,11 +341,7 @@ fn poll_acp_installs(
                 *state = (&progress).into();
             }
         }
-        if job
-            .thread
-            .as_ref()
-            .is_some_and(std::thread::JoinHandle::is_finished)
-        {
+        if job.thread.as_ref().is_some_and(JoinHandle::is_finished) {
             let thread = job.thread.take().unwrap();
             job.outcome = Some(thread.join().unwrap_or_else(|_| AcpInstallOutcome {
                 package_added: false,

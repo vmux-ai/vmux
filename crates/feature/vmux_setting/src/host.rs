@@ -35,7 +35,7 @@ impl Plugin for SettingsPlugin {
         app.add_plugins((
             agent::AgentSettingsPlugin,
             SettingsRuntimePlugin,
-            tool::SettingToolPlugin,
+            SettingToolPlugin,
             state::StatePlugin,
             projection::ProjectionPlugin,
             appearance::AppearancePlugin,

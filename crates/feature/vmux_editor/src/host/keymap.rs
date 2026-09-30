@@ -84,7 +84,7 @@ pub struct EditorKeymap(pub Box<dyn Keymap>);
 
 #[derive(PartialEq, Eq)]
 pub(super) struct KeymapConfig {
-    kind: vmux_core::KeymapKind,
+    kind: KeymapKind,
     maps: Vec<vmux_core::editor::KeyMapping>,
     leader: String,
 }
@@ -93,7 +93,7 @@ impl KeymapConfig {
     pub(super) fn resolve(settings: Option<&vmux_setting::AppSettings>) -> Self {
         let Some(settings) = settings else {
             return Self {
-                kind: vmux_core::KeymapKind::default(),
+                kind: KeymapKind::default(),
                 maps: Vec::new(),
                 leader: " ".to_string(),
             };
@@ -113,7 +113,7 @@ impl KeymapConfig {
         self.kind.initial_mode()
     }
 
-    pub(super) fn kind(&self) -> vmux_core::KeymapKind {
+    pub(super) fn kind(&self) -> KeymapKind {
         self.kind
     }
 }

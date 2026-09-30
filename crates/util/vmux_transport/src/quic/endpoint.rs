@@ -123,15 +123,12 @@ impl Trust {
         Ok(endpoint)
     }
 
-    pub fn endpoint_on(
-        &self,
-        socket: std::sync::Arc<dyn quinn::AsyncUdpSocket>,
-    ) -> Result<Endpoint, String> {
+    pub fn endpoint_on(&self, socket: Arc<dyn quinn::AsyncUdpSocket>) -> Result<Endpoint, String> {
         let mut endpoint = Endpoint::new_with_abstract_socket(
             quinn::EndpointConfig::default(),
             None,
             socket,
-            std::sync::Arc::new(quinn::TokioRuntime),
+            Arc::new(quinn::TokioRuntime),
         )
         .map_err(|error| format!("QUIC tunnel endpoint failed: {error}"))?;
         endpoint.set_default_client_config(self.client_config()?);

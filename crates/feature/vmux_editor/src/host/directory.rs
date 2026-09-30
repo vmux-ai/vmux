@@ -460,14 +460,14 @@ pub fn parent_listing(path: &Path) -> (String, Vec<FileDirEntry>) {
     }
 }
 
-pub fn project_root(start: &Path) -> std::path::PathBuf {
+pub fn project_root(start: &Path) -> PathBuf {
     project_root_with_knowledge(
         start,
         &vmux_core::knowledge::KnowledgeVault::user().into_root(),
     )
 }
 
-fn project_root_with_knowledge(start: &Path, knowledge: &Path) -> std::path::PathBuf {
+fn project_root_with_knowledge(start: &Path, knowledge: &Path) -> PathBuf {
     let base = if start.is_dir() {
         start
     } else {

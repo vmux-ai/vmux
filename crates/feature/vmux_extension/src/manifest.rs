@@ -202,7 +202,7 @@ fn validate_version(version: &str) -> Result<(), String> {
 fn validate_resource_path(kind: &str, path: &str) -> Result<(), String> {
     if path.is_empty()
         || path.contains('\\')
-        || std::path::Path::new(path).components().any(|component| {
+        || Path::new(path).components().any(|component| {
             !matches!(
                 component,
                 std::path::Component::Normal(_) | std::path::Component::CurDir

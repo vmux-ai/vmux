@@ -78,7 +78,7 @@ fn serve_snapshot_requests(
     tabs_q: Query<(Entity, &LayoutTab, Option<&Children>)>,
     splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
     leaves_q: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
-    stacks_q: Query<(Entity, Option<&Children>, Option<&vmux_core::PageMetadata>), With<Stack>>,
+    stacks_q: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
     pane_sizes_q: Query<&PaneSize>,
     zoomed_q: Query<&crate::pane::Zoomed>,
     focused: crate::stack::FocusedStack,
@@ -115,7 +115,7 @@ fn serve_snapshot_requests(
             snapshot.tabs.retain(|tab| {
                 tab.id
                     .as_deref()
-                    .and_then(|id| crate::protocol::parse_id(id).ok())
+                    .and_then(|id| parse_id(id).ok())
                     .map(|(_, bits)| space_hierarchy.get(Entity::from_bits(bits)) == Some(target))
                     .unwrap_or(true)
             });
@@ -230,7 +230,7 @@ fn respond_to_layout_apply(
     tabs_q: Query<(Entity, &LayoutTab, Option<&Children>)>,
     splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
     leaves_q: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
-    stacks_q: Query<(Entity, Option<&Children>, Option<&vmux_core::PageMetadata>), With<Stack>>,
+    stacks_q: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
     pane_sizes_q: Query<&PaneSize>,
     zoomed_q: Query<&crate::pane::Zoomed>,
     focused: crate::stack::FocusedStack,
@@ -275,8 +275,7 @@ fn apply_layout_plan(
     page_open: &mut MessageWriter<PageOpenRequest>,
     commands: &mut Commands,
 ) {
-    let mut new_entities: std::collections::HashMap<*const proto::LayoutNode, Entity> =
-        std::collections::HashMap::new();
+    let mut new_entities: HashMap<*const proto::LayoutNode, Entity> = HashMap::new();
     let mut materialized: Vec<(&proto::Tab, Entity, i64)> = Vec::with_capacity(snapshot.tabs.len());
     let tab_parent: Option<Entity> = snapshot
         .tabs
@@ -367,7 +366,7 @@ fn materialize_descendants(
     parent: Entity,
     parent_is_tab: bool,
     node: &proto::LayoutNode,
-    new_entities: &mut std::collections::HashMap<*const proto::LayoutNode, Entity>,
+    new_entities: &mut HashMap<*const proto::LayoutNode, Entity>,
     children_q: &Query<&Children>,
     splits: &mut Query<(Entity, &mut PaneSplit, Option<&mut Node>)>,
     terminal_spawn: &mut MessageWriter<TerminalLayoutSpawnRequest>,
@@ -574,7 +573,7 @@ fn apply_tab(
 fn apply_structure(
     parent: Option<Entity>,
     node: &proto::LayoutNode,
-    new_entities: &std::collections::HashMap<*const proto::LayoutNode, Entity>,
+    new_entities: &HashMap<*const proto::LayoutNode, Entity>,
     commands: &mut Commands,
 ) {
     let Some(entity) = resolve_node_entity(node, new_entities) else {
@@ -613,7 +612,7 @@ fn apply_structure(
 
 fn resolve_node_entity(
     node: &proto::LayoutNode,
-    new_entities: &std::collections::HashMap<*const proto::LayoutNode, Entity>,
+    new_entities: &HashMap<*const proto::LayoutNode, Entity>,
 ) -> Option<Entity> {
     let id = match node {
         proto::LayoutNode::Split { id, .. } | proto::LayoutNode::Pane { id, .. } => id.as_deref(),

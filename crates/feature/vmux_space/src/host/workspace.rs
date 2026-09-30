@@ -318,9 +318,7 @@ impl AgentWorkspaceState<'_, '_> {
         };
         session.cwd = cwd.to_path_buf();
         let cwd = cwd.to_string_lossy().into_owned();
-        commands
-            .entity(stack)
-            .insert(vmux_core::AgentWorkingDir(cwd.clone()));
+        commands.entity(stack).insert(AgentWorkingDir(cwd.clone()));
         Some(ClientMessage::RebindAcpWorkspace {
             sid: session.sid.clone(),
             cwd,

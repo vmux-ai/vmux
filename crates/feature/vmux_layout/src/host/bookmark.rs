@@ -1475,7 +1475,7 @@ mod tests {
         let expected = PageMetadata {
             title: "Start".into(),
             url: "vmux://start/".into(),
-            icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Sparkles),
+            icon: PageIcon::Builtin(vmux_core::BuiltinIcon::Sparkles),
             bg_color: Some("#111111".into()),
         };
         TestRequest::send(

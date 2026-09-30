@@ -332,7 +332,7 @@ fn focus_native_page(
 fn host_window_for(world: &World, entity: Entity) -> Option<Entity> {
     let mut current = entity;
     loop {
-        if let Some(host) = world.get::<bevy_cef::prelude::HostWindow>(current) {
+        if let Some(host) = world.get::<HostWindow>(current) {
             return Some(host.0);
         }
         current = world.get::<ChildOf>(current).map(Relationship::get)?;

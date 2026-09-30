@@ -303,7 +303,7 @@ fn handle_agent_file_touch(
             .push(PendingFilePreview {
                 anchor: *anchor,
                 agent_pane,
-                url: FileUrl::from_path(std::path::Path::new(path), *line, *col, *end_col),
+                url: FileUrl::from_path(Path::new(path), *line, *col, *end_col),
                 request_id: request.request_id.0,
                 user_origin: !request.origin.is_agent(),
                 kind: *kind,
@@ -437,15 +437,15 @@ mod tests {
     #[test]
     fn file_touch_url_builds_goto_fragment() {
         assert_eq!(
-            FileUrl::from_path(std::path::Path::new("/a/b.rs"), None, None, None,),
+            FileUrl::from_path(Path::new("/a/b.rs"), None, None, None,),
             "file:///a/b.rs"
         );
         assert_eq!(
-            FileUrl::from_path(std::path::Path::new("/a/b.rs"), Some(10), None, None,),
+            FileUrl::from_path(Path::new("/a/b.rs"), Some(10), None, None,),
             "file:///a/b.rs#L10"
         );
         assert_eq!(
-            FileUrl::from_path(std::path::Path::new("/a/b.rs"), Some(10), Some(5), Some(12),),
+            FileUrl::from_path(Path::new("/a/b.rs"), Some(10), Some(5), Some(12),),
             "file:///a/b.rs#L10:5-12"
         );
     }

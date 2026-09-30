@@ -486,11 +486,9 @@ fn publish_active_session(
         if last.get(&entity) == Some(&event) {
             continue;
         }
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<crate::state::LayoutUiState>::from_event(
-                entity, &event,
-            ),
-        );
+        commands.trigger(vmux_core::host::UiStateWrite::<LayoutUiState>::from_event(
+            entity, &event,
+        ));
         last.insert(entity, event);
     }
 }
@@ -634,12 +632,10 @@ fn publish_side_sheet(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<crate::state::LayoutUiState>::from_event(
-                entity,
-                &projection.state,
-            ),
-        );
+        commands.trigger(vmux_core::host::UiStateWrite::<LayoutUiState>::from_event(
+            entity,
+            &projection.state,
+        ));
     }
 }
 
@@ -648,12 +644,10 @@ fn publish_bookmark_ui(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<crate::state::LayoutUiState>::from_event(
-                entity,
-                &projection.0,
-            ),
-        );
+        commands.trigger(vmux_core::host::UiStateWrite::<LayoutUiState>::from_event(
+            entity,
+            &projection.0,
+        ));
     }
 }
 

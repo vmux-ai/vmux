@@ -157,10 +157,10 @@ struct RoomRegistry {
 }
 
 #[derive(Message, Clone, Debug, PartialEq)]
-pub struct RoomOpReceived(pub vmux_api::room::RoomEvent);
+pub struct RoomOpReceived(pub RoomEvent);
 
 #[derive(Message, Clone, Debug, PartialEq)]
-pub struct RoomOpCommitted(pub vmux_api::room::RoomEvent);
+pub struct RoomOpCommitted(pub RoomEvent);
 
 #[derive(Message, Clone, Debug, Eq, PartialEq)]
 pub struct CrdtChangeReceived {

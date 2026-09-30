@@ -415,7 +415,7 @@ mod tests {
                 .add_message::<crate::lsp::manager::LspGoto>()
                 .add_plugins((
                     NavigationPlugin,
-                    vmux_core::host::UiStatePlugin::<vmux_core::event::FileUiState>::default(),
+                    vmux_core::host::UiStatePlugin::<FileUiState>::default(),
                 ))
                 .init_resource::<Emitted>()
                 .add_observer(

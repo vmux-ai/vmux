@@ -807,7 +807,7 @@ fn panel_width_clamps() {
 fn open_editors_track_on_navigate_and_close() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("src");
-    std::fs::create_dir(&dir).unwrap();
+    fs::create_dir(&dir).unwrap();
     let mut app = App::new();
     app.add_plugins((MinimalPlugins, TabsPlugin));
     app.world_mut().spawn(crate::lsp::manager::LspManager::new(

@@ -544,10 +544,10 @@ fn install_vmux_fixture(home: &Path, extension: &Path, extension_id: &str) -> Re
     let source = store.source_dir(extension_id, &parsed.version);
     copy_tree(extension, &source)?;
     let source_hash = store.source_hash(&source)?;
-    let mut profile_enabled = std::collections::BTreeMap::new();
+    let mut profile_enabled = BTreeMap::new();
     profile_enabled.insert(CONFORMANCE_PROFILE.into(), true);
     let mut index = store::Index::default();
-    let mut approved_grants = std::collections::BTreeMap::new();
+    let mut approved_grants = BTreeMap::new();
     approved_grants.insert(
         CONFORMANCE_PROFILE.into(),
         store::ExtensionGrants {

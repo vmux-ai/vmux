@@ -1574,8 +1574,8 @@ impl Process {
             }
             let data = match self.pty_rx.try_recv() {
                 Ok(data) => data,
-                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
-                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                Err(mpsc::error::TryRecvError::Empty) => break,
+                Err(mpsc::error::TryRecvError::Disconnected) => {
                     pty_closed = true;
                     break;
                 }

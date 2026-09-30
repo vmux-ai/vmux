@@ -45,7 +45,7 @@ pub enum PlacementMode {
 pub struct AgentRun {
     pub anchor: ProcessId,
     pub command: String,
-    pub direction: vmux_layout::AgentPaneDirection,
+    pub direction: AgentPaneDirection,
     pub focus: bool,
     pub beside: Option<ProcessId>,
     pub mode: PlacementMode,
@@ -502,7 +502,7 @@ impl PagerEnv {
 }
 
 fn command_with_marker(shell: &str, command: &str, token: &str, env: PagerEnv) -> String {
-    let base = std::path::Path::new(shell)
+    let base = Path::new(shell)
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or(shell);
@@ -800,9 +800,7 @@ fn run_agent_commands(
                     for entity in candidate
                         .activation_entities(&context.panes.child_of_q, &context.panes.tab_q)
                     {
-                        commands
-                            .entity(entity)
-                            .insert(vmux_core::LastActivatedAt::now());
+                        commands.entity(entity).insert(LastActivatedAt::now());
                     }
                 }
                 break 'run AgentCommandResult::Text(candidate.pid.to_string());
@@ -850,7 +848,7 @@ fn run_agent_commands(
                             &context.panes.split_dir_q,
                             &mut split_this_batch,
                         );
-                        vmux_layout::pane::split_or_extend(
+                        split_or_extend(
                             &mut commands,
                             split.pane,
                             split.direction,

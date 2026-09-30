@@ -121,7 +121,7 @@ fn open_file(
 fn read_file(
     mut commands: Commands,
     requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &ReadFileArgs), Added<ReadFileArgs>>,
-    protocol_requests: Query<(), With<vmux_mcp::protocol::McpRequest>>,
+    protocol_requests: Query<(), With<McpRequest>>,
 ) {
     for (entity, name, anchor, args) in &requests {
         if protocol_requests.contains(entity) {
@@ -147,7 +147,7 @@ fn read_file(
 fn grep(
     mut commands: Commands,
     requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &GrepArgs), Added<GrepArgs>>,
-    protocol_requests: Query<(), With<vmux_mcp::protocol::McpRequest>>,
+    protocol_requests: Query<(), With<McpRequest>>,
 ) {
     for (entity, name, anchor, args) in &requests {
         if protocol_requests.contains(entity) {

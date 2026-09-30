@@ -90,7 +90,7 @@ impl Plugin for CommandBarControllerPlugin {
                 PostUpdate,
                 reveal_command_bar.chain().after(LayoutSystems::Layout),
             )
-            .add_systems(Update, keep_awake.after(crate::ReadCommandRequests));
+            .add_systems(Update, keep_awake.after(ReadCommandRequests));
     }
 }
 
@@ -547,7 +547,7 @@ fn handle_open_command_bar(
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     contributed_pages: ContributedPages,
     contributed_commands: Query<&ContributedCommand>,
-    definitions: Query<&crate::CommandDefinition>,
+    definitions: Query<&CommandDefinition>,
     locale: Option<Res<ResolvedLocale>>,
     mut commands: Commands,
 ) {
@@ -900,7 +900,7 @@ mod tests {
         let payload = world
             .run_system_once(
                 |pages: ContributedPages, commands: Query<&ContributedCommand>| {
-                    let definitions = [crate::CommandDefinition {
+                    let definitions = [CommandDefinition {
                         id: "test_command".to_string(),
                         aliases: Vec::new(),
                         label: "Test Command".to_string(),

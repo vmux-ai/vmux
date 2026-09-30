@@ -189,7 +189,7 @@ fn dismiss_splash(
         SplashDismissDecision::None => {
             let close = state
                 .fade_started
-                .is_some_and(|t| t.elapsed() >= std::time::Duration::from_millis(280));
+                .is_some_and(|t| t.elapsed() >= Duration::from_millis(280));
             if close && let Some(panel) = state.window.take() {
                 let window: &NSWindow = panel.as_super();
                 window.close();

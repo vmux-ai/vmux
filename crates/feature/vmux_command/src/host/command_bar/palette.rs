@@ -412,7 +412,7 @@ fn receive_palette_open(
 }
 
 fn update_palette_draft(
-    trigger: On<bevy_cef::prelude::UiInput<CommandPaletteDraftRequest>>,
+    trigger: On<UiInput<CommandPaletteDraftRequest>>,
     mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput, &mut PaletteMenuState)>,
     active: Query<(), With<PaletteMcpActive>>,
     mut commands: Commands,

@@ -109,7 +109,7 @@ impl GitRepository {
         Ok(parse::parse_porcelain_v2_statuses(&stdout).into_file_statuses())
     }
 
-    pub fn dirty_paths(&self) -> Result<std::collections::HashSet<String>, GitError> {
+    pub fn dirty_paths(&self) -> Result<HashSet<String>, GitError> {
         let (stdout, stderr, ok) = git_read_bytes(
             &self.0,
             &["status", "--porcelain=v2", "-z", "--untracked-files=all"],
@@ -1721,7 +1721,7 @@ mod tests {
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         test_repo::write(repo.path(), "a.txt", "X1\nl2\nX3\nl4\nl5\n");
 
-        let hunks: std::collections::HashSet<u32> = repository
+        let hunks: HashSet<u32> = repository
             .diff_lines(&file)
             .unwrap()
             .iter()

@@ -562,7 +562,7 @@ fn send_acp_input(
             .map(|modes| modes.selected_for(&session.agent_id).to_string())
             .filter(|mode| !mode.is_empty());
         service_requests.write(ServiceRequest(
-            vmux_api::protocol::SharedMessage::AgentInput {
+            SharedMessage::AgentInput {
                 sid: session.sid.clone(),
                 text,
                 context,

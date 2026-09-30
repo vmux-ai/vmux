@@ -99,11 +99,11 @@ impl Profile {
         cef_keychain_switches_for(is_test_session())
     }
 
-    fn display_name_path(&self, data: &std::path::Path) -> PathBuf {
+    fn display_name_path(&self, data: &Path) -> PathBuf {
         data.join("profiles").join(&self.id).join("display_name")
     }
 
-    fn display_name_in(&self, data: &std::path::Path, is_test: bool) -> String {
+    fn display_name_in(&self, data: &Path, is_test: bool) -> String {
         let configured = std::fs::read_to_string(self.display_name_path(data)).ok();
         self.display_name_from(configured.as_deref(), is_test)
     }
@@ -122,7 +122,7 @@ impl Profile {
         }
     }
 
-    fn all_in(data: &std::path::Path, active: Self) -> Vec<Self> {
+    fn all_in(data: &Path, active: Self) -> Vec<Self> {
         let root = data.join("profiles");
         let mut profiles = std::collections::BTreeSet::new();
         profiles.insert(active.id);
@@ -136,7 +136,7 @@ impl Profile {
         profiles.into_iter().map(|id| Self { id }).collect()
     }
 
-    fn create_in(data: &std::path::Path, name: &str) -> std::io::Result<Self> {
+    fn create_in(data: &Path, name: &str) -> std::io::Result<Self> {
         let name = name.trim();
         if name.is_empty() {
             return Err(std::io::Error::new(
@@ -335,7 +335,7 @@ fn data_dir_suffix_for(profile: &str) -> PathBuf {
     }
 }
 
-fn recording_dir_for(data: &std::path::Path, profile: &str) -> PathBuf {
+fn recording_dir_for(data: &Path, profile: &str) -> PathBuf {
     data.join("profiles").join(profile).join("recording")
 }
 
@@ -346,7 +346,7 @@ fn config_suffix() -> Option<&'static str> {
     }
 }
 
-fn settings_candidates_in(base: &std::path::Path, suffix: Option<&str>) -> Vec<PathBuf> {
+fn settings_candidates_in(base: &Path, suffix: Option<&str>) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(suffix) = suffix {
         candidates.push(base.join(suffix).join("settings.ron"));
@@ -356,7 +356,7 @@ fn settings_candidates_in(base: &std::path::Path, suffix: Option<&str>) -> Vec<P
 }
 
 fn cef_cache_path_in(
-    data: &std::path::Path,
+    data: &Path,
     profile: &str,
     build_profile: &str,
     worktree_id: &str,
@@ -378,16 +378,16 @@ fn cef_keychain_switches_for(is_test_session: bool) -> &'static [&'static str] {
     }
 }
 
-fn store_dir_for(base: &std::path::Path, _profile: &str) -> PathBuf {
+fn store_dir_for(base: &Path, _profile: &str) -> PathBuf {
     base.to_path_buf()
 }
 
-fn spaces_root_for(data: &std::path::Path, _profile: &str) -> PathBuf {
+fn spaces_root_for(data: &Path, _profile: &str) -> PathBuf {
     data.join("spaces")
 }
 
 #[cfg(test)]
-fn space_dir_path(data: &std::path::Path, profile: &str, space_id: &str) -> PathBuf {
+fn space_dir_path(data: &Path, profile: &str, space_id: &str) -> PathBuf {
     spaces_root_for(data, profile).join(space_id)
 }
 
@@ -397,13 +397,13 @@ fn home_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/"))
 }
 
-fn is_empty_dir(path: &std::path::Path) -> bool {
+fn is_empty_dir(path: &Path) -> bool {
     std::fs::read_dir(path)
         .map(|mut entries| entries.next().is_none())
         .unwrap_or(false)
 }
 
-fn collect_subdirs(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+fn collect_subdirs(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -416,7 +416,7 @@ fn collect_subdirs(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn prune_empty_legacy_space_dirs_in(data: &std::path::Path) {
+fn prune_empty_legacy_space_dirs_in(data: &Path) {
     let root = spaces_root_for(data, "personal");
     if root
         .symlink_metadata()
@@ -436,7 +436,7 @@ fn prune_empty_legacy_space_dirs_in(data: &std::path::Path) {
     }
 }
 
-fn migrate_dir(legacy: &std::path::Path, target: &std::path::Path) {
+fn migrate_dir(legacy: &Path, target: &Path) {
     let Ok(legacy_metadata) = legacy.symlink_metadata() else {
         return;
     };
@@ -463,11 +463,7 @@ fn migrate_dir(legacy: &std::path::Path, target: &std::path::Path) {
     let _ = std::fs::remove_dir(legacy);
 }
 
-fn migrate_legacy_personal_layout_in(
-    home: &std::path::Path,
-    data: &std::path::Path,
-    managed_data: &std::path::Path,
-) {
+fn migrate_legacy_personal_layout_in(home: &Path, data: &Path, managed_data: &Path) {
     let config = home.join(".vmux");
     migrate_dir(
         &config.join("profiles").join("personal").join("spaces"),
@@ -504,7 +500,7 @@ mod tests {
     #[test]
     fn recording_dir_is_nested_under_profile() {
         assert_eq!(
-            recording_dir_for(std::path::Path::new("/data/Vmux"), "personal"),
+            recording_dir_for(Path::new("/data/Vmux"), "personal"),
             PathBuf::from("/data/Vmux/profiles/personal/recording")
         );
     }
@@ -512,7 +508,7 @@ mod tests {
     #[test]
     fn recording_dir_test_profile_is_nested() {
         assert_eq!(
-            recording_dir_for(std::path::Path::new("/data/Vmux"), "test"),
+            recording_dir_for(Path::new("/data/Vmux"), "test"),
             PathBuf::from("/data/Vmux/profiles/test/recording")
         );
     }
@@ -566,7 +562,7 @@ mod tests {
 
     #[test]
     fn store_dir_is_profile_agnostic_base() {
-        let base = std::path::Path::new("/data/Vmux/dev");
+        let base = Path::new("/data/Vmux/dev");
         assert_eq!(
             store_dir_for(base, "personal"),
             PathBuf::from("/data/Vmux/dev")
@@ -609,7 +605,7 @@ mod tests {
 
     #[test]
     fn spaces_root_is_profile_agnostic() {
-        let data = std::path::Path::new("/data/Vmux");
+        let data = Path::new("/data/Vmux");
         assert_eq!(
             spaces_root_for(data, "personal"),
             PathBuf::from("/data/Vmux/spaces")
@@ -654,19 +650,14 @@ mod tests {
     #[test]
     fn release_keeps_the_shared_cef_profile() {
         assert_eq!(
-            cef_cache_path_in(
-                std::path::Path::new("/data/Vmux"),
-                "personal",
-                "release",
-                "worktree-a",
-            ),
+            cef_cache_path_in(Path::new("/data/Vmux"), "personal", "release", "worktree-a",),
             PathBuf::from("/data/Vmux/profiles/personal")
         );
     }
 
     #[test]
     fn local_cef_profiles_are_isolated_by_worktree() {
-        let data = std::path::Path::new("/data/Vmux");
+        let data = Path::new("/data/Vmux");
         let first = cef_cache_path_in(data, "personal", "local", "worktree-a");
         let second = cef_cache_path_in(data, "personal", "local", "worktree-b");
 
@@ -724,7 +715,7 @@ mod tests {
     #[test]
     fn space_dir_is_under_vmux_spaces() {
         assert_eq!(
-            space_dir_path(std::path::Path::new("/data/Vmux"), "personal", "work"),
+            space_dir_path(Path::new("/data/Vmux"), "personal", "work"),
             PathBuf::from("/data/Vmux/spaces/work")
         );
     }

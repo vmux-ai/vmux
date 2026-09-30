@@ -74,7 +74,7 @@ pub(crate) struct QuitRequest;
 #[derive(Component)]
 struct QuitConfirmation {
     count: usize,
-    wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
+    wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
 }
 
 #[cfg(feature = "tray")]

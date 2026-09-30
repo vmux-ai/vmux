@@ -78,8 +78,8 @@ fn update_agents_snapshot(
 }
 
 fn acp_agent_summaries(
-    catalog: &[crate::acp_registry::RegistryAgent],
-    is_installed: impl Fn(&crate::acp_registry::RegistryAgent) -> bool,
+    catalog: &[RegistryAgent],
+    is_installed: impl Fn(&RegistryAgent) -> bool,
 ) -> Vec<AgentSummary> {
     let mut agents: Vec<AgentSummary> = catalog
         .iter()
@@ -162,8 +162,8 @@ mod tests {
         app
     }
 
-    fn registry_agent(id: &str, name: &str) -> crate::acp_registry::RegistryAgent {
-        crate::acp_registry::RegistryAgent {
+    fn registry_agent(id: &str, name: &str) -> RegistryAgent {
+        RegistryAgent {
             id: id.to_string(),
             name: name.to_string(),
             version: None,

@@ -1,8 +1,8 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use syn::visit::{self, Visit};
-use syn::{Expr, ExprMethodCall, ItemFn};
+use syn::{Expr, ExprMethodCall, Item, ItemFn, UseTree};
 
 const GENERIC_MODULES: &[&str] = &[
     "bin", "host", "lib", "main", "plugin", "runtime", "src", "test", "tests", "ui",
@@ -196,4 +196,120 @@ fn system_name_policy_detects_framework_and_module_repetition() {
         )
         .is_none()
     );
+}
+
+#[test]
+fn files_do_not_mix_imported_and_qualified_paths_for_one_type() {
+    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("crates dir");
+    let mut violations = Vec::new();
+
+    walk(crates_dir, &mut |path, source| {
+        let Ok(file) = syn::parse_file(source) else {
+            return;
+        };
+        audit_imports(path, &file.items, "crate", &mut violations);
+    });
+
+    assert!(
+        violations.is_empty(),
+        "use either an import or a qualified path for one type within a file:\n{}",
+        violations.join("\n")
+    );
+}
+
+fn audit_imports(path: &Path, items: &[Item], scope: &str, violations: &mut Vec<String>) {
+    let mut imports = BTreeMap::<String, Vec<Vec<String>>>::new();
+    for item in items {
+        if let Item::Use(item) = item {
+            collect_imports(Vec::new(), &item.tree, &mut imports);
+        }
+    }
+
+    let mut paths = QualifiedPaths::default();
+    for item in items {
+        if !matches!(item, Item::Use(_) | Item::Mod(_)) {
+            paths.visit_item(item);
+        }
+    }
+
+    for (name, imported_paths) in imports {
+        for imported in imported_paths {
+            if paths
+                .0
+                .iter()
+                .any(|qualified| qualified.starts_with(&imported))
+            {
+                violations.push(format!(
+                    "{} ({scope}): `{name}` is both imported and written as `{}`",
+                    path.display(),
+                    imported.join("::")
+                ));
+            }
+        }
+    }
+
+    for item in items {
+        let Item::Mod(module) = item else {
+            continue;
+        };
+        let Some((_, items)) = &module.content else {
+            continue;
+        };
+        let nested = format!("{scope}::{}", module.ident);
+        audit_imports(path, items, &nested, violations);
+    }
+}
+
+fn collect_imports(
+    mut prefix: Vec<String>,
+    tree: &UseTree,
+    imports: &mut BTreeMap<String, Vec<Vec<String>>>,
+) {
+    match tree {
+        UseTree::Path(path) => {
+            prefix.push(path.ident.to_string());
+            collect_imports(prefix, &path.tree, imports);
+        }
+        UseTree::Name(name) => {
+            let local = name.ident.to_string();
+            if local == "self" {
+                if let Some(local) = prefix.last() {
+                    imports.entry(local.clone()).or_default().push(prefix);
+                }
+                return;
+            }
+            prefix.push(local.clone());
+            imports.entry(local).or_default().push(prefix);
+        }
+        UseTree::Group(group) => {
+            for item in &group.items {
+                collect_imports(prefix.clone(), item, imports);
+            }
+        }
+        UseTree::Glob(_) | UseTree::Rename(_) => {}
+    }
+}
+
+#[derive(Default)]
+struct QualifiedPaths(Vec<Vec<String>>);
+
+impl<'ast> Visit<'ast> for QualifiedPaths {
+    fn visit_item_mod(&mut self, _module: &'ast syn::ItemMod) {}
+
+    fn visit_item_use(&mut self, _item: &'ast syn::ItemUse) {}
+
+    fn visit_path(&mut self, path: &'ast syn::Path) {
+        if path.segments.len() > 1 {
+            self.0.push(
+                path.segments
+                    .iter()
+                    .map(|segment| segment.ident.to_string())
+                    .collect(),
+            );
+        }
+        visit::visit_path(self, path);
+    }
 }

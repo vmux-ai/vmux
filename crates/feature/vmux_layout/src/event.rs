@@ -520,7 +520,7 @@ pub struct BookmarkUiState {
     pub pins: Vec<BookmarkPinState>,
     pub rows: Vec<BookmarkTreeState>,
     pub folders: Vec<BookmarkFolderChoice>,
-    pub active_page: Option<vmux_core::PageMetadata>,
+    pub active_page: Option<PageMetadata>,
 }
 
 #[vmux_api::contract(Eq)]
@@ -734,7 +734,7 @@ pub struct ActiveWorkspaceProject {
 #[vmux_api::contract(Default)]
 pub struct HeaderState {
     pub active: Option<StackRow>,
-    pub metadata: Option<vmux_core::PageMetadata>,
+    pub metadata: Option<PageMetadata>,
     pub bookmarked: bool,
     pub pinned_uuid: Option<String>,
     pub user: Option<vmux_core::event::team::TeamMemberRow>,

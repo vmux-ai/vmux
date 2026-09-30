@@ -94,7 +94,7 @@ pub(crate) struct LayoutSpawnPlugin;
 impl Plugin for LayoutSpawnPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<crate::LauncherDismissRequest>()
-            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_systems(
                 Update,
@@ -1139,8 +1139,8 @@ mod tests {
             .spawn((crate::space::Space, ChildOf(main)))
             .id();
         app.world_mut()
-            .resource_mut::<Messages<crate::TabLayoutSpawnRequest>>()
-            .write(crate::TabLayoutSpawnRequest {
+            .resource_mut::<Messages<TabLayoutSpawnRequest>>()
+            .write(TabLayoutSpawnRequest {
                 space,
                 primary_window: window,
                 name: None,
@@ -1175,8 +1175,8 @@ mod tests {
             .spawn((crate::space::Space, ChildOf(main)))
             .id();
         app.world_mut()
-            .resource_mut::<Messages<crate::TabLayoutSpawnRequest>>()
-            .write(crate::TabLayoutSpawnRequest {
+            .resource_mut::<Messages<TabLayoutSpawnRequest>>()
+            .write(TabLayoutSpawnRequest {
                 space: requested_space,
                 primary_window: window,
                 name: None,

@@ -447,10 +447,7 @@ fn apply_edit_request(
                 continue;
             }
             EditCommand::OpenCommandLine => {
-                commands.write_message(vmux_command::CommandInvocation::new(
-                    entity,
-                    "browser_open_ex_bar",
-                ));
+                commands.write_message(CommandInvocation::new(entity, "browser_open_ex_bar"));
                 continue;
             }
             EditCommand::TriggerCompletion => {

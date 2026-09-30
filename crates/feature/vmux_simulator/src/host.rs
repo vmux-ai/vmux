@@ -692,6 +692,6 @@ impl SimulatorDevice {
     pub fn canonical_url(&self) -> Option<String> {
         self.version
             .as_ref()
-            .map(|version| crate::url::SimulatorRoute::url(version, Some(&self.name)))
+            .map(|version| SimulatorRoute::url(version, Some(&self.name)))
     }
 }

@@ -29,11 +29,11 @@ const CODEC: LengthPrefixed = LengthPrefixed::new(64 * 1024 * 1024);
 
 #[cfg(host)]
 #[derive(Clone, Message)]
-pub struct ServiceRequest(pub vmux_api::protocol::ClientMessage);
+pub struct ServiceRequest(pub ClientMessage);
 
 #[cfg(host)]
 #[derive(Clone, Message)]
-pub struct ServiceInbound(pub vmux_api::protocol::ServiceMessage);
+pub struct ServiceInbound(pub ServiceMessage);
 
 #[cfg(host)]
 pub trait ServiceMessageVariant: Message + Sized {

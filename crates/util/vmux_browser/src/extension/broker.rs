@@ -59,7 +59,7 @@ fn spawn_extension_broker(
 
 fn arm_bridge_wake(
     server: Single<&ExtensionBridgeServer>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
     mut armed: Local<bool>,
 ) {
     if *armed {
