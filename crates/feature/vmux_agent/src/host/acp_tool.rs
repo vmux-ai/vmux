@@ -52,11 +52,11 @@ fn scan_tools(
     refresh: bool,
 ) -> Result<ToolProviderSnapshot, String> {
     let catalog = if refresh {
-        acp_registry::fetch_blocking()
+        acp_registry::Registry::fetch_blocking()
             .ok()
-            .or_else(acp_registry::load_cached)
+            .or_else(acp_registry::Registry::cached)
     } else {
-        acp_registry::load_cached()
+        acp_registry::Registry::cached()
     };
     let catalog = catalog
         .map(|registry| {

@@ -13,6 +13,42 @@ pub struct Registry {
     pub agents: Vec<RegistryAgent>,
 }
 
+impl std::str::FromStr for Registry {
+    type Err = String;
+
+    fn from_str(json: &str) -> Result<Self, Self::Err> {
+        serde_json::from_str(json).map_err(|error| format!("acp registry: parse failed: {error}"))
+    }
+}
+
+impl Registry {
+    pub fn cached() -> Option<Self> {
+        std::fs::read_to_string(Self::cache_path())
+            .ok()?
+            .parse()
+            .ok()
+    }
+
+    pub fn fetch_blocking() -> Result<Self, String> {
+        let text = reqwest::blocking::get(REGISTRY_URL)
+            .and_then(|response| response.error_for_status())
+            .and_then(|response| response.text())
+            .map_err(|error| format!("acp registry: fetch failed: {error}"))?;
+        let registry = text.parse()?;
+        let dir = vmux_core::profile::ProfilePaths::current().agents();
+        if std::fs::create_dir_all(&dir).is_ok() {
+            let _ = vmux_path::AtomicFile::write(Self::cache_path(), text.as_bytes());
+        }
+        Ok(registry)
+    }
+
+    fn cache_path() -> PathBuf {
+        vmux_core::profile::ProfilePaths::current()
+            .agents()
+            .join("registry.json")
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct RegistryAgent {
     pub id: String,
@@ -125,33 +161,6 @@ impl RegistryAgent {
     }
 }
 
-fn cache_path() -> PathBuf {
-    vmux_core::profile::ProfilePaths::current()
-        .agents()
-        .join("registry.json")
-}
-
-pub fn parse(json: &str) -> Result<Registry, String> {
-    serde_json::from_str(json).map_err(|e| format!("acp registry: parse failed: {e}"))
-}
-
-pub fn load_cached() -> Option<Registry> {
-    parse(&std::fs::read_to_string(cache_path()).ok()?).ok()
-}
-
-pub fn fetch_blocking() -> Result<Registry, String> {
-    let text = reqwest::blocking::get(REGISTRY_URL)
-        .and_then(|r| r.error_for_status())
-        .and_then(|r| r.text())
-        .map_err(|e| format!("acp registry: fetch failed: {e}"))?;
-    let registry = parse(&text)?;
-    let dir = vmux_core::profile::ProfilePaths::current().agents();
-    if std::fs::create_dir_all(&dir).is_ok() {
-        let _ = vmux_path::AtomicFile::write(cache_path(), text.as_bytes());
-    }
-    Ok(registry)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,7 +197,7 @@ mod tests {
 
     #[test]
     fn parses_all_distribution_types() {
-        let reg = parse(SAMPLE).unwrap();
+        let reg: Registry = SAMPLE.parse().unwrap();
         assert_eq!(reg.version, "1.0.0");
         assert_eq!(reg.agents.len(), 3);
 
@@ -219,10 +228,9 @@ mod tests {
             "fast-agent-acp"
         );
 
-        let checksummed = parse(
-            r#"{"version":"1","agents":[{"id":"agent","name":"Agent","distribution":{"binary":{"darwin-aarch64":{"archive":"https://example.com/agent","cmd":"agent","sha256":"ed16a0c68a7df1e55597fcb7c884140ce292def6116cbaab1fc05045433494b9"}}}}]}"#,
-        )
-        .unwrap();
+        let checksummed: Registry = r#"{"version":"1","agents":[{"id":"agent","name":"Agent","distribution":{"binary":{"darwin-aarch64":{"archive":"https://example.com/agent","cmd":"agent","sha256":"ed16a0c68a7df1e55597fcb7c884140ce292def6116cbaab1fc05045433494b9"}}}}]}"#
+            .parse()
+            .unwrap();
         assert_eq!(
             checksummed.agents[0].distribution.binary.as_ref().unwrap()["darwin-aarch64"]
                 .sha256
@@ -245,7 +253,7 @@ mod tests {
 
     #[test]
     fn preferred_runtime_prefers_binary_then_node_then_uv() {
-        let reg = parse(SAMPLE).unwrap();
+        let reg: Registry = SAMPLE.parse().unwrap();
         assert_eq!(reg.agents[0].preferred_runtime(), Runtime::Node);
         assert_eq!(reg.agents[2].preferred_runtime(), Runtime::Uv);
         #[cfg(any(
@@ -257,7 +265,7 @@ mod tests {
 
     #[test]
     fn binary_for_host_resolves_matching_target() {
-        let reg = parse(SAMPLE).unwrap();
+        let reg: Registry = SAMPLE.parse().unwrap();
         let vibe = &reg.agents[1];
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         {

@@ -276,9 +276,9 @@ fn spawn_acp_catalog(mut commands: Commands) {
 fn start_catalog_fetch(mut commands: Commands) {
     let (tx, rx) = crossbeam_channel::unbounded();
     std::thread::spawn(move || {
-        let agents = crate::acp_registry::fetch_blocking()
+        let agents = crate::acp_registry::Registry::fetch_blocking()
             .ok()
-            .or_else(crate::acp_registry::load_cached)
+            .or_else(crate::acp_registry::Registry::cached)
             .map(|r| r.agents)
             .unwrap_or_default();
         let _ = tx.send(agents);

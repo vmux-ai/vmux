@@ -418,9 +418,9 @@ pub(super) fn resolve_from_registry(
             .into_iter()
             .find(|agent| RegistryAgent::ids_match(&agent.id, agent_id))
     };
-    let agent = match acp_registry::load_cached().and_then(find) {
+    let agent = match acp_registry::Registry::cached().and_then(find) {
         Some(a) => a,
-        None => acp_registry::fetch_blocking()?
+        None => acp_registry::Registry::fetch_blocking()?
             .agents
             .into_iter()
             .find(|agent| RegistryAgent::ids_match(&agent.id, agent_id))
