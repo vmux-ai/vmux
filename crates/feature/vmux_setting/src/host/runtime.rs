@@ -1149,7 +1149,16 @@ fn load_settings(mut commands: Commands, runtime: Single<Entity, With<LastSelfWr
     let (settings, config_path) = read_settings_and_path();
     vmux_ui::i18n::Locale::requested(Some(&settings.appearance.locale)).make_current();
 
-    sync_layout_resources(&mut commands, &settings);
+    commands.insert_resource(settings.layout.clone());
+    commands.insert_resource(ResolvedLocale(vmux_ui::i18n::Locale::requested(Some(
+        &settings.appearance.locale,
+    ))));
+    commands.insert_resource(ConfirmCloseSettings {
+        enabled: settings
+            .terminal
+            .as_ref()
+            .is_none_or(|terminal| terminal.confirm_close),
+    });
     commands.insert_resource(settings);
 
     if let Some(path) = config_path {
@@ -1240,19 +1249,6 @@ fn load_embedded_settings() -> AppSettings {
         .expect("embedded feature settings must parse")
         .policy
         .defaults
-}
-
-fn sync_layout_resources(commands: &mut Commands, settings: &AppSettings) {
-    commands.insert_resource(settings.layout.clone());
-    commands.insert_resource(ResolvedLocale(vmux_ui::i18n::Locale::requested(Some(
-        &settings.appearance.locale,
-    ))));
-    commands.insert_resource(ConfirmCloseSettings {
-        enabled: settings
-            .terminal
-            .as_ref()
-            .is_none_or(|terminal| terminal.confirm_close),
-    });
 }
 
 fn sync_search_engine(

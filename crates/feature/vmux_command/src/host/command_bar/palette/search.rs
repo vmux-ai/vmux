@@ -141,23 +141,25 @@ fn request_completion(
     let Some(query) = CompletionQuery::parse(&search.query) else {
         return;
     };
-    spawn_completion_delay(target, generation, query, commands);
+    CompletionRequestDelay::spawn(target, generation, query, commands);
 }
 
 #[derive(Component)]
 struct CompletionRequestDelay(RequestDelay);
 
-fn spawn_completion_delay(target: Entity, generation: u64, query: String, commands: &mut Commands) {
-    commands.spawn((
-        Name::new("Command Palette Completion Debounce"),
-        CompletionRequestDelay(RequestDelay::new(
-            target,
-            generation,
-            query,
-            COMPLETION_DEBOUNCE,
-        )),
-        PendingPaletteRequest,
-    ));
+impl CompletionRequestDelay {
+    fn spawn(target: Entity, generation: u64, query: String, commands: &mut Commands) {
+        commands.spawn((
+            Name::new("Command Palette Completion Debounce"),
+            Self(RequestDelay::new(
+                target,
+                generation,
+                query,
+                COMPLETION_DEBOUNCE,
+            )),
+            PendingPaletteRequest,
+        ));
+    }
 }
 
 fn request_history_suggestions(
@@ -174,7 +176,7 @@ fn request_history_suggestions(
     let Some(query) = HistoryQuery::parse(&search.query) else {
         return;
     };
-    spawn_history_delay(target, generation, query.to_string(), commands);
+    HistoryRequestDelay::spawn(target, generation, query.to_string(), commands);
 }
 
 fn dispatch_completion_request(
@@ -206,17 +208,19 @@ fn dispatch_completion_request(
 #[derive(Component)]
 struct HistoryRequestDelay(RequestDelay);
 
-fn spawn_history_delay(target: Entity, generation: u64, query: String, commands: &mut Commands) {
-    commands.spawn((
-        Name::new("Command Palette History Debounce"),
-        HistoryRequestDelay(RequestDelay::new(
-            target,
-            generation,
-            query,
-            HISTORY_DEBOUNCE,
-        )),
-        PendingPaletteRequest,
-    ));
+impl HistoryRequestDelay {
+    fn spawn(target: Entity, generation: u64, query: String, commands: &mut Commands) {
+        commands.spawn((
+            Name::new("Command Palette History Debounce"),
+            Self(RequestDelay::new(
+                target,
+                generation,
+                query,
+                HISTORY_DEBOUNCE,
+            )),
+            PendingPaletteRequest,
+        ));
+    }
 }
 
 fn dispatch_history_request(

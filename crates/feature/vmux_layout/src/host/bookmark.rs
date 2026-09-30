@@ -1,5 +1,6 @@
 use crate::stack::{ActiveTabParam, LayoutFocus, Stack};
 use bevy::ecs::relationship::Relationship;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::bookmark::{
@@ -334,26 +335,39 @@ fn new_uuid() -> Uuid {
     Uuid(uuid::Uuid::new_v4().to_string())
 }
 
-fn find_by_uuid(target: &str, q: &Query<(Entity, &Uuid)>) -> Option<Entity> {
-    q.iter()
-        .find(|(_, id)| id.0 == target)
-        .map(|(entity, _)| entity)
+#[derive(SystemParam)]
+struct BookmarkEntities<'w, 's> {
+    ids: Query<'w, 's, (Entity, &'static Uuid)>,
+    parents: Query<'w, 's, &'static ChildOf>,
+}
+
+impl BookmarkEntities<'_, '_> {
+    fn find(&self, target: &str) -> Option<Entity> {
+        self.ids
+            .iter()
+            .find(|(_, id)| id.0 == target)
+            .map(|(entity, _)| entity)
+    }
+
+    fn parent(&self, entity: Entity) -> Option<Entity> {
+        self.parents.get(entity).ok().map(Relationship::get)
+    }
+
+    fn can_parent(&self, folder: Entity, parent: Entity) -> bool {
+        let mut current = Some(parent);
+        let mut seen = std::collections::HashSet::new();
+        while let Some(entity) = current {
+            if entity == folder || !seen.insert(entity) {
+                return false;
+            }
+            current = self.parent(entity);
+        }
+        true
+    }
 }
 
 fn next_top_order(orders: impl Iterator<Item = u32>) -> BookmarkOrder {
     BookmarkOrder(orders.max().map(|m| m + 1).unwrap_or(0))
-}
-
-fn can_parent_folder(folder: Entity, parent: Entity, child_of_q: &Query<&ChildOf>) -> bool {
-    let mut current = Some(parent);
-    let mut seen = std::collections::HashSet::new();
-    while let Some(entity) = current {
-        if entity == folder || !seen.insert(entity) {
-            return false;
-        }
-        current = child_of_q.get(entity).ok().map(Relationship::get);
-    }
-    true
 }
 
 fn apply_toggle_for_url_requests(
@@ -392,7 +406,7 @@ fn apply_toggle_for_url_requests(
 
 fn apply_add_requests(
     mut reader: MessageReader<AddRequest>,
-    ids: Query<(Entity, &Uuid)>,
+    entities: BookmarkEntities,
     bookmarks: Query<(Entity, &PageMetadata), With<Bookmark>>,
     pinned: Query<(Entity, &PageMetadata), With<Pin>>,
     folders: Query<(), With<Folder>>,
@@ -401,7 +415,7 @@ fn apply_add_requests(
 ) {
     for request in reader.read() {
         let folder_entity = request.folder.as_ref().and_then(|folder_uuid| {
-            let entity = find_by_uuid(folder_uuid, &ids)?;
+            let entity = entities.find(folder_uuid)?;
             folders.get(entity).ok().map(|_| entity)
         });
         if request.folder.is_some() && folder_entity.is_none() {
@@ -439,13 +453,13 @@ fn apply_add_requests(
 
 fn apply_remove_requests(
     mut reader: MessageReader<RemoveRequest>,
-    ids: Query<(Entity, &Uuid)>,
+    entities: BookmarkEntities,
     bookmarks: Query<(), With<Bookmark>>,
     pinned: Query<(), With<Pin>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        if let Some(entity) = find_by_uuid(&request.uuid, &ids)
+        if let Some(entity) = entities.find(&request.uuid)
             && (bookmarks.get(entity).is_ok() || pinned.get(entity).is_ok())
         {
             if bookmarks.get(entity).is_ok() && pinned.get(entity).is_ok() {
@@ -462,7 +476,7 @@ fn apply_remove_requests(
 
 fn apply_rename_requests(
     mut reader: MessageReader<RenameRequest>,
-    ids: Query<(Entity, &Uuid)>,
+    entities: BookmarkEntities,
     bookmarks: Query<&PageMetadata, With<Bookmark>>,
     mut commands: Commands,
 ) {
@@ -471,7 +485,7 @@ fn apply_rename_requests(
         if name.is_empty() {
             continue;
         }
-        if let Some(entity) = find_by_uuid(&request.uuid, &ids)
+        if let Some(entity) = entities.find(&request.uuid)
             && let Ok(metadata) = bookmarks.get(entity)
         {
             let mut metadata = metadata.clone();
@@ -483,17 +497,17 @@ fn apply_rename_requests(
 
 fn apply_move_requests(
     mut reader: MessageReader<MoveRequest>,
-    ids: Query<(Entity, &Uuid)>,
+    entities: BookmarkEntities,
     bookmarks: Query<(), With<Bookmark>>,
     folders: Query<(), With<Folder>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        if let Some(entity) = find_by_uuid(&request.uuid, &ids)
+        if let Some(entity) = entities.find(&request.uuid)
             && bookmarks.get(entity).is_ok()
         {
             if let Some(folder_uuid) = &request.folder
-                && let Some(folder_entity) = find_by_uuid(folder_uuid, &ids)
+                && let Some(folder_entity) = entities.find(folder_uuid)
                 && folders.get(folder_entity).is_ok()
             {
                 commands.entity(entity).insert(ChildOf(folder_entity));
@@ -506,20 +520,20 @@ fn apply_move_requests(
 
 fn apply_move_pin_requests(
     mut reader: MessageReader<MovePinRequest>,
-    ids: Query<(Entity, &Uuid)>,
+    entities: BookmarkEntities,
     pinned: Query<(), With<Pin>>,
     folders: Query<(), With<Folder>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
         let folder_entity = request.folder.as_ref().and_then(|folder_uuid| {
-            let entity = find_by_uuid(folder_uuid, &ids)?;
+            let entity = entities.find(folder_uuid)?;
             folders.get(entity).ok().map(|_| entity)
         });
         if request.folder.is_some() && folder_entity.is_none() {
             continue;
         }
-        if let Some(entity) = find_by_uuid(&request.uuid, &ids)
+        if let Some(entity) = entities.find(&request.uuid)
             && pinned.get(entity).is_ok()
         {
             let mut entity_commands = commands.entity(entity);
@@ -567,7 +581,7 @@ fn apply_reorder_pin_requests(
 
 fn apply_create_folder_requests(
     mut reader: MessageReader<CreateFolderRequest>,
-    ids: Query<(Entity, &Uuid)>,
+    entities: BookmarkEntities,
     folders: Query<(), With<Folder>>,
     orders: Query<&BookmarkOrder>,
     mut commands: Commands,
@@ -578,7 +592,7 @@ fn apply_create_folder_requests(
             continue;
         }
         let parent_entity = if let Some(parent) = &request.parent {
-            let Some(parent_entity) = find_by_uuid(parent, &ids) else {
+            let Some(parent_entity) = entities.find(parent) else {
                 continue;
             };
             if folders.get(parent_entity).is_err() {
@@ -598,24 +612,23 @@ fn apply_create_folder_requests(
 
 fn apply_move_folder_requests(
     mut reader: MessageReader<MoveFolderRequest>,
-    ids: Query<(Entity, &Uuid)>,
+    entities: BookmarkEntities,
     folders: Query<(), With<Folder>>,
-    child_of: Query<&ChildOf>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        let Some(folder_entity) = find_by_uuid(&request.uuid, &ids) else {
+        let Some(folder_entity) = entities.find(&request.uuid) else {
             continue;
         };
         if folders.get(folder_entity).is_err() {
             continue;
         }
         if let Some(parent_uuid) = &request.parent {
-            let Some(parent_entity) = find_by_uuid(parent_uuid, &ids) else {
+            let Some(parent_entity) = entities.find(parent_uuid) else {
                 continue;
             };
             if folders.get(parent_entity).is_ok()
-                && can_parent_folder(folder_entity, parent_entity, &child_of)
+                && entities.can_parent(folder_entity, parent_entity)
             {
                 commands
                     .entity(folder_entity)
@@ -629,17 +642,16 @@ fn apply_move_folder_requests(
 
 fn apply_remove_folder_requests(
     mut reader: MessageReader<RemoveFolderRequest>,
-    ids: Query<(Entity, &Uuid)>,
+    entities: BookmarkEntities,
     folders: Query<(), With<Folder>>,
     children: Query<&Children>,
-    child_of: Query<&ChildOf>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        if let Some(folder_entity) = find_by_uuid(&request.uuid, &ids)
+        if let Some(folder_entity) = entities.find(&request.uuid)
             && folders.get(folder_entity).is_ok()
         {
-            let parent = child_of.get(folder_entity).ok().map(Relationship::get);
+            let parent = entities.parent(folder_entity);
             if let Ok(folder_children) = children.get(folder_entity) {
                 for child in folder_children.iter() {
                     if let Some(parent) = parent {
@@ -656,7 +668,7 @@ fn apply_remove_folder_requests(
 
 fn apply_rename_folder_requests(
     mut reader: MessageReader<RenameFolderRequest>,
-    ids: Query<(Entity, &Uuid)>,
+    entities: BookmarkEntities,
     folders: Query<(), With<Folder>>,
     mut commands: Commands,
 ) {
@@ -665,7 +677,7 @@ fn apply_rename_folder_requests(
         if name.is_empty() {
             continue;
         }
-        if let Some(folder_entity) = find_by_uuid(&request.uuid, &ids)
+        if let Some(folder_entity) = entities.find(&request.uuid)
             && folders.get(folder_entity).is_ok()
         {
             commands
@@ -677,13 +689,13 @@ fn apply_rename_folder_requests(
 
 fn apply_toggle_folder_requests(
     mut reader: MessageReader<ToggleFolderRequest>,
-    ids: Query<(Entity, &Uuid)>,
+    entities: BookmarkEntities,
     folders: Query<(), With<Folder>>,
     collapsed: Query<(), With<Collapsed>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        if let Some(folder_entity) = find_by_uuid(&request.uuid, &ids)
+        if let Some(folder_entity) = entities.find(&request.uuid)
             && folders.get(folder_entity).is_ok()
         {
             if collapsed.get(folder_entity).is_ok() {
@@ -697,12 +709,12 @@ fn apply_toggle_folder_requests(
 
 fn apply_pin_requests(
     mut reader: MessageReader<PinRequest>,
-    ids: Query<(Entity, &Uuid)>,
+    entities: BookmarkEntities,
     bookmarks: Query<(), With<Bookmark>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        if let Some(entity) = find_by_uuid(&request.uuid, &ids)
+        if let Some(entity) = entities.find(&request.uuid)
             && bookmarks.get(entity).is_ok()
         {
             commands.entity(entity).insert(Pin);
@@ -741,13 +753,13 @@ fn apply_pin_url_requests(
 
 fn apply_unpin_requests(
     mut reader: MessageReader<UnpinRequest>,
-    ids: Query<(Entity, &Uuid)>,
+    entities: BookmarkEntities,
     pinned: Query<(), With<Pin>>,
     bookmarks: Query<(), With<Bookmark>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        if let Some(entity) = find_by_uuid(&request.uuid, &ids)
+        if let Some(entity) = entities.find(&request.uuid)
             && pinned.get(entity).is_ok()
         {
             if bookmarks.get(entity).is_ok() {

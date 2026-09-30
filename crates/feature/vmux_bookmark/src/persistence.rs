@@ -66,6 +66,21 @@ impl Default for BookmarkPersistencePath {
     }
 }
 
+impl BookmarkPersistencePath {
+    fn save(&self, commands: &mut Commands) {
+        if is_test_session() {
+            return;
+        }
+        if let Some(parent) = self.0.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let mut save = SaveWorld::<BookmarkFilter>::into_file(self.0.clone());
+        save.components = bookmark_scene_filter();
+        save.resources = bookmark_resource_filter();
+        commands.trigger_save(save);
+    }
+}
+
 fn bookmark_scene_filter() -> WorldFilter {
     WorldFilter::deny_all()
         .allow::<ChildOf>()
@@ -83,19 +98,6 @@ fn bookmark_scene_filter() -> WorldFilter {
 
 fn bookmark_resource_filter() -> WorldFilter {
     WorldFilter::deny_all().allow::<OfferedBookmarkDefaults>()
-}
-
-fn save_bookmarks_to_path(commands: &mut Commands, path: PathBuf) {
-    if is_test_session() {
-        return;
-    }
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let mut save = SaveWorld::<BookmarkFilter>::into_file(path);
-    save.components = bookmark_scene_filter();
-    save.resources = bookmark_resource_filter();
-    commands.trigger_save(save);
 }
 
 fn load_bookmarks_on_startup(
@@ -620,7 +622,7 @@ fn autosave_bookmarks(
     if !auto.dirty {
         return;
     }
-    save_bookmarks_to_path(&mut commands, path.0.clone());
+    path.save(&mut commands);
     auto.dirty = false;
 }
 
