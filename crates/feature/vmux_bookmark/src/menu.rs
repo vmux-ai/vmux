@@ -11,7 +11,7 @@ impl Plugin for BookmarkPlugin {
         ));
 
         #[cfg(target_os = "macos")]
-        macos::build(app);
+        app.add_plugins(macos::BookmarkMenuPlugin);
     }
 }
 
@@ -37,33 +37,37 @@ mod macos {
     };
     use vmux_ui::i18n::{Locale, TranslationValue};
 
-    pub(super) fn build(app: &mut App) {
-        app.add_plugins(vmux_layout::LayoutContractPlugin)
-            .add_message::<NewFolderInputRequest>()
-            .add_message::<RenameInputRequest>()
-            .add_systems(Startup, spawn_bookmark_menu_input_revision)
-            .add_systems(
-                Update,
-                (
-                    forward_message::<OpenRequest>,
-                    forward_message::<AddRequest>,
-                    forward_message::<MoveRequest>,
-                    forward_message::<MoveFolderRequest>,
-                    forward_message::<PinRequest>,
-                    forward_message::<RemoveRequest>,
-                    forward_message::<RemoveFolderRequest>,
-                    forward_message::<ToggleFolderRequest>,
-                    forward_message::<UnpinRequest>,
-                    forward_message::<NewFolderInputRequest>,
-                    forward_message::<RenameInputRequest>,
+    pub(super) struct BookmarkMenuPlugin;
+
+    impl Plugin for BookmarkMenuPlugin {
+        fn build(&self, app: &mut App) {
+            app.add_plugins(vmux_layout::LayoutContractPlugin)
+                .add_message::<NewFolderInputRequest>()
+                .add_message::<RenameInputRequest>()
+                .add_systems(Startup, spawn_bookmark_menu_input_revision)
+                .add_systems(
+                    Update,
+                    (
+                        forward_message::<OpenRequest>,
+                        forward_message::<AddRequest>,
+                        forward_message::<MoveRequest>,
+                        forward_message::<MoveFolderRequest>,
+                        forward_message::<PinRequest>,
+                        forward_message::<RemoveRequest>,
+                        forward_message::<RemoveFolderRequest>,
+                        forward_message::<ToggleFolderRequest>,
+                        forward_message::<UnpinRequest>,
+                        forward_message::<NewFolderInputRequest>,
+                        forward_message::<RenameInputRequest>,
+                    )
+                        .in_set(OsMenuSet::Dispatch),
                 )
-                    .in_set(OsMenuSet::Dispatch),
-            )
-            .add_systems(Update, show_bookmark_menu)
-            .add_systems(
-                Update,
-                begin_bookmark_menu_input.after(vmux_layout::bookmark::BookmarkRequestSet),
-            );
+                .add_systems(Update, show_bookmark_menu)
+                .add_systems(
+                    Update,
+                    begin_bookmark_menu_input.after(vmux_layout::bookmark::BookmarkRequestSet),
+                );
+        }
     }
 
     #[derive(Component, Default)]
