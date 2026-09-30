@@ -1,12 +1,10 @@
-use super::composer::options::ChatMenuSet;
 use super::format::{PromptEdit, PromptHistoryDirection, prompt_history_direction};
 use super::state::Chat;
 use dioxus::prelude::*;
 use vmux_core::input::{KeyStroke, UiKeyContext, Unclaimed};
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
-use vmux_ui::components::composer_bar::ComposerMenuKind;
-use vmux_ui::hooks::{KeyClaim, MenuDirection, move_selection, send, use_key_claim};
+use vmux_ui::hooks::{KeyClaim, send, use_key_claim};
 
 #[derive(Clone, Copy)]
 pub struct ChatKeys {
@@ -96,31 +94,6 @@ impl ChatKeyHandler {
     }
 }
 
-impl Chat {
-    pub(super) fn move_active_list(self, direction: MenuDirection) {
-        let Some(list) = ChatList::current(self) else {
-            return;
-        };
-        list.move_by(self, direction);
-    }
-
-    pub(super) fn choose_active_list(self) {
-        let Some(list) = ChatList::current(self) else {
-            return;
-        };
-        let index = *list.selection(self).peek();
-        list.choose(self, index);
-    }
-
-    pub(super) fn accepts_input_effect(mut self, revision: u64) -> bool {
-        if revision <= *self.input_effect_revision.peek() {
-            return false;
-        }
-        self.input_effect_revision.set(revision);
-        true
-    }
-}
-
 impl ChatKeyHandler {
     fn type_into_draft(&self, event: &KeyboardEvent) {
         let modifiers = event.modifiers();
@@ -147,7 +120,7 @@ impl ChatKeyHandler {
 enum ChatList {
     Approval,
     Choice,
-    ComposerMenu(ComposerMenuKind),
+    ComposerMenu,
     Media,
     Mcp,
     Session,
@@ -163,8 +136,8 @@ impl ChatList {
         if !chat.run.choice_options.read().is_empty() {
             return Some(Self::Choice);
         }
-        if let Some(kind) = chat.menu.opened() {
-            return Some(Self::ComposerMenu(kind));
+        if chat.menu.opened().is_some() {
+            return Some(Self::ComposerMenu);
         }
         if chat.media_menu_open() {
             return Some(Self::Media);
@@ -186,69 +159,6 @@ impl ChatList {
 
     fn is_selector(self) -> bool {
         !matches!(self, Self::Approval | Self::Choice)
-    }
-
-    fn len(self, chat: Chat) -> usize {
-        match self {
-            Self::Approval | Self::Choice => 0,
-            Self::ComposerMenu(kind) => ChatMenuSet::from(chat).rows(kind),
-            Self::Media => chat.media.entries.read().len(),
-            Self::Mcp => chat.filtered_mcp_servers().len(),
-            Self::Session => chat.filtered_sessions().len(),
-            Self::Model => chat.filtered_models().len(),
-            Self::Command => chat.filtered_commands().len(),
-        }
-    }
-
-    fn selection(self, chat: Chat) -> Signal<usize> {
-        chat.slash.menu_sel
-    }
-
-    fn move_by(self, chat: Chat, direction: MenuDirection) {
-        if matches!(self, Self::Approval | Self::Choice) {
-            return;
-        }
-        if let Self::ComposerMenu(kind) = self {
-            chat.menu
-                .step(direction, ChatMenuSet::from(chat).rows(kind));
-            return;
-        }
-        let mut selection = self.selection(chat);
-        let landed = move_selection(*selection.peek(), self.len(chat), direction);
-        selection.set(landed);
-    }
-
-    fn choose(self, chat: Chat, index: usize) {
-        match self {
-            Self::Approval | Self::Choice => {}
-            Self::ComposerMenu(kind) => {
-                if ChatMenuSet::from(chat).choose(kind, index) {
-                    chat.menu.close();
-                }
-            }
-            Self::Media => {
-                let entry = chat.media.entries.peek().get(index).cloned();
-                if let Some(entry) = entry {
-                    chat.select_media_entry(&entry);
-                }
-            }
-            Self::Mcp => chat.activate_mcp_server(index),
-            Self::Session => {
-                if let Some(session) = chat.filtered_sessions().get(index) {
-                    chat.select_resume_session(session);
-                }
-            }
-            Self::Model => {
-                if let Some(model) = chat.filtered_models().get(index) {
-                    chat.select_model(model);
-                }
-            }
-            Self::Command => {
-                if let Some(command) = chat.filtered_commands().get(index) {
-                    chat.select_slash_command(command.command);
-                }
-            }
-        }
     }
 }
 

@@ -3,8 +3,7 @@ use crate::ui::state::Chat;
 use dioxus::prelude::*;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::components::composer_bar::{
-    BranchMenuData, ComposerMenuKind, ComposerMenus, EffortMenuData, PermissionMenuData,
-    ProjectMenuData,
+    BranchMenuData, ComposerMenus, EffortMenuData, PermissionMenuData, ProjectMenuData,
 };
 use vmux_ui::components::model_menu::ModelMenu;
 use vmux_ui::components::project_picker::ProjectPick;
@@ -83,74 +82,6 @@ impl From<Chat> for ChatMenuSet {
 }
 
 impl ChatMenuSet {
-    pub(crate) fn rows(&self, kind: ComposerMenuKind) -> usize {
-        match kind {
-            ComposerMenuKind::Agent | ComposerMenuKind::Model => 0,
-            ComposerMenuKind::Effort => self.effort.levels.len() + 1,
-            ComposerMenuKind::Permission => self.permission.modes.len(),
-            ComposerMenuKind::Project => self.roots().len() + 1,
-            ComposerMenuKind::Branch => self.branch.branches.len(),
-        }
-    }
-
-    pub(crate) fn choose(&self, kind: ComposerMenuKind, index: usize) -> bool {
-        match kind {
-            ComposerMenuKind::Agent | ComposerMenuKind::Model => return false,
-            ComposerMenuKind::Effort => {
-                if index == 0 {
-                    self.effort.on_select.call(String::new());
-                    return true;
-                }
-                let Some(level) = self.effort.levels.get(index - 1) else {
-                    return false;
-                };
-                self.effort.on_select.call(level.clone());
-            }
-            ComposerMenuKind::Permission => {
-                let Some(mode) = self.permission.modes.get(index) else {
-                    return false;
-                };
-                self.permission.on_select.call(mode.clone());
-            }
-            ComposerMenuKind::Project => {
-                let roots = self.roots();
-                if index == roots.len() {
-                    self.project.on_choose_another.call(());
-                    return true;
-                }
-                let Some(project) = roots.get(index) else {
-                    return false;
-                };
-                self.project.on_pick.call(ProjectPick {
-                    project: project.path.clone(),
-                    branch: String::new(),
-                    checkout: String::new(),
-                });
-            }
-            ComposerMenuKind::Branch => {
-                let Some(branch) = self.branch.branches.get(index) else {
-                    return false;
-                };
-                self.branch.on_pick.call(ProjectPick {
-                    project: self.branch.project.clone(),
-                    branch: branch.branch.clone(),
-                    checkout: branch.checkout.clone(),
-                });
-            }
-        }
-        true
-    }
-
-    fn roots(&self) -> Vec<&vmux_api::space::ProjectRow> {
-        let mut roots = Vec::new();
-        for project in &self.project.projects {
-            if project.depth == 0 {
-                roots.push(project);
-            }
-        }
-        roots
-    }
-
     fn go_to(pick: ProjectPick) {
         let _ = send(&ChatGoToBranch {
             project: pick.project,
@@ -163,13 +94,13 @@ impl ChatMenuSet {
 
 #[component]
 pub(super) fn ChatModelMenu(chat: Chat) -> Element {
-    let mut menu_sel = chat.slash.menu_sel;
+    let menu_sel = chat.slash.menu_sel;
     rsx! {
         ModelMenu {
             models: chat.filtered_models(),
             current_model_id: (chat.models.current_model_id)(),
             selected: menu_sel(),
-            on_hover: move |index| menu_sel.set(index),
+            on_hover: move |index| chat.point_at_list(index),
             on_select: move |model: ModelOptionEntry| chat.select_model(&model),
             on_dismiss: move |()| chat.dismiss_selector(),
         }

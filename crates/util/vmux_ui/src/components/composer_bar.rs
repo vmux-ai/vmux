@@ -652,6 +652,15 @@ impl ComposerMenu {
         true
     }
 
+    pub fn show_at(&self, kind: ComposerMenuKind, index: usize) {
+        let mut open = self.open;
+        let mut cursor = self.cursor;
+        cursor.set(index);
+        if *open.peek() != Some(kind) {
+            open.set(Some(kind));
+        }
+    }
+
     pub fn close(&self) {
         let mut open = self.open;
         let mut cursor = self.cursor;

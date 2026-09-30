@@ -290,7 +290,7 @@ fn tab_activity_icon(
     ComposerState,
     ComposerSelectors,
     super::prompt::ChatPromptFocusRevision,
-    super::key::ChatKeyEffectRevision,
+    super::key::ActiveComposerMenu,
     ChatListSelection
 )]
 pub struct ChatView;

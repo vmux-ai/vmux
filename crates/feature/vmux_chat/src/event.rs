@@ -200,19 +200,9 @@ pub struct ChatChoiceSelected {
 }
 
 #[vmux_api::ui_event(Default)]
-pub struct ChatChoiceSelectionChanged {
-    pub index: u32,
-}
-
-#[vmux_api::ui_event(Default)]
 pub struct ChatApproval {
     pub call_id: String,
     pub decision: ApprovalDecision,
-}
-
-#[vmux_api::ui_event(Default)]
-pub struct ChatApprovalSelectionChanged {
-    pub index: u32,
 }
 
 #[vmux_api::ui_event]
@@ -253,31 +243,46 @@ pub struct ChatPromptFocusEffect {
 }
 
 #[vmux_api::contract(Copy, Eq)]
-pub struct ChatListMoveEffect {
-    pub revision: u64,
-    pub next: bool,
+pub enum ChatListKind {
+    Approval,
+    Choice,
+    Composer,
+    Media,
+    Mcp,
+    Session,
+    Model,
+    Command,
 }
 
 #[vmux_api::contract(Copy, Eq)]
-pub struct ChatListChooseEffect {
-    pub revision: u64,
+pub struct ChatListSelectionState {
+    pub kind: ChatListKind,
+    pub index: u32,
 }
 
-#[vmux_api::contract(Copy, Eq)]
-pub struct ChatChoiceSelectionEffect {
-    pub revision: u64,
+#[vmux_api::ui_event(Default)]
+pub struct ChatListSelectionChanged {
     pub index: u32,
 }
 
 #[vmux_api::contract(Copy, Eq)]
-pub struct ChatApprovalSelectionEffect {
-    pub revision: u64,
+pub enum ChatComposerMenuKind {
+    Effort,
+    Permission,
+    Project,
+    Branch,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct ChatComposerMenuChanged {
+    pub menu: Option<ChatComposerMenuKind>,
     pub index: u32,
 }
 
-#[vmux_api::contract(Copy, Eq)]
-pub struct ChatSelectorDismissEffect {
-    pub revision: u64,
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatComposerMenuState {
+    pub menu: Option<ChatComposerMenuKind>,
+    pub index: u32,
 }
 
 #[vmux_api::ui_event]

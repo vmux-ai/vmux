@@ -2,14 +2,14 @@ use super::format::{ChatPageTitle, ImportedMessages, ModelOptions, ResumeMenuSta
 use super::scroll;
 use crate::event::ChatResumeState;
 use crate::event::{
-    ApprovalDecision, ChatApproval, ChatApprovalSelectionChanged, ChatApprovalSelectionEffect,
-    ChatAttachPaths, ChatAttachment, ChatAttachments, ChatBranch, ChatBranchesRequest,
-    ChatBranchesState, ChatChoiceSelected, ChatChoiceSelectionChanged, ChatChoiceSelectionEffect,
-    ChatComposerEffect, ChatDraftChanged, ChatHistoryMoreRequest, ChatItem, ChatListChooseEffect,
-    ChatListMoveEffect, ChatMediaEntry, ChatMediaState, ChatRemoveAttachment,
-    ChatSelectorDismissEffect, ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit,
-    ChatTranscriptState, ComposerContext, ModelOptionEntry, QueuedPromptSnapshot,
-    ResumableSessionEntry, ResumeSession, SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
+    ApprovalDecision, ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachments, ChatBranch,
+    ChatBranchesRequest, ChatBranchesState, ChatChoiceSelected, ChatComposerEffect,
+    ChatComposerMenuChanged, ChatComposerMenuKind, ChatComposerMenuState, ChatDraftChanged,
+    ChatHistoryMoreRequest, ChatItem, ChatListKind, ChatListSelectionChanged,
+    ChatListSelectionState, ChatMediaEntry, ChatMediaState, ChatRemoveAttachment,
+    ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit, ChatTranscriptState,
+    ComposerContext, ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry, ResumeSession,
+    SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
 };
 use crate::host::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
@@ -26,7 +26,7 @@ use vmux_ui::components::composer_bar::{
 use vmux_ui::components::mcp_menu::{McpConnections, use_mcp_connections};
 use vmux_ui::components::prompt_media_options::PromptMediaOption;
 use vmux_ui::file_icon::FilePath;
-use vmux_ui::hooks::{MenuDirection, send, use_selector, use_theme, use_ui_state_patches};
+use vmux_ui::hooks::{send, use_selector, use_theme, use_ui_state_patches};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -48,7 +48,6 @@ pub struct Chat {
     pub slash: SlashCommands,
     pub resume: Resume,
     pub menu: ComposerMenu,
-    pub input_effect_revision: Signal<u64>,
 }
 
 pub fn use_chat() -> Chat {
@@ -72,7 +71,6 @@ pub fn use_chat() -> Chat {
         slash: use_slash_commands(),
         resume: use_resume(),
         menu: use_composer_menu(),
-        input_effect_revision: use_signal(|| 0),
     };
     chat.listen();
     chat.watch();
@@ -154,34 +152,43 @@ impl Chat {
             focus_revision.set(effect.revision);
             focus_prompt_end(PROMPT_INPUT_ID);
         }
-        if let Some(ChatListMoveEffect { revision, next }) = patch.list_move
-            && self.accepts_input_effect(revision)
-        {
-            self.move_active_list(match next {
-                true => MenuDirection::Next,
-                false => MenuDirection::Previous,
-            });
+        if let Some(selection) = patch.list_selection {
+            self.apply_list_selection(selection);
         }
-        if let Some(ChatListChooseEffect { revision }) = patch.list_choose
-            && self.accepts_input_effect(revision)
-        {
-            self.choose_active_list();
+        if let Some(menu) = &patch.composer_menu {
+            self.apply_composer_menu(menu);
         }
-        if let Some(ChatChoiceSelectionEffect { revision, index }) = patch.choice_selection
-            && self.accepts_input_effect(revision)
-        {
-            set_if_changed(self.slash.menu_sel, index as usize);
+    }
+
+    fn apply_list_selection(&self, selection: ChatListSelectionState) {
+        match selection.kind {
+            ChatListKind::Approval => {
+                set_if_changed(self.run.approval_sel, selection.index as usize);
+            }
+            ChatListKind::Composer => self.menu.point_at(selection.index as usize),
+            ChatListKind::Choice
+            | ChatListKind::Media
+            | ChatListKind::Mcp
+            | ChatListKind::Session
+            | ChatListKind::Model
+            | ChatListKind::Command => {
+                set_if_changed(self.slash.menu_sel, selection.index as usize);
+            }
         }
-        if let Some(ChatApprovalSelectionEffect { revision, index }) = patch.approval_selection
-            && self.accepts_input_effect(revision)
-        {
-            set_if_changed(self.run.approval_sel, index as usize);
-        }
-        if let Some(ChatSelectorDismissEffect { revision }) = patch.selector_dismiss
-            && self.accepts_input_effect(revision)
-        {
-            self.dismiss_selector();
-        }
+    }
+
+    fn apply_composer_menu(&self, state: &ChatComposerMenuState) {
+        let Some(kind) = state.menu else {
+            self.menu.close();
+            return;
+        };
+        let kind = match kind {
+            ChatComposerMenuKind::Effort => ComposerMenuKind::Effort,
+            ChatComposerMenuKind::Permission => ComposerMenuKind::Permission,
+            ChatComposerMenuKind::Project => ComposerMenuKind::Project,
+            ChatComposerMenuKind::Branch => ComposerMenuKind::Branch,
+        };
+        self.menu.show_at(kind, state.index as usize);
     }
 
     fn apply_composer_effect(&self, effect: &ChatComposerEffect) {
@@ -228,6 +235,19 @@ impl Chat {
     fn watch(&self) {
         let chat = *self;
         use_effect(move || focus_prompt_end(PROMPT_INPUT_ID));
+        use_effect(move || {
+            let menu = match chat.menu.opened() {
+                Some(ComposerMenuKind::Effort) => Some(ChatComposerMenuKind::Effort),
+                Some(ComposerMenuKind::Permission) => Some(ChatComposerMenuKind::Permission),
+                Some(ComposerMenuKind::Project) => Some(ChatComposerMenuKind::Project),
+                Some(ComposerMenuKind::Branch) => Some(ChatComposerMenuKind::Branch),
+                Some(ComposerMenuKind::Agent | ComposerMenuKind::Model) | None => None,
+            };
+            let _ = send(&ChatComposerMenuChanged {
+                menu,
+                index: chat.menu.cursor() as u32,
+            });
+        });
         use_effect(move || {
             let _ = chat.transcript.items.read().len();
             let _ = chat.run.status.read();
@@ -768,7 +788,7 @@ impl Chat {
 
     pub fn point_at_choice(&self, index: usize) {
         set_if_changed(self.slash.menu_sel, index);
-        let _ = send(&ChatChoiceSelectionChanged {
+        let _ = send(&ChatListSelectionChanged {
             index: index as u32,
         });
     }
@@ -784,7 +804,14 @@ impl Chat {
 
     pub fn point_at_approval(&self, index: usize) {
         set_if_changed(self.run.approval_sel, index);
-        let _ = send(&ChatApprovalSelectionChanged {
+        let _ = send(&ChatListSelectionChanged {
+            index: index as u32,
+        });
+    }
+
+    pub fn point_at_list(&self, index: usize) {
+        set_if_changed(self.slash.menu_sel, index);
+        let _ = send(&ChatListSelectionChanged {
             index: index as u32,
         });
     }

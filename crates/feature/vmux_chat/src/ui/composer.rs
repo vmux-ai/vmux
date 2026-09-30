@@ -30,7 +30,7 @@ pub(super) fn ChatDock(chat: Chat) -> Element {
                         entries: chat.filtered_mcp_servers(),
                         selected: chat.mcp_selected(),
                         on_select: move |index| chat.activate_mcp_server(index),
-                        on_hover: move |index| chat.slash.menu_sel.set(index),
+                        on_hover: move |index| chat.point_at_list(index),
                         on_dismiss: move |()| chat.dismiss_selector(),
                     }
                 }

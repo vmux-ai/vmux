@@ -3,7 +3,9 @@ use bevy_ecs::prelude::*;
 use vmux_api::room::RemoteModelState;
 
 use super::state::{ChatRuntime, ChatUiStatePlugin, ChatUiStateProjection, RepublishChatUiState};
-use crate::event::{ModeState, ModelState, SlashCommand, SlashCommandEntry, SlashCommands};
+use crate::event::{
+    ModeState, ModelOptionEntry, ModelState, SlashCommand, SlashCommandEntry, SlashCommands,
+};
 
 pub struct ChatModelPlugin;
 
@@ -34,6 +36,57 @@ pub struct Models(pub RemoteModelState);
 
 #[derive(Component, Default)]
 pub struct Picker(pub ModelState);
+
+#[derive(Component, Default)]
+pub(super) struct ModelPickerProjection(pub ModelState);
+
+impl ModelPickerProjection {
+    pub(super) fn filtered(&self, query: &str) -> Vec<ModelOptionEntry> {
+        let query = query.trim().to_lowercase();
+        if query.is_empty() {
+            return self.0.models.clone();
+        }
+        let mut matching = Vec::new();
+        for model in &self.0.models {
+            if model.id.to_lowercase().contains(&query)
+                || model.name.to_lowercase().contains(&query)
+                || model.description.to_lowercase().contains(&query)
+            {
+                matching.push(model.clone());
+            }
+        }
+        matching
+    }
+}
+
+#[derive(Component, Default)]
+pub(super) struct ModeProjection(pub ModeState);
+
+#[derive(Component, Default)]
+pub(super) struct SlashCommandProjection(pub SlashCommands);
+
+impl SlashCommandProjection {
+    pub(super) fn filtered(&self, query: &str) -> Vec<SlashCommandEntry> {
+        let query = query.to_lowercase();
+        let mut matching = Vec::new();
+        for command in &self.0.commands {
+            if Self::name(command.command).starts_with(&query) {
+                matching.push(command.clone());
+            }
+        }
+        matching
+    }
+
+    fn name(command: SlashCommand) -> &'static str {
+        match command {
+            SlashCommand::Upload => "upload",
+            SlashCommand::Resume => "resume",
+            SlashCommand::Mcp => "mcp",
+            SlashCommand::Model => "model",
+            SlashCommand::Cli => "cli",
+        }
+    }
+}
 
 #[derive(EntityEvent)]
 pub struct ChatModelStateChanged {
@@ -111,6 +164,9 @@ fn emit_model_picker(
 
 fn publish_model_state(trigger: On<ChatModelStateChanged>, mut commands: Commands) {
     let event = trigger.event();
+    commands
+        .entity(event.webview)
+        .insert(ModelPickerProjection(event.state.clone()));
     commands.trigger(
         vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
             event.webview,
@@ -143,6 +199,11 @@ fn publish_model_state(trigger: On<ChatModelStateChanged>, mut commands: Command
             description: "Continue this session in the CLI".to_string(),
         });
     }
+    commands
+        .entity(event.webview)
+        .insert(SlashCommandProjection(SlashCommands {
+            commands: commands_list.clone(),
+        }));
     commands.trigger(
         vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
             event.webview,
@@ -155,6 +216,9 @@ fn publish_model_state(trigger: On<ChatModelStateChanged>, mut commands: Command
 
 fn publish_mode_state(trigger: On<ChatModeStateChanged>, mut commands: Commands) {
     let event = trigger.event();
+    commands
+        .entity(event.webview)
+        .insert(ModeProjection(event.state.clone()));
     commands.trigger(
         vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
             event.webview,

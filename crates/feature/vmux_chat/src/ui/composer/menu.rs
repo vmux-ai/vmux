@@ -9,7 +9,7 @@ use vmux_ui::i18n::translate;
 
 #[component]
 pub(super) fn MediaMenu(chat: Chat) -> Element {
-    let mut menu_sel = chat.slash.menu_sel;
+    let menu_sel = chat.slash.menu_sel;
     rsx! {
         PromptPopup { on_dismiss: move |()| chat.dismiss_selector(),
             PromptMediaOptions {
@@ -18,7 +18,7 @@ pub(super) fn MediaMenu(chat: Chat) -> Element {
                 loading: (chat.media.loading)(),
                 loading_label: translate("agent-loading-media"),
                 empty_label: translate("agent-no-matching-media"),
-                on_hover: move |index| menu_sel.set(index),
+                on_hover: move |index| chat.point_at_list(index),
                 on_select: move |index| {
                     if let Some(entry) = chat.media.entries.peek().get(index).cloned() {
                         chat.select_media_entry(&entry);
@@ -31,7 +31,7 @@ pub(super) fn MediaMenu(chat: Chat) -> Element {
 
 #[component]
 pub(super) fn CommandMenu(chat: Chat) -> Element {
-    let mut menu_sel = chat.slash.menu_sel;
+    let menu_sel = chat.slash.menu_sel;
     rsx! {
         PromptPopup { on_dismiss: move |()| chat.dismiss_selector(),
             for (index , command) in chat.filtered_commands().into_iter().enumerate() {
@@ -55,7 +55,7 @@ pub(super) fn CommandMenu(chat: Chat) -> Element {
                                 let command = command.command;
                                 move |()| chat.select_slash_command(command)
                             },
-                            on_hover: move |()| menu_sel.set(index),
+                            on_hover: move |()| chat.point_at_list(index),
                         }
                     }
                 }
@@ -66,7 +66,7 @@ pub(super) fn CommandMenu(chat: Chat) -> Element {
 
 #[component]
 pub(super) fn ResumeMenu(chat: Chat) -> Element {
-    let mut menu_sel = chat.slash.menu_sel;
+    let menu_sel = chat.slash.menu_sel;
     let state = chat.resume_state();
     let note = match state {
         Some(ResumeMenuState::Loading) => Some(translate("agent-loading-sessions")),
@@ -90,7 +90,7 @@ pub(super) fn ResumeMenu(chat: Chat) -> Element {
                                 let session = entry.clone();
                                 move |()| chat.select_resume_session(&session)
                             },
-                            on_hover: move |()| menu_sel.set(index),
+                            on_hover: move |()| chat.point_at_list(index),
                         }
                     }
                 }
