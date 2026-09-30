@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 
 use bevy::prelude::*;
+use ron::value::RawValue;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use vmux_api::InputSchema;
 
 use crate::cli::CliManifest;
@@ -13,6 +15,8 @@ pub struct FeatureManifest {
     pub tools: Vec<Tool>,
     pub cli: Option<CliManifest>,
     pub mcp_servers: Vec<McpServer>,
+    policy: Option<Box<RawValue>>,
+    policies: Option<Box<RawValue>>,
 }
 
 impl FeatureManifest {
@@ -21,6 +25,22 @@ impl FeatureManifest {
             ron::from_str(source).expect("embedded feature manifest must be valid RON");
         manifest.validate();
         manifest
+    }
+
+    pub fn policy<T: DeserializeOwned>(&self) -> Result<Option<T>, String> {
+        Self::decode(&self.policy)
+    }
+
+    pub fn policies<T: DeserializeOwned>(&self) -> Result<Option<T>, String> {
+        Self::decode(&self.policies)
+    }
+
+    fn decode<T: DeserializeOwned>(value: &Option<Box<RawValue>>) -> Result<Option<T>, String> {
+        value
+            .as_deref()
+            .map(|value| ron::from_str(value.get_ron()))
+            .transpose()
+            .map_err(|error| error.to_string())
     }
 
     fn validate(&self) {
@@ -58,6 +78,10 @@ impl<'de> Deserialize<'de> for FeatureManifest {
             cli: Option<CliManifest>,
             #[serde(default)]
             mcp_servers: Vec<McpServer>,
+            #[serde(default)]
+            policy: Option<Box<RawValue>>,
+            #[serde(default)]
+            policies: Option<Box<RawValue>>,
         }
 
         let manifest = Manifest::deserialize(deserializer)?;
@@ -67,6 +91,8 @@ impl<'de> Deserialize<'de> for FeatureManifest {
             tools: manifest.tools,
             cli: manifest.cli,
             mcp_servers: manifest.mcp_servers,
+            policy: manifest.policy,
+            policies: manifest.policies,
         })
     }
 }
@@ -246,8 +272,22 @@ mod tests {
             description: "Open a file",
             input_schema: (type: Object),
         )],
-        cli: (default: Some("app.open")),
+        cli: Some((
+            default: Some("app.open"),
+            providers: Some({"example": (enabled: true)}),
+        )),
+        policy: Some((enabled: true)),
     )"#;
+
+    #[derive(Debug, Deserialize, PartialEq, Eq)]
+    struct Policy {
+        enabled: bool,
+    }
+
+    #[derive(Debug, Deserialize, PartialEq, Eq)]
+    struct Provider {
+        enabled: bool,
+    }
 
     #[test]
     fn one_feature_entity_owns_all_parsed_sections() {
@@ -272,6 +312,20 @@ mod tests {
         assert_eq!(
             manifests[0].cli.as_ref().unwrap().default.as_deref(),
             Some("app.open")
+        );
+        assert_eq!(
+            manifests[0]
+                .cli
+                .as_ref()
+                .unwrap()
+                .providers::<std::collections::BTreeMap<String, Provider>>()
+                .unwrap()
+                .unwrap()["example"],
+            Provider { enabled: true }
+        );
+        assert_eq!(
+            manifests[0].policy::<Policy>().unwrap(),
+            Some(Policy { enabled: true })
         );
     }
 }

@@ -7,18 +7,16 @@ use vmux_api::protocol::{
     AgentRequestId, AgentTurnEnded, ClientMessage, FileTouchKind, ProcessId, ServiceMessage,
 };
 use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
-use vmux_core::host::manifest::FeatureManifestPlugin;
 use vmux_core::service::ServiceConnection;
 
 pub struct AgentCliPlugin;
 
 impl Plugin for AgentCliPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            FeatureManifestPlugin::new(include_str!("feature.ron")),
-            CliManifestPlugin,
-        ))
-        .add_systems(
+        if !app.is_plugin_added::<crate::manifest::AgentManifestPlugin>() {
+            app.add_plugins(crate::manifest::AgentManifestPlugin);
+        }
+        app.add_plugins(CliManifestPlugin).add_systems(
             Update,
             (
                 route_agent_cli,

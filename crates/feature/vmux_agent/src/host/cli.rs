@@ -17,6 +17,7 @@ use std::time::SystemTime;
 use bevy::prelude::*;
 use bevy::tasks::IoTaskPool;
 
+use crate::manifest::{CliProviderManifest, CliProviderManifests};
 use crate::message::Message;
 use vmux_core::agent::AgentKind;
 use vmux_core::profile::mcp_credentials::McpCredentialAccess;
@@ -63,19 +64,22 @@ impl Plugin for CliLaunchPlugin {
 fn prepare_launches<P: CliLaunchProvider>(
     requests: Query<(Entity, &AgentLaunchRequest), Added<AgentLaunchRequest>>,
     policy: AgentLaunchPolicyQuery,
+    providers: Single<&CliProviderManifests>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let policy = policy.snapshot();
+    let provider = providers.get(P::KIND).clone();
     for (entity, request) in &requests {
         if request.kind != P::KIND {
             continue;
         }
         let request = request.clone();
         let policy = policy.clone();
+        let provider = provider.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
-            let result = prepare_launch::<P>(&request, &policy);
+            let result = prepare_launch::<P>(&request, &policy, &provider);
             if let Some(wake) = wake {
                 let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
             }
@@ -88,6 +92,7 @@ fn prepare_launches<P: CliLaunchProvider>(
 fn prepare_launch<P: CliLaunchProvider>(
     request: &AgentLaunchRequest,
     policy: &AgentLaunchPolicy,
+    provider: &CliProviderManifest,
 ) -> Result<PreparedAgentLaunch, String> {
     if request.kind != P::KIND {
         return Err(format!(
@@ -109,7 +114,7 @@ fn prepare_launch<P: CliLaunchProvider>(
         if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
             bevy::log::warn!("external agent Knowledge sync failed: {error}");
         }
-        P::prepare(&mcp_cfg);
+        P::prepare(&mcp_cfg, provider);
         let effort_key = format!("cli:{}", P::KIND.as_url_segment());
         let mut args = match request
             .effort
@@ -122,10 +127,14 @@ fn prepare_launch<P: CliLaunchProvider>(
         if let Some(model) = request.model.as_deref().filter(|model| !model.is_empty()) {
             args.extend(P::model_arguments(model));
         }
-        args.extend(P::policy_arguments(policy));
-        args.extend(P::arguments(&mcp_cfg, request.session_id.as_deref()));
+        args.extend(P::policy_arguments(policy, provider));
+        args.extend(P::arguments(
+            &mcp_cfg,
+            request.session_id.as_deref(),
+            provider,
+        ));
         let mut env: Vec<(String, String)> = std::env::vars().collect();
-        env.extend(P::environment(&mcp_cfg));
+        env.extend(P::environment(&mcp_cfg, provider));
         if let Some(model) = request.model.as_deref().filter(|model| !model.is_empty()) {
             env.extend(P::model_environment(model));
         }
@@ -150,19 +159,22 @@ fn prepare_launch<P: CliLaunchProvider>(
 fn prepare_restarts<P: CliLaunchProvider>(
     requests: Query<(Entity, &AgentRestartRequest), Added<AgentRestartRequest>>,
     policy: AgentLaunchPolicyQuery,
+    providers: Single<&CliProviderManifests>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let policy = policy.snapshot();
+    let provider = providers.get(P::KIND).clone();
     for (entity, request) in &requests {
         if request.kind != P::KIND {
             continue;
         }
         let request = request.clone();
         let policy = policy.clone();
+        let provider = provider.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
-            let result = prepare_restart::<P>(&request, &policy);
+            let result = prepare_restart::<P>(&request, &policy, &provider);
             if let Some(wake) = wake {
                 let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
             }
@@ -175,6 +187,7 @@ fn prepare_restarts<P: CliLaunchProvider>(
 fn prepare_restart<P: CliLaunchProvider>(
     request: &AgentRestartRequest,
     policy: &AgentLaunchPolicy,
+    provider: &CliProviderManifest,
 ) -> Result<PreparedAgentLaunch, String> {
     if request.kind != P::KIND {
         return Err(format!(
@@ -192,9 +205,13 @@ fn prepare_restart<P: CliLaunchProvider>(
             &request.shell,
         )
         .resolve()?;
-        let mut args = P::policy_arguments(policy);
-        args.extend(P::arguments(&mcp_cfg, request.session_id.as_deref()));
-        let fresh = P::environment(&mcp_cfg);
+        let mut args = P::policy_arguments(policy, provider);
+        args.extend(P::arguments(
+            &mcp_cfg,
+            request.session_id.as_deref(),
+            provider,
+        ));
+        let fresh = P::environment(&mcp_cfg, provider);
         let fresh_keys: HashSet<String> = fresh.iter().map(|(key, _)| key.clone()).collect();
         let mut env: Vec<(String, String)> = request
             .launch
@@ -228,7 +245,11 @@ fn prepare_restart<P: CliLaunchProvider>(
 pub(super) fn prepare_restart_for_test<P: CliLaunchProvider>(
     request: &AgentRestartRequest,
 ) -> Result<PreparedAgentLaunch, String> {
-    prepare_restart::<P>(request, &AgentLaunchPolicy::default())
+    prepare_restart::<P>(
+        request,
+        &AgentLaunchPolicy::default(),
+        &CliProviderManifest::bundled(P::KIND),
+    )
 }
 
 #[derive(Component)]

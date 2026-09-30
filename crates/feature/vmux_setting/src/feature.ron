@@ -45,7 +45,7 @@
                 shortcuts: [(shortcut: Direct("Super+,"), when: None)],
             ),
     ],
-    policy: (
+    policy: Some((
         defaults: (
             browser: (
                 startup_url: "vmux://start/",
@@ -158,5 +158,5 @@
                 ],
             ),
         ),
-    ),
+    )),
 )

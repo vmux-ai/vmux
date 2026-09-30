@@ -708,7 +708,7 @@ fn same_structured_key_prefers_the_local_value() {
     };
     assert_eq!(
         ron_map_get(&settings, &ron::Value::String("value".to_string())),
-        Some(&ron::Value::Number(ron::value::Number::Integer(3)))
+        Some(&ron::Value::Number(ron::value::Number::new(3i64)))
     );
 }
 

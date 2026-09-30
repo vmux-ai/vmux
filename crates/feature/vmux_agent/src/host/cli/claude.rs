@@ -81,12 +81,15 @@ pub(crate) struct ClaudeLaunch;
 impl CliLaunchProvider for ClaudeLaunch {
     const KIND: AgentKind = AgentKind::Claude;
 
-    fn arguments(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
-        build_args(mcp, session_id, &CliProviderManifest::bundled(Self::KIND))
+    fn arguments(
+        mcp: &McpServerConfig,
+        session_id: Option<&str>,
+        manifest: &CliProviderManifest,
+    ) -> Vec<String> {
+        build_args(mcp, session_id, manifest)
     }
 
-    fn policy_arguments(policy: &AgentLaunchPolicy) -> Vec<String> {
-        let manifest = CliProviderManifest::bundled(Self::KIND);
+    fn policy_arguments(policy: &AgentLaunchPolicy, manifest: &CliProviderManifest) -> Vec<String> {
         vec![
             "--append-system-prompt".to_string(),
             policy.prompt(&manifest.run_prompt),
@@ -101,7 +104,10 @@ impl CliLaunchProvider for ClaudeLaunch {
         effort_args(effort)
     }
 
-    fn environment(mcp: &McpServerConfig) -> Vec<(String, String)> {
+    fn environment(
+        mcp: &McpServerConfig,
+        _manifest: &CliProviderManifest,
+    ) -> Vec<(String, String)> {
         build_env(mcp)
     }
 }
@@ -582,6 +588,10 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    fn manifest() -> CliProviderManifest {
+        CliProviderManifest::bundled(AgentKind::Claude)
+    }
+
     fn unique_tmp(label: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -662,7 +672,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = ClaudeLaunch::arguments(&mcp, None);
+        let args = ClaudeLaunch::arguments(&mcp, None, &manifest());
         assert!(args.iter().any(|a| a == "--mcp-config"));
         assert!(!args.iter().any(|a| a == "--strict-mcp-config"));
         assert!(!args.iter().any(|a| a == "--permission-mode"));
@@ -676,7 +686,7 @@ mod tests {
             args: vec![],
             cwd: None,
         };
-        let args = ClaudeLaunch::arguments(&mcp, Some("abc-123"));
+        let args = ClaudeLaunch::arguments(&mcp, Some("abc-123"), &manifest());
         let resume_idx = args.iter().position(|a| a == "--resume").unwrap();
         assert_eq!(args[resume_idx + 1], "abc-123");
         assert_eq!(
@@ -693,8 +703,9 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let mut args = ClaudeLaunch::policy_arguments(&AgentLaunchPolicy::default());
-        args.extend(ClaudeLaunch::arguments(&mcp, None));
+        let manifest = manifest();
+        let mut args = ClaudeLaunch::policy_arguments(&AgentLaunchPolicy::default(), &manifest);
+        args.extend(ClaudeLaunch::arguments(&mcp, None, &manifest));
 
         let disallowed = args.iter().position(|a| a == "--disallowedTools").unwrap();
         assert_eq!(args[disallowed + 1], "Bash,Monitor,WebSearch,WebFetch");
@@ -732,7 +743,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = ClaudeLaunch::arguments(&mcp, None);
+        let args = ClaudeLaunch::arguments(&mcp, None, &manifest());
         let settings = args.iter().position(|a| a == "--settings").unwrap();
         let json = &args[settings + 1];
         assert!(json.contains("Notification"));
@@ -751,7 +762,7 @@ mod tests {
             args: vec!["mcp".into(), "--anchor".into(), "42".into()],
             cwd: None,
         };
-        let args = ClaudeLaunch::arguments(&mcp, None);
+        let args = ClaudeLaunch::arguments(&mcp, None, &manifest());
         let settings = args.iter().position(|a| a == "--settings").unwrap();
         let json = &args[settings + 1];
         assert!(json.contains("PostToolUse"), "json: {json}");
@@ -768,7 +779,7 @@ mod tests {
             args: vec!["mcp".into(), "--anchor".into(), "42".into()],
             cwd: None,
         };
-        let args = ClaudeLaunch::arguments(&mcp, None);
+        let args = ClaudeLaunch::arguments(&mcp, None, &manifest());
         let settings = args.iter().position(|a| a == "--settings").unwrap();
         let json = &args[settings + 1];
         let parsed: Value = serde_json::from_str(json).unwrap();
@@ -808,7 +819,7 @@ mod tests {
         };
 
         assert_eq!(
-            ClaudeLaunch::environment(&mcp),
+            ClaudeLaunch::environment(&mcp, &manifest()),
             vec![("MCP_TOOL_TIMEOUT".into(), "660000".into())]
         );
     }

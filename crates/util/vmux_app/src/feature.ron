@@ -1,5 +1,5 @@
 (
-    cli: (
+    cli: Some((
         default: Some("app.open"),
-    ),
+    )),
 )

@@ -1,10 +1,7 @@
+use bevy::prelude::{Component, Query};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-
-#[derive(Deserialize)]
-struct BrowserFeatureManifest {
-    policy: BrowserFeaturePolicy,
-}
+use vmux_core::host::manifest::FeatureManifest;
 
 #[derive(Deserialize)]
 struct BrowserFeaturePolicy {
@@ -37,17 +34,30 @@ pub struct CapabilityEntry {
     pub scenario: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Component, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapabilityMatrix {
     pub chromium_major: u32,
     pub entries: Vec<CapabilityEntry>,
 }
 
 impl CapabilityMatrix {
+    pub(super) fn from_features(manifests: &Query<&FeatureManifest>) -> Result<Self, String> {
+        for manifest in manifests.iter() {
+            let Ok(Some(policy)) = manifest.policy::<BrowserFeaturePolicy>() else {
+                continue;
+            };
+            policy.extension.validate()?;
+            return Ok(policy.extension);
+        }
+        Err("browser feature manifest has no extension policy".to_string())
+    }
+
+    #[cfg(test)]
     pub fn embedded() -> Result<Self, String> {
-        ron::from_str::<BrowserFeatureManifest>(include_str!("../feature.ron"))
-            .map(|manifest| manifest.policy.extension)
-            .map_err(|error| error.to_string())
+        FeatureManifest::parse(include_str!("../feature.ron"))
+            .policy::<BrowserFeaturePolicy>()?
+            .map(|policy| policy.extension)
+            .ok_or_else(|| "browser feature manifest has no extension policy".to_string())
     }
 
     pub fn lookup(

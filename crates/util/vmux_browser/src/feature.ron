@@ -193,9 +193,8 @@
                     ],
                 ),
             ),
-        ],
     ],
-    policy: (
+    policy: Some((
         extension: (
             chromium_major: 148,
             entries: [
@@ -235,5 +234,5 @@
                 (platform: "linux", namespace: "windows", member: "onBoundsChanged", kind: Event, status: Bridged, owner: Some("vmux"), scenario: Some("unit:windows_namespace_is_fully_shimmed")),
             ],
         ),
-    ),
+    )),
 )

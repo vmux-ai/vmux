@@ -26,7 +26,7 @@ use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_session::AcpSession;
 use vmux_setting::{AppSettings, SettingsWriteRequest};
 
-pub(super) struct AcpModelPlugin;
+pub struct AcpModelPlugin;
 
 impl Plugin for AcpModelPlugin {
     fn build(&self, app: &mut App) {

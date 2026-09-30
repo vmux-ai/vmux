@@ -4,14 +4,22 @@ use bevy::prelude::Query;
 use vmux_core::agent::{AgentDisabledSkillRoot, AgentPromptContribution};
 use vmux_core::terminal::TerminalLaunch;
 
+use crate::manifest::CliProviderManifest;
 use crate::mcp::McpServerConfig;
 
 pub(crate) trait CliLaunchProvider: Send + Sync + 'static {
     const KIND: AgentKind;
 
-    fn arguments(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String>;
+    fn arguments(
+        mcp: &McpServerConfig,
+        session_id: Option<&str>,
+        manifest: &CliProviderManifest,
+    ) -> Vec<String>;
 
-    fn policy_arguments(_policy: &AgentLaunchPolicy) -> Vec<String> {
+    fn policy_arguments(
+        _policy: &AgentLaunchPolicy,
+        _manifest: &CliProviderManifest,
+    ) -> Vec<String> {
         Vec::new()
     }
 
@@ -27,9 +35,9 @@ pub(crate) trait CliLaunchProvider: Send + Sync + 'static {
         Vec::new()
     }
 
-    fn environment(mcp: &McpServerConfig) -> Vec<(String, String)>;
+    fn environment(mcp: &McpServerConfig, manifest: &CliProviderManifest) -> Vec<(String, String)>;
 
-    fn prepare(_mcp: &McpServerConfig) {}
+    fn prepare(_mcp: &McpServerConfig, _manifest: &CliProviderManifest) {}
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]

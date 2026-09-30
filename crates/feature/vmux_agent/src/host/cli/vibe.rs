@@ -13,6 +13,7 @@ use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
 
 use super::super::launch::CliLaunchProvider;
 use super::super::session::{DiscoverAgentSessions, DiscoverAgentSessionsSet};
+use crate::manifest::CliProviderManifest;
 
 pub(super) struct VibeCliPlugin;
 
@@ -113,7 +114,11 @@ pub(crate) struct VibeLaunch;
 impl CliLaunchProvider for VibeLaunch {
     const KIND: AgentKind = AgentKind::Vibe;
 
-    fn arguments(_mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
+    fn arguments(
+        _mcp: &McpServerConfig,
+        session_id: Option<&str>,
+        _manifest: &CliProviderManifest,
+    ) -> Vec<String> {
         build_args(session_id)
     }
 
@@ -121,11 +126,14 @@ impl CliLaunchProvider for VibeLaunch {
         vec![("VIBE_ACTIVE_MODEL".to_string(), model.to_string())]
     }
 
-    fn environment(mcp: &McpServerConfig) -> Vec<(String, String)> {
+    fn environment(
+        mcp: &McpServerConfig,
+        _manifest: &CliProviderManifest,
+    ) -> Vec<(String, String)> {
         build_env(mcp)
     }
 
-    fn prepare(mcp: &McpServerConfig) {
+    fn prepare(mcp: &McpServerConfig, _manifest: &CliProviderManifest) {
         ensure_vibe_hooks(&mcp.command);
     }
 }
@@ -617,6 +625,10 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    fn manifest() -> CliProviderManifest {
+        CliProviderManifest::bundled(AgentKind::Vibe)
+    }
+
     #[test]
     fn model_catalog_reads_vibe_aliases_and_active_model() {
         let tmp = unique_tmp("vibe-models");
@@ -655,7 +667,7 @@ mod tests {
         let prev = std::env::var("VMUX_TEST").ok();
         unsafe { std::env::remove_var("VMUX_TEST") };
         assert_eq!(
-            VibeLaunch::arguments(&mcp, None),
+            VibeLaunch::arguments(&mcp, None, &manifest()),
             vec![
                 "--trust",
                 "--disabled-tools",
@@ -665,7 +677,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            VibeLaunch::arguments(&mcp, Some("sid-1")),
+            VibeLaunch::arguments(&mcp, Some("sid-1"), &manifest()),
             vec![
                 "--trust",
                 "--disabled-tools",
@@ -678,7 +690,7 @@ mod tests {
         );
         unsafe { std::env::set_var("VMUX_TEST", "1") };
         assert!(
-            VibeLaunch::arguments(&mcp, None)
+            VibeLaunch::arguments(&mcp, None, &manifest())
                 .iter()
                 .any(|a| a == "--auto-approve")
         );
@@ -695,7 +707,7 @@ mod tests {
             args: vec![],
             cwd: None,
         };
-        let env = VibeLaunch::environment(&mcp);
+        let env = VibeLaunch::environment(&mcp, &manifest());
         assert!(env.iter().all(|(key, _)| key != "VIBE_DISABLED_TOOLS"));
     }
 
@@ -706,7 +718,7 @@ mod tests {
             args: vec![],
             cwd: None,
         };
-        let env = VibeLaunch::environment(&mcp);
+        let env = VibeLaunch::environment(&mcp, &manifest());
         assert!(
             env.iter()
                 .any(|(k, v)| k == "VIBE_ENABLE_EXPERIMENTAL_HOOKS" && v == "true")

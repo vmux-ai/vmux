@@ -23,10 +23,13 @@ mod install;
 pub(super) mod model;
 pub mod registry;
 
+pub(super) use model::AcpModelPlugin;
+
 use self::environment::AcpEnvironment;
 use self::install::{resolve_from_registry, uninstall};
 use self::registry::{Registry, RegistryAgent};
 use crate::host::launch::{AgentLaunchPolicy, AgentLaunchPolicyQuery};
+use crate::manifest::{CliProviderManifest, CliProviderManifests};
 use vmux_session::AgentRunState;
 
 pub(crate) struct AcpToolPlugin;
@@ -201,6 +204,7 @@ struct AcpInstallRequest {
     fallback: Option<AcpAgentConfig>,
     shell: String,
     policy: AgentLaunchPolicy,
+    provider: CliProviderManifest,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -223,6 +227,7 @@ struct AcpLaunch {
     env: Vec<(String, String)>,
     managed_mcp_servers: Vec<ManagedMcpServer>,
     mcp_revision: u64,
+    direct_only_namespace: String,
 }
 
 #[derive(Clone)]
@@ -238,6 +243,7 @@ fn start_acp_installs(
     focused: vmux_layout::stack::FocusedStack,
     settings: Option<Res<AppSettings>>,
     policy: AgentLaunchPolicyQuery,
+    providers: Single<&CliProviderManifests>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
 ) {
     let Some(settings) = settings else {
@@ -263,11 +269,15 @@ fn start_acp_installs(
             .iter()
             .find(|config| RegistryAgent::ids_match(&config.id, &session.agent_id))
             .cloned();
+        let Some(kind) = RegistryAgent::kind(&session.agent_id) else {
+            continue;
+        };
         let request = AcpInstallRequest {
             agent_id: session.agent_id.clone(),
             fallback,
             shell: shell.clone(),
             policy: policy.clone(),
+            provider: providers.get(kind).clone(),
         };
         let key = request.key();
         let job = match active_jobs
@@ -495,20 +505,22 @@ fn resolve_acp_install(
             command: resolved.command,
             args: resolved.args,
             env: AcpEnvironment::build(resolved.env, login_env, resolved.path_prepend)
-                .for_agent(&request.agent_id, &request.policy)
+                .for_agent(&request.agent_id, &request.policy, &request.provider)
                 .into_inner(),
             managed_mcp_servers: managed_mcp.servers,
             mcp_revision: managed_mcp.revision,
+            direct_only_namespace: request.provider.direct_only_namespace.clone(),
         }),
         Err(registry_error) => match request.fallback {
             Some(config) if !config.command.is_empty() => Ok(AcpLaunch {
                 command: config.command,
                 args: config.args,
                 env: AcpEnvironment::build(config.env, login_env, None)
-                    .for_agent(&request.agent_id, &request.policy)
+                    .for_agent(&request.agent_id, &request.policy, &request.provider)
                     .into_inner(),
                 managed_mcp_servers: managed_mcp.servers,
                 mcp_revision: managed_mcp.revision,
+                direct_only_namespace: request.provider.direct_only_namespace.clone(),
             }),
             _ => Err(registry_error),
         },
@@ -565,6 +577,7 @@ impl AcpLaunch {
         let env = AcpEnvironment::from(self.env.clone())
             .with_managed_servers(
                 &session.agent_id,
+                &self.direct_only_namespace,
                 self.managed_mcp_servers
                     .iter()
                     .map(|server| server.name.clone()),
@@ -684,6 +697,7 @@ mod tests {
             fallback: None,
             shell: String::new(),
             policy: AgentLaunchPolicy::default(),
+            provider: CliProviderManifest::bundled(RegistryAgent::kind(agent_id).unwrap()),
         }
         .key()
     }

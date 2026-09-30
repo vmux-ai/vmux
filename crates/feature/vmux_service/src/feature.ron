@@ -1,6 +1,5 @@
 (
-    cli:
-    (
+    cli: Some((
         commands: [
             (
                 id: "service",
@@ -42,6 +41,5 @@
                 ],
             ),
         ],
-    )
-    ,
+    )),
 )

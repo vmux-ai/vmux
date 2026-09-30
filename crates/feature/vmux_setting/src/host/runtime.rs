@@ -2,7 +2,7 @@ use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use std::sync::{Mutex, mpsc};
+use std::sync::{Mutex, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 use vmux_command::event::{SearchEngine, SearchEngineSetting};
 pub use vmux_layout::settings::LayoutSettings;
@@ -1025,11 +1025,6 @@ impl TerminalSettings {
 const FEATURE_MANIFEST: &str = include_str!("../feature.ron");
 
 #[derive(Deserialize)]
-struct SettingsFeatureManifest {
-    policy: SettingsFeaturePolicy,
-}
-
-#[derive(Deserialize)]
 struct SettingsFeaturePolicy {
     defaults: AppSettings,
 }
@@ -1245,10 +1240,16 @@ fn reload_settings_on_change(
 }
 
 fn load_embedded_settings() -> AppSettings {
-    ron::de::from_str::<SettingsFeatureManifest>(FEATURE_MANIFEST)
-        .expect("embedded feature settings must parse")
-        .policy
-        .defaults
+    static DEFAULTS: OnceLock<AppSettings> = OnceLock::new();
+    DEFAULTS
+        .get_or_init(|| {
+            vmux_core::host::manifest::FeatureManifest::parse(FEATURE_MANIFEST)
+                .policy::<SettingsFeaturePolicy>()
+                .expect("embedded feature settings policy must parse")
+                .expect("settings feature manifest defines policy")
+                .defaults
+        })
+        .clone()
 }
 
 fn sync_search_engine(

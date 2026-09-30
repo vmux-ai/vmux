@@ -3,7 +3,9 @@ use std::ffi::OsString;
 
 use bevy::app::{App, Plugin, Startup};
 use bevy_ecs::prelude::*;
+use ron::value::RawValue;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 
 use crate::host::manifest::FeatureManifest;
 
@@ -29,6 +31,18 @@ pub struct CliManifest {
     pub default: Option<String>,
     #[serde(default)]
     pub commands: Vec<CliCommandManifest>,
+    #[serde(default)]
+    providers: Option<Box<RawValue>>,
+}
+
+impl CliManifest {
+    pub fn providers<T: DeserializeOwned>(&self) -> Result<Option<T>, String> {
+        self.providers
+            .as_deref()
+            .map(|value| ron::from_str(value.get_ron()))
+            .transpose()
+            .map_err(|error| error.to_string())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -150,9 +164,9 @@ mod tests {
     fn parses_cli_from_feature_manifest() {
         let manifest = FeatureManifest::parse(
             r#"(
-                cli: (
+                cli: Some((
                     commands: [(id: "tool", name: "tools")],
-                ),
+                )),
                 ignored: true,
             )"#,
         );

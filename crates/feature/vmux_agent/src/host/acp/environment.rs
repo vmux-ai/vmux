@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use super::registry::RegistryAgent;
+#[cfg(test)]
 use crate::AgentKind;
 use crate::host::launch::AgentLaunchPolicy;
 use crate::manifest::CliProviderManifest;
@@ -20,10 +21,15 @@ impl AcpEnvironment {
         environment
     }
 
-    pub(super) fn for_agent(mut self, agent_id: &str, policy: &AgentLaunchPolicy) -> Self {
+    pub(super) fn for_agent(
+        mut self,
+        agent_id: &str,
+        policy: &AgentLaunchPolicy,
+        manifest: &CliProviderManifest,
+    ) -> Self {
         match RegistryAgent::canonical_id(agent_id) {
             "mistral-vibe" => self.apply_vibe(),
-            "codex-acp" => self.apply_codex(policy),
+            "codex-acp" => self.apply_codex(policy, manifest),
             "claude-acp" => self.apply_claude(),
             _ => {}
         }
@@ -33,6 +39,7 @@ impl AcpEnvironment {
     pub(super) fn with_managed_servers(
         mut self,
         agent_id: &str,
+        direct_only_namespace: &str,
         server_names: impl IntoIterator<Item = String>,
     ) -> Self {
         if RegistryAgent::canonical_id(agent_id) != "codex-acp" {
@@ -71,8 +78,7 @@ impl AcpEnvironment {
             *namespaces = serde_json::json!([]);
         }
         let namespaces = namespaces.as_array_mut().unwrap();
-        let manifest = CliProviderManifest::bundled(AgentKind::Codex);
-        let vmux = serde_json::Value::String(manifest.direct_only_namespace);
+        let vmux = serde_json::Value::String(direct_only_namespace.to_string());
         if !namespaces.contains(&vmux) {
             namespaces.push(vmux);
         }
@@ -189,8 +195,7 @@ impl AcpEnvironment {
         }
     }
 
-    fn apply_codex(&mut self, policy: &AgentLaunchPolicy) {
-        let manifest = CliProviderManifest::bundled(AgentKind::Codex);
+    fn apply_codex(&mut self, policy: &AgentLaunchPolicy, manifest: &CliProviderManifest) {
         self.0
             .retain(|(key, _)| key != "DISABLE_MCP_CONFIG_FILTERING");
         let existing = self
@@ -388,6 +393,10 @@ mod tests {
         (key.to_string(), value.to_string())
     }
 
+    fn manifest(kind: AgentKind) -> CliProviderManifest {
+        CliProviderManifest::bundled(kind)
+    }
+
     #[test]
     fn login_environment_overrides_registry_environment() {
         let base = vec![env("MISTRAL_API_KEY", ""), env("KEEP", "1")];
@@ -441,8 +450,9 @@ mod tests {
             Vec::new(),
         );
         for agent_id in ["codex", "codex-acp"] {
+            let manifest = manifest(AgentKind::Codex);
             let environment = AcpEnvironment::from(Vec::new())
-                .for_agent(agent_id, &policy)
+                .for_agent(agent_id, &policy, &manifest)
                 .into_inner();
             let config = environment
                 .iter()
@@ -478,10 +488,12 @@ mod tests {
 
     #[test]
     fn codex_environment_exposes_managed_namespaces() {
+        let manifest = manifest(AgentKind::Codex);
         let environment = AcpEnvironment::from(Vec::new())
-            .for_agent("codex-acp", &AgentLaunchPolicy::default())
+            .for_agent("codex-acp", &AgentLaunchPolicy::default(), &manifest)
             .with_managed_servers(
                 "codex-acp",
+                &manifest.direct_only_namespace,
                 ["vmux_linear".to_string(), "vmux_notion".to_string()],
             )
             .into_inner();
@@ -529,8 +541,9 @@ mod tests {
     #[test]
     fn claude_environment_extends_mcp_timeout() {
         for agent_id in ["claude", "claude-acp"] {
+            let manifest = manifest(AgentKind::Claude);
             let environment = AcpEnvironment::from(vec![env("MCP_TOOL_TIMEOUT", "60000")])
-                .for_agent(agent_id, &AgentLaunchPolicy::default())
+                .for_agent(agent_id, &AgentLaunchPolicy::default(), &manifest)
                 .into_inner();
             assert_eq!(
                 environment
@@ -544,6 +557,7 @@ mod tests {
 
     #[test]
     fn vibe_environment_disables_shell_tool() {
+        let manifest = manifest(AgentKind::Vibe);
         let environment = AcpEnvironment::from(vec![
             env("VIBE_DISABLED_TOOLS", r#"["from-env"]"#),
             env(
@@ -551,7 +565,7 @@ mod tests {
                 r#"[{"name":"from-env","transport":"stdio","command":"env-command"}]"#,
             ),
         ])
-        .for_agent("mistral-vibe", &AgentLaunchPolicy::default())
+        .for_agent("mistral-vibe", &AgentLaunchPolicy::default(), &manifest)
         .into_inner();
         let disabled = environment
             .iter()
@@ -570,8 +584,9 @@ mod tests {
 
     #[test]
     fn vibe_environment_discards_invalid_mcp_configuration() {
+        let manifest = manifest(AgentKind::Vibe);
         let environment = AcpEnvironment::from(vec![env("VIBE_MCP_SERVERS", "not-json")])
-            .for_agent("mistral-vibe", &AgentLaunchPolicy::default())
+            .for_agent("mistral-vibe", &AgentLaunchPolicy::default(), &manifest)
             .into_inner();
 
         assert!(environment.iter().all(|(key, _)| key != "VIBE_MCP_SERVERS"));
@@ -579,11 +594,12 @@ mod tests {
 
     #[test]
     fn codex_environment_preserves_existing_configuration() {
+        let manifest = manifest(AgentKind::Codex);
         let environment = AcpEnvironment::from(vec![env(
             "CODEX_CONFIG",
             r#"{"model":"gpt-test","features":{"custom_feature":true,"code_mode":{"custom_setting":"keep"}}}"#,
         )])
-        .for_agent("codex", &AgentLaunchPolicy::default())
+        .for_agent("codex", &AgentLaunchPolicy::default(), &manifest)
         .into_inner();
         let config = environment
             .iter()

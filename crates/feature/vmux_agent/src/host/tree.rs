@@ -30,7 +30,7 @@ impl Plugin for AgentPagesPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             vmux_chat::ChatPlugin,
-            super::acp::model::AcpModelPlugin,
+            super::acp::AcpModelPlugin,
             super::transcript::ChatTranscriptPlugin,
             crate::setup::AgentSetupPlugin,
         ));
@@ -41,6 +41,9 @@ pub struct AgentSessionPlugin;
 
 impl Plugin for AgentSessionPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::manifest::AgentManifestPlugin>() {
+            app.add_plugins(crate::manifest::AgentManifestPlugin);
+        }
         app.add_systems(PreStartup, spawn_agent_store_validator);
         app.add_systems(Startup, register_agent_session_route);
         app.add_plugins(super::cli::CliPlugin);

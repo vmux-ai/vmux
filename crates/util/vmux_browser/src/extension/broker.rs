@@ -3,7 +3,6 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::RecvTimeoutError;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
-use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use vmux_extension::protocol::{
     ApiEvent, ApiRequest, ApiResponse, BridgeClientMessage, BridgeServerMessage, ExtensionApiError,
@@ -22,28 +21,37 @@ pub(crate) struct ExtensionBrokerPlugin;
 
 impl Plugin for ExtensionBrokerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_extension_broker)
-            .add_systems(
-                Update,
-                drain_bridge_requests
-                    .in_set(super::ExtensionSystemSet::DrainBridge)
-                    .after(super::ExtensionSystemSet::SyncWindows),
-            )
-            .add_systems(
-                Update,
-                forward_extension_model_events.after(super::project::ExtensionProjectionSet),
-            )
-            .add_systems(Update, fire_conformance_wake_timer)
-            .add_systems(Update, arm_bridge_wake);
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_systems(Startup, spawn_extension_broker)
+        .add_systems(
+            Update,
+            drain_bridge_requests
+                .in_set(super::ExtensionSystemSet::DrainBridge)
+                .after(super::ExtensionSystemSet::SyncWindows),
+        )
+        .add_systems(
+            Update,
+            forward_extension_model_events.after(super::project::ExtensionProjectionSet),
+        )
+        .add_systems(Update, fire_conformance_wake_timer)
+        .add_systems(Update, arm_bridge_wake);
     }
 }
 
-fn spawn_extension_broker(mut commands: Commands) {
+fn spawn_extension_broker(
+    manifests: Query<&vmux_core::host::manifest::FeatureManifest>,
+    mut commands: Commands,
+) {
+    let matrix = CapabilityMatrix::from_features(&manifests)
+        .expect("browser feature manifest contains a valid extension policy");
     let mut entity = commands.spawn((
         Name::new("Extension broker"),
         BridgeSubscriptions::default(),
         BridgeResponseCache::default(),
         PendingBridgeEvents::default(),
+        matrix,
     ));
     if extension_conformance_enabled() {
         entity.insert(ConformanceWakeTimer::default());
@@ -72,13 +80,6 @@ const MAX_PENDING_EVENTS: usize = 256;
 const MAX_SEEN_REQUESTS: usize = 256;
 const MAX_CACHED_RESPONSES_PER_EXTENSION: usize = 256;
 const MAX_SUBSCRIPTIONS_PER_EXTENSION: usize = 64;
-static CAPABILITY_MATRIX: LazyLock<CapabilityMatrix> = LazyLock::new(|| {
-    let matrix = CapabilityMatrix::embedded().expect("valid embedded capability matrix");
-    matrix
-        .validate()
-        .expect("valid extension capability matrix");
-    matrix
-});
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BridgeSubscription {
@@ -138,6 +139,7 @@ fn drain_bridge_requests(
         &mut PendingBridgeEvents,
         &mut BridgeResponseCache,
         Option<&mut ConformanceWakeTimer>,
+        &CapabilityMatrix,
     )>,
     model: Single<&ExtensionModel>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -149,7 +151,8 @@ fn drain_bridge_requests(
     mut update_host_window_requests: MessageWriter<UpdateHostWindowRequest>,
     mut model_events: MessageWriter<ExtensionModelEvent>,
 ) {
-    let (mut subscriptions, mut pending, mut response_cache, mut wake_timer) = broker.into_inner();
+    let (mut subscriptions, mut pending, mut response_cache, mut wake_timer, matrix) =
+        broker.into_inner();
     for _ in 0..MAX_BRIDGE_MESSAGES_PER_UPDATE {
         let Ok(inbound) = server.try_recv() else {
             break;
@@ -237,7 +240,7 @@ fn drain_bridge_requests(
                     requests.pop_front();
                 }
                 let dispatched = dispatch_api_request(
-                    &CAPABILITY_MATRIX,
+                    matrix,
                     request,
                     &model,
                     &mut extension_windows,

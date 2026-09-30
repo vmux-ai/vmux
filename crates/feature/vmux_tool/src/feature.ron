@@ -40,8 +40,7 @@
             ],
         ),
     ],
-    cli:
-    (
+    cli: Some((
         commands: [
             (
                 id: "tool",
@@ -104,8 +103,7 @@
                 ],
             ),
         ],
-    )
-    ,
+    )),
     mcp_servers: [
         (
             id: "linear",

@@ -85,12 +85,15 @@ pub(crate) struct CodexLaunch;
 impl CliLaunchProvider for CodexLaunch {
     const KIND: AgentKind = AgentKind::Codex;
 
-    fn arguments(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
-        build_args(mcp, session_id, &CliProviderManifest::bundled(Self::KIND))
+    fn arguments(
+        mcp: &McpServerConfig,
+        session_id: Option<&str>,
+        manifest: &CliProviderManifest,
+    ) -> Vec<String> {
+        build_args(mcp, session_id, manifest)
     }
 
-    fn policy_arguments(policy: &AgentLaunchPolicy) -> Vec<String> {
-        let manifest = CliProviderManifest::bundled(Self::KIND);
+    fn policy_arguments(policy: &AgentLaunchPolicy, manifest: &CliProviderManifest) -> Vec<String> {
         let mut args = Vec::new();
         if let Some(skills) =
             build_skills_config_override(&codex_disabled_skill_files(policy.disabled_skill_roots()))
@@ -114,7 +117,10 @@ impl CliLaunchProvider for CodexLaunch {
         effort_args(effort)
     }
 
-    fn environment(mcp: &McpServerConfig) -> Vec<(String, String)> {
+    fn environment(
+        mcp: &McpServerConfig,
+        _manifest: &CliProviderManifest,
+    ) -> Vec<(String, String)> {
         build_env(mcp)
     }
 }
@@ -852,6 +858,10 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    fn manifest() -> CliProviderManifest {
+        CliProviderManifest::bundled(AgentKind::Codex)
+    }
+
     fn unique_tmp(label: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -989,7 +999,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = CodexLaunch::arguments(&mcp, None);
+        let args = CodexLaunch::arguments(&mcp, None, &manifest());
         assert!(!args.iter().any(|a| a == "-s"));
         assert!(!args.iter().any(|a| a == "-a"));
         assert!(
@@ -1061,7 +1071,7 @@ mod tests {
             args: vec!["mcp".into(), "--anchor".into(), "42".into()],
             cwd: None,
         };
-        let args = CodexLaunch::arguments(&mcp, None);
+        let args = CodexLaunch::arguments(&mcp, None, &manifest());
         assert!(args.iter().any(|a| a == "features.hooks=true"));
         let hook = args
             .iter()
@@ -1080,7 +1090,7 @@ mod tests {
             args: vec!["mcp".into(), "--anchor".into(), "42".into()],
             cwd: None,
         };
-        let args = CodexLaunch::arguments(&mcp, None);
+        let args = CodexLaunch::arguments(&mcp, None, &manifest());
         let hook = args
             .iter()
             .find(|a| a.starts_with("hooks.Stop="))
@@ -1101,7 +1111,7 @@ mod tests {
             args: vec![],
             cwd: None,
         };
-        let args = CodexLaunch::arguments(&mcp, Some("abc-123"));
+        let args = CodexLaunch::arguments(&mcp, Some("abc-123"), &manifest());
         let resume_idx = args.iter().position(|a| a == "resume").unwrap();
         assert_eq!(args[resume_idx + 1], "abc-123");
         let last_dash_c = args.iter().rposition(|a| a == "-c").unwrap();
@@ -1120,7 +1130,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = CodexLaunch::arguments(&mcp, None);
+        let args = CodexLaunch::arguments(&mcp, None, &manifest());
         let disabled: Vec<&str> = args
             .windows(2)
             .filter(|w| w[0] == "--disable")
@@ -1137,7 +1147,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = CodexLaunch::arguments(&mcp, None);
+        let args = CodexLaunch::arguments(&mcp, None, &manifest());
         assert!(args.iter().any(|a| a == "tools.web_search=false"));
     }
 
@@ -1163,7 +1173,7 @@ mod tests {
         std::fs::write(temp.path().join("ignored.md"), "ignored").unwrap();
 
         let policy = AgentLaunchPolicy::new(Vec::new(), vec![temp.path().to_path_buf()]);
-        let args = CodexLaunch::policy_arguments(&policy);
+        let args = CodexLaunch::policy_arguments(&policy, &manifest());
         let skills = args
             .iter()
             .find(|argument| argument.starts_with("skills.config="))
@@ -1177,7 +1187,7 @@ mod tests {
             vec!["Feature-owned agent instruction.".to_string()],
             Vec::new(),
         );
-        let args = CodexLaunch::policy_arguments(&policy);
+        let args = CodexLaunch::policy_arguments(&policy, &manifest());
         let steer = args
             .iter()
             .find(|a| a.starts_with("developer_instructions="))
@@ -1193,7 +1203,7 @@ mod tests {
             args: vec!["mcp".into()],
             cwd: None,
         };
-        let args = CodexLaunch::arguments(&mcp, None);
+        let args = CodexLaunch::arguments(&mcp, None, &manifest());
         assert!(
             args.iter()
                 .any(|a| a == "features.code_mode.direct_only_tool_namespaces=[\"mcp__vmux\"]"),

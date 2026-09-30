@@ -17,6 +17,7 @@ use vmux_terminal::reattach_terminal_bundle;
 
 use crate::event::AgentApprovalRequest;
 use crate::handoff::{ImportedConversation, PendingHandoff};
+use crate::manifest::AcpWorkspacePolicy;
 use vmux_chat::host::ChatView;
 use vmux_session::AgentRunState;
 use vmux_session::{AcpSession, AgentApprovalPolicy, PromptQueue};
@@ -28,6 +29,9 @@ pub(crate) struct AcpModelInfoSet;
 
 impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::manifest::AgentManifestPlugin>() {
+            app.add_plugins(crate::manifest::AgentManifestPlugin);
+        }
         app.add_message::<ServiceRequest>()
             .add_plugins(crate::acp_tool::AcpToolPlugin)
             .add_message::<crate::event::UiAgentInfo>()
@@ -113,33 +117,13 @@ fn cli_target(
     Some((target.format(), cwd.to_path_buf()))
 }
 
-#[derive(Component, serde::Deserialize)]
-struct AcpWorkspacePolicy {
-    unbound: String,
-    pending_worktree: String,
-    repository_needs_worktree: String,
-}
-
-#[derive(serde::Deserialize)]
-struct AgentFeatureManifest {
-    policies: std::collections::BTreeMap<String, AcpWorkspacePolicy>,
-}
-
-impl AcpWorkspacePolicy {
-    fn bundled() -> Self {
-        ron::from_str::<AgentFeatureManifest>(include_str!("../../feature.ron"))
-            .expect("agent feature manifest contains valid policies")
-            .policies
-            .remove("acp_workspace")
-            .expect("agent feature manifest defines acp_workspace policy")
-    }
-
-    fn context(&self, state: AcpWorkspaceState) -> Option<&str> {
-        match state {
-            AcpWorkspaceState::Bound => None,
-            AcpWorkspaceState::Unbound => Some(&self.unbound),
-            AcpWorkspaceState::PendingWorktree => Some(&self.pending_worktree),
-            AcpWorkspaceState::RepositoryNeedsWorktree => Some(&self.repository_needs_worktree),
+impl AcpWorkspaceState {
+    fn context<'a>(self, policy: &'a AcpWorkspacePolicy) -> Option<&'a str> {
+        match self {
+            Self::Bound => None,
+            Self::Unbound => Some(&policy.unbound),
+            Self::PendingWorktree => Some(&policy.pending_worktree),
+            Self::RepositoryNeedsWorktree => Some(&policy.repository_needs_worktree),
         }
     }
 }
@@ -183,7 +167,7 @@ fn acp_prompt_context(
     handoff: Option<String>,
     workspace_state: Option<AcpWorkspaceState>,
 ) -> Option<String> {
-    let policy = workspace_state.and_then(|state| policy.context(state));
+    let policy = workspace_state.and_then(|state| state.context(policy));
     match (handoff, policy) {
         (Some(handoff), Some(policy)) => Some(format!("{handoff}\n\n{policy}")),
         (Some(handoff), None) => Some(handoff),
@@ -266,11 +250,7 @@ struct AcpCatalogFetch {
 }
 
 fn spawn_acp_catalog(mut commands: Commands) {
-    commands.spawn((
-        Name::new("ACP catalog"),
-        AcpCatalog::default(),
-        AcpWorkspacePolicy::bundled(),
-    ));
+    commands.spawn((Name::new("ACP catalog"), AcpCatalog::default()));
 }
 
 fn start_catalog_fetch(mut commands: Commands) {
