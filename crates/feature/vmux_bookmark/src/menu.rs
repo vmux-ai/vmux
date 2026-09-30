@@ -8,7 +8,10 @@ pub struct BookmarkPlugin;
 
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
-        app.add_agent_message::<AddRequest>()
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
+            crate::Feature,
+        >::new(crate::FEATURE_MANIFEST))
+            .add_agent_message::<AddRequest>()
             .add_agent_message::<CreateFolderRequest>()
             .add_agent_message::<PinRequest>()
             .add_agent_message::<PinUrlRequest>()

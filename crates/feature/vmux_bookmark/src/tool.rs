@@ -20,23 +20,25 @@ pub struct BookmarkToolPlugin;
 
 impl Plugin for BookmarkToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::new(crate::FEATURE_MANIFEST))
-            .add_message::<ToolQueryRequest>()
-            .add_message::<ToolQueryHandled>()
-            .add_message::<ServiceRequest>()
-            .register_tool::<BookmarkListArgs>()
-            .register_tool::<BookmarkAddArgs>()
-            .register_tool::<BookmarkRemoveArgs>()
-            .register_tool::<BookmarkPinArgs>()
-            .register_tool::<BookmarkUnpinArgs>()
-            .register_tool::<BookmarkFolderCreateArgs>()
-            .add_message::<BookmarkListRequest>()
-            .add_systems(
-                Update,
-                (list, add, remove, pin, unpin, create_folder).in_set(ToolDispatchSet),
-            )
-            .add_systems(Update, route_bookmark_queries.in_set(ToolQueryRouteSet))
-            .add_systems(Update, answer_bookmark_queries.after(ToolQueryRouteSet));
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
+            crate::FEATURE_MANIFEST,
+        ))
+        .add_message::<ToolQueryRequest>()
+        .add_message::<ToolQueryHandled>()
+        .add_message::<ServiceRequest>()
+        .register_tool::<BookmarkListArgs>()
+        .register_tool::<BookmarkAddArgs>()
+        .register_tool::<BookmarkRemoveArgs>()
+        .register_tool::<BookmarkPinArgs>()
+        .register_tool::<BookmarkUnpinArgs>()
+        .register_tool::<BookmarkFolderCreateArgs>()
+        .add_message::<BookmarkListRequest>()
+        .add_systems(
+            Update,
+            (list, add, remove, pin, unpin, create_folder).in_set(ToolDispatchSet),
+        )
+        .add_systems(Update, route_bookmark_queries.in_set(ToolQueryRouteSet))
+        .add_systems(Update, answer_bookmark_queries.after(ToolQueryRouteSet));
     }
 }
 

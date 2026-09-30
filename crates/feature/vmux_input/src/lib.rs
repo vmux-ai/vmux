@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
+pub(crate) type Feature = CapturePlugin;
 
 mod capture;
 #[cfg(target_os = "macos")]

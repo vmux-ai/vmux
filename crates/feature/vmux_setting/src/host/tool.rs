@@ -15,22 +15,24 @@ pub struct SettingToolPlugin;
 
 impl Plugin for SettingToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::new(crate::FEATURE_MANIFEST))
-            .register_tool::<GetSettingsArgs>()
-            .register_tool::<UpdateSettingsArgs>()
-            .add_message::<ToolQueryRequest>()
-            .add_message::<ToolQueryHandled>()
-            .add_message::<ServiceRequest>()
-            .add_systems(
-                Update,
-                (get_settings, update_settings).in_set(ToolDispatchSet),
-            )
-            .add_systems(
-                Update,
-                answer_settings_queries
-                    .in_set(ToolQueryRouteSet)
-                    .after(ServiceMessageSet),
-            );
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
+            crate::FEATURE_MANIFEST,
+        ))
+        .register_tool::<GetSettingsArgs>()
+        .register_tool::<UpdateSettingsArgs>()
+        .add_message::<ToolQueryRequest>()
+        .add_message::<ToolQueryHandled>()
+        .add_message::<ServiceRequest>()
+        .add_systems(
+            Update,
+            (get_settings, update_settings).in_set(ToolDispatchSet),
+        )
+        .add_systems(
+            Update,
+            answer_settings_queries
+                .in_set(ToolQueryRouteSet)
+                .after(ServiceMessageSet),
+        );
     }
 }
 

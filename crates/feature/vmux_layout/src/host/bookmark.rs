@@ -32,9 +32,9 @@ pub struct BookmarkRequestSet;
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ));
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
+            crate::Feature,
+        >::new(crate::FEATURE_MANIFEST));
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -1123,7 +1123,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_core::host::manifest::FeatureManifestPlugin::new(crate::FEATURE_MANIFEST),
+            vmux_core::host::manifest::FeatureManifestPlugin::<crate::Feature>::new(
+                crate::FEATURE_MANIFEST,
+            ),
             vmux_command::CommandRuntimePlugin,
         ))
         .add_message::<BookmarkToggleActiveRequest>()

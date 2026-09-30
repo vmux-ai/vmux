@@ -7,7 +7,7 @@ use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use vmux_core::ProcessId;
-use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
+use vmux_core::cli::{CliInvocation, CliResult};
 use vmux_core::host::manifest::FeatureManifestPlugin;
 
 use crate::protocol::{McpConfig, McpInput, McpOutput, McpPlugin, McpRuntime, McpServer, McpSet};
@@ -17,8 +17,7 @@ pub struct McpCliPlugin;
 impl Plugin for McpCliPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            FeatureManifestPlugin::new(crate::FEATURE_MANIFEST),
-            CliManifestPlugin,
+            FeatureManifestPlugin::<crate::Feature>::new(crate::FEATURE_MANIFEST),
             McpPlugin,
         ))
         .add_systems(

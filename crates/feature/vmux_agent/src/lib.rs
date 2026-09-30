@@ -2,6 +2,8 @@
 
 #[cfg(feature = "app")]
 pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
+#[cfg(all(host, feature = "app"))]
+pub(crate) type Feature = host::AgentToolPlugin;
 
 pub mod setup;
 

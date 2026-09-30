@@ -27,9 +27,9 @@ impl Plugin for ProcessMonitorPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::monitor::ProcessMonitorPage::plugin());
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ));
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
+            crate::Feature,
+        >::new(crate::FEATURE_MANIFEST));
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }

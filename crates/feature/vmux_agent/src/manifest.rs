@@ -10,8 +10,10 @@ pub(crate) struct AgentManifestPlugin;
 
 impl Plugin for AgentManifestPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::new(crate::FEATURE_MANIFEST))
-            .add_systems(Startup, load);
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
+            crate::FEATURE_MANIFEST,
+        ))
+        .add_systems(Startup, load);
     }
 }
 

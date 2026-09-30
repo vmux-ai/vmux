@@ -23,22 +23,24 @@ pub struct CommandToolPlugin;
 
 impl Plugin for CommandToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::new(crate::FEATURE_MANIFEST))
-            .register_tool::<OpenCommandBarArgs>()
-            .register_tool::<NotifyArgs>()
-            .add_message::<ToolQueryRequest>()
-            .add_message::<ToolQueryHandled>()
-            .add_message::<ServiceRequest>()
-            .add_systems(
-                Update,
-                (open_command_bar, notify, dispatch_unclaimed_tools).in_set(ToolDispatchSet),
-            )
-            .add_systems(
-                Update,
-                answer_command_queries
-                    .in_set(ToolQueryRouteSet)
-                    .after(ServiceMessageSet),
-            );
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
+            crate::FEATURE_MANIFEST,
+        ))
+        .register_tool::<OpenCommandBarArgs>()
+        .register_tool::<NotifyArgs>()
+        .add_message::<ToolQueryRequest>()
+        .add_message::<ToolQueryHandled>()
+        .add_message::<ServiceRequest>()
+        .add_systems(
+            Update,
+            (open_command_bar, notify, dispatch_unclaimed_tools).in_set(ToolDispatchSet),
+        )
+        .add_systems(
+            Update,
+            answer_command_queries
+                .in_set(ToolQueryRouteSet)
+                .after(ServiceMessageSet),
+        );
     }
 }
 

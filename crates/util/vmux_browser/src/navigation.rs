@@ -26,9 +26,9 @@ pub(crate) struct NavigationPlugin;
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ));
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
+            crate::Feature,
+        >::new(crate::FEATURE_MANIFEST));
         app.add_message::<vmux_core::service::ServiceRequest>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
@@ -494,9 +494,9 @@ mod command_definition_tests {
     fn history_mcp_definition_dispatches_to_the_typed_request() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-                crate::FEATURE_MANIFEST,
-            ))
+            .add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
+                crate::Feature,
+            >::new(crate::FEATURE_MANIFEST))
             .add_plugins(CommandRuntimePlugin)
             .add_message::<OpenHistoryRequest>()
             .add_systems(Startup, bind_command.in_set(BindCommands))

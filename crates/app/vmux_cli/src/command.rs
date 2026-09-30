@@ -7,6 +7,7 @@ use bevy_app::{App, AppExit, First, Last, Plugin, PreUpdate};
 use bevy_ecs::prelude::*;
 use clap::error::ErrorKind;
 use vmux_core::cli::{CliInvocation, CliResult};
+use vmux_core::host::manifest::FeatureManifest;
 
 mod catalog;
 mod parser;
@@ -48,12 +49,15 @@ struct CliArguments(Vec<OsString>);
 
 fn collect_cli_catalog(
     processes: Query<Entity, (With<CliArguments>, Without<CliCatalog>)>,
-    manifests: Query<&vmux_core::cli::CliManifest>,
+    manifests: Query<&FeatureManifest>,
     mut commands: Commands,
 ) {
     let mut default = None;
     let mut registered = Vec::new();
-    for manifest in &manifests {
+    for feature in &manifests {
+        let Some(manifest) = &feature.cli else {
+            continue;
+        };
         if let Some(candidate) = &manifest.default {
             assert!(
                 default.is_none(),

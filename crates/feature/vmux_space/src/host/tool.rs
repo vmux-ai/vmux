@@ -24,34 +24,36 @@ pub struct SpaceToolPlugin;
 
 impl Plugin for SpaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::new(crate::FEATURE_MANIFEST))
-            .register_tool::<ListSpacesArgs>()
-            .register_tool::<CreateSpaceArgs>()
-            .register_tool::<RenameSpaceArgs>()
-            .register_tool::<DeleteSpaceArgs>()
-            .register_tool::<SelectProjectArgs>()
-            .register_tool::<CreateWorktreeArgs>()
-            .add_message::<ToolQueryRequest>()
-            .add_message::<ToolQueryHandled>()
-            .add_message::<ServiceRequest>()
-            .add_systems(
-                Update,
-                (
-                    list_spaces,
-                    create,
-                    rename,
-                    delete,
-                    select_project,
-                    create_worktree,
-                )
-                    .in_set(ToolDispatchSet),
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
+            crate::FEATURE_MANIFEST,
+        ))
+        .register_tool::<ListSpacesArgs>()
+        .register_tool::<CreateSpaceArgs>()
+        .register_tool::<RenameSpaceArgs>()
+        .register_tool::<DeleteSpaceArgs>()
+        .register_tool::<SelectProjectArgs>()
+        .register_tool::<CreateWorktreeArgs>()
+        .add_message::<ToolQueryRequest>()
+        .add_message::<ToolQueryHandled>()
+        .add_message::<ServiceRequest>()
+        .add_systems(
+            Update,
+            (
+                list_spaces,
+                create,
+                rename,
+                delete,
+                select_project,
+                create_worktree,
             )
-            .add_systems(
-                Update,
-                answer_space_queries
-                    .in_set(ToolQueryRouteSet)
-                    .after(ServiceMessageSet),
-            );
+                .in_set(ToolDispatchSet),
+        )
+        .add_systems(
+            Update,
+            answer_space_queries
+                .in_set(ToolQueryRouteSet)
+                .after(ServiceMessageSet),
+        );
     }
 }
 

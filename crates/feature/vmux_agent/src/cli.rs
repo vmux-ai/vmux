@@ -6,7 +6,7 @@ use vmux_api::protocol::{
     AGENT_REQUEST_TIMEOUT, AgentCommandResult, AgentFileTouched, AgentNotify, AgentRequest,
     AgentRequestId, AgentTurnEnded, ClientMessage, FileTouchKind, ProcessId, ServiceMessage,
 };
-use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
+use vmux_core::cli::{CliInvocation, CliResult};
 use vmux_core::service::ServiceConnection;
 
 pub struct AgentCliPlugin;
@@ -16,7 +16,7 @@ impl Plugin for AgentCliPlugin {
         if !app.is_plugin_added::<crate::manifest::AgentManifestPlugin>() {
             app.add_plugins(crate::manifest::AgentManifestPlugin);
         }
-        app.add_plugins(CliManifestPlugin).add_systems(
+        app.add_systems(
             Update,
             (
                 route_agent_cli,

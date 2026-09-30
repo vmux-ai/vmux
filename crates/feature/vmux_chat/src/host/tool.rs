@@ -11,13 +11,15 @@ pub struct ChatToolPlugin;
 
 impl Plugin for ChatToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::new(crate::FEATURE_MANIFEST))
-            .register_tool::<RequestUserChoiceArgs>()
-            .register_tool::<SetConversationTitleArgs>()
-            .add_systems(
-                Update,
-                (request_user_choice, set_conversation_title).in_set(ToolDispatchSet),
-            );
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
+            crate::FEATURE_MANIFEST,
+        ))
+        .register_tool::<RequestUserChoiceArgs>()
+        .register_tool::<SetConversationTitleArgs>()
+        .add_systems(
+            Update,
+            (request_user_choice, set_conversation_title).in_set(ToolDispatchSet),
+        );
     }
 }
 

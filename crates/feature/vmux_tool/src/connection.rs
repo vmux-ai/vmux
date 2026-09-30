@@ -18,7 +18,7 @@ use vmux_api::mcp::{
     McpServerEntry, McpServerOperation, McpServerPending, McpServerRequest, McpServerResult,
     McpServerStatus, McpServers, McpServersRequest,
 };
-use vmux_core::host::manifest::{FeatureManifest, FeatureManifestPlugin};
+use vmux_core::host::manifest::FeatureManifest;
 use vmux_core::host::{UiStatePlugin, UiStateWrite};
 use vmux_core::profile::mcp_credentials::{
     McpCredentialAccess, McpCredentialStorage, McpOauthCredentials,
@@ -30,7 +30,6 @@ pub struct McpConnectionPlugin;
 impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            FeatureManifestPlugin::new(crate::FEATURE_MANIFEST),
             UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default(),
             UiStatePlugin::<McpServers>::default(),
         ))

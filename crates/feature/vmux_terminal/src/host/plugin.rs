@@ -81,6 +81,9 @@ pub struct TerminalPlugin;
 
 impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
+            crate::Feature,
+        >::new(crate::FEATURE_MANIFEST));
         #[cfg(ui)]
         app.add_plugins(crate::ui::TerminalPage::plugin());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {

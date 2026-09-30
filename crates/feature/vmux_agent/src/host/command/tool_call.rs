@@ -154,6 +154,8 @@ mod tests {
     #[derive(Component, Deserialize)]
     struct TestQueryArgs {}
 
+    struct TestFeature;
+
     #[derive(Resource, Default)]
     struct CapturedAgentQueries(Vec<AgentRequest>);
 
@@ -182,7 +184,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            FeatureManifestPlugin::new(
+            FeatureManifestPlugin::<TestFeature>::new(
                 r#"(tools: [(name: "test_query", description: "test", input_schema: (type: Object))])"#,
             ),
             ToolCallPlugin,

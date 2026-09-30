@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
+use vmux_core::cli::{CliInvocation, CliResult};
 use vmux_core::host::manifest::FeatureManifestPlugin;
 
 use crate::DotfileLinkState;
@@ -12,9 +12,8 @@ pub struct ToolCliPlugin;
 
 impl Plugin for ToolCliPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            FeatureManifestPlugin::new(crate::FEATURE_MANIFEST),
-            CliManifestPlugin,
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
+            crate::FEATURE_MANIFEST,
         ))
         .add_systems(
             Update,

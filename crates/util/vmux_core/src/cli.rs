@@ -1,29 +1,10 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 
-use bevy::app::{App, Plugin, Startup};
 use bevy_ecs::prelude::*;
 use ron::value::RawValue;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-
-use crate::host::manifest::FeatureManifest;
-
-pub struct CliManifestPlugin;
-
-impl Plugin for CliManifestPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register_feature_cli_manifests);
-    }
-}
-
-fn register_feature_cli_manifests(manifests: Query<&FeatureManifest>, mut commands: Commands) {
-    for feature in &manifests {
-        if let Some(manifest) = &feature.cli {
-            commands.spawn(manifest.clone());
-        }
-    }
-}
 
 #[derive(Clone, Component, Debug, Deserialize, PartialEq, Eq)]
 pub struct CliManifest {
@@ -134,6 +115,7 @@ impl CliResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::manifest::FeatureManifest;
 
     #[test]
     fn parses_nested_command_manifest() {

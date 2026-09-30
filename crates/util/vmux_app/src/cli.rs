@@ -2,7 +2,7 @@ use std::io;
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
+use vmux_core::cli::{CliInvocation, CliResult};
 use vmux_core::host::manifest::FeatureManifestPlugin;
 
 pub struct VmuxCliPlugin;
@@ -10,8 +10,7 @@ pub struct VmuxCliPlugin;
 impl Plugin for VmuxCliPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            FeatureManifestPlugin::new(crate::FEATURE_MANIFEST),
-            CliManifestPlugin,
+            FeatureManifestPlugin::<crate::Feature>::new(crate::FEATURE_MANIFEST),
             vmux_agent::AgentCliPlugin,
             vmux_service::ServiceCliPlugin,
             vmux_tool::ToolCliPlugin,

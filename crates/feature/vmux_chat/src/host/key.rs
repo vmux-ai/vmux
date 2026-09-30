@@ -924,7 +924,9 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((
                 MinimalPlugins,
-                vmux_core::host::manifest::FeatureManifestPlugin::new(crate::FEATURE_MANIFEST),
+                vmux_core::host::manifest::FeatureManifestPlugin::<crate::Feature>::new(
+                    crate::FEATURE_MANIFEST,
+                ),
                 ChatKeyPlugin,
             ))
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()

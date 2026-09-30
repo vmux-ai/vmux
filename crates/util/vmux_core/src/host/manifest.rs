@@ -1,4 +1,6 @@
+use std::any::TypeId;
 use std::collections::HashSet;
+use std::marker::PhantomData;
 
 use bevy::prelude::*;
 use ron::value::RawValue;
@@ -219,34 +221,42 @@ pub struct McpServer {
 }
 
 #[derive(Resource, Default)]
-struct RegisteredFeatureManifests(HashSet<(usize, usize)>);
+struct RegisteredFeatureManifests(HashSet<TypeId>);
 
-pub struct FeatureManifestPlugin {
+#[derive(Component)]
+pub struct FeatureManifestSource<M>(PhantomData<fn() -> M>);
+
+pub struct FeatureManifestPlugin<M> {
     source: &'static str,
+    marker: PhantomData<fn() -> M>,
 }
 
-impl FeatureManifestPlugin {
+impl<M> FeatureManifestPlugin<M> {
     pub const fn new(source: &'static str) -> Self {
-        Self { source }
+        Self {
+            source,
+            marker: PhantomData,
+        }
     }
 }
 
-impl Plugin for FeatureManifestPlugin {
+impl<M: Send + Sync + 'static> Plugin for FeatureManifestPlugin<M> {
     fn build(&self, app: &mut App) {
         let source = self.source;
         let mut registered = app
             .world_mut()
             .get_resource_or_init::<RegisteredFeatureManifests>();
-        if !registered
-            .0
-            .insert((source.as_ptr() as usize, source.len()))
-        {
+        if !registered.0.insert(TypeId::of::<M>()) {
             return;
         }
         drop(registered);
         let manifest = FeatureManifest::parse(source);
         app.add_systems(PreStartup, move |mut commands: Commands| {
-            commands.spawn((Name::new("Feature manifest"), manifest.clone()));
+            commands.spawn((
+                Name::new(std::any::type_name::<M>()),
+                FeatureManifestSource::<M>(PhantomData),
+                manifest.clone(),
+            ));
         });
     }
 
@@ -289,13 +299,16 @@ mod tests {
         enabled: bool,
     }
 
+    struct Feature;
+    struct OtherFeature;
+
     #[test]
     fn one_feature_entity_owns_all_parsed_sections() {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            FeatureManifestPlugin::new(SOURCE),
-            FeatureManifestPlugin::new(SOURCE),
+            FeatureManifestPlugin::<Feature>::new(SOURCE),
+            FeatureManifestPlugin::<Feature>::new(SOURCE),
         ));
         app.update();
 
@@ -327,5 +340,23 @@ mod tests {
             manifests[0].policy::<Policy>().unwrap(),
             Some(Policy { enabled: true })
         );
+    }
+
+    #[test]
+    fn identical_sources_for_distinct_features_create_distinct_entities() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            FeatureManifestPlugin::<Feature>::new(SOURCE),
+            FeatureManifestPlugin::<OtherFeature>::new(SOURCE),
+        ));
+        app.update();
+
+        let manifests = app
+            .world_mut()
+            .query::<&FeatureManifest>()
+            .iter(app.world())
+            .count();
+        assert_eq!(manifests, 2);
     }
 }

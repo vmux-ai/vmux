@@ -75,7 +75,10 @@ pub struct ServicePlugin;
 
 impl Plugin for ServicePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ServiceRequest>()
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
+            crate::Feature,
+        >::new(crate::FEATURE_MANIFEST))
+            .add_message::<ServiceRequest>()
             .add_message::<ServiceInbound>()
             .add_systems(
                 Startup,

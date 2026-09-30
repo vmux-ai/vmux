@@ -70,6 +70,9 @@ pub struct SimulatorPlugin;
 
 impl Plugin for SimulatorPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
+            crate::Feature,
+        >::new(crate::FEATURE_MANIFEST));
         #[cfg(ui)]
         app.add_plugins(crate::ui::SimulatorPage::plugin());
         app.add_plugins(

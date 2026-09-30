@@ -50,9 +50,9 @@ pub(crate) struct CommandPlugin;
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ));
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
+            crate::Feature,
+        >::new(crate::FEATURE_MANIFEST));
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
@@ -988,7 +988,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_core::host::manifest::FeatureManifestPlugin::new(crate::FEATURE_MANIFEST),
+            vmux_core::host::manifest::FeatureManifestPlugin::<crate::Feature>::new(
+                crate::FEATURE_MANIFEST,
+            ),
             vmux_command::CommandRuntimePlugin,
         ))
         .add_message::<NavigationRequest>()

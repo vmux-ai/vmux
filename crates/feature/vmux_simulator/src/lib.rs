@@ -1,4 +1,6 @@
 pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
+#[cfg(host)]
+pub(crate) type Feature = host::SimulatorToolPlugin;
 
 pub mod event;
 pub mod url;

@@ -18,13 +18,15 @@ pub struct VaultToolPlugin;
 
 impl Plugin for VaultToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::new(crate::FEATURE_MANIFEST))
-            .add_message::<ToolQueryRequest>()
-            .add_message::<ToolQueryHandled>()
-            .add_message::<ServiceRequest>()
-            .register_tool::<VaultStatusArgs>()
-            .register_tool::<OpenVaultArgs>()
-            .add_systems(Update, (vault_status, open_vault).in_set(ToolDispatchSet));
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
+            crate::FEATURE_MANIFEST,
+        ))
+        .add_message::<ToolQueryRequest>()
+        .add_message::<ToolQueryHandled>()
+        .add_message::<ServiceRequest>()
+        .register_tool::<VaultStatusArgs>()
+        .register_tool::<OpenVaultArgs>()
+        .add_systems(Update, (vault_status, open_vault).in_set(ToolDispatchSet));
     }
 }
 

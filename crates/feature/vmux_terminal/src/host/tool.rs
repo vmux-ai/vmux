@@ -23,14 +23,16 @@ pub struct TerminalToolPlugin;
 
 impl Plugin for TerminalToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::new(crate::FEATURE_MANIFEST))
-            .register_tool::<RunArgs>()
-            .register_tool::<ReadTerminalArgs>()
-            .register_tool::<TerminalSendArgs>()
-            .add_systems(
-                Update,
-                (run, read_terminal, dispatch).in_set(ToolDispatchSet),
-            );
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
+            crate::FEATURE_MANIFEST,
+        ))
+        .register_tool::<RunArgs>()
+        .register_tool::<ReadTerminalArgs>()
+        .register_tool::<TerminalSendArgs>()
+        .add_systems(
+            Update,
+            (run, read_terminal, dispatch).in_set(ToolDispatchSet),
+        );
     }
 }
 

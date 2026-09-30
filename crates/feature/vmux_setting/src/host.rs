@@ -30,6 +30,9 @@ pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
+            crate::Feature,
+        >::new(crate::FEATURE_MANIFEST));
         #[cfg(ui)]
         app.add_plugins(crate::ui::SettingsPage::plugin());
         app.add_plugins((
