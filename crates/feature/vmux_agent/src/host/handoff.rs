@@ -20,6 +20,77 @@ pub struct ImportedConversation {
     pub first_prompt: Option<String>,
 }
 
+impl ImportedConversation {
+    pub fn sanitize_replay(messages: &mut [Message], first_prompt: Option<&str>) {
+        let mut fallback = first_prompt;
+        for message in messages {
+            let Message::User { text, .. } = message else {
+                continue;
+            };
+            if let Some(display_text) =
+                vmux_api::protocol::extract_display_prompt(text).map(str::to_string)
+            {
+                *text = display_text;
+            } else if vmux_api::protocol::has_private_context_envelope(text)
+                && let Some(display_text) = fallback.take()
+            {
+                *text = display_text.to_string();
+            }
+        }
+    }
+
+    pub fn save(&self, agent_id: &str, session_id: &str) -> Result<(), String> {
+        self.save_in(
+            &vmux_core::profile::ProfilePaths::current()
+                .profile()
+                .join("handoffs"),
+            agent_id,
+            session_id,
+        )
+    }
+
+    pub fn load(agent_id: &str, session_id: &str) -> Option<Self> {
+        Self::load_in(
+            &vmux_core::profile::ProfilePaths::current()
+                .profile()
+                .join("handoffs"),
+            agent_id,
+            session_id,
+        )
+    }
+
+    fn save_in(&self, root: &Path, agent_id: &str, session_id: &str) -> Result<(), String> {
+        let path = Self::record_path(root, agent_id, session_id);
+        let parent = path
+            .parent()
+            .ok_or_else(|| format!("invalid handoff path {}", path.display()))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("create handoff directory {}: {error}", parent.display()))?;
+        let bytes = serde_json::to_vec(self)
+            .map_err(|error| format!("serialize handoff record: {error}"))?;
+        std::fs::write(&path, bytes)
+            .map_err(|error| format!("write handoff record {}: {error}", path.display()))
+    }
+
+    fn load_in(root: &Path, agent_id: &str, session_id: &str) -> Option<Self> {
+        let bytes = std::fs::read(Self::record_path(root, agent_id, session_id)).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
+    fn record_path(root: &Path, agent_id: &str, session_id: &str) -> PathBuf {
+        root.join(Self::hex_component(agent_id))
+            .join(format!("{}.json", Self::hex_component(session_id)))
+    }
+
+    fn hex_component(value: &str) -> String {
+        value
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+}
+
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct PendingHandoff {
     pub context: String,
@@ -46,32 +117,34 @@ pub struct BuiltContext {
     pub truncated: bool,
 }
 
-pub fn build_context(messages: &[Message], limit: usize) -> BuiltContext {
-    let segments: Vec<String> = messages.iter().filter_map(context_segment).collect();
-    let full = format!("{CONTEXT_INTRO}{}", segments.join("\n"));
-    if full.chars().count() <= limit {
-        return BuiltContext {
-            text: full,
-            truncated: false,
-        };
-    }
-
-    let reserved = CONTEXT_INTRO.chars().count() + OMITTED_MARKER.chars().count() + 2;
-    let mut remaining = limit.saturating_sub(reserved);
-    let mut kept = Vec::new();
-    for segment in segments.iter().rev() {
-        let len = segment.chars().count() + usize::from(!kept.is_empty());
-        if len > remaining {
-            break;
+impl BuiltContext {
+    pub fn from_messages(messages: &[Message], limit: usize) -> Self {
+        let segments: Vec<String> = messages.iter().filter_map(context_segment).collect();
+        let full = format!("{CONTEXT_INTRO}{}", segments.join("\n"));
+        if full.chars().count() <= limit {
+            return Self {
+                text: full,
+                truncated: false,
+            };
         }
-        remaining -= len;
-        kept.push(segment.clone());
-    }
-    kept.reverse();
 
-    BuiltContext {
-        text: format!("{CONTEXT_INTRO}{OMITTED_MARKER}\n\n{}", kept.join("\n")),
-        truncated: true,
+        let reserved = CONTEXT_INTRO.chars().count() + OMITTED_MARKER.chars().count() + 2;
+        let mut remaining = limit.saturating_sub(reserved);
+        let mut kept = Vec::new();
+        for segment in segments.iter().rev() {
+            let len = segment.chars().count() + usize::from(!kept.is_empty());
+            if len > remaining {
+                break;
+            }
+            remaining -= len;
+            kept.push(segment.clone());
+        }
+        kept.reverse();
+
+        Self {
+            text: format!("{CONTEXT_INTRO}{OMITTED_MARKER}\n\n{}", kept.join("\n")),
+            truncated: true,
+        }
     }
 }
 
@@ -98,24 +171,6 @@ fn wire_prompt(context: &str, display_text: &str) -> String {
     vmux_api::protocol::compose_agent_prompt(display_text, Some(context))
 }
 
-pub fn sanitize_replayed_messages(messages: &mut [Message], first_prompt: Option<&str>) {
-    let mut fallback = first_prompt;
-    for message in messages {
-        let Message::User { text, .. } = message else {
-            continue;
-        };
-        if let Some(display_text) =
-            vmux_api::protocol::extract_display_prompt(text).map(str::to_string)
-        {
-            *text = display_text;
-        } else if vmux_api::protocol::has_private_context_envelope(text)
-            && let Some(display_text) = fallback.take()
-        {
-            *text = display_text.to_string();
-        }
-    }
-}
-
 #[cfg(test)]
 fn visible_messages(imported: Option<&ImportedConversation>, live: &[Message]) -> Vec<Message> {
     let mut messages = imported
@@ -123,67 +178,6 @@ fn visible_messages(imported: Option<&ImportedConversation>, live: &[Message]) -
         .unwrap_or_default();
     messages.extend_from_slice(live);
     messages
-}
-
-pub fn save(
-    agent_id: &str,
-    session_id: &str,
-    imported: &ImportedConversation,
-) -> Result<(), String> {
-    save_in(
-        &vmux_core::profile::ProfilePaths::current()
-            .profile()
-            .join("handoffs"),
-        agent_id,
-        session_id,
-        imported,
-    )
-}
-
-pub fn load(agent_id: &str, session_id: &str) -> Option<ImportedConversation> {
-    load_in(
-        &vmux_core::profile::ProfilePaths::current()
-            .profile()
-            .join("handoffs"),
-        agent_id,
-        session_id,
-    )
-}
-
-fn hex_component(value: &str) -> String {
-    value
-        .as_bytes()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-fn record_path_in(root: &Path, agent_id: &str, session_id: &str) -> PathBuf {
-    root.join(hex_component(agent_id))
-        .join(format!("{}.json", hex_component(session_id)))
-}
-
-fn save_in(
-    root: &Path,
-    agent_id: &str,
-    session_id: &str,
-    imported: &ImportedConversation,
-) -> Result<(), String> {
-    let path = record_path_in(root, agent_id, session_id);
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("invalid handoff path {}", path.display()))?;
-    std::fs::create_dir_all(parent)
-        .map_err(|err| format!("create handoff directory {}: {err}", parent.display()))?;
-    let bytes =
-        serde_json::to_vec(imported).map_err(|err| format!("serialize handoff record: {err}"))?;
-    std::fs::write(&path, bytes)
-        .map_err(|err| format!("write handoff record {}: {err}", path.display()))
-}
-
-fn load_in(root: &Path, agent_id: &str, session_id: &str) -> Option<ImportedConversation> {
-    let bytes = std::fs::read(record_path_in(root, agent_id, session_id)).ok()?;
-    serde_json::from_slice(&bytes).ok()
 }
 
 #[cfg(test)]
@@ -209,7 +203,7 @@ mod tests {
             user("new message"),
         ];
 
-        let built = build_context(&messages, 100);
+        let built = BuiltContext::from_messages(&messages, 100);
 
         assert!(built.truncated);
         assert!(built.text.contains(OMITTED_MARKER));
@@ -221,7 +215,7 @@ mod tests {
     fn context_budget_preserves_chronological_order() {
         let messages = vec![user("first"), assistant("second"), user("third")];
 
-        let built = build_context(&messages, 1_000);
+        let built = BuiltContext::from_messages(&messages, 1_000);
 
         let first = built.text.find("first").unwrap();
         let second = built.text.find("second").unwrap();
@@ -238,7 +232,7 @@ mod tests {
             user("new-small"),
         ];
 
-        let built = build_context(&messages, 120);
+        let built = BuiltContext::from_messages(&messages, 120);
 
         assert!(built.text.contains("new-small"));
         assert!(!built.text.contains("middle-large"));
@@ -267,7 +261,7 @@ mod tests {
             },
         ];
 
-        let built = build_context(&messages, 1_000);
+        let built = BuiltContext::from_messages(&messages, 1_000);
 
         assert!(built.text.contains("visible"));
         assert!(!built.text.contains("secret"));
@@ -290,7 +284,7 @@ mod tests {
             assistant("done"),
         ];
 
-        sanitize_replayed_messages(&mut messages, Some("continue here"));
+        ImportedConversation::sanitize_replay(&mut messages, Some("continue here"));
 
         assert_eq!(messages[0], user("continue here"));
         assert_eq!(messages[1], assistant("done"));
@@ -303,7 +297,7 @@ mod tests {
             user(&wire_prompt("prior conversation", "second try")),
         ];
 
-        sanitize_replayed_messages(&mut messages, Some("stale sidecar text"));
+        ImportedConversation::sanitize_replay(&mut messages, Some("stale sidecar text"));
 
         assert_eq!(messages, vec![user("first try"), user("second try")]);
     }
@@ -313,7 +307,7 @@ mod tests {
         let text = format!("{HANDOFF_PROMPT_PREFIX} ordinary user text");
         let mut messages = vec![user(&text)];
 
-        sanitize_replayed_messages(&mut messages, Some("fallback"));
+        ImportedConversation::sanitize_replay(&mut messages, Some("fallback"));
 
         assert_eq!(messages, vec![user(&text)]);
     }
@@ -356,11 +350,16 @@ mod tests {
             first_prompt: Some("continue".into()),
         };
 
-        save_in(&root, "claude/custom", "target?1", &imported).unwrap();
-        let loaded = load_in(&root, "claude/custom", "target?1").unwrap();
+        imported
+            .save_in(&root, "claude/custom", "target?1")
+            .unwrap();
+        let loaded = ImportedConversation::load_in(&root, "claude/custom", "target?1").unwrap();
 
         assert_eq!(loaded, imported);
-        assert!(record_path_in(&root, "claude/custom", "target?1").starts_with(&root));
+        assert!(
+            ImportedConversation::record_path(&root, "claude/custom", "target?1")
+                .starts_with(&root)
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -375,11 +374,11 @@ mod tests {
                 .as_nanos()
         ));
 
-        assert!(load_in(&root, "claude", "missing").is_none());
-        let path = record_path_in(&root, "claude", "bad");
+        assert!(ImportedConversation::load_in(&root, "claude", "missing").is_none());
+        let path = ImportedConversation::record_path(&root, "claude", "bad");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, "not json").unwrap();
-        assert!(load_in(&root, "claude", "bad").is_none());
+        assert!(ImportedConversation::load_in(&root, "claude", "bad").is_none());
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -251,7 +251,7 @@ fn attach_acp_agents(
             vmux_core::AgentWorkingDir(cwd.to_string_lossy().to_string()),
         ));
         if let Some(resume) = resume.as_deref()
-            && let Some(imported) = crate::handoff::load(agent_id, resume)
+            && let Some(imported) = crate::handoff::ImportedConversation::load(agent_id, resume)
         {
             commands.entity(entity).insert(imported);
         }

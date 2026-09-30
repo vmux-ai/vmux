@@ -576,8 +576,7 @@ fn apply_acp_session_created(
             session.resume = Some(ev.acp_session_id.clone());
             if let Some(imported) = imported
                 && imported.first_prompt.is_some()
-                && let Err(err) =
-                    crate::handoff::save(&session.agent_id, &ev.acp_session_id, imported)
+                && let Err(err) = imported.save(&session.agent_id, &ev.acp_session_id)
             {
                 bevy::log::warn!("acp: failed to persist handoff metadata: {err}");
             }

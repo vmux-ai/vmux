@@ -51,7 +51,8 @@ impl DaemonBinary {
 
         #[cfg(target_os = "macos")]
         if AppBundle::try_from(self.path()).is_ok()
-            && let Err(error) = crate::sm_app_service::unregister_agent(EMBEDDED_AGENT_PLIST)
+            && let Err(error) =
+                crate::sm_app_service::AgentService::new(EMBEDDED_AGENT_PLIST).unregister()
         {
             tracing::debug!(%error, "unregister embedded agent before detached spawn");
         }

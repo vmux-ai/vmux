@@ -163,7 +163,7 @@ fn register_service(
                         Ok(())
                     }
                     RegistrationStep::UnregisterMainApp => {
-                        if let Err(error) = crate::sm_app_service::unregister_main_app() {
+                        if let Err(error) = crate::sm_app_service::MainAppService::unregister() {
                             tracing::debug!(
                                 %error,
                                 "unregister main app login item (ignored)"
@@ -172,19 +172,25 @@ fn register_service(
                         Ok(())
                     }
                     RegistrationStep::UnregisterEmbeddedAgent => {
-                        if let Err(error) = crate::sm_app_service::unregister_agent(
+                        if let Err(error) = crate::sm_app_service::AgentService::new(
                             crate::bundle::EMBEDDED_AGENT_PLIST,
-                        ) {
+                        )
+                        .unregister()
+                        {
                             tracing::debug!(%error, "unregister embedded agent (ignored)");
                         }
                         Ok(())
                     }
                     RegistrationStep::RegisterEmbeddedAgent => {
-                        crate::sm_app_service::register_agent(crate::bundle::EMBEDDED_AGENT_PLIST)
-                            .map_err(RegistrationError::from)
+                        crate::sm_app_service::AgentService::new(
+                            crate::bundle::EMBEDDED_AGENT_PLIST,
+                        )
+                        .register()
+                        .map_err(RegistrationError::from)
                     }
                     RegistrationStep::KickstartEmbeddedAgent => {
-                        crate::launchd::kickstart(crate::bundle::EMBEDDED_AGENT_LABEL)
+                        crate::LaunchAgent::for_profile("release")
+                            .kickstart()
                             .map_err(RegistrationError::from)
                     }
                     RegistrationStep::EnsureLaunchAgent => {

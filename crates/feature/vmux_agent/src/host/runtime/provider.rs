@@ -6,7 +6,7 @@ use crate::event::{
     UiAgentApprovalResolved, UiAgentAwaitingApproval, UiAgentDelta, UiAgentRunStatus,
     UiAgentSnapshot,
 };
-use crate::handoff::{ImportedConversation, PendingHandoff, sanitize_replayed_messages};
+use crate::handoff::{ImportedConversation, PendingHandoff};
 use crate::host::approval;
 use crate::run_state_kind::LastRunStateKind;
 use crate::toast::ToastPlugin;
@@ -249,7 +249,7 @@ fn consume_provider_agent_stream(
             && let Ok((_, mut messages, mut times, _, _, _, _, _, _, imported)) = q.get_mut(entity)
         {
             let mut parsed = snapshot.messages.clone();
-            sanitize_replayed_messages(
+            ImportedConversation::sanitize_replay(
                 &mut parsed,
                 imported.and_then(|imported| imported.first_prompt.as_deref()),
             );

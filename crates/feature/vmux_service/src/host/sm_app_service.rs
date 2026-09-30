@@ -26,26 +26,53 @@ impl fmt::Display for SmError {
 
 impl std::error::Error for SmError {}
 
-pub fn register_main_app() -> Result<(), SmError> {
-    let service = unsafe { SMAppService::mainAppService() };
-    unsafe { service.registerAndReturnError() }.map_err(|e| SmError::Other(format!("{}", e)))
+pub struct MainAppService;
+
+impl MainAppService {
+    pub fn register() -> Result<(), SmError> {
+        let service = unsafe { SMAppService::mainAppService() };
+        unsafe { service.registerAndReturnError() }
+            .map_err(|error| SmError::Other(error.to_string()))
+    }
+
+    pub fn unregister() -> Result<(), SmError> {
+        let service = unsafe { SMAppService::mainAppService() };
+        unsafe { service.unregisterAndReturnError() }
+            .map_err(|error| SmError::Other(error.to_string()))
+    }
+
+    pub fn status() -> Status {
+        let service = unsafe { SMAppService::mainAppService() };
+        Status::of(&service)
+    }
 }
 
-pub fn unregister_main_app() -> Result<(), SmError> {
-    let service = unsafe { SMAppService::mainAppService() };
-    unsafe { service.unregisterAndReturnError() }.map_err(|e| SmError::Other(format!("{}", e)))
-}
+pub struct AgentService(String);
 
-pub fn register_agent(plist_name: &str) -> Result<(), SmError> {
-    let ns_name = NSString::from_str(plist_name);
-    let service = unsafe { SMAppService::agentServiceWithPlistName(&ns_name) };
-    unsafe { service.registerAndReturnError() }.map_err(|e| SmError::Other(format!("{e}")))
-}
+impl AgentService {
+    pub fn new(plist_name: impl Into<String>) -> Self {
+        Self(plist_name.into())
+    }
 
-pub fn unregister_agent(plist_name: &str) -> Result<(), SmError> {
-    let ns_name = NSString::from_str(plist_name);
-    let service = unsafe { SMAppService::agentServiceWithPlistName(&ns_name) };
-    unsafe { service.unregisterAndReturnError() }.map_err(|e| SmError::Other(format!("{e}")))
+    pub fn register(&self) -> Result<(), SmError> {
+        let name = NSString::from_str(&self.0);
+        let service = unsafe { SMAppService::agentServiceWithPlistName(&name) };
+        unsafe { service.registerAndReturnError() }
+            .map_err(|error| SmError::Other(error.to_string()))
+    }
+
+    pub fn unregister(&self) -> Result<(), SmError> {
+        let name = NSString::from_str(&self.0);
+        let service = unsafe { SMAppService::agentServiceWithPlistName(&name) };
+        unsafe { service.unregisterAndReturnError() }
+            .map_err(|error| SmError::Other(error.to_string()))
+    }
+
+    pub fn status(&self) -> Status {
+        let name = NSString::from_str(&self.0);
+        let service = unsafe { SMAppService::agentServiceWithPlistName(&name) };
+        Status::of(&service)
+    }
 }
 
 #[derive(Debug)]
@@ -56,25 +83,14 @@ pub enum Status {
     NotFound,
 }
 
-pub fn main_app_status() -> Status {
-    let service = unsafe { SMAppService::mainAppService() };
-    match unsafe { service.status() } {
-        SMAppServiceStatus::NotRegistered => Status::NotRegistered,
-        SMAppServiceStatus::Enabled => Status::Enabled,
-        SMAppServiceStatus::RequiresApproval => Status::RequiresApproval,
-        SMAppServiceStatus::NotFound => Status::NotFound,
-        _ => Status::NotFound,
-    }
-}
-
-pub fn agent_status(plist_name: &str) -> Status {
-    let ns_name = NSString::from_str(plist_name);
-    let service = unsafe { SMAppService::agentServiceWithPlistName(&ns_name) };
-    match unsafe { service.status() } {
-        SMAppServiceStatus::NotRegistered => Status::NotRegistered,
-        SMAppServiceStatus::Enabled => Status::Enabled,
-        SMAppServiceStatus::RequiresApproval => Status::RequiresApproval,
-        SMAppServiceStatus::NotFound => Status::NotFound,
-        _ => Status::NotFound,
+impl Status {
+    fn of(service: &SMAppService) -> Self {
+        match unsafe { service.status() } {
+            SMAppServiceStatus::NotRegistered => Self::NotRegistered,
+            SMAppServiceStatus::Enabled => Self::Enabled,
+            SMAppServiceStatus::RequiresApproval => Self::RequiresApproval,
+            SMAppServiceStatus::NotFound => Self::NotFound,
+            _ => Self::NotFound,
+        }
     }
 }

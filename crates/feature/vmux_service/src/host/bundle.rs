@@ -30,5 +30,3 @@ impl TryFrom<&Path> for AppBundle {
 }
 
 pub const EMBEDDED_AGENT_PLIST: &str = "ai.vmux.service.plist";
-
-pub const EMBEDDED_AGENT_LABEL: &str = "ai.vmux.service";

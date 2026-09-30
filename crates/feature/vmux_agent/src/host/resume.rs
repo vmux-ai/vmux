@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
+use crate::handoff::{BuiltContext, DEFAULT_CONTEXT_LIMIT};
 use crate::session_source::{CliSessionSources, acp_agent_kind, sort_sessions};
 use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
 use vmux_chat::event::{
@@ -518,7 +518,7 @@ fn on_resume_session(
                 )
             })?;
             let messages = (source.load_transcript)(&source_sid)?;
-            let built = build_context(&messages, DEFAULT_CONTEXT_LIMIT);
+            let built = BuiltContext::from_messages(&messages, DEFAULT_CONTEXT_LIMIT);
             Ok(StackSessionHandoff {
                 source_agent,
                 source_kind: kind,

@@ -88,7 +88,7 @@ impl LaunchAgent {
             let _ = self.bootout();
         }
         bootstrap(&plist)?;
-        kickstart(&self.label())
+        self.kickstart()
     }
 
     fn reconcile_plist_at(
@@ -112,6 +112,18 @@ impl LaunchAgent {
         std::fs::write(plist, desired)?;
         Ok(true)
     }
+
+    pub fn kickstart(&self) -> std::io::Result<()> {
+        let uid = current_uid();
+        let label = self.label();
+        let status = Command::new("launchctl")
+            .args(["kickstart", "-k", &format!("gui/{uid}/{label}")])
+            .status()?;
+        if !status.success() {
+            tracing::warn!(code = ?status.code(), "launchctl kickstart exited nonzero");
+        }
+        Ok(())
+    }
 }
 
 fn current_uid() -> u32 {
@@ -126,17 +138,6 @@ fn bootstrap(plist: &Path) -> std::io::Result<()> {
         .status()?;
     if !status.success() {
         tracing::warn!(code = ?status.code(), "launchctl bootstrap exited nonzero");
-    }
-    Ok(())
-}
-
-pub fn kickstart(label: &str) -> std::io::Result<()> {
-    let uid = current_uid();
-    let status = Command::new("launchctl")
-        .args(["kickstart", "-k", &format!("gui/{uid}/{label}")])
-        .status()?;
-    if !status.success() {
-        tracing::warn!(code = ?status.code(), "launchctl kickstart exited nonzero");
     }
     Ok(())
 }

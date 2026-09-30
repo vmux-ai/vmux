@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use vmux_service::DaemonBinary;
-use vmux_service::bundle::{EMBEDDED_AGENT_LABEL, EMBEDDED_AGENT_PLIST};
+use vmux_service::bundle::EMBEDDED_AGENT_PLIST;
 use vmux_service::registry::{Backend, RegistrationStep};
+use vmux_service::{DaemonBinary, LaunchAgent};
 
 #[test]
 fn bundled_path_chooses_sm_app_service() {
@@ -60,9 +60,10 @@ fn launchctl_registration_plan_uses_profile_agent() {
 #[test]
 fn embedded_agent_label_matches_packaging_plist() {
     let plist = include_str!("../../../../packaging/macos/ai.vmux.service.plist");
-    let needle = format!("<string>{EMBEDDED_AGENT_LABEL}</string>");
+    let label = LaunchAgent::for_profile("release").label();
+    let needle = format!("<string>{label}</string>");
     assert!(
         plist.contains(&needle),
-        "EMBEDDED_AGENT_LABEL ({EMBEDDED_AGENT_LABEL}) must match the <Label> in {EMBEDDED_AGENT_PLIST}"
+        "release service label ({label}) must match the <Label> in {EMBEDDED_AGENT_PLIST}"
     );
 }
