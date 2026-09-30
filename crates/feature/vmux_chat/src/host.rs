@@ -19,7 +19,7 @@ mod tool;
 pub use composer::ChatCliRequest;
 #[cfg(host)]
 pub use media::ChatAttachmentHydrationRequest;
-pub use model::Models;
+pub use model::{ChatModeStateChanged, ChatModelStateChanged, Models};
 pub use prompt::{Attach, Attachments, Browsed, RemoveAttachment};
 pub use room::{Agents, Conversation, LiveTurn, Log, Reported, Submitted};
 #[cfg(host)]

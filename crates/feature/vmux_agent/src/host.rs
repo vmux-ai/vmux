@@ -16,7 +16,6 @@ pub mod follow;
 pub mod handoff;
 mod ingress;
 pub mod launch;
-pub(crate) mod model;
 mod model_selection;
 pub mod page_open;
 pub mod provider;
