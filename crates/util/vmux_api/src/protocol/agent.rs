@@ -89,12 +89,6 @@ pub struct AgentInvokeCommand {
 }
 
 #[vmux_api::agent]
-pub struct AgentUpdateSettings {
-    pub path: String,
-    pub value: JsonValue,
-}
-
-#[vmux_api::agent]
 pub struct AgentNotify {
     pub title: Option<String>,
     pub body: Option<String>,
@@ -121,47 +115,11 @@ pub struct AgentResumeInAcp {
 }
 
 #[vmux_api::agent]
-pub struct AgentRequestUserChoice {
-    pub anchor: ProcessId,
-    pub question: String,
-    pub options: Vec<String>,
-}
-
-#[vmux_api::agent]
 pub struct AgentFileSearch {
     pub anchor: ProcessId,
     pub root: String,
     pub query: String,
     pub matches: Vec<FileSearchMatch>,
-}
-
-#[vmux_api::agent]
-pub struct AgentSetConversationTitle {
-    pub anchor: ProcessId,
-    pub title: String,
-}
-
-#[vmux_api::agent]
-pub struct AgentWriteKnowledge {
-    pub anchor: ProcessId,
-    pub path: Option<String>,
-    pub title: String,
-    pub content: String,
-}
-
-#[vmux_api::agent]
-pub struct AgentSearchKnowledge {
-    pub anchor: ProcessId,
-    pub query: String,
-    pub limit: u16,
-}
-
-#[vmux_api::agent]
-pub struct AgentReadKnowledge {
-    pub anchor: ProcessId,
-    pub path: String,
-    pub line: u32,
-    pub limit: u32,
 }
 
 #[vmux_api::agent]

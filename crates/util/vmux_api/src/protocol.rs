@@ -103,21 +103,6 @@ mod tests {
     }
 
     #[test]
-    fn typed_agent_request_routes_and_decodes_without_an_enum() {
-        let payload = AgentSearchKnowledge {
-            anchor: ProcessId::new(),
-            query: "typed boundaries".to_string(),
-            limit: 20,
-        };
-        let request = AgentRequest::encode(&payload).unwrap();
-        let decoded = request.decode::<AgentSearchKnowledge>().unwrap();
-
-        assert_eq!(request.id, "agent_search_knowledge@1");
-        assert_eq!(decoded, Some(payload));
-        assert!(request.decode::<AgentReadKnowledge>().unwrap().is_none());
-    }
-
-    #[test]
     fn agent_cancel_and_interrupted_roundtrip() {
         let msg = ClientMessage::Shared(SharedMessage::AgentCancel { sid: "s1".into() });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
@@ -195,19 +180,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_screenshot_routes_and_decodes() {
-        let query = AgentScreenshot {
-            pane: Some("pane:42".into()),
-        };
-        let request = AgentRequest::encode(&query).unwrap();
-        assert_eq!(request.decode::<AgentScreenshot>().unwrap(), Some(query));
-
-        let none = AgentScreenshot { pane: None };
-        let request = AgentRequest::encode(&none).unwrap();
-        assert_eq!(request.decode::<AgentScreenshot>().unwrap(), Some(none));
-    }
-
-    #[test]
     fn agent_image_rkyv_round_trip() {
         let image = AgentImage {
             path: "/tmp/x.png".into(),
@@ -280,27 +252,6 @@ mod tests {
         };
         assert_eq!(recovered_id, request_id);
         assert_eq!(snapshot.root, "/Users/test/.vmux");
-    }
-
-    #[test]
-    fn agent_record_start_routes_and_decodes() {
-        let query = AgentRecordStart {
-            gif: true,
-            max_secs: 120,
-            pane: Some("pane:7".into()),
-        };
-        let request = AgentRequest::encode(&query).unwrap();
-        assert_eq!(request.decode::<AgentRecordStart>().unwrap(), Some(query));
-    }
-
-    #[test]
-    fn agent_record_stop_routes_and_decodes() {
-        let query = AgentRecordStop {
-            dir: Some("/tmp/out".into()),
-            name: None,
-        };
-        let request = AgentRequest::encode(&query).unwrap();
-        assert_eq!(request.decode::<AgentRecordStop>().unwrap(), Some(query));
     }
 
     #[test]
@@ -447,15 +398,6 @@ mod tests {
             }
             _ => panic!("wrong variant"),
         }
-    }
-
-    #[test]
-    fn get_settings_query_routes_and_decodes() {
-        let request = AgentRequest::encode(&AgentGetSettings).unwrap();
-        assert_eq!(
-            request.decode::<AgentGetSettings>().unwrap(),
-            Some(AgentGetSettings)
-        );
     }
 
     #[test]

@@ -1,15 +1,30 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
-use vmux_api::protocol::{
-    AgentImage, AgentRecordStart, AgentRecordStop, AgentRecording, AgentRequest, AgentRequestId,
-    AgentScreenshot, ClientMessage,
-};
+use vmux_api::protocol::{AgentImage, AgentRecording, AgentRequest, AgentRequestId, ClientMessage};
 use vmux_core::service::ServiceRequest;
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolDispatchSet, ToolManifestPlugin, ToolQuery, ToolQueryHandled,
     ToolQueryRequest, ToolQueryRouteSet,
 };
+
+#[vmux_api::agent(Eq)]
+struct AgentScreenshot {
+    pane: Option<String>,
+}
+
+#[vmux_api::agent(Eq)]
+struct AgentRecordStart {
+    gif: bool,
+    max_secs: u32,
+    pane: Option<String>,
+}
+
+#[vmux_api::agent(Eq)]
+struct AgentRecordStop {
+    dir: Option<String>,
+    name: Option<String>,
+}
 
 pub struct CapturePlugin;
 

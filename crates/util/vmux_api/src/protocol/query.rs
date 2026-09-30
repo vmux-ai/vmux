@@ -22,30 +22,6 @@ pub struct AgentProcessRunCompletion {
 }
 
 #[vmux_api::agent(Copy, Eq)]
-pub struct AgentGetSettings;
-
-#[vmux_api::agent(Eq)]
-pub struct AgentScreenshot {
-    pub pane: Option<String>,
-}
-
-#[vmux_api::agent(Eq)]
-pub struct AgentRecordStart {
-    pub gif: bool,
-    pub max_secs: u32,
-    pub pane: Option<String>,
-}
-
-#[vmux_api::agent(Eq)]
-pub struct AgentRecordStop {
-    pub dir: Option<String>,
-    pub name: Option<String>,
-}
-
-#[vmux_api::agent(Copy, Eq)]
-pub struct AgentVaultStatus;
-
-#[vmux_api::agent(Copy, Eq)]
 pub struct AgentListCommands;
 
 #[vmux_api::contract(Eq)]

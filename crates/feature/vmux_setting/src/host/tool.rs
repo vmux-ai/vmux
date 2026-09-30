@@ -1,14 +1,14 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
-use vmux_api::protocol::{
-    AgentGetSettings, AgentRequest, AgentUpdateSettings, ClientMessage, JsonValue,
-};
+use vmux_api::protocol::{AgentRequest, ClientMessage, JsonValue};
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
     ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
 };
+
+use super::agent::{AgentGetSettings, AgentUpdateSettings};
 
 pub struct SettingToolPlugin;
 

@@ -14,7 +14,7 @@ use crate::event::{
 };
 use crate::state::ChatUiState;
 use vmux_api::ProcessId;
-use vmux_api::protocol::{AgentCommandResult, AgentRequestUserChoice, AgentSetConversationTitle};
+use vmux_api::protocol::AgentCommandResult;
 use vmux_core::agent::{
     AgentCommandResponse, AgentContinuationRequest, AgentRequestAppExt, AgentRequestMessage,
     AgentRequestRouteSet, AgentSessionRoot,
@@ -28,6 +28,19 @@ use vmux_layout::stack::OpenRequest;
 use vmux_session::{AgentConversationTitle, AgentMessages, AgentRunState, AgentSession};
 
 type ChatUiStateUpdates = UiState<ChatUiState>;
+
+#[vmux_api::agent]
+pub(crate) struct AgentRequestUserChoice {
+    pub anchor: ProcessId,
+    pub question: String,
+    pub options: Vec<String>,
+}
+
+#[vmux_api::agent]
+pub(crate) struct AgentSetConversationTitle {
+    pub anchor: ProcessId,
+    pub title: String,
+}
 
 #[cfg(host)]
 pub struct ChatPlugin;

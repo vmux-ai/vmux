@@ -23,21 +23,6 @@
         "default":
         [
             (
-                name: "set_conversation_title",
-                description: r#"Set the agent conversation header to a concise model-written summary without asking permission. Always call first after the first user message to replace the provisional raw-prompt title. On later messages, call first only when the topic materially changes. Use 3 to 7 words, correct spelling and grammar, and never copy the user's prompt verbatim."#,
-                input_schema: (
-                    type: Object,
-                    required: ["title"],
-                    properties: {
-                        "title": (
-                            type: String,
-                            min_length: Some(1),
-                            max_length: Some(120),
-                        ),
-                    },
-                ),
-            ),
-            (
                 name: "search_knowledge",
                 description: r#"Search every Markdown note in the user's vmux Knowledge base. Returns ranked source references as path:line with titles and matching previews. Use this before read_knowledge when the relevant note is unknown. No permission is required."#,
                 input_schema: (

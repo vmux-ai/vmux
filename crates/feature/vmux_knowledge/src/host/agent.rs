@@ -1,12 +1,33 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{
-    AgentCommandResult, AgentReadKnowledge, AgentSearchKnowledge, AgentWriteKnowledge, ProcessId,
-};
+use vmux_api::protocol::{AgentCommandResult, ProcessId};
 use vmux_core::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
     AgentSession,
 };
 use vmux_core::knowledge::{KnowledgeIndex, KnowledgeVault};
+
+#[vmux_api::agent]
+pub(crate) struct AgentWriteKnowledge {
+    pub anchor: ProcessId,
+    pub path: Option<String>,
+    pub title: String,
+    pub content: String,
+}
+
+#[vmux_api::agent]
+pub(crate) struct AgentSearchKnowledge {
+    pub anchor: ProcessId,
+    pub query: String,
+    pub limit: u16,
+}
+
+#[vmux_api::agent]
+pub(crate) struct AgentReadKnowledge {
+    pub anchor: ProcessId,
+    pub path: String,
+    pub line: u32,
+    pub limit: u32,
+}
 
 pub(super) struct KnowledgeAgentPlugin;
 

@@ -1,8 +1,10 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_api::protocol::{AgentRequest, AgentRequestUserChoice};
+use vmux_api::protocol::AgentRequest;
 use vmux_core::ProcessAnchor;
 use vmux_tool::{ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin};
+
+use crate::host::{AgentRequestUserChoice, AgentSetConversationTitle};
 
 pub struct ChatToolPlugin;
 
@@ -13,7 +15,11 @@ impl Plugin for ChatToolPlugin {
             "default",
         ))
         .register_tool::<RequestUserChoiceArgs>("request_user_choice")
-        .add_systems(Update, request_user_choice.in_set(ToolDispatchSet));
+        .register_tool::<SetConversationTitleArgs>("set_conversation_title")
+        .add_systems(
+            Update,
+            (request_user_choice, set_conversation_title).in_set(ToolDispatchSet),
+        );
     }
 }
 
@@ -22,6 +28,12 @@ impl Plugin for ChatToolPlugin {
 struct RequestUserChoiceArgs {
     question: String,
     options: Vec<String>,
+}
+
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetConversationTitleArgs {
+    title: String,
 }
 
 fn request_user_choice(
@@ -55,6 +67,31 @@ fn request_user_choice(
                 question,
                 options,
             })
+        });
+        commands.entity(entity).insert(ToolCommand(command));
+    }
+}
+
+fn set_conversation_title(
+    mut commands: Commands,
+    requests: Query<
+        (
+            Entity,
+            &Name,
+            Option<&ProcessAnchor>,
+            &SetConversationTitleArgs,
+        ),
+        Added<SetConversationTitleArgs>,
+    >,
+) {
+    for (entity, name, anchor, args) in &requests {
+        let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| {
+            let title = Text::into_option(args.title.clone())
+                .ok_or("set_conversation_title.title is empty")?;
+            if title.chars().count() > 120 {
+                return Err("set_conversation_title.title exceeds 120 characters".to_string());
+            }
+            AgentRequest::encode(&AgentSetConversationTitle { anchor, title })
         });
         commands.entity(entity).insert(ToolCommand(command));
     }

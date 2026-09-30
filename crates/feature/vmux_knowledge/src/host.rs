@@ -4,6 +4,8 @@ use vmux_core::host::persistence::PersistenceAppExt;
 mod agent;
 mod index;
 
+pub(crate) use agent::{AgentReadKnowledge, AgentSearchKnowledge, AgentWriteKnowledge};
+
 #[vmux_native::page]
 pub struct KnowledgePlugin;
 

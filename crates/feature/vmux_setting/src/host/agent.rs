@@ -1,10 +1,19 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{AgentCommandResult, AgentUpdateSettings};
+use vmux_api::protocol::{AgentCommandResult, JsonValue};
 use vmux_core::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
 
 use super::{AppSettings, SettingsWriteRequest};
+
+#[vmux_api::agent]
+pub(super) struct AgentUpdateSettings {
+    pub path: String,
+    pub value: JsonValue,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub(super) struct AgentGetSettings;
 
 pub(super) struct AgentSettingsPlugin;
 

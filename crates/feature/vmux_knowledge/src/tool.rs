@@ -1,11 +1,10 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_api::protocol::{
-    AgentReadKnowledge, AgentRequest, AgentSearchKnowledge, AgentSetConversationTitle,
-    AgentWriteKnowledge,
-};
+use vmux_api::protocol::AgentRequest;
 use vmux_core::ProcessAnchor;
 use vmux_tool::{ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin};
+
+use crate::host::{AgentReadKnowledge, AgentSearchKnowledge, AgentWriteKnowledge};
 
 pub struct KnowledgeToolPlugin;
 
@@ -15,21 +14,11 @@ impl Plugin for KnowledgeToolPlugin {
             include_str!("feature.ron"),
             "default",
         ))
-        .register_tool::<SetConversationTitleArgs>("set_conversation_title")
         .register_tool::<SearchKnowledgeArgs>("search_knowledge")
         .register_tool::<ReadKnowledgeArgs>("read_knowledge")
         .register_tool::<WriteKnowledgeArgs>("write_knowledge")
-        .add_systems(
-            Update,
-            (set_conversation_title, search, read, write).in_set(ToolDispatchSet),
-        );
+        .add_systems(Update, (search, read, write).in_set(ToolDispatchSet));
     }
-}
-
-#[derive(Component, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SetConversationTitleArgs {
-    title: String,
 }
 
 #[derive(Component, Deserialize)]
@@ -53,39 +42,6 @@ struct WriteKnowledgeArgs {
     path: Option<String>,
     title: String,
     content: String,
-}
-
-fn set_conversation_title(
-    mut commands: Commands,
-    requests: Query<
-        (
-            Entity,
-            &Name,
-            Option<&ProcessAnchor>,
-            &SetConversationTitleArgs,
-        ),
-        Added<SetConversationTitleArgs>,
-    >,
-) {
-    for (entity, name, anchor, args) in &requests {
-        let command = anchor
-            .map(|anchor| anchor.0)
-            .ok_or_else(|| {
-                format!(
-                    "{} requires an agent anchor (not available to this client)",
-                    name.as_str()
-                )
-            })
-            .and_then(|anchor| {
-                let title =
-                    Text::required(args.title.clone(), "set_conversation_title.title is empty")?;
-                if title.chars().count() > 120 {
-                    return Err("set_conversation_title.title exceeds 120 characters".to_string());
-                }
-                AgentRequest::encode(&AgentSetConversationTitle { anchor, title })
-            });
-        commands.entity(entity).insert(ToolCommand(command));
-    }
 }
 
 fn search(

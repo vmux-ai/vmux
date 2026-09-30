@@ -10327,6 +10327,7 @@ name = "vmux_capture"
 version = "0.0.34"
 dependencies = [
  "bevy",
+ "rkyv",
  "serde",
  "serde_json",
  "vmux_api",
@@ -10703,6 +10704,7 @@ dependencies = [
  "bevy_reflect",
  "moonshine-save",
  "notify",
+ "rkyv",
  "serde",
  "tempfile",
  "vmux_api",
@@ -11232,6 +11234,7 @@ dependencies = [
  "notify",
  "parking_lot",
  "rfd 0.15.4",
+ "rkyv",
  "serde",
  "vmux_api",
  "vmux_core",
