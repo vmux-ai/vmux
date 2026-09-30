@@ -12,9 +12,14 @@ use vmux_ui::hooks::send;
 #[component]
 pub(super) fn ChatComposerMenus(chat: Chat) -> Element {
     let menus = ChatMenuSet::from(chat);
+    let menu = chat.menu;
     rsx! {
         ComposerMenus {
-            menu: chat.menu,
+            opened: menu.opened(),
+            cursor: menu.cursor(),
+            on_hover: move |index| menu.point_at(index),
+            on_dismiss: move |()| menu.close(),
+            on_selected: move |()| menu.close(),
             effort: Some(menus.effort),
             permission: Some(menus.permission),
             project: Some(menus.project),

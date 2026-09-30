@@ -1,6 +1,6 @@
-use crate::palette::{PaletteGlyph, PaletteMode, PaletteRows, PaletteState, PaletteSurface};
+use crate::palette::{PaletteGlyph, PaletteMode, PaletteSurface};
 use crate::prompt_media::{ChatPasteMedia, ChatPickFiles};
-use crate::ui::composer::{ComposerChips, ComposerMenuSet, use_prompt_recall};
+use crate::ui::composer::{ComposerChips, ComposerMenuSet};
 use crate::ui::media::PromptMedia;
 use crate::ui::signals::{
     COMMAND_BAR_INPUT_ID, CommandBarField, Readline, TypedDigit, use_palette_signals,
@@ -12,13 +12,15 @@ use vmux_api::command_bar::{
     CommandPaletteActivateRequest, CommandPaletteDraftRequest, CommandPaletteHistoryMoveRequest,
     CommandPaletteMediaActivateRequest, CommandPaletteMediaDismissRequest,
     CommandPaletteMediaHighlightRequest, CommandPaletteMediaMoveRequest,
+    CommandPaletteMenuActivateRequest, CommandPaletteMenuDismissRequest,
+    CommandPaletteMenuHighlightRequest, CommandPaletteMenuMoveRequest,
     CommandPaletteRemoveAttachmentRequest, CommandPaletteState, CommandPaletteSubmitRequest,
 };
 use vmux_core::input::{UiKeyContext, Unclaimed};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposer, focus_prompt_end};
-use vmux_ui::components::composer_bar::{ComposerBar, ComposerMenus, use_composer_menu};
+use vmux_ui::components::composer_bar::{ComposerBar, ComposerMenus};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::mcp_menu::{McpMenu, use_mcp_connections};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
@@ -74,7 +76,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     let mut signals = use_palette_signals();
     let host_state = use_ui_state::<CommandPaletteState>();
-    let menu = use_composer_menu();
     let mcp = use_mcp_connections();
     let ime = use_ime_guard();
     let mut handled_close = use_signal(|| None);
@@ -93,14 +94,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     use_effect(move || {
         let opened = state();
         let query = (signals.query)();
-        let target_url = (signals.target_url)();
         let selected = (signals.selected)() as u32;
         let navigating = (signals.nav_mode)();
         let _ = send(&CommandPaletteDraftRequest {
             open_id: opened.open_id,
             query,
             start: is_start,
-            target_url,
             selected,
             navigating,
         });
@@ -122,7 +121,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         on_activity.call(());
     });
 
-    let mut recall = use_prompt_recall();
     let mut handled_attachment = use_signal(|| None);
     use_effect(move || {
         let opened = state();
@@ -140,14 +138,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         focus_prompt_end(PROMPT_INPUT_ID);
     });
 
-    let rows = use_memo(move || {
-        let opened = state();
-        let snapshot = host_state.read();
-        if snapshot.open_id != opened.open_id {
-            return PaletteRows::default();
-        }
-        PaletteRows::from_projection(&snapshot.projection)
-    });
     let input_id = if is_start {
         PROMPT_INPUT_ID
     } else {
@@ -183,10 +173,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
     let keys = use_key_claim(Unclaimed::Types, move || {
         let mut context = vec!["command-bar".to_string()];
-        if menu.opened().is_some() {
+        let snapshot = host_state.read();
+        if snapshot.open_id == state().open_id && snapshot.projection.menu.is_some() {
             context.push("command-bar.menu".to_string());
         } else {
-            let snapshot = host_state.read();
             if is_start && snapshot.open_id == state().open_id && snapshot.media_query.is_some() {
                 context.push("command-bar.media".to_string());
             }
@@ -201,19 +191,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     } else {
         CommandPaletteState::default()
     };
-    let palette = std::rc::Rc::new(PaletteState::from_rows(
-        &rows(),
-        &state_val,
-        &signals.draft(),
-        surface,
-    ));
+    let projection = std::rc::Rc::new(palette_data.projection.clone());
     let attachments = std::rc::Rc::new(palette_data.attachments.clone());
-    let q = palette.query.clone();
-    let ghost_text = palette.ghost.clone();
-    let mcp_open = palette_data.projection.mcp_open;
-    let mcp_entries = std::rc::Rc::new(palette_data.projection.mcp_entries.clone());
-    let mcp_selected =
-        (palette_data.projection.selected as usize).min(mcp_entries.len().saturating_sub(1));
+    let q = (signals.query)();
+    let ghost_text = projection.ghost.clone();
+    let mcp_open = projection.mcp_open;
+    let mcp_entries = std::rc::Rc::new(projection.mcp_entries.clone());
+    let mcp_selected = (projection.selected as usize).min(mcp_entries.len().saturating_sub(1));
     let media_menu_open = is_start && palette_data.media_query.is_some();
     let media_entries = palette_data.media_entries.clone();
     let media_sel =
@@ -233,82 +217,18 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         ScrollIntoView::nearest(&format!("prompt-media-item-{}", snapshot.media_selected));
     });
 
-    let composer = palette.composer.clone();
-    let accent = palette.accent_agent.as_deref().map(agent_accent);
+    let composer = projection.composer.clone();
+    let accent = projection.accent_agent.as_deref().map(agent_accent);
     let start_accent = accent.unwrap_or_else(|| agent_accent("vibe"));
     let start_prompt_attachments = PromptMedia::composer_attachments(attachments.as_ref());
     let start_submission_enabled = !q.trim().is_empty() || !attachments.is_empty();
-    let prompt_history = std::rc::Rc::new(palette_data.prompt_history.clone());
-    let chips = ComposerChips::build(&composer, menu);
-    let menus = ComposerMenuSet::build(&composer, signals, &palette_data);
-    let mut handled_menu_move = use_signal(|| 0u64);
-    let mut handled_menu_choose = use_signal(|| 0u64);
-    let mut handled_menu_dismiss = use_signal(|| 0u64);
-
-    let moved_menus = menus.clone();
-    use_effect(move || {
-        let snapshot = host_state.read();
-        if snapshot.open_id != state().open_id {
-            return;
-        }
-        let Some(effect) = snapshot.projection.menu_move else {
-            return;
-        };
-        if effect.revision <= *handled_menu_move.peek() {
-            return;
-        }
-        handled_menu_move.set(effect.revision);
-        let Some(kind) = menu.opened() else {
-            return;
-        };
-        menu.step(
-            match effect.next {
-                true => MenuDirection::Next,
-                false => MenuDirection::Previous,
-            },
-            moved_menus.rows(kind),
-        );
-    });
-
-    let chosen_menus = menus.clone();
-    use_effect(move || {
-        let snapshot = host_state.read();
-        if snapshot.open_id != state().open_id {
-            return;
-        }
-        let Some(effect) = snapshot.projection.menu_choose else {
-            return;
-        };
-        if effect.revision <= *handled_menu_choose.peek() {
-            return;
-        }
-        handled_menu_choose.set(effect.revision);
-        let Some(kind) = menu.opened() else {
-            return;
-        };
-        if chosen_menus.choose(kind, menu.cursor()) {
-            menu.close();
-        }
-    });
-
-    use_effect(move || {
-        let snapshot = host_state.read();
-        if snapshot.open_id != state().open_id {
-            return;
-        }
-        let Some(effect) = snapshot.projection.menu_dismiss else {
-            return;
-        };
-        if effect.revision <= *handled_menu_dismiss.peek() {
-            return;
-        }
-        handled_menu_dismiss.set(effect.revision);
-        menu.close();
-    });
+    let chips = ComposerChips::build(&composer, state_val.open_id);
+    let menus = ComposerMenuSet::build(&composer, &palette_data, state_val.open_id);
+    let opened_menu = ComposerMenuSet::kind(projection.menu);
 
     let start_composer_footer = rsx! {
         ComposerBar {
-            menu,
+            opened: opened_menu,
             agent: Some(chips.agent),
             model: chips.model,
             permission: chips.permission,
@@ -322,7 +242,19 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
     let start_menus = rsx! {
         ComposerMenus {
-            menu,
+            opened: opened_menu,
+            cursor: projection.menu_cursor as usize,
+            on_hover: move |index| {
+                let _ = send(&CommandPaletteMenuHighlightRequest {
+                    open_id: state().open_id,
+                    index: index as u32,
+                });
+            },
+            on_dismiss: move |()| {
+                let _ = send(&CommandPaletteMenuDismissRequest {
+                    open_id: state().open_id,
+                });
+            },
             placement: PromptPopupPlacement::Downward,
             agent: Some(menus.agent.clone()),
             model: Some(menus.model.clone()),
@@ -333,11 +265,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
 
     let start_keydown = {
-        let palette = palette.clone();
-        let menus = menus.clone();
-        let prompt_history = prompt_history.clone();
+        let projection = projection.clone();
+        let query = q.clone();
         move |e: KeyboardEvent| {
-            if Readline::chord(&e, signals.query, &palette.ghost, PROMPT_INPUT_ID) {
+            if Readline::chord(&e, signals.query, &projection.ghost, PROMPT_INPUT_ID) {
                 return;
             }
             if e.key() == Key::Tab {
@@ -347,13 +278,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
             let ctrl = e.modifiers().contains(Modifiers::CONTROL);
             if !ctrl
-                && palette.space_switch
-                && palette.query.trim().is_empty()
+                && projection.space_switch
+                && query.trim().is_empty()
                 && let Some(digit) = TypedDigit::from_event(&e)
-                && let Some(index) = palette.space_digit(digit)
+                && digit < projection.space_count as usize
             {
                 e.prevent_default();
-                signals.highlight(index);
+                signals.highlight(digit);
                 return;
             }
             let direction = MenuDirection::from_key(&e);
@@ -378,30 +309,37 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             }
 
-            if let Some(kind) = menu.opened() {
+            if projection.menu.is_some() {
                 let handled = direction.is_some()
                     || e.key() == Key::Enter && !e.modifiers().shift()
                     || e.key() == Key::Escape
                     || ctrl && e.code() == Code::KeyC;
-                if keys.resolves() && handled {
+                if !handled {
+                    return;
+                }
+                e.prevent_default();
+                if keys.resolves() {
                     keys.on_keydown(&e, |_| false);
                     return;
                 }
                 if e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC) {
-                    e.prevent_default();
-                    menu.close();
+                    let _ = send(&CommandPaletteMenuDismissRequest {
+                        open_id: state().open_id,
+                    });
                     return;
                 }
                 if let Some(direction) = direction {
-                    e.prevent_default();
-                    menu.step(direction, menus.rows(kind));
+                    let _ = send(&CommandPaletteMenuMoveRequest {
+                        open_id: state().open_id,
+                        next: direction == MenuDirection::Next,
+                    });
                     return;
                 }
                 if e.key() == Key::Enter && !e.modifiers().shift() {
-                    e.prevent_default();
-                    if menus.choose(kind, menu.cursor()) {
-                        menu.close();
-                    }
+                    let _ = send(&CommandPaletteMenuActivateRequest {
+                        open_id: state().open_id,
+                        index: projection.menu_cursor,
+                    });
                     return;
                 }
             }
@@ -441,19 +379,19 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             }
 
-            let wanted = match recall.recalling(&palette.query) {
+            let wanted = match projection.history_recalling {
                 true => PromptHistoryDirection::from_menu(direction),
                 false => {
                     let (start, end) = EventSelection::in_field(PROMPT_INPUT_ID);
-                    let entering = go_up && palette.selected == 0;
+                    let entering = go_up && projection.selected == 0;
                     entering
                         .then(|| {
                             prompt_history_direction(
                                 &e.key().to_string(),
                                 ctrl,
-                                &palette.query,
-                                byte_offset_to_utf16(&palette.query, start),
-                                byte_offset_to_utf16(&palette.query, end),
+                                &query,
+                                byte_offset_to_utf16(&query, start),
+                                byte_offset_to_utf16(&query, end),
                             )
                         })
                         .flatten()
@@ -461,17 +399,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             };
             if let Some(wanted) = wanted {
                 e.prevent_default();
-                if keys.resolves() {
-                    let _ = send(&CommandPaletteHistoryMoveRequest {
-                        open_id: state().open_id,
-                        older: matches!(wanted, PromptHistoryDirection::Older),
-                    });
-                } else if let Some(value) =
-                    recall.walk(prompt_history.as_ref(), wanted, &palette.query)
-                {
-                    signals.retype(value);
-                    focus_prompt_end(PROMPT_INPUT_ID);
-                }
+                let _ = send(&CommandPaletteHistoryMoveRequest {
+                    open_id: state().open_id,
+                    older: matches!(wanted, PromptHistoryDirection::Older),
+                });
                 return;
             }
 
@@ -494,23 +425,24 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         }
     };
     let modal_keydown = {
-        let palette = palette.clone();
+        let projection = projection.clone();
+        let query = q.clone();
         move |e: KeyboardEvent| {
             if ime.swallows(&e) {
                 return;
             }
-            if Readline::chord(&e, signals.query, &palette.ghost, COMMAND_BAR_INPUT_ID) {
+            if Readline::chord(&e, signals.query, &projection.ghost, COMMAND_BAR_INPUT_ID) {
                 return;
             }
             let ctrl = e.modifiers().contains(Modifiers::CONTROL);
             if !ctrl
-                && palette.space_switch
-                && palette.query.trim().is_empty()
+                && projection.space_switch
+                && query.trim().is_empty()
                 && let Some(digit) = TypedDigit::from_event(&e)
-                && let Some(index) = palette.space_digit(digit)
+                && digit < projection.space_count as usize
             {
                 e.prevent_default();
-                signals.highlight(index);
+                signals.highlight(digit);
                 return;
             }
             if e.key() == Key::Enter {
@@ -547,7 +479,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 PromptComposer {
                     shared_transition: true,
                     value: q.clone(),
-                    overlay: palette.row_text.clone().unwrap_or_default(),
+                    overlay: projection.row_text.clone().unwrap_or_default(),
                     completion: ghost_text.clone(),
                     attachments: start_prompt_attachments,
                     placeholder: translate("command-composer-placeholder"),
@@ -556,10 +488,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     footer: Some(start_composer_footer),
                     action_title: translate("command-send"),
                     action_enabled: start_submission_enabled,
-                    on_input: move |value| {
-                        menu.close();
-                        signals.retype(value);
-                    },
+                    on_input: move |value| signals.retype(value),
                     on_keydown: start_keydown,
                     on_paste: move |_| {
                         let _ = send(&ChatPasteMedia);
@@ -583,19 +512,19 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     glass: false,
                     class: "p-2",
                     div { class: "flex w-full min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg bg-foreground/5 px-3",
-                        if !palette.space_name.is_empty() {
+                        if !projection.space_name.is_empty() {
                             span {
-                                title: "{palette.space_name}",
+                                title: "{projection.space_name}",
                                 class: "max-w-36 shrink-0 truncate rounded-md bg-glass-hover px-2 py-1 text-ui-xs font-medium text-muted-foreground",
-                                "{palette.space_name}"
+                                "{projection.space_name}"
                             }
                         }
-                        PaletteModeChip { mode: palette.mode }
-                        if let Some(glyph) = palette.glyph {
+                        PaletteModeChip { mode: projection.mode }
+                        if let Some(glyph) = projection.glyph {
                             PaletteGlyphIcon { glyph }
                         }
                         div { class: "relative min-w-0 flex-1 overflow-hidden",
-                            if let Some(row_text) = palette.row_text.clone() {
+                            if let Some(row_text) = projection.row_text.clone() {
                                 div { class: "pointer-events-none absolute inset-0 flex items-center",
                                     span { class: "truncate text-base text-foreground", "{row_text}" }
                                 }
@@ -609,12 +538,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 id: "command-bar-input",
                                 r#type: "text",
                                 "data-ghost": "{ghost_text}",
-                                class: if palette.row_text.is_some() {
+                                class: if projection.row_text.is_some() {
                                     "w-full min-w-0 cursor-text bg-transparent py-2.5 text-base text-transparent caret-foreground outline-none placeholder:text-muted-foreground"
                                 } else {
                                     "w-full min-w-0 cursor-text bg-transparent py-2.5 text-base text-foreground caret-foreground outline-none placeholder:text-muted-foreground"
                                 },
-                                placeholder: if palette.row_text.is_some() { String::new() } else { palette.placeholder.clone() },
+                                placeholder: if projection.row_text.is_some() { String::new() } else { projection.placeholder.clone() },
                                 value: "{q}",
                                 autofocus: true,
                                 oninput: move |event| signals.retype(event.value()),
@@ -627,7 +556,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
             }
-            if menu.opened().is_none() && mcp_open {
+            if projection.menu.is_none() && mcp_open {
                 McpMenu {
                     connections: mcp,
                     entries: mcp_entries.as_ref().clone(),
@@ -643,7 +572,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     on_dismiss: move |()| signals.retype(String::new()),
                 }
             }
-            if menu.opened().is_none() && !mcp_open && media_menu_open {
+            if projection.menu.is_none() && !mcp_open && media_menu_open {
                 PromptPopup {
                     placement: PromptPopupPlacement::Downward,
                     id: "command-bar-results",
@@ -668,26 +597,24 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
             }
-            if menu.opened().is_none() && !mcp_open && !media_menu_open && !palette.rows.is_empty() {
+            if projection.menu.is_none() && !mcp_open && !media_menu_open && !projection.rows.is_empty() {
                 PromptPopup {
                     placement: if is_start { PromptPopupPlacement::Downward } else { PromptPopupPlacement::Inline },
                     id: "command-bar-results",
                     class: if is_start { "" } else { "max-h-80 overflow-x-hidden overflow-y-auto border-t border-border" },
-                for (i, item) in palette.rows.iter().enumerate() {
+                for (i, item) in projection.rows.iter().enumerate() {
                     ResultRow {
                         key: "{i}",
                         index: i,
                         item: item.clone(),
-                        selected: i == palette.selected,
+                        selected: i == projection.selected as usize,
                         on_activate: move |_| {
                             let _ = send(&CommandPaletteActivateRequest {
                                 open_id: state().open_id,
                                 index: i as u32,
                             });
                         },
-                        space_switch: palette.space_switch,
-                        start_prompt_mode: palette.start_prompt_mode,
-                        query: q.clone(),
+                        space_switch: projection.space_switch,
                         on_hover: move |_| {
                             if is_start {
                                 signals.selected.set(i);

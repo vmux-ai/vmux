@@ -2,6 +2,9 @@ use super::{CommandBarPick, CommandBarPicker, SearchEngine};
 use crate::PageIcon;
 use crate::chat::ResumableSessionEntry;
 use crate::mcp::McpServerEntry;
+use crate::protocol::AcpModeOption;
+use crate::room::ModelOptionEntry;
+use crate::space::ProjectRow;
 
 #[vmux_api::contract(Copy, Default, Eq)]
 pub enum PaletteMode {
@@ -15,20 +18,54 @@ pub enum PaletteMode {
     Picking(CommandBarPicker),
 }
 
-#[vmux_api::contract(Copy, Default, Eq)]
-pub struct CommandPaletteMenuMoveEffect {
-    pub revision: u64,
-    pub next: bool,
+#[vmux_api::contract(Copy, Eq)]
+pub enum PaletteGlyph {
+    Command,
+    Path,
+    Url,
+    Search,
 }
 
-#[vmux_api::contract(Copy, Default, Eq)]
-pub struct CommandPaletteMenuChooseEffect {
-    pub revision: u64,
+#[vmux_api::contract(Default, Eq)]
+pub struct CommandPaletteAgent {
+    pub url: String,
+    pub title: String,
 }
 
-#[vmux_api::contract(Copy, Default, Eq)]
-pub struct CommandPaletteMenuDismissEffect {
-    pub revision: u64,
+#[vmux_api::contract(Default)]
+pub struct CommandPaletteComposer {
+    pub loading: bool,
+    pub agents: Vec<CommandPaletteAgent>,
+    pub agent_title: String,
+    pub agent_url: String,
+    pub model_name: String,
+    pub model_options: Vec<ModelOptionEntry>,
+    pub model_agent_key: String,
+    pub model_current_id: String,
+    pub permission_modes: Vec<AcpModeOption>,
+    pub permission_agent_key: String,
+    pub permission_current_id: String,
+    pub workspace_label: String,
+    pub workspace_title: String,
+    pub branch_label: String,
+    pub branch_title: String,
+    pub worktree_title: String,
+    pub project: String,
+    pub projects: Vec<ProjectRow>,
+    pub cwd: String,
+    pub is_git_repo: bool,
+    pub is_worktree: bool,
+    pub uncommitted: u32,
+    pub ahead: u32,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub enum CommandPaletteMenu {
+    Agent,
+    Model,
+    Permission,
+    Project,
+    Branch,
 }
 
 #[vmux_api::contract(Eq)]
@@ -81,9 +118,11 @@ pub enum CommandBarResultItem {
         icon: PageIcon,
         shortcut: String,
         prompt_target: bool,
+        prompt_hint: bool,
     },
     Navigate {
         url: String,
+        is_url: bool,
     },
     Search {
         engine: SearchEngine,
@@ -128,19 +167,27 @@ pub enum CommandBarResultItem {
     },
 }
 
-#[vmux_api::contract(Default, Eq)]
+#[vmux_api::contract(Default)]
 pub struct CommandPaletteProjection {
     pub query: String,
     pub rows: Vec<CommandBarResultItem>,
     pub selected: u32,
     pub navigating: bool,
+    pub history_recalling: bool,
+    pub row_text: Option<String>,
+    pub placeholder: String,
+    pub glyph: Option<PaletteGlyph>,
+    pub space_switch: bool,
+    pub space_count: u32,
+    pub space_name: String,
+    pub accent_agent: Option<String>,
+    pub composer: CommandPaletteComposer,
+    pub menu: Option<CommandPaletteMenu>,
+    pub menu_cursor: u32,
     pub input_revision: u64,
     pub close_revision: u64,
     pub mcp_open: bool,
     pub mcp_entries: Vec<McpServerEntry>,
-    pub menu_move: Option<CommandPaletteMenuMoveEffect>,
-    pub menu_choose: Option<CommandPaletteMenuChooseEffect>,
-    pub menu_dismiss: Option<CommandPaletteMenuDismissEffect>,
     pub prompt_targets: Vec<CommandBarResultItem>,
     pub default_target: Option<CommandBarResultItem>,
     pub ghost: String,

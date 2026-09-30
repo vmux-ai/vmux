@@ -235,6 +235,7 @@ pub fn command_bar_open_payload(
     CommandBarOpenEvent {
         open_id,
         native_windowed,
+        caret_at_end: false,
         url,
         space_name,
         spaces,

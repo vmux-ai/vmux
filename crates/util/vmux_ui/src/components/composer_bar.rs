@@ -3,7 +3,7 @@ use vmux_api::protocol::AcpModeOption;
 use vmux_api::room::ModelOptionEntry;
 use vmux_api::space::{ProjectBranch, ProjectRow};
 
-use crate::components::agent_menu::{AgentMenu, ComposerAgentOption};
+use crate::components::agent_menu::AgentMenu;
 use crate::components::effort_menu::EffortMenu;
 use crate::components::model_menu::ModelMenu;
 use crate::components::permission_menu::PermissionMenu;
@@ -23,7 +23,7 @@ const COMPOSER_CHIP_SKELETON: &str = "h-7 shrink-0 rounded-lg bg-foreground/[0.0
 
 #[derive(Clone, PartialEq, Props)]
 pub struct ComposerBarProps {
-    pub menu: ComposerMenu,
+    pub opened: Option<ComposerMenuKind>,
     #[props(default)]
     pub agent: Option<ComposerChip>,
     #[props(default)]
@@ -162,7 +162,7 @@ pub fn WorkspaceBadges(
 #[component]
 pub fn ComposerBar(props: ComposerBarProps) -> Element {
     let ComposerBarProps {
-        menu,
+        opened,
         agent,
         model,
         effort,
@@ -185,35 +185,35 @@ pub fn ComposerBar(props: ComposerBarProps) -> Element {
                     ComposerChipSlot {
                         kind: ComposerMenuKind::Agent,
                         chip,
-                        open: menu.is(ComposerMenuKind::Agent),
+                        open: opened == Some(ComposerMenuKind::Agent),
                     }
                 }
                 if let Some(chip) = model {
                     ComposerChipSlot {
                         kind: ComposerMenuKind::Model,
                         chip,
-                        open: menu.is(ComposerMenuKind::Model),
+                        open: opened == Some(ComposerMenuKind::Model),
                     }
                 }
                 if let Some(chip) = effort {
                     ComposerChipSlot {
                         kind: ComposerMenuKind::Effort,
                         chip,
-                        open: menu.is(ComposerMenuKind::Effort),
+                        open: opened == Some(ComposerMenuKind::Effort),
                     }
                 }
                 if let Some(chip) = project {
                     ComposerChipSlot {
                         kind: ComposerMenuKind::Project,
                         chip,
-                        open: menu.is(ComposerMenuKind::Project),
+                        open: opened == Some(ComposerMenuKind::Project),
                     }
                 }
                 if let Some(chip) = branch {
                     ComposerChipSlot {
                         kind: ComposerMenuKind::Branch,
                         chip,
-                        open: menu.is(ComposerMenuKind::Branch),
+                        open: opened == Some(ComposerMenuKind::Branch),
                     }
                 }
                 WorkspaceBadges {
@@ -228,7 +228,7 @@ pub fn ComposerBar(props: ComposerBarProps) -> Element {
                     ComposerChipSlot {
                         kind: ComposerMenuKind::Permission,
                         chip,
-                        open: menu.is(ComposerMenuKind::Permission),
+                        open: opened == Some(ComposerMenuKind::Permission),
                     }
                 }
                 ComposerStatus { status, active_subagents, active_tasks, queued_count }
@@ -239,7 +239,12 @@ pub fn ComposerBar(props: ComposerBarProps) -> Element {
 
 #[derive(Clone, PartialEq, Props)]
 pub struct ComposerMenusProps {
-    pub menu: ComposerMenu,
+    pub opened: Option<ComposerMenuKind>,
+    pub cursor: usize,
+    pub on_hover: EventHandler<usize>,
+    pub on_dismiss: EventHandler<()>,
+    #[props(default)]
+    pub on_selected: Option<EventHandler<()>>,
     #[props(default)]
     pub placement: PromptPopupPlacement,
     #[props(default)]
@@ -259,7 +264,11 @@ pub struct ComposerMenusProps {
 #[component]
 pub fn ComposerMenus(props: ComposerMenusProps) -> Element {
     let ComposerMenusProps {
-        menu,
+        opened,
+        cursor,
+        on_hover,
+        on_dismiss,
+        on_selected,
         placement,
         agent,
         model,
@@ -268,93 +277,104 @@ pub fn ComposerMenus(props: ComposerMenusProps) -> Element {
         project,
         branch,
     } = props;
-    let cursor = menu.cursor();
     rsx! {
-        if menu.is(ComposerMenuKind::Agent) {
+        if opened == Some(ComposerMenuKind::Agent) {
             if let Some(data) = agent {
                 AgentMenu {
                     placement,
                     options: data.options,
                     selected_url: data.selected_url,
                     cursor,
-                    on_hover: move |index| menu.point_at(index),
+                    on_hover,
                     on_select: move |url: String| {
-                        menu.close();
+                        if let Some(selected) = on_selected {
+                            selected.call(());
+                        }
                         data.on_select.call(url);
                     },
-                    on_dismiss: move |()| menu.close(),
+                    on_dismiss,
                 }
             }
         }
-        if menu.is(ComposerMenuKind::Model) {
+        if opened == Some(ComposerMenuKind::Model) {
             if let Some(data) = model {
                 ModelMenu {
                     placement,
                     models: data.models,
                     current_model_id: data.current_model_id,
                     selected: cursor,
-                    on_hover: move |index| menu.point_at(index),
+                    on_hover,
                     on_select: move |entry: ModelOptionEntry| {
-                        menu.close();
+                        if let Some(selected) = on_selected {
+                            selected.call(());
+                        }
                         data.on_select.call(entry);
                     },
-                    on_dismiss: move |()| menu.close(),
+                    on_dismiss,
                 }
             }
         }
-        if menu.is(ComposerMenuKind::Effort) {
+        if opened == Some(ComposerMenuKind::Effort) {
             if let Some(data) = effort {
                 EffortMenu {
                     placement,
                     levels: data.levels,
                     selected: data.selected,
                     cursor,
-                    on_hover: move |index| menu.point_at(index),
+                    on_hover,
                     on_select: move |level: String| {
-                        menu.close();
+                        if let Some(selected) = on_selected {
+                            selected.call(());
+                        }
                         data.on_select.call(level);
                     },
-                    on_dismiss: move |()| menu.close(),
+                    on_dismiss,
                 }
             }
         }
-        if menu.is(ComposerMenuKind::Permission) {
+        if opened == Some(ComposerMenuKind::Permission) {
             if let Some(data) = permission {
                 PermissionMenu {
                     placement,
                     modes: data.modes,
                     current_mode_id: data.current_mode_id,
                     selected: cursor,
-                    on_hover: move |index| menu.point_at(index),
+                    on_hover,
                     on_select: move |mode: AcpModeOption| {
-                        menu.close();
+                        if let Some(selected) = on_selected {
+                            selected.call(());
+                        }
                         data.on_select.call(mode);
                     },
-                    on_dismiss: move |()| menu.close(),
+                    on_dismiss,
                 }
             }
         }
-        if menu.is(ComposerMenuKind::Project) {
+        if opened == Some(ComposerMenuKind::Project) {
             if let Some(data) = project {
                 ProjectPicker {
                     placement,
                     projects: data.projects,
                     loaded: data.loaded,
                     cursor,
-                    on_hover: move |index| menu.point_at(index),
+                    on_hover,
                     on_pick: move |pick: ProjectPick| {
-                        menu.close();
+                        if let Some(selected) = on_selected {
+                            selected.call(());
+                        }
                         data.on_pick.call(pick);
                     },
                     on_choose_another: move |()| {
-                        menu.close();
+                        if let Some(selected) = on_selected {
+                            selected.call(());
+                        }
                         data.on_choose_another.call(());
                     },
-                    on_dismiss: move |()| menu.close(),
+                    on_dismiss,
                 }
             }
         }
-        if menu.is(ComposerMenuKind::Branch) {
+        if opened == Some(ComposerMenuKind::Branch) {
             if let Some(data) = branch {
                 BranchPicker {
                     placement,
@@ -362,12 +382,14 @@ pub fn ComposerMenus(props: ComposerMenusProps) -> Element {
                     branches: data.branches,
                     loaded: data.loaded,
                     cursor,
-                    on_hover: move |index| menu.point_at(index),
+                    on_hover,
                     on_pick: move |pick: ProjectPick| {
-                        menu.close();
+                        if let Some(selected) = on_selected {
+                            selected.call(());
+                        }
                         data.on_pick.call(pick);
                     },
-                    on_dismiss: move |()| menu.close(),
+                    on_dismiss,
                 }
             }
         }
@@ -548,7 +570,7 @@ impl ComposerChip {
 
 #[derive(Clone, PartialEq)]
 pub struct AgentMenuData {
-    pub options: Vec<ComposerAgentOption>,
+    pub options: Vec<vmux_api::command_bar::CommandPaletteAgent>,
     pub selected_url: String,
     pub on_select: EventHandler<String>,
 }

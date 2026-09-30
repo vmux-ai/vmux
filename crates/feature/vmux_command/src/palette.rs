@@ -1,16 +1,12 @@
 use vmux_api::command_bar::{
     AgentModels, AgentModes, CommandBarOpenEvent, CommandBarPick, CommandBarPicker,
-    CommandBarPromptContext, CommandPaletteProjection, ExRequest, HistoryEntry, InvokeRequest,
-    OpenRequest, PathEntry, PickRequest, PromptRequest, SwitchSpaceRequest, SwitchTabRequest,
-    TerminalRequest,
+    CommandBarPromptContext, CommandPaletteAgent, CommandPaletteComposer, CommandPaletteProjection,
+    ExRequest, HistoryEntry, InvokeRequest, OpenRequest, PathEntry, PickRequest, PromptRequest,
+    SwitchSpaceRequest, SwitchTabRequest, TerminalRequest,
 };
 use vmux_api::open_target::OpenTarget;
 use vmux_api::prompt_media::{ChatAttachment, ChatSubmitAttachment};
-use vmux_api::protocol::AcpModeOption;
-use vmux_api::room::ModelOptionEntry;
-use vmux_api::space::ProjectRow;
 
-use vmux_ui::components::agent_menu::ComposerAgentOption;
 use vmux_ui::i18n::translate;
 use vmux_ui::list_nav::MenuDirection;
 
@@ -26,7 +22,7 @@ pub mod results;
 
 pub use query::PaletteQuery;
 
-pub use vmux_api::command_bar::PaletteMode;
+pub use vmux_api::command_bar::{PaletteGlyph, PaletteMode};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaletteSurface {
@@ -118,18 +114,6 @@ impl PaletteRows {
         }
     }
 
-    pub fn projection(&self) -> CommandPaletteProjection {
-        CommandPaletteProjection {
-            rows: self.items.clone(),
-            prompt_targets: self.prompt_targets.clone(),
-            default_target: self.default_target.clone(),
-            ghost: self.ghost.clone(),
-            start_prompt_mode: self.start_prompt_mode,
-            mode: self.mode,
-            ..Default::default()
-        }
-    }
-
     pub fn build(
         state: &CommandBarOpenEvent,
         draft: &PaletteDraft,
@@ -157,6 +141,14 @@ impl PaletteRows {
         );
         if start_prompt_mode {
             prepend_prompt_targets(&mut items, default_target.as_ref(), &prompt_targets, query);
+        }
+        for item in &mut items {
+            let show_hint = start_prompt_mode
+                && prompt_target_url(item).is_some()
+                && !prompt_target_matches_query(item, query);
+            if let CommandBarResultItem::Page { prompt_hint, .. } = item {
+                *prompt_hint = show_hint;
+            }
         }
 
         Self {
@@ -354,16 +346,13 @@ impl PaletteRows {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PaletteGlyph {
-    Command,
-    Path,
-    Url,
-    Search,
-}
+struct Glyph;
 
-impl PaletteGlyph {
-    fn resolve(navigating: Option<&CommandBarResultItem>, mode: PaletteMode) -> Option<Self> {
+impl Glyph {
+    fn resolve(
+        navigating: Option<&CommandBarResultItem>,
+        mode: PaletteMode,
+    ) -> Option<PaletteGlyph> {
         if let PaletteMode::Picking(picker) = mode
             && picker != CommandBarPicker::Space
         {
@@ -377,8 +366,8 @@ impl PaletteGlyph {
             | CommandBarResultItem::Ex { .. }
             | CommandBarResultItem::Slash { .. }
             | CommandBarResultItem::Resume { .. }
-            | CommandBarResultItem::Pick { .. } => Self::Command,
-            CommandBarResultItem::Terminal { path } if path.is_empty() => Self::Command,
+            | CommandBarResultItem::Pick { .. } => PaletteGlyph::Command,
+            CommandBarResultItem::Terminal { path } if path.is_empty() => PaletteGlyph::Command,
             CommandBarResultItem::Terminal { .. }
             | CommandBarResultItem::Editor { .. }
             | CommandBarResultItem::File { .. }
@@ -386,26 +375,33 @@ impl PaletteGlyph {
             | CommandBarResultItem::PartialIndex
             | CommandBarResultItem::MoreMatches { .. }
             | CommandBarResultItem::ResumePending { .. }
-            | CommandBarResultItem::RecentFile { .. } => Self::Path,
-            CommandBarResultItem::Stack { .. } | CommandBarResultItem::History { .. } => Self::Url,
-            CommandBarResultItem::Navigate { url } => {
-                let is_url = url.contains("://") || (url.contains('.') && !url.contains(' '));
-                if is_url { Self::Url } else { Self::Search }
+            | CommandBarResultItem::RecentFile { .. } => PaletteGlyph::Path,
+            CommandBarResultItem::Stack { .. } | CommandBarResultItem::History { .. } => {
+                PaletteGlyph::Url
+            }
+            CommandBarResultItem::Navigate { is_url, .. } => {
+                if *is_url {
+                    PaletteGlyph::Url
+                } else {
+                    PaletteGlyph::Search
+                }
             }
             CommandBarResultItem::Space { .. }
             | CommandBarResultItem::Page { .. }
-            | CommandBarResultItem::Search { .. } => Self::Search,
+            | CommandBarResultItem::Search { .. } => PaletteGlyph::Search,
         };
         Some(glyph)
     }
 
-    const fn in_mode(mode: PaletteMode) -> Option<Self> {
+    const fn in_mode(mode: PaletteMode) -> Option<PaletteGlyph> {
         match mode {
-            PaletteMode::Command | PaletteMode::Ex | PaletteMode::Slash => Some(Self::Command),
-            PaletteMode::Path => Some(Self::Path),
-            PaletteMode::Url => Some(Self::Url),
+            PaletteMode::Command | PaletteMode::Ex | PaletteMode::Slash => {
+                Some(PaletteGlyph::Command)
+            }
+            PaletteMode::Path => Some(PaletteGlyph::Path),
+            PaletteMode::Url => Some(PaletteGlyph::Url),
             PaletteMode::Picking(CommandBarPicker::Space) | PaletteMode::Search => {
-                Some(Self::Search)
+                Some(PaletteGlyph::Search)
             }
             PaletteMode::Picking(_) => None,
         }
@@ -481,39 +477,14 @@ impl ExLine {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ComposerState {
-    pub loading: bool,
-    pub agents: Vec<ComposerAgentOption>,
-    pub agent_title: String,
-    pub agent_url: String,
-    pub model_name: String,
-    pub model_options: Vec<ModelOptionEntry>,
-    pub model_agent_key: String,
-    pub model_current_id: String,
-    pub permission_modes: Vec<AcpModeOption>,
-    pub permission_agent_key: String,
-    pub permission_current_id: String,
-    pub workspace_label: String,
-    pub workspace_title: String,
-    pub branch_label: String,
-    pub branch_title: String,
-    pub worktree_title: String,
-    pub project: String,
-    pub projects: Vec<ProjectRow>,
-    pub cwd: String,
-    pub is_git_repo: bool,
-    pub is_worktree: bool,
-    pub uncommitted: u32,
-    pub ahead: u32,
-}
+struct Composer;
 
-impl ComposerState {
+impl Composer {
     fn build(
         state: &CommandBarOpenEvent,
         prompt_targets: &[CommandBarResultItem],
         effective_target: Option<&CommandBarResultItem>,
-    ) -> Self {
+    ) -> CommandPaletteComposer {
         let context = &state.prompt_context;
         let agent_url = effective_target
             .and_then(prompt_target_url)
@@ -528,7 +499,7 @@ impl ComposerState {
             let CommandBarResultItem::Page { url, title, .. } = item else {
                 continue;
             };
-            agents.push(ComposerAgentOption {
+            agents.push(CommandPaletteAgent {
                 url: url.clone(),
                 title: title.clone(),
             });
@@ -572,7 +543,7 @@ impl ComposerState {
             format!("Worktree from {}", context.base_ref)
         };
 
-        Self {
+        CommandPaletteComposer {
             loading: state.pages.is_empty(),
             agents,
             agent_title,
@@ -715,7 +686,7 @@ pub struct PaletteState {
     pub default_target: Option<CommandBarResultItem>,
     pub effective_target: Option<CommandBarResultItem>,
     pub accent_agent: Option<String>,
-    pub composer: ComposerState,
+    pub composer: CommandPaletteComposer,
 }
 
 impl PaletteState {
@@ -765,7 +736,7 @@ impl PaletteState {
             ghost: rows.ghost.clone(),
             row_text,
             placeholder: Placeholder::resolve(rows.mode, state, surface),
-            glyph: PaletteGlyph::resolve(navigating, rows.mode),
+            glyph: Glyph::resolve(navigating, rows.mode),
             mode: rows.mode,
             start_prompt_mode: rows.start_prompt_mode,
             space_switch: PaletteRows::is_space(rows.mode),
@@ -774,7 +745,7 @@ impl PaletteState {
             space_name: state.space_name.clone(),
             prompt_targets: rows.prompt_targets.clone(),
             default_target: rows.default_target.clone(),
-            composer: ComposerState::build(state, &rows.prompt_targets, effective_target.as_ref()),
+            composer: Composer::build(state, &rows.prompt_targets, effective_target.as_ref()),
             effective_target,
             accent_agent,
         }
@@ -782,6 +753,34 @@ impl PaletteState {
 
     pub fn row(&self, index: usize) -> Option<&CommandBarResultItem> {
         self.rows.get(index)
+    }
+
+    pub fn projection(&self) -> CommandPaletteProjection {
+        let space_count = self
+            .rows
+            .iter()
+            .filter(|row| matches!(row, CommandBarResultItem::Space { .. }))
+            .count() as u32;
+        CommandPaletteProjection {
+            query: self.query.clone(),
+            rows: self.rows.clone(),
+            selected: self.selected as u32,
+            navigating: self.nav_mode,
+            row_text: self.row_text.clone(),
+            placeholder: self.placeholder.clone(),
+            glyph: self.glyph,
+            space_switch: self.space_switch,
+            space_count,
+            space_name: self.space_name.clone(),
+            accent_agent: self.accent_agent.clone(),
+            composer: self.composer.clone(),
+            prompt_targets: self.prompt_targets.clone(),
+            default_target: self.default_target.clone(),
+            ghost: self.ghost.clone(),
+            start_prompt_mode: self.start_prompt_mode,
+            mode: self.mode,
+            ..Default::default()
+        }
     }
 
     pub fn step(&self, direction: MenuDirection) -> usize {
@@ -862,7 +861,7 @@ impl PaletteState {
                 Some(PaletteDecision::switch_space(id.clone()))
             }
             CommandBarResultItem::Page { url, .. }
-            | CommandBarResultItem::Navigate { url }
+            | CommandBarResultItem::Navigate { url, .. }
             | CommandBarResultItem::History { url, .. } => {
                 (!url.is_empty()).then(|| PaletteDecision::open(true, url, self.open_target))
             }
@@ -1060,7 +1059,7 @@ impl RowText {
             CommandBarResultItem::Slash { name, .. } => format!("/{name} "),
             CommandBarResultItem::Resume { entry, .. } => entry.title.clone(),
             CommandBarResultItem::Pick { label, .. } => label.clone(),
-            CommandBarResultItem::Navigate { url } => url.clone(),
+            CommandBarResultItem::Navigate { url, .. } => url.clone(),
             CommandBarResultItem::Search { query, .. } => query.clone(),
             CommandBarResultItem::Stack { url, .. } => url.clone(),
             CommandBarResultItem::Space { name, .. } => name.clone(),
@@ -1356,6 +1355,9 @@ mod tests {
     use vmux_api::command_bar::{
         CommandBarCommandEntry, CommandBarPage, CommandBarSpace, CommandBarTab, SearchEngine,
     };
+    use vmux_api::protocol::AcpModeOption;
+    use vmux_api::room::ModelOptionEntry;
+    use vmux_api::space::ProjectRow;
 
     impl<'a> Completions<'a> {
         fn listing(entries: &'a [PathEntry]) -> Self {
@@ -1844,7 +1846,7 @@ mod tests {
             PaletteState::modal(&state, PaletteDraft::typed("close").at(0).navigating());
         assert_eq!(
             navigated.glyph,
-            PaletteGlyph::resolve(navigated.row(0), navigated.mode),
+            Glyph::resolve(navigated.row(0), navigated.mode),
             "navigating reads the row, not the text"
         );
     }
@@ -1852,11 +1854,11 @@ mod tests {
     #[test]
     fn a_picker_shows_no_input_glyph_because_its_chip_already_names_it() {
         assert_eq!(
-            PaletteGlyph::resolve(None, PaletteMode::Picking(CommandBarPicker::Encoding)),
+            Glyph::resolve(None, PaletteMode::Picking(CommandBarPicker::Encoding)),
             None
         );
         assert_eq!(
-            PaletteGlyph::resolve(None, PaletteMode::Picking(CommandBarPicker::Space)),
+            Glyph::resolve(None, PaletteMode::Picking(CommandBarPicker::Space)),
             Some(PaletteGlyph::Search),
             "the space switcher is a picker but reads as a search"
         );
@@ -2371,8 +2373,13 @@ mod tests {
         let state = Launcher::state();
         let palette = PaletteState::modal(&state, PaletteDraft::default());
 
-        let submitted =
-            palette.activate(&CommandBarResultItem::Navigate { url: String::new() }, &[]);
+        let submitted = palette.activate(
+            &CommandBarResultItem::Navigate {
+                url: String::new(),
+                is_url: false,
+            },
+            &[],
+        );
 
         assert_eq!(submitted, PaletteDecision::Close);
     }

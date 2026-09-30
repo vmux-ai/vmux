@@ -97,7 +97,7 @@ fn ComposerFooter(chat: Chat) -> Element {
     let context = (chat.slash.composer_context)();
     rsx! {
         ComposerBar {
-            menu: chat.menu,
+            opened: chat.menu.opened(),
             model: chat.model_chip(),
             effort: chat.effort_chip(),
             permission: chat.permission_chip(),

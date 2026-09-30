@@ -8,9 +8,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
 use vmux_ui::util::cn;
 
-use crate::palette::PaletteQuery;
-use crate::palette::results::CommandBarResultItem as ResultItem;
-use crate::palette::results::{prompt_target_matches_query, prompt_target_url};
+use vmux_api::command_bar::{CommandBarResultItem as ResultItem, ResumeSection};
 
 #[component]
 pub fn ResultRow(
@@ -18,13 +16,10 @@ pub fn ResultRow(
     item: ResultItem,
     selected: bool,
     #[props(default)] space_switch: bool,
-    #[props(default)] start_prompt_mode: bool,
-    #[props(default)] query: String,
     on_activate: EventHandler<()>,
     on_hover: EventHandler<()>,
 ) -> Element {
     let i = index;
-    let q = query.as_str();
     let resume_section = match &item {
         ResultItem::Resume { section, .. } => section.clone(),
         _ => None,
@@ -173,7 +168,7 @@ pub fn ResultRow(
                                 }
                                 span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground" }
                             },
-                            ResultItem::Page { url, title, icon, shortcut, .. } => rsx! {
+                            ResultItem::Page { url, title, icon, shortcut, prompt_hint, .. } => rsx! {
                                 div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                     PageIconView {
                                         icon: icon.clone(),
@@ -182,10 +177,7 @@ pub fn ResultRow(
                                         icon_class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground".to_string(),
                                     }
                                     div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                        if start_prompt_mode
-                                            && prompt_target_url(&item).is_some()
-                                            && !prompt_target_matches_query(&item, q)
-                                        {
+                                        if *prompt_hint {
                                             span { class: "min-w-0 truncate text-base leading-snug text-foreground", "Ask {title}" }
                                         } else {
                                             span { class: "min-w-0 truncate text-base leading-snug text-foreground", "{title}" }
@@ -194,10 +186,7 @@ pub fn ResultRow(
                                     }
                                 }
                                 span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground",
-                                    if start_prompt_mode
-                                        && prompt_target_url(&item).is_some()
-                                        && !prompt_target_matches_query(&item, q)
-                                    {
+                                    if *prompt_hint {
                                         {translate("command-prompt")}
                                     } else if shortcut.is_empty() {
                                         {translate("command-new-tab")}
@@ -206,7 +195,7 @@ pub fn ResultRow(
                                     }
                                 }
                             },
-                            ResultItem::Navigate { url } => rsx! {
+                            ResultItem::Navigate { url, is_url } => rsx! {
                                 div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                     Icon { class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground",
                                         circle { cx: "11", cy: "11", r: "8" }
@@ -214,7 +203,7 @@ pub fn ResultRow(
                                     }
                                     if url.is_empty() {
                                         span { class: "text-sm text-foreground", {translate("command-search")} }
-                                    } else if PaletteQuery::new(url).looks_like_url() {
+                                    } else if *is_url {
                                         span { class: "min-w-0 truncate text-base leading-snug text-foreground", {translate_with("command-open-value", &[("value", TranslationValue::String(url))])} }
                                     } else {
                                         span { class: "min-w-0 truncate text-base leading-snug text-foreground", {translate_with("command-search-value", &[("value", TranslationValue::String(url))])} }
@@ -375,7 +364,7 @@ impl ResumePreview {
 }
 
 #[component]
-fn ResumeSectionRow(section: crate::palette::results::ResumeSection) -> Element {
+fn ResumeSectionRow(section: ResumeSection) -> Element {
     if section.agent.is_empty() && section.project.is_empty() && section.branch.is_empty() {
         return rsx! {};
     }

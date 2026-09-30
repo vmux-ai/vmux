@@ -58,7 +58,6 @@ pub struct CommandPaletteDraftRequest {
     pub open_id: super::OpenId,
     pub query: String,
     pub start: bool,
-    pub target_url: String,
     pub selected: u32,
     pub navigating: bool,
 }
@@ -72,6 +71,35 @@ pub struct CommandPaletteSubmitRequest {
 pub struct CommandPaletteHistoryMoveRequest {
     pub open_id: super::OpenId,
     pub older: bool,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct CommandPaletteMenuToggleRequest {
+    pub open_id: super::OpenId,
+    pub menu: super::CommandPaletteMenu,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPaletteMenuMoveRequest {
+    pub open_id: super::OpenId,
+    pub next: bool,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPaletteMenuHighlightRequest {
+    pub open_id: super::OpenId,
+    pub index: u32,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPaletteMenuActivateRequest {
+    pub open_id: super::OpenId,
+    pub index: u32,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPaletteMenuDismissRequest {
+    pub open_id: super::OpenId,
 }
 
 #[vmux_api::ui_event(Copy, Default, Eq)]

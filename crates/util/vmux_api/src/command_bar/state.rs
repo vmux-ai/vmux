@@ -79,6 +79,7 @@ mod tests {
             projection: CommandPaletteProjection {
                 rows: vec![CommandBarResultItem::Navigate {
                     url: "vmux://settings".to_string(),
+                    is_url: true,
                 }],
                 ghost: "/settings".to_string(),
                 mode: PaletteMode::Url,
@@ -93,7 +94,7 @@ mod tests {
         assert_eq!(decoded.projection.mode, PaletteMode::Url);
         assert!(matches!(
             decoded.projection.rows.as_slice(),
-            [CommandBarResultItem::Navigate { url }] if url == "vmux://settings"
+            [CommandBarResultItem::Navigate { url, is_url }] if url == "vmux://settings" && *is_url
         ));
     }
 }

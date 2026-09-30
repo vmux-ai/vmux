@@ -1,5 +1,4 @@
 use crate::palette::keyboard::TextEditCommand;
-use crate::palette::{PaletteDraft, PaletteRows, PaletteState};
 use dioxus::prelude::*;
 use vmux_api::command_bar::{CommandBarOpenEvent, OpenId};
 use vmux_ui::caret::{EventSelection, TextCaret};
@@ -12,7 +11,6 @@ pub struct PaletteSignals {
     pub query: Signal<String>,
     pub selected: Signal<usize>,
     pub nav_mode: Signal<bool>,
-    pub target_url: Signal<String>,
     pub last_open_id: Signal<OpenId>,
     pub last_focus_open_id: Signal<OpenId>,
     pub last_input_revision: Signal<u64>,
@@ -23,7 +21,6 @@ pub fn use_palette_signals() -> PaletteSignals {
         query: use_signal(String::new),
         selected: use_signal(|| 0usize),
         nav_mode: use_signal(|| false),
-        target_url: use_signal(String::new),
         last_open_id: use_signal(|| OpenId(u64::MAX)),
         last_focus_open_id: use_signal(|| OpenId(u64::MAX)),
         last_input_revision: use_signal(|| 0),
@@ -31,16 +28,6 @@ pub fn use_palette_signals() -> PaletteSignals {
 }
 
 impl PaletteSignals {
-    pub fn draft(&self) -> PaletteDraft {
-        PaletteDraft {
-            query: (self.query)(),
-            selected: (self.selected)(),
-            nav_mode: (self.nav_mode)(),
-            target_url: (self.target_url)(),
-            ..PaletteDraft::default()
-        }
-    }
-
     pub fn reopened(&mut self, open_id: OpenId) -> bool {
         if (self.last_open_id)() == open_id {
             return false;
@@ -51,7 +38,7 @@ impl PaletteSignals {
 
     pub fn restart(&mut self, opened: &CommandBarOpenEvent) {
         self.query.set(opened.url.clone());
-        self.selected.set(PaletteState::opening_selection(opened));
+        self.selected.set(0);
         self.nav_mode.set(false);
     }
 
@@ -65,12 +52,6 @@ impl PaletteSignals {
 
     pub fn retype(&mut self, value: String) {
         self.query.set(value);
-        self.selected.set(0);
-        self.nav_mode.set(false);
-    }
-
-    pub fn retarget(&mut self, url: String) {
-        self.target_url.set(url);
         self.selected.set(0);
         self.nav_mode.set(false);
     }
@@ -125,7 +106,7 @@ pub struct CommandBarField;
 
 impl CommandBarField {
     pub fn focus(opened: &CommandBarOpenEvent) {
-        if PaletteRows::opens_at_end(&opened.url, opened.picker) {
+        if opened.caret_at_end {
             FocusClaim::new(COMMAND_BAR_INPUT_ID)
                 .caret_at_end()
                 .request();

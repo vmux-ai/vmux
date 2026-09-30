@@ -253,6 +253,7 @@ fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarR
             icon: page.icon.clone(),
             shortcut: page.shortcut.clone(),
             prompt_target: false,
+            prompt_hint: false,
         })
         .collect()
 }
@@ -274,6 +275,7 @@ pub fn prompt_target_results(pages: &[CommandBarPage], query: &str) -> Vec<Comma
             icon: page.icon.clone(),
             shortcut: page.shortcut.clone(),
             prompt_target: true,
+            prompt_hint: false,
         })
         .collect()
 }
@@ -428,6 +430,7 @@ pub fn start_page_results(
                 icon: page.icon.clone(),
                 shortcut: page.shortcut.clone(),
                 prompt_target: false,
+                prompt_hint: false,
             }),
     );
     results.extend(work_dir_results(work_dirs, &search_lower));
@@ -435,6 +438,7 @@ pub fn start_page_results(
     if !PaletteQuery::new(trimmed).is_start_prompt() && !trimmed.is_empty() {
         results.push(CommandBarResultItem::Navigate {
             url: trimmed.to_string(),
+            is_url: PaletteQuery::new(trimmed).looks_like_url(),
         });
     }
     results
@@ -490,6 +494,7 @@ pub fn space_switch_results(
             icon: page.icon.clone(),
             shortcut: String::new(),
             prompt_target: false,
+            prompt_hint: false,
         });
     }
     items
@@ -539,7 +544,10 @@ pub fn filter_results(
 
     if q.is_empty() {
         let mut items: Vec<CommandBarResultItem> = Vec::new();
-        items.push(CommandBarResultItem::Navigate { url: String::new() });
+        items.push(CommandBarResultItem::Navigate {
+            url: String::new(),
+            is_url: false,
+        });
         if new_tab {
             items.push(CommandBarResultItem::Terminal {
                 path: String::new(),
@@ -667,6 +675,7 @@ pub fn filter_results(
     if !search.is_empty() {
         items.push(CommandBarResultItem::Navigate {
             url: search.to_string(),
+            is_url: PaletteQuery::new(search).looks_like_url(),
         });
     }
 
@@ -851,6 +860,7 @@ mod tests {
             icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Layers),
             shortcut: String::new(),
             prompt_target: false,
+            prompt_hint: false,
         }));
         assert!(results.iter().any(|r| matches!(
             r, CommandBarResultItem::Space { id, .. } if id == "space-1"
@@ -886,6 +896,7 @@ mod tests {
             icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Layers),
             shortcut: String::new(),
             prompt_target: false,
+            prompt_hint: false,
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
             id: "browser_open_command_bar".to_string(),
@@ -920,6 +931,7 @@ mod tests {
             icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Layers),
             shortcut: String::new(),
             prompt_target: false,
+            prompt_hint: false,
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
             id: "space_open".to_string(),
@@ -972,6 +984,7 @@ mod tests {
             icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Settings),
             shortcut: String::new(),
             prompt_target: false,
+            prompt_hint: false,
         }));
     }
 
@@ -1327,6 +1340,7 @@ mod tests {
             icon: vmux_api::PageIcon::None,
             shortcut: String::new(),
             prompt_target: false,
+            prompt_hint: false,
         };
 
         assert_eq!(prompt_target_url(&agent), Some("vmux://sessions/vibe/"));

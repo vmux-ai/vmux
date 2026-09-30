@@ -80,6 +80,8 @@ pub struct CommandBarOpenEvent {
     pub open_id: OpenId,
     #[serde(default)]
     pub native_windowed: bool,
+    #[serde(default)]
+    pub caret_at_end: bool,
     pub url: String,
     #[serde(default)]
     pub space_name: String,

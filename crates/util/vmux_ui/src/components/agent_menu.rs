@@ -1,20 +1,15 @@
 use dioxus::prelude::*;
+use vmux_api::command_bar::CommandPaletteAgent;
 
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::favicon::Favicon;
 use crate::i18n::translate;
 use crate::util::cn;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ComposerAgentOption {
-    pub url: String,
-    pub title: String,
-}
-
 #[component]
 pub fn AgentMenu(
     #[props(default)] placement: PromptPopupPlacement,
-    options: Vec<ComposerAgentOption>,
+    options: Vec<CommandPaletteAgent>,
     selected_url: String,
     #[props(default)] cursor: usize,
     #[props(default)] on_hover: Option<EventHandler<usize>>,
@@ -49,7 +44,7 @@ pub fn AgentMenu(
 
 #[component]
 fn AgentMenuRow(
-    option: ComposerAgentOption,
+    option: CommandPaletteAgent,
     current: bool,
     at_cursor: bool,
     on_hover: EventHandler<()>,
