@@ -191,11 +191,11 @@ fn open_from_command_bar(
 }
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<super::command::TerminalCloseRequest>(&mut commands, "terminal_close");
-    registry.message::<super::command::TerminalNextRequest>(&mut commands, "terminal_next");
-    registry.message::<super::command::TerminalPrevRequest>(&mut commands, "terminal_prev");
-    registry.message::<super::command::TerminalClearRequest>(&mut commands, "terminal_clear");
-    registry.message::<super::command::CopyModeRequest>(&mut commands, "terminal_copy_mode");
+    registry.message::<super::command::TerminalCloseRequest>(&mut commands);
+    registry.message::<super::command::TerminalNextRequest>(&mut commands);
+    registry.message::<super::command::TerminalPrevRequest>(&mut commands);
+    registry.message::<super::command::TerminalClearRequest>(&mut commands);
+    registry.message::<super::command::CopyModeRequest>(&mut commands);
 }
 
 struct TerminalServicePlugin;

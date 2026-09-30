@@ -91,7 +91,7 @@ impl TryFrom<&CommandInvocation> for OpenServicesRequest {
 }
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<OpenServicesRequest>(&mut commands, "service_open");
+    registry.message::<OpenServicesRequest>(&mut commands);
 }
 
 fn open_services(

@@ -176,10 +176,10 @@ impl TryFrom<&CommandInvocation> for ToggleFullscreenRequest {
 }
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<MinimizeWindowRequest>(&mut commands, "minimize_window");
-    registry.message::<NewWindowRequest>(&mut commands, "new_window");
-    registry.message::<CloseFocusedWindowRequest>(&mut commands, "close_window");
-    registry.message::<ToggleFullscreenRequest>(&mut commands, "toggle_fullscreen");
+    registry.message::<MinimizeWindowRequest>(&mut commands);
+    registry.message::<NewWindowRequest>(&mut commands);
+    registry.message::<CloseFocusedWindowRequest>(&mut commands);
+    registry.message::<ToggleFullscreenRequest>(&mut commands);
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]

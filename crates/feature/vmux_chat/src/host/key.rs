@@ -17,7 +17,9 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use vmux_api::mcp::{McpServerEntry, McpServerRequest, McpServers};
 use vmux_api::prompt_media::{inline_media_query, replace_inline_media_query};
-use vmux_command::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
+use vmux_command::{
+    BindCommands, CommandBinding, CommandDispatch, CommandRegistry, CommandRuntimePlugin,
+};
 use vmux_core::host::UiState;
 use vmux_core::prompt_media::MediaPath;
 use vmux_ui::hooks::{MenuDirection, move_selection};
@@ -104,53 +106,67 @@ pub(super) struct ActiveComposerMenu {
     index: usize,
 }
 
+#[vmux_command::command(id = "chat_list_next")]
 #[derive(Component)]
 struct ListNextBinding;
 
+#[vmux_command::command(id = "chat_list_previous")]
 #[derive(Component)]
 struct ListPreviousBinding;
 
+#[vmux_command::command(id = "chat_list_choose")]
 #[derive(Component)]
 struct ListChooseBinding;
 
 #[derive(Component)]
 struct ChoiceNumberBinding(u32);
 
+impl CommandBinding for ChoiceNumberBinding {
+    fn for_command(id: &str) -> Option<Self> {
+        match id {
+            "chat_choice_1" => Some(Self(0)),
+            "chat_choice_2" => Some(Self(1)),
+            "chat_choice_3" => Some(Self(2)),
+            _ => None,
+        }
+    }
+}
+
+#[vmux_command::command(id = "chat_history_older")]
 #[derive(Component)]
 struct HistoryOlderBinding;
 
+#[vmux_command::command(id = "chat_history_newer")]
 #[derive(Component)]
 struct HistoryNewerBinding;
 
+#[vmux_command::command(id = "chat_submit")]
 #[derive(Component)]
 struct SubmitBinding;
 
+#[vmux_command::command(id = "chat_dismiss_selector")]
 #[derive(Component)]
 struct DismissSelectorBinding;
 
+#[vmux_command::command(id = "chat_interrupt")]
 #[derive(Component)]
 struct InterruptBinding;
 
+#[vmux_command::command(id = "chat_cancel")]
 #[derive(Component)]
 struct CancelBinding;
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind(&mut commands, "chat_list_next", ListNextBinding);
-    registry.bind(&mut commands, "chat_list_previous", ListPreviousBinding);
-    registry.bind(&mut commands, "chat_list_choose", ListChooseBinding);
-    registry.bind(&mut commands, "chat_choice_1", ChoiceNumberBinding(0));
-    registry.bind(&mut commands, "chat_choice_2", ChoiceNumberBinding(1));
-    registry.bind(&mut commands, "chat_choice_3", ChoiceNumberBinding(2));
-    registry.bind(&mut commands, "chat_history_older", HistoryOlderBinding);
-    registry.bind(&mut commands, "chat_history_newer", HistoryNewerBinding);
-    registry.bind(&mut commands, "chat_submit", SubmitBinding);
-    registry.bind(
-        &mut commands,
-        "chat_dismiss_selector",
-        DismissSelectorBinding,
-    );
-    registry.bind(&mut commands, "chat_interrupt", InterruptBinding);
-    registry.bind(&mut commands, "chat_cancel", CancelBinding);
+    registry.bind::<ListNextBinding>(&mut commands);
+    registry.bind::<ListPreviousBinding>(&mut commands);
+    registry.bind::<ListChooseBinding>(&mut commands);
+    registry.bind::<ChoiceNumberBinding>(&mut commands);
+    registry.bind::<HistoryOlderBinding>(&mut commands);
+    registry.bind::<HistoryNewerBinding>(&mut commands);
+    registry.bind::<SubmitBinding>(&mut commands);
+    registry.bind::<DismissSelectorBinding>(&mut commands);
+    registry.bind::<InterruptBinding>(&mut commands);
+    registry.bind::<CancelBinding>(&mut commands);
 }
 
 #[derive(SystemParam)]

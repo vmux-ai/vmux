@@ -235,45 +235,12 @@ impl TryFrom<&CommandInvocation> for ToggleZoomRequest {
 }
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    for id in [
-        "open_in_pane_top",
-        "open_in_pane_right",
-        "open_in_pane_bottom",
-        "open_in_pane_left",
-    ] {
-        registry.message::<OpenRequest>(&mut commands, id);
-    }
-    registry.message::<CloseRequest>(&mut commands, "close_pane");
-    for id in [
-        "toggle_pane",
-        "select_pane_left",
-        "select_pane_right",
-        "select_pane_up",
-        "select_pane_down",
-    ] {
-        registry.message::<FocusRequest>(&mut commands, id);
-    }
-    for id in [
-        "swap_pane_prev",
-        "swap_pane_next",
-        "rotate_forward",
-        "rotate_backward",
-        "mirror_panes",
-        "mirror_panes_horizontal",
-        "mirror_panes_vertical",
-    ] {
-        registry.message::<ArrangeRequest>(&mut commands, id);
-    }
-    for id in [
-        "equalize_pane_size",
-        "resize_pane_left",
-        "resize_pane_right",
-        "resize_pane_up",
-        "resize_pane_down",
-    ] {
-        registry.message::<ResizeRequest>(&mut commands, id);
-    }
-    registry.message::<ToggleZoomRequest>(&mut commands, "zoom_pane");
+    registry.message::<OpenRequest>(&mut commands);
+    registry.message::<CloseRequest>(&mut commands);
+    registry.message::<FocusRequest>(&mut commands);
+    registry.message::<ArrangeRequest>(&mut commands);
+    registry.message::<ResizeRequest>(&mut commands);
+    registry.message::<ToggleZoomRequest>(&mut commands);
 }
 
 pub struct PaneCommandPlugin;

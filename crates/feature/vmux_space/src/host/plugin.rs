@@ -180,8 +180,8 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
 }
 
 fn bind_command(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<OpenRequest>(&mut commands, "open_in_new_space");
-    registry.message::<CommandBarSpaceOpenRequest>(&mut commands, "space_open");
+    registry.message::<OpenRequest>(&mut commands);
+    registry.message::<CommandBarSpaceOpenRequest>(&mut commands);
 }
 
 fn open_command_bar_space(

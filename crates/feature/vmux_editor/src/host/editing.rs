@@ -79,7 +79,7 @@ struct ExLineSubmitted {
 }
 
 fn bind_ex_command(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<OpenExRequest>(&mut commands, "browser_open_ex_bar");
+    registry.message::<OpenExRequest>(&mut commands);
 }
 
 fn open_ex(

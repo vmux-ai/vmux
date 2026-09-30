@@ -10,6 +10,7 @@ pub mod ui;
 pub mod size;
 pub use vmux_api::open_target;
 pub use vmux_api::prompt_media;
+pub use vmux_macro::command;
 
 #[cfg(host)]
 pub mod host;
@@ -20,12 +21,12 @@ pub use host::{
     CommandBarAgentsSnapshot, CommandBarEntry, CommandBarPagesSnapshot, CommandBarPicks,
     CommandBarProjectRoots, CommandBarProjection, CommandBarSpacesSnapshot,
     CommandBarTerminalsSnapshot, CommandBarUiStateUpdates, CommandBarWorkDirectory,
-    CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot, CommandDefinition, CommandDispatch,
-    CommandInvocation, CommandManifest, CommandMcp, CommandMessage, CommandPlugin, CommandRegistry,
-    CommandRuntimePlugin, CommandShortcut, CommandToolPlugin, ContributedCommand, ContributedPage,
-    ContributedPages, DispatchCommandInvocations, InputSchema, KeyPlugin, ReadCommandRequests,
-    RegisteredPage, ResolvedLocale, ShortcutDefinition, SpaceSummary, UiStatePlugin,
-    WriteCommandBarSnapshots, WriteCommandRequests, build_command_bar_open_payload, bundle,
-    command_bar, command_bar_open_payload, command_list, definition, page_key, payload, plugin,
-    settings, shortcut, snapshot, surface,
+    CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot, CommandBinding, CommandDefinition,
+    CommandDispatch, CommandInvocation, CommandManifest, CommandMcp, CommandMessage, CommandPlugin,
+    CommandRegistry, CommandRuntimePlugin, CommandShortcut, CommandToolPlugin, ContributedCommand,
+    ContributedPage, ContributedPages, DispatchCommandInvocations, InputSchema, KeyPlugin,
+    ReadCommandRequests, RegisteredPage, ResolvedLocale, ShortcutDefinition, SpaceSummary,
+    UiStatePlugin, WriteCommandBarSnapshots, WriteCommandRequests, build_command_bar_open_payload,
+    bundle, command_bar, command_bar_open_payload, command_list, definition, page_key, payload,
+    plugin, settings, shortcut, snapshot, surface,
 };

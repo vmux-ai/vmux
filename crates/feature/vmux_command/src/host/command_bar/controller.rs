@@ -189,11 +189,10 @@ pub struct WriteCommandBarRequests;
 pub struct ApplyCommandBarRequests;
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<CommandBarToggleRequest>(&mut commands, "browser_open_command_bar");
-    registry
-        .message::<CommandBarEditPageRequest>(&mut commands, "browser_open_page_in_command_bar");
-    registry.message::<CommandBarPathRequest>(&mut commands, "browser_open_path_bar");
-    registry.message::<CommandBarCommandsRequest>(&mut commands, "browser_open_commands");
+    registry.message::<CommandBarToggleRequest>(&mut commands);
+    registry.message::<CommandBarEditPageRequest>(&mut commands);
+    registry.message::<CommandBarPathRequest>(&mut commands);
+    registry.message::<CommandBarCommandsRequest>(&mut commands);
 }
 
 #[derive(Component)]

@@ -178,9 +178,9 @@ impl TryFrom<&CommandInvocation> for CreateFolderRequest {
 }
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<BookmarkToggleActiveRequest>(&mut commands, "bookmark_toggle_active");
-    registry.message::<BookmarkPinActiveRequest>(&mut commands, "bookmark_pin_active");
-    registry.message::<CreateFolderRequest>(&mut commands, "bookmark_new_folder");
+    registry.message::<BookmarkToggleActiveRequest>(&mut commands);
+    registry.message::<BookmarkPinActiveRequest>(&mut commands);
+    registry.message::<CreateFolderRequest>(&mut commands);
 }
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]

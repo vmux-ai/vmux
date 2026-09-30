@@ -88,39 +88,27 @@ impl PaletteMedia {
     }
 }
 
+#[vmux_command::command(id = "command_bar_media_next")]
 #[derive(Component)]
 struct PaletteMediaNextBinding;
 
+#[vmux_command::command(id = "command_bar_media_previous")]
 #[derive(Component)]
 struct PaletteMediaPreviousBinding;
 
+#[vmux_command::command(id = "command_bar_media_choose")]
 #[derive(Component)]
 struct PaletteMediaActivateBinding;
 
+#[vmux_command::command(id = "command_bar_media_dismiss")]
 #[derive(Component)]
 struct PaletteMediaDismissBinding;
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind(
-        &mut commands,
-        "command_bar_media_next",
-        PaletteMediaNextBinding,
-    );
-    registry.bind(
-        &mut commands,
-        "command_bar_media_previous",
-        PaletteMediaPreviousBinding,
-    );
-    registry.bind(
-        &mut commands,
-        "command_bar_media_choose",
-        PaletteMediaActivateBinding,
-    );
-    registry.bind(
-        &mut commands,
-        "command_bar_media_dismiss",
-        PaletteMediaDismissBinding,
-    );
+    registry.bind::<PaletteMediaNextBinding>(&mut commands);
+    registry.bind::<PaletteMediaPreviousBinding>(&mut commands);
+    registry.bind::<PaletteMediaActivateBinding>(&mut commands);
+    registry.bind::<PaletteMediaDismissBinding>(&mut commands);
 }
 
 fn attach_palette_media(

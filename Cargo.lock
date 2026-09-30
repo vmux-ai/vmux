@@ -10415,6 +10415,7 @@ dependencies = [
  "vmux_core",
  "vmux_flex",
  "vmux_history",
+ "vmux_macro",
  "vmux_tool",
  "vmux_ui",
 ]

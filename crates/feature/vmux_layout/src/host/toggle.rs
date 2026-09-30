@@ -45,7 +45,7 @@ impl TryFrom<&vmux_command::CommandInvocation> for ToggleLayoutRequest {
 }
 
 fn bind_command(registry: vmux_command::CommandRegistry, mut commands: Commands) {
-    registry.message::<ToggleLayoutRequest>(&mut commands, "toggle_layout");
+    registry.message::<ToggleLayoutRequest>(&mut commands);
 }
 
 #[derive(Component, Default, Debug)]

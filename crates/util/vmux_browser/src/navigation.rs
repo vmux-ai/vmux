@@ -65,11 +65,12 @@ impl Plugin for NavigationPlugin {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OpenHistoryRequest;
 
+#[vmux_command::command(id = "browser_open_history")]
 #[derive(Component)]
 struct OpenHistoryBinding;
 
 fn bind_command(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind(&mut commands, "browser_open_history", OpenHistoryBinding);
+    registry.bind::<OpenHistoryBinding>(&mut commands);
 }
 
 fn issue_open_history(

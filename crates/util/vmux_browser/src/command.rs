@@ -385,20 +385,10 @@ impl TryFrom<&CommandInvocation> for ShowDevToolsRequest {
 }
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    for id in [
-        "browser_prev_page",
-        "browser_next_page",
-        "browser_reload",
-        "browser_hard_reload",
-        "browser_stop",
-    ] {
-        registry.message::<NavigationRequest>(&mut commands, id);
-    }
-    registry.message::<OpenRequest>(&mut commands, "open_in_place");
-    for id in ["browser_zoom_in", "browser_zoom_out", "browser_zoom_reset"] {
-        registry.message::<ZoomRequest>(&mut commands, id);
-    }
-    registry.message::<ShowDevToolsRequest>(&mut commands, "browser_dev_tools");
+    registry.message::<NavigationRequest>(&mut commands);
+    registry.message::<OpenRequest>(&mut commands);
+    registry.message::<ZoomRequest>(&mut commands);
+    registry.message::<ShowDevToolsRequest>(&mut commands);
 }
 
 fn handle_navigation_requests(

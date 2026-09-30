@@ -187,27 +187,11 @@ impl TryFrom<&CommandInvocation> for MoveRequest {
 }
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<OpenRequest>(&mut commands, "open_in_new_tab");
-    registry.message::<CreateRequest>(&mut commands, "new_task");
-    registry.message::<CloseRequest>(&mut commands, "close_tab");
-    for id in [
-        "next_tab",
-        "prev_tab",
-        "tab_select_1",
-        "tab_select_2",
-        "tab_select_3",
-        "tab_select_4",
-        "tab_select_5",
-        "tab_select_6",
-        "tab_select_7",
-        "tab_select_8",
-        "tab_select_last",
-    ] {
-        registry.message::<FocusRequest>(&mut commands, id);
-    }
-    for id in ["swap_tab_prev", "swap_tab_next"] {
-        registry.message::<MoveRequest>(&mut commands, id);
-    }
+    registry.message::<OpenRequest>(&mut commands);
+    registry.message::<CreateRequest>(&mut commands);
+    registry.message::<CloseRequest>(&mut commands);
+    registry.message::<FocusRequest>(&mut commands);
+    registry.message::<MoveRequest>(&mut commands);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

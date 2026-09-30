@@ -21,6 +21,7 @@ url = { workspace = true }
 vmux_core = { path = "../../util/vmux_core" }
 vmux_history = { path = "../vmux_history", default-features = false }
 vmux_api = { path = "../../util/vmux_api" }
+vmux_macro = { path = "../../util/vmux_macro" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }

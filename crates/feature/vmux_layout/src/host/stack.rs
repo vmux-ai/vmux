@@ -151,14 +151,10 @@ impl TryFrom<&CommandInvocation> for MoveRequest {
 }
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<OpenRequest>(&mut commands, "open_in_new_stack");
-    registry.message::<CloseRequest>(&mut commands, "stack_close");
-    for id in ["stack_next", "stack_previous"] {
-        registry.message::<FocusRequest>(&mut commands, id);
-    }
-    for id in ["stack_swap_prev", "stack_swap_next"] {
-        registry.message::<MoveRequest>(&mut commands, id);
-    }
+    registry.message::<OpenRequest>(&mut commands);
+    registry.message::<CloseRequest>(&mut commands);
+    registry.message::<FocusRequest>(&mut commands);
+    registry.message::<MoveRequest>(&mut commands);
 }
 
 #[derive(Component)]

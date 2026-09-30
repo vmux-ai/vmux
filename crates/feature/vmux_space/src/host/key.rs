@@ -25,23 +25,27 @@ impl Plugin for SpaceKeyPlugin {
     }
 }
 
+#[vmux_command::command(id = "space_next")]
 #[derive(Component)]
 struct SelectNextSpace;
 
+#[vmux_command::command(id = "space_previous")]
 #[derive(Component)]
 struct SelectPreviousSpace;
 
+#[vmux_command::command(id = "space_attach")]
 #[derive(Component)]
 struct AttachSelectedSpace;
 
+#[vmux_command::command(id = "space_delete")]
 #[derive(Component)]
 struct DeleteSelectedSpace;
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind(&mut commands, "space_next", SelectNextSpace);
-    registry.bind(&mut commands, "space_previous", SelectPreviousSpace);
-    registry.bind(&mut commands, "space_attach", AttachSelectedSpace);
-    registry.bind(&mut commands, "space_delete", DeleteSelectedSpace);
+    registry.bind::<SelectNextSpace>(&mut commands);
+    registry.bind::<SelectPreviousSpace>(&mut commands);
+    registry.bind::<AttachSelectedSpace>(&mut commands);
+    registry.bind::<DeleteSelectedSpace>(&mut commands);
 }
 
 fn select_next_space(

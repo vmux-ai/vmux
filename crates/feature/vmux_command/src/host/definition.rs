@@ -510,6 +510,10 @@ pub struct CommandInvocation {
 #[derive(Component, Clone, Copy)]
 pub struct CommandMessage(fn(&CommandInvocation, &mut Commands));
 
+pub trait CommandBinding: Bundle + Sized {
+    fn for_command(id: &str) -> Option<Self>;
+}
+
 impl CommandMessage {
     fn of<T>() -> Self
     where
@@ -567,27 +571,24 @@ pub struct CommandRegistry<'w, 's> {
 }
 
 impl CommandRegistry<'_, '_> {
-    pub fn bind<B: Bundle>(&self, commands: &mut Commands, id: &str, bundle: B) {
-        let entity = self.entity(id);
-        commands.entity(entity).insert(bundle);
+    pub fn bind<B: CommandBinding>(&self, commands: &mut Commands) {
+        for (entity, definition) in &self.definitions {
+            if let Some(bundle) = B::for_command(&definition.id) {
+                commands.entity(entity).insert(bundle);
+            }
+        }
     }
 
-    pub fn message<T>(&self, commands: &mut Commands, id: &str)
+    pub fn message<T>(&self, commands: &mut Commands)
     where
         T: Message + for<'a> TryFrom<&'a CommandInvocation>,
     {
-        self.bind(commands, id, CommandMessage::of::<T>());
-    }
-
-    fn entity(&self, id: &str) -> Entity {
-        let Some((entity, _)) = self
-            .definitions
-            .iter()
-            .find(|(_, definition)| definition.id == id)
-        else {
-            panic!("feature manifest does not define command {id}");
-        };
-        entity
+        for (entity, definition) in &self.definitions {
+            let invocation = CommandInvocation::new(Entity::PLACEHOLDER, &definition.id);
+            if T::try_from(&invocation).is_ok() {
+                commands.entity(entity).insert(CommandMessage::of::<T>());
+            }
+        }
     }
 }
 

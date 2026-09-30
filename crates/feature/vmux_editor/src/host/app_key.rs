@@ -56,27 +56,35 @@ impl Plugin for KeyPlugin {
     }
 }
 
+#[vmux_command::command(id = "file_toggle_explorer")]
 #[derive(Component)]
 struct FileToggleExplorerKeyBinding;
 
+#[vmux_command::command(id = "file_reveal_in_explorer")]
 #[derive(Component)]
 struct FileRevealExplorerKeyBinding;
 
+#[vmux_command::command(id = "file_find")]
 #[derive(Component)]
 struct FileFindKeyBinding;
 
+#[vmux_command::command(id = "file_find_in_files")]
 #[derive(Component)]
 struct FileFindInFilesKeyBinding;
 
+#[vmux_command::command(id = "file_panel_next")]
 #[derive(Component)]
 struct FilePanelNextKeyBinding;
 
+#[vmux_command::command(id = "file_panel_previous")]
 #[derive(Component)]
 struct FilePanelPreviousKeyBinding;
 
+#[vmux_command::command(id = "file_panel_choose")]
 #[derive(Component)]
 struct FilePanelChooseKeyBinding;
 
+#[vmux_command::command(id = "file_panel_dismiss")]
 #[derive(Component)]
 struct FilePanelDismissKeyBinding;
 
@@ -106,48 +114,15 @@ struct FileStatusPicked {
 }
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind(
-        &mut commands,
-        "file_toggle_explorer",
-        FileToggleExplorerKeyBinding,
-    );
-    registry.bind(
-        &mut commands,
-        "file_reveal_in_explorer",
-        FileRevealExplorerKeyBinding,
-    );
-    registry.bind(&mut commands, "file_find", FileFindKeyBinding);
-    registry.bind(
-        &mut commands,
-        "file_find_in_files",
-        FileFindInFilesKeyBinding,
-    );
-    registry.bind(&mut commands, "file_panel_next", FilePanelNextKeyBinding);
-    registry.bind(
-        &mut commands,
-        "file_panel_previous",
-        FilePanelPreviousKeyBinding,
-    );
-    registry.bind(
-        &mut commands,
-        "file_panel_choose",
-        FilePanelChooseKeyBinding,
-    );
-    registry.bind(
-        &mut commands,
-        "file_panel_dismiss",
-        FilePanelDismissKeyBinding,
-    );
-    for id in [
-        "browser_open_goto_line",
-        "browser_open_indentation",
-        "browser_open_line_ending",
-        "browser_open_encoding",
-        "browser_open_reopen_with_encoding",
-        "browser_open_save_with_encoding",
-    ] {
-        registry.message::<OpenStatusPickerRequest>(&mut commands, id);
-    }
+    registry.bind::<FileToggleExplorerKeyBinding>(&mut commands);
+    registry.bind::<FileRevealExplorerKeyBinding>(&mut commands);
+    registry.bind::<FileFindKeyBinding>(&mut commands);
+    registry.bind::<FileFindInFilesKeyBinding>(&mut commands);
+    registry.bind::<FilePanelNextKeyBinding>(&mut commands);
+    registry.bind::<FilePanelPreviousKeyBinding>(&mut commands);
+    registry.bind::<FilePanelChooseKeyBinding>(&mut commands);
+    registry.bind::<FilePanelDismissKeyBinding>(&mut commands);
+    registry.message::<OpenStatusPickerRequest>(&mut commands);
 }
 
 fn open_bound_status_picker(

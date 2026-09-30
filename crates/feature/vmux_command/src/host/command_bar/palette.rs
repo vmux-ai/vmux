@@ -20,7 +20,7 @@ use vmux_core::host::{UiState, UiStateWrite};
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
 use vmux_tool::McpSnapshotRequest;
 
-use crate::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
+use crate::{BindCommands, CommandBinding, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
 
 use super::CommandBarDismiss;
 
@@ -293,18 +293,35 @@ enum PaletteKey {
 #[derive(Component)]
 struct PaletteKeyBinding(PaletteKey);
 
+impl CommandBinding for PaletteKeyBinding {
+    fn for_command(id: &str) -> Option<Self> {
+        match id {
+            "command_bar_next" => Some(Self(PaletteKey::Next)),
+            "command_bar_previous" => Some(Self(PaletteKey::Previous)),
+            "command_bar_complete" => Some(Self(PaletteKey::Complete)),
+            "command_bar_dismiss" => Some(Self(PaletteKey::Dismiss)),
+            _ => None,
+        }
+    }
+}
+
+#[vmux_command::command(id = "command_bar_submit")]
 #[derive(Component)]
 struct PaletteSubmitBinding;
 
+#[vmux_command::command(id = "command_bar_menu_next")]
 #[derive(Component)]
 struct PaletteMenuNextBinding;
 
+#[vmux_command::command(id = "command_bar_menu_previous")]
 #[derive(Component)]
 struct PaletteMenuPreviousBinding;
 
+#[vmux_command::command(id = "command_bar_menu_choose")]
 #[derive(Component)]
 struct PaletteMenuChooseBinding;
 
+#[vmux_command::command(id = "command_bar_menu_dismiss")]
 #[derive(Component)]
 struct PaletteMenuDismissBinding;
 
@@ -316,47 +333,12 @@ struct PaletteDecisionReady {
 }
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind(
-        &mut commands,
-        "command_bar_next",
-        PaletteKeyBinding(PaletteKey::Next),
-    );
-    registry.bind(
-        &mut commands,
-        "command_bar_previous",
-        PaletteKeyBinding(PaletteKey::Previous),
-    );
-    registry.bind(
-        &mut commands,
-        "command_bar_complete",
-        PaletteKeyBinding(PaletteKey::Complete),
-    );
-    registry.bind(
-        &mut commands,
-        "command_bar_dismiss",
-        PaletteKeyBinding(PaletteKey::Dismiss),
-    );
-    registry.bind(&mut commands, "command_bar_submit", PaletteSubmitBinding);
-    registry.bind(
-        &mut commands,
-        "command_bar_menu_next",
-        PaletteMenuNextBinding,
-    );
-    registry.bind(
-        &mut commands,
-        "command_bar_menu_previous",
-        PaletteMenuPreviousBinding,
-    );
-    registry.bind(
-        &mut commands,
-        "command_bar_menu_choose",
-        PaletteMenuChooseBinding,
-    );
-    registry.bind(
-        &mut commands,
-        "command_bar_menu_dismiss",
-        PaletteMenuDismissBinding,
-    );
+    registry.bind::<PaletteKeyBinding>(&mut commands);
+    registry.bind::<PaletteSubmitBinding>(&mut commands);
+    registry.bind::<PaletteMenuNextBinding>(&mut commands);
+    registry.bind::<PaletteMenuPreviousBinding>(&mut commands);
+    registry.bind::<PaletteMenuChooseBinding>(&mut commands);
+    registry.bind::<PaletteMenuDismissBinding>(&mut commands);
 }
 
 fn attach_palette_snapshot(

@@ -1,5 +1,6 @@
 mod app_plugin;
 mod bin_event;
+mod command;
 mod contract;
 mod native_page;
 mod service_message;
@@ -26,6 +27,15 @@ pub fn app_plugin(_args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn contract(args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match contract::expand(args.into(), input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn command(args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match command::expand(args.into(), input) {
         Ok(tokens) => tokens.into(),
         Err(error) => error.to_compile_error().into(),
     }
