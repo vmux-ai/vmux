@@ -146,7 +146,7 @@ impl TryFrom<&CommandInvocation> for BookmarkPinActiveRequest {
     }
 }
 
-#[derive(Message, Clone, Debug, PartialEq, Eq)]
+#[vmux_api::agent(Eq, Message)]
 pub struct CreateFolderRequest {
     pub name: String,
     pub parent: Option<String>,
@@ -204,13 +204,13 @@ pub struct ToggleForUrlRequest {
     pub metadata: PageMetadata,
 }
 
-#[derive(Message, Clone, Debug, PartialEq, Eq)]
+#[vmux_api::agent(Eq, Message)]
 pub struct AddRequest {
     pub metadata: PageMetadata,
     pub folder: Option<String>,
 }
 
-#[derive(Message, Clone, Debug, PartialEq, Eq)]
+#[vmux_api::agent(Eq, Message)]
 pub struct RemoveRequest {
     pub uuid: String,
 }
@@ -261,17 +261,17 @@ pub struct ToggleFolderRequest {
     pub uuid: String,
 }
 
-#[derive(Message, Clone, Debug, PartialEq, Eq)]
+#[vmux_api::agent(Eq, Message)]
 pub struct PinRequest {
     pub uuid: String,
 }
 
-#[derive(Message, Clone, Debug, PartialEq, Eq)]
+#[vmux_api::agent(Eq, Message)]
 pub struct PinUrlRequest {
     pub metadata: PageMetadata,
 }
 
-#[derive(Message, Clone, Debug, PartialEq, Eq)]
+#[vmux_api::agent(Eq, Message)]
 pub struct UnpinRequest {
     pub uuid: String,
 }

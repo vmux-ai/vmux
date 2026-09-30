@@ -1,14 +1,23 @@
 use bevy::prelude::*;
+use vmux_core::agent::AgentRequestAppExt;
+use vmux_layout::bookmark::{
+    AddRequest, CreateFolderRequest, PinRequest, PinUrlRequest, RemoveRequest, UnpinRequest,
+};
 
 pub struct BookmarkPlugin;
 
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            crate::agent::BookmarkAgentPlugin,
-            crate::persistence::BookmarkPersistencePlugin,
-            crate::tool::BookmarkToolPlugin,
-        ));
+        app.add_agent_message::<AddRequest>()
+            .add_agent_message::<CreateFolderRequest>()
+            .add_agent_message::<PinRequest>()
+            .add_agent_message::<PinUrlRequest>()
+            .add_agent_message::<RemoveRequest>()
+            .add_agent_message::<UnpinRequest>()
+            .add_plugins((
+                crate::persistence::BookmarkPersistencePlugin,
+                crate::tool::BookmarkToolPlugin,
+            ));
 
         #[cfg(target_os = "macos")]
         app.add_plugins(macos::BookmarkMenuPlugin);

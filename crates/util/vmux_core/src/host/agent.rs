@@ -84,6 +84,15 @@ pub trait AgentRequestAppExt {
     fn add_agent_request<T>(&mut self) -> &mut Self
     where
         T: vmux_api::AgentRequestContract + serde::de::DeserializeOwned + Send + Sync;
+
+    fn add_agent_message<T>(&mut self) -> &mut Self
+    where
+        T: vmux_api::AgentRequestContract
+            + serde::de::DeserializeOwned
+            + Message
+            + Clone
+            + Send
+            + Sync;
 }
 
 impl AgentRequestAppExt for App {
@@ -113,6 +122,23 @@ impl AgentRequestAppExt for App {
                 route_agent_requests::<T>.in_set(AgentRequestRouteSet),
             )
     }
+
+    fn add_agent_message<T>(&mut self) -> &mut Self
+    where
+        T: vmux_api::AgentRequestContract
+            + serde::de::DeserializeOwned
+            + Message
+            + Clone
+            + Send
+            + Sync,
+    {
+        self.add_agent_request::<T>()
+            .add_message::<T>()
+            .add_systems(
+                Update,
+                forward_agent_messages::<T>.in_set(AgentRequestApplySet),
+            )
+    }
 }
 
 fn route_agent_requests<T>(
@@ -139,6 +165,19 @@ fn route_agent_requests<T>(
                 );
             }
         }
+    }
+}
+
+fn forward_agent_messages<T>(
+    mut requests: MessageReader<AgentRequestMessage<T>>,
+    mut messages: MessageWriter<T>,
+    mut responses: MessageWriter<AgentCommandResponse>,
+) where
+    T: Message + Clone,
+{
+    for request in requests.read() {
+        messages.write(request.payload.clone());
+        responses.write(request.reply.ok());
     }
 }
 
