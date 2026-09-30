@@ -8,10 +8,10 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
 use vmux_ui::util::cn;
 
-use super::query::looks_like_url;
-use super::results::CommandBarResultItem as ResultItem;
-use super::results::{prompt_target_matches_query, prompt_target_url};
-use super::style::{
+use crate::palette::query::looks_like_url;
+use crate::palette::results::CommandBarResultItem as ResultItem;
+use crate::palette::results::{prompt_target_matches_query, prompt_target_url};
+use crate::palette::style::{
     RESULT_CONTENT_ROW_CLASS, RESULT_FAVICON_CLASS, RESULT_HISTORY_URL_CLASS,
     RESULT_LEADING_ICON_CLASS, RESULT_LOCATION_CLASS, RESULT_PRIMARY_TEXT_CLASS,
     RESULT_SECONDARY_TEXT_CLASS, RESULT_SHORTCUT_BADGE_CLASS, RESULT_TERMINAL_PATH_CLASS,
@@ -378,7 +378,7 @@ impl ResumePreview {
 }
 
 #[component]
-fn ResumeSectionRow(section: super::results::ResumeSection) -> Element {
+fn ResumeSectionRow(section: crate::palette::results::ResumeSection) -> Element {
     if section.agent.is_empty() && section.project.is_empty() && section.branch.is_empty() {
         return rsx! {};
     }

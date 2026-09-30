@@ -23,10 +23,8 @@ use self::results::{
 };
 
 pub mod keyboard;
-mod query;
+pub(crate) mod query;
 pub mod results;
-#[cfg(ui)]
-pub mod row;
 #[cfg(ui)]
 pub(crate) mod style;
 

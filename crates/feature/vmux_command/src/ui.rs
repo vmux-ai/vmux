@@ -3,7 +3,6 @@ use crate::event::{
     CommandPaletteActivateRequest, CommandPaletteDraftRequest, CommandPaletteHistoryMoveRequest,
     CommandPaletteState, CommandPaletteSubmitRequest,
 };
-use crate::palette::row::ResultRow;
 use crate::palette::style::{
     COMMAND_BAR_INPUT_ROW_CLASS, COMMAND_BAR_INPUT_WRAP_CLASS, COMMAND_BAR_ROW_OVERLAY_CLASS,
     RESULT_LIST_CLASS, command_bar_input_class,
@@ -34,7 +33,12 @@ use vmux_ui::scroll::ScrollIntoView;
 
 mod composer;
 mod media;
+mod panel;
+mod row;
 mod signals;
+
+pub use panel::CommandBarPanel;
+pub use row::ResultRow;
 
 pub fn use_command_bar_ui() -> Signal<CommandBarOpenEvent> {
     let mut state = use_signal(CommandBarOpenEvent::default);

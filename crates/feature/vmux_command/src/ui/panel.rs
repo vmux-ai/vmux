@@ -1,6 +1,6 @@
+use super::{CommandPalette, use_command_bar_ui};
 use crate::event::{CommandBarPanelRequest, PanelPlacement, clamp_panel_placement};
 use crate::palette::PaletteSurface;
-use crate::ui::{CommandPalette, use_command_bar_ui};
 use dioxus::prelude::InteractionLocation;
 use dioxus::prelude::*;
 use vmux_ui::hooks::send;
