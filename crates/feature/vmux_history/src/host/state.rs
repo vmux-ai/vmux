@@ -75,9 +75,10 @@ mod tests {
 
     #[test]
     fn search_resets_pagination_and_duplicate_load_more_is_ignored() {
-        let mut state = HistoryPageState::default();
-
-        state.has_more = true;
+        let mut state = HistoryPageState {
+            has_more: true,
+            ..Default::default()
+        };
         state.load_more();
         state.load_more();
         assert_eq!(state.limit, 100);

@@ -144,7 +144,7 @@ fn attach_page_agents(
             webview,
         } = attachment;
         let title = format!("{provider}/{model}");
-        let url = format!("{}{}", crate::url::page_url_prefix(&provider, &model), sid);
+        let url = format!("{}{}", crate::url::page_url_prefix(provider, model), sid);
         commands.entity(entity).insert(PageMetadata {
             url: url.clone(),
             title: title.clone(),
@@ -237,7 +237,7 @@ fn attach_acp_agents(
             crate::AgentMessages::default(),
             crate::AgentApprovalPolicy::default(),
             vmux_session::AgentRunState::default(),
-            vmux_core::team::Profile::registry(&name, agent_id),
+            vmux_core::team::Profile::registry(name, agent_id),
             vmux_core::team::Agent {
                 sid: sid.clone(),
                 kind: None,
@@ -254,7 +254,7 @@ fn attach_acp_agents(
         } else {
             commands
                 .spawn((
-                    vmux_layout::Browser::native_page(&url, &name),
+                    vmux_layout::Browser::native_page(&url, name),
                     vmux_chat::host::ChatView,
                     ChildOf(entity),
                     anchor,

@@ -740,7 +740,7 @@ fn handle_agent_page_open_task(
                 "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
                     .to_string()
             })?;
-            let kind = strategies.page_kind(&provider.provider, &provider.default_model)?;
+            let kind = strategies.page_kind(provider.provider, provider.default_model)?;
             let sid = uuid::Uuid::new_v4().to_string();
             if transition_webview.is_none() {
                 commands.entity(task.stack).despawn_children();

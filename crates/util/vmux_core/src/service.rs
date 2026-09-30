@@ -1,8 +1,13 @@
+#[cfg(host)]
 use std::collections::HashMap;
+#[cfg(host)]
 use std::hash::Hash;
+#[cfg(host)]
 use std::marker::PhantomData;
 use std::path::PathBuf;
+#[cfg(host)]
 use std::sync::Arc;
+#[cfg(host)]
 use std::time::Duration;
 use vmux_profile::{Profile, ProfilePaths, build_profile};
 

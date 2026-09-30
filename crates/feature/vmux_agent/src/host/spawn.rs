@@ -401,7 +401,7 @@ fn respond_page_agent_spawn_default(
             );
             continue;
         };
-        let Ok(kind) = strategies.page_kind(&p.provider, &p.default_model) else {
+        let Ok(kind) = strategies.page_kind(p.provider, p.default_model) else {
             continue;
         };
         let sid = uuid::Uuid::new_v4().to_string();
@@ -429,7 +429,7 @@ fn respond_page_agent_attach_default(
             );
             continue;
         };
-        let Ok(kind) = strategies.page_kind(&p.provider, &p.default_model) else {
+        let Ok(kind) = strategies.page_kind(p.provider, p.default_model) else {
             continue;
         };
         let sid = uuid::Uuid::new_v4().to_string();

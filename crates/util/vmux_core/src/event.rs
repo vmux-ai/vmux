@@ -10,6 +10,7 @@ mod editor;
 mod explorer;
 mod file_ui_state;
 mod lsp;
+#[cfg(host)]
 mod page;
 mod terminal;
 
@@ -17,6 +18,7 @@ pub use editor::*;
 pub use explorer::*;
 pub use file_ui_state::*;
 pub use lsp::*;
+#[cfg(host)]
 pub use page::*;
 pub use terminal::*;
 

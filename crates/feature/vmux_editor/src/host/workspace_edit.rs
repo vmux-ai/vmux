@@ -25,16 +25,11 @@ fn apply_lsp_workspace_edit(
     browsers: NonSend<Browsers>,
     mut replies: MessageWriter<crate::lsp::server_request::ServerReply>,
     mut renames: MessageReader<crate::lsp::manager::LspRequestedEdit>,
-    views: Query<(Entity, &FileView, &Editor)>,
-    mut self_writes: NonSendMut<SelfWrites>,
-    manager: Single<&crate::lsp::manager::LspManager>,
-    mut commands: Commands,
+    mut edits: WorkspaceEdits,
 ) {
     for (request, awaiting) in &requests {
         let refusal = match WorkspaceEditPlan::within(&awaiting.root, &awaiting.params.edit) {
-            Ok(plan) => {
-                apply_workspace_edit(plan, &views, &manager, &mut self_writes, &mut commands)
-            }
+            Ok(plan) => edits.apply(plan),
             Err(refusal) => Some(refusal.to_string()),
         };
         replies.write(crate::lsp::server_request::ServerReply {
@@ -52,9 +47,7 @@ fn apply_lsp_workspace_edit(
         let refusal = match &rename.result {
             Err(reason) => Some(reason.clone()),
             Ok(edit) => match WorkspaceEditPlan::within(&rename.root, edit) {
-                Ok(plan) => {
-                    apply_workspace_edit(plan, &views, &manager, &mut self_writes, &mut commands)
-                }
+                Ok(plan) => edits.apply(plan),
                 Err(refusal) => Some(refusal.to_string()),
             },
         };
@@ -62,26 +55,34 @@ fn apply_lsp_workspace_edit(
             continue;
         };
         if browsers.can_emit_to(&rename.entity) {
-            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-                rename.entity,
-                &vmux_core::event::FileEditFailure { reason },
-            ));
+            edits
+                .commands
+                .trigger(vmux_core::host::FileUiStateWrite::from_event(
+                    rename.entity,
+                    &vmux_core::event::FileEditFailure { reason },
+                ));
         }
     }
 }
 
-fn apply_workspace_edit(
-    plan: WorkspaceEditPlan,
-    views: &Query<(Entity, &FileView, &Editor)>,
-    manager: &crate::lsp::manager::LspManager,
-    self_writes: &mut SelfWrites,
-    commands: &mut Commands,
-) -> Option<String> {
-    let prepared = match PreparedWorkspaceEdit::new(plan, views, manager) {
-        Ok(prepared) => prepared,
-        Err(reason) => return Some(reason),
-    };
-    apply_prepared_workspace_edit(prepared, self_writes, commands).err()
+#[derive(bevy::ecs::system::SystemParam)]
+struct WorkspaceEdits<'w, 's> {
+    views: Query<'w, 's, (Entity, &'static FileView, &'static Editor)>,
+    self_writes: NonSendMut<'w, SelfWrites>,
+    manager: Single<'w, 's, &'static crate::lsp::manager::LspManager>,
+    commands: Commands<'w, 's>,
+}
+
+impl WorkspaceEdits<'_, '_> {
+    fn apply(&mut self, plan: WorkspaceEditPlan) -> Option<String> {
+        let prepared = match PreparedWorkspaceEdit::new(plan, &self.views, &self.manager) {
+            Ok(prepared) => prepared,
+            Err(reason) => return Some(reason),
+        };
+        prepared
+            .apply(&mut self.self_writes, &mut self.commands)
+            .err()
+    }
 }
 
 struct PreparedWorkspaceEdit {
@@ -100,17 +101,13 @@ impl PreparedWorkspaceEdit {
         }
         Ok(Self { documents })
     }
-}
 
-fn apply_prepared_workspace_edit(
-    prepared: PreparedWorkspaceEdit,
-    self_writes: &mut SelfWrites,
-    commands: &mut Commands,
-) -> Result<(), String> {
-    for document in prepared.documents {
-        apply_prepared_document(document, self_writes, commands)?;
+    fn apply(self, self_writes: &mut SelfWrites, commands: &mut Commands) -> Result<(), String> {
+        for document in self.documents {
+            document.apply(self_writes, commands)?;
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 struct PreparedDocument {
@@ -173,29 +170,25 @@ impl PreparedDocument {
             updated,
         })
     }
-}
 
-fn apply_prepared_document(
-    document: PreparedDocument,
-    self_writes: &mut SelfWrites,
-    commands: &mut Commands,
-) -> Result<(), String> {
-    if document.targets.is_empty() {
-        vmux_path::AtomicFile::write(document.path.as_path(), document.updated.as_bytes())
-            .map_err(|error| format!("{}: {error}", document.path.as_path().display()))?;
-        self_writes.0.insert(
-            vmux_path::PathIdentity::resolve(document.path.as_path()).into_path_buf(),
-            std::time::Instant::now(),
-        );
-        return Ok(());
+    fn apply(self, self_writes: &mut SelfWrites, commands: &mut Commands) -> Result<(), String> {
+        if self.targets.is_empty() {
+            vmux_path::AtomicFile::write(self.path.as_path(), self.updated.as_bytes())
+                .map_err(|error| format!("{}: {error}", self.path.as_path().display()))?;
+            self_writes.0.insert(
+                vmux_path::PathIdentity::resolve(self.path.as_path()).into_path_buf(),
+                std::time::Instant::now(),
+            );
+            return Ok(());
+        }
+        for entity in self.targets {
+            commands.trigger(EditRequest::new(
+                entity,
+                vec![EditCommand::ReplaceText(self.updated.clone())],
+            ));
+        }
+        Ok(())
     }
-    for entity in document.targets {
-        commands.trigger(EditRequest::new(
-            entity,
-            vec![EditCommand::ReplaceText(document.updated.clone())],
-        ));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

@@ -139,13 +139,40 @@ pub struct ExtensionBridgeServer {
     accept_worker: Option<JoinHandle<()>>,
 }
 
-#[derive(Component)]
-pub(super) struct ExtensionBridgeStartup {
-    pub(super) profile: String,
-    pub(super) registrations: Vec<BridgeRegistration>,
+pub(super) struct ExtensionBridgePlugin {
+    profile: String,
+    registrations: Vec<BridgeRegistration>,
 }
 
-pub(super) fn start_extension_bridge(
+impl ExtensionBridgePlugin {
+    pub(super) fn new(profile: String, registrations: Vec<BridgeRegistration>) -> Self {
+        Self {
+            profile,
+            registrations,
+        }
+    }
+}
+
+impl bevy::prelude::Plugin for ExtensionBridgePlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
+        app.world_mut().spawn((
+            bevy::prelude::Name::new("Extension bridge"),
+            ExtensionBridgeStartup {
+                profile: self.profile.clone(),
+                registrations: self.registrations.clone(),
+            },
+        ));
+        app.add_systems(bevy::prelude::Startup, start_extension_bridge);
+    }
+}
+
+#[derive(Component)]
+struct ExtensionBridgeStartup {
+    profile: String,
+    registrations: Vec<BridgeRegistration>,
+}
+
+fn start_extension_bridge(
     mut commands: bevy::prelude::Commands,
     startup: bevy::prelude::Single<(bevy::prelude::Entity, &ExtensionBridgeStartup)>,
 ) {

@@ -48,21 +48,17 @@ impl bevy::prelude::Plugin for ExtensionPlugin {
             })
             .collect();
         app.world_mut().spawn((
-            bevy::prelude::Name::new("Extension bridge"),
+            bevy::prelude::Name::new("Extensions"),
             load::PreparedExtensions(prepared),
-            bridge::ExtensionBridgeStartup {
-                profile,
-                registrations,
-            },
         ));
-        app.add_systems(bevy::prelude::Startup, bridge::start_extension_bridge)
-            .add_plugins((
-                bridge_page::ExtensionBridgePagePlugin,
-                broker::ExtensionBrokerPlugin,
-                project::ExtensionProjectPlugin,
-                windows::ExtensionWindowsPlugin,
-                manager_page::ManagerPagePlugin,
-            ));
+        app.add_plugins((
+            bridge::ExtensionBridgePlugin::new(profile, registrations),
+            bridge_page::ExtensionBridgePagePlugin,
+            broker::ExtensionBrokerPlugin,
+            project::ExtensionProjectPlugin,
+            windows::ExtensionWindowsPlugin,
+            manager_page::ManagerPagePlugin,
+        ));
     }
 }
 

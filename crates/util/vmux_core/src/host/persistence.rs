@@ -77,8 +77,10 @@ impl PersistenceAppExt for App {
     }
 }
 
+type PersistedChanged<T> = Or<(Added<T>, Changed<T>)>;
+
 fn detect_persistence_change<T: Component>(
-    changed: Query<(), Or<(Added<T>, Changed<T>)>>,
+    changed: Query<(), PersistedChanged<T>>,
     mut removed: RemovedComponents<T>,
     mut commands: Commands,
 ) {

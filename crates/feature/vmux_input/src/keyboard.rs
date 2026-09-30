@@ -446,20 +446,24 @@ fn install_monitor(
     commands.entity(entity).remove::<KeyboardMonitorPending>();
 }
 
+type ActiveNativeKeyClaims<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static NativeKey,
+        Has<ConsumesNativeKey>,
+        Has<PassesNativeKey>,
+    ),
+    With<Active>,
+>;
+
 fn sync_keyboard_context(
     keyboard: Single<&KeyboardBridge>,
     keymap: Single<Ref<Keymap>>,
     contexts: Query<&KeyboardContext>,
     capture: Query<(), With<NativeKeyCapture>>,
-    claims: Query<
-        (
-            Entity,
-            &NativeKey,
-            Has<ConsumesNativeKey>,
-            Has<PassesNativeKey>,
-        ),
-        With<Active>,
-    >,
+    claims: ActiveNativeKeyClaims,
 ) {
     let mut context = keyboard.context.lock();
     if keymap.is_changed() || context.keymap.is_none() {

@@ -205,23 +205,27 @@ fn open_page(trigger: On<UiInput<ChatOpenPage>>, mut requests: MessageWriter<Ope
 
 const TAB_ACTIVITY_TAIL_ITEMS: usize = 1;
 
+type ChangedChatSessions<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Children,
+        Option<&'static AgentConversationTitle>,
+        &'static AgentMessages,
+        &'static AgentRunState,
+        Option<&'static Profile>,
+        Option<&'static AgentSession>,
+    ),
+    Or<(
+        Changed<AgentConversationTitle>,
+        Changed<AgentMessages>,
+        Changed<AgentRunState>,
+        Changed<Profile>,
+    )>,
+>;
+
 fn report_tab_identity(
-    sessions: Query<
-        (
-            &Children,
-            Option<&AgentConversationTitle>,
-            &AgentMessages,
-            &AgentRunState,
-            Option<&Profile>,
-            Option<&AgentSession>,
-        ),
-        Or<(
-            Changed<AgentConversationTitle>,
-            Changed<AgentMessages>,
-            Changed<AgentRunState>,
-            Changed<Profile>,
-        )>,
-    >,
+    sessions: ChangedChatSessions,
     views: Query<Option<&PageIdentity>, With<ChatView>>,
     mut commands: Commands,
 ) {
