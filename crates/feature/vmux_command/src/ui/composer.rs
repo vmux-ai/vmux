@@ -1,14 +1,16 @@
 use dioxus::prelude::*;
 use vmux_api::command_bar::{
     CommandPaletteComposer, CommandPaletteMenu, CommandPaletteMenuActivateRequest,
+    CommandPaletteMenuDismissRequest, CommandPaletteMenuHighlightRequest,
     CommandPaletteMenuToggleRequest, CommandPaletteState, OpenId,
 };
+use vmux_ui::components::agent_menu::AgentMenu;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
-use vmux_ui::components::composer_bar::{
-    AgentMenuData, BranchMenuData, ComposerChip, ComposerMenuKind, ModelMenuData,
-    PermissionMenuData, ProjectMenuData,
-};
-use vmux_ui::components::project_picker::ProjectPick;
+use vmux_ui::components::composer_bar::{ComposerChip, ComposerMenuKind};
+use vmux_ui::components::model_menu::ModelMenu;
+use vmux_ui::components::permission_menu::PermissionMenu;
+use vmux_ui::components::project_picker::{BranchPicker, ProjectPick, ProjectPicker};
+use vmux_ui::components::prompt_box::PromptPopupPlacement;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
@@ -161,16 +163,9 @@ impl MenuSelection {
     }
 }
 
-#[derive(Clone)]
-pub struct ComposerMenuSet {
-    pub agent: AgentMenuData,
-    pub model: ModelMenuData,
-    pub permission: PermissionMenuData,
-    pub project: ProjectMenuData,
-    pub branch: BranchMenuData,
-}
+pub struct ComposerMenuView;
 
-impl ComposerMenuSet {
+impl ComposerMenuView {
     pub const fn kind(menu: Option<CommandPaletteMenu>) -> Option<ComposerMenuKind> {
         match menu {
             Some(CommandPaletteMenu::Agent) => Some(ComposerMenuKind::Agent),
@@ -181,63 +176,120 @@ impl ComposerMenuSet {
             None => None,
         }
     }
+}
 
-    pub fn build(
-        composer: &CommandPaletteComposer,
-        palette: &CommandPaletteState,
-        open_id: OpenId,
-    ) -> Self {
-        let selection = MenuSelection(open_id);
-        let agents = composer.agents.clone();
-        let agent = AgentMenuData {
-            options: agents.clone(),
-            selected_url: composer.agent_url.clone(),
-            on_select: EventHandler::new(move |url: String| {
-                selection.agent(&agents, &url);
-            }),
-        };
-        let models = composer.model_options.clone();
-        let model = ModelMenuData {
-            models: models.clone(),
-            current_model_id: composer.model_current_id.clone(),
-            on_select: EventHandler::new(move |model: vmux_api::room::ModelOptionEntry| {
-                selection.model(&models, &model.id);
-            }),
-        };
-        let modes = composer.permission_modes.clone();
-        let permission = PermissionMenuData {
-            modes: modes.clone(),
-            current_mode_id: composer.permission_current_id.clone(),
-            on_select: EventHandler::new(move |mode: vmux_api::protocol::AcpModeOption| {
-                selection.permission(&modes, &mode.id);
-            }),
-        };
-        let projects = composer.projects.clone();
-        let project_rows = projects.clone();
-        let project_count = projects.iter().filter(|project| project.depth == 0).count();
-        let project = ProjectMenuData {
-            projects,
-            loaded: !composer.projects.is_empty(),
-            on_pick: EventHandler::new(move |pick| selection.project(&project_rows, &pick)),
-            on_choose_another: EventHandler::new(move |()| {
-                selection.activate(project_count);
-            }),
-        };
-        let branches = palette.branches.clone();
-        let branch_rows = branches.clone();
-        let branch = BranchMenuData {
-            project: composer.project.clone(),
-            branches,
-            loaded: palette.branch_project == composer.project,
-            on_pick: EventHandler::new(move |pick| selection.branch(&branch_rows, &pick)),
-        };
+#[component]
+pub fn CommandComposerMenus(
+    composer: CommandPaletteComposer,
+    palette: CommandPaletteState,
+    open_id: OpenId,
+    opened: Option<CommandPaletteMenu>,
+    cursor: usize,
+) -> Element {
+    let selection = MenuSelection(open_id);
+    let agents = composer.agents.clone();
+    let models = composer.model_options.clone();
+    let modes = composer.permission_modes.clone();
+    let projects = composer.projects.clone();
+    let branches = palette.branches.clone();
+    let project_count = projects.iter().filter(|project| project.depth == 0).count();
 
-        Self {
-            agent,
-            model,
-            permission,
-            project,
-            branch,
+    rsx! {
+        if opened == Some(CommandPaletteMenu::Agent) {
+            AgentMenu {
+                placement: PromptPopupPlacement::Downward,
+                options: agents.clone(),
+                selected_url: composer.agent_url.clone(),
+                cursor,
+                on_hover: move |index| {
+                    let _ = send(&CommandPaletteMenuHighlightRequest {
+                        open_id,
+                        index: index as u32,
+                    });
+                },
+                on_select: move |url: String| selection.agent(&agents, &url),
+                on_dismiss: move |()| {
+                    let _ = send(&CommandPaletteMenuDismissRequest { open_id });
+                },
+            }
+        }
+        if opened == Some(CommandPaletteMenu::Model) {
+            ModelMenu {
+                placement: PromptPopupPlacement::Downward,
+                models: models.clone(),
+                current_model_id: composer.model_current_id.clone(),
+                selected: cursor,
+                on_hover: move |index| {
+                    let _ = send(&CommandPaletteMenuHighlightRequest {
+                        open_id,
+                        index: index as u32,
+                    });
+                },
+                on_select: move |model: vmux_api::room::ModelOptionEntry| {
+                    selection.model(&models, &model.id);
+                },
+                on_dismiss: move |()| {
+                    let _ = send(&CommandPaletteMenuDismissRequest { open_id });
+                },
+            }
+        }
+        if opened == Some(CommandPaletteMenu::Permission) {
+            PermissionMenu {
+                placement: PromptPopupPlacement::Downward,
+                modes: modes.clone(),
+                current_mode_id: composer.permission_current_id.clone(),
+                selected: cursor,
+                on_hover: move |index| {
+                    let _ = send(&CommandPaletteMenuHighlightRequest {
+                        open_id,
+                        index: index as u32,
+                    });
+                },
+                on_select: move |mode: vmux_api::protocol::AcpModeOption| {
+                    selection.permission(&modes, &mode.id);
+                },
+                on_dismiss: move |()| {
+                    let _ = send(&CommandPaletteMenuDismissRequest { open_id });
+                },
+            }
+        }
+        if opened == Some(CommandPaletteMenu::Project) {
+            ProjectPicker {
+                placement: PromptPopupPlacement::Downward,
+                projects: projects.clone(),
+                loaded: !composer.projects.is_empty(),
+                cursor,
+                on_hover: move |index| {
+                    let _ = send(&CommandPaletteMenuHighlightRequest {
+                        open_id,
+                        index: index as u32,
+                    });
+                },
+                on_pick: move |pick| selection.project(&projects, &pick),
+                on_choose_another: move |()| selection.activate(project_count),
+                on_dismiss: move |()| {
+                    let _ = send(&CommandPaletteMenuDismissRequest { open_id });
+                },
+            }
+        }
+        if opened == Some(CommandPaletteMenu::Branch) {
+            BranchPicker {
+                placement: PromptPopupPlacement::Downward,
+                project: composer.project.clone(),
+                branches: branches.clone(),
+                loaded: palette.branch_project == composer.project,
+                cursor,
+                on_hover: move |index| {
+                    let _ = send(&CommandPaletteMenuHighlightRequest {
+                        open_id,
+                        index: index as u32,
+                    });
+                },
+                on_pick: move |pick| selection.branch(&branches, &pick),
+                on_dismiss: move |()| {
+                    let _ = send(&CommandPaletteMenuDismissRequest { open_id });
+                },
+            }
         }
     }
 }

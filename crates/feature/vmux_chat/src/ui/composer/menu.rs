@@ -1,7 +1,7 @@
 use crate::ui::format::ResumeMenuState;
 use crate::ui::state::Chat;
 use dioxus::prelude::*;
-use vmux_command::palette::results::{CommandBarResultItem, ResumeRows};
+use vmux_api::command_bar::CommandBarResultItem;
 use vmux_command::ui::ResultRow;
 use vmux_ui::components::prompt_box::PromptPopup;
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
@@ -79,7 +79,7 @@ pub(super) fn ResumeMenu(chat: Chat) -> Element {
             if let Some(note) = note {
                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", "{note}" }
             } else {
-                for (index , item) in ResumeRows::all(&chat.filtered_sessions()).into_iter().enumerate() {
+                for (index , item) in chat.resume.rows.read().iter().cloned().enumerate() {
                     if let CommandBarResultItem::Resume { entry, .. } = &item {
                         ResultRow {
                             key: "rs{index}",

@@ -317,6 +317,7 @@ pub struct ChatResumeState {
     pub request_id: u64,
     pub query: String,
     pub sessions: Vec<ResumableSessionEntry>,
+    pub rows: Vec<vmux_api::command_bar::CommandBarResultItem>,
     pub total: u32,
     pub loading: bool,
     pub active: bool,

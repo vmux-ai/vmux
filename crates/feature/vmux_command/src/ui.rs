@@ -1,6 +1,6 @@
 use crate::palette::{PaletteGlyph, PaletteMode, PaletteSurface};
 use crate::prompt_media::{ChatPasteMedia, ChatPickFiles};
-use crate::ui::composer::{ComposerChips, ComposerMenuSet};
+use crate::ui::composer::{CommandComposerMenus, ComposerChips, ComposerMenuView};
 use crate::ui::media::PromptMedia;
 use crate::ui::signals::{
     COMMAND_BAR_INPUT_ID, CommandBarField, Readline, TypedDigit, use_palette_signals,
@@ -13,14 +13,14 @@ use vmux_api::command_bar::{
     CommandPaletteMediaActivateRequest, CommandPaletteMediaDismissRequest,
     CommandPaletteMediaHighlightRequest, CommandPaletteMediaMoveRequest,
     CommandPaletteMenuActivateRequest, CommandPaletteMenuDismissRequest,
-    CommandPaletteMenuHighlightRequest, CommandPaletteMenuMoveRequest,
-    CommandPaletteRemoveAttachmentRequest, CommandPaletteState, CommandPaletteSubmitRequest,
+    CommandPaletteMenuMoveRequest, CommandPaletteRemoveAttachmentRequest, CommandPaletteState,
+    CommandPaletteSubmitRequest,
 };
 use vmux_core::input::{UiKeyContext, Unclaimed};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposer, focus_prompt_end};
-use vmux_ui::components::composer_bar::{ComposerBar, ComposerMenus};
+use vmux_ui::components::composer_bar::ComposerBar;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::mcp_menu::{McpMenu, use_mcp_connections};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
@@ -223,8 +223,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let start_prompt_attachments = PromptMedia::composer_attachments(attachments.as_ref());
     let start_submission_enabled = !q.trim().is_empty() || !attachments.is_empty();
     let chips = ComposerChips::build(&composer, state_val.open_id);
-    let menus = ComposerMenuSet::build(&composer, &palette_data, state_val.open_id);
-    let opened_menu = ComposerMenuSet::kind(projection.menu);
+    let opened_menu = ComposerMenuView::kind(projection.menu);
 
     let start_composer_footer = rsx! {
         ComposerBar {
@@ -241,26 +240,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         }
     };
     let start_menus = rsx! {
-        ComposerMenus {
-            opened: opened_menu,
+        CommandComposerMenus {
+            composer: composer.clone(),
+            palette: palette_data.clone(),
+            open_id: state_val.open_id,
+            opened: projection.menu,
             cursor: projection.menu_cursor as usize,
-            on_hover: move |index| {
-                let _ = send(&CommandPaletteMenuHighlightRequest {
-                    open_id: state().open_id,
-                    index: index as u32,
-                });
-            },
-            on_dismiss: move |()| {
-                let _ = send(&CommandPaletteMenuDismissRequest {
-                    open_id: state().open_id,
-                });
-            },
-            placement: PromptPopupPlacement::Downward,
-            agent: Some(menus.agent.clone()),
-            model: Some(menus.model.clone()),
-            permission: Some(menus.permission.clone()),
-            project: Some(menus.project.clone()),
-            branch: Some(menus.branch.clone()),
         }
     };
 

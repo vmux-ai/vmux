@@ -533,6 +533,7 @@ impl ChatResumeProjection {
         self.0.active = active;
         self.0.query = query;
         self.0.sessions.clear();
+        self.0.rows.clear();
         self.0.total = 0;
         self.0.loading = active;
         Some(self.0.request_id)
@@ -546,6 +547,7 @@ impl ChatResumeProjection {
             return false;
         }
         self.0.sessions.clone_from(&sessions.sessions);
+        self.0.rows = vmux_command::palette::results::ResumeRows::all(&sessions.sessions);
         self.0.total = sessions.total;
         self.0.loading = false;
         true

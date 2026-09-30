@@ -220,6 +220,7 @@ impl Chat {
     fn apply_sessions(&self, state: &ChatResumeState) {
         set_if_changed(self.resume.query, state.query.clone());
         set_if_changed(self.resume.sessions, state.sessions.clone());
+        set_if_changed(self.resume.rows, state.rows.clone());
         set_if_changed(self.resume.total, state.total);
         set_if_changed(self.resume.loading, state.loading);
         set_if_changed(self.resume.active, state.active);
@@ -406,10 +407,6 @@ impl Chat {
         matching
     }
 
-    pub fn filtered_sessions(&self) -> Vec<ResumableSessionEntry> {
-        self.resume.sessions.read().clone()
-    }
-
     pub fn filtered_models(&self) -> Vec<ModelOptionEntry> {
         let draft = self.draft();
         let SelectorMode::Models(query) = SelectorMode::from_draft(&draft) else {
@@ -474,7 +471,7 @@ impl Chat {
             (self.resume.active)(),
             (self.resume.loading)(),
             &(self.resume.query)(),
-            self.resume.sessions.read().len(),
+            self.resume.rows.read().len(),
         ))
     }
 
@@ -1133,6 +1130,7 @@ pub fn use_slash_commands() -> SlashCommands {
 #[derive(Clone, Copy, PartialEq)]
 pub struct Resume {
     pub sessions: Signal<Vec<ResumableSessionEntry>>,
+    pub rows: Signal<Vec<vmux_api::command_bar::CommandBarResultItem>>,
     pub query: Signal<String>,
     pub total: Signal<u32>,
     pub loading: Signal<bool>,
@@ -1142,6 +1140,7 @@ pub struct Resume {
 pub fn use_resume() -> Resume {
     Resume {
         sessions: use_signal(Vec::new),
+        rows: use_signal(Vec::new),
         query: use_signal(String::new),
         total: use_signal(|| 0),
         loading: use_signal(|| false),
