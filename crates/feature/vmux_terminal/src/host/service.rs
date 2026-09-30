@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use vmux_api::protocol::{CommandLifecycleKind, ProcessId, ProcessInfo};
 use vmux_api::{TermCursor, TermLine, TermSelectionRange};
 use vmux_core::event::TermViewportPatch;
-use vmux_core::service::{ServiceMessagePlugin, ServiceMessageSet};
+use vmux_core::service::{ServiceMessageAppExt, ServiceMessageSet};
 
 use super::input_queue::TerminalProcessIndex;
 use super::plugin::{CommandLifecycleEvent, OscTitleChanged, ProcessExitedEvent};
@@ -105,36 +105,34 @@ pub(crate) struct ServiceIngressPlugin;
 
 impl Plugin for ServiceIngressPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            ServiceMessagePlugin::<TerminalProcessCreated>::default(),
-            ServiceMessagePlugin::<TerminalProcessCreateFailed>::default(),
-            ServiceMessagePlugin::<ProcessViewportPatch>::default(),
-            ServiceMessagePlugin::<ProcessSnapshot>::default(),
-            ServiceMessagePlugin::<ProcessExitedInput>::default(),
-            ServiceMessagePlugin::<ProcessTitleInput>::default(),
-            ServiceMessagePlugin::<ProcessCommandLifecycle>::default(),
-            ServiceMessagePlugin::<ProcessListInput>::default(),
-            ServiceMessagePlugin::<TerminalServiceError>::default(),
-            ServiceMessagePlugin::<TerminalSelectionText>::default(),
-            ServiceMessagePlugin::<ProcessBell>::default(),
-            ServiceMessagePlugin::<ProcessTerminalMode>::default(),
-        ))
-        .add_message::<TerminalViewportUpdate>()
-        .add_systems(
-            Update,
-            (
-                project_viewport_patches,
-                project_snapshots,
-                project_process_exits,
-                project_process_titles,
-                project_command_lifecycle,
-                project_process_list,
-                project_bells,
-                project_terminal_modes,
-            )
-                .in_set(ServiceMessageSet)
-                .chain(),
-        );
+        app.add_service_message::<TerminalProcessCreated>()
+            .add_service_message::<TerminalProcessCreateFailed>()
+            .add_service_message::<ProcessViewportPatch>()
+            .add_service_message::<ProcessSnapshot>()
+            .add_service_message::<ProcessExitedInput>()
+            .add_service_message::<ProcessTitleInput>()
+            .add_service_message::<ProcessCommandLifecycle>()
+            .add_service_message::<ProcessListInput>()
+            .add_service_message::<TerminalServiceError>()
+            .add_service_message::<TerminalSelectionText>()
+            .add_service_message::<ProcessBell>()
+            .add_service_message::<ProcessTerminalMode>()
+            .add_message::<TerminalViewportUpdate>()
+            .add_systems(
+                Update,
+                (
+                    project_viewport_patches,
+                    project_snapshots,
+                    project_process_exits,
+                    project_process_titles,
+                    project_command_lifecycle,
+                    project_process_list,
+                    project_bells,
+                    project_terminal_modes,
+                )
+                    .in_set(ServiceMessageSet)
+                    .chain(),
+            );
     }
 }
 

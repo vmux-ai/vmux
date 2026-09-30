@@ -6,7 +6,7 @@ use vmux_api::protocol::{
     AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage, ServiceMessage,
 };
 use vmux_core::service::{
-    ServiceMessagePlugin, ServiceMessageSet, ServiceMessageVariant, ServiceRequest,
+    ServiceMessageAppExt, ServiceMessageSet, ServiceMessageVariant, ServiceRequest,
 };
 
 #[vmux_api::agent(Copy, Eq)]
@@ -18,8 +18,7 @@ pub struct ToolQueryPlugin;
 
 impl Plugin for ToolQueryPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ServiceMessagePlugin::<ToolQueryRequest>::default())
-            .add_message::<ToolQueryRequest>()
+        app.add_service_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
             .configure_sets(

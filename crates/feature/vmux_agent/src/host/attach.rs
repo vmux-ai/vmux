@@ -328,7 +328,7 @@ fn acp_target_id_for_kind(
 ) -> Option<String> {
     configs
         .iter()
-        .find(|config| crate::session_source::acp_agent_kind(&config.id) == Some(kind))
+        .find(|config| RegistryAgent::kind(&config.id) == Some(kind))
         .map(|config| config.id.clone())
         .or_else(|| {
             let id = kind.as_url_segment();
@@ -373,7 +373,7 @@ fn handle_resume_in_acp(
             .iter()
             .find(|(process_id, ..)| *process_id == anchor)
         {
-            if !crate::session_source::kind_supports_cross_runtime(session.kind) {
+            if !session.kind.supports_cross_runtime() {
                 AgentCommandResult::Error(format!(
                     "resume_in_acp: {} does not support ACP resume",
                     session.kind.display_name()

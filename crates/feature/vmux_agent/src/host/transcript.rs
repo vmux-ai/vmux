@@ -2,9 +2,9 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use super::model::{ModeProjection, ModelProjection};
+use crate::acp_registry::RegistryAgent;
 use crate::handoff::ImportedConversation;
 use crate::runtime::acp::{AcpModeState, AcpModelState};
-use crate::session_source::{acp_agent_kind, kind_supports_cross_runtime};
 #[cfg(test)]
 use vmux_chat::event::ChatItem;
 use vmux_chat::event::{
@@ -18,6 +18,7 @@ use vmux_chat::host::{
 };
 use vmux_chat::media::ChatAttachmentHydrationRequest;
 use vmux_core::PageMetadata;
+use vmux_core::agent::AgentKind;
 use vmux_core::chat::{group_turns_before, group_turns_tail, grouped_item_count};
 use vmux_core::team::{Profile, User};
 use vmux_session::AcpSession;
@@ -413,8 +414,8 @@ fn sync_chat_to_ready_views(
             .ok()
             .map(|(acp, model, mode)| {
                 (
-                    acp_agent_kind(&acp.agent_id)
-                        .map(kind_supports_cross_runtime)
+                    RegistryAgent::kind(&acp.agent_id)
+                        .map(AgentKind::supports_cross_runtime)
                         .unwrap_or(false),
                     model,
                     mode,

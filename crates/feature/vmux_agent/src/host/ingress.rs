@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use vmux_api::protocol::ClientMessage;
 use vmux_core::agent::AgentCommandResponse;
 use vmux_core::service::{
-    ServiceConnected, ServiceMessagePlugin, ServiceMessageSet, ServiceRequest,
+    ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
 
 #[vmux_core::service_message(AgentRequest)]
@@ -30,37 +30,33 @@ pub(crate) struct AgentIngressPlugin;
 
 impl Plugin for AgentIngressPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            ServiceMessagePlugin::<InboundAgentRequest>::default(),
-            ServiceMessagePlugin::<AgentToolCallRequest>::default(),
-            ServiceMessagePlugin::<UiAgentDelta>::default(),
-            ServiceMessagePlugin::<UiAgentRunStatus>::default(),
-            ServiceMessagePlugin::<InboundAgentAwaitingApproval>::default(),
-            ServiceMessagePlugin::<UiAgentApprovalResolved>::default(),
-            ServiceMessagePlugin::<UiAgentSnapshot>::default(),
-            ServiceMessagePlugin::<UiAgentInfo>::default(),
-            ServiceMessagePlugin::<UiAgentWorkspaceChanged>::default(),
-            ServiceMessagePlugin::<UiAgentModelInfo>::default(),
-            ServiceMessagePlugin::<UiAgentModelSelectionResult>::default(),
-            ServiceMessagePlugin::<UiAgentModeInfo>::default(),
-            ServiceMessagePlugin::<UiAgentModeSelectionResult>::default(),
-        ))
-        .add_plugins((
-            ServiceMessagePlugin::<UiAgentSessionCreated>::default(),
-            ServiceMessagePlugin::<UiAgentAcpTerminalCreated>::default(),
-        ))
-        .add_message::<ServiceRequest>()
-        .add_message::<AgentCommandResponse>()
-        .add_message::<AgentRequestInput>()
-        .add_message::<UiAgentAwaitingApproval>()
-        .add_systems(
-            Update,
-            (
-                subscribe_agent_commands,
-                (route_agent_requests, route_approval_requests).in_set(ServiceMessageSet),
-            ),
-        )
-        .add_systems(Last, forward_agent_command_responses);
+        app.add_service_message::<InboundAgentRequest>()
+            .add_service_message::<AgentToolCallRequest>()
+            .add_service_message::<UiAgentDelta>()
+            .add_service_message::<UiAgentRunStatus>()
+            .add_service_message::<InboundAgentAwaitingApproval>()
+            .add_service_message::<UiAgentApprovalResolved>()
+            .add_service_message::<UiAgentSnapshot>()
+            .add_service_message::<UiAgentInfo>()
+            .add_service_message::<UiAgentWorkspaceChanged>()
+            .add_service_message::<UiAgentModelInfo>()
+            .add_service_message::<UiAgentModelSelectionResult>()
+            .add_service_message::<UiAgentModeInfo>()
+            .add_service_message::<UiAgentModeSelectionResult>()
+            .add_service_message::<UiAgentSessionCreated>()
+            .add_service_message::<UiAgentAcpTerminalCreated>()
+            .add_message::<ServiceRequest>()
+            .add_message::<AgentCommandResponse>()
+            .add_message::<AgentRequestInput>()
+            .add_message::<UiAgentAwaitingApproval>()
+            .add_systems(
+                Update,
+                (
+                    subscribe_agent_commands,
+                    (route_agent_requests, route_approval_requests).in_set(ServiceMessageSet),
+                ),
+            )
+            .add_systems(Last, forward_agent_command_responses);
     }
 }
 

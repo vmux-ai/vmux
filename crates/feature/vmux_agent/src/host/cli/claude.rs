@@ -14,6 +14,7 @@ use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
 
 use super::super::launch::{AgentLaunchPolicy, CliLaunchProvider};
 use super::super::session::{DiscoverAgentSessions, DiscoverAgentSessionsSet};
+use crate::manifest::CliProviderManifest;
 
 pub(super) struct ClaudeCliPlugin;
 
@@ -69,29 +70,6 @@ fn discover_sessions(
     }
 }
 
-const DISALLOWED_TOOLS: &str = "Bash,Monitor,WebSearch,WebFetch";
-const HOST_ALLOWED_TOOLS: &str = "mcp__vmux__*";
-const RUN_STEER_PROMPT: &str = "The native shell and web tools are disabled. Run \
-ALL shell commands via the mcp__vmux__run tool (a visible terminal the user can watch and take \
-over). Use the output returned by run directly; call read_terminal only when run says the command \
-is still running. An unbound tab starts in ~/.vmux/projects. Before accessing project files or \
-running project commands, call mcp__vmux__select_project with the known project path or omit it to \
-open the picker. Paths inside ~/.vmux/projects are selected immediately; paths outside it require \
-explicit user approval in the native picker. For a \
-new project, first use mcp__vmux__request_user_choice to offer a concrete suggested path and \
-Choose existing project. Use ~/.vmux/projects/<remote-host>/<organization>/<repository> when a \
-remote is known and ~/.vmux/projects/local/<project> otherwise. If creation is selected, use run \
-only to create the empty directory, then select that path. vmux will offer Git initialization and \
-use the new project root directly; never call create_worktree for that new project. Do not ask the \
-user to invent a folder location. In a previously existing Git project, immediately before any \
-edit, write, test, build, or other mutation, call mcp__vmux__create_worktree. If it reports ambiguous existing \
-worktrees, ask whether to create or choose an existing path, then call create_worktree with \
-create=true or the selected path. Never \
-run git worktree add yourself. After project or worktree setup succeeds, continue the original \
-request immediately. Never enumerate tool registries or wait for optional tools. If a skill requires \
-an unavailable tool, continue with the available tools.";
-const FILE_TOUCH_MATCHER: &str = "Read|Edit|Write|MultiEdit";
-
 pub(super) const SESSIONS: CliSessionSource = CliSessionSource {
     kind: AgentKind::Claude,
     list_sessions,
@@ -104,13 +82,14 @@ impl CliLaunchProvider for ClaudeLaunch {
     const KIND: AgentKind = AgentKind::Claude;
 
     fn arguments(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
-        build_args(mcp, session_id)
+        build_args(mcp, session_id, &CliProviderManifest::bundled(Self::KIND))
     }
 
     fn policy_arguments(policy: &AgentLaunchPolicy) -> Vec<String> {
+        let manifest = CliProviderManifest::bundled(Self::KIND);
         vec![
             "--append-system-prompt".to_string(),
-            policy.prompt(RUN_STEER_PROMPT),
+            policy.prompt(&manifest.run_prompt),
         ]
     }
 
@@ -154,16 +133,23 @@ fn prompt_history(cwd: &Path) -> Vec<String> {
     PromptHistory::recent(spoken)
 }
 
-fn build_args(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
+fn build_args(
+    mcp: &McpServerConfig,
+    session_id: Option<&str>,
+    manifest: &CliProviderManifest,
+) -> Vec<String> {
     let mut args = vec![
         "--mcp-config".to_string(),
         build_mcp_config_json(mcp),
         "--settings".to_string(),
-        build_settings_json(mcp),
+        build_settings_json(mcp, &manifest.file_touch_matcher),
         "--disallowedTools".to_string(),
-        DISALLOWED_TOOLS.to_string(),
+        manifest.disallowed_tools.join(","),
         "--allowedTools".to_string(),
-        allowed_tools(crate::managed_mcp::ManagedMcpServers::current().into_names()),
+        allowed_tools(
+            &manifest.host_allowed_tools,
+            crate::managed_mcp::ManagedMcpServers::current().into_names(),
+        ),
     ];
     if let Some(sid) = session_id {
         args.push("--resume".to_string());
@@ -261,10 +247,12 @@ impl ClaudeModels {
     }
 }
 
-fn allowed_tools(servers: impl IntoIterator<Item = String>) -> String {
-    let mut tools = HOST_ALLOWED_TOOLS.to_string();
+fn allowed_tools(base: &[String], servers: impl IntoIterator<Item = String>) -> String {
+    let mut tools = base.join(",");
     for server in servers {
-        tools.push(',');
+        if !tools.is_empty() {
+            tools.push(',');
+        }
         tools.push_str("mcp__");
         tools.push_str(&server);
         tools.push_str("__*");
@@ -285,7 +273,7 @@ fn project_dir_name(cwd: &Path) -> String {
         .collect()
 }
 
-fn build_settings_json(mcp: &McpServerConfig) -> String {
+fn build_settings_json(mcp: &McpServerConfig, file_touch_matcher: &str) -> String {
     let anchor = anchor_from_mcp(mcp);
     let args_for = |subcommand: &str| {
         let mut a = vec![Value::String(subcommand.into())];
@@ -302,7 +290,7 @@ fn build_settings_json(mcp: &McpServerConfig) -> String {
             ],
             "PostToolUse": [
                 {
-                    "matcher": FILE_TOUCH_MATCHER,
+                    "matcher": file_touch_matcher,
                     "hooks": [
                         { "type": "command", "command": mcp.command, "args": args_for("notify-file-touch"), "async": true }
                     ]
@@ -726,7 +714,11 @@ mod tests {
 
     #[test]
     fn managed_mcp_tools_are_allowed_without_an_interactive_terminal_prompt() {
-        let allowed = allowed_tools(["linear".to_string(), "notion".to_string()]);
+        let manifest = CliProviderManifest::bundled(AgentKind::Claude);
+        let allowed = allowed_tools(
+            &manifest.host_allowed_tools,
+            ["linear".to_string(), "notion".to_string()],
+        );
 
         assert!(allowed.contains("mcp__linear__*"));
         assert!(allowed.contains("mcp__notion__*"));

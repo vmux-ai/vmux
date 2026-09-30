@@ -104,7 +104,8 @@ fn prepare_launch<P: CliLaunchProvider>(
     for _ in 0..3 {
         let mcp_revision = McpCredentialAccess::stable_revision()?;
         let mcp_cfg =
-            crate::host::mcp::resolve(&request.cwd, request.anchor, P::KIND, &request.shell)?;
+            crate::mcp::McpLaunchSpec::cli(&request.cwd, request.anchor, P::KIND, &request.shell)
+                .resolve()?;
         if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
             bevy::log::warn!("external agent Knowledge sync failed: {error}");
         }
@@ -184,12 +185,13 @@ fn prepare_restart<P: CliLaunchProvider>(
     }
     for _ in 0..3 {
         let mcp_revision = McpCredentialAccess::stable_revision()?;
-        let mcp_cfg = crate::host::mcp::resolve(
+        let mcp_cfg = crate::mcp::McpLaunchSpec::cli(
             Path::new(&request.launch.cwd),
             request.anchor,
             P::KIND,
             &request.shell,
-        )?;
+        )
+        .resolve()?;
         let mut args = P::policy_arguments(policy);
         args.extend(P::arguments(&mcp_cfg, request.session_id.as_deref()));
         let fresh = P::environment(&mcp_cfg);
@@ -200,7 +202,7 @@ fn prepare_restart<P: CliLaunchProvider>(
             .iter()
             .filter(|(key, _)| {
                 !fresh_keys.contains(key)
-                    && !crate::host::managed_mcp::McpAuthorization::is_environment_variable(key)
+                    && !crate::managed_mcp::McpAuthorization::is_environment_variable(key)
             })
             .cloned()
             .collect();
@@ -257,6 +259,15 @@ pub struct ResumableSession {
     pub title: String,
     pub latest: String,
     pub cross_runtime: bool,
+}
+
+impl ResumableSession {
+    pub(crate) fn newest_unique(mut sessions: Vec<Self>) -> Vec<Self> {
+        sessions.sort_by_key(|session| std::cmp::Reverse(session.mtime));
+        let mut seen = HashSet::new();
+        sessions.retain(|session| seen.insert((session.kind, session.sid.clone())));
+        sessions
+    }
 }
 
 pub(crate) struct PromptHistory;

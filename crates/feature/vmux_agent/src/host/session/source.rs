@@ -1,9 +1,8 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
-use super::cli::{CliPromptHistory, CliSessionSource, ResumableSession};
+use super::super::cli::{CliPromptHistory, CliSessionSource};
 use crate::AgentKind;
-use crate::acp_registry::RegistryAgent;
 
 #[derive(SystemParam)]
 pub struct CliSessionSources<'w, 's> {
@@ -31,27 +30,10 @@ impl CliSessionSources<'_, '_> {
     }
 }
 
-pub fn kind_supports_cross_runtime(kind: AgentKind) -> bool {
-    matches!(kind, AgentKind::Vibe | AgentKind::Claude | AgentKind::Codex)
-}
-
-pub(crate) fn acp_agent_kind(agent_id: &str) -> Option<AgentKind> {
-    AgentKind::all().into_iter().find(|kind| {
-        let segment = kind.as_url_segment();
-        agent_id == segment || agent_id == RegistryAgent::canonical_id(segment)
-    })
-}
-
-pub(crate) fn sort_sessions(mut sessions: Vec<ResumableSession>) -> Vec<ResumableSession> {
-    sessions.sort_by_key(|s| std::cmp::Reverse(s.mtime));
-    let mut seen = std::collections::HashSet::new();
-    sessions.retain(|s| seen.insert((s.kind, s.sid.clone())));
-    sessions
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::cli::ResumableSession;
     use std::path::PathBuf;
     use std::time::SystemTime;
 
@@ -85,7 +67,7 @@ mod tests {
             latest: String::new(),
             cross_runtime: true,
         };
-        let got = sort_sessions(vec![mk("a", 10), mk("b", 30), mk("a", 20)]);
+        let got = ResumableSession::newest_unique(vec![mk("a", 10), mk("b", 30), mk("a", 20)]);
         assert_eq!(
             got.iter().map(|s| s.sid.as_str()).collect::<Vec<_>>(),
             vec!["b", "a"]
@@ -93,20 +75,15 @@ mod tests {
     }
 
     #[test]
-    fn all_builtin_kinds_support_cross_runtime_handoff() {
-        for kind in AgentKind::all() {
-            assert!(kind_supports_cross_runtime(kind));
-        }
-    }
-
-    #[test]
     fn acp_agent_kind_maps_launcher_and_registry_ids() {
-        assert_eq!(acp_agent_kind("claude"), Some(AgentKind::Claude));
-        assert_eq!(acp_agent_kind("claude-acp"), Some(AgentKind::Claude));
-        assert_eq!(acp_agent_kind("codex"), Some(AgentKind::Codex));
-        assert_eq!(acp_agent_kind("codex-acp"), Some(AgentKind::Codex));
-        assert_eq!(acp_agent_kind("vibe"), Some(AgentKind::Vibe));
-        assert_eq!(acp_agent_kind("mistral-vibe"), Some(AgentKind::Vibe));
-        assert_eq!(acp_agent_kind("custom"), None);
+        use crate::acp_registry::RegistryAgent;
+
+        assert_eq!(RegistryAgent::kind("claude"), Some(AgentKind::Claude));
+        assert_eq!(RegistryAgent::kind("claude-acp"), Some(AgentKind::Claude));
+        assert_eq!(RegistryAgent::kind("codex"), Some(AgentKind::Codex));
+        assert_eq!(RegistryAgent::kind("codex-acp"), Some(AgentKind::Codex));
+        assert_eq!(RegistryAgent::kind("vibe"), Some(AgentKind::Vibe));
+        assert_eq!(RegistryAgent::kind("mistral-vibe"), Some(AgentKind::Vibe));
+        assert_eq!(RegistryAgent::kind("custom"), None);
     }
 }

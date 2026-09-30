@@ -15,8 +15,8 @@ use vmux_setting::AppSettings;
 use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::{ProcessExited, TerminalGridSize, new_terminal_bundle_with_cwd};
 
+use crate::session::CliSessionSources;
 use crate::session::{AgentSession, AgentSessionExited, PendingAgentSession, SessionId};
-use crate::session_source::CliSessionSources;
 
 use super::attach::{AgentStrategies, PageAgentAttachment};
 use super::launch::{AgentLaunchRequest, AgentRestartRequest, PreparedAgentLaunch};

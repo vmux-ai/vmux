@@ -6,7 +6,7 @@ use vmux_editor::lsp::download::{self, RemoteArtifact};
 use vmux_editor::lsp::package_path::{PackageName, PackagePath, Sha256Digest};
 use vmux_editor::lsp::store::{PackageStore, Receipt};
 
-use crate::acp_registry::{self, BinaryTarget, RegistryAgent};
+use super::registry::{BinaryTarget, Registry, RegistryAgent, Runtime};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ResolvedAgent {
@@ -379,12 +379,12 @@ fn is_agent_installed_at(store: &PackageStore, agent: &RegistryAgent) -> bool {
         return false;
     }
     match agent.preferred_runtime() {
-        acp_registry::Runtime::None => true,
-        acp_registry::Runtime::Node => {
+        Runtime::None => true,
+        Runtime::Node => {
             node_bindir(store).is_some_and(|bindir| bindir.join("node").is_file())
                 && node_cli(store, "npx-cli.js").is_some_and(|path| path.is_file())
         }
-        acp_registry::Runtime::Uv => uv_bindir(store)
+        Runtime::Uv => uv_bindir(store)
             .map(|b| b.join("uvx").exists())
             .unwrap_or(false),
     }
@@ -413,14 +413,14 @@ pub(super) fn resolve_from_registry(
     emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<ResolvedAgent, String> {
     let reg_id = RegistryAgent::canonical_id(agent_id);
-    let find = |reg: acp_registry::Registry| {
+    let find = |reg: Registry| {
         reg.agents
             .into_iter()
             .find(|agent| RegistryAgent::ids_match(&agent.id, agent_id))
     };
-    let agent = match acp_registry::Registry::cached().and_then(find) {
+    let agent = match Registry::cached().and_then(find) {
         Some(a) => a,
-        None => acp_registry::Registry::fetch_blocking()?
+        None => Registry::fetch_blocking()?
             .agents
             .into_iter()
             .find(|agent| RegistryAgent::ids_match(&agent.id, agent_id))
@@ -434,7 +434,6 @@ fn ensure_installed(
     version: Option<&str>,
     emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<ResolvedAgent, String> {
-    use acp_registry::Runtime;
     match agent.preferred_runtime() {
         Runtime::None => ensure_binary_installed(agent, emit),
         Runtime::Node => ensure_npx_installed(agent, version, emit),
@@ -513,6 +512,7 @@ fn install_binary(
 
 #[cfg(test)]
 mod tests {
+    use super::super::registry::{Distribution, PackageDist};
     use super::*;
 
     fn npx_agent(id: &str) -> RegistryAgent {
@@ -523,9 +523,9 @@ mod tests {
             description: None,
             icon: None,
             repository: None,
-            distribution: acp_registry::Distribution {
+            distribution: Distribution {
                 binary: None,
-                npx: Some(acp_registry::PackageDist {
+                npx: Some(PackageDist {
                     package: format!("@example/{id}"),
                     args: vec![],
                     env: Default::default(),

@@ -7,9 +7,9 @@ use super::model_selection::{
     AcpModeRequestCounter, AcpModelRequestCounter, AgentSelectionKey, ModelSelectionPlugin,
 };
 pub(crate) use super::model_selection::{AgentModeSelections, AgentModelSelections};
+use crate::acp_registry::RegistryAgent;
 use crate::event::AgentRequestInput;
 use crate::runtime::acp::{AcpModeState, AcpModelState};
-use crate::session_source::{acp_agent_kind, kind_supports_cross_runtime};
 use vmux_api::command_bar::{AgentModels, AgentModes};
 use vmux_api::protocol::{
     AgentCommandResult, AgentListModels, AgentSelectModel, AgentSetEffort, ClientMessage,
@@ -23,7 +23,7 @@ use vmux_chat::host::ChatView;
 use vmux_chat::state::ChatUiState;
 use vmux_command::event::{StartSelectMode, StartSelectModel};
 use vmux_command::snapshot::{AgentPromptTarget, CommandBarProjection};
-use vmux_core::agent::{default_effort, effort_levels};
+use vmux_core::agent::{AgentKind, default_effort, effort_levels};
 use vmux_core::host::UiStateWrite;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_session::AcpSession;
@@ -449,8 +449,8 @@ fn push_acp_model_state_to_page(
         let Some(webview) = kids.iter().find(|&entity| chat_views.contains(entity)) else {
             continue;
         };
-        let cross = acp_agent_kind(&session.agent_id)
-            .map(kind_supports_cross_runtime)
+        let cross = RegistryAgent::kind(&session.agent_id)
+            .map(AgentKind::supports_cross_runtime)
             .unwrap_or(false);
         let projection = ModelProjection::new(
             Some(model_state),
@@ -487,8 +487,8 @@ fn push_removed_acp_model_state_to_page(
         let Some(webview) = kids.iter().find(|&entity| chat_views.contains(entity)) else {
             continue;
         };
-        let cross = acp_agent_kind(&session.agent_id)
-            .map(kind_supports_cross_runtime)
+        let cross = RegistryAgent::kind(&session.agent_id)
+            .map(AgentKind::supports_cross_runtime)
             .unwrap_or(false);
         let projection = ModelProjection::new(None, cross, &session.agent_id, settings.as_deref());
         commands.trigger(UiStateWrite::<ChatUiState>::from_event(

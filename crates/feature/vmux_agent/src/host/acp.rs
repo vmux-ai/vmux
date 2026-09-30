@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 #[cfg(test)]
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use bevy::prelude::*;
+use crossbeam_channel::{Receiver, Sender};
 use vmux_api::protocol::{ClientMessage, ManagedMcpServer};
 use vmux_core::event::InstallPhase;
 use vmux_core::service::ServiceConnected;
@@ -18,9 +18,13 @@ use vmux_tool::{
     ToolScanner, ToolStore, ToolsManifest,
 };
 
-use super::acp_environment::AcpEnvironment;
-use super::acp_install::{resolve_from_registry, uninstall};
-use crate::acp_registry::{self, RegistryAgent};
+mod environment;
+mod install;
+pub mod registry;
+
+use self::environment::AcpEnvironment;
+use self::install::{resolve_from_registry, uninstall};
+use self::registry::{Registry, RegistryAgent};
 use crate::host::launch::{AgentLaunchPolicy, AgentLaunchPolicyQuery};
 use vmux_session::AgentRunState;
 
@@ -52,11 +56,9 @@ fn scan_tools(
     refresh: bool,
 ) -> Result<ToolProviderSnapshot, String> {
     let catalog = if refresh {
-        acp_registry::Registry::fetch_blocking()
-            .ok()
-            .or_else(acp_registry::Registry::cached)
+        Registry::fetch_blocking().ok().or_else(Registry::cached)
     } else {
-        acp_registry::Registry::cached()
+        Registry::cached()
     };
     let catalog = catalog
         .map(|registry| {
@@ -163,7 +165,7 @@ pub(crate) struct AcpPackageChanged {
 
 #[derive(Component)]
 struct AcpInstallJob {
-    progress: Arc<Mutex<Option<AcpInstallProgress>>>,
+    progress: Receiver<AcpInstallProgress>,
     thread: Option<JoinHandle<AcpInstallOutcome>>,
     outcome: Option<AcpInstallOutcome>,
     package_reported: bool,
@@ -224,7 +226,7 @@ struct AcpLaunch {
 
 #[derive(Clone)]
 struct AcpInstallProgressSink {
-    pending: Arc<Mutex<Option<AcpInstallProgress>>>,
+    pending: Sender<AcpInstallProgress>,
     wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
 }
 
@@ -433,11 +435,8 @@ impl AcpLaunchStarted {
 }
 
 impl AcpInstallJob {
-    fn take_progress(&mut self) -> Option<AcpInstallProgress> {
-        match self.progress.lock() {
-            Ok(mut pending) => pending.take(),
-            Err(poisoned) => poisoned.into_inner().take(),
-        }
+    fn take_progress(&self) -> Option<AcpInstallProgress> {
+        self.progress.try_iter().last()
     }
 }
 
@@ -445,9 +444,9 @@ fn start_acp_install_job(
     request: AcpInstallRequest,
     wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
 ) -> AcpInstallJob {
-    let progress = Arc::new(Mutex::new(None));
+    let (progress_sender, progress) = crossbeam_channel::unbounded();
     let sink = AcpInstallProgressSink {
-        pending: progress.clone(),
+        pending: progress_sender,
         wake,
     };
     let thread = std::thread::spawn(move || {
@@ -553,13 +552,15 @@ impl AcpLaunch {
                 vmux_terminal::agent_run::AgentTerminalShell::configured(settings).into_string()
             })
             .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_default());
-        let mcp = crate::mcp::resolve_acp(&session.cwd, session.anchor, &session.agent_id, &shell)
-            .inspect_err(|error| {
-                bevy::log::warn!(
-                    "acp: vmux_mcp sidecar unresolved; agent runs without vmux tools: {error}"
-                );
-            })
-            .ok();
+        let mcp =
+            crate::mcp::McpLaunchSpec::acp(&session.cwd, session.anchor, &session.agent_id, &shell)
+                .resolve()
+                .inspect_err(|error| {
+                    bevy::log::warn!(
+                        "acp: vmux_mcp sidecar unresolved; agent runs without vmux tools: {error}"
+                    );
+                })
+                .ok();
         let env = AcpEnvironment::from(self.env.clone())
             .with_managed_servers(
                 &session.agent_id,
@@ -589,10 +590,7 @@ impl AcpLaunch {
 
 impl AcpInstallProgressSink {
     fn publish(&self, progress: AcpInstallProgress) {
-        match self.pending.lock() {
-            Ok(mut pending) => *pending = Some(progress),
-            Err(poisoned) => *poisoned.into_inner() = Some(progress),
-        }
+        let _ = self.pending.send(progress);
         self.notify();
     }
 
@@ -667,8 +665,9 @@ mod tests {
     }
 
     fn completed_job(message: &str) -> AcpInstallJob {
+        let (_progress_sender, progress) = crossbeam_channel::unbounded();
         AcpInstallJob {
-            progress: Arc::new(Mutex::new(None)),
+            progress,
             thread: None,
             outcome: Some(AcpInstallOutcome {
                 package_added: false,

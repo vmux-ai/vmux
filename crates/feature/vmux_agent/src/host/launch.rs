@@ -4,7 +4,7 @@ use bevy::prelude::Query;
 use vmux_core::agent::{AgentDisabledSkillRoot, AgentPromptContribution};
 use vmux_core::terminal::TerminalLaunch;
 
-use super::mcp::McpServerConfig;
+use crate::mcp::McpServerConfig;
 
 pub(crate) trait CliLaunchProvider: Send + Sync + 'static {
     const KIND: AgentKind;

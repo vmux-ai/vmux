@@ -2,8 +2,9 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
+use crate::acp_registry::RegistryAgent;
 use crate::handoff::{BuiltContext, DEFAULT_CONTEXT_LIMIT};
-use crate::session_source::{CliSessionSources, acp_agent_kind, sort_sessions};
+use crate::session::CliSessionSources;
 use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
 use vmux_chat::event::{
     ChatResumeQueryRequest, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
@@ -227,7 +228,7 @@ impl ResumeAsk<'_, '_> {
         let stack = self.child_of.get(webview).ok().map(ChildOf::parent);
         let acp = stack.and_then(|stack| self.acp_sessions.get(stack).ok());
         let kind = acp
-            .and_then(|acp| acp_agent_kind(&acp.agent_id))
+            .and_then(|acp| RegistryAgent::kind(&acp.agent_id))
             .or_else(|| {
                 stack.and_then(|stack| {
                     self.agent_sessions
@@ -351,7 +352,7 @@ fn on_resume_list_request(
                 for scan in scanning {
                     all.extend(scan.await);
                 }
-                let all = sort_sessions(all);
+                let all = crate::host::cli::ResumableSession::newest_unique(all);
                 let ranked = Preferred::first(&all, kind, project.as_deref());
                 (ranked, Some(all))
             }
@@ -504,7 +505,7 @@ fn on_resume_session(
     };
     if let Ok(acp) = acp_sessions.get(stack)
         && let Some(target_url) =
-            foreign_handoff_target(&acp.agent_id, acp_agent_kind(&acp.agent_id), kind)
+            foreign_handoff_target(&acp.agent_id, RegistryAgent::kind(&acp.agent_id), kind)
     {
         let source = sources.get(kind);
         let source_sid = payload.sid.clone();
@@ -550,7 +551,6 @@ fn on_resume_session(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session_source::kind_supports_cross_runtime;
 
     #[test]
     fn resume_query_matches_sid_title_and_cwd_case_insensitively() {
@@ -608,7 +608,7 @@ mod tests {
             mtime: SystemTime::UNIX_EPOCH,
             title: sid.into(),
             latest: String::new(),
-            cross_runtime: kind_supports_cross_runtime(kind),
+            cross_runtime: kind.supports_cross_runtime(),
         };
         let entries = resume_entries(
             vec![

@@ -16,6 +16,7 @@ use crate::{AgentKind, AssistantBlock, McpServerConfig, Message};
 
 use super::super::launch::{AgentLaunchPolicy, CliLaunchProvider};
 use super::super::session::{DiscoverAgentSessions, DiscoverAgentSessionsSet};
+use crate::manifest::CliProviderManifest;
 
 pub(super) struct CodexCliPlugin;
 
@@ -72,32 +73,7 @@ fn discover_sessions(
     }
 }
 
-const DISABLED_FEATURES: &[&str] = &["shell_tool", "unified_exec"];
 const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(2);
-pub(crate) const DIRECT_ONLY_NAMESPACE: &str = "mcp__vmux";
-pub(crate) const RUN_STEER_PROMPT: &str = "The native shell and web tools are disabled. Run ALL shell \
-commands via the mcp__vmux__run tool (a visible terminal the user can watch and take over). Use the \
-output returned by run directly; call read_terminal only when run says the command is still running. To READ \
-a file, use the mcp__vmux__read_file tool (it shows the file in a pane beside you and returns its \
-text) - do NOT cat/sed/head/tail a file via run. To SEARCH code, use the mcp__vmux__grep tool (it \
-opens each matching file in a pane and returns the matches) - do NOT run rg/grep/ag via run. An unbound tab starts in ~/.vmux/projects. Before accessing \
-project files or running project commands, call mcp__vmux__select_project, passing its known path \
-or omitting it to open the picker. Paths inside ~/.vmux/projects are selected immediately; paths \
-outside it require explicit user approval in the native picker. For a new project, first use mcp__vmux__request_user_choice to offer \
-a concrete suggested path and Choose existing project. Use \
-~/.vmux/projects/<remote-host>/<organization>/<repository> when a remote is known and \
-~/.vmux/projects/local/<project> otherwise. If creation is selected, use run to create the \
-empty directory, then select that path. vmux will offer Git initialization and use the new project \
-root directly; never call create_worktree for that new project. Do not ask the user to invent a \
-folder location. In a previously existing Git project, immediately before any edit, write, test, \
-build, or other mutation, call mcp__vmux__create_worktree. If it reports ambiguous existing \
-worktrees, ask whether to create or choose an existing path, then call mcp__vmux__create_worktree with \
-create=true or the selected path. Never \
-run git worktree add yourself. After project or worktree setup succeeds, continue the original \
-request immediately. Never enumerate tool registries or wait for optional tools. If a skill requires \
-an unavailable tool, continue with the available tools.";
-const FILE_TOUCH_MATCHER: &str = "apply_patch|Edit|Write";
-
 pub(super) const SESSIONS: CliSessionSource = CliSessionSource {
     kind: AgentKind::Codex,
     list_sessions,
@@ -110,10 +86,11 @@ impl CliLaunchProvider for CodexLaunch {
     const KIND: AgentKind = AgentKind::Codex;
 
     fn arguments(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
-        build_args(mcp, session_id)
+        build_args(mcp, session_id, &CliProviderManifest::bundled(Self::KIND))
     }
 
     fn policy_arguments(policy: &AgentLaunchPolicy) -> Vec<String> {
+        let manifest = CliProviderManifest::bundled(Self::KIND);
         let mut args = Vec::new();
         if let Some(skills) =
             build_skills_config_override(&codex_disabled_skill_files(policy.disabled_skill_roots()))
@@ -124,7 +101,7 @@ impl CliLaunchProvider for CodexLaunch {
         args.push("-c".to_string());
         args.push(format!(
             "developer_instructions={}",
-            quote_toml(&policy.prompt(RUN_STEER_PROMPT))
+            quote_toml(&policy.prompt(&manifest.run_prompt))
         ));
         args
     }
@@ -163,7 +140,11 @@ fn prompt_history(_cwd: &Path) -> Vec<String> {
     PromptHistory::recent(spoken)
 }
 
-fn build_args(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
+fn build_args(
+    mcp: &McpServerConfig,
+    session_id: Option<&str>,
+    manifest: &CliProviderManifest,
+) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "-c".into(),
         format!("mcp_servers.vmux.command={}", quote_toml(&mcp.command)),
@@ -186,19 +167,22 @@ fn build_args(mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
     args.push("-c".into());
     args.push(format!(
         "features.code_mode.direct_only_tool_namespaces=[{}]",
-        quote_toml(DIRECT_ONLY_NAMESPACE)
+        quote_toml(&manifest.direct_only_namespace)
     ));
     args.push("-c".into());
     args.push("tools.web_search=false".to_string());
     args.push("-c".into());
     args.push("features.hooks=true".into());
     args.push("-c".into());
-    args.push(build_file_touch_hook_override(mcp));
+    args.push(build_file_touch_hook_override(
+        mcp,
+        &manifest.file_touch_matcher,
+    ));
     args.push("-c".into());
     args.push(build_turn_end_hook_override(mcp));
-    for feature in DISABLED_FEATURES {
+    for feature in &manifest.disabled_features {
         args.push("--disable".into());
-        args.push((*feature).to_string());
+        args.push(feature.clone());
     }
     if let Some(sid) = session_id {
         args.push("resume".into());
@@ -539,7 +523,7 @@ fn collect_skill_files(root: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-fn build_file_touch_hook_override(mcp: &McpServerConfig) -> String {
+fn build_file_touch_hook_override(mcp: &McpServerConfig, file_touch_matcher: &str) -> String {
     let mut hook_args = vec![quote_toml("notify-file-touch")];
     if let Some(i) = mcp.args.iter().position(|a| a == "--anchor")
         && let Some(anchor) = mcp.args.get(i + 1)
@@ -549,7 +533,7 @@ fn build_file_touch_hook_override(mcp: &McpServerConfig) -> String {
     }
     format!(
         "hooks.PostToolUse=[{{matcher={},hooks=[{{type={},command={},args=[{}]}}]}}]",
-        quote_toml(FILE_TOUCH_MATCHER),
+        quote_toml(file_touch_matcher),
         quote_toml("command"),
         quote_toml(&mcp.command),
         hook_args.join(","),

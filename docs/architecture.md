@@ -328,6 +328,18 @@ lifecycle transitions, asynchronous task boundaries, cross-feature dispatch, and
 ordering. A miscellaneous parameter bundle or a large hidden `run`/`dispatch` workflow is not
 a capability and stays as ordinary system logic.
 
+Not every Rust value is ECS state. Use a component when a value has identity, lifecycle,
+independent mutation, observation, or scheduling significance. Use a message when ordering or
+cross-system delivery matters. Keep immutable specifications, parsed manifests, serialization
+adapters, validated values, and deterministic transformations as plain Rust types. Promote one
+to ECS only when the world must address, observe, replace, or schedule it independently; wrapping
+a temporary function input in an entity adds indirection without composition.
+
+Keep those non-ECS values in the owning feature's noun module, and put external side effects in a
+named boundary module such as `acp/install.rs` or `transport.rs`. Do not create a generic `util`
+drawer. `host.rs` and its root plugin remain the composition entrypoint; private systems call the
+boundary adapter and project its result back onto ECS entities.
+
 ### Plugins
 
 One crate, one capability, one `build()`. A plugin bundles its components, systems,

@@ -16,7 +16,9 @@ impl Plugin for PaletteBranchPlugin {
             .add_systems(PreUpdate, attach_palette_branch)
             .add_systems(
                 PostUpdate,
-                update_palette_branch.in_set(PaletteProjectionSet::Context),
+                (update_palette_branch, request_palette_branches)
+                    .chain()
+                    .in_set(PaletteProjectionSet::Context),
             );
     }
 }
@@ -54,9 +56,8 @@ fn update_palette_branch(
         ),
         Changed<PaletteContext>,
     >,
-    mut commands: Commands,
 ) {
-    for (target, context, mut branch, mut snapshot) in &mut palettes {
+    for (_, context, mut branch, mut snapshot) in &mut palettes {
         let Some(opened) = branch.open.accept(context.open_id) else {
             continue;
         };
@@ -73,14 +74,12 @@ fn update_palette_branch(
             snapshot.0.branch_project.clear();
             snapshot.0.branches.clear();
         }
-        branch.request(target, &mut commands);
     }
 }
 
 fn receive_palette_branches(
     trigger: On<UiStateWrite<CommandBarUiState>>,
     mut palettes: Query<(&mut PaletteBranch, &mut PaletteSnapshot)>,
-    mut commands: Commands,
 ) {
     let Some(response) =
         <CommandBarUiStatePatch as vmux_api::UiStatePatch<StartProjectBranches>>::payload(
@@ -89,8 +88,7 @@ fn receive_palette_branches(
     else {
         return;
     };
-    let target = trigger.event().webview();
-    let Ok((mut branch, mut snapshot)) = palettes.get_mut(target) else {
+    let Ok((mut branch, mut snapshot)) = palettes.get_mut(trigger.event().webview()) else {
         return;
     };
     let Some(flight) = branch.inflight.take() else {
@@ -104,18 +102,22 @@ fn receive_palette_branches(
         snapshot.0.branches.clone_from(&response.branches);
         branch.loaded = flight.project;
     }
-    branch.request(target, &mut commands);
 }
 
-impl PaletteBranch {
-    fn request(&mut self, target: Entity, commands: &mut Commands) {
-        if self.inflight.is_some() || self.desired.trim().is_empty() || self.desired == self.loaded
+fn request_palette_branches(
+    mut palettes: Query<(Entity, &mut PaletteBranch)>,
+    mut commands: Commands,
+) {
+    for (target, mut branch) in &mut palettes {
+        if branch.inflight.is_some()
+            || branch.desired.trim().is_empty()
+            || branch.desired == branch.loaded
         {
-            return;
+            continue;
         }
-        let project = self.desired.clone();
-        self.inflight = Some(BranchFlight {
-            open_generation: self.open.generation(),
+        let project = branch.desired.clone();
+        branch.inflight = Some(BranchFlight {
+            open_generation: branch.open.generation(),
             project: project.clone(),
         });
         commands.trigger(UiInput {

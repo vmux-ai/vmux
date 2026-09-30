@@ -2,8 +2,6 @@
 use std::collections::HashMap;
 #[cfg(host)]
 use std::hash::Hash;
-#[cfg(host)]
-use std::marker::PhantomData;
 use std::path::PathBuf;
 #[cfg(host)]
 use std::sync::Arc;
@@ -43,28 +41,25 @@ pub trait ServiceMessageVariant: Message + Sized {
 }
 
 #[cfg(host)]
-pub struct ServiceMessagePlugin<M>(PhantomData<fn() -> M>);
-
-#[cfg(host)]
-impl<M> Default for ServiceMessagePlugin<M> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
+pub trait ServiceMessageAppExt {
+    fn add_service_message<M>(&mut self) -> &mut Self
+    where
+        M: ServiceMessageVariant;
 }
 
 #[cfg(host)]
-impl<M> Plugin for ServiceMessagePlugin<M>
-where
-    M: ServiceMessageVariant,
-{
-    fn build(&self, app: &mut App) {
-        app.add_message::<ServiceInbound>()
+impl ServiceMessageAppExt for App {
+    fn add_service_message<M>(&mut self) -> &mut Self
+    where
+        M: ServiceMessageVariant,
+    {
+        self.add_message::<ServiceInbound>()
             .add_message::<M>()
             .configure_sets(Update, (ServiceMessageDecodeSet, ServiceMessageSet).chain())
             .add_systems(
                 Update,
                 route_service_message::<M>.in_set(ServiceMessageDecodeSet),
-            );
+            )
     }
 }
 

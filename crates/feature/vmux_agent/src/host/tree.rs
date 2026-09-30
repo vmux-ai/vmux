@@ -31,7 +31,6 @@ impl Plugin for AgentPagesPlugin {
         app.add_plugins((
             vmux_chat::ChatPlugin,
             super::model::ChatModelPlugin,
-            super::resume::ChatResumePlugin,
             super::transcript::ChatTranscriptPlugin,
             crate::setup::AgentSetupPlugin,
         ));
@@ -56,13 +55,12 @@ impl Plugin for AgentSessionPlugin {
             super::attach::AttachPlugin,
             super::attention::AttentionPlugin,
             super::command::CommandPlugin,
-            super::continuation::AgentContinuationPlugin,
             super::follow::FollowPlugin,
             super::ingress::AgentIngressPlugin,
             super::page_open::PageOpenPlugin,
             super::provider::ProviderPlugin,
             session::AgentSessionLifecyclePlugin,
-            super::snapshot_updater::SnapshotPlugin,
+            super::snapshot::SnapshotPlugin,
             super::spawn::SpawnPlugin,
         ))
         .add_message::<AgentRequestInput>()

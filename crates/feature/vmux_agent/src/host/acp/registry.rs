@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use vmux_api::agent::AgentKind;
 use vmux_editor::lsp::package_path::Sha256Digest;
 
 pub const REGISTRY_URL: &str =
@@ -130,6 +131,13 @@ impl RegistryAgent {
         let left = Self::canonical_id(left);
         let right = Self::canonical_id(right);
         left == right || Self::url_id(left) == Self::url_id(right)
+    }
+
+    pub fn kind(id: &str) -> Option<AgentKind> {
+        AgentKind::all().into_iter().find(|kind| {
+            let segment = kind.as_url_segment();
+            id == segment || id == Self::canonical_id(segment)
+        })
     }
 
     pub fn host_target() -> Option<&'static str> {

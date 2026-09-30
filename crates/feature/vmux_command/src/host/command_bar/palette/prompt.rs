@@ -15,7 +15,9 @@ impl Plugin for PalettePromptPlugin {
             .add_systems(PreUpdate, attach_palette_prompt)
             .add_systems(
                 PostUpdate,
-                update_palette_prompt.in_set(PaletteProjectionSet::Context),
+                (update_palette_prompt, request_palette_prompt_history)
+                    .chain()
+                    .in_set(PaletteProjectionSet::Context),
             );
     }
 }
@@ -53,9 +55,8 @@ fn update_palette_prompt(
         ),
         Changed<PaletteContext>,
     >,
-    mut commands: Commands,
 ) {
-    for (target, context, mut prompt, mut snapshot) in &mut palettes {
+    for (_, context, mut prompt, mut snapshot) in &mut palettes {
         let Some(opened) = prompt.open.accept(context.open_id) else {
             continue;
         };
@@ -71,22 +72,19 @@ fn update_palette_prompt(
             prompt.loaded = None;
             snapshot.0.prompt_history.clear();
         }
-        prompt.request_history(target, &mut commands);
     }
 }
 
 fn receive_palette_prompt_history(
     trigger: On<UiStateWrite<CommandBarUiState>>,
     mut palettes: Query<(&mut PalettePrompt, &mut PaletteSnapshot)>,
-    mut commands: Commands,
 ) {
     let Some(response) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<PromptHistory>>::payload(
         trigger.event().patch(),
     ) else {
         return;
     };
-    let target = trigger.event().webview();
-    let Ok((mut prompt, mut snapshot)) = palettes.get_mut(target) else {
+    let Ok((mut prompt, mut snapshot)) = palettes.get_mut(trigger.event().webview()) else {
         return;
     };
     let Some(flight) = prompt.inflight.take() else {
@@ -98,19 +96,21 @@ fn receive_palette_prompt_history(
         snapshot.0.prompt_history.clone_from(&response.prompts);
         prompt.loaded = Some(flight.context);
     }
-    prompt.request_history(target, &mut commands);
 }
 
-impl PalettePrompt {
-    fn request_history(&mut self, target: Entity, commands: &mut Commands) {
-        if self.inflight.is_some() || self.desired == self.loaded {
-            return;
+fn request_palette_prompt_history(
+    mut palettes: Query<(Entity, &mut PalettePrompt)>,
+    mut commands: Commands,
+) {
+    for (target, mut prompt) in &mut palettes {
+        if prompt.inflight.is_some() || prompt.desired == prompt.loaded {
+            continue;
         }
-        let Some(context) = self.desired.clone() else {
-            return;
+        let Some(context) = prompt.desired.clone() else {
+            continue;
         };
-        self.inflight = Some(PromptFlight {
-            open_generation: self.open.generation(),
+        prompt.inflight = Some(PromptFlight {
+            open_generation: prompt.open.generation(),
             context: context.clone(),
         });
         commands.trigger(UiInput {

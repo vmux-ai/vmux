@@ -59,6 +59,10 @@ impl AgentKind {
         [AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex]
     }
 
+    pub fn supports_cross_runtime(self) -> bool {
+        matches!(self, AgentKind::Vibe | AgentKind::Claude | AgentKind::Codex)
+    }
+
     pub fn avatar(self) -> AvatarSpec {
         AvatarSpec {
             initials: match self {
@@ -104,6 +108,13 @@ mod tests {
         assert_eq!(AgentKind::Vibe.executable(), "vibe");
         assert_eq!(AgentKind::Claude.executable(), "claude");
         assert_eq!(AgentKind::Codex.executable(), "codex");
+    }
+
+    #[test]
+    fn all_agent_kinds_support_cross_runtime_handoff() {
+        for kind in AgentKind::all() {
+            assert!(kind.supports_cross_runtime());
+        }
     }
 
     #[test]

@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
-use crate::acp_registry::RegistryAgent;
+use super::registry::RegistryAgent;
+use crate::AgentKind;
 use crate::host::launch::AgentLaunchPolicy;
+use crate::manifest::CliProviderManifest;
 
 pub(super) struct AcpEnvironment(Vec<(String, String)>);
 
@@ -69,8 +71,8 @@ impl AcpEnvironment {
             *namespaces = serde_json::json!([]);
         }
         let namespaces = namespaces.as_array_mut().unwrap();
-        let vmux =
-            serde_json::Value::String(crate::host::cli::codex::DIRECT_ONLY_NAMESPACE.to_string());
+        let manifest = CliProviderManifest::bundled(AgentKind::Codex);
+        let vmux = serde_json::Value::String(manifest.direct_only_namespace);
         if !namespaces.contains(&vmux) {
             namespaces.push(vmux);
         }
@@ -188,6 +190,7 @@ impl AcpEnvironment {
     }
 
     fn apply_codex(&mut self, policy: &AgentLaunchPolicy) {
+        let manifest = CliProviderManifest::bundled(AgentKind::Codex);
         self.0
             .retain(|(key, _)| key != "DISABLE_MCP_CONFIG_FILTERING");
         let existing = self
@@ -211,8 +214,9 @@ impl AcpEnvironment {
             *features = serde_json::json!({});
         }
         let features = features.as_object_mut().unwrap();
-        features.insert("shell_tool".to_string(), serde_json::Value::Bool(false));
-        features.insert("unified_exec".to_string(), serde_json::Value::Bool(false));
+        for feature in &manifest.disabled_features {
+            features.insert(feature.clone(), serde_json::Value::Bool(false));
+        }
         let code_mode = features
             .entry("code_mode")
             .or_insert_with(|| serde_json::json!({}));
@@ -221,7 +225,7 @@ impl AcpEnvironment {
         }
         code_mode.as_object_mut().unwrap().insert(
             "direct_only_tool_namespaces".to_string(),
-            serde_json::json!([crate::host::cli::codex::DIRECT_ONLY_NAMESPACE]),
+            serde_json::json!([manifest.direct_only_namespace]),
         );
         let tools = config
             .entry("tools")
@@ -262,18 +266,17 @@ impl AcpEnvironment {
         let instructions = if instructions.contains("mcp__vmux__run") {
             instructions.to_string()
         } else if instructions.is_empty() {
-            crate::host::cli::codex::RUN_STEER_PROMPT.to_string()
+            manifest.run_prompt.clone()
         } else {
-            format!(
-                "{instructions}\n\n{}",
-                crate::host::cli::codex::RUN_STEER_PROMPT
-            )
+            format!("{instructions}\n\n{}", manifest.run_prompt)
         };
         let instructions = policy.prompt(&instructions);
-        let instructions = if instructions.contains("mcp__vmux__set_conversation_title") {
+        let instructions = if manifest.conversation_title_prompt.is_empty()
+            || instructions.contains("mcp__vmux__set_conversation_title")
+        {
             instructions
         } else {
-            format!("{instructions}\n\n{CONVERSATION_TITLE_STEER_PROMPT}")
+            format!("{instructions}\n\n{}", manifest.conversation_title_prompt)
         };
         config.insert(
             "developer_instructions".to_string(),
@@ -377,8 +380,6 @@ impl From<Vec<(String, String)>> for AcpEnvironment {
     }
 }
 
-const CONVERSATION_TITLE_STEER_PROMPT: &str = "On the first user message, always call mcp__vmux__set_conversation_title as the first tool of the turn. The host immediately shows the raw first prompt as a provisional title; replace it with a concise 3 to 7 word summary with corrected spelling and grammar. On later user messages, call the tool only when the conversation topic materially changes; keep the current title for same-topic follow-ups. When needed, call it before reading skills, calling any other tool, or answering. Never copy the user's prompt verbatim. This tool never needs user permission.";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,7 +462,7 @@ mod tests {
             );
             assert_eq!(
                 config["features"]["code_mode"]["direct_only_tool_namespaces"],
-                serde_json::json!([crate::host::cli::codex::DIRECT_ONLY_NAMESPACE])
+                serde_json::json!(["mcp__vmux"])
             );
             let instructions = config["developer_instructions"].as_str().unwrap();
             assert!(instructions.contains("mcp__vmux__run"));

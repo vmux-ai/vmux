@@ -1,3 +1,9 @@
+pub(super) mod continuation;
+pub(super) mod resume;
+mod source;
+
+pub(crate) use source::CliSessionSources;
+
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::{Mutex, mpsc};
@@ -9,11 +15,9 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::PageMetadata;
 pub use vmux_core::agent::{AgentSession, PendingAgentSession, SessionId};
 
+use super::cli::CliSessionRoot;
 #[cfg(test)]
 use crate::AgentKind;
-use crate::session_source::CliSessionSources;
-
-use super::cli::CliSessionRoot;
 
 #[derive(Message, Debug, Clone, Copy)]
 pub struct AgentSessionExited {
@@ -30,20 +34,24 @@ pub(crate) struct AgentSessionLifecyclePlugin;
 
 impl Plugin for AgentSessionLifecyclePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentSessionExited>()
-            .add_message::<DiscoverAgentSessions>()
-            .configure_sets(Update, DiscoverAgentSessionsSet)
-            .add_systems(
-                Update,
-                (
-                    start_agent_session_watchers,
-                    request_discovery_for_fs_change,
-                    request_discovery_for_pending,
-                )
-                    .chain()
-                    .before(DiscoverAgentSessionsSet),
+        app.add_plugins((
+            continuation::AgentContinuationPlugin,
+            resume::ChatResumePlugin,
+        ))
+        .add_message::<AgentSessionExited>()
+        .add_message::<DiscoverAgentSessions>()
+        .configure_sets(Update, DiscoverAgentSessionsSet)
+        .add_systems(
+            Update,
+            (
+                start_agent_session_watchers,
+                request_discovery_for_fs_change,
+                request_discovery_for_pending,
             )
-            .add_systems(Update, format_agent_url);
+                .chain()
+                .before(DiscoverAgentSessionsSet),
+        )
+        .add_systems(Update, format_agent_url);
     }
 }
 
