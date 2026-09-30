@@ -8,10 +8,10 @@ use crate::event::{
     ApprovalDecision, ChatApproval, ChatAttachPaths, ChatCancel, ChatChoiceSelected,
     ChatComposerMenuChanged, ChatComposerMenuKind, ChatComposerMenuState, ChatEscape,
     ChatGoToBranch, ChatListKind, ChatListSelectionChanged, ChatListSelectionState,
-    ChatSelectWorkspace, ChatSlashCommandRequest, ChatSubmit, ResumeSession, SelectMode,
-    SelectModel, SetAgentEffort,
+    ChatSelectWorkspace, ChatSelectorKind, ChatSelectorState, ChatSlashCommandRequest, ChatSubmit,
+    ResumeSession, SelectMode, SelectModel, SetAgentEffort,
 };
-use bevy_app::{App, Plugin, Startup};
+use bevy_app::{App, Plugin, Startup, Update};
 use bevy_cef::prelude::UiInput;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
@@ -39,6 +39,7 @@ impl Plugin for ChatKeyPlugin {
             ChatComposerMenuChanged,
         )>::default())
             .add_systems(Startup, bind_commands.in_set(BindCommands))
+            .add_systems(Update, project_selector)
             .add_observer(move_list)
             .add_observer(choose_list)
             .add_observer(choose_number)
@@ -57,6 +58,9 @@ pub(super) struct ChatListSelection {
     list: Option<ChatListIdentity>,
     index: usize,
 }
+
+#[derive(Component, Default)]
+pub(super) struct ChatSelectorProjection(pub ChatSelectorState);
 
 impl ChatListSelection {
     fn current(&mut self, list: &ActiveChatList) -> &mut usize {
@@ -185,6 +189,53 @@ struct ChatLists<'w, 's> {
 }
 
 impl ChatLists<'_, '_> {
+    fn selector(&self, webview: Entity, draft: &str) -> ChatSelectorState {
+        if inline_media_query(draft).is_some() {
+            return ChatSelectorState {
+                kind: ChatSelectorKind::Media,
+                ..Default::default()
+            };
+        }
+        match SelectorMode::from_draft(draft) {
+            SelectorMode::Mcp(query) => ChatSelectorState {
+                kind: ChatSelectorKind::Mcp,
+                mcp_servers: self.mcp_entries(webview, query),
+                ..Default::default()
+            },
+            SelectorMode::Resume(_) => ChatSelectorState {
+                kind: ChatSelectorKind::Resume,
+                ..Default::default()
+            },
+            SelectorMode::Models(query) => ChatSelectorState {
+                kind: ChatSelectorKind::Model,
+                models: self
+                    .models
+                    .get(webview)
+                    .map(|projection| projection.filtered(query))
+                    .unwrap_or_default(),
+                ..Default::default()
+            },
+            SelectorMode::Commands(query) => {
+                let commands = self
+                    .commands
+                    .get(webview)
+                    .map(|projection| projection.filtered(query))
+                    .unwrap_or_default();
+                let kind = if commands.is_empty() {
+                    ChatSelectorKind::None
+                } else {
+                    ChatSelectorKind::Command
+                };
+                ChatSelectorState {
+                    kind,
+                    commands,
+                    ..Default::default()
+                }
+            }
+            SelectorMode::None => ChatSelectorState::default(),
+        }
+    }
+
     fn active(&self, webview: Entity, draft: &str) -> Option<ActiveChatList> {
         if let Ok(snapshot) = self.snapshots.get(webview)
             && let Some(approval) = &snapshot.0.approval
@@ -335,6 +386,27 @@ impl ChatLists<'_, '_> {
             }
         }
         matching
+    }
+}
+
+fn project_selector(
+    lists: ChatLists,
+    composers: Query<&ComposerState>,
+    mut projections: Query<(Entity, &mut ChatSelectorProjection), With<ChatView>>,
+    mut commands: Commands,
+) {
+    for (webview, mut projection) in &mut projections {
+        let Ok(composer) = composers.get(webview) else {
+            continue;
+        };
+        let state = lists.selector(webview, composer.draft());
+        if projection.0 == state {
+            continue;
+        }
+        projection.0 = state.clone();
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(webview, &state),
+        );
     }
 }
 
@@ -888,6 +960,7 @@ fn cancel(
 mod tests {
     use super::super::state::ChatUiState;
     use super::*;
+    use crate::event::{ModelOptionEntry, ModelState};
     use bevy::MinimalPlugins;
     use vmux_command::CommandInvocation;
     use vmux_core::host::UiStateWrite;
@@ -1028,5 +1101,42 @@ mod tests {
         Echo::issue(&mut app, page, "chat_list_choose");
 
         assert_eq!(app.world().resource::<ChoiceNumbers>().0, vec![(page, 1)]);
+    }
+
+    #[test]
+    fn selector_filtering_is_projected_by_host_ecs() {
+        let mut app = Echo::app();
+        let page = app
+            .world_mut()
+            .spawn((
+                ChatView,
+                ModelPickerProjection(ModelState {
+                    models: vec![
+                        ModelOptionEntry {
+                            id: "claude-sonnet".into(),
+                            name: "Sonnet".into(),
+                            description: "Balanced".into(),
+                        },
+                        ModelOptionEntry {
+                            id: "claude-opus".into(),
+                            name: "Opus".into(),
+                            description: "Most capable".into(),
+                        },
+                    ],
+                    ..Default::default()
+                }),
+            ))
+            .id();
+        app.world_mut()
+            .get_mut::<ComposerState>(page)
+            .unwrap()
+            .update("/model son");
+
+        app.update();
+
+        let selector = &app.world().get::<ChatSelectorProjection>(page).unwrap().0;
+        assert_eq!(selector.kind, ChatSelectorKind::Model);
+        assert_eq!(selector.models.len(), 1);
+        assert_eq!(selector.models[0].id, "claude-sonnet");
     }
 }

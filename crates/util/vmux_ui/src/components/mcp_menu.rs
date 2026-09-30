@@ -25,22 +25,6 @@ impl McpConnections {
             id: server.id.clone(),
         });
     }
-
-    pub fn filtered(&self, query: &str) -> Vec<McpServerEntry> {
-        let query = query.trim().to_ascii_lowercase();
-        let mut matching = Vec::new();
-        for server in self.state.read().servers.iter() {
-            let description = McpServerText::description(server);
-            if query.is_empty()
-                || server.id.to_ascii_lowercase().contains(&query)
-                || server.name.to_ascii_lowercase().contains(&query)
-                || description.to_ascii_lowercase().contains(&query)
-            {
-                matching.push(server.clone());
-            }
-        }
-        matching
-    }
 }
 
 #[component]

@@ -34,3 +34,43 @@ impl<'a> SelectorMode<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn distinguishes_mcp_and_other_selector_arguments() {
+        assert_eq!(SelectorMode::from_draft("hello"), SelectorMode::None);
+        assert_eq!(
+            SelectorMode::from_draft("/res"),
+            SelectorMode::Commands("res")
+        );
+        assert_eq!(
+            SelectorMode::from_draft("/resume"),
+            SelectorMode::Commands("resume")
+        );
+        assert_eq!(
+            SelectorMode::from_draft("/resume "),
+            SelectorMode::Resume("")
+        );
+        assert_eq!(
+            SelectorMode::from_draft("/model"),
+            SelectorMode::Commands("model")
+        );
+        assert_eq!(
+            SelectorMode::from_draft("/model son"),
+            SelectorMode::Models("son")
+        );
+        assert_eq!(SelectorMode::from_draft("/mcp"), SelectorMode::Mcp(""));
+        assert_eq!(
+            SelectorMode::from_draft("/mcp lin"),
+            SelectorMode::Mcp("lin")
+        );
+        assert_eq!(
+            SelectorMode::from_draft("/resume  SID-9"),
+            SelectorMode::Resume("SID-9")
+        );
+        assert_eq!(SelectorMode::from_draft("/unknown arg"), SelectorMode::None);
+    }
+}

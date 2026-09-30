@@ -254,6 +254,25 @@ pub enum ChatListKind {
     Command,
 }
 
+#[vmux_api::contract(Copy, Default, Eq)]
+pub enum ChatSelectorKind {
+    #[default]
+    None,
+    Media,
+    Resume,
+    Mcp,
+    Model,
+    Command,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatSelectorState {
+    pub kind: ChatSelectorKind,
+    pub commands: Vec<SlashCommandEntry>,
+    pub models: Vec<ModelOptionEntry>,
+    pub mcp_servers: Vec<vmux_api::mcp::McpServerEntry>,
+}
+
 #[vmux_api::contract(Copy, Eq)]
 pub struct ChatListSelectionState {
     pub kind: ChatListKind,

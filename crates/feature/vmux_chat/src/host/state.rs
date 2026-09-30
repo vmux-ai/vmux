@@ -3,8 +3,8 @@ use super::prompt::{AttachmentPreviews, Attachments, Browsed, Media};
 use super::room::{Agents, Conversation, LiveTurn, Log, RoomTranscript, Snapshot};
 use crate::event::{
     ChatAttachments, ChatBranchesState, ChatComposerEffect, ChatComposerMenuState,
-    ChatListSelectionState, ChatMediaState, ChatPromptFocusEffect, ChatResumeState, ChatSnapshot,
-    ChatTranscriptState, ComposerContext, ModeState, ModelState, SlashCommands,
+    ChatListSelectionState, ChatMediaState, ChatPromptFocusEffect, ChatResumeState,
+    ChatSelectorState, ChatSnapshot, ChatTranscriptState, ComposerContext, ModeState, ModelState,
 };
 use bevy_app::{App, Last, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -38,9 +38,9 @@ pub struct ChatUiStatePatch {
     pub composer: Option<ComposerContext>,
     pub mode: Option<ModeState>,
     pub model: Option<ModelState>,
-    pub slash_commands: Option<SlashCommands>,
     pub list_selection: Option<ChatListSelectionState>,
     pub composer_menu: Option<ChatComposerMenuState>,
+    pub selector: Option<ChatSelectorState>,
     pub transcript: Option<Box<ChatTranscriptState>>,
     pub attachments: Option<Box<ChatAttachments>>,
     pub media: Option<Box<ChatMediaState>>,

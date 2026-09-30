@@ -70,20 +70,11 @@ impl SlashCommandProjection {
         let query = query.to_lowercase();
         let mut matching = Vec::new();
         for command in &self.0.commands {
-            if Self::name(command.command).starts_with(&query) {
+            if command.command.name().starts_with(&query) {
                 matching.push(command.clone());
             }
         }
         matching
-    }
-
-    fn name(command: SlashCommand) -> &'static str {
-        match command {
-            SlashCommand::Upload => "upload",
-            SlashCommand::Resume => "resume",
-            SlashCommand::Mcp => "mcp",
-            SlashCommand::Model => "model",
-        }
     }
 }
 
@@ -190,16 +181,8 @@ fn publish_model_state(trigger: On<ChatModelStateChanged>, mut commands: Command
     commands
         .entity(event.webview)
         .insert(SlashCommandProjection(SlashCommands {
-            commands: commands_list.clone(),
+            commands: commands_list,
         }));
-    commands.trigger(
-        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
-            event.webview,
-            &SlashCommands {
-                commands: commands_list,
-            },
-        ),
-    );
 }
 
 fn publish_mode_state(trigger: On<ChatModeStateChanged>, mut commands: Commands) {
@@ -254,9 +237,13 @@ mod tests {
         app.world_mut().flush();
 
         let published = &app.world().resource::<Published>().0;
-        assert_eq!(published.len(), 2);
+        assert_eq!(published.len(), 1);
         assert!(published[0].model.is_some());
-        let commands = published[1].slash_commands.as_ref().unwrap();
+        let commands = &app
+            .world()
+            .get::<SlashCommandProjection>(webview)
+            .unwrap()
+            .0;
         assert_eq!(
             commands
                 .commands
@@ -270,5 +257,28 @@ mod tests {
                 SlashCommand::Model,
             ]
         );
+    }
+
+    #[test]
+    fn model_filtering_is_host_owned() {
+        let models = ModelPickerProjection(ModelState {
+            models: vec![
+                ModelOptionEntry {
+                    id: "claude-sonnet".into(),
+                    name: "Sonnet".into(),
+                    description: "Balanced".into(),
+                },
+                ModelOptionEntry {
+                    id: "claude-opus".into(),
+                    name: "Opus".into(),
+                    description: "Most capable".into(),
+                },
+            ],
+            ..Default::default()
+        });
+
+        assert_eq!(models.filtered("son")[0].id, "claude-sonnet");
+        assert_eq!(models.filtered("capable")[0].id, "claude-opus");
+        assert_eq!(models.filtered("claude-opus")[0].name, "Opus");
     }
 }

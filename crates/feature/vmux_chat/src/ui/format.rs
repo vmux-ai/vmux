@@ -1,5 +1,3 @@
-use crate::event::ModelOptionEntry;
-pub(crate) use crate::selector::SelectorMode;
 use unicode_segmentation::UnicodeSegmentation;
 #[cfg(ui)]
 pub(crate) use vmux_ui::prompt_recall::{PromptHistoryDirection, prompt_history_direction};
@@ -31,31 +29,6 @@ impl ResumeMenuState {
         } else {
             Self::Results
         }
-    }
-}
-
-pub(crate) struct ModelOptions(Vec<ModelOptionEntry>);
-
-impl ModelOptions {
-    pub(crate) fn new(models: Vec<ModelOptionEntry>) -> Self {
-        Self(models)
-    }
-
-    pub(crate) fn filtered(&self, query: &str) -> Vec<ModelOptionEntry> {
-        let query = query.trim().to_lowercase();
-        if query.is_empty() {
-            return self.0.clone();
-        }
-        let mut matching = Vec::new();
-        for model in &self.0 {
-            if model.id.to_lowercase().contains(&query)
-                || model.name.to_lowercase().contains(&query)
-                || model.description.to_lowercase().contains(&query)
-            {
-                matching.push(model.clone());
-            }
-        }
-        matching
     }
 }
 
@@ -205,61 +178,6 @@ impl PromptEdit {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn selector_mode_distinguishes_mcp_and_other_selector_arguments() {
-        assert_eq!(SelectorMode::from_draft("hello"), SelectorMode::None);
-        assert_eq!(
-            SelectorMode::from_draft("/res"),
-            SelectorMode::Commands("res")
-        );
-        assert_eq!(
-            SelectorMode::from_draft("/resume"),
-            SelectorMode::Commands("resume")
-        );
-        assert_eq!(
-            SelectorMode::from_draft("/resume "),
-            SelectorMode::Resume("")
-        );
-        assert_eq!(
-            SelectorMode::from_draft("/model"),
-            SelectorMode::Commands("model")
-        );
-        assert_eq!(
-            SelectorMode::from_draft("/model son"),
-            SelectorMode::Models("son")
-        );
-        assert_eq!(SelectorMode::from_draft("/mcp"), SelectorMode::Mcp(""));
-        assert_eq!(
-            SelectorMode::from_draft("/mcp lin"),
-            SelectorMode::Mcp("lin")
-        );
-        assert_eq!(
-            SelectorMode::from_draft("/resume  SID-9"),
-            SelectorMode::Resume("SID-9")
-        );
-        assert_eq!(SelectorMode::from_draft("/unknown arg"), SelectorMode::None);
-    }
-
-    #[test]
-    fn models_filter_by_name_id_and_description() {
-        let models = vec![
-            ModelOptionEntry {
-                id: "claude-sonnet".into(),
-                name: "Sonnet".into(),
-                description: "Balanced".into(),
-            },
-            ModelOptionEntry {
-                id: "claude-opus".into(),
-                name: "Opus".into(),
-                description: "Most capable".into(),
-            },
-        ];
-        let models = ModelOptions::new(models);
-        assert_eq!(models.filtered("son")[0].id, "claude-sonnet");
-        assert_eq!(models.filtered("capable")[0].id, "claude-opus");
-        assert_eq!(models.filtered("claude-opus")[0].name, "Opus");
-    }
 
     #[test]
     fn resume_menu_distinguishes_loading_from_loaded_empty() {

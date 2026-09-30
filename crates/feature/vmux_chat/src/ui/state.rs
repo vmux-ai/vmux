@@ -1,4 +1,4 @@
-use super::format::{ChatPageTitle, ImportedMessages, ModelOptions, ResumeMenuState, SelectorMode};
+use super::format::{ChatPageTitle, ImportedMessages, ResumeMenuState};
 use super::scroll;
 use crate::event::ChatResumeState;
 use crate::event::{
@@ -6,10 +6,10 @@ use crate::event::{
     ChatBranchesRequest, ChatBranchesState, ChatChoiceSelected, ChatComposerEffect,
     ChatComposerMenuChanged, ChatComposerMenuKind, ChatComposerMenuState, ChatDraftChanged,
     ChatHistoryMoreRequest, ChatItem, ChatListKind, ChatListSelectionChanged,
-    ChatListSelectionState, ChatMediaEntry, ChatMediaState, ChatRemoveAttachment,
-    ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit, ChatTranscriptState,
-    ComposerContext, ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry, ResumeSession,
-    SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
+    ChatListSelectionState, ChatMediaEntry, ChatMediaState, ChatRemoveAttachment, ChatSelectorKind,
+    ChatSelectorState, ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit,
+    ChatTranscriptState, ComposerContext, ModelOptionEntry, QueuedPromptSnapshot,
+    ResumableSessionEntry, ResumeSession, SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
 };
 use crate::host::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
@@ -47,6 +47,7 @@ pub struct Chat {
     pub projects: ProjectPicker,
     pub slash: SlashCommands,
     pub resume: Resume,
+    pub selector: Signal<ChatSelectorState>,
     pub menu: ComposerMenu,
 }
 
@@ -70,6 +71,7 @@ pub fn use_chat() -> Chat {
         projects: use_project_picker(),
         slash: use_slash_commands(),
         resume: use_resume(),
+        selector: use_signal(ChatSelectorState::default),
         menu: use_composer_menu(),
     };
     chat.listen();
@@ -102,7 +104,6 @@ impl Chat {
             current_mode_id.set(state.current_mode_id.clone());
         }
         if let Some(state) = &patch.model {
-            let mut models = self.models.models;
             let mut current_model_id = self.models.current_model_id;
             let mut default_model_id = self.models.default_model_id;
             let mut current_model = self.models.current_model;
@@ -112,7 +113,6 @@ impl Chat {
             let mut default_level = self.effort.default_level;
             let mut agent_key = self.effort.agent_key;
             let mut menu_sel = self.slash.menu_sel;
-            models.set(state.models.clone());
             current_model_id.set(state.current_model_id.clone());
             default_model_id.set(state.default_model_id.clone());
             current_model.set(state.current_model_name.clone());
@@ -122,10 +122,6 @@ impl Chat {
             agent_key.set(state.agent_key.clone());
             menu_sel.set(0);
             loaded.set(true);
-        }
-        if let Some(incoming) = &patch.slash_commands {
-            let mut commands = self.slash.commands;
-            commands.set(incoming.commands.clone());
         }
         if let Some(state) = &patch.transcript {
             self.apply_transcript(state);
@@ -157,6 +153,9 @@ impl Chat {
         }
         if let Some(menu) = &patch.composer_menu {
             self.apply_composer_menu(menu);
+        }
+        if let Some(selector) = &patch.selector {
+            set_if_changed(self.selector, selector.clone());
         }
     }
 
@@ -258,16 +257,12 @@ impl Chat {
             scroll::to_bottom(chat.transcript.scroll_container);
         });
         use_selector(chat.slash.menu_sel, move |selected| {
-            let media_open = {
-                let draft = chat.composer.draft.read();
-                inline_media_query(&draft).is_some()
-            };
+            let selector = chat.selector.read().kind;
             let _ = chat.resume.sessions.read().len();
-            let _ = chat.models.models.read().len();
             let _ = chat.media.entries.read().len();
             if !chat.run.choice_options.read().is_empty() {
                 format!("agent-choice-item-{selected}")
-            } else if media_open {
+            } else if selector == ChatSelectorKind::Media {
                 format!("prompt-media-item-{selected}")
             } else {
                 format!("agent-selector-item-{selected}")
@@ -393,66 +388,31 @@ impl Chat {
     }
 
     pub fn filtered_commands(&self) -> Vec<SlashCommandEntry> {
-        let draft = self.draft();
-        let SelectorMode::Commands(query) = SelectorMode::from_draft(&draft) else {
-            return Vec::new();
-        };
-        let query = query.to_lowercase();
-        let mut matching = Vec::new();
-        for command in self.slash.commands.read().iter() {
-            if SlashCommands::name(command.command).starts_with(&query) {
-                matching.push(command.clone());
-            }
-        }
-        matching
+        self.selector.read().commands.clone()
     }
 
     pub fn filtered_models(&self) -> Vec<ModelOptionEntry> {
-        let draft = self.draft();
-        let SelectorMode::Models(query) = SelectorMode::from_draft(&draft) else {
-            return Vec::new();
-        };
-        self.models.filtered(query)
+        self.selector.read().models.clone()
     }
 
     pub fn filtered_mcp_servers(&self) -> Vec<vmux_api::mcp::McpServerEntry> {
-        let draft = self.draft();
-        let SelectorMode::Mcp(query) = SelectorMode::from_draft(&draft) else {
-            return Vec::new();
-        };
-        self.mcp.filtered(query)
+        self.selector.read().mcp_servers.clone()
     }
 
     pub fn command_menu_open(&self) -> bool {
-        !self.filtered_commands().is_empty()
+        self.selector.read().kind == ChatSelectorKind::Command
     }
 
     pub fn resume_menu_open(&self) -> bool {
-        matches!(
-            SelectorMode::from_draft(&self.draft()),
-            SelectorMode::Resume(_)
-        )
+        self.selector.read().kind == ChatSelectorKind::Resume
     }
 
     pub fn model_menu_open(&self) -> bool {
-        matches!(
-            SelectorMode::from_draft(&self.draft()),
-            SelectorMode::Models(_)
-        )
+        self.selector.read().kind == ChatSelectorKind::Model
     }
 
     pub fn mcp_menu_open(&self) -> bool {
-        #[cfg(host)]
-        {
-            matches!(
-                SelectorMode::from_draft(&self.draft()),
-                SelectorMode::Mcp(_)
-            )
-        }
-        #[cfg(not(host))]
-        {
-            false
-        }
+        self.selector.read().kind == ChatSelectorKind::Mcp
     }
 
     pub fn selector_open(&self) -> bool {
@@ -476,7 +436,7 @@ impl Chat {
     }
 
     pub fn media_menu_open(&self) -> bool {
-        inline_media_query(&self.draft()).is_some()
+        self.selector.read().kind == ChatSelectorKind::Media
     }
 
     pub fn media_options(&self) -> Vec<PromptMediaOption> {
@@ -1030,22 +990,14 @@ pub fn use_media_picker() -> MediaPicker {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct ModelPicker {
-    pub models: Signal<Vec<ModelOptionEntry>>,
     pub current_model_id: Signal<String>,
     pub default_model_id: Signal<String>,
     pub current_model: Signal<String>,
     pub loaded: Signal<bool>,
 }
 
-impl ModelPicker {
-    fn filtered(&self, query: &str) -> Vec<ModelOptionEntry> {
-        ModelOptions::new(self.models.read().clone()).filtered(query)
-    }
-}
-
 pub fn use_model_picker() -> ModelPicker {
     ModelPicker {
-        models: use_signal(Vec::new),
         current_model_id: use_signal(String::new),
         default_model_id: use_signal(String::new),
         current_model: use_signal(String::new),
@@ -1102,25 +1054,12 @@ pub fn use_permission_picker() -> PermissionPicker {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct SlashCommands {
-    pub commands: Signal<Vec<SlashCommandEntry>>,
     pub menu_sel: Signal<usize>,
     pub composer_context: Signal<ComposerContext>,
 }
 
-impl SlashCommands {
-    pub const fn name(command: SlashCommand) -> &'static str {
-        match command {
-            SlashCommand::Upload => "upload",
-            SlashCommand::Resume => "resume",
-            SlashCommand::Mcp => "mcp",
-            SlashCommand::Model => "model",
-        }
-    }
-}
-
 pub fn use_slash_commands() -> SlashCommands {
     SlashCommands {
-        commands: use_signal(Vec::new),
         menu_sel: use_signal(|| 0),
         composer_context: use_signal(ComposerContext::default),
     }

@@ -229,7 +229,7 @@ pub enum RemoteEvent {
     },
 }
 
-#[vmux_api::contract(Default)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ModelOptionEntry {
     pub id: String,
     pub name: String,

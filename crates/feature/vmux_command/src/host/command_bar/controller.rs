@@ -14,7 +14,7 @@ use crate::command_bar::work_snapshot::WorkSnapshotPlugin;
 use crate::snapshot::{
     CommandBarProjection, ContributedCommand, ContributedPages, WriteCommandBarSnapshots,
 };
-use crate::{CommandInvocation, CommandRegistry, ReadCommandRequests};
+use crate::{CommandDefinition, CommandInvocation, CommandRegistry, ReadCommandRequests};
 use bevy::{
     ecs::{message::MessageReader, system::SystemParam},
     prelude::*,
@@ -837,7 +837,7 @@ fn mirror_project_roots(mut state: Single<&mut CommandBarProjection>) {
 mod tests {
     use super::*;
     use crate::command_bar_open_payload;
-    use crate::{CommandDefinition, CommandPlugin, ReadCommandRequests};
+    use crate::{CommandPlugin, ReadCommandRequests};
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use bevy::ecs::system::RunSystemOnce;
     use vmux_api::command_bar::{

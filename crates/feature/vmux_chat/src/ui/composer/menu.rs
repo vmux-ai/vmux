@@ -46,8 +46,7 @@ pub(super) fn CommandMenu(chat: Chat) -> Element {
                             key: "sc{index}",
                             index,
                             item: CommandBarResultItem::Slash {
-                                name: crate::ui::state::SlashCommands::name(command.command)
-                                    .to_string(),
+                                name: command.command.name().to_string(),
                                 hint,
                             },
                             selected: index == menu_sel(),
