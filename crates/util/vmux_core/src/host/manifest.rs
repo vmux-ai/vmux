@@ -239,14 +239,23 @@ impl<M> Default for FeaturePlugin<M> {
 
 impl<M: FeatureManifestSource> Plugin for FeaturePlugin<M> {
     fn build(&self, app: &mut App) {
+        if app
+            .world()
+            .iter_entities()
+            .any(|entity| entity.contains::<FeatureManifestOwner<M>>())
+        {
+            return;
+        }
         let manifest = FeatureManifest::of::<M>();
-        app.add_systems(PreStartup, move |mut commands: Commands| {
-            commands.spawn((
-                Name::new(std::any::type_name::<M>()),
-                FeatureManifestOwner::<M>(PhantomData),
-                manifest.clone(),
-            ));
-        });
+        app.world_mut().spawn((
+            Name::new(std::any::type_name::<M>()),
+            FeatureManifestOwner::<M>(PhantomData),
+            manifest,
+        ));
+    }
+
+    fn is_unique(&self) -> bool {
+        false
     }
 }
 
@@ -347,5 +356,22 @@ mod tests {
             .iter(app.world())
             .count();
         assert_eq!(manifests, 2);
+    }
+
+    #[test]
+    fn repeated_feature_registration_reuses_the_source_entity() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            FeaturePlugin::<Feature>::default(),
+            FeaturePlugin::<Feature>::default(),
+        ));
+
+        let manifests = app
+            .world_mut()
+            .query_filtered::<&FeatureManifest, With<FeatureManifestOwner<Feature>>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(manifests, 1);
     }
 }
