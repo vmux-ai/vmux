@@ -3,10 +3,9 @@ use bevy::prelude::*;
 use vmux_api::protocol::ClientMessage;
 use vmux_api::protocol::SharedMessage;
 use vmux_command::WriteCommandRequests;
-use vmux_core::agent::{AgentContinuationRequest, AgentSession};
+use vmux_core::agent::AgentContinuationRequest;
 use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
 use vmux_session::{AcpSession, AgentRunState};
-use vmux_terminal::BufferedAgentPrompt;
 
 pub(super) struct AgentContinuationPlugin;
 
@@ -43,24 +42,13 @@ fn send_continuations(
         Entity,
         &PendingAgentContinuation,
         Option<&AcpSession>,
-        Option<&AgentSession>,
         Option<&mut AgentRunState>,
     )>,
     connected: Option<Single<(), With<ServiceConnected>>>,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    for (entity, continuation, acp, cli, state) in &mut sessions {
-        if cli.is_some() {
-            commands
-                .entity(entity)
-                .insert(BufferedAgentPrompt {
-                    text: continuation.0.clone(),
-                    submit: true,
-                })
-                .remove::<PendingAgentContinuation>();
-            continue;
-        }
+    for (entity, continuation, acp, state) in &mut sessions {
         if connected.is_none() {
             continue;
         }
@@ -88,40 +76,6 @@ fn send_continuations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::agent::AgentKind;
-
-    #[test]
-    fn cli_workspace_continuation_queues_terminal_prompt_without_service_wait() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<ServiceRequest>()
-            .add_systems(Update, send_continuations);
-        let entity = app
-            .world_mut()
-            .spawn((
-                AgentSession {
-                    kind: AgentKind::Codex,
-                },
-                PendingAgentContinuation("continue original request".to_string()),
-            ))
-            .id();
-
-        app.update();
-
-        assert!(
-            app.world()
-                .get::<PendingAgentContinuation>(entity)
-                .is_none()
-        );
-        assert_eq!(
-            app.world().get::<BufferedAgentPrompt>(entity).unwrap(),
-            &BufferedAgentPrompt {
-                text: "continue original request".to_string(),
-                submit: true,
-            }
-        );
-    }
-
     #[test]
     fn chat_workspace_continuation_is_private_same_session_input() {
         let message: ClientMessage = SharedMessage::AgentInput {

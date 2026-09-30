@@ -2,8 +2,6 @@ use bevy::prelude::*;
 #[cfg(test)]
 use vmux_api::protocol::AgentRequest;
 use vmux_api::protocol::{AgentTurnEnded, ProcessId};
-#[cfg(test)]
-use vmux_core::agent::AgentKind as CoreAgentKind;
 use vmux_core::notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 use vmux_core::service::ServiceMessageSet;
 use vmux_core::team::{Agent, Profile};
@@ -11,7 +9,7 @@ use vmux_layout::active_pane::ActiveStack;
 use vmux_layout::stack::{ComputeFocusSet, FocusedStack, Stack};
 
 use crate::event::AgentRequestInput;
-use crate::session::SessionId;
+use vmux_core::agent::SessionId;
 
 pub(super) struct AttentionPlugin;
 
@@ -216,7 +214,7 @@ mod tests {
             .spawn((
                 Agent {
                     sid: "s".to_string(),
-                    kind: Some(CoreAgentKind::Claude),
+                    kind: None,
                 },
                 pid,
             ))
@@ -313,7 +311,7 @@ mod tests {
         let stack = app.world_mut().spawn(Stack::default()).id();
         let agent = app
             .world_mut()
-            .spawn((Profile::agent(CoreAgentKind::Claude), ChildOf(stack)))
+            .spawn((Profile::registry("Agent", "test-agent"), ChildOf(stack)))
             .id();
         (agent, stack)
     }
@@ -385,7 +383,7 @@ mod tests {
         let mut app = done_test_app();
         let stack = app
             .world_mut()
-            .spawn((Stack::default(), Profile::agent(CoreAgentKind::Claude)))
+            .spawn((Stack::default(), Profile::registry("Agent", "test-agent")))
             .id();
         set_window(&mut app, true);
         focus_stack(&mut app, stack);

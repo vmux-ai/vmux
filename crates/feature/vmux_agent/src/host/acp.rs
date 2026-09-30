@@ -27,7 +27,7 @@ pub(super) use config::AcpSessionConfigPlugin;
 
 use self::environment::AcpEnvironment;
 use self::install::{resolve_from_registry, uninstall};
-use self::registry::{Registry, RegistryAgent};
+use self::registry::Registry;
 use vmux_session::AgentRunState;
 
 pub(crate) struct AcpToolPlugin;
@@ -258,7 +258,7 @@ fn start_acp_installs(
             .agent
             .acp
             .iter()
-            .find(|config| RegistryAgent::ids_match(&config.id, &session.agent_id))
+            .find(|config| config.id == session.agent_id)
             .cloned();
         let request = AcpInstallRequest {
             agent_id: session.agent_id.clone(),

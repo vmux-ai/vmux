@@ -4,9 +4,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use crate::event::AgentRequestInput;
 #[cfg(test)]
 use crate::host::model_selection::SavedAgentModel;
-use crate::host::model_selection::{
-    AcpSessionConfigRequestCounter, AgentSelectionKey, ModelSelectionPlugin,
-};
+use crate::host::model_selection::{AcpSessionConfigRequestCounter, ModelSelectionPlugin};
 use crate::host::model_selection::{AgentModeSelections, AgentModelSelections};
 use crate::runtime::acp::{AcpSessionConfigState, PendingAcpSessionConfig};
 use vmux_api::command_bar::{AgentModels, AgentModes};
@@ -20,7 +18,7 @@ use vmux_chat::event::{
     ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort,
 };
 use vmux_chat::host::{ChatModeStateChanged, ChatModelStateChanged, ChatView};
-use vmux_command::snapshot::CommandBarProjection;
+use vmux_command::snapshot::{AgentPromptTarget, CommandBarProjection};
 use vmux_core::page::PageReady;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_session::AcpSession;
@@ -320,7 +318,7 @@ fn remember_acp_model_lists(
             })
             .collect::<Vec<_>>();
         let current = state.display_value(model).to_string();
-        let url = AgentSelectionKey::acp_url(&session.agent_id);
+        let url = AgentPromptTarget::new(&session.agent_id).url();
         last_used.remember_catalog(&session.agent_id, &url, &current, &listed);
     }
 }
@@ -342,7 +340,7 @@ fn remember_acp_mode_lists(
                 description: option.description.clone(),
             })
             .collect::<Vec<_>>();
-        let url = AgentSelectionKey::acp_url(&session.agent_id);
+        let url = AgentPromptTarget::new(&session.agent_id).url();
         last_used.remember_catalog(&session.agent_id, &url, state.display_value(mode), &modes);
     }
 }
@@ -534,10 +532,7 @@ fn apply_last_used_acp_model(
     mut requests: MessageWriter<AcpSetSessionConfigRequest>,
 ) {
     for (session, mut state) in &mut sessions {
-        let Some(remembered) = last_used
-            .by_agent
-            .get(AgentSelectionKey::normalize(&session.agent_id))
-        else {
+        let Some(remembered) = last_used.by_agent.get(&session.agent_id) else {
             continue;
         };
         let model_id = &remembered.selected;
@@ -847,25 +842,6 @@ mod tests {
                 .selected_for("codex-acp"),
             "agent"
         );
-    }
-
-    #[test]
-    fn agent_selection_keys_stay_stable_when_loaded_again() {
-        for agent_id in [
-            "claude",
-            "claude-acp",
-            "codex",
-            "codex-acp",
-            "vibe",
-            "vibe-acp",
-            "mistral-vibe",
-            "custom",
-            "custom-acp",
-        ] {
-            let once = AgentSelectionKey::normalize(agent_id);
-            let twice = AgentSelectionKey::normalize(once);
-            assert_eq!(once, twice, "{agent_id}");
-        }
     }
 
     #[test]

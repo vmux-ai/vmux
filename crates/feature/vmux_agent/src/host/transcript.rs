@@ -528,8 +528,6 @@ fn apply_chat_history_results(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::agent::AgentKind;
-
     #[test]
     fn streaming_snapshots_wait_for_frame_interval() {
         assert!(!chat_snapshot_due(
@@ -562,7 +560,6 @@ mod tests {
     fn snapshot_reports_grouped_imported_item_boundary() {
         let imported = ImportedConversation {
             source_agent: "Codex".into(),
-            source_kind: AgentKind::Codex,
             source_sid: "codex-1".into(),
             messages: vec![
                 crate::Message::user("one"),

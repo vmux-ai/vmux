@@ -413,17 +413,13 @@ pub(super) fn resolve_from_registry(
     emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<ResolvedAgent, String> {
     let reg_id = agent_id;
-    let find = |reg: Registry| {
-        reg.agents
-            .into_iter()
-            .find(|agent| RegistryAgent::ids_match(&agent.id, agent_id))
-    };
+    let find = |reg: Registry| reg.agents.into_iter().find(|agent| agent.id == agent_id);
     let agent = match Registry::cached().and_then(find) {
         Some(a) => a,
         None => Registry::fetch_blocking()?
             .agents
             .into_iter()
-            .find(|agent| RegistryAgent::ids_match(&agent.id, agent_id))
+            .find(|agent| agent.id == agent_id)
             .ok_or_else(|| format!("agent not in ACP registry: {agent_id} ({reg_id})"))?,
     };
     ensure_installed(&agent, version, emit)

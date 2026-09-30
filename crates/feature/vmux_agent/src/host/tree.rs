@@ -1,75 +1,46 @@
 use bevy::prelude::*;
-use vmux_core::agent::{RestartAgentPty, SpawnAgentInStackRequest, SwapStackSession};
+use vmux_core::agent::SwapStackSession;
 use vmux_core::host::persistence::WorkspaceStoreValidator;
 use vmux_core::notify::{AgentAttention, BellReceived, OsNotify};
 use vmux_core::{HostSpawnRoute, PageOpenRequest};
-use vmux_terminal::TerminalStackSpawnRequest;
 
 use crate::event::{AgentRequestInput, AgentToolCallRequest};
-use crate::session;
 
 pub struct AgentPlugin;
 
 impl Plugin for AgentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            AgentSessionPlugin,
-            AgentPagesPlugin,
-            crate::AgentToolPlugin,
-            crate::runtime::AgentRuntimePlugin,
-        ));
-    }
-}
-
-pub struct AgentPagesPlugin;
-
-impl Plugin for AgentPagesPlugin {
-    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::manifest::AgentManifestPlugin>() {
+            app.add_plugins(crate::manifest::AgentManifestPlugin);
+        }
         app.add_plugins((
             vmux_chat::ChatPlugin,
             super::acp::AcpSessionConfigPlugin,
             super::transcript::ChatTranscriptPlugin,
-            crate::setup::AgentSetupPlugin,
-        ));
-    }
-}
-
-pub struct AgentSessionPlugin;
-
-impl Plugin for AgentSessionPlugin {
-    fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<crate::manifest::AgentManifestPlugin>() {
-            app.add_plugins(crate::manifest::AgentManifestPlugin);
-        }
-        app.add_systems(PreStartup, spawn_agent_store_validator);
-        app.add_systems(Startup, register_agent_session_route);
-        app.add_plugins(super::cli::CliPlugin);
-        app.add_plugins((
+            crate::runtime::AgentRuntimePlugin,
             vmux_layout::LayoutContractPlugin,
             vmux_editor::ContractPlugin,
             vmux_terminal::TerminalContractPlugin,
-        ))
-        .add_plugins((
             vmux_session::room::RoomPlugin,
             crate::command_bar::CommandBarPlugin,
             super::approval::ApprovalPlugin,
             super::attach::AttachPlugin,
             super::attention::AttentionPlugin,
             super::command::CommandPlugin,
+            super::continuation::AgentContinuationPlugin,
+        ))
+        .add_plugins((
             super::follow::FollowPlugin,
             super::ingress::AgentIngressPlugin,
             super::page_open::PageOpenPlugin,
-            session::AgentSessionLifecyclePlugin,
             super::snapshot::SnapshotPlugin,
-            super::spawn::SpawnPlugin,
             super::tidy::TidyPlugin,
             super::toast::ToastPlugin,
         ))
+        .add_systems(PreStartup, spawn_agent_store_validator)
+        .add_systems(Startup, register_agent_session_route)
         .add_message::<AgentRequestInput>()
         .add_message::<AgentToolCallRequest>()
-        .add_message::<SpawnAgentInStackRequest>()
-        .add_message::<TerminalStackSpawnRequest>()
-        .add_message::<RestartAgentPty>()
         .add_message::<SwapStackSession>()
         .add_message::<BellReceived>()
         .add_message::<AgentAttention>()
@@ -90,49 +61,4 @@ fn spawn_agent_store_validator(mut commands: Commands) {
 
 fn register_agent_session_route(mut commands: Commands) {
     commands.spawn(HostSpawnRoute::subtree("vmux://sessions/"));
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use vmux_core::agent::{AgentCliKind, AgentKind};
-
-    #[test]
-    fn agent_plugin_registers_all_three_cli_entries() {
-        let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_command::CommandPlugin,
-            AgentSessionPlugin,
-        ));
-        app.world_mut().run_schedule(PreStartup);
-        app.world_mut().run_schedule(Startup);
-        let mut q = app.world_mut().query::<&AgentCliKind>();
-        let ids: std::collections::HashSet<&'static str> =
-            q.iter(app.world()).map(|p| p.0.as_url_segment()).collect();
-        for id in ["vibe", "claude", "codex"] {
-            assert!(ids.contains(id), "missing provider: {id}");
-        }
-    }
-
-    #[test]
-    fn agent_plugin_registers_three_cli_strategies() {
-        let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_command::CommandPlugin,
-            AgentSessionPlugin,
-        ));
-        app.world_mut().run_schedule(PreStartup);
-        app.world_mut().run_schedule(Startup);
-        let kinds = app
-            .world_mut()
-            .query::<&crate::CliSessionSource>()
-            .iter(app.world())
-            .map(|strategy| strategy.kind)
-            .collect::<std::collections::HashSet<_>>();
-        assert!(kinds.contains(&AgentKind::Vibe));
-        assert!(kinds.contains(&AgentKind::Claude));
-        assert!(kinds.contains(&AgentKind::Codex));
-    }
 }

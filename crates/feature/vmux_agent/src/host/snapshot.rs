@@ -87,7 +87,7 @@ fn acp_agent_summaries(
         .map(|agent| AgentSummary {
             id: agent.id.clone(),
             name: agent.name.clone(),
-            url: format!("vmux://sessions/{}", RegistryAgent::url_id(&agent.id)),
+            url: format!("vmux://sessions/{}", agent.id),
             icon: agent.icon.clone().unwrap_or_default(),
         })
         .collect();
@@ -113,14 +113,12 @@ fn update_recent_agents(
     for (session, timestamp) in &acp_sessions {
         consider(
             timestamp.map(|timestamp| timestamp.0).unwrap_or(i64::MIN),
-            AgentPromptTarget::new(RegistryAgent::url_id(&session.agent_id)),
+            AgentPromptTarget::new(&session.agent_id),
         );
     }
     for page in &archived_pages {
         let target = match crate::url::AgentUrl::parse(&page.url) {
-            Some(crate::url::AgentUrl::Acp { id, .. }) => {
-                AgentPromptTarget::new(RegistryAgent::url_id(&id))
-            }
+            Some(crate::url::AgentUrl::Acp { id, .. }) => AgentPromptTarget::new(&id),
             _ => continue,
         };
         consider(page.closed_at, target);
@@ -192,7 +190,7 @@ mod tests {
 
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].id, "new-agent-acp");
-        assert_eq!(agents[0].url, "vmux://sessions/new-agent");
+        assert_eq!(agents[0].url, "vmux://sessions/new-agent-acp");
     }
 
     #[test]
@@ -236,7 +234,10 @@ mod tests {
 
         assert_eq!(
             projection(&app).agents.recent,
-            vec![AgentPromptTarget::new("claude")]
+            vec![
+                AgentPromptTarget::new("claude"),
+                AgentPromptTarget::new("claude-acp")
+            ]
         );
 
         let mut q = app
@@ -250,7 +251,10 @@ mod tests {
 
         assert_eq!(
             projection(&app).agents.recent,
-            vec![AgentPromptTarget::new("claude")]
+            vec![
+                AgentPromptTarget::new("claude"),
+                AgentPromptTarget::new("claude-acp")
+            ]
         );
     }
 
@@ -267,7 +271,7 @@ mod tests {
 
         assert_eq!(
             projection(&app).agents.recent,
-            vec![AgentPromptTarget::new("codex")]
+            vec![AgentPromptTarget::new("codex-acp")]
         );
     }
 
@@ -300,8 +304,8 @@ mod tests {
         assert_eq!(
             projection(&app).agents.recent,
             vec![
-                AgentPromptTarget::new("claude"),
-                AgentPromptTarget::new("codex"),
+                AgentPromptTarget::new("claude-acp"),
+                AgentPromptTarget::new("codex-acp"),
             ]
         );
     }

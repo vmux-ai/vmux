@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use crate::{AgentKind, AssistantBlock, Message};
+use crate::{AssistantBlock, Message};
 
 pub const HANDOFF_PROMPT_PREFIX: &str = vmux_api::protocol::PRIVATE_CONTEXT_PREFIX;
 pub const OMITTED_MARKER: &str = "[Older source turns omitted]";
@@ -13,7 +13,6 @@ const CONTEXT_INTRO: &str = "Conversation imported from another agent:\n";
 #[derive(Component, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ImportedConversation {
     pub source_agent: String,
-    pub source_kind: AgentKind,
     pub source_sid: String,
     pub messages: Vec<Message>,
     pub truncated: bool,
@@ -343,7 +342,6 @@ mod tests {
         ));
         let imported = ImportedConversation {
             source_agent: "Codex".into(),
-            source_kind: AgentKind::Codex,
             source_sid: "cx/1".into(),
             messages: vec![user("fix auth"), assistant("working")],
             truncated: true,
@@ -386,7 +384,6 @@ mod tests {
     fn visible_messages_prepend_imported_history() {
         let imported = ImportedConversation {
             source_agent: "Codex".into(),
-            source_kind: AgentKind::Codex,
             source_sid: "cx-1".into(),
             messages: vec![user("old")],
             truncated: false,

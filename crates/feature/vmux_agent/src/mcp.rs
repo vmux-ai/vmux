@@ -4,35 +4,19 @@ use vmux_core::ProcessId;
 pub use vmux_core::agent::McpServerConfig;
 
 const LONG_RUN_TIMEOUT_SECS: u64 = 600;
-pub(crate) const LONG_MCP_TOOL_TIMEOUT_SECS: u64 = LONG_RUN_TIMEOUT_SECS + 60;
 
 pub(crate) struct McpLaunchSpec {
     cwd: PathBuf,
     anchor: ProcessId,
-    acp_session: bool,
-    acp_terminals: bool,
     run_timeout_secs: u64,
     shell: String,
 }
 
 impl McpLaunchSpec {
-    pub fn cli(cwd: &Path, anchor: ProcessId, shell: &str) -> Self {
-        Self {
-            cwd: cwd.to_path_buf(),
-            anchor,
-            acp_session: false,
-            acp_terminals: false,
-            run_timeout_secs: LONG_RUN_TIMEOUT_SECS,
-            shell: shell.to_string(),
-        }
-    }
-
     pub fn acp(cwd: &Path, anchor: ProcessId, shell: &str) -> Self {
         Self {
             cwd: cwd.to_path_buf(),
             anchor,
-            acp_session: true,
-            acp_terminals: true,
             run_timeout_secs: LONG_RUN_TIMEOUT_SECS,
             shell: shell.to_string(),
         }
@@ -85,12 +69,8 @@ impl McpLaunchSpec {
             args.push("--shell".to_string());
             args.push(self.shell.clone());
         }
-        if self.acp_session {
-            args.push("--acp-session".to_string());
-        }
-        if self.acp_terminals {
-            args.push("--acp-terminals".to_string());
-        }
+        args.push("--acp-session".to_string());
+        args.push("--acp-terminals".to_string());
         args
     }
 
@@ -122,7 +102,7 @@ mod tests {
     fn mcp_args_always_append_profile() {
         let anchor = ProcessId::new();
         for profile in ["personal", "gregor"] {
-            let args = McpLaunchSpec::cli(Path::new("/workspace"), anchor, "nu").args(profile);
+            let args = McpLaunchSpec::acp(Path::new("/workspace"), anchor, "nu").args(profile);
             assert!(
                 args.windows(2)
                     .any(|w| w[0] == "--profile" && w[1] == profile)
@@ -133,27 +113,15 @@ mod tests {
     #[test]
     fn acp_args_append_acp_terminals_flag() {
         let anchor = ProcessId::new();
-        let plain = McpLaunchSpec::cli(Path::new("/workspace"), anchor, "").args("personal");
         let acp = McpLaunchSpec::acp(Path::new("/workspace"), anchor, "").args("personal");
-        assert!(!plain.iter().any(|a| a == "--acp-session"));
         assert!(acp.iter().any(|a| a == "--acp-session"));
-        assert!(!plain.iter().any(|a| a == "--acp-terminals"));
         assert!(acp.iter().any(|a| a == "--acp-terminals"));
     }
 
     #[test]
     fn acp_uses_protocol_terminal_and_long_timeout() {
         let acp = McpLaunchSpec::acp(Path::new("/"), ProcessId::new(), "");
-        assert!(acp.acp_terminals);
         assert_eq!(acp.run_timeout_secs, LONG_RUN_TIMEOUT_SECS);
-    }
-
-    #[test]
-    fn cli_uses_long_tool_timeout() {
-        assert_eq!(
-            McpLaunchSpec::cli(Path::new("/"), ProcessId::new(), "").run_timeout_secs,
-            LONG_RUN_TIMEOUT_SECS
-        );
     }
 
     #[test]
@@ -164,7 +132,7 @@ mod tests {
         std::fs::write(workspace.join("Cargo.toml"), b"[workspace]\n").unwrap();
 
         let anchor = ProcessId::new();
-        let config = McpLaunchSpec::cli(&workspace, anchor, "/bin/zsh")
+        let config = McpLaunchSpec::acp(&workspace, anchor, "/bin/zsh")
             .resolve_with_sidecar(&temp.join("missing-vmux"), "personal")
             .unwrap();
         let _ = std::fs::remove_dir_all(&temp);
@@ -188,7 +156,9 @@ mod tests {
                 "--run-timeout-secs",
                 "600",
                 "--shell",
-                "/bin/zsh"
+                "/bin/zsh",
+                "--acp-session",
+                "--acp-terminals"
             ]
         );
         assert_eq!(config.cwd, Some(workspace));
@@ -202,7 +172,7 @@ mod tests {
         std::fs::write(workspace.join("Cargo.toml"), b"[workspace]\n").unwrap();
 
         let anchor = ProcessId::new();
-        let config = McpLaunchSpec::cli(&workspace, anchor, "/bin/zsh")
+        let config = McpLaunchSpec::acp(&workspace, anchor, "/bin/zsh")
             .resolve_with_sidecar(&temp.join("missing-vmux"), "personal")
             .unwrap();
         let _ = std::fs::remove_dir_all(&temp);

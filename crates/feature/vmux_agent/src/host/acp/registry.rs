@@ -113,14 +113,6 @@ pub enum Runtime {
 }
 
 impl RegistryAgent {
-    pub fn url_id(id: &str) -> &str {
-        id.strip_suffix("-acp").unwrap_or(id)
-    }
-
-    pub fn ids_match(left: &str, right: &str) -> bool {
-        left == right || Self::url_id(left) == Self::url_id(right)
-    }
-
     pub fn host_target() -> Option<&'static str> {
         match (std::env::consts::OS, std::env::consts::ARCH) {
             ("macos", "aarch64") => Some("darwin-aarch64"),
@@ -263,15 +255,5 @@ mod tests {
             assert_eq!(bin.args, vec!["acp".to_string()]);
         }
         let _ = vibe;
-    }
-
-    #[test]
-    fn ids_match_aliases_and_url_segments() {
-        assert_eq!(RegistryAgent::url_id("codex-acp"), "codex");
-        assert_eq!(RegistryAgent::url_id("mistral-vibe"), "mistral-vibe");
-        assert!(RegistryAgent::ids_match("codex", "codex-acp"));
-        assert!(RegistryAgent::ids_match("custom", "custom-acp"));
-        assert!(!RegistryAgent::ids_match("vibe", "mistral-vibe"));
-        assert!(!RegistryAgent::ids_match("codex", "custom-acp"));
     }
 }

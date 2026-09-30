@@ -8,7 +8,6 @@ use vmux_api::protocol::{
     AgentFileSearch, AgentFileTouched, FileSearchMatch, FileTouchKind, ProcessId,
 };
 use vmux_command::WriteCommandRequests;
-use vmux_core::agent::AgentKind;
 use vmux_core::event::{ExplorerSearchFile, ExplorerSearchMatch, FileViewMode};
 use vmux_core::file_url::FileUrl;
 use vmux_core::service::ServiceMessageSet;
@@ -33,7 +32,6 @@ use vmux_layout::worktree::{
 use vmux_setting::AppSettings;
 
 use crate::event::{AgentRequestInput, CommandOrigin};
-use crate::session::AgentSession;
 
 pub(super) struct FollowPlugin;
 
@@ -65,7 +63,6 @@ struct AgentFileResolve<'w, 's> {
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentFileLayout<'w, 's> {
     agent_terms: Query<'w, 's, (Entity, &'static ProcessId, &'static ChildOf)>,
-    kinds: Query<'w, 's, &'static AgentSession>,
     child_of: Query<'w, 's, &'static ChildOf>,
     file_pages: Query<
         'w,
@@ -105,14 +102,6 @@ impl AgentFileLayout<'_, '_> {
             .iter()
             .find(|(_, pid, _)| **pid == anchor)?;
         self.child_of.get(term_co.get()).ok().map(|co| co.get())
-    }
-
-    fn agent_kind(&self, anchor: ProcessId) -> Option<AgentKind> {
-        let (entity, _, _) = self
-            .agent_terms
-            .iter()
-            .find(|(_, pid, _)| **pid == anchor)?;
-        self.kinds.get(entity).ok().map(|session| session.kind)
     }
 
     fn ancestor_tab(&self, entity: Entity) -> Option<Entity> {
@@ -375,14 +364,13 @@ fn handle_agent_file_touch(
                 .map(|target| target.pane)
                 .or(existing.map(|(_, pane)| pane))
             {
-                let kind = resolve.layout.agent_kind(anchor);
                 resolve.activate.write(ActivatePane {
                     profile: vmux_layout::active_pane::ProfileId::Agent(format!("{anchor:?}")),
                     active: vmux_layout::active_pane::ActiveStack {
                         tab: None,
                         pane: Some(pane),
                         stack: None,
-                        kind,
+                        kind: None,
                     },
                 });
             }

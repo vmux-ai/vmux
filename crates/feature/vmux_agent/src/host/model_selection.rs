@@ -5,8 +5,6 @@ use vmux_command::snapshot::AgentPromptTarget;
 use vmux_core::profile::ProfilePaths;
 use vmux_path::AtomicFile;
 
-use crate::acp_registry::RegistryAgent;
-
 pub(super) struct ModelSelectionPlugin;
 
 impl Plugin for ModelSelectionPlugin {
@@ -58,18 +56,6 @@ pub(super) struct AgentModeMemory {
     pub(super) modes: Vec<AcpModeOption>,
 }
 
-pub(super) struct AgentSelectionKey;
-
-impl AgentSelectionKey {
-    pub(super) fn normalize(agent_id: &str) -> &str {
-        RegistryAgent::url_id(agent_id)
-    }
-
-    pub(super) fn acp_url(agent_id: &str) -> String {
-        AgentPromptTarget::new(Self::normalize(agent_id)).url()
-    }
-}
-
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 pub(super) enum SavedAgentModel {
@@ -117,12 +103,11 @@ fn load_agent_model_selections(mut models: Single<&mut AgentModelSelections>) {
         return;
     };
     for (agent, entry) in saved {
-        let key = AgentSelectionKey::normalize(&agent).to_string();
         let mut memory = entry.memory();
         if !memory.url.is_empty() {
-            memory.url = AgentSelectionKey::acp_url(&agent);
+            memory.url = AgentPromptTarget::new(&agent).url();
         }
-        models.by_agent.insert(key, memory);
+        models.by_agent.insert(agent, memory);
     }
     models.dirty = false;
 }
@@ -137,9 +122,8 @@ fn load_agent_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
         return;
     };
     for (agent, mut memory) in saved {
-        let key = AgentSelectionKey::normalize(&agent).to_string();
-        memory.url = AgentSelectionKey::acp_url(&agent);
-        modes.by_agent.insert(key, memory);
+        memory.url = AgentPromptTarget::new(&agent).url();
+        modes.by_agent.insert(agent, memory);
     }
     modes.dirty = false;
 }
@@ -175,8 +159,7 @@ pub(super) struct AcpSessionConfigRequestCounter(u64);
 
 impl AgentModelSelections {
     pub(super) fn select(&mut self, agent_id: &str, model_id: &str) {
-        let key = AgentSelectionKey::normalize(agent_id).to_string();
-        let entry = self.by_agent.entry(key).or_default();
+        let entry = self.by_agent.entry(agent_id.to_string()).or_default();
         if !entry.models.is_empty() && !entry.models.iter().any(|model| model.id == model_id) {
             return;
         }
@@ -187,8 +170,9 @@ impl AgentModelSelections {
         self.dirty = true;
     }
 
+    #[cfg(test)]
     pub(crate) fn selected_for(&self, agent_id: &str) -> &str {
-        match self.by_agent.get(AgentSelectionKey::normalize(agent_id)) {
+        match self.by_agent.get(agent_id) {
             Some(memory) => &memory.selected,
             None => "",
         }
@@ -204,8 +188,7 @@ impl AgentModelSelections {
         if models.is_empty() {
             return;
         }
-        let key = AgentSelectionKey::normalize(agent_id).to_string();
-        let entry = self.by_agent.entry(key).or_default();
+        let entry = self.by_agent.entry(agent_id.to_string()).or_default();
         let mut changed = false;
         if entry.url != url {
             entry.url = url.to_string();
@@ -234,8 +217,7 @@ impl AgentModelSelections {
 
 impl AgentModeSelections {
     pub(super) fn select(&mut self, agent_id: &str, mode_id: &str) {
-        let key = AgentSelectionKey::normalize(agent_id).to_string();
-        let entry = self.by_agent.entry(key).or_default();
+        let entry = self.by_agent.entry(agent_id.to_string()).or_default();
         if !entry.modes.is_empty() && !entry.modes.iter().any(|mode| mode.id == mode_id) {
             return;
         }
@@ -247,7 +229,7 @@ impl AgentModeSelections {
     }
 
     pub(crate) fn selected_for(&self, agent_id: &str) -> &str {
-        match self.by_agent.get(AgentSelectionKey::normalize(agent_id)) {
+        match self.by_agent.get(agent_id) {
             Some(memory) => &memory.selected,
             None => "",
         }
@@ -263,8 +245,7 @@ impl AgentModeSelections {
         if modes.is_empty() {
             return;
         }
-        let key = AgentSelectionKey::normalize(agent_id).to_string();
-        let entry = self.by_agent.entry(key).or_default();
+        let entry = self.by_agent.entry(agent_id.to_string()).or_default();
         let mut changed = false;
         if entry.url != url {
             entry.url = url.to_string();

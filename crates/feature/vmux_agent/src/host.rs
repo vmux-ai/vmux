@@ -1,5 +1,5 @@
 mod tree;
-pub use tree::{AgentPagesPlugin, AgentPlugin, AgentSessionPlugin};
+pub use tree::AgentPlugin;
 
 pub mod acp;
 pub use acp as acp_tool;
@@ -7,23 +7,19 @@ pub use acp::registry as acp_registry;
 pub(crate) mod approval;
 pub mod attach;
 pub mod attention;
-mod cli;
 pub mod command;
 pub mod command_bar;
+mod continuation;
 pub mod event;
 pub mod follow;
 pub mod handoff;
 mod ingress;
-pub mod launch;
 mod model_selection;
 pub mod page_open;
 pub mod run_state_kind;
 pub mod runtime;
-pub mod session;
 pub mod snapshot;
-pub mod spawn;
 pub mod toast;
-mod tool;
 mod transcript;
 pub mod url;
 
@@ -35,12 +31,10 @@ pub(crate) mod tidy;
 pub use vmux_api::room as message;
 
 pub use crate::mcp::McpServerConfig;
-pub use cli::CliSessionSource;
 pub use message::{AssistantBlock, Message};
 pub use run_state_kind::{AgentRunStateKind, LastRunStateKind};
 pub use toast::{AgentToast, ToastLevel};
-pub use tool::AgentToolPlugin;
-pub use url::{AgentKind, AgentUrl};
+pub use url::AgentUrl;
 pub use vmux_session::room::{
     ChatRoom, CollaborativeDocument, CrdtChangeReceived, DocumentKind, MaterializedRoomEvent,
     MemberPresence, MessageDelivery, RoomAgentBinding, RoomEventIdentity, RoomMember,

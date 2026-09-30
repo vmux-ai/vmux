@@ -1,37 +1,12 @@
-use std::path::PathBuf;
-
 use bevy::prelude::*;
-#[cfg(test)]
-use vmux_api::protocol::AgentRequest;
-use vmux_api::protocol::{AgentCommandResult, AgentResumeInAcp, ClientMessage, ProcessId};
-use vmux_command::WriteCommandRequests;
+use vmux_api::protocol::ProcessId;
 use vmux_core::PageMetadata;
-use vmux_core::agent::AgentKind;
-use vmux_core::service::{ServiceMessageSet, ServiceRequest};
-use vmux_setting::AppSettings;
-use vmux_terminal::Terminal;
-use vmux_terminal::launch::TerminalLaunch;
-
-use crate::acp_registry::RegistryAgent;
-use crate::event::{AgentRequestInput, CommandOrigin};
-use crate::session::{AgentSession, SessionId};
 
 pub(super) struct AttachPlugin;
 
 impl Plugin for AttachPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentRequestInput>()
-            .add_message::<vmux_core::agent::SwapStackSession>()
-            .add_message::<ServiceRequest>()
-            .add_systems(Update, attach_acp_agents)
-            .add_systems(
-                Update,
-                handle_resume_in_acp
-                    .in_set(WriteCommandRequests)
-                    .after(ServiceMessageSet)
-                    .after(super::command::CommandSet::ToolCalls)
-                    .before(super::command::CommandSet::Commands),
-            );
+        app.add_systems(Update, attach_acp_agents);
     }
 }
 
@@ -94,7 +69,7 @@ fn attach_acp_agents(
             resume,
             webview,
         } = request;
-        let agent_id = RegistryAgent::url_id(agent_id);
+        let agent_id = agent_id.as_str();
         let url = match resume.as_deref() {
             Some(acp_sid) => format!("vmux://sessions/{agent_id}/{acp_sid}"),
             None => format!("vmux://sessions/{agent_id}"),
@@ -165,10 +140,7 @@ pub(crate) fn acp_registry_agent_for_id<'a>(
     catalog: Option<&'a crate::runtime::acp::AcpCatalog>,
     id: &str,
 ) -> Option<&'a crate::acp_registry::RegistryAgent> {
-    catalog?
-        .agents
-        .iter()
-        .find(|agent| RegistryAgent::ids_match(&agent.id, id))
+    catalog?.agents.iter().find(|agent| agent.id == id)
 }
 
 pub(crate) fn acp_icon_for_id(
@@ -194,113 +166,14 @@ pub(crate) fn acp_profile_name_for_id(
         .to_string()
 }
 
-fn acp_target_id_for_kind(
-    kind: AgentKind,
-    configs: &[vmux_setting::AcpAgentConfig],
-    catalog: Option<&crate::runtime::acp::AcpCatalog>,
-) -> Option<String> {
-    configs
-        .iter()
-        .find(|config| RegistryAgent::url_id(&config.id) == kind.as_url_segment())
-        .map(|config| config.id.clone())
-        .or_else(|| {
-            let id = kind.as_url_segment();
-            acp_registry_agent_for_id(catalog, id)
-                .is_some()
-                .then(|| id.to_string())
-        })
-}
-
-fn handle_resume_in_acp(
-    mut reader: MessageReader<AgentRequestInput>,
-    cli_sessions: Query<
-        (
-            &ProcessId,
-            &ChildOf,
-            &AgentSession,
-            Option<&SessionId>,
-            &TerminalLaunch,
-        ),
-        With<Terminal>,
-    >,
-    settings: Res<AppSettings>,
-    catalog: Option<Single<&crate::runtime::acp::AcpCatalog>>,
-    mut swap: MessageWriter<vmux_core::agent::SwapStackSession>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    let catalog = catalog.as_ref().map(|catalog| **catalog);
-    for request in reader.read() {
-        let Ok(Some(command)) = request.decode::<AgentResumeInAcp>() else {
-            continue;
-        };
-        let anchor = &command.anchor;
-        let result = if !matches!(
-            &request.origin,
-            CommandOrigin::Agent {
-                anchor: Some(origin_anchor),
-                ..
-            } if origin_anchor == anchor
-        ) {
-            AgentCommandResult::Error("resume_in_acp: caller anchor mismatch".to_string())
-        } else if let Some((_, child_of, session, session_id, launch)) = cli_sessions
-            .iter()
-            .find(|(process_id, ..)| *process_id == anchor)
-        {
-            if !session.kind.supports_cross_runtime() {
-                AgentCommandResult::Error(format!(
-                    "resume_in_acp: {} does not support ACP resume",
-                    session.kind.display_name()
-                ))
-            } else if let Some(session_id) = session_id {
-                if let Some(agent_id) =
-                    acp_target_id_for_kind(session.kind, &settings.agent.acp, catalog)
-                {
-                    swap.write(vmux_core::agent::SwapStackSession {
-                        stack: child_of.parent(),
-                        target_url: crate::AgentUrl::Acp {
-                            id: agent_id,
-                            sid: Some(session_id.0.clone()),
-                        }
-                        .format(),
-                        cwd: PathBuf::from(&launch.cwd),
-                        handoff: None,
-                    });
-                    AgentCommandResult::Ok
-                } else {
-                    AgentCommandResult::Error(format!(
-                        "resume_in_acp: no ACP runtime available for {}",
-                        session.kind.display_name()
-                    ))
-                }
-            } else {
-                AgentCommandResult::Error(
-                    "resume_in_acp: current CLI session id is not available yet".to_string(),
-                )
-            }
-        } else {
-            AgentCommandResult::Error("resume_in_acp: current CLI session not found".to_string())
-        };
-        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
-            request_id: request.request_id,
-            result,
-        }));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::test_support::test_settings;
-    use vmux_api::protocol::AgentRequestId;
-    use vmux_terminal::Terminal;
 
     #[test]
     fn acp_attach_gives_profile_agent_and_icon() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, AttachPlugin))
-            .insert_resource(test_settings())
-            .add_message::<AgentRequestInput>()
-            .add_message::<vmux_core::agent::SwapStackSession>();
+        app.add_plugins((MinimalPlugins, AttachPlugin));
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().entity_mut(stack).insert(
             AcpAgentAttachment::new(
@@ -355,7 +228,7 @@ mod tests {
             Some("https://cdn.example/vibe.svg")
         );
         assert_eq!(
-            acp_icon_for_id(Some(&catalog), "claude").as_deref(),
+            acp_icon_for_id(Some(&catalog), "claude-acp").as_deref(),
             Some("https://cdn.example/claude.svg")
         );
         assert_eq!(acp_icon_for_id(Some(&catalog), "absent"), None);
@@ -368,7 +241,7 @@ mod tests {
         use vmux_setting::AcpAgentConfig;
 
         let mut config = AcpAgentConfig {
-            id: "claude".into(),
+            id: "claude-acp".into(),
             name: "Configured Claude".into(),
             command: "npx".into(),
             args: vec![],
@@ -399,77 +272,7 @@ mod tests {
         config.name = "   ".into();
         assert_eq!(
             acp_profile_name_for_id(&config.id, Some(&config), None),
-            "claude"
+            "claude-acp"
         );
-    }
-
-    #[test]
-    fn acp_target_id_accepts_registry_alias_config() {
-        let config = vmux_setting::AcpAgentConfig {
-            id: "claude-acp".into(),
-            name: "Claude".into(),
-            command: "npx".into(),
-            args: vec![],
-            env: vec![],
-            cwd: None,
-            version: None,
-        };
-
-        assert_eq!(
-            acp_target_id_for_kind(AgentKind::Claude, &[config], None).as_deref(),
-            Some("claude-acp")
-        );
-    }
-
-    #[test]
-    fn resume_in_acp_command_swaps_current_cli_stack() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<AgentRequestInput>()
-            .add_message::<ServiceRequest>()
-            .add_message::<vmux_core::agent::SwapStackSession>()
-            .insert_resource(test_settings())
-            .add_systems(Update, handle_resume_in_acp);
-        let stack = app.world_mut().spawn_empty().id();
-        let anchor = ProcessId::new();
-        app.world_mut().spawn((
-            Terminal,
-            anchor,
-            ChildOf(stack),
-            AgentSession {
-                kind: AgentKind::Claude,
-            },
-            SessionId("session-7".into()),
-            TerminalLaunch {
-                command: "claude".into(),
-                args: vec![],
-                cwd: "/workspace/project".into(),
-                env: vec![],
-                kind: vmux_terminal::launch::TerminalKind::Claude,
-            },
-        ));
-        app.world_mut()
-            .resource_mut::<Messages<AgentRequestInput>>()
-            .write(AgentRequestInput {
-                request_id: AgentRequestId::new(),
-                origin: CommandOrigin::Agent {
-                    sid: None,
-                    anchor: Some(anchor),
-                },
-                request: AgentRequest::encode(&AgentResumeInAcp { anchor }).unwrap(),
-            });
-
-        app.update();
-
-        let swaps: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
-            .drain()
-            .collect();
-        assert_eq!(swaps.len(), 1);
-        assert_eq!(swaps[0].stack, stack);
-        assert_eq!(swaps[0].target_url, "vmux://sessions/claude/session-7");
-        assert_eq!(swaps[0].cwd, PathBuf::from("/workspace/project"));
-        assert!(swaps[0].handoff.is_none());
     }
 }

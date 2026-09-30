@@ -1,10 +1,5 @@
-pub use vmux_core::agent::AgentKind;
-
-pub const CLI_FRESH_SID: &str = "cli";
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AgentUrl {
-    Cli { kind: AgentKind, sid: String },
     Acp { id: String, sid: Option<String> },
     AcpDefault,
 }
@@ -15,81 +10,35 @@ impl AgentUrl {
         if !route.is_agent() {
             return None;
         }
-        let segs: Vec<&str> = route.path_segments().collect();
-        match segs.as_slice() {
-            [] => Some(AgentUrl::AcpDefault),
-            [id] => Some(AgentUrl::Acp {
+        let segments: Vec<&str> = route.path_segments().collect();
+        match segments.as_slice() {
+            [] => Some(Self::AcpDefault),
+            [id] => Some(Self::Acp {
                 id: (*id).to_string(),
                 sid: None,
             }),
-            [x, y] => {
-                if *y == CLI_FRESH_SID
-                    && let Some(kind) = AgentKind::from_url_segment(x)
-                {
-                    Some(AgentUrl::Cli {
-                        kind,
-                        sid: CLI_FRESH_SID.to_string(),
-                    })
-                } else {
-                    Some(AgentUrl::Acp {
-                        id: (*x).to_string(),
-                        sid: Some((*y).to_string()),
-                    })
-                }
-            }
-            [x, y, z] => {
-                if *y == CLI_FRESH_SID
-                    && let Some(kind) = AgentKind::from_url_segment(x)
-                {
-                    Some(AgentUrl::Cli {
-                        kind,
-                        sid: (*z).to_string(),
-                    })
-                } else {
-                    None
-                }
-            }
+            [id, sid] if *sid != "cli" => Some(Self::Acp {
+                id: (*id).to_string(),
+                sid: Some((*sid).to_string()),
+            }),
             _ => None,
         }
     }
 
     pub fn sid(&self) -> &str {
         match self {
-            AgentUrl::Cli { sid, .. } => sid,
-            AgentUrl::Acp { sid, .. } => sid.as_deref().unwrap_or(""),
-            AgentUrl::AcpDefault => "",
+            Self::Acp { sid, .. } => sid.as_deref().unwrap_or(""),
+            Self::AcpDefault => "",
         }
     }
 
     pub fn format(&self) -> String {
         match self {
-            AgentUrl::Cli { kind, sid } => {
-                if sid == CLI_FRESH_SID {
-                    format!("{}{CLI_FRESH_SID}", kind.cli_url_prefix())
-                } else {
-                    format!("{}{CLI_FRESH_SID}/{sid}", kind.cli_url_prefix())
-                }
-            }
-            AgentUrl::Acp { id, sid } => match sid {
+            Self::Acp { id, sid } => match sid {
                 Some(sid) => format!("vmux://sessions/{id}/{sid}"),
                 None => format!("vmux://sessions/{id}"),
             },
-            AgentUrl::AcpDefault => "vmux://sessions/".to_string(),
-        }
-    }
-
-    pub fn for_session(kind: AgentKind, sid: &str, prefer_acp: bool, acp_ids: &[String]) -> Self {
-        let seg = kind.as_url_segment();
-        if prefer_acp && acp_ids.iter().any(|id| id == seg) {
-            AgentUrl::Acp {
-                id: seg.to_string(),
-                sid: Some(sid.to_string()),
-            }
-        } else {
-            AgentUrl::Cli {
-                kind,
-                sid: sid.to_string(),
-            }
+            Self::AcpDefault => "vmux://sessions/".to_string(),
         }
     }
 
@@ -99,16 +48,8 @@ impl AgentUrl {
                 let suffix = tail.split('"').next().unwrap_or_default();
                 let url = format!("{prefix}{suffix}");
                 let normalized = url.trim_end_matches('/');
-                if matches!(normalized, "vmux://sessions" | "vmux://agent") {
-                    return false;
-                }
-                if AgentKind::all()
-                    .into_iter()
-                    .any(|kind| normalized == kind.cli_url_prefix().trim_end_matches('/'))
-                {
-                    return false;
-                }
-                AgentUrl::parse(normalized).is_none()
+                !matches!(normalized, "vmux://sessions" | "vmux://agent")
+                    && Self::parse(normalized).is_none()
             }) {
                 return true;
             }
@@ -122,21 +63,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bare_agent_url_parses_to_acp_default() {
+    fn parses_default_fresh_and_resumed_acp_urls() {
         assert_eq!(
             AgentUrl::parse("vmux://sessions/"),
             Some(AgentUrl::AcpDefault)
-        );
-    }
-
-    #[test]
-    fn single_segment_is_acp_fresh() {
-        assert_eq!(
-            AgentUrl::parse("vmux://sessions/claude"),
-            Some(AgentUrl::Acp {
-                id: "claude".into(),
-                sid: None,
-            })
         );
         assert_eq!(
             AgentUrl::parse("vmux://sessions/mistral-vibe"),
@@ -145,163 +75,46 @@ mod tests {
                 sid: None,
             })
         );
-    }
-
-    #[test]
-    fn two_segment_plain_is_acp_session() {
         assert_eq!(
-            AgentUrl::parse("vmux://sessions/claude/abc-123"),
+            AgentUrl::parse("vmux://sessions/claude/session-1"),
             Some(AgentUrl::Acp {
                 id: "claude".into(),
-                sid: Some("abc-123".into()),
+                sid: Some("session-1".into()),
             })
         );
     }
 
     #[test]
-    fn two_segment_cli_marker_is_fresh_cli() {
-        assert_eq!(
-            AgentUrl::parse("vmux://sessions/claude/cli"),
-            Some(AgentUrl::Cli {
-                kind: AgentKind::Claude,
-                sid: CLI_FRESH_SID.into(),
-            })
-        );
+    fn rejects_removed_cli_and_malformed_routes() {
+        assert_eq!(AgentUrl::parse("vmux://sessions/claude/cli"), None);
+        assert_eq!(AgentUrl::parse("vmux://sessions/codex/cli/session-1"), None);
+        assert_eq!(AgentUrl::parse("vmux://sessions/a/b/c"), None);
     }
 
     #[test]
-    fn three_segment_cli_marker_is_cli_resume() {
-        assert_eq!(
-            AgentUrl::parse("vmux://sessions/vibe/cli/abc-123"),
-            Some(AgentUrl::Cli {
-                kind: AgentKind::Vibe,
-                sid: "abc-123".into(),
-            })
-        );
-    }
-
-    #[test]
-    fn three_segment_plain_is_rejected() {
-        assert_eq!(
-            AgentUrl::parse("vmux://sessions/openai/gpt-5.5/xHigh"),
-            None
-        );
-    }
-
-    #[test]
-    fn cli_marker_with_non_kind_falls_through_to_acp() {
-        assert_eq!(
-            AgentUrl::parse("vmux://sessions/fast-agent/cli"),
-            Some(AgentUrl::Acp {
-                id: "fast-agent".into(),
-                sid: Some("cli".into()),
-            })
-        );
-    }
-
-    #[test]
-    fn too_many_segments_rejected() {
-        assert_eq!(AgentUrl::parse("vmux://sessions/vibe/cli/abc/extra"), None);
-        assert_eq!(AgentUrl::parse("vmux://sessions/o/m/sid/extra"), None);
-    }
-
-    #[test]
-    fn malformed_persisted_agent_urls_are_rejected() {
-        assert!(AgentUrl::rejects_persisted_store(
-            r#"url: "vmux://sessions/echo/echo/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
-        ));
-        assert!(!AgentUrl::rejects_persisted_store(
-            r#"url: "vmux://agent/claude/session-id""#
-        ));
-        assert!(!AgentUrl::rejects_persisted_store(
-            r#"url: "vmux://sessions/codex/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
-        ));
-        assert!(!AgentUrl::rejects_persisted_store(
-            r#"url: "vmux://sessions/vibe/""#
-        ));
-        assert!(AgentUrl::rejects_persisted_store(
-            r#"url: "vmux://sessions/a/b/c/d/e""#
-        ));
-    }
-
-    #[test]
-    fn acp_format_round_trips() {
-        for u in [
+    fn acp_urls_round_trip() {
+        for url in [
             AgentUrl::Acp {
                 id: "claude".into(),
                 sid: None,
             },
             AgentUrl::Acp {
                 id: "mistral-vibe".into(),
-                sid: Some("sess-9".into()),
+                sid: Some("session-9".into()),
             },
+            AgentUrl::AcpDefault,
         ] {
-            assert_eq!(AgentUrl::parse(&u.format()), Some(u));
+            assert_eq!(AgentUrl::parse(&url.format()), Some(url));
         }
     }
 
     #[test]
-    fn cli_format_round_trips_fresh_and_resume() {
-        let fresh = AgentUrl::Cli {
-            kind: AgentKind::Codex,
-            sid: CLI_FRESH_SID.into(),
-        };
-        assert_eq!(fresh.format(), "vmux://sessions/codex/cli");
-        assert_eq!(AgentUrl::parse(&fresh.format()), Some(fresh));
-
-        let resume = AgentUrl::Cli {
-            kind: AgentKind::Codex,
-            sid: "xyz".into(),
-        };
-        assert_eq!(resume.format(), "vmux://sessions/codex/cli/xyz");
-        assert_eq!(AgentUrl::parse(&resume.format()), Some(resume));
-    }
-
-    #[test]
-    fn acp_default_round_trips() {
-        assert_eq!(AgentUrl::AcpDefault.format(), "vmux://sessions/");
-        assert_eq!(
-            AgentUrl::parse(&AgentUrl::AcpDefault.format()),
-            Some(AgentUrl::AcpDefault)
-        );
-    }
-
-    #[test]
-    fn legacy_agent_url_parses_but_formats_as_session() {
-        let parsed = AgentUrl::parse("vmux://agent/codex/cli/xyz").unwrap();
-        assert_eq!(parsed.format(), "vmux://sessions/codex/cli/xyz");
-    }
-
-    #[test]
-    fn for_session_prefers_acp_when_configured() {
-        let ids = vec!["claude".to_string(), "codex".to_string()];
-        assert_eq!(
-            AgentUrl::for_session(AgentKind::Claude, "s1", true, &ids),
-            AgentUrl::Acp {
-                id: "claude".into(),
-                sid: Some("s1".into()),
-            }
-        );
-        assert_eq!(
-            AgentUrl::for_session(AgentKind::Codex, "s2", true, &ids),
-            AgentUrl::Acp {
-                id: "codex".into(),
-                sid: Some("s2".into()),
-            }
-        );
-        assert_eq!(
-            AgentUrl::for_session(AgentKind::Vibe, "s3", true, &ids),
-            AgentUrl::Cli {
-                kind: AgentKind::Vibe,
-                sid: "s3".into(),
-            }
-        );
-        assert_eq!(
-            AgentUrl::for_session(AgentKind::Claude, "s4", false, &ids),
-            AgentUrl::Cli {
-                kind: AgentKind::Claude,
-                sid: "s4".into(),
-            }
-        );
+    fn persisted_store_rejects_removed_cli_routes() {
+        assert!(AgentUrl::rejects_persisted_store(
+            r#"url: "vmux://sessions/codex/cli""#
+        ));
+        assert!(!AgentUrl::rejects_persisted_store(
+            r#"url: "vmux://sessions/codex/session-1""#
+        ));
     }
 }

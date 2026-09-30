@@ -11,7 +11,6 @@ impl Plugin for VmuxCliPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             FeatureManifestPlugin::<crate::Feature>::new(crate::FEATURE_MANIFEST),
-            vmux_agent::AgentCliPlugin,
             vmux_service::ServiceCliPlugin,
             vmux_tool::ToolCliPlugin,
             vmux_mcp::McpCliPlugin,
@@ -30,7 +29,6 @@ impl Plugin for VmuxCliPlugin {
             vmux_setting::SettingToolPlugin,
             vmux_space::SpaceToolPlugin,
             vmux_terminal::TerminalToolPlugin,
-            vmux_agent::AgentToolPlugin,
             vmux_simulator::SimulatorToolPlugin,
         ))
         .add_systems(Update, open_app);
