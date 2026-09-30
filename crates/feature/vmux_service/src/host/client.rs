@@ -5,6 +5,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use vmux_api::protocol::{ClientMessage, ServiceMessage};
 use vmux_core::service::ServiceConnection;
 
+use super::supervisor::{RunningDaemon, ServiceRuntimeFiles};
+
 #[derive(Component)]
 pub(super) struct ServiceClient(pub(super) ServiceHandle);
 
@@ -19,49 +21,68 @@ pub(super) struct ServiceDrain {
 pub(super) struct ServiceHandle {
     cmd_tx: std::sync::mpsc::Sender<ClientMessage>,
     msg_rx: std::sync::Mutex<std::sync::mpsc::Receiver<ServiceMessage>>,
-    disconnected: Arc<AtomicBool>,
-    wake_pending: Arc<AtomicBool>,
+    notifier: ServiceNotifier,
     _runtime: Arc<tokio::runtime::Runtime>,
 }
 
 pub(super) type ServiceWake = Arc<dyn Fn() + Send + Sync + 'static>;
 
+#[derive(Clone)]
+struct ServiceNotifier {
+    wake: Option<ServiceWake>,
+    pending: Arc<AtomicBool>,
+    disconnected: Arc<AtomicBool>,
+}
+
+impl ServiceNotifier {
+    fn new(wake: Option<ServiceWake>) -> Self {
+        Self {
+            wake,
+            pending: Arc::new(AtomicBool::new(false)),
+            disconnected: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    #[cfg(test)]
+    fn disconnected() -> Self {
+        Self {
+            wake: None,
+            pending: Arc::new(AtomicBool::new(false)),
+            disconnected: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn forward(
+        &self,
+        sender: &std::sync::mpsc::Sender<ServiceMessage>,
+        message: ServiceMessage,
+    ) -> Result<(), std::sync::mpsc::SendError<ServiceMessage>> {
+        sender.send(message)?;
+        self.wake();
+        Ok(())
+    }
+
+    fn disconnect(&self) {
+        self.disconnected.store(true, Ordering::Release);
+        self.wake();
+    }
+
+    fn drained(&self) -> bool {
+        self.pending.store(false, Ordering::Release);
+        self.disconnected.swap(false, Ordering::AcqRel)
+    }
+
+    fn wake(&self) {
+        if let Some(wake) = &self.wake
+            && !self.pending.swap(true, Ordering::AcqRel)
+        {
+            wake();
+        }
+    }
+}
+
 #[allow(clippy::result_large_err)]
-fn forward_service_message(
-    msg_tx: &std::sync::mpsc::Sender<ServiceMessage>,
-    wake: Option<&ServiceWake>,
-    wake_pending: &AtomicBool,
-    msg: ServiceMessage,
-) -> Result<(), std::sync::mpsc::SendError<ServiceMessage>> {
-    msg_tx.send(msg)?;
-    if let Some(wake) = wake
-        && !wake_pending.swap(true, Ordering::AcqRel)
-    {
-        wake();
-    }
-    Ok(())
-}
-
-fn report_service_disconnected(
-    disconnected: &AtomicBool,
-    wake: Option<&ServiceWake>,
-    wake_pending: &AtomicBool,
-) {
-    disconnected.store(true, Ordering::Release);
-    if let Some(wake) = wake
-        && !wake_pending.swap(true, Ordering::AcqRel)
-    {
-        wake();
-    }
-}
-
-fn clean_service_files(sock: &std::path::Path) {
-    let paths = ServicePaths::current();
-    let _ = std::fs::remove_file(sock);
-    let _ = std::fs::remove_file(paths.pid());
-    let _ = std::fs::remove_file(paths.identity());
-}
-
 impl ServiceHandle {
     pub(super) fn connect(wake: Option<ServiceWake>) -> Option<Self> {
         if !Self::service_running() {
@@ -100,14 +121,11 @@ impl ServiceHandle {
 
         let (command_sender, command_receiver) = std::sync::mpsc::channel::<ClientMessage>();
         let (message_sender, message_receiver) = std::sync::mpsc::channel::<ServiceMessage>();
-        let disconnected = Arc::new(AtomicBool::new(false));
-        let wake_pending = Arc::new(AtomicBool::new(false));
+        let notifier = ServiceNotifier::new(wake);
 
         let read_connection = Arc::clone(&connection);
         let read_runtime = Arc::clone(&runtime);
-        let reader_disconnected = Arc::clone(&disconnected);
-        let reader_wake_pending = Arc::clone(&wake_pending);
-        let reader_wake = wake.clone();
+        let reader_notifier = notifier.clone();
         std::thread::Builder::new()
             .name("service-reader".into())
             .spawn(move || {
@@ -115,14 +133,7 @@ impl ServiceHandle {
                     loop {
                         match read_connection.recv().await {
                             Ok(Some(message)) => {
-                                if forward_service_message(
-                                    &message_sender,
-                                    reader_wake.as_ref(),
-                                    &reader_wake_pending,
-                                    message,
-                                )
-                                .is_err()
-                                {
+                                if reader_notifier.forward(&message_sender, message).is_err() {
                                     break;
                                 }
                             }
@@ -130,29 +141,20 @@ impl ServiceHandle {
                             Err(_) => break,
                         }
                     }
-                    report_service_disconnected(
-                        &reader_disconnected,
-                        reader_wake.as_ref(),
-                        &reader_wake_pending,
-                    );
+                    reader_notifier.disconnect();
                 });
             })
             .ok()?;
 
         let write_runtime = Arc::clone(&runtime);
-        let writer_disconnected = Arc::clone(&disconnected);
-        let writer_wake_pending = Arc::clone(&wake_pending);
+        let writer_notifier = notifier.clone();
         std::thread::Builder::new()
             .name("service-writer".into())
             .spawn(move || {
                 write_runtime.block_on(async move {
                     while let Ok(message) = command_receiver.recv() {
                         if connection.send(&message).await.is_err() {
-                            report_service_disconnected(
-                                &writer_disconnected,
-                                wake.as_ref(),
-                                &writer_wake_pending,
-                            );
+                            writer_notifier.disconnect();
                             break;
                         }
                     }
@@ -163,8 +165,7 @@ impl ServiceHandle {
         Some(Self {
             cmd_tx: command_sender,
             msg_rx: std::sync::Mutex::new(message_receiver),
-            disconnected,
-            wake_pending,
+            notifier,
             _runtime: runtime,
         })
     }
@@ -180,7 +181,7 @@ impl ServiceHandle {
             Ok(s) => s,
             Err(_) => {
                 tracing::warn!("socket exists but no PID file, cleaning up");
-                clean_service_files(&sock);
+                ServiceRuntimeFiles::remove();
                 return false;
             }
         };
@@ -188,13 +189,13 @@ impl ServiceHandle {
             Ok(p) => p,
             Err(_) => {
                 tracing::warn!(pid_file = ?pid_str.trim(), "invalid PID file content");
-                clean_service_files(&sock);
+                ServiceRuntimeFiles::remove();
                 return false;
             }
         };
         if unsafe { libc::kill(pid, 0) } != 0 {
             tracing::warn!(pid, "stale service — cleaning up");
-            clean_service_files(&sock);
+            ServiceRuntimeFiles::remove();
             return false;
         }
 
@@ -202,7 +203,7 @@ impl ServiceHandle {
             Ok(identity) => identity,
             Err(e) => {
                 tracing::error!(error = %e, "failed to identify current executable");
-                clean_service_files(&sock);
+                ServiceRuntimeFiles::remove();
                 return false;
             }
         };
@@ -210,13 +211,13 @@ impl ServiceHandle {
             Ok(identity) => DaemonIdentity::recorded(&identity),
             Err(_) => {
                 tracing::warn!("service identity missing, cleaning up");
-                clean_service_files(&sock);
+                ServiceRuntimeFiles::remove();
                 return false;
             }
         };
         if !service_identity.matches(&current_identity) {
             tracing::warn!(pid, "service identity mismatch, replacing running daemon");
-            let outcome = crate::supervisor::RunningDaemon::new(pid).replace(|| {
+            let outcome = RunningDaemon::new(pid).replace(|| {
                 let stream = std::os::unix::net::UnixStream::connect(&sock)?;
                 stream.set_write_timeout(Some(std::time::Duration::from_millis(500)))?;
                 let mut stream = stream;
@@ -226,7 +227,7 @@ impl ServiceHandle {
                 )
             });
             tracing::info!(?outcome, "replaced running daemon");
-            crate::supervisor::ServiceRuntimeFiles::remove();
+            ServiceRuntimeFiles::remove();
             return false;
         }
         true
@@ -237,9 +238,8 @@ impl ServiceHandle {
     }
 
     pub(super) fn drain_with_status(&self) -> ServiceDrain {
-        self.wake_pending.store(false, Ordering::Release);
         let rx = self.msg_rx.lock().unwrap();
-        drain_service_messages_bounded(&rx, self.disconnected.swap(false, Ordering::AcqRel))
+        ServiceDrain::read(&rx, self.notifier.drained())
     }
 
     #[cfg(test)]
@@ -250,8 +250,7 @@ impl ServiceHandle {
         Self {
             cmd_tx,
             msg_rx: std::sync::Mutex::new(msg_rx),
-            disconnected: Arc::new(AtomicBool::new(true)),
-            wake_pending: Arc::new(AtomicBool::new(false)),
+            notifier: ServiceNotifier::disconnected(),
             _runtime: Arc::new(
                 tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -262,32 +261,31 @@ impl ServiceHandle {
     }
 }
 
-fn drain_service_messages_bounded(
-    rx: &std::sync::mpsc::Receiver<ServiceMessage>,
-    disconnected: bool,
-) -> ServiceDrain {
-    let mut messages = Vec::with_capacity(MAX_SERVICE_MESSAGES_PER_DRAIN);
-    for _ in 0..MAX_SERVICE_MESSAGES_PER_DRAIN {
-        let Ok(msg) = rx.try_recv() else {
-            return ServiceDrain {
-                messages,
-                disconnected,
-                capped: false,
+impl ServiceDrain {
+    fn read(rx: &std::sync::mpsc::Receiver<ServiceMessage>, disconnected: bool) -> Self {
+        let mut messages = Vec::with_capacity(MAX_SERVICE_MESSAGES_PER_DRAIN);
+        for _ in 0..MAX_SERVICE_MESSAGES_PER_DRAIN {
+            let Ok(message) = rx.try_recv() else {
+                return Self {
+                    messages,
+                    disconnected,
+                    capped: false,
+                };
             };
-        };
-        messages.push(msg);
-    }
-    ServiceDrain {
-        messages,
-        disconnected,
-        capped: true,
+            messages.push(message);
+        }
+        Self {
+            messages,
+            disconnected,
+            capped: true,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicUsize;
 
     #[test]
     fn forwarding_burst_wakes_consumer_once_until_drain() {
@@ -297,26 +295,24 @@ mod tests {
         let wake: ServiceWake = Arc::new(move || {
             wakes_for_callback.fetch_add(1, Ordering::Relaxed);
         });
-        let wake_pending = AtomicBool::new(false);
+        let notifier = ServiceNotifier::new(Some(wake));
 
-        forward_service_message(
-            &tx,
-            Some(&wake),
-            &wake_pending,
-            ServiceMessage::ProcessList {
-                processes: Vec::new(),
-            },
-        )
-        .expect("message should forward");
-        forward_service_message(
-            &tx,
-            Some(&wake),
-            &wake_pending,
-            ServiceMessage::ProcessList {
-                processes: Vec::new(),
-            },
-        )
-        .expect("message should forward");
+        notifier
+            .forward(
+                &tx,
+                ServiceMessage::ProcessList {
+                    processes: Vec::new(),
+                },
+            )
+            .expect("message should forward");
+        notifier
+            .forward(
+                &tx,
+                ServiceMessage::ProcessList {
+                    processes: Vec::new(),
+                },
+            )
+            .expect("message should forward");
 
         assert!(matches!(
             rx.try_recv(),
@@ -328,16 +324,15 @@ mod tests {
         ));
         assert_eq!(wakes.load(Ordering::Relaxed), 1);
 
-        wake_pending.store(false, Ordering::Release);
-        forward_service_message(
-            &tx,
-            Some(&wake),
-            &wake_pending,
-            ServiceMessage::ProcessList {
-                processes: Vec::new(),
-            },
-        )
-        .expect("message should forward");
+        assert!(!notifier.drained());
+        notifier
+            .forward(
+                &tx,
+                ServiceMessage::ProcessList {
+                    processes: Vec::new(),
+                },
+            )
+            .expect("message should forward");
 
         assert_eq!(wakes.load(Ordering::Relaxed), 2);
     }
@@ -352,7 +347,7 @@ mod tests {
             .expect("service message should queue");
         }
 
-        let drained = drain_service_messages_bounded(&rx, false);
+        let drained = ServiceDrain::read(&rx, false);
 
         assert_eq!(drained.messages.len(), MAX_SERVICE_MESSAGES_PER_DRAIN);
         assert!(
@@ -372,7 +367,7 @@ mod tests {
             .expect("service message should queue");
         }
 
-        let drained = drain_service_messages_bounded(&rx, false);
+        let drained = ServiceDrain::read(&rx, false);
 
         assert_eq!(drained.messages.len(), 3);
         assert!(!drained.disconnected);
@@ -384,7 +379,7 @@ mod tests {
     fn service_message_drain_reports_disconnect() {
         let (_tx, rx) = std::sync::mpsc::channel();
 
-        let drained = drain_service_messages_bounded(&rx, true);
+        let drained = ServiceDrain::read(&rx, true);
 
         assert!(drained.messages.is_empty());
         assert!(drained.disconnected);

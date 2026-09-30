@@ -7,8 +7,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
-#[cfg(test)]
-use agent_client_protocol::schema::v1::SessionConfigOptionCategory;
 use agent_client_protocol::schema::v1::{
     AudioContent, CancelNotification, ContentBlock, CreateTerminalRequest, CreateTerminalResponse,
     ImageContent, Implementation, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
@@ -16,11 +14,13 @@ use agent_client_protocol::schema::v1::{
     PromptCapabilities, PromptRequest, ReadTextFileRequest, ReadTextFileResponse,
     ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome,
-    SessionConfigOption, SessionId, SessionModeState, SessionNotification, SessionUpdate,
+    SessionConfigOption, SessionId, SessionModeState, SessionNotification,
     SetSessionConfigOptionRequest, SetSessionModeRequest, TerminalExitStatus, TerminalId,
     TerminalOutputRequest, TerminalOutputResponse, TextContent, WaitForTerminalExitRequest,
     WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
+#[cfg(test)]
+use agent_client_protocol::schema::v1::{SessionConfigOptionCategory, SessionUpdate};
 use agent_client_protocol::{Client, Responder};
 use base64::Engine;
 use tokio::process::Command;
