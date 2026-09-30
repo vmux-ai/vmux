@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::*;
 use vmux_api::chat::SlashCommand;
-use vmux_api::prompt_media::inline_media_query;
+use vmux_api::prompt_media::{inline_media_query, replace_inline_media_query};
 
 #[cfg(host)]
 use bevy_app::{App, Plugin};
@@ -15,11 +15,14 @@ use crate::event::ChatDraftChanged;
 #[cfg(host)]
 use crate::event::{ChatPickFiles, ChatResumeQueryRequest, ChatSlashCommandRequest};
 use crate::selector::SelectorMode;
+use vmux_ui::prompt_recall::{PromptHistoryDirection, move_prompt_history};
 
 #[derive(Component, Default)]
 pub struct ComposerState {
     revision: u64,
     draft: String,
+    history_cursor: Option<usize>,
+    history_scratch: String,
     media_query: String,
     resume_active: bool,
     resume_query: String,
@@ -28,7 +31,13 @@ pub struct ComposerState {
 
 impl ComposerState {
     pub fn update(&mut self, draft: impl Into<String>) -> ComposerQueryChanges {
-        self.draft = draft.into();
+        self.history_cursor = None;
+        self.history_scratch.clear();
+        self.update_queries(draft.into())
+    }
+
+    fn update_queries(&mut self, draft: String) -> ComposerQueryChanges {
+        self.draft = draft;
         let media_query = inline_media_query(&self.draft)
             .map(|query| query.query.to_string())
             .unwrap_or_default();
@@ -86,6 +95,43 @@ impl ComposerState {
             SlashCommand::Upload | SlashCommand::Cli => "",
         };
         self.effect(draft, true)
+    }
+
+    pub fn recall(
+        &mut self,
+        history: &[String],
+        direction: PromptHistoryDirection,
+    ) -> (ChatComposerEffect, ComposerQueryChanges) {
+        let (draft, cursor, scratch) = move_prompt_history(
+            history,
+            self.history_cursor,
+            &self.history_scratch,
+            &self.draft,
+            direction,
+        );
+        self.history_cursor = cursor;
+        self.history_scratch = scratch;
+        let changes = self.update_queries(draft);
+        self.revision = self.revision.wrapping_add(1).max(1);
+        (
+            ChatComposerEffect {
+                revision: self.revision,
+                draft: self.draft.clone(),
+                focus: true,
+            },
+            changes,
+        )
+    }
+
+    pub fn dismiss_selector(&mut self) -> Option<(ChatComposerEffect, ComposerQueryChanges)> {
+        let draft = if let Some(query) = inline_media_query(&self.draft) {
+            replace_inline_media_query(&self.draft, query, "")
+        } else if SelectorMode::from_draft(&self.draft) != SelectorMode::None {
+            String::new()
+        } else {
+            return None;
+        };
+        Some(self.effect(draft, true))
     }
 
     pub fn draft(&self) -> &str {
@@ -294,5 +340,35 @@ mod tests {
         let mcp = state.update("/mcp ");
         assert!(mcp.opens_mcp());
         assert_eq!(mcp.media(), Some(""));
+    }
+
+    #[test]
+    fn prompt_history_is_owned_by_the_composer() {
+        let mut state = ComposerState::default();
+        state.update("unfinished");
+        let history = vec!["first".to_string(), "second".to_string()];
+
+        let (older, _) = state.recall(&history, PromptHistoryDirection::Older);
+        let (oldest, _) = state.recall(&history, PromptHistoryDirection::Older);
+        let (newer, _) = state.recall(&history, PromptHistoryDirection::Newer);
+        let (scratch, _) = state.recall(&history, PromptHistoryDirection::Newer);
+
+        assert_eq!(older.draft, "second");
+        assert_eq!(oldest.draft, "first");
+        assert_eq!(newer.draft, "second");
+        assert_eq!(scratch.draft, "unfinished");
+    }
+
+    #[test]
+    fn selector_dismissal_is_owned_by_the_composer() {
+        let mut state = ComposerState::default();
+        state.update("open @src");
+
+        let (media, _) = state.dismiss_selector().unwrap();
+        state.update("/model sonnet");
+        let (model, _) = state.dismiss_selector().unwrap();
+
+        assert_eq!(media.draft, "open ");
+        assert!(model.draft.is_empty());
     }
 }

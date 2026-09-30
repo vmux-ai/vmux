@@ -2,9 +2,7 @@ use crate::event::ModelOptionEntry;
 pub(crate) use crate::selector::SelectorMode;
 use unicode_segmentation::UnicodeSegmentation;
 #[cfg(ui)]
-pub(crate) use vmux_ui::prompt_recall::{
-    PromptHistoryDirection, move_prompt_history, prompt_history_direction,
-};
+pub(crate) use vmux_ui::prompt_recall::{PromptHistoryDirection, prompt_history_direction};
 
 const CHAT_PAGE_TITLE_MAX_GRAPHEMES: usize = 64;
 #[derive(Clone, Debug, PartialEq, Eq)]

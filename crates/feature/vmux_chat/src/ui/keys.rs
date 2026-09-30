@@ -1,17 +1,12 @@
 use super::composer::options::ChatMenuSet;
-use super::format::{
-    PromptEdit, PromptHistoryDirection, move_prompt_history, prompt_history_direction,
-};
+use super::format::{PromptEdit, PromptHistoryDirection, prompt_history_direction};
 use super::state::Chat;
-use crate::event::ChatItem;
 use dioxus::prelude::*;
 use vmux_core::input::{KeyStroke, UiKeyContext, Unclaimed};
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::components::composer_bar::ComposerMenuKind;
-use vmux_ui::hooks::{
-    KeyClaim, MenuDirection, choice_number_index, move_selection, send, use_key_claim,
-};
+use vmux_ui::hooks::{KeyClaim, MenuDirection, move_selection, send, use_key_claim};
 
 const APPROVAL_OPTION_COUNT: usize = 3;
 
@@ -39,18 +34,7 @@ impl ChatKeys {
         if self.claim.resolves() {
             self.claim
                 .on_keydown(&event, |stroke| self.handler.wanted_locally(stroke));
-            return;
         }
-        if self.handler.answered_by_number(&event) {
-            return;
-        }
-        if self.handler.moves_list_locally(&event) {
-            return;
-        }
-        if self.handler.submits_prompt(&event) {
-            return;
-        }
-        self.handler.recall_alone(&event);
     }
 
     pub fn on_root_keydown(&self, event: KeyboardEvent) {
@@ -62,13 +46,6 @@ impl ChatKeys {
             }
             return;
         }
-        if self.handler.answered_by_number(&event) {
-            return;
-        }
-        if self.handler.moves_list_locally(&event) {
-            return;
-        }
-        self.handler.recall_alone(&event);
         if event.default_action_enabled() {
             self.handler.type_into_draft(&event);
         }
@@ -79,31 +56,6 @@ impl ChatKeys {
 struct ChatKeyHandler(Chat);
 
 impl ChatKeyHandler {
-    fn moves_list_locally(&self, event: &KeyboardEvent) -> bool {
-        if ChatList::current(self.0).is_none() {
-            return false;
-        }
-        let Some(direction) = MenuDirection::from_key(&event.data()) else {
-            return false;
-        };
-        event.prevent_default();
-        self.move_list(direction);
-        true
-    }
-
-    fn recall_alone(&self, event: &KeyboardEvent) {
-        let modifiers = event.modifiers();
-        if modifiers.meta() || modifiers.alt() {
-            return;
-        }
-        let key = event.key().to_string();
-        let Some(direction) = self.recall_direction(&key, modifiers.ctrl()) else {
-            return;
-        };
-        event.prevent_default();
-        self.recall(direction);
-    }
-
     fn wanted_locally(&self, stroke: &KeyStroke) -> bool {
         if Self::copies(stroke) {
             return EventSelection::in_document();
@@ -114,7 +66,7 @@ impl ChatKeyHandler {
         if ChatList::current(self.0).is_some() {
             return false;
         }
-        self.recall_direction(&stroke.key, stroke.mods.ctrl)
+        self.history_direction(&stroke.key, stroke.mods.ctrl)
             .is_none()
     }
 
@@ -133,29 +85,16 @@ impl ChatKeyHandler {
         }
     }
 
-    fn move_list(&self, direction: MenuDirection) {
-        self.0.move_active_list(direction);
-    }
-
-    fn recall_direction(&self, key: &str, ctrl: bool) -> Option<PromptHistoryDirection> {
+    fn history_direction(&self, key: &str, ctrl: bool) -> Option<PromptHistoryDirection> {
         let draft = self.0.draft();
         let (start, end) = EventSelection::in_field(PROMPT_INPUT_ID);
-        let direction = prompt_history_direction(
+        prompt_history_direction(
             key,
             ctrl,
             &draft,
             byte_offset_to_utf16(&draft, start),
             byte_offset_to_utf16(&draft, end),
-        )?;
-        let usable = match direction {
-            PromptHistoryDirection::Older => !self.0.prompt_history().is_empty(),
-            PromptHistoryDirection::Newer => self.0.composer.history_cursor.peek().is_some(),
-        };
-        usable.then_some(direction)
-    }
-
-    fn recall(&self, direction: PromptHistoryDirection) {
-        self.0.recall_prompt(direction);
+        )
     }
 }
 
@@ -175,30 +114,6 @@ impl Chat {
         list.choose(self, index);
     }
 
-    pub(super) fn choose_active_list_at(self, index: usize) {
-        let Some(list @ (ChatList::Approval | ChatList::Choice)) = ChatList::current(self) else {
-            return;
-        };
-        list.choose(self, index);
-    }
-
-    pub(super) fn recall_prompt(self, direction: PromptHistoryDirection) {
-        let mut history_cursor = self.composer.history_cursor;
-        let mut history_scratch = self.composer.history_scratch;
-        let scratch = history_scratch.peek().clone();
-        let (value, next_cursor, scratch) = move_prompt_history(
-            &self.prompt_history(),
-            *history_cursor.peek(),
-            &scratch,
-            &self.draft(),
-            direction,
-        );
-        self.set_draft(value);
-        history_cursor.set(next_cursor);
-        history_scratch.set(scratch);
-        focus_prompt_end(PROMPT_INPUT_ID);
-    }
-
     pub(super) fn accepts_input_effect(mut self, revision: u64) -> bool {
         if revision <= *self.input_effect_revision.peek() {
             return false;
@@ -209,40 +124,6 @@ impl Chat {
 }
 
 impl ChatKeyHandler {
-    fn answered_by_number(&self, event: &KeyboardEvent) -> bool {
-        let modifiers = event.modifiers();
-        if modifiers.meta() || modifiers.ctrl() || modifiers.alt() {
-            return false;
-        }
-        let list = match ChatList::current(self.0) {
-            Some(list @ (ChatList::Approval | ChatList::Choice)) => list,
-            _ => return false,
-        };
-        let key = event.key().to_string();
-        let Some(index) = choice_number_index(&key, list.len(self.0)) else {
-            return false;
-        };
-        event.prevent_default();
-        list.choose(self.0, index);
-        true
-    }
-
-    fn submits_prompt(&self, event: &KeyboardEvent) -> bool {
-        let modifiers = event.modifiers();
-        if event.key() != Key::Enter
-            || modifiers.shift()
-            || modifiers.meta()
-            || modifiers.ctrl()
-            || modifiers.alt()
-            || ChatList::current(self.0).is_some()
-        {
-            return false;
-        }
-        event.prevent_default();
-        self.0.submit();
-        true
-    }
-
     fn type_into_draft(&self, event: &KeyboardEvent) {
         let modifiers = event.modifiers();
         if modifiers.meta() || modifiers.ctrl() || modifiers.alt() {
@@ -401,23 +282,5 @@ impl Chat {
             keys.push("chat.selector".to_string());
         }
         keys
-    }
-
-    fn prompt_history(&self) -> Vec<String> {
-        let mut history = Vec::new();
-        for item in self.transcript.items.peek().iter() {
-            let ChatItem::User { text, .. } = item else {
-                continue;
-            };
-            if !text.trim().is_empty() {
-                history.push(text.clone());
-            }
-        }
-        for prompt in self.queue.queued.peek().iter() {
-            if !prompt.text.trim().is_empty() {
-                history.push(prompt.text.clone());
-            }
-        }
-        history
     }
 }

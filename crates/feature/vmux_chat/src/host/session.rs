@@ -348,6 +348,24 @@ pub struct ChatHistoryResult {
 }
 
 impl ChatTranscriptProjection {
+    pub fn prompt_history(&self, snapshot: &ChatSnapshotProjection) -> Vec<String> {
+        let mut history = Vec::new();
+        for item in &self.state.items {
+            let ChatItem::User { text, .. } = item else {
+                continue;
+            };
+            if !text.trim().is_empty() {
+                history.push(text.clone());
+            }
+        }
+        for prompt in &snapshot.0.queued {
+            if !prompt.text.trim().is_empty() {
+                history.push(prompt.text.clone());
+            }
+        }
+        history
+    }
+
     pub fn merge_tail(&mut self, tail: TranscriptTail) -> bool {
         if self.tail_start == tail.start
             && self.tail == tail.items

@@ -1,13 +1,16 @@
-use super::composer::ComposerState;
-use super::session::ChatView;
+use super::composer::{ComposerQueriesChanged, ComposerState};
+use super::session::{
+    ChatSnapshotProjection, ChatTranscriptProjection, ChatView, PendingAgentChoice,
+};
 use crate::event::{
-    ChatCancel, ChatChoiceNumberEffect, ChatEscape, ChatHistoryMoveEffect, ChatListChooseEffect,
-    ChatListMoveEffect, ChatSelectorDismissEffect, ChatSubmit,
+    ApprovalDecision, ChatApproval, ChatCancel, ChatChoiceSelected, ChatEscape,
+    ChatListChooseEffect, ChatListMoveEffect, ChatSelectorDismissEffect, ChatSubmit,
 };
 use bevy_app::{App, Plugin, Startup};
 use bevy_cef::prelude::UiInput;
 use bevy_ecs::prelude::*;
 use vmux_command::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
+use vmux_ui::prompt_recall::PromptHistoryDirection;
 
 pub struct ChatKeyPlugin;
 
@@ -141,57 +144,78 @@ fn choose_list(
 fn choose_number(
     trigger: On<CommandDispatch>,
     bindings: Query<&ChoiceNumberBinding>,
-    mut revisions: Query<&mut ChatKeyEffectRevision>,
+    choices: Query<&PendingAgentChoice>,
+    snapshots: Query<&ChatSnapshotProjection>,
     mut commands: Commands,
 ) {
     let Ok(binding) = bindings.get(trigger.event().command()) else {
         return;
     };
     let caller = trigger.event().invocation().caller;
-    let Ok(mut revision) = revisions.get_mut(caller) else {
+    if let Ok(snapshot) = snapshots.get(caller)
+        && let Some(approval) = &snapshot.0.approval
+    {
+        let decision = match binding.0 {
+            0 => ApprovalDecision::Allow,
+            1 => ApprovalDecision::AllowAlways,
+            2 => ApprovalDecision::Deny,
+            _ => return,
+        };
+        commands.trigger(UiInput {
+            webview: caller,
+            payload: ChatApproval {
+                call_id: approval.call_id.clone(),
+                decision,
+            },
+        });
+        return;
+    }
+    let Ok(choice) = choices.get(caller) else {
         return;
     };
-    revision.0 = revision.0.wrapping_add(1).max(1);
-    commands.trigger(
-        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
-            caller,
-            &ChatChoiceNumberEffect {
-                revision: revision.0,
-                index: binding.0,
-            },
-        ),
-    );
+    if binding.0 as usize >= choice.options.len() {
+        return;
+    }
+    commands.trigger(UiInput {
+        webview: caller,
+        payload: ChatChoiceSelected { index: binding.0 },
+    });
 }
 
 fn move_history(
     trigger: On<CommandDispatch>,
     older: Query<(), With<HistoryOlderBinding>>,
     newer: Query<(), With<HistoryNewerBinding>>,
-    mut revisions: Query<&mut ChatKeyEffectRevision>,
+    mut views: Query<
+        (
+            &mut ComposerState,
+            &ChatTranscriptProjection,
+            &ChatSnapshotProjection,
+        ),
+        With<ChatView>,
+    >,
     mut commands: Commands,
 ) {
     let command = trigger.event().command();
-    let older = if older.contains(command) {
-        true
+    let direction = if older.contains(command) {
+        PromptHistoryDirection::Older
     } else if newer.contains(command) {
-        false
+        PromptHistoryDirection::Newer
     } else {
         return;
     };
     let caller = trigger.event().invocation().caller;
-    let Ok(mut revision) = revisions.get_mut(caller) else {
+    let Ok((mut composer, transcript, snapshot)) = views.get_mut(caller) else {
         return;
     };
-    revision.0 = revision.0.wrapping_add(1).max(1);
+    let history = transcript.prompt_history(snapshot);
+    let (effect, changes) = composer.recall(&history, direction);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
-            caller,
-            &ChatHistoryMoveEffect {
-                revision: revision.0,
-                older,
-            },
-        ),
+        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(caller, &effect),
     );
+    if let Some(changed) = ComposerQueriesChanged::new(caller, changes) {
+        commands.trigger(changed);
+    }
 }
 
 fn submit(
@@ -218,6 +242,7 @@ fn submit(
 fn dismiss_selector(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<DismissSelectorBinding>>,
+    mut composers: Query<&mut ComposerState, With<ChatView>>,
     mut revisions: Query<&mut ChatKeyEffectRevision>,
     mut commands: Commands,
 ) {
@@ -225,6 +250,17 @@ fn dismiss_selector(
         return;
     }
     let caller = trigger.event().invocation().caller;
+    if let Ok(mut composer) = composers.get_mut(caller)
+        && let Some((effect, changes)) = composer.dismiss_selector()
+    {
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(caller, &effect),
+        );
+        if let Some(changed) = ComposerQueriesChanged::new(caller, changes) {
+            commands.trigger(changed);
+        }
+        return;
+    }
     let Ok(mut revision) = revisions.get_mut(caller) else {
         return;
     };
@@ -291,16 +327,13 @@ mod tests {
     }
 
     #[derive(Resource, Default)]
-    struct ChoiceNumbers(Vec<(Entity, u64, u32)>);
+    struct ChoiceNumbers(Vec<(Entity, u32)>);
 
     impl ChoiceNumbers {
-        fn record(trigger: On<UiStateWrite<ChatUiState>>, mut choices: ResMut<Self>) {
-            let Some(effect) = trigger.event().patch().choice_number else {
-                return;
-            };
+        fn record(trigger: On<UiInput<ChatChoiceSelected>>, mut choices: ResMut<Self>) {
             choices
                 .0
-                .push((trigger.event().webview(), effect.revision, effect.index));
+                .push((trigger.event().webview, trigger.event().payload.index));
         }
     }
 
@@ -346,13 +379,20 @@ mod tests {
     #[test]
     fn a_numbered_choice_carries_its_index() {
         let mut app = Echo::app();
-        let page = app.world_mut().spawn(ChatKeyEffectRevision::default()).id();
+        let page = app
+            .world_mut()
+            .spawn((
+                ChatKeyEffectRevision::default(),
+                PendingAgentChoice {
+                    session_entity: Entity::PLACEHOLDER,
+                    question: "pick".to_string(),
+                    options: vec!["one".to_string(), "two".to_string()],
+                },
+            ))
+            .id();
 
         Echo::issue(&mut app, page, "chat_choice_2");
 
-        assert_eq!(
-            app.world().resource::<ChoiceNumbers>().0,
-            vec![(page, 1, 1)]
-        );
+        assert_eq!(app.world().resource::<ChoiceNumbers>().0, vec![(page, 1)]);
     }
 }

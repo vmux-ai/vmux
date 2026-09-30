@@ -1,17 +1,14 @@
-use super::format::{
-    ChatPageTitle, ImportedMessages, ModelOptions, PromptHistoryDirection, ResumeMenuState,
-    SelectorMode,
-};
+use super::format::{ChatPageTitle, ImportedMessages, ModelOptions, ResumeMenuState, SelectorMode};
 use super::scroll;
 use crate::event::ChatResumeState;
 use crate::event::{
     ApprovalDecision, ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachments, ChatBranch,
-    ChatBranchesRequest, ChatBranchesState, ChatChoiceNumberEffect, ChatChoiceSelected,
-    ChatComposerEffect, ChatDraftChanged, ChatHistoryMoreRequest, ChatHistoryMoveEffect, ChatItem,
-    ChatListChooseEffect, ChatListMoveEffect, ChatMediaEntry, ChatMediaState, ChatRemoveAttachment,
-    ChatSelectorDismissEffect, ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit,
-    ChatTranscriptState, ComposerContext, ModelOptionEntry, QueuedPromptSnapshot,
-    ResumableSessionEntry, ResumeSession, SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
+    ChatBranchesRequest, ChatBranchesState, ChatChoiceSelected, ChatComposerEffect,
+    ChatDraftChanged, ChatHistoryMoreRequest, ChatItem, ChatListChooseEffect, ChatListMoveEffect,
+    ChatMediaEntry, ChatMediaState, ChatRemoveAttachment, ChatSelectorDismissEffect,
+    ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit, ChatTranscriptState,
+    ComposerContext, ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry, ResumeSession,
+    SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
 };
 use crate::host::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
@@ -169,19 +166,6 @@ impl Chat {
         {
             self.choose_active_list();
         }
-        if let Some(ChatChoiceNumberEffect { revision, index }) = patch.choice_number
-            && self.accepts_input_effect(revision)
-        {
-            self.choose_active_list_at(index as usize);
-        }
-        if let Some(ChatHistoryMoveEffect { revision, older }) = patch.history_move
-            && self.accepts_input_effect(revision)
-        {
-            self.recall_prompt(match older {
-                true => PromptHistoryDirection::Older,
-                false => PromptHistoryDirection::Newer,
-            });
-        }
         if let Some(ChatSelectorDismissEffect { revision }) = patch.selector_dismiss
             && self.accepts_input_effect(revision)
         {
@@ -195,13 +179,9 @@ impl Chat {
         }
         let mut revision = self.composer.effect_revision;
         let mut draft = self.composer.draft;
-        let mut history_cursor = self.composer.history_cursor;
-        let mut history_scratch = self.composer.history_scratch;
         let mut menu_sel = self.slash.menu_sel;
         revision.set(effect.revision);
         draft.set(effect.draft.clone());
-        history_cursor.set(None);
-        history_scratch.set(String::new());
         menu_sel.set(0);
         if effect.focus {
             focus_prompt_end(PROMPT_INPUT_ID);
@@ -813,13 +793,9 @@ impl Chat {
     }
 
     pub fn edit_draft(&self, value: String) {
-        let mut history_cursor = self.composer.history_cursor;
-        let mut history_scratch = self.composer.history_scratch;
         let mut menu_sel = self.slash.menu_sel;
         self.menu.close();
         self.set_draft(value);
-        history_cursor.set(None);
-        history_scratch.set(String::new());
         menu_sel.set(0);
     }
 
@@ -960,8 +936,6 @@ pub struct ComposerDraft {
     pub effect_revision: Signal<u64>,
     pub focus_revision: Signal<u64>,
     pub attachments: Signal<Vec<ChatAttachment>>,
-    pub history_cursor: Signal<Option<usize>>,
-    pub history_scratch: Signal<String>,
     pub transition_preview: Signal<String>,
     pub transition_attachments: Signal<Vec<ChatAttachment>>,
 }
@@ -972,8 +946,6 @@ pub fn use_composer_draft() -> ComposerDraft {
         effect_revision: use_signal(|| 0),
         focus_revision: use_signal(|| 0),
         attachments: use_signal(Vec::new),
-        history_cursor: use_signal(|| None),
-        history_scratch: use_signal(String::new),
         transition_preview: use_signal(String::new),
         transition_attachments: use_signal(Vec::new),
     }
