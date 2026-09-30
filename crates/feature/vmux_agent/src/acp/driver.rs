@@ -73,16 +73,118 @@ pub enum AcpInput {
 }
 
 #[derive(Clone, Copy)]
-pub enum AcpTerminalExit {
+enum AcpTerminalExit {
     Pending,
     Exited(Option<i32>),
     Removed,
 }
 
-pub struct AcpTerminal {
-    pub process_id: ProcessId,
-    pub exit_rx: watch::Receiver<AcpTerminalExit>,
-    pub output_byte_limit: Option<u64>,
+impl AcpTerminalExit {
+    fn recovered(recorded: Option<Option<i32>>) -> Option<Self> {
+        match recorded {
+            None => Some(Self::Removed),
+            Some(None) => None,
+            Some(code) => Some(Self::Exited(code)),
+        }
+    }
+
+    fn status(code: Option<i32>) -> TerminalExitStatus {
+        let status = TerminalExitStatus::new();
+        match code {
+            Some(code) => status.exit_code(code as u32),
+            None => status,
+        }
+    }
+}
+
+struct AcpTerminal {
+    process_id: ProcessId,
+    exit_rx: watch::Receiver<AcpTerminalExit>,
+    output_byte_limit: Option<u64>,
+}
+
+impl AcpTerminal {
+    fn snapshot(&self) -> Result<AcpTerminalSnapshot, String> {
+        let exit = *self.exit_rx.borrow();
+        if matches!(exit, AcpTerminalExit::Removed) {
+            return Err("process no longer exists".into());
+        }
+        Ok(AcpTerminalSnapshot {
+            process_id: self.process_id,
+            exit,
+            output_byte_limit: self.output_byte_limit,
+        })
+    }
+}
+
+struct AcpTerminalSnapshot {
+    process_id: ProcessId,
+    exit: AcpTerminalExit,
+    output_byte_limit: Option<u64>,
+}
+
+impl AcpTerminalSnapshot {
+    fn truncate(&self, output: String) -> (String, bool) {
+        let Some(limit) = self.output_byte_limit else {
+            return (output, false);
+        };
+        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+        if output.len() <= limit {
+            return (output, false);
+        }
+        let mut start = output.len().saturating_sub(limit);
+        while !output.is_char_boundary(start) {
+            start += 1;
+        }
+        (output[start..].to_string(), true)
+    }
+}
+
+#[derive(Default)]
+struct AcpTerminals(Mutex<HashMap<String, AcpTerminal>>);
+
+impl AcpTerminals {
+    fn insert(&self, id: String, terminal: AcpTerminal) {
+        self.0.lock().unwrap().insert(id, terminal);
+    }
+
+    fn snapshot(&self, terminal_id: &TerminalId) -> Result<AcpTerminalSnapshot, String> {
+        let key = terminal_id.0.to_string();
+        let terminals = self.0.lock().unwrap();
+        let terminal = terminals
+            .get(&key)
+            .ok_or_else(|| format!("acp: unknown terminal {key}"))?;
+        terminal
+            .snapshot()
+            .map_err(|error| format!("acp: terminal {key} {error}"))
+    }
+
+    fn exit_receiver(
+        &self,
+        terminal_id: &TerminalId,
+    ) -> Result<watch::Receiver<AcpTerminalExit>, String> {
+        let key = terminal_id.0.to_string();
+        self.0
+            .lock()
+            .unwrap()
+            .get(&key)
+            .map(|terminal| terminal.exit_rx.clone())
+            .ok_or_else(|| format!("acp: unknown terminal {key}"))
+    }
+
+    fn remove(&self, terminal_id: &TerminalId) -> Result<AcpTerminal, String> {
+        let key = terminal_id.0.to_string();
+        self.0
+            .lock()
+            .unwrap()
+            .remove(&key)
+            .ok_or_else(|| format!("acp: unknown terminal {key}"))
+    }
+
+    #[cfg(test)]
+    fn contains(&self, terminal_id: &str) -> bool {
+        self.0.lock().unwrap().contains_key(terminal_id)
+    }
 }
 
 #[derive(Clone)]
@@ -361,7 +463,7 @@ pub(super) struct AcpShared {
     wake: mpsc::UnboundedSender<()>,
     pub(super) projector_updates: watch::Sender<u64>,
     pub pending_perms: Mutex<HashMap<String, oneshot::Sender<ApprovalDecision>>>,
-    pub terminals: Mutex<HashMap<String, AcpTerminal>>,
+    terminals: AcpTerminals,
     processes: AcpProcesses,
     pub cancel_requested: AtomicBool,
     stderr_tail: AcpStderrTail,
@@ -400,7 +502,7 @@ impl AcpShared {
             wake,
             projector_updates: watch::channel(0).0,
             pending_perms: Mutex::new(HashMap::new()),
-            terminals: Mutex::new(HashMap::new()),
+            terminals: AcpTerminals::default(),
             processes: processes.into(),
             cancel_requested: AtomicBool::new(false),
             stderr_tail: AcpStderrTail::default(),
@@ -1265,7 +1367,7 @@ async fn create_terminal(
                 Ok(_) => {}
                 Err(broadcast::error::RecvError::Lagged(_)) => {
                     let recorded = processes.exit_code(id).await.ok();
-                    if let Some(exit) = exit_after_lag(recorded) {
+                    if let Some(exit) = AcpTerminalExit::recovered(recorded) {
                         let _ = exit_tx.send(exit);
                         break;
                     }
@@ -1279,7 +1381,7 @@ async fn create_terminal(
     });
 
     let terminal_id = id.to_string();
-    shared.terminals.lock().unwrap().insert(
+    shared.terminals.insert(
         terminal_id.clone(),
         AcpTerminal {
             process_id: id,
@@ -1298,55 +1400,27 @@ async fn create_terminal(
     Ok(CreateTerminalResponse::new(TerminalId::new(terminal_id)))
 }
 
-fn lookup_terminal(
-    shared: &AcpShared,
-    terminal_id: &TerminalId,
-) -> Result<(ProcessId, AcpTerminalExit, Option<u64>), String> {
-    let key = terminal_id.0.to_string();
-    let terminals = shared.terminals.lock().unwrap();
-    let terminal = terminals
-        .get(&key)
-        .ok_or_else(|| format!("acp: unknown terminal {key}"))?;
-    let exit = *terminal.exit_rx.borrow();
-    if matches!(exit, AcpTerminalExit::Removed) {
-        return Err(format!("acp: terminal {key} process no longer exists"));
-    }
-    Ok((terminal.process_id, exit, terminal.output_byte_limit))
-}
-
-fn terminal_exit_status(code: Option<i32>) -> TerminalExitStatus {
-    let status = TerminalExitStatus::new();
-    match code {
-        Some(code) => status.exit_code(code as u32),
-        None => status,
-    }
-}
-
 async fn terminal_output(
     shared: &AcpShared,
     req: TerminalOutputRequest,
 ) -> Result<TerminalOutputResponse, String> {
-    let (process_id, exit, output_byte_limit) = lookup_terminal(shared, &req.terminal_id)?;
-    let output = shared.processes.transcript(process_id).await.map_err(|_| {
-        format!(
-            "acp: terminal {} process no longer exists",
-            req.terminal_id.0
-        )
-    })?;
-    let (output, truncated) = truncate_terminal_output(output, output_byte_limit);
+    let terminal = shared.terminals.snapshot(&req.terminal_id)?;
+    let output = shared
+        .processes
+        .transcript(terminal.process_id)
+        .await
+        .map_err(|_| {
+            format!(
+                "acp: terminal {} process no longer exists",
+                req.terminal_id.0
+            )
+        })?;
+    let (output, truncated) = terminal.truncate(output);
     let mut resp = TerminalOutputResponse::new(output, truncated);
-    if let AcpTerminalExit::Exited(code) = exit {
-        resp = resp.exit_status(terminal_exit_status(code));
+    if let AcpTerminalExit::Exited(code) = terminal.exit {
+        resp = resp.exit_status(AcpTerminalExit::status(code));
     }
     Ok(resp)
-}
-
-fn exit_after_lag(recorded: Option<Option<i32>>) -> Option<AcpTerminalExit> {
-    match recorded {
-        None => Some(AcpTerminalExit::Removed),
-        Some(None) => None,
-        Some(code) => Some(AcpTerminalExit::Exited(code)),
-    }
 }
 
 async fn wait_for_terminal_exit(
@@ -1354,13 +1428,7 @@ async fn wait_for_terminal_exit(
     req: WaitForTerminalExitRequest,
 ) -> Result<WaitForTerminalExitResponse, String> {
     let key = req.terminal_id.0.to_string();
-    let mut exit_rx = {
-        let terminals = shared.terminals.lock().unwrap();
-        terminals
-            .get(&key)
-            .map(|terminal| terminal.exit_rx.clone())
-            .ok_or_else(|| format!("acp: unknown terminal {key}"))?
-    };
+    let mut exit_rx = shared.terminals.exit_receiver(&req.terminal_id)?;
     let code = loop {
         match *exit_rx.borrow() {
             AcpTerminalExit::Pending => {}
@@ -1373,43 +1441,25 @@ async fn wait_for_terminal_exit(
             return Err(format!("acp: terminal {key} exit state closed"));
         }
     };
-    Ok(WaitForTerminalExitResponse::new(terminal_exit_status(code)))
+    Ok(WaitForTerminalExitResponse::new(AcpTerminalExit::status(
+        code,
+    )))
 }
 
 async fn kill_terminal(
     shared: &AcpShared,
     req: KillTerminalRequest,
 ) -> Result<KillTerminalResponse, String> {
-    let (process_id, _, _) = lookup_terminal(shared, &req.terminal_id)?;
-    shared.processes.kill(process_id).await?;
+    let terminal = shared.terminals.snapshot(&req.terminal_id)?;
+    shared.processes.kill(terminal.process_id).await?;
     Ok(KillTerminalResponse::new())
-}
-
-fn truncate_terminal_output(output: String, output_byte_limit: Option<u64>) -> (String, bool) {
-    let Some(limit) = output_byte_limit else {
-        return (output, false);
-    };
-    let limit = usize::try_from(limit).unwrap_or(usize::MAX);
-    if output.len() <= limit {
-        return (output, false);
-    }
-    let mut start = output.len().saturating_sub(limit);
-    while !output.is_char_boundary(start) {
-        start += 1;
-    }
-    (output[start..].to_string(), true)
 }
 
 async fn release_terminal(
     shared: &AcpShared,
     req: ReleaseTerminalRequest,
 ) -> Result<ReleaseTerminalResponse, String> {
-    let terminal = shared
-        .terminals
-        .lock()
-        .unwrap()
-        .remove(&req.terminal_id.0.to_string())
-        .ok_or_else(|| format!("acp: unknown terminal {}", req.terminal_id.0))?;
+    let terminal = shared.terminals.remove(&req.terminal_id)?;
     shared.processes.remove(terminal.process_id).await?;
     Ok(ReleaseTerminalResponse::new())
 }
@@ -2364,16 +2414,16 @@ mod tests {
     #[test]
     fn a_dropped_exit_is_recovered_from_the_manager() {
         assert!(matches!(
-            exit_after_lag(Some(Some(7))),
+            AcpTerminalExit::recovered(Some(Some(7))),
             Some(AcpTerminalExit::Exited(Some(7)))
         ));
         assert!(matches!(
-            exit_after_lag(None),
+            AcpTerminalExit::recovered(None),
             Some(AcpTerminalExit::Removed)
         ));
 
         assert!(
-            exit_after_lag(Some(None)).is_none(),
+            AcpTerminalExit::recovered(Some(None)).is_none(),
             "a child that is still running has an exit still to come, so waiting is correct"
         );
     }
@@ -2397,7 +2447,7 @@ mod tests {
         ]);
         let created = create_terminal(&shared, req).await.expect("create");
         let tid = created.terminal_id.0.to_string();
-        assert!(shared.terminals.lock().unwrap().contains_key(&tid));
+        assert!(shared.terminals.contains(&tid));
 
         let (emitted_id, emitted_pid) = loop {
             match stream_rx.recv().await.expect("stream open") {
@@ -2439,7 +2489,7 @@ mod tests {
         )
         .await
         .expect("release");
-        assert!(!shared.terminals.lock().unwrap().contains_key(&tid));
+        assert!(!shared.terminals.contains(&tid));
 
         poll.abort();
     }
@@ -2537,7 +2587,10 @@ mod tests {
         )
         .await;
         assert!(output.is_err());
-        shared.terminals.lock().unwrap().remove(&terminal_id);
+        shared
+            .terminals
+            .remove(&TerminalId::new(terminal_id))
+            .unwrap();
     }
 
     #[tokio::test]
