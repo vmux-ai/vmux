@@ -850,8 +850,7 @@ mod tests {
 
     #[test]
     fn command_bar_mcp_definitions_are_the_dispatchable_command_set() {
-        let definitions =
-            crate::CommandManifest::from_feature_ron(crate::FEATURE_MANIFEST).into_vec();
+        let definitions = crate::CommandManifest::for_feature::<crate::Feature>().into_vec();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)

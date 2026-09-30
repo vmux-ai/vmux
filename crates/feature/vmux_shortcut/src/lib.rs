@@ -1,3 +1,11 @@
+#[cfg(host)]
+pub(crate) struct Feature;
+
+#[cfg(host)]
+impl vmux_core::host::manifest::FeatureManifestSource for Feature {
+    const SOURCE: &'static str = include_str!("feature.ron");
+}
+
 pub const PAGE_URL: &str = "vmux://shortcuts/";
 pub struct ShortcutUrl;
 

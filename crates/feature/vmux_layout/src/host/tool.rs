@@ -21,30 +21,28 @@ pub struct LayoutToolPlugin;
 
 impl Plugin for LayoutToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .register_tool::<OpenPageArgs>()
-        .register_tool::<ReadLayoutArgs>()
-        .register_tool::<UpdateLayoutArgs>()
-        .register_tool::<SelectTabArgs>()
-        .add_message::<ToolQueryRequest>()
-        .add_message::<ToolQueryHandled>()
-        .add_message::<ServiceRequest>()
-        .add_message::<LayoutSnapshotRequest>()
-        .add_message::<LayoutSnapshotResponse>()
-        .add_message::<LayoutApplyResponse>()
-        .add_systems(
-            Update,
-            (open_page, read_layout, update_layout, select_tab).in_set(ToolDispatchSet),
-        )
-        .add_systems(
-            Update,
-            route_layout_queries
-                .in_set(ToolQueryRouteSet)
-                .after(ServiceMessageSet),
-        )
-        .add_systems(Update, (forward_layout_apply_responses, forward_snapshots));
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::default())
+            .register_tool::<OpenPageArgs>()
+            .register_tool::<ReadLayoutArgs>()
+            .register_tool::<UpdateLayoutArgs>()
+            .register_tool::<SelectTabArgs>()
+            .add_message::<ToolQueryRequest>()
+            .add_message::<ToolQueryHandled>()
+            .add_message::<ServiceRequest>()
+            .add_message::<LayoutSnapshotRequest>()
+            .add_message::<LayoutSnapshotResponse>()
+            .add_message::<LayoutApplyResponse>()
+            .add_systems(
+                Update,
+                (open_page, read_layout, update_layout, select_tab).in_set(ToolDispatchSet),
+            )
+            .add_systems(
+                Update,
+                route_layout_queries
+                    .in_set(ToolQueryRouteSet)
+                    .after(ServiceMessageSet),
+            )
+            .add_systems(Update, (forward_layout_apply_responses, forward_snapshots));
     }
 }
 

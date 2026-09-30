@@ -1,5 +1,3 @@
-use std::any::TypeId;
-use std::collections::HashSet;
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
@@ -22,6 +20,10 @@ pub struct FeatureManifest {
 }
 
 impl FeatureManifest {
+    pub fn of<M: FeatureManifestSource>() -> Self {
+        Self::parse(M::SOURCE)
+    }
+
     pub fn parse(source: &str) -> Self {
         let manifest: Self =
             ron::from_str(source).expect("embedded feature manifest must be valid RON");
@@ -220,48 +222,31 @@ pub struct McpServer {
     pub scopes: Vec<String>,
 }
 
-#[derive(Resource, Default)]
-struct RegisteredFeatureManifests(HashSet<TypeId>);
-
-#[derive(Component)]
-pub struct FeatureManifestSource<M>(PhantomData<fn() -> M>);
-
-pub struct FeatureManifestPlugin<M> {
-    source: &'static str,
-    marker: PhantomData<fn() -> M>,
+pub trait FeatureManifestSource: Send + Sync + 'static {
+    const SOURCE: &'static str;
 }
 
-impl<M> FeatureManifestPlugin<M> {
-    pub const fn new(source: &'static str) -> Self {
-        Self {
-            source,
-            marker: PhantomData,
-        }
+#[derive(Component)]
+pub struct FeatureManifestOwner<M>(PhantomData<fn() -> M>);
+
+pub struct FeatureManifestPlugin<M>(PhantomData<fn() -> M>);
+
+impl<M> Default for FeatureManifestPlugin<M> {
+    fn default() -> Self {
+        Self(PhantomData)
     }
 }
 
-impl<M: Send + Sync + 'static> Plugin for FeatureManifestPlugin<M> {
+impl<M: FeatureManifestSource> Plugin for FeatureManifestPlugin<M> {
     fn build(&self, app: &mut App) {
-        let source = self.source;
-        let mut registered = app
-            .world_mut()
-            .get_resource_or_init::<RegisteredFeatureManifests>();
-        if !registered.0.insert(TypeId::of::<M>()) {
-            return;
-        }
-        drop(registered);
-        let manifest = FeatureManifest::parse(source);
+        let manifest = FeatureManifest::of::<M>();
         app.add_systems(PreStartup, move |mut commands: Commands| {
             commands.spawn((
                 Name::new(std::any::type_name::<M>()),
-                FeatureManifestSource::<M>(PhantomData),
+                FeatureManifestOwner::<M>(PhantomData),
                 manifest.clone(),
             ));
         });
-    }
-
-    fn is_unique(&self) -> bool {
-        false
     }
 }
 
@@ -302,14 +287,18 @@ mod tests {
     struct Feature;
     struct OtherFeature;
 
+    impl FeatureManifestSource for Feature {
+        const SOURCE: &'static str = SOURCE;
+    }
+
+    impl FeatureManifestSource for OtherFeature {
+        const SOURCE: &'static str = SOURCE;
+    }
+
     #[test]
     fn one_feature_entity_owns_all_parsed_sections() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            FeatureManifestPlugin::<Feature>::new(SOURCE),
-            FeatureManifestPlugin::<Feature>::new(SOURCE),
-        ));
+        app.add_plugins((MinimalPlugins, FeatureManifestPlugin::<Feature>::default()));
         app.update();
 
         let manifests = app
@@ -347,8 +336,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            FeatureManifestPlugin::<Feature>::new(SOURCE),
-            FeatureManifestPlugin::<OtherFeature>::new(SOURCE),
+            FeatureManifestPlugin::<Feature>::default(),
+            FeatureManifestPlugin::<OtherFeature>::default(),
         ));
         app.update();
 

@@ -33,34 +33,32 @@ pub struct CapturePlugin;
 
 impl Plugin for CapturePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_message::<ToolQueryRequest>()
-        .add_message::<ToolQueryHandled>()
-        .add_message::<ServiceRequest>()
-        .register_tool::<ScreenshotArgs>()
-        .register_tool::<RecordStartArgs>()
-        .register_tool::<RecordStopArgs>()
-        .add_message::<ScreenshotRequest>()
-        .add_message::<ScreenshotResponse>()
-        .add_message::<RecordStartRequest>()
-        .add_message::<RecordStartResponse>()
-        .add_message::<RecordStopRequest>()
-        .add_message::<RecordStopResponse>()
-        .add_systems(
-            Update,
-            (screenshot, record_start, record_stop).in_set(ToolDispatchSet),
-        )
-        .add_systems(Update, route_capture_queries.in_set(ToolQueryRouteSet))
-        .add_systems(
-            Update,
-            (
-                forward_screenshot_responses,
-                forward_record_start_responses,
-                forward_record_stop_responses,
-            ),
-        );
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::default())
+            .add_message::<ToolQueryRequest>()
+            .add_message::<ToolQueryHandled>()
+            .add_message::<ServiceRequest>()
+            .register_tool::<ScreenshotArgs>()
+            .register_tool::<RecordStartArgs>()
+            .register_tool::<RecordStopArgs>()
+            .add_message::<ScreenshotRequest>()
+            .add_message::<ScreenshotResponse>()
+            .add_message::<RecordStartRequest>()
+            .add_message::<RecordStartResponse>()
+            .add_message::<RecordStopRequest>()
+            .add_message::<RecordStopResponse>()
+            .add_systems(
+                Update,
+                (screenshot, record_start, record_stop).in_set(ToolDispatchSet),
+            )
+            .add_systems(Update, route_capture_queries.in_set(ToolQueryRouteSet))
+            .add_systems(
+                Update,
+                (
+                    forward_screenshot_responses,
+                    forward_record_start_responses,
+                    forward_record_stop_responses,
+                ),
+            );
     }
 }
 

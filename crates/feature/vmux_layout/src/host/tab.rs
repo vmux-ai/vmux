@@ -78,7 +78,7 @@ impl Plugin for TabCommandPlugin {
         #[cfg(test)]
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
             crate::Feature,
-        >::new(crate::FEATURE_MANIFEST));
+        >::default());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -673,7 +673,7 @@ mod tests {
 
     #[test]
     fn tab_mcp_definition_dispatches_to_the_typed_request() {
-        let definitions = CommandManifest::from_feature_ron(crate::FEATURE_MANIFEST).into_vec();
+        let definitions = CommandManifest::for_feature::<crate::Feature>().into_vec();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)

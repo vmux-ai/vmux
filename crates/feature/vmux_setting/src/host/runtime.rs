@@ -1222,7 +1222,7 @@ fn load_embedded_settings() -> AppSettings {
     static DEFAULTS: OnceLock<AppSettings> = OnceLock::new();
     DEFAULTS
         .get_or_init(|| {
-            vmux_core::host::manifest::FeatureManifest::parse(crate::FEATURE_MANIFEST)
+            vmux_core::host::manifest::FeatureManifest::of::<crate::Feature>()
                 .policy::<SettingsFeaturePolicy>()
                 .expect("embedded feature settings policy must parse")
                 .expect("settings feature manifest defines policy")

@@ -19,13 +19,11 @@ pub struct FileToolPlugin;
 
 impl Plugin for FileToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .register_tool::<OpenFileArgs>()
-        .register_tool::<ReadFileArgs>()
-        .register_tool::<GrepArgs>()
-        .add_systems(Update, (open_file, read_file, grep).in_set(ToolDispatchSet));
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::default())
+            .register_tool::<OpenFileArgs>()
+            .register_tool::<ReadFileArgs>()
+            .register_tool::<GrepArgs>()
+            .add_systems(Update, (open_file, read_file, grep).in_set(ToolDispatchSet));
     }
 }
 

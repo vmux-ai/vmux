@@ -24,7 +24,7 @@ impl Plugin for ExtensionBrokerPlugin {
         #[cfg(test)]
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
             crate::Feature,
-        >::new(crate::FEATURE_MANIFEST));
+        >::default());
         app.add_systems(Startup, spawn_extension_broker)
             .add_systems(
                 Update,

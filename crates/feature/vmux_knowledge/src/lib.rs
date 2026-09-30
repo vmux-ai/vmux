@@ -1,6 +1,10 @@
-pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
 #[cfg(host)]
-pub(crate) type Feature = KnowledgeToolPlugin;
+pub(crate) struct Feature;
+
+#[cfg(host)]
+impl vmux_core::host::manifest::FeatureManifestSource for Feature {
+    const SOURCE: &'static str = include_str!("feature.ron");
+}
 
 #[cfg(host)]
 mod host;

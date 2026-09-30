@@ -56,22 +56,19 @@ pub struct ChatPlugin;
 #[cfg(host)]
 impl Plugin for ChatPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
-            crate::Feature,
-        >::new(crate::FEATURE_MANIFEST))
-            .add_plugins((
-                ChatAgentPlugin,
-                super::ChatStatePlugin,
-                super::key::ChatKeyPlugin,
-                super::media::ChatMediaPlugin,
-                super::tool::ChatToolPlugin,
-                super::composer::ChatComposerPlugin,
-                super::prompt::ChatPromptInputPlugin,
-            ))
-            .add_plugins(UiEventPlugin::<(ChatOpenPage, PromptRequest)>::default())
-            .add_observer(open_page)
-            .add_observer(submit_from_command_bar)
-            .add_systems(Update, report_tab_identity);
+        app.add_plugins((
+            ChatAgentPlugin,
+            super::ChatStatePlugin,
+            super::key::ChatKeyPlugin,
+            super::media::ChatMediaPlugin,
+            super::tool::ChatToolPlugin,
+            super::composer::ChatComposerPlugin,
+            super::prompt::ChatPromptInputPlugin,
+        ))
+        .add_plugins(UiEventPlugin::<(ChatOpenPage, PromptRequest)>::default())
+        .add_observer(open_page)
+        .add_observer(submit_from_command_bar)
+        .add_systems(Update, report_tab_identity);
     }
 }
 

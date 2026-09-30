@@ -10,9 +10,6 @@ pub struct AgentPlugin;
 
 impl Plugin for AgentPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<crate::manifest::AgentManifestPlugin>() {
-            app.add_plugins(crate::manifest::AgentManifestPlugin);
-        }
         app.add_plugins((
             vmux_chat::ChatPlugin,
             super::acp::AcpSessionConfigPlugin,

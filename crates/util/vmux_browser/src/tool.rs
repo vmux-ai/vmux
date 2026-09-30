@@ -15,30 +15,28 @@ pub struct BrowserToolPlugin;
 
 impl Plugin for BrowserToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_systems(Startup, register_agent_policy)
-        .register_tool::<BrowserNavigateArgs>()
-        .register_tool::<BrowserGoBackArgs>()
-        .register_tool::<BrowserGoForwardArgs>()
-        .register_tool::<BrowserHistorySearchArgs>()
-        .register_tool::<BrowserInstallExtensionArgs>()
-        .register_tool::<BrowserSnapshotArgs>()
-        .register_tool::<BrowserScrollArgs>()
-        .add_systems(
-            Update,
-            (
-                navigate,
-                go_back,
-                go_forward,
-                history_search,
-                install_extension,
-                snapshot,
-                scroll,
-            )
-                .in_set(ToolDispatchSet),
-        );
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::default())
+            .add_systems(Startup, register_agent_policy)
+            .register_tool::<BrowserNavigateArgs>()
+            .register_tool::<BrowserGoBackArgs>()
+            .register_tool::<BrowserGoForwardArgs>()
+            .register_tool::<BrowserHistorySearchArgs>()
+            .register_tool::<BrowserInstallExtensionArgs>()
+            .register_tool::<BrowserSnapshotArgs>()
+            .register_tool::<BrowserScrollArgs>()
+            .add_systems(
+                Update,
+                (
+                    navigate,
+                    go_back,
+                    go_forward,
+                    history_search,
+                    install_extension,
+                    snapshot,
+                    scroll,
+                )
+                    .in_set(ToolDispatchSet),
+            );
     }
 }
 

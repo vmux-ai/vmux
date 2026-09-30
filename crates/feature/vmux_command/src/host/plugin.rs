@@ -19,9 +19,6 @@ pub struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
-            crate::Feature,
-        >::new(crate::FEATURE_MANIFEST));
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

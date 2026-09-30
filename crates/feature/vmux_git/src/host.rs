@@ -40,6 +40,9 @@ pub struct GitPlugin;
 
 impl Plugin for GitPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
+            crate::Feature,
+        >::default());
         #[cfg(ui)]
         app.add_plugins((
             crate::ui::GitPage::plugin(),

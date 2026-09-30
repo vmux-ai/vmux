@@ -331,11 +331,6 @@ impl PaletteRows {
         full[typed.len()..].to_string()
     }
 
-    #[cfg(test)]
-    pub fn completed(&self, query: &str) -> String {
-        format!("{query}{}", self.ghost)
-    }
-
     pub fn selected(&self, stored: usize) -> usize {
         stored.min(self.items.len().saturating_sub(1))
     }
@@ -780,14 +775,6 @@ impl PaletteState {
             start_prompt_mode: self.start_prompt_mode,
             mode: self.mode,
             ..Default::default()
-        }
-    }
-
-    #[cfg(test)]
-    pub fn step(&self, direction: MenuDirection) -> usize {
-        match direction {
-            MenuDirection::Next => (self.selected + 1).min(self.rows.len().saturating_sub(1)),
-            MenuDirection::Previous => self.selected.saturating_sub(1),
         }
     }
 

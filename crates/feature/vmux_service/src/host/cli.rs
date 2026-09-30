@@ -16,13 +16,11 @@ pub struct ServiceCliPlugin;
 
 impl Plugin for ServiceCliPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_systems(
-            Update,
-            (route_service_cli, execute_service_cli, execute_remote_cli).chain(),
-        );
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::default())
+            .add_systems(
+                Update,
+                (route_service_cli, execute_service_cli, execute_remote_cli).chain(),
+            );
     }
 }
 

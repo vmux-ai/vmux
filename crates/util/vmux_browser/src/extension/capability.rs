@@ -54,7 +54,7 @@ impl CapabilityMatrix {
 
     #[cfg(test)]
     pub fn embedded() -> Result<Self, String> {
-        FeatureManifest::parse(crate::FEATURE_MANIFEST)
+        FeatureManifest::of::<crate::Feature>()
             .policy::<BrowserFeaturePolicy>()?
             .map(|policy| policy.extension)
             .ok_or_else(|| "browser feature manifest has no extension policy".to_string())

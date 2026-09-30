@@ -17,7 +17,7 @@ pub struct McpCliPlugin;
 impl Plugin for McpCliPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            FeatureManifestPlugin::<crate::Feature>::new(crate::FEATURE_MANIFEST),
+            FeatureManifestPlugin::<crate::Feature>::default(),
             McpPlugin,
         ))
         .add_systems(

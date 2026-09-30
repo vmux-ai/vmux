@@ -13,19 +13,17 @@ pub struct SimulatorToolPlugin;
 
 impl Plugin for SimulatorToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .register_tool::<SimulatorScreenshotArgs>()
-        .register_tool::<SimulatorTapArgs>()
-        .register_tool::<SimulatorSwipeArgs>()
-        .register_tool::<SimulatorTypeArgs>()
-        .register_tool::<SimulatorKeyArgs>()
-        .register_tool::<SimulatorButtonArgs>()
-        .add_systems(
-            Update,
-            (screenshot, tap, swipe, type_text, key, button).in_set(ToolDispatchSet),
-        );
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::default())
+            .register_tool::<SimulatorScreenshotArgs>()
+            .register_tool::<SimulatorTapArgs>()
+            .register_tool::<SimulatorSwipeArgs>()
+            .register_tool::<SimulatorTypeArgs>()
+            .register_tool::<SimulatorKeyArgs>()
+            .register_tool::<SimulatorButtonArgs>()
+            .add_systems(
+                Update,
+                (screenshot, tap, swipe, type_text, key, button).in_set(ToolDispatchSet),
+            );
     }
 }
 

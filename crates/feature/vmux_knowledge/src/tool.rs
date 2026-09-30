@@ -11,13 +11,11 @@ pub struct KnowledgeToolPlugin;
 
 impl Plugin for KnowledgeToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .register_tool::<SearchKnowledgeArgs>()
-        .register_tool::<ReadKnowledgeArgs>()
-        .register_tool::<WriteKnowledgeArgs>()
-        .add_systems(Update, (search, read, write).in_set(ToolDispatchSet));
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::default())
+            .register_tool::<SearchKnowledgeArgs>()
+            .register_tool::<ReadKnowledgeArgs>()
+            .register_tool::<WriteKnowledgeArgs>()
+            .add_systems(Update, (search, read, write).in_set(ToolDispatchSet));
     }
 }
 

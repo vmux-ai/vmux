@@ -1,7 +1,10 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
-pub(crate) type Feature = BrowserToolPlugin;
+pub(crate) struct Feature;
+
+impl vmux_core::host::manifest::FeatureManifestSource for Feature {
+    const SOURCE: &'static str = include_str!("feature.ron");
+}
 
 mod appearance;
 mod command;
@@ -69,9 +72,6 @@ pub struct BrowserPlugin;
 
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(
-            vmux_core::host::manifest::FeatureManifestPlugin::<Feature>::new(FEATURE_MANIFEST),
-        );
         let startup_settings = vmux_setting::AppSettings::from_disk();
         let startup_locale =
             Locale::requested(Some(&startup_settings.appearance.locale)).into_string();

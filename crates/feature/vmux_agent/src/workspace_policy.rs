@@ -2,16 +2,13 @@ use std::collections::BTreeMap;
 
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_core::host::manifest::{FeatureManifest, FeatureManifestPlugin};
+use vmux_core::host::manifest::FeatureManifest;
 
-pub(crate) struct AgentManifestPlugin;
+pub(crate) struct AcpWorkspacePolicyPlugin;
 
-impl Plugin for AgentManifestPlugin {
+impl Plugin for AcpWorkspacePolicyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_systems(Startup, load);
+        app.add_systems(Startup, load);
     }
 }
 
@@ -25,7 +22,7 @@ pub(crate) struct AcpWorkspacePolicy {
 #[cfg(test)]
 impl AcpWorkspacePolicy {
     pub(crate) fn bundled() -> Self {
-        let manifest = FeatureManifest::parse(crate::FEATURE_MANIFEST);
+        let manifest = FeatureManifest::of::<crate::Feature>();
         manifest
             .policies::<BTreeMap<String, Self>>()
             .unwrap()
@@ -60,7 +57,11 @@ mod tests {
     #[test]
     fn agent_feature_manifest_attaches_typed_sections_to_one_entity() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, AgentManifestPlugin));
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_core::host::manifest::FeatureManifestPlugin::<crate::Feature>::default(),
+            AcpWorkspacePolicyPlugin,
+        ));
         app.update();
 
         let entries = app

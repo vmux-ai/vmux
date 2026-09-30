@@ -156,6 +156,11 @@ mod tests {
 
     struct TestFeature;
 
+    impl vmux_core::host::manifest::FeatureManifestSource for TestFeature {
+        const SOURCE: &'static str =
+            r#"(tools: [(name: "test_query", description: "test", input_schema: (type: Object))])"#;
+    }
+
     #[derive(Resource, Default)]
     struct CapturedAgentQueries(Vec<AgentRequest>);
 
@@ -184,9 +189,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            FeatureManifestPlugin::<TestFeature>::new(
-                r#"(tools: [(name: "test_query", description: "test", input_schema: (type: Object))])"#,
-            ),
+            FeatureManifestPlugin::<TestFeature>::default(),
             ToolCallPlugin,
         ))
         .register_tool::<TestQueryArgs>()

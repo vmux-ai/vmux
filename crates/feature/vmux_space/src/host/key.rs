@@ -13,7 +13,7 @@ impl Plugin for SpaceKeyPlugin {
         #[cfg(test)]
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
             crate::Feature,
-        >::new(crate::FEATURE_MANIFEST));
+        >::default());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

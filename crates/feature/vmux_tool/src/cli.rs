@@ -12,24 +12,22 @@ pub struct ToolCliPlugin;
 
 impl Plugin for ToolCliPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_systems(
-            Update,
-            (
-                route_tool_cli,
-                execute_status,
-                execute_apply,
-                execute_homebrew_import,
-                execute_npm_import,
-                execute_mcp_import,
-                execute_dotfile_import,
-                execute_adopt,
-                execute_unlink,
-            )
-                .chain(),
-        );
+        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::default())
+            .add_systems(
+                Update,
+                (
+                    route_tool_cli,
+                    execute_status,
+                    execute_apply,
+                    execute_homebrew_import,
+                    execute_npm_import,
+                    execute_mcp_import,
+                    execute_dotfile_import,
+                    execute_adopt,
+                    execute_unlink,
+                )
+                    .chain(),
+            );
     }
 }
 

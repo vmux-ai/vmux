@@ -5,9 +5,6 @@ pub struct EditorPlugin;
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
-            crate::Feature,
-        >::new(crate::FEATURE_MANIFEST));
         #[cfg(ui)]
         app.add_plugins((
             crate::ui::LspPage::plugin(),

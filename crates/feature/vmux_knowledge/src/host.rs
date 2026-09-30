@@ -11,10 +11,7 @@ pub struct KnowledgePlugin;
 
 impl Plugin for KnowledgePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
-            crate::Feature,
-        >::new(crate::FEATURE_MANIFEST))
-            .add_plugins(Self::MANIFEST.plugin())
+        app.add_plugins(Self::MANIFEST.plugin())
             .add_plugins((
                 crate::KnowledgeToolPlugin,
                 agent::KnowledgeAgentPlugin,

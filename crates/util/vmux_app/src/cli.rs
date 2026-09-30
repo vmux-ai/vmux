@@ -10,7 +10,7 @@ pub struct VmuxCliPlugin;
 impl Plugin for VmuxCliPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            FeatureManifestPlugin::<crate::Feature>::new(crate::FEATURE_MANIFEST),
+            FeatureManifestPlugin::<crate::Feature>::default(),
             vmux_service::ServiceCliPlugin,
             vmux_tool::ToolCliPlugin,
             vmux_mcp::McpCliPlugin,

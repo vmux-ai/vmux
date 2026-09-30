@@ -1,8 +1,12 @@
 #![allow(non_snake_case)]
 
-pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
 #[cfg(host)]
-pub(crate) type Feature = host::ChatToolPlugin;
+pub(crate) struct Feature;
+
+#[cfg(host)]
+impl vmux_core::host::manifest::FeatureManifestSource for Feature {
+    const SOURCE: &'static str = include_str!("feature.ron");
+}
 
 pub mod activity;
 pub mod event;

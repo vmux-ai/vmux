@@ -28,7 +28,7 @@ impl Plugin for NavigationPlugin {
         #[cfg(test)]
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
             crate::Feature,
-        >::new(crate::FEATURE_MANIFEST));
+        >::default());
         app.add_message::<vmux_core::service::ServiceRequest>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
@@ -495,7 +495,7 @@ mod command_definition_tests {
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
                 crate::Feature,
-            >::new(crate::FEATURE_MANIFEST))
+            >::default())
             .add_plugins(CommandRuntimePlugin)
             .add_message::<OpenHistoryRequest>()
             .add_systems(Startup, bind_command.in_set(BindCommands))

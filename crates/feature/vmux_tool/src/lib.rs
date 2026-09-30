@@ -2,8 +2,11 @@
 
 extern crate self as vmux_tool;
 
-pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
-pub(crate) type Feature = ToolPlugin;
+pub(crate) struct Feature;
+
+impl vmux_core::host::manifest::FeatureManifestSource for Feature {
+    const SOURCE: &'static str = include_str!("feature.ron");
+}
 
 #[cfg(host)]
 mod cli;
@@ -51,9 +54,7 @@ pub struct ToolPlugin;
 
 impl Plugin for ToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(
-            vmux_core::host::manifest::FeatureManifestPlugin::<Feature>::new(FEATURE_MANIFEST),
-        );
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<Feature>::default());
         #[cfg(ui)]
         app.add_plugins(ui::ToolsPage::plugin());
 

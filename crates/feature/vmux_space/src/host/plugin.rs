@@ -51,9 +51,6 @@ pub struct SpacePlugin;
 
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
-            crate::Feature,
-        >::new(crate::FEATURE_MANIFEST));
         #[cfg(ui)]
         app.add_plugins(crate::ui::SpacesPage::plugin());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
@@ -954,7 +951,7 @@ mod tests {
 
     #[test]
     fn space_mcp_definition_dispatches_to_the_typed_request() {
-        let definitions = CommandManifest::from_feature_ron(crate::FEATURE_MANIFEST).into_vec();
+        let definitions = CommandManifest::for_feature::<crate::Feature>().into_vec();
         let tools = definitions
             .iter()
             .filter_map(vmux_command::CommandDefinition::agent_tool)

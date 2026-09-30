@@ -77,7 +77,7 @@ impl Plugin for ServicePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
             crate::Feature,
-        >::new(crate::FEATURE_MANIFEST))
+        >::default())
             .add_message::<ServiceRequest>()
             .add_message::<ServiceInbound>()
             .add_systems(

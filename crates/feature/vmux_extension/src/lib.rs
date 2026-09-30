@@ -1,6 +1,14 @@
 #![allow(clippy::type_complexity)]
 
 #[cfg(host)]
+pub(crate) struct Feature;
+
+#[cfg(host)]
+impl vmux_core::host::manifest::FeatureManifestSource for Feature {
+    const SOURCE: &'static str = include_str!("feature.ron");
+}
+
+#[cfg(host)]
 mod catalog;
 #[cfg(host)]
 pub mod crx;

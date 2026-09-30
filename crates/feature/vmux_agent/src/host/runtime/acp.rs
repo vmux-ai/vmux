@@ -15,7 +15,7 @@ use vmux_terminal::reattach_terminal_bundle;
 
 use crate::event::AgentApprovalRequest;
 use crate::handoff::{ImportedConversation, PendingHandoff};
-use crate::manifest::AcpWorkspacePolicy;
+use crate::workspace_policy::AcpWorkspacePolicy;
 use vmux_chat::host::ChatView;
 use vmux_session::AgentRunState;
 use vmux_session::{AcpSession, AgentApprovalPolicy, PromptQueue};
@@ -27,39 +27,40 @@ pub(crate) struct AcpSessionConfigSet;
 
 impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<crate::manifest::AgentManifestPlugin>() {
-            app.add_plugins(crate::manifest::AgentManifestPlugin);
-        }
-        app.add_message::<ServiceRequest>()
-            .add_plugins(crate::acp_tool::AcpToolPlugin)
-            .add_message::<crate::event::UiAgentInfo>()
-            .add_message::<crate::event::UiAgentWorkspaceChanged>()
-            .add_message::<crate::event::UiAgentSessionConfigState>()
-            .add_message::<crate::event::UiAgentSessionConfigSelectionResult>()
-            .add_message::<crate::event::UiAgentSessionCreated>()
-            .add_message::<crate::event::UiAgentAcpTerminalCreated>()
-            .add_systems(Startup, (spawn_acp_catalog, start_catalog_fetch))
-            .add_systems(
-                Update,
+        app.add_plugins((
+            vmux_core::host::manifest::FeatureManifestPlugin::<crate::Feature>::default(),
+            crate::workspace_policy::AcpWorkspacePolicyPlugin,
+        ))
+        .add_message::<ServiceRequest>()
+        .add_plugins(crate::acp_tool::AcpToolPlugin)
+        .add_message::<crate::event::UiAgentInfo>()
+        .add_message::<crate::event::UiAgentWorkspaceChanged>()
+        .add_message::<crate::event::UiAgentSessionConfigState>()
+        .add_message::<crate::event::UiAgentSessionConfigSelectionResult>()
+        .add_message::<crate::event::UiAgentSessionCreated>()
+        .add_message::<crate::event::UiAgentAcpTerminalCreated>()
+        .add_systems(Startup, (spawn_acp_catalog, start_catalog_fetch))
+        .add_systems(
+            Update,
+            (
+                send_acp_input,
+                receive_catalog,
                 (
-                    send_acp_input,
-                    receive_catalog,
+                    apply_acp_agent_info,
+                    apply_acp_workspace_changed,
                     (
-                        apply_acp_agent_info,
-                        apply_acp_workspace_changed,
-                        (
-                            apply_acp_session_config_state.in_set(AcpSessionConfigSet),
-                            apply_acp_session_config_selection,
-                        )
-                            .chain(),
-                        apply_acp_session_created,
-                        apply_acp_terminal_created,
+                        apply_acp_session_config_state.in_set(AcpSessionConfigSet),
+                        apply_acp_session_config_selection,
                     )
-                        .after(vmux_core::service::ServiceMessageSet),
-                ),
-            )
-            .add_observer(close_acp_session_on_remove)
-            .add_observer(auto_allow_acp_approval);
+                        .chain(),
+                    apply_acp_session_created,
+                    apply_acp_terminal_created,
+                )
+                    .after(vmux_core::service::ServiceMessageSet),
+            ),
+        )
+        .add_observer(close_acp_session_on_remove)
+        .add_observer(auto_allow_acp_approval);
     }
 }
 

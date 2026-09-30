@@ -14,6 +14,9 @@ pub struct HistoryPlugin;
 
 impl Plugin for HistoryPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
+            crate::Feature,
+        >::default());
         #[cfg(ui)]
         app.add_plugins(crate::ui::HistoryPage::plugin());
         app.add_plugins(

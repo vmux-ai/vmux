@@ -7,8 +7,6 @@ use vmux_command::shortcut::KeyCombo;
 pub(crate) struct TerminalMode {
     pub(crate) mouse_capture: bool,
     pub(crate) copy_mode: bool,
-    pub(crate) alt_screen: bool,
-    pub(crate) focus_reporting: bool,
 }
 
 #[derive(Component, Default)]

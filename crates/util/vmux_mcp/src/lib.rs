@@ -1,7 +1,10 @@
 #![allow(clippy::type_complexity)]
 
-pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
-pub(crate) type Feature = McpCliPlugin;
+pub(crate) struct Feature;
+
+impl vmux_core::host::manifest::FeatureManifestSource for Feature {
+    const SOURCE: &'static str = include_str!("feature.ron");
+}
 
 mod cli;
 pub mod host_quote;

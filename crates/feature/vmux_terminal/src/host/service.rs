@@ -97,8 +97,6 @@ struct ProcessTerminalMode {
     process_id: ProcessId,
     mouse_capture: bool,
     copy_mode: bool,
-    alt_screen: bool,
-    focus_reporting: bool,
 }
 
 pub(crate) struct ServiceIngressPlugin;
@@ -266,8 +264,6 @@ fn project_terminal_modes(
         *mode = TerminalMode {
             mouse_capture: inbound.mouse_capture,
             copy_mode: inbound.copy_mode,
-            alt_screen: inbound.alt_screen,
-            focus_reporting: inbound.focus_reporting,
         };
         copy_mode_state.set(inbound.copy_mode);
     }
@@ -332,8 +328,6 @@ mod tests {
         assert_eq!(created[0].pid, 4242);
         assert!(mode.mouse_capture);
         assert!(mode.copy_mode);
-        assert!(mode.alt_screen);
-        assert!(mode.focus_reporting);
         assert!(copy_mode.active);
     }
 }

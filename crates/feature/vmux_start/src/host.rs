@@ -26,6 +26,9 @@ pub struct StartPlugin;
 
 impl Plugin for StartPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
+            crate::Feature,
+        >::default());
         #[cfg(ui)]
         app.add_plugins(crate::ui::StartPage::plugin());
         app.add_plugins(Self::MANIFEST.plugin().hosted(

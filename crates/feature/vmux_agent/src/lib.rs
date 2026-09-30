@@ -1,9 +1,12 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-#[cfg(feature = "app")]
-pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
 #[cfg(all(host, feature = "app"))]
-pub(crate) type Feature = host::AgentPlugin;
+pub(crate) struct Feature;
+
+#[cfg(all(host, feature = "app"))]
+impl vmux_core::host::manifest::FeatureManifestSource for Feature {
+    const SOURCE: &'static str = include_str!("feature.ron");
+}
 
 #[cfg(all(host, feature = "service"))]
 pub mod acp;
@@ -15,9 +18,9 @@ pub mod host;
 #[cfg(all(host, feature = "app"))]
 pub mod managed_mcp;
 #[cfg(all(host, feature = "app"))]
-mod manifest;
-#[cfg(all(host, feature = "app"))]
 pub mod mcp;
+#[cfg(all(host, feature = "app"))]
+mod workspace_policy;
 #[cfg(all(test, host, feature = "app"))]
 pub use host::test_support;
 #[cfg(all(host, feature = "app"))]

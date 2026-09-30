@@ -1,7 +1,10 @@
 #[cfg(feature = "cli")]
-pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
+pub(crate) struct Feature;
+
 #[cfg(feature = "cli")]
-pub(crate) type Feature = VmuxCliPlugin;
+impl vmux_core::host::manifest::FeatureManifestSource for Feature {
+    const SOURCE: &'static str = include_str!("feature.ron");
+}
 
 #[cfg(feature = "cli")]
 mod cli;
