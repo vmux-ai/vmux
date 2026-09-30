@@ -48,13 +48,10 @@ app = [
     "dep:url",
     "dep:uuid",
     "dep:vmux_chat",
-    "dep:vmux_clipboard",
     "dep:vmux_command",
     "dep:vmux_core",
     "dep:vmux_editor",
-    "dep:vmux_extension",
     "dep:vmux_git",
-    "dep:vmux_history",
     "dep:vmux_layout",
     "dep:vmux_mcp",
     "dep:vmux_path",
@@ -64,7 +61,6 @@ app = [
     "dep:vmux_start",
     "dep:vmux_terminal",
     "dep:vmux_tool",
-    "dep:vmux_transport",
     "dep:vmux_ui",
 ]
 
@@ -79,7 +75,6 @@ vmux_chat = { path = "../vmux_chat", optional = true }
 vmux_api = { path = "../../util/vmux_api" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
-vmux_clipboard = { path = "../../util/vmux_clipboard", optional = true }
 vmux_command = { path = "../vmux_command", optional = true }
 agent-client-protocol = { version = "1.0.1", optional = true }
 base64 = { version = "0.22", optional = true }
@@ -105,15 +100,12 @@ uuid = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 vmux_core = { path = "../../util/vmux_core", optional = true }
 vmux_editor = { path = "../vmux_editor", optional = true }
-vmux_extension = { path = "../vmux_extension", optional = true }
 vmux_git = { path = "../vmux_git", optional = true }
-vmux_history = { path = "../vmux_history", optional = true }
 vmux_layout = { path = "../vmux_layout", optional = true }
 vmux_start = { path = "../vmux_start", optional = true }
 vmux_mcp = { path = "../../util/vmux_mcp", optional = true }
 vmux_path = { path = "../../util/vmux_path", optional = true }
 vmux_process = { path = "../../util/vmux_process", optional = true }
-vmux_transport = { path = "../../util/vmux_transport", optional = true }
 vmux_session = { path = "../../util/vmux_session", optional = true }
 vmux_setting = { path = "../vmux_setting", optional = true }
 vmux_space = { path = "../vmux_space", optional = true }
