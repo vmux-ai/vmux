@@ -129,14 +129,14 @@ fn attach(
 }
 
 pub(crate) fn acp_registry_agent_for_id<'a>(
-    catalog: Option<&'a crate::runtime::acp::AcpCatalog>,
+    catalog: Option<&'a crate::runtime::AcpCatalog>,
     id: &str,
 ) -> Option<&'a crate::acp_registry::RegistryAgent> {
     catalog?.agents.iter().find(|agent| agent.id == id)
 }
 
 pub(crate) fn acp_icon_for_id(
-    catalog: Option<&crate::runtime::acp::AcpCatalog>,
+    catalog: Option<&crate::runtime::AcpCatalog>,
     id: &str,
 ) -> Option<String> {
     acp_registry_agent_for_id(catalog, id).and_then(|agent| agent.icon.clone())
@@ -145,7 +145,7 @@ pub(crate) fn acp_icon_for_id(
 pub(crate) fn acp_profile_name_for_id(
     id: &str,
     config: Option<&vmux_setting::AcpAgentConfig>,
-    catalog: Option<&crate::runtime::acp::AcpCatalog>,
+    catalog: Option<&crate::runtime::AcpCatalog>,
 ) -> String {
     acp_registry_agent_for_id(catalog, id)
         .map(|agent| agent.name.trim())
@@ -192,7 +192,7 @@ mod tests {
     #[test]
     fn acp_icon_for_id_reads_catalog() {
         use crate::acp_registry::{Distribution, RegistryAgent};
-        let catalog = crate::runtime::acp::AcpCatalog {
+        let catalog = crate::runtime::AcpCatalog {
             agents: vec![
                 RegistryAgent {
                     id: "mistral-vibe".to_string(),
@@ -240,7 +240,7 @@ mod tests {
             cwd: None,
             version: None,
         };
-        let catalog = crate::runtime::acp::AcpCatalog {
+        let catalog = crate::runtime::AcpCatalog {
             agents: vec![RegistryAgent {
                 id: "claude-acp".into(),
                 name: "Claude".into(),

@@ -49,7 +49,7 @@ fn sync_work_directories(
 
 #[allow(clippy::type_complexity)]
 fn update_agents_snapshot(
-    catalog: Option<Single<Ref<crate::runtime::acp::AcpCatalog>>>,
+    catalog: Option<Single<Ref<crate::runtime::AcpCatalog>>>,
     mut package_changes: MessageReader<crate::acp_tool::AcpPackageChanged>,
     mut state: Single<&mut CommandBarProjection>,
 ) {

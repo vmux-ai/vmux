@@ -449,7 +449,7 @@ fn handle_agent_page_open(
     mut commands: Commands,
     settings: Res<AppSettings>,
     workspace: AgentPageOpenWorkspace,
-    catalog: Option<Single<&crate::runtime::acp::AcpCatalog>>,
+    catalog: Option<Single<&crate::runtime::AcpCatalog>>,
     transitions: Query<&StartInlineTransition>,
     launches: Query<&TerminalLaunch>,
 ) {
@@ -540,7 +540,7 @@ fn handle_agent_page_open(
 fn handle_swap_stack_session(
     mut reader: MessageReader<SwapStackSession>,
     settings: Res<AppSettings>,
-    catalog: Option<Single<&crate::runtime::acp::AcpCatalog>>,
+    catalog: Option<Single<&crate::runtime::AcpCatalog>>,
     mut commands: Commands,
 ) {
     let catalog = catalog.as_ref().map(|catalog| **catalog);
@@ -617,7 +617,7 @@ fn handle_agent_page_open_task(
     commands: &mut Commands,
     default_cwd: &Path,
     acp_configs: &[vmux_setting::AcpAgentConfig],
-    catalog: Option<&crate::runtime::acp::AcpCatalog>,
+    catalog: Option<&crate::runtime::AcpCatalog>,
 ) -> Result<(), String> {
     let target = match crate::AgentUrl::parse(&task.url) {
         Some(crate::AgentUrl::AcpDefault) => {
