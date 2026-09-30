@@ -10197,7 +10197,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_api"
-version = "0.0.34"
+version = "0.0.35"
 dependencies = [
  "bevy_ecs",
  "bevy_reflect",
@@ -10211,7 +10211,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_app"
-version = "0.0.34"
+version = "0.0.35"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -10246,7 +10246,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_bookmark"
-version = "0.0.34"
+version = "0.0.35"
 dependencies = [
  "bevy",
  "bevy_world_serialization",
@@ -10365,27 +10365,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vmux_client"
-version = "0.0.35"
-dependencies = [
- "chrono",
- "libc",
- "ring",
- "rkyv",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "url",
- "uuid",
- "vmux_api",
- "vmux_path",
- "vmux_profile",
- "vmux_transport",
-]
-
-[[package]]
 name = "vmux_clipboard"
 version = "0.0.35"
 dependencies = [
@@ -10417,15 +10396,6 @@ dependencies = [
  "vmux_macro",
  "vmux_tool",
  "vmux_ui",
-]
-
-[[package]]
-name = "vmux_command_mcp"
-version = "0.0.35"
-dependencies = [
- "serde_json",
- "vmux_command",
- "vmux_macro",
 ]
 
 [[package]]
@@ -10588,7 +10558,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_extension"
-version = "0.0.34"
+version = "0.0.35"
 dependencies = [
  "base64 0.22.1",
  "bevy",
@@ -10666,7 +10636,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_input"
-version = "0.0.34"
+version = "0.0.35"
 dependencies = [
  "bevy",
  "bevy_cef_core",
@@ -10837,14 +10807,14 @@ dependencies = [
 
 [[package]]
 name = "vmux_path"
-version = "0.0.34"
+version = "0.0.35"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "vmux_process"
-version = "0.0.34"
+version = "0.0.35"
 dependencies = [
  "alacritty_terminal",
  "bevy",
@@ -10882,17 +10852,13 @@ dependencies = [
 name = "vmux_remote"
 version = "0.0.35"
 dependencies = [
- "bytes",
- "quinn",
- "rcgen",
- "ring",
- "rustls",
- "rustls-pemfile",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "webpki-roots",
+ "bevy",
+ "bevy_cef",
+ "uuid",
+ "vmux_clipboard",
+ "vmux_core",
+ "vmux_layout",
+ "vmux_service",
 ]
 
 [[package]]
@@ -11134,7 +11100,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_tool"
-version = "0.0.34"
+version = "0.0.35"
 dependencies = [
  "bevy",
  "bevy_app",
@@ -11164,7 +11130,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_transport"
-version = "0.0.34"
+version = "0.0.35"
 dependencies = [
  "bytes",
  "quinn",
@@ -11195,27 +11161,11 @@ dependencies = [
  "vmux_api",
  "vmux_clipboard",
  "vmux_core",
- "vmux_wire",
-]
-
-[[package]]
-name = "vmux_wire"
-version = "0.0.35"
-dependencies = [
- "bevy_ecs",
- "bevy_reflect",
- "rkyv",
- "serde",
- "serde_json",
- "unicode-segmentation",
- "url",
- "uuid",
- "vmux_macro",
 ]
 
 [[package]]
 name = "vmux_vault"
-version = "0.0.34"
+version = "0.0.35"
 dependencies = [
  "bevy",
  "bevy_cef",
