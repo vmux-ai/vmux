@@ -15,7 +15,7 @@ use vmux_terminal::reattach_terminal_bundle;
 
 use crate::event::AgentApprovalRequest;
 use crate::handoff::{ImportedConversation, PendingHandoff};
-use crate::workspace_policy::AcpWorkspacePolicy;
+use crate::policy::AcpWorkspacePolicy;
 use vmux_chat::host::ChatView;
 use vmux_session::AgentRunState;
 use vmux_session::{AcpSession, AgentApprovalPolicy, PromptQueue};
@@ -29,7 +29,7 @@ impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default(),
-            crate::workspace_policy::AcpWorkspacePolicyPlugin,
+            crate::policy::AgentPolicyPlugin,
         ))
         .add_message::<ServiceRequest>()
         .add_plugins(crate::acp_tool::AcpToolPlugin)

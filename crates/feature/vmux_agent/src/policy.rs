@@ -1,14 +1,30 @@
-use std::collections::BTreeMap;
-
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_core::host::manifest::FeatureManifest;
 
-pub(crate) struct AcpWorkspacePolicyPlugin;
+use crate::handoff::HandoffPolicy;
 
-impl Plugin for AcpWorkspacePolicyPlugin {
+pub(crate) struct AgentPolicyPlugin;
+
+impl Plugin for AgentPolicyPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, load);
+    }
+}
+
+#[derive(Deserialize)]
+struct AgentPolicies {
+    acp_workspace: AcpWorkspacePolicy,
+    handoff: HandoffPolicy,
+}
+
+#[cfg(test)]
+impl AgentPolicies {
+    fn bundled() -> Self {
+        FeatureManifest::of::<crate::Feature>()
+            .policies::<Self>()
+            .unwrap()
+            .unwrap()
     }
 }
 
@@ -22,13 +38,14 @@ pub(crate) struct AcpWorkspacePolicy {
 #[cfg(test)]
 impl AcpWorkspacePolicy {
     pub(crate) fn bundled() -> Self {
-        let manifest = FeatureManifest::of::<crate::Feature>();
-        manifest
-            .policies::<BTreeMap<String, Self>>()
-            .unwrap()
-            .unwrap()
-            .remove("acp_workspace")
-            .unwrap()
+        AgentPolicies::bundled().acp_workspace
+    }
+}
+
+#[cfg(test)]
+impl HandoffPolicy {
+    pub(crate) fn bundled() -> Self {
+        AgentPolicies::bundled().handoff
     }
 }
 
@@ -38,14 +55,11 @@ fn load(
 ) {
     for (entity, manifest) in &manifests {
         let policies = manifest
-            .policies::<BTreeMap<String, AcpWorkspacePolicy>>()
+            .policies::<AgentPolicies>()
             .expect("agent feature manifest contains valid policies");
         let mut entity = commands.entity(entity);
-        if let Some(mut policies) = policies {
-            let policy = policies
-                .remove("acp_workspace")
-                .expect("agent feature manifest defines acp_workspace policy");
-            entity.insert(policy);
+        if let Some(policies) = policies {
+            entity.insert((policies.acp_workspace, policies.handoff));
         }
     }
 }
@@ -60,16 +74,17 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default(),
-            AcpWorkspacePolicyPlugin,
+            AgentPolicyPlugin,
         ));
         app.update();
 
         let entries = app
             .world_mut()
-            .query::<(&FeatureManifest, &AcpWorkspacePolicy)>()
+            .query::<(&FeatureManifest, &AcpWorkspacePolicy, &HandoffPolicy)>()
             .iter(app.world())
             .collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert!(entries[0].1.unbound.contains("select_project"));
+        assert!(entries[0].2.context_intro.contains("Conversation imported"));
     }
 }

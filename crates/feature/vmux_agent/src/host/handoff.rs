@@ -17,11 +17,48 @@ impl Plugin for HandoffPlugin {
     }
 }
 
-pub const HANDOFF_PROMPT_PREFIX: &str = vmux_api::protocol::PRIVATE_CONTEXT_PREFIX;
-pub const OMITTED_MARKER: &str = "[Older source turns omitted]";
-pub const DEFAULT_CONTEXT_LIMIT: usize = 64 * 1024;
+#[derive(Component, Clone, Debug, Deserialize)]
+pub(crate) struct HandoffPolicy {
+    pub(crate) context_intro: String,
+    omitted_marker: String,
+    context_limit: usize,
+}
 
-const CONTEXT_INTRO: &str = "Conversation imported from another agent:\n";
+impl HandoffPolicy {
+    pub(crate) fn build_context(&self, messages: &[Message]) -> BuiltContext {
+        let segments: Vec<String> = messages.iter().filter_map(context_segment).collect();
+        let full = format!("{}{}", self.context_intro, segments.join("\n"));
+        if full.chars().count() <= self.context_limit {
+            return BuiltContext {
+                text: full,
+                truncated: false,
+            };
+        }
+
+        let reserved = self.context_intro.chars().count() + self.omitted_marker.chars().count() + 2;
+        let mut remaining = self.context_limit.saturating_sub(reserved);
+        let mut kept = Vec::new();
+        for segment in segments.iter().rev() {
+            let len = segment.chars().count() + usize::from(!kept.is_empty());
+            if len > remaining {
+                break;
+            }
+            remaining -= len;
+            kept.push(segment.clone());
+        }
+        kept.reverse();
+
+        BuiltContext {
+            text: format!(
+                "{}{}\n\n{}",
+                self.context_intro,
+                self.omitted_marker,
+                kept.join("\n")
+            ),
+            truncated: true,
+        }
+    }
+}
 
 #[derive(Component, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ImportedConversation {
@@ -152,37 +189,6 @@ pub struct BuiltContext {
     pub truncated: bool,
 }
 
-impl BuiltContext {
-    pub fn from_messages(messages: &[Message], limit: usize) -> Self {
-        let segments: Vec<String> = messages.iter().filter_map(context_segment).collect();
-        let full = format!("{CONTEXT_INTRO}{}", segments.join("\n"));
-        if full.chars().count() <= limit {
-            return Self {
-                text: full,
-                truncated: false,
-            };
-        }
-
-        let reserved = CONTEXT_INTRO.chars().count() + OMITTED_MARKER.chars().count() + 2;
-        let mut remaining = limit.saturating_sub(reserved);
-        let mut kept = Vec::new();
-        for segment in segments.iter().rev() {
-            let len = segment.chars().count() + usize::from(!kept.is_empty());
-            if len > remaining {
-                break;
-            }
-            remaining -= len;
-            kept.push(segment.clone());
-        }
-        kept.reverse();
-
-        Self {
-            text: format!("{CONTEXT_INTRO}{OMITTED_MARKER}\n\n{}", kept.join("\n")),
-            truncated: true,
-        }
-    }
-}
-
 fn context_segment(message: &Message) -> Option<String> {
     match message {
         Message::User { text, .. } if !text.trim().is_empty() => Some(format!("User:\n{text}")),
@@ -256,6 +262,12 @@ mod tests {
         }
     }
 
+    fn policy(context_limit: usize) -> HandoffPolicy {
+        let mut policy = HandoffPolicy::bundled();
+        policy.context_limit = context_limit;
+        policy
+    }
+
     #[test]
     fn context_budget_keeps_newest_complete_messages() {
         let messages = vec![
@@ -264,10 +276,11 @@ mod tests {
             user("new message"),
         ];
 
-        let built = BuiltContext::from_messages(&messages, 100);
+        let policy = policy(100);
+        let built = policy.build_context(&messages);
 
         assert!(built.truncated);
-        assert!(built.text.contains(OMITTED_MARKER));
+        assert!(built.text.contains(&policy.omitted_marker));
         assert!(built.text.contains("new message"));
         assert!(!built.text.contains("old message"));
     }
@@ -276,7 +289,7 @@ mod tests {
     fn context_budget_preserves_chronological_order() {
         let messages = vec![user("first"), assistant("second"), user("third")];
 
-        let built = BuiltContext::from_messages(&messages, 1_000);
+        let built = policy(1_000).build_context(&messages);
 
         let first = built.text.find("first").unwrap();
         let second = built.text.find("second").unwrap();
@@ -293,7 +306,7 @@ mod tests {
             user("new-small"),
         ];
 
-        let built = BuiltContext::from_messages(&messages, 120);
+        let built = policy(120).build_context(&messages);
 
         assert!(built.text.contains("new-small"));
         assert!(!built.text.contains("middle-large"));
@@ -322,7 +335,7 @@ mod tests {
             },
         ];
 
-        let built = BuiltContext::from_messages(&messages, 1_000);
+        let built = policy(1_000).build_context(&messages);
 
         assert!(built.text.contains("visible"));
         assert!(!built.text.contains("secret"));
@@ -333,7 +346,7 @@ mod tests {
     fn private_wire_prompt_keeps_display_prompt_separate() {
         let prompt = wire_prompt("prior conversation", "continue here");
 
-        assert!(prompt.starts_with(HANDOFF_PROMPT_PREFIX));
+        assert!(prompt.starts_with(vmux_api::protocol::PRIVATE_CONTEXT_PREFIX));
         assert!(prompt.contains("prior conversation"));
         assert!(prompt.ends_with("continue here"));
     }
@@ -393,7 +406,10 @@ mod tests {
 
     #[test]
     fn replay_preserves_plain_prompt_starting_with_private_prefix() {
-        let text = format!("{HANDOFF_PROMPT_PREFIX} ordinary user text");
+        let text = format!(
+            "{} ordinary user text",
+            vmux_api::protocol::PRIVATE_CONTEXT_PREFIX
+        );
         let messages = vec![user(&text)];
 
         let directory = TestHandoffDirectory::new("plain");

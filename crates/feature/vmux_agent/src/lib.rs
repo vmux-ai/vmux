@@ -20,7 +20,7 @@ pub mod managed_mcp;
 #[cfg(all(host, feature = "app"))]
 pub mod mcp;
 #[cfg(all(host, feature = "app"))]
-mod workspace_policy;
+mod policy;
 #[cfg(all(test, host, feature = "app"))]
 pub use host::test_support;
 #[cfg(all(host, feature = "app"))]
