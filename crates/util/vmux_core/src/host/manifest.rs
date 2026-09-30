@@ -8,6 +8,7 @@ use crate::cli::CliManifest;
 
 #[derive(Component, Clone)]
 pub struct FeatureManifest {
+    pub pages: Vec<Page>,
     pub commands: Vec<Command>,
     pub tools: Vec<Tool>,
     pub cli: Option<CliManifest>,
@@ -48,6 +49,8 @@ impl<'de> Deserialize<'de> for FeatureManifest {
         #[derive(Deserialize)]
         struct Manifest {
             #[serde(default)]
+            pages: Vec<Page>,
+            #[serde(default)]
             commands: Vec<Command>,
             #[serde(default)]
             tools: Vec<Tool>,
@@ -59,12 +62,44 @@ impl<'de> Deserialize<'de> for FeatureManifest {
 
         let manifest = Manifest::deserialize(deserializer)?;
         Ok(Self {
+            pages: manifest.pages,
             commands: manifest.commands,
             tools: manifest.tools,
             cli: manifest.cli,
             mcp_servers: manifest.mcp_servers,
         })
     }
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Page {
+    #[serde(default)]
+    pub name: String,
+    pub url: String,
+    pub title: String,
+    #[serde(default)]
+    pub manifest_url: String,
+    #[serde(default)]
+    pub manifest_title: String,
+    #[serde(default)]
+    pub asset_host: String,
+    #[serde(default)]
+    pub owns_subtree: bool,
+    #[serde(default)]
+    pub title_message_id: String,
+    #[serde(default)]
+    pub replaces_command: String,
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    #[serde(default)]
+    pub icon: String,
+    #[serde(default)]
+    pub command_bar: bool,
+    #[serde(default)]
+    pub manifest: bool,
+    #[serde(default)]
+    pub permissions: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -199,6 +234,12 @@ mod tests {
     use super::*;
 
     const SOURCE: &str = r#"(
+        pages: [(
+            name: "default",
+            url: "vmux://example/",
+            title: "Example",
+            permissions: ["PageReady"],
+        )],
         commands: [(id: "open", label: "Open", group: "File")],
         tools: [(
             name: "open_file",
@@ -224,6 +265,8 @@ mod tests {
             .iter(app.world())
             .collect::<Vec<_>>();
         assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].pages[0].url, "vmux://example/");
+        assert_eq!(manifests[0].pages[0].permissions, ["PageReady"]);
         assert_eq!(manifests[0].commands[0].id, "open");
         assert_eq!(manifests[0].tools[0].name, "open_file");
         assert_eq!(
