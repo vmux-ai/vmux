@@ -2,8 +2,6 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_core::host::manifest::FeatureManifest;
 
-use crate::handoff::HandoffPolicy;
-
 pub(crate) struct AgentPolicyPlugin;
 
 impl Plugin for AgentPolicyPlugin {
@@ -15,7 +13,6 @@ impl Plugin for AgentPolicyPlugin {
 #[derive(Deserialize)]
 struct AgentPolicies {
     acp_workspace: AcpWorkspacePolicy,
-    handoff: HandoffPolicy,
 }
 
 #[cfg(test)]
@@ -42,13 +39,6 @@ impl AcpWorkspacePolicy {
     }
 }
 
-#[cfg(test)]
-impl HandoffPolicy {
-    pub(crate) fn bundled() -> Self {
-        AgentPolicies::bundled().handoff
-    }
-}
-
 fn load(
     manifests: Query<(Entity, &FeatureManifest), Added<FeatureManifest>>,
     mut commands: Commands,
@@ -59,7 +49,7 @@ fn load(
             .expect("agent feature manifest contains valid policies");
         let mut entity = commands.entity(entity);
         if let Some(policies) = policies {
-            entity.insert((policies.acp_workspace, policies.handoff));
+            entity.insert(policies.acp_workspace);
         }
     }
 }
@@ -80,11 +70,10 @@ mod tests {
 
         let entries = app
             .world_mut()
-            .query::<(&FeatureManifest, &AcpWorkspacePolicy, &HandoffPolicy)>()
+            .query::<(&FeatureManifest, &AcpWorkspacePolicy)>()
             .iter(app.world())
             .collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert!(entries[0].1.unbound.contains("select_project"));
-        assert!(entries[0].2.context_intro.contains("Conversation imported"));
     }
 }

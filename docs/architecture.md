@@ -328,6 +328,14 @@ lifecycle transitions, asynchronous task boundaries, cross-feature dispatch, and
 ordering. A miscellaneous parameter bundle or a large hidden `run`/`dispatch` workflow is not
 a capability and stays as ordinary system logic.
 
+Asynchronous work remains explicit ECS state. A finite filesystem, process, or compute operation
+is a task component on the entity whose lifecycle it advances; one system starts it and another
+consumes its result. Long-lived runtime-specific I/O, streams, retries, and timers belong to a
+transport actor that exchanges typed inputs and outputs with ECS. Coroutine runtimes with ambient
+world access are not the default because they hide scheduling and lifecycle state from queries.
+Use one only for isolated sequential UI choreography where the sequence itself is the behavior,
+never for blocking work, transport ownership, or ordinary domain transitions.
+
 System names use their module as context. Prefer `open`, `refresh`, `bind`, `project`, or
 `request_definition` inside the owning module over names that repeat the feature, module,
 transport, and request type. Keep a longer name only when two systems in the same module would

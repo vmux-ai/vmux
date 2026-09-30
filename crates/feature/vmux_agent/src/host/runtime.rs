@@ -21,9 +21,9 @@ use crate::event::{
     UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState, UiAgentSessionCreated,
     UiAgentWorkspaceChanged,
 };
-use crate::handoff::{ImportedConversation, PendingHandoff};
+use crate::handoff::PendingHandoff;
 use crate::policy::{AcpWorkspacePolicy, AgentPolicyPlugin};
-use vmux_chat::host::ChatView;
+use vmux_chat::host::{ChatView, ImportedConversation};
 use vmux_session::AgentRunState;
 use vmux_session::{AcpSession, AgentApprovalPolicy, PromptQueue};
 

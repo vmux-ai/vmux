@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use vmux_api::protocol::AgentAttachment;
-use vmux_chat::host::ChatView;
+use vmux_chat::host::{ChatView, ImportedConversation};
 use vmux_core::agent::SwapStackSession;
 use vmux_core::host::persistence::PageRestore;
 use vmux_core::terminal::TerminalLaunch;
@@ -561,7 +561,7 @@ fn handle_swap_stack_session(
         }
         let imported = ev.handoff.as_ref().map(|handoff| {
             (
-                crate::handoff::ImportedConversation {
+                ImportedConversation {
                     source_agent: handoff.source_agent.clone(),
                     source_sid: handoff.source_sid.clone(),
                     messages: handoff.messages.clone(),
@@ -582,7 +582,7 @@ fn handle_swap_stack_session(
             .remove::<crate::AgentMessages>()
             .remove::<crate::AgentApprovalPolicy>()
             .remove::<vmux_session::AgentRunState>()
-            .remove::<crate::handoff::ImportedConversation>()
+            .remove::<ImportedConversation>()
             .remove::<crate::handoff::PendingHandoff>()
             .remove::<vmux_core::AgentWorkingDir>()
             .remove::<vmux_core::team::Agent>()

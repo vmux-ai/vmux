@@ -1,14 +1,13 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use crate::handoff::ImportedConversation;
 #[cfg(test)]
 use vmux_chat::event::ChatItem;
 use vmux_chat::event::{
     CHAT_INITIAL_ITEM_LIMIT, ChatHistoryMoreRequest, ChatSnapshot, PendingApproval,
     QueuedPromptSnapshot,
 };
-use vmux_chat::host::ChatAttachmentHydrationRequest;
+use vmux_chat::host::{ChatAttachmentHydrationRequest, ImportedConversation};
 use vmux_chat::host::{
     ChatAttachmentProjection, ChatHistoryQuery, ChatHistoryResult, ChatSnapshotProjection,
     ChatSynced, ChatTranscriptProjection, ChatView, PendingAgentChoice, TranscriptPage,

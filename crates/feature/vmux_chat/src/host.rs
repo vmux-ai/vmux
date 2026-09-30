@@ -3,6 +3,8 @@ use bevy_app::{App, Plugin};
 #[cfg(host)]
 mod composer;
 #[cfg(host)]
+mod handoff;
+#[cfg(host)]
 mod key;
 #[cfg(host)]
 mod media;
@@ -15,6 +17,8 @@ mod state;
 #[cfg(host)]
 mod tool;
 
+#[cfg(host)]
+pub use handoff::ImportedConversation;
 #[cfg(host)]
 pub use media::ChatAttachmentHydrationRequest;
 pub use model::{ChatModeStateChanged, ChatModelStateChanged, Models};

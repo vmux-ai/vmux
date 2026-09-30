@@ -1,8 +1,8 @@
 use bevy::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use vmux_chat::host::ImportedConversation;
 
-use crate::{AssistantBlock, Message};
+use crate::Message;
 
 pub(super) struct HandoffPlugin;
 
@@ -15,58 +15,6 @@ impl Plugin for HandoffPlugin {
                 persist_imported_conversation.after(vmux_core::service::ServiceMessageSet),
             );
     }
-}
-
-#[derive(Component, Clone, Debug, Deserialize)]
-pub(crate) struct HandoffPolicy {
-    pub(crate) context_intro: String,
-    omitted_marker: String,
-    context_limit: usize,
-}
-
-impl HandoffPolicy {
-    pub(crate) fn build_context(&self, messages: &[Message]) -> BuiltContext {
-        let segments: Vec<String> = messages.iter().filter_map(context_segment).collect();
-        let full = format!("{}{}", self.context_intro, segments.join("\n"));
-        if full.chars().count() <= self.context_limit {
-            return BuiltContext {
-                text: full,
-                truncated: false,
-            };
-        }
-
-        let reserved = self.context_intro.chars().count() + self.omitted_marker.chars().count() + 2;
-        let mut remaining = self.context_limit.saturating_sub(reserved);
-        let mut kept = Vec::new();
-        for segment in segments.iter().rev() {
-            let len = segment.chars().count() + usize::from(!kept.is_empty());
-            if len > remaining {
-                break;
-            }
-            remaining -= len;
-            kept.push(segment.clone());
-        }
-        kept.reverse();
-
-        BuiltContext {
-            text: format!(
-                "{}{}\n\n{}",
-                self.context_intro,
-                self.omitted_marker,
-                kept.join("\n")
-            ),
-            truncated: true,
-        }
-    }
-}
-
-#[derive(Component, Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct ImportedConversation {
-    pub source_agent: String,
-    pub source_sid: String,
-    pub messages: Vec<Message>,
-    pub truncated: bool,
-    pub first_prompt: Option<String>,
 }
 
 #[derive(Component)]
@@ -183,30 +131,6 @@ pub struct PendingHandoff {
     pub sent: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BuiltContext {
-    pub text: String,
-    pub truncated: bool,
-}
-
-fn context_segment(message: &Message) -> Option<String> {
-    match message {
-        Message::User { text, .. } if !text.trim().is_empty() => Some(format!("User:\n{text}")),
-        Message::Assistant { blocks } => {
-            let text = blocks
-                .iter()
-                .filter_map(|block| match block {
-                    AssistantBlock::Text(text) if !text.trim().is_empty() => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            (!text.is_empty()).then(|| format!("Assistant:\n{text}"))
-        }
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 fn wire_prompt(context: &str, display_text: &str) -> String {
     vmux_api::protocol::compose_agent_prompt(display_text, Some(context))
@@ -260,86 +184,6 @@ mod tests {
         Message::Assistant {
             blocks: vec![AssistantBlock::Text(text.to_string())],
         }
-    }
-
-    fn policy(context_limit: usize) -> HandoffPolicy {
-        let mut policy = HandoffPolicy::bundled();
-        policy.context_limit = context_limit;
-        policy
-    }
-
-    #[test]
-    fn context_budget_keeps_newest_complete_messages() {
-        let messages = vec![
-            user("old message that should not fit"),
-            assistant("middle message"),
-            user("new message"),
-        ];
-
-        let policy = policy(100);
-        let built = policy.build_context(&messages);
-
-        assert!(built.truncated);
-        assert!(built.text.contains(&policy.omitted_marker));
-        assert!(built.text.contains("new message"));
-        assert!(!built.text.contains("old message"));
-    }
-
-    #[test]
-    fn context_budget_preserves_chronological_order() {
-        let messages = vec![user("first"), assistant("second"), user("third")];
-
-        let built = policy(1_000).build_context(&messages);
-
-        let first = built.text.find("first").unwrap();
-        let second = built.text.find("second").unwrap();
-        let third = built.text.find("third").unwrap();
-        assert!(first < second && second < third);
-        assert!(!built.truncated);
-    }
-
-    #[test]
-    fn context_budget_keeps_a_contiguous_newest_suffix() {
-        let messages = vec![
-            user("old-small"),
-            assistant(&"middle-large".repeat(20)),
-            user("new-small"),
-        ];
-
-        let built = policy(120).build_context(&messages);
-
-        assert!(built.text.contains("new-small"));
-        assert!(!built.text.contains("middle-large"));
-        assert!(!built.text.contains("old-small"));
-    }
-
-    #[test]
-    fn context_ignores_non_text_assistant_blocks_and_tool_results() {
-        let messages = vec![
-            Message::Assistant {
-                blocks: vec![
-                    AssistantBlock::Thinking("secret".into()),
-                    AssistantBlock::Text("visible".into()),
-                    AssistantBlock::ToolUse {
-                        call_id: "c".into(),
-                        name: "run".into(),
-                        args: "{}".into(),
-                        parent_call_id: None,
-                    },
-                ],
-            },
-            Message::ToolResult {
-                call_id: "c".into(),
-                content: "tool output".into(),
-                is_error: false,
-            },
-        ];
-
-        let built = policy(1_000).build_context(&messages);
-
-        assert!(built.text.contains("visible"));
-        assert!(!built.text.contains("secret"));
-        assert!(!built.text.contains("tool output"));
     }
 
     #[test]
