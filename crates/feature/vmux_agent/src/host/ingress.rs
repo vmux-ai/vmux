@@ -30,9 +30,6 @@ pub(crate) struct AgentIngressPlugin;
 
 impl Plugin for AgentIngressPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<vmux_tool::ToolQueryPlugin>() {
-            app.add_plugins(vmux_tool::ToolQueryPlugin);
-        }
         app.add_plugins((
             ServiceMessagePlugin::<InboundAgentRequest>::default(),
             ServiceMessagePlugin::<AgentToolCallRequest>::default(),
@@ -124,12 +121,9 @@ fn route_approval_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::protocol::{
-        AgentRequest, AgentRequestId, AgentVaultStatus, ServiceMessage, SharedEvent,
-    };
+    use vmux_api::protocol::{AgentRequest, AgentRequestId, ServiceMessage, SharedEvent};
     use vmux_core::service::ServiceInbound;
     use vmux_space::AgentRenameProfile;
-    use vmux_tool::ToolQueryRequest;
 
     #[test]
     fn routes_agent_messages_without_terminal_ownership() {
@@ -152,12 +146,6 @@ mod tests {
                     text: "hello".into(),
                 },
             )));
-        app.world_mut()
-            .write_message(ServiceInbound(ServiceMessage::AgentQuery {
-                request_id,
-                query: AgentRequest::encode(&AgentVaultStatus).unwrap(),
-            }));
-
         app.update();
 
         let commands = app
@@ -170,21 +158,10 @@ mod tests {
             .resource_mut::<Messages<UiAgentDelta>>()
             .drain()
             .collect::<Vec<_>>();
-        let queries = app
-            .world_mut()
-            .resource_mut::<Messages<ToolQueryRequest>>()
-            .drain()
-            .collect::<Vec<_>>();
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].request_id, request_id);
         assert_eq!(deltas.len(), 1);
         assert_eq!(deltas[0].sid, "session");
         assert_eq!(deltas[0].text, "hello");
-        assert_eq!(queries.len(), 1);
-        assert_eq!(queries[0].request_id, request_id);
-        assert_eq!(
-            queries[0].query.decode::<AgentVaultStatus>().unwrap(),
-            Some(AgentVaultStatus)
-        );
     }
 }

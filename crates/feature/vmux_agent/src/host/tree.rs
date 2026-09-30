@@ -10,7 +10,6 @@ use vmux_terminal::TerminalStackSpawnRequest;
 
 use crate::event::{AgentRequestInput, AgentToolCallRequest};
 use crate::session;
-use vmux_tool::ToolQueryRequest;
 
 pub struct AgentPlugin;
 
@@ -67,7 +66,6 @@ impl Plugin for AgentSessionPlugin {
             super::spawn::SpawnPlugin,
         ))
         .add_message::<AgentRequestInput>()
-        .add_message::<ToolQueryRequest>()
         .add_message::<AgentToolCallRequest>()
         .add_message::<SpawnAgentInStackRequest>()
         .add_message::<PageAgentAttachRequest>()

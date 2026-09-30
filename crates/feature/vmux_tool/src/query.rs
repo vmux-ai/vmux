@@ -130,7 +130,8 @@ fn reject_unhandled(
 mod tests {
     use super::*;
     use vmux_api::ProcessId;
-    use vmux_api::protocol::AgentWorkingDirectory;
+    use vmux_api::protocol::{AgentWorkingDirectory, ServiceMessage};
+    use vmux_core::service::ServiceInbound;
 
     fn handle_known(
         mut queries: MessageReader<ToolQueryRequest>,
@@ -198,5 +199,32 @@ mod tests {
         assert_eq!(routed.len(), 1);
         assert_eq!(routed[0].request_id, request_id);
         assert_eq!(routed[0].payload.anchor, anchor);
+    }
+
+    #[test]
+    fn service_queries_enter_through_the_tool_boundary() {
+        let mut app = App::new();
+        app.add_plugins(ToolQueryPlugin);
+        let request_id = AgentRequestId([4; 16]);
+        let anchor = ProcessId([8; 16]);
+        app.world_mut()
+            .write_message(ServiceInbound(ServiceMessage::AgentQuery {
+                request_id,
+                query: AgentRequest::encode(&AgentWorkingDirectory { anchor }).unwrap(),
+            }));
+
+        app.update();
+
+        let queries = app
+            .world_mut()
+            .resource_mut::<Messages<ToolQueryRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(queries.len(), 1);
+        assert_eq!(queries[0].request_id, request_id);
+        assert_eq!(
+            queries[0].query.decode::<AgentWorkingDirectory>().unwrap(),
+            Some(AgentWorkingDirectory { anchor })
+        );
     }
 }
