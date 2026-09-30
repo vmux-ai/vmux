@@ -126,11 +126,11 @@ impl Plugin for SpacePlugin {
                 vmux_core::event::ProjectTreeToggle,
             )>::default(),
         ))
-        .add_observer(on_space_attach)
-        .add_observer(on_space_create)
-        .add_observer(on_space_delete)
-        .add_observer(on_space_open_page)
-        .add_observer(on_space_rename)
+        .add_observer(on_attach)
+        .add_observer(on_create)
+        .add_observer(on_delete)
+        .add_observer(on_open_page)
+        .add_observer(on_rename)
         .add_observer(on_project_activate)
         .add_observer(on_project_forget)
         .add_observer(switch_space)
@@ -592,11 +592,7 @@ fn sync_space_name_to_id(
     }
 }
 
-fn on_space_rename(
-    trigger: On<UiInput<SpaceRenameRequest>>,
-    graph: SpaceGraph,
-    mut commands: Commands,
-) {
+fn on_rename(trigger: On<UiInput<SpaceRenameRequest>>, graph: SpaceGraph, mut commands: Commands) {
     let request = &trigger.event().payload;
     let name = request.name.trim();
     if name.is_empty() {
@@ -634,7 +630,7 @@ fn on_space_rename(
     }
 }
 
-fn on_space_open_page(
+fn on_open_page(
     trigger: On<UiInput<SpaceOpenPageRequest>>,
     space_window: SpaceWindow,
     focus: FocusedStack,
@@ -667,7 +663,7 @@ fn on_space_open_page(
     });
 }
 
-fn on_space_delete(
+fn on_delete(
     trigger: On<UiInput<SpaceDeleteRequest>>,
     graph: SpaceGraph,
     space_window: SpaceWindow,
@@ -727,7 +723,7 @@ fn on_space_delete(
     }
 }
 
-fn on_space_attach(
+fn on_attach(
     trigger: On<UiInput<SpaceAttachRequest>>,
     graph: SpaceGraph,
     space_window: SpaceWindow,
@@ -776,7 +772,7 @@ fn switch_space(trigger: On<UiInput<SwitchSpaceRequest>>, mut commands: Commands
     commands.trigger(CommandBarDismiss::new(webview, false));
 }
 
-fn on_space_create(
+fn on_create(
     trigger: On<UiInput<SpaceCreateRequest>>,
     graph: SpaceGraph,
     space_window: SpaceWindow,
@@ -1074,7 +1070,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(on_space_attach);
+            .add_observer(on_attach);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
         app.world_mut().entity_mut(second_window).insert(Active);
@@ -1143,7 +1139,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(on_space_delete);
+            .add_observer(on_delete);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
         app.world_mut().entity_mut(second_window).insert(Active);
@@ -1581,7 +1577,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(on_space_rename);
+            .add_observer(on_rename);
         app.world_mut().spawn(bevy::window::PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
         let space = app

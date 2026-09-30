@@ -38,16 +38,16 @@ impl Plugin for DirectoryPlugin {
                     publish_directory.after(initialize_directory),
                 ),
             )
-            .add_observer(on_directory_select)
-            .add_observer(on_directory_next)
-            .add_observer(on_directory_previous)
-            .add_observer(on_directory_ascend)
-            .add_observer(on_directory_descend)
-            .add_observer(on_directory_activate)
-            .add_observer(on_directory_parent)
-            .add_observer(on_directory_open)
-            .add_observer(on_directory_back)
-            .add_observer(on_directory_toggle_hidden);
+            .add_observer(on_select)
+            .add_observer(on_next)
+            .add_observer(on_previous)
+            .add_observer(on_ascend)
+            .add_observer(on_descend)
+            .add_observer(on_activate)
+            .add_observer(on_parent)
+            .add_observer(on_open)
+            .add_observer(on_back)
+            .add_observer(on_toggle_hidden);
     }
 }
 
@@ -212,7 +212,7 @@ fn publish_directory(
     }
 }
 
-fn on_directory_select(
+fn on_select(
     trigger: On<UiInput<FileDirectorySelectRequest>>,
     directories: Query<&FileDir>,
     mut navigation: Query<&mut FileDirectoryNavigation>,
@@ -231,7 +231,7 @@ fn on_directory_select(
     navigation.selected = index.min(visible.len().saturating_sub(1));
 }
 
-fn on_directory_next(
+fn on_next(
     trigger: On<UiInput<FileDirectoryNextRequest>>,
     directories: Query<&FileDir>,
     mut navigation: Query<&mut FileDirectoryNavigation>,
@@ -247,7 +247,7 @@ fn on_directory_next(
     navigation.selected = (navigation.selected + 1).min(len.saturating_sub(1));
 }
 
-fn on_directory_previous(
+fn on_previous(
     trigger: On<UiInput<FileDirectoryPreviousRequest>>,
     mut navigation: Query<&mut FileDirectoryNavigation>,
 ) {
@@ -257,7 +257,7 @@ fn on_directory_previous(
     navigation.selected = navigation.selected.saturating_sub(1);
 }
 
-fn on_directory_ascend(
+fn on_ascend(
     trigger: On<UiInput<FileDirectoryAscendRequest>>,
     navigation: Query<&FileDirectoryNavigation>,
     mut commands: Commands,
@@ -279,7 +279,7 @@ fn on_directory_ascend(
     ));
 }
 
-fn on_directory_descend(
+fn on_descend(
     trigger: On<UiInput<FileDirectoryDescendRequest>>,
     directories: Query<&FileDir>,
     navigation: Query<&FileDirectoryNavigation>,
@@ -305,7 +305,7 @@ fn on_directory_descend(
     commands.trigger(FileNavigateRequest::new(entity, path, 0));
 }
 
-fn on_directory_activate(
+fn on_activate(
     trigger: On<UiInput<FileDirectoryActivateRequest>>,
     directories: Query<&FileDir>,
     views: Query<&FileView>,
@@ -337,7 +337,7 @@ fn on_directory_activate(
     commands.trigger(FileNavigateRequest::new(entity, path, 0));
 }
 
-fn on_directory_parent(
+fn on_parent(
     trigger: On<UiInput<FileDirectoryParentRequest>>,
     views: Query<&FileView>,
     navigation: Query<&FileDirectoryNavigation>,
@@ -363,7 +363,7 @@ fn on_directory_parent(
     ));
 }
 
-fn on_directory_open(
+fn on_open(
     trigger: On<UiInput<FileDirectoryOpenRequest>>,
     views: Query<&FileView>,
     mut commands: Commands,
@@ -388,7 +388,7 @@ fn on_directory_open(
     commands.trigger(FileNavigateRequest::new(entity, path, 0));
 }
 
-fn on_directory_back(
+fn on_back(
     trigger: On<UiInput<FileDirectoryBackRequest>>,
     back: Query<&FileBackDirectory>,
     mut commands: Commands,
@@ -403,7 +403,7 @@ fn on_directory_back(
     commands.trigger(FileNavigateRequest::new(entity, back.path.clone(), 0));
 }
 
-fn on_directory_toggle_hidden(
+fn on_toggle_hidden(
     trigger: On<UiInput<FileDirectoryToggleHiddenRequest>>,
     directories: Query<&FileDir>,
     mut navigation: Query<&mut FileDirectoryNavigation>,

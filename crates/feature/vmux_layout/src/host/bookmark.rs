@@ -32,9 +32,7 @@ pub struct BookmarkRequestSet;
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
-            crate::Feature,
-        >::default());
+        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -68,27 +66,27 @@ impl Plugin for BookmarkPlugin {
                 BookmarkContextMenuRequest,
                 BookmarkDropRequest,
             )>::default())
-            .add_observer(on_bookmark_toggle_request)
-            .add_observer(on_bookmark_menu_request::<BookmarkMenuRootRequest>)
-            .add_observer(on_bookmark_menu_request::<BookmarkMenuPinRequest>)
-            .add_observer(on_bookmark_menu_request::<BookmarkMenuEntryRequest>)
-            .add_observer(on_bookmark_menu_request::<BookmarkMenuFolderRequest>)
-            .add_observer(on_bookmark_open_request)
-            .add_observer(on_bookmark_add_request)
-            .add_observer(on_bookmark_pin_url_request)
-            .add_observer(on_bookmark_remove_request)
-            .add_observer(on_bookmark_rename_request)
-            .add_observer(on_bookmark_move_request)
-            .add_observer(on_bookmark_pin_request)
-            .add_observer(on_bookmark_unpin_request)
+            .add_observer(on_toggle_request)
+            .add_observer(on_menu_request::<BookmarkMenuRootRequest>)
+            .add_observer(on_menu_request::<BookmarkMenuPinRequest>)
+            .add_observer(on_menu_request::<BookmarkMenuEntryRequest>)
+            .add_observer(on_menu_request::<BookmarkMenuFolderRequest>)
+            .add_observer(on_open_request)
+            .add_observer(on_add_request)
+            .add_observer(on_pin_url_request)
+            .add_observer(on_remove_request)
+            .add_observer(on_rename_request)
+            .add_observer(on_move_request)
+            .add_observer(on_pin_request)
+            .add_observer(on_unpin_request)
             .add_observer(toggle_folder)
             .add_observer(create_folder)
-            .add_observer(on_bookmark_folder_move_request)
+            .add_observer(on_folder_move_request)
             .add_observer(rename_folder)
             .add_observer(remove_folder)
-            .add_observer(on_bookmark_text_input_request)
+            .add_observer(on_text_input_request)
             .add_observer(open_context_menu)
-            .add_observer(on_bookmark_drop_request)
+            .add_observer(on_drop_request)
             .add_systems(
                 Update,
                 (
@@ -298,10 +296,7 @@ fn open_context_menu(trigger: On<UiInput<BookmarkContextMenuRequest>>, mut comma
     }
 }
 
-fn on_bookmark_text_input_request(
-    trigger: On<UiInput<BookmarkTextInputRequest>>,
-    mut commands: Commands,
-) {
+fn on_text_input_request(trigger: On<UiInput<BookmarkTextInputRequest>>, mut commands: Commands) {
     let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
         return;
     };
@@ -819,14 +814,14 @@ fn sync_bookmark_metadata(
     }
 }
 
-fn on_bookmark_toggle_request(
+fn on_toggle_request(
     _trigger: On<UiInput<BookmarkToggleRequest>>,
     mut requests: MessageWriter<BookmarkToggleActiveRequest>,
 ) {
     requests.write(BookmarkToggleActiveRequest);
 }
 
-fn on_bookmark_open_request(
+fn on_open_request(
     trigger: On<UiInput<BookmarkOpenRequest>>,
     mut requests: MessageWriter<OpenRequest>,
 ) {
@@ -835,10 +830,8 @@ fn on_bookmark_open_request(
     });
 }
 
-fn on_bookmark_menu_request<R>(
-    trigger: On<UiInput<R>>,
-    mut menu_req: MessageWriter<ShowBookmarkMenuRequest>,
-) where
+fn on_menu_request<R>(trigger: On<UiInput<R>>, mut menu_req: MessageWriter<ShowBookmarkMenuRequest>)
+where
     R: Clone + Send + Sync + 'static,
     BookmarkMenuTarget: From<R>,
 {
@@ -848,7 +841,7 @@ fn on_bookmark_menu_request<R>(
     });
 }
 
-fn on_bookmark_add_request(
+fn on_add_request(
     trigger: On<UiInput<BookmarkAddUiRequest>>,
     mut requests: MessageWriter<AddRequest>,
 ) {
@@ -858,7 +851,7 @@ fn on_bookmark_add_request(
     });
 }
 
-fn on_bookmark_pin_url_request(
+fn on_pin_url_request(
     trigger: On<UiInput<BookmarkPinUrlUiRequest>>,
     mut requests: MessageWriter<PinUrlRequest>,
 ) {
@@ -867,7 +860,7 @@ fn on_bookmark_pin_url_request(
     });
 }
 
-fn on_bookmark_remove_request(
+fn on_remove_request(
     trigger: On<UiInput<BookmarkRemoveUiRequest>>,
     mut requests: MessageWriter<RemoveRequest>,
 ) {
@@ -876,7 +869,7 @@ fn on_bookmark_remove_request(
     });
 }
 
-fn on_bookmark_rename_request(
+fn on_rename_request(
     trigger: On<UiInput<BookmarkRenameUiRequest>>,
     mut requests: MessageWriter<RenameRequest>,
 ) {
@@ -890,7 +883,7 @@ fn on_bookmark_rename_request(
     });
 }
 
-fn on_bookmark_move_request(
+fn on_move_request(
     trigger: On<UiInput<BookmarkMoveUiRequest>>,
     mut requests: MessageWriter<MoveRequest>,
 ) {
@@ -900,7 +893,7 @@ fn on_bookmark_move_request(
     });
 }
 
-fn on_bookmark_drop_request(
+fn on_drop_request(
     trigger: On<UiInput<BookmarkDropRequest>>,
     mut add_requests: MessageWriter<AddRequest>,
     mut move_requests: MessageWriter<MoveRequest>,
@@ -972,7 +965,7 @@ fn on_bookmark_drop_request(
     }
 }
 
-fn on_bookmark_pin_request(
+fn on_pin_request(
     trigger: On<UiInput<BookmarkPinUiRequest>>,
     mut requests: MessageWriter<PinRequest>,
 ) {
@@ -981,7 +974,7 @@ fn on_bookmark_pin_request(
     });
 }
 
-fn on_bookmark_unpin_request(
+fn on_unpin_request(
     trigger: On<UiInput<BookmarkUnpinUiRequest>>,
     mut requests: MessageWriter<UnpinRequest>,
 ) {
@@ -1013,7 +1006,7 @@ fn create_folder(
     });
 }
 
-fn on_bookmark_folder_move_request(
+fn on_folder_move_request(
     trigger: On<UiInput<BookmarkFolderMoveUiRequest>>,
     mut requests: MessageWriter<MoveFolderRequest>,
 ) {
@@ -1123,7 +1116,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_core::host::manifest::FeatureManifestPlugin::<crate::Feature>::default(),
+            vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default(),
             vmux_command::CommandRuntimePlugin,
         ))
         .add_message::<BookmarkToggleActiveRequest>()
@@ -1204,7 +1197,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<ShowBookmarkMenuRequest>()
             .add_message::<OpenRequest>()
-            .add_observer(on_bookmark_open_request);
+            .add_observer(on_open_request);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().trigger(UiInput::<BookmarkOpenRequest> {
             webview,
@@ -1234,7 +1227,7 @@ mod tests {
             .add_message::<MovePinRequest>()
             .add_message::<ReorderPinRequest>()
             .add_message::<MoveFolderRequest>()
-            .add_observer(on_bookmark_drop_request);
+            .add_observer(on_drop_request);
         let webview = app.world_mut().spawn_empty().id();
         for payload in [
             BookmarkDropRequest {
@@ -1330,7 +1323,7 @@ mod tests {
     fn text_input_event_toggles_layout_keyboard_marker() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_observer(on_bookmark_text_input_request);
+            .add_observer(on_text_input_request);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut()
             .trigger(UiInput::<BookmarkTextInputRequest> {

@@ -12,7 +12,7 @@ pub(crate) struct LayoutOverlayPlugin;
 impl Plugin for LayoutOverlayPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(LayoutOverlayEvent,)>::default())
-            .add_observer(on_layout_overlay_emit)
+            .add_observer(on_emit)
             .add_systems(PreUpdate, adopt_window_overlays);
     }
 }
@@ -20,7 +20,7 @@ impl Plugin for LayoutOverlayPlugin {
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct LayoutOverlayActive(BTreeSet<String>);
 
-fn on_layout_overlay_emit(
+fn on_emit(
     trigger: On<UiInput<LayoutOverlayEvent>>,
     mut active: Query<&mut LayoutOverlayActive>,
     mut commands: Commands,

@@ -21,7 +21,7 @@ pub(super) struct FocusPlugin;
 impl Plugin for FocusPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<FocusRequest>()
-            .add_systems(Update, on_pane_select.in_set(LayoutRequestSet::Handle))
+            .add_systems(Update, on_select.in_set(LayoutRequestSet::Handle))
             .add_systems(PostUpdate, warp_cursor_to_active_pane);
         #[cfg(target_os = "macos")]
         app.add_systems(
@@ -52,7 +52,7 @@ impl PaneHoverCooldown {
 #[derive(Component)]
 pub struct PendingCursorWarp;
 
-fn on_pane_select(
+fn on_select(
     mut reader: MessageReader<FocusRequest>,
     active_tab_param: ActiveTabParam,
     focus_query: LayoutFocus,
@@ -346,7 +346,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_message::<FocusRequest>()
-                .add_systems(Update, on_pane_select);
+                .add_systems(Update, on_select);
             app.world_mut().spawn(PrimaryWindow);
             Self { app }
         }

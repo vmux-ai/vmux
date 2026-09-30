@@ -3,14 +3,14 @@ use std::io;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_core::cli::{CliInvocation, CliResult};
-use vmux_core::host::manifest::FeatureManifestPlugin;
+use vmux_core::host::manifest::FeaturePlugin;
 
 pub struct VmuxCliPlugin;
 
 impl Plugin for VmuxCliPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            FeatureManifestPlugin::<crate::Feature>::default(),
+            FeaturePlugin::<crate::Feature>::default(),
             vmux_service::ServiceCliPlugin,
             vmux_tool::ToolCliPlugin,
             vmux_mcp::McpCliPlugin,

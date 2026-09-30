@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use vmux_api::protocol::{
     AgentRequest, AgentRequestId, AgentRunCompletion, ClientMessage, ProcessId, ServiceMessage,
 };
-use vmux_core::host::manifest::FeatureManifestPlugin;
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::service::ServiceConnection;
 use vmux_core::{HostShell, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
@@ -23,7 +23,7 @@ pub struct TerminalToolPlugin;
 
 impl Plugin for TerminalToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::default())
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
             .register_tool::<RunArgs>()
             .register_tool::<ReadTerminalArgs>()
             .register_tool::<TerminalSendArgs>()

@@ -5,9 +5,9 @@ pub struct HistoryPrunePlugin;
 
 impl Plugin for HistoryPrunePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, prune_history).add_systems(
+        app.add_systems(Startup, prune).add_systems(
             Update,
-            prune_history.run_if(bevy::time::common_conditions::on_timer(
+            prune.run_if(bevy::time::common_conditions::on_timer(
                 std::time::Duration::from_secs(3600),
             )),
         );
@@ -16,7 +16,7 @@ impl Plugin for HistoryPrunePlugin {
 
 pub const RETENTION_MS: i64 = 90 * 86_400_000;
 
-fn prune_history(
+fn prune(
     mut commands: Commands,
     visits: Query<(Entity, &CreatedAt, &VisitedUrl), With<Visit>>,
     urls: Query<(Entity, &LastVisitedAt), With<Url>>,
@@ -52,7 +52,7 @@ mod tests {
         let mut a = App::new();
         a.add_plugins(MinimalPlugins);
         a.add_plugins(CorePlugin);
-        a.add_systems(Update, prune_history);
+        a.add_systems(Update, prune);
         a
     }
 

@@ -26,9 +26,7 @@ pub struct StartPlugin;
 
 impl Plugin for StartPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
-            crate::Feature,
-        >::default());
+        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
         #[cfg(ui)]
         app.add_plugins(crate::ui::StartPage::plugin());
         app.add_plugins(Self::MANIFEST.plugin().hosted(
@@ -41,9 +39,9 @@ impl Plugin for StartPlugin {
             vmux_api::command_bar::StartBranchesRequest,
             vmux_api::command_bar::StartGoToBranch,
         )>::default())
-            .add_observer(on_start_select_workspace)
-            .add_observer(on_start_branches_request)
-            .add_observer(on_start_go_to_branch)
+            .add_observer(on_select_workspace)
+            .add_observer(on_branches_request)
+            .add_observer(on_go_to_branch)
             .add_observer(apply_chosen_project)
             .add_observer(publish_command_bar_focus)
             .add_systems(
@@ -51,7 +49,7 @@ impl Plugin for StartPlugin {
                 (
                     sync_live_start_pages,
                     drain_start_workspace_pickers,
-                    start_branch_reads,
+                    begin_branch_reads,
                     drain_start_branch_reads,
                 ),
             );
@@ -192,7 +190,7 @@ impl StartPromptContext<'_, '_> {
     }
 }
 
-fn on_start_select_workspace(
+fn on_select_workspace(
     trigger: On<UiInput<StartSelectWorkspace>>,
     child_of: Query<&ChildOf>,
     tabs: Query<(), With<Tab>>,
@@ -305,7 +303,7 @@ struct StartBranchRead {
     task: Task<Vec<ProjectBranch>>,
 }
 
-fn start_branch_reads(
+fn begin_branch_reads(
     queries: Query<(Entity, &StartBranchQuery), Added<StartBranchQuery>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -346,7 +344,7 @@ fn start_branch_reads(
     }
 }
 
-fn on_start_branches_request(
+fn on_branches_request(
     trigger: On<UiInput<vmux_api::command_bar::StartBranchesRequest>>,
     mut commands: Commands,
 ) {
@@ -381,7 +379,7 @@ fn drain_start_branch_reads(
     }
 }
 
-fn on_start_go_to_branch(
+fn on_go_to_branch(
     trigger: On<UiInput<vmux_api::command_bar::StartGoToBranch>>,
     child_of: Query<&ChildOf>,
     tab_query: Query<(), With<Tab>>,

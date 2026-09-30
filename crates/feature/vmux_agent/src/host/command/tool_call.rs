@@ -147,7 +147,7 @@ mod tests {
     use super::*;
     use serde::Deserialize;
     use vmux_api::protocol::AgentRequest;
-    use vmux_core::host::manifest::FeatureManifestPlugin;
+    use vmux_core::host::manifest::FeaturePlugin;
     use vmux_tool::{AddedTool, ToolAppExt, ToolDispatchSet, ToolQuery};
 
     #[vmux_tool::input]
@@ -189,7 +189,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            FeatureManifestPlugin::<TestFeature>::default(),
+            FeaturePlugin::<TestFeature>::default(),
             ToolCallPlugin,
         ))
         .register_tool::<TestQueryArgs>()

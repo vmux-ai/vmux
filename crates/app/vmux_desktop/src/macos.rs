@@ -17,7 +17,7 @@ pub(super) struct RuntimePlatformPlugin;
 
 impl Plugin for RuntimePlatformPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, seed_system_appearance)
+        app.add_systems(Startup, seed)
             .add_systems(Update, activate_app_during_boot)
             .add_systems(Update, grab_key_window_on_pane_hover)
             .add_systems(
@@ -31,10 +31,7 @@ impl Plugin for RuntimePlatformPlugin {
     }
 }
 
-fn seed_system_appearance(
-    _non_send: bevy::ecs::system::NonSendMarker,
-    mut system: Single<&mut SystemAppearance>,
-) {
+fn seed(_non_send: bevy::ecs::system::NonSendMarker, mut system: Single<&mut SystemAppearance>) {
     if system.0.is_some() {
         return;
     }

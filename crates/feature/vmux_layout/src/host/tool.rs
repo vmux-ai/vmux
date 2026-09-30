@@ -7,7 +7,7 @@ use vmux_api::protocol::{
 };
 use vmux_command::AgentInvokeCommand;
 use vmux_core::ProcessAnchor;
-use vmux_core::host::manifest::FeatureManifestPlugin;
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled,
@@ -21,7 +21,7 @@ pub struct LayoutToolPlugin;
 
 impl Plugin for LayoutToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::default())
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
             .register_tool::<OpenPageArgs>()
             .register_tool::<ReadLayoutArgs>()
             .register_tool::<UpdateLayoutArgs>()

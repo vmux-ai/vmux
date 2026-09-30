@@ -21,7 +21,7 @@ impl Plugin for AttentionPlugin {
         app.add_systems(
             Update,
             (
-                agent_bell_to_attention,
+                bell,
                 handle_agent_turn_ended
                     .in_set(TurnEndedSet)
                     .after(ServiceMessageSet),
@@ -39,7 +39,7 @@ impl Plugin for AttentionPlugin {
     }
 }
 
-fn agent_bell_to_attention(
+fn bell(
     mut reader: MessageReader<BellReceived>,
     mut attention: MessageWriter<AgentAttention>,
     agents: Query<(Entity, &ProcessId), With<Agent>>,
@@ -205,7 +205,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<BellReceived>()
             .add_message::<AgentAttention>()
-            .add_systems(Update, agent_bell_to_attention);
+            .add_systems(Update, bell);
         app
     }
 

@@ -44,15 +44,15 @@ impl Plugin for ToolHostPlugin {
         )>::default())
         .add_observer(on_page_ready)
         .add_observer(on_refresh_request)
-        .add_observer(on_tool_operation_request::<ToolInstallRequest>)
-        .add_observer(on_tool_operation_request::<ToolUpdateRequest>)
-        .add_observer(on_tool_operation_request::<ToolUninstallRequest>)
-        .add_observer(on_tool_operation_request::<ToolForgetRequest>)
-        .add_observer(on_tool_operation_request::<ToolAdoptRequest>)
-        .add_observer(on_tool_operation_request::<ToolLinkRequest>)
-        .add_observer(on_tool_operation_request::<ToolUnlinkRequest>)
-        .add_observer(on_tool_operation_request::<ToolApplyRequest>)
-        .add_observer(on_tool_operation_request::<ToolImportRequest>)
+        .add_observer(on_operation_request::<ToolInstallRequest>)
+        .add_observer(on_operation_request::<ToolUpdateRequest>)
+        .add_observer(on_operation_request::<ToolUninstallRequest>)
+        .add_observer(on_operation_request::<ToolForgetRequest>)
+        .add_observer(on_operation_request::<ToolAdoptRequest>)
+        .add_observer(on_operation_request::<ToolLinkRequest>)
+        .add_observer(on_operation_request::<ToolUnlinkRequest>)
+        .add_observer(on_operation_request::<ToolApplyRequest>)
+        .add_observer(on_operation_request::<ToolImportRequest>)
         .add_observer(on_open_request)
         .add_observer(on_navigate_request)
         .add_systems(Startup, spawn_tool_registry)
@@ -307,7 +307,7 @@ fn queue_tool_operation<R: Clone + Send + Sync + 'static>(
     ));
 }
 
-fn on_tool_operation_request<R>(
+fn on_operation_request<R>(
     trigger: On<UiInput<R>>,
     registries: Query<&mut OperationRequestSequence, With<ToolRegistry>>,
     subscribers: Query<&mut ToolSubscriber>,

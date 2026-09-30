@@ -4,7 +4,7 @@ use bevy_cef::prelude::HostWindow;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentSpace, ClientMessage};
-use vmux_core::host::manifest::FeatureManifestPlugin;
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_core::{Active, Order, ProcessAnchor};
 use vmux_layout::space::{Space, SpaceId};
@@ -24,7 +24,7 @@ pub struct SpaceToolPlugin;
 
 impl Plugin for SpaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::default())
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
             .register_tool::<ListSpacesArgs>()
             .register_tool::<CreateSpaceArgs>()
             .register_tool::<RenameSpaceArgs>()

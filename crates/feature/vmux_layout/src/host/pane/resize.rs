@@ -25,11 +25,8 @@ impl Plugin for ResizePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ResizeRequest>()
             .register_persisted::<PaneSize>()
-            .add_systems(
-                Update,
-                resize_from_commands.in_set(LayoutRequestSet::Handle),
-            )
-            .add_systems(Update, resize_from_pointer)
+            .add_systems(Update, from_commands.in_set(LayoutRequestSet::Handle))
+            .add_systems(Update, from_pointer)
             .add_systems(PostUpdate, sync_split_gaps);
     }
 }
@@ -82,7 +79,7 @@ pub fn apply_pane_split_gaps(split: &PaneSplit, node: &mut Node, gap: f32) {
     node.row_gap = gaps.row_gap;
 }
 
-fn resize_from_commands(
+fn from_commands(
     mut reader: MessageReader<ResizeRequest>,
     active_tab: ActiveTabParam,
     all_children: Query<&Children>,
@@ -257,7 +254,7 @@ fn resized_pair(pane_grow: f32, sibling_grow: f32, delta: f32, parent_length: f3
     (pane_grow, sibling_grow)
 }
 
-fn resize_from_pointer(
+fn from_pointer(
     windows: Query<&Window>,
     focused_window: crate::window::FocusedWindow,
     splits: Query<(Entity, &PaneSplit, &Children), Without<PaneDrag>>,
@@ -399,7 +396,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_message::<ResizeRequest>()
-                .add_systems(Update, resize_from_commands);
+                .add_systems(Update, from_commands);
             let tab = app
                 .world_mut()
                 .spawn((Tab::default(), LastActivatedAt::now()))

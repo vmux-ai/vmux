@@ -22,7 +22,7 @@ impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_repository_roots)
             .register_persisted::<ExpandedProjectDirs>()
-            .add_observer(on_project_tree_toggle)
+            .add_observer(on_tree_toggle)
             .add_systems(
                 Update,
                 (
@@ -39,7 +39,7 @@ fn spawn_repository_roots(mut commands: Commands) {
     commands.spawn((Name::new("Repository roots"), RepoRoots::default()));
 }
 
-fn on_project_tree_toggle(
+fn on_tree_toggle(
     trigger: On<UiInput<ProjectTreeToggle>>,
     space_of_pane: SpaceOfPane,
     mut expanded: Query<&mut ExpandedProjectDirs>,

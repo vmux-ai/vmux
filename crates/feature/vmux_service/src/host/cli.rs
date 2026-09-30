@@ -6,7 +6,7 @@ use bevy::app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use vmux_core::cli::{CliInvocation, CliResult};
-use vmux_core::host::manifest::FeatureManifestPlugin;
+use vmux_core::host::manifest::FeaturePlugin;
 
 #[cfg(target_os = "macos")]
 use super::LaunchAgent;
@@ -16,7 +16,7 @@ pub struct ServiceCliPlugin;
 
 impl Plugin for ServiceCliPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::default())
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
             .add_systems(
                 Update,
                 (route_service_cli, execute_service_cli, execute_remote_cli).chain(),

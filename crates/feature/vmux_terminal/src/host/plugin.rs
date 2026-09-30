@@ -207,9 +207,9 @@ impl Plugin for TerminalServicePlugin {
                 Update,
                 prewarm_login_shell_env.run_if(resource_added::<AppSettings>),
             )
-            .add_observer(on_terminal_restart)
+            .add_observer(on_restart)
             .add_observer(on_restart_pty)
-            .add_observer(on_terminal_removed);
+            .add_observer(on_removed);
     }
 }
 
@@ -385,7 +385,7 @@ fn format_terminal_url(
     }
 }
 
-fn on_terminal_removed(
+fn on_removed(
     trigger: On<Remove, ProcessId>,
     pids: Query<&ProcessId>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -742,7 +742,7 @@ pub struct TerminalRestartRequest {
     pub terminal: Entity,
 }
 
-fn on_terminal_restart(trigger: On<TerminalRestartRequest>, mut commands: Commands) {
+fn on_restart(trigger: On<TerminalRestartRequest>, mut commands: Commands) {
     commands
         .entity(trigger.event_target())
         .remove::<ShellOutputSeen>()
@@ -2738,7 +2738,7 @@ mod tests {
     fn restart_state_clears_shell_output_seen_and_preserves_pending_input() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, InputQueuePlugin))
-            .add_observer(on_terminal_restart);
+            .add_observer(on_restart);
         let entity = app.world_mut().spawn((Terminal, ShellOutputSeen)).id();
         app.world_mut().write_message(QueueTerminalInput {
             terminal: entity,

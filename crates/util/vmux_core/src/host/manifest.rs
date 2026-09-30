@@ -229,15 +229,15 @@ pub trait FeatureManifestSource: Send + Sync + 'static {
 #[derive(Component)]
 pub struct FeatureManifestOwner<M>(PhantomData<fn() -> M>);
 
-pub struct FeatureManifestPlugin<M>(PhantomData<fn() -> M>);
+pub struct FeaturePlugin<M>(PhantomData<fn() -> M>);
 
-impl<M> Default for FeatureManifestPlugin<M> {
+impl<M> Default for FeaturePlugin<M> {
     fn default() -> Self {
         Self(PhantomData)
     }
 }
 
-impl<M: FeatureManifestSource> Plugin for FeatureManifestPlugin<M> {
+impl<M: FeatureManifestSource> Plugin for FeaturePlugin<M> {
     fn build(&self, app: &mut App) {
         let manifest = FeatureManifest::of::<M>();
         app.add_systems(PreStartup, move |mut commands: Commands| {
@@ -298,7 +298,7 @@ mod tests {
     #[test]
     fn one_feature_entity_owns_all_parsed_sections() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, FeatureManifestPlugin::<Feature>::default()));
+        app.add_plugins((MinimalPlugins, FeaturePlugin::<Feature>::default()));
         app.update();
 
         let manifests = app
@@ -336,8 +336,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            FeatureManifestPlugin::<Feature>::default(),
-            FeatureManifestPlugin::<OtherFeature>::default(),
+            FeaturePlugin::<Feature>::default(),
+            FeaturePlugin::<OtherFeature>::default(),
         ));
         app.update();
 

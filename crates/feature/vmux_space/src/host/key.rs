@@ -11,9 +11,7 @@ pub(crate) struct SpaceKeyPlugin;
 impl Plugin for SpaceKeyPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
-            crate::Feature,
-        >::default());
+        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

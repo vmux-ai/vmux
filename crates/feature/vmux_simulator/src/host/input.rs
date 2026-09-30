@@ -63,10 +63,10 @@ impl Plugin for SimulatorInputPlugin {
                 SimulatorClipboardSelectAllRequest,
             )>::default())
             .add_observer(on_touch)
-            .add_observer(on_input_text)
-            .add_observer(on_input_key)
-            .add_observer(on_input_modified_key)
-            .add_observer(on_input_hardware_button)
+            .add_observer(on_text)
+            .add_observer(on_key)
+            .add_observer(on_modified_key)
+            .add_observer(on_hardware_button)
             .add_observer(on_clipboard_copy)
             .add_observer(on_clipboard_cut)
             .add_observer(on_clipboard_paste)
@@ -655,7 +655,7 @@ fn normalized_point(touch: &SimulatorTouch, points: (f32, f32)) -> Option<(f32, 
     ))
 }
 
-fn on_input_text(
+fn on_text(
     trigger: On<UiInput<SimulatorInputTextRequest>>,
     mut requests: MessageWriter<SimulatorInputRequest>,
 ) {
@@ -665,7 +665,7 @@ fn on_input_text(
     });
 }
 
-fn on_input_key(
+fn on_key(
     trigger: On<UiInput<SimulatorInputKeyRequest>>,
     mut requests: MessageWriter<SimulatorInputRequest>,
 ) {
@@ -675,7 +675,7 @@ fn on_input_key(
     });
 }
 
-fn on_input_modified_key(
+fn on_modified_key(
     trigger: On<UiInput<SimulatorInputModifiedKeyRequest>>,
     mut requests: MessageWriter<SimulatorInputRequest>,
 ) {
@@ -688,7 +688,7 @@ fn on_input_modified_key(
     });
 }
 
-fn on_input_hardware_button(
+fn on_hardware_button(
     trigger: On<UiInput<SimulatorInputHardwareButtonRequest>>,
     mut requests: MessageWriter<SimulatorInputRequest>,
 ) {

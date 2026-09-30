@@ -28,13 +28,13 @@ impl Plugin for ChatMediaPlugin {
             ChatAttachPaths,
             ChatRemoveAttachment,
         )>::default())
-            .add_observer(on_chat_pick_files)
-            .add_observer(on_chat_paste_media)
-            .add_observer(on_chat_media_query_request)
-            .add_observer(on_chat_media_query)
-            .add_observer(on_chat_media_list_request)
-            .add_observer(on_chat_attach_paths)
-            .add_observer(on_chat_remove_attachment)
+            .add_observer(on_pick_files)
+            .add_observer(on_paste_media)
+            .add_observer(on_query_request)
+            .add_observer(on_query)
+            .add_observer(on_list_request)
+            .add_observer(on_attach_paths)
+            .add_observer(on_remove_attachment)
             .add_observer(hydrate_attachments)
             .add_systems(
                 Update,
@@ -574,7 +574,7 @@ fn chat_media_previews(mut response: ChatMediaEntries) -> ChatMediaEntries {
     response
 }
 
-fn on_chat_media_list_request(trigger: On<UiInput<ChatMediaListRequest>>, mut commands: Commands) {
+fn on_list_request(trigger: On<UiInput<ChatMediaListRequest>>, mut commands: Commands) {
     let request = trigger.event().payload.clone();
     let task = IoTaskPool::get()
         .spawn(async move { chat_media_entries(request.request_id, request.query) });
@@ -584,17 +584,14 @@ fn on_chat_media_list_request(trigger: On<UiInput<ChatMediaListRequest>>, mut co
     });
 }
 
-fn on_chat_media_query_request(
-    trigger: On<UiInput<ChatMediaQueryRequest>>,
-    mut commands: Commands,
-) {
+fn on_query_request(trigger: On<UiInput<ChatMediaQueryRequest>>, mut commands: Commands) {
     commands.trigger(ChatMediaQuery::new(
         trigger.event().webview,
         trigger.event().payload.query.clone(),
     ));
 }
 
-fn on_chat_media_query(
+fn on_query(
     trigger: On<ChatMediaQuery>,
     mut projections: Query<&mut ChatMediaProjection, With<ChatView>>,
     mut commands: Commands,
@@ -620,7 +617,7 @@ fn on_chat_media_query(
     commands.spawn(ChatMediaListTask { webview, task });
 }
 
-fn on_chat_attach_paths(
+fn on_attach_paths(
     trigger: On<UiInput<ChatAttachPaths>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -661,7 +658,7 @@ fn hydrate_attachments(
     );
 }
 
-fn on_chat_remove_attachment(
+fn on_remove_attachment(
     trigger: On<UiInput<ChatRemoveAttachment>>,
     mut projections: Query<
         (&mut ChatAttachmentProjection, &mut ChatPromptFocusRevision),
@@ -690,7 +687,7 @@ fn on_chat_remove_attachment(
     );
 }
 
-fn on_chat_pick_files(
+fn on_pick_files(
     trigger: On<UiInput<ChatPickFiles>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -731,7 +728,7 @@ fn clipboard_image_path() -> Option<std::path::PathBuf> {
     Some(path)
 }
 
-fn on_chat_paste_media(
+fn on_paste_media(
     trigger: On<UiInput<ChatPasteMedia>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,

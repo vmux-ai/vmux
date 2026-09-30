@@ -43,10 +43,10 @@ impl Plugin for TabPlugin {
                 TabActivateRequest,
                 TabReorderRequest,
             )>::default())
-            .add_observer(on_tab_create_request)
-            .add_observer(on_tab_close_request)
-            .add_observer(on_tab_activate_request)
-            .add_observer(on_tab_reorder_request)
+            .add_observer(on_create_request)
+            .add_observer(on_close_request)
+            .add_observer(on_activate_request)
+            .add_observer(on_reorder_request)
             .add_systems(
                 Update,
                 (
@@ -76,9 +76,7 @@ pub struct TabCommandPlugin;
 impl Plugin for TabCommandPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
-            crate::Feature,
-        >::default());
+        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -556,14 +554,14 @@ fn sync_tab_order(
     }
 }
 
-fn on_tab_create_request(
+fn on_create_request(
     _trigger: On<UiInput<TabCreateRequest>>,
     mut requests: MessageWriter<OpenRequest>,
 ) {
     requests.write(OpenRequest { url: None });
 }
 
-fn on_tab_close_request(
+fn on_close_request(
     trigger: On<UiInput<TabCloseRequest>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab_param: crate::stack::ActiveTabParam,
@@ -579,7 +577,7 @@ fn on_tab_close_request(
     close_requests.write(CloseTabRequest { tab: target });
 }
 
-fn on_tab_activate_request(
+fn on_activate_request(
     trigger: On<UiInput<TabActivateRequest>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     mut commands: Commands,
@@ -593,7 +591,7 @@ fn on_tab_activate_request(
     commands.entity(target).insert(LastActivatedAt::now());
 }
 
-fn on_tab_reorder_request(
+fn on_reorder_request(
     trigger: On<UiInput<TabReorderRequest>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of: Query<&ChildOf>,
@@ -1411,7 +1409,7 @@ mod tests {
         ))
         .add_message::<crate::TabLayoutSpawnRequest>()
         .add_message::<CloseTabRequest>()
-        .add_observer(on_tab_close_request);
+        .add_observer(on_close_request);
 
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut()

@@ -23,8 +23,8 @@ impl Plugin for SearchPlugin {
                 )
                     .chain(),
             )
-            .add_observer(on_explorer_goto)
-            .add_observer(on_explorer_search_open);
+            .add_observer(on_goto)
+            .add_observer(on_open);
     }
 }
 
@@ -70,7 +70,7 @@ type GlobalSearchDirtyReady = (
     With<GlobalSearchDirty>,
     With<vmux_core::page::PageReady>,
 );
-fn on_explorer_goto(
+fn on_goto(
     trigger: On<UiInput<ExplorerGoto>>,
     views: Query<&FileView>,
     mut writer: MessageWriter<crate::lsp::manager::LspGoto>,
@@ -160,7 +160,7 @@ fn emit_global_search(
     }
 }
 
-fn on_explorer_search_open(trigger: On<UiInput<ExplorerSearchOpen>>, mut commands: Commands) {
+fn on_open(trigger: On<UiInput<ExplorerSearchOpen>>, mut commands: Commands) {
     let entity = trigger.event().webview;
     let request = &trigger.event().payload;
     commands.trigger(FileNavigateRequest::new(

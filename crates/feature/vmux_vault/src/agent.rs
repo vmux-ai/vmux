@@ -3,7 +3,7 @@ use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage};
 use vmux_core::ProcessAnchor;
-use vmux_core::host::manifest::FeatureManifestPlugin;
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::service::ServiceRequest;
 use vmux_layout::AgentOpenBeside;
 use vmux_tool::{
@@ -18,13 +18,13 @@ pub struct VaultToolPlugin;
 
 impl Plugin for VaultToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::default())
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
             .register_tool::<VaultStatusArgs>()
             .register_tool::<OpenVaultArgs>()
-            .add_systems(Update, (vault_status, open_vault).in_set(ToolDispatchSet));
+            .add_systems(Update, (status, open_vault).in_set(ToolDispatchSet));
     }
 }
 
@@ -64,7 +64,7 @@ struct VaultStatusRequest {
     request_id: AgentRequestId,
 }
 
-fn vault_status(mut commands: Commands, calls: Query<Entity, AddedTool<VaultStatusArgs>>) {
+fn status(mut commands: Commands, calls: Query<Entity, AddedTool<VaultStatusArgs>>) {
     for request in &calls {
         commands
             .entity(request)

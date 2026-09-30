@@ -23,10 +23,7 @@ impl Plugin for HomebrewToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_providers)
             .add_systems(Update, route.in_set(ToolOperationRouteSet))
-            .add_systems(
-                Update,
-                import_brewfile_system.after(ToolOperationRouteFlush),
-            )
+            .add_systems(Update, import_brewfile.after(ToolOperationRouteFlush))
             .add_systems(Update, complete);
     }
 }
@@ -282,7 +279,7 @@ pub(super) struct ImportedBrewfile {
     casks: usize,
 }
 
-fn import_brewfile_system(
+fn import_brewfile(
     operations: Query<
         (Entity, &ImportBrewfile, &ToolStoreTarget),
         (

@@ -28,14 +28,14 @@ impl Plugin for DirectoryPlugin {
             GitDirectoryParentRequest,
             GitDirectoryToggleHiddenRequest,
         )>::default())
-            .add_observer(on_directory_open_request)
-            .add_observer(on_directory_select_request)
-            .add_observer(on_directory_next_request)
-            .add_observer(on_directory_previous_request)
-            .add_observer(on_directory_ascend_request)
-            .add_observer(on_directory_descend_request)
-            .add_observer(on_directory_activate_request)
-            .add_observer(on_directory_parent_request)
+            .add_observer(on_open_request)
+            .add_observer(on_select_request)
+            .add_observer(on_next_request)
+            .add_observer(on_previous_request)
+            .add_observer(on_ascend_request)
+            .add_observer(on_descend_request)
+            .add_observer(on_activate_request)
+            .add_observer(on_parent_request)
             .add_observer(toggle_hidden)
             .add_observer(load_directory);
     }
@@ -209,10 +209,7 @@ struct DirectoryLoad {
     came_from: String,
 }
 
-fn on_directory_open_request(
-    trigger: On<UiInput<GitDirectoryOpenRequest>>,
-    mut commands: Commands,
-) {
+fn on_open_request(trigger: On<UiInput<GitDirectoryOpenRequest>>, mut commands: Commands) {
     commands.trigger(DirectoryLoad {
         webview: trigger.event().webview,
         path: trigger.event().payload.path.clone(),
@@ -220,7 +217,7 @@ fn on_directory_open_request(
     });
 }
 
-fn on_directory_select_request(
+fn on_select_request(
     trigger: On<UiInput<GitDirectorySelectRequest>>,
     mut navigation: Query<&mut GitDirectoryNavigation>,
 ) {
@@ -233,7 +230,7 @@ fn on_directory_select_request(
     navigation.select(index);
 }
 
-fn on_directory_next_request(
+fn on_next_request(
     trigger: On<UiInput<GitDirectoryNextRequest>>,
     mut navigation: Query<&mut GitDirectoryNavigation>,
 ) {
@@ -244,7 +241,7 @@ fn on_directory_next_request(
     navigation.select(next);
 }
 
-fn on_directory_previous_request(
+fn on_previous_request(
     trigger: On<UiInput<GitDirectoryPreviousRequest>>,
     mut navigation: Query<&mut GitDirectoryNavigation>,
 ) {
@@ -255,7 +252,7 @@ fn on_directory_previous_request(
     navigation.select(previous);
 }
 
-fn on_directory_ascend_request(
+fn on_ascend_request(
     trigger: On<UiInput<GitDirectoryAscendRequest>>,
     navigation: Query<&GitDirectoryNavigation>,
     mut commands: Commands,
@@ -277,7 +274,7 @@ fn on_directory_ascend_request(
     });
 }
 
-fn on_directory_descend_request(
+fn on_descend_request(
     trigger: On<UiInput<GitDirectoryDescendRequest>>,
     navigation: Query<&GitDirectoryNavigation>,
     mut commands: Commands,
@@ -295,7 +292,7 @@ fn on_directory_descend_request(
     });
 }
 
-fn on_directory_activate_request(
+fn on_activate_request(
     trigger: On<UiInput<GitDirectoryActivateRequest>>,
     navigation: Query<&GitDirectoryNavigation>,
     mut commands: Commands,
@@ -313,7 +310,7 @@ fn on_directory_activate_request(
     });
 }
 
-fn on_directory_parent_request(
+fn on_parent_request(
     trigger: On<UiInput<GitDirectoryParentRequest>>,
     navigation: Query<&GitDirectoryNavigation>,
     mut commands: Commands,

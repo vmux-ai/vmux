@@ -23,10 +23,7 @@ impl Plugin for NpmToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_provider)
             .add_systems(Update, route.in_set(ToolOperationRouteSet))
-            .add_systems(
-                Update,
-                import_npm_manifest_system.after(ToolOperationRouteFlush),
-            )
+            .add_systems(Update, import_manifest.after(ToolOperationRouteFlush))
             .add_systems(Update, complete);
     }
 }
@@ -230,7 +227,7 @@ impl ImportedNpmManifest {
     }
 }
 
-fn import_npm_manifest_system(
+fn import_manifest(
     operations: Query<
         (Entity, &ImportNpmManifest, &ToolStoreTarget),
         (

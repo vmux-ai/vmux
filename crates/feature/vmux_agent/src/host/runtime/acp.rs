@@ -28,7 +28,7 @@ pub(crate) struct AcpSessionConfigSet;
 impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            vmux_core::host::manifest::FeatureManifestPlugin::<crate::Feature>::default(),
+            vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default(),
             crate::workspace_policy::AcpWorkspacePolicyPlugin,
         ))
         .add_message::<ServiceRequest>()

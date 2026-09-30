@@ -29,7 +29,7 @@ impl Plugin for ClosePlugin {
             .add_message::<CloseDialogResult>()
             .add_systems(
                 Update,
-                (request_pane_close, close_panes)
+                (request_pane_close, close)
                     .chain()
                     .in_set(LayoutRequestSet::Handle),
             )
@@ -108,7 +108,7 @@ fn request_pane_close(
     }
 }
 
-fn close_panes(
+fn close(
     mut requests: MessageReader<PaneCloseRequest>,
     pane_children: Query<&Children, With<Pane>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,

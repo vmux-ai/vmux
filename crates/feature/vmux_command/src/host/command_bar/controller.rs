@@ -57,9 +57,9 @@ impl Plugin for CommandBarControllerPlugin {
             )>::default())
             .add_observer(on_dismiss_request)
             .add_observer(close_command_bar)
-            .add_observer(on_command_bar_ready)
-            .add_observer(on_command_bar_rendered)
-            .add_observer(on_command_bar_size)
+            .add_observer(on_ready)
+            .add_observer(on_rendered)
+            .add_observer(on_size)
             .add_systems(
                 Update,
                 prewarm_command_bar_modal.before(CefSystems::CreateAndResize),
@@ -359,7 +359,7 @@ fn should_retry_command_bar_open_payload(
     open_id.is_open() && payload.is_some() && rendered_open_id != Some(open_id)
 }
 
-fn on_command_bar_ready(
+fn on_ready(
     trigger: On<UiInput<CommandBarReadyEvent>>,
     mut pending_q: Query<&mut PendingCommandBarReveal>,
     mut commands: Commands,
@@ -377,7 +377,7 @@ fn on_command_bar_ready(
         .remove::<CommandBarRecreating>();
 }
 
-fn on_command_bar_rendered(
+fn on_rendered(
     trigger: On<UiInput<CommandBarRenderedEvent>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -394,7 +394,7 @@ fn on_command_bar_rendered(
     ));
 }
 
-fn on_command_bar_size(
+fn on_size(
     trigger: On<UiInput<CommandBarSizeEvent>>,
     browsers: NonSend<Browsers>,
     state: Query<(

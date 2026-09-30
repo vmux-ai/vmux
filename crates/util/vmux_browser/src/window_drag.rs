@@ -14,7 +14,7 @@ use crate::host::LayoutPointerCapture;
 impl Plugin for WindowDragPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PreUpdate, initialize_window_drag_regions)
-            .add_observer(on_window_drag_region)
+            .add_observer(on_region)
             .add_systems(
                 PostUpdate,
                 publish_window_drag_region.after(LayoutSystems::Layout),
@@ -126,7 +126,7 @@ fn initialize_window_drag_regions(
     }
 }
 
-fn on_window_drag_region(
+fn on_region(
     trigger: On<UiInput<WindowDragRegionEvent>>,
     mut reported: Query<&mut ReportedWindowDragRegions>,
 ) {

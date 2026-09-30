@@ -22,9 +22,7 @@ pub(crate) struct ExtensionBrokerPlugin;
 impl Plugin for ExtensionBrokerPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
-            crate::Feature,
-        >::default());
+        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
         app.add_systems(Startup, spawn_extension_broker)
             .add_systems(
                 Update,

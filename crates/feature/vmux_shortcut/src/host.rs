@@ -26,9 +26,7 @@ pub struct ShortcutPlugin;
 
 impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
-            crate::Feature,
-        >::default());
+        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
         #[cfg(ui)]
         app.add_plugins(crate::ui::ShortcutPage::plugin());
         app.add_plugins((
@@ -38,9 +36,9 @@ impl Plugin for ShortcutPlugin {
         ))
         .add_message::<NativeKeyInput>()
         .add_observer(send_shortcuts)
-        .add_observer(on_shortcut_probe_press_request)
-        .add_observer(on_shortcut_probe_clear_request)
-        .add_observer(on_shortcut_probe_press)
+        .add_observer(on_probe_press_request)
+        .add_observer(on_probe_clear_request)
+        .add_observer(on_probe_press)
         .add_systems(
             Update,
             normalize_shortcut_alias.in_set(PageOpenSet::ResolveTarget),
@@ -345,7 +343,7 @@ fn send_shortcuts(
     view.catalog = ShortcutCatalog::build(&keymap, context, &locale, &definitions);
 }
 
-fn on_shortcut_probe_press_request(
+fn on_probe_press_request(
     trigger: On<UiInput<ShortcutProbePressRequest>>,
     mut views: Query<&mut Shortcuts>,
 ) {
@@ -361,7 +359,7 @@ fn on_shortcut_probe_press_request(
     );
 }
 
-fn on_shortcut_probe_clear_request(
+fn on_probe_clear_request(
     trigger: On<UiInput<ShortcutProbeClearRequest>>,
     mut views: Query<&mut Shortcuts>,
 ) {
@@ -371,7 +369,7 @@ fn on_shortcut_probe_clear_request(
     view.probe.clear();
 }
 
-fn on_shortcut_probe_press(trigger: On<ShortcutProbePress>, mut views: Query<&mut Shortcuts>) {
+fn on_probe_press(trigger: On<ShortcutProbePress>, mut views: Query<&mut Shortcuts>) {
     let Ok(mut view) = views.get_mut(trigger.event_target()) else {
         return;
     };

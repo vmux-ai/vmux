@@ -30,12 +30,7 @@ impl Plugin for LayoutApplyPlugin {
             .add_message::<LayoutApplyResult>()
             .add_systems(
                 Update,
-                (
-                    plan_layout_requests,
-                    apply_layout_plans,
-                    respond_to_layout_apply,
-                )
-                    .chain(),
+                (plan_layout_requests, apply, respond_to_layout_apply).chain(),
             )
             .add_systems(Update, serve_snapshot_requests);
     }
@@ -189,7 +184,7 @@ fn plan_layout_requests(
     }
 }
 
-fn apply_layout_plans(
+fn apply(
     mut plans: MessageReader<LayoutApplyPlan>,
     children: Query<&Children>,
     child_of: Query<&ChildOf>,

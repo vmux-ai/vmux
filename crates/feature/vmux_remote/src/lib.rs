@@ -19,11 +19,11 @@ pub struct RemotePlugin;
 impl Plugin for RemotePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<RemoteOperationRequest>()
-            .add_observer(on_remote_request)
+            .add_observer(on_request)
             .add_observer(show_remote_pairing)
             .add_observer(dismiss_remote_pairing)
-            .add_observer(on_remote_copy)
-            .add_observer(on_remote_revoke)
+            .add_observer(on_copy)
+            .add_observer(on_revoke)
             .add_systems(
                 Startup,
                 (spawn_remote_runtime, reconcile_remote_on_startup).chain(),
@@ -70,7 +70,7 @@ fn spawn_remote_runtime(mut commands: Commands) {
     ));
 }
 
-fn on_remote_copy(
+fn on_copy(
     _trigger: On<UiInput<RemoteCopyEvent>>,
     state: Query<(&RemoteState, &RemotePairingInfo)>,
 ) {
@@ -82,7 +82,7 @@ fn on_remote_copy(
     }
 }
 
-fn on_remote_revoke(
+fn on_revoke(
     trigger: On<UiInput<RemoteRevokeRequest>>,
     mut states: Query<(&mut RemoteState, &RemoteAuthorizationStore)>,
 ) {
@@ -168,7 +168,7 @@ fn reconcile_remote_on_startup(
     }
 }
 
-fn on_remote_request(
+fn on_request(
     trigger: On<UiInput<RemoteRequest>>,
     mut states: Query<(Entity, &mut RemoteState, &mut PairingVisibility)>,
     mut operations: MessageWriter<RemoteOperationRequest>,

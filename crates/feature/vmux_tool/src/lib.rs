@@ -54,7 +54,7 @@ pub struct ToolPlugin;
 
 impl Plugin for ToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<Feature>::default());
+        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<Feature>::default());
         #[cfg(ui)]
         app.add_plugins(ui::ToolsPage::plugin());
 

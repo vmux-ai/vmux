@@ -937,7 +937,7 @@ fn close_lsp_documents(
     }
 }
 
-fn lsp_open_documents(
+fn open_documents(
     q: Query<(Entity, &FileView, &Editor), Without<LspOpened>>,
     starts: Query<&LspServerStartTask>,
     failures: Query<&LspServerFailed>,
@@ -1270,15 +1270,15 @@ pub fn build(
             finish_lsp_server_starts,
             close_lsp_documents,
             change_lsp_documents,
-            lsp_open_documents,
+            open_documents,
             lint_on_open,
             drain_lsp_diagnostics,
             drain_lint,
             request_code_actions,
             drain_lsp_requests,
             apply_semantic_tokens,
-            emit_diagnostics_system,
-            lsp_status_system,
+            emit_diagnostics,
+            publish_status,
         )
             .chain(),
     );
@@ -1346,7 +1346,7 @@ pub(crate) struct OfferedCodeActions(pub(crate) Vec<lsp_types::CodeActionOrComma
 #[derive(Component, Default)]
 pub struct DiagSent(Vec<FileDiagnostic>);
 
-fn emit_diagnostics_system(
+fn emit_diagnostics(
     q: Query<(Entity, &FileView, Option<&DiagSent>), With<PageReady>>,
     lsp_diagnostics: Query<&LspDiagnostics>,
     lint_diagnostics: Query<&LintDiagnostics>,
@@ -1487,7 +1487,7 @@ pub struct LspStatusSent {
     path: PathBuf,
 }
 
-fn lsp_status_system(
+fn publish_status(
     q: Query<(Entity, &FileView, Option<&LspStatusSent>), With<PageReady>>,
     settings: Res<AppSettings>,
     manager: Single<&LspManager>,

@@ -39,7 +39,7 @@ impl Plugin for ControllerPlugin {
             GitStashSelectRequest,
             GitDiscardFileRequest,
         )>::default())
-            .add_observer(on_git_ui_state_write)
+            .add_observer(on_ui_state_write)
             .add_observer(on_key_request)
             .add_observer(on_panel_select_request)
             .add_observer(on_shortcut_help_request)
@@ -705,7 +705,7 @@ impl SelectionDirection {
     }
 }
 
-fn on_git_ui_state_write(
+fn on_ui_state_write(
     trigger: On<UiStateWrite<GitUiState>>,
     mut pages: Query<(
         &mut GitState,

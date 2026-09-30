@@ -62,9 +62,7 @@ pub struct ArchivePlugin;
 impl Plugin for ArchivePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::<
-            crate::Feature,
-        >::default());
+        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -77,9 +75,7 @@ impl Plugin for ArchivePlugin {
             .add_systems(
                 Update,
                 (
-                    archive_on_stack_close
-                        .after(StackCommandSet)
-                        .before(CloseStackSet),
+                    on_stack_close.after(StackCommandSet).before(CloseStackSet),
                     handle_reopen_closed_page,
                     handle_close_tab_requests
                         .after(TabCommandSet)
@@ -93,7 +89,7 @@ impl Plugin for ArchivePlugin {
 const MAX_ARCHIVE_ENTRIES: usize = 25;
 const ARCHIVE_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
-fn archive_on_stack_close(
+fn on_stack_close(
     mut reader: MessageReader<CloseStackRequest>,
     layout: TabArchiveLayout,
     mut writer: MessageWriter<PageArchiveRequest>,

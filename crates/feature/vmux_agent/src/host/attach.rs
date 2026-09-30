@@ -6,7 +6,7 @@ pub(super) struct AttachPlugin;
 
 impl Plugin for AttachPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, attach_acp_agents);
+        app.add_systems(Update, attach);
     }
 }
 
@@ -55,7 +55,7 @@ impl AcpAgentAttachment {
     }
 }
 
-fn attach_acp_agents(
+fn attach(
     attachments: Query<(Entity, &AcpAgentAttachment), Added<AcpAgentAttachment>>,
     mut commands: Commands,
 ) {

@@ -28,9 +28,9 @@ impl Plugin for ExplorerEntryPlugin {
                     drain_explorer_deletes,
                 ),
             )
-            .add_observer(on_explorer_create)
-            .add_observer(on_explorer_rename)
-            .add_observer(on_explorer_delete);
+            .add_observer(on_create)
+            .add_observer(on_rename)
+            .add_observer(on_delete);
     }
 }
 
@@ -71,7 +71,7 @@ struct ExplorerDeleteTask {
     task: Task<Result<ExplorerDeleteOutcome, String>>,
 }
 
-fn on_explorer_create(
+fn on_create(
     trigger: On<UiInput<ExplorerCreate>>,
     views: Query<&UsesExplorerTree>,
     trees: Query<&ExplorerTree>,
@@ -103,7 +103,7 @@ fn on_explorer_create(
     });
 }
 
-fn on_explorer_rename(
+fn on_rename(
     trigger: On<UiInput<ExplorerRename>>,
     views: Query<&UsesExplorerTree>,
     trees: Query<&ExplorerTree>,
@@ -157,7 +157,7 @@ fn on_explorer_rename(
     });
 }
 
-fn on_explorer_delete(
+fn on_delete(
     trigger: On<UiInput<ExplorerDelete>>,
     views: Query<&UsesExplorerTree>,
     trees: Query<&ExplorerTree>,

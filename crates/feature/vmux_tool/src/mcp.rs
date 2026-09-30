@@ -30,11 +30,11 @@ impl Plugin for McpToolPlugin {
                 Update,
                 (
                     locate_mcp_configs,
-                    discover_mcp_servers_system,
-                    import_mcp_config_system,
+                    discover,
+                    import_config,
                     import_defaults,
-                    import_mcp_server_system,
-                    forget_mcp_server_system,
+                    import_server,
+                    forget_server,
                 )
                     .after(ToolOperationRouteFlush),
             )
@@ -287,7 +287,7 @@ fn locate_mcp_configs(
     }
 }
 
-fn discover_mcp_servers_system(
+fn discover(
     operations: Query<
         (Entity, &McpConfigSources),
         (
@@ -323,7 +323,7 @@ pub(super) struct ImportedMcpConfig {
     servers: usize,
 }
 
-fn import_mcp_config_system(
+fn import_config(
     operations: Query<
         (Entity, &ImportMcpConfig, &ToolStoreTarget),
         (
@@ -394,7 +394,7 @@ pub(super) struct ImportedMcpServer {
     name: String,
 }
 
-fn import_mcp_server_system(
+fn import_server(
     operations: Query<
         (
             Entity,
@@ -440,7 +440,7 @@ pub(super) struct ForgottenMcpServer {
     name: String,
 }
 
-fn forget_mcp_server_system(
+fn forget_server(
     operations: Query<
         (Entity, &ForgetMcpServer, &ToolStoreTarget),
         (

@@ -52,10 +52,10 @@ impl Plugin for TreePlugin {
         .add_observer(mark_explorer_tree_dirty)
         .add_observer(request_reveal)
         .add_observer(reveal_current)
-        .add_observer(on_explorer_collapse_all)
-        .add_observer(on_explorer_tree_toggle)
-        .add_observer(on_explorer_tree_prefetch)
-        .add_observer(on_explorer_tree_refresh);
+        .add_observer(on_collapse_all)
+        .add_observer(on_toggle)
+        .add_observer(on_prefetch)
+        .add_observer(on_refresh);
     }
 }
 
@@ -366,7 +366,7 @@ impl ExplorerRoot {
     }
 }
 
-fn on_explorer_tree_toggle(
+fn on_toggle(
     trigger: On<UiInput<ExplorerTreeToggle>>,
     query: Query<&UsesExplorerTree>,
     mut trees: Query<&mut ExplorerTree>,
@@ -393,7 +393,7 @@ fn on_explorer_tree_toggle(
     commands.trigger(ExplorerTreeChanged(tree_of.0));
 }
 
-fn on_explorer_tree_prefetch(
+fn on_prefetch(
     trigger: On<UiInput<ExplorerTreePrefetch>>,
     query: Query<&UsesExplorerTree>,
     mut trees: Query<&mut ExplorerTree>,
@@ -413,7 +413,7 @@ fn on_explorer_tree_prefetch(
     }
 }
 
-fn on_explorer_tree_refresh(
+fn on_refresh(
     trigger: On<UiInput<ExplorerTreeRefresh>>,
     query: Query<&UsesExplorerTree>,
     mut trees: Query<&mut ExplorerTree>,
@@ -474,7 +474,7 @@ fn reveal_current(
     }
 }
 
-fn on_explorer_collapse_all(
+fn on_collapse_all(
     trigger: On<UiInput<ExplorerCollapseAll>>,
     query: Query<&UsesExplorerTree>,
     mut trees: Query<&mut ExplorerTree>,

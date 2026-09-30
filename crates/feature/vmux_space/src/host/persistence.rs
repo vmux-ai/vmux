@@ -54,7 +54,7 @@ impl Plugin for WorkspacePersistencePlugin {
                     .after(LayoutPersistenceSet::Restore)
                     .run_if(any_with_component::<RestorePending>),
             )
-            .add_systems(Update, (auto_save_system, handle_save_space_requests));
+            .add_systems(Update, (auto_save, handle_save_space_requests));
     }
 }
 
@@ -184,7 +184,7 @@ fn mark_persistence_dirty(_trigger: On<PersistenceDirty>, mut auto_save: Single<
     auto_save.debounce.reset();
 }
 
-fn auto_save_system(
+fn auto_save(
     time: Res<Time>,
     mut auto_save: Single<&mut AutoSave>,
     path: Single<&WorkspaceStorePath>,
@@ -1167,7 +1167,7 @@ mod tests {
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
             .add_observer(save_on_default_event)
-            .add_systems(Update, auto_save_system);
+            .add_systems(Update, auto_save);
         app.world_mut().spawn((
             Save,
             WindowGeometry {
@@ -1200,7 +1200,7 @@ mod tests {
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
             .add_observer(save_on_default_event)
-            .add_systems(Update, auto_save_system);
+            .add_systems(Update, auto_save);
         app.world_mut().spawn((
             Save,
             Space,

@@ -16,12 +16,7 @@ impl Plugin for RelaunchPlugin {
         .add_observer(on_page_relaunch)
         .add_systems(
             Update,
-            (
-                request_profile_launch,
-                relaunch_application,
-                launch_profiles,
-            )
-                .chain(),
+            (request_profile_launch, relaunch, launch_profiles).chain(),
         );
     }
 }
@@ -104,10 +99,7 @@ struct RelaunchApplication;
 #[derive(Message)]
 struct LaunchProfile(String);
 
-fn relaunch_application(
-    mut requests: MessageReader<RelaunchApplication>,
-    mut exit: MessageWriter<AppExit>,
-) {
+fn relaunch(mut requests: MessageReader<RelaunchApplication>, mut exit: MessageWriter<AppExit>) {
     if requests.read().next().is_none() {
         return;
     }

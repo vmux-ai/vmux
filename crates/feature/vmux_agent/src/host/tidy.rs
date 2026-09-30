@@ -28,15 +28,15 @@ impl Plugin for TidyPlugin {
             .add_message::<CloseStackRequest>()
             .add_message::<SettingsSaveRequest>()
             .add_plugins(UiEventPlugin::<(FileTidyRequest,)>::default())
-            .add_observer(on_tidy_request)
+            .add_observer(on_request)
             .add_systems(
                 Update,
-                tidy_on_agent_attention
+                on_attention
                     .in_set(TidySet)
                     .after(ComputeFocusSet)
                     .after(crate::attention::TurnEndedSet),
             )
-            .add_systems(Update, tidy_acp_on_idle.after(ComputeFocusSet));
+            .add_systems(Update, on_idle.after(ComputeFocusSet));
     }
 }
 
@@ -45,7 +45,7 @@ struct PendingTidy {
     closable: Vec<Entity>,
 }
 
-fn on_tidy_request(
+fn on_request(
     trigger: On<UiInput<FileTidyRequest>>,
     child_of: Query<&ChildOf>,
     pending: Query<&PendingTidy>,
@@ -229,7 +229,7 @@ fn tidy_follow_pane(
     }
 }
 
-fn tidy_on_agent_attention(
+fn on_attention(
     mut reader: MessageReader<AgentAttention>,
     settings: Option<Res<AppSettings>>,
     agents: Query<&ProcessId, With<Agent>>,
@@ -266,7 +266,7 @@ fn tidy_on_agent_attention(
     }
 }
 
-fn tidy_acp_on_idle(
+fn on_idle(
     settings: Option<Res<AppSettings>>,
     sessions: Query<(&AcpSession, &AgentRunState), Changed<AgentRunState>>,
     layout: AgentFileLayout,

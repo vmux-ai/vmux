@@ -26,9 +26,9 @@ impl Plugin for PanelPlugin {
             .add_observer(toggle_explorer)
             .add_observer(reveal_in_explorer)
             .add_observer(open_find_in_files)
-            .add_observer(on_explorer_panel_set_visible)
-            .add_observer(on_explorer_panel_view_set)
-            .add_observer(on_explorer_panel_width);
+            .add_observer(on_set_visible)
+            .add_observer(on_view_set)
+            .add_observer(on_width);
     }
 }
 
@@ -298,7 +298,7 @@ fn open_find_in_files(
     mutation.mark_unsent();
 }
 
-fn on_explorer_panel_set_visible(
+fn on_set_visible(
     trigger: On<UiInput<ExplorerPanelSetVisible>>,
     mut mutation: ExplorerPanelMutation,
 ) {
@@ -321,17 +321,14 @@ fn on_explorer_panel_set_visible(
     }
 }
 
-fn on_explorer_panel_view_set(
-    trigger: On<UiInput<ExplorerPanelViewSet>>,
-    mut mutation: ExplorerPanelMutation,
-) {
+fn on_view_set(trigger: On<UiInput<ExplorerPanelViewSet>>, mut mutation: ExplorerPanelMutation) {
     let entity = trigger.event().webview;
     let scope = mutation.scope(entity);
     mutation.set_view(scope, trigger.event().payload.search);
     mutation.mark_unsent();
 }
 
-fn on_explorer_panel_width(
+fn on_width(
     trigger: On<UiInput<ExplorerPanelWidth>>,
     mut panel: Single<&mut ExplorerPanelDefaults>,
     settings: Option<ResMut<AppSettings>>,

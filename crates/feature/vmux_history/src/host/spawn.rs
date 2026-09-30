@@ -15,14 +15,14 @@ impl Plugin for HistorySpawnPlugin {
         app.add_message::<vmux_core::event::RecordVisitRequest>()
             .add_systems(
                 Update,
-                (spawn_visits, record_requested_visits, record_vmux_pages)
+                (spawn, record_requested_visits, record_vmux_pages)
                     .chain()
                     .in_set(HistoryWriteSet),
             );
     }
 }
 
-fn spawn_visits(
+fn spawn(
     mut events: bevy::ecs::message::MessageReader<
         bevy_cef_core::prelude::WebviewCommittedNavigationEvent,
     >,
@@ -145,7 +145,7 @@ mod system_tests {
         app.add_plugins(MinimalPlugins)
             .add_plugins(CorePlugin)
             .add_message::<WebviewCommittedNavigationEvent>()
-            .add_systems(Update, spawn_visits);
+            .add_systems(Update, spawn);
         app
     }
 

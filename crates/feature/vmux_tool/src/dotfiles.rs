@@ -42,14 +42,14 @@ impl Plugin for DotfileToolPlugin {
                 Update,
                 (
                     discover_packages,
-                    plan_dotfile_package_system,
-                    import_dotfiles_system,
+                    plan_package,
+                    import,
                     import_available,
-                    link_dotfile_package_system,
-                    disable_dotfile_package_system,
-                    unlink_dotfile_package_system,
-                    apply_enabled_dotfiles_system,
-                    adopt_dotfile_system,
+                    link_package,
+                    disable_package,
+                    unlink_package,
+                    apply_enabled,
+                    adopt,
                 )
                     .after(ToolOperationRouteFlush),
             )
@@ -390,7 +390,7 @@ impl PlanDotfilePackage {
     }
 }
 
-fn plan_dotfile_package_system(
+fn plan_package(
     operations: Query<
         (Entity, &PlanDotfilePackage, &ToolStoreTarget),
         (
@@ -436,7 +436,7 @@ pub(super) struct ImportedDotfiles {
     packages: usize,
 }
 
-fn import_dotfiles_system(
+fn import(
     operations: Query<
         (Entity, &ImportDotfiles, &ToolStoreTarget),
         (
@@ -532,7 +532,7 @@ pub(super) struct LinkedDotfilePackage {
     files: usize,
 }
 
-fn link_dotfile_package_system(
+fn link_package(
     operations: Query<
         (Entity, &LinkDotfilePackage, &ToolStoreTarget),
         (
@@ -583,7 +583,7 @@ pub(super) struct DisabledDotfilePackage {
     files: usize,
 }
 
-fn disable_dotfile_package_system(
+fn disable_package(
     operations: Query<
         (Entity, &DisableDotfilePackage, &ToolStoreTarget),
         (
@@ -632,7 +632,7 @@ pub(super) struct UnlinkedDotfilePackage {
     files: usize,
 }
 
-fn unlink_dotfile_package_system(
+fn unlink_package(
     operations: Query<
         (Entity, &UnlinkDotfilePackage, &ToolStoreTarget),
         (
@@ -671,7 +671,7 @@ pub(super) struct AppliedEnabledDotfiles {
     files: usize,
 }
 
-fn apply_enabled_dotfiles_system(
+fn apply_enabled(
     operations: Query<
         (Entity, &ToolStoreTarget),
         (
@@ -722,7 +722,7 @@ pub(super) struct AdoptedDotfile {
     path: PathBuf,
 }
 
-fn adopt_dotfile_system(
+fn adopt(
     operations: Query<
         (Entity, &AdoptDotfile, &ToolStoreTarget),
         (

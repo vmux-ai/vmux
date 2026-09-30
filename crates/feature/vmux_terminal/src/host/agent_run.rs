@@ -1652,7 +1652,7 @@ mod tests {
         pane: Entity,
     }
 
-    fn touch_reused_run_pane_spawn_seq_test_system(
+    fn touch_reused_run_pane_spawn_seq(
         input: Res<ReusedRunPaneTouchInput>,
         mut commands: Commands,
         mut next_sequence: NextPaneSpawnSequence,
@@ -1665,7 +1665,7 @@ mod tests {
     fn reusable_run_pane_touch_refreshes_spawn_seq() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, LayoutContractPlugin))
-            .add_systems(Update, touch_reused_run_pane_spawn_seq_test_system);
+            .add_systems(Update, touch_reused_run_pane_spawn_seq);
 
         let reused = app.world_mut().spawn((Pane, SpawnSeq(2))).id();
         app.world_mut().spawn(SpawnCounter::default());
@@ -1684,7 +1684,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct SplitRunPaneOutput(Option<Entity>);
 
-    fn split_run_pane_test_system(
+    fn split_run_pane(
         input: Res<SplitRunPaneInput>,
         mut out: ResMut<SplitRunPaneOutput>,
         mut commands: Commands,
@@ -1720,7 +1720,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .init_resource::<SplitRunPaneOutput>()
-            .add_systems(Update, split_run_pane_test_system);
+            .add_systems(Update, split_run_pane);
 
         let tab = app
             .world_mut()
@@ -1839,7 +1839,7 @@ mod tests {
         candidate: RunTerminalCandidate,
     }
 
-    fn focus_reused_run_terminal_test_system(
+    fn focus_reused_run_terminal(
         input: Res<ReusedRunTerminalFocusInput>,
         mut commands: Commands,
         child_of_q: Query<&ChildOf>,
@@ -1854,7 +1854,7 @@ mod tests {
     fn reused_run_terminal_focus_activates_stack_pane_and_tab() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, focus_reused_run_terminal_test_system);
+            .add_systems(Update, focus_reused_run_terminal);
         let tab = app
             .world_mut()
             .spawn((Tab::default(), LastActivatedAt(1)))

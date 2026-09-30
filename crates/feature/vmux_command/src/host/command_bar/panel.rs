@@ -10,7 +10,7 @@ pub struct PanelPlugin;
 impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(CommandBarPanelRequest,)>::default())
-            .add_observer(on_command_bar_panel_active)
+            .add_observer(on_active)
             .add_systems(Update, mark_command_bar_shown_inline);
     }
 }
@@ -36,10 +36,7 @@ fn mark_command_bar_shown_inline(
     }
 }
 
-fn on_command_bar_panel_active(
-    trigger: On<UiInput<CommandBarPanelRequest>>,
-    mut commands: Commands,
-) {
+fn on_active(trigger: On<UiInput<CommandBarPanelRequest>>, mut commands: Commands) {
     let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
         return;
     };
@@ -57,7 +54,7 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_observer(on_command_bar_panel_active)
+            .add_observer(on_active)
             .add_systems(Update, mark_command_bar_shown_inline);
         app
     }

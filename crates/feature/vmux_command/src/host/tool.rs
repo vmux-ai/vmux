@@ -5,7 +5,7 @@ use vmux_api::protocol::{
     AgentListCommands, AgentNotify, AgentQueryResult, AgentRequest, ClientMessage, JsonValue,
 };
 use vmux_core::JsonArguments;
-use vmux_core::host::manifest::FeatureManifestPlugin;
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQueryHandled, ToolQueryRequest,
@@ -23,7 +23,7 @@ pub struct CommandToolPlugin;
 
 impl Plugin for CommandToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::<crate::Feature>::default())
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default())
             .register_tool::<OpenCommandBarArgs>()
             .register_tool::<NotifyArgs>()
             .add_message::<ToolQueryRequest>()

@@ -8,7 +8,7 @@ pub struct AppearancePlugin;
 
 impl Plugin for AppearancePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_system_appearance)
+        app.add_systems(Startup, spawn)
             .add_message::<ColorSchemeChanged>()
             .add_systems(
                 Update,
@@ -17,7 +17,7 @@ impl Plugin for AppearancePlugin {
     }
 }
 
-fn spawn_system_appearance(mut commands: Commands) {
+fn spawn(mut commands: Commands) {
     commands.spawn((
         Name::new("System appearance"),
         SystemAppearance::default(),

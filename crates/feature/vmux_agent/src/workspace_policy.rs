@@ -59,7 +59,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_core::host::manifest::FeatureManifestPlugin::<crate::Feature>::default(),
+            vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default(),
             AcpWorkspacePolicyPlugin,
         ));
         app.update();
