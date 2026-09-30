@@ -20,6 +20,7 @@ pub mod launch;
 pub mod managed_mcp;
 pub mod mcp;
 pub(crate) mod model;
+mod model_selection;
 pub mod page_open;
 pub mod provider;
 mod resume;

@@ -1,14 +1,18 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use crate::acp_registry::RegistryAgent;
+#[cfg(test)]
+use super::model_selection::SavedAgentModel;
+use super::model_selection::{
+    AcpModeRequestCounter, AcpModelRequestCounter, AgentSelectionKey, ModelSelectionPlugin,
+};
+pub(crate) use super::model_selection::{AgentModeSelections, AgentModelSelections};
 use crate::event::AgentRequestInput;
 use crate::runtime::acp::{AcpModeState, AcpModelState};
 use crate::session_source::{acp_agent_kind, kind_supports_cross_runtime};
 use vmux_api::command_bar::{AgentModels, AgentModes};
 use vmux_api::protocol::{
-    AcpModeOption, AgentCommandResult, AgentListModels, AgentSelectModel, AgentSetEffort,
-    ClientMessage,
+    AgentCommandResult, AgentListModels, AgentSelectModel, AgentSetEffort, ClientMessage,
 };
 use vmux_api::room::RemoteModelState;
 use vmux_chat::event::{
@@ -21,9 +25,7 @@ use vmux_command::event::{StartSelectMode, StartSelectModel};
 use vmux_command::snapshot::{AgentPromptTarget, CommandBarProjection};
 use vmux_core::agent::{default_effort, effort_levels};
 use vmux_core::host::UiStateWrite;
-use vmux_core::profile::ProfilePaths;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
-use vmux_path::AtomicFile;
 use vmux_session::AcpSession;
 use vmux_setting::{AppSettings, SettingsWriteRequest};
 
@@ -31,7 +33,8 @@ pub(super) struct ChatModelPlugin;
 
 impl Plugin for ChatModelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ServiceRequest>()
+        app.add_plugins(ModelSelectionPlugin)
+            .add_message::<ServiceRequest>()
             .add_message::<AcpSetModelRequest>()
             .add_message::<AcpSetModeRequest>()
             .add_message::<ModeSelectRequest>()
@@ -39,15 +42,6 @@ impl Plugin for ChatModelPlugin {
             .add_message::<EffortSetRequest>()
             .add_plugins(UiEventPlugin::<(SelectModel, SetAgentEffort, SelectMode)>::default())
             .add_plugins(UiEventPlugin::<(StartSelectModel, StartSelectMode)>::default())
-            .add_systems(
-                Startup,
-                (
-                    spawn_agent_model_registry,
-                    load_agent_model_selections,
-                    load_agent_mode_selections,
-                )
-                    .chain(),
-            )
             .add_observer(on_select_model)
             .add_observer(on_select_mode)
             .add_observer(on_set_agent_effort)
@@ -72,10 +66,6 @@ impl Plugin for ChatModelPlugin {
                     remember_acp_mode_lists,
                     publish_agent_models.after(remember_acp_model_lists),
                     publish_agent_modes.after(remember_acp_mode_lists),
-                    save_agent_model_selections
-                        .after(apply_last_used_acp_model)
-                        .after(remember_acp_model_lists),
-                    save_agent_mode_selections.after(remember_acp_mode_lists),
                 ),
             );
     }
@@ -234,161 +224,6 @@ struct ModeSelectRequest {
     sid: String,
     mode_id: String,
 }
-
-#[derive(Component, Default)]
-pub(crate) struct AgentModelSelections {
-    by_agent: std::collections::BTreeMap<String, AgentModelMemory>,
-    dirty: bool,
-}
-
-#[derive(Component, Default)]
-pub(crate) struct AgentModeSelections {
-    by_agent: std::collections::BTreeMap<String, AgentModeMemory>,
-    dirty: bool,
-}
-
-#[derive(Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-struct AgentModelMemory {
-    #[serde(default)]
-    url: String,
-    selected: String,
-    #[serde(default)]
-    models: Vec<ModelOptionEntry>,
-}
-
-#[derive(Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-struct AgentModeMemory {
-    #[serde(default)]
-    url: String,
-    selected: String,
-    #[serde(default)]
-    modes: Vec<AcpModeOption>,
-}
-
-struct AgentSelectionKey;
-
-impl AgentSelectionKey {
-    fn normalize(agent_id: &str) -> &str {
-        if agent_id.starts_with("cli:") {
-            return agent_id;
-        }
-        RegistryAgent::url_id(agent_id)
-    }
-
-    fn acp_url(agent_id: &str) -> String {
-        AgentPromptTarget::Acp {
-            id: Self::normalize(agent_id).to_string(),
-        }
-        .url()
-    }
-}
-
-#[derive(serde::Deserialize)]
-#[serde(untagged)]
-enum SavedAgentModel {
-    Remembered(AgentModelMemory),
-    Selected(String),
-}
-
-impl SavedAgentModel {
-    fn memory(self) -> AgentModelMemory {
-        match self {
-            Self::Remembered(memory) => memory,
-            Self::Selected(selected) => AgentModelMemory {
-                url: String::new(),
-                selected,
-                models: Vec::new(),
-            },
-        }
-    }
-}
-
-fn agent_model_selections_path() -> std::path::PathBuf {
-    ProfilePaths::current().profile().join("agent-models.json")
-}
-
-fn agent_mode_selections_path() -> std::path::PathBuf {
-    ProfilePaths::current().profile().join("agent-modes.json")
-}
-
-fn spawn_agent_model_registry(mut commands: Commands) {
-    commands.spawn((
-        Name::new("Agent model registry"),
-        AcpModelRequestCounter::default(),
-        AcpModeRequestCounter::default(),
-        AgentModelSelections::default(),
-        AgentModeSelections::default(),
-    ));
-}
-
-fn load_agent_model_selections(mut models: Single<&mut AgentModelSelections>) {
-    let Ok(bytes) = std::fs::read(agent_model_selections_path()) else {
-        return;
-    };
-    let Ok(saved) =
-        serde_json::from_slice::<std::collections::BTreeMap<String, SavedAgentModel>>(&bytes)
-    else {
-        return;
-    };
-    for (agent, entry) in saved {
-        let key = AgentSelectionKey::normalize(&agent).to_string();
-        let mut memory = entry.memory();
-        if !key.starts_with("cli:") && !memory.url.is_empty() {
-            memory.url = AgentSelectionKey::acp_url(&agent);
-        }
-        models.by_agent.insert(key, memory);
-    }
-    models.dirty = false;
-}
-
-fn load_agent_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
-    let Ok(bytes) = std::fs::read(agent_mode_selections_path()) else {
-        return;
-    };
-    let Ok(saved) =
-        serde_json::from_slice::<std::collections::BTreeMap<String, AgentModeMemory>>(&bytes)
-    else {
-        return;
-    };
-    for (agent, mut memory) in saved {
-        let key = AgentSelectionKey::normalize(&agent).to_string();
-        memory.url = AgentSelectionKey::acp_url(&agent);
-        modes.by_agent.insert(key, memory);
-    }
-    modes.dirty = false;
-}
-
-fn save_agent_model_selections(mut models: Single<&mut AgentModelSelections>) {
-    if !models.dirty {
-        return;
-    }
-    let path = agent_model_selections_path();
-    let Ok(bytes) = serde_json::to_vec_pretty(&models.by_agent) else {
-        return;
-    };
-    if AtomicFile::write(&path, &bytes).is_ok() {
-        models.dirty = false;
-    }
-}
-
-fn save_agent_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
-    if !modes.dirty {
-        return;
-    }
-    let path = agent_mode_selections_path();
-    let Ok(bytes) = serde_json::to_vec_pretty(&modes.by_agent) else {
-        return;
-    };
-    if AtomicFile::write(&path, &bytes).is_ok() {
-        modes.dirty = false;
-    }
-}
-
-#[derive(Component, Default)]
-struct AcpModelRequestCounter(u64);
-
-#[derive(Component, Default)]
-struct AcpModeRequestCounter(u64);
 
 pub(super) struct ModelProjection {
     pub(super) state: ModelState,
@@ -890,138 +725,6 @@ fn send_acp_mode_requests(
             config_id: request.config_id.clone(),
             mode_id: request.mode_id.clone(),
         }));
-    }
-}
-
-impl AgentModelSelections {
-    fn select(&mut self, agent_id: &str, model_id: &str) {
-        let key = AgentSelectionKey::normalize(agent_id).to_string();
-        let entry = self.by_agent.entry(key).or_default();
-        if !entry.models.is_empty() && !entry.models.iter().any(|model| model.id == model_id) {
-            return;
-        }
-        if entry.selected == model_id {
-            return;
-        }
-        entry.selected = model_id.to_string();
-        self.dirty = true;
-    }
-
-    pub(crate) fn selected_for(&self, agent_id: &str) -> &str {
-        match self.by_agent.get(AgentSelectionKey::normalize(agent_id)) {
-            Some(memory) => &memory.selected,
-            None => "",
-        }
-    }
-
-    fn remember_catalog(
-        &mut self,
-        agent_id: &str,
-        url: &str,
-        selected: &str,
-        models: &[ModelOptionEntry],
-    ) {
-        if models.is_empty() {
-            return;
-        }
-        let key = AgentSelectionKey::normalize(agent_id).to_string();
-        let entry = self.by_agent.entry(key).or_default();
-        let mut changed = false;
-        if entry.url != url {
-            entry.url = url.to_string();
-            changed = true;
-        }
-        if entry.models != models {
-            entry.models = models.to_vec();
-            changed = true;
-        }
-        if !entry.models.iter().any(|model| model.id == entry.selected) {
-            let next = if entry.models.iter().any(|model| model.id == selected) {
-                selected
-            } else {
-                &entry.models[0].id
-            };
-            if entry.selected != next {
-                entry.selected = next.to_string();
-                changed = true;
-            }
-        }
-        if changed {
-            self.dirty = true;
-        }
-    }
-}
-
-impl AgentModeSelections {
-    fn select(&mut self, agent_id: &str, mode_id: &str) {
-        let key = AgentSelectionKey::normalize(agent_id).to_string();
-        let entry = self.by_agent.entry(key).or_default();
-        if !entry.modes.is_empty() && !entry.modes.iter().any(|mode| mode.id == mode_id) {
-            return;
-        }
-        if entry.selected == mode_id {
-            return;
-        }
-        entry.selected = mode_id.to_string();
-        self.dirty = true;
-    }
-
-    pub(crate) fn selected_for(&self, agent_id: &str) -> &str {
-        match self.by_agent.get(AgentSelectionKey::normalize(agent_id)) {
-            Some(memory) => &memory.selected,
-            None => "",
-        }
-    }
-
-    fn remember_catalog(
-        &mut self,
-        agent_id: &str,
-        url: &str,
-        selected: &str,
-        modes: &[AcpModeOption],
-    ) {
-        if modes.is_empty() {
-            return;
-        }
-        let key = AgentSelectionKey::normalize(agent_id).to_string();
-        let entry = self.by_agent.entry(key).or_default();
-        let mut changed = false;
-        if entry.url != url {
-            entry.url = url.to_string();
-            changed = true;
-        }
-        if entry.modes != modes {
-            entry.modes = modes.to_vec();
-            changed = true;
-        }
-        if !entry.modes.iter().any(|mode| mode.id == entry.selected) {
-            let next = if entry.modes.iter().any(|mode| mode.id == selected) {
-                selected
-            } else {
-                &entry.modes[0].id
-            };
-            if entry.selected != next {
-                entry.selected = next.to_string();
-                changed = true;
-            }
-        }
-        if changed {
-            self.dirty = true;
-        }
-    }
-}
-
-impl AcpModelRequestCounter {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(1);
-        self.0
-    }
-}
-
-impl AcpModeRequestCounter {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(1);
-        self.0
     }
 }
 
