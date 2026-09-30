@@ -279,6 +279,11 @@ pub struct ChatListSelectionChanged {
     pub index: u32,
 }
 
+#[vmux_api::ui_event(Default)]
+pub struct ChatListChooseRequest {
+    pub index: u32,
+}
+
 #[vmux_api::contract(Copy, Eq)]
 pub enum ChatComposerMenuKind {
     Effort,

@@ -2,14 +2,13 @@ use super::format::{ChatPageTitle, ImportedMessages, ResumeMenuState};
 use super::scroll;
 use crate::event::ChatResumeState;
 use crate::event::{
-    ApprovalDecision, ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachments, ChatBranch,
-    ChatBranchesRequest, ChatBranchesState, ChatChoiceSelected, ChatComposerEffect,
-    ChatComposerMenuChanged, ChatComposerMenuKind, ChatComposerMenuState, ChatDraftChanged,
-    ChatHistoryMoreRequest, ChatItem, ChatListKind, ChatListSelectionChanged,
+    ApprovalDecision, ChatApproval, ChatAttachment, ChatAttachments, ChatBranch,
+    ChatBranchesRequest, ChatBranchesState, ChatComposerEffect, ChatComposerMenuChanged,
+    ChatComposerMenuKind, ChatComposerMenuState, ChatDraftChanged, ChatHistoryMoreRequest,
+    ChatItem, ChatListChooseRequest, ChatListKind, ChatListSelectionChanged,
     ChatListSelectionState, ChatMediaEntry, ChatMediaState, ChatRemoveAttachment,
-    ChatSelectorState, ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit,
-    ChatTranscriptState, ComposerContext, ModelOptionEntry, QueuedPromptSnapshot,
-    ResumableSessionEntry, ResumeSession, SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
+    ChatSelectorState, ChatSnapshot, ChatStop, ChatSubmit, ChatTranscriptState, ComposerContext,
+    ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry, SelectMode, SlashCommandEntry,
 };
 use crate::host::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
@@ -669,81 +668,15 @@ impl Chat {
         let _ = send(&ChatStop);
     }
 
-    pub fn select_slash_command(&self, command: SlashCommand) {
-        let _ = send(&ChatSlashCommandRequest { command });
-    }
-
-    pub fn select_model(&self, model: &ModelOptionEntry) {
-        let _ = send(&SelectModel {
-            model_id: model.id.clone(),
-        });
-        self.set_draft(String::new());
-    }
-
     pub fn select_mode(&self, mode_id: String) {
         let _ = send(&SelectMode { mode_id });
         focus_prompt_end(PROMPT_INPUT_ID);
     }
 
-    pub fn activate_mcp_server(&self, index: usize) {
-        let servers = self.filtered_mcp_servers();
-        let index = index.min(servers.len().saturating_sub(1));
-        let Some(server) = servers.get(index) else {
-            return;
-        };
-        self.mcp.activate(server);
-    }
-
-    pub fn mcp_selected(&self) -> usize {
-        (self.slash.menu_sel)().min(self.filtered_mcp_servers().len().saturating_sub(1))
-    }
-
-    pub fn select_resume_session(&self, session: &ResumableSessionEntry) {
-        let _ = send(&ResumeSession {
-            kind: session.kind.clone(),
-            sid: session.sid.clone(),
-            cwd: session.cwd.clone(),
-        });
-        self.set_draft(String::new());
-    }
-
-    pub fn select_media_entry(&self, entry: &ChatMediaEntry) {
-        let mut menu_sel = self.slash.menu_sel;
-        let value = self.composer.draft.peek().clone();
-        let Some(query) = inline_media_query(&value) else {
-            return;
-        };
-        let reference = MediaPath::new(entry).reference();
-        let replacement = if entry.is_dir {
-            format!("@{reference}/")
-        } else {
-            if send(&ChatAttachPaths {
-                paths: vec![entry.path.clone()],
-            })
-            .is_err()
-            {
-                return;
-            }
-            String::new()
-        };
-        self.set_draft(replace_inline_media_query(&value, query, &replacement));
-        menu_sel.set(0);
-        focus_prompt_end(PROMPT_INPUT_ID);
-    }
-
-    pub fn answer_choice(&self, index: usize) {
-        let mut question = self.run.choice_question;
-        let mut options = self.run.choice_options;
-        let mut menu_sel = self.slash.menu_sel;
-        if send(&ChatChoiceSelected {
+    pub fn choose_list(&self, index: usize) {
+        let _ = send(&ChatListChooseRequest {
             index: index as u32,
-        })
-        .is_ok()
-        {
-            question.set(String::new());
-            options.set(Vec::new());
-            menu_sel.set(0);
-        }
+        });
     }
 
     pub fn point_at_choice(&self, index: usize) {

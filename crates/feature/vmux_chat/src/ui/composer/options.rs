@@ -106,7 +106,7 @@ pub(super) fn ChatModelMenu(chat: Chat) -> Element {
             current_model_id: (chat.models.current_model_id)(),
             selected: menu_sel(),
             on_hover: move |index| chat.point_at_list(index),
-            on_select: move |model: ModelOptionEntry| chat.select_model(&model),
+            on_select: move |(index, _model): (usize, ModelOptionEntry)| chat.choose_list(index),
             on_dismiss: move |()| chat.dismiss_selector(),
         }
     }

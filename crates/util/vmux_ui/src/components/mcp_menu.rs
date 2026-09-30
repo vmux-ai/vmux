@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
-use vmux_api::mcp::{McpServerEntry, McpServerRequest, McpServerStatus, McpServers};
+use vmux_api::mcp::{McpServerEntry, McpServerStatus, McpServers};
 
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
-use crate::hooks::{send, use_ui_state};
+use crate::hooks::use_ui_state;
 use crate::i18n::translate;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -13,17 +13,6 @@ pub struct McpConnections {
 pub fn use_mcp_connections() -> McpConnections {
     McpConnections {
         state: use_ui_state::<McpServers>(),
-    }
-}
-
-impl McpConnections {
-    pub fn activate(&self, server: &McpServerEntry) {
-        if self.state.peek().pending.is_some() {
-            return;
-        }
-        let _ = send(&McpServerRequest {
-            id: server.id.clone(),
-        });
     }
 }
 

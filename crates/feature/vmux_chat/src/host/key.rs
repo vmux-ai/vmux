@@ -7,9 +7,9 @@ use super::session::{
 use crate::event::{
     ApprovalDecision, ChatApproval, ChatAttachPaths, ChatCancel, ChatChoiceSelected,
     ChatComposerMenuChanged, ChatComposerMenuKind, ChatComposerMenuState, ChatEscape,
-    ChatGoToBranch, ChatListKind, ChatListSelectionChanged, ChatListSelectionState,
-    ChatSelectWorkspace, ChatSelectorState, ChatSlashCommandRequest, ChatSubmit, ResumeSession,
-    SelectMode, SelectModel, SetAgentEffort,
+    ChatGoToBranch, ChatListChooseRequest, ChatListKind, ChatListSelectionChanged,
+    ChatListSelectionState, ChatSelectWorkspace, ChatSelectorState, ChatSlashCommandRequest,
+    ChatSubmit, ResumeSession, SelectMode, SelectModel, SetAgentEffort,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_cef::prelude::UiInput;
@@ -36,12 +36,15 @@ impl Plugin for ChatKeyPlugin {
         }
         app.add_plugins(bevy_cef::prelude::UiEventPlugin::<(
             ChatListSelectionChanged,
+            ChatListChooseRequest,
             ChatComposerMenuChanged,
         )>::default())
             .add_systems(Startup, bind_commands.in_set(BindCommands))
             .add_systems(Update, project_selector)
             .add_observer(move_list)
-            .add_observer(choose_list)
+            .add_observer(choose_shortcut)
+            .add_observer(choose_from_ui)
+            .add_observer(choose)
             .add_observer(choose_number)
             .add_observer(select_list)
             .add_observer(update_composer_menu)
@@ -72,8 +75,8 @@ impl ChatListSelection {
         &mut self.index
     }
 
-    fn update(&mut self, list: ActiveChatList, index: usize) {
-        self.list = Some(list.identity);
+    fn update(&mut self, list: &ActiveChatList, index: usize) {
+        self.list = Some(list.identity.clone());
         self.index = index.min(list.len.saturating_sub(1));
     }
 
@@ -121,6 +124,13 @@ struct ListPreviousBinding;
 #[vmux_command::command(id = "chat_list_choose")]
 #[derive(Component)]
 struct ListChooseBinding;
+
+#[derive(EntityEvent)]
+struct ChooseList {
+    #[event_target]
+    target: Entity,
+    index: Option<usize>,
+}
 
 #[derive(Component)]
 struct ChoiceNumberBinding(u32);
@@ -463,18 +473,35 @@ fn move_list(
     );
 }
 
-fn choose_list(
+fn choose_shortcut(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<ListChooseBinding>>,
-    lists: ChatLists,
-    mut composers: Query<&mut ComposerState>,
-    mut selections: Query<&mut ChatListSelection>,
     mut commands: Commands,
 ) {
     if !bindings.contains(trigger.event().command()) {
         return;
     }
-    let caller = trigger.event().invocation().caller;
+    commands.trigger(ChooseList {
+        target: trigger.event().invocation().caller,
+        index: None,
+    });
+}
+
+fn choose_from_ui(trigger: On<UiInput<ChatListChooseRequest>>, mut commands: Commands) {
+    commands.trigger(ChooseList {
+        target: trigger.event().webview,
+        index: Some(trigger.event().payload.index as usize),
+    });
+}
+
+fn choose(
+    trigger: On<ChooseList>,
+    lists: ChatLists,
+    mut composers: Query<&mut ComposerState>,
+    mut selections: Query<&mut ChatListSelection>,
+    mut commands: Commands,
+) {
+    let caller = trigger.event_target();
     let Ok(mut composer) = composers.get_mut(caller) else {
         return;
     };
@@ -484,10 +511,25 @@ fn choose_list(
     let Ok(mut selection) = selections.get_mut(caller) else {
         return;
     };
-    let selected = *selection.current(&list);
+    let kind = list.kind;
+    let selected = if let Some(index) = trigger.event().index {
+        selection.update(&list, index);
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+                caller,
+                &ChatListSelectionState {
+                    kind,
+                    index: selection.index as u32,
+                },
+            ),
+        );
+        selection.index
+    } else {
+        *selection.current(&list)
+    };
     let mut close_menu = false;
     let mut change_composer = None;
-    match list.kind {
+    match kind {
         ChatListKind::Approval => {
             let Ok(snapshot) = lists.snapshots.get(caller) else {
                 return;
@@ -759,7 +801,7 @@ fn select_list(
     let Ok(mut selection) = selections.get_mut(webview) else {
         return;
     };
-    selection.update(list, trigger.event().payload.index as usize);
+    selection.update(&list, trigger.event().payload.index as usize);
 }
 
 fn update_composer_menu(
@@ -1106,6 +1148,31 @@ mod tests {
 
         Echo::issue(&mut app, page, "chat_list_next");
         Echo::issue(&mut app, page, "chat_list_choose");
+
+        assert_eq!(app.world().resource::<ChoiceNumbers>().0, vec![(page, 1)]);
+    }
+
+    #[test]
+    fn pointer_choice_uses_the_same_host_selection_path() {
+        let mut app = Echo::app();
+        let page = app
+            .world_mut()
+            .spawn((
+                ComposerState::default(),
+                ChatListSelection::default(),
+                PendingAgentChoice {
+                    session_entity: Entity::PLACEHOLDER,
+                    question: "pick".to_string(),
+                    options: vec!["one".to_string(), "two".to_string()],
+                },
+            ))
+            .id();
+
+        app.world_mut().trigger(UiInput {
+            webview: page,
+            payload: ChatListChooseRequest { index: 1 },
+        });
+        app.world_mut().flush();
 
         assert_eq!(app.world().resource::<ChoiceNumbers>().0, vec![(page, 1)]);
     }

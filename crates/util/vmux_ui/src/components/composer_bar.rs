@@ -304,7 +304,7 @@ pub fn ComposerMenus(props: ComposerMenusProps) -> Element {
                     current_model_id: data.current_model_id,
                     selected: cursor,
                     on_hover,
-                    on_select: move |entry: ModelOptionEntry| {
+                    on_select: move |(_index, entry): (usize, ModelOptionEntry)| {
                         if let Some(selected) = on_selected {
                             selected.call(());
                         }

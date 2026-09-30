@@ -14,7 +14,7 @@ pub fn ModelMenu(
     current_model_id: String,
     selected: usize,
     on_hover: EventHandler<usize>,
-    on_select: EventHandler<ModelOptionEntry>,
+    on_select: EventHandler<(usize, ModelOptionEntry)>,
     #[props(default)] on_dismiss: Option<EventHandler<()>>,
 ) -> Element {
     let empty_class = cn([PROMPT_MENU_ROW, "text-muted-foreground"]);
@@ -34,7 +34,7 @@ pub fn ModelMenu(
                         onmouseenter: move |_| on_hover.call(i),
                         onclick: {
                             let model = model.clone();
-                            move |_| on_select.call(model.clone())
+                            move |_| on_select.call((i, model.clone()))
                         },
                         div { class: "flex min-w-0 items-baseline gap-2",
                             span { class: "min-w-0 flex-1 truncate text-sm text-foreground", "{model.name}" }

@@ -19,11 +19,7 @@ pub(super) fn MediaMenu(chat: Chat) -> Element {
                 loading_label: translate("agent-loading-media"),
                 empty_label: translate("agent-no-matching-media"),
                 on_hover: move |index| chat.point_at_list(index),
-                on_select: move |index| {
-                    if let Some(entry) = chat.media.entries.peek().get(index).cloned() {
-                        chat.select_media_entry(&entry);
-                    }
-                },
+                on_select: move |index| chat.choose_list(index),
             }
         }
     }
@@ -50,10 +46,7 @@ pub(super) fn CommandMenu(chat: Chat) -> Element {
                                 hint,
                             },
                             selected: index == menu_sel(),
-                            on_activate: {
-                                let command = command.command;
-                                move |()| chat.select_slash_command(command)
-                            },
+                            on_activate: move |()| chat.choose_list(index),
                             on_hover: move |()| chat.point_at_list(index),
                         }
                     }
@@ -79,16 +72,13 @@ pub(super) fn ResumeMenu(chat: Chat) -> Element {
                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", "{note}" }
             } else {
                 for (index , item) in chat.resume.rows.read().iter().cloned().enumerate() {
-                    if let CommandBarResultItem::Resume { entry, .. } = &item {
+                    if let CommandBarResultItem::Resume { .. } = &item {
                         ResultRow {
                             key: "rs{index}",
                             index,
                             item: item.clone(),
                             selected: index == menu_sel(),
-                            on_activate: {
-                                let session = entry.clone();
-                                move |()| chat.select_resume_session(&session)
-                            },
+                            on_activate: move |()| chat.choose_list(index),
                             on_hover: move |()| chat.point_at_list(index),
                         }
                     }

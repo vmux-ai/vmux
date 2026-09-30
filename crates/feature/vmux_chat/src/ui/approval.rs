@@ -131,7 +131,7 @@ pub(super) fn ChoiceList(chat: Chat) -> Element {
                         id: "agent-choice-item-{index}",
                         onmouseenter: move |_| chat.point_at_choice(index),
                         class: if index == (chat.slash.menu_sel)() { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
-                        onclick: move |_| chat.answer_choice(index),
+                        onclick: move |_| chat.choose_list(index),
                         span { class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-current/20 font-mono text-[10px]", "{index + 1}" }
                         span { class: "min-w-0 flex-1", "{option}" }
                     }
