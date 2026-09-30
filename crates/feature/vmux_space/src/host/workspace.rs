@@ -22,7 +22,7 @@ use vmux_layout::worktree::{
 };
 use vmux_session::AcpSession;
 
-use super::agent_workspace::{AgentWorkspaceRequestSet, ancestor_acp_stack, rebind_acp_workspace};
+use super::agent_workspace::AgentWorkspaceRequestSet;
 use vmux_core::profile::ProjectsDirectory;
 
 pub(super) struct WorkspaceAgentPlugin;
@@ -200,121 +200,142 @@ fn failed_workspace_continuation(message: &str) -> String {
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct AgentTabWorkspace<'w, 's> {
+pub(crate) struct AgentWorkspaceState<'w, 's> {
     pub(crate) tabs: Query<'w, 's, &'static mut Tab>,
     pub(crate) worktrees: Query<'w, 's, &'static TabWorktree>,
     pub(crate) workspaces: Query<'w, 's, &'static TabWorkspace>,
     pub(crate) pending_projects: Query<'w, 's, &'static PendingProject>,
     pub(crate) managed_root: Option<Res<'w, ManagedWorktreeRoot>>,
+    acp_sessions: Query<'w, 's, &'static mut AcpSession>,
+    child_of: Query<'w, 's, &'static ChildOf>,
 }
 
-pub(crate) fn activate_agent_worktree(
-    tab_entity: Entity,
-    agent_entity: Entity,
-    project_dir: &Path,
-    activation: TabWorktreeActivation,
-    tabs: &mut Query<&mut Tab>,
-    acp_sessions: &mut Query<&mut AcpSession>,
-    child_of: &Query<&ChildOf>,
-    commands: &mut Commands,
-) -> Result<(PathBuf, Option<ClientMessage>), String> {
-    let execution_dir = activation.execution_dir.clone();
-    {
-        let Ok(mut tab) = tabs.get_mut(tab_entity) else {
-            return Err("tab not found".to_string());
-        };
-        bind_tab_workspace(&mut tab, project_dir, &execution_dir);
+impl AgentWorkspaceState<'_, '_> {
+    pub(crate) fn activate_worktree(
+        &mut self,
+        tab_entity: Entity,
+        agent_entity: Entity,
+        project_dir: &Path,
+        activation: TabWorktreeActivation,
+        commands: &mut Commands,
+    ) -> Result<(PathBuf, Option<ClientMessage>), String> {
+        let execution_dir = activation.execution_dir.clone();
+        self.bind_tab(tab_entity, project_dir, &execution_dir)?;
+        commands
+            .entity(tab_entity)
+            .insert((
+                TabWorkspace {
+                    project_dir: project_dir.to_string_lossy().into_owned(),
+                },
+                activation.metadata,
+                activation.ready,
+                TabDirDecided,
+            ))
+            .remove::<PendingProject>()
+            .remove::<RepositoryNeedsWorktree>()
+            .remove::<TabWorktreeUnavailable>();
+        let rebind = self.rebind_acp_workspace(agent_entity, &execution_dir, commands);
+        Ok((execution_dir, rebind))
     }
-    commands
-        .entity(tab_entity)
-        .insert((
-            TabWorkspace {
-                project_dir: project_dir.to_string_lossy().into_owned(),
-            },
-            activation.metadata,
-            activation.ready,
-            TabDirDecided,
-        ))
-        .remove::<PendingProject>()
-        .remove::<RepositoryNeedsWorktree>()
-        .remove::<TabWorktreeUnavailable>();
-    let rebind = ancestor_acp_stack(agent_entity, acp_sessions, child_of)
-        .and_then(|stack| rebind_acp_workspace(stack, &execution_dir, acp_sessions, commands));
-    Ok((execution_dir, rebind))
-}
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn activate_agent_directory(
-    tab_entity: Entity,
-    agent_entity: Entity,
-    project_dir: &Path,
-    execution_dir: &Path,
-    tabs: &mut Query<&mut Tab>,
-    acp_sessions: &mut Query<&mut AcpSession>,
-    child_of: &Query<&ChildOf>,
-    commands: &mut Commands,
-) -> Result<Option<ClientMessage>, String> {
-    {
-        let Ok(mut tab) = tabs.get_mut(tab_entity) else {
+    pub(crate) fn activate_directory(
+        &mut self,
+        tab_entity: Entity,
+        agent_entity: Entity,
+        project_dir: &Path,
+        execution_dir: &Path,
+        commands: &mut Commands,
+    ) -> Result<Option<ClientMessage>, String> {
+        self.bind_tab(tab_entity, project_dir, execution_dir)?;
+        commands
+            .entity(tab_entity)
+            .insert((
+                TabWorkspace {
+                    project_dir: project_dir.to_string_lossy().into_owned(),
+                },
+                TabDirDecided,
+            ))
+            .remove::<PendingProject>()
+            .remove::<RepositoryNeedsWorktree>()
+            .remove::<TabWorktree>()
+            .remove::<TabWorktreeReady>()
+            .remove::<TabWorktreeUnavailable>();
+        Ok(self.rebind_acp_workspace(agent_entity, execution_dir, commands))
+    }
+
+    fn activate_selected(
+        &mut self,
+        tab_entity: Entity,
+        agent_entity: Entity,
+        selected: &Path,
+        commands: &mut Commands,
+    ) -> Result<(PathBuf, Option<ClientMessage>, SelectedWorkspaceKind), String> {
+        let kind = if selected.join(".git").exists() {
+            CheckoutInfo::try_from(selected).map_err(|error| {
+                format!("selected project has invalid Git metadata: {}", error.0)
+            })?;
+            SelectedWorkspaceKind::Git {
+                needs_worktree: !is_linked_worktree(selected),
+            }
+        } else {
+            SelectedWorkspaceKind::Plain
+        };
+        let rebind =
+            self.activate_directory(tab_entity, agent_entity, selected, selected, commands)?;
+        if matches!(
+            kind,
+            SelectedWorkspaceKind::Git {
+                needs_worktree: true
+            }
+        ) {
+            commands.entity(tab_entity).insert(RepositoryNeedsWorktree);
+        }
+        Ok((selected.to_path_buf(), rebind, kind))
+    }
+
+    fn bind_tab(
+        &mut self,
+        tab_entity: Entity,
+        project_dir: &Path,
+        execution_dir: &Path,
+    ) -> Result<(), String> {
+        let Ok(mut tab) = self.tabs.get_mut(tab_entity) else {
             return Err("tab not found".to_string());
         };
         bind_tab_workspace(&mut tab, project_dir, execution_dir);
+        Ok(())
     }
-    commands
-        .entity(tab_entity)
-        .insert((
-            TabWorkspace {
-                project_dir: project_dir.to_string_lossy().into_owned(),
-            },
-            TabDirDecided,
-        ))
-        .remove::<PendingProject>()
-        .remove::<RepositoryNeedsWorktree>()
-        .remove::<TabWorktree>()
-        .remove::<TabWorktreeReady>()
-        .remove::<TabWorktreeUnavailable>();
-    Ok(ancestor_acp_stack(agent_entity, acp_sessions, child_of)
-        .and_then(|stack| rebind_acp_workspace(stack, execution_dir, acp_sessions, commands)))
-}
 
-#[allow(clippy::too_many_arguments)]
-fn activate_selected_workspace(
-    tab_entity: Entity,
-    agent_entity: Entity,
-    selected: &Path,
-    tabs: &mut Query<&mut Tab>,
-    acp_sessions: &mut Query<&mut AcpSession>,
-    child_of: &Query<&ChildOf>,
-    commands: &mut Commands,
-) -> Result<(PathBuf, Option<ClientMessage>, SelectedWorkspaceKind), String> {
-    let kind = if selected.join(".git").exists() {
-        CheckoutInfo::try_from(selected)
-            .map_err(|error| format!("selected project has invalid Git metadata: {}", error.0))?;
-        SelectedWorkspaceKind::Git {
-            needs_worktree: !is_linked_worktree(selected),
-        }
-    } else {
-        SelectedWorkspaceKind::Plain
-    };
-    let rebind = activate_agent_directory(
-        tab_entity,
-        agent_entity,
-        selected,
-        selected,
-        tabs,
-        acp_sessions,
-        child_of,
-        commands,
-    )?;
-    if matches!(
-        kind,
-        SelectedWorkspaceKind::Git {
-            needs_worktree: true
-        }
-    ) {
-        commands.entity(tab_entity).insert(RepositoryNeedsWorktree);
+    fn rebind_acp_workspace(
+        &mut self,
+        agent_entity: Entity,
+        cwd: &Path,
+        commands: &mut Commands,
+    ) -> Option<ClientMessage> {
+        let stack = self.ancestor_acp_stack(agent_entity)?;
+        let Ok(mut session) = self.acp_sessions.get_mut(stack) else {
+            return None;
+        };
+        session.cwd = cwd.to_path_buf();
+        let cwd = cwd.to_string_lossy().into_owned();
+        commands
+            .entity(stack)
+            .insert(vmux_core::AgentWorkingDir(cwd.clone()));
+        Some(ClientMessage::RebindAcpWorkspace {
+            sid: session.sid.clone(),
+            cwd,
+        })
     }
-    Ok((selected.to_path_buf(), rebind, kind))
+
+    fn ancestor_acp_stack(&self, entity: Entity) -> Option<Entity> {
+        let mut current = entity;
+        loop {
+            if self.acp_sessions.contains(current) {
+                return Some(current);
+            }
+            current = self.child_of.get(current).ok()?.parent();
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -330,89 +351,99 @@ pub(super) struct ExistingWorktreeCandidate {
     pub(super) branch: String,
 }
 
-pub(super) fn existing_worktree_candidates(
-    project_dir: &Path,
-) -> Result<Vec<ExistingWorktreeCandidate>, String> {
-    let project_dir = project_dir
-        .canonicalize()
-        .map_err(|error| format!("invalid project directory: {error}"))?;
-    let project_checkout =
-        CheckoutInfo::try_from(project_dir.as_path()).map_err(|error| error.0)?;
-    let relative_dir = project_dir
-        .strip_prefix(&project_checkout.root)
-        .map_err(|_| "project directory is outside its checkout".to_string())?;
-    let mut candidates = worktree_registrations(&project_checkout.root)
-        .map_err(|error| error.0)?
-        .into_iter()
-        .filter_map(|registration| {
-            let branch = registration.branch?;
-            let checkout = CheckoutInfo::try_from(registration.path.as_path()).ok()?;
-            if checkout.common_dir != project_checkout.common_dir
-                || !is_linked_worktree(&checkout.root)
-            {
-                return None;
-            }
-            let execution_dir = checkout.root.join(relative_dir).canonicalize().ok()?;
-            execution_dir.is_dir().then_some(ExistingWorktreeCandidate {
-                checkout_dir: checkout.root,
-                execution_dir,
-                branch,
+pub(super) struct ExistingWorktreeCandidates(Vec<ExistingWorktreeCandidate>);
+
+impl ExistingWorktreeCandidates {
+    pub(super) fn for_project(project_dir: &Path) -> Result<Self, String> {
+        let project_dir = project_dir
+            .canonicalize()
+            .map_err(|error| format!("invalid project directory: {error}"))?;
+        let project_checkout =
+            CheckoutInfo::try_from(project_dir.as_path()).map_err(|error| error.0)?;
+        let relative_dir = project_dir
+            .strip_prefix(&project_checkout.root)
+            .map_err(|_| "project directory is outside its checkout".to_string())?;
+        let mut candidates = worktree_registrations(&project_checkout.root)
+            .map_err(|error| error.0)?
+            .into_iter()
+            .filter_map(|registration| {
+                let branch = registration.branch?;
+                let checkout = CheckoutInfo::try_from(registration.path.as_path()).ok()?;
+                if checkout.common_dir != project_checkout.common_dir
+                    || !is_linked_worktree(&checkout.root)
+                {
+                    return None;
+                }
+                let execution_dir = checkout.root.join(relative_dir).canonicalize().ok()?;
+                execution_dir.is_dir().then_some(ExistingWorktreeCandidate {
+                    checkout_dir: checkout.root,
+                    execution_dir,
+                    branch,
+                })
             })
-        })
-        .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| left.execution_dir.cmp(&right.execution_dir));
-    candidates.dedup_by(|left, right| left.execution_dir == right.execution_dir);
-    Ok(candidates)
-}
+            .collect::<Vec<_>>();
+        candidates.sort_by(|left, right| left.execution_dir.cmp(&right.execution_dir));
+        candidates.dedup_by(|left, right| left.execution_dir == right.execution_dir);
+        Ok(Self(candidates))
+    }
 
-pub(super) fn resolve_requested_worktree(
-    project_dir: &Path,
-    requested: &Path,
-) -> Result<ExistingWorktreeCandidate, String> {
-    let requested = requested
-        .canonicalize()
-        .map_err(|error| format!("invalid worktree path: {error}"))?;
-    existing_worktree_candidates(project_dir)?
-        .into_iter()
-        .find(|candidate| {
-            requested == candidate.execution_dir
-                || requested.starts_with(&candidate.execution_dir)
-                || requested == candidate.checkout_dir
-                || requested.starts_with(&candidate.checkout_dir)
-        })
-        .ok_or_else(|| {
-            format!(
-                "{} is not an existing linked worktree for this repository",
-                requested.display()
-            )
-        })
-}
+    pub(super) fn resolve(
+        project_dir: &Path,
+        requested: &Path,
+    ) -> Result<ExistingWorktreeCandidate, String> {
+        let requested = requested
+            .canonicalize()
+            .map_err(|error| format!("invalid worktree path: {error}"))?;
+        Self::for_project(project_dir)?
+            .0
+            .into_iter()
+            .find(|candidate| {
+                requested == candidate.execution_dir
+                    || requested.starts_with(&candidate.execution_dir)
+                    || requested == candidate.checkout_dir
+                    || requested.starts_with(&candidate.checkout_dir)
+            })
+            .ok_or_else(|| {
+                format!(
+                    "{} is not an existing linked worktree for this repository",
+                    requested.display()
+                )
+            })
+    }
 
-pub(super) fn ambiguous_worktree_message(candidates: &[ExistingWorktreeCandidate]) -> String {
-    let existing = candidates
-        .iter()
-        .enumerate()
-        .map(|(index, candidate)| {
-            format!(
-                "{}. {} — {}",
-                index + 2,
-                candidate.branch,
-                candidate.execution_dir.display()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!(
-        "Multiple existing worktrees match this repository. Ask the user with request_user_choice using these options, then call create_worktree again with create=true or the selected path:\n1. Create new worktree\n{existing}"
-    )
+    pub(super) fn automatic(mut self) -> Result<Option<ExistingWorktreeCandidate>, String> {
+        match self.0.len() {
+            0 => Ok(None),
+            1 => Ok(self.0.pop()),
+            _ => Err(self.ambiguous_message()),
+        }
+    }
+
+    fn ambiguous_message(&self) -> String {
+        let existing = self
+            .0
+            .iter()
+            .enumerate()
+            .map(|(index, candidate)| {
+                format!(
+                    "{}. {} — {}",
+                    index + 2,
+                    candidate.branch,
+                    candidate.execution_dir.display()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "Multiple existing worktrees match this repository. Ask the user with request_user_choice using these options, then call create_worktree again with create=true or the selected path:\n1. Create new worktree\n{existing}"
+        )
+    }
 }
 
 fn drain_workspace_picker_tasks(
     mut pickers: Query<(Entity, &mut PendingWorkspacePicker)>,
     chat_views: Query<(), With<ChatView>>,
-    mut tabs: Query<&mut Tab>,
-    mut acp_sessions: Query<&mut AcpSession>,
-    child_of: Query<&ChildOf>,
+    mut workspace: AgentWorkspaceState,
     mut commands: Commands,
     mut continuations: MessageWriter<AgentContinuationRequest>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -427,18 +458,15 @@ fn drain_workspace_picker_tasks(
             )),
             Some(selected) => match selected.canonicalize() {
                 Ok(selected) if selected.is_dir() => {
-                    if tabs.get(picker.tab_entity).is_err() {
+                    if workspace.tabs.get(picker.tab_entity).is_err() {
                         Some(failed_workspace_continuation(
                             "The project tab no longer exists",
                         ))
                     } else {
-                        match activate_selected_workspace(
+                        match workspace.activate_selected(
                             picker.tab_entity,
                             picker.agent_entity,
                             &selected,
-                            &mut tabs,
-                            &mut acp_sessions,
-                            &child_of,
                             &mut commands,
                         ) {
                             Ok((execution_dir, rebind, kind)) => {
@@ -660,18 +688,12 @@ mod tests {
         let rebind = app
             .world_mut()
             .run_system_once(
-                move |mut tabs: Query<&mut Tab>,
-                      mut sessions: Query<&mut AcpSession>,
-                      child_of: Query<&ChildOf>,
-                      mut commands: Commands| {
-                    activate_agent_worktree(
+                move |mut workspace: AgentWorkspaceState, mut commands: Commands| {
+                    workspace.activate_worktree(
                         tab,
                         view,
                         &project_for_system,
                         activation.clone(),
-                        &mut tabs,
-                        &mut sessions,
-                        &child_of,
                         &mut commands,
                     )
                 },
@@ -738,17 +760,11 @@ mod tests {
         let linked_execution = app
             .world_mut()
             .run_system_once(
-                move |mut tabs: Query<&mut Tab>,
-                      mut sessions: Query<&mut AcpSession>,
-                      child_of: Query<&ChildOf>,
-                      mut commands: Commands| {
-                    activate_selected_workspace(
+                move |mut workspace: AgentWorkspaceState, mut commands: Commands| {
+                    workspace.activate_selected(
                         linked_tab,
                         linked_agent,
                         &external_for_system,
-                        &mut tabs,
-                        &mut sessions,
-                        &child_of,
                         &mut commands,
                     )
                 },
@@ -785,17 +801,11 @@ mod tests {
         let managed_execution = app
             .world_mut()
             .run_system_once(
-                move |mut tabs: Query<&mut Tab>,
-                      mut sessions: Query<&mut AcpSession>,
-                      child_of: Query<&ChildOf>,
-                      mut commands: Commands| {
-                    activate_selected_workspace(
+                move |mut workspace: AgentWorkspaceState, mut commands: Commands| {
+                    workspace.activate_selected(
                         managed_tab,
                         managed_agent,
                         &project_for_system,
-                        &mut tabs,
-                        &mut sessions,
-                        &child_of,
                         &mut commands,
                     )
                 },
@@ -842,19 +852,8 @@ mod tests {
         let (execution_dir, _, kind) = app
             .world_mut()
             .run_system_once(
-                move |mut tabs: Query<&mut Tab>,
-                      mut sessions: Query<&mut AcpSession>,
-                      child_of: Query<&ChildOf>,
-                      mut commands: Commands| {
-                    activate_selected_workspace(
-                        tab,
-                        agent,
-                        &selected_for_system,
-                        &mut tabs,
-                        &mut sessions,
-                        &child_of,
-                        &mut commands,
-                    )
+                move |mut workspace: AgentWorkspaceState, mut commands: Commands| {
+                    workspace.activate_selected(tab, agent, &selected_for_system, &mut commands)
                 },
             )
             .unwrap()
@@ -879,11 +878,11 @@ mod tests {
         worktree_add(&project_dir, &first, "feature/first", "main").unwrap();
         worktree_add(&project_dir, &second, "feature/second", "main").unwrap();
 
-        let candidates = existing_worktree_candidates(&project_dir).unwrap();
-        let resolved = resolve_requested_worktree(&project_dir, &first).unwrap();
-        let message = ambiguous_worktree_message(&candidates);
+        let candidates = ExistingWorktreeCandidates::for_project(&project_dir).unwrap();
+        let resolved = ExistingWorktreeCandidates::resolve(&project_dir, &first).unwrap();
+        let message = candidates.ambiguous_message();
 
-        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates.0.len(), 2);
         assert_eq!(resolved.branch, "feature/first");
         assert!(message.contains("1. Create new worktree"));
         assert!(message.contains("feature/first"));

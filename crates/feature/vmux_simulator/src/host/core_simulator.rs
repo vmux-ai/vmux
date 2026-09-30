@@ -31,6 +31,22 @@ impl Plugin for CoreSimulatorPlugin {
     }
 }
 
+impl CoreSimulatorPlugin {
+    pub(super) fn exit_helper_if_requested() {
+        let Some(request) = helper_request() else {
+            return;
+        };
+        let result = request.and_then(|(udid, enabled)| set_hardware_keyboard(&udid, enabled));
+        match result {
+            Ok(()) => std::process::exit(0),
+            Err(error) => {
+                let _ = writeln!(std::io::stderr(), "{error}");
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
 #[derive(Component, Default)]
 struct HardwareKeyboardState {
     enabled: bool,
@@ -123,20 +139,6 @@ impl HardwareKeyboardState {
             enabled: true,
             requested: VecDeque::from([false]),
             pending: None,
-        }
-    }
-}
-
-pub(super) fn exit_if_requested() {
-    let Some(request) = helper_request() else {
-        return;
-    };
-    let result = request.and_then(|(udid, enabled)| set_hardware_keyboard(&udid, enabled));
-    match result {
-        Ok(()) => std::process::exit(0),
-        Err(error) => {
-            let _ = writeln!(std::io::stderr(), "{error}");
-            std::process::exit(1);
         }
     }
 }

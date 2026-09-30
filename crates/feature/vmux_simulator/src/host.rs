@@ -466,7 +466,7 @@ fn sync_active_simulator_view(
 impl SimulatorPlugin {
     #[cfg(target_os = "macos")]
     pub fn exit_helper_if_requested() {
-        core_simulator::exit_if_requested();
+        core_simulator::CoreSimulatorPlugin::exit_helper_if_requested();
     }
 }
 

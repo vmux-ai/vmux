@@ -1,10 +1,9 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use vmux_api::protocol::{AgentCommandResult, ProcessId};
+use vmux_api::protocol::AgentCommandResult;
 use vmux_core::agent::{
-    AgentCommandResponse, AgentRequestAppExt, AgentRequestApplySet, AgentRequestBlocked,
-    AgentRequestInput, AgentRequestMessage, AgentRequestRouteSet,
+    AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
 use vmux_core::{KeyboardOwner, LastActivatedAt, PageMetadata};
 use vmux_layout::pane::{Pane, PaneSplit};
@@ -15,13 +14,6 @@ use vmux_setting::AppSettings;
 pub enum AgentShellMode {
     NewTab,
     Active,
-}
-
-#[vmux_api::contract(Copy, Eq)]
-pub enum PlacementMode {
-    Auto,
-    Split,
-    Stack,
 }
 
 #[vmux_api::agent]
@@ -45,42 +37,20 @@ pub struct AgentTerminalSend {
     pub terminal: Option<String>,
 }
 
-#[vmux_api::agent]
-pub struct AgentRun {
-    pub anchor: ProcessId,
-    pub command: String,
-    pub direction: vmux_layout::AgentPaneDirection,
-    pub focus: bool,
-    pub beside: Option<ProcessId>,
-    pub mode: PlacementMode,
-    pub terminal: Option<ProcessId>,
-    pub done_marker: Option<String>,
-}
-
-#[vmux_api::agent]
-pub struct AgentRunWithPlacementOverride(pub AgentRun);
-
 pub(super) struct AgentTerminalPlugin;
 
 impl Plugin for AgentTerminalPlugin {
     fn build(&self, app: &mut App) {
-        app.add_agent_request::<AgentNewTerminalTab>()
+        app.add_plugins(super::agent_run::AgentRunPlugin)
+            .add_agent_request::<AgentNewTerminalTab>()
             .add_agent_request::<AgentRunShell>()
             .add_agent_request::<AgentTerminalSend>()
-            .add_message::<AgentRequestInput>()
-            .add_message::<AgentRequestBlocked>()
             .add_message::<ProcessStackSpawnRequest>()
             .add_systems(
                 Update,
                 (open_terminal_tab, run_shell, send_to_terminal)
                     .after(AgentRequestRouteSet)
                     .before(respond_process_stack_spawn),
-            )
-            .add_systems(
-                Update,
-                super::agent_run::run_agent_commands
-                    .in_set(AgentRequestApplySet)
-                    .before(super::TerminalStackSpawnSet),
             );
     }
 }

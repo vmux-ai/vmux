@@ -7,7 +7,9 @@ use vmux_api::service::RUN_OSC;
 use vmux_api::terminal::CursorStyle;
 use vmux_command::open_target::PaneDirection;
 use vmux_core::PageMetadata;
-use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestBlocked, AgentRequestInput};
+use vmux_core::agent::{
+    AgentCommandResponse, AgentReply, AgentRequestApplySet, AgentRequestBlocked, AgentRequestInput,
+};
 use vmux_core::profile::ProjectsDirectory;
 #[cfg(test)]
 use vmux_core::{LastActivatedAt, terminal::TerminalKind as CoreTerminalKind};
@@ -33,7 +35,42 @@ use crate::{
 use crate::{TerminalContractPlugin, launch::TerminalKind as LaunchTerminalKind};
 use vmux_space::cwd::valid_cwd;
 
-use super::{AgentRun, AgentRunWithPlacementOverride, PlacementMode};
+#[vmux_api::contract(Copy, Eq)]
+pub enum PlacementMode {
+    Auto,
+    Split,
+    Stack,
+}
+
+#[vmux_api::agent]
+pub struct AgentRun {
+    pub anchor: ProcessId,
+    pub command: String,
+    pub direction: vmux_layout::AgentPaneDirection,
+    pub focus: bool,
+    pub beside: Option<ProcessId>,
+    pub mode: PlacementMode,
+    pub terminal: Option<ProcessId>,
+    pub done_marker: Option<String>,
+}
+
+#[vmux_api::agent]
+pub struct AgentRunWithPlacementOverride(pub AgentRun);
+
+pub(super) struct AgentRunPlugin;
+
+impl Plugin for AgentRunPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<AgentRequestInput>()
+            .add_message::<AgentRequestBlocked>()
+            .add_systems(
+                Update,
+                run_agent_commands
+                    .in_set(AgentRequestApplySet)
+                    .before(super::TerminalStackSpawnSet),
+            );
+    }
+}
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct AgentTerminalRegion {
@@ -655,7 +692,7 @@ impl AgentRunContext<'_, '_> {
     }
 }
 
-pub(super) fn run_agent_commands(
+fn run_agent_commands(
     mut requests: MessageReader<AgentRequestInput>,
     mut blocked: MessageReader<AgentRequestBlocked>,
     mut context: AgentRunContext,

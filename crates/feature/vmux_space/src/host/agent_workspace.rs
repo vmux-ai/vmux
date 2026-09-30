@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use vmux_api::BinEvent;
+use vmux_api::protocol::ProcessId;
 #[cfg(test)]
 use vmux_api::protocol::{AgentRequest, AgentRequestId};
-use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_chat::host::USER_CHOICE_REQUESTED;
 use vmux_command::WriteCommandRequests;
 #[cfg(test)]
@@ -18,10 +18,9 @@ use super::agent::{
     AgentCreateWorktreeOnBranch, AgentPrepareWorktree,
 };
 use super::workspace::{
-    AgentTabWorkspace, AgentWorkspacePicker, PendingWorkspacePicker, WORKSPACE_SELECTION_PENDING,
-    WORKSPACE_SELECTION_REQUESTED, activate_agent_directory, activate_agent_worktree,
-    ambiguous_worktree_message, existing_worktree_candidates, resolve_requested_worktree,
-    workspace_path_task, workspace_picker_task,
+    AgentWorkspacePicker, AgentWorkspaceState, ExistingWorktreeCandidates, PendingWorkspacePicker,
+    WORKSPACE_SELECTION_PENDING, WORKSPACE_SELECTION_REQUESTED, workspace_path_task,
+    workspace_picker_task,
 };
 use vmux_core::profile::ProjectsDirectory;
 
@@ -84,20 +83,6 @@ fn ancestor_self_tab(
     }
 }
 
-pub(crate) fn ancestor_acp_stack(
-    entity: Entity,
-    sessions: &Query<&mut vmux_session::AcpSession>,
-    child_of: &Query<&ChildOf>,
-) -> Option<Entity> {
-    let mut current = entity;
-    loop {
-        if sessions.contains(current) {
-            return Some(current);
-        }
-        current = child_of.get(current).ok()?.parent();
-    }
-}
-
 fn ancestor_agent_session(
     entity: Entity,
     session_roots: &Query<(), With<vmux_core::agent::AgentSessionRoot>>,
@@ -110,26 +95,6 @@ fn ancestor_agent_session(
         }
         current = child_of.get(current).ok()?.parent();
     }
-}
-
-pub(crate) fn rebind_acp_workspace(
-    stack: Entity,
-    cwd: &Path,
-    sessions: &mut Query<&mut vmux_session::AcpSession>,
-    commands: &mut Commands,
-) -> Option<ClientMessage> {
-    let Ok(mut session) = sessions.get_mut(stack) else {
-        return None;
-    };
-    session.cwd = cwd.to_path_buf();
-    let cwd = cwd.to_string_lossy().into_owned();
-    commands
-        .entity(stack)
-        .insert(vmux_core::AgentWorkingDir(cwd.clone()));
-    Some(ClientMessage::RebindAcpWorkspace {
-        sid: session.sid.clone(),
-        cwd,
-    })
 }
 
 fn workspace_request_anchor(request: &AgentRequestInput) -> Option<ProcessId> {
@@ -174,18 +139,17 @@ impl WorkspaceChoice {
 fn handle_agent_workspace_requests(
     mut reader: MessageReader<AgentRequestInput>,
     agent_terms: Query<(Entity, &ProcessId, &ChildOf)>,
-    mut acp_sessions: Query<&mut vmux_session::AcpSession>,
     ctx: vmux_layout::pane::PanePlacement,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
     mut blocked_requests: MessageWriter<AgentRequestBlocked>,
     active_space: vmux_layout::space::FocusedSpace,
     settings: Res<AppSettings>,
-    mut tab_worktree: AgentTabWorkspace,
+    mut workspace: AgentWorkspaceState,
     workspace_picker: AgentWorkspacePicker,
 ) {
     use vmux_api::protocol::{AgentCommandResult, ClientMessage};
-    let managed_root = tab_worktree
+    let managed_root = workspace
         .managed_root
         .as_deref()
         .cloned()
@@ -206,7 +170,7 @@ fn handle_agent_workspace_requests(
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
                 Some((agent_entity, pane)) => {
                     let Some(tab_entity) =
-                        ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
+                        ancestor_self_tab(pane, &workspace.tabs, &ctx.child_of_q)
                     else {
                         service_requests.write(ServiceRequest(
                             ClientMessage::AgentCommandResponse {
@@ -273,7 +237,7 @@ fn handle_agent_workspace_requests(
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
                 Some((agent_entity, pane)) => {
                     let Some(tab_entity) =
-                        ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
+                        ancestor_self_tab(pane, &workspace.tabs, &ctx.child_of_q)
                     else {
                         service_requests.write(ServiceRequest(
                             ClientMessage::AgentCommandResponse {
@@ -283,7 +247,7 @@ fn handle_agent_workspace_requests(
                         ));
                         continue;
                     };
-                    let current_dir = tab_worktree.tabs.get(tab_entity).ok().and_then(|tab| {
+                    let current_dir = workspace.tabs.get(tab_entity).ok().and_then(|tab| {
                         WorkspaceDirectory::stored(tab.startup_dir.as_deref())
                             .ok()
                             .flatten()
@@ -293,7 +257,7 @@ fn handle_agent_workspace_requests(
                     {
                         AgentCommandResult::Text(current_dir.to_string_lossy().into_owned())
                     } else {
-                        let project_dir = tab_worktree
+                        let project_dir = workspace
                             .workspaces
                             .get(tab_entity)
                             .ok()
@@ -303,7 +267,7 @@ fn handle_agent_workspace_requests(
                                     .flatten()
                             })
                             .or_else(|| {
-                                tab_worktree
+                                workspace
                                     .pending_projects
                                     .get(tab_entity)
                                     .ok()
@@ -329,32 +293,22 @@ fn handle_agent_workspace_requests(
                                 Ok(None)
                             } else {
                                 match path.as_deref() {
-                                    Some(path) => {
-                                        resolve_requested_worktree(&project_dir, Path::new(path))
-                                            .map(Some)
-                                    }
-                                    None => match existing_worktree_candidates(&project_dir) {
-                                        Ok(candidates) if candidates.is_empty() => Ok(None),
-                                        Ok(candidates) if candidates.len() == 1 => {
-                                            Ok(candidates.into_iter().next())
-                                        }
-                                        Ok(candidates) => {
-                                            Err(ambiguous_worktree_message(&candidates))
-                                        }
-                                        Err(error) => Err(error),
-                                    },
+                                    Some(path) => ExistingWorktreeCandidates::resolve(
+                                        &project_dir,
+                                        Path::new(path),
+                                    )
+                                    .map(Some),
+                                    None => ExistingWorktreeCandidates::for_project(&project_dir)
+                                        .and_then(ExistingWorktreeCandidates::automatic),
                                 }
                             };
                             match candidate {
                                 Err(error) => AgentCommandResult::Error(error),
-                                Ok(Some(candidate)) => match activate_agent_directory(
+                                Ok(Some(candidate)) => match workspace.activate_directory(
                                     tab_entity,
                                     agent_entity,
                                     &project_dir,
                                     &candidate.execution_dir,
-                                    &mut tab_worktree.tabs,
-                                    &mut acp_sessions,
-                                    &ctx.child_of_q,
                                     &mut commands,
                                 ) {
                                     Ok(rebind) => {
@@ -374,7 +328,7 @@ fn handle_agent_workspace_requests(
                                         .filter(|task| !task.trim().is_empty())
                                         .map(str::to_string)
                                         .or_else(|| {
-                                            tab_worktree
+                                            workspace
                                                 .tabs
                                                 .get(tab_entity)
                                                 .ok()
@@ -390,14 +344,11 @@ fn handle_agent_workspace_requests(
                                         &slug_hint,
                                         &managed_root,
                                     ) {
-                                        Ok(activation) => match activate_agent_worktree(
+                                        Ok(activation) => match workspace.activate_worktree(
                                             tab_entity,
                                             agent_entity,
                                             &project_dir,
                                             activation,
-                                            &mut tab_worktree.tabs,
-                                            &mut acp_sessions,
-                                            &ctx.child_of_q,
                                             &mut commands,
                                         ) {
                                             Ok((execution_dir, rebind)) => {
@@ -431,7 +382,7 @@ fn handle_agent_workspace_requests(
                 Some((_, pane)) => {
                     let mut cur = pane;
                     let tab_e = loop {
-                        if tab_worktree.tabs.get(cur).is_ok() {
+                        if workspace.tabs.get(cur).is_ok() {
                             break Some(cur);
                         }
                         match ctx.child_of_q.get(cur) {
@@ -442,10 +393,10 @@ fn handle_agent_workspace_requests(
                     match tab_e {
                         None => AgentCommandResult::Error("no tab for agent".to_string()),
                         Some(tab_e)
-                            if tab_worktree.worktrees.get(tab_e).is_ok()
+                            if workspace.worktrees.get(tab_e).is_ok()
                                 || worktree_created_this_batch.contains_key(&tab_e) =>
                         {
-                            let tab_dir = tab_worktree
+                            let tab_dir = workspace
                                 .tabs
                                 .get(tab_e)
                                 .ok()
@@ -461,12 +412,12 @@ fn handle_agent_workspace_requests(
                             }
                         }
                         Some(tab_e) => {
-                            let tab_dir = tab_worktree
+                            let tab_dir = workspace
                                 .tabs
                                 .get(tab_e)
                                 .ok()
                                 .and_then(|t| t.startup_dir.clone());
-                            let name = tab_worktree
+                            let name = workspace
                                 .tabs
                                 .get(tab_e)
                                 .map(|t| t.name.clone())
@@ -477,7 +428,7 @@ fn handle_agent_workspace_requests(
                                     let configured_dir = active_space
                                         .id()
                                         .and_then(|space_id| settings.startup_dir(space_id));
-                                    let workspace_dir = tab_worktree
+                                    let workspace_dir = workspace
                                         .workspaces
                                         .get(tab_e)
                                         .ok()
@@ -500,7 +451,7 @@ fn handle_agent_workspace_requests(
                                     } else {
                                         let base_dir =
                                             workspace_dir.unwrap_or_else(|| current_dir.clone());
-                                        if tab_worktree.workspaces.get(tab_e).is_err() {
+                                        if workspace.workspaces.get(tab_e).is_err() {
                                             commands.entity(tab_e).insert(
                                                 vmux_layout::tab::TabWorkspace {
                                                     project_dir: base_dir
@@ -524,8 +475,7 @@ fn handle_agent_workspace_requests(
                                                     .execution_dir
                                                     .to_string_lossy()
                                                     .into_owned();
-                                                if let Ok(mut t) = tab_worktree.tabs.get_mut(tab_e)
-                                                {
+                                                if let Ok(mut t) = workspace.tabs.get_mut(tab_e) {
                                                     t.startup_dir = Some(path.clone());
                                                 }
                                                 commands
@@ -557,7 +507,7 @@ fn handle_agent_workspace_requests(
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
                 Some((agent_entity, pane)) => {
                     let Some(tab_entity) =
-                        ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
+                        ancestor_self_tab(pane, &workspace.tabs, &ctx.child_of_q)
                     else {
                         blocked_requests.write(AgentRequestBlocked {
                             anchor: *anchor,
@@ -572,7 +522,7 @@ fn handle_agent_workspace_requests(
                         ));
                         continue;
                     };
-                    let existing_branch = tab_worktree
+                    let existing_branch = workspace
                         .worktrees
                         .get(tab_entity)
                         .ok()
@@ -584,7 +534,7 @@ fn handle_agent_workspace_requests(
                                 "Tab already has a worktree on branch {existing_branch}; requested {branch}"
                             ))
                         } else {
-                            let path = tab_worktree
+                            let path = workspace
                                 .tabs
                                 .get(tab_entity)
                                 .ok()
@@ -604,14 +554,14 @@ fn handle_agent_workspace_requests(
                                     WorkspaceDirectory::stored(Some(picked)).ok().flatten()
                                 })
                                 .or_else(|| {
-                                    tab_worktree
+                                    workspace
                                         .pending_projects
                                         .get(tab_entity)
                                         .ok()
                                         .map(|project| project.0.clone())
                                 })
                                 .or_else(|| {
-                                    tab_worktree.workspaces.get(tab_entity).ok().and_then(
+                                    workspace.workspaces.get(tab_entity).ok().and_then(
                                         |workspace| {
                                             WorkspaceDirectory::stored(Some(&workspace.project_dir))
                                                 .ok()
@@ -641,14 +591,11 @@ fn handle_agent_workspace_requests(
                             branch,
                             &managed_root,
                         ) {
-                            Ok(activation) => match activate_agent_worktree(
+                            Ok(activation) => match workspace.activate_worktree(
                                 tab_entity,
                                 agent_entity,
                                 &base_dir,
                                 activation,
-                                &mut tab_worktree.tabs,
-                                &mut acp_sessions,
-                                &ctx.child_of_q,
                                 &mut commands,
                             ) {
                                 Ok((execution_dir, rebind)) => {

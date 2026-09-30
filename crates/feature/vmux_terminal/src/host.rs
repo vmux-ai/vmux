@@ -23,10 +23,8 @@ mod tool;
 
 pub(crate) mod link;
 
-pub use agent::{
-    AgentNewTerminalTab, AgentRun, AgentRunShell, AgentRunWithPlacementOverride, AgentShellMode,
-    AgentTerminalSend, PlacementMode,
-};
+pub use agent::{AgentNewTerminalTab, AgentRunShell, AgentShellMode, AgentTerminalSend};
+pub use agent_run::{AgentRun, AgentRunWithPlacementOverride, PlacementMode};
 pub use component::{
     AgentRunTerminal, ProcessExited, PtyExited, RetainOnProcessExit, Terminal,
     TerminalUiStateUpdates,

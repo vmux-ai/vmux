@@ -480,15 +480,16 @@ fn resolve_acp_install(
         .map(|resolved| resolved.package_added)
         .unwrap_or(false);
     let login_env = vmux_terminal::shell_env::login_shell_env(&request.shell);
-    let managed_mcp = match crate::managed_mcp::acp_servers(&request.agent_id) {
-        Ok(managed_mcp) => managed_mcp,
-        Err(message) => {
-            return AcpInstallOutcome {
-                package_added,
-                launch: Err(message),
-            };
-        }
-    };
+    let managed_mcp =
+        match crate::managed_mcp::PreparedManagedMcpServers::for_agent(&request.agent_id) {
+            Ok(managed_mcp) => managed_mcp,
+            Err(message) => {
+                return AcpInstallOutcome {
+                    package_added,
+                    launch: Err(message),
+                };
+            }
+        };
     let launch = match resolved {
         Ok(resolved) => Ok(AcpLaunch {
             command: resolved.command,

@@ -55,27 +55,29 @@ pub(super) struct PreparedManagedMcpServers {
     pub(super) revision: u64,
 }
 
-pub(super) fn acp_servers(agent_id: &str) -> Result<PreparedManagedMcpServers, String> {
-    for _ in 0..3 {
-        let revision = McpCredentialAccess::stable_revision()?;
-        let mut servers = Vec::new();
-        for (name, server) in ManagedMcpServers::current() {
-            if crate::acp_tool::registry_id_alias(agent_id) == "codex-acp"
-                && server.transport == McpTransport::Sse
-            {
-                bevy::log::warn!(
-                    "managed MCP server {name} skipped for Codex because SSE is unsupported"
-                );
+impl PreparedManagedMcpServers {
+    pub(super) fn for_agent(agent_id: &str) -> Result<Self, String> {
+        for _ in 0..3 {
+            let revision = McpCredentialAccess::stable_revision()?;
+            let mut servers = Vec::new();
+            for (name, server) in ManagedMcpServers::current() {
+                if crate::acp_tool::registry_id_alias(agent_id) == "codex-acp"
+                    && server.transport == McpTransport::Sse
+                {
+                    bevy::log::warn!(
+                        "managed MCP server {name} skipped for Codex because SSE is unsupported"
+                    );
+                    continue;
+                }
+                servers.push(acp_server(name, server, agent_id));
+            }
+            if McpCredentialAccess::revision() != revision {
                 continue;
             }
-            servers.push(acp_server(name, server, agent_id));
+            return Ok(Self { servers, revision });
         }
-        if McpCredentialAccess::revision() != revision {
-            continue;
-        }
-        return Ok(PreparedManagedMcpServers { servers, revision });
+        Err("MCP configuration changed repeatedly while preparing the agent".to_string())
     }
-    Err("MCP configuration changed repeatedly while preparing the agent".to_string())
 }
 
 fn acp_server(mut name: String, server: McpServerManifest, agent_id: &str) -> ManagedMcpServer {
