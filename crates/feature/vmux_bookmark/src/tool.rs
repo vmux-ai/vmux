@@ -2,7 +2,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{
-    AgentBookmark, AgentBookmarkNode, AgentBookmarks, AgentRequest, AgentRequestId, ClientMessage,
+    AgentBookmark, AgentBookmarkNode, AgentBookmarks, AgentQueryResult, AgentRequest,
+    AgentRequestId, ClientMessage,
 };
 use vmux_core::service::ServiceRequest;
 use vmux_core::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
@@ -208,10 +209,9 @@ fn route_bookmark_queries(
                 });
             }
             Err(message) => {
-                service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
-                    request_id: request.request_id,
-                    message,
-                }));
+                service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+                    AgentQueryResult::text(request.request_id, Err(message)),
+                )));
             }
             Ok(None) => {}
         }
@@ -300,10 +300,11 @@ fn answer_bookmark_queries(
         }
         roots.sort_by_key(|(order, _)| *order);
         let roots = roots.into_iter().map(|(_, node)| node).collect();
-        service_requests.write(ServiceRequest(ClientMessage::AgentBookmarksResult {
-            request_id: request.request_id,
-            result: Ok(AgentBookmarks { pins, roots }),
-        }));
+        let result = serde_json::to_string(&AgentBookmarks { pins, roots })
+            .map_err(|error| error.to_string());
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult::text(request.request_id, result),
+        )));
     }
 }
 

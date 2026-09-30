@@ -2,7 +2,9 @@ use std::collections::HashSet;
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_api::protocol::{AgentRequest, AgentRequestId, ClientMessage, ServiceMessage};
+use vmux_api::protocol::{
+    AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage, ServiceMessage,
+};
 use vmux_core::service::{
     ServiceMessagePlugin, ServiceMessageSet, ServiceMessageVariant, ServiceRequest,
 };
@@ -102,10 +104,9 @@ fn route_tool_queries<T>(
             Ok(None) => {}
             Err(message) => {
                 handled.write(ToolQueryHandled(request.request_id));
-                service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
-                    request_id: request.request_id,
-                    message,
-                }));
+                service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+                    AgentQueryResult::text(request.request_id, Err(message)),
+                )));
             }
         }
     }
@@ -124,10 +125,12 @@ fn reject_unhandled(
         if handled.contains(&request.request_id) {
             continue;
         }
-        service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
-            request_id: request.request_id,
-            message: format!("unknown agent query: {}", request.query.id),
-        }));
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult::text(
+                request.request_id,
+                Err(format!("unknown agent query: {}", request.query.id)),
+            ),
+        )));
     }
 }
 
@@ -179,7 +182,8 @@ mod tests {
         assert_eq!(responses.len(), 1);
         assert!(matches!(
             &responses[0].0,
-            ClientMessage::AgentQueryError { request_id, .. } if *request_id == unknown
+            ClientMessage::AgentQueryResult(result)
+                if result.request_id == unknown && result.is_error
         ));
     }
 

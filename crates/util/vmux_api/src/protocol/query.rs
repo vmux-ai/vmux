@@ -92,6 +92,42 @@ pub struct AgentQueryResult {
     pub image: Option<AgentImage>,
 }
 
+impl AgentQueryResult {
+    pub fn text(request_id: AgentRequestId, result: Result<String, String>) -> Self {
+        match result {
+            Ok(content) => Self {
+                request_id,
+                content,
+                is_error: false,
+                image: None,
+            },
+            Err(content) => Self {
+                request_id,
+                content,
+                is_error: true,
+                image: None,
+            },
+        }
+    }
+
+    pub fn image(request_id: AgentRequestId, result: Result<(String, AgentImage), String>) -> Self {
+        match result {
+            Ok((content, image)) => Self {
+                request_id,
+                content,
+                is_error: false,
+                image: Some(image),
+            },
+            Err(content) => Self {
+                request_id,
+                content,
+                is_error: true,
+                image: None,
+            },
+        }
+    }
+}
+
 #[vmux_api::contract(Eq)]
 pub struct AgentRecording {
     pub mp4_path: String,

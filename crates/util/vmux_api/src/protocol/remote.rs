@@ -1,8 +1,6 @@
 use super::{
-    AgentBookmarks, AgentCommandExit, AgentCommandResult, AgentCommandTool, AgentImage,
-    AgentQueryResult, AgentRecording, AgentRequest, AgentRequestId, AgentRunCompletion, AgentSpace,
-    CommandLifecycleKind, CopyModeKey, JsonValue, ManagedMcpServer, ProcessInfo, SharedEvent,
-    SharedMessage,
+    AgentCommandResult, AgentQueryResult, AgentRequest, AgentRequestId, CommandLifecycleKind,
+    CopyModeKey, JsonValue, ManagedMcpServer, ProcessInfo, SharedEvent, SharedMessage,
 };
 use crate::{ProcessId, TermCursor, TermLine, TermSelectionRange};
 
@@ -93,67 +91,7 @@ pub enum ClientMessage {
         request_id: AgentRequestId,
         query: AgentRequest,
     },
-    AgentQueryError {
-        request_id: AgentRequestId,
-        message: String,
-    },
-    AgentLayoutResult {
-        request_id: AgentRequestId,
-        result: Result<crate::protocol::layout::LayoutSnapshot, String>,
-    },
-    ProcessOutputResult {
-        request_id: AgentRequestId,
-        result: Result<String, String>,
-    },
-    ProcessTranscriptResult {
-        request_id: AgentRequestId,
-        result: Result<String, String>,
-    },
-    ProcessCommandExitResult {
-        request_id: AgentRequestId,
-        result: Result<AgentCommandExit, String>,
-    },
-    ProcessRunCompletionResult {
-        request_id: AgentRequestId,
-        result: Result<AgentRunCompletion, String>,
-    },
-    AgentSettingsResult {
-        request_id: AgentRequestId,
-        result: Result<JsonValue, String>,
-    },
-    AgentSpacesResult {
-        request_id: AgentRequestId,
-        result: Result<Vec<AgentSpace>, String>,
-    },
-    AgentScreenshotResult {
-        request_id: AgentRequestId,
-        result: Result<AgentImage, String>,
-    },
     AgentQueryResult(AgentQueryResult),
-    AgentRecordStartResult {
-        request_id: AgentRequestId,
-        result: Result<u32, String>,
-    },
-    AgentRecordStopResult {
-        request_id: AgentRequestId,
-        result: Result<AgentRecording, String>,
-    },
-    AgentBookmarksResult {
-        request_id: AgentRequestId,
-        result: Result<AgentBookmarks, String>,
-    },
-    AgentWorkingDirectoryResult {
-        request_id: AgentRequestId,
-        result: Result<String, String>,
-    },
-    AgentVaultStatusResult {
-        request_id: AgentRequestId,
-        result: Result<crate::vault::VaultStatusSnapshot, String>,
-    },
-    AgentCommandsResult {
-        request_id: AgentRequestId,
-        result: Result<Vec<AgentCommandTool>, String>,
-    },
     AgentCommandResponse {
         request_id: AgentRequestId,
         result: AgentCommandResult,
@@ -285,67 +223,7 @@ pub enum ServiceMessage {
         request_id: AgentRequestId,
         query: AgentRequest,
     },
-    AgentQueryError {
-        request_id: AgentRequestId,
-        message: String,
-    },
-    AgentLayoutResult {
-        request_id: AgentRequestId,
-        result: Result<crate::protocol::layout::LayoutSnapshot, String>,
-    },
-    ProcessOutputResult {
-        request_id: AgentRequestId,
-        result: Result<String, String>,
-    },
-    ProcessTranscriptResult {
-        request_id: AgentRequestId,
-        result: Result<String, String>,
-    },
-    ProcessCommandExitResult {
-        request_id: AgentRequestId,
-        result: Result<AgentCommandExit, String>,
-    },
-    ProcessRunCompletionResult {
-        request_id: AgentRequestId,
-        result: Result<AgentRunCompletion, String>,
-    },
-    AgentSettingsResult {
-        request_id: AgentRequestId,
-        result: Result<JsonValue, String>,
-    },
-    AgentSpacesResult {
-        request_id: AgentRequestId,
-        result: Result<Vec<AgentSpace>, String>,
-    },
-    AgentScreenshotResult {
-        request_id: AgentRequestId,
-        result: Result<AgentImage, String>,
-    },
     AgentQueryResult(AgentQueryResult),
-    AgentRecordStartResult {
-        request_id: AgentRequestId,
-        result: Result<u32, String>,
-    },
-    AgentRecordStopResult {
-        request_id: AgentRequestId,
-        result: Result<AgentRecording, String>,
-    },
-    AgentBookmarksResult {
-        request_id: AgentRequestId,
-        result: Result<AgentBookmarks, String>,
-    },
-    AgentWorkingDirectoryResult {
-        request_id: AgentRequestId,
-        result: Result<String, String>,
-    },
-    AgentVaultStatusResult {
-        request_id: AgentRequestId,
-        result: Result<crate::vault::VaultStatusSnapshot, String>,
-    },
-    AgentCommandsResult {
-        request_id: AgentRequestId,
-        result: Result<Vec<AgentCommandTool>, String>,
-    },
     AgentCommandResult {
         request_id: AgentRequestId,
         result: AgentCommandResult,

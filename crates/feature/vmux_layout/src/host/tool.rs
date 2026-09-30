@@ -2,7 +2,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{
-    AgentCommandResult, AgentRequest, AgentRequestId, ClientMessage, JsonValue, layout,
+    AgentCommandResult, AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage, JsonValue,
+    layout,
 };
 use vmux_command::AgentInvokeCommand;
 use vmux_core::ProcessAnchor;
@@ -121,10 +122,9 @@ fn route_layout_queries(
                 });
             }
             Err(error) => {
-                service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
-                    request_id: request.request_id,
-                    message: error.to_string(),
-                }));
+                service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+                    AgentQueryResult::text(request.request_id, Err(error.to_string())),
+                )));
             }
         }
     }
@@ -136,7 +136,10 @@ fn forward_layout_apply_responses(
 ) {
     for response in responses.read() {
         let result = match response.result.clone() {
-            Ok(snapshot) => AgentCommandResult::Layout(snapshot),
+            Ok(snapshot) => match serde_json::to_string(&snapshot) {
+                Ok(json) => AgentCommandResult::Text(json),
+                Err(error) => AgentCommandResult::Error(error.to_string()),
+            },
             Err(message) => AgentCommandResult::Error(message),
         };
         service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
@@ -151,10 +154,10 @@ fn forward_layout_snapshot_responses(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in responses.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentLayoutResult {
-            request_id: AgentRequestId(response.request_id),
-            result: Ok(response.snapshot.clone()),
-        }));
+        let result = serde_json::to_string(&response.snapshot).map_err(|error| error.to_string());
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult::text(AgentRequestId(response.request_id), result),
+        )));
     }
 }
 

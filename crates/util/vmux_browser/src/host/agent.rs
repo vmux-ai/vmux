@@ -174,10 +174,9 @@ fn answer_working_directory_queries(
                 .map(ProjectsDirectory::into_path)
                 .map(|path| path.to_string_lossy().into_owned())
         };
-        service_requests.write(ServiceRequest(ClientMessage::AgentWorkingDirectoryResult {
-            request_id: request.request_id,
-            result,
-        }));
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult::text(request.request_id, result),
+        )));
     }
 }
 

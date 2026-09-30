@@ -154,28 +154,28 @@ mod tests {
         );
 
         let request_id = AgentRequestId::new();
-        let response = ServiceMessage::AgentCommandsResult {
+        let commands = vec![AgentCommandTool {
+            name: "terminal_clear".to_string(),
+            description: "Clear Terminal".to_string(),
+            input_schema: JsonValue::Object(vec![(
+                "type".to_string(),
+                JsonValue::String("object".to_string()),
+            )]),
+        }];
+        let response = ServiceMessage::AgentQueryResult(AgentQueryResult {
             request_id,
-            result: Ok(vec![AgentCommandTool {
-                name: "terminal_clear".to_string(),
-                description: "Clear Terminal".to_string(),
-                input_schema: JsonValue::Object(vec![(
-                    "type".to_string(),
-                    JsonValue::String("object".to_string()),
-                )]),
-            }]),
-        };
+            content: serde_json::to_string(&commands).unwrap(),
+            is_error: false,
+            image: None,
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response).unwrap();
         let recovered: ServiceMessage =
             rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
-        let ServiceMessage::AgentCommandsResult {
-            request_id: recovered_id,
-            result: Ok(commands),
-        } = recovered
-        else {
+        let ServiceMessage::AgentQueryResult(result) = recovered else {
             panic!("unexpected response");
         };
-        assert_eq!(recovered_id, request_id);
+        assert_eq!(result.request_id, request_id);
+        let commands = serde_json::from_str::<Vec<AgentCommandTool>>(&result.content).unwrap();
         assert_eq!(commands[0].name, "terminal_clear");
     }
 
@@ -222,35 +222,36 @@ mod tests {
     #[test]
     fn agent_vault_status_result_rkyv_round_trip() {
         let request_id = AgentRequestId::new();
-        let response = ServiceMessage::AgentVaultStatusResult {
-            request_id,
-            result: Ok(crate::vault::VaultStatusSnapshot {
-                root: "/Users/test/.vmux".into(),
-                connected: true,
-                encrypted: true,
-                unlocked: true,
-                recovery_key: true,
-                automatic_backup: true,
-                provider: Some(crate::vault::VaultProvider::Github),
-                remote: Some("https://github.com/vmux-ai/vault.git".into()),
-                branch: "main".into(),
-                local_changes: 2,
-                ahead: 1,
-                behind: 0,
-                sync_needed: true,
-            }),
+        let snapshot = crate::vault::VaultStatusSnapshot {
+            root: "/Users/test/.vmux".into(),
+            connected: true,
+            encrypted: true,
+            unlocked: true,
+            recovery_key: true,
+            automatic_backup: true,
+            provider: Some(crate::vault::VaultProvider::Github),
+            remote: Some("https://github.com/vmux-ai/vault.git".into()),
+            branch: "main".into(),
+            local_changes: 2,
+            ahead: 1,
+            behind: 0,
+            sync_needed: true,
         };
+        let response = ServiceMessage::AgentQueryResult(AgentQueryResult {
+            request_id,
+            content: serde_json::to_string_pretty(&snapshot).unwrap(),
+            is_error: false,
+            image: None,
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response).unwrap();
         let recovered: ServiceMessage =
             rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
-        let ServiceMessage::AgentVaultStatusResult {
-            request_id: recovered_id,
-            result: Ok(snapshot),
-        } = recovered
-        else {
+        let ServiceMessage::AgentQueryResult(result) = recovered else {
             panic!("unexpected response");
         };
-        assert_eq!(recovered_id, request_id);
+        assert_eq!(result.request_id, request_id);
+        let snapshot =
+            serde_json::from_str::<crate::vault::VaultStatusSnapshot>(&result.content).unwrap();
         assert_eq!(snapshot.root, "/Users/test/.vmux");
     }
 
@@ -293,40 +294,6 @@ mod tests {
                 rkyv::from_bytes::<AgentCommandResult, rkyv::rancor::Error>(&bytes).unwrap();
             assert_eq!(decoded, variant);
         }
-    }
-
-    #[test]
-    fn agent_command_result_layout_rkyv_round_trip() {
-        let result = AgentCommandResult::Layout(LayoutSnapshot {
-            tabs: vec![Tab {
-                id: Some("tab:1".into()),
-                name: "X".into(),
-                is_active: true,
-                root: LayoutNode::Pane {
-                    id: Some("pane:2".into()),
-                    is_zoomed: false,
-                    stacks: vec![Stack {
-                        id: Some("stack:3".into()),
-                        title: "T".into(),
-                        url: "https://x".into(),
-                        kind: "browser".into(),
-                        is_loading: false,
-                        icon: crate::PageIcon::None,
-                        is_self: false,
-                        process_id: None,
-                    }],
-                },
-            }],
-            focused: Focus {
-                tab: Some("tab:1".into()),
-                pane: Some("pane:2".into()),
-                stack: Some("stack:3".into()),
-            },
-        });
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&result).unwrap();
-        let recovered: AgentCommandResult =
-            rkyv::from_bytes::<AgentCommandResult, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(recovered, result);
     }
 
     #[test]
@@ -403,27 +370,21 @@ mod tests {
     #[test]
     fn settings_query_result_rkyv_roundtrip() {
         let request_id = AgentRequestId::new();
-        let response = ServiceMessage::AgentSettingsResult {
+        let settings = JsonValue::Object(vec![("auto_update".to_string(), JsonValue::Bool(true))]);
+        let value = serde_json::Value::try_from(&settings).unwrap();
+        let response = ServiceMessage::AgentQueryResult(AgentQueryResult {
             request_id,
-            result: Ok(JsonValue::Object(vec![(
-                "auto_update".to_string(),
-                JsonValue::Bool(true),
-            )])),
-        };
+            content: serde_json::to_string(&value).unwrap(),
+            is_error: false,
+            image: None,
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response).unwrap();
         let decoded = rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
-        let ServiceMessage::AgentSettingsResult {
-            request_id: recovered_id,
-            result: Ok(settings),
-        } = decoded
-        else {
+        let ServiceMessage::AgentQueryResult(result) = decoded else {
             panic!("unexpected response");
         };
-        assert_eq!(recovered_id, request_id);
-        assert_eq!(
-            settings,
-            JsonValue::Object(vec![("auto_update".to_string(), JsonValue::Bool(true),)])
-        );
+        assert_eq!(result.request_id, request_id);
+        assert_eq!(result.content, "{\"auto_update\":true}");
     }
 
     #[test]

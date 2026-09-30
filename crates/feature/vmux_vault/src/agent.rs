@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
-use vmux_api::protocol::{AgentRequest, AgentRequestId, ClientMessage};
+use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage};
 use vmux_core::ProcessAnchor;
 use vmux_core::service::ServiceRequest;
 use vmux_layout::AgentOpenBeside;
@@ -120,10 +120,9 @@ fn route_vault_queries(
                 });
             }
             Err(message) => {
-                service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
-                    request_id: request.request_id,
-                    message,
-                }));
+                service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+                    AgentQueryResult::text(request.request_id, Err(message)),
+                )));
             }
             Ok(None) => {}
         }
@@ -135,9 +134,10 @@ fn answer_vault_queries(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in requests.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentVaultStatusResult {
-            request_id: request.request_id,
-            result: Ok(vmux_core::profile::vault::VaultStatus::current().snapshot()),
-        }));
+        let snapshot = vmux_core::profile::vault::VaultStatus::current().snapshot();
+        let result = serde_json::to_string_pretty(&snapshot).map_err(|error| error.to_string());
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult::text(request.request_id, result),
+        )));
     }
 }

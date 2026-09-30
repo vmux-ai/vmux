@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
-use vmux_api::protocol::{AgentRequest, ClientMessage, JsonValue};
+use vmux_api::protocol::{AgentQueryResult, AgentRequest, ClientMessage, JsonValue};
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
@@ -49,15 +49,10 @@ fn answer_settings_queries(
         handled.write(ToolQueryHandled(request.request_id));
         let result = serde_json::from_slice::<AgentGetSettings>(&request.query.body)
             .map_err(|error| error.to_string())
-            .and_then(|_| {
-                serde_json::to_value(&*settings)
-                    .map(JsonValue::from)
-                    .map_err(|error| format!("failed to serialize settings: {error}"))
-            });
-        service_requests.write(ServiceRequest(ClientMessage::AgentSettingsResult {
-            request_id: request.request_id,
-            result,
-        }));
+            .and_then(|_| serde_json::to_string(&*settings).map_err(|error| error.to_string()));
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult::text(request.request_id, result),
+        )));
     }
 }
 

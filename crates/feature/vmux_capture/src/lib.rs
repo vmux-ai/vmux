@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
-use vmux_api::protocol::{AgentImage, AgentRecording, AgentRequest, AgentRequestId, ClientMessage};
+use vmux_api::protocol::{
+    AgentImage, AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage,
+};
 use vmux_core::service::ServiceRequest;
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolDispatchSet, ToolManifestPlugin, ToolQuery, ToolQueryHandled,
@@ -241,10 +243,9 @@ fn route_capture_queries(
             _ => unreachable!(),
         };
         if let Err(message) = result {
-            service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
-                request_id: request.request_id,
-                message,
-            }));
+            service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+                AgentQueryResult::text(request.request_id, Err(message)),
+            )));
         }
     }
 }
@@ -257,18 +258,20 @@ fn forward_screenshot_responses(
         let result = response.result.as_ref().map_or_else(
             |message| Err(message.clone()),
             |image| {
-                Ok(AgentImage {
-                    path: image.path.clone(),
-                    png: image.png.clone(),
-                    width: image.width,
-                    height: image.height,
-                })
+                Ok((
+                    format!("saved {} ({}×{})", image.path, image.width, image.height),
+                    AgentImage {
+                        path: image.path.clone(),
+                        png: image.png.clone(),
+                        width: image.width,
+                        height: image.height,
+                    },
+                ))
             },
         );
-        service_requests.write(ServiceRequest(ClientMessage::AgentScreenshotResult {
-            request_id: AgentRequestId(response.request_id),
-            result,
-        }));
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult::image(AgentRequestId(response.request_id), result),
+        )));
     }
 }
 
@@ -277,10 +280,13 @@ fn forward_record_start_responses(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in responses.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentRecordStartResult {
-            request_id: AgentRequestId(response.request_id),
-            result: response.result.clone(),
-        }));
+        let result = response
+            .result
+            .clone()
+            .map(|max_secs| format!("recording started, max {max_secs}s"));
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult::text(AgentRequestId(response.request_id), result),
+        )));
     }
 }
 
@@ -292,19 +298,23 @@ fn forward_record_stop_responses(
         let result = response.result.as_ref().map_or_else(
             |message| Err(message.clone()),
             |recording| {
-                Ok(AgentRecording {
-                    mp4_path: recording.mp4_path.clone(),
-                    gif_path: recording.gif_path.clone(),
-                    duration_ms: recording.duration_ms,
-                    bytes: recording.bytes,
-                    auto_stopped: recording.auto_stopped,
-                })
+                let secs = recording.duration_ms as f64 / 1000.0;
+                let mut text = format!(
+                    "recorded {secs:.1}s → {} ({} bytes)",
+                    recording.mp4_path, recording.bytes
+                );
+                if let Some(gif) = &recording.gif_path {
+                    text.push_str(&format!(" + {gif}"));
+                }
+                if recording.auto_stopped {
+                    text.push_str(" (auto-stopped)");
+                }
+                Ok(text)
             },
         );
-        service_requests.write(ServiceRequest(ClientMessage::AgentRecordStopResult {
-            request_id: AgentRequestId(response.request_id),
-            result,
-        }));
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult::text(AgentRequestId(response.request_id), result),
+        )));
     }
 }
 

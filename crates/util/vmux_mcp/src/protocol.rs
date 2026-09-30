@@ -294,11 +294,10 @@ fn start_list_tools(
             .remove::<ToolCatalog>()
             .insert(McpExecution::new(async move {
                 if let Ok(connection) = ServiceConnection::connect().await
-                    && let Ok(ServiceMessage::AgentCommandsResult {
-                        result: Ok(commands),
-                        ..
-                    }) =
+                    && let Ok(ServiceMessage::AgentQueryResult(result)) =
                         agent_query(&connection, AgentRequest::encode(&AgentListCommands)?).await
+                    && !result.is_error
+                    && let Ok(commands) = serde_json::from_str(&result.content)
                 {
                     definitions = ToolDefinition::merge_commands(definitions, commands)?;
                 }
@@ -488,12 +487,6 @@ pub fn command_result_to_mcp_response(result: AgentCommandResult) -> Result<Valu
         AgentCommandResult::Text(text) => Ok(json!({
             "content": [{"type": "text", "text": text}]
         })),
-        AgentCommandResult::Layout(snapshot) => {
-            let text = serde_json::to_string(&snapshot).unwrap_or_default();
-            Ok(json!({
-                "content": [{"type": "text", "text": text}]
-            }))
-        }
         AgentCommandResult::Error(message) => Err(message),
     }
 }
@@ -527,21 +520,6 @@ async fn agent_query(
 fn query_response_request_id(message: &ServiceMessage) -> Option<AgentRequestId> {
     match message {
         ServiceMessage::AgentQueryResult(result) => Some(result.request_id),
-        ServiceMessage::AgentLayoutResult { request_id, .. }
-        | ServiceMessage::AgentQueryError { request_id, .. }
-        | ServiceMessage::ProcessOutputResult { request_id, .. }
-        | ServiceMessage::ProcessTranscriptResult { request_id, .. }
-        | ServiceMessage::ProcessCommandExitResult { request_id, .. }
-        | ServiceMessage::ProcessRunCompletionResult { request_id, .. }
-        | ServiceMessage::AgentSettingsResult { request_id, .. }
-        | ServiceMessage::AgentSpacesResult { request_id, .. }
-        | ServiceMessage::AgentScreenshotResult { request_id, .. }
-        | ServiceMessage::AgentRecordStartResult { request_id, .. }
-        | ServiceMessage::AgentRecordStopResult { request_id, .. }
-        | ServiceMessage::AgentBookmarksResult { request_id, .. }
-        | ServiceMessage::AgentWorkingDirectoryResult { request_id, .. }
-        | ServiceMessage::AgentVaultStatusResult { request_id, .. }
-        | ServiceMessage::AgentCommandsResult { request_id, .. } => Some(*request_id),
         _ => None,
     }
 }
@@ -556,7 +534,6 @@ async fn run_agent_query(query: AgentRequest) -> Result<Value, String> {
 
 pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
     match response {
-        ServiceMessage::AgentQueryError { message, .. } => tool_error(&message),
         ServiceMessage::AgentQueryResult(result) => {
             if result.is_error {
                 return tool_error(&result.content);
@@ -573,189 +550,6 @@ pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
             }
             json!({"content": content})
         }
-        ServiceMessage::AgentLayoutResult {
-            result: Ok(snapshot),
-            ..
-        } => {
-            let text = serde_json::to_string(&snapshot).unwrap_or_default();
-            json!({
-                "content": [{"type": "text", "text": text}]
-            })
-        }
-        ServiceMessage::AgentVaultStatusResult {
-            result: Ok(snapshot),
-            ..
-        } => {
-            let text = serde_json::to_string_pretty(&snapshot).unwrap_or_default();
-            json!({
-                "content": [{"type": "text", "text": text}]
-            })
-        }
-        ServiceMessage::ProcessOutputResult {
-            result: Ok(text), ..
-        }
-        | ServiceMessage::ProcessTranscriptResult {
-            result: Ok(text), ..
-        }
-        | ServiceMessage::AgentWorkingDirectoryResult {
-            result: Ok(text), ..
-        } => {
-            json!({
-                "content": [{"type": "text", "text": text}]
-            })
-        }
-        ServiceMessage::AgentSettingsResult {
-            result: Ok(settings),
-            ..
-        } => {
-            let value = serde_json::Value::try_from(&settings).unwrap_or(serde_json::Value::Null);
-            let text = serde_json::to_string(&value).unwrap_or_default();
-            json!({
-                "content": [{"type": "text", "text": text}]
-            })
-        }
-        ServiceMessage::AgentSpacesResult {
-            result: Ok(spaces), ..
-        } => {
-            let text = serde_json::to_string(&spaces).unwrap_or_default();
-            json!({
-                "content": [{"type": "text", "text": text}]
-            })
-        }
-        ServiceMessage::AgentBookmarksResult {
-            result: Ok(bookmarks),
-            ..
-        } => {
-            let text = serde_json::to_string(&bookmarks).unwrap_or_default();
-            json!({
-                "content": [{"type": "text", "text": text}]
-            })
-        }
-        ServiceMessage::AgentCommandsResult {
-            result: Ok(commands),
-            ..
-        } => {
-            let text = serde_json::to_string(&commands).unwrap_or_default();
-            json!({
-                "content": [{"type": "text", "text": text}]
-            })
-        }
-        ServiceMessage::ProcessCommandExitResult {
-            result: Ok(result), ..
-        } => {
-            let exit = result
-                .exit
-                .map_or_else(|| "null".to_string(), |code| code.to_string());
-            json!({
-                "content": [{"type": "text", "text": format!("{{\"seq\":{},\"exit\":{exit}}}", result.sequence)}]
-            })
-        }
-        ServiceMessage::ProcessRunCompletionResult {
-            result: Ok(result), ..
-        } => {
-            let token = result
-                .token
-                .map_or_else(|| "null".to_string(), |token| format!("\"{token}\""));
-            let exit = result
-                .exit
-                .map_or_else(|| "null".to_string(), |code| code.to_string());
-            json!({
-                "content": [{"type": "text", "text": format!("{{\"token\":{token},\"exit\":{exit}}}")}]
-            })
-        }
-        ServiceMessage::AgentScreenshotResult {
-            result: Ok(image), ..
-        } => {
-            use base64::Engine;
-            let data = base64::engine::general_purpose::STANDARD.encode(&image.png);
-            json!({
-                "content": [
-                    {"type": "text", "text": format!("saved {} ({}×{})", image.path, image.width, image.height)},
-                    {"type": "image", "data": data, "mimeType": "image/png"}
-                ]
-            })
-        }
-        ServiceMessage::AgentRecordStartResult {
-            result: Ok(max_secs),
-            ..
-        } => json!({
-            "content": [{"type": "text", "text": format!("recording started, max {max_secs}s")}]
-        }),
-        ServiceMessage::AgentRecordStopResult {
-            result: Ok(recording),
-            ..
-        } => {
-            let secs = recording.duration_ms as f64 / 1000.0;
-            let mut text = format!(
-                "recorded {secs:.1}s → {} ({} bytes)",
-                recording.mp4_path, recording.bytes
-            );
-            if let Some(gif) = recording.gif_path {
-                text.push_str(&format!(" + {gif}"));
-            }
-            if recording.auto_stopped {
-                text.push_str(" (auto-stopped)");
-            }
-            json!({
-                "content": [{"type": "text", "text": text}]
-            })
-        }
-        ServiceMessage::AgentLayoutResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::ProcessOutputResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::ProcessTranscriptResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::ProcessCommandExitResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::ProcessRunCompletionResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::AgentSettingsResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::AgentSpacesResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::AgentScreenshotResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::AgentRecordStartResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::AgentRecordStopResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::AgentBookmarksResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::AgentWorkingDirectoryResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::AgentVaultStatusResult {
-            result: Err(message),
-            ..
-        }
-        | ServiceMessage::AgentCommandsResult {
-            result: Err(message),
-            ..
-        } => tool_error(&message),
         _ => tool_error("unexpected agent query response"),
     }
 }
@@ -816,16 +610,15 @@ mod tests {
 
     #[test]
     fn recording_maps_to_text_block() {
-        let v = query_response_to_mcp_response(ServiceMessage::AgentRecordStopResult {
-            request_id: AgentRequestId::new(),
-            result: Ok(vmux_api::protocol::AgentRecording {
-                mp4_path: "/tmp/x.mp4".into(),
-                gif_path: Some("/tmp/x.gif".into()),
-                duration_ms: 7400,
-                bytes: 1_000_000,
-                auto_stopped: true,
-            }),
-        });
+        let v = query_response_to_mcp_response(ServiceMessage::AgentQueryResult(
+            vmux_api::protocol::AgentQueryResult {
+                request_id: AgentRequestId::new(),
+                content: "recorded 7.4s → /tmp/x.mp4 (1000000 bytes) + /tmp/x.gif (auto-stopped)"
+                    .to_string(),
+                is_error: false,
+                image: None,
+            },
+        ));
         let text = v["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("/tmp/x.mp4"));
         assert!(text.contains("/tmp/x.gif"));

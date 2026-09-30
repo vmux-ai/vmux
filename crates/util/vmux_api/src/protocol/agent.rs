@@ -155,7 +155,6 @@ pub const AGENT_TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 pub enum AgentCommandResult {
     Ok,
     Text(String),
-    Layout(crate::protocol::layout::LayoutSnapshot),
     Error(String),
 }
 

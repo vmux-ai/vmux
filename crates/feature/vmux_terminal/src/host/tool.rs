@@ -405,10 +405,14 @@ async fn run_completion(
             return Err("vmux_service disconnected".to_string());
         };
         match message {
-            ServiceMessage::ProcessRunCompletionResult {
-                request_id: received,
-                result,
-            } if received == request_id => return Ok(result),
+            ServiceMessage::AgentQueryResult(result) if result.request_id == request_id => {
+                if result.is_error {
+                    return Ok(Err(result.content));
+                }
+                return serde_json::from_str(&result.content)
+                    .map(Ok)
+                    .map_err(|error| format!("cannot decode process completion: {error}"));
+            }
             ServiceMessage::Error { message } => return Err(message),
             _ => {}
         }
@@ -435,10 +439,11 @@ async fn read_full_text(connection: &ServiceConnection, process_id: ProcessId) -
             return String::new();
         };
         match message {
-            ServiceMessage::ProcessTranscriptResult {
-                request_id: received,
-                result,
-            } if received == request_id => return result.unwrap_or_default(),
+            ServiceMessage::AgentQueryResult(result) if result.request_id == request_id => {
+                return (!result.is_error)
+                    .then_some(result.content)
+                    .unwrap_or_default();
+            }
             ServiceMessage::Error { .. } => return String::new(),
             _ => {}
         }

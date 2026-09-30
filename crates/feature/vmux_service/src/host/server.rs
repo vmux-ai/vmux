@@ -315,114 +315,15 @@ fn command_result_to_content(result: vmux_api::protocol::AgentCommandResult) -> 
     match result {
         AgentCommandResult::Ok => ("ok".to_string(), false),
         AgentCommandResult::Text(text) => (text, false),
-        AgentCommandResult::Layout(snapshot) => {
-            (serde_json::to_string(&snapshot).unwrap_or_default(), false)
-        }
         AgentCommandResult::Error(message) => (message, true),
     }
 }
 
 fn query_response_to_content(response: ServiceMessage) -> Option<(String, bool)> {
-    let content = match response {
-        ServiceMessage::AgentQueryError { message, .. } => (message, true),
-        ServiceMessage::AgentQueryResult(result) => (result.content, result.is_error),
-        ServiceMessage::AgentLayoutResult { result, .. } => match result {
-            Ok(snapshot) => (serde_json::to_string(&snapshot).unwrap_or_default(), false),
-            Err(message) => (message, true),
-        },
-        ServiceMessage::AgentVaultStatusResult { result, .. } => match result {
-            Ok(snapshot) => (
-                serde_json::to_string_pretty(&snapshot).unwrap_or_default(),
-                false,
-            ),
-            Err(message) => (message, true),
-        },
-        ServiceMessage::ProcessOutputResult { result, .. }
-        | ServiceMessage::ProcessTranscriptResult { result, .. }
-        | ServiceMessage::AgentWorkingDirectoryResult { result, .. } => match result {
-            Ok(text) => (text, false),
-            Err(message) => (message, true),
-        },
-        ServiceMessage::AgentSettingsResult { result, .. } => match result {
-            Ok(settings) => {
-                let value =
-                    serde_json::Value::try_from(&settings).unwrap_or(serde_json::Value::Null);
-                (serde_json::to_string(&value).unwrap_or_default(), false)
-            }
-            Err(message) => (message, true),
-        },
-        ServiceMessage::AgentSpacesResult { result, .. } => match result {
-            Ok(spaces) => (serde_json::to_string(&spaces).unwrap_or_default(), false),
-            Err(message) => (message, true),
-        },
-        ServiceMessage::AgentBookmarksResult { result, .. } => match result {
-            Ok(bookmarks) => (serde_json::to_string(&bookmarks).unwrap_or_default(), false),
-            Err(message) => (message, true),
-        },
-        ServiceMessage::AgentCommandsResult { result, .. } => match result {
-            Ok(commands) => (serde_json::to_string(&commands).unwrap_or_default(), false),
-            Err(message) => (message, true),
-        },
-        ServiceMessage::ProcessCommandExitResult { result, .. } => match result {
-            Ok(result) => {
-                let exit = result
-                    .exit
-                    .map_or_else(|| "null".to_string(), |code| code.to_string());
-                (
-                    format!("{{\"seq\":{},\"exit\":{exit}}}", result.sequence),
-                    false,
-                )
-            }
-            Err(message) => (message, true),
-        },
-        ServiceMessage::ProcessRunCompletionResult { result, .. } => match result {
-            Ok(result) => {
-                let token = result
-                    .token
-                    .map_or_else(|| "null".to_string(), |token| format!("\"{token}\""));
-                let exit = result
-                    .exit
-                    .map_or_else(|| "null".to_string(), |code| code.to_string());
-                (format!("{{\"token\":{token},\"exit\":{exit}}}"), false)
-            }
-            Err(message) => (message, true),
-        },
-        ServiceMessage::AgentScreenshotResult { result, .. } => match result {
-            Ok(image) => (
-                format!("saved {} ({}×{})", image.path, image.width, image.height),
-                false,
-            ),
-            Err(message) => (message, true),
-        },
-        ServiceMessage::AgentRecordStartResult { result, .. } => match result {
-            Ok(max_secs) => (format!("recording started, max {max_secs}s"), false),
-            Err(message) => (message, true),
-        },
-        ServiceMessage::AgentRecordStopResult { result, .. } => match result {
-            Ok(recording) => {
-                let secs = recording.duration_ms as f64 / 1000.0;
-                let gif = recording
-                    .gif_path
-                    .map(|path| format!(" + {path}"))
-                    .unwrap_or_default();
-                let auto = if recording.auto_stopped {
-                    " (auto-stopped)"
-                } else {
-                    ""
-                };
-                (
-                    format!(
-                        "recorded {secs:.1}s -> {} ({} bytes){gif}{auto}",
-                        recording.mp4_path, recording.bytes
-                    ),
-                    false,
-                )
-            }
-            Err(message) => (message, true),
-        },
-        _ => return None,
+    let ServiceMessage::AgentQueryResult(result) = response else {
+        return None;
     };
-    Some(content)
+    Some((result.content, result.is_error))
 }
 
 async fn route_agent_query_response(
@@ -776,85 +677,6 @@ async fn handle_client(
                 vmux_core::service::write_service_message(&mut *writer, &response).await?;
             }
 
-            ClientMessage::AgentQueryError {
-                request_id,
-                message,
-            } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::AgentQueryError {
-                        request_id,
-                        message,
-                    },
-                    &broker,
-                )
-                .await;
-            }
-
-            ClientMessage::AgentLayoutResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::AgentLayoutResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::ProcessOutputResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::ProcessOutputResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::ProcessTranscriptResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::ProcessTranscriptResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::ProcessCommandExitResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::ProcessCommandExitResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::ProcessRunCompletionResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::ProcessRunCompletionResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::AgentSettingsResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::AgentSettingsResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::AgentSpacesResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::AgentSpacesResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::AgentScreenshotResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::AgentScreenshotResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
             ClientMessage::AgentQueryResult(result) => {
                 let request_id = result.request_id;
                 route_agent_query_response(
@@ -864,55 +686,6 @@ async fn handle_client(
                 )
                 .await;
             }
-            ClientMessage::AgentRecordStartResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::AgentRecordStartResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::AgentRecordStopResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::AgentRecordStopResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::AgentBookmarksResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::AgentBookmarksResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::AgentWorkingDirectoryResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::AgentWorkingDirectoryResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::AgentVaultStatusResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::AgentVaultStatusResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-            ClientMessage::AgentCommandsResult { request_id, result } => {
-                route_agent_query_response(
-                    request_id,
-                    ServiceMessage::AgentCommandsResult { request_id, result },
-                    &broker,
-                )
-                .await;
-            }
-
             ClientMessage::AgentCommandResponse { request_id, result } => {
                 if !broker.resolve_command(request_id, result.clone()).await {
                     let (content, is_error) = command_result_to_content(result);

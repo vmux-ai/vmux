@@ -3,8 +3,8 @@ use std::sync::Mutex;
 use bevy::prelude::{App, Bundle, Component, IntoScheduleConfigs, Plugin, Query, Update};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use vmux_api::protocol::{
-    AgentCommandExit, AgentRequest, AgentRequestId, AgentRunCompletion, CopyModeKey, ProcessInfo,
-    ServiceMessage,
+    AgentCommandExit, AgentQueryResult, AgentRequest, AgentRequestId, AgentRunCompletion,
+    CopyModeKey, ProcessInfo, ServiceMessage,
 };
 use vmux_api::{ProcessId, TermSelectionRange};
 
@@ -322,28 +322,39 @@ impl ProcessRuntime {
         request: &AgentRequest,
     ) -> Result<Option<ServiceMessage>, String> {
         if let Some(request) = request.decode::<AgentReadProcessOutput>()? {
-            return Ok(Some(ServiceMessage::ProcessOutputResult {
-                request_id,
-                result: self.output(request.process_id).await,
-            }));
+            return Ok(Some(ServiceMessage::AgentQueryResult(
+                AgentQueryResult::text(request_id, self.output(request.process_id).await),
+            )));
         }
         if let Some(request) = request.decode::<AgentReadProcessTranscript>()? {
-            return Ok(Some(ServiceMessage::ProcessTranscriptResult {
-                request_id,
-                result: self.transcript(request.process_id).await,
-            }));
+            return Ok(Some(ServiceMessage::AgentQueryResult(
+                AgentQueryResult::text(request_id, self.transcript(request.process_id).await),
+            )));
         }
         if let Some(request) = request.decode::<AgentProcessCommandExit>()? {
-            return Ok(Some(ServiceMessage::ProcessCommandExitResult {
-                request_id,
-                result: self.command_exit(request.process_id).await,
-            }));
+            let result = self.command_exit(request.process_id).await.map(|result| {
+                let exit = result
+                    .exit
+                    .map_or_else(|| "null".to_string(), |code| code.to_string());
+                format!("{{\"seq\":{},\"exit\":{exit}}}", result.sequence)
+            });
+            return Ok(Some(ServiceMessage::AgentQueryResult(
+                AgentQueryResult::text(request_id, result),
+            )));
         }
         if let Some(request) = request.decode::<AgentProcessRunCompletion>()? {
-            return Ok(Some(ServiceMessage::ProcessRunCompletionResult {
-                request_id,
-                result: self.run_completion(request.process_id).await,
-            }));
+            let result = self.run_completion(request.process_id).await.map(|result| {
+                let token = result
+                    .token
+                    .map_or_else(|| "null".to_string(), |token| format!("\"{token}\""));
+                let exit = result
+                    .exit
+                    .map_or_else(|| "null".to_string(), |code| code.to_string());
+                format!("{{\"token\":{token},\"exit\":{exit}}}")
+            });
+            return Ok(Some(ServiceMessage::AgentQueryResult(
+                AgentQueryResult::text(request_id, result),
+            )));
         }
         Ok(None)
     }

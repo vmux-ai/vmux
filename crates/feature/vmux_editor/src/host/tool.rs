@@ -195,11 +195,11 @@ async fn agent_working_directory(anchor: Option<ProcessId>) -> Result<PathBuf, S
             return Err("vmux_service disconnected".to_string());
         };
         match message {
-            ServiceMessage::AgentWorkingDirectoryResult {
-                request_id: received,
-                result,
-            } if received == request_id => {
-                return PathBuf::from(result?)
+            ServiceMessage::AgentQueryResult(result) if result.request_id == request_id => {
+                if result.is_error {
+                    return Err(result.content);
+                }
+                return PathBuf::from(result.content)
                     .canonicalize()
                     .map_err(|error| format!("cannot resolve agent working directory: {error}"));
             }

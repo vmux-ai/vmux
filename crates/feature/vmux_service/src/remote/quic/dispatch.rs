@@ -182,7 +182,7 @@ where
     };
     match super::super::server::broker_result(state, request).await {
         Some(AgentCommandResult::Text(json)) => SharedResponse::BrokerJson(json),
-        Some(AgentCommandResult::Ok) | Some(AgentCommandResult::Layout(_)) => SharedResponse::Ok,
+        Some(AgentCommandResult::Ok) => SharedResponse::Ok,
         Some(AgentCommandResult::Error(message)) => {
             tracing::warn!(%message, "remote quic: the GUI refused a brokered command");
             SharedResponse::Failed(SharedFailure::Invalid)

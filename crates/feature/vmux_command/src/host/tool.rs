@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
-use vmux_api::protocol::{AgentListCommands, AgentNotify, AgentRequest, ClientMessage, JsonValue};
+use vmux_api::protocol::{
+    AgentListCommands, AgentNotify, AgentQueryResult, AgentRequest, ClientMessage, JsonValue,
+};
 use vmux_core::JsonArguments;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{
@@ -68,10 +70,9 @@ fn answer_command_queries(
         }
         handled.write(ToolQueryHandled(request.request_id));
         if let Err(error) = serde_json::from_slice::<AgentListCommands>(&request.query.body) {
-            service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
-                request_id: request.request_id,
-                message: error.to_string(),
-            }));
+            service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+                AgentQueryResult::text(request.request_id, Err(error.to_string())),
+            )));
             continue;
         }
         let mut tools = commands
@@ -79,10 +80,10 @@ fn answer_command_queries(
             .filter_map(crate::CommandDefinition::agent_tool)
             .collect::<Vec<_>>();
         tools.sort_by(|left, right| left.name.cmp(&right.name));
-        service_requests.write(ServiceRequest(ClientMessage::AgentCommandsResult {
-            request_id: request.request_id,
-            result: Ok(tools),
-        }));
+        let result = serde_json::to_string(&tools).map_err(|error| error.to_string());
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult::text(request.request_id, result),
+        )));
     }
 }
 

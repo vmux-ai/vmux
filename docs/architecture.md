@@ -262,7 +262,7 @@ carrying an rkyv `SharedMessage` and `SharedResponse`. The relay's control conne
 the odd one: a JSON hello, then opaque DATAGRAM frames it cannot read.
 
 Remote agent operations are flat `SharedMessage` variants rather than a nested request enum.
-The QUIC application protocol is `vmux/5`; changing the positional rkyv wire contract requires
+The QUIC application protocol is `vmux/7`; changing the positional rkyv wire contract requires
 another ALPN version.
 
 Agent commands and queries use the same routed `AgentRequest` envelope. Each operation is a

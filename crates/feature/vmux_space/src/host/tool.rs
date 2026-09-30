@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
 use serde::Deserialize;
 use vmux_api::BinEvent;
-use vmux_api::protocol::{AgentRequest, AgentSpace, ClientMessage};
+use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentSpace, ClientMessage};
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_core::{Active, Order, ProcessAnchor};
 use vmux_layout::space::{Space, SpaceId};
@@ -71,10 +71,9 @@ fn answer_space_queries(
         }
         handled.write(ToolQueryHandled(request.request_id));
         if let Err(error) = serde_json::from_slice::<AgentListSpaces>(&request.query.body) {
-            service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
-                request_id: request.request_id,
-                message: error.to_string(),
-            }));
+            service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+                AgentQueryResult::text(request.request_id, Err(error.to_string())),
+            )));
             continue;
         }
         let mut rows: Vec<(u32, AgentSpace)> = Vec::new();
@@ -103,10 +102,11 @@ fn answer_space_queries(
             ));
         }
         rows.sort_by_key(|(order, _)| *order);
-        service_requests.write(ServiceRequest(ClientMessage::AgentSpacesResult {
-            request_id: request.request_id,
-            result: Ok(rows.into_iter().map(|(_, row)| row).collect()),
-        }));
+        let rows = rows.into_iter().map(|(_, row)| row).collect::<Vec<_>>();
+        let result = serde_json::to_string(&rows).map_err(|error| error.to_string());
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
+            AgentQueryResult::text(request.request_id, result),
+        )));
     }
 }
 
@@ -309,10 +309,10 @@ mod tests {
         let requests = app.world().resource::<Messages<ServiceRequest>>();
         let mut cursor = requests.get_cursor();
         let response = cursor.read(requests).next().expect("space response");
-        let ClientMessage::AgentSpacesResult { result, .. } = &response.0 else {
+        let ClientMessage::AgentQueryResult(result) = &response.0 else {
             panic!("expected spaces result");
         };
-        let rows = result.as_ref().unwrap();
+        let rows = serde_json::from_str::<Vec<AgentSpace>>(&result.content).unwrap();
         assert_eq!(rows.len(), 2);
         assert!(
             !rows
