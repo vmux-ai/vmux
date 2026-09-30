@@ -7,13 +7,13 @@ use bevy_app::{App, Plugin};
 #[cfg(host)]
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
+#[cfg(host)]
+use super::session::ChatView;
 use crate::event::ChatComposerEffect;
 #[cfg(host)]
 use crate::event::ChatDraftChanged;
 #[cfg(host)]
 use crate::event::{ChatPickFiles, ChatResumeQueryRequest, ChatSlashCommandRequest};
-#[cfg(host)]
-use crate::host::ChatView;
 use crate::selector::{SelectorMode, selector_mode};
 
 #[derive(Component, Default)]
@@ -197,7 +197,7 @@ fn on_slash_command(
     };
     let (effect, changes) = composer.slash_effect(command);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
+        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(webview, &effect),
     );
     if let Some(changed) = ComposerQueriesChanged::new(webview, changes) {
         commands.trigger(changed);
@@ -216,7 +216,7 @@ fn on_slash_command(
 fn on_queries_changed(trigger: On<ComposerQueriesChanged>, mut commands: Commands) {
     let webview = trigger.event_target();
     if let Some(query) = trigger.event().media() {
-        commands.trigger(crate::media::ChatMediaQuery::new(
+        commands.trigger(super::media::ChatMediaQuery::new(
             webview,
             query.to_string(),
         ));

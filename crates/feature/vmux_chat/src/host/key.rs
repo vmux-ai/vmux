@@ -1,9 +1,9 @@
-use crate::composer::ComposerState;
+use super::composer::ComposerState;
+use super::session::ChatView;
 use crate::event::{
     ChatCancel, ChatChoiceNumberEffect, ChatEscape, ChatHistoryMoveEffect, ChatListChooseEffect,
     ChatListMoveEffect, ChatSelectorDismissEffect, ChatSubmit,
 };
-use crate::host::ChatView;
 use bevy_app::{App, Plugin, Startup};
 use bevy_cef::prelude::UiInput;
 use bevy_ecs::prelude::*;
@@ -64,7 +64,8 @@ struct InterruptBinding;
 struct CancelBinding;
 
 fn spawn_commands(mut commands: Commands) {
-    let mut definitions = CommandDefinitions::from_feature_ron(include_str!("feature.ron"), "key");
+    let mut definitions =
+        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "key");
     commands.spawn((definitions.take("chat_list_next"), ListNextBinding));
     commands.spawn((definitions.take("chat_list_previous"), ListPreviousBinding));
     commands.spawn((definitions.take("chat_list_choose"), ListChooseBinding));
@@ -104,7 +105,7 @@ fn move_list(
     };
     revision.0 = revision.0.wrapping_add(1).max(1);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
             caller,
             &ChatListMoveEffect {
                 revision: revision.0,
@@ -129,7 +130,7 @@ fn choose_list(
     };
     revision.0 = revision.0.wrapping_add(1).max(1);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
             caller,
             &ChatListChooseEffect {
                 revision: revision.0,
@@ -153,7 +154,7 @@ fn choose_number(
     };
     revision.0 = revision.0.wrapping_add(1).max(1);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
             caller,
             &ChatChoiceNumberEffect {
                 revision: revision.0,
@@ -184,7 +185,7 @@ fn move_history(
     };
     revision.0 = revision.0.wrapping_add(1).max(1);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
             caller,
             &ChatHistoryMoveEffect {
                 revision: revision.0,
@@ -230,7 +231,7 @@ fn dismiss_selector(
     };
     revision.0 = revision.0.wrapping_add(1).max(1);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
             caller,
             &ChatSelectorDismissEffect {
                 revision: revision.0,
@@ -273,8 +274,8 @@ fn cancel(
 
 #[cfg(test)]
 mod tests {
+    use super::super::state::ChatUiState;
     use super::*;
-    use crate::state::ChatUiState;
     use vmux_command::CommandInvocation;
     use vmux_core::host::UiStateWrite;
 

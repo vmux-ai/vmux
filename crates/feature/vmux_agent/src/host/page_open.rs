@@ -35,8 +35,6 @@ use vmux_setting::AppSettings;
 use vmux_setting::SpaceOverrides;
 #[cfg(test)]
 use vmux_space::model::SpaceRecord;
-#[cfg(test)]
-use vmux_space::spaces::space_profile_bundle;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
 
 use super::attach::{
@@ -1909,11 +1907,12 @@ mod tests {
             .insert_resource(settings)
             .add_systems(Update, handle_agent_page_open);
         app.world_mut().spawn((
-            space_profile_bundle(&SpaceRecord {
+            SpaceRecord {
                 id: "space-1".into(),
                 name: "Space 1".into(),
                 profile: "Personal".into(),
-            }),
+            }
+            .bundle(),
             CurrentSpace,
         ));
 
@@ -1969,11 +1968,12 @@ mod tests {
             .insert_resource(settings)
             .add_systems(Update, handle_agent_page_open);
         app.world_mut().spawn((
-            space_profile_bundle(&SpaceRecord {
+            SpaceRecord {
                 id: "active".into(),
                 name: "Active".into(),
                 profile: "Personal".into(),
-            }),
+            }
+            .bundle(),
             CurrentSpace,
         ));
         let space = app
@@ -2178,11 +2178,12 @@ mod tests {
             .insert_resource(settings)
             .add_systems(Update, handle_agent_page_open);
         app.world_mut().spawn((
-            space_profile_bundle(&SpaceRecord {
+            SpaceRecord {
                 id: "space-1".into(),
                 name: "Space 1".into(),
                 profile: "Personal".into(),
-            }),
+            }
+            .bundle(),
             CurrentSpace,
         ));
 

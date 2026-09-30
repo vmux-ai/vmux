@@ -1,12 +1,12 @@
+use super::model::{Models, Picker};
+use super::prompt::{AttachmentPreviews, Attachments, Browsed, Media};
+use super::room::{Agents, Conversation, LiveTurn, Log, RoomTranscript, Snapshot};
 use crate::event::{
     ChatAttachments, ChatBranchesState, ChatChoiceNumberEffect, ChatComposerEffect,
     ChatHistoryMoveEffect, ChatListChooseEffect, ChatListMoveEffect, ChatMediaState,
     ChatPromptFocusEffect, ChatResumeState, ChatSelectorDismissEffect, ChatSnapshot,
     ChatTranscriptState, ComposerContext, ModeState, ModelState, SlashCommands,
 };
-use crate::model::{Models, Picker};
-use crate::prompt::{AttachmentPreviews, Attachments, Browsed, Media};
-use crate::room::{Agents, Conversation, LiveTurn, Log, RoomTranscript, Snapshot};
 use bevy_app::{App, Last, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::page::UiStateEmit;
@@ -82,7 +82,7 @@ fn spawn_chat_runtime(mut commands: Commands) {
         Models::default(),
         Picker::default(),
         Attachments::default(),
-        crate::prompt::ChatPromptFocusRevision::default(),
+        super::prompt::ChatPromptFocusRevision::default(),
         AttachmentPreviews::default(),
         Browsed::default(),
         Media::default(),

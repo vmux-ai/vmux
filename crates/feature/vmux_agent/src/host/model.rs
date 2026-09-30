@@ -19,8 +19,8 @@ use vmux_chat::event::{
     ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort, SlashCommand,
     SlashCommandEntry, SlashCommands,
 };
+use vmux_chat::host::ChatUiState;
 use vmux_chat::host::ChatView;
-use vmux_chat::state::ChatUiState;
 use vmux_command::event::{StartSelectMode, StartSelectModel};
 use vmux_command::snapshot::{AgentPromptTarget, CommandBarProjection};
 use vmux_core::agent::{AgentKind, default_effort, effort_levels};

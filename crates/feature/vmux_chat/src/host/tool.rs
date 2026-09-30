@@ -4,14 +4,14 @@ use vmux_api::protocol::AgentRequest;
 use vmux_core::ProcessAnchor;
 use vmux_tool::{ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin};
 
-use crate::host::{AgentRequestUserChoice, AgentSetConversationTitle};
+use super::session::{AgentRequestUserChoice, AgentSetConversationTitle};
 
 pub struct ChatToolPlugin;
 
 impl Plugin for ChatToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("feature.ron"),
+            include_str!("../feature.ron"),
             "default",
         ))
         .register_tool::<RequestUserChoiceArgs>("request_user_choice")

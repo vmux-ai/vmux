@@ -13,7 +13,7 @@ use crate::format::{
     ChatPageTitle, ImportedMessages, ModelOptions, PromptHistoryDirection, ResumeMenuState,
     SelectorMode, selector_mode,
 };
-use crate::state::{ChatUiState, ChatUiStatePatch};
+use crate::host::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
 use dioxus::prelude::*;
 use vmux_api::prompt_media::{inline_media_query, replace_inline_media_query};

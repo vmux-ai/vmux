@@ -405,7 +405,7 @@ fn on_chat_resume_query(
         return;
     };
     commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
             webview,
             &projection.0,
         ),
@@ -444,7 +444,7 @@ fn drain_resume_list_tasks(
                 continue;
             }
             commands.trigger(
-                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
                     task.webview,
                     &projection.0,
                 ),

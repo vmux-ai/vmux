@@ -7,9 +7,7 @@ impl Plugin for VmuxMobilePlugin {
         app.add_plugins((
             vmux_start::roster::StartRosterPlugin,
             vmux_team::roster::TeamRosterPlugin,
-            vmux_chat::room::ChatRoomPlugin,
-            vmux_chat::prompt::ChatPromptPlugin,
-            vmux_chat::model::ChatModelPlugin,
+            vmux_chat::host::ChatStatePlugin,
         ));
     }
 }

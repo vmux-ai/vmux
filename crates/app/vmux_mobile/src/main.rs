@@ -20,7 +20,7 @@ use crate::pairing::{
 use crate::runtime::RuntimeHandle;
 use crate::session::{LeaveSession, RestartSession, SessionPlugin, use_session};
 use bevy_app::{App as BevyApp, AppExit, Plugin};
-use vmux_chat::room::Agents;
+use vmux_chat::host::Agents;
 use vmux_start::roster::Roster;
 
 use dioxus::prelude::*;

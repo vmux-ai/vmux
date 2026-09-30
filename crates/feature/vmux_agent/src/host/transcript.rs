@@ -11,12 +11,12 @@ use vmux_chat::event::{
     CHAT_INITIAL_ITEM_LIMIT, ChatHistoryMoreRequest, ChatSnapshot, PendingApproval,
     QueuedPromptSnapshot,
 };
+use vmux_chat::host::ChatAttachmentHydrationRequest;
 use vmux_chat::host::{
     ChatAttachmentProjection, ChatHistoryQuery, ChatHistoryResult, ChatSnapshotProjection,
     ChatSynced, ChatTranscriptProjection, ChatView, PendingAgentChoice, TranscriptPage,
     TranscriptTail,
 };
-use vmux_chat::media::ChatAttachmentHydrationRequest;
 use vmux_core::PageMetadata;
 use vmux_core::agent::AgentKind;
 use vmux_core::chat::{group_turns_before, group_turns_tail, grouped_item_count};
@@ -175,14 +175,14 @@ fn push_chat_to_page(
             );
         }
         commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
                 webview,
                 &snapshot.0,
             ),
         );
         if transcript_changed {
             commands.trigger(
-                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
                     webview,
                     &transcript.state,
                 ),
@@ -388,19 +388,19 @@ fn sync_chat_to_ready_views(
         attachments.hydrate_snapshot(&mut projection.snapshot);
         snapshot.0 = projection.snapshot;
         commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
                 webview,
                 &snapshot.0,
             ),
         );
         commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
                 webview,
                 &transcript.state,
             ),
         );
         commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
                 webview,
                 &attachments.state(),
             ),
@@ -425,20 +425,20 @@ fn sync_chat_to_ready_views(
             .unwrap_or((false, None, None, String::new()));
         let model = ModelProjection::new(model_state, cross, &agent_key, settings.as_deref());
         commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
                 webview,
                 &model.state,
             ),
         );
         commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
                 webview,
                 &model.slash_commands,
             ),
         );
         let mode = ModeProjection::from(mode_state);
         commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
                 webview, &mode.0,
             ),
         );
@@ -471,7 +471,7 @@ fn on_chat_history_more_request(
     };
     commands.spawn(query);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
             webview,
             &transcript.state,
         ),
@@ -549,7 +549,7 @@ fn apply_chat_history_results(
         commands.entity(entity).despawn();
         if changed {
             commands.trigger(
-                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
                     result.webview,
                     &transcript.state,
                 ),

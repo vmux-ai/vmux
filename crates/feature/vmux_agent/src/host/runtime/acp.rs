@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use crossbeam_channel::Receiver;
 use vmux_api::protocol::{AcpModeOption, AcpModelOption, ClientMessage, SharedMessage};
-use vmux_chat::composer::ChatCliRequest;
+use vmux_chat::host::ChatCliRequest;
 #[cfg(test)]
 use vmux_core::ProcessId;
 use vmux_core::agent::SwapStackSession;

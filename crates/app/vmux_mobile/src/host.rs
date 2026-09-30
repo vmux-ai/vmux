@@ -8,10 +8,10 @@ use vmux_chat::event::{
     ChatApproval, ChatCancel, ChatComposerEffect, ChatDraftChanged, ChatEscape,
     ChatRemoveAttachment, ChatStop, ChatSubmit, SelectModel, SetAgentEffort,
 };
-use vmux_chat::model::Models;
-use vmux_chat::prompt::{Attach, Attachments, Browsed, RemoveAttachment};
-use vmux_chat::room::{Conversation, Reported, Submitted};
-use vmux_chat::state::{ChatUiState, PublishComposerEffect, RepublishChatUiState};
+use vmux_chat::host::{
+    Attach, Attachments, Browsed, ChatUiState, Conversation, Models, PublishComposerEffect,
+    RemoveAttachment, Reported, RepublishChatUiState, Submitted,
+};
 use vmux_start::roster::RepublishLauncher;
 use vmux_team::roster::{Members, RepublishTeam};
 

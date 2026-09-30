@@ -12,8 +12,7 @@ use bevy_ecs::system::{Commands, NonSendMut, Query, Single};
 use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
 use dioxus::prelude::*;
 use vmux_api::room::{NewChatRequest, RemoteEvent, RemoteSession};
-use vmux_chat::room::{Conversation, LiveTurn, Log, Reported};
-use vmux_chat::state::ChatRuntime;
+use vmux_chat::host::{ChatRuntime, Conversation, LiveTurn, Log, Reported};
 
 use crate::pairing::ConnectionState;
 use crate::remote::{Api, ApiError, next_client_op_id, remote_event_from_shared};

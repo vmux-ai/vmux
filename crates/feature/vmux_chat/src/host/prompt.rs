@@ -17,17 +17,17 @@ use vmux_session::{
 };
 
 #[cfg(host)]
-use crate::composer::{ComposerQueriesChanged, ComposerState};
+use super::composer::{ComposerQueriesChanged, ComposerState};
+use super::room::Submitted;
+#[cfg(host)]
+use super::session::{ChatAttachmentProjection, ChatView};
+use super::state::{ChatRuntime, ChatUiStatePlugin, ChatUiStateProjection, RepublishChatUiState};
 #[cfg(host)]
 use crate::event::{
     ChatApproval, ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue,
     ChatEscape, ChatResume, ChatStop, ChatSubmit,
 };
 use crate::event::{ChatMediaState, ChatPromptFocusEffect};
-#[cfg(host)]
-use crate::host::{ChatAttachmentProjection, ChatView};
-use crate::room::Submitted;
-use crate::state::{ChatRuntime, ChatUiStatePlugin, ChatUiStateProjection, RepublishChatUiState};
 
 pub struct ChatPromptPlugin;
 
@@ -127,14 +127,14 @@ fn on_chat_submit(
     enqueue_prompt(&mut queue, &mut state, text, attachments);
     let (effect, queries) = composer.effect(String::new(), true);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
+        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(webview, &effect),
     );
     if let Some(changed) = ComposerQueriesChanged::new(webview, queries) {
         commands.trigger(changed);
     }
     if selected.clear_selected() {
         commands.trigger(
-            vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
                 webview,
                 &selected.state(),
             ),
@@ -272,7 +272,7 @@ fn on_chat_escape(
     if !running && queue.items.is_empty() && !composer.draft().is_empty() {
         let (effect, queries) = composer.effect(String::new(), true);
         commands.trigger(
-            vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
                 webview, &effect,
             ),
         );

@@ -7,9 +7,9 @@ use vmux_api::room::{
 };
 use vmux_core::chat::group_turns_tail;
 
+use super::prompt::AttachmentPreviews;
+use super::state::{ChatRuntime, ChatUiStatePlugin, ChatUiStateProjection, RepublishChatUiState};
 use crate::event::{ChatSnapshot, ChatTranscriptState, PendingApproval};
-use crate::prompt::AttachmentPreviews;
-use crate::state::{ChatRuntime, ChatUiStatePlugin, ChatUiStateProjection, RepublishChatUiState};
 
 pub struct ChatRoomPlugin;
 
