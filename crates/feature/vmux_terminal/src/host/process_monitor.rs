@@ -25,7 +25,7 @@ pub struct ProcessMonitorPlugin;
 impl Plugin for ProcessMonitorPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
-        app.add_plugins(crate::monitor::ProcessMonitorPage::plugin());
+        app.add_plugins(crate::ui::monitor::ProcessMonitorPage::plugin());
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
@@ -63,7 +63,7 @@ impl Plugin for ProcessMonitorPlugin {
             .add_observer(on_process_kill)
             .add_observer(on_process_kill_all)
             .add_plugins(HostedUiPlugin::<ProcessMonitorView>::new(
-                crate::monitor::ProcessMonitorPage::MANIFEST,
+                crate::ui::monitor::ProcessMonitorPage::MANIFEST,
             ));
     }
 }
@@ -103,7 +103,7 @@ fn open_services(
 ) {
     for _ in requests.read() {
         stack_requests.write(OpenRequest {
-            url: Some(crate::monitor::ProcessMonitorPage::URL.to_string()),
+            url: Some(crate::ui::monitor::ProcessMonitorPage::URL.to_string()),
         });
     }
 }
