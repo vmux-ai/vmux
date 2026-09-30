@@ -680,30 +680,22 @@ impl Chat {
     }
 
     pub fn point_at_choice(&self, index: usize) {
-        set_if_changed(self.slash.menu_sel, index);
         let _ = send(&ChatListSelectionChanged {
             index: index as u32,
         });
     }
 
     pub fn answer_approval(&self, call_id: String, decision: ApprovalDecision) {
-        let mut approval = self.run.approval;
-        let mut approval_sel = self.run.approval_sel;
-        if send(&ChatApproval { call_id, decision }).is_ok() {
-            approval.set(None);
-            approval_sel.set(0);
-        }
+        let _ = send(&ChatApproval { call_id, decision });
     }
 
     pub fn point_at_approval(&self, index: usize) {
-        set_if_changed(self.run.approval_sel, index);
         let _ = send(&ChatListSelectionChanged {
             index: index as u32,
         });
     }
 
     pub fn point_at_list(&self, index: usize) {
-        set_if_changed(self.slash.menu_sel, index);
         let _ = send(&ChatListSelectionChanged {
             index: index as u32,
         });

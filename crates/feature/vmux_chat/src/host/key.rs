@@ -790,6 +790,7 @@ fn select_list(
     lists: ChatLists,
     composers: Query<&ComposerState>,
     mut selections: Query<&mut ChatListSelection>,
+    mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let Ok(composer) = composers.get(webview) else {
@@ -802,6 +803,15 @@ fn select_list(
         return;
     };
     selection.update(&list, trigger.event().payload.index as usize);
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+            webview,
+            &ChatListSelectionState {
+                kind: list.kind,
+                index: selection.index as u32,
+            },
+        ),
+    );
 }
 
 fn update_composer_menu(
