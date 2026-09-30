@@ -1,12 +1,10 @@
 use bevy::prelude::*;
-#[cfg(not(feature = "recording"))]
-use vmux_capture::{
-    RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse,
-};
-#[cfg(not(feature = "screenshots"))]
-use vmux_capture::{ScreenshotRequest, ScreenshotResponse};
 #[cfg(any(not(feature = "screenshots"), not(feature = "recording")))]
 use vmux_command::WriteCommandRequests;
+#[cfg(not(feature = "recording"))]
+use vmux_input::{RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse};
+#[cfg(not(feature = "screenshots"))]
+use vmux_input::{ScreenshotRequest, ScreenshotResponse};
 #[cfg(not(feature = "updater"))]
 use vmux_setting::event::{CheckForUpdatesRequest, CurrentUpdateCheckStatus, UpdateCheckStatus};
 

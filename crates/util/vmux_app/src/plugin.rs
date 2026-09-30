@@ -11,7 +11,7 @@ pub enum VmuxPlugin {
     #[plugin(feature = "bookmark", desktop, requires(layout))]
     Bookmark(vmux_bookmark::BookmarkPlugin),
     #[plugin(feature = "capture", desktop, requires(tool))]
-    Capture(vmux_capture::CapturePlugin),
+    Capture(vmux_input::CapturePlugin),
     #[plugin(feature = "vault", desktop, requires(layout))]
     Vault(vmux_vault::VaultPlugin),
     #[plugin(feature = "core", option = core, desktop)]

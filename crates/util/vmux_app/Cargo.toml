@@ -52,7 +52,7 @@ desktop = [
 ]
 mobile = ["dep:vmux_chat", "dep:vmux_start", "dep:vmux_team"]
 tool = ["dep:vmux_tool"]
-capture = ["tool", "dep:vmux_capture"]
+capture = ["tool", "dep:vmux_input"]
 bookmark = ["layout", "dep:vmux_bookmark"]
 core = [
     "dep:vmux_command",
@@ -93,7 +93,6 @@ vmux_agent = { path = "../../feature/vmux_agent", optional = true }
 vmux_bookmark = { path = "../../feature/vmux_bookmark", optional = true }
 vmux_browser = { path = "../vmux_browser", optional = true }
 vmux_chat = { path = "../../feature/vmux_chat", optional = true }
-vmux_capture = { path = "../../feature/vmux_capture", optional = true }
 vmux_command = { path = "../../feature/vmux_command", optional = true }
 vmux_core = { path = "../vmux_core", optional = true }
 vmux_editor = { path = "../../feature/vmux_editor", optional = true }
@@ -101,6 +100,7 @@ vmux_extension = { path = "../../feature/vmux_extension", optional = true }
 vmux_flex = { path = "../vmux_flex", optional = true }
 vmux_git = { path = "../../feature/vmux_git", optional = true }
 vmux_history = { path = "../../feature/vmux_history", optional = true }
+vmux_input = { path = "../../feature/vmux_input", optional = true }
 vmux_knowledge = { path = "../../feature/vmux_knowledge", optional = true }
 vmux_layout = { path = "../../feature/vmux_layout", optional = true }
 vmux_mcp = { path = "../vmux_mcp", optional = true }

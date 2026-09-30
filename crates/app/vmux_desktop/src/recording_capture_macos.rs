@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use vmux_capture::RecordStartResponse;
+use vmux_input::RecordStartResponse;
 
 const PIXEL_FORMAT_BGRA: u32 = 0x4247_5241;
 

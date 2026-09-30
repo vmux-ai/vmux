@@ -1,9 +1,13 @@
 use bevy::prelude::*;
 
+pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
+
+mod capture;
 #[cfg(target_os = "macos")]
 mod keyboard;
 pub mod pointer;
 
+pub use capture::*;
 #[cfg(target_os = "macos")]
 pub use keyboard::KeyboardPlugin;
 

@@ -21,7 +21,7 @@ impl Plugin for VmuxCliPlugin {
             vmux_command::CommandToolPlugin,
             vmux_team::TeamToolPlugin,
             vmux_browser::BrowserToolPlugin,
-            vmux_capture::CapturePlugin,
+            vmux_input::CapturePlugin,
             vmux_chat::host::ChatToolPlugin,
             vmux_editor::FileToolPlugin,
             vmux_knowledge::KnowledgeToolPlugin,

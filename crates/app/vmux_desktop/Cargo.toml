@@ -91,7 +91,6 @@ url = { workspace = true }
 vmux_agent = { path = "../../feature/vmux_agent" }
 vmux_app = { path = "../../util/vmux_app", features = ["desktop"] }
 vmux_browser = { path = "../../util/vmux_browser" }
-vmux_capture = { path = "../../feature/vmux_capture" }
 vmux_shortcut = { path = "../../feature/vmux_shortcut" }
 vmux_command = { path = "../../feature/vmux_command" }
 vmux_core = { path = "../../util/vmux_core" }

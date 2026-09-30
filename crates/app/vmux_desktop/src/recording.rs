@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::Arc;
-use vmux_capture::{
+use vmux_input::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
 };
 use vmux_setting::AppSettings;
@@ -269,7 +269,7 @@ mod capture {
     use bevy::prelude::Entity;
     use crossbeam_channel::Sender;
     use std::path::PathBuf;
-    use vmux_capture::RecordStartResponse;
+    use vmux_input::RecordStartResponse;
 
     #[derive(Default)]
     pub(crate) struct CaptureRuntime;

@@ -10219,7 +10219,6 @@ dependencies = [
  "vmux_agent",
  "vmux_bookmark",
  "vmux_browser",
- "vmux_capture",
  "vmux_chat",
  "vmux_command",
  "vmux_core",
@@ -10228,6 +10227,7 @@ dependencies = [
  "vmux_flex",
  "vmux_git",
  "vmux_history",
+ "vmux_input",
  "vmux_knowledge",
  "vmux_layout",
  "vmux_macro",
@@ -10316,19 +10316,6 @@ dependencies = [
  "vmux_ui",
  "wry",
  "zip",
-]
-
-[[package]]
-name = "vmux_capture"
-version = "0.0.34"
-dependencies = [
- "bevy",
- "rkyv",
- "serde",
- "serde_json",
- "vmux_api",
- "vmux_core",
- "vmux_tool",
 ]
 
 [[package]]
@@ -10524,7 +10511,6 @@ dependencies = [
  "vmux_api",
  "vmux_app",
  "vmux_browser",
- "vmux_capture",
  "vmux_command",
  "vmux_core",
  "vmux_editor",
@@ -10687,8 +10673,13 @@ dependencies = [
  "crossbeam-channel",
  "objc2-app-kit 0.3.2",
  "parking_lot",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "vmux_api",
  "vmux_command",
  "vmux_core",
+ "vmux_tool",
 ]
 
 [[package]]
