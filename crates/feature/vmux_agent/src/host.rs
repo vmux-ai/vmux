@@ -1,6 +1,7 @@
 mod tree;
 pub use tree::{AgentPagesPlugin, AgentPlugin, AgentSessionPlugin};
 
+mod acp_environment;
 mod acp_install;
 pub mod acp_registry;
 pub mod acp_tool;
