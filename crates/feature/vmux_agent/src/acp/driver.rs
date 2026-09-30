@@ -90,6 +90,78 @@ struct AcpFsScope {
     cwd: PathBuf,
 }
 
+impl AcpFsScope {
+    fn resolve(&self, path: &std::path::Path) -> Option<PathBuf> {
+        vmux_path::ScopedPath::resolve(&self.cwd, path)
+            .ok()
+            .map(vmux_path::ScopedPath::into_path_buf)
+    }
+
+    fn read(&self, request: &ReadTextFileRequest) -> Result<String, String> {
+        let path = self
+            .resolve(&request.path)
+            .ok_or("path outside session cwd")?;
+        let text = std::fs::read_to_string(&path)
+            .map_err(|error| format!("read {}: {error}", path.display()))?;
+        Ok(AcpFileContents(text).slice(request.line, request.limit))
+    }
+
+    fn write(&self, request: &WriteTextFileRequest) -> Result<(), String> {
+        let path = self
+            .resolve(&request.path)
+            .ok_or("path outside session cwd")?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("mkdir {}: {error}", parent.display()))?;
+        }
+        std::fs::write(&path, &request.content)
+            .map_err(|error| format!("write {}: {error}", path.display()))
+    }
+}
+
+struct AcpFileContents(String);
+
+impl AcpFileContents {
+    fn slice(&self, line: Option<u32>, limit: Option<u32>) -> String {
+        if line.is_none() && limit.is_none() {
+            return self.0.clone();
+        }
+        let start = line.unwrap_or(1).saturating_sub(1) as usize;
+        let lines = self.0.lines().collect::<Vec<_>>();
+        let end = limit
+            .map(|limit| start.saturating_add(limit as usize).min(lines.len()))
+            .unwrap_or(lines.len());
+        lines.get(start..end).unwrap_or(&[]).join("\n")
+    }
+}
+
+#[derive(Default)]
+struct AcpStderrTail(Mutex<VecDeque<String>>);
+
+impl AcpStderrTail {
+    fn push(&self, line: String) {
+        let mut tail = self.0.lock().unwrap();
+        if tail.len() >= STDERR_TAIL_CAPACITY {
+            tail.pop_front();
+        }
+        tail.push_back(line);
+    }
+
+    fn detail(&self, shown: usize) -> String {
+        let tail = self.0.lock().unwrap();
+        let lines = tail
+            .iter()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>();
+        if lines.is_empty() {
+            return String::new();
+        }
+        let start = lines.len().saturating_sub(shown);
+        format!("\n\n{}", lines[start..].join("\n"))
+    }
+}
+
 #[derive(Clone)]
 pub(super) enum AcpProcesses {
     Runtime(ProcessRuntime),
@@ -204,7 +276,7 @@ pub(super) struct AcpShared {
     pub terminals: Mutex<HashMap<String, AcpTerminal>>,
     processes: AcpProcesses,
     pub cancel_requested: AtomicBool,
-    stderr_tail: Mutex<VecDeque<String>>,
+    stderr_tail: AcpStderrTail,
     startup_ready: AtomicBool,
 }
 
@@ -243,7 +315,7 @@ impl AcpShared {
             terminals: Mutex::new(HashMap::new()),
             processes: processes.into(),
             cancel_requested: AtomicBool::new(false),
-            stderr_tail: Mutex::new(VecDeque::new()),
+            stderr_tail: AcpStderrTail::default(),
             startup_ready: AtomicBool::new(false),
         }
     }
@@ -346,30 +418,9 @@ impl AcpShared {
         receiver.await.unwrap_or_default()
     }
 
-    fn push_stderr(&self, line: String) {
-        let mut tail = self.stderr_tail.lock().unwrap();
-        if tail.len() >= STDERR_TAIL_CAPACITY {
-            tail.pop_front();
-        }
-        tail.push_back(line);
-    }
-
     fn stderr_detail(&self) -> String {
-        stderr_detail_from(&self.stderr_tail.lock().unwrap(), STDERR_TAIL_SHOWN)
+        self.stderr_tail.detail(STDERR_TAIL_SHOWN)
     }
-}
-
-fn stderr_detail_from(tail: &VecDeque<String>, shown: usize) -> String {
-    let lines: Vec<&str> = tail
-        .iter()
-        .map(|line| line.trim())
-        .filter(|line| !line.is_empty())
-        .collect();
-    if lines.is_empty() {
-        return String::new();
-    }
-    let start = lines.len().saturating_sub(shown);
-    format!("\n\n{}", lines[start..].join("\n"))
 }
 
 fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
@@ -584,7 +635,7 @@ pub async fn run(
                 let scope = AcpFsScope {
                     cwd: read_shared.cwd(),
                 };
-                match read_text_file(&scope, &req) {
+                match scope.read(&req) {
                     Ok(content) => responder.respond(ReadTextFileResponse::new(content)),
                     Err(err) => responder.respond_with_internal_error(err),
                 }
@@ -598,7 +649,7 @@ pub async fn run(
                 let scope = AcpFsScope {
                     cwd: write_shared.cwd(),
                 };
-                match write_text_file(&scope, &req) {
+                match scope.write(&req) {
                     Ok(()) => responder.respond(WriteTextFileResponse::new()),
                     Err(err) => responder.respond_with_internal_error(err),
                 }
@@ -1069,7 +1120,7 @@ async fn drain_stderr(stderr: tokio::process::ChildStderr, shared: Arc<AcpShared
     let mut lines = BufReader::new(stderr).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         tracing::warn!(target: "acp", "{line}");
-        shared.push_stderr(line);
+        shared.stderr_tail.push(line);
     }
     if !shared.startup_ready() {
         shared.emit_status(AgentRunStatus::Errored(format!(
@@ -1109,12 +1160,14 @@ async fn create_terminal(
             cwd.display()
         ));
     }
-    let cwd = resolve_in_cwd(&session_cwd, &cwd).ok_or_else(|| {
-        format!(
-            "acp: terminal cwd is outside session cwd: {}; select the project and wait for user approval first",
-            cwd.display()
-        )
-    })?;
+    let cwd = AcpFsScope { cwd: session_cwd }
+        .resolve(&cwd)
+        .ok_or_else(|| {
+            format!(
+                "acp: terminal cwd is outside session cwd: {}; select the project and wait for user approval first",
+                cwd.display()
+            )
+        })?;
     let cwd = cwd.to_string_lossy().into_owned();
     let created = shared
         .processes
@@ -1361,43 +1414,6 @@ fn is_permissionless_host_tool(name: &str) -> bool {
     )
 }
 
-fn resolve_in_cwd(cwd: &std::path::Path, path: &std::path::Path) -> Option<PathBuf> {
-    vmux_path::ScopedPath::resolve(cwd, path)
-        .ok()
-        .map(vmux_path::ScopedPath::into_path_buf)
-}
-
-fn resolve_acp_fs_path(scope: &AcpFsScope, path: &std::path::Path) -> Option<PathBuf> {
-    resolve_in_cwd(&scope.cwd, path)
-}
-
-fn slice_lines(text: &str, line: Option<u32>, limit: Option<u32>) -> String {
-    if line.is_none() && limit.is_none() {
-        return text.to_string();
-    }
-    let start = line.unwrap_or(1).saturating_sub(1) as usize;
-    let lines: Vec<&str> = text.lines().collect();
-    let end = limit
-        .map(|l| start.saturating_add(l as usize).min(lines.len()))
-        .unwrap_or(lines.len());
-    lines.get(start..end).unwrap_or(&[]).join("\n")
-}
-
-fn read_text_file(scope: &AcpFsScope, req: &ReadTextFileRequest) -> Result<String, String> {
-    let path = resolve_acp_fs_path(scope, &req.path).ok_or("path outside session cwd")?;
-    let text =
-        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    Ok(slice_lines(&text, req.line, req.limit))
-}
-
-fn write_text_file(scope: &AcpFsScope, req: &WriteTextFileRequest) -> Result<(), String> {
-    let path = resolve_acp_fs_path(scope, &req.path).ok_or("path outside session cwd")?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
-    }
-    std::fs::write(&path, &req.content).map_err(|e| format!("write {}: {e}", path.display()))
-}
-
 fn status_after_prompt(cancelled: bool, errored: Option<String>) -> AgentRunStatus {
     if cancelled {
         AgentRunStatus::Interrupted
@@ -1468,7 +1484,7 @@ mod tests {
     }
 
     #[test]
-    fn stderr_detail_from_shows_last_lines_and_skips_blanks() {
+    fn stderr_tail_shows_last_lines_and_skips_blanks() {
         let tail: VecDeque<String> = [
             "npm warn old",
             "",
@@ -1479,17 +1495,18 @@ mod tests {
         .iter()
         .map(|line| line.to_string())
         .collect();
+        let tail = AcpStderrTail(Mutex::new(tail));
         assert_eq!(
-            stderr_detail_from(&tail, 2),
+            tail.detail(2),
             "\n\nnpm error 403 Forbidden\nBlocked by Security Policy"
         );
     }
 
     #[test]
-    fn stderr_detail_from_is_empty_without_output() {
+    fn stderr_tail_is_empty_without_output() {
         let blanks: VecDeque<String> = ["", "   "].iter().map(|line| line.to_string()).collect();
-        assert!(stderr_detail_from(&blanks, 8).is_empty());
-        assert!(stderr_detail_from(&VecDeque::new(), 8).is_empty());
+        assert!(AcpStderrTail(Mutex::new(blanks)).detail(8).is_empty());
+        assert!(AcpStderrTail::default().detail(8).is_empty());
     }
 
     fn opt(id: &str, kind: PermissionOptionKind) -> PermissionOption {
@@ -2210,23 +2227,29 @@ mod tests {
     }
 
     #[test]
-    fn resolve_in_cwd_rejects_escape() {
-        let cwd = std::path::Path::new("/work");
+    fn file_scope_rejects_escape() {
+        let scope = AcpFsScope {
+            cwd: PathBuf::from("/work"),
+        };
         assert_eq!(
-            resolve_in_cwd(cwd, std::path::Path::new("/work/a.rs")),
+            scope.resolve(std::path::Path::new("/work/a.rs")),
             Some(PathBuf::from("/work/a.rs"))
         );
-        assert!(resolve_in_cwd(cwd, std::path::Path::new("/etc/passwd")).is_none());
-        assert!(resolve_in_cwd(cwd, std::path::Path::new("/work/../etc/passwd")).is_none());
+        assert!(scope.resolve(std::path::Path::new("/etc/passwd")).is_none());
+        assert!(
+            scope
+                .resolve(std::path::Path::new("/work/../etc/passwd"))
+                .is_none()
+        );
     }
 
     #[test]
-    fn slice_lines_honors_line_and_limit() {
-        let text = "a\nb\nc\nd";
-        assert_eq!(slice_lines(text, None, None), "a\nb\nc\nd");
-        assert_eq!(slice_lines(text, Some(2), None), "b\nc\nd");
-        assert_eq!(slice_lines(text, Some(2), Some(2)), "b\nc");
-        assert_eq!(slice_lines(text, Some(10), Some(2)), "");
+    fn file_contents_honor_line_and_limit() {
+        let text = AcpFileContents("a\nb\nc\nd".into());
+        assert_eq!(text.slice(None, None), "a\nb\nc\nd");
+        assert_eq!(text.slice(Some(2), None), "b\nc\nd");
+        assert_eq!(text.slice(Some(2), Some(2)), "b\nc");
+        assert_eq!(text.slice(Some(10), Some(2)), "");
     }
 
     fn test_shared_at(
@@ -2328,11 +2351,11 @@ mod tests {
         assert_eq!(shared.cwd(), worktree);
         let scope = AcpFsScope { cwd: shared.cwd() };
         assert_eq!(
-            read_text_file(&scope, &ReadTextFileRequest::new("s1", &worktree_file)),
+            scope.read(&ReadTextFileRequest::new("s1", &worktree_file)),
             Ok("worktree".into())
         );
         assert_eq!(
-            read_text_file(&scope, &ReadTextFileRequest::new("s1", &original_file)),
+            scope.read(&ReadTextFileRequest::new("s1", &original_file)),
             Err("path outside session cwd".into())
         );
     }
