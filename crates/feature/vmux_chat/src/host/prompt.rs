@@ -17,7 +17,7 @@ use vmux_session::{
 };
 
 #[cfg(host)]
-use super::composer::{ComposerQueriesChanged, ComposerState};
+use super::composer::{ComposerChanged, ComposerState};
 use super::room::Submitted;
 #[cfg(host)]
 use super::session::{ChatAttachmentProjection, ChatView};
@@ -125,13 +125,11 @@ fn on_chat_submit(
             .insert(AgentConversationTitle(title));
     }
     enqueue_prompt(&mut queue, &mut state, text, attachments);
-    let (effect, queries) = composer.effect(String::new(), true);
+    let effect = composer.effect(String::new(), true);
     commands.trigger(
         vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(webview, &effect),
     );
-    if let Some(changed) = ComposerQueriesChanged::new(webview, queries) {
-        commands.trigger(changed);
-    }
+    commands.trigger(ComposerChanged::new(webview));
     if selected.clear_selected() {
         commands.trigger(
             vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
@@ -270,15 +268,13 @@ fn on_chat_escape(
         return;
     };
     if !running && queue.items.is_empty() && !composer.draft().is_empty() {
-        let (effect, queries) = composer.effect(String::new(), true);
+        let effect = composer.effect(String::new(), true);
         commands.trigger(
             vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
                 webview, &effect,
             ),
         );
-        if let Some(changed) = ComposerQueriesChanged::new(webview, queries) {
-            commands.trigger(changed);
-        }
+        commands.trigger(ComposerChanged::new(webview));
     }
 }
 

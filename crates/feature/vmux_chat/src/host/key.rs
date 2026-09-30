@@ -1,4 +1,4 @@
-use super::composer::{ComposerQueriesChanged, ComposerState};
+use super::composer::{ComposerChanged, ComposerState};
 use super::session::{
     ChatSnapshotProjection, ChatTranscriptProjection, ChatView, PendingAgentChoice,
 };
@@ -209,13 +209,11 @@ fn move_history(
         return;
     };
     let history = transcript.prompt_history(snapshot);
-    let (effect, changes) = composer.recall(&history, direction);
+    let effect = composer.recall(&history, direction);
     commands.trigger(
         vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(caller, &effect),
     );
-    if let Some(changed) = ComposerQueriesChanged::new(caller, changes) {
-        commands.trigger(changed);
-    }
+    commands.trigger(ComposerChanged::new(caller));
 }
 
 fn submit(
@@ -251,14 +249,12 @@ fn dismiss_selector(
     }
     let caller = trigger.event().invocation().caller;
     if let Ok(mut composer) = composers.get_mut(caller)
-        && let Some((effect, changes)) = composer.dismiss_selector()
+        && let Some(effect) = composer.dismiss_selector()
     {
         commands.trigger(
             vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(caller, &effect),
         );
-        if let Some(changed) = ComposerQueriesChanged::new(caller, changes) {
-            commands.trigger(changed);
-        }
+        commands.trigger(ComposerChanged::new(caller));
         return;
     }
     let Ok(mut revision) = revisions.get_mut(caller) else {
