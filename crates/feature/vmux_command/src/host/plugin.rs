@@ -29,8 +29,6 @@ impl Plugin for CommandPlugin {
                 SurfacePlugin,
                 crate::CommandToolPlugin,
             ))
-            .add_message::<crate::host::ExLineSubmitted>()
-            .add_message::<crate::host::FileStatusPicked>()
             .add_systems(Update, invoke_command.after(AgentRequestRouteSet))
             .add_systems(
                 Update,

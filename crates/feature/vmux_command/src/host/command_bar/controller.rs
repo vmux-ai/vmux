@@ -3,26 +3,16 @@ use crate::build_command_bar_open_payload;
 use crate::host::payload::CommandBarPicks;
 use std::time::{Duration, Instant};
 use vmux_api::command_bar::{
-    CommandBarOpenEvent, CommandBarPick, CommandBarPicker, DismissRequest, ExRequest,
-    InvokeRequest, OpenRequest as CommandBarPageOpenRequest, PickRequest, PromptRequest,
-    SwitchSpaceRequest, SwitchTabRequest, TerminalRequest,
+    CommandBarOpenEvent, CommandBarPicker, CommandBarReadyEvent, CommandBarRenderedEvent,
+    CommandBarSizeEvent, DismissRequest, OpenId,
 };
-use vmux_core::launcher::{
-    HostsLauncher, InlineTransitionRequested, LauncherDismissRequest, RendersLauncherPanel,
-    RestoreKeyboardToStack, StackInPaneChosen,
-};
+use vmux_core::launcher::{LauncherDismissRequest, RendersLauncherPanel, RestoreKeyboardToStack};
 
-use crate::command_bar::CloseCommandBar;
+use crate::command_bar::CommandBarDismiss;
 use crate::command_bar::panel::CommandBarPanelActive;
 use crate::command_bar::work_snapshot::WorkSnapshotPlugin;
-use crate::event::{
-    CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent, OpenId, SearchEngine,
-    SearchEngineSetting,
-};
-use crate::open_target::{OpenTarget, PaneDirection};
 use crate::snapshot::{
-    ClaimedUrls, CommandBarProjection, ContributedCommand, ContributedPages,
-    WriteCommandBarSnapshots,
+    CommandBarProjection, ContributedCommand, ContributedPages, WriteCommandBarSnapshots,
 };
 use crate::{CommandInvocation, CommandRegistry, ReadCommandRequests};
 use bevy::{
@@ -30,64 +20,41 @@ use bevy::{
     prelude::*,
 };
 use bevy_cef::prelude::*;
-use vmux_core::event::space::SpaceAttachRequest;
+use vmux_core::PageMetadata;
 use vmux_core::host::page::HostsPage;
-use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
-use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
-use vmux_core::{
-    PageMetadata, PageOpenRequest, PageOpenTarget, PendingPrompt, PendingPromptAttachments,
-};
 use vmux_history::now_millis;
-use vmux_ui::i18n::{Locale, TranslationValue};
+use vmux_ui::i18n::Locale;
 
 use crate::ResolvedLocale;
-use crate::search_engine::SearchEngines;
 use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 
-pub(crate) struct InputPlugin;
+pub(super) struct CommandBarControllerPlugin;
 
-impl Plugin for InputPlugin {
+impl Plugin for CommandBarControllerPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CommandBarToggleRequest>()
             .add_plugins(WorkSnapshotPlugin)
             .add_message::<CommandBarEditPageRequest>()
             .add_message::<CommandBarPathRequest>()
             .add_message::<CommandBarCommandsRequest>()
-            .add_message::<CommandBarExRequest>()
-            .add_message::<CommandBarPickerRequest>()
-            .add_message::<SpaceOpenRequest>()
+            .add_message::<CommandBarOpenRequest>()
+            .configure_sets(
+                Update,
+                (WriteCommandBarRequests, ApplyCommandBarRequests)
+                    .chain()
+                    .in_set(ReadCommandRequests),
+            )
             .add_systems(Startup, bind_commands.in_set(crate::BindCommands))
             .add_message::<LauncherDismissRequest>()
             .add_message::<vmux_core::ContributedCommandChosen>()
-            .add_message::<InlineTransitionRequested>()
-            .add_message::<StackInPaneChosen>()
             .add_message::<RestoreKeyboardToStack>()
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .add_message::<SettingsPageSpawnRequest>()
-            .add_message::<SpacesPageSpawnRequest>()
             .add_plugins(UiEventPlugin::<(
-                PromptRequest,
-                CommandBarPageOpenRequest,
-                TerminalRequest,
-                InvokeRequest,
-                SwitchSpaceRequest,
-                SwitchTabRequest,
-                ExRequest,
-                PickRequest,
                 DismissRequest,
                 CommandBarReadyEvent,
                 CommandBarRenderedEvent,
                 CommandBarSizeEvent,
             )>::default())
-            .add_observer(on_prompt_request)
-            .add_observer(on_page_open_request)
-            .add_observer(on_terminal_request)
-            .add_observer(on_invoke_request)
-            .add_observer(on_switch_space_request)
-            .add_observer(on_switch_tab_request)
-            .add_observer(on_ex_request)
-            .add_observer(on_pick_request)
             .add_observer(on_dismiss_request)
             .add_observer(close_command_bar)
             .add_observer(on_command_bar_ready)
@@ -100,7 +67,7 @@ impl Plugin for InputPlugin {
             .add_systems(
                 Update,
                 handle_open_command_bar
-                    .in_set(ReadCommandRequests)
+                    .in_set(ApplyCommandBarRequests)
                     .after(prewarm_command_bar_modal)
                     .after(vmux_core::workspace::TabCommandSet)
                     .after(vmux_core::workspace::StackCommandSet),
@@ -122,18 +89,20 @@ impl Plugin for InputPlugin {
             .add_systems(
                 PostUpdate,
                 reveal_command_bar.chain().after(LayoutSystems::Layout),
-            );
+            )
+            .add_systems(Update, keep_awake.after(crate::ReadCommandRequests));
     }
 }
 
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-struct SpaceOpenRequest;
-
-impl TryFrom<&CommandInvocation> for SpaceOpenRequest {
-    type Error = ();
-
-    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-        (invocation.id == "space_open").then_some(Self).ok_or(())
+fn keep_awake(
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    pending: Query<&PendingCommandBarReveal>,
+) {
+    if !pending.iter().any(PendingCommandBarReveal::is_active) {
+        return;
+    }
+    if let Some(proxy) = proxy {
+        let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
     }
 }
 
@@ -189,56 +158,42 @@ impl TryFrom<&CommandInvocation> for CommandBarCommandsRequest {
     }
 }
 
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-struct CommandBarExRequest;
-
-impl TryFrom<&CommandInvocation> for CommandBarExRequest {
-    type Error = ();
-
-    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-        (invocation.id == "browser_open_ex_bar")
-            .then_some(Self)
-            .ok_or(())
-    }
+#[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
+pub struct CommandBarOpenRequest {
+    query: Option<String>,
+    picker: Option<CommandBarPicker>,
+    replace_active_stack: bool,
 }
 
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-struct CommandBarPickerRequest(CommandBarPicker);
+impl CommandBarOpenRequest {
+    pub fn query(query: impl Into<String>) -> Self {
+        Self {
+            query: Some(query.into()),
+            ..default()
+        }
+    }
 
-impl TryFrom<&CommandInvocation> for CommandBarPickerRequest {
-    type Error = ();
-
-    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-        match invocation.id.as_str() {
-            "browser_open_goto_line" => Ok(Self(CommandBarPicker::GotoLine)),
-            "browser_open_indentation" => Ok(Self(CommandBarPicker::Indent)),
-            "browser_open_line_ending" => Ok(Self(CommandBarPicker::LineEnding)),
-            "browser_open_encoding" => Ok(Self(CommandBarPicker::Encoding)),
-            "browser_open_reopen_with_encoding" => Ok(Self(CommandBarPicker::EncodingReopen)),
-            "browser_open_save_with_encoding" => Ok(Self(CommandBarPicker::EncodingSave)),
-            _ => Err(()),
+    pub fn picker(picker: CommandBarPicker) -> Self {
+        Self {
+            query: Some(String::new()),
+            picker: Some(picker),
+            ..default()
         }
     }
 }
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct WriteCommandBarRequests;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ApplyCommandBarRequests;
+
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.message::<SpaceOpenRequest>(&mut commands, "space_open");
     registry.message::<CommandBarToggleRequest>(&mut commands, "browser_open_command_bar");
     registry
         .message::<CommandBarEditPageRequest>(&mut commands, "browser_open_page_in_command_bar");
     registry.message::<CommandBarPathRequest>(&mut commands, "browser_open_path_bar");
     registry.message::<CommandBarCommandsRequest>(&mut commands, "browser_open_commands");
-    registry.message::<CommandBarExRequest>(&mut commands, "browser_open_ex_bar");
-    for id in [
-        "browser_open_goto_line",
-        "browser_open_indentation",
-        "browser_open_line_ending",
-        "browser_open_encoding",
-        "browser_open_reopen_with_encoding",
-        "browser_open_save_with_encoding",
-    ] {
-        registry.message::<CommandBarPickerRequest>(&mut commands, id);
-    }
 }
 
 #[derive(Component)]
@@ -518,8 +473,7 @@ impl CommandBarOpenState {
         edit_page: bool,
         path: bool,
         commands: bool,
-        ex: bool,
-        picker: Option<CommandBarPicker>,
+        open: impl IntoIterator<Item = &'a CommandBarOpenRequest>,
         ids: impl IntoIterator<Item = &'a str>,
     ) -> Self {
         let mut request = Self::default();
@@ -539,14 +493,15 @@ impl CommandBarOpenState {
             request.should_toggle = true;
             request.url_override = Some(">".to_string());
         }
-        if ex {
+        for open in open {
             request.should_toggle = true;
-            request.url_override = Some(":".to_string());
-        }
-        if let Some(picker) = picker {
-            request.should_toggle = true;
-            request.picker = Some(picker);
-            request.url_override = Some(String::new());
+            request.replace_active_stack |= open.replace_active_stack;
+            if open.query.is_some() {
+                request.url_override.clone_from(&open.query);
+            }
+            if open.picker.is_some() {
+                request.picker = open.picker;
+            }
         }
         for id in ids {
             match id {
@@ -564,18 +519,6 @@ impl CommandBarOpenState {
         }
         request
     }
-
-    fn picker_id(picker: CommandBarPicker) -> Option<&'static str> {
-        match picker {
-            CommandBarPicker::GotoLine => Some("browser_open_goto_line"),
-            CommandBarPicker::Indent => Some("browser_open_indentation"),
-            CommandBarPicker::LineEnding => Some("browser_open_line_ending"),
-            CommandBarPicker::Encoding => Some("browser_open_encoding"),
-            CommandBarPicker::EncodingReopen => Some("browser_open_reopen_with_encoding"),
-            CommandBarPicker::EncodingSave => Some("browser_open_save_with_encoding"),
-            CommandBarPicker::Space => None,
-        }
-    }
 }
 
 fn command_bar_toggle_should_open(is_open: bool, picker: Option<CommandBarPicker>) -> bool {
@@ -588,14 +531,12 @@ struct CommandBarOpenRequests<'w, 's> {
     edit_page: MessageReader<'w, 's, CommandBarEditPageRequest>,
     path: MessageReader<'w, 's, CommandBarPathRequest>,
     commands: MessageReader<'w, 's, CommandBarCommandsRequest>,
-    ex: MessageReader<'w, 's, CommandBarExRequest>,
-    picker: MessageReader<'w, 's, CommandBarPickerRequest>,
+    open: MessageReader<'w, 's, CommandBarOpenRequest>,
 }
 
 fn handle_open_command_bar(
     mut reader: MessageReader<CommandInvocation>,
     mut open_requests: CommandBarOpenRequests,
-    mut open_space_picker: MessageReader<SpaceOpenRequest>,
     layout_q: Query<
         (Entity, Has<CommandBarPanelActive>, Option<&HostWindow>),
         With<RendersLauncherPanel>,
@@ -611,20 +552,14 @@ fn handle_open_command_bar(
     locale: Option<Res<ResolvedLocale>>,
     mut commands: Commands,
 ) {
-    let mut request = CommandBarOpenState::from_requests(
+    let request = CommandBarOpenState::from_requests(
         open_requests.toggle.read().next().is_some(),
         open_requests.edit_page.read().next().is_some(),
         open_requests.path.read().next().is_some(),
         open_requests.commands.read().next().is_some(),
-        open_requests.ex.read().next().is_some(),
-        open_requests.picker.read().last().map(|request| request.0),
+        open_requests.open.read(),
         reader.read().map(|invocation| invocation.id.as_str()),
     );
-    if open_space_picker.read().next().is_some() {
-        request.should_toggle = true;
-        request.picker = Some(CommandBarPicker::Space);
-        request.url_override = Some(String::new());
-    }
     if !request.should_toggle && !request.should_dismiss && !request.should_dismiss_nav {
         return;
     }
@@ -723,389 +658,12 @@ fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
     >::from_event(layout, &CommandBarOpenEvent::default()));
 }
 
-fn open_invocation(caller: Entity, target: Option<OpenTarget>, url: String) -> CommandInvocation {
-    let (id, arguments) = match target {
-        Some(OpenTarget::InPlace) | None => ("open_in_place", serde_json::json!({ "url": url })),
-        Some(OpenTarget::InNewStack) => ("open_in_new_stack", serde_json::json!({ "url": url })),
-        Some(OpenTarget::InPane {
-            direction,
-            target,
-            mode,
-        }) => (
-            match direction {
-                PaneDirection::Top => "open_in_pane_top",
-                PaneDirection::Right => "open_in_pane_right",
-                PaneDirection::Bottom => "open_in_pane_bottom",
-                PaneDirection::Left => "open_in_pane_left",
-            },
-            serde_json::json!({ "url": url, "target": target, "mode": mode }),
-        ),
-        Some(OpenTarget::InNewTab) => ("open_in_new_tab", serde_json::json!({ "url": url })),
-        Some(OpenTarget::InNewSpace) => ("open_in_new_space", serde_json::json!({ "url": url })),
-    };
-    CommandInvocation::new(caller, id).with_arguments(arguments)
-}
-
-struct Home;
-
-impl Home {
-    fn resolve(value: &str) -> std::path::PathBuf {
-        let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
-        if let Some(rest) = value.strip_prefix('~') {
-            return match home {
-                Some(home) => home.join(rest.trim_start_matches('/')),
-                None => std::path::PathBuf::from(value),
-            };
-        }
-        if value.starts_with('/') {
-            return std::path::PathBuf::from(value);
-        }
-        match home {
-            Some(home) => home.join(value),
-            None => std::path::PathBuf::from(value),
-        }
-    }
-
-    fn expanded_file_url(value: &str) -> String {
-        let Some(path) = value.strip_prefix("file://") else {
-            return value.to_string();
-        };
-        if !path.starts_with('~') {
-            return value.to_string();
-        }
-        format!("file://{}", Self::resolve(path).display())
-    }
-}
-
-fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
-    let value = value.trim();
-    let query = crate::palette::PaletteQuery::new(value);
-    if query.is_data_uri() || (value.contains("://") && query.looks_like_url()) {
-        value.to_string()
-    } else if query.looks_like_url() {
-        format!("https://{}", value)
-    } else {
-        SearchEngines::url(search_engine, value)
-    }
-}
-
-fn on_prompt_request(
-    trigger: On<UiInput<PromptRequest>>,
-    launcher_hosts: Query<(), With<HostsLauncher>>,
-    child_of: Query<&ChildOf>,
-    contributed_pages: ContributedPages,
-    command_bar: Single<&CommandBarProjection>,
-    mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut inline_transition: MessageWriter<InlineTransitionRequested>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    let request = &trigger.event().payload;
-    let prompt = request.text.trim();
-    let attachments = request
-        .attachments
-        .iter()
-        .filter(|attachment| !attachment.path.is_empty())
-        .map(|attachment| vmux_api::protocol::AgentAttachment {
-            path: attachment.path.clone(),
-            name: attachment.name.clone(),
-            mime_type: attachment.mime_type.clone(),
-            size: attachment.size,
-        })
-        .collect::<Vec<_>>();
-    let inline_stack = launcher_hosts
-        .contains(webview)
-        .then(|| child_of.get(webview).ok().map(|parent| parent.0))
-        .flatten();
-    let mut custom_keyboard_restore = false;
-    if (!prompt.is_empty() || !attachments.is_empty())
-        && let Some(stack) = command_bar.workspace.stack
-        && let Some(url) = contributed_pages.prompt_url(request.target_url.as_deref())
-    {
-        if inline_stack == Some(stack) && vmux_api::agent::supports_inline_agent_transition(&url) {
-            inline_transition.write(InlineTransitionRequested { stack, webview });
-            if let Some(proxy) = proxy.as_deref() {
-                let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-        }
-        commands
-            .entity(stack)
-            .insert(PendingPrompt(prompt.to_string()));
-        if attachments.is_empty() {
-            commands.entity(stack).remove::<PendingPromptAttachments>();
-        } else {
-            commands
-                .entity(stack)
-                .insert(PendingPromptAttachments(attachments));
-        }
-        page_open_requests.write(PageOpenRequest {
-            target: PageOpenTarget::Stack(stack),
-            url,
-            request_id: None,
-        });
-        custom_keyboard_restore = true;
-    }
-    commands.trigger(CloseCommandBar::after(webview, custom_keyboard_restore));
-}
-
-fn on_page_open_request(
-    trigger: On<UiInput<CommandBarPageOpenRequest>>,
-    search_engine: Option<Single<&SearchEngineSetting>>,
-    child_of: Query<&ChildOf>,
-    launcher_hosts: Query<(), With<HostsLauncher>>,
-    claimed_urls: ClaimedUrls,
-    command_bar: Single<&CommandBarProjection>,
-    locale: Option<Res<ResolvedLocale>>,
-    mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
-    mut chosen_writer: MessageWriter<vmux_core::ContributedCommandChosen>,
-    mut inline_transition: MessageWriter<InlineTransitionRequested>,
-    mut command_invocations: MessageWriter<CommandInvocation>,
-    users: Query<Entity, With<vmux_core::team::User>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    let focus = &command_bar.workspace;
-    let webview = trigger.event().webview;
-    let request = &trigger.event().payload;
-    let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
-    let mut custom_keyboard_restore = false;
-    let inline_stack = launcher_hosts
-        .contains(webview)
-        .then(|| child_of.get(webview).ok().map(|parent| parent.0))
-        .flatten();
-    let locale = locale
-        .as_deref()
-        .map(|locale| locale.0.clone())
-        .unwrap_or_else(Locale::preferred);
-    let value = Home::expanded_file_url(&request.value);
-    let expanded = Home::resolve(&value);
-    if expanded.exists() {
-        let directory = if expanded.is_dir() {
-            &expanded
-        } else {
-            expanded.parent().unwrap_or(&expanded)
-        };
-        if let Some(pane) = focus.pane {
-            terminal_spawn_requests.write(TerminalSpawnRequest {
-                cwd: Some(directory.to_path_buf()),
-                target: TerminalSpawnTarget::NewStackInPane(pane),
-                metadata: Some(PageMetadata {
-                    url: command_bar.terminals.terminal_page_url.clone(),
-                    title: locale.translate_with(
-                        "command-terminal-path",
-                        &[(
-                            "path",
-                            TranslationValue::String(&directory.display().to_string()),
-                        )],
-                    ),
-                    ..default()
-                }),
-            });
-            custom_keyboard_restore = true;
-        }
-    } else {
-        let url = normalize_url(
-            &value,
-            search_engine.map(|setting| setting.0).unwrap_or_default(),
-        );
-        let inline_transitioned = if matches!(request.open, None | Some(OpenTarget::InPlace))
-            && vmux_api::agent::supports_inline_agent_transition(&url)
-            && let Some(stack) = inline_stack
-        {
-            inline_transition.write(InlineTransitionRequested { stack, webview });
-            if let Some(proxy) = proxy.as_deref() {
-                let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            true
-        } else {
-            false
-        };
-        if !inline_transitioned && claimed_urls.contains(&url) {
-            if let Some(pane) = focus.pane {
-                chosen_writer.write(vmux_core::ContributedCommandChosen {
-                    id: url,
-                    stack: None,
-                    pane: Some(pane),
-                });
-                custom_keyboard_restore = true;
-            }
-        } else {
-            command_invocations.write(open_invocation(caller, request.open, url));
-        }
-    }
-    commands.trigger(CloseCommandBar::after(webview, custom_keyboard_restore));
-}
-
-fn on_terminal_request(
-    trigger: On<UiInput<TerminalRequest>>,
-    command_bar: Single<&CommandBarProjection>,
-    locale: Option<Res<ResolvedLocale>>,
-    mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
-    mut command_invocations: MessageWriter<CommandInvocation>,
-    users: Query<Entity, With<vmux_core::team::User>>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    let value = &trigger.event().payload.value;
-    let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
-    let focus = &command_bar.workspace;
-    let locale = locale
-        .as_deref()
-        .map(|locale| locale.0.clone())
-        .unwrap_or_else(Locale::preferred);
-    let mut custom_keyboard_restore = false;
-    if let Some(entity) = command_bar.terminals.running.get(value).copied() {
-        commands.trigger(vmux_core::ActivateRequest { entity });
-        custom_keyboard_restore = true;
-    } else {
-        if value.starts_with(&command_bar.terminals.terminal_page_url) {
-            bevy::log::warn!("no terminal pane for {}; spawning new", value);
-        }
-        let cwd = if value.is_empty() || value.contains("://") {
-            None
-        } else {
-            let expanded = if value.starts_with("~/") {
-                std::env::var("HOME")
-                    .map(|home| std::path::PathBuf::from(home).join(&value[2..]))
-                    .unwrap_or_else(|_| std::path::PathBuf::from(value))
-            } else if value.starts_with('/') {
-                std::path::PathBuf::from(value)
-            } else {
-                std::env::var("HOME")
-                    .map(|home| std::path::PathBuf::from(home).join(value))
-                    .unwrap_or_else(|_| std::path::PathBuf::from(value))
-            };
-            Some(expanded)
-        };
-        if let Some(pane) = focus.pane {
-            terminal_spawn_requests.write(TerminalSpawnRequest {
-                cwd,
-                target: TerminalSpawnTarget::NewStackInPane(pane),
-                metadata: Some(PageMetadata {
-                    url: command_bar.terminals.terminal_page_url.clone(),
-                    title: locale.translate("command-terminal"),
-                    ..default()
-                }),
-            });
-        } else {
-            command_invocations.write(open_invocation(
-                caller,
-                Some(OpenTarget::InNewStack),
-                "vmux://terminal/".into(),
-            ));
-        }
-    }
-    commands.trigger(CloseCommandBar::after(webview, custom_keyboard_restore));
-}
-
-fn on_invoke_request(
-    trigger: On<UiInput<InvokeRequest>>,
-    contributed_pages: ContributedPages,
-    contributed_commands: Query<&ContributedCommand>,
-    command_bar: Single<&CommandBarProjection>,
-    users: Query<Entity, With<vmux_core::team::User>>,
-    mut chosen: MessageWriter<vmux_core::ContributedCommandChosen>,
-    mut invocations: MessageWriter<CommandInvocation>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    let request = &trigger.event().payload;
-    let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
-    let mut custom_keyboard_restore = false;
-    if contributed_commands
-        .iter()
-        .any(|command| command.id == request.id)
-    {
-        if let Some(pane) = command_bar.workspace.pane {
-            chosen.write(vmux_core::ContributedCommandChosen {
-                id: request.id.clone(),
-                stack: None,
-                pane: Some(pane),
-            });
-            custom_keyboard_restore = true;
-        }
-    } else if let Some(url) = contributed_pages.page_url(&request.id) {
-        invocations.write(open_invocation(caller, request.open, url));
-        custom_keyboard_restore = true;
-    } else {
-        invocations.write(CommandInvocation::new(caller, &request.id));
-    }
-    commands.trigger(CloseCommandBar::after(webview, custom_keyboard_restore));
-}
-
-fn on_switch_space_request(trigger: On<UiInput<SwitchSpaceRequest>>, mut commands: Commands) {
-    let webview = trigger.event().webview;
-    let id = &trigger.event().payload.id;
-    if !id.is_empty() {
-        commands.trigger(UiInput {
-            webview,
-            payload: SpaceAttachRequest {
-                space_id: id.clone(),
-            },
-        });
-    }
-    commands.trigger(CloseCommandBar::after(webview, true));
-}
-
-fn on_switch_tab_request(
-    trigger: On<UiInput<SwitchTabRequest>>,
-    mut chosen: MessageWriter<StackInPaneChosen>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    let request = &trigger.event().payload;
-    chosen.write(StackInPaneChosen {
-        pane_bits: request.pane,
-        index: request.index,
-    });
-    commands.trigger(CloseCommandBar::after(webview, false));
-}
-
-fn on_ex_request(
-    trigger: On<UiInput<ExRequest>>,
-    command_bar: Single<&CommandBarProjection>,
-    mut lines: MessageWriter<crate::host::ExLineSubmitted>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    lines.write(crate::host::ExLineSubmitted {
-        stack: command_bar.workspace.stack,
-        line: trigger.event().payload.line.clone(),
-    });
-    commands.trigger(CloseCommandBar::after(webview, false));
-}
-
-fn on_pick_request(
-    trigger: On<UiInput<PickRequest>>,
-    command_bar: Single<&CommandBarProjection>,
-    users: Query<Entity, With<vmux_core::team::User>>,
-    mut picked: MessageWriter<crate::host::FileStatusPicked>,
-    mut invocations: MessageWriter<CommandInvocation>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    let pick = &trigger.event().payload.pick;
-    if let CommandBarPick::Picker(next) = pick {
-        if let Some(id) = CommandBarOpenState::picker_id(*next) {
-            let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
-            invocations.write(CommandInvocation::new(caller, id));
-        }
-    } else {
-        picked.write(crate::host::FileStatusPicked {
-            stack: command_bar.workspace.stack,
-            pick: pick.clone(),
-        });
-    }
-    commands.trigger(CloseCommandBar::after(webview, false));
-}
-
 fn on_dismiss_request(trigger: On<UiInput<DismissRequest>>, mut commands: Commands) {
-    commands.trigger(CloseCommandBar::after(trigger.event().webview, false));
+    commands.trigger(CommandBarDismiss::new(trigger.event().webview, true));
 }
 
 fn close_command_bar(
-    trigger: On<CloseCommandBar>,
+    trigger: On<CommandBarDismiss>,
     command_bar: Single<&CommandBarProjection>,
     mut modal_q: Query<
         (
@@ -1279,13 +837,15 @@ fn mirror_project_roots(mut state: Single<&mut CommandBarProjection>) {
 mod tests {
     use super::*;
     use crate::command_bar_open_payload;
-    use crate::event::CommandBarOpenEvent;
-    use crate::event::CommandBarSpace;
     use crate::{CommandDefinition, CommandPlugin, ReadCommandRequests};
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_api::command_bar::{CommandBarUiState, CommandBarUiStatePatch};
+    use vmux_api::command_bar::{
+        CommandBarOpenEvent, CommandBarSpace, CommandBarUiState, CommandBarUiStatePatch,
+    };
+    use vmux_api::open_target::OpenTarget;
     use vmux_core::host::UiStateWrite;
+    use vmux_core::launcher::HostsLauncher;
     use vmux_core::overlay::OverlayState;
 
     #[test]
@@ -1301,8 +861,6 @@ mod tests {
                     || CommandBarEditPageRequest::try_from(&invocation).is_ok()
                     || CommandBarPathRequest::try_from(&invocation).is_ok()
                     || CommandBarCommandsRequest::try_from(&invocation).is_ok()
-                    || CommandBarExRequest::try_from(&invocation).is_ok()
-                    || CommandBarPickerRequest::try_from(&invocation).is_ok()
             })
             .collect::<Vec<_>>();
         assert_eq!(
@@ -1315,13 +873,6 @@ mod tests {
                 "browser_open_page_in_command_bar",
                 "browser_open_path_bar",
                 "browser_open_commands",
-                "browser_open_ex_bar",
-                "browser_open_goto_line",
-                "browser_open_indentation",
-                "browser_open_line_ending",
-                "browser_open_encoding",
-                "browser_open_reopen_with_encoding",
-                "browser_open_save_with_encoding",
             ],
         );
         for tool in tools {
@@ -1339,12 +890,7 @@ mod tests {
                 "browser_open_commands" => {
                     assert!(CommandBarCommandsRequest::try_from(&invocation).is_ok());
                 }
-                "browser_open_ex_bar" => {
-                    assert!(CommandBarExRequest::try_from(&invocation).is_ok());
-                }
-                _ => {
-                    assert!(CommandBarPickerRequest::try_from(&invocation).is_ok());
-                }
+                _ => unreachable!(),
             }
         }
     }
@@ -1801,59 +1347,6 @@ mod tests {
     }
 
     #[test]
-    fn space_open_command_opens_space_switch_mode() {
-        let request = CommandBarOpenState {
-            should_toggle: true,
-            picker: Some(CommandBarPicker::Space),
-            url_override: Some(String::new()),
-            ..Default::default()
-        };
-
-        assert!(request.should_toggle);
-        assert_eq!(request.picker, Some(CommandBarPicker::Space));
-        assert_eq!(request.url_override, Some(String::new()));
-    }
-
-    #[test]
-    fn every_status_bar_command_asserts_its_own_picker() {
-        for (id, expected) in [
-            ("browser_open_goto_line", CommandBarPicker::GotoLine),
-            ("browser_open_indentation", CommandBarPicker::Indent),
-            ("browser_open_line_ending", CommandBarPicker::LineEnding),
-            ("browser_open_encoding", CommandBarPicker::Encoding),
-            (
-                "browser_open_reopen_with_encoding",
-                CommandBarPicker::EncodingReopen,
-            ),
-            (
-                "browser_open_save_with_encoding",
-                CommandBarPicker::EncodingSave,
-            ),
-        ] {
-            let open =
-                CommandBarPickerRequest::try_from(&CommandInvocation::new(Entity::PLACEHOLDER, id))
-                    .unwrap();
-            let request = CommandBarOpenState::from_requests(
-                false,
-                false,
-                false,
-                false,
-                false,
-                Some(open.0),
-                std::iter::empty(),
-            );
-
-            assert!(request.should_toggle, "{id}");
-            assert_eq!(request.picker, Some(expected), "{id}");
-            assert_eq!(
-                CommandBarOpenState::picker_id(expected),
-                Some(id),
-                "the picker returns to its command"
-            );
-        }
-    }
-
-    #[test]
     fn the_generic_bar_commands_assert_no_picker() {
         for (id, request) in [
             (
@@ -1863,8 +1356,7 @@ mod tests {
                     false,
                     false,
                     false,
-                    false,
-                    None,
+                    std::iter::empty(),
                     std::iter::empty(),
                 ),
             ),
@@ -1875,8 +1367,7 @@ mod tests {
                     false,
                     true,
                     false,
-                    false,
-                    None,
+                    std::iter::empty(),
                     std::iter::empty(),
                 ),
             ),
@@ -1887,20 +1378,7 @@ mod tests {
                     false,
                     false,
                     true,
-                    false,
-                    None,
                     std::iter::empty(),
-                ),
-            ),
-            (
-                "browser_open_ex_bar",
-                CommandBarOpenState::from_requests(
-                    false,
-                    false,
-                    false,
-                    false,
-                    true,
-                    None,
                     std::iter::empty(),
                 ),
             ),
@@ -1931,8 +1409,7 @@ mod tests {
             false,
             false,
             false,
-            false,
-            None,
+            std::iter::empty(),
             ["open_in_new_stack"],
         );
 
@@ -1946,8 +1423,7 @@ mod tests {
             false,
             false,
             false,
-            false,
-            None,
+            std::iter::empty(),
             std::iter::empty(),
         );
 
@@ -1962,8 +1438,7 @@ mod tests {
             true,
             false,
             false,
-            false,
-            None,
+            std::iter::empty(),
             std::iter::empty(),
         );
 
@@ -1990,12 +1465,7 @@ mod tests {
             .add_message::<CommandBarEditPageRequest>()
             .add_message::<CommandBarPathRequest>()
             .add_message::<CommandBarCommandsRequest>()
-            .add_message::<CommandBarExRequest>()
-            .add_message::<CommandBarPickerRequest>()
-            .add_message::<SpaceOpenRequest>()
-            .add_message::<PageOpenRequest>()
-            .add_message::<InlineTransitionRequested>()
-            .add_message::<StackInPaneChosen>()
+            .add_message::<CommandBarOpenRequest>()
             .add_message::<RestoreKeyboardToStack>()
             .add_message::<LauncherDismissRequest>()
             .init_resource::<EmittedToPage>()
@@ -2028,9 +1498,6 @@ mod tests {
 
     fn send(app: &mut App, id: &str) {
         match id {
-            "space_open" => {
-                app.world_mut().write_message(SpaceOpenRequest);
-            }
             "browser_open_command_bar" => {
                 app.world_mut().write_message(CommandBarToggleRequest);
             }
@@ -2042,19 +1509,6 @@ mod tests {
             }
             "browser_open_commands" => {
                 app.world_mut().write_message(CommandBarCommandsRequest);
-            }
-            "browser_open_ex_bar" => {
-                app.world_mut().write_message(CommandBarExRequest);
-            }
-            "browser_open_goto_line"
-            | "browser_open_indentation"
-            | "browser_open_line_ending"
-            | "browser_open_encoding"
-            | "browser_open_reopen_with_encoding"
-            | "browser_open_save_with_encoding" => {
-                let invocation = CommandInvocation::new(Entity::PLACEHOLDER, id);
-                let request = CommandBarPickerRequest::try_from(&invocation).unwrap();
-                app.world_mut().write_message(request);
             }
             _ => {
                 app.world_mut()
@@ -2136,20 +1590,6 @@ mod tests {
     }
 
     #[test]
-    fn space_switch_reopens_an_already_open_command_bar() {
-        let mut app = panel_app();
-        let layout = app
-            .world_mut()
-            .spawn((RendersLauncherPanel, CommandBarPanelActive))
-            .id();
-
-        send(&mut app, "space_open");
-
-        assert_eq!(emitted_to_page(&app), vec![layout]);
-        assert_eq!(open_payload(&app).picker, Some(CommandBarPicker::Space));
-    }
-
-    #[test]
     fn open_page_in_command_bar_marks_payload_as_in_place_target() {
         let mut app = panel_app();
         app.world_mut().spawn(RendersLauncherPanel);
@@ -2165,12 +1605,8 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(InputPlugin)
-            .add_message::<TerminalSpawnRequest>()
-            .add_message::<InlineTransitionRequested>()
-            .add_message::<StackInPaneChosen>()
+            .add_plugins(CommandBarControllerPlugin)
             .add_message::<RestoreKeyboardToStack>()
-            .add_message::<PageOpenRequest>()
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>();
         app.world_mut().spawn(CommandBarProjection::default());
 
@@ -2267,7 +1703,7 @@ mod tests {
     fn command_bar_open_runs_after_tab_commands() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(InputPlugin);
+            .add_plugins(CommandBarControllerPlugin);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
         let mut update = schedules.remove(Update).unwrap();
@@ -2291,151 +1727,6 @@ mod tests {
             NodeId::Set(tab_command_set),
             NodeId::System(command_bar_open_system)
         ));
-    }
-
-    #[test]
-    fn open_invocation_none_target_yields_in_place() {
-        let invocation = open_invocation(Entity::PLACEHOLDER, None, "https://example.com".into());
-        assert_eq!(invocation.id, "open_in_place");
-        assert_eq!(
-            invocation.argument::<String>("url").as_deref(),
-            Some("https://example.com")
-        );
-    }
-
-    #[test]
-    fn open_invocation_in_place_target_yields_in_place() {
-        let invocation = open_invocation(
-            Entity::PLACEHOLDER,
-            Some(OpenTarget::InPlace),
-            "https://example.com".into(),
-        );
-        assert_eq!(invocation.id, "open_in_place");
-    }
-
-    #[test]
-    fn open_invocation_in_new_stack_target() {
-        let invocation = open_invocation(
-            Entity::PLACEHOLDER,
-            Some(OpenTarget::InNewStack),
-            "https://example.com".to_string(),
-        );
-        assert_eq!(invocation.id, "open_in_new_stack");
-    }
-
-    #[test]
-    fn open_invocation_in_new_tab_target() {
-        let invocation = open_invocation(
-            Entity::PLACEHOLDER,
-            Some(OpenTarget::InNewTab),
-            "https://example.com".to_string(),
-        );
-        assert_eq!(invocation.id, "open_in_new_tab");
-    }
-
-    #[test]
-    fn open_invocation_in_new_space_target() {
-        let invocation = open_invocation(
-            Entity::PLACEHOLDER,
-            Some(OpenTarget::InNewSpace),
-            "https://example.com".to_string(),
-        );
-        assert_eq!(invocation.id, "open_in_new_space");
-    }
-
-    #[test]
-    fn open_invocation_in_pane_target() {
-        use crate::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
-        let invocation = open_invocation(
-            Entity::PLACEHOLDER,
-            Some(OpenTarget::InPane {
-                direction: PaneDirection::Right,
-                target: PaneTarget::NewSplit,
-                mode: PaneOpenMode::NewStack,
-            }),
-            "https://example.com".to_string(),
-        );
-        assert_eq!(invocation.id, "open_in_pane_right");
-        assert_eq!(invocation.argument("target"), Some(PaneTarget::NewSplit));
-        assert_eq!(invocation.argument("mode"), Some(PaneOpenMode::NewStack));
-    }
-
-    #[test]
-    fn a_picked_editor_row_carries_a_path_the_editor_can_open() {
-        let home = std::env::var("HOME").expect("a home directory");
-
-        assert_eq!(
-            Home::expanded_file_url("file://~/.vmux"),
-            format!("file://{home}/.vmux"),
-            "the launcher builds this row from what was typed, so the tilde arrives unexpanded"
-        );
-        assert_eq!(
-            Home::expanded_file_url("file:///etc/hosts"),
-            "file:///etc/hosts"
-        );
-        assert_eq!(
-            Home::expanded_file_url("https://vmux.ai/~jun"),
-            "https://vmux.ai/~jun"
-        );
-    }
-
-    #[test]
-    fn normalize_url_adds_https_for_domain() {
-        assert_eq!(
-            normalize_url("google.com", SearchEngine::Google),
-            "https://google.com"
-        );
-    }
-
-    #[test]
-    fn normalize_url_preserves_explicit_protocol() {
-        assert_eq!(
-            normalize_url("http://example.com", SearchEngine::Google),
-            "http://example.com"
-        );
-        assert_eq!(
-            normalize_url("https://example.com", SearchEngine::Google),
-            "https://example.com"
-        );
-    }
-
-    #[test]
-    fn normalize_url_search_query_becomes_google() {
-        assert_eq!(
-            normalize_url("hello world", SearchEngine::Google),
-            "https://www.google.com/search?q=hello+world"
-        );
-    }
-
-    #[test]
-    fn normalize_url_uses_selected_search_engine() {
-        assert_eq!(
-            normalize_url("hello world", SearchEngine::DuckDuckGo),
-            "https://duckduckgo.com/?q=hello+world"
-        );
-    }
-
-    #[test]
-    fn normalize_url_searches_multiline_text_with_embedded_url() {
-        let prompt = "Continue DSK-627\nPR: https://github.com/example/repo/pull/1";
-        assert_eq!(
-            normalize_url(prompt, SearchEngine::Google),
-            "https://www.google.com/search?q=Continue+DSK-627%0APR%3A+https%3A%2F%2Fgithub.com%2Fexample%2Frepo%2Fpull%2F1"
-        );
-    }
-
-    #[test]
-    fn normalize_url_preserves_vmux_protocol() {
-        assert_eq!(
-            normalize_url("vmux://terminal/123", SearchEngine::Google),
-            "vmux://terminal/123"
-        );
-    }
-
-    #[test]
-    fn normalize_url_preserves_data_scheme() {
-        let data = "data:text/html,<style>body{background:white}</style><h1>x</h1>";
-        assert_eq!(normalize_url(data, SearchEngine::Google), data);
     }
 
     #[test]

@@ -26,110 +26,120 @@ pub struct Catalog {
     packages: Vec<Package>,
 }
 
-fn str_array(v: Option<&Value>) -> Vec<String> {
-    match v {
-        Some(Value::Array(a)) => a
-            .iter()
-            .filter_map(|x| x.as_str().map(String::from))
-            .collect(),
-        Some(Value::String(s)) => vec![s.clone()],
-        _ => Vec::new(),
-    }
-}
-
-fn parse_digest(v: &Value) -> Result<Option<Sha256Digest>, String> {
-    for key in ["sha256", "digest", "checksum", "integrity"] {
-        let Some(value) = v.get(key).and_then(Value::as_str) else {
-            continue;
-        };
-        return Sha256Digest::parse(value).map(Some);
-    }
-    Ok(None)
-}
-
-fn parse_asset(v: &Value) -> Result<Vec<Asset>, String> {
-    let targets = str_array(v.get("target"));
-    let Some(file) = v.get("file").and_then(Value::as_str) else {
-        return Ok(Vec::new());
-    };
-    let file = PackagePath::parse(file)?;
-    let bin = v
-        .get("bin")
-        .and_then(Value::as_str)
-        .map(PackagePath::parse)
-        .transpose()?;
-    let sha256 = parse_digest(v)?;
-    Ok(targets
-        .into_iter()
-        .map(|target| Asset {
-            target,
-            file: file.clone(),
-            bin: bin.clone(),
-            sha256: sha256.clone(),
+impl Package {
+    fn parse(value: &Value) -> Result<Self, String> {
+        let name = value
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "package name is missing".to_string())?;
+        let source = value
+            .get("source")
+            .ok_or_else(|| format!("{name}: source is missing"))?;
+        let source_id = source
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("{name}: source id is missing"))?
+            .to_string();
+        Ok(Self {
+            name: PackageName::parse(name)?,
+            description: value
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+            languages: Self::strings(value.get("languages")),
+            categories: Self::strings(value.get("categories")),
+            source_id,
+            assets: Self::assets(source.get("asset"))?,
+            bin: Self::bin(value.get("bin"))?,
         })
-        .collect())
-}
-
-fn parse_assets(v: Option<&Value>) -> Result<Vec<Asset>, String> {
-    match v {
-        Some(Value::Array(assets)) => {
-            let mut parsed = Vec::new();
-            for asset in assets {
-                parsed.extend(parse_asset(asset)?);
-            }
-            Ok(parsed)
-        }
-        Some(asset @ Value::Object(_)) => parse_asset(asset),
-        _ => Ok(Vec::new()),
     }
-}
 
-fn parse_bin(v: Option<&Value>) -> Result<BTreeMap<PackageName, String>, String> {
-    let mut out = BTreeMap::new();
-    match v {
-        Some(Value::Object(m)) => {
-            for (k, val) in m {
-                if let Some(s) = val.as_str() {
-                    out.insert(PackageName::parse(k)?, s.to_string());
+    fn strings(value: Option<&Value>) -> Vec<String> {
+        match value {
+            Some(Value::Array(values)) => {
+                let mut strings = Vec::new();
+                for value in values {
+                    if let Some(value) = value.as_str() {
+                        strings.push(value.to_string());
+                    }
+                }
+                strings
+            }
+            Some(Value::String(value)) => vec![value.clone()],
+            _ => Vec::new(),
+        }
+    }
+
+    fn digest(value: &Value) -> Result<Option<Sha256Digest>, String> {
+        for key in ["sha256", "digest", "checksum", "integrity"] {
+            let Some(value) = value.get(key).and_then(Value::as_str) else {
+                continue;
+            };
+            return Sha256Digest::parse(value).map(Some);
+        }
+        Ok(None)
+    }
+
+    fn asset(value: &Value) -> Result<Vec<Asset>, String> {
+        let targets = Self::strings(value.get("target"));
+        let Some(file) = value.get("file").and_then(Value::as_str) else {
+            return Ok(Vec::new());
+        };
+        let file = PackagePath::parse(file)?;
+        let bin = value
+            .get("bin")
+            .and_then(Value::as_str)
+            .map(PackagePath::parse)
+            .transpose()?;
+        let sha256 = Self::digest(value)?;
+        let mut assets = Vec::new();
+        for target in targets {
+            assets.push(Asset {
+                target,
+                file: file.clone(),
+                bin: bin.clone(),
+                sha256: sha256.clone(),
+            });
+        }
+        Ok(assets)
+    }
+
+    fn assets(value: Option<&Value>) -> Result<Vec<Asset>, String> {
+        match value {
+            Some(Value::Array(values)) => {
+                let mut assets = Vec::new();
+                for value in values {
+                    assets.extend(Self::asset(value)?);
+                }
+                Ok(assets)
+            }
+            Some(value @ Value::Object(_)) => Self::asset(value),
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    fn bin(value: Option<&Value>) -> Result<BTreeMap<PackageName, String>, String> {
+        let mut bin = BTreeMap::new();
+        match value {
+            Some(Value::Object(values)) => {
+                for (name, value) in values {
+                    if let Some(path) = value.as_str() {
+                        bin.insert(PackageName::parse(name)?, path.to_string());
+                    }
                 }
             }
+            Some(Value::String(value)) => {
+                let (name, path) = value
+                    .split_once(':')
+                    .unwrap_or((value.as_str(), value.as_str()));
+                bin.insert(PackageName::parse(name)?, path.to_string());
+            }
+            _ => {}
         }
-        Some(Value::String(s)) => {
-            let (k, f) = s.split_once(':').unwrap_or((s.as_str(), s.as_str()));
-            out.insert(PackageName::parse(k)?, f.to_string());
-        }
-        _ => {}
+        Ok(bin)
     }
-    Ok(out)
-}
-
-fn parse_one(v: &Value) -> Result<Package, String> {
-    let name = v
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "package name is missing".to_string())?;
-    let source = v
-        .get("source")
-        .ok_or_else(|| format!("{name}: source is missing"))?;
-    let source_id = source
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("{name}: source id is missing"))?
-        .to_string();
-    Ok(Package {
-        name: PackageName::parse(name)?,
-        description: v
-            .get("description")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string(),
-        languages: str_array(v.get("languages")),
-        categories: str_array(v.get("categories")),
-        source_id,
-        assets: parse_assets(source.get("asset"))?,
-        bin: parse_bin(v.get("bin"))?,
-    })
 }
 
 struct CatalogSource(Vec<u8>);
@@ -168,10 +178,10 @@ impl Catalog {
     pub fn parse(source: &str) -> Result<Self, String> {
         let entries: Vec<Value> =
             serde_json::from_str(source).map_err(|error| error.to_string())?;
-        let packages = entries
-            .iter()
-            .map(parse_one)
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut packages = Vec::with_capacity(entries.len());
+        for entry in &entries {
+            packages.push(Package::parse(entry)?);
+        }
         Ok(Self { packages })
     }
 

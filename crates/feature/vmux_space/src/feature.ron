@@ -91,6 +91,12 @@
     ],
     commands: [
             (
+                id: "space_open",
+                label: "Open",
+                group: "Layout > Space",
+                shortcuts: [(shortcut: Chord("Ctrl+b, s"), when: None)],
+            ),
+            (
                 id: "space_next",
                 label: "Next Space",
                 group: "Layout > Space",

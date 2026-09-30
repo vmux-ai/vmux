@@ -8,13 +8,16 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
+use vmux_api::command_bar::TerminalRequest as CommandBarTerminalRequest;
 use vmux_api::protocol::{ClientMessage, CopyModeKey, ProcessId};
 use vmux_clipboard::Clipboard;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
+use vmux_command::command_bar::CommandBarDismiss;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_command::{
-    CommandRegistry, CommandRuntimePlugin, ReadCommandRequests, WriteCommandRequests,
+    CommandInvocation, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
+    WriteCommandRequests,
 };
 #[cfg(test)]
 use vmux_core::PageOpenId;
@@ -34,7 +37,7 @@ use vmux_core::{
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
-use vmux_layout::event::TERMINAL_CEF_BG_COLOR;
+use vmux_layout::event::{TERMINAL_CEF_BG_COLOR, TERMINAL_PAGE_URL};
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::stack::{
     CloseRequest as StackCloseRequest, FocusRequest, FocusedStack, Stack, stack_bundle,
@@ -71,6 +74,7 @@ use crate::pid::{self, Pid};
 use crate::{ProcessExited, RetainOnProcessExit, Terminal};
 use vmux_core::service::ServiceMessageSet;
 use vmux_flex::prelude::*;
+use vmux_ui::i18n::Locale;
 
 #[vmux_native::page]
 pub struct TerminalPlugin;
@@ -100,6 +104,8 @@ impl Plugin for TerminalPlugin {
             crate::TerminalToolPlugin,
         ))
         .add_plugins(crate::contract::TerminalContractPlugin)
+        .add_plugins(UiEventPlugin::<(CommandBarTerminalRequest,)>::default())
+        .add_observer(open_from_command_bar)
         .register_persisted::<crate::launch::TerminalLaunch>()
         .register_type::<crate::launch::TerminalKind>()
         .add_systems(Update, sync_launch_to_stack)
@@ -117,6 +123,71 @@ impl Plugin for TerminalPlugin {
             crate::theme::TerminalThemePlugin,
         ));
     }
+}
+
+fn open_from_command_bar(
+    trigger: On<UiInput<CommandBarTerminalRequest>>,
+    focus: FocusedStack,
+    pid_indexes: Query<&pid::PidToEntity>,
+    locale: Option<Res<vmux_command::ResolvedLocale>>,
+    users: Query<Entity, With<vmux_core::team::User>>,
+    mut spawn: MessageWriter<TerminalSpawnRequest>,
+    mut invocations: MessageWriter<CommandInvocation>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let value = &trigger.event().payload.value;
+    let running = pid_indexes.iter().find_map(|index| {
+        index
+            .iter()
+            .find_map(|(pid, entity)| (Pid(pid).page_url() == *value).then_some(entity))
+    });
+    if let Some(entity) = running {
+        commands.trigger(vmux_core::ActivateRequest { entity });
+        commands.trigger(CommandBarDismiss::new(webview, false));
+        return;
+    }
+
+    if value.starts_with(TERMINAL_PAGE_URL) {
+        warn!("no terminal pane for {}; spawning new", value);
+    }
+    let cwd = if value.is_empty() || value.contains("://") {
+        None
+    } else if let Some(rest) = value.strip_prefix("~/") {
+        std::env::var("HOME")
+            .map(|home| PathBuf::from(home).join(rest))
+            .or_else(|_| Ok::<_, std::convert::Infallible>(PathBuf::from(value)))
+            .ok()
+    } else if value.starts_with('/') {
+        Some(PathBuf::from(value))
+    } else {
+        std::env::var("HOME")
+            .map(|home| PathBuf::from(home).join(value))
+            .or_else(|_| Ok::<_, std::convert::Infallible>(PathBuf::from(value)))
+            .ok()
+    };
+    let locale = locale
+        .as_deref()
+        .map(|locale| locale.0.clone())
+        .unwrap_or_else(Locale::preferred);
+    if let Some(pane) = focus.pane {
+        spawn.write(TerminalSpawnRequest {
+            cwd,
+            target: TerminalSpawnTarget::NewStackInPane(pane),
+            metadata: Some(PageMetadata {
+                url: TERMINAL_PAGE_URL.to_string(),
+                title: locale.translate("command-terminal"),
+                ..default()
+            }),
+        });
+    } else {
+        let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
+        invocations.write(
+            CommandInvocation::new(caller, "open_in_new_stack")
+                .with_arguments(serde_json::json!({ "url": TERMINAL_PAGE_URL })),
+        );
+    }
+    commands.trigger(CommandBarDismiss::new(webview, true));
 }
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {

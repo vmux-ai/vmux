@@ -7,7 +7,7 @@ use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::CommandLineConfig;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
-use vmux_command::command_bar::handler::PendingCommandBarReveal;
+use vmux_command::command_bar::PendingCommandBarReveal;
 use vmux_command::command_bar::panel::CommandBarPanelActive;
 use vmux_core::{PageOpenSet, page::PageReady};
 use vmux_flex::prelude::*;

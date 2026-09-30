@@ -7,9 +7,8 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch, CommandPaletteActivateRequest,
-    CommandPaletteDraftRequest, CommandPaletteHistoryMoveRequest, CommandPaletteMediaChooseEffect,
-    CommandPaletteMediaDismissEffect, CommandPaletteMediaMoveEffect,
-    CommandPaletteMenuChooseEffect, CommandPaletteMenuDismissEffect, CommandPaletteMenuMoveEffect,
+    CommandPaletteDraftRequest, CommandPaletteHistoryMoveRequest, CommandPaletteMenuChooseEffect,
+    CommandPaletteMenuDismissEffect, CommandPaletteMenuMoveEffect,
     CommandPaletteRemoveAttachmentRequest, CommandPaletteState, CommandPaletteSubmitRequest,
     OpenId,
 };
@@ -20,7 +19,7 @@ use vmux_tool::McpSnapshotRequest;
 
 use crate::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
 
-use super::CloseCommandBar;
+use super::CommandBarDismiss;
 
 mod branch;
 mod media;
@@ -66,9 +65,6 @@ impl Plugin for PalettePlugin {
         .add_observer(move_palette_menu)
         .add_observer(choose_palette_menu)
         .add_observer(dismiss_palette_menu)
-        .add_observer(move_palette_media)
-        .add_observer(choose_palette_media)
-        .add_observer(dismiss_palette_media)
         .add_systems(Startup, bind_commands.in_set(BindCommands))
         .add_systems(
             PreUpdate,
@@ -125,9 +121,6 @@ struct PaletteDraftInput {
     menu_move: Option<CommandPaletteMenuMoveEffect>,
     menu_choose: Option<CommandPaletteMenuChooseEffect>,
     menu_dismiss: Option<CommandPaletteMenuDismissEffect>,
-    media_move: Option<CommandPaletteMediaMoveEffect>,
-    media_choose: Option<CommandPaletteMediaChooseEffect>,
-    media_dismiss: Option<CommandPaletteMediaDismissEffect>,
 }
 
 impl PaletteDraftInput {
@@ -209,18 +202,6 @@ struct PaletteMenuChooseBinding;
 #[derive(Component)]
 struct PaletteMenuDismissBinding;
 
-#[derive(Component)]
-struct PaletteMediaNextBinding;
-
-#[derive(Component)]
-struct PaletteMediaPreviousBinding;
-
-#[derive(Component)]
-struct PaletteMediaChooseBinding;
-
-#[derive(Component)]
-struct PaletteMediaDismissBinding;
-
 #[derive(EntityEvent)]
 struct PaletteDecisionReady {
     #[event_target]
@@ -269,26 +250,6 @@ fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
         &mut commands,
         "command_bar_menu_dismiss",
         PaletteMenuDismissBinding,
-    );
-    registry.bind(
-        &mut commands,
-        "command_bar_media_next",
-        PaletteMediaNextBinding,
-    );
-    registry.bind(
-        &mut commands,
-        "command_bar_media_previous",
-        PaletteMediaPreviousBinding,
-    );
-    registry.bind(
-        &mut commands,
-        "command_bar_media_choose",
-        PaletteMediaChooseBinding,
-    );
-    registry.bind(
-        &mut commands,
-        "command_bar_media_dismiss",
-        PaletteMediaDismissBinding,
     );
 }
 
@@ -357,9 +318,6 @@ fn receive_palette_open(
     draft.menu_move = None;
     draft.menu_choose = None;
     draft.menu_dismiss = None;
-    draft.media_move = None;
-    draft.media_choose = None;
-    draft.media_dismiss = None;
     draft.input_revision = draft.input_revision.wrapping_add(1).max(1);
     draft.close_revision = 0;
     snapshot.0.open_id = opened.open_id;
@@ -529,7 +487,7 @@ fn apply_palette_decision(
     match decision {
         PaletteDecision::None => {}
         PaletteDecision::Close => {
-            commands.trigger(CloseCommandBar::after(target, false));
+            commands.trigger(CommandBarDismiss::new(target, true));
         }
         PaletteDecision::Retype(query) => {
             let Ok(mut input) = inputs.get_mut(target) else {
@@ -645,7 +603,7 @@ fn apply_palette_key(
         }
         PaletteKey::Dismiss => {
             input.close_revision = input.close_revision.wrapping_add(1).max(1);
-            commands.trigger(CloseCommandBar::after(target, false));
+            commands.trigger(CommandBarDismiss::new(target, true));
             return;
         }
     }
@@ -731,64 +689,6 @@ fn dismiss_palette_menu(
     });
 }
 
-fn move_palette_media(
-    trigger: On<CommandDispatch>,
-    next: Query<(), With<PaletteMediaNextBinding>>,
-    previous: Query<(), With<PaletteMediaPreviousBinding>>,
-    mut inputs: Query<&mut PaletteDraftInput>,
-) {
-    let command = trigger.event().command();
-    let next = if next.contains(command) {
-        true
-    } else if previous.contains(command) {
-        false
-    } else {
-        return;
-    };
-    let Ok(mut input) = inputs.get_mut(trigger.event().invocation().caller) else {
-        return;
-    };
-    input.effect_revision = input.effect_revision.wrapping_add(1).max(1);
-    input.media_move = Some(CommandPaletteMediaMoveEffect {
-        revision: input.effect_revision,
-        next,
-    });
-}
-
-fn choose_palette_media(
-    trigger: On<CommandDispatch>,
-    bindings: Query<(), With<PaletteMediaChooseBinding>>,
-    mut inputs: Query<&mut PaletteDraftInput>,
-) {
-    if !bindings.contains(trigger.event().command()) {
-        return;
-    }
-    let Ok(mut input) = inputs.get_mut(trigger.event().invocation().caller) else {
-        return;
-    };
-    input.effect_revision = input.effect_revision.wrapping_add(1).max(1);
-    input.media_choose = Some(CommandPaletteMediaChooseEffect {
-        revision: input.effect_revision,
-    });
-}
-
-fn dismiss_palette_media(
-    trigger: On<CommandDispatch>,
-    bindings: Query<(), With<PaletteMediaDismissBinding>>,
-    mut inputs: Query<&mut PaletteDraftInput>,
-) {
-    if !bindings.contains(trigger.event().command()) {
-        return;
-    }
-    let Ok(mut input) = inputs.get_mut(trigger.event().invocation().caller) else {
-        return;
-    };
-    input.effect_revision = input.effect_revision.wrapping_add(1).max(1);
-    input.media_dismiss = Some(CommandPaletteMediaDismissEffect {
-        revision: input.effect_revision,
-    });
-}
-
 fn project_palette(
     mut palettes: Query<(
         &PaletteOpen,
@@ -846,9 +746,6 @@ fn project_palette(
         projection.menu_move = input.menu_move;
         projection.menu_choose = input.menu_choose;
         projection.menu_dismiss = input.menu_dismiss;
-        projection.media_move = input.media_move;
-        projection.media_choose = input.media_choose;
-        projection.media_dismiss = input.media_dismiss;
         let palette = PaletteState::from_rows(&rows, &opened.0, &draft, surface);
         let next_context = PaletteContext {
             open_id: opened.0.open_id,
@@ -1085,7 +982,7 @@ mod tests {
     }
 
     #[test]
-    fn palette_key_commands_update_host_selection() {
+    fn palette_key_commands_update_host_selection_and_menu_effect() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
@@ -1143,20 +1040,6 @@ mod tests {
             Some(CommandPaletteMenuMoveEffect {
                 revision: 1,
                 next: true,
-            })
-        );
-
-        app.world_mut()
-            .resource_mut::<Messages<CommandInvocation>>()
-            .write(CommandInvocation::new(page, "command_bar_media_previous"));
-        app.update();
-
-        let snapshot = app.world().get::<PaletteSnapshot>(page).unwrap();
-        assert_eq!(
-            snapshot.0.projection.media_move,
-            Some(CommandPaletteMediaMoveEffect {
-                revision: 2,
-                next: false,
             })
         );
     }

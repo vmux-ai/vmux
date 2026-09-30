@@ -9,8 +9,8 @@ use vmux_core::host::UiStateWrite;
 use crate::command_bar::project_files::{
     MAX_RESULTS, PendingProjectCompletion, ProjectCompletions, ProjectIndex, RankBias,
 };
-use crate::event::{CommandBarUiState, PathCompleteRequest, PathEntry};
 use crate::snapshot::{CommandBarProjection, WriteCommandBarSnapshots};
+use vmux_api::command_bar::{CommandBarUiState, PathCompleteRequest, PathEntry};
 
 pub(super) struct CompletionPlugin;
 

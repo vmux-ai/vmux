@@ -9,8 +9,8 @@ use vmux_core::event::{
     ExplorerTreeToggle, FileDirEntry, TreeRow,
 };
 
+mod entry;
 mod fs;
-mod mutation;
 mod outline;
 mod panel;
 mod search;
@@ -20,7 +20,7 @@ mod tree;
 #[cfg(test)]
 mod tests;
 
-use mutation::MutationPlugin;
+use entry::ExplorerEntryPlugin;
 use outline::OutlinePlugin;
 pub(crate) use outline::OutlineRows;
 use panel::PanelPlugin;
@@ -184,7 +184,7 @@ impl Plugin for ExplorerPlugin {
         app.add_plugins((
             TreePlugin,
             PanelPlugin,
-            MutationPlugin,
+            ExplorerEntryPlugin,
             OutlinePlugin,
             SearchPlugin,
             TabsPlugin,

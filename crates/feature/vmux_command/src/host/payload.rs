@@ -1,5 +1,4 @@
 use crate::definition::CommandDefinition;
-use crate::event::{CommandBarOpenEvent, OpenId};
 use crate::open_target::OpenTarget;
 use crate::snapshot::{
     CommandBarPagesSnapshot, CommandBarSpacesSnapshot, ContributedCommand, ContributedPages,
@@ -9,6 +8,7 @@ use vmux_api::command_bar::{
     CommandBarCommandEntry, CommandBarPage, CommandBarPick, CommandBarPickRow, CommandBarPicker,
     CommandBarSpace, CommandBarTab, SearchEngine,
 };
+use vmux_api::command_bar::{CommandBarOpenEvent, OpenId};
 use vmux_ui::i18n::{Locale, TranslationValue};
 
 pub struct CommandBarEntry {
@@ -227,8 +227,8 @@ pub fn command_bar_open_payload(
     commands: Vec<CommandBarCommandEntry>,
     target: Option<crate::open_target::OpenTarget>,
     pages: Vec<CommandBarPage>,
-    work_dirs: Vec<crate::event::CommandBarWorkDir>,
-    recent_files: Vec<crate::event::CommandBarRecentFile>,
+    work_dirs: Vec<vmux_api::command_bar::CommandBarWorkDir>,
+    recent_files: Vec<vmux_api::command_bar::CommandBarRecentFile>,
     search_engines: Vec<SearchEngine>,
     projects: Vec<String>,
 ) -> CommandBarOpenEvent {

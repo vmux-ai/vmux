@@ -1,6 +1,8 @@
-use crate::event::{CommandBarPage, CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
 use bevy::prelude::*;
 use std::collections::HashMap;
+use vmux_api::command_bar::{
+    CommandBarPage, CommandBarRecentFile, CommandBarWorkDir, SearchEngine,
+};
 use vmux_core::agent::AgentKind;
 use vmux_core::launcher::RendersLauncherPanel;
 use vmux_core::page::PageManifest;
@@ -221,6 +223,9 @@ pub struct CommandBarWorkSnapshot {
     pub search_engines: Vec<SearchEngine>,
     pub projects: Vec<String>,
 }
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct CommandBarWorkDirectory(pub String);
 
 fn update_pages_snapshot(
     manifests: Query<&PageManifest>,

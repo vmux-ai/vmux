@@ -12,116 +12,54 @@ pub enum ArchiveKind {
     Raw,
 }
 
-fn relative_path(path: &Path) -> Result<PathBuf, String> {
-    let mut relative = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Normal(component) => relative.push(component),
-            Component::CurDir => {}
-            _ => return Err(format!("unsafe archive path: {}", path.display())),
+struct ArchivePath(PathBuf);
+
+impl ArchivePath {
+    fn parse(path: &Path) -> Result<Self, String> {
+        let mut relative = PathBuf::new();
+        for component in path.components() {
+            match component {
+                Component::Normal(component) => relative.push(component),
+                Component::CurDir => {}
+                _ => return Err(format!("unsafe archive path: {}", path.display())),
+            }
         }
+        if relative.as_os_str().is_empty() {
+            return Err(format!("unsafe archive path: {}", path.display()));
+        }
+        Ok(Self(relative))
     }
-    if relative.as_os_str().is_empty() {
-        return Err(format!("unsafe archive path: {}", path.display()));
+
+    fn join(&self, destination: &Path) -> PathBuf {
+        destination.join(&self.0)
     }
-    Ok(relative)
 }
 
-fn add_expanded(total: &mut u64, size: u64) -> Result<(), String> {
-    *total = total
-        .checked_add(size)
-        .ok_or_else(|| "archive expanded size overflow".to_string())?;
-    if *total > MAX_EXPANDED_BYTES {
-        return Err(format!("archive expands beyond {MAX_EXPANDED_BYTES} bytes"));
-    }
-    Ok(())
-}
+#[derive(Default)]
+struct ExpandedSize(u64);
 
-fn copy_bounded(mut reader: impl Read, mut writer: impl Write) -> Result<(), String> {
-    let mut limited = reader.by_ref().take(MAX_EXPANDED_BYTES + 1);
-    let written = std::io::copy(&mut limited, &mut writer).map_err(|error| error.to_string())?;
-    if written > MAX_EXPANDED_BYTES {
-        return Err(format!("archive expands beyond {MAX_EXPANDED_BYTES} bytes"));
+impl ExpandedSize {
+    fn add(&mut self, size: u64) -> Result<(), String> {
+        self.0 = self
+            .0
+            .checked_add(size)
+            .ok_or_else(|| "archive expanded size overflow".to_string())?;
+        if self.0 > MAX_EXPANDED_BYTES {
+            return Err(format!("archive expands beyond {MAX_EXPANDED_BYTES} bytes"));
+        }
+        Ok(())
     }
-    writer.flush().map_err(|error| error.to_string())?;
-    Ok(())
-}
 
-fn extract_tar_gz(file: &Path, dest_dir: &Path) -> Result<(), String> {
-    let file = std::fs::File::open(file).map_err(|error| error.to_string())?;
-    let decoder = flate2::read::GzDecoder::new(file);
-    let mut archive = tar::Archive::new(decoder);
-    let entries = archive.entries().map_err(|error| error.to_string())?;
-    let mut entry_count = 0usize;
-    let mut expanded = 0u64;
-    for entry in entries {
-        entry_count += 1;
-        if entry_count > MAX_ARCHIVE_ENTRIES {
-            return Err(format!(
-                "archive contains more than {MAX_ARCHIVE_ENTRIES} entries"
-            ));
+    fn copy(mut reader: impl Read, mut writer: impl Write) -> Result<(), String> {
+        let mut limited = reader.by_ref().take(MAX_EXPANDED_BYTES + 1);
+        let written =
+            std::io::copy(&mut limited, &mut writer).map_err(|error| error.to_string())?;
+        if written > MAX_EXPANDED_BYTES {
+            return Err(format!("archive expands beyond {MAX_EXPANDED_BYTES} bytes"));
         }
-        let mut entry = entry.map_err(|error| error.to_string())?;
-        let relative = relative_path(&entry.path().map_err(|error| error.to_string())?)?;
-        let output = dest_dir.join(relative);
-        let kind = entry.header().entry_type();
-        if kind.is_symlink() || kind.is_hard_link() {
-            continue;
-        }
-        if kind.is_dir() {
-            std::fs::create_dir_all(&output).map_err(|error| error.to_string())?;
-            continue;
-        }
-        if !kind.is_file() {
-            return Err("unsupported tar entry type".to_string());
-        }
-        add_expanded(
-            &mut expanded,
-            entry.header().size().map_err(|error| error.to_string())?,
-        )?;
-        if let Some(parent) = output.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        entry.unpack(&output).map_err(|error| error.to_string())?;
+        writer.flush().map_err(|error| error.to_string())?;
+        Ok(())
     }
-    Ok(())
-}
-
-fn extract_zip(file: &Path, dest_dir: &Path) -> Result<(), String> {
-    let file = std::fs::File::open(file).map_err(|error| error.to_string())?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
-    if archive.len() > MAX_ARCHIVE_ENTRIES {
-        return Err(format!(
-            "archive contains more than {MAX_ARCHIVE_ENTRIES} entries"
-        ));
-    }
-    let mut expanded = 0u64;
-    for index in 0..archive.len() {
-        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
-        let enclosed = entry
-            .enclosed_name()
-            .ok_or_else(|| format!("unsafe archive path: {}", entry.name()))?;
-        let relative = relative_path(&enclosed)?;
-        let output = dest_dir.join(relative);
-        if entry
-            .unix_mode()
-            .is_some_and(|mode| mode & 0o170000 == 0o120000)
-        {
-            continue;
-        }
-        if entry.is_dir() {
-            std::fs::create_dir_all(&output).map_err(|error| error.to_string())?;
-            continue;
-        }
-        add_expanded(&mut expanded, entry.size())?;
-        if let Some(parent) = output.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let mut output_file = std::fs::File::create(&output).map_err(|error| error.to_string())?;
-        std::io::copy(&mut entry, &mut output_file).map_err(|error| error.to_string())?;
-        output_file.flush().map_err(|error| error.to_string())?;
-    }
-    Ok(())
 }
 
 impl ArchiveKind {
@@ -142,30 +80,104 @@ impl ArchiveKind {
         std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
         match self {
             Self::Gz => {
-                let relative = relative_path(Path::new(single_name))?;
+                let relative = ArchivePath::parse(Path::new(single_name))?;
                 let file = std::fs::File::open(file).map_err(|error| error.to_string())?;
                 let decoder = flate2::read::GzDecoder::new(file);
-                let output = destination.join(relative);
+                let output = relative.join(destination);
                 if let Some(parent) = output.parent() {
                     std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
                 }
                 let output = std::fs::File::create(output).map_err(|error| error.to_string())?;
-                copy_bounded(decoder, output)
+                ExpandedSize::copy(decoder, output)
             }
-            Self::TarGz => extract_tar_gz(file, destination),
-            Self::Zip => extract_zip(file, destination),
+            Self::TarGz => Self::extract_tar_gz(file, destination),
+            Self::Zip => Self::extract_zip(file, destination),
             Self::Raw => {
-                let relative = relative_path(Path::new(single_name))?;
+                let relative = ArchivePath::parse(Path::new(single_name))?;
                 let input = std::fs::File::open(file).map_err(|error| error.to_string())?;
-                let output_path = destination.join(relative);
+                let output_path = relative.join(destination);
                 if let Some(parent) = output_path.parent() {
                     std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
                 }
                 let output =
                     std::fs::File::create(output_path).map_err(|error| error.to_string())?;
-                copy_bounded(input, output)
+                ExpandedSize::copy(input, output)
             }
         }
+    }
+
+    fn extract_tar_gz(file: &Path, destination: &Path) -> Result<(), String> {
+        let file = std::fs::File::open(file).map_err(|error| error.to_string())?;
+        let decoder = flate2::read::GzDecoder::new(file);
+        let mut archive = tar::Archive::new(decoder);
+        let entries = archive.entries().map_err(|error| error.to_string())?;
+        let mut entry_count = 0usize;
+        let mut expanded = ExpandedSize::default();
+        for entry in entries {
+            entry_count += 1;
+            if entry_count > MAX_ARCHIVE_ENTRIES {
+                return Err(format!(
+                    "archive contains more than {MAX_ARCHIVE_ENTRIES} entries"
+                ));
+            }
+            let mut entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path().map_err(|error| error.to_string())?;
+            let output = ArchivePath::parse(&path)?.join(destination);
+            let kind = entry.header().entry_type();
+            if kind.is_symlink() || kind.is_hard_link() {
+                continue;
+            }
+            if kind.is_dir() {
+                std::fs::create_dir_all(&output).map_err(|error| error.to_string())?;
+                continue;
+            }
+            if !kind.is_file() {
+                return Err("unsupported tar entry type".to_string());
+            }
+            expanded.add(entry.header().size().map_err(|error| error.to_string())?)?;
+            if let Some(parent) = output.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            entry.unpack(&output).map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn extract_zip(file: &Path, destination: &Path) -> Result<(), String> {
+        let file = std::fs::File::open(file).map_err(|error| error.to_string())?;
+        let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
+        if archive.len() > MAX_ARCHIVE_ENTRIES {
+            return Err(format!(
+                "archive contains more than {MAX_ARCHIVE_ENTRIES} entries"
+            ));
+        }
+        let mut expanded = ExpandedSize::default();
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+            let enclosed = entry
+                .enclosed_name()
+                .ok_or_else(|| format!("unsafe archive path: {}", entry.name()))?;
+            let output = ArchivePath::parse(&enclosed)?.join(destination);
+            if entry
+                .unix_mode()
+                .is_some_and(|mode| mode & 0o170000 == 0o120000)
+            {
+                continue;
+            }
+            if entry.is_dir() {
+                std::fs::create_dir_all(&output).map_err(|error| error.to_string())?;
+                continue;
+            }
+            expanded.add(entry.size())?;
+            if let Some(parent) = output.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            let mut output_file =
+                std::fs::File::create(&output).map_err(|error| error.to_string())?;
+            std::io::copy(&mut entry, &mut output_file).map_err(|error| error.to_string())?;
+            output_file.flush().map_err(|error| error.to_string())?;
+        }
+        Ok(())
     }
 }
 

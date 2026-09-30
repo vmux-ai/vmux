@@ -2,6 +2,9 @@ use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
 #[cfg(test)]
 use vmux_command::CommandManifest;
+use vmux_command::command_bar::{
+    CommandBarDismiss, CommandBarOpenRequest, WriteCommandBarRequests,
+};
 use vmux_command::{
     BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
 };
@@ -41,6 +44,7 @@ use crate::event::{
 };
 use crate::model::SpaceRecord;
 use crate::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
+use vmux_api::command_bar::{CommandBarPicker, SwitchSpaceRequest};
 
 #[vmux_native::page]
 pub struct SpacePlugin;
@@ -60,12 +64,18 @@ impl Plugin for SpacePlugin {
         .add_plugins(super::SpaceToolPlugin)
         .add_plugins(LayoutContractPlugin)
         .add_plugins(vmux_core::host::UiStatePlugin::<SpacesUiState>::default())
+        .add_message::<CommandBarOpenRequest>()
         .add_message::<SpaceAttachRequest>()
         .add_message::<SpaceCreateRequest>()
         .add_message::<SpaceDeleteRequest>()
         .add_message::<SpaceOpenPageRequest>()
         .add_message::<SpaceRenameRequest>()
         .add_message::<OpenRequest>()
+        .add_message::<CommandBarSpaceOpenRequest>()
+        .add_systems(
+            Update,
+            open_command_bar_space.in_set(WriteCommandBarRequests),
+        )
         .add_systems(Startup, bind_command.in_set(BindCommands))
         .add_systems(
             Update,
@@ -112,6 +122,7 @@ impl Plugin for SpacePlugin {
                 SpaceRenameRequest,
                 ProjectActivateRequest,
                 ProjectForgetRequest,
+                SwitchSpaceRequest,
                 vmux_core::event::ProjectTreeToggle,
             )>::default(),
         ))
@@ -122,6 +133,7 @@ impl Plugin for SpacePlugin {
         .add_observer(on_space_rename)
         .add_observer(on_project_activate)
         .add_observer(on_project_forget)
+        .add_observer(switch_space)
         .add_observer(reset_sent)
         .add_systems(Update, handle_open_in_new_space.in_set(ReadCommandRequests))
         .add_systems(Update, broadcast_spaces_to_views);
@@ -144,6 +156,17 @@ pub struct OpenRequest {
     pub url: Option<String>,
 }
 
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+struct CommandBarSpaceOpenRequest;
+
+impl TryFrom<&CommandInvocation> for CommandBarSpaceOpenRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "space_open").then_some(Self).ok_or(())
+    }
+}
+
 impl TryFrom<&CommandInvocation> for OpenRequest {
     type Error = ();
 
@@ -158,6 +181,16 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
 
 fn bind_command(registry: CommandRegistry, mut commands: Commands) {
     registry.message::<OpenRequest>(&mut commands, "open_in_new_space");
+    registry.message::<CommandBarSpaceOpenRequest>(&mut commands, "space_open");
+}
+
+fn open_command_bar_space(
+    mut requests: MessageReader<CommandBarSpaceOpenRequest>,
+    mut open: MessageWriter<CommandBarOpenRequest>,
+) {
+    if requests.read().next().is_some() {
+        open.write(CommandBarOpenRequest::picker(CommandBarPicker::Space));
+    }
 }
 
 fn update_effective_startup(
@@ -727,6 +760,20 @@ fn on_space_attach(
         .entity(entity)
         .insert((Active, LastActivatedAt::now()));
     graph.bump_tab(entity, &mut commands);
+}
+
+fn switch_space(trigger: On<UiInput<SwitchSpaceRequest>>, mut commands: Commands) {
+    let webview = trigger.event().webview;
+    let id = &trigger.event().payload.id;
+    if !id.is_empty() {
+        commands.trigger(UiInput {
+            webview,
+            payload: SpaceAttachRequest {
+                space_id: id.clone(),
+            },
+        });
+    }
+    commands.trigger(CommandBarDismiss::new(webview, false));
 }
 
 fn on_space_create(

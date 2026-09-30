@@ -45,6 +45,7 @@ pub struct CommandPaletteState {
     pub media_query: Option<String>,
     pub media_entries: Vec<ChatMediaEntry>,
     pub media_loading: bool,
+    pub media_selected: u32,
     pub attachments: Vec<ChatAttachment>,
     pub attachment_sequence: u64,
 }

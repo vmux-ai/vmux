@@ -10,6 +10,7 @@ use crate::host::model_selection::{
 use crate::host::model_selection::{AgentModeSelections, AgentModelSelections};
 use crate::runtime::acp::{AcpModeState, AcpModelState};
 use vmux_api::command_bar::{AgentModels, AgentModes};
+use vmux_api::command_bar::{StartSelectMode, StartSelectModel};
 use vmux_api::protocol::{
     AgentCommandResult, AgentListModels, AgentSelectModel, AgentSetEffort, ClientMessage,
 };
@@ -18,7 +19,6 @@ use vmux_chat::event::{
     ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort,
 };
 use vmux_chat::host::{ChatModeStateChanged, ChatModelStateChanged, ChatView};
-use vmux_command::event::{StartSelectMode, StartSelectModel};
 use vmux_command::snapshot::{AgentPromptTarget, CommandBarProjection};
 use vmux_core::agent::{AgentKind, default_effort, effort_levels};
 use vmux_core::page::PageReady;

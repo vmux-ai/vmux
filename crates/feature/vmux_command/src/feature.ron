@@ -24,12 +24,6 @@
     ],
     commands: [
             (
-                id: "space_open",
-                label: "Open",
-                group: "Layout > Space",
-                shortcuts: [(shortcut: Chord("Ctrl+b, s"), when: None)],
-            ),
-            (
                 id: "browser_open_command_bar",
                 label: "Command Bar",
                 group: "Browser > Bar",
@@ -62,48 +56,6 @@
                 group: "Browser > Bar",
                 shortcuts: [(shortcut: Direct(">"), when: None)],
                 mcp: Some((description: "Commands")),
-            ),
-            (
-                id: "browser_open_ex_bar",
-                label: "Vim Command Line",
-                group: "Browser > Bar",
-                mcp: Some((description: "Vim Command Line")),
-            ),
-            (
-                id: "browser_open_goto_line",
-                label: "Go to Line",
-                group: "Browser > Bar",
-                mcp: Some((description: "Go to Line")),
-            ),
-            (
-                id: "browser_open_indentation",
-                label: "Select Indentation",
-                group: "Browser > Bar",
-                mcp: Some((description: "Select Indentation")),
-            ),
-            (
-                id: "browser_open_line_ending",
-                label: "Select End of Line Sequence",
-                group: "Browser > Bar",
-                mcp: Some((description: "Select End of Line Sequence")),
-            ),
-            (
-                id: "browser_open_encoding",
-                label: "Select Encoding",
-                group: "Browser > Bar",
-                mcp: Some((description: "Select Encoding")),
-            ),
-            (
-                id: "browser_open_reopen_with_encoding",
-                label: "Reopen with Encoding",
-                group: "Browser > Bar",
-                mcp: Some((description: "Reopen with Encoding")),
-            ),
-            (
-                id: "browser_open_save_with_encoding",
-                label: "Save with Encoding",
-                group: "Browser > Bar",
-                mcp: Some((description: "Save with Encoding")),
             ),
             (
                 id: "command_bar_next",

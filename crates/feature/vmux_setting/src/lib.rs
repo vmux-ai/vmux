@@ -21,8 +21,8 @@ pub use host::{
     AcpAgentConfig, AgentSettings, AppSettings, BookmarkFolderSettings, BrowserSettings,
     ColorScheme, ColorSchemeChanged, DirSource, EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH,
     EXPLORER_MIN_WIDTH, KeyComboDef, ResolvedColorScheme, ResolvedScheme, SearchEngine,
-    SettingToolPlugin, Settings, SettingsLoadSet, SettingsPlugin, SettingsRuntimePlugin,
-    SettingsSaveRequest, SettingsWriteRequest, ShortcutDef, ShortcutEntry, ShortcutSettings,
-    SpaceOverrides, SpaceProject, StartupDir, SystemAppearance, TerminalSettings, TerminalTheme,
-    UpdateChannel,
+    SearchEngineSetting, SettingToolPlugin, Settings, SettingsLoadSet, SettingsPlugin,
+    SettingsRuntimePlugin, SettingsSaveRequest, SettingsWriteRequest, ShortcutDef, ShortcutEntry,
+    ShortcutSettings, SpaceOverrides, SpaceProject, StartupDir, SystemAppearance, TerminalSettings,
+    TerminalTheme, UpdateChannel,
 };

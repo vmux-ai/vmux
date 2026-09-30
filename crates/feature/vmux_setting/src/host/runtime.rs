@@ -1,10 +1,10 @@
+use crate::{SearchEngine, SearchEngineSetting};
 use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, OnceLock, mpsc};
 use std::time::{Duration, Instant};
-use vmux_command::event::{SearchEngine, SearchEngineSetting};
 pub use vmux_layout::settings::LayoutSettings;
 use vmux_layout::settings::{ConfirmCloseSettings, ResolvedLocale};
 #[cfg(test)]

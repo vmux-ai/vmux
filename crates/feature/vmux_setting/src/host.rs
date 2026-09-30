@@ -20,7 +20,10 @@ pub use runtime::{
 };
 pub use state::Settings;
 pub use tool::SettingToolPlugin;
-pub use vmux_command::event::SearchEngine;
+pub use vmux_api::command_bar::SearchEngine;
+
+#[derive(bevy::prelude::Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SearchEngineSetting(pub SearchEngine);
 
 #[vmux_native::page]
 pub struct SettingsPlugin;

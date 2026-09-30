@@ -6,8 +6,8 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use vmux_command::CommandBar;
-use vmux_command::command_bar::handler::{CommandBarNativeSize, PendingCommandBarReveal};
 use vmux_command::command_bar::panel::CommandBarPanelActive;
+use vmux_command::command_bar::{CommandBarNativeSize, PendingCommandBarReveal};
 use vmux_core::overlay::{OverlayState, WindowOverlay};
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;

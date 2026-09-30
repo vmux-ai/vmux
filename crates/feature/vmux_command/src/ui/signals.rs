@@ -1,7 +1,7 @@
-use crate::event::{CommandBarOpenEvent, OpenId};
 use crate::palette::keyboard::TextEditCommand;
 use crate::palette::{PaletteDraft, PaletteRows, PaletteState};
 use dioxus::prelude::*;
+use vmux_api::command_bar::{CommandBarOpenEvent, OpenId};
 use vmux_ui::caret::{EventSelection, TextCaret};
 use vmux_ui::focus::FocusClaim;
 

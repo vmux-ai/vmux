@@ -11,9 +11,9 @@ use super::{
 };
 use crate::host::editor::FileView;
 
-pub(super) struct MutationPlugin;
+pub(super) struct ExplorerEntryPlugin;
 
-impl Plugin for MutationPlugin {
+impl Plugin for ExplorerEntryPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(
             ExplorerCreate,

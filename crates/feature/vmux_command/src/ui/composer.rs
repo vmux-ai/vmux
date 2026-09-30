@@ -1,9 +1,9 @@
-use crate::event::{
-    CommandPaletteState, StartGoToBranch, StartSelectMode, StartSelectModel, StartSelectWorkspace,
-};
 use crate::palette::ComposerState;
 use crate::ui::signals::PaletteSignals;
 use dioxus::prelude::*;
+use vmux_api::command_bar::{
+    CommandPaletteState, StartGoToBranch, StartSelectMode, StartSelectModel, StartSelectWorkspace,
+};
 use vmux_api::room::ModelOptionEntry;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::components::composer_bar::{

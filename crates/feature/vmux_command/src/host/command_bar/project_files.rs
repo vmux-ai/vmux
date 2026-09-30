@@ -7,7 +7,7 @@ use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 use bevy::winit::EventLoopProxyWrapper;
 use ignore::WalkBuilder;
 
-use crate::event::{CommandBarRecentFile, PathCompleteResponse, PathEntry};
+use vmux_api::command_bar::{CommandBarRecentFile, PathCompleteResponse, PathEntry};
 
 const MAX_INDEXED_PATHS: usize = 400_000;
 pub const MAX_RESULTS: usize = 200;

@@ -31,6 +31,49 @@ pub enum SearchEngine {
     Kagi,
 }
 
+impl SearchEngine {
+    pub const ALL: [Self; 5] = [
+        Self::Google,
+        Self::Bing,
+        Self::DuckDuckGo,
+        Self::Brave,
+        Self::Kagi,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Google => "Google",
+            Self::Bing => "Bing",
+            Self::DuckDuckGo => "DuckDuckGo",
+            Self::Brave => "Brave Search",
+            Self::Kagi => "Kagi",
+        }
+    }
+
+    pub fn from_url(url: &str) -> Option<Self> {
+        let parsed = url::Url::parse(url).ok()?;
+        match parsed.host_str()?.trim_start_matches("www.") {
+            "google.com" => Some(Self::Google),
+            "bing.com" => Some(Self::Bing),
+            "duckduckgo.com" => Some(Self::DuckDuckGo),
+            "search.brave.com" => Some(Self::Brave),
+            "kagi.com" => Some(Self::Kagi),
+            _ => None,
+        }
+    }
+
+    pub fn query_url(self, query: &str) -> String {
+        let query: String = url::form_urlencoded::byte_serialize(query.trim().as_bytes()).collect();
+        match self {
+            Self::Google => format!("https://www.google.com/search?q={query}"),
+            Self::Bing => format!("https://www.bing.com/search?q={query}"),
+            Self::DuckDuckGo => format!("https://duckduckgo.com/?q={query}"),
+            Self::Brave => format!("https://search.brave.com/search?q={query}"),
+            Self::Kagi => format!("https://kagi.com/search?q={query}"),
+        }
+    }
+}
+
 #[vmux_api::contract(Default)]
 pub struct CommandBarOpenEvent {
     #[serde(default)]

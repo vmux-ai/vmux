@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use vmux_command::snapshot::{
     AgentPromptTarget, AgentProviderSummary, AgentStrategySummary, CommandBarProjection,
+    CommandBarWorkDirectory,
 };
 
 use vmux_core::agent::AgentProviderTargetKind;
@@ -25,10 +26,28 @@ impl Plugin for SnapshotPlugin {
                     update_agents_snapshot,
                     update_recent_agents,
                     update_agent_sessions_snapshot.in_set(SnapshotSet::AgentSessions),
+                    sync_work_directories,
                 )
                     .chain()
                     .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
             );
+    }
+}
+
+fn sync_work_directories(
+    changed: Query<(Entity, &vmux_core::AgentWorkingDir), Changed<vmux_core::AgentWorkingDir>>,
+    mut removed: RemovedComponents<vmux_core::AgentWorkingDir>,
+    mut commands: Commands,
+) {
+    for (entity, directory) in &changed {
+        commands
+            .entity(entity)
+            .insert(CommandBarWorkDirectory(directory.0.clone()));
+    }
+    for entity in removed.read() {
+        if let Ok(mut entity) = commands.get_entity(entity) {
+            entity.remove::<CommandBarWorkDirectory>();
+        }
     }
 }
 

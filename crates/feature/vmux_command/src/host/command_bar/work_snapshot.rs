@@ -1,10 +1,6 @@
-#[cfg(test)]
-use crate::event::SearchEngine;
-use crate::event::{CommandBarRecentFile, CommandBarWorkDir};
-use crate::search_engine::SearchEngines;
-use crate::snapshot::CommandBarProjection;
+use crate::snapshot::{CommandBarProjection, CommandBarWorkDirectory};
 use bevy::prelude::*;
-use vmux_core::terminal::{Terminal, TerminalLaunch};
+use vmux_api::command_bar::{CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
 use vmux_core::{LastVisitedAt, PageMetadata, Url, VisitCount};
 use vmux_history::LastActivatedAt;
 
@@ -61,8 +57,7 @@ fn list_dir_entries(dir: &str) -> Vec<CommandBarWorkDir> {
 }
 
 fn update_work_dirs_snapshot(
-    terminals: Query<(&TerminalLaunch, Option<&LastActivatedAt>), With<Terminal>>,
-    agent_dirs: Query<(&vmux_core::AgentWorkingDir, Option<&LastActivatedAt>)>,
+    directories: Query<(&CommandBarWorkDirectory, Option<&LastActivatedAt>)>,
     mut last_cwds: Local<Vec<String>>,
     mut state: Single<&mut CommandBarProjection>,
 ) {
@@ -77,10 +72,7 @@ fn update_work_dirs_snapshot(
             acc.push((cwd.to_string(), ts));
         }
     };
-    for (launch, last) in &terminals {
-        merge(&launch.cwd, last.map(|l| l.0).unwrap_or(0), &mut by_cwd);
-    }
-    for (dir, last) in &agent_dirs {
+    for (dir, last) in &directories {
         merge(&dir.0, last.map(|l| l.0).unwrap_or(0), &mut by_cwd);
     }
     by_cwd.sort_by_key(|(_, ts)| std::cmp::Reverse(*ts));
@@ -140,13 +132,13 @@ fn update_recent_files_snapshot(
         .take(RECENT_FILES_CAP)
         .map(|(_, f)| f)
         .collect();
-    let mut engine_recency = SearchEngines::ALL
+    let mut engine_recency = SearchEngine::ALL
         .into_iter()
         .map(|engine| {
             let latest = urls
                 .iter()
                 .filter_map(|(meta, _, visited)| {
-                    (SearchEngines::from_url(&meta.url) == Some(engine)).then_some(visited.0)
+                    (SearchEngine::from_url(&meta.url) == Some(engine)).then_some(visited.0)
                 })
                 .max()
                 .unwrap_or(i64::MIN);
@@ -169,22 +161,11 @@ fn update_recent_files_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::terminal::TerminalKind;
 
     fn projection(app: &mut App) -> CommandBarProjection {
         let world = app.world_mut();
         let mut query = world.query::<&CommandBarProjection>();
         query.single(world).unwrap().clone()
-    }
-
-    fn launch(cwd: &str, kind: TerminalKind) -> TerminalLaunch {
-        TerminalLaunch {
-            command: "/bin/zsh".into(),
-            args: vec![],
-            cwd: cwd.into(),
-            env: vec![],
-            kind,
-        }
     }
 
     #[test]
@@ -200,8 +181,7 @@ mod tests {
         let mut app = App::new();
         app.add_systems(Update, update_work_dirs_snapshot);
         app.world_mut().spawn(CommandBarProjection::default());
-        app.world_mut()
-            .spawn((Terminal, launch(&cwd, TerminalKind::Plain)));
+        app.world_mut().spawn(CommandBarWorkDirectory(cwd));
         app.update();
 
         let snap = projection(&mut app).work;
@@ -229,10 +209,8 @@ mod tests {
         let mut app = App::new();
         app.add_systems(Update, update_work_dirs_snapshot);
         app.world_mut().spawn(CommandBarProjection::default());
-        app.world_mut().spawn((
-            Terminal,
-            launch(&root.to_string_lossy(), TerminalKind::Plain),
-        ));
+        app.world_mut()
+            .spawn(CommandBarWorkDirectory(root.to_string_lossy().into_owned()));
         app.update();
         let snap = projection(&mut app).work;
         assert!(
@@ -256,8 +234,7 @@ mod tests {
         let mut app = App::new();
         app.add_systems(Update, update_work_dirs_snapshot);
         app.world_mut().spawn(CommandBarProjection::default());
-        app.world_mut()
-            .spawn(vmux_core::AgentWorkingDir(cwd.clone()));
+        app.world_mut().spawn(CommandBarWorkDirectory(cwd.clone()));
         app.update();
 
         let snap = projection(&mut app).work;
@@ -329,7 +306,7 @@ mod tests {
 
         let snapshot = projection(&mut app);
         let engines = &snapshot.work.search_engines;
-        assert_eq!(engines.len(), SearchEngines::ALL.len());
+        assert_eq!(engines.len(), SearchEngine::ALL.len());
         assert_eq!(
             &engines[..3],
             &[

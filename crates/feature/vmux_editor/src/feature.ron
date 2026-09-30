@@ -164,6 +164,48 @@
     ],
     commands: [
             (
+                id: "browser_open_ex_bar",
+                label: "Vim Command Line",
+                group: "Editor",
+                mcp: Some((description: "Vim Command Line")),
+            ),
+            (
+                id: "browser_open_goto_line",
+                label: "Go to Line",
+                group: "Editor",
+                mcp: Some((description: "Go to Line")),
+            ),
+            (
+                id: "browser_open_indentation",
+                label: "Select Indentation",
+                group: "Editor",
+                mcp: Some((description: "Select Indentation")),
+            ),
+            (
+                id: "browser_open_line_ending",
+                label: "Select End of Line Sequence",
+                group: "Editor",
+                mcp: Some((description: "Select End of Line Sequence")),
+            ),
+            (
+                id: "browser_open_encoding",
+                label: "Select Encoding",
+                group: "Editor",
+                mcp: Some((description: "Select Encoding")),
+            ),
+            (
+                id: "browser_open_reopen_with_encoding",
+                label: "Reopen with Encoding",
+                group: "Editor",
+                mcp: Some((description: "Reopen with Encoding")),
+            ),
+            (
+                id: "browser_open_save_with_encoding",
+                label: "Save with Encoding",
+                group: "Editor",
+                mcp: Some((description: "Save with Encoding")),
+            ),
+            (
                 id: "file_toggle_explorer",
                 label: "Toggle Explorer",
                 group: "Editor",

@@ -48,6 +48,11 @@ pub struct PickRequest {
 #[vmux_api::ui_event]
 pub struct DismissRequest;
 
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandBarPanelRequest {
+    pub active: bool,
+}
+
 #[vmux_api::ui_event(Default, Eq)]
 pub struct CommandPaletteDraftRequest {
     pub open_id: super::OpenId,
@@ -73,6 +78,29 @@ pub struct CommandPaletteHistoryMoveRequest {
 pub struct CommandPaletteActivateRequest {
     pub open_id: super::OpenId,
     pub index: u32,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPaletteMediaMoveRequest {
+    pub open_id: super::OpenId,
+    pub next: bool,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPaletteMediaHighlightRequest {
+    pub open_id: super::OpenId,
+    pub index: u32,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPaletteMediaActivateRequest {
+    pub open_id: super::OpenId,
+    pub index: Option<u32>,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPaletteMediaDismissRequest {
+    pub open_id: super::OpenId,
 }
 
 #[vmux_api::ui_event(Default, Eq)]

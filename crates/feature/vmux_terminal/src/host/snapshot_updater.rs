@@ -1,8 +1,10 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
-use vmux_command::snapshot::CommandBarProjection;
+use vmux_command::snapshot::{CommandBarProjection, CommandBarWorkDirectory};
 use vmux_layout::event::TERMINAL_PAGE_URL;
 
+use crate::Terminal;
+use crate::launch::TerminalLaunch;
 use crate::pid::{Pid, PidToEntity};
 
 pub struct SnapshotPlugin;
@@ -11,8 +13,26 @@ impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            update_terminals_snapshot.in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
+            (sync_work_directories, update_terminals_snapshot)
+                .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
         );
+    }
+}
+
+fn sync_work_directories(
+    changed: Query<(Entity, &TerminalLaunch), (With<Terminal>, Changed<TerminalLaunch>)>,
+    mut removed: RemovedComponents<TerminalLaunch>,
+    mut commands: Commands,
+) {
+    for (entity, launch) in &changed {
+        commands
+            .entity(entity)
+            .insert(CommandBarWorkDirectory(launch.cwd.clone()));
+    }
+    for entity in removed.read() {
+        if let Ok(mut entity) = commands.get_entity(entity) {
+            entity.remove::<CommandBarWorkDirectory>();
+        }
     }
 }
 

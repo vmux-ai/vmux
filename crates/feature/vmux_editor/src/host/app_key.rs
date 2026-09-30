@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_api::command_bar::{CommandBarPick, CommandBarPicker};
-use vmux_command::host::FileStatusPicked;
+use vmux_api::command_bar::{CommandBarPick, CommandBarPicker, PickRequest};
+use vmux_command::command_bar::{
+    CommandBarDismiss, CommandBarOpenRequest, WriteCommandBarRequests,
+};
 use vmux_command::{
     BindCommands, CommandDispatch, CommandInvocation, CommandRegistry, CommandRuntimePlugin,
 };
@@ -31,8 +33,15 @@ impl Plugin for KeyPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(UiEventPlugin::<(FileStatusPickerOpen,)>::default())
+        app.add_plugins(UiEventPlugin::<(FileStatusPickerOpen, PickRequest)>::default())
+            .add_message::<CommandBarOpenRequest>()
+            .add_message::<FileStatusPicked>()
+            .add_message::<OpenStatusPickerRequest>()
             .add_systems(Startup, bind_commands.in_set(BindCommands))
+            .add_systems(
+                Update,
+                open_bound_status_picker.in_set(WriteCommandBarRequests),
+            )
             .add_systems(Update, apply_status_picks)
             .add_observer(toggle_explorer)
             .add_observer(reveal_in_explorer)
@@ -42,7 +51,8 @@ impl Plugin for KeyPlugin {
             .add_observer(dispatch_panel_previous_command)
             .add_observer(dispatch_panel_choose_command)
             .add_observer(dispatch_panel_dismiss_command)
-            .add_observer(open_status_picker);
+            .add_observer(open_status_picker)
+            .add_observer(pick_status);
     }
 }
 
@@ -69,6 +79,31 @@ struct FilePanelChooseKeyBinding;
 
 #[derive(Component)]
 struct FilePanelDismissKeyBinding;
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+struct OpenStatusPickerRequest(CommandBarPicker);
+
+impl TryFrom<&CommandInvocation> for OpenStatusPickerRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        match invocation.id.as_str() {
+            "browser_open_goto_line" => Ok(Self(CommandBarPicker::GotoLine)),
+            "browser_open_indentation" => Ok(Self(CommandBarPicker::Indent)),
+            "browser_open_line_ending" => Ok(Self(CommandBarPicker::LineEnding)),
+            "browser_open_encoding" => Ok(Self(CommandBarPicker::Encoding)),
+            "browser_open_reopen_with_encoding" => Ok(Self(CommandBarPicker::EncodingReopen)),
+            "browser_open_save_with_encoding" => Ok(Self(CommandBarPicker::EncodingSave)),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Message, Clone)]
+struct FileStatusPicked {
+    stack: Option<Entity>,
+    pick: CommandBarPick,
+}
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
     registry.bind(
@@ -103,6 +138,25 @@ fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
         "file_panel_dismiss",
         FilePanelDismissKeyBinding,
     );
+    for id in [
+        "browser_open_goto_line",
+        "browser_open_indentation",
+        "browser_open_line_ending",
+        "browser_open_encoding",
+        "browser_open_reopen_with_encoding",
+        "browser_open_save_with_encoding",
+    ] {
+        registry.message::<OpenStatusPickerRequest>(&mut commands, id);
+    }
+}
+
+fn open_bound_status_picker(
+    mut requests: MessageReader<OpenStatusPickerRequest>,
+    mut open: MessageWriter<CommandBarOpenRequest>,
+) {
+    if let Some(request) = requests.read().last() {
+        open.write(CommandBarOpenRequest::picker(request.0));
+    }
 }
 
 fn toggle_explorer(
@@ -214,22 +268,46 @@ fn dispatch_panel_dismiss_command(
 fn open_status_picker(
     trigger: On<UiInput<FileStatusPickerOpen>>,
     views: Query<(), With<FileView>>,
-    mut invocations: MessageWriter<CommandInvocation>,
+    mut open: MessageWriter<CommandBarOpenRequest>,
 ) {
-    let caller = trigger.event().webview;
-    if !views.contains(caller) {
+    if !views.contains(trigger.event().webview) {
         return;
     }
-    let id = match trigger.event().payload.picker {
-        CommandBarPicker::GotoLine => "browser_open_goto_line",
-        CommandBarPicker::Indent => "browser_open_indentation",
-        CommandBarPicker::LineEnding => "browser_open_line_ending",
-        CommandBarPicker::Encoding => "browser_open_encoding",
-        CommandBarPicker::EncodingReopen => "browser_open_reopen_with_encoding",
-        CommandBarPicker::EncodingSave => "browser_open_save_with_encoding",
+    match trigger.event().payload.picker {
+        CommandBarPicker::GotoLine
+        | CommandBarPicker::Indent
+        | CommandBarPicker::LineEnding
+        | CommandBarPicker::Encoding
+        | CommandBarPicker::EncodingReopen
+        | CommandBarPicker::EncodingSave => {
+            open.write(CommandBarOpenRequest::picker(
+                trigger.event().payload.picker,
+            ));
+        }
         CommandBarPicker::Space => return,
-    };
-    invocations.write(CommandInvocation::new(caller, id));
+    }
+}
+
+fn pick_status(
+    trigger: On<UiInput<PickRequest>>,
+    focus: vmux_layout::stack::FocusedStack,
+    mut picked: MessageWriter<FileStatusPicked>,
+    mut open: MessageWriter<CommandBarOpenRequest>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    match &trigger.event().payload.pick {
+        CommandBarPick::Picker(next) => {
+            open.write(CommandBarOpenRequest::picker(*next));
+        }
+        pick => {
+            picked.write(FileStatusPicked {
+                stack: focus.stack,
+                pick: pick.clone(),
+            });
+        }
+    }
+    commands.trigger(CommandBarDismiss::new(webview, true));
 }
 
 fn apply_status_picks(

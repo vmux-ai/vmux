@@ -5,11 +5,19 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use vmux_api::VmuxRoute;
+use vmux_api::command_bar::{
+    InvokeRequest, OpenRequest as CommandBarPageOpenRequest, SearchEngine,
+};
 #[cfg(test)]
 use vmux_command::CommandDefinition;
 #[cfg(test)]
 use vmux_command::CommandManifest;
-use vmux_command::{CommandInvocation, CommandRegistry, ReadCommandRequests};
+use vmux_command::command_bar::CommandBarDismiss;
+use vmux_command::snapshot::{
+    ClaimedUrls, CommandBarProjection, ContributedCommand, ContributedPages,
+};
+use vmux_command::{CommandInvocation, CommandRegistry, ReadCommandRequests, ResolvedLocale};
+use vmux_core::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_core::{
     HostSpawnRoute, PageMetadata, PageOpenRequest, PageOpenTarget,
     host::{UiStateWrite, page::NativelyHosted},
@@ -32,7 +40,10 @@ use vmux_layout::{
     state::LayoutUiState,
 };
 
+use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
+use vmux_setting::SearchEngineSetting;
 use vmux_terminal::{RestartPty, Terminal};
+use vmux_ui::i18n::{Locale, TranslationValue};
 
 pub(crate) struct CommandPlugin;
 
@@ -49,6 +60,7 @@ impl Plugin for CommandPlugin {
             .add_message::<OpenRequest>()
             .add_message::<ZoomRequest>()
             .add_message::<ShowDevToolsRequest>()
+            .add_plugins(UiEventPlugin::<(CommandBarPageOpenRequest, InvokeRequest)>::default())
             .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands))
             .add_observer(on_header_back)
             .add_observer(on_header_forward)
@@ -60,6 +72,8 @@ impl Plugin for CommandPlugin {
             .add_observer(on_side_sheet_project_open)
             .add_observer(on_side_sheet_section)
             .add_observer(on_side_sheet_resize)
+            .add_observer(open_from_command_bar)
+            .add_observer(invoke_from_command_bar)
             .add_observer(on_reload_notify_header)
             .add_observer(on_hard_reload_notify_header)
             .add_systems(
@@ -74,6 +88,213 @@ impl Plugin for CommandPlugin {
                     .in_set(ReadCommandRequests),
             );
     }
+}
+
+struct PageOpenCommand;
+
+impl PageOpenCommand {
+    fn for_target(
+        caller: Entity,
+        target: Option<vmux_api::open_target::OpenTarget>,
+        url: String,
+    ) -> CommandInvocation {
+        use vmux_api::open_target::{OpenTarget, PaneDirection};
+
+        let (id, arguments) = match target {
+            Some(OpenTarget::InPlace) | None => {
+                ("open_in_place", serde_json::json!({ "url": url }))
+            }
+            Some(OpenTarget::InNewStack) => {
+                ("open_in_new_stack", serde_json::json!({ "url": url }))
+            }
+            Some(OpenTarget::InPane {
+                direction,
+                target,
+                mode,
+            }) => (
+                match direction {
+                    PaneDirection::Top => "open_in_pane_top",
+                    PaneDirection::Right => "open_in_pane_right",
+                    PaneDirection::Bottom => "open_in_pane_bottom",
+                    PaneDirection::Left => "open_in_pane_left",
+                },
+                serde_json::json!({ "url": url, "target": target, "mode": mode }),
+            ),
+            Some(OpenTarget::InNewTab) => ("open_in_new_tab", serde_json::json!({ "url": url })),
+            Some(OpenTarget::InNewSpace) => {
+                ("open_in_new_space", serde_json::json!({ "url": url }))
+            }
+        };
+        CommandInvocation::new(caller, id).with_arguments(arguments)
+    }
+}
+
+struct Home;
+
+impl Home {
+    fn resolve(value: &str) -> std::path::PathBuf {
+        let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
+        if let Some(rest) = value.strip_prefix('~') {
+            return match home {
+                Some(home) => home.join(rest.trim_start_matches('/')),
+                None => std::path::PathBuf::from(value),
+            };
+        }
+        if value.starts_with('/') {
+            return std::path::PathBuf::from(value);
+        }
+        match home {
+            Some(home) => home.join(value),
+            None => std::path::PathBuf::from(value),
+        }
+    }
+
+    fn expanded_file_url(value: &str) -> String {
+        let Some(path) = value.strip_prefix("file://") else {
+            return value.to_string();
+        };
+        if !path.starts_with('~') {
+            return value.to_string();
+        }
+        format!("file://{}", Self::resolve(path).display())
+    }
+}
+
+fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
+    let value = value.trim();
+    let query = vmux_command::palette::PaletteQuery::new(value);
+    if query.is_data_uri() || (value.contains("://") && query.looks_like_url()) {
+        value.to_string()
+    } else if query.looks_like_url() {
+        format!("https://{value}")
+    } else {
+        search_engine.query_url(value)
+    }
+}
+
+fn open_from_command_bar(
+    trigger: On<UiInput<CommandBarPageOpenRequest>>,
+    search_engine: Option<Single<&SearchEngineSetting>>,
+    child_of: Query<&ChildOf>,
+    launcher_hosts: Query<(), With<HostsLauncher>>,
+    claimed_urls: ClaimedUrls,
+    command_bar: Single<&CommandBarProjection>,
+    locale: Option<Res<ResolvedLocale>>,
+    mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
+    mut chosen_writer: MessageWriter<vmux_core::ContributedCommandChosen>,
+    mut inline_transition: MessageWriter<InlineTransitionRequested>,
+    mut command_invocations: MessageWriter<CommandInvocation>,
+    users: Query<Entity, With<vmux_core::team::User>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let focus = &command_bar.workspace;
+    let webview = trigger.event().webview;
+    let request = &trigger.event().payload;
+    let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
+    let mut custom_keyboard_restore = false;
+    let inline_stack = launcher_hosts
+        .contains(webview)
+        .then(|| child_of.get(webview).ok().map(|parent| parent.0))
+        .flatten();
+    let locale = locale
+        .as_deref()
+        .map(|locale| locale.0.clone())
+        .unwrap_or_else(Locale::preferred);
+    let value = Home::expanded_file_url(&request.value);
+    let expanded = Home::resolve(&value);
+    if expanded.exists() {
+        let directory = if expanded.is_dir() {
+            &expanded
+        } else {
+            expanded.parent().unwrap_or(&expanded)
+        };
+        if let Some(pane) = focus.pane {
+            terminal_spawn_requests.write(TerminalSpawnRequest {
+                cwd: Some(directory.to_path_buf()),
+                target: TerminalSpawnTarget::NewStackInPane(pane),
+                metadata: Some(PageMetadata {
+                    url: vmux_layout::event::TERMINAL_PAGE_URL.to_string(),
+                    title: locale.translate_with(
+                        "command-terminal-path",
+                        &[(
+                            "path",
+                            TranslationValue::String(&directory.display().to_string()),
+                        )],
+                    ),
+                    ..default()
+                }),
+            });
+            custom_keyboard_restore = true;
+        }
+    } else {
+        let url = normalize_url(
+            &value,
+            search_engine.map(|setting| setting.0).unwrap_or_default(),
+        );
+        let inline_transitioned = if matches!(
+            request.open,
+            None | Some(vmux_api::open_target::OpenTarget::InPlace)
+        ) && vmux_api::agent::supports_inline_agent_transition(&url)
+            && let Some(stack) = inline_stack
+        {
+            inline_transition.write(InlineTransitionRequested { stack, webview });
+            if let Some(proxy) = proxy.as_deref() {
+                let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
+            }
+            true
+        } else {
+            false
+        };
+        if !inline_transitioned && claimed_urls.contains(&url) {
+            if let Some(pane) = focus.pane {
+                chosen_writer.write(vmux_core::ContributedCommandChosen {
+                    id: url,
+                    stack: None,
+                    pane: Some(pane),
+                });
+                custom_keyboard_restore = true;
+            }
+        } else {
+            command_invocations.write(PageOpenCommand::for_target(caller, request.open, url));
+        }
+    }
+    commands.trigger(CommandBarDismiss::new(webview, !custom_keyboard_restore));
+}
+
+fn invoke_from_command_bar(
+    trigger: On<UiInput<InvokeRequest>>,
+    contributed_pages: ContributedPages,
+    contributed_commands: Query<&ContributedCommand>,
+    command_bar: Single<&CommandBarProjection>,
+    users: Query<Entity, With<vmux_core::team::User>>,
+    mut chosen: MessageWriter<vmux_core::ContributedCommandChosen>,
+    mut invocations: MessageWriter<CommandInvocation>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let request = &trigger.event().payload;
+    let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
+    let mut custom_keyboard_restore = false;
+    if contributed_commands
+        .iter()
+        .any(|command| command.id == request.id)
+    {
+        if let Some(pane) = command_bar.workspace.pane {
+            chosen.write(vmux_core::ContributedCommandChosen {
+                id: request.id.clone(),
+                stack: None,
+                pane: Some(pane),
+            });
+            custom_keyboard_restore = true;
+        }
+    } else if let Some(url) = contributed_pages.page_url(&request.id) {
+        invocations.write(PageOpenCommand::for_target(caller, request.open, url));
+        custom_keyboard_restore = true;
+    } else {
+        invocations.write(CommandInvocation::new(caller, &request.id));
+    }
+    commands.trigger(CommandBarDismiss::new(webview, !custom_keyboard_restore));
 }
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,9 +1,37 @@
 use super::{CommandPalette, use_command_bar_ui};
-use crate::event::{CommandBarPanelRequest, PanelPlacement, clamp_panel_placement};
 use crate::palette::PaletteSurface;
 use dioxus::prelude::InteractionLocation;
 use dioxus::prelude::*;
+use vmux_api::command_bar::CommandBarPanelRequest;
 use vmux_ui::hooks::send;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PanelPlacement {
+    left: f64,
+    top: f64,
+    width: f64,
+    height: f64,
+}
+
+const PANEL_MIN_WIDTH: f64 = 320.0;
+const PANEL_MIN_HEIGHT: f64 = 120.0;
+
+impl PanelPlacement {
+    fn clamped(self, viewport_width: f64, viewport_height: f64) -> Self {
+        let width = self
+            .width
+            .clamp(PANEL_MIN_WIDTH, viewport_width.max(PANEL_MIN_WIDTH));
+        let height = self
+            .height
+            .clamp(PANEL_MIN_HEIGHT, viewport_height.max(PANEL_MIN_HEIGHT));
+        Self {
+            left: self.left.clamp(0.0, (viewport_width - width).max(0.0)),
+            top: self.top.clamp(0.0, (viewport_height - height).max(0.0)),
+            width,
+            height,
+        }
+    }
+}
 
 fn set_command_bar_panel_active(active: bool) {
     let _ = send(&CommandBarPanelRequest { active });
@@ -81,11 +109,9 @@ impl PanelDrag {
         };
         let (x, y) = panel_pointer_at(&event);
 
-        self.placement.set(Some(clamp_panel_placement(
-            origin.apply(x, y),
-            viewport_width,
-            viewport_height,
-        )));
+        self.placement.set(Some(
+            origin.apply(x, y).clamped(viewport_width, viewport_height),
+        ));
     }
 
     fn finish(&mut self) {
@@ -199,5 +225,42 @@ pub fn CommandBarPanel() -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panel_placement_stays_in_viewport() {
+        let placement = PanelPlacement {
+            left: 5000.0,
+            top: 5000.0,
+            width: 576.0,
+            height: 400.0,
+        }
+        .clamped(1440.0, 900.0);
+
+        assert_eq!(placement.left, 864.0);
+        assert_eq!(placement.top, 500.0);
+        assert_eq!(placement.width, 576.0);
+        assert_eq!(placement.height, 400.0);
+    }
+
+    #[test]
+    fn panel_placement_respects_minimum_size() {
+        let placement = PanelPlacement {
+            left: 40.0,
+            top: 40.0,
+            width: 10.0,
+            height: 10.0,
+        }
+        .clamped(200.0, 100.0);
+
+        assert_eq!(placement.left, 0.0);
+        assert_eq!(placement.top, 0.0);
+        assert_eq!(placement.width, PANEL_MIN_WIDTH);
+        assert_eq!(placement.height, PANEL_MIN_HEIGHT);
     }
 }

@@ -15,7 +15,10 @@ use crate::event::{
     ChatTranscriptState, ComposerContext, ResumableSessions,
 };
 use vmux_api::ProcessId;
+use vmux_api::command_bar::PromptRequest;
 use vmux_api::protocol::AgentCommandResult;
+use vmux_command::command_bar::CommandBarDismiss;
+use vmux_command::snapshot::{CommandBarProjection, ContributedPages};
 use vmux_core::agent::{
     AgentCommandResponse, AgentContinuationRequest, AgentRequestAppExt, AgentRequestMessage,
     AgentRequestRouteSet, AgentSessionRoot,
@@ -23,8 +26,12 @@ use vmux_core::agent::{
 use vmux_core::chat::group_turns_tail;
 use vmux_core::chat_projection::{activity_counts, current_activity};
 use vmux_core::host::UiState;
+use vmux_core::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_core::team::Profile;
-use vmux_core::{PageIcon, PageIdentity};
+use vmux_core::{
+    PageIcon, PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt,
+    PendingPromptAttachments,
+};
 use vmux_layout::stack::OpenRequest;
 use vmux_session::{AgentConversationTitle, AgentMessages, AgentRunState, AgentSession};
 
@@ -58,10 +65,71 @@ impl Plugin for ChatPlugin {
             super::composer::ChatComposerPlugin,
             super::prompt::ChatPromptInputPlugin,
         ))
-        .add_plugins(UiEventPlugin::<(ChatOpenPage,)>::default())
+        .add_plugins(UiEventPlugin::<(ChatOpenPage, PromptRequest)>::default())
         .add_observer(open_page)
+        .add_observer(submit_from_command_bar)
         .add_systems(Update, report_tab_identity);
     }
+}
+
+fn submit_from_command_bar(
+    trigger: On<UiInput<PromptRequest>>,
+    launcher_hosts: Query<(), With<HostsLauncher>>,
+    child_of: Query<&ChildOf>,
+    contributed_pages: ContributedPages,
+    command_bar: Single<&CommandBarProjection>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut inline_transition: MessageWriter<InlineTransitionRequested>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let request = &trigger.event().payload;
+    let prompt = request.text.trim();
+    let attachments = request
+        .attachments
+        .iter()
+        .filter(|attachment| !attachment.path.is_empty())
+        .map(|attachment| vmux_api::protocol::AgentAttachment {
+            path: attachment.path.clone(),
+            name: attachment.name.clone(),
+            mime_type: attachment.mime_type.clone(),
+            size: attachment.size,
+        })
+        .collect::<Vec<_>>();
+    let inline_stack = launcher_hosts
+        .contains(webview)
+        .then(|| child_of.get(webview).ok().map(|parent| parent.0))
+        .flatten();
+    let mut opened = false;
+    if (!prompt.is_empty() || !attachments.is_empty())
+        && let Some(stack) = command_bar.workspace.stack
+        && let Some(url) = contributed_pages.prompt_url(request.target_url.as_deref())
+    {
+        if inline_stack == Some(stack) && vmux_api::agent::supports_inline_agent_transition(&url) {
+            inline_transition.write(InlineTransitionRequested { stack, webview });
+            if let Some(proxy) = proxy.as_deref() {
+                let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+        }
+        commands
+            .entity(stack)
+            .insert(PendingPrompt(prompt.to_string()));
+        if attachments.is_empty() {
+            commands.entity(stack).remove::<PendingPromptAttachments>();
+        } else {
+            commands
+                .entity(stack)
+                .insert(PendingPromptAttachments(attachments));
+        }
+        page_open_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(stack),
+            url,
+            request_id: None,
+        });
+        opened = true;
+    }
+    commands.trigger(CommandBarDismiss::new(webview, !opened));
 }
 
 struct ChatAgentPlugin;

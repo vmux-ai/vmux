@@ -1,6 +1,11 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
+use vmux_api::command_bar::ExRequest;
+use vmux_command::command_bar::{
+    CommandBarDismiss, CommandBarOpenRequest, WriteCommandBarRequests,
+};
 use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap};
+use vmux_command::{BindCommands, CommandInvocation, CommandRegistry};
 use vmux_core::event::*;
 use vmux_core::input::KeyStroke;
 
@@ -26,6 +31,7 @@ pub(super) struct EditorPlugin;
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(EditExecutionPlugin)
+            .add_message::<CommandBarOpenRequest>()
             .add_plugins(UiEventPlugin::<(
                 FileOpenEvent,
                 FileTextInput,
@@ -35,7 +41,12 @@ impl Plugin for EditorPlugin {
                 KnowledgeLinkOpen,
                 FilePropertyEdit,
                 FileFindRequest,
+                ExRequest,
             )>::default())
+            .add_message::<ExLineSubmitted>()
+            .add_message::<OpenExRequest>()
+            .add_systems(Startup, bind_ex_command.in_set(BindCommands))
+            .add_systems(Update, open_ex.in_set(WriteCommandBarRequests))
             .add_observer(on_file_key)
             .add_observer(on_file_text_input)
             .add_observer(on_file_pointer)
@@ -43,8 +54,55 @@ impl Plugin for EditorPlugin {
             .add_observer(open_file_find)
             .add_observer(close_file_find)
             .add_observer(on_file_find_request)
-            .add_observer(on_file_property_edit);
+            .add_observer(on_file_property_edit)
+            .add_observer(submit_ex);
     }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+struct OpenExRequest;
+
+impl TryFrom<&CommandInvocation> for OpenExRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "browser_open_ex_bar")
+            .then_some(Self)
+            .ok_or(())
+    }
+}
+
+#[derive(Message, Clone)]
+struct ExLineSubmitted {
+    stack: Option<Entity>,
+    line: String,
+}
+
+fn bind_ex_command(registry: CommandRegistry, mut commands: Commands) {
+    registry.message::<OpenExRequest>(&mut commands, "browser_open_ex_bar");
+}
+
+fn open_ex(
+    mut requests: MessageReader<OpenExRequest>,
+    mut open: MessageWriter<CommandBarOpenRequest>,
+) {
+    if requests.read().next().is_some() {
+        open.write(CommandBarOpenRequest::query(":"));
+    }
+}
+
+fn submit_ex(
+    trigger: On<UiInput<ExRequest>>,
+    focus: vmux_layout::stack::FocusedStack,
+    mut submitted: MessageWriter<ExLineSubmitted>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    submitted.write(ExLineSubmitted {
+        stack: focus.stack,
+        line: trigger.event().payload.line.clone(),
+    });
+    commands.trigger(CommandBarDismiss::new(webview, true));
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -663,7 +721,7 @@ fn on_file_property_edit(
 }
 
 fn run_submitted_ex_lines(
-    mut submitted: MessageReader<vmux_command::host::ExLineSubmitted>,
+    mut submitted: MessageReader<ExLineSubmitted>,
     children: Query<&Children>,
     q: Query<(), (With<Editor>, With<EditorKeymap>)>,
     mut commands: Commands,

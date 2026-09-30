@@ -11,7 +11,6 @@ use vmux_ui::util::cn;
 use crate::palette::PaletteQuery;
 use crate::palette::results::CommandBarResultItem as ResultItem;
 use crate::palette::results::{prompt_target_matches_query, prompt_target_url};
-use crate::search_engine::SearchEngines;
 
 #[component]
 pub fn ResultRow(
@@ -231,11 +230,11 @@ pub fn ResultRow(
                                 div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                     Favicon {
                                         favicon_url: String::new(),
-                                        url: SearchEngines::url(*engine, query),
+                                        url: engine.query_url(query),
                                         class: "mt-0.5 h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
                                         globe_class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground".to_string(),
                                     }
-                                    span { class: "min-w-0 truncate text-base leading-snug text-foreground", "Search with {SearchEngines::name(*engine)}" }
+                                    span { class: "min-w-0 truncate text-base leading-snug text-foreground", "Search with {engine.name()}" }
                                 }
                                 span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground", "\u{21b5}" }
                             },

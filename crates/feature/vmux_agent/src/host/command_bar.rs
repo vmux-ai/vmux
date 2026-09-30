@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_command::event::CommandBarPage;
+use vmux_api::command_bar::CommandBarPage;
 #[cfg(test)]
 use vmux_command::snapshot::ClaimedUrls;
 use vmux_command::snapshot::{

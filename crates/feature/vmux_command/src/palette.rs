@@ -14,8 +14,6 @@ use vmux_ui::components::agent_menu::ComposerAgentOption;
 use vmux_ui::i18n::translate;
 use vmux_ui::list_nav::MenuDirection;
 
-use crate::search_engine::SearchEngines;
-
 use self::results::{
     CommandBarResultItem, PickerRows, SlashRows, filter_results, open_session_results,
     prepend_prompt_targets, prompt_target_matches_query, prompt_target_results, prompt_target_url,
@@ -873,7 +871,7 @@ impl PaletteState {
             }
             CommandBarResultItem::Search { engine, query } => Some(PaletteDecision::open(
                 true,
-                &SearchEngines::url(*engine, query),
+                &engine.query_url(query),
                 self.open_target,
             )),
             CommandBarResultItem::PartialIndex
