@@ -69,7 +69,6 @@ wry = { version = "0.53", features = ["transparent"] }
 
 [dev-dependencies]
 async-channel = "2"
-vmux_agent = { path = "../../feature/vmux_agent" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [lints]

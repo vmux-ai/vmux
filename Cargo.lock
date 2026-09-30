@@ -10301,7 +10301,6 @@ dependencies = [
  "tungstenite",
  "url",
  "uuid",
- "vmux_agent",
  "vmux_api",
  "vmux_command",
  "vmux_core",

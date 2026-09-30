@@ -269,9 +269,8 @@ mod browser_navigate_flow {
     use crate::input::RecentBrowserInteraction;
     use bevy::ecs::relationship::Relationship;
     use bevy::prelude::*;
-    use vmux_agent::event::AgentRequestInput;
-    use vmux_agent::host::AgentSessionPlugin;
     use vmux_api::protocol::{AgentRequest, AgentRequestId};
+    use vmux_core::agent::{AgentRequestInput, CommandOrigin};
     use vmux_core::{
         LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
         PageOpenId, PageOpenSet, PageOpenTask,
@@ -385,7 +384,6 @@ mod browser_navigate_flow {
         app.add_plugins((
             MinimalPlugins,
             vmux_command::CommandPlugin,
-            AgentSessionPlugin,
             ConsumerPlugin,
         ));
         app.insert_resource(test_settings())
@@ -411,7 +409,7 @@ mod browser_navigate_flow {
             .resource_mut::<Messages<AgentRequestInput>>()
             .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
-                origin: vmux_agent::event::CommandOrigin::User,
+                origin: CommandOrigin::User,
                 request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "https://example.com".to_string(),
                     pane: None,
@@ -434,7 +432,6 @@ mod browser_navigate_flow {
         app.add_plugins((
             MinimalPlugins,
             vmux_command::CommandPlugin,
-            AgentSessionPlugin,
             ConsumerPlugin,
         ));
         app.insert_resource(test_settings());
@@ -447,7 +444,7 @@ mod browser_navigate_flow {
             .resource_mut::<Messages<AgentRequestInput>>()
             .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
-                origin: vmux_agent::event::CommandOrigin::User,
+                origin: CommandOrigin::User,
                 request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "https://example.com".to_string(),
                     pane: None,
@@ -582,7 +579,6 @@ mod browser_navigate_flow {
         app.add_plugins((
             MinimalPlugins,
             vmux_command::CommandPlugin,
-            AgentSessionPlugin,
             ConsumerPlugin,
         ));
         app.insert_resource(test_settings());
@@ -596,7 +592,7 @@ mod browser_navigate_flow {
             .resource_mut::<Messages<AgentRequestInput>>()
             .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
-                origin: vmux_agent::event::CommandOrigin::User,
+                origin: CommandOrigin::User,
                 request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "https://example.com".to_string(),
                     pane: Some(pane_b.to_bits().to_string()),
@@ -627,7 +623,6 @@ mod browser_navigate_flow {
         app.add_plugins((
             MinimalPlugins,
             vmux_command::CommandPlugin,
-            AgentSessionPlugin,
             ConsumerPlugin,
         ));
         app.insert_resource(test_settings());
@@ -640,7 +635,7 @@ mod browser_navigate_flow {
             .resource_mut::<Messages<AgentRequestInput>>()
             .write(AgentRequestInput {
                 request_id,
-                origin: vmux_agent::event::CommandOrigin::User,
+                origin: CommandOrigin::User,
                 request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "vmux://terminal/".to_string(),
                     pane: None,
@@ -821,7 +816,6 @@ mod browser_navigate_flow {
         app.add_plugins((
             MinimalPlugins,
             vmux_command::CommandPlugin,
-            AgentSessionPlugin,
             ConsumerPlugin,
         ));
         app.insert_resource(test_settings());
@@ -834,7 +828,7 @@ mod browser_navigate_flow {
             .resource_mut::<Messages<AgentRequestInput>>()
             .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
-                origin: vmux_agent::event::CommandOrigin::User,
+                origin: CommandOrigin::User,
                 request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "vmux://terminal/".to_string(),
                     pane: Some(pane_b.to_bits().to_string()),
@@ -871,7 +865,6 @@ mod browser_navigate_flow {
         app.add_plugins((
             MinimalPlugins,
             vmux_command::CommandPlugin,
-            AgentSessionPlugin,
             ConsumerPlugin,
         ));
         app.insert_resource(test_settings());
@@ -883,7 +876,7 @@ mod browser_navigate_flow {
             .resource_mut::<Messages<AgentRequestInput>>()
             .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
-                origin: vmux_agent::event::CommandOrigin::User,
+                origin: CommandOrigin::User,
                 request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "vmux://nonsense/".to_string(),
                     pane: None,
@@ -993,7 +986,6 @@ mod browser_navigate_flow {
         app.add_plugins((
             MinimalPlugins,
             vmux_command::CommandPlugin,
-            AgentSessionPlugin,
             ConsumerPlugin,
         ));
         app.insert_resource(test_settings());
@@ -1005,7 +997,7 @@ mod browser_navigate_flow {
             .resource_mut::<Messages<AgentRequestInput>>()
             .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
-                origin: vmux_agent::event::CommandOrigin::User,
+                origin: CommandOrigin::User,
                 request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "vmux://sessions/claude/cli/".into(),
                     pane: None,
@@ -1035,7 +1027,6 @@ mod browser_navigate_flow {
         app.add_plugins((
             MinimalPlugins,
             vmux_command::CommandPlugin,
-            AgentSessionPlugin,
             ConsumerPlugin,
         ));
         app.insert_resource(test_settings());
@@ -1047,7 +1038,7 @@ mod browser_navigate_flow {
             .resource_mut::<Messages<AgentRequestInput>>()
             .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
-                origin: vmux_agent::event::CommandOrigin::User,
+                origin: CommandOrigin::User,
                 request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "vmux://sessions/codex/cli/".into(),
                     pane: None,
