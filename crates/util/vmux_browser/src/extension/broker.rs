@@ -21,22 +21,23 @@ pub(crate) struct ExtensionBrokerPlugin;
 
 impl Plugin for ExtensionBrokerPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(test)]
         app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
             crate::FEATURE_MANIFEST,
-        ))
-        .add_systems(Startup, spawn_extension_broker)
-        .add_systems(
-            Update,
-            drain_bridge_requests
-                .in_set(super::ExtensionSystemSet::DrainBridge)
-                .after(super::ExtensionSystemSet::SyncWindows),
-        )
-        .add_systems(
-            Update,
-            forward_extension_model_events.after(super::project::ExtensionProjectionSet),
-        )
-        .add_systems(Update, fire_conformance_wake_timer)
-        .add_systems(Update, arm_bridge_wake);
+        ));
+        app.add_systems(Startup, spawn_extension_broker)
+            .add_systems(
+                Update,
+                drain_bridge_requests
+                    .in_set(super::ExtensionSystemSet::DrainBridge)
+                    .after(super::ExtensionSystemSet::SyncWindows),
+            )
+            .add_systems(
+                Update,
+                forward_extension_model_events.after(super::project::ExtensionProjectionSet),
+            )
+            .add_systems(Update, fire_conformance_wake_timer)
+            .add_systems(Update, arm_bridge_wake);
     }
 }
 

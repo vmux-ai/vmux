@@ -25,39 +25,40 @@ pub(crate) struct NavigationPlugin;
 
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(test)]
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            crate::FEATURE_MANIFEST,
+        ));
         app.add_message::<vmux_core::service::ServiceRequest>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_message::<OpenHistoryRequest>()
-        .configure_sets(
-            Update,
-            crate::BrowserSystemSet::Navigate
-                .after(vmux_core::service::ServiceMessageSet)
-                .before(vmux_core::PageOpenSet::ResolveTarget),
-        )
-        .add_systems(Startup, bind_command.in_set(BindCommands))
-        .add_observer(issue_open_history)
-        .add_systems(
-            Update,
-            (
-                drain_committed_navigation,
-                navigate.in_set(crate::BrowserSystemSet::Navigate),
-                go_back,
-                go_forward,
-                open_in_new_stack,
-                open_history.in_set(ReadCommandRequests),
-            ),
-        )
-        .add_systems(
-            Update,
-            (sync_tab_metadata, record_visits)
-                .chain()
-                .after(vmux_layout::LayoutCefStateSet::Apply),
-        );
+        app.add_message::<OpenHistoryRequest>()
+            .configure_sets(
+                Update,
+                crate::BrowserSystemSet::Navigate
+                    .after(vmux_core::service::ServiceMessageSet)
+                    .before(vmux_core::PageOpenSet::ResolveTarget),
+            )
+            .add_systems(Startup, bind_command.in_set(BindCommands))
+            .add_observer(issue_open_history)
+            .add_systems(
+                Update,
+                (
+                    drain_committed_navigation,
+                    navigate.in_set(crate::BrowserSystemSet::Navigate),
+                    go_back,
+                    go_forward,
+                    open_in_new_stack,
+                    open_history.in_set(ReadCommandRequests),
+                ),
+            )
+            .add_systems(
+                Update,
+                (sync_tab_metadata, record_visits)
+                    .chain()
+                    .after(vmux_layout::LayoutCefStateSet::Apply),
+            );
     }
 }
 

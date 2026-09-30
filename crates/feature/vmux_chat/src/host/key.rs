@@ -32,26 +32,21 @@ impl Plugin for ChatKeyPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(
-            (
-                vmux_core::host::manifest::FeatureManifestPlugin::new(crate::FEATURE_MANIFEST),
-                bevy_cef::prelude::UiEventPlugin::<(
-                    ChatListSelectionChanged,
-                    ChatComposerMenuChanged,
-                )>::default(),
-            ),
-        )
-        .add_systems(Startup, bind_commands.in_set(BindCommands))
-        .add_observer(move_list)
-        .add_observer(choose_list)
-        .add_observer(choose_number)
-        .add_observer(select_list)
-        .add_observer(update_composer_menu)
-        .add_observer(move_history)
-        .add_observer(submit)
-        .add_observer(dismiss_selector)
-        .add_observer(interrupt)
-        .add_observer(cancel);
+        app.add_plugins(bevy_cef::prelude::UiEventPlugin::<(
+            ChatListSelectionChanged,
+            ChatComposerMenuChanged,
+        )>::default())
+            .add_systems(Startup, bind_commands.in_set(BindCommands))
+            .add_observer(move_list)
+            .add_observer(choose_list)
+            .add_observer(choose_number)
+            .add_observer(select_list)
+            .add_observer(update_composer_menu)
+            .add_observer(move_history)
+            .add_observer(submit)
+            .add_observer(dismiss_selector)
+            .add_observer(interrupt)
+            .add_observer(cancel);
     }
 }
 

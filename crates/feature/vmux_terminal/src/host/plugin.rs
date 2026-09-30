@@ -82,10 +82,7 @@ impl Plugin for TerminalPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_plugins(
+        app.add_plugins(
             Self::MANIFEST
                 .plugin()
                 .route(vmux_core::HostSpawnRoute::page("vmux://terminal/")),

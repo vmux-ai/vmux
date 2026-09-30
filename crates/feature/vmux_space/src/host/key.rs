@@ -10,17 +10,18 @@ pub(crate) struct SpaceKeyPlugin;
 
 impl Plugin for SpaceKeyPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(test)]
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            crate::FEATURE_MANIFEST,
+        ));
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_systems(Startup, bind_commands.in_set(BindCommands))
-        .add_observer(select_next_space)
-        .add_observer(select_previous_space)
-        .add_observer(attach_selected_space)
-        .add_observer(delete_selected_space);
+        app.add_systems(Startup, bind_commands.in_set(BindCommands))
+            .add_observer(select_next_space)
+            .add_observer(select_previous_space)
+            .add_observer(attach_selected_space)
+            .add_observer(delete_selected_space);
     }
 }
 

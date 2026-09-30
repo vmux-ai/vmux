@@ -75,18 +75,19 @@ pub struct TabCommandPlugin;
 
 impl Plugin for TabCommandPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(test)]
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            crate::FEATURE_MANIFEST,
+        ));
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_message::<OpenRequest>()
-        .add_message::<CreateRequest>()
-        .add_message::<CloseRequest>()
-        .add_message::<FocusRequest>()
-        .add_message::<MoveRequest>()
-        .add_systems(Startup, bind_commands.in_set(BindCommands));
+        app.add_message::<OpenRequest>()
+            .add_message::<CreateRequest>()
+            .add_message::<CloseRequest>()
+            .add_message::<FocusRequest>()
+            .add_message::<MoveRequest>()
+            .add_systems(Startup, bind_commands.in_set(BindCommands));
     }
 }
 

@@ -29,62 +29,63 @@ pub struct WindowLayoutPlugin;
 
 impl Plugin for WindowLayoutPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(test)]
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            crate::FEATURE_MANIFEST,
+        ));
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_plugins(LayoutSpawnPlugin)
-        .add_message::<MinimizeWindowRequest>()
-        .add_message::<NewWindowRequest>()
-        .add_message::<CloseFocusedWindowRequest>()
-        .add_message::<ToggleFullscreenRequest>()
-        .register_persisted::<WindowGeometry>()
-        .register_type::<Option<IVec2>>()
-        .register_type::<Option<Vec2>>()
-        .add_systems(
-            Startup,
-            setup_window_shells
-                .in_set(LayoutStartupSet::Window)
-                .after(PageEmbedSet),
-        )
-        .add_systems(
-            Startup,
-            request_default_layout.in_set(LayoutStartupSet::DefaultTab),
-        )
-        .add_systems(Startup, bind_commands.in_set(BindCommands))
-        .add_systems(
-            Startup,
-            fit_window_to_screen
-                .in_set(LayoutStartupSet::Post)
-                .after(crate::stack::OpenStartupPageSet),
-        )
-        .add_systems(
-            PostUpdate,
-            (
-                fit_window_to_screen,
-                sync_window_layout_to_settings,
-                sync_main_column_gap,
-            ),
-        )
-        .add_systems(
-            Update,
-            (sync_focused_window, bevy::ecs::schedule::ApplyDeferred)
-                .chain()
-                .in_set(WindowFocusSet),
-        )
-        .add_systems(
-            Update,
-            (setup_window_shells, bevy::ecs::schedule::ApplyDeferred)
-                .chain()
-                .in_set(WindowShellSet)
-                .after(WindowFocusSet),
-        )
-        .add_systems(
-            Update,
-            minimize_focused_window.in_set(LayoutRequestSet::Handle),
-        );
+        app.add_plugins(LayoutSpawnPlugin)
+            .add_message::<MinimizeWindowRequest>()
+            .add_message::<NewWindowRequest>()
+            .add_message::<CloseFocusedWindowRequest>()
+            .add_message::<ToggleFullscreenRequest>()
+            .register_persisted::<WindowGeometry>()
+            .register_type::<Option<IVec2>>()
+            .register_type::<Option<Vec2>>()
+            .add_systems(
+                Startup,
+                setup_window_shells
+                    .in_set(LayoutStartupSet::Window)
+                    .after(PageEmbedSet),
+            )
+            .add_systems(
+                Startup,
+                request_default_layout.in_set(LayoutStartupSet::DefaultTab),
+            )
+            .add_systems(Startup, bind_commands.in_set(BindCommands))
+            .add_systems(
+                Startup,
+                fit_window_to_screen
+                    .in_set(LayoutStartupSet::Post)
+                    .after(crate::stack::OpenStartupPageSet),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    fit_window_to_screen,
+                    sync_window_layout_to_settings,
+                    sync_main_column_gap,
+                ),
+            )
+            .add_systems(
+                Update,
+                (sync_focused_window, bevy::ecs::schedule::ApplyDeferred)
+                    .chain()
+                    .in_set(WindowFocusSet),
+            )
+            .add_systems(
+                Update,
+                (setup_window_shells, bevy::ecs::schedule::ApplyDeferred)
+                    .chain()
+                    .in_set(WindowShellSet)
+                    .after(WindowFocusSet),
+            )
+            .add_systems(
+                Update,
+                minimize_focused_window.in_set(LayoutRequestSet::Handle),
+            );
 
         app.init_resource::<Assets<WindowMaterial>>()
             .init_resource::<WindowBackground>();

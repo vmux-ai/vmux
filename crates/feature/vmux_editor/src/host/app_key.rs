@@ -24,24 +24,25 @@ pub(crate) struct KeyPlugin;
 
 impl Plugin for KeyPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(test)]
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            crate::FEATURE_MANIFEST,
+        ));
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_plugins(UiEventPlugin::<(FileStatusPickerOpen,)>::default())
-        .add_systems(Startup, bind_commands.in_set(BindCommands))
-        .add_systems(Update, apply_status_picks)
-        .add_observer(toggle_explorer)
-        .add_observer(reveal_in_explorer)
-        .add_observer(open_find)
-        .add_observer(open_find_in_files)
-        .add_observer(dispatch_panel_next_command)
-        .add_observer(dispatch_panel_previous_command)
-        .add_observer(dispatch_panel_choose_command)
-        .add_observer(dispatch_panel_dismiss_command)
-        .add_observer(open_status_picker);
+        app.add_plugins(UiEventPlugin::<(FileStatusPickerOpen,)>::default())
+            .add_systems(Startup, bind_commands.in_set(BindCommands))
+            .add_systems(Update, apply_status_picks)
+            .add_observer(toggle_explorer)
+            .add_observer(reveal_in_explorer)
+            .add_observer(open_find)
+            .add_observer(open_find_in_files)
+            .add_observer(dispatch_panel_next_command)
+            .add_observer(dispatch_panel_previous_command)
+            .add_observer(dispatch_panel_choose_command)
+            .add_observer(dispatch_panel_dismiss_command)
+            .add_observer(open_status_picker);
     }
 }
 

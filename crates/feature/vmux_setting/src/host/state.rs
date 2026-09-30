@@ -26,28 +26,29 @@ pub(super) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(test)]
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            crate::FEATURE_MANIFEST,
+        ));
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_message::<OpenSettingsRequest>()
-        .add_systems(Startup, bind_command.in_set(BindCommands))
-        .add_observer(issue_open_settings)
-        .add_message::<CheckForUpdatesRequest>()
-        .add_plugins((
-            HostedUiPlugin::<Settings>::new(super::SettingsPlugin::MANIFEST),
-            UiEventPlugin::<(SettingsRequest, CheckForUpdatesEvent)>::default(),
-        ))
-        .add_observer(on_settings_request)
-        .add_observer(on_check_for_updates)
-        .add_systems(
-            Update,
-            handle_open_settings_command
-                .in_set(ReadCommandRequests)
-                .after(WriteCommandRequests),
-        );
+        app.add_message::<OpenSettingsRequest>()
+            .add_systems(Startup, bind_command.in_set(BindCommands))
+            .add_observer(issue_open_settings)
+            .add_message::<CheckForUpdatesRequest>()
+            .add_plugins((
+                HostedUiPlugin::<Settings>::new(super::SettingsPlugin::MANIFEST),
+                UiEventPlugin::<(SettingsRequest, CheckForUpdatesEvent)>::default(),
+            ))
+            .add_observer(on_settings_request)
+            .add_observer(on_check_for_updates)
+            .add_systems(
+                Update,
+                handle_open_settings_command
+                    .in_set(ReadCommandRequests)
+                    .after(WriteCommandRequests),
+            );
     }
 }
 

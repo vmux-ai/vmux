@@ -280,19 +280,20 @@ pub struct PaneCommandPlugin;
 
 impl Plugin for PaneCommandPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(test)]
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            crate::FEATURE_MANIFEST,
+        ));
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_message::<OpenRequest>()
-        .add_message::<CloseRequest>()
-        .add_message::<FocusRequest>()
-        .add_message::<ArrangeRequest>()
-        .add_message::<ResizeRequest>()
-        .add_message::<ToggleZoomRequest>()
-        .add_systems(Startup, bind_commands.in_set(BindCommands));
+        app.add_message::<OpenRequest>()
+            .add_message::<CloseRequest>()
+            .add_message::<FocusRequest>()
+            .add_message::<ArrangeRequest>()
+            .add_message::<ResizeRequest>()
+            .add_message::<ToggleZoomRequest>()
+            .add_systems(Startup, bind_commands.in_set(BindCommands));
     }
 }
 

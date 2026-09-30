@@ -52,10 +52,7 @@ impl Plugin for SpacePlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_plugins((
+        app.add_plugins((
             SpaceAgentPlugin,
             super::composer::SpaceComposerPlugin,
             super::persistence::WorkspacePersistencePlugin,

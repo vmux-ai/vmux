@@ -29,58 +29,59 @@ pub struct StackPlugin;
 
 impl Plugin for StackPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(test)]
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            crate::FEATURE_MANIFEST,
+        ));
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_message::<OpenRequest>()
-        .add_message::<CloseRequest>()
-        .add_message::<FocusRequest>()
-        .add_message::<MoveRequest>()
-        .add_message::<PageOpenRequest>()
-        .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands))
-        .add_systems(
-            Startup,
-            open_startup_url_if_no_stacks
-                .in_set(crate::LayoutStartupSet::Post)
-                .in_set(OpenStartupPageSet),
-        )
-        .register_persisted::<Stack>()
-        .add_message::<CloseStackRequest>()
-        .add_systems(
-            Update,
-            (
-                handle_open_requests,
-                handle_close_requests,
-                handle_focus_requests,
-                handle_move_requests,
+        app.add_message::<OpenRequest>()
+            .add_message::<CloseRequest>()
+            .add_message::<FocusRequest>()
+            .add_message::<MoveRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands))
+            .add_systems(
+                Startup,
+                open_startup_url_if_no_stacks
+                    .in_set(crate::LayoutStartupSet::Post)
+                    .in_set(OpenStartupPageSet),
             )
-                .chain()
-                .in_set(StackCommandSet)
-                .in_set(LayoutRequestSet::Handle),
-        )
-        .add_systems(
-            Update,
-            handle_close_stack_requests
-                .in_set(CloseStackSet)
-                .in_set(LayoutRequestSet::Handle),
-        )
-        .add_systems(
-            Update,
-            compute_focused_stack
-                .in_set(ComputeFocusSet)
-                .after(LayoutRequestSet::Handle)
-                .after(crate::active::ActiveSystemSet::Descendants),
-        )
-        .add_systems(
-            Update,
-            open_startup_url_if_no_stacks
-                .in_set(OpenStartupPageSet)
-                .after(crate::window::WindowShellSet)
-                .before(vmux_core::PageOpenSet::ResolveTarget),
-        );
+            .register_persisted::<Stack>()
+            .add_message::<CloseStackRequest>()
+            .add_systems(
+                Update,
+                (
+                    handle_open_requests,
+                    handle_close_requests,
+                    handle_focus_requests,
+                    handle_move_requests,
+                )
+                    .chain()
+                    .in_set(StackCommandSet)
+                    .in_set(LayoutRequestSet::Handle),
+            )
+            .add_systems(
+                Update,
+                handle_close_stack_requests
+                    .in_set(CloseStackSet)
+                    .in_set(LayoutRequestSet::Handle),
+            )
+            .add_systems(
+                Update,
+                compute_focused_stack
+                    .in_set(ComputeFocusSet)
+                    .after(LayoutRequestSet::Handle)
+                    .after(crate::active::ActiveSystemSet::Descendants),
+            )
+            .add_systems(
+                Update,
+                open_startup_url_if_no_stacks
+                    .in_set(OpenStartupPageSet)
+                    .after(crate::window::WindowShellSet)
+                    .before(vmux_core::PageOpenSet::ResolveTarget),
+            );
     }
 }
 

@@ -38,40 +38,41 @@ pub(crate) struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(test)]
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            crate::FEATURE_MANIFEST,
+        ));
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_message::<NavigationRequest>()
-        .add_message::<OpenRequest>()
-        .add_message::<ZoomRequest>()
-        .add_message::<ShowDevToolsRequest>()
-        .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands))
-        .add_observer(on_header_back)
-        .add_observer(on_header_forward)
-        .add_observer(on_header_reload)
-        .add_observer(on_header_address_focus)
-        .add_observer(on_side_sheet_stack_activate)
-        .add_observer(on_side_sheet_stack_close)
-        .add_observer(on_side_sheet_stack_create)
-        .add_observer(on_side_sheet_project_open)
-        .add_observer(on_side_sheet_section)
-        .add_observer(on_side_sheet_resize)
-        .add_observer(on_reload_notify_header)
-        .add_observer(on_hard_reload_notify_header)
-        .add_systems(
-            Update,
-            (
-                handle_navigation_requests,
-                handle_open_requests,
-                handle_zoom_requests,
-                show_dev_tools,
-            )
-                .chain()
-                .in_set(ReadCommandRequests),
-        );
+        app.add_message::<NavigationRequest>()
+            .add_message::<OpenRequest>()
+            .add_message::<ZoomRequest>()
+            .add_message::<ShowDevToolsRequest>()
+            .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands))
+            .add_observer(on_header_back)
+            .add_observer(on_header_forward)
+            .add_observer(on_header_reload)
+            .add_observer(on_header_address_focus)
+            .add_observer(on_side_sheet_stack_activate)
+            .add_observer(on_side_sheet_stack_close)
+            .add_observer(on_side_sheet_stack_create)
+            .add_observer(on_side_sheet_project_open)
+            .add_observer(on_side_sheet_section)
+            .add_observer(on_side_sheet_resize)
+            .add_observer(on_reload_notify_header)
+            .add_observer(on_hard_reload_notify_header)
+            .add_systems(
+                Update,
+                (
+                    handle_navigation_requests,
+                    handle_open_requests,
+                    handle_zoom_requests,
+                    show_dev_tools,
+                )
+                    .chain()
+                    .in_set(ReadCommandRequests),
+            );
     }
 }
 

@@ -26,48 +26,49 @@ impl Plugin for ProcessMonitorPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::monitor::ProcessMonitorPage::plugin());
+        #[cfg(test)]
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            crate::FEATURE_MANIFEST,
+        ));
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_message::<ServiceProcessSnapshot>()
-        .add_message::<OpenServicesRequest>()
-        .add_systems(
-            Startup,
-            (
-                spawn_process_monitor,
-                bind_commands.in_set(vmux_command::BindCommands),
-            ),
-        )
-        .add_plugins(UiEventPlugin::<(
-            ProcessNavigateEvent,
-            ProcessKillEvent,
-            ProcessKillAllEvent,
-        )>::default())
-        .add_plugins(UiStatePlugin::<ProcessesUiState>::default())
-        .add_systems(
-            Update,
-            (
-                reconcile_service_processes,
-                request_process_list,
-                sample_process_usage,
-                broadcast_to_monitors,
+        app.add_message::<ServiceProcessSnapshot>()
+            .add_message::<OpenServicesRequest>()
+            .add_systems(
+                Startup,
+                (
+                    spawn_process_monitor,
+                    bind_commands.in_set(vmux_command::BindCommands),
+                ),
             )
-                .chain()
-                .after(vmux_core::service::ServiceMessageSet),
-        )
-        .add_systems(
-            Update,
-            open_services.before(vmux_core::workspace::StackCommandSet),
-        )
-        .add_observer(on_process_navigate)
-        .add_observer(on_process_kill)
-        .add_observer(on_process_kill_all)
-        .add_plugins(HostedUiPlugin::<ProcessMonitorView>::new(
-            crate::ui::monitor::ProcessMonitorPage::MANIFEST,
-        ));
+            .add_plugins(UiEventPlugin::<(
+                ProcessNavigateEvent,
+                ProcessKillEvent,
+                ProcessKillAllEvent,
+            )>::default())
+            .add_plugins(UiStatePlugin::<ProcessesUiState>::default())
+            .add_systems(
+                Update,
+                (
+                    reconcile_service_processes,
+                    request_process_list,
+                    sample_process_usage,
+                    broadcast_to_monitors,
+                )
+                    .chain()
+                    .after(vmux_core::service::ServiceMessageSet),
+            )
+            .add_systems(
+                Update,
+                open_services.before(vmux_core::workspace::StackCommandSet),
+            )
+            .add_observer(on_process_navigate)
+            .add_observer(on_process_kill)
+            .add_observer(on_process_kill_all)
+            .add_plugins(HostedUiPlugin::<ProcessMonitorView>::new(
+                crate::ui::monitor::ProcessMonitorPage::MANIFEST,
+            ));
     }
 }
 

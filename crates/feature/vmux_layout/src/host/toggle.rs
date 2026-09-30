@@ -13,22 +13,23 @@ pub struct TogglePlugin;
 
 impl Plugin for TogglePlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(test)]
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            crate::FEATURE_MANIFEST,
+        ));
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_message::<ToggleLayoutRequest>()
-        .add_systems(Startup, bind_command.in_set(vmux_command::BindCommands))
-        .add_systems(
-            Update,
-            handle_visibility_requests.in_set(LayoutRequestSet::Handle),
-        )
-        .add_systems(
-            PostUpdate,
-            sync_window_padding.before(LayoutSystems::Layout),
-        );
+        app.add_message::<ToggleLayoutRequest>()
+            .add_systems(Startup, bind_command.in_set(vmux_command::BindCommands))
+            .add_systems(
+                Update,
+                handle_visibility_requests.in_set(LayoutRequestSet::Handle),
+            )
+            .add_systems(
+                PostUpdate,
+                sync_window_padding.before(LayoutSystems::Layout),
+            );
     }
 }
 

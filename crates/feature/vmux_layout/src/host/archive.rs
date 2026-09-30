@@ -61,31 +61,32 @@ pub struct ArchivePlugin;
 
 impl Plugin for ArchivePlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(test)]
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            crate::FEATURE_MANIFEST,
+        ));
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
-            crate::FEATURE_MANIFEST,
-        ))
-        .add_message::<ReopenClosedPage>()
-        .add_message::<PageArchiveRequest>()
-        .add_message::<CloseTabRequest>()
-        .add_systems(Startup, bind_command.in_set(BindCommands))
-        .add_observer(issue_reopen_closed_page)
-        .add_systems(Update, (capture_archived_pages, maintain_archive))
-        .add_systems(
-            Update,
-            (
-                archive_on_stack_close
-                    .after(StackCommandSet)
-                    .before(CloseStackSet),
-                handle_reopen_closed_page,
-                handle_close_tab_requests
-                    .after(TabCommandSet)
-                    .after(StackCommandSet),
-            )
-                .in_set(LayoutRequestSet::Handle),
-        );
+        app.add_message::<ReopenClosedPage>()
+            .add_message::<PageArchiveRequest>()
+            .add_message::<CloseTabRequest>()
+            .add_systems(Startup, bind_command.in_set(BindCommands))
+            .add_observer(issue_reopen_closed_page)
+            .add_systems(Update, (capture_archived_pages, maintain_archive))
+            .add_systems(
+                Update,
+                (
+                    archive_on_stack_close
+                        .after(StackCommandSet)
+                        .before(CloseStackSet),
+                    handle_reopen_closed_page,
+                    handle_close_tab_requests
+                        .after(TabCommandSet)
+                        .after(StackCommandSet),
+                )
+                    .in_set(LayoutRequestSet::Handle),
+            );
     }
 }
 
