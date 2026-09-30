@@ -4,10 +4,6 @@ use crate::AgentVariant;
 
 pub const CLI_FRESH_SID: &str = "cli";
 
-pub fn page_url_prefix(provider: &str, model: &str) -> String {
-    format!("vmux://sessions/{provider}/{model}/")
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AgentUrl {
     Cli {
@@ -109,7 +105,7 @@ impl AgentUrl {
                 provider,
                 model,
                 sid,
-            } => format!("{}{sid}", page_url_prefix(provider, model)),
+            } => format!("vmux://sessions/{provider}/{model}/{sid}"),
             AgentUrl::PageDefault => "vmux://sessions/".to_string(),
         }
     }

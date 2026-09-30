@@ -216,7 +216,7 @@ impl ServiceHandle {
         };
         if !service_identity.matches(&current_identity) {
             tracing::warn!(pid, "service identity mismatch, replacing running daemon");
-            let outcome = crate::supervisor::replace_running(pid, || {
+            let outcome = crate::supervisor::RunningDaemon::new(pid).replace(|| {
                 let stream = std::os::unix::net::UnixStream::connect(&sock)?;
                 stream.set_write_timeout(Some(std::time::Duration::from_millis(500)))?;
                 let mut stream = stream;
@@ -226,7 +226,7 @@ impl ServiceHandle {
                 )
             });
             tracing::info!(?outcome, "replaced running daemon");
-            crate::supervisor::clean_runtime_files();
+            crate::supervisor::ServiceRuntimeFiles::remove();
             return false;
         }
         true

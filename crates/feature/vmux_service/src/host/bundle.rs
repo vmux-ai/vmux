@@ -1,32 +1,32 @@
 use std::path::{Path, PathBuf};
 
-pub fn is_bundled_path(exe: &Path) -> bool {
-    bundle_root_for(exe).is_some()
-}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppBundle(PathBuf);
 
-pub fn bundle_root_for(exe: &Path) -> Option<PathBuf> {
-    let parent = exe.parent()?;
-    if parent.file_name()?.to_str()? != "MacOS" {
-        return None;
-    }
-    let contents = parent.parent()?;
-    if contents.file_name()?.to_str()? != "Contents" {
-        return None;
-    }
-    let app = contents.parent()?;
-    if app.extension()?.to_str()? == "app" {
-        Some(app.to_path_buf())
-    } else {
-        None
+impl AppBundle {
+    pub fn path(&self) -> &Path {
+        &self.0
     }
 }
 
-pub fn current_bundle_root() -> Option<PathBuf> {
-    bundle_root_for(&std::env::current_exe().ok()?)
-}
+impl TryFrom<&Path> for AppBundle {
+    type Error = ();
 
-pub fn is_bundled() -> bool {
-    current_bundle_root().is_some()
+    fn try_from(exe: &Path) -> Result<Self, Self::Error> {
+        let parent = exe.parent().ok_or(())?;
+        if parent.file_name().and_then(|name| name.to_str()) != Some("MacOS") {
+            return Err(());
+        }
+        let contents = parent.parent().ok_or(())?;
+        if contents.file_name().and_then(|name| name.to_str()) != Some("Contents") {
+            return Err(());
+        }
+        let app = contents.parent().ok_or(())?;
+        if app.extension().and_then(|extension| extension.to_str()) != Some("app") {
+            return Err(());
+        }
+        Ok(Self(app.to_path_buf()))
+    }
 }
 
 pub const EMBEDDED_AGENT_PLIST: &str = "ai.vmux.service.plist";

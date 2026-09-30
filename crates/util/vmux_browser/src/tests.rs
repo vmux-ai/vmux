@@ -381,11 +381,7 @@ mod browser_navigate_flow {
         use vmux_layout::Browser;
 
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_command::CommandPlugin,
-            ConsumerPlugin,
-        ));
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings())
             .init_resource::<CapturedNavigateUrls>();
 
@@ -429,11 +425,7 @@ mod browser_navigate_flow {
         use vmux_layout::Browser;
 
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_command::CommandPlugin,
-            ConsumerPlugin,
-        ));
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
@@ -576,11 +568,7 @@ mod browser_navigate_flow {
     #[test]
     fn browser_navigate_targets_specific_pane_when_id_provided() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_command::CommandPlugin,
-            ConsumerPlugin,
-        ));
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings());
 
         let pane_a = app.world_mut().spawn(Pane).id();
@@ -620,11 +608,7 @@ mod browser_navigate_flow {
     #[test]
     fn browser_navigate_with_terminal_url_spawns_terminal_in_focused_pane() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_command::CommandPlugin,
-            ConsumerPlugin,
-        ));
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
@@ -813,11 +797,7 @@ mod browser_navigate_flow {
     #[test]
     fn browser_navigate_with_terminal_url_and_target_pane_uses_target() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_command::CommandPlugin,
-            ConsumerPlugin,
-        ));
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings());
 
         let pane_a = app.world_mut().spawn(Pane).id();
@@ -862,11 +842,7 @@ mod browser_navigate_flow {
         use vmux_layout::Browser;
 
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_command::CommandPlugin,
-            ConsumerPlugin,
-        ));
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
@@ -983,11 +959,7 @@ mod browser_navigate_flow {
         use vmux_layout::Browser;
 
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_command::CommandPlugin,
-            ConsumerPlugin,
-        ));
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
@@ -1024,11 +996,7 @@ mod browser_navigate_flow {
         use vmux_layout::Browser;
 
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_command::CommandPlugin,
-            ConsumerPlugin,
-        ));
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();

@@ -148,7 +148,9 @@ fn register_service(
             for step in registration.0.registration_steps() {
                 let step_result = match step {
                     RegistrationStep::CleanupLegacy => {
-                        match crate::cleanup::cleanup_legacy_registrations() {
+                        match crate::cleanup::LegacyRegistrations::current()
+                            .and_then(crate::cleanup::LegacyRegistrations::cleanup)
+                        {
                             Ok(0) => {}
                             Ok(count) => {
                                 tracing::info!(removed = count, "removed legacy launchd plists")

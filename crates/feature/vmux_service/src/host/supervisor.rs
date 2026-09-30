@@ -11,63 +11,75 @@ pub enum ReplaceOutcome {
     AlreadyDead,
 }
 
-pub fn wait_for_pid_exit(pid: i32, deadline: Instant) -> bool {
-    while Instant::now() < deadline {
-        if !pid_alive(pid) {
-            return true;
+pub(crate) struct RunningDaemon(i32);
+
+impl RunningDaemon {
+    pub(crate) fn new(pid: i32) -> Self {
+        Self(pid)
+    }
+
+    fn wait_for_exit(&self, deadline: Instant) -> bool {
+        while Instant::now() < deadline {
+            if !self.is_alive() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(25));
         }
-        std::thread::sleep(Duration::from_millis(25));
+        !self.is_alive()
     }
-    !pid_alive(pid)
+
+    fn is_alive(&self) -> bool {
+        unsafe { libc::kill(self.0, 0) == 0 }
+    }
+
+    fn signal(&self, signal: i32) -> std::io::Result<()> {
+        let result = unsafe { libc::kill(self.0, signal) };
+        if result == 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ESRCH) {
+            Ok(())
+        } else {
+            Err(error)
+        }
+    }
+
+    pub(crate) fn replace<F>(&self, send_shutdown: F) -> ReplaceOutcome
+    where
+        F: FnOnce() -> std::io::Result<()>,
+    {
+        if !self.is_alive() {
+            return ReplaceOutcome::AlreadyDead;
+        }
+
+        if send_shutdown().is_ok() && self.wait_for_exit(Instant::now() + SHUTDOWN_GRACE) {
+            tracing::info!(pid = self.0, "old daemon exited via Shutdown handshake");
+            return ReplaceOutcome::GracefulShutdown;
+        }
+
+        tracing::warn!(pid = self.0, "Shutdown timed out, escalating to SIGTERM");
+        let _ = self.signal(libc::SIGTERM);
+        if self.wait_for_exit(Instant::now() + SIGTERM_GRACE) {
+            return ReplaceOutcome::SigtermExit;
+        }
+
+        tracing::warn!(pid = self.0, "SIGTERM timed out, escalating to SIGKILL");
+        let _ = self.signal(libc::SIGKILL);
+        let _ = self.wait_for_exit(Instant::now() + Duration::from_millis(500));
+        ReplaceOutcome::SigkillExit
+    }
 }
 
-pub fn pid_alive(pid: i32) -> bool {
-    unsafe { libc::kill(pid, 0) == 0 }
-}
+pub(crate) struct ServiceRuntimeFiles;
 
-pub fn send_signal(pid: i32, sig: i32) -> std::io::Result<()> {
-    let r = unsafe { libc::kill(pid, sig) };
-    if r == 0 {
-        return Ok(());
+impl ServiceRuntimeFiles {
+    pub(crate) fn remove() {
+        let paths = crate::ServicePaths::current();
+        let _ = std::fs::remove_file(paths.socket());
+        let _ = std::fs::remove_file(paths.pid());
+        let _ = std::fs::remove_file(paths.identity());
     }
-    let err = std::io::Error::last_os_error();
-    if err.raw_os_error() == Some(libc::ESRCH) {
-        Ok(())
-    } else {
-        Err(err)
-    }
-}
-
-pub fn replace_running<F>(pid: i32, send_shutdown: F) -> ReplaceOutcome
-where
-    F: FnOnce() -> std::io::Result<()>,
-{
-    if !pid_alive(pid) {
-        return ReplaceOutcome::AlreadyDead;
-    }
-
-    if send_shutdown().is_ok() && wait_for_pid_exit(pid, Instant::now() + SHUTDOWN_GRACE) {
-        tracing::info!(pid, "old daemon exited via Shutdown handshake");
-        return ReplaceOutcome::GracefulShutdown;
-    }
-
-    tracing::warn!(pid, "Shutdown timed out, escalating to SIGTERM");
-    let _ = send_signal(pid, libc::SIGTERM);
-    if wait_for_pid_exit(pid, Instant::now() + SIGTERM_GRACE) {
-        return ReplaceOutcome::SigtermExit;
-    }
-
-    tracing::warn!(pid, "SIGTERM timed out, escalating to SIGKILL");
-    let _ = send_signal(pid, libc::SIGKILL);
-    let _ = wait_for_pid_exit(pid, Instant::now() + Duration::from_millis(500));
-    ReplaceOutcome::SigkillExit
-}
-
-pub fn clean_runtime_files() {
-    let paths = crate::ServicePaths::current();
-    let _ = std::fs::remove_file(paths.socket());
-    let _ = std::fs::remove_file(paths.pid());
-    let _ = std::fs::remove_file(paths.identity());
 }
 
 #[cfg(test)]
@@ -77,10 +89,10 @@ mod tests {
     #[test]
     fn already_dead_pid_returns_alreadydead() {
         let mut pid = 999_999;
-        while pid_alive(pid) {
+        while RunningDaemon::new(pid).is_alive() {
             pid -= 1;
         }
-        let outcome = replace_running(pid, || Ok(()));
+        let outcome = RunningDaemon::new(pid).replace(|| Ok(()));
         assert_eq!(outcome, ReplaceOutcome::AlreadyDead);
     }
 
@@ -101,7 +113,7 @@ mod tests {
     fn graceful_shutdown_when_send_succeeds_and_pid_exits() {
         let pid = start_and_detach();
 
-        let outcome = replace_running(pid, || {
+        let outcome = RunningDaemon::new(pid).replace(|| {
             unsafe { libc::kill(pid, libc::SIGTERM) };
             Ok(())
         });
@@ -112,7 +124,7 @@ mod tests {
     fn escalates_to_sigterm_when_shutdown_send_fails() {
         let pid = start_and_detach();
 
-        let outcome = replace_running(pid, || {
+        let outcome = RunningDaemon::new(pid).replace(|| {
             Err(std::io::Error::new(
                 std::io::ErrorKind::ConnectionRefused,
                 "no socket",

@@ -1,5 +1,5 @@
 use crate::DaemonBinary;
-use crate::bundle;
+use crate::bundle::{AppBundle, EMBEDDED_AGENT_PLIST};
 
 #[derive(Debug)]
 pub enum Backend {
@@ -19,7 +19,7 @@ pub enum RegistrationStep {
 
 impl Backend {
     pub fn for_binary(binary: &DaemonBinary) -> Self {
-        if bundle::bundle_root_for(binary.path()).is_some() {
+        if AppBundle::try_from(binary.path()).is_ok() {
             Self::SmAppService
         } else {
             Self::Launchctl
@@ -42,7 +42,7 @@ impl Backend {
 
 impl DaemonBinary {
     pub fn requires_registration(&self, profile: &str) -> bool {
-        profile == "release" && bundle::bundle_root_for(self.path()).is_some()
+        profile == "release" && AppBundle::try_from(self.path()).is_ok()
     }
 
     pub fn prepare_detached_spawn(&self) {
@@ -50,9 +50,8 @@ impl DaemonBinary {
         let _ = self;
 
         #[cfg(target_os = "macos")]
-        if bundle::bundle_root_for(self.path()).is_some()
-            && let Err(error) =
-                crate::sm_app_service::unregister_agent(bundle::EMBEDDED_AGENT_PLIST)
+        if AppBundle::try_from(self.path()).is_ok()
+            && let Err(error) = crate::sm_app_service::unregister_agent(EMBEDDED_AGENT_PLIST)
         {
             tracing::debug!(%error, "unregister embedded agent before detached spawn");
         }

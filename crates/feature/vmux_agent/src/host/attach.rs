@@ -145,7 +145,12 @@ fn attach_page_agents(
             webview,
         } = attachment;
         let title = format!("{provider}/{model}");
-        let url = format!("{}{}", crate::url::page_url_prefix(provider, model), sid);
+        let url = crate::AgentUrl::Page {
+            provider: provider.clone(),
+            model: model.clone(),
+            sid: sid.clone(),
+        }
+        .format();
         commands.entity(entity).insert(PageMetadata {
             url: url.clone(),
             title: title.clone(),

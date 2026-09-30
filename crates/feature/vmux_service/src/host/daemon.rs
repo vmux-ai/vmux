@@ -21,9 +21,11 @@ impl DaemonBinary {
             return Self(exe.to_path_buf());
         }
 
-        if let Some(root) = crate::bundle::bundle_root_for(exe) {
+        if let Ok(bundle) = crate::bundle::AppBundle::try_from(exe) {
             return Self(
-                root.join("Contents")
+                bundle
+                    .path()
+                    .join("Contents")
                     .join("Library")
                     .join("LoginItems")
                     .join("Vmux Service.app")
