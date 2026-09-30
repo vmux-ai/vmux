@@ -78,6 +78,10 @@ jobs:
             libxdo-dev \
             libvulkan-dev
 
+      - uses: rui314/setup-mold@v1
+        with:
+          mold-version: 2.42.1
+
       - uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt, clippy
@@ -154,6 +158,10 @@ jobs:
             libgtk-3-dev \
             libxdo-dev \
             libvulkan-dev
+
+      - uses: rui314/setup-mold@v1
+        with:
+          mold-version: 2.42.1
 
       - uses: dtolnay/rust-toolchain@1.95.0
 
