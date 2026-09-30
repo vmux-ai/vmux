@@ -74,25 +74,25 @@ pub(crate) enum AuthState {
 }
 
 #[derive(Clone, Default, PartialEq)]
-struct ConnectionView {
-    pub(crate) auth: AuthState,
-    pub(crate) pair_url: String,
-    pub(crate) error: String,
-    pub(crate) sessions: Vec<RemoteSession>,
-    pub(crate) agents: Vec<RemoteAgent>,
-    pub(crate) reachable: bool,
-    pub(crate) pairing: bool,
+pub(super) struct ConnectionView {
+    pub(super) auth: AuthState,
+    pub(super) pair_url: String,
+    pub(super) error: String,
+    pub(super) sessions: Vec<RemoteSession>,
+    pub(super) agents: Vec<RemoteAgent>,
+    pub(super) reachable: bool,
+    pub(super) pairing: bool,
 }
 
 #[derive(Clone, Copy)]
-struct ConnectionProjection {
-    pub(crate) view: Signal<ConnectionView>,
-    pub(crate) api: Signal<Option<Api>>,
-    pub(crate) sessions: Signal<Vec<RemoteSession>>,
-    pub(crate) agents: Signal<Vec<RemoteAgent>>,
+pub(super) struct ConnectionProjection {
+    pub(super) view: Signal<ConnectionView>,
+    pub(super) api: Signal<Option<Api>>,
+    pub(super) sessions: Signal<Vec<RemoteSession>>,
+    pub(super) agents: Signal<Vec<RemoteAgent>>,
 }
 
-pub(crate) fn use_connection(runtime: RuntimeHandle) -> ConnectionProjection {
+pub(super) fn use_connection(runtime: RuntimeHandle) -> ConnectionProjection {
     let mut view = use_signal(ConnectionView::default);
     let mut api = use_signal(|| None);
     let mut sessions = use_signal(Vec::new);
@@ -677,17 +677,17 @@ fn normalized_pairing_base(mut url: Url) -> Result<String, String> {
 }
 
 #[derive(Props, Clone, PartialEq)]
-struct PairCardProps {
-    pub(crate) value: String,
-    pub(crate) error: String,
-    pub(crate) pairing: bool,
-    pub(crate) on_value: EventHandler<String>,
-    pub(crate) on_pair: EventHandler<()>,
-    pub(crate) on_scan: EventHandler<()>,
+pub(super) struct PairCardProps {
+    pub(super) value: String,
+    pub(super) error: String,
+    pub(super) pairing: bool,
+    pub(super) on_value: EventHandler<String>,
+    pub(super) on_pair: EventHandler<()>,
+    pub(super) on_scan: EventHandler<()>,
 }
 
 #[component]
-pub(crate) fn PairCard(props: PairCardProps) -> Element {
+pub(super) fn PairCard(props: PairCardProps) -> Element {
     let unavailable = use_hook(|| qr_scanner::ScannerSupport::detect().unavailable());
     let mut show_link = use_signal(|| unavailable.is_some() || !props.value.trim().is_empty());
 

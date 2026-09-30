@@ -611,6 +611,7 @@ fn expand_native(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStre
     Ok(quote! {
         #manifest_dependency
 
+        #[cfg_attr(not(host), allow(dead_code))]
         #input
 
         impl #ident {

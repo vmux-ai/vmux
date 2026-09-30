@@ -11,6 +11,7 @@ impl SearchEngines {
         SearchEngine::Kagi,
     ];
 
+    #[cfg(ui)]
     pub(crate) const fn name(engine: SearchEngine) -> &'static str {
         match engine {
             SearchEngine::Google => "Google",
@@ -21,6 +22,7 @@ impl SearchEngines {
         }
     }
 
+    #[cfg(any(host, test))]
     pub(crate) fn from_url(url: &str) -> Option<SearchEngine> {
         let parsed = url::Url::parse(url).ok()?;
         let host = parsed.host_str()?.trim_start_matches("www.");

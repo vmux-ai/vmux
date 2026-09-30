@@ -27,6 +27,7 @@ mod query;
 pub mod results;
 #[cfg(ui)]
 pub mod row;
+#[cfg(ui)]
 pub(crate) mod style;
 
 pub(crate) use query::PaletteQuery;

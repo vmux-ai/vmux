@@ -56,7 +56,7 @@ thread_local! {
     static EPOCH: Cell<u64> = const { Cell::new(0) };
 }
 
-pub(crate) fn install(
+pub(super) fn install(
     runtime: RuntimeHandle,
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
@@ -83,14 +83,14 @@ fn superseded(epoch: u64) -> bool {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-struct ComposerExchange {
+pub(super) struct ComposerExchange {
     media_request: Signal<Option<ChatMediaListRequest>>,
     offered: Signal<Vec<RemoteMediaEntry>>,
     draft: Signal<String>,
     effect_revision: Signal<u64>,
 }
 
-pub(crate) fn use_composer_exchange() -> ComposerExchange {
+pub(super) fn use_composer_exchange() -> ComposerExchange {
     ComposerExchange {
         media_request: use_signal(|| None),
         offered: use_signal(Vec::new),

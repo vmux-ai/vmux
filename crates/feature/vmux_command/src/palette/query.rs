@@ -40,6 +40,7 @@ impl PaletteQuery<'_> {
         named.then_some((name, tail))
     }
 
+    #[cfg(any(host, test))]
     pub(crate) fn mcp_filter(&self) -> Option<&str> {
         let rest = self.0.strip_prefix("/mcp")?;
         if rest.is_empty() {

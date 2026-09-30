@@ -7,11 +7,11 @@ use bevy_app::{App, Plugin};
 #[cfg(host)]
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
+use crate::event::ChatComposerEffect;
 #[cfg(host)]
 use crate::event::ChatDraftChanged;
-use crate::event::{
-    ChatComposerEffect, ChatPickFiles, ChatResumeQueryRequest, ChatSlashCommandRequest,
-};
+#[cfg(host)]
+use crate::event::{ChatPickFiles, ChatResumeQueryRequest, ChatSlashCommandRequest};
 #[cfg(host)]
 use crate::host::ChatView;
 use crate::selector::{SelectorMode, selector_mode};

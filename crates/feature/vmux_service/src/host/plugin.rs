@@ -11,7 +11,7 @@ use crate::registry::{Backend, RegistrationError};
 use vmux_api::protocol::ClientMessage;
 use vmux_core::service::{ServiceConnected, ServiceInbound, ServiceRequest, ServiceUnavailable};
 
-use super::client::{ServiceClient, ServiceHandle, ServiceWake, connect_service_handle};
+use super::client::{ServiceClient, ServiceHandle, ServiceWake};
 
 #[derive(Component)]
 struct ServiceConnectRetry {
@@ -263,7 +263,7 @@ fn start_service_connection(
             let started = std::thread::Builder::new()
                 .name("service-connect-worker".into())
                 .spawn(move || {
-                    let _ = sender.send(connect_service_handle(wake));
+                    let _ = sender.send(ServiceHandle::connect(wake));
                 });
             if started.is_ok() {
                 commands.entity(entity).insert(ServiceConnectTask(receiver));
