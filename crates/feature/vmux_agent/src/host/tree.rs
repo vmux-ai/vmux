@@ -27,7 +27,7 @@ impl Plugin for AgentPagesPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             vmux_chat::ChatPlugin,
-            super::acp::AcpModelPlugin,
+            super::acp::AcpSessionConfigPlugin,
             super::transcript::ChatTranscriptPlugin,
             crate::setup::AgentSetupPlugin,
         ));

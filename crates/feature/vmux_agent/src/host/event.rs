@@ -1,9 +1,7 @@
 use bevy::prelude::*;
 use serde_json::Value;
 use vmux_api::ProcessId;
-use vmux_api::protocol::{
-    AcpModeOption, AcpModelOption, AgentRequestId, AgentRunStatus, JsonValue,
-};
+use vmux_api::protocol::{AcpSessionConfig, AgentRequestId, AgentRunStatus, JsonValue};
 
 pub use vmux_api::protocol::ApprovalDecision;
 pub use vmux_core::agent::{AgentRequestInput, CommandOrigin};
@@ -63,35 +61,18 @@ pub struct UiAgentWorkspaceChanged {
     pub workspace_cwd: String,
 }
 
-#[vmux_core::service_message(Shared(SharedEvent::AcpModelInfo))]
-pub struct UiAgentModelInfo {
+#[vmux_core::service_message(AcpSessionConfigState)]
+pub struct UiAgentSessionConfigState {
     pub sid: String,
-    pub config_id: String,
-    pub current_model_id: String,
-    pub models: Vec<AcpModelOption>,
+    pub configs: Vec<AcpSessionConfig>,
 }
 
-#[vmux_core::service_message(AcpModelSelectionResult)]
-pub struct UiAgentModelSelectionResult {
+#[vmux_core::service_message(AcpSessionConfigSelectionResult)]
+pub struct UiAgentSessionConfigSelectionResult {
     pub sid: String,
     pub request_id: u64,
-    pub model_id: String,
-    pub succeeded: bool,
-}
-
-#[vmux_core::service_message(AcpModeInfo)]
-pub struct UiAgentModeInfo {
-    pub sid: String,
-    pub config_id: String,
-    pub current_mode_id: String,
-    pub modes: Vec<AcpModeOption>,
-}
-
-#[vmux_core::service_message(AcpModeSelectionResult)]
-pub struct UiAgentModeSelectionResult {
-    pub sid: String,
-    pub request_id: u64,
-    pub mode_id: String,
+    pub config_id: Option<String>,
+    pub value: String,
     pub succeeded: bool,
 }
 

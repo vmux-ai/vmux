@@ -18,12 +18,12 @@ use vmux_tool::{
     ToolScanner, ToolStore, ToolsManifest,
 };
 
+mod config;
 mod environment;
 mod install;
-pub(super) mod model;
 pub mod registry;
 
-pub(super) use model::AcpModelPlugin;
+pub(super) use config::AcpSessionConfigPlugin;
 
 use self::environment::AcpEnvironment;
 use self::install::{resolve_from_registry, uninstall};

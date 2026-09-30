@@ -1,8 +1,8 @@
 use crate::event::{
     AgentRequestInput, AgentToolCallRequest, CommandOrigin, UiAgentAcpTerminalCreated,
-    UiAgentApprovalResolved, UiAgentAwaitingApproval, UiAgentDelta, UiAgentInfo, UiAgentModeInfo,
-    UiAgentModeSelectionResult, UiAgentModelInfo, UiAgentModelSelectionResult, UiAgentRunStatus,
-    UiAgentSessionCreated, UiAgentSnapshot, UiAgentWorkspaceChanged,
+    UiAgentApprovalResolved, UiAgentAwaitingApproval, UiAgentDelta, UiAgentInfo, UiAgentRunStatus,
+    UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState, UiAgentSessionCreated,
+    UiAgentSnapshot, UiAgentWorkspaceChanged,
 };
 use bevy::prelude::*;
 use vmux_api::protocol::ClientMessage;
@@ -39,10 +39,8 @@ impl Plugin for AgentIngressPlugin {
             .add_service_message::<UiAgentSnapshot>()
             .add_service_message::<UiAgentInfo>()
             .add_service_message::<UiAgentWorkspaceChanged>()
-            .add_service_message::<UiAgentModelInfo>()
-            .add_service_message::<UiAgentModelSelectionResult>()
-            .add_service_message::<UiAgentModeInfo>()
-            .add_service_message::<UiAgentModeSelectionResult>()
+            .add_service_message::<UiAgentSessionConfigState>()
+            .add_service_message::<UiAgentSessionConfigSelectionResult>()
             .add_service_message::<UiAgentSessionCreated>()
             .add_service_message::<UiAgentAcpTerminalCreated>()
             .add_message::<ServiceRequest>()

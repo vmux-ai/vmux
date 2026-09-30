@@ -87,7 +87,6 @@ mod tests {
                 "AgentMessagesSnapshot",
                 "AcpAgentInfo",
                 "AcpWorkspaceChanged",
-                "AcpModelInfo",
                 "Session",
             ]
         );
@@ -411,11 +410,11 @@ mod tests {
                 }],
                 preferred_mode: Some("auto".into()),
             }),
-            ClientMessage::AcpSetModel {
+            ClientMessage::AcpSetSessionConfig {
                 sid: "s".into(),
                 request_id: 7,
-                config_id: "model".into(),
-                model_id: "sonnet".into(),
+                config_id: Some("model".into()),
+                value: "sonnet".into(),
             },
             ClientMessage::Shared(SharedMessage::AgentApprove {
                 sid: "s".into(),
@@ -566,20 +565,27 @@ mod tests {
                 sid: "s".into(),
                 name: "Antigravity".into(),
             }),
-            ServiceMessage::Shared(SharedEvent::AcpModelInfo {
+            ServiceMessage::AcpSessionConfigState {
                 sid: "s".into(),
-                config_id: "model".into(),
-                current_model_id: "sonnet".into(),
-                models: vec![AcpModelOption {
-                    id: "sonnet".into(),
-                    name: "Claude Sonnet".into(),
-                    description: Some("Balanced".into()),
+                configs: vec![AcpSessionConfig {
+                    config_id: Some("model".into()),
+                    name: "Model".into(),
+                    description: None,
+                    category: Some("model".into()),
+                    current_value: "sonnet".into(),
+                    values: vec![AcpSessionConfigValue {
+                        value: "sonnet".into(),
+                        name: "Claude Sonnet".into(),
+                        description: Some("Balanced".into()),
+                        group: None,
+                    }],
                 }],
-            }),
-            ServiceMessage::AcpModelSelectionResult {
+            },
+            ServiceMessage::AcpSessionConfigSelectionResult {
                 sid: "s".into(),
                 request_id: 7,
-                model_id: "opus".into(),
+                config_id: Some("model".into()),
+                value: "opus".into(),
                 succeeded: false,
             },
         ];

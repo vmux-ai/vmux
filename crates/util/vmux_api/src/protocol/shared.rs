@@ -1,7 +1,4 @@
-use super::{
-    AcpModelOption, AgentAttachment, AgentRunStatus, ApprovalDecision, ClientMessage,
-    ServiceMessage,
-};
+use super::{AgentAttachment, AgentRunStatus, ApprovalDecision, ClientMessage, ServiceMessage};
 use crate::json::JsonValue;
 use crate::room::{ClientOpId, Message, RemoteAgent, RemoteMediaEntry, RemoteSession};
 #[vmux_macro::variant_names]
@@ -91,12 +88,6 @@ pub enum SharedEvent {
         branch: String,
         cwd: String,
         workspace_cwd: String,
-    },
-    AcpModelInfo {
-        sid: String,
-        config_id: String,
-        current_model_id: String,
-        models: Vec<AcpModelOption>,
     },
     Session {
         session: RemoteSession,

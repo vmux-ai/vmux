@@ -654,13 +654,9 @@ async fn handle_client(
                         let mut w = writer.lock().await;
                         vmux_core::service::write_service_message(&mut *w, &agent_info).await?;
                     }
-                    if let Some(model_info) = acp_sessions.model_info(sid.clone()).await {
+                    if let Some(config_state) = acp_sessions.config_state(sid.clone()).await {
                         let mut w = writer.lock().await;
-                        vmux_core::service::write_service_message(&mut *w, &model_info).await?;
-                    }
-                    if let Some(mode_info) = acp_sessions.mode_info(sid.clone()).await {
-                        let mut w = writer.lock().await;
-                        vmux_core::service::write_service_message(&mut *w, &mode_info).await?;
+                        vmux_core::service::write_service_message(&mut *w, &config_state).await?;
                     }
                     if let Some(old) = agent_forwarders.remove(&sid) {
                         old.abort();
@@ -734,37 +730,19 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::AcpSetModel {
+            ClientMessage::AcpSetSessionConfig {
                 sid,
                 request_id,
                 config_id,
-                model_id,
+                value,
             } => {
                 acp_sessions
                     .input(
                         sid,
-                        vmux_agent::acp::AcpInput::SetModel {
+                        vmux_agent::acp::AcpInput::SetConfig {
                             request_id,
                             config_id,
-                            model_id,
-                        },
-                    )
-                    .await;
-            }
-
-            ClientMessage::AcpSetMode {
-                sid,
-                request_id,
-                config_id,
-                mode_id,
-            } => {
-                acp_sessions
-                    .input(
-                        sid,
-                        vmux_agent::acp::AcpInput::SetMode {
-                            request_id,
-                            config_id,
-                            mode_id,
+                            value,
                         },
                     )
                     .await;
@@ -849,13 +827,9 @@ async fn handle_client(
                         let mut w = writer.lock().await;
                         vmux_core::service::write_service_message(&mut *w, &agent_info).await?;
                     }
-                    if let Some(model_info) = acp_sessions.model_info(sid.clone()).await {
+                    if let Some(config_state) = acp_sessions.config_state(sid.clone()).await {
                         let mut w = writer.lock().await;
-                        vmux_core::service::write_service_message(&mut *w, &model_info).await?;
-                    }
-                    if let Some(mode_info) = acp_sessions.mode_info(sid.clone()).await {
-                        let mut w = writer.lock().await;
-                        vmux_core::service::write_service_message(&mut *w, &mode_info).await?;
+                        vmux_core::service::write_service_message(&mut *w, &config_state).await?;
                     }
                     if let Some(old) = agent_forwarders.remove(&sid) {
                         old.abort();

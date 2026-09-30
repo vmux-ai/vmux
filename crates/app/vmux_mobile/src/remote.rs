@@ -236,9 +236,7 @@ pub(crate) fn remote_event_from_shared(
             })
         }
         Shared::Session { session } => Some(RemoteEvent::Session { session }),
-        Shared::AcpAgentInfo { .. }
-        | Shared::AcpWorkspaceChanged { .. }
-        | Shared::AcpModelInfo { .. } => None,
+        Shared::AcpAgentInfo { .. } | Shared::AcpWorkspaceChanged { .. } => None,
     }
 }
 

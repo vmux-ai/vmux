@@ -107,8 +107,7 @@ fn agent_mode_selections_path() -> std::path::PathBuf {
 fn spawn_agent_model_registry(mut commands: Commands) {
     commands.spawn((
         Name::new("Agent model registry"),
-        AcpModelRequestCounter::default(),
-        AcpModeRequestCounter::default(),
+        AcpSessionConfigRequestCounter::default(),
         AgentModelSelections::default(),
         AgentModeSelections::default(),
     ));
@@ -178,10 +177,7 @@ fn save_agent_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
 }
 
 #[derive(Component, Default)]
-pub(super) struct AcpModelRequestCounter(u64);
-
-#[derive(Component, Default)]
-pub(super) struct AcpModeRequestCounter(u64);
+pub(super) struct AcpSessionConfigRequestCounter(u64);
 
 impl AgentModelSelections {
     pub(super) fn select(&mut self, agent_id: &str, model_id: &str) {
@@ -301,14 +297,7 @@ impl AgentModeSelections {
     }
 }
 
-impl AcpModelRequestCounter {
-    pub(super) fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(1);
-        self.0
-    }
-}
-
-impl AcpModeRequestCounter {
+impl AcpSessionConfigRequestCounter {
     pub(super) fn next(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(1);
         self.0

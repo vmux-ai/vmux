@@ -99,11 +99,11 @@ pub enum ClientMessage {
     DetachAgentSession {
         sid: String,
     },
-    AcpSetModel {
+    AcpSetSessionConfig {
         sid: String,
         request_id: u64,
-        config_id: String,
-        model_id: String,
+        config_id: Option<String>,
+        value: String,
     },
     CloseAgentSession {
         sid: String,
@@ -125,12 +125,6 @@ pub enum ClientMessage {
         mcp_args: Vec<String>,
         resume_acp_session_id: Option<String>,
         managed_mcp_servers: Vec<ManagedMcpServer>,
-    },
-    AcpSetMode {
-        sid: String,
-        request_id: u64,
-        config_id: String,
-        mode_id: String,
     },
     Status,
     RebindAcpWorkspace {
@@ -251,28 +245,39 @@ pub enum ServiceMessage {
         sid: String,
         acp_session_id: String,
     },
-    AcpModelSelectionResult {
-        sid: String,
-        request_id: u64,
-        model_id: String,
-        succeeded: bool,
-    },
     Shared(SharedEvent),
-    AcpModeInfo {
+    AcpSessionConfigState {
         sid: String,
-        config_id: String,
-        current_mode_id: String,
-        modes: Vec<AcpModeOption>,
+        configs: Vec<AcpSessionConfig>,
     },
-    AcpModeSelectionResult {
+    AcpSessionConfigSelectionResult {
         sid: String,
         request_id: u64,
-        mode_id: String,
+        config_id: Option<String>,
+        value: String,
         succeeded: bool,
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[vmux_api::contract(Eq)]
+pub struct AcpSessionConfig {
+    pub config_id: Option<String>,
+    pub name: String,
+    pub description: Option<String>,
+    pub category: Option<String>,
+    pub current_value: String,
+    pub values: Vec<AcpSessionConfigValue>,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct AcpSessionConfigValue {
+    pub value: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub group: Option<String>,
+}
+
+#[vmux_api::contract(Eq)]
 pub struct AcpModelOption {
     pub id: String,
     pub name: String,

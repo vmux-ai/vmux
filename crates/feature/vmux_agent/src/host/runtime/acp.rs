@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use crossbeam_channel::Receiver;
-use vmux_api::protocol::{AcpModeOption, AcpModelOption, ClientMessage, SharedMessage};
+use vmux_api::protocol::{AcpSessionConfig, ClientMessage, SharedMessage};
 use vmux_chat::host::ChatCliRequest;
 #[cfg(test)]
 use vmux_core::ProcessId;
@@ -25,7 +25,7 @@ use vmux_session::{AcpSession, AgentApprovalPolicy, PromptQueue};
 pub struct AcpAgentPlugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct AcpModelInfoSet;
+pub(crate) struct AcpSessionConfigSet;
 
 impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
@@ -36,10 +36,8 @@ impl Plugin for AcpAgentPlugin {
             .add_plugins(crate::acp_tool::AcpToolPlugin)
             .add_message::<crate::event::UiAgentInfo>()
             .add_message::<crate::event::UiAgentWorkspaceChanged>()
-            .add_message::<crate::event::UiAgentModelInfo>()
-            .add_message::<crate::event::UiAgentModelSelectionResult>()
-            .add_message::<crate::event::UiAgentModeInfo>()
-            .add_message::<crate::event::UiAgentModeSelectionResult>()
+            .add_message::<crate::event::UiAgentSessionConfigState>()
+            .add_message::<crate::event::UiAgentSessionConfigSelectionResult>()
             .add_message::<crate::event::UiAgentSessionCreated>()
             .add_message::<crate::event::UiAgentAcpTerminalCreated>()
             .add_systems(Startup, (spawn_acp_catalog, start_catalog_fetch))
@@ -52,10 +50,8 @@ impl Plugin for AcpAgentPlugin {
                         apply_acp_agent_info,
                         apply_acp_workspace_changed,
                         (
-                            apply_acp_model_info.in_set(AcpModelInfoSet),
-                            apply_model_selection,
-                            apply_acp_mode_info,
-                            apply_acp_mode_selection_result,
+                            apply_acp_session_config_state.in_set(AcpSessionConfigSet),
+                            apply_acp_session_config_selection,
                         )
                             .chain(),
                         apply_acp_session_created,
@@ -177,66 +173,57 @@ fn acp_prompt_context(
     }
 }
 
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct AcpModelState {
-    pub config_id: String,
-    pub current_model_id: String,
-    pub default_model_id: String,
-    pub(crate) pending: Option<PendingAcpModelSelection>,
-    pub models: Vec<AcpModelOption>,
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct AcpSessionConfigState {
+    pub configs: Vec<AcpSessionConfig>,
+    pub(crate) pending: Vec<PendingAcpSessionConfig>,
+    pub(crate) initial: Vec<InitialAcpSessionConfig>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PendingAcpModelSelection {
+pub(crate) struct PendingAcpSessionConfig {
     pub request_id: u64,
-    pub model_id: String,
-}
-
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct AcpModeState {
-    pub config_id: String,
-    pub current_mode_id: String,
-    pub(crate) pending: Option<PendingAcpModeSelection>,
-    pub modes: Vec<AcpModeOption>,
+    pub config_id: Option<String>,
+    pub value: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PendingAcpModeSelection {
-    pub request_id: u64,
-    pub mode_id: String,
+pub(crate) struct InitialAcpSessionConfig {
+    pub(crate) config_id: Option<String>,
+    pub(crate) value: String,
 }
 
-impl AcpModeState {
-    pub fn display_mode_id(&self) -> &str {
-        self.pending
-            .as_ref()
-            .map(|pending| pending.mode_id.as_str())
-            .unwrap_or(&self.current_mode_id)
-    }
-
-    pub fn current_name(&self) -> &str {
-        self.modes
+impl AcpSessionConfigState {
+    pub fn category(&self, category: &str) -> Option<&AcpSessionConfig> {
+        self.configs
             .iter()
-            .find(|mode| mode.id == self.display_mode_id())
-            .map(|mode| mode.name.as_str())
-            .unwrap_or_else(|| self.display_mode_id())
+            .find(|config| config.category.as_deref() == Some(category))
     }
-}
 
-impl AcpModelState {
-    pub fn display_model_id(&self) -> &str {
+    pub fn display_value<'a>(&'a self, config: &'a AcpSessionConfig) -> &'a str {
         self.pending
-            .as_ref()
-            .map(|pending| pending.model_id.as_str())
-            .unwrap_or(&self.current_model_id)
+            .iter()
+            .find(|pending| pending.config_id == config.config_id)
+            .map(|pending| pending.value.as_str())
+            .unwrap_or(&config.current_value)
     }
 
-    pub fn current_name(&self) -> &str {
-        self.models
+    pub fn display_name<'a>(&'a self, config: &'a AcpSessionConfig) -> &'a str {
+        let value = self.display_value(config);
+        config
+            .values
             .iter()
-            .find(|model| model.id == self.display_model_id())
-            .map(|model| model.name.as_str())
-            .unwrap_or_else(|| self.display_model_id())
+            .find(|option| option.value == value)
+            .map(|option| option.name.as_str())
+            .unwrap_or(value)
+    }
+
+    pub fn initial_value<'a>(&'a self, config: &'a AcpSessionConfig) -> &'a str {
+        self.initial
+            .iter()
+            .find(|initial| initial.config_id == config.config_id)
+            .map(|initial| initial.value.as_str())
+            .unwrap_or(&config.current_value)
     }
 }
 
@@ -387,9 +374,9 @@ fn apply_acp_workspace_changed(
     }
 }
 
-fn apply_acp_model_info(
-    mut reader: MessageReader<crate::event::UiAgentModelInfo>,
-    mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpModelState>)>,
+fn apply_acp_session_config_state(
+    mut reader: MessageReader<crate::event::UiAgentSessionConfigState>,
+    mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpSessionConfigState>)>,
     mut commands: Commands,
 ) {
     for event in reader.read() {
@@ -397,109 +384,78 @@ fn apply_acp_model_info(
             if session.sid != event.sid {
                 continue;
             }
-            if event.config_id.is_empty() || event.models.is_empty() {
+            if event.configs.is_empty() {
                 if current.is_some() {
-                    commands.entity(entity).remove::<AcpModelState>();
+                    commands.entity(entity).remove::<AcpSessionConfigState>();
                 }
                 continue;
             }
             if let Some(mut current) = current {
-                let pending = current.pending.take();
-                let default_model_id = match current.default_model_id.is_empty() {
-                    true => event.current_model_id.clone(),
-                    false => current.default_model_id.clone(),
-                };
-                *current = AcpModelState {
-                    config_id: event.config_id.clone(),
-                    current_model_id: event.current_model_id.clone(),
-                    default_model_id,
-                    pending,
-                    models: event.models.clone(),
-                };
+                current.pending.retain(|pending| {
+                    event.configs.iter().any(|config| {
+                        config.config_id == pending.config_id
+                            && config
+                                .values
+                                .iter()
+                                .any(|option| option.value == pending.value)
+                    })
+                });
+                for config in &event.configs {
+                    if !current
+                        .initial
+                        .iter()
+                        .any(|initial| initial.config_id == config.config_id)
+                    {
+                        current.initial.push(InitialAcpSessionConfig {
+                            config_id: config.config_id.clone(),
+                            value: config.current_value.clone(),
+                        });
+                    }
+                }
+                current.configs.clone_from(&event.configs);
             } else {
-                commands.entity(entity).insert(AcpModelState {
-                    config_id: event.config_id.clone(),
-                    current_model_id: event.current_model_id.clone(),
-                    default_model_id: event.current_model_id.clone(),
-                    pending: None,
-                    models: event.models.clone(),
+                let initial = event
+                    .configs
+                    .iter()
+                    .map(|config| InitialAcpSessionConfig {
+                        config_id: config.config_id.clone(),
+                        value: config.current_value.clone(),
+                    })
+                    .collect();
+                commands.entity(entity).insert(AcpSessionConfigState {
+                    configs: event.configs.clone(),
+                    pending: Vec::new(),
+                    initial,
                 });
             }
         }
     }
 }
 
-fn apply_model_selection(
-    mut reader: MessageReader<crate::event::UiAgentModelSelectionResult>,
-    mut sessions: Query<(&AcpSession, &mut AcpModelState)>,
+fn apply_acp_session_config_selection(
+    mut reader: MessageReader<crate::event::UiAgentSessionConfigSelectionResult>,
+    mut sessions: Query<(&AcpSession, &mut AcpSessionConfigState)>,
 ) {
     for event in reader.read() {
         for (session, mut state) in &mut sessions {
-            if session.sid == event.sid
-                && state.pending.as_ref().is_some_and(|pending| {
-                    pending.request_id == event.request_id && pending.model_id == event.model_id
-                })
-            {
-                if event.succeeded {
-                    state.current_model_id.clone_from(&event.model_id);
-                }
-                state.pending = None;
-            }
-        }
-    }
-}
-
-fn apply_acp_mode_info(
-    mut reader: MessageReader<crate::event::UiAgentModeInfo>,
-    mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpModeState>)>,
-    mut commands: Commands,
-) {
-    for event in reader.read() {
-        for (entity, session, current) in &mut sessions {
             if session.sid != event.sid {
                 continue;
             }
-            if event.modes.is_empty() {
-                if current.is_some() {
-                    commands.entity(entity).remove::<AcpModeState>();
-                }
+            let Some(index) = state.pending.iter().position(|pending| {
+                pending.request_id == event.request_id
+                    && pending.config_id == event.config_id
+                    && pending.value == event.value
+            }) else {
                 continue;
-            }
-            if let Some(mut current) = current {
-                let pending = current.pending.take();
-                *current = AcpModeState {
-                    config_id: event.config_id.clone(),
-                    current_mode_id: event.current_mode_id.clone(),
-                    pending,
-                    modes: event.modes.clone(),
-                };
-            } else {
-                commands.entity(entity).insert(AcpModeState {
-                    config_id: event.config_id.clone(),
-                    current_mode_id: event.current_mode_id.clone(),
-                    pending: None,
-                    modes: event.modes.clone(),
-                });
-            }
-        }
-    }
-}
-
-fn apply_acp_mode_selection_result(
-    mut reader: MessageReader<crate::event::UiAgentModeSelectionResult>,
-    mut sessions: Query<(&AcpSession, &mut AcpModeState)>,
-) {
-    for event in reader.read() {
-        for (session, mut state) in &mut sessions {
-            if session.sid == event.sid
-                && state.pending.as_ref().is_some_and(|pending| {
-                    pending.request_id == event.request_id && pending.mode_id == event.mode_id
-                })
+            };
+            state.pending.remove(index);
+            if event.succeeded
+                && let Some(config) = state
+                    .configs
+                    .iter_mut()
+                    .find(|config| config.config_id == event.config_id)
             {
-                if event.succeeded {
-                    state.current_mode_id.clone_from(&event.mode_id);
-                }
-                state.pending = None;
+                config.current_value.clone_from(&event.value);
             }
         }
     }
@@ -1072,8 +1028,9 @@ mod tests {
     }
 
     #[test]
-    fn live_acp_model_info_updates_only_matching_session() {
-        use crate::event::UiAgentModelInfo;
+    fn live_acp_config_state_updates_only_matching_session() {
+        use crate::event::UiAgentSessionConfigState;
+        use vmux_api::protocol::{AcpSessionConfig, AcpSessionConfigValue};
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
@@ -1099,51 +1056,59 @@ mod tests {
             })
             .id();
 
-        app.world_mut().write_message(UiAgentModelInfo {
+        app.world_mut().write_message(UiAgentSessionConfigState {
             sid: "s1".into(),
-            config_id: "model".into(),
-            current_model_id: "sonnet".into(),
-            models: vec![AcpModelOption {
-                id: "sonnet".into(),
-                name: "Claude Sonnet".into(),
+            configs: vec![AcpSessionConfig {
+                config_id: Some("model".into()),
+                name: "Model".into(),
                 description: None,
+                category: Some("model".into()),
+                current_value: "sonnet".into(),
+                values: vec![AcpSessionConfigValue {
+                    value: "sonnet".into(),
+                    name: "Claude Sonnet".into(),
+                    description: None,
+                    group: None,
+                }],
             }],
         });
         app.update();
 
-        let state = app.world().get::<AcpModelState>(matching).unwrap();
-        assert_eq!(state.current_name(), "Claude Sonnet");
-        assert!(state.pending.is_none());
-        assert!(app.world().get::<AcpModelState>(unrelated).is_none());
+        let state = app.world().get::<AcpSessionConfigState>(matching).unwrap();
+        let model = state.category("model").unwrap();
+        assert_eq!(state.display_name(model), "Claude Sonnet");
+        assert!(state.pending.is_empty());
+        assert!(
+            app.world()
+                .get::<AcpSessionConfigState>(unrelated)
+                .is_none()
+        );
     }
 
     #[test]
-    fn model_results_preserve_latest_pending_selection() {
-        use crate::event::{UiAgentModelInfo, UiAgentModelSelectionResult};
+    fn config_results_preserve_latest_pending_selection() {
+        use crate::event::{UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState};
+        use vmux_api::protocol::{AcpSessionConfig, AcpSessionConfigValue};
 
-        let models = vec![
-            AcpModelOption {
-                id: "default".into(),
-                name: "Default".into(),
+        let values = ["default", "opus", "fable"]
+            .into_iter()
+            .map(|value| AcpSessionConfigValue {
+                value: value.into(),
+                name: value.into(),
                 description: None,
-            },
-            AcpModelOption {
-                id: "opus".into(),
-                name: "Opus".into(),
-                description: None,
-            },
-            AcpModelOption {
-                id: "fable".into(),
-                name: "Fable".into(),
-                description: None,
-            },
-        ];
+                group: None,
+            })
+            .collect::<Vec<_>>();
         let mut app = App::new();
-        app.add_message::<UiAgentModelInfo>()
-            .add_message::<UiAgentModelSelectionResult>()
+        app.add_message::<UiAgentSessionConfigState>()
+            .add_message::<UiAgentSessionConfigSelectionResult>()
             .add_systems(
                 Update,
-                (apply_acp_model_info, apply_model_selection).chain(),
+                (
+                    apply_acp_session_config_state,
+                    apply_acp_session_config_selection,
+                )
+                    .chain(),
             );
         let entity = app
             .world_mut()
@@ -1155,159 +1120,103 @@ mod tests {
                     anchor: ProcessId::new(),
                     resume: None,
                 },
-                AcpModelState {
-                    config_id: "model".into(),
-                    current_model_id: "default".into(),
-                    default_model_id: "default".into(),
-                    pending: Some(PendingAcpModelSelection {
+                AcpSessionConfigState {
+                    configs: vec![AcpSessionConfig {
+                        config_id: Some("model".into()),
+                        name: "Model".into(),
+                        description: None,
+                        category: Some("model".into()),
+                        current_value: "default".into(),
+                        values: values.clone(),
+                    }],
+                    pending: vec![PendingAcpSessionConfig {
                         request_id: 2,
-                        model_id: "fable".into(),
-                    }),
-                    models: models.clone(),
+                        config_id: Some("model".into()),
+                        value: "fable".into(),
+                    }],
+                    initial: vec![InitialAcpSessionConfig {
+                        config_id: Some("model".into()),
+                        value: "default".into(),
+                    }],
                 },
             ))
             .id();
 
-        app.world_mut().write_message(UiAgentModelInfo {
+        app.world_mut().write_message(UiAgentSessionConfigState {
             sid: "s1".into(),
-            config_id: "model".into(),
-            current_model_id: "opus".into(),
-            models: models.clone(),
+            configs: vec![AcpSessionConfig {
+                config_id: Some("model".into()),
+                name: "Model".into(),
+                description: None,
+                category: Some("model".into()),
+                current_value: "opus".into(),
+                values,
+            }],
         });
         app.update();
 
-        let state = app.world().get::<AcpModelState>(entity).unwrap();
-        assert_eq!(state.current_model_id, "opus");
-        assert_eq!(
-            state.pending.as_ref().map(|pending| pending.request_id),
-            Some(2)
-        );
-        assert_eq!(state.current_name(), "Fable");
+        let state = app.world().get::<AcpSessionConfigState>(entity).unwrap();
+        let model = state.category("model").unwrap();
+        assert_eq!(model.current_value, "opus");
+        assert_eq!(state.pending[0].request_id, 2);
+        assert_eq!(state.display_name(model), "fable");
 
-        app.world_mut().write_message(UiAgentModelSelectionResult {
-            sid: "s1".into(),
-            request_id: 1,
-            model_id: "fable".into(),
-            succeeded: false,
-        });
+        app.world_mut()
+            .write_message(UiAgentSessionConfigSelectionResult {
+                sid: "s1".into(),
+                request_id: 1,
+                config_id: Some("model".into()),
+                value: "fable".into(),
+                succeeded: false,
+            });
         app.update();
         assert_eq!(
             app.world()
-                .get::<AcpModelState>(entity)
+                .get::<AcpSessionConfigState>(entity)
                 .unwrap()
-                .pending
-                .as_ref()
-                .map(|pending| pending.request_id),
-            Some(2)
+                .pending[0]
+                .request_id,
+            2
         );
 
-        app.world_mut().write_message(UiAgentModelSelectionResult {
-            sid: "s1".into(),
-            request_id: 2,
-            model_id: "fable".into(),
-            succeeded: false,
-        });
+        app.world_mut()
+            .write_message(UiAgentSessionConfigSelectionResult {
+                sid: "s1".into(),
+                request_id: 2,
+                config_id: Some("model".into()),
+                value: "fable".into(),
+                succeeded: false,
+            });
         app.update();
-        let state = app.world().get::<AcpModelState>(entity).unwrap();
-        assert!(state.pending.is_none());
-        assert_eq!(state.current_name(), "Opus");
+        let state = app.world().get::<AcpSessionConfigState>(entity).unwrap();
+        let model = state.category("model").unwrap();
+        assert!(state.pending.is_empty());
+        assert_eq!(state.display_name(model), "opus");
 
         {
-            let mut state = app.world_mut().get_mut::<AcpModelState>(entity).unwrap();
-            state.pending = Some(PendingAcpModelSelection {
+            let mut state = app
+                .world_mut()
+                .get_mut::<AcpSessionConfigState>(entity)
+                .unwrap();
+            state.pending.push(PendingAcpSessionConfig {
                 request_id: 3,
-                model_id: "fable".into(),
+                config_id: Some("model".into()),
+                value: "fable".into(),
             });
         }
-        app.world_mut().write_message(UiAgentModelSelectionResult {
-            sid: "s1".into(),
-            request_id: 3,
-            model_id: "fable".into(),
-            succeeded: true,
-        });
+        app.world_mut()
+            .write_message(UiAgentSessionConfigSelectionResult {
+                sid: "s1".into(),
+                request_id: 3,
+                config_id: Some("model".into()),
+                value: "fable".into(),
+                succeeded: true,
+            });
         app.update();
-        let state = app.world().get::<AcpModelState>(entity).unwrap();
-        assert_eq!(state.current_model_id, "fable");
-        assert!(state.pending.is_none());
-    }
-
-    #[test]
-    fn mode_results_preserve_latest_pending_selection() {
-        use crate::event::{UiAgentModeInfo, UiAgentModeSelectionResult};
-
-        let modes = vec![
-            AcpModeOption {
-                id: "ask".into(),
-                name: "Ask".into(),
-                description: None,
-            },
-            AcpModeOption {
-                id: "auto".into(),
-                name: "Auto Allow".into(),
-                description: None,
-            },
-        ];
-        let mut app = App::new();
-        app.add_message::<UiAgentModeInfo>()
-            .add_message::<UiAgentModeSelectionResult>()
-            .add_systems(
-                Update,
-                (apply_acp_mode_info, apply_acp_mode_selection_result).chain(),
-            );
-        let entity = app
-            .world_mut()
-            .spawn((
-                AcpSession {
-                    agent_id: "claude".into(),
-                    sid: "s1".into(),
-                    cwd: "/tmp".into(),
-                    anchor: ProcessId::new(),
-                    resume: None,
-                },
-                AcpModeState {
-                    config_id: String::new(),
-                    current_mode_id: "ask".into(),
-                    pending: Some(PendingAcpModeSelection {
-                        request_id: 2,
-                        mode_id: "auto".into(),
-                    }),
-                    modes: modes.clone(),
-                },
-            ))
-            .id();
-
-        app.world_mut().write_message(UiAgentModeInfo {
-            sid: "s1".into(),
-            config_id: String::new(),
-            current_mode_id: "ask".into(),
-            modes,
-        });
-        app.world_mut().write_message(UiAgentModeSelectionResult {
-            sid: "s1".into(),
-            request_id: 1,
-            mode_id: "auto".into(),
-            succeeded: false,
-        });
-        app.update();
-
-        let state = app.world().get::<AcpModeState>(entity).unwrap();
-        assert_eq!(state.display_mode_id(), "auto");
-        assert_eq!(
-            state.pending.as_ref().map(|pending| pending.request_id),
-            Some(2)
-        );
-
-        app.world_mut().write_message(UiAgentModeSelectionResult {
-            sid: "s1".into(),
-            request_id: 2,
-            mode_id: "auto".into(),
-            succeeded: true,
-        });
-        app.update();
-
-        let state = app.world().get::<AcpModeState>(entity).unwrap();
-        assert_eq!(state.current_mode_id, "auto");
-        assert!(state.pending.is_none());
+        let state = app.world().get::<AcpSessionConfigState>(entity).unwrap();
+        let model = state.category("model").unwrap();
+        assert_eq!(model.current_value, "fable");
+        assert!(state.pending.is_empty());
     }
 
     #[test]

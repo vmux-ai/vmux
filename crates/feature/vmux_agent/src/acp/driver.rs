@@ -63,15 +63,10 @@ pub enum AcpInput {
         call_id: String,
         decision: ApprovalDecision,
     },
-    SetModel {
+    SetConfig {
         request_id: u64,
-        config_id: String,
-        model_id: String,
-    },
-    SetMode {
-        request_id: u64,
-        config_id: String,
-        mode_id: String,
+        config_id: Option<String>,
+        value: String,
     },
     Cancel,
     Close,
@@ -299,47 +294,26 @@ impl AcpShared {
         self.project(AcpProjectionInput::AgentInfo(name));
     }
 
-    fn publish_model_info(&self, config_options: &[SessionConfigOption]) {
-        self.project(AcpProjectionInput::ModelInfo(config_options.to_vec()));
-    }
-
-    fn publish_mode_info(
+    fn publish_config_state(
         &self,
         config_options: &[SessionConfigOption],
         modes: Option<&SessionModeState>,
     ) {
-        self.project(AcpProjectionInput::ModeInfo {
+        self.project(AcpProjectionInput::ConfigState {
             config_options: config_options.to_vec(),
             modes: modes.cloned(),
         });
     }
 
-    fn publish_selected_mode(&self, mode_id: &str) {
-        self.project(AcpProjectionInput::SelectedMode(mode_id.to_string()));
-    }
-
-    fn publish_selected_config_mode(
+    fn publish_selected_config(
         &self,
-        config_id: &str,
-        mode_id: &str,
+        config_id: Option<&str>,
+        value: &str,
         config_options: &[SessionConfigOption],
     ) {
-        self.project(AcpProjectionInput::SelectedConfigMode {
-            config_id: config_id.to_string(),
-            mode_id: mode_id.to_string(),
-            config_options: config_options.to_vec(),
-        });
-    }
-
-    fn publish_selected_model(
-        &self,
-        config_id: &str,
-        model_id: &str,
-        config_options: &[SessionConfigOption],
-    ) {
-        self.project(AcpProjectionInput::SelectedModel {
-            config_id: config_id.to_string(),
-            model_id: model_id.to_string(),
+        self.project(AcpProjectionInput::SelectedConfig {
+            config_id: config_id.map(str::to_string),
+            value: value.to_string(),
             config_options: config_options.to_vec(),
         });
     }
@@ -752,8 +726,7 @@ pub async fn run(
                         };
                         let response = loaded.map_err(|err| err.to_string())?;
                         let config_options = response.config_options.as_deref().unwrap_or_default();
-                        shared.publish_model_info(config_options);
-                        shared.publish_mode_info(config_options, response.modes.as_ref());
+                        shared.publish_config_state(config_options, response.modes.as_ref());
                         Ok(())
                     }
                 })
@@ -783,8 +756,10 @@ pub async fn run(
                             Ok(Ok(response)) => {
                                 let config_options =
                                     response.config_options.as_deref().unwrap_or_default();
-                                shared.publish_model_info(config_options);
-                                shared.publish_mode_info(config_options, response.modes.as_ref());
+                                shared.publish_config_state(
+                                    config_options,
+                                    response.modes.as_ref(),
+                                );
                                 Ok(response.session_id)
                             }
                             Ok(Err(err)) => Err(err.to_string()),
@@ -843,8 +818,7 @@ pub async fn run(
                                     .map(|response| {
                                         let config_options =
                                             response.config_options.as_deref().unwrap_or_default();
-                                        shared.publish_model_info(config_options);
-                                        shared.publish_mode_info(
+                                        shared.publish_config_state(
                                             config_options,
                                             response.modes.as_ref(),
                                         );
@@ -868,13 +842,35 @@ pub async fn run(
                                 acp_session_id: active_session_id.to_string(),
                             });
                         }
-                        let available_mode = main_shared.selection_snapshot().await.mode;
+                        let available_mode = main_shared
+                            .selection_snapshot()
+                            .await
+                            .configs
+                            .into_iter()
+                            .find(|config| config.category.as_deref() == Some("mode"));
                         if let Some(mode_id) = preferred_mode
                             && let Some(mode) = available_mode
-                            && mode.current_mode_id != mode_id
-                            && mode.modes.iter().any(|option| option.id == mode_id)
+                            && mode.current_value != mode_id
+                            && mode.values.iter().any(|option| option.value == mode_id)
                         {
-                            if mode.config_id.is_empty() {
+                            if let Some(config_id) = mode.config_id.as_ref() {
+                                match cx
+                                    .send_request(SetSessionConfigOptionRequest::new(
+                                        active_session_id.clone(),
+                                        config_id.clone(),
+                                        mode_id.clone(),
+                                    ))
+                                    .block_task()
+                                    .await
+                                {
+                                    Ok(response) => main_shared.publish_selected_config(
+                                        Some(config_id),
+                                        &mode_id,
+                                        &response.config_options,
+                                    ),
+                                    Err(error) => tracing::warn!(target: "acp", sid = %main_shared.sid, "initial mode selection failed: {error}"),
+                                }
+                            } else {
                                 match cx
                                     .send_request(SetSessionModeRequest::new(
                                         active_session_id.clone(),
@@ -883,23 +879,10 @@ pub async fn run(
                                     .block_task()
                                     .await
                                 {
-                                    Ok(_) => main_shared.publish_selected_mode(&mode_id),
-                                    Err(error) => tracing::warn!(target: "acp", sid = %main_shared.sid, "initial mode selection failed: {error}"),
-                                }
-                            } else {
-                                match cx
-                                    .send_request(SetSessionConfigOptionRequest::new(
-                                        active_session_id.clone(),
-                                        mode.config_id.clone(),
-                                        mode_id.clone(),
-                                    ))
-                                    .block_task()
-                                    .await
-                                {
-                                    Ok(response) => main_shared.publish_selected_config_mode(
-                                        &mode.config_id,
+                                    Ok(_) => main_shared.publish_selected_config(
+                                        None,
                                         &mode_id,
-                                        &response.config_options,
+                                        &[],
                                     ),
                                     Err(error) => tracing::warn!(target: "acp", sid = %main_shared.sid, "initial mode selection failed: {error}"),
                                 }
@@ -935,107 +918,60 @@ pub async fn run(
                             let _ = tx.send(decision);
                         }
                     }
-                    AcpInput::SetModel {
+                    AcpInput::SetConfig {
                         request_id,
                         config_id,
-                        model_id,
-                    } => {
-                        let Some(current_sid) = session_id.clone() else {
-                            main_shared.emit_status(AgentRunStatus::Errored(
-                                "ACP session is not ready".to_string(),
-                            ));
-                            continue;
-                        };
-                        match cx
-                            .send_request(SetSessionConfigOptionRequest::new(
-                                current_sid,
-                                config_id.clone(),
-                                model_id.clone(),
-                            ))
-                            .block_task()
-                            .await
-                        {
-                            Ok(response) => {
-                                main_shared.publish_selected_model(
-                                    &config_id,
-                                    &model_id,
-                                    &response.config_options,
-                                );
-                                publish_model_selection_result(
-                                    &main_shared,
-                                    request_id,
-                                    &model_id,
-                                    true,
-                                );
-                            }
-                            Err(err) => {
-                                publish_model_selection_result(
-                                    &main_shared,
-                                    request_id,
-                                    &model_id,
-                                    false,
-                                );
-                                main_shared.emit_status(AgentRunStatus::Errored(format!(
-                                    "acp model selection failed: {err}"
-                                )));
-                            }
-                        }
-                    }
-                    AcpInput::SetMode {
-                        request_id,
-                        config_id,
-                        mode_id,
+                        value,
                     } => {
                         let Some(sid) = session_id.clone() else {
-                            publish_mode_selection_result(
+                            publish_config_selection_result(
                                 &main_shared,
                                 request_id,
-                                &mode_id,
+                                config_id.as_deref(),
+                                &value,
                                 false,
                             );
                             continue;
                         };
-                        let result = if config_id.is_empty() {
-                            cx.send_request(SetSessionModeRequest::new(sid, mode_id.clone()))
-                                .block_task()
-                                .await
-                                .map(|_| Vec::new())
-                        } else {
+                        let result = if let Some(config_id) = config_id.as_ref() {
                             cx.send_request(SetSessionConfigOptionRequest::new(
                                 sid,
                                 config_id.clone(),
-                                mode_id.clone(),
+                                value.clone(),
                             ))
                             .block_task()
                             .await
                             .map(|response| response.config_options)
+                        } else {
+                            cx.send_request(SetSessionModeRequest::new(sid, value.clone()))
+                                .block_task()
+                                .await
+                                .map(|_| Vec::new())
                         };
                         match result {
                             Ok(config_options) => {
-                                if config_id.is_empty() {
-                                    main_shared.publish_selected_mode(&mode_id);
-                                } else {
-                                    main_shared.publish_selected_config_mode(
-                                        &config_id,
-                                        &mode_id,
-                                        &config_options,
-                                    );
-                                }
-                                publish_mode_selection_result(
+                                main_shared.publish_selected_config(
+                                    config_id.as_deref(),
+                                    &value,
+                                    &config_options,
+                                );
+                                publish_config_selection_result(
                                     &main_shared,
                                     request_id,
-                                    &mode_id,
+                                    config_id.as_deref(),
+                                    &value,
                                     true,
                                 );
                             }
                             Err(err) => {
-                                publish_mode_selection_result(
+                                publish_config_selection_result(
                                     &main_shared,
                                     request_id,
-                                    &mode_id,
+                                    config_id.as_deref(),
+                                    &value,
                                     false,
                                 );
-                                tracing::warn!(target: "acp", sid = %main_shared.sid, "mode selection failed: {err}");
+                                tracing::warn!(target: "acp", sid = %main_shared.sid, "session config selection failed: {err}");
                             }
                         }
                     }
@@ -1082,30 +1018,18 @@ fn acp_display_name(info: Option<&Implementation>) -> Option<String> {
         .map(str::to_string)
 }
 
-fn publish_model_selection_result(
+fn publish_config_selection_result(
     shared: &AcpShared,
     request_id: u64,
-    model_id: &str,
+    config_id: Option<&str>,
+    value: &str,
     succeeded: bool,
 ) {
-    shared.emit(ServiceMessage::AcpModelSelectionResult {
+    shared.emit(ServiceMessage::AcpSessionConfigSelectionResult {
         sid: shared.sid.clone(),
         request_id,
-        model_id: model_id.to_string(),
-        succeeded,
-    });
-}
-
-fn publish_mode_selection_result(
-    shared: &AcpShared,
-    request_id: u64,
-    mode_id: &str,
-    succeeded: bool,
-) {
-    shared.emit(ServiceMessage::AcpModeSelectionResult {
-        sid: shared.sid.clone(),
-        request_id,
-        mode_id: mode_id.to_string(),
+        config_id: config_id.map(str::to_string),
+        value: value.to_string(),
         succeeded,
     });
 }
@@ -1524,8 +1448,7 @@ mod tests {
                     super::super::AcpProjectionInbox(projection_rx),
                     AcpProjector::default(),
                     super::super::AcpAgentName::default(),
-                    super::super::AcpModelState::default(),
-                    super::super::AcpModeState::default(),
+                    super::super::AcpSessionConfigs::default(),
                     super::super::AcpRunState(AgentRunStatus::Idle),
                     super::super::AcpApprovalState::default(),
                     super::super::AcpHistoryReplay::default(),
@@ -1688,7 +1611,7 @@ mod tests {
     }
 
     #[test]
-    fn model_info_reads_categorized_grouped_selector() {
+    fn session_configs_preserve_categorized_grouped_selector() {
         let config = SessionConfigOption::select(
             "llm",
             "Language model",
@@ -1705,17 +1628,20 @@ mod tests {
         )
         .category(SessionConfigOptionCategory::Model);
 
-        let info = super::super::AcpModelInfo::from_config(&[config]).expect("model selector");
+        let configs = super::super::AcpSessionConfigs::from_acp(&[config], None);
+        let info = &configs.0[0];
 
-        assert_eq!(info.config_id, "llm");
-        assert_eq!(info.current_model_id, "opus");
-        assert_eq!(info.models.len(), 2);
-        assert_eq!(info.models[1].name, "Claude Opus");
-        assert_eq!(info.models[1].description.as_deref(), Some("Most capable"));
+        assert_eq!(info.config_id.as_deref(), Some("llm"));
+        assert_eq!(info.category.as_deref(), Some("model"));
+        assert_eq!(info.current_value, "opus");
+        assert_eq!(info.values.len(), 2);
+        assert_eq!(info.values[1].name, "Claude Opus");
+        assert_eq!(info.values[1].group.as_deref(), Some("Anthropic"));
+        assert_eq!(info.values[1].description.as_deref(), Some("Most capable"));
     }
 
     #[test]
-    fn model_info_falls_back_to_model_id_without_category() {
+    fn session_configs_do_not_infer_category_from_id() {
         let config = SessionConfigOption::select(
             "model",
             "Runtime",
@@ -1723,14 +1649,16 @@ mod tests {
             vec![SessionConfigSelectOption::new("gpt-5", "GPT-5")],
         );
 
-        let info = super::super::AcpModelInfo::from_config(&[config]).expect("model selector");
+        let configs = super::super::AcpSessionConfigs::from_acp(&[config], None);
+        let info = &configs.0[0];
 
-        assert_eq!(info.config_id, "model");
-        assert_eq!(info.current_model_id, "gpt-5");
+        assert_eq!(info.config_id.as_deref(), Some("model"));
+        assert_eq!(info.category, None);
+        assert_eq!(info.current_value, "gpt-5");
     }
 
     #[test]
-    fn mode_info_reads_legacy_session_modes() {
+    fn session_configs_include_legacy_session_modes() {
         let modes = SessionModeState::new(
             "ask",
             vec![
@@ -1739,20 +1667,22 @@ mod tests {
             ],
         );
 
-        let info = super::super::AcpModeInfo::from_config(&[], Some(&modes)).expect("legacy modes");
+        let configs = super::super::AcpSessionConfigs::from_acp(&[], Some(&modes));
+        let info = &configs.0[0];
 
-        assert!(info.config_id.is_empty());
-        assert_eq!(info.current_mode_id, "ask");
-        assert_eq!(info.modes.len(), 2);
-        assert_eq!(info.modes[1].name, "Auto Allow");
+        assert_eq!(info.config_id, None);
+        assert_eq!(info.category.as_deref(), Some("mode"));
+        assert_eq!(info.current_value, "ask");
+        assert_eq!(info.values.len(), 2);
+        assert_eq!(info.values[1].name, "Auto Allow");
         assert_eq!(
-            info.modes[1].description.as_deref(),
+            info.values[1].description.as_deref(),
             Some("Approve tool calls")
         );
     }
 
     #[test]
-    fn mode_info_prefers_categorized_config_selector() {
+    fn categorized_mode_suppresses_legacy_duplicate() {
         let legacy = SessionModeState::new("ask", vec![SessionMode::new("ask", "Ask")]);
         let config = SessionConfigOption::select(
             "approval",
@@ -1765,32 +1695,17 @@ mod tests {
         )
         .category(SessionConfigOptionCategory::Mode);
 
-        let info = super::super::AcpModeInfo::from_config(&[config], Some(&legacy))
-            .expect("mode selector");
+        let configs = super::super::AcpSessionConfigs::from_acp(&[config], Some(&legacy));
+        let info = &configs.0[0];
 
-        assert_eq!(info.config_id, "approval");
-        assert_eq!(info.current_mode_id, "auto");
-        assert_eq!(info.modes.len(), 2);
+        assert_eq!(configs.0.len(), 1);
+        assert_eq!(info.config_id.as_deref(), Some("approval"));
+        assert_eq!(info.current_value, "auto");
+        assert_eq!(info.values.len(), 2);
     }
 
     #[test]
-    fn mode_info_falls_back_to_permission_named_selector() {
-        let config = SessionConfigOption::select(
-            "permission_policy",
-            "Tool permissions",
-            "ask",
-            vec![SessionConfigSelectOption::new("ask", "Ask")],
-        );
-
-        let info =
-            super::super::AcpModeInfo::from_config(&[config], None).expect("permission selector");
-
-        assert_eq!(info.config_id, "permission_policy");
-        assert_eq!(info.current_mode_id, "ask");
-    }
-
-    #[test]
-    fn mode_selection_result_publishes_request_identity() {
+    fn config_selection_result_publishes_request_identity() {
         let (stream_tx, mut stream_rx) = broadcast::channel(2);
         let shared = AcpShared::new(
             "s1".into(),
@@ -1799,26 +1714,28 @@ mod tests {
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
         );
-        publish_mode_selection_result(&shared, 9, "auto", true);
+        publish_config_selection_result(&shared, 9, Some("approval"), "auto", true);
 
         match stream_rx.try_recv().expect("selection result") {
-            ServiceMessage::AcpModeSelectionResult {
+            ServiceMessage::AcpSessionConfigSelectionResult {
                 sid,
                 request_id,
-                mode_id,
+                config_id,
+                value,
                 succeeded,
             } => {
                 assert_eq!(sid, "s1");
                 assert_eq!(request_id, 9);
-                assert_eq!(mode_id, "auto");
+                assert_eq!(config_id.as_deref(), Some("approval"));
+                assert_eq!(value, "auto");
                 assert!(succeeded);
             }
-            other => panic!("expected ACP mode selection result, got {other:?}"),
+            other => panic!("expected ACP config selection result, got {other:?}"),
         }
     }
 
     #[test]
-    fn selected_mode_uses_cached_options_when_set_response_is_empty() {
+    fn selected_config_uses_cached_options_when_set_response_is_empty() {
         let mut harness = ProjectionHarness::new(4);
         let config = SessionConfigOption::select(
             "approval",
@@ -1830,30 +1747,26 @@ mod tests {
             ],
         )
         .category(SessionConfigOptionCategory::Mode);
-        harness.shared.publish_mode_info(&[config], None);
+        harness.shared.publish_config_state(&[config], None);
         harness.update();
         let _ = harness.stream.try_recv();
 
         harness
             .shared
-            .publish_selected_config_mode("approval", "auto", &[]);
+            .publish_selected_config(Some("approval"), "auto", &[]);
         harness.update();
 
-        match harness.stream.try_recv().expect("selected mode update") {
-            ServiceMessage::AcpModeInfo {
-                current_mode_id,
-                modes,
-                ..
-            } => {
-                assert_eq!(current_mode_id, "auto");
-                assert_eq!(modes.len(), 2);
+        match harness.stream.try_recv().expect("selected config update") {
+            ServiceMessage::AcpSessionConfigState { configs, .. } => {
+                assert_eq!(configs[0].current_value, "auto");
+                assert_eq!(configs[0].values.len(), 2);
             }
-            other => panic!("expected ACP mode info, got {other:?}"),
+            other => panic!("expected ACP config state, got {other:?}"),
         }
     }
 
     #[test]
-    fn acp_model_info_is_replayable_without_a_subscriber() {
+    fn acp_config_state_is_replayable_without_a_subscriber() {
         let mut harness = ProjectionHarness::new(1);
         let config = SessionConfigOption::select(
             "model",
@@ -1863,115 +1776,17 @@ mod tests {
         )
         .category(SessionConfigOptionCategory::Model);
 
-        harness.shared.publish_model_info(&[config]);
+        harness.shared.publish_config_state(&[config], None);
         harness.update();
 
-        let model = harness
+        let configs = harness
             .app
             .world()
             .entity(harness.entity)
-            .get::<super::super::AcpModelState>()
-            .unwrap()
-            .0
-            .as_ref()
+            .get::<super::super::AcpSessionConfigs>()
             .unwrap();
-        assert_eq!(model.current_model_id, "sonnet");
-        assert_eq!(model.models[0].name, "Claude Sonnet");
-    }
-
-    #[test]
-    fn model_selection_result_publishes_request_identity() {
-        let (stream_tx, mut stream_rx) = broadcast::channel(2);
-        let shared = AcpShared::new(
-            "s1".into(),
-            PathBuf::from("/tmp"),
-            ProcessId::new(),
-            stream_tx,
-            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-        );
-        publish_model_selection_result(&shared, 7, "fable", false);
-
-        match stream_rx.try_recv().expect("selection result") {
-            ServiceMessage::AcpModelSelectionResult {
-                sid,
-                request_id,
-                model_id,
-                succeeded,
-            } => {
-                assert_eq!(sid, "s1");
-                assert_eq!(request_id, 7);
-                assert_eq!(model_id, "fable");
-                assert!(!succeeded);
-            }
-            other => panic!("expected ACP model selection result, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn selected_model_wins_over_stale_set_response() {
-        let mut harness = ProjectionHarness::new(4);
-        let stale = SessionConfigOption::select(
-            "model",
-            "Model",
-            "fable",
-            vec![
-                SessionConfigSelectOption::new("default", "Default"),
-                SessionConfigSelectOption::new("fable", "Fable"),
-            ],
-        )
-        .category(SessionConfigOptionCategory::Model);
-        harness
-            .shared
-            .publish_model_info(std::slice::from_ref(&stale));
-        harness.update();
-        let _ = harness.stream.try_recv();
-
-        harness
-            .shared
-            .publish_selected_model("model", "default", &[stale]);
-        harness.update();
-
-        match harness.stream.try_recv().expect("selected model update") {
-            ServiceMessage::Shared(SharedEvent::AcpModelInfo {
-                current_model_id, ..
-            }) => assert_eq!(current_model_id, "default"),
-            other => panic!("expected ACP model info, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn selected_model_uses_cached_options_when_set_response_is_empty() {
-        let mut harness = ProjectionHarness::new(4);
-        let config = SessionConfigOption::select(
-            "model",
-            "Model",
-            "fable",
-            vec![
-                SessionConfigSelectOption::new("default", "Default"),
-                SessionConfigSelectOption::new("fable", "Fable"),
-            ],
-        )
-        .category(SessionConfigOptionCategory::Model);
-        harness.shared.publish_model_info(&[config]);
-        harness.update();
-        let _ = harness.stream.try_recv();
-
-        harness
-            .shared
-            .publish_selected_model("model", "default", &[]);
-        harness.update();
-
-        match harness.stream.try_recv().expect("selected model update") {
-            ServiceMessage::Shared(SharedEvent::AcpModelInfo {
-                current_model_id,
-                models,
-                ..
-            }) => {
-                assert_eq!(current_model_id, "default");
-                assert_eq!(models.len(), 2);
-            }
-            other => panic!("expected ACP model info, got {other:?}"),
-        }
+        assert_eq!(configs.0[0].current_value, "sonnet");
+        assert_eq!(configs.0[0].values[0].name, "Claude Sonnet");
     }
 
     #[test]
