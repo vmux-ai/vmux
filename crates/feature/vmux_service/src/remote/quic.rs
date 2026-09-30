@@ -378,21 +378,14 @@ async fn subscribe(
     state: &super::server::RemoteState,
     sid: &str,
 ) -> Option<tokio::sync::broadcast::Receiver<ServiceMessage>> {
-    if let Some(receiver) = state.acp.subscribe(sid.to_string()).await {
-        return Some(receiver);
-    }
-    state.agents.subscribe(sid.to_string()).await
+    state.acp.subscribe(sid.to_string()).await
 }
 
 async fn session_snapshot(
     state: &super::server::RemoteState,
     sid: &str,
 ) -> Option<vmux_api::protocol::SharedEvent> {
-    let snapshot = if let Some(snapshot) = state.acp.snapshot(sid.to_string()).await {
-        Some(snapshot)
-    } else {
-        state.agents.snapshot(sid.to_string()).await
-    }?;
+    let snapshot = state.acp.snapshot(sid.to_string()).await?;
     match snapshot {
         ServiceMessage::Shared(event) => Some(event),
         _ => None,
@@ -509,13 +502,6 @@ mod live {
                 }
             });
             let (agent_tx, _) = broadcast::channel(8);
-            let (agent_wake, agent_wake_inbox) = mpsc::unbounded_channel();
-            drop(agent_wake_inbox);
-            let (agents, agent_runtime) = vmux_agent::service::AgentSessions::new(
-                tokio::runtime::Handle::current(),
-                agent_wake,
-            );
-            drop(agent_runtime);
             let (acp_wake, acp_wake_inbox) = mpsc::unbounded_channel();
             drop(acp_wake_inbox);
             let (acp, acp_runtime) =
@@ -524,9 +510,8 @@ mod live {
             let state = super::super::server::RemoteState {
                 relay_token: Arc::from("relay-token"),
                 authorizations: authorizations.clone(),
-                agents,
                 acp,
-                broker: vmux_agent::service::AgentBroker::new(
+                broker: vmux_agent::broker::AgentBroker::new(
                     agent_tx,
                     Default::default(),
                     Default::default(),

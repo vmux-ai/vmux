@@ -7,7 +7,7 @@ use vmux_api::room::{
 };
 
 use crate::acp::AcpSession;
-use crate::session::{AgentConversationTitle, AgentMessages, AgentSession};
+use crate::session::{AgentConversationTitle, AgentMessages};
 
 pub struct RoomPlugin;
 
@@ -170,14 +170,6 @@ pub struct CrdtChangeReceived {
     pub change: Vec<u8>,
 }
 
-fn session_identity<'a>(
-    page: Option<&'a AgentSession>,
-    acp: Option<&'a AcpSession>,
-) -> Option<(&'a str, &'a str)> {
-    page.map(|session| (session.sid.as_str(), session.provider.as_str()))
-        .or_else(|| acp.map(|session| (session.sid.as_str(), session.agent_id.as_str())))
-}
-
 fn ensure_implicit_rooms(
     mut commands: Commands,
     sessions: Query<
@@ -185,20 +177,15 @@ fn ensure_implicit_rooms(
             Entity,
             &AgentMessages,
             Option<&AgentConversationTitle>,
-            Option<&AgentSession>,
-            Option<&AcpSession>,
+            &AcpSession,
         ),
-        (
-            Or<(With<AgentSession>, With<AcpSession>)>,
-            Without<RoomAgentBinding>,
-        ),
+        Without<RoomAgentBinding>,
     >,
     mut registry: Single<&mut RoomRegistry>,
 ) {
-    for (session_entity, messages, title, page, acp) in &sessions {
-        let Some((sid, agent_name)) = session_identity(page, acp) else {
-            continue;
-        };
+    for (session_entity, messages, title, session) in &sessions {
+        let sid = session.sid.as_str();
+        let agent_name = session.agent_id.as_str();
         let room_id = RoomId::for_session(sid);
         let agent_id = MemberId::agent(&room_id);
         let room_entity = registry.rooms.get(&room_id).copied().unwrap_or_else(|| {
@@ -306,23 +293,13 @@ fn materialize_events(
 
 fn sync_room_messages(
     mut commands: Commands,
-    sessions: Query<
-        (
-            &AgentMessages,
-            &RoomAgentBinding,
-            Option<&AgentSession>,
-            Option<&AcpSession>,
-        ),
-        Changed<AgentMessages>,
-    >,
+    sessions: Query<(&AgentMessages, &RoomAgentBinding, &AcpSession), Changed<AgentMessages>>,
     mut registry: Single<&mut RoomRegistry>,
     existing: Query<(Entity, &RoomEventIdentity, &ChildOf), With<MaterializedRoomEvent>>,
     mut projections: Query<&mut RoomProjection>,
 ) {
-    for (messages, binding, page, acp) in &sessions {
-        let Some((sid, _)) = session_identity(page, acp) else {
-            continue;
-        };
+    for (messages, binding, session) in &sessions {
+        let sid = session.sid.as_str();
         let Some(&room_entity) = registry.rooms.get(&binding.room_id) else {
             continue;
         };
@@ -396,17 +373,14 @@ fn sync_room_titles(
 
 fn cleanup_orphaned_rooms(
     mut commands: Commands,
-    sessions: Query<
-        (Option<&AgentSession>, Option<&AcpSession>),
-        Or<(With<AgentSession>, With<AcpSession>)>,
-    >,
+    sessions: Query<&AcpSession>,
     room_entities: Query<(Entity, &ChatRoom, &RoomProjection)>,
     room_events: Query<(&RoomEventIdentity, &ChildOf), With<MaterializedRoomEvent>>,
     mut registry: Single<&mut RoomRegistry>,
 ) {
     let live_sids = sessions
         .iter()
-        .filter_map(|(page, acp)| session_identity(page, acp).map(|(sid, _)| sid.to_string()))
+        .map(|session| session.sid.clone())
         .collect::<HashSet<_>>();
     for (entity, room, projection) in &room_entities {
         if live_sids.contains(&projection.source_sid) {
@@ -425,8 +399,7 @@ fn cleanup_orphaned_rooms(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::variant::AgentVariant;
-    use vmux_api::agent::AgentKind;
+    use vmux_api::protocol::ProcessId;
     use vmux_api::room::AssistantBlock;
 
     #[test]
@@ -452,18 +425,18 @@ mod tests {
     }
 
     #[test]
-    fn projects_agent_session_into_stable_room_entities() {
+    fn projects_acp_session_into_stable_room_entities() {
         let mut app = App::new();
         app.add_plugins(RoomPlugin);
         let session = app
             .world_mut()
             .spawn((
-                AgentSession {
-                    kind: AgentKind::Codex,
-                    variant: AgentVariant::Page,
+                AcpSession {
+                    agent_id: "codex".to_string(),
                     sid: "session-1".to_string(),
-                    provider: "Codex".to_string(),
-                    model: "default".to_string(),
+                    cwd: std::path::PathBuf::from("/tmp"),
+                    anchor: ProcessId::new(),
+                    resume: None,
                 },
                 AgentMessages(vec![Message::user("hello")]),
                 AgentConversationTitle("Collaborative room".to_string()),

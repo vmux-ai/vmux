@@ -3,19 +3,15 @@ use vmux_api::command_bar::CommandBarPage;
 #[cfg(test)]
 use vmux_command::snapshot::ClaimedUrls;
 use vmux_command::snapshot::{
-    AgentPromptTarget, ClaimedUrl, CommandBarAgentsSnapshot, CommandBarProjection,
-    ContributedCommand, ContributedPage, WriteCommandBarSnapshots,
-};
-use vmux_core::agent::{
-    PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
-    PageAgentSpawnStackRequest,
+    AgentPromptTarget, ClaimedUrl, CommandBarAgentsSnapshot, CommandBarProjection, ContributedPage,
+    WriteCommandBarSnapshots,
 };
 
 pub(crate) struct CommandBarPlugin;
 
 impl Plugin for CommandBarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, claim_chosen_command).add_systems(
+        app.add_systems(
             Update,
             publish_contributions
                 .in_set(WriteCommandBarSnapshots)
@@ -36,7 +32,7 @@ struct AgentContribution;
 
 impl AgentContribution {
     fn launcher_pages(agents: &CommandBarAgentsSnapshot) -> Vec<ContributedPage> {
-        let mut pages = Vec::with_capacity(agents.acp.len() + agents.providers.len());
+        let mut pages = Vec::with_capacity(agents.acp.len() + agents.cli.len());
         for agent in &agents.acp {
             pages.push(ContributedPage {
                 id: agent.id.clone(),
@@ -55,7 +51,7 @@ impl AgentContribution {
                 },
             });
         }
-        for agent in &agents.providers {
+        for agent in &agents.cli {
             pages.push(ContributedPage {
                 id: agent.id.clone(),
                 rank: 0,
@@ -107,87 +103,8 @@ fn publish_contributions(
     for page in AgentContribution::launcher_pages(agents) {
         commands.spawn((AgentContribution, page));
     }
-    for strategy in &agents.strategies {
-        let row = AppAgentId {
-            provider: strategy.provider.clone(),
-            model: strategy.model.clone(),
-        };
-        commands.spawn((
-            AgentContribution,
-            ContributedCommand {
-                id: row.to_string(),
-                message_id: "command-new-app-chat".to_string(),
-                args: vec![
-                    ("provider".to_string(), row.provider),
-                    ("model".to_string(), row.model),
-                ],
-            },
-        ));
-    }
     for url in DEFAULT_AGENT_URLS {
         commands.spawn((AgentContribution, ClaimedUrl(url.to_string())));
-    }
-}
-
-fn claim_chosen_command(
-    mut reader: MessageReader<vmux_layout::ContributedCommandChosen>,
-    mut attach: MessageWriter<PageAgentAttachRequest>,
-    mut spawn: MessageWriter<PageAgentSpawnStackRequest>,
-    mut attach_default: MessageWriter<PageAgentAttachDefaultRequest>,
-    mut spawn_default: MessageWriter<PageAgentSpawnDefaultRequest>,
-) {
-    for chosen in reader.read() {
-        if DEFAULT_AGENT_URLS.contains(&chosen.id.as_str()) {
-            if let Some(stack) = chosen.stack {
-                attach_default.write(PageAgentAttachDefaultRequest { stack });
-            } else if let Some(pane) = chosen.pane {
-                spawn_default.write(PageAgentSpawnDefaultRequest { pane });
-            }
-            continue;
-        }
-        let Some(row) = AppAgentId::parse(&chosen.id) else {
-            continue;
-        };
-        let AppAgentId { provider, model } = row;
-        let sid = uuid::Uuid::new_v4().to_string();
-        if let Some(stack) = chosen.stack {
-            attach.write(PageAgentAttachRequest {
-                stack,
-                provider,
-                model,
-                sid,
-            });
-        } else if let Some(pane) = chosen.pane {
-            spawn.write(PageAgentSpawnStackRequest {
-                pane,
-                provider,
-                model,
-                sid,
-            });
-        }
-    }
-}
-
-struct AppAgentId {
-    provider: String,
-    model: String,
-}
-
-impl AppAgentId {
-    fn parse(id: &str) -> Option<Self> {
-        let body = id.strip_prefix("app_")?.strip_suffix("_new")?;
-        let (provider, model) = body.split_once('_')?;
-        Some(Self {
-            provider: provider.to_string(),
-            model: model.to_string(),
-        })
-    }
-}
-
-impl std::fmt::Display for AppAgentId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { provider, model } = self;
-        write!(f, "app_{provider}_{model}_new")
     }
 }
 
@@ -195,19 +112,19 @@ impl std::fmt::Display for AppAgentId {
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_command::snapshot::AgentProviderSummary;
+    use vmux_command::snapshot::AgentSummary;
     use vmux_core::agent::AgentKind;
 
     #[test]
     fn launcher_pages_list_only_installed_agents_in_recent_order() {
         let snapshot = CommandBarAgentsSnapshot {
-            providers: vec![AgentProviderSummary {
+            cli: vec![AgentSummary {
                 id: "codex".to_string(),
                 name: "Codex".to_string(),
                 url: "vmux://sessions/codex/cli".to_string(),
                 icon: String::new(),
             }],
-            acp: vec![AgentProviderSummary {
+            acp: vec![AgentSummary {
                 id: "claude-acp".to_string(),
                 name: "Claude Agent".to_string(),
                 url: "vmux://sessions/claude".to_string(),
@@ -235,28 +152,6 @@ mod tests {
             pages[1].page.icon,
             vmux_core::PageIcon::Favicon(ref u) if u == "https://cdn.example/claude-acp.svg"
         ));
-    }
-
-    #[test]
-    fn a_published_row_id_parses_back_to_what_named_it() {
-        let id = AppAgentId {
-            provider: "anthropic".to_string(),
-            model: "claude-opus-4".to_string(),
-        }
-        .to_string();
-        let parsed = AppAgentId::parse(&id).expect("an id this file wrote must parse");
-        assert_eq!(
-            (parsed.provider.as_str(), parsed.model.as_str()),
-            ("anthropic", "claude-opus-4"),
-            "model names contain the separator, so only the first underscore may split"
-        );
-    }
-
-    #[test]
-    fn another_crates_row_is_left_alone() {
-        for id in ["browser_open_history", "app_new", "app_onlyprovider_new"] {
-            assert!(AppAgentId::parse(id).is_none(), "{id} is not ours to claim");
-        }
     }
 
     #[test]

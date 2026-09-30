@@ -510,8 +510,6 @@ impl SpaceOverrides {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AgentSettings {
     #[serde(default)]
-    pub app_providers: Vec<AppProviderSettings>,
-    #[serde(default)]
     pub allow_run_placement_override: bool,
     #[serde(default = "default_true")]
     pub follow_files: bool,
@@ -544,11 +542,6 @@ impl Default for AgentSettings {
 
 fn default_agent_settings() -> AgentSettings {
     AgentSettings {
-        app_providers: vec![AppProviderSettings {
-            provider: "stub".to_string(),
-            kind: "vibe".to_string(),
-            models: vec!["echo".to_string()],
-        }],
         allow_run_placement_override: false,
         follow_files: true,
         tidy_files: true,
@@ -620,18 +613,6 @@ fn default_acp_agents() -> Vec<AcpAgentConfig> {
             version: None,
         },
     ]
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AppProviderSettings {
-    pub provider: String,
-    #[serde(default = "default_provider_kind")]
-    pub kind: String,
-    pub models: Vec<String>,
-}
-
-fn default_provider_kind() -> String {
-    "vibe".to_string()
 }
 
 fn normalize_space_key(key: &str) -> String {

@@ -12,8 +12,7 @@ use vmux_core::prompt_media::AttachmentSelection;
 use vmux_core::service::ServiceRequest;
 #[cfg(host)]
 use vmux_session::{
-    AcpSession, AgentConversationTitle, AgentRunState, AgentSession, PromptQueue,
-    provisional_conversation_title,
+    AcpSession, AgentConversationTitle, AgentRunState, PromptQueue, provisional_conversation_title,
 };
 
 #[cfg(host)]
@@ -144,25 +143,20 @@ fn on_chat_submit(
 fn on_chat_stop(
     trigger: On<UiInput<ChatStop>>,
     child_of: Query<&ChildOf>,
-    mut sessions: Query<(
-        &mut PromptQueue,
-        &mut AgentRunState,
-        Option<&AcpSession>,
-        Option<&AgentSession>,
-    )>,
+    mut sessions: Query<(&mut PromptQueue, &mut AgentRunState, &AcpSession)>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let Ok(parent) = child_of.get(trigger.event().webview) else {
         return;
     };
-    let Ok((mut queue, mut state, acp, page)) = sessions.get_mut(parent.parent()) else {
+    let Ok((mut queue, mut state, session)) = sessions.get_mut(parent.parent()) else {
         return;
     };
     if queue.items.is_empty() {
         if queue.flush_pending() {
             queue.cancel_flush();
         }
-        cancel_session(acp, page, &mut service_requests);
+        cancel_session(session, &mut service_requests);
         return;
     }
     if queue.request_flush() && matches!(*state, AgentRunState::Errored(_)) {
@@ -172,7 +166,7 @@ fn on_chat_stop(
         *state,
         AgentRunState::Streaming | AgentRunState::AwaitingApproval { .. }
     ) {
-        cancel_session(acp, page, &mut service_requests);
+        cancel_session(session, &mut service_requests);
     }
 }
 
@@ -193,35 +187,27 @@ fn enqueue_prompt(
 fn on_chat_cancel(
     trigger: On<UiInput<ChatCancel>>,
     child_of: Query<&ChildOf>,
-    mut sessions: Query<(&mut PromptQueue, Option<&AcpSession>, Option<&AgentSession>)>,
+    mut sessions: Query<(&mut PromptQueue, &AcpSession)>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let Ok(parent) = child_of.get(trigger.event().webview) else {
         return;
     };
-    let Ok((mut queue, acp, page)) = sessions.get_mut(parent.parent()) else {
+    let Ok((mut queue, session)) = sessions.get_mut(parent.parent()) else {
         return;
     };
     if queue.flush_pending() {
         queue.cancel_flush();
     }
-    cancel_session(acp, page, &mut service_requests);
+    cancel_session(session, &mut service_requests);
 }
 
 #[cfg(host)]
-fn cancel_session(
-    acp: Option<&AcpSession>,
-    page: Option<&AgentSession>,
-    service_requests: &mut MessageWriter<ServiceRequest>,
-) {
-    let Some(sid) = acp
-        .map(|session| session.sid.clone())
-        .or_else(|| page.map(|session| session.sid.clone()))
-    else {
-        return;
-    };
+fn cancel_session(session: &AcpSession, service_requests: &mut MessageWriter<ServiceRequest>) {
     service_requests.write(ServiceRequest(ClientMessage::Shared(
-        SharedMessage::AgentCancel { sid },
+        SharedMessage::AgentCancel {
+            sid: session.sid.clone(),
+        },
     )));
 }
 
@@ -230,12 +216,7 @@ fn on_chat_escape(
     trigger: On<UiInput<ChatEscape>>,
     child_of: Query<&ChildOf>,
     mut composers: Query<&mut ComposerState, With<ChatView>>,
-    mut sessions: Query<(
-        &mut PromptQueue,
-        &mut AgentRunState,
-        Option<&AcpSession>,
-        Option<&AgentSession>,
-    )>,
+    mut sessions: Query<(&mut PromptQueue, &mut AgentRunState, &AcpSession)>,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -243,7 +224,7 @@ fn on_chat_escape(
     let Ok(parent) = child_of.get(webview) else {
         return;
     };
-    let Ok((mut queue, mut state, acp, page)) = sessions.get_mut(parent.parent()) else {
+    let Ok((mut queue, mut state, session)) = sessions.get_mut(parent.parent()) else {
         return;
     };
     let running = matches!(
@@ -262,7 +243,7 @@ fn on_chat_escape(
         *state = AgentRunState::Idle;
     }
     if running {
-        cancel_session(acp, page, &mut service_requests);
+        cancel_session(session, &mut service_requests);
     }
     let Ok(mut composer) = composers.get_mut(webview) else {
         return;
@@ -506,6 +487,20 @@ fn remove_attachments(
 mod tests {
     use super::*;
 
+    struct TestSession;
+
+    impl TestSession {
+        fn acp() -> AcpSession {
+            AcpSession {
+                agent_id: "mock".into(),
+                sid: "session".into(),
+                cwd: std::path::PathBuf::from("/tmp"),
+                anchor: vmux_core::ProcessId::new(),
+                resume: None,
+            }
+        }
+    }
+
     struct Started(App);
 
     impl Started {
@@ -671,7 +666,7 @@ mod tests {
         let mut queue = PromptQueue::default();
         queue.enqueue("queued".into());
         assert!(queue.request_flush());
-        let stack = app.world_mut().spawn(queue).id();
+        let stack = app.world_mut().spawn((TestSession::acp(), queue)).id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
         app.world_mut().trigger(UiInput::<ChatCancel> {
@@ -698,7 +693,11 @@ mod tests {
         queue.paused = true;
         let stack = app
             .world_mut()
-            .spawn((queue, AgentRunState::Errored("failed".into())))
+            .spawn((
+                TestSession::acp(),
+                queue,
+                AgentRunState::Errored("failed".into()),
+            ))
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
@@ -724,7 +723,11 @@ mod tests {
         app.add_observer(on_chat_escape);
         let stack = app
             .world_mut()
-            .spawn((PromptQueue::default(), AgentRunState::Idle))
+            .spawn((
+                TestSession::acp(),
+                PromptQueue::default(),
+                AgentRunState::Idle,
+            ))
             .id();
         let webview = app.world_mut().spawn((ChildOf(stack), ChatView)).id();
         app.world_mut()

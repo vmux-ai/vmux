@@ -922,12 +922,17 @@ mod tests {
     impl Echo {
         fn app() -> App {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, ChatKeyPlugin))
-                .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-                .init_resource::<ListSelections>()
-                .init_resource::<ChoiceNumbers>()
-                .add_observer(ListSelections::record)
-                .add_observer(ChoiceNumbers::record);
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_core::host::manifest::FeatureManifestPlugin::new(crate::FEATURE_MANIFEST),
+                ChatKeyPlugin,
+            ))
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .init_resource::<ListSelections>()
+            .init_resource::<ChoiceNumbers>()
+            .add_observer(ListSelections::record)
+            .add_observer(ChoiceNumbers::record);
+            app.update();
             app
         }
 

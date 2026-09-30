@@ -412,7 +412,7 @@ pub(super) fn resolve_from_registry(
     version: Option<&str>,
     emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<ResolvedAgent, String> {
-    let reg_id = RegistryAgent::canonical_id(agent_id);
+    let reg_id = agent_id;
     let find = |reg: Registry| {
         reg.agents
             .into_iter()

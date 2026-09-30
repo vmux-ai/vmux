@@ -302,7 +302,6 @@ fn build_settings_schema_for(locale: &Locale) -> SettingsSchema {
                         "tidy_files".into(),
                         "tidy_files_max".into(),
                         "tidy_files_auto".into(),
-                        "app_providers".into(),
                         "acp".into(),
                     ],
                     ..Default::default()
@@ -320,10 +319,6 @@ fn build_settings_schema_for(locale: &Locale) -> SettingsSchema {
             labeled_field("agent.tidy_files", t("schema-tidy-files")),
             labeled_field("agent.tidy_files_max", t("schema-tidy-files-max")),
             labeled_field("agent.tidy_files_auto", t("schema-tidy-files-auto")),
-            labeled_field("agent.app_providers", t("schema-app-providers")),
-            labeled_field("agent.app_providers[].provider", t("schema-provider")),
-            labeled_field("agent.app_providers[].kind", t("schema-kind")),
-            labeled_field("agent.app_providers[].models", t("schema-models")),
             labeled_field("agent.acp", t("schema-acp")),
             labeled_field("agent.acp[].id", t("schema-id")),
             labeled_field("agent.acp[].name", t("schema-name")),
@@ -600,14 +595,6 @@ mod appearance_schema_tests {
         );
         assert_eq!(appearance.root_path, "appearance");
         assert!(appearance.synthetic_keys.is_empty());
-        assert_eq!(
-            schema
-                .field("agent.app_providers[0].provider")
-                .unwrap()
-                .label
-                .as_deref(),
-            Some("プロバイダー")
-        );
         assert_eq!(
             schema
                 .field("agent.acp[0].command")

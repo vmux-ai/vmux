@@ -751,13 +751,6 @@ mod tests {
         ))))
     }
 
-    fn meta(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
-        let serde_json::Value::Object(meta) = value else {
-            panic!("expected metadata object")
-        };
-        meta
-    }
-
     #[test]
     fn session_info_worktree_metadata_emits_workspace_change() {
         let project = tempfile::tempdir().unwrap();

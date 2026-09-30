@@ -11,7 +11,7 @@ use crate::remote::authorization::RemoteAuthorizations;
 use crate::remote::client_operation::ClientOperations;
 use crate::remote::{ClientOpId, RemoteMediaEntry, RemoteSession};
 use vmux_agent::acp::AcpSessions;
-use vmux_agent::service::{AgentBroker, AgentSessions};
+use vmux_agent::broker::AgentBroker;
 use vmux_api::protocol::AgentAttachment;
 use vmux_api::room::Message;
 
@@ -37,7 +37,6 @@ pub(crate) struct RemoteRuntimeStartup(Option<RemoteRuntimeStart>);
 struct RemoteRuntimeStart {
     runtime: Handle,
     authorizations: RemoteAuthorizations,
-    agents: AgentSessions,
     acp: AcpSessions,
     broker: AgentBroker,
     client_ops: ClientOperations,
@@ -47,7 +46,6 @@ impl RemoteRuntimeStartup {
     pub(crate) fn new(
         runtime: Handle,
         authorizations: RemoteAuthorizations,
-        agents: AgentSessions,
         acp: AcpSessions,
         broker: AgentBroker,
         client_ops: ClientOperations,
@@ -55,7 +53,6 @@ impl RemoteRuntimeStartup {
         Self(Some(RemoteRuntimeStart {
             runtime,
             authorizations,
-            agents,
             acp,
             broker,
             client_ops,
@@ -116,7 +113,6 @@ fn start_remote_runtime(
                 RemoteState {
                     relay_token: Arc::from(relay_token.as_str()),
                     authorizations: start.authorizations,
-                    agents: start.agents,
                     acp: start.acp,
                     broker: start.broker,
                     client_ops: start.client_ops,
@@ -186,7 +182,6 @@ const MAX_CLIENT_OP_ID_BYTES: usize = 256;
 pub(crate) struct RemoteState {
     pub(crate) relay_token: Arc<str>,
     pub(crate) authorizations: RemoteAuthorizations,
-    pub(crate) agents: AgentSessions,
     pub(crate) acp: AcpSessions,
     pub(crate) broker: AgentBroker,
     pub(crate) client_ops: ClientOperations,
@@ -204,19 +199,11 @@ pub(crate) async fn broker_result(
 }
 
 pub(crate) async fn session_messages(state: &RemoteState, sid: &str) -> Option<Vec<Message>> {
-    if let Some(messages) = state.acp.remote_messages(sid.to_string()).await {
-        return Some(messages);
-    }
-    state.agents.remote_messages(sid.to_string()).await
+    state.acp.remote_messages(sid.to_string()).await
 }
 
 pub(crate) async fn current_session(state: &RemoteState, sid: &str) -> Option<RemoteSession> {
-    let acp_session = state.acp.remote_session(sid.to_string()).await;
-    let mut session = if let Some(session) = acp_session {
-        session
-    } else {
-        state.agents.remote_session(sid.to_string()).await?
-    };
+    let mut session = state.acp.remote_session(sid.to_string()).await?;
     if let Some(messages) = session_messages(state, sid).await {
         session.title = vmux_core::room::ConversationTitle::from_messages(&messages, &session.name);
     }

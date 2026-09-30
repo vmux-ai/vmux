@@ -80,9 +80,8 @@ pub struct CommandBarAgentModes {
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct CommandBarAgentsSnapshot {
-    pub providers: Vec<AgentProviderSummary>,
-    pub strategies: Vec<AgentStrategySummary>,
-    pub acp: Vec<AgentProviderSummary>,
+    pub cli: Vec<AgentSummary>,
+    pub acp: Vec<AgentSummary>,
     pub recent: Vec<AgentPromptTarget>,
 }
 
@@ -169,17 +168,11 @@ impl AgentPromptTarget {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct AgentProviderSummary {
+pub struct AgentSummary {
     pub id: String,
     pub name: String,
     pub url: String,
     pub icon: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct AgentStrategySummary {
-    pub provider: String,
-    pub model: String,
 }
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -312,8 +305,7 @@ mod tests {
     #[test]
     fn agents_snapshot_default_is_empty() {
         let s = CommandBarAgentsSnapshot::default();
-        assert!(s.providers.is_empty());
-        assert!(s.strategies.is_empty());
+        assert!(s.cli.is_empty());
         assert!(s.acp.is_empty());
         assert!(s.recent.is_empty());
     }

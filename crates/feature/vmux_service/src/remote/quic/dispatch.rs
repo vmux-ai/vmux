@@ -6,7 +6,6 @@ use vmux_api::room::{ClientOpId, RemoteSession};
 
 use super::super::server::{MAX_PROMPT_BYTES, RemoteState};
 use vmux_agent::acp::AcpInput;
-use vmux_agent::service::SessionInput;
 
 pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> SharedResponse {
     match request {
@@ -22,26 +21,13 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
             preferred_mode,
         } => prompt(state, &sid, text, context, attachments, preferred_mode).await,
 
-        SharedMessage::AgentCancel { sid } => {
-            push_input(state, &sid, AcpInput::Cancel, SessionInput::Cancel).await
-        }
+        SharedMessage::AgentCancel { sid } => push_input(state, &sid, AcpInput::Cancel).await,
 
         SharedMessage::AgentApprove {
             sid,
             call_id,
             decision,
-        } => {
-            push_input(
-                state,
-                &sid,
-                AcpInput::Approve {
-                    call_id: call_id.clone(),
-                    decision,
-                },
-                SessionInput::Approve { call_id, decision },
-            )
-            .await
-        }
+        } => push_input(state, &sid, AcpInput::Approve { call_id, decision }).await,
 
         SharedMessage::AgentListMedia { sid, query } => media(state, &sid, query).await,
 
@@ -111,8 +97,7 @@ async fn media(state: &RemoteState, sid: &str, query: String) -> SharedResponse 
 }
 
 async fn sessions(state: &RemoteState) -> Vec<RemoteSession> {
-    let mut sessions = state.agents.remote_sessions().await;
-    sessions.extend(state.acp.remote_sessions().await);
+    let mut sessions = state.acp.remote_sessions().await;
     for session in &mut sessions {
         if let Some(messages) = super::super::server::session_messages(state, &session.sid).await {
             session.title =
@@ -125,23 +110,13 @@ async fn sessions(state: &RemoteState) -> Vec<RemoteSession> {
 
 async fn session_exists(state: &RemoteState, sid: &str) -> bool {
     state.acp.remote_session(sid.to_string()).await.is_some()
-        || state.agents.remote_session(sid.to_string()).await.is_some()
 }
 
-async fn push_input(
-    state: &RemoteState,
-    sid: &str,
-    acp: AcpInput,
-    page: SessionInput,
-) -> SharedResponse {
-    if state.acp.input(sid.to_string(), acp).await {
+async fn push_input(state: &RemoteState, sid: &str, input: AcpInput) -> SharedResponse {
+    if state.acp.input(sid.to_string(), input).await {
         return SharedResponse::Ok;
     }
-    if state.agents.input(sid.to_string(), page).await {
-        SharedResponse::Ok
-    } else {
-        SharedResponse::Failed(SharedFailure::NotFound)
-    }
+    SharedResponse::Failed(SharedFailure::NotFound)
 }
 
 async fn prompt(
@@ -162,12 +137,11 @@ async fn prompt(
         state,
         sid,
         AcpInput::User {
-            text: text.clone(),
-            context: context.clone(),
-            attachments: attachments.clone(),
+            text,
+            context,
+            attachments,
             preferred_mode,
         },
-        SessionInput::User { text, attachments },
     )
     .await
 }
@@ -207,11 +181,6 @@ mod tests {
 
     fn empty_state() -> RemoteState {
         let (agent_tx, _) = broadcast::channel(8);
-        let (wake, wake_inbox) = tokio::sync::mpsc::unbounded_channel();
-        drop(wake_inbox);
-        let (agents, runtime) =
-            vmux_agent::service::AgentSessions::new(tokio::runtime::Handle::current(), wake);
-        drop(runtime);
         let (acp_wake, acp_wake_inbox) = tokio::sync::mpsc::unbounded_channel();
         drop(acp_wake_inbox);
         let (acp, acp_runtime) =
@@ -220,9 +189,8 @@ mod tests {
         RemoteState {
             relay_token: Arc::from("token"),
             authorizations: crate::remote::authorization::RemoteAuthorizations::closed(),
-            agents,
             acp,
-            broker: vmux_agent::service::AgentBroker::new(
+            broker: vmux_agent::broker::AgentBroker::new(
                 agent_tx,
                 Default::default(),
                 Default::default(),

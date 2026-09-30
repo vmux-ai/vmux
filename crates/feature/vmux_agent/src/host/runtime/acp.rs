@@ -105,7 +105,8 @@ fn cli_target(
     resume: Option<&str>,
     cwd: &std::path::Path,
 ) -> Option<(String, std::path::PathBuf)> {
-    let kind = crate::acp_registry::RegistryAgent::kind(agent_id)?;
+    let kind =
+        crate::AgentKind::from_url_segment(crate::acp_registry::RegistryAgent::url_id(agent_id))?;
     if !kind.supports_cross_runtime() {
         return None;
     }
@@ -694,7 +695,7 @@ fn close_acp_session_on_remove(
     let Ok(session) = sessions.get(trigger.event_target()) else {
         return;
     };
-    service_requests.write(ServiceRequest(ClientMessage::ClosePageAgent {
+    service_requests.write(ServiceRequest(ClientMessage::CloseAgentSession {
         sid: session.sid.clone(),
     }));
 }
@@ -1401,7 +1402,6 @@ mod tests {
             ("codex", "codex"),
             ("codex-acp", "codex"),
             ("vibe", "vibe"),
-            ("mistral-vibe", "vibe"),
         ];
         for (agent_id, cli_segment) in cases {
             let got = cli_target(agent_id, Some("sid-9"), std::path::Path::new("/w"));
@@ -1418,6 +1418,10 @@ mod tests {
     #[test]
     fn cli_switch_requires_shared_session() {
         assert_eq!(cli_target("claude", None, std::path::Path::new("/w")), None);
+        assert_eq!(
+            cli_target("mistral-vibe", Some("s"), std::path::Path::new("/w")),
+            None
+        );
         assert_eq!(
             cli_target("custom", Some("s"), std::path::Path::new("/w")),
             None

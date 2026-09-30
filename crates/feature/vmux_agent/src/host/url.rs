@@ -1,25 +1,12 @@
 pub use vmux_core::agent::AgentKind;
 
-use crate::AgentVariant;
-
 pub const CLI_FRESH_SID: &str = "cli";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AgentUrl {
-    Cli {
-        kind: AgentKind,
-        sid: String,
-    },
-    Acp {
-        id: String,
-        sid: Option<String>,
-    },
-    Page {
-        provider: String,
-        model: String,
-        sid: String,
-    },
-    PageDefault,
+    Cli { kind: AgentKind, sid: String },
+    Acp { id: String, sid: Option<String> },
+    AcpDefault,
 }
 
 impl AgentUrl {
@@ -30,7 +17,7 @@ impl AgentUrl {
         }
         let segs: Vec<&str> = route.path_segments().collect();
         match segs.as_slice() {
-            [] => Some(AgentUrl::PageDefault),
+            [] => Some(AgentUrl::AcpDefault),
             [id] => Some(AgentUrl::Acp {
                 id: (*id).to_string(),
                 sid: None,
@@ -59,23 +46,10 @@ impl AgentUrl {
                         sid: (*z).to_string(),
                     })
                 } else {
-                    Some(AgentUrl::Page {
-                        provider: (*x).to_string(),
-                        model: (*y).to_string(),
-                        sid: (*z).to_string(),
-                    })
+                    None
                 }
             }
             _ => None,
-        }
-    }
-
-    pub fn variant(&self) -> AgentVariant {
-        match self {
-            AgentUrl::Cli { .. } => AgentVariant::Cli,
-            AgentUrl::Acp { .. } | AgentUrl::Page { .. } | AgentUrl::PageDefault => {
-                AgentVariant::Page
-            }
         }
     }
 
@@ -83,8 +57,7 @@ impl AgentUrl {
         match self {
             AgentUrl::Cli { sid, .. } => sid,
             AgentUrl::Acp { sid, .. } => sid.as_deref().unwrap_or(""),
-            AgentUrl::Page { sid, .. } => sid,
-            AgentUrl::PageDefault => "",
+            AgentUrl::AcpDefault => "",
         }
     }
 
@@ -101,12 +74,7 @@ impl AgentUrl {
                 Some(sid) => format!("vmux://sessions/{id}/{sid}"),
                 None => format!("vmux://sessions/{id}"),
             },
-            AgentUrl::Page {
-                provider,
-                model,
-                sid,
-            } => format!("vmux://sessions/{provider}/{model}/{sid}"),
-            AgentUrl::PageDefault => "vmux://sessions/".to_string(),
+            AgentUrl::AcpDefault => "vmux://sessions/".to_string(),
         }
     }
 
@@ -154,10 +122,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bare_agent_url_parses_to_page_default() {
+    fn bare_agent_url_parses_to_acp_default() {
         assert_eq!(
             AgentUrl::parse("vmux://sessions/"),
-            Some(AgentUrl::PageDefault)
+            Some(AgentUrl::AcpDefault)
         );
     }
 
@@ -213,14 +181,10 @@ mod tests {
     }
 
     #[test]
-    fn three_segment_plain_is_page() {
+    fn three_segment_plain_is_rejected() {
         assert_eq!(
             AgentUrl::parse("vmux://sessions/openai/gpt-5.5/xHigh"),
-            Some(AgentUrl::Page {
-                provider: "openai".into(),
-                model: "gpt-5.5".into(),
-                sid: "xHigh".into(),
-            })
+            None
         );
     }
 
@@ -243,7 +207,7 @@ mod tests {
 
     #[test]
     fn malformed_persisted_agent_urls_are_rejected() {
-        assert!(!AgentUrl::rejects_persisted_store(
+        assert!(AgentUrl::rejects_persisted_store(
             r#"url: "vmux://sessions/echo/echo/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
         ));
         assert!(!AgentUrl::rejects_persisted_store(
@@ -294,22 +258,11 @@ mod tests {
     }
 
     #[test]
-    fn page_format_round_trips() {
-        let u = AgentUrl::Page {
-            provider: "anthropic".into(),
-            model: "claude-opus-4.7".into(),
-            sid: "xyz".into(),
-        };
-        assert_eq!(u.format(), "vmux://sessions/anthropic/claude-opus-4.7/xyz");
-        assert_eq!(AgentUrl::parse(&u.format()), Some(u));
-    }
-
-    #[test]
-    fn page_default_round_trips() {
-        assert_eq!(AgentUrl::PageDefault.format(), "vmux://sessions/");
+    fn acp_default_round_trips() {
+        assert_eq!(AgentUrl::AcpDefault.format(), "vmux://sessions/");
         assert_eq!(
-            AgentUrl::parse(&AgentUrl::PageDefault.format()),
-            Some(AgentUrl::PageDefault)
+            AgentUrl::parse(&AgentUrl::AcpDefault.format()),
+            Some(AgentUrl::AcpDefault)
         );
     }
 
@@ -317,26 +270,6 @@ mod tests {
     fn legacy_agent_url_parses_but_formats_as_session() {
         let parsed = AgentUrl::parse("vmux://agent/codex/cli/xyz").unwrap();
         assert_eq!(parsed.format(), "vmux://sessions/codex/cli/xyz");
-    }
-
-    #[test]
-    fn variant_returned_correctly() {
-        assert_eq!(
-            AgentUrl::Cli {
-                kind: AgentKind::Vibe,
-                sid: "x".into(),
-            }
-            .variant(),
-            AgentVariant::Cli
-        );
-        assert_eq!(
-            AgentUrl::Acp {
-                id: "claude".into(),
-                sid: None,
-            }
-            .variant(),
-            AgentVariant::Page
-        );
     }
 
     #[test]

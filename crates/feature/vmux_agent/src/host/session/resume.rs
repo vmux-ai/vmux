@@ -15,7 +15,6 @@ use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 use vmux_core::team::Profile;
 use vmux_session::AcpSession;
 use vmux_session::AgentRunState;
-use vmux_session::AgentSession;
 
 pub(super) struct ChatResumePlugin;
 
@@ -217,7 +216,6 @@ impl ResumableScan {
 struct ResumeAsk<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
     acp_sessions: Query<'w, 's, &'static AcpSession>,
-    agent_sessions: Query<'w, 's, &'static AgentSession>,
     profiles: Query<'w, 's, &'static Profile>,
     space_hierarchy: vmux_layout::space::SpaceHierarchy<'w, 's>,
     settings: Option<Res<'w, vmux_setting::AppSettings>>,
@@ -227,16 +225,8 @@ impl ResumeAsk<'_, '_> {
     fn agent_of(&self, webview: Entity) -> (Option<AgentKind>, String) {
         let stack = self.child_of.get(webview).ok().map(ChildOf::parent);
         let acp = stack.and_then(|stack| self.acp_sessions.get(stack).ok());
-        let kind = acp
-            .and_then(|acp| RegistryAgent::kind(&acp.agent_id))
-            .or_else(|| {
-                stack.and_then(|stack| {
-                    self.agent_sessions
-                        .get(stack)
-                        .ok()
-                        .map(|session| session.kind)
-                })
-            });
+        let kind =
+            acp.and_then(|acp| AgentKind::from_url_segment(RegistryAgent::url_id(&acp.agent_id)));
         let name = resume_agent_name(
             stack.and_then(|stack| self.profiles.get(stack).ok()),
             kind,
@@ -504,8 +494,11 @@ fn on_resume_session(
         return;
     };
     if let Ok(acp) = acp_sessions.get(stack)
-        && let Some(target_url) =
-            foreign_handoff_target(&acp.agent_id, RegistryAgent::kind(&acp.agent_id), kind)
+        && let Some(target_url) = foreign_handoff_target(
+            &acp.agent_id,
+            AgentKind::from_url_segment(RegistryAgent::url_id(&acp.agent_id)),
+            kind,
+        )
     {
         let source = sources.get(kind);
         let source_sid = payload.sid.clone();

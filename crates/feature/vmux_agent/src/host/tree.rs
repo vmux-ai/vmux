@@ -1,8 +1,5 @@
 use bevy::prelude::*;
-use vmux_core::agent::{
-    PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
-    PageAgentSpawnStackRequest, RestartAgentPty, SpawnAgentInStackRequest, SwapStackSession,
-};
+use vmux_core::agent::{RestartAgentPty, SpawnAgentInStackRequest, SwapStackSession};
 use vmux_core::host::persistence::WorkspaceStoreValidator;
 use vmux_core::notify::{AgentAttention, BellReceived, OsNotify};
 use vmux_core::{HostSpawnRoute, PageOpenRequest};
@@ -55,24 +52,22 @@ impl Plugin for AgentSessionPlugin {
         .add_plugins((
             vmux_session::room::RoomPlugin,
             crate::command_bar::CommandBarPlugin,
+            super::approval::ApprovalPlugin,
             super::attach::AttachPlugin,
             super::attention::AttentionPlugin,
             super::command::CommandPlugin,
             super::follow::FollowPlugin,
             super::ingress::AgentIngressPlugin,
             super::page_open::PageOpenPlugin,
-            super::provider::ProviderPlugin,
             session::AgentSessionLifecyclePlugin,
             super::snapshot::SnapshotPlugin,
             super::spawn::SpawnPlugin,
+            super::tidy::TidyPlugin,
+            super::toast::ToastPlugin,
         ))
         .add_message::<AgentRequestInput>()
         .add_message::<AgentToolCallRequest>()
         .add_message::<SpawnAgentInStackRequest>()
-        .add_message::<PageAgentAttachRequest>()
-        .add_message::<PageAgentSpawnStackRequest>()
-        .add_message::<PageAgentSpawnDefaultRequest>()
-        .add_message::<PageAgentAttachDefaultRequest>()
         .add_message::<TerminalStackSpawnRequest>()
         .add_message::<RestartAgentPty>()
         .add_message::<SwapStackSession>()
@@ -100,18 +95,19 @@ fn register_agent_session_route(mut commands: Commands) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::agent::{AgentKind, AgentProviderTargetKind};
+    use vmux_core::agent::{AgentCliKind, AgentKind};
 
     #[test]
-    fn agent_plugin_registers_all_three_provider_entries() {
+    fn agent_plugin_registers_all_three_cli_entries() {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
             vmux_command::CommandPlugin,
             AgentSessionPlugin,
         ));
+        app.world_mut().run_schedule(PreStartup);
         app.world_mut().run_schedule(Startup);
-        let mut q = app.world_mut().query::<&AgentProviderTargetKind>();
+        let mut q = app.world_mut().query::<&AgentCliKind>();
         let ids: std::collections::HashSet<&'static str> =
             q.iter(app.world()).map(|p| p.0.as_url_segment()).collect();
         for id in ["vibe", "claude", "codex"] {
@@ -127,6 +123,7 @@ mod tests {
             vmux_command::CommandPlugin,
             AgentSessionPlugin,
         ));
+        app.world_mut().run_schedule(PreStartup);
         app.world_mut().run_schedule(Startup);
         let kinds = app
             .world_mut()

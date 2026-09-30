@@ -33,7 +33,7 @@ use vmux_core::{
     PendingPromptAttachments,
 };
 use vmux_layout::stack::OpenRequest;
-use vmux_session::{AgentConversationTitle, AgentMessages, AgentRunState, AgentSession};
+use vmux_session::{AcpSession, AgentConversationTitle, AgentMessages, AgentRunState};
 
 type ChatUiStateUpdates = UiState<ChatUiState>;
 
@@ -295,7 +295,7 @@ type ChangedChatSessions<'w, 's> = Query<
         &'static AgentMessages,
         &'static AgentRunState,
         Option<&'static Profile>,
-        Option<&'static AgentSession>,
+        &'static AcpSession,
     ),
     Or<(
         Changed<AgentConversationTitle>,
@@ -329,19 +329,16 @@ fn tab_activity_icon(
     messages: &AgentMessages,
     state: &AgentRunState,
     profile: Option<&Profile>,
-    session: Option<&AgentSession>,
+    session: &AcpSession,
 ) -> Option<PageIcon> {
     let running = matches!(state, AgentRunState::Streaming);
     let page = group_turns_tail(&[], &messages.0, &[], &[], running, TAB_ACTIVITY_TAIL_ITEMS);
     let activity = current_activity(&page.items, state.status())?;
-    let provider = session
-        .map(|session| session.provider.as_str())
-        .unwrap_or_default();
     let accent = crate::tab::Accent::for_agent(
         profile
             .map(|profile| profile.avatar.color.as_str())
             .unwrap_or_default(),
-        provider,
+        &session.agent_id,
     );
     Some(PageIcon::favicon(
         ActivityIcon::from(activity).favicon(&accent.css),
@@ -584,6 +581,7 @@ mod tests {
     use super::*;
     use vmux_api::chat::{ChatBlock, ChatTurn};
     use vmux_api::protocol::{AgentRequest, AgentRequestId};
+    use vmux_core::ProcessId;
     use vmux_core::agent::{AgentRequestInput, CommandOrigin};
 
     struct Conversation {
@@ -597,6 +595,13 @@ mod tests {
             let session = app
                 .world_mut()
                 .spawn((
+                    AcpSession {
+                        agent_id: "mock".into(),
+                        sid: "session".into(),
+                        cwd: std::path::PathBuf::from("/tmp"),
+                        anchor: ProcessId::new(),
+                        resume: None,
+                    },
                     vmux_session::AgentMessages::default(),
                     vmux_session::AgentRunState::default(),
                 ))

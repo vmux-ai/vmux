@@ -1,8 +1,7 @@
 use crate::run_state_kind::{AgentRunStateKind, LastRunStateKind};
 use bevy::prelude::*;
 use bevy_cef::prelude::UiEventPlugin;
-use vmux_session::AgentRunState;
-use vmux_session::{AcpSession, AgentSession};
+use vmux_session::{AcpSession, AgentRunState};
 
 pub(crate) struct ToastPlugin;
 
@@ -10,7 +9,7 @@ impl Plugin for ToastPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AgentToast>()
             .add_plugins(UiEventPlugin::<(AgentToast,)>::default())
-            .add_systems(Update, surface_errors);
+            .add_systems(Update, (initialize, ApplyDeferred, surface_errors).chain());
     }
 }
 
@@ -28,22 +27,20 @@ pub struct AgentToast {
     pub message: String,
 }
 
+fn initialize(
+    sessions: Query<Entity, (Added<AcpSession>, Without<LastRunStateKind>)>,
+    mut commands: Commands,
+) {
+    for entity in &sessions {
+        commands.entity(entity).insert(LastRunStateKind::default());
+    }
+}
+
 fn surface_errors(
     mut writer: MessageWriter<AgentToast>,
-    mut sessions: Query<(
-        &AgentRunState,
-        &mut LastRunStateKind,
-        Option<&AgentSession>,
-        Option<&AcpSession>,
-    )>,
+    mut sessions: Query<(&AgentRunState, &mut LastRunStateKind, &AcpSession)>,
 ) {
-    for (state, mut last, page, acp) in &mut sessions {
-        let Some(sid) = page
-            .map(|session| session.sid.clone())
-            .or_else(|| acp.map(|session| session.sid.clone()))
-        else {
-            continue;
-        };
+    for (state, mut last, session) in &mut sessions {
         let current = AgentRunStateKind::from(state);
         if last.0 == current {
             continue;
@@ -56,7 +53,7 @@ fn surface_errors(
             continue;
         };
         writer.write(AgentToast {
-            session_sid: sid,
+            session_sid: session.sid.clone(),
             level: ToastLevel::Error,
             message: message.clone(),
         });
@@ -66,7 +63,7 @@ fn surface_errors(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AgentKind, AgentVariant};
+    use vmux_api::protocol::ProcessId;
 
     struct TestApp;
 
@@ -79,13 +76,13 @@ mod tests {
             app
         }
 
-        fn session() -> AgentSession {
-            AgentSession {
-                kind: AgentKind::Vibe,
-                variant: AgentVariant::Page,
+        fn session() -> AcpSession {
+            AcpSession {
+                agent_id: "mock".into(),
                 sid: "abc".into(),
-                provider: "mock".into(),
-                model: "m".into(),
+                cwd: std::path::PathBuf::from("/tmp"),
+                anchor: ProcessId::new(),
+                resume: None,
             }
         }
 

@@ -5,7 +5,7 @@ use vmux_api::protocol::SharedMessage;
 use vmux_command::WriteCommandRequests;
 use vmux_core::agent::{AgentContinuationRequest, AgentSession};
 use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
-use vmux_session::{AcpSession, AgentRunState, AgentSession as PageAgentSession};
+use vmux_session::{AcpSession, AgentRunState};
 use vmux_terminal::BufferedAgentPrompt;
 
 pub(super) struct AgentContinuationPlugin;
@@ -43,7 +43,6 @@ fn send_continuations(
         Entity,
         &PendingAgentContinuation,
         Option<&AcpSession>,
-        Option<&PageAgentSession>,
         Option<&AgentSession>,
         Option<&mut AgentRunState>,
     )>,
@@ -51,7 +50,7 @@ fn send_continuations(
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    for (entity, continuation, acp, page, cli, state) in &mut sessions {
+    for (entity, continuation, acp, cli, state) in &mut sessions {
         if cli.is_some() {
             commands
                 .entity(entity)
@@ -65,10 +64,7 @@ fn send_continuations(
         if connected.is_none() {
             continue;
         }
-        let sid = acp
-            .map(|session| session.sid.as_str())
-            .or_else(|| page.map(|session| session.sid.as_str()));
-        let (Some(sid), Some(mut state)) = (sid, state) else {
+        let (Some(session), Some(mut state)) = (acp, state) else {
             continue;
         };
         if !matches!(*state, AgentRunState::Idle | AgentRunState::Errored(_)) {
@@ -76,7 +72,7 @@ fn send_continuations(
         }
         service_requests.write(ServiceRequest(
             SharedMessage::AgentInput {
-                sid: sid.to_string(),
+                sid: session.sid.clone(),
                 text: String::new(),
                 context: Some(continuation.0.clone()),
                 attachments: Vec::new(),

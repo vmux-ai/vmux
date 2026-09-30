@@ -262,7 +262,7 @@ carrying an rkyv `SharedMessage` and `SharedResponse`. The relay's control conne
 the odd one: a JSON hello, then opaque DATAGRAM frames it cannot read.
 
 Remote agent operations are flat `SharedMessage` variants rather than a nested request enum.
-The QUIC application protocol is `vmux/7`; changing the positional rkyv wire contract requires
+The QUIC application protocol is `vmux/8`; changing the positional rkyv wire contract requires
 another ALPN version.
 
 Agent commands and queries use the same routed `AgentRequest` envelope. Each operation is a
@@ -890,13 +890,13 @@ manifest key, so plugin registration is `register_tool::<T>()` without a second 
 handwritten feature exposes only its plugin; its private update systems consume matching tool-call
 components, validate typed arguments, and produce command or query dispatch.
 Publication and execution query those entities directly; there is no separate runtime registry or
-central function-pointer table. Page agents install the same tool plugin into the application's
+central function-pointer table. ACP sessions install the same tool plugin into the application's
 world and submit tool-call entities there; they do not maintain a nested or thread-local Bevy app.
-`vmux_agent` carries only the generic query envelope. Browser, capture, bookmark, vault, simulator,
-and other feature plugins decode their own query contracts, emit their own ECS requests, and map
-their results back to the service boundary. Feature-specific agent instructions and disabled skill
-roots are components registered by those same plugins. Agent providers aggregate that policy when
-launching; they do not enumerate or name the features installed beside them.
+`vmux_agent` carries only the generic ACP and query envelopes. Browser, capture, bookmark, vault,
+simulator, and other feature plugins decode their own query contracts, emit their own ECS requests,
+and map their results back to the service boundary. Feature-specific agent instructions and
+disabled skill roots are components registered by those same plugins. ACP and CLI launch boundaries
+aggregate that policy without enumerating or naming the features installed beside them.
 
 Application commands follow the same ownership rule. The shared command registry seeds
 command-definition entities from each registered feature manifest. Feature systems bind their

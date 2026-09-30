@@ -12,7 +12,7 @@ use vmux_core::team::Agent;
 use vmux_git::GitRepository;
 use vmux_layout::CloseStackRequest;
 use vmux_layout::stack::ComputeFocusSet;
-use vmux_session::{AcpSession, AgentRunState, AgentSession};
+use vmux_session::{AcpSession, AgentRunState};
 use vmux_setting::{AppSettings, SettingsSaveRequest};
 
 use crate::follow::AgentFileLayout;
@@ -36,10 +36,7 @@ impl Plugin for TidyPlugin {
                     .after(ComputeFocusSet)
                     .after(crate::attention::TurnEndedSet),
             )
-            .add_systems(
-                Update,
-                (tidy_acp_on_idle, tidy_page_on_idle).after(ComputeFocusSet),
-            );
+            .add_systems(Update, tidy_acp_on_idle.after(ComputeFocusSet));
     }
 }
 
@@ -303,44 +300,9 @@ fn tidy_acp_on_idle(
     }
 }
 
-fn tidy_page_on_idle(
-    settings: Option<Res<AppSettings>>,
-    sessions: Query<(&ChildOf, &AgentRunState), (With<AgentSession>, Changed<AgentRunState>)>,
-    layout: AgentFileLayout,
-    last_activated: Query<&LastActivatedAt>,
-    pending: Query<(), With<PendingTidy>>,
-    mut close: MessageWriter<CloseStackRequest>,
-    mut commands: Commands,
-) {
-    let Some(settings) = settings else {
-        return;
-    };
-    if !settings.agent.tidy_files {
-        return;
-    }
-    for (parent, state) in &sessions {
-        if !matches!(state, AgentRunState::Idle) {
-            continue;
-        }
-        tidy_follow_pane(
-            parent.get(),
-            &settings,
-            &layout,
-            &last_activated,
-            &pending,
-            &mut close,
-            &mut commands,
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::test_support::{
-        close_stack_requests, spawn_file_preview_stack, test_settings,
-    };
-    use vmux_layout::pane::Pane;
 
     #[test]
     fn parses_file_url_stripping_scheme_fragment_and_encoding() {
@@ -401,61 +363,5 @@ mod tests {
             .map(|(i, &e)| (e, i as i64, true))
             .collect();
         assert!(decide_closable(&stacks, 5).is_empty());
-    }
-
-    #[test]
-    fn page_agent_idle_closes_clean_previews() {
-        let mut settings = test_settings();
-        settings.agent.tidy_files_auto = true;
-
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
-            .add_message::<vmux_core::PageOpenRequest>()
-            .insert_resource(settings)
-            .add_systems(Update, tidy_page_on_idle);
-
-        let parent = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
-        let agent_pane = app.world_mut().spawn((Pane, ChildOf(parent))).id();
-        let agent_stack = app
-            .world_mut()
-            .spawn((
-                vmux_layout::stack::stack_bundle(),
-                vmux_session::AgentSession {
-                    kind: vmux_core::agent::AgentKind::Claude,
-                    variant: crate::AgentVariant::Cli,
-                    sid: "sid-1".to_string(),
-                    provider: "claude".to_string(),
-                    model: "cli".to_string(),
-                },
-                vmux_session::AgentRunState::Streaming,
-                ChildOf(agent_pane),
-            ))
-            .id();
-        let file_pane = app.world_mut().spawn((Pane, ChildOf(parent))).id();
-        let previews: Vec<Entity> = (0..6)
-            .map(|index| {
-                spawn_file_preview_stack(
-                    &mut app,
-                    file_pane,
-                    index,
-                    &format!("file:///clean/f{index}.rs"),
-                )
-            })
-            .collect();
-
-        app.update();
-        assert!(close_stack_requests(&app).is_empty());
-
-        *app.world_mut()
-            .get_mut::<vmux_session::AgentRunState>(agent_stack)
-            .unwrap() = vmux_session::AgentRunState::Idle;
-        app.update();
-
-        let mut closed = close_stack_requests(&app);
-        closed.sort();
-        let mut expected = previews[0..5].to_vec();
-        expected.sort();
-        assert_eq!(closed, expected);
-        assert!(!closed.contains(&previews[5]));
     }
 }

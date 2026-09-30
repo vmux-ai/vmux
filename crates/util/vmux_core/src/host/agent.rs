@@ -235,7 +235,7 @@ impl From<AgentKind> for TerminalKind {
 }
 
 #[derive(Component, Clone, Copy, Debug)]
-pub struct AgentProviderTargetKind(pub AgentKind);
+pub struct AgentCliKind(pub AgentKind);
 
 #[derive(Component, Debug, Clone)]
 #[require(AgentSessionRoot)]
@@ -288,52 +288,9 @@ pub struct SwapStackSession {
     pub handoff: Option<StackSessionHandoff>,
 }
 
-#[derive(Message, Debug, Clone)]
-pub struct PageAgentAttachRequest {
-    pub stack: Entity,
-    pub provider: String,
-    pub model: String,
-    pub sid: String,
-}
-
-#[derive(Message, Debug, Clone)]
-pub struct PageAgentSpawnStackRequest {
-    pub pane: Entity,
-    pub provider: String,
-    pub model: String,
-    pub sid: String,
-}
-
-#[derive(Message, Debug, Clone, Copy)]
-pub struct PageAgentSpawnDefaultRequest {
-    pub pane: Entity,
-}
-
-#[derive(Message, Debug, Clone, Copy)]
-pub struct PageAgentAttachDefaultRequest {
-    pub stack: Entity,
-}
-
 #[derive(Message, Debug, Clone, Copy)]
 pub struct RestartAgentPty {
     pub entity: Entity,
-}
-
-pub fn parse_page_agent_url(url: &str) -> Option<(String, String, Option<String>)> {
-    let route = vmux_api::VmuxRoute::parse(url)?;
-    if !route.is_agent() {
-        return None;
-    }
-    let segs: Vec<&str> = route.path_segments().collect();
-    match segs.as_slice() {
-        [provider, model] => Some(((*provider).to_string(), (*model).to_string(), None)),
-        [provider, model, sid] => Some((
-            (*provider).to_string(),
-            (*model).to_string(),
-            Some((*sid).to_string()),
-        )),
-        _ => None,
-    }
 }
 
 pub fn parse_acp_agent_url(url: &str) -> Option<String> {

@@ -73,17 +73,4 @@ mod tests {
             vec!["b", "a"]
         );
     }
-
-    #[test]
-    fn acp_agent_kind_maps_launcher_and_registry_ids() {
-        use crate::acp_registry::RegistryAgent;
-
-        assert_eq!(RegistryAgent::kind("claude"), Some(AgentKind::Claude));
-        assert_eq!(RegistryAgent::kind("claude-acp"), Some(AgentKind::Claude));
-        assert_eq!(RegistryAgent::kind("codex"), Some(AgentKind::Codex));
-        assert_eq!(RegistryAgent::kind("codex-acp"), Some(AgentKind::Codex));
-        assert_eq!(RegistryAgent::kind("vibe"), Some(AgentKind::Vibe));
-        assert_eq!(RegistryAgent::kind("mistral-vibe"), Some(AgentKind::Vibe));
-        assert_eq!(RegistryAgent::kind("custom"), None);
-    }
 }

@@ -3,21 +3,8 @@ use std::collections::{HashSet, VecDeque};
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 use serde::{Deserialize, Serialize};
-use vmux_api::agent::AgentKind;
 use vmux_api::protocol::AgentAttachment;
 use vmux_api::room::Message;
-
-use crate::variant::AgentVariant;
-
-#[derive(Component, Clone, Debug, Serialize, Deserialize, Reflect)]
-#[reflect(Component)]
-pub struct AgentSession {
-    pub kind: AgentKind,
-    pub variant: AgentVariant,
-    pub sid: String,
-    pub provider: String,
-    pub model: String,
-}
 
 #[derive(Component, Clone, Debug, Default, Serialize, Deserialize)]
 #[require(AgentMessageTimes)]

@@ -19,7 +19,8 @@ use bevy::tasks::IoTaskPool;
 
 use crate::manifest::{CliProviderManifest, CliProviderManifests};
 use crate::message::Message;
-use vmux_core::agent::AgentKind;
+use vmux_core::Ready;
+use vmux_core::agent::{AgentCliKind, AgentKind};
 use vmux_core::profile::mcp_credentials::McpCredentialAccess;
 use vmux_core::terminal::TerminalLaunch;
 
@@ -38,7 +39,46 @@ impl Plugin for CliPlugin {
             vibe::VibeCliPlugin,
             claude::ClaudeCliPlugin,
             codex::CodexCliPlugin,
-        ));
+        ))
+        .add_systems(Startup, (spawn_cli_targets, detect_availability).chain());
+    }
+}
+
+#[derive(Component, Clone, Default)]
+pub(crate) struct AgentExecutableOverride(pub std::collections::HashMap<AgentKind, bool>);
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct AgentExecutables<'w, 's> {
+    override_: Option<Single<'w, 's, &'static AgentExecutableOverride>>,
+}
+
+impl AgentExecutables<'_, '_> {
+    pub(crate) fn resolve(&self, kind: AgentKind) -> Option<PathBuf> {
+        if let Some(forced) = self
+            .override_
+            .as_deref()
+            .and_then(|override_| override_.0.get(&kind).copied())
+        {
+            return forced.then(|| PathBuf::from(kind.executable()));
+        }
+        vmux_core::Executable::find(kind.executable()).map(vmux_core::Executable::into_path)
+    }
+}
+
+fn spawn_cli_targets(mut commands: Commands) {
+    for kind in AgentKind::all() {
+        commands.spawn((AgentCliKind(kind), Name::new(kind.display_name())));
+    }
+}
+
+fn detect_availability(
+    mut commands: Commands,
+    targets: Query<(Entity, &AgentCliKind), Without<Ready>>,
+) {
+    for (entity, kind) in &targets {
+        if vmux_core::Executable::find(kind.0.executable()).is_some() {
+            commands.entity(entity).insert(Ready);
+        }
     }
 }
 
@@ -108,9 +148,8 @@ fn prepare_launch<P: CliLaunchProvider>(
         .map_err(|error| error.to_string())?;
     for _ in 0..3 {
         let mcp_revision = McpCredentialAccess::stable_revision()?;
-        let mcp_cfg =
-            crate::mcp::McpLaunchSpec::cli(&request.cwd, request.anchor, P::KIND, &request.shell)
-                .resolve()?;
+        let mcp_cfg = crate::mcp::McpLaunchSpec::cli(&request.cwd, request.anchor, &request.shell)
+            .resolve()?;
         if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
             bevy::log::warn!("external agent Knowledge sync failed: {error}");
         }
@@ -201,7 +240,6 @@ fn prepare_restart<P: CliLaunchProvider>(
         let mcp_cfg = crate::mcp::McpLaunchSpec::cli(
             Path::new(&request.launch.cwd),
             request.anchor,
-            P::KIND,
             &request.shell,
         )
         .resolve()?;

@@ -262,9 +262,11 @@ impl AcpModelProjection<'_> {
     }
 
     fn cross_runtime(&self) -> bool {
-        super::registry::RegistryAgent::kind(&self.session.agent_id)
-            .map(AgentKind::supports_cross_runtime)
-            .unwrap_or(false)
+        AgentKind::from_url_segment(super::registry::RegistryAgent::url_id(
+            &self.session.agent_id,
+        ))
+        .map(AgentKind::supports_cross_runtime)
+        .unwrap_or(false)
     }
 
     fn options(model: &AcpModelState) -> Vec<ModelOptionEntry> {

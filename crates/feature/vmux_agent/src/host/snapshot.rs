@@ -1,14 +1,12 @@
 use bevy::prelude::*;
 use vmux_command::snapshot::{
-    AgentPromptTarget, AgentProviderSummary, AgentStrategySummary, CommandBarProjection,
-    CommandBarWorkDirectory,
+    AgentPromptTarget, AgentSummary, CommandBarProjection, CommandBarWorkDirectory,
 };
 
-use vmux_core::agent::AgentProviderTargetKind;
+use vmux_core::agent::AgentCliKind;
 use vmux_core::{ArchivedPage, LastActivatedAt, Ready};
 
 use crate::acp_registry::RegistryAgent;
-use crate::runtime::strategy::{Strategy, StrategyKey};
 
 pub(super) struct SnapshotPlugin;
 
@@ -53,44 +51,22 @@ fn sync_work_directories(
 
 #[allow(clippy::type_complexity)]
 fn update_agents_snapshot(
-    providers_q: Query<(&AgentProviderTargetKind, &Name), With<Ready>>,
-    changed_q: Query<
-        Entity,
-        (
-            With<AgentProviderTargetKind>,
-            Or<(Added<Ready>, Added<AgentProviderTargetKind>)>,
-        ),
-    >,
-    provider_strategies: Query<&StrategyKey, With<Strategy>>,
-    changed_provider_strategies: Query<
-        (),
-        (
-            With<Strategy>,
-            Or<(Added<Strategy>, Added<StrategyKey>, Changed<StrategyKey>)>,
-        ),
-    >,
-    mut removed_provider_strategies: RemovedComponents<Strategy>,
-    mut removed_provider_keys: RemovedComponents<StrategyKey>,
+    cli_q: Query<(&AgentCliKind, &Name), With<Ready>>,
+    changed_q: Query<Entity, (With<AgentCliKind>, Or<(Added<Ready>, Added<AgentCliKind>)>)>,
     catalog: Option<Single<Ref<crate::runtime::acp::AcpCatalog>>>,
     mut package_changes: MessageReader<crate::acp_tool::AcpPackageChanged>,
     mut state: Single<&mut CommandBarProjection>,
 ) {
-    let providers_changed = !changed_q.is_empty();
-    let strategies_changed = !changed_provider_strategies.is_empty()
-        || removed_provider_strategies.read().next().is_some()
-        || removed_provider_keys.read().next().is_some();
+    let cli_changed = !changed_q.is_empty();
     let catalog_changed = catalog
         .as_ref()
         .map(|r| r.is_changed() || r.is_added())
         .unwrap_or(false);
     let installs_changed = package_changes.read().next().is_some();
-    if !providers_changed
-        && !strategies_changed
+    if !cli_changed
         && !catalog_changed
         && !installs_changed
-        && (!state.agents.providers.is_empty()
-            || !state.agents.strategies.is_empty()
-            || !state.agents.acp.is_empty())
+        && (!state.agents.cli.is_empty() || !state.agents.acp.is_empty())
     {
         return;
     }
@@ -101,26 +77,18 @@ fn update_agents_snapshot(
         .unwrap_or_default();
     let acp = acp_agent_summaries(catalog_agents, RegistryAgent::is_installed);
 
-    let mut providers: Vec<AgentProviderSummary> = providers_q
+    let mut cli: Vec<AgentSummary> = cli_q
         .iter()
-        .map(|(kind, name)| AgentProviderSummary {
+        .map(|(kind, name)| AgentSummary {
             id: kind.0.as_url_segment().to_string(),
             name: name.as_str().to_string(),
             url: format!("{}cli", kind.0.cli_url_prefix()),
             icon: String::new(),
         })
         .collect();
-    providers.sort_by(|a, b| a.id.cmp(&b.id));
-    let strategies = provider_strategies
-        .iter()
-        .map(|key| AgentStrategySummary {
-            provider: key.provider.clone(),
-            model: key.model.clone(),
-        })
-        .collect();
+    cli.sort_by(|a, b| a.id.cmp(&b.id));
     let next = vmux_command::snapshot::CommandBarAgentsSnapshot {
-        providers,
-        strategies,
+        cli,
         acp,
         recent: state.agents.recent.clone(),
     };
@@ -132,11 +100,11 @@ fn update_agents_snapshot(
 fn acp_agent_summaries(
     catalog: &[crate::acp_registry::RegistryAgent],
     is_installed: impl Fn(&crate::acp_registry::RegistryAgent) -> bool,
-) -> Vec<AgentProviderSummary> {
-    let mut agents: Vec<AgentProviderSummary> = catalog
+) -> Vec<AgentSummary> {
+    let mut agents: Vec<AgentSummary> = catalog
         .iter()
         .filter(|agent| is_installed(agent))
-        .map(|agent| AgentProviderSummary {
+        .map(|agent| AgentSummary {
             id: agent.id.clone(),
             name: agent.name.clone(),
             url: format!("vmux://sessions/{}", RegistryAgent::url_id(&agent.id)),
@@ -168,8 +136,7 @@ fn update_recent_agents(
         consider(
             timestamp.map(|timestamp| timestamp.0).unwrap_or(i64::MIN),
             AgentPromptTarget::Acp {
-                id: RegistryAgent::url_id(RegistryAgent::canonical_id(&session.agent_id))
-                    .to_string(),
+                id: RegistryAgent::url_id(&session.agent_id).to_string(),
             },
         );
     }
@@ -186,7 +153,7 @@ fn update_recent_agents(
         let target = match crate::url::AgentUrl::parse(&page.url) {
             Some(crate::url::AgentUrl::Cli { kind, .. }) => AgentPromptTarget::Cli(kind),
             Some(crate::url::AgentUrl::Acp { id, .. }) => AgentPromptTarget::Acp {
-                id: RegistryAgent::url_id(RegistryAgent::canonical_id(&id)).to_string(),
+                id: RegistryAgent::url_id(&id).to_string(),
             },
             _ => continue,
         };
@@ -268,8 +235,7 @@ mod tests {
         let mut app = app();
         app.update();
         let snap = &projection(&app).agents;
-        assert!(snap.providers.is_empty());
-        assert!(snap.strategies.is_empty());
+        assert!(snap.cli.is_empty());
     }
 
     #[test]
@@ -313,23 +279,23 @@ mod tests {
     }
 
     #[test]
-    fn cli_snapshot_only_contains_ready_providers() {
+    fn cli_snapshot_only_contains_ready_entries() {
         let mut app = app();
         app.world_mut().spawn((
-            AgentProviderTargetKind(vmux_core::agent::AgentKind::Codex),
+            AgentCliKind(vmux_core::agent::AgentKind::Codex),
             Name::new("Codex"),
             Ready,
         ));
         app.world_mut().spawn((
-            AgentProviderTargetKind(vmux_core::agent::AgentKind::Claude),
+            AgentCliKind(vmux_core::agent::AgentKind::Claude),
             Name::new("Claude"),
         ));
 
         app.update();
 
-        let providers = &projection(&app).agents.providers;
-        assert_eq!(providers.len(), 1);
-        assert_eq!(providers[0].id, "codex");
+        let cli = &projection(&app).agents.cli;
+        assert_eq!(cli.len(), 1);
+        assert_eq!(cli[0].id, "codex");
     }
 
     #[test]

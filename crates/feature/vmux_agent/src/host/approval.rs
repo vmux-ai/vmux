@@ -10,7 +10,7 @@ use vmux_chat::event::ChatApproval;
 use vmux_core::service::ServiceRequest;
 use vmux_session::AcpSession;
 use vmux_session::AgentRunState;
-use vmux_session::{AgentApprovalPolicy, AgentSession, approval_tool_key};
+use vmux_session::{AgentApprovalPolicy, approval_tool_key};
 
 pub(crate) struct ApprovalPlugin;
 
@@ -127,12 +127,7 @@ fn approval_scope_key(cwd: &Path) -> Option<String> {
 }
 
 fn canonical_agent_id(agent: &str) -> String {
-    match agent.trim().to_ascii_lowercase().as_str() {
-        "claude" | "claude-acp" => "claude".to_string(),
-        "codex" | "codex-acp" => "codex".to_string(),
-        "vibe" | "vibe-acp" | "mistral-vibe" => "vibe".to_string(),
-        other => other.strip_suffix("-acp").unwrap_or(other).to_string(),
-    }
+    agent.trim().to_ascii_lowercase()
 }
 
 fn sync_policy(
@@ -147,23 +142,12 @@ fn sync_policy(
 #[allow(clippy::type_complexity)]
 fn handle_approval_reply(
     trigger: On<AgentApprovalReply>,
-    mut q: Query<(
-        &mut AgentRunState,
-        &mut AgentApprovalPolicy,
-        Option<&AgentSession>,
-        Option<&AcpSession>,
-    )>,
+    mut q: Query<(&mut AgentRunState, &mut AgentApprovalPolicy, &AcpSession)>,
     mut service_requests: MessageWriter<ServiceRequest>,
     mut store: Option<Single<&mut AgentApprovalStore>>,
 ) {
     let reply = trigger.event();
-    let Ok((mut state, mut policy, page, acp)) = q.get_mut(reply.session) else {
-        return;
-    };
-    let Some(sid) = page
-        .map(|s| s.sid.clone())
-        .or_else(|| acp.map(|s| s.sid.clone()))
-    else {
+    let Ok((mut state, mut policy, session)) = q.get_mut(reply.session) else {
         return;
     };
     let matches_call = matches!(
@@ -177,15 +161,13 @@ fn handle_approval_reply(
         && let AgentRunState::AwaitingApproval { name, .. } = &*state
     {
         policy.allow(name);
-        if let Some(acp) = acp
-            && let Some(store) = store.as_deref_mut()
-        {
-            store.remember(&acp.agent_id, &acp.cwd, name);
+        if let Some(store) = store.as_deref_mut() {
+            store.remember(&session.agent_id, &session.cwd, name);
         }
     }
     service_requests.write(ServiceRequest(ClientMessage::Shared(
         SharedMessage::AgentApprove {
-            sid,
+            sid: session.sid.clone(),
             call_id: reply.call_id.clone(),
             decision: reply.decision,
         },
@@ -196,16 +178,16 @@ fn handle_approval_reply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AgentKind, AgentVariant};
     use serde_json::json;
+    use vmux_api::protocol::ProcessId;
 
-    fn session() -> AgentSession {
-        AgentSession {
-            kind: AgentKind::Vibe,
-            variant: AgentVariant::Page,
+    fn session() -> AcpSession {
+        AcpSession {
+            agent_id: "anthropic".into(),
             sid: "s".into(),
-            provider: "anthropic".into(),
-            model: "m".into(),
+            cwd: PathBuf::from("/tmp"),
+            anchor: ProcessId::new(),
+            resume: None,
         }
     }
 
@@ -324,12 +306,12 @@ mod tests {
 
         assert!(
             loaded
-                .policy_for("codex", directory.path())
+                .policy_for("codex-acp", directory.path())
                 .allows("mcp.vmux.run")
         );
         assert!(
             !loaded
-                .policy_for("claude", directory.path())
+                .policy_for("codex", directory.path())
                 .allows("mcp.vmux.run")
         );
         assert!(
@@ -350,6 +332,11 @@ mod tests {
 
         assert!(
             loaded
+                .policy_for("codex", directory.path())
+                .allows("execute_command")
+        );
+        assert!(
+            !loaded
                 .policy_for("codex-acp", directory.path())
                 .allows("execute_command")
         );

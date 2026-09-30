@@ -100,7 +100,7 @@ fn list_agents(
                 icon: agent.icon.clone(),
             });
         }
-        for agent in &command_bar.agents.providers {
+        for agent in &command_bar.agents.cli {
             agents.push(vmux_api::room::RemoteAgent {
                 id: agent.id.clone(),
                 name: format!("{} (CLI)", agent.name),

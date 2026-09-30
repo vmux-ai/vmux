@@ -5,15 +5,13 @@ use std::time::Instant;
 use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tokio::sync::{broadcast, mpsc};
-use vmux_api::protocol::{
-    AgentAttachment, ClientMessage, ProcessId, ServiceMessage, SharedMessage, compose_agent_prompt,
-};
+use vmux_api::protocol::{ClientMessage, ProcessId, ServiceMessage, SharedMessage};
 use vmux_process::{ProcessLaunch, ProcessRuntime};
 
 use crate::remote::authorization::RemoteAuthorizations;
 use crate::remote::client_operation::ClientOperations;
 use vmux_agent::acp::AcpSessions;
-use vmux_agent::service::{AgentBroker, AgentSessions};
+use vmux_agent::broker::AgentBroker;
 
 pub struct ServiceDaemonPlugin;
 
@@ -27,8 +25,6 @@ impl ServiceDaemonPlugin {
         let (processes, process_runtime) = ProcessRuntime::new(wake.clone());
         let (client_operations, client_operation_runtime) = ClientOperations::new(wake.clone());
         let (authorizations, authorization_runtime) = RemoteAuthorizations::new(wake.clone());
-        let (agent_sessions, agent_session_runtime) =
-            AgentSessions::new(runtime.clone(), wake.clone());
         let (acp_sessions, acp_session_runtime) = AcpSessions::new(runtime.clone(), wake.clone());
         let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
         let broker = AgentBroker::new(
@@ -40,7 +36,6 @@ impl ServiceDaemonPlugin {
         let remote_runtime = crate::remote::server::RemoteRuntimeStartup::new(
             runtime.clone(),
             authorizations,
-            agent_sessions.clone(),
             acp_sessions.clone(),
             broker.clone(),
             client_operations,
@@ -50,7 +45,6 @@ impl ServiceDaemonPlugin {
             ServiceDaemonStartup(Some(ServiceDaemonStart {
                 listener,
                 processes,
-                agent_sessions,
                 acp_sessions,
                 agent_tx,
                 broker,
@@ -61,7 +55,6 @@ impl ServiceDaemonPlugin {
             process_runtime,
             client_operation_runtime,
             authorization_runtime,
-            agent_session_runtime,
             acp_session_runtime,
             remote_runtime,
         )
@@ -73,7 +66,6 @@ impl Plugin for ServiceDaemonPlugin {
         app.add_plugins((
             vmux_process::ProcessPlugin,
             crate::remote::RemotePlugin,
-            vmux_agent::service::AgentSessionPlugin,
             vmux_agent::acp::AcpSessionPlugin,
         ))
         .add_systems(Startup, start_service_daemon)
@@ -90,7 +82,6 @@ struct ServiceDaemonStartup(Option<ServiceDaemonStart>);
 struct ServiceDaemonStart {
     listener: UnixListener,
     processes: ProcessRuntime,
-    agent_sessions: AgentSessions,
     acp_sessions: AcpSessions,
     agent_tx: broadcast::Sender<ServiceMessage>,
     broker: AgentBroker,
@@ -120,7 +111,6 @@ struct ServiceClientRuntime {
     processes: ProcessRuntime,
     agent_tx: broadcast::Sender<ServiceMessage>,
     broker: AgentBroker,
-    agent_sessions: AgentSessions,
     acp_sessions: AcpSessions,
     shutdown: mpsc::Sender<()>,
     wake: mpsc::UnboundedSender<()>,
@@ -171,7 +161,6 @@ fn start_service_daemon(
                     processes: start.processes,
                     agent_tx: start.agent_tx,
                     broker: start.broker,
-                    agent_sessions: start.agent_sessions,
                     acp_sessions: start.acp_sessions,
                     shutdown,
                     wake: start.wake,
@@ -230,7 +219,6 @@ fn start_service_clients(
                 client.processes,
                 client.agent_tx,
                 client.broker,
-                client.agent_sessions,
                 client.acp_sessions,
                 client.shutdown,
                 client.started_at,
@@ -258,56 +246,6 @@ fn reap_service_clients(
             commands.entity(entity).despawn();
         }
     }
-}
-
-fn page_agent_prompt(text: String, attachments: &[AgentAttachment]) -> String {
-    if attachments.is_empty() {
-        return text;
-    }
-    let mut prompt = text;
-    if !prompt.is_empty() {
-        prompt.push_str("\n\n");
-    }
-    prompt.push_str("Attached files:\n");
-    for attachment in attachments {
-        prompt.push_str("- ");
-        prompt.push_str(&attachment.path);
-        prompt.push('\n');
-    }
-    prompt.pop();
-    prompt
-}
-
-async fn route_agent_input(
-    acp_sessions: &AcpSessions,
-    agent_sessions: &AgentSessions,
-    sid: String,
-    text: String,
-    context: Option<String>,
-    attachments: Vec<AgentAttachment>,
-    preferred_mode: Option<String>,
-) {
-    if acp_sessions
-        .input(
-            sid.clone(),
-            vmux_agent::acp::AcpInput::User {
-                text: text.clone(),
-                context: context.clone(),
-                attachments: attachments.clone(),
-                preferred_mode,
-            },
-        )
-        .await
-    {
-        return;
-    }
-    let text = compose_agent_prompt(&page_agent_prompt(text, &attachments), context.as_deref());
-    agent_sessions
-        .input(
-            sid,
-            vmux_agent::service::SessionInput::User { text, attachments },
-        )
-        .await;
 }
 
 fn command_result_to_content(result: vmux_api::protocol::AgentCommandResult) -> (String, bool) {
@@ -345,7 +283,6 @@ async fn handle_client(
     processes: ProcessRuntime,
     agent_tx: broadcast::Sender<ServiceMessage>,
     broker: AgentBroker,
-    agent_sessions: AgentSessions,
     acp_sessions: AcpSessions,
     shutdown_tx: mpsc::Sender<()>,
     started_at: ServiceStartedAt,
@@ -357,7 +294,7 @@ async fn handle_client(
     let attached: Arc<tokio::sync::Mutex<HashMap<ProcessId, tokio::task::JoinHandle<()>>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     let mut agent_subscription: Option<tokio::task::JoinHandle<()>> = None;
-    let mut page_agent_forwarders: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
+    let mut agent_forwarders: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
 
     let mut created_processes: Vec<ProcessId> = Vec::new();
 
@@ -693,27 +630,6 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::SpawnPageAgent {
-                sid,
-                provider,
-                model,
-                cwd,
-                auto_tools,
-                tools_json,
-            } => {
-                let tools: Vec<vmux_agent::stream::ToolDef> =
-                    serde_json::from_str(&tools_json).unwrap_or_default();
-                let auto: std::collections::HashSet<String> = auto_tools.into_iter().collect();
-                let result = agent_sessions
-                    .spawn(sid, provider, model, cwd, tools, auto, broker.clone())
-                    .await;
-                if let Err(message) = result {
-                    let resp = ServiceMessage::Error { message };
-                    let mut w = writer.lock().await;
-                    vmux_core::service::write_service_message(&mut *w, &resp).await?;
-                }
-            }
-
             ClientMessage::Shared(
                 SharedMessage::ListSessions
                 | SharedMessage::AgentNewChat { .. }
@@ -728,13 +644,25 @@ async fn handle_client(
             }
 
             ClientMessage::Shared(SharedMessage::AgentAttach { sid }) => {
-                let rx = agent_sessions.subscribe(sid.clone()).await;
+                let rx = acp_sessions.subscribe(sid.clone()).await;
                 if let Some(mut rx) = rx {
-                    if let Some(snapshot) = agent_sessions.snapshot(sid.clone()).await {
+                    if let Some(snapshot) = acp_sessions.snapshot(sid.clone()).await {
                         let mut w = writer.lock().await;
                         vmux_core::service::write_service_message(&mut *w, &snapshot).await?;
                     }
-                    if let Some(old) = page_agent_forwarders.remove(&sid) {
+                    if let Some(agent_info) = acp_sessions.agent_info(sid.clone()).await {
+                        let mut w = writer.lock().await;
+                        vmux_core::service::write_service_message(&mut *w, &agent_info).await?;
+                    }
+                    if let Some(model_info) = acp_sessions.model_info(sid.clone()).await {
+                        let mut w = writer.lock().await;
+                        vmux_core::service::write_service_message(&mut *w, &model_info).await?;
+                    }
+                    if let Some(mode_info) = acp_sessions.mode_info(sid.clone()).await {
+                        let mut w = writer.lock().await;
+                        vmux_core::service::write_service_message(&mut *w, &mode_info).await?;
+                    }
+                    if let Some(old) = agent_forwarders.remove(&sid) {
                         old.abort();
                     }
                     let w = writer.clone();
@@ -765,12 +693,12 @@ async fn handle_client(
                             }
                         }
                     });
-                    page_agent_forwarders.insert(sid, handle);
+                    agent_forwarders.insert(sid, handle);
                 }
             }
 
-            ClientMessage::DetachPageAgent { sid } => {
-                if let Some(handle) = page_agent_forwarders.remove(&sid) {
+            ClientMessage::DetachAgentSession { sid } => {
+                if let Some(handle) = agent_forwarders.remove(&sid) {
                     handle.abort();
                 }
             }
@@ -782,16 +710,17 @@ async fn handle_client(
                 attachments,
                 preferred_mode,
             }) => {
-                route_agent_input(
-                    &acp_sessions,
-                    &agent_sessions,
-                    sid,
-                    text,
-                    context,
-                    attachments,
-                    preferred_mode,
-                )
-                .await;
+                acp_sessions
+                    .input(
+                        sid,
+                        vmux_agent::acp::AcpInput::User {
+                            text,
+                            context,
+                            attachments,
+                            preferred_mode,
+                        },
+                    )
+                    .await;
             }
 
             ClientMessage::RebindAcpWorkspace { sid, cwd } => {
@@ -842,14 +771,9 @@ async fn handle_client(
             }
 
             ClientMessage::Shared(SharedMessage::AgentCancel { sid }) => {
-                if !acp_sessions
-                    .input(sid.clone(), vmux_agent::acp::AcpInput::Cancel)
-                    .await
-                {
-                    agent_sessions
-                        .input(sid, vmux_agent::service::SessionInput::Cancel)
-                        .await;
-                }
+                acp_sessions
+                    .input(sid, vmux_agent::acp::AcpInput::Cancel)
+                    .await;
             }
 
             ClientMessage::Shared(SharedMessage::AgentApprove {
@@ -857,30 +781,17 @@ async fn handle_client(
                 call_id,
                 decision,
             }) => {
-                if !acp_sessions
+                acp_sessions
                     .input(
-                        sid.clone(),
-                        vmux_agent::acp::AcpInput::Approve {
-                            call_id: call_id.clone(),
-                            decision,
-                        },
+                        sid,
+                        vmux_agent::acp::AcpInput::Approve { call_id, decision },
                     )
-                    .await
-                {
-                    agent_sessions
-                        .input(
-                            sid,
-                            vmux_agent::service::SessionInput::Approve { call_id, decision },
-                        )
-                        .await;
-                }
+                    .await;
             }
 
-            ClientMessage::ClosePageAgent { sid } => {
-                if !acp_sessions.close(sid.clone()).await {
-                    agent_sessions.close(sid.clone()).await;
-                }
-                if let Some(handle) = page_agent_forwarders.remove(&sid) {
+            ClientMessage::CloseAgentSession { sid } => {
+                acp_sessions.close(sid.clone()).await;
+                if let Some(handle) = agent_forwarders.remove(&sid) {
                     handle.abort();
                 }
             }
@@ -946,7 +857,7 @@ async fn handle_client(
                         let mut w = writer.lock().await;
                         vmux_core::service::write_service_message(&mut *w, &mode_info).await?;
                     }
-                    if let Some(old) = page_agent_forwarders.remove(&sid) {
+                    if let Some(old) = agent_forwarders.remove(&sid) {
                         old.abort();
                     }
                     let w = writer.clone();
@@ -977,7 +888,7 @@ async fn handle_client(
                             }
                         }
                     });
-                    page_agent_forwarders.insert(sid, handle);
+                    agent_forwarders.insert(sid, handle);
                 }
             }
         }
@@ -989,7 +900,7 @@ async fn handle_client(
     if let Some(handle) = agent_subscription.take() {
         handle.abort();
     }
-    for (_, handle) in page_agent_forwarders.drain() {
+    for (_, handle) in agent_forwarders.drain() {
         handle.abort();
     }
 
@@ -1051,10 +962,6 @@ mod tests {
 
     async fn run_test_server(listener: UnixListener, wake: mpsc::UnboundedSender<()>) {
         let (_process_app, processes) = ProcessAppThread::start(wake.clone());
-        let (agent_sessions, _agent_runtime) = vmux_agent::service::AgentSessions::new(
-            tokio::runtime::Handle::current(),
-            wake.clone(),
-        );
         let (acp_sessions, acp_runtime) =
             vmux_agent::acp::AcpSessions::new(tokio::runtime::Handle::current(), wake.clone());
         drop(acp_runtime);
@@ -1079,7 +986,6 @@ mod tests {
                         processes.clone(),
                         agent_tx.clone(),
                         broker.clone(),
-                        agent_sessions.clone(),
                         acp_sessions.clone(),
                         shutdown.clone(),
                         started_at,
@@ -1090,31 +996,6 @@ mod tests {
         }
         clients.abort_all();
         let _ = listener.await;
-    }
-
-    #[test]
-    fn page_agent_prompt_appends_attachment_paths() {
-        let attachments = vec![AgentAttachment {
-            path: "/tmp/report.txt".into(),
-            name: "report.txt".into(),
-            mime_type: "text/plain".into(),
-            size: 12,
-        }];
-        assert_eq!(
-            page_agent_prompt("review".into(), &attachments),
-            "review\n\nAttached files:\n- /tmp/report.txt"
-        );
-    }
-
-    #[test]
-    fn page_agent_private_context_keeps_empty_display_prompt() {
-        let prompt = compose_agent_prompt(&page_agent_prompt(String::new(), &[]), Some("resume"));
-
-        assert!(prompt.contains("resume"));
-        assert_eq!(
-            vmux_api::protocol::extract_display_prompt(&prompt),
-            Some("")
-        );
     }
 
     #[tokio::test]

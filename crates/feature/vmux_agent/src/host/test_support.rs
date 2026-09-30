@@ -1,5 +1,3 @@
-use bevy::prelude::*;
-use vmux_core::PageMetadata;
 use vmux_layout::settings::{
     FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
 };
@@ -53,31 +51,4 @@ pub(crate) fn test_settings() -> AppSettings {
         editor: Default::default(),
         appearance: Default::default(),
     }
-}
-
-pub(crate) fn close_stack_requests(app: &App) -> Vec<Entity> {
-    let messages = app
-        .world()
-        .resource::<bevy::ecs::message::Messages<vmux_layout::CloseStackRequest>>();
-    let mut cursor = messages.get_cursor();
-    cursor.read(messages).map(|m| m.stack).collect()
-}
-
-pub(crate) fn spawn_file_preview_stack(app: &mut App, pane: Entity, ts: i64, url: &str) -> Entity {
-    let stack = app
-        .world_mut()
-        .spawn((
-            vmux_layout::stack::stack_bundle(),
-            vmux_core::LastActivatedAt(ts),
-            ChildOf(pane),
-        ))
-        .id();
-    app.world_mut().spawn((
-        PageMetadata {
-            url: url.to_string(),
-            ..default()
-        },
-        ChildOf(stack),
-    ));
-    stack
 }

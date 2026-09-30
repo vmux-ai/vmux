@@ -22,7 +22,6 @@ use vmux_layout::stack::Stack;
 use vmux_layout::tab::Tab;
 #[cfg(test)]
 use vmux_layout::{LayoutContractPlugin, pane::split_or_extend, stack::stack_bundle};
-use vmux_session::AgentSession;
 use vmux_setting::{AppSettings, StartupDir};
 #[cfg(test)]
 use vmux_setting::{TerminalSettings, TerminalTheme};
@@ -165,11 +164,7 @@ struct RunTerminals<'w, 's> {
             &'static TerminalLaunch,
             Has<AgentRunTerminal>,
         ),
-        (
-            With<Terminal>,
-            Without<AgentSession>,
-            Without<ProcessExited>,
-        ),
+        (With<Terminal>, Without<ProcessExited>),
     >,
     terminals: Query<'w, 's, (Entity, &'static ProcessId), With<Terminal>>,
     launches: Query<'w, 's, &'static TerminalLaunch>,

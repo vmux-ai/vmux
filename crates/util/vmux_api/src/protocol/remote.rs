@@ -96,15 +96,7 @@ pub enum ClientMessage {
         request_id: AgentRequestId,
         result: AgentCommandResult,
     },
-    SpawnPageAgent {
-        sid: String,
-        provider: String,
-        model: String,
-        cwd: String,
-        auto_tools: Vec<String>,
-        tools_json: String,
-    },
-    DetachPageAgent {
+    DetachAgentSession {
         sid: String,
     },
     AcpSetModel {
@@ -113,7 +105,7 @@ pub enum ClientMessage {
         config_id: String,
         model_id: String,
     },
-    ClosePageAgent {
+    CloseAgentSession {
         sid: String,
     },
     AgentToolResult {

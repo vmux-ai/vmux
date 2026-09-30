@@ -3,9 +3,6 @@ use std::path::{Path, PathBuf};
 use vmux_core::ProcessId;
 pub use vmux_core::agent::McpServerConfig;
 
-use crate::AgentKind;
-
-const DEFAULT_RUN_TIMEOUT_SECS: u64 = 50;
 const LONG_RUN_TIMEOUT_SECS: u64 = 600;
 pub(crate) const LONG_MCP_TOOL_TIMEOUT_SECS: u64 = LONG_RUN_TIMEOUT_SECS + 60;
 
@@ -19,16 +16,13 @@ pub(crate) struct McpLaunchSpec {
 }
 
 impl McpLaunchSpec {
-    pub fn cli(cwd: &Path, anchor: ProcessId, kind: AgentKind, shell: &str) -> Self {
+    pub fn cli(cwd: &Path, anchor: ProcessId, shell: &str) -> Self {
         Self {
             cwd: cwd.to_path_buf(),
             anchor,
             acp_session: false,
             acp_terminals: false,
-            run_timeout_secs: match kind {
-                AgentKind::Vibe => DEFAULT_RUN_TIMEOUT_SECS,
-                AgentKind::Claude | AgentKind::Codex => LONG_RUN_TIMEOUT_SECS,
-            },
+            run_timeout_secs: LONG_RUN_TIMEOUT_SECS,
             shell: shell.to_string(),
         }
     }
@@ -128,8 +122,7 @@ mod tests {
     fn mcp_args_always_append_profile() {
         let anchor = ProcessId::new();
         for profile in ["personal", "gregor"] {
-            let args = McpLaunchSpec::cli(Path::new("/workspace"), anchor, AgentKind::Vibe, "nu")
-                .args(profile);
+            let args = McpLaunchSpec::cli(Path::new("/workspace"), anchor, "nu").args(profile);
             assert!(
                 args.windows(2)
                     .any(|w| w[0] == "--profile" && w[1] == profile)
@@ -140,8 +133,7 @@ mod tests {
     #[test]
     fn acp_args_append_acp_terminals_flag() {
         let anchor = ProcessId::new();
-        let plain = McpLaunchSpec::cli(Path::new("/workspace"), anchor, AgentKind::Vibe, "")
-            .args("personal");
+        let plain = McpLaunchSpec::cli(Path::new("/workspace"), anchor, "").args("personal");
         let acp = McpLaunchSpec::acp(Path::new("/workspace"), anchor, "").args("personal");
         assert!(!plain.iter().any(|a| a == "--acp-session"));
         assert!(acp.iter().any(|a| a == "--acp-session"));
@@ -157,25 +149,10 @@ mod tests {
     }
 
     #[test]
-    fn direct_cli_timeout_matches_provider_runtime() {
+    fn cli_uses_long_tool_timeout() {
         assert_eq!(
-            McpLaunchSpec::cli(Path::new("/"), ProcessId::new(), AgentKind::Codex, "")
-                .run_timeout_secs,
+            McpLaunchSpec::cli(Path::new("/"), ProcessId::new(), "").run_timeout_secs,
             LONG_RUN_TIMEOUT_SECS
-        );
-        assert_eq!(
-            McpLaunchSpec::cli(Path::new("/"), ProcessId::new(), AgentKind::Claude, "")
-                .run_timeout_secs,
-            LONG_RUN_TIMEOUT_SECS
-        );
-    }
-
-    #[test]
-    fn vibe_keeps_default_run_timeout() {
-        assert_eq!(
-            McpLaunchSpec::cli(Path::new("/"), ProcessId::new(), AgentKind::Vibe, "")
-                .run_timeout_secs,
-            DEFAULT_RUN_TIMEOUT_SECS
         );
     }
 
@@ -187,7 +164,7 @@ mod tests {
         std::fs::write(workspace.join("Cargo.toml"), b"[workspace]\n").unwrap();
 
         let anchor = ProcessId::new();
-        let config = McpLaunchSpec::cli(&workspace, anchor, AgentKind::Vibe, "/bin/zsh")
+        let config = McpLaunchSpec::cli(&workspace, anchor, "/bin/zsh")
             .resolve_with_sidecar(&temp.join("missing-vmux"), "personal")
             .unwrap();
         let _ = std::fs::remove_dir_all(&temp);
@@ -209,7 +186,7 @@ mod tests {
                 "--profile",
                 "personal",
                 "--run-timeout-secs",
-                "50",
+                "600",
                 "--shell",
                 "/bin/zsh"
             ]
@@ -225,7 +202,7 @@ mod tests {
         std::fs::write(workspace.join("Cargo.toml"), b"[workspace]\n").unwrap();
 
         let anchor = ProcessId::new();
-        let config = McpLaunchSpec::cli(&workspace, anchor, AgentKind::Vibe, "/bin/zsh")
+        let config = McpLaunchSpec::cli(&workspace, anchor, "/bin/zsh")
             .resolve_with_sidecar(&temp.join("missing-vmux"), "personal")
             .unwrap();
         let _ = std::fs::remove_dir_all(&temp);

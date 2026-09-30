@@ -12,18 +12,18 @@ use vmux_setting::AppSettings;
 use vmux_terminal::Terminal;
 use vmux_terminal::launch::TerminalLaunch;
 
-use crate::AgentVariant;
 use crate::acp_registry::RegistryAgent;
 use crate::event::{AgentRequestInput, CommandOrigin};
-use crate::runtime::strategy::{Strategy, StrategyKey, StrategyKind};
 use crate::session::{AgentSession, SessionId};
 
 pub(super) struct AttachPlugin;
 
 impl Plugin for AttachPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ServiceRequest>()
-            .add_systems(Update, (attach_page_agents, attach_acp_agents))
+        app.add_message::<AgentRequestInput>()
+            .add_message::<vmux_core::agent::SwapStackSession>()
+            .add_message::<ServiceRequest>()
+            .add_systems(Update, attach_acp_agents)
             .add_systems(
                 Update,
                 handle_resume_in_acp
@@ -32,37 +32,6 @@ impl Plugin for AttachPlugin {
                     .after(super::command::CommandSet::ToolCalls)
                     .before(super::command::CommandSet::Commands),
             );
-    }
-}
-
-#[derive(Component)]
-pub(super) struct PageAgentAttachment {
-    kind: AgentKind,
-    provider: String,
-    model: String,
-    sid: String,
-    webview: Option<Entity>,
-}
-
-impl PageAgentAttachment {
-    pub(super) fn new(
-        kind: AgentKind,
-        provider: impl Into<String>,
-        model: impl Into<String>,
-        sid: impl Into<String>,
-    ) -> Self {
-        Self {
-            kind,
-            provider: provider.into(),
-            model: model.into(),
-            sid: sid.into(),
-            webview: None,
-        }
-    }
-
-    pub(super) fn with_webview(mut self, webview: Option<Entity>) -> Self {
-        self.webview = webview;
-        self
     }
 }
 
@@ -111,99 +80,6 @@ impl AcpAgentAttachment {
     }
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
-pub(super) struct AgentStrategies<'w, 's> {
-    strategies: Query<'w, 's, (&'static StrategyKey, &'static StrategyKind), With<Strategy>>,
-}
-
-impl AgentStrategies<'_, '_> {
-    pub(super) fn page_kind(&self, provider: &str, model: &str) -> Result<AgentKind, String> {
-        let Some((_, kind)) = self
-            .strategies
-            .iter()
-            .find(|(key, _)| key.provider == provider && key.model == model)
-        else {
-            return Err(format!(
-                "no Page agent strategy registered for {}/{}",
-                provider, model
-            ));
-        };
-        Ok(kind.0)
-    }
-}
-
-fn attach_page_agents(
-    attachments: Query<(Entity, &PageAgentAttachment), Added<PageAgentAttachment>>,
-    mut commands: Commands,
-) {
-    for (entity, attachment) in &attachments {
-        let PageAgentAttachment {
-            kind,
-            provider,
-            model,
-            sid,
-            webview,
-        } = attachment;
-        let title = format!("{provider}/{model}");
-        let url = crate::AgentUrl::Page {
-            provider: provider.clone(),
-            model: model.clone(),
-            sid: sid.clone(),
-        }
-        .format();
-        commands.entity(entity).insert(PageMetadata {
-            url: url.clone(),
-            title: title.clone(),
-            bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
-            ..default()
-        });
-        commands.entity(entity).insert((
-            vmux_core::agent::AgentSessionRoot,
-            vmux_session::AgentSession {
-                kind: *kind,
-                variant: AgentVariant::Page,
-                sid: sid.clone(),
-                provider: provider.clone(),
-                model: model.clone(),
-            },
-            crate::AgentMessages::default(),
-            crate::AgentApprovalPolicy::default(),
-            vmux_session::AgentRunState::default(),
-            vmux_core::team::Profile::agent(*kind),
-            vmux_core::team::Agent {
-                sid: sid.clone(),
-                kind: Some(*kind),
-            },
-        ));
-        let url = format!("vmux://sessions/{provider}");
-        if let Some(webview) = *webview {
-            commands
-                .entity(webview)
-                .insert((
-                    PageMetadata {
-                        url,
-                        title,
-                        bg_color: None,
-                        ..default()
-                    },
-                    vmux_chat::host::ChatView,
-                ))
-                .remove::<(
-                    vmux_start::StartInlineTransitionView,
-                    vmux_core::launcher::HostsLauncher,
-                    vmux_core::page::PageReady,
-                )>();
-        } else {
-            commands.spawn((
-                vmux_layout::Browser::native_page(&url, &title),
-                vmux_chat::host::ChatView,
-                ChildOf(entity),
-            ));
-        }
-        commands.entity(entity).remove::<PageAgentAttachment>();
-    }
-}
-
 fn attach_acp_agents(
     attachments: Query<(Entity, &AcpAgentAttachment), Added<AcpAgentAttachment>>,
     mut commands: Commands,
@@ -240,9 +116,6 @@ fn attach_acp_agents(
                 anchor,
                 resume: resume.clone(),
             },
-            crate::AgentMessages::default(),
-            crate::AgentApprovalPolicy::default(),
-            vmux_session::AgentRunState::default(),
             vmux_core::team::Profile::registry(name, agent_id),
             vmux_core::team::Agent {
                 sid: sid.clone(),
@@ -328,7 +201,7 @@ fn acp_target_id_for_kind(
 ) -> Option<String> {
     configs
         .iter()
-        .find(|config| RegistryAgent::kind(&config.id) == Some(kind))
+        .find(|config| RegistryAgent::url_id(&config.id) == kind.as_url_segment())
         .map(|config| config.id.clone())
         .or_else(|| {
             let id = kind.as_url_segment();

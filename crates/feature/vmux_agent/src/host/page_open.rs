@@ -38,8 +38,7 @@ use vmux_space::model::SpaceRecord;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
 
 use super::attach::{
-    AcpAgentAttachment, AgentStrategies, PageAgentAttachment, acp_icon_for_id,
-    acp_profile_name_for_id, acp_registry_agent_for_id,
+    AcpAgentAttachment, acp_icon_for_id, acp_profile_name_for_id, acp_registry_agent_for_id,
 };
 use super::spawn::PendingPageOpen;
 use crate::acp_registry::RegistryAgent;
@@ -121,19 +120,10 @@ struct AgentChatTarget {
 impl AgentChatTarget {
     fn parse(url: &str) -> Option<Self> {
         match crate::AgentUrl::parse(url)? {
-            crate::AgentUrl::Page {
-                provider, model, ..
-            } => Some(Self {
-                url: format!("vmux://sessions/{provider}"),
-                title: format!("{provider}/{model}"),
+            crate::AgentUrl::AcpDefault => Some(Self {
+                url: "vmux://sessions/".to_string(),
+                title: "Agent".to_string(),
             }),
-            crate::AgentUrl::PageDefault => {
-                let provider = crate::host::provider::resolve_default_app_provider()?;
-                Some(Self {
-                    url: format!("vmux://sessions/{}", provider.provider),
-                    title: format!("{}/{}", provider.provider, provider.default_model),
-                })
-            }
             crate::AgentUrl::Acp { id, sid } => {
                 let id = RegistryAgent::url_id(&id);
                 let url = match sid {
@@ -488,7 +478,6 @@ fn handle_agent_page_open(
     cli_sessions: Query<(Entity, &CoreAgentSession, &CoreSessionId)>,
     acp_sessions: Query<&AcpSession>,
     child_of_q: Query<&ChildOf>,
-    strategies: AgentStrategies,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
     mut commands: Commands,
     settings: Res<AppSettings>,
@@ -563,7 +552,6 @@ fn handle_agent_page_open(
             &agents,
             &cli_sessions,
             &acp_sessions,
-            &strategies,
             &mut spawn_agent,
             &mut commands,
             &default_cwd,
@@ -639,7 +627,6 @@ fn handle_swap_stack_session(
             .entity(ev.stack)
             .remove::<AcpSession>()
             .remove::<crate::acp_tool::AcpLaunchStarted>()
-            .remove::<vmux_session::AgentSession>()
             .remove::<crate::AgentMessages>()
             .remove::<crate::AgentApprovalPolicy>()
             .remove::<vmux_session::AgentRunState>()
@@ -693,7 +680,6 @@ fn handle_agent_page_open_task(
     agents: &Query<&CoreAgentSession>,
     cli_sessions: &Query<(Entity, &CoreAgentSession, &CoreSessionId)>,
     acp_sessions: &Query<&AcpSession>,
-    strategies: &AgentStrategies,
     spawn_agent: &mut MessageWriter<SpawnAgentInStackRequest>,
     commands: &mut Commands,
     default_cwd: &std::path::Path,
@@ -707,40 +693,28 @@ fn handle_agent_page_open_task(
         attach_cli_setup_to_stack(kind, task.stack, commands);
         return Ok(());
     }
-    match crate::AgentUrl::parse(&task.url) {
-        Some(crate::AgentUrl::Page {
-            provider,
-            model,
-            sid,
-        }) => {
-            let kind = strategies.page_kind(&provider, &model)?;
-            if transition_webview.is_none() {
-                commands.entity(task.stack).despawn_children();
-            }
-            let request = PageAgentAttachment::new(kind, provider, model, sid)
-                .with_webview(transition_webview);
-            commands.entity(task.stack).insert(request);
-            insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
-            Ok(())
+    let target = match crate::AgentUrl::parse(&task.url) {
+        Some(crate::AgentUrl::AcpDefault) => {
+            let id = acp_configs
+                .first()
+                .map(|config| config.id.clone())
+                .or_else(|| {
+                    catalog.and_then(|catalog| {
+                        catalog
+                            .agents
+                            .iter()
+                            .find(|agent| RegistryAgent::is_installed(agent))
+                            .map(|agent| agent.id.clone())
+                    })
+                })
+                .ok_or_else(|| "no ACP agent is configured or installed".to_string())?;
+            crate::AgentUrl::Acp { id, sid: None }
         }
-        Some(crate::AgentUrl::PageDefault) => {
-            let provider = crate::host::provider::resolve_default_app_provider().ok_or_else(|| {
-                "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
-                    .to_string()
-            })?;
-            let kind = strategies.page_kind(provider.provider, provider.default_model)?;
-            let sid = uuid::Uuid::new_v4().to_string();
-            if transition_webview.is_none() {
-                commands.entity(task.stack).despawn_children();
-            }
-            let request =
-                PageAgentAttachment::new(kind, provider.provider, provider.default_model, sid)
-                    .with_webview(transition_webview);
-            commands.entity(task.stack).insert(request);
-            insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
-            Ok(())
-        }
-        Some(crate::AgentUrl::Cli { kind, sid }) => {
+        Some(target) => target,
+        None => return Err(format!("malformed agent URL '{}'", task.url)),
+    };
+    match target {
+        crate::AgentUrl::Cli { kind, sid } => {
             if sid == crate::url::CLI_FRESH_SID {
                 if !stack_has_agent_of_kind(task.stack, kind, children_q, agents) {
                     spawn_agent.write(SpawnAgentInStackRequest {
@@ -771,26 +745,11 @@ fn handle_agent_page_open_task(
             });
             Ok(())
         }
-        Some(crate::AgentUrl::Acp { id, sid }) => {
+        crate::AgentUrl::Acp { id, sid } => {
             let cfg = acp_configs
                 .iter()
                 .find(|config| RegistryAgent::ids_match(&config.id, &id));
             if cfg.is_none() && acp_registry_agent_for_id(catalog, &id).is_none() {
-                if sid.is_none()
-                    && let Some(kind) = AgentKind::from_url_segment(&id)
-                {
-                    if !stack_has_agent_of_kind(task.stack, kind, children_q, agents) {
-                        spawn_agent.write(SpawnAgentInStackRequest {
-                            kind,
-                            cwd: default_cwd.to_path_buf(),
-                            session_id: None,
-                            stack: task.stack,
-                            initial_prompt,
-                            initial_attachments,
-                        });
-                    }
-                    return Ok(());
-                }
                 return Err(format!("ACP agent unavailable for '{id}'"));
             }
             if acp_sessions
@@ -813,7 +772,7 @@ fn handle_agent_page_open_task(
             insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
             Ok(())
         }
-        None => Err(format!("malformed agent URL '{}'", task.url)),
+        crate::AgentUrl::AcpDefault => unreachable!(),
     }
 }
 
@@ -956,15 +915,16 @@ fn data_url_for_html(html: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::attach::AttachPlugin;
+    use crate::host::cli::AgentExecutableOverride;
     use crate::host::cli::VIBE as VIBE_CLI;
-    use crate::host::provider::AgentExecutableOverride;
     use crate::host::spawn::{SpawnPlugin, SpawnRequestSet, SpawnRequestsPlugin};
     use crate::host::test_support::{init_worktree_test_repo, test_settings};
     use vmux_terminal::Terminal;
 
     pub(crate) fn swap_test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, AttachPlugin))
             .add_message::<SwapStackSession>()
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(test_settings())
@@ -1036,6 +996,7 @@ mod tests {
             });
 
         app.update();
+        app.update();
 
         let session = app.world().get::<AcpSession>(stack).unwrap();
         assert_eq!(session.agent_id, "claude");
@@ -1072,6 +1033,7 @@ mod tests {
             });
 
         app.update();
+        app.update();
 
         assert!(
             app.world()
@@ -1101,7 +1063,7 @@ mod tests {
         app.world_mut().spawn(PageOpenTask {
             id: PageOpenId::new(),
             stack,
-            url: "vmux://sessions/vibe/".to_string(),
+            url: "vmux://sessions/vibe/cli".to_string(),
             request_id: None,
         });
 
@@ -1151,7 +1113,7 @@ mod tests {
             app.world_mut().spawn(PageOpenTask {
                 id: PageOpenId::new(),
                 stack,
-                url: format!("vmux://sessions/{segment}/"),
+                url: format!("vmux://sessions/{segment}/cli"),
                 request_id: None,
             });
 
@@ -1185,7 +1147,7 @@ mod tests {
                 distribution: Distribution::default(),
             }],
         });
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, AttachPlugin))
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(settings)
             .add_systems(Update, handle_agent_page_open);
@@ -1201,6 +1163,7 @@ mod tests {
             })
             .id();
 
+        app.update();
         app.update();
 
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
@@ -1315,7 +1278,7 @@ mod tests {
     fn inline_open_starts_agent_before_worktree_creation() {
         let repo = init_worktree_test_repo();
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, AttachPlugin))
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(test_settings())
             .add_systems(
@@ -1403,6 +1366,7 @@ mod tests {
             [start]
         );
 
+        app.update();
         app.update();
 
         assert!(app.world().get::<PageOpenDeferred>(first).is_none());
@@ -1707,7 +1671,7 @@ mod tests {
     #[test]
     fn acp_tab_without_workspace_attaches_once_without_setup_page() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, AttachPlugin))
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(test_settings())
             .add_systems(Update, handle_agent_page_open);
@@ -1733,6 +1697,7 @@ mod tests {
             request_id: None,
         });
 
+        app.update();
         app.update();
 
         let session = app.world().get::<AcpSession>(stack).unwrap();
@@ -1760,7 +1725,7 @@ mod tests {
     #[test]
     fn inline_start_transition_navigates_the_launcher_view_and_keeps_the_prompt() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, AttachPlugin))
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(test_settings())
             .add_systems(Update, handle_agent_page_open);
@@ -1802,6 +1767,7 @@ mod tests {
         });
 
         app.update();
+        app.update();
 
         assert!(app.world().get_entity(webview).is_ok());
         let mut views = app
@@ -1839,7 +1805,7 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, AttachPlugin))
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(test_settings())
             .add_systems(
@@ -1873,6 +1839,7 @@ mod tests {
             })
             .id();
 
+        app.update();
         app.update();
 
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
@@ -1920,7 +1887,7 @@ mod tests {
         app.world_mut().spawn(PageOpenTask {
             id: PageOpenId::new(),
             stack,
-            url: "vmux://sessions/claude/".to_string(),
+            url: "vmux://sessions/claude/cli".to_string(),
             request_id: None,
         });
 
@@ -2051,16 +2018,13 @@ mod tests {
             ])));
         app.add_plugins((
             MinimalPlugins,
+            crate::manifest::AgentManifestPlugin,
             crate::host::cli::CliLaunchPlugin,
             SpawnPlugin,
         ))
         .add_message::<SpawnAgentInStackRequest>()
         .add_message::<crate::session::AgentSessionExited>()
         .add_message::<vmux_core::agent::RestartAgentPty>()
-        .add_message::<vmux_core::agent::PageAgentAttachRequest>()
-        .add_message::<vmux_core::agent::PageAgentSpawnStackRequest>()
-        .add_message::<vmux_core::agent::PageAgentSpawnDefaultRequest>()
-        .add_message::<vmux_core::agent::PageAgentAttachDefaultRequest>()
         .insert_resource(test_settings());
         let stack = app.world_mut().spawn(stack_bundle()).id();
         app.world_mut()
@@ -2198,7 +2162,7 @@ mod tests {
         app.world_mut().spawn(PageOpenTask {
             id: PageOpenId::new(),
             stack,
-            url: "vmux://sessions/claude/".to_string(),
+            url: "vmux://sessions/claude/cli".to_string(),
             request_id: None,
         });
 
@@ -2241,7 +2205,7 @@ mod tests {
             .spawn(PageOpenTask {
                 id: PageOpenId::new(),
                 stack,
-                url: "vmux://sessions/claude/".to_string(),
+                url: "vmux://sessions/claude/cli".to_string(),
                 request_id: None,
             })
             .id();
@@ -2258,7 +2222,7 @@ mod tests {
     }
 
     #[test]
-    fn bare_agent_open_skips_when_stack_already_has_same_agent() {
+    fn cli_agent_open_skips_when_stack_already_has_same_agent() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
@@ -2275,7 +2239,7 @@ mod tests {
         app.world_mut().spawn(PageOpenTask {
             id: PageOpenId::new(),
             stack,
-            url: "vmux://sessions/vibe/".to_string(),
+            url: "vmux://sessions/vibe/cli".to_string(),
             request_id: None,
         });
 
@@ -2289,7 +2253,7 @@ mod tests {
         assert_eq!(
             spawns.len(),
             0,
-            "bare agent open must not spawn a second agent when the stack already has one"
+            "CLI agent open must not spawn a second agent when the stack already has one"
         );
     }
 }

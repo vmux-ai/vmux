@@ -28,8 +28,8 @@ pub use payload::{
 };
 pub use settings::ResolvedLocale;
 pub use snapshot::{
-    AgentPromptTarget, AgentProviderSummary, AgentStrategySummary, ClaimedUrl, ClaimedUrls,
-    CommandBarAgentModels, CommandBarAgentModes, CommandBarAgentsSnapshot, CommandBarPagesSnapshot,
+    AgentPromptTarget, AgentSummary, ClaimedUrl, ClaimedUrls, CommandBarAgentModels,
+    CommandBarAgentModes, CommandBarAgentsSnapshot, CommandBarPagesSnapshot,
     CommandBarProjectRoots, CommandBarProjection, CommandBarSpacesSnapshot,
     CommandBarTerminalsSnapshot, CommandBarUiStateUpdates, CommandBarWorkDirectory,
     CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot, ContributedCommand, ContributedPage,

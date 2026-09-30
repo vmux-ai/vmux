@@ -4,12 +4,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_command::WriteCommandRequests;
 use vmux_core::KeyboardOwner;
-use vmux_core::agent::{
-    PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
-    PageAgentSpawnStackRequest, RestartAgentPty, SpawnAgentInStackRequest,
-};
+use vmux_core::agent::{RestartAgentPty, SpawnAgentInStackRequest};
 use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
-use vmux_core::{LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled};
+use vmux_core::{PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled};
 use vmux_layout::pane::ForcePaneClose;
 use vmux_setting::AppSettings;
 use vmux_terminal::launch::TerminalLaunch;
@@ -18,12 +15,11 @@ use vmux_terminal::{ProcessExited, TerminalGridSize, new_terminal_bundle_with_cw
 use crate::session::CliSessionSources;
 use crate::session::{AgentSession, AgentSessionExited, PendingAgentSession, SessionId};
 
-use super::attach::{AgentStrategies, PageAgentAttachment};
+use super::cli::AgentExecutables;
 use super::launch::{AgentLaunchRequest, AgentRestartRequest, PreparedAgentLaunch};
 use super::page_open::{
     attach_agent_spawn_error_to_stack, attach_cli_setup_to_stack, cli_initial_prompt,
 };
-use super::provider::AgentExecutables;
 
 pub(super) struct SpawnPlugin;
 
@@ -61,10 +57,6 @@ impl Plugin for SpawnPlugin {
                     drain_agent_restarts
                         .in_set(ApplyAgentLaunchSet)
                         .before(ServiceMessageSet),
-                    respond_page_agent_attach,
-                    respond_page_agent_spawn_stack,
-                    spawn_default,
-                    attach_default,
                 ),
             );
     }
@@ -341,100 +333,6 @@ fn drain_agent_launches(
                     .remove::<AgentLaunchGeneration>();
             }
         }
-    }
-}
-
-fn respond_page_agent_attach(
-    mut reader: MessageReader<PageAgentAttachRequest>,
-    strategies: AgentStrategies,
-    mut commands: Commands,
-) {
-    for req in reader.read() {
-        let Ok(kind) = strategies.page_kind(&req.provider, &req.model) else {
-            continue;
-        };
-        let request = PageAgentAttachment::new(
-            kind,
-            req.provider.clone(),
-            req.model.clone(),
-            req.sid.clone(),
-        );
-        commands.entity(req.stack).insert(request);
-    }
-}
-
-fn respond_page_agent_spawn_stack(
-    mut reader: MessageReader<PageAgentSpawnStackRequest>,
-    strategies: AgentStrategies,
-    mut commands: Commands,
-) {
-    for req in reader.read() {
-        let Ok(kind) = strategies.page_kind(&req.provider, &req.model) else {
-            continue;
-        };
-        let stack = commands
-            .spawn((
-                vmux_layout::stack::stack_bundle(),
-                LastActivatedAt::now(),
-                ChildOf(req.pane),
-            ))
-            .id();
-        let request = PageAgentAttachment::new(
-            kind,
-            req.provider.clone(),
-            req.model.clone(),
-            req.sid.clone(),
-        );
-        commands.entity(stack).insert(request);
-    }
-}
-
-fn spawn_default(
-    mut reader: MessageReader<PageAgentSpawnDefaultRequest>,
-    strategies: AgentStrategies,
-    mut commands: Commands,
-) {
-    for req in reader.read() {
-        let Some(p) = crate::host::provider::resolve_default_app_provider() else {
-            bevy::log::warn!(
-                "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
-            );
-            continue;
-        };
-        let Ok(kind) = strategies.page_kind(p.provider, p.default_model) else {
-            continue;
-        };
-        let sid = uuid::Uuid::new_v4().to_string();
-        let stack = commands
-            .spawn((
-                vmux_layout::stack::stack_bundle(),
-                LastActivatedAt::now(),
-                ChildOf(req.pane),
-            ))
-            .id();
-        let request = PageAgentAttachment::new(kind, p.provider, p.default_model, sid);
-        commands.entity(stack).insert(request);
-    }
-}
-
-fn attach_default(
-    mut reader: MessageReader<PageAgentAttachDefaultRequest>,
-    strategies: AgentStrategies,
-    mut commands: Commands,
-) {
-    for req in reader.read() {
-        let Some(p) = crate::host::provider::resolve_default_app_provider() else {
-            bevy::log::warn!(
-                "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
-            );
-            continue;
-        };
-        let Ok(kind) = strategies.page_kind(p.provider, p.default_model) else {
-            continue;
-        };
-        let sid = uuid::Uuid::new_v4().to_string();
-        let request = PageAgentAttachment::new(kind, p.provider, p.default_model, sid);
-        commands.entity(req.stack).insert(request);
     }
 }
 

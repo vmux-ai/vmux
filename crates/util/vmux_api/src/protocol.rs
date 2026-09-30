@@ -388,18 +388,10 @@ mod tests {
     }
 
     #[test]
-    fn page_agent_client_messages_roundtrip() {
+    fn agent_session_client_messages_roundtrip() {
         let messages = [
-            ClientMessage::SpawnPageAgent {
-                sid: "s".into(),
-                provider: "anthropic".into(),
-                model: "m".into(),
-                cwd: "/tmp".into(),
-                auto_tools: vec!["list_spaces".into()],
-                tools_json: "[]".into(),
-            },
             ClientMessage::Shared(SharedMessage::AgentAttach { sid: "s".into() }),
-            ClientMessage::DetachPageAgent { sid: "s".into() },
+            ClientMessage::DetachAgentSession { sid: "s".into() },
             ClientMessage::Shared(SharedMessage::AgentInput {
                 sid: "s".into(),
                 text: "hi".into(),
@@ -435,7 +427,7 @@ mod tests {
                 call_id: "ca".into(),
                 decision: ApprovalDecision::AllowAlways,
             }),
-            ClientMessage::ClosePageAgent { sid: "s".into() },
+            ClientMessage::CloseAgentSession { sid: "s".into() },
             ClientMessage::AgentToolResult {
                 request_id: AgentRequestId::new(),
                 content: "ok".into(),
