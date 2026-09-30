@@ -8,15 +8,9 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
 use vmux_ui::util::cn;
 
-use crate::palette::query::looks_like_url;
+use crate::palette::PaletteQuery;
 use crate::palette::results::CommandBarResultItem as ResultItem;
 use crate::palette::results::{prompt_target_matches_query, prompt_target_url};
-use crate::palette::style::{
-    RESULT_CONTENT_ROW_CLASS, RESULT_FAVICON_CLASS, RESULT_HISTORY_URL_CLASS,
-    RESULT_LEADING_ICON_CLASS, RESULT_LOCATION_CLASS, RESULT_PRIMARY_TEXT_CLASS,
-    RESULT_SECONDARY_TEXT_CLASS, RESULT_SHORTCUT_BADGE_CLASS, RESULT_TERMINAL_PATH_CLASS,
-    RESULT_TRAILING_SLOT_CLASS, result_item_class,
-};
 use crate::search_engine::SearchEngines;
 
 #[component]
@@ -42,51 +36,55 @@ pub fn ResultRow(
         }
         div {
             id: "command-bar-item-{index}",
-            class: result_item_class(selected),
+            class: if selected {
+                "flex min-h-15 min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden bg-primary/12 px-3.5 py-2.5 text-foreground shadow-[inset_2px_0_0_0_var(--primary),0_0_18px_-4px_color-mix(in_oklab,var(--primary)_45%,transparent)]"
+            } else {
+                "flex min-h-15 min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden px-3.5 py-2.5 hover:bg-foreground/5"
+            },
             onclick: move |_| on_activate.call(()),
             onmouseenter: move |_| on_hover.call(()),
             match &item {
                             ResultItem::Pick { label, .. } => rsx! {
-                                div { class: RESULT_CONTENT_ROW_CLASS,
-                                    span { class: RESULT_PRIMARY_TEXT_CLASS, "{label}" }
+                                div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
+                                    span { class: "min-w-0 truncate text-base leading-snug text-foreground", "{label}" }
                                 }
-                                span { class: RESULT_TRAILING_SLOT_CLASS, "\u{21b5}" }
+                                span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground", "\u{21b5}" }
                             },
                             ResultItem::Terminal { path } => rsx! {
-                                div { class: RESULT_CONTENT_ROW_CLASS,
+                                div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                     span { class: "shrink-0 text-sm text-muted-foreground", ">_" }
                                     if path.is_empty() {
                                         span { class: "text-sm text-foreground", {translate("command-terminal")} }
                                     } else {
                                         span { class: "shrink-0 text-sm text-foreground", {translate("command-open-terminal")} }
-                                        span { class: RESULT_TERMINAL_PATH_CLASS, "{path}" }
+                                        span { class: "ml-1 min-w-0 truncate text-sm text-muted-foreground", "{path}" }
                                     }
                                 }
-                                span { class: RESULT_TRAILING_SLOT_CLASS }
+                                span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground" }
                             },
                             ResultItem::Editor { path } => rsx! {
-                                div { class: RESULT_CONTENT_ROW_CLASS,
+                                div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                     span { class: "shrink-0 text-sm text-muted-foreground", "\u{2261}" }
                                     span { class: "shrink-0 text-sm text-foreground", {translate("command-open-editor")} }
-                                    span { class: RESULT_TERMINAL_PATH_CLASS, "{path}" }
+                                    span { class: "ml-1 min-w-0 truncate text-sm text-muted-foreground", "{path}" }
                                 }
-                                span { class: RESULT_TRAILING_SLOT_CLASS }
+                                span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground" }
                             },
                             ResultItem::Stack { title, url, icon, location, .. } => rsx! {
-                                div { class: RESULT_CONTENT_ROW_CLASS,
+                                div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                     PageIconView {
                                         icon: icon.clone(),
                                         url: url.clone(),
-                                        img_class: RESULT_FAVICON_CLASS.to_string(),
-                                        icon_class: RESULT_LEADING_ICON_CLASS.to_string(),
+                                        img_class: "mt-0.5 h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
+                                        icon_class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground".to_string(),
                                     }
                                     div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                        span { class: RESULT_PRIMARY_TEXT_CLASS, "{title}" }
-                                        span { class: RESULT_SECONDARY_TEXT_CLASS, "{url}" }
+                                        span { class: "min-w-0 truncate text-base leading-snug text-foreground", "{title}" }
+                                        span { class: "min-w-0 truncate text-sm leading-snug text-muted-foreground", "{url}" }
                                     }
                                 }
                                 span {
-                                    class: RESULT_LOCATION_CLASS,
+                                    class: "ml-3 min-w-0 max-w-[46%] shrink-0 truncate rounded-md bg-foreground/[0.055] px-2 py-1 text-right font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/[0.06]",
                                     title: "{location}",
                                     if location.is_empty() { {translate("command-stack")} } else { "{location}" }
                                 }
@@ -97,51 +95,51 @@ pub fn ResultRow(
                                 }
                                 div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
                                     div { class: "flex min-w-0 items-center gap-2",
-                                        span { class: RESULT_PRIMARY_TEXT_CLASS, "{name}" }
+                                        span { class: "min-w-0 truncate text-base leading-snug text-foreground", "{name}" }
                                         if *is_active {
                                             span { class: "rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-300", {translate("common-active")} }
                                         }
                                     }
-                                    span { class: RESULT_SECONDARY_TEXT_CLASS, "{profile}" }
+                                    span { class: "min-w-0 truncate text-sm leading-snug text-muted-foreground", "{profile}" }
                                 }
-                                span { class: RESULT_TRAILING_SLOT_CLASS, {translate_with("command-tabs", &[("count", TranslationValue::Number(*tab_count as i64))])} }
+                                span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground", {translate_with("command-tabs", &[("count", TranslationValue::Number(*tab_count as i64))])} }
                             },
                             ResultItem::Command { name, shortcut, .. } => rsx! {
-                                div { class: RESULT_CONTENT_ROW_CLASS,
+                                div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                     span { class: "shrink-0 text-sm text-muted-foreground", ">_" }
-                                    span { class: RESULT_PRIMARY_TEXT_CLASS, "{name}" }
+                                    span { class: "min-w-0 truncate text-base leading-snug text-foreground", "{name}" }
                                 }
-                                span { class: RESULT_TRAILING_SLOT_CLASS,
+                                span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground",
                                     if !shortcut.is_empty() {
-                                        span { class: RESULT_SHORTCUT_BADGE_CLASS, "{shortcut}" }
+                                        span { class: "max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground", "{shortcut}" }
                                     }
                                 }
                             },
                             ResultItem::Ex { name, hint } => rsx! {
-                                div { class: RESULT_CONTENT_ROW_CLASS,
+                                div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                     span { class: "shrink-0 font-mono text-sm text-muted-foreground", ":" }
                                     span { class: "shrink-0 font-mono text-sm text-foreground", "{name}" }
-                                    span { class: "{RESULT_SECONDARY_TEXT_CLASS} min-w-0 truncate", "{hint}" }
+                                    span { class: "min-w-0 truncate text-sm leading-snug text-muted-foreground", "{hint}" }
                                 }
-                                span { class: RESULT_TRAILING_SLOT_CLASS, "\u{21b5}" }
+                                span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground", "\u{21b5}" }
                             },
                             ResultItem::Slash { name, hint } => rsx! {
-                                div { class: RESULT_CONTENT_ROW_CLASS,
+                                div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                     span { class: "shrink-0 font-mono text-sm text-muted-foreground", "/" }
                                     span { class: "shrink-0 font-mono text-sm text-foreground", "{name}" }
-                                    span { class: "{RESULT_SECONDARY_TEXT_CLASS} min-w-0 truncate", "{hint}" }
+                                    span { class: "min-w-0 truncate text-sm leading-snug text-muted-foreground", "{hint}" }
                                 }
-                                span { class: RESULT_TRAILING_SLOT_CLASS, "\u{21b5}" }
+                                span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground", "\u{21b5}" }
                             },
                             ResultItem::Resume { entry, .. } => {
                                 let preview = ResumePreview::after_title(&entry.title, &entry.latest);
                                 rsx! {
-                                    div { class: RESULT_CONTENT_ROW_CLASS,
+                                    div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                         span { class: "shrink-0 text-sm text-muted-foreground", "\u{21ba}" }
                                         div { class: "flex min-w-0 flex-1 flex-col gap-0.5",
                                             span { class: "min-w-0 truncate text-sm text-foreground", "{entry.title}" }
                                             if let Some(preview) = preview {
-                                                span { class: "{RESULT_SECONDARY_TEXT_CLASS} min-w-0 truncate", "{preview}" }
+                                                span { class: "min-w-0 truncate text-sm leading-snug text-muted-foreground", "{preview}" }
                                             }
                                         }
                                         span { class: "ml-3 w-20 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground/75",
@@ -152,51 +150,51 @@ pub fn ResultRow(
                                 }
                             },
                             ResultItem::ResumePending { row } => rsx! {
-                                div { class: RESULT_CONTENT_ROW_CLASS,
+                                div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                     span { class: "shrink-0 text-sm text-muted-foreground/40", "\u{21ba}" }
                                     div { class: "flex min-w-0 flex-1 flex-col gap-1.5",
                                         Skeleton { class: cn(["h-3 bg-muted-foreground/20", SkeletonWidth::title(*row)]) }
                                         Skeleton { class: cn(["h-2.5 bg-muted-foreground/10", SkeletonWidth::latest(*row)]) }
                                     }
                                 }
-                                span { class: RESULT_TRAILING_SLOT_CLASS }
+                                span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground" }
                             },
                             ResultItem::History { url, title, favicon_url, .. } => rsx! {
-                                div { class: RESULT_CONTENT_ROW_CLASS,
+                                div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                     Favicon {
                                         favicon_url: favicon_url.clone(),
                                         url: url.clone(),
-                                        class: RESULT_FAVICON_CLASS.to_string(),
-                                        globe_class: RESULT_LEADING_ICON_CLASS.to_string(),
+                                        class: "mt-0.5 h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
+                                        globe_class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground".to_string(),
                                     }
                                     span { class: "min-w-0 flex-1 truncate text-sm text-foreground",
                                         if title.is_empty() { "{url}" } else { "{title}" }
                                     }
-                                    span { class: RESULT_HISTORY_URL_CLASS, "{url}" }
+                                    span { class: "ml-auto min-w-0 max-w-xs truncate text-sm text-muted-foreground", "{url}" }
                                 }
-                                span { class: RESULT_TRAILING_SLOT_CLASS }
+                                span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground" }
                             },
                             ResultItem::Page { url, title, icon, shortcut, .. } => rsx! {
-                                div { class: RESULT_CONTENT_ROW_CLASS,
+                                div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                     PageIconView {
                                         icon: icon.clone(),
                                         url: url.clone(),
-                                        img_class: RESULT_FAVICON_CLASS.to_string(),
-                                        icon_class: RESULT_LEADING_ICON_CLASS.to_string(),
+                                        img_class: "mt-0.5 h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
+                                        icon_class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground".to_string(),
                                     }
                                     div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
                                         if start_prompt_mode
                                             && prompt_target_url(&item).is_some()
                                             && !prompt_target_matches_query(&item, q)
                                         {
-                                            span { class: RESULT_PRIMARY_TEXT_CLASS, "Ask {title}" }
+                                            span { class: "min-w-0 truncate text-base leading-snug text-foreground", "Ask {title}" }
                                         } else {
-                                            span { class: RESULT_PRIMARY_TEXT_CLASS, "{title}" }
-                                            span { class: RESULT_SECONDARY_TEXT_CLASS, "{url}" }
+                                            span { class: "min-w-0 truncate text-base leading-snug text-foreground", "{title}" }
+                                            span { class: "min-w-0 truncate text-sm leading-snug text-muted-foreground", "{url}" }
                                         }
                                     }
                                 }
-                                span { class: RESULT_TRAILING_SLOT_CLASS,
+                                span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground",
                                     if start_prompt_mode
                                         && prompt_target_url(&item).is_some()
                                         && !prompt_target_matches_query(&item, q)
@@ -205,118 +203,118 @@ pub fn ResultRow(
                                     } else if shortcut.is_empty() {
                                         {translate("command-new-tab")}
                                     } else {
-                                        span { class: RESULT_SHORTCUT_BADGE_CLASS, "{shortcut}" }
+                                        span { class: "max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground", "{shortcut}" }
                                     }
                                 }
                             },
                             ResultItem::Navigate { url } => rsx! {
-                                div { class: RESULT_CONTENT_ROW_CLASS,
-                                    Icon { class: RESULT_LEADING_ICON_CLASS,
+                                div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
+                                    Icon { class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground",
                                         circle { cx: "11", cy: "11", r: "8" }
                                         path { d: "m21 21-4.3-4.3" }
                                     }
                                     if url.is_empty() {
                                         span { class: "text-sm text-foreground", {translate("command-search")} }
-                                    } else if looks_like_url(url) {
-                                        span { class: RESULT_PRIMARY_TEXT_CLASS, {translate_with("command-open-value", &[("value", TranslationValue::String(url))])} }
+                                    } else if PaletteQuery::new(url).looks_like_url() {
+                                        span { class: "min-w-0 truncate text-base leading-snug text-foreground", {translate_with("command-open-value", &[("value", TranslationValue::String(url))])} }
                                     } else {
-                                        span { class: RESULT_PRIMARY_TEXT_CLASS, {translate_with("command-search-value", &[("value", TranslationValue::String(url))])} }
+                                        span { class: "min-w-0 truncate text-base leading-snug text-foreground", {translate_with("command-search-value", &[("value", TranslationValue::String(url))])} }
                                     }
                                 }
                                 if !url.is_empty() {
-                                    span { class: RESULT_TRAILING_SLOT_CLASS, "\u{21b5}" }
+                                    span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground", "\u{21b5}" }
                                 } else {
-                                    span { class: RESULT_TRAILING_SLOT_CLASS }
+                                    span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground" }
                                 }
                             },
                             ResultItem::Search { engine, query } => rsx! {
-                                div { class: RESULT_CONTENT_ROW_CLASS,
+                                div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                     Favicon {
                                         favicon_url: String::new(),
                                         url: SearchEngines::url(*engine, query),
-                                        class: RESULT_FAVICON_CLASS.to_string(),
-                                        globe_class: RESULT_LEADING_ICON_CLASS.to_string(),
+                                        class: "mt-0.5 h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
+                                        globe_class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground".to_string(),
                                     }
-                                    span { class: RESULT_PRIMARY_TEXT_CLASS, "Search with {SearchEngines::name(*engine)}" }
+                                    span { class: "min-w-0 truncate text-base leading-snug text-foreground", "Search with {SearchEngines::name(*engine)}" }
                                 }
-                                span { class: RESULT_TRAILING_SLOT_CLASS, "\u{21b5}" }
+                                span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground", "\u{21b5}" }
                             },
                             ResultItem::File { path, is_dir, project, relative } => {
                                 let name = FilePath(path).name();
                                 let location = FileLocation::resolve(project, relative, path);
                                 rsx! {
-                                    div { class: RESULT_CONTENT_ROW_CLASS,
+                                    div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                         if *is_dir {
-                                            Icon { class: RESULT_LEADING_ICON_CLASS,
+                                            Icon { class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground",
                                                 path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
                                             }
                                         } else {
-                                            Icon { class: RESULT_LEADING_ICON_CLASS,
+                                            Icon { class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground",
                                                 path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
                                                 path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
                                             }
                                         }
                                         div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                            span { class: RESULT_PRIMARY_TEXT_CLASS, "{name}" }
+                                            span { class: "min-w-0 truncate text-base leading-snug text-foreground", "{name}" }
                                             div { class: "flex min-w-0 items-center gap-1.5",
                                                 if !project.is_empty() {
-                                                    span { class: "{RESULT_SHORTCUT_BADGE_CLASS} shrink-0", "{project}" }
+                                                    span { class: "max-w-full shrink-0 truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground", "{project}" }
                                                 }
-                                                span { class: "{RESULT_SECONDARY_TEXT_CLASS} min-w-0 truncate", "{location}" }
+                                                span { class: "min-w-0 truncate text-sm leading-snug text-muted-foreground", "{location}" }
                                             }
                                         }
                                     }
                                     if *is_dir {
-                                        span { class: RESULT_TRAILING_SLOT_CLASS }
+                                        span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground" }
                                     } else {
-                                        span { class: RESULT_TRAILING_SLOT_CLASS, "\u{21b5}" }
+                                        span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground", "\u{21b5}" }
                                     }
                                 }
                             },
                             ResultItem::WorkDir { path, is_dir } => {
                                 let name = FilePath(path).name();
                                 rsx! {
-                                    div { class: RESULT_CONTENT_ROW_CLASS,
+                                    div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
                                         if *is_dir {
-                                            Icon { class: RESULT_LEADING_ICON_CLASS,
+                                            Icon { class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground",
                                                 path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
                                             }
                                         } else {
-                                            Icon { class: RESULT_LEADING_ICON_CLASS,
+                                            Icon { class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground",
                                                 path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
                                                 path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
                                             }
                                         }
                                         div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                            span { class: RESULT_PRIMARY_TEXT_CLASS, "{name}" }
-                                            span { class: RESULT_SECONDARY_TEXT_CLASS, "{path}" }
+                                            span { class: "min-w-0 truncate text-base leading-snug text-foreground", "{name}" }
+                                            span { class: "min-w-0 truncate text-sm leading-snug text-muted-foreground", "{path}" }
                                         }
                                     }
                                     if *is_dir {
-                                        span { class: RESULT_TRAILING_SLOT_CLASS }
+                                        span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground" }
                                     } else {
-                                        span { class: RESULT_TRAILING_SLOT_CLASS, "\u{21b5}" }
+                                        span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground", "\u{21b5}" }
                                     }
                                 }
                             },
                             ResultItem::PartialIndex => rsx! {
-                                div { class: RESULT_CONTENT_ROW_CLASS,
-                                    Icon { class: RESULT_LEADING_ICON_CLASS,
+                                div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
+                                    Icon { class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground",
                                         circle { cx: "12", cy: "12", r: "10" }
                                         path { d: "M12 8v4" }
                                         path { d: "M12 16h.01" }
                                     }
-                                    span { class: RESULT_SECONDARY_TEXT_CLASS, {translate("command-partial-index")} }
+                                    span { class: "min-w-0 truncate text-sm leading-snug text-muted-foreground", {translate("command-partial-index")} }
                                 }
-                                span { class: RESULT_TRAILING_SLOT_CLASS }
+                                span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground" }
                             },
                             ResultItem::MoreMatches { shown, total } => rsx! {
-                                div { class: RESULT_CONTENT_ROW_CLASS,
-                                    Icon { class: RESULT_LEADING_ICON_CLASS,
+                                div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
+                                    Icon { class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground",
                                         circle { cx: "12", cy: "12", r: "10" }
                                         path { d: "M8 12h8" }
                                     }
-                                    span { class: RESULT_SECONDARY_TEXT_CLASS,
+                                    span { class: "min-w-0 truncate text-sm leading-snug text-muted-foreground",
                                         {translate_with(
                                             "command-more-matches",
                                             &[
@@ -326,7 +324,7 @@ pub fn ResultRow(
                                         )}
                                     }
                                 }
-                                span { class: RESULT_TRAILING_SLOT_CLASS }
+                                span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground" }
                             },
                             ResultItem::RecentFile { url, title } => {
                                 let display = url.strip_prefix("file://").unwrap_or(url.as_str()).to_string();
@@ -336,17 +334,17 @@ pub fn ResultRow(
                                     title.clone()
                                 };
                                 rsx! {
-                                    div { class: RESULT_CONTENT_ROW_CLASS,
-                                        Icon { class: RESULT_LEADING_ICON_CLASS,
+                                    div { class: "flex min-w-0 flex-1 items-start gap-2 overflow-hidden",
+                                        Icon { class: "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground",
                                             path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
                                             path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
                                         }
                                         div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                            span { class: RESULT_PRIMARY_TEXT_CLASS, "{name}" }
-                                            span { class: RESULT_SECONDARY_TEXT_CLASS, "{display}" }
+                                            span { class: "min-w-0 truncate text-base leading-snug text-foreground", "{name}" }
+                                            span { class: "min-w-0 truncate text-sm leading-snug text-muted-foreground", "{display}" }
                                         }
                                     }
-                                    span { class: RESULT_TRAILING_SLOT_CLASS, "\u{21b5}" }
+                                    span { class: "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground", "\u{21b5}" }
                                 }
                             },
             }

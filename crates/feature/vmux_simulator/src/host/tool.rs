@@ -13,7 +13,7 @@ pub struct SimulatorToolPlugin;
 
 impl Plugin for SimulatorToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FeatureManifestPlugin::new(include_str!("../feature.ron")))
+        app.add_plugins(FeatureManifestPlugin::new(crate::FEATURE_MANIFEST))
             .register_tool::<SimulatorScreenshotArgs>()
             .register_tool::<SimulatorTapArgs>()
             .register_tool::<SimulatorSwipeArgs>()

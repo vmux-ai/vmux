@@ -3,10 +3,6 @@ use crate::event::{
     CommandPaletteActivateRequest, CommandPaletteDraftRequest, CommandPaletteHistoryMoveRequest,
     CommandPaletteState, CommandPaletteSubmitRequest,
 };
-use crate::palette::style::{
-    COMMAND_BAR_INPUT_ROW_CLASS, COMMAND_BAR_INPUT_WRAP_CLASS, COMMAND_BAR_ROW_OVERLAY_CLASS,
-    RESULT_LIST_CLASS, command_bar_input_class,
-};
 use crate::palette::{PaletteGlyph, PaletteMode, PaletteRows, PaletteState, PaletteSurface};
 use crate::prompt_media::{ChatPasteMedia, ChatPickFiles, inline_media_query};
 use crate::ui::composer::{ComposerChips, ComposerMenuSet, use_prompt_recall};
@@ -607,7 +603,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 PromptBox {
                     glass: false,
                     class: "p-2",
-                    div { class: COMMAND_BAR_INPUT_ROW_CLASS,
+                    div { class: "flex w-full min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg bg-foreground/5 px-3",
                         if !palette.space_name.is_empty() {
                             span {
                                 title: "{palette.space_name}",
@@ -619,13 +615,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         if let Some(glyph) = palette.glyph {
                             PaletteGlyphIcon { glyph }
                         }
-                        div { class: COMMAND_BAR_INPUT_WRAP_CLASS,
+                        div { class: "relative min-w-0 flex-1 overflow-hidden",
                             if let Some(row_text) = palette.row_text.clone() {
-                                div { class: COMMAND_BAR_ROW_OVERLAY_CLASS,
+                                div { class: "pointer-events-none absolute inset-0 flex items-center",
                                     span { class: "truncate text-base text-foreground", "{row_text}" }
                                 }
                             } else if !ghost_text.is_empty() {
-                                div { class: COMMAND_BAR_ROW_OVERLAY_CLASS,
+                                div { class: "pointer-events-none absolute inset-0 flex items-center",
                                     span { class: "invisible text-base", "{q}" }
                                     span { class: "text-base text-muted-foreground/40", "{ghost_text}" }
                                 }
@@ -634,7 +630,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 id: "command-bar-input",
                                 r#type: "text",
                                 "data-ghost": "{ghost_text}",
-                                class: command_bar_input_class(palette.row_text.is_some()),
+                                class: if palette.row_text.is_some() {
+                                    "w-full min-w-0 cursor-text bg-transparent py-2.5 text-base text-transparent caret-foreground outline-none placeholder:text-muted-foreground"
+                                } else {
+                                    "w-full min-w-0 cursor-text bg-transparent py-2.5 text-base text-foreground caret-foreground outline-none placeholder:text-muted-foreground"
+                                },
                                 placeholder: if palette.row_text.is_some() { String::new() } else { palette.placeholder.clone() },
                                 value: "{q}",
                                 autofocus: true,
@@ -683,7 +683,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 PromptPopup {
                     placement: if is_start { PromptPopupPlacement::Downward } else { PromptPopupPlacement::Inline },
                     id: "command-bar-results",
-                    class: if is_start { "" } else { RESULT_LIST_CLASS },
+                    class: if is_start { "" } else { "max-h-80 overflow-x-hidden overflow-y-auto border-t border-border" },
                 for (i, item) in palette.rows.iter().enumerate() {
                     ResultRow {
                         key: "{i}",

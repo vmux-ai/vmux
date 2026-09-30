@@ -1,4 +1,7 @@
 #[cfg(feature = "cli")]
+pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
+
+#[cfg(feature = "cli")]
 mod cli;
 #[cfg(feature = "mobile")]
 mod mobile;

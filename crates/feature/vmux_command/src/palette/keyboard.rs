@@ -1,7 +1,7 @@
 use vmux_ui::caret::floor_char_boundary;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TextEditCommand {
+pub(crate) enum TextEditCommand {
     Home,
     End,
     Forward,
@@ -12,36 +12,28 @@ pub enum TextEditCommand {
     DeleteToBeginning,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CtrlKeyCapture {
-    Ignore,
-    Edit(TextEditCommand),
-    PassToDioxus,
-}
-
-pub fn ctrl_key_capture_for_code(code: &str) -> CtrlKeyCapture {
-    match code {
-        "KeyA" => CtrlKeyCapture::Edit(TextEditCommand::Home),
-        "KeyE" => CtrlKeyCapture::Edit(TextEditCommand::End),
-        "KeyF" => CtrlKeyCapture::Edit(TextEditCommand::Forward),
-        "KeyB" => CtrlKeyCapture::Edit(TextEditCommand::Back),
-        "KeyD" => CtrlKeyCapture::Edit(TextEditCommand::Delete),
-        "KeyH" => CtrlKeyCapture::Edit(TextEditCommand::Backspace),
-        "KeyW" => CtrlKeyCapture::Edit(TextEditCommand::DeleteWord),
-        "KeyU" => CtrlKeyCapture::Edit(TextEditCommand::DeleteToBeginning),
-        "KeyC" | "KeyJ" | "KeyK" | "KeyN" | "KeyP" => CtrlKeyCapture::PassToDioxus,
-        _ => CtrlKeyCapture::Ignore,
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Edited {
-    pub value: String,
-    pub caret: usize,
+pub(crate) struct Edited {
+    pub(crate) value: String,
+    pub(crate) caret: usize,
 }
 
 impl TextEditCommand {
-    pub fn apply(self, value: &str, caret: usize, ghost: &str) -> Edited {
+    pub(crate) fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "KeyA" => Some(Self::Home),
+            "KeyE" => Some(Self::End),
+            "KeyF" => Some(Self::Forward),
+            "KeyB" => Some(Self::Back),
+            "KeyD" => Some(Self::Delete),
+            "KeyH" => Some(Self::Backspace),
+            "KeyW" => Some(Self::DeleteWord),
+            "KeyU" => Some(Self::DeleteToBeginning),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn apply(self, value: &str, caret: usize, ghost: &str) -> Edited {
         let caret = floor_char_boundary(value, caret);
         let kept = |caret| Edited {
             value: value.to_string(),
@@ -104,7 +96,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_ctrl_chord_is_edited_passed_on_or_ignored() {
+    fn readline_chords_map_to_text_edits() {
         let edits = [
             ("KeyA", TextEditCommand::Home),
             ("KeyE", TextEditCommand::End),
@@ -116,27 +108,13 @@ mod tests {
             ("KeyU", TextEditCommand::DeleteToBeginning),
         ];
         for (code, command) in edits {
-            assert_eq!(
-                ctrl_key_capture_for_code(code),
-                CtrlKeyCapture::Edit(command),
-                "{code}"
-            );
+            assert_eq!(TextEditCommand::from_code(code), Some(command), "{code}");
         }
 
-        for code in ["KeyC", "KeyJ", "KeyK", "KeyN", "KeyP"] {
-            assert_eq!(
-                ctrl_key_capture_for_code(code),
-                CtrlKeyCapture::PassToDioxus,
-                "{code}"
-            );
-        }
-
-        for code in ["KeyG", "KeyZ", "Enter", "Tab", ""] {
-            assert_eq!(
-                ctrl_key_capture_for_code(code),
-                CtrlKeyCapture::Ignore,
-                "{code}"
-            );
+        for code in [
+            "KeyC", "KeyJ", "KeyK", "KeyN", "KeyP", "KeyG", "KeyZ", "Enter", "Tab", "",
+        ] {
+            assert_eq!(TextEditCommand::from_code(code), None, "{code}");
         }
     }
 

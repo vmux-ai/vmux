@@ -779,11 +779,10 @@ impl Home {
 
 fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
     let value = value.trim();
-    if crate::palette::is_data_uri(value)
-        || (value.contains("://") && crate::palette::looks_like_url(value))
-    {
+    let query = crate::palette::PaletteQuery::new(value);
+    if query.is_data_uri() || (value.contains("://") && query.looks_like_url()) {
         value.to_string()
-    } else if crate::palette::looks_like_url(value) {
+    } else if query.looks_like_url() {
         format!("https://{}", value)
     } else {
         SearchEngines::url(search_engine, value)

@@ -390,7 +390,7 @@ fn update_palette_draft(
     draft.target_url.clone_from(&request.target_url);
     draft.selected = request.selected as usize;
     draft.navigating = request.navigating;
-    let wants_mcp = PaletteQuery(&request.query).mcp_filter().is_some();
+    let wants_mcp = PaletteQuery::new(&request.query).mcp_filter().is_some();
     match (wants_mcp, active.contains(target)) {
         (true, false) => {
             commands.entity(target).insert(PaletteMcpActive);
@@ -821,7 +821,7 @@ fn project_palette(
         let rows = PaletteRows::build(&opened.0, &draft, surface);
         let mut projection = rows.projection();
         projection.query.clone_from(&input.query);
-        if let Some(filter) = PaletteQuery(&input.query).mcp_filter() {
+        if let Some(filter) = PaletteQuery::new(&input.query).mcp_filter() {
             let filter = filter.trim().to_ascii_lowercase();
             projection.mcp_open = true;
             for server in &mcp.0.servers {

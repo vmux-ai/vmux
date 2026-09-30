@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use unicode_width::UnicodeWidthChar;
-use vmux_command::palette::{is_data_uri, looks_like_path};
+use vmux_command::palette::PaletteQuery;
 use vmux_core::event::{LinkRange, TermLine};
 use vmux_layout::stack::OpenRequest;
 
@@ -124,10 +124,11 @@ fn may_hold_link(text: &str) -> bool {
 }
 
 fn resolve_target(token: &str, cwd: Option<&Path>) -> Option<String> {
-    if is_data_uri(token) || token.contains("://") {
+    let query = PaletteQuery::new(token);
+    if query.is_data_uri() || token.contains("://") {
         return Some(token.to_string());
     }
-    if looks_like_path(token) && path_token_has_name(token) {
+    if query.looks_like_path() && path_token_has_name(token) {
         return resolve_path(token, cwd);
     }
     None

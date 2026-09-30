@@ -1,5 +1,7 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
+
 #[cfg(host)]
 mod agent;
 #[cfg(host)]

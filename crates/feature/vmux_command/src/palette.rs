@@ -25,11 +25,8 @@ use self::results::{
 pub mod keyboard;
 pub(crate) mod query;
 pub mod results;
-#[cfg(ui)]
-pub(crate) mod style;
 
-pub(crate) use query::PaletteQuery;
-pub use query::{is_data_uri, looks_like_path, looks_like_url};
+pub use query::PaletteQuery;
 
 pub use vmux_api::command_bar::PaletteMode;
 
@@ -154,7 +151,7 @@ impl PaletteRows {
             .find(|item| prompt_target_url(item) == Some(draft.target_url.as_str()))
             .cloned()
             .or_else(|| prompt_targets.first().cloned());
-        let start_prompt_mode = is_start && PaletteQuery(query).is_start_prompt();
+        let start_prompt_mode = is_start && PaletteQuery::new(query).is_start_prompt();
 
         let mut items = FileRows::under_projects(
             Self::listed(state, draft, surface, mode, start_prompt_mode),
@@ -234,7 +231,7 @@ impl PaletteRows {
         if query.trim() == "/" {
             return !slash_commands.is_empty();
         }
-        let held = PaletteQuery(query);
+        let held = PaletteQuery::new(query);
         let Some((name, _)) = held.slash_token() else {
             return false;
         };
@@ -818,7 +815,7 @@ impl PaletteState {
         attachments: &[ChatAttachment],
     ) -> PaletteDecision {
         if self.surface.is_start()
-            && (PaletteQuery(&self.query).is_start_prompt() || !attachments.is_empty())
+            && (PaletteQuery::new(&self.query).is_start_prompt() || !attachments.is_empty())
             && let Some(target_url) = prompt_target_url(item)
         {
             return if prompt_target_matches_query(item, &self.query) && attachments.is_empty() {
@@ -953,7 +950,8 @@ impl PaletteState {
 
     fn submit_typed(&self, attachments: &[ChatAttachment]) -> PaletteDecision {
         if !TypedRow::beats_a_guessed_url(self.row(self.selected), &self.query)
-            && PaletteQuery(&self.query).opens_typed_url_on_enter(self.open_target, self.nav_mode)
+            && PaletteQuery::new(&self.query)
+                .opens_typed_url_on_enter(self.open_target, self.nav_mode)
         {
             return PaletteDecision::open(true, &self.query, self.open_target);
         }
@@ -1174,10 +1172,11 @@ impl CompletionQuery {
         if let Some(rest) = trimmed.strip_prefix("file://") {
             return Some(rest.to_string());
         }
-        if Self::looks_like_path(trimmed) {
+        if PaletteQuery::new(trimmed).looks_like_path() {
             return Some(trimmed.to_string());
         }
-        if trimmed.is_empty() || trimmed.contains("://") || is_data_uri(trimmed) {
+        if trimmed.is_empty() || trimmed.contains("://") || PaletteQuery::new(trimmed).is_data_uri()
+        {
             return None;
         }
         Some(trimmed.to_string())
@@ -1199,17 +1198,6 @@ impl CompletionQuery {
             }
         }
         false
-    }
-
-    fn looks_like_path(value: &str) -> bool {
-        if is_data_uri(value) {
-            return false;
-        }
-        value.starts_with('/')
-            || value.starts_with("~/")
-            || value.starts_with("./")
-            || value.starts_with("../")
-            || value.contains('/') && !value.contains(' ') && !value.contains("://")
     }
 }
 
@@ -1250,7 +1238,7 @@ impl FileRows {
         }
         let trimmed = query.trim();
         let leads =
-            CompletionQuery::looks_like_path(trimmed) || CompletionQuery::names_a_file(trimmed);
+            PaletteQuery::new(trimmed).looks_like_path() || CompletionQuery::names_a_file(trimmed);
         let mut files = Vec::with_capacity(completions.entries.len());
         let mut listed = Vec::with_capacity(completions.entries.len());
         for entry in completions.entries {

@@ -17,7 +17,7 @@ pub struct McpCliPlugin;
 impl Plugin for McpCliPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            FeatureManifestPlugin::new(include_str!("feature.ron")),
+            FeatureManifestPlugin::new(crate::FEATURE_MANIFEST),
             CliManifestPlugin,
             McpPlugin,
         ))

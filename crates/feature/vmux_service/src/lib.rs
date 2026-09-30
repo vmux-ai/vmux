@@ -1,3 +1,5 @@
+pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
+
 pub use vmux_api::service as event;
 
 pub mod remote;

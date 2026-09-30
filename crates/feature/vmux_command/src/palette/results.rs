@@ -9,7 +9,7 @@ use vmux_ui::i18n::translate;
 
 pub use vmux_api::command_bar::{CommandBarResultItem, ResumeSection};
 
-use super::query::{PaletteQuery, is_data_uri};
+use super::query::PaletteQuery;
 use crate::search_engine::SearchEngines;
 
 pub struct SlashRows;
@@ -23,7 +23,7 @@ impl SlashRows {
         sessions: &[ResumableSessionEntry],
         pending: bool,
     ) -> Vec<CommandBarResultItem> {
-        let held = PaletteQuery(query);
+        let held = PaletteQuery::new(query);
         let (name, rest) = match held.slash_token() {
             Some(parts) => parts,
             None if query.trim() == "/" => ("", ""),
@@ -201,17 +201,6 @@ impl PickerRows {
     }
 }
 
-fn looks_like_path(s: &str) -> bool {
-    if is_data_uri(s) {
-        return false;
-    }
-    s.starts_with('/')
-        || s.starts_with("~/")
-        || s.starts_with("./")
-        || s.starts_with("../")
-        || s.contains('/') && !s.contains(' ') && !s.contains("://")
-}
-
 fn space_result(space: &CommandBarSpace) -> CommandBarResultItem {
     CommandBarResultItem::Space {
         id: space.id.clone(),
@@ -328,7 +317,7 @@ pub fn prepend_prompt_targets(
     recent_targets: &[CommandBarResultItem],
     query: &str,
 ) {
-    if !PaletteQuery(query).is_start_prompt()
+    if !PaletteQuery::new(query).is_start_prompt()
         || results.iter().any(|item| prompt_target_url(item).is_some())
     {
         return;
@@ -410,7 +399,7 @@ pub fn start_page_results(
             .filter(|item| prompt_target_matches_query(item, query)),
     );
     let trimmed = query.trim();
-    if PaletteQuery(trimmed).is_start_prompt() {
+    if PaletteQuery::new(trimmed).is_start_prompt() {
         let engines = if search_engines.is_empty() {
             SearchEngines::ALL.as_slice()
         } else {
@@ -444,7 +433,7 @@ pub fn start_page_results(
     );
     results.extend(work_dir_results(work_dirs, &search_lower));
     results.extend(recent_file_results(recent_files, &search_lower));
-    if !PaletteQuery(trimmed).is_start_prompt() && !trimmed.is_empty() {
+    if !PaletteQuery::new(trimmed).is_start_prompt() && !trimmed.is_empty() {
         results.push(CommandBarResultItem::Navigate {
             url: trimmed.to_string(),
         });
@@ -582,7 +571,7 @@ pub fn filter_results(
 
     let mut items = Vec::new();
 
-    let is_path = looks_like_path(search);
+    let is_path = PaletteQuery::new(search).looks_like_path();
 
     if !starts_with_cmd && is_path {
         let names_a_directory = search.ends_with('/');

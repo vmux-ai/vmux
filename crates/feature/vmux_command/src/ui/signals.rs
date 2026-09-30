@@ -1,5 +1,5 @@
 use crate::event::{CommandBarOpenEvent, OpenId};
-use crate::palette::keyboard::{CtrlKeyCapture, TextEditCommand, ctrl_key_capture_for_code};
+use crate::palette::keyboard::TextEditCommand;
 use crate::palette::{PaletteDraft, PaletteRows, PaletteState};
 use dioxus::prelude::*;
 use vmux_ui::caret::{EventSelection, TextCaret};
@@ -152,13 +152,8 @@ impl Readline {
             return false;
         }
 
-        let edit = match ctrl_key_capture_for_code(&event.code().to_string()) {
-            CtrlKeyCapture::Ignore => return false,
-            CtrlKeyCapture::PassToDioxus => {
-                event.prevent_default();
-                return false;
-            }
-            CtrlKeyCapture::Edit(edit) => edit,
+        let Some(edit) = TextEditCommand::from_code(&event.code().to_string()) else {
+            return false;
         };
 
         event.prevent_default();

@@ -198,7 +198,7 @@ struct ResumeQuery;
 
 impl ResumeQuery {
     fn matches(query: &str) -> bool {
-        PaletteQuery(query)
+        PaletteQuery::new(query)
             .slash_token()
             .is_some_and(|(name, _)| "resume".starts_with(&name.to_lowercase()))
     }
