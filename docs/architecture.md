@@ -387,6 +387,12 @@ Page manifests are static plugin registration data. Their registration entities 
 plugin construction so the browser can build the complete embedded-host allowlist before CEF
 initializes. Runtime page state and behavior still initialize through ECS schedules.
 
+Each feature keeps one `src/feature.ron`. `pages`, `tools`, and application `commands` are flat
+lists; `cli` is the optional command tree. String-keyed pseudo-sections are not namespaces. A
+`FeatureManifestPlugin` registers the source as an ECS component, and page, tool, command, and CLI
+consumers read only the metadata they own. Feature plugins bind typed behavior without reparsing a
+named subsection or teaching an application crate which features exist.
+
 `vmux_app::extension` exposes the stable integration pieces: page manifests and hosted-page
 plugins, command-bar contributions and their chosen message, and typed MCP tool plugins. A custom
 MCP binary builds a Bevy `App` with `McpPlugin` and its tool plugins, then gives that app to the
@@ -871,9 +877,11 @@ needed, build the response, and despawn it after stdout delivery. The runtime en
 adapter.
 
 Tools are long-lived entities. Their name, aliases, schema, availability, and publication order
-are components seeded from feature-local RON manifests. Each handwritten feature exposes only its
-plugin; its private startup system spawns the tool entities and its private update systems consume
-matching tool-call components, validate typed arguments, and produce command or query dispatch.
+are components seeded from feature-local RON manifests by the shared tool registry system. A
+feature marks each typed argument component with `#[vmux_tool::input]`; the type name supplies the
+manifest key, so plugin registration is `register_tool::<T>()` without a second string name. Each
+handwritten feature exposes only its plugin; its private update systems consume matching tool-call
+components, validate typed arguments, and produce command or query dispatch.
 Publication and execution query those entities directly; there is no separate runtime registry or
 central function-pointer table. Page agents install the same tool plugin into the application's
 world and submit tool-call entities there; they do not maintain a nested or thread-local Bevy app.
@@ -883,12 +891,13 @@ their results back to the service boundary. Feature-specific agent instructions 
 roots are components registered by those same plugins. Agent providers aggregate that policy when
 launching; they do not enumerate or name the features installed beside them.
 
-Application commands follow the same ownership rule. Feature plugins spawn command-definition
-entities beside the parser for their typed Bevy request. Optional MCP metadata lives on that same
-definition. The MCP process asks the running application for its command tools and forwards calls
-back to the command-definition entities. Systems query those entities directly to resolve aliases,
-validate authorization and arguments, and emit the typed request. There is no command-catalog
-resource, second command enum, or MCP-only command catalog.
+Application commands follow the same ownership rule. The shared command registry seeds
+command-definition entities from each registered feature manifest. Feature systems bind their
+typed Bevy requests or observer markers to those entities through `CommandRegistry`. Optional MCP
+metadata lives on that same definition. The MCP process asks the running application for its
+command tools and forwards calls back to the command-definition entities. Systems query those
+entities directly to resolve aliases, validate authorization and arguments, and emit the typed
+request. There is no command-catalog resource, second command enum, or MCP-only command catalog.
 
 Every agent is launched **anchored to its own Space**. Tool calls resolve relative to that
 anchor, so a background agent cannot read or disrupt the space you are looking at.

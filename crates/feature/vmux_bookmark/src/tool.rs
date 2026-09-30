@@ -5,47 +5,47 @@ use vmux_api::protocol::{
     AgentBookmark, AgentBookmarkNode, AgentBookmarks, AgentQueryResult, AgentRequest,
     AgentRequestId, ClientMessage,
 };
+use vmux_core::host::manifest::FeatureManifestPlugin;
 use vmux_core::service::ServiceRequest;
 use vmux_core::{Bookmark, BookmarkOrder, Collapsed, Folder, PageIcon, PageMetadata, Pin, Uuid};
 use vmux_layout::bookmark::{
     AddRequest, CreateFolderRequest, PinRequest, PinUrlRequest, RemoveRequest, UnpinRequest,
 };
 use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
-    ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
+    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled,
+    ToolQueryRequest, ToolQueryRouteSet,
 };
 
 pub struct BookmarkToolPlugin;
 
 impl Plugin for BookmarkToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("feature.ron"),
-            "default",
-        ))
-        .add_message::<ToolQueryRequest>()
-        .add_message::<ToolQueryHandled>()
-        .add_message::<ServiceRequest>()
-        .register_tool::<BookmarkListArgs>("bookmark_list")
-        .register_tool::<BookmarkAddArgs>("bookmark_add")
-        .register_tool::<BookmarkRemoveArgs>("bookmark_remove")
-        .register_tool::<BookmarkPinArgs>("bookmark_pin")
-        .register_tool::<BookmarkUnpinArgs>("bookmark_unpin")
-        .register_tool::<BookmarkFolderCreateArgs>("bookmark_folder_create")
-        .add_message::<BookmarkListRequest>()
-        .add_systems(
-            Update,
-            (list, add, remove, pin, unpin, create_folder).in_set(ToolDispatchSet),
-        )
-        .add_systems(Update, route_bookmark_queries.in_set(ToolQueryRouteSet))
-        .add_systems(Update, answer_bookmark_queries.after(ToolQueryRouteSet));
+        app.add_plugins(FeatureManifestPlugin::new(include_str!("feature.ron")))
+            .add_message::<ToolQueryRequest>()
+            .add_message::<ToolQueryHandled>()
+            .add_message::<ServiceRequest>()
+            .register_tool::<BookmarkListArgs>()
+            .register_tool::<BookmarkAddArgs>()
+            .register_tool::<BookmarkRemoveArgs>()
+            .register_tool::<BookmarkPinArgs>()
+            .register_tool::<BookmarkUnpinArgs>()
+            .register_tool::<BookmarkFolderCreateArgs>()
+            .add_message::<BookmarkListRequest>()
+            .add_systems(
+                Update,
+                (list, add, remove, pin, unpin, create_folder).in_set(ToolDispatchSet),
+            )
+            .add_systems(Update, route_bookmark_queries.in_set(ToolQueryRouteSet))
+            .add_systems(Update, answer_bookmark_queries.after(ToolQueryRouteSet));
     }
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BookmarkListArgs {}
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BookmarkAddArgs {
@@ -55,12 +55,14 @@ struct BookmarkAddArgs {
     folder: Option<String>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BookmarkRemoveArgs {
     uuid: String,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BookmarkUnpinArgs {
@@ -81,6 +83,7 @@ struct PagePinArgs {
     favicon_url: Option<String>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(untagged)]
 enum BookmarkPinArgs {
@@ -88,6 +91,7 @@ enum BookmarkPinArgs {
     Page(PagePinArgs),
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BookmarkFolderCreateArgs {

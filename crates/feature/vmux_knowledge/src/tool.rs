@@ -2,7 +2,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
 use vmux_core::ProcessAnchor;
-use vmux_tool::{ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin};
+use vmux_core::host::manifest::FeatureManifestPlugin;
+use vmux_tool::{ToolAppExt, ToolCommand, ToolDispatchSet};
 
 use crate::host::{AgentReadKnowledge, AgentSearchKnowledge, AgentWriteKnowledge};
 
@@ -10,17 +11,15 @@ pub struct KnowledgeToolPlugin;
 
 impl Plugin for KnowledgeToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("feature.ron"),
-            "default",
-        ))
-        .register_tool::<SearchKnowledgeArgs>("search_knowledge")
-        .register_tool::<ReadKnowledgeArgs>("read_knowledge")
-        .register_tool::<WriteKnowledgeArgs>("write_knowledge")
-        .add_systems(Update, (search, read, write).in_set(ToolDispatchSet));
+        app.add_plugins(FeatureManifestPlugin::new(include_str!("feature.ron")))
+            .register_tool::<SearchKnowledgeArgs>()
+            .register_tool::<ReadKnowledgeArgs>()
+            .register_tool::<WriteKnowledgeArgs>()
+            .add_systems(Update, (search, read, write).in_set(ToolDispatchSet));
     }
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SearchKnowledgeArgs {
@@ -28,6 +27,7 @@ struct SearchKnowledgeArgs {
     limit: Option<u64>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ReadKnowledgeArgs {
@@ -36,6 +36,7 @@ struct ReadKnowledgeArgs {
     limit: Option<u64>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WriteKnowledgeArgs {

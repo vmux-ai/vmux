@@ -1,22 +1,21 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
+use vmux_core::host::manifest::FeatureManifestPlugin;
 use vmux_space::AgentRenameProfile;
-use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin};
+use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet};
 
 pub struct TeamToolPlugin;
 
 impl Plugin for TeamToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("feature.ron"),
-            "default",
-        ))
-        .register_tool::<RenameProfileArgs>("rename_profile")
-        .add_systems(Update, rename_profile.in_set(ToolDispatchSet));
+        app.add_plugins(FeatureManifestPlugin::new(include_str!("feature.ron")))
+            .register_tool::<RenameProfileArgs>()
+            .add_systems(Update, rename_profile.in_set(ToolDispatchSet));
     }
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RenameProfileArgs {

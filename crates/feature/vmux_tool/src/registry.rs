@@ -3,7 +3,7 @@ use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use vmux_api::protocol::{AgentCommandTool, AgentRequest};
 use vmux_core::host::manifest::FeatureManifestSource;
@@ -58,59 +58,12 @@ impl Plugin for ToolRegistryPlugin {
     }
 }
 
-pub struct ToolManifestPlugin {
-    source: FeatureManifestSource,
-    section: Option<&'static str>,
-}
-
-impl ToolManifestPlugin {
-    pub const fn new(manifest: &'static str) -> Self {
-        Self {
-            source: FeatureManifestSource::new(manifest),
-            section: None,
-        }
-    }
-
-    pub const fn from_feature(source: &'static str, section: &'static str) -> Self {
-        Self {
-            source: FeatureManifestSource::new(source),
-            section: Some(section),
-        }
-    }
-}
-
-impl Plugin for ToolManifestPlugin {
-    fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<ToolRegistryPlugin>() {
-            app.add_plugins(ToolRegistryPlugin);
-        }
-        let source = self.source;
-        let section = self.section;
-        app.add_systems(
-            Startup,
-            (move |mut commands: Commands| {
-                commands.spawn(ToolManifestSource { source, section });
-            })
-            .in_set(ToolStartupSet::Registry),
-        );
-    }
-
-    fn is_unique(&self) -> bool {
-        false
-    }
-}
-
 pub trait ToolAppExt {
-    fn register_tool<T>(&mut self, name: &'static str) -> &mut Self
-    where
-        T: Component + serde::de::DeserializeOwned;
+    fn register_tool<T: ToolInput>(&mut self) -> &mut Self;
 }
 
 impl ToolAppExt for App {
-    fn register_tool<T>(&mut self, name: &'static str) -> &mut Self
-    where
-        T: Component + serde::de::DeserializeOwned,
-    {
+    fn register_tool<T: ToolInput>(&mut self) -> &mut Self {
         if !self.is_plugin_added::<ToolRegistryPlugin>() {
             self.add_plugins(ToolRegistryPlugin);
         }
@@ -118,7 +71,6 @@ impl ToolAppExt for App {
             Startup,
             (move |mut commands: Commands| {
                 commands.spawn(ToolBindingSource::<T> {
-                    name,
                     marker: PhantomData,
                 });
             })
@@ -129,10 +81,8 @@ impl ToolAppExt for App {
     }
 }
 
-#[derive(Component)]
-struct ToolManifestSource {
-    source: FeatureManifestSource,
-    section: Option<&'static str>,
+pub trait ToolInput: Component + serde::de::DeserializeOwned {
+    const NAME: &'static str;
 }
 
 fn spawn_tool_registry(mut commands: Commands) {
@@ -140,13 +90,21 @@ fn spawn_tool_registry(mut commands: Commands) {
 }
 
 fn register_tool_manifests(
-    manifests: Query<(Entity, &ToolManifestSource)>,
+    features: Query<&FeatureManifestSource>,
     mut commands: Commands,
     mut next_order: Single<&mut NextToolOrder>,
 ) {
-    for (source_entity, source) in &manifests {
-        let manifest = ToolManifest::from_ron(source.source.as_str(), source.section);
-        for entry in manifest.0 {
+    let mut seen = HashSet::new();
+    for source in &features {
+        if seen.insert(source.as_str()) {
+            ToolManifest::from_feature_ron(source.as_str()).spawn(&mut commands, &mut next_order);
+        }
+    }
+}
+
+impl ToolManifest {
+    fn spawn(self, commands: &mut Commands, next_order: &mut NextToolOrder) {
+        for entry in self.0 {
             let seed = entry.into_seed();
             let order = next_order.0;
             next_order.0 += 1;
@@ -163,13 +121,11 @@ fn register_tool_manifests(
                 entity.insert(ShellAware);
             }
         }
-        commands.entity(source_entity).despawn();
     }
 }
 
 #[derive(Component)]
 struct ToolBindingSource<T> {
-    name: &'static str,
     marker: PhantomData<fn() -> T>,
 }
 
@@ -181,12 +137,11 @@ fn bind_tool<T>(
     tools: Query<(Entity, &Name), With<RegisteredTool>>,
     mut commands: Commands,
 ) where
-    T: Component,
+    T: ToolInput,
 {
-    for (binding_entity, binding) in &bindings {
-        let Some((tool_entity, _)) = tools.iter().find(|(_, name)| name.as_str() == binding.name)
-        else {
-            panic!("tool manifest does not define {}", binding.name);
+    for (binding_entity, _) in &bindings {
+        let Some((tool_entity, _)) = tools.iter().find(|(_, name)| name.as_str() == T::NAME) else {
+            panic!("tool manifest does not define {}", T::NAME);
         };
         commands
             .entity(tool_entity)
@@ -200,7 +155,7 @@ fn parse_tool<T>(
     tools: Query<(), With<ToolBinding<T>>>,
     mut commands: Commands,
 ) where
-    T: Component + serde::de::DeserializeOwned,
+    T: ToolInput,
 {
     for (request, name, arguments, target) in &calls {
         if !tools.contains(target.entity()) {
@@ -517,15 +472,10 @@ impl ToolEntry {
 struct ToolManifest(Vec<ToolEntry>);
 
 impl ToolManifest {
-    fn from_ron(source: &str, section: Option<&str>) -> Self {
-        let entries = match section {
-            Some(section) => ron::from_str::<FeatureToolManifest>(source)
-                .expect("embedded feature manifest must contain valid tool metadata")
-                .tools
-                .remove(section)
-                .unwrap_or_else(|| panic!("feature manifest has no tool section {section}")),
-            None => ron::from_str(source).expect("embedded tool definitions must be valid RON"),
-        };
+    fn from_feature_ron(source: &str) -> Self {
+        let entries = ron::from_str::<FeatureToolManifest>(source)
+            .expect("embedded feature manifest must contain valid tool metadata")
+            .tools;
         for entry in &entries {
             entry
                 .input_schema
@@ -538,7 +488,8 @@ impl ToolManifest {
 
 #[derive(Deserialize)]
 struct FeatureToolManifest {
-    tools: BTreeMap<String, Vec<ToolEntry>>,
+    #[serde(default)]
+    tools: Vec<ToolEntry>,
 }
 
 pub fn canonical_tool_name(name: &str) -> &str {
@@ -585,18 +536,15 @@ mod tests {
 
     #[test]
     fn parses_tools_from_feature_manifest() {
-        let manifest = ToolManifest::from_ron(
+        let manifest = ToolManifest::from_feature_ron(
             r#"(
-                tools: {
-                    "test": [(
+                tools: [(
                         name: "test",
                         description: "Test",
                         input_schema: (type: Object),
                     )],
-                },
                 ignored: true,
             )"#,
-            Some("test"),
         );
 
         assert_eq!(manifest.0[0].name, "test");

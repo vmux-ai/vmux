@@ -7,9 +7,7 @@ use crate::event::{
 use bevy_app::{App, Plugin, Startup};
 use bevy_cef::prelude::UiInput;
 use bevy_ecs::prelude::*;
-use vmux_command::{
-    CommandDefinitions, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
-};
+use vmux_command::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
 
 pub struct ChatKeyPlugin;
 
@@ -18,15 +16,18 @@ impl Plugin for ChatKeyPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_systems(Startup, spawn_commands.in_set(RegisterCommandDefinitions))
-            .add_observer(move_list)
-            .add_observer(choose_list)
-            .add_observer(choose_number)
-            .add_observer(move_history)
-            .add_observer(submit)
-            .add_observer(dismiss_selector)
-            .add_observer(interrupt)
-            .add_observer(cancel);
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_systems(Startup, bind_commands.in_set(BindCommands))
+        .add_observer(move_list)
+        .add_observer(choose_list)
+        .add_observer(choose_number)
+        .add_observer(move_history)
+        .add_observer(submit)
+        .add_observer(dismiss_selector)
+        .add_observer(interrupt)
+        .add_observer(cancel);
     }
 }
 
@@ -63,25 +64,23 @@ struct InterruptBinding;
 #[derive(Component)]
 struct CancelBinding;
 
-fn spawn_commands(mut commands: Commands) {
-    let mut definitions =
-        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "key");
-    commands.spawn((definitions.take("chat_list_next"), ListNextBinding));
-    commands.spawn((definitions.take("chat_list_previous"), ListPreviousBinding));
-    commands.spawn((definitions.take("chat_list_choose"), ListChooseBinding));
-    commands.spawn((definitions.take("chat_choice_1"), ChoiceNumberBinding(0)));
-    commands.spawn((definitions.take("chat_choice_2"), ChoiceNumberBinding(1)));
-    commands.spawn((definitions.take("chat_choice_3"), ChoiceNumberBinding(2)));
-    commands.spawn((definitions.take("chat_history_older"), HistoryOlderBinding));
-    commands.spawn((definitions.take("chat_history_newer"), HistoryNewerBinding));
-    commands.spawn((definitions.take("chat_submit"), SubmitBinding));
-    commands.spawn((
-        definitions.take("chat_dismiss_selector"),
+fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+    registry.bind(&mut commands, "chat_list_next", ListNextBinding);
+    registry.bind(&mut commands, "chat_list_previous", ListPreviousBinding);
+    registry.bind(&mut commands, "chat_list_choose", ListChooseBinding);
+    registry.bind(&mut commands, "chat_choice_1", ChoiceNumberBinding(0));
+    registry.bind(&mut commands, "chat_choice_2", ChoiceNumberBinding(1));
+    registry.bind(&mut commands, "chat_choice_3", ChoiceNumberBinding(2));
+    registry.bind(&mut commands, "chat_history_older", HistoryOlderBinding);
+    registry.bind(&mut commands, "chat_history_newer", HistoryNewerBinding);
+    registry.bind(&mut commands, "chat_submit", SubmitBinding);
+    registry.bind(
+        &mut commands,
+        "chat_dismiss_selector",
         DismissSelectorBinding,
-    ));
-    commands.spawn((definitions.take("chat_interrupt"), InterruptBinding));
-    commands.spawn((definitions.take("chat_cancel"), CancelBinding));
-    definitions.assert_all_registered();
+    );
+    registry.bind(&mut commands, "chat_interrupt", InterruptBinding);
+    registry.bind(&mut commands, "chat_cancel", CancelBinding);
 }
 
 fn move_list(

@@ -1,7 +1,7 @@
 (
-    pages: {
-        "default":
+    pages: [
         (
+            name: "default",
             url: "vmux://simulator/",
             title: "Simulator",
             owns_subtree: true,
@@ -24,12 +24,9 @@
                 "SimulatorClipboardPasteRequest",
                 "SimulatorClipboardSelectAllRequest",
             ],
-        )
-        ,
-    },
-    tools: {
-        "default":
-        [
+        ),
+    ],
+    tools: [
             (
                 name: "simulator_screenshot",
                 description: "Capture the attached iOS Simulator screen and return it inline. Use the returned pixel dimensions and image coordinates with simulator_tap and simulator_swipe.",
@@ -93,7 +90,5 @@
                     },
                 ),
             ),
-        ]
-        ,
-    },
+    ],
 )

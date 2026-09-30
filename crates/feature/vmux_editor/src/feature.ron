@@ -1,7 +1,7 @@
 (
-    pages: {
-        "default":
+    pages: [
         (
+            name: "default",
             url: "file://",
             title: "Files",
             manifest_url: "vmux://files/",
@@ -84,8 +84,8 @@
             ],
         )
         ,
-        "projects":
         (
+            name: "projects",
             url: "vmux://projects/",
             title: "Projects",
             owns_subtree: true,
@@ -102,8 +102,8 @@
             ],
         )
         ,
-        "lsp":
         (
+            name: "lsp",
             url: "vmux://tools/lsp",
             title: "Language Servers",
             asset_host: "lsp",
@@ -120,12 +120,9 @@
                 "LspUninstallRequest",
                 "LspUpdateRequest",
             ],
-        )
-        ,
-    },
-    tools: {
-        "default":
-        [
+        ),
+    ],
+    tools: [
             (
                 name: "open_file",
                 description: r#"Open a local file (or directory) in the vmux editor using vmux auto placement. Omit `direction` so vmux focuses an already-open matching file first, then reuses the file pane bucket, and otherwise spirals off the latest non-agent pane. path is an absolute filesystem path, e.g. /Users/me/project/src/main.rs. Files render with syntax highlighting; directories show a listing. direction is an override for a forced adjacent open: right|left|top|bottom. focus defaults false. The path must be inside the selected project; call select_project first to request access elsewhere."#,
@@ -164,12 +161,8 @@
                     },
                 ),
             ),
-        ]
-        ,
-    },
-    commands: {
-        "app_key":
-        [
+    ],
+    commands: [
             (
                 id: "file_toggle_explorer",
                 label: "Toggle Explorer",
@@ -239,7 +232,5 @@
                 hidden: true,
                 shortcuts: [(shortcut: Direct("Escape"), when: Some("files.panel"))],
             ),
-        ]
-        ,
-    },
+    ],
 )

@@ -19,6 +19,7 @@ vmux_path = { path = "../../util/vmux_path" }
 vmux_profile = { path = "../../util/vmux_profile" }
 vmux_core = { path = "../../util/vmux_core" }
 vmux_api = { path = "../../util/vmux_api" }
+vmux_macro = { path = "../../util/vmux_macro" }
 vmux_native = { path = "../../util/vmux_native" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 

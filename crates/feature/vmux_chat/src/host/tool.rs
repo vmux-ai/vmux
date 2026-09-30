@@ -2,7 +2,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
 use vmux_core::ProcessAnchor;
-use vmux_tool::{ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin};
+use vmux_core::host::manifest::FeatureManifestPlugin;
+use vmux_tool::{ToolAppExt, ToolCommand, ToolDispatchSet};
 
 use super::session::{AgentRequestUserChoice, AgentSetConversationTitle};
 
@@ -10,19 +11,17 @@ pub struct ChatToolPlugin;
 
 impl Plugin for ChatToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("../feature.ron"),
-            "default",
-        ))
-        .register_tool::<RequestUserChoiceArgs>("request_user_choice")
-        .register_tool::<SetConversationTitleArgs>("set_conversation_title")
-        .add_systems(
-            Update,
-            (request_user_choice, set_conversation_title).in_set(ToolDispatchSet),
-        );
+        app.add_plugins(FeatureManifestPlugin::new(include_str!("../feature.ron")))
+            .register_tool::<RequestUserChoiceArgs>()
+            .register_tool::<SetConversationTitleArgs>()
+            .add_systems(
+                Update,
+                (request_user_choice, set_conversation_title).in_set(ToolDispatchSet),
+            );
     }
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RequestUserChoiceArgs {
@@ -30,6 +29,7 @@ struct RequestUserChoiceArgs {
     options: Vec<String>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SetConversationTitleArgs {

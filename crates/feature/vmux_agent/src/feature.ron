@@ -46,18 +46,14 @@
         ],
     )
     ,
-    tools: {
-        "default":
-        [
+    tools: [
             (
                 name: "resume_in_acp",
                 description: r#"Continue the current CLI conversation in its ACP chat runtime. Replaces this CLI page in place while preserving the session id and working directory. Call only when the user asks to switch or continue in ACP."#,
                 input_schema: (type: Object),
                 availability: outside_acp_session,
             ),
-        ]
-        ,
-    },
+    ],
     policies: {
         "acp_workspace":
         (

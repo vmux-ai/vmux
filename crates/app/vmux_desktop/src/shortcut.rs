@@ -20,7 +20,7 @@ impl Plugin for ShortcutPlugin {
                 sync_keymap
                     .in_set(ShortcutInit)
                     .after(SettingsLoadSet)
-                    .after(vmux_command::RegisterCommandDefinitions),
+                    .after(vmux_command::BindCommands),
             )
             .add_systems(Update, sync_keymap)
             .add_systems(Update, process_key_input.in_set(WriteCommandRequests));
@@ -182,9 +182,7 @@ fn is_modifier_key(key: KeyCode) -> bool {
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
-    use vmux_command::{
-        CommandDefinition, CommandInvocation, CommandPlugin, RegisterCommandDefinitions,
-    };
+    use vmux_command::{CommandInvocation, CommandPlugin};
     use vmux_layout::pane::PaneCommandPlugin;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
@@ -206,10 +204,6 @@ mod tests {
                 TabCommandPlugin,
                 ShortcutPlugin,
             ))
-            .add_systems(
-                Startup,
-                spawn_space_open_command.in_set(RegisterCommandDefinitions),
-            )
             .insert_resource(ButtonInput::<KeyCode>::default());
             if let Some(settings) = settings {
                 app.insert_resource(settings);
@@ -225,12 +219,6 @@ mod tests {
                 .map(|invocation| invocation.id)
                 .collect()
         }
-    }
-
-    fn spawn_space_open_command(mut commands: Commands) {
-        commands.spawn(
-            CommandDefinition::new("space_open", "Spaces", "Layout > Space").chord("Ctrl+b, s"),
-        );
     }
 
     fn test_settings_with_leader(key: &str) -> AppSettings {

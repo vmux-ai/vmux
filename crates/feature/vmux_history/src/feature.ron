@@ -1,7 +1,7 @@
 (
-    pages: {
-        "default":
+    pages: [
         (
+            name: "default",
             url: "vmux://history/",
             title: "History",
             title_message_id: "history-title",
@@ -19,7 +19,6 @@
                 "HistoryClearAllRequest",
                 "HistoryOpenRequest",
             ],
-        )
-        ,
-    },
+        ),
+    ],
 )

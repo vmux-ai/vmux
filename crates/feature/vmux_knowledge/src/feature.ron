@@ -1,7 +1,7 @@
 (
-    pages: {
-        "default":
+    pages: [
         (
+            name: "default",
             url: "vmux://knowledge/",
             title: "Knowledge",
             owns_subtree: true,
@@ -16,12 +16,9 @@
                 "KeyStroke",
                 "KeyClaims",
             ],
-        )
-        ,
-    },
-    tools: {
-        "default":
-        [
+        ),
+    ],
+    tools: [
             (
                 name: "search_knowledge",
                 description: r#"Search every Markdown note in the user's vmux Knowledge base. Returns ranked source references as path:line with titles and matching previews. Use this before read_knowledge when the relevant note is unknown. No permission is required."#,
@@ -60,7 +57,5 @@
                     },
                 ),
             ),
-        ]
-        ,
-    },
+    ],
 )

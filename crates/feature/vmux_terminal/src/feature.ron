@@ -1,7 +1,7 @@
 (
-    pages: {
-        "default":
+    pages: [
         (
+            name: "default",
             url: "vmux://terminal/",
             title: "Terminal",
             title_message_id: "command-terminal",
@@ -22,8 +22,8 @@
             ],
         )
         ,
-        "process_monitor":
         (
+            name: "process_monitor",
             url: "vmux://services/",
             title: "Services",
             title_message_id: "services-title",
@@ -40,12 +40,9 @@
                 "ProcessKillEvent",
                 "ProcessKillAllEvent",
             ],
-        )
-        ,
-    },
-    tools: {
-        "default":
-        [
+        ),
+    ],
+    tools: [
             (
                 name: "run",
                 description: r#"Run a shell command in a visible terminal pane the user can watch live and take over. Blocks until the command finishes and returns its full output plus the exit code (`terminal: <id>`, `exit: <code>`, `output: ...`). If it reaches the configured wait limit, returns the output so far with a note to call read_terminal for the rest.
@@ -98,12 +95,8 @@
                     },
                 ),
             ),
-        ]
-        ,
-    },
-    commands: {
-        "command":
-        [
+    ],
+    commands: [
             (
                 id: "terminal_close",
                 label: "Close Terminal",
@@ -136,17 +129,11 @@
                 shortcuts: [(shortcut: Chord("Ctrl+b, ["), when: None)],
                 mcp: Some((description: "Visual Mode", allow_agent: true)),
             ),
-        ]
-        ,
-        "process_monitor":
-        [
             (
                 id: "service_open",
                 label: "Open Service Monitor",
                 group: "Service",
                 mcp: Some((description: "Open Service Monitor")),
             ),
-        ]
-        ,
-    },
+    ],
 )

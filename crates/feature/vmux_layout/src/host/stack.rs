@@ -12,7 +12,9 @@ use bevy::{
 use moonshine_save::prelude::*;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
-use vmux_command::{CommandDefinitions, CommandInvocation};
+#[cfg(test)]
+use vmux_command::CommandManifest;
+use vmux_command::{CommandInvocation, CommandRegistry};
 use vmux_core::host::persistence::PersistenceAppExt;
 pub use vmux_core::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
@@ -30,55 +32,55 @@ impl Plugin for StackPlugin {
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
-        app.add_message::<OpenRequest>()
-            .add_message::<CloseRequest>()
-            .add_message::<FocusRequest>()
-            .add_message::<MoveRequest>()
-            .add_message::<PageOpenRequest>()
-            .add_systems(
-                Startup,
-                spawn_stack_commands.in_set(vmux_command::RegisterCommandDefinitions),
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_message::<OpenRequest>()
+        .add_message::<CloseRequest>()
+        .add_message::<FocusRequest>()
+        .add_message::<MoveRequest>()
+        .add_message::<PageOpenRequest>()
+        .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands))
+        .add_systems(
+            Startup,
+            open_startup_url_if_no_stacks
+                .in_set(crate::LayoutStartupSet::Post)
+                .in_set(OpenStartupPageSet),
+        )
+        .register_persisted::<Stack>()
+        .add_message::<CloseStackRequest>()
+        .add_systems(
+            Update,
+            (
+                handle_open_requests,
+                handle_close_requests,
+                handle_focus_requests,
+                handle_move_requests,
             )
-            .add_systems(
-                Startup,
-                open_startup_url_if_no_stacks
-                    .in_set(crate::LayoutStartupSet::Post)
-                    .in_set(OpenStartupPageSet),
-            )
-            .register_persisted::<Stack>()
-            .add_message::<CloseStackRequest>()
-            .add_systems(
-                Update,
-                (
-                    handle_open_requests,
-                    handle_close_requests,
-                    handle_focus_requests,
-                    handle_move_requests,
-                )
-                    .chain()
-                    .in_set(StackCommandSet)
-                    .in_set(LayoutRequestSet::Handle),
-            )
-            .add_systems(
-                Update,
-                handle_close_stack_requests
-                    .in_set(CloseStackSet)
-                    .in_set(LayoutRequestSet::Handle),
-            )
-            .add_systems(
-                Update,
-                compute_focused_stack
-                    .in_set(ComputeFocusSet)
-                    .after(LayoutRequestSet::Handle)
-                    .after(crate::active::ActiveSystemSet::Descendants),
-            )
-            .add_systems(
-                Update,
-                open_startup_url_if_no_stacks
-                    .in_set(OpenStartupPageSet)
-                    .after(crate::window::WindowShellSet)
-                    .before(vmux_core::PageOpenSet::ResolveTarget),
-            );
+                .chain()
+                .in_set(StackCommandSet)
+                .in_set(LayoutRequestSet::Handle),
+        )
+        .add_systems(
+            Update,
+            handle_close_stack_requests
+                .in_set(CloseStackSet)
+                .in_set(LayoutRequestSet::Handle),
+        )
+        .add_systems(
+            Update,
+            compute_focused_stack
+                .in_set(ComputeFocusSet)
+                .after(LayoutRequestSet::Handle)
+                .after(crate::active::ActiveSystemSet::Descendants),
+        )
+        .add_systems(
+            Update,
+            open_startup_url_if_no_stacks
+                .in_set(OpenStartupPageSet)
+                .after(crate::window::WindowShellSet)
+                .before(vmux_core::PageOpenSet::ResolveTarget),
+        );
     }
 }
 
@@ -147,22 +149,15 @@ impl TryFrom<&CommandInvocation> for MoveRequest {
     }
 }
 
-fn spawn_stack_commands(mut commands: Commands) {
-    let mut definitions =
-        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "stack");
-    commands.spawn(
-        definitions
-            .take("open_in_new_stack")
-            .message::<OpenRequest>(),
-    );
-    commands.spawn(definitions.take("stack_close").message::<CloseRequest>());
+fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+    registry.message::<OpenRequest>(&mut commands, "open_in_new_stack");
+    registry.message::<CloseRequest>(&mut commands, "stack_close");
     for id in ["stack_next", "stack_previous"] {
-        commands.spawn(definitions.take(id).message::<FocusRequest>());
+        registry.message::<FocusRequest>(&mut commands, id);
     }
     for id in ["stack_swap_prev", "stack_swap_next"] {
-        commands.spawn(definitions.take(id).message::<MoveRequest>());
+        registry.message::<MoveRequest>(&mut commands, id);
     }
-    definitions.assert_all_registered();
 }
 
 #[derive(Component)]
@@ -756,11 +751,14 @@ mod tests {
     #[test]
     fn stack_mcp_definitions_are_the_dispatchable_command_set() {
         let definitions =
-            CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "stack")
-                .into_vec();
+            CommandManifest::from_feature_ron(include_str!("../feature.ron")).into_vec();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)
+            .filter(|tool| {
+                let invocation = CommandInvocation::new(Entity::PLACEHOLDER, &tool.name);
+                OpenRequest::try_from(&invocation).is_ok()
+            })
             .collect::<Vec<_>>();
         assert_eq!(
             tools

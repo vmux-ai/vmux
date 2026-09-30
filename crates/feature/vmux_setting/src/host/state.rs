@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_command::{
-    CommandDefinitions, CommandDispatch, CommandRuntimePlugin, ReadCommandRequests,
-    RegisterCommandDefinitions, WriteCommandRequests,
+    BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
+    WriteCommandRequests,
 };
 use vmux_core::host::UiState;
 use vmux_core::{PageIcon, PageMetadata, PageOpenRequest, PageOpenTarget};
@@ -29,25 +29,25 @@ impl Plugin for StatePlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_message::<OpenSettingsRequest>()
-            .add_systems(
-                Startup,
-                spawn_open_settings_command.in_set(RegisterCommandDefinitions),
-            )
-            .add_observer(issue_open_settings)
-            .add_message::<CheckForUpdatesRequest>()
-            .add_plugins((
-                HostedUiPlugin::<Settings>::new(super::SettingsPlugin::MANIFEST),
-                UiEventPlugin::<(SettingsRequest, CheckForUpdatesEvent)>::default(),
-            ))
-            .add_observer(on_settings_request)
-            .add_observer(on_check_for_updates)
-            .add_systems(
-                Update,
-                handle_open_settings_command
-                    .in_set(ReadCommandRequests)
-                    .after(WriteCommandRequests),
-            );
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_message::<OpenSettingsRequest>()
+        .add_systems(Startup, bind_command.in_set(BindCommands))
+        .add_observer(issue_open_settings)
+        .add_message::<CheckForUpdatesRequest>()
+        .add_plugins((
+            HostedUiPlugin::<Settings>::new(super::SettingsPlugin::MANIFEST),
+            UiEventPlugin::<(SettingsRequest, CheckForUpdatesEvent)>::default(),
+        ))
+        .add_observer(on_settings_request)
+        .add_observer(on_check_for_updates)
+        .add_systems(
+            Update,
+            handle_open_settings_command
+                .in_set(ReadCommandRequests)
+                .after(WriteCommandRequests),
+        );
     }
 }
 
@@ -67,11 +67,8 @@ struct OpenSettingsRequest;
 #[derive(Component)]
 struct OpenSettingsBinding;
 
-fn spawn_open_settings_command(mut commands: Commands) {
-    let mut definitions =
-        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "state");
-    commands.spawn((definitions.take("open_settings"), OpenSettingsBinding));
-    definitions.assert_all_registered();
+fn bind_command(registry: CommandRegistry, mut commands: Commands) {
+    registry.bind(&mut commands, "open_settings", OpenSettingsBinding);
 }
 
 fn issue_open_settings(

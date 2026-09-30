@@ -18,9 +18,7 @@ use vmux_api::bookmark::{
     BookmarkRenameRequest as BookmarkRenameUiRequest, BookmarkTextInputRequest,
     BookmarkToggleRequest, BookmarkUnpinRequest as BookmarkUnpinUiRequest,
 };
-use vmux_command::{
-    CommandDefinitions, CommandInvocation, CommandRuntimePlugin, RegisterCommandDefinitions,
-};
+use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
 use vmux_core::host::page::PageManifest;
 use vmux_core::{Bookmark, BookmarkOrder, Collapsed, Folder, PageIcon, PageMetadata, Pin, Uuid};
 
@@ -36,87 +34,87 @@ impl Plugin for BookmarkPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_message::<BookmarkToggleActiveRequest>()
-            .add_message::<BookmarkPinActiveRequest>()
-            .add_message::<CreateFolderRequest>()
-            .add_systems(
-                Startup,
-                spawn_bookmark_commands.in_set(RegisterCommandDefinitions),
-            )
-            .add_message::<ShowBookmarkMenuRequest>()
-            .add_plugins(UiEventPlugin::<(
-                BookmarkToggleRequest,
-                BookmarkMenuRootRequest,
-                BookmarkMenuPinRequest,
-                BookmarkMenuEntryRequest,
-                BookmarkMenuFolderRequest,
-                BookmarkOpenRequest,
-                BookmarkAddUiRequest,
-                BookmarkPinUrlUiRequest,
-                BookmarkRemoveUiRequest,
-                BookmarkRenameUiRequest,
-                BookmarkMoveUiRequest,
-            )>::default())
-            .add_plugins(UiEventPlugin::<(
-                BookmarkPinUiRequest,
-                BookmarkUnpinUiRequest,
-                BookmarkFolderToggleUiRequest,
-                BookmarkFolderCreateUiRequest,
-                BookmarkFolderMoveUiRequest,
-                BookmarkFolderRenameUiRequest,
-                BookmarkFolderRemoveUiRequest,
-                BookmarkTextInputRequest,
-                BookmarkContextMenuRequest,
-                BookmarkDropRequest,
-            )>::default())
-            .add_observer(on_bookmark_toggle_request)
-            .add_observer(on_bookmark_menu_request::<BookmarkMenuRootRequest>)
-            .add_observer(on_bookmark_menu_request::<BookmarkMenuPinRequest>)
-            .add_observer(on_bookmark_menu_request::<BookmarkMenuEntryRequest>)
-            .add_observer(on_bookmark_menu_request::<BookmarkMenuFolderRequest>)
-            .add_observer(on_bookmark_open_request)
-            .add_observer(on_bookmark_add_request)
-            .add_observer(on_bookmark_pin_url_request)
-            .add_observer(on_bookmark_remove_request)
-            .add_observer(on_bookmark_rename_request)
-            .add_observer(on_bookmark_move_request)
-            .add_observer(on_bookmark_pin_request)
-            .add_observer(on_bookmark_unpin_request)
-            .add_observer(on_bookmark_folder_toggle_request)
-            .add_observer(on_bookmark_folder_create_request)
-            .add_observer(on_bookmark_folder_move_request)
-            .add_observer(on_bookmark_folder_rename_request)
-            .add_observer(on_bookmark_folder_remove_request)
-            .add_observer(on_bookmark_text_input_request)
-            .add_observer(on_bookmark_context_menu_request)
-            .add_observer(on_bookmark_drop_request)
-            .add_systems(
-                Update,
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_message::<BookmarkToggleActiveRequest>()
+        .add_message::<BookmarkPinActiveRequest>()
+        .add_message::<CreateFolderRequest>()
+        .add_systems(Startup, bind_commands.in_set(BindCommands))
+        .add_message::<ShowBookmarkMenuRequest>()
+        .add_plugins(UiEventPlugin::<(
+            BookmarkToggleRequest,
+            BookmarkMenuRootRequest,
+            BookmarkMenuPinRequest,
+            BookmarkMenuEntryRequest,
+            BookmarkMenuFolderRequest,
+            BookmarkOpenRequest,
+            BookmarkAddUiRequest,
+            BookmarkPinUrlUiRequest,
+            BookmarkRemoveUiRequest,
+            BookmarkRenameUiRequest,
+            BookmarkMoveUiRequest,
+        )>::default())
+        .add_plugins(UiEventPlugin::<(
+            BookmarkPinUiRequest,
+            BookmarkUnpinUiRequest,
+            BookmarkFolderToggleUiRequest,
+            BookmarkFolderCreateUiRequest,
+            BookmarkFolderMoveUiRequest,
+            BookmarkFolderRenameUiRequest,
+            BookmarkFolderRemoveUiRequest,
+            BookmarkTextInputRequest,
+            BookmarkContextMenuRequest,
+            BookmarkDropRequest,
+        )>::default())
+        .add_observer(on_bookmark_toggle_request)
+        .add_observer(on_bookmark_menu_request::<BookmarkMenuRootRequest>)
+        .add_observer(on_bookmark_menu_request::<BookmarkMenuPinRequest>)
+        .add_observer(on_bookmark_menu_request::<BookmarkMenuEntryRequest>)
+        .add_observer(on_bookmark_menu_request::<BookmarkMenuFolderRequest>)
+        .add_observer(on_bookmark_open_request)
+        .add_observer(on_bookmark_add_request)
+        .add_observer(on_bookmark_pin_url_request)
+        .add_observer(on_bookmark_remove_request)
+        .add_observer(on_bookmark_rename_request)
+        .add_observer(on_bookmark_move_request)
+        .add_observer(on_bookmark_pin_request)
+        .add_observer(on_bookmark_unpin_request)
+        .add_observer(on_bookmark_folder_toggle_request)
+        .add_observer(on_bookmark_folder_create_request)
+        .add_observer(on_bookmark_folder_move_request)
+        .add_observer(on_bookmark_folder_rename_request)
+        .add_observer(on_bookmark_folder_remove_request)
+        .add_observer(on_bookmark_text_input_request)
+        .add_observer(on_bookmark_context_menu_request)
+        .add_observer(on_bookmark_drop_request)
+        .add_systems(
+            Update,
+            (
+                handle_bookmark_requests.in_set(LayoutRequestSet::Handle),
                 (
-                    handle_bookmark_requests.in_set(LayoutRequestSet::Handle),
-                    (
-                        apply_toggle_for_url_requests,
-                        apply_add_requests,
-                        apply_remove_requests,
-                        apply_rename_requests,
-                        apply_move_requests,
-                        apply_move_pin_requests,
-                        apply_reorder_pin_requests,
-                        apply_create_folder_requests,
-                        apply_move_folder_requests,
-                        apply_remove_folder_requests,
-                        apply_rename_folder_requests,
-                        apply_toggle_folder_requests,
-                        apply_pin_requests,
-                        apply_pin_url_requests,
-                        apply_unpin_requests,
-                    )
-                        .chain()
-                        .in_set(BookmarkRequestSet),
-                    sync_bookmark_metadata,
+                    apply_toggle_for_url_requests,
+                    apply_add_requests,
+                    apply_remove_requests,
+                    apply_rename_requests,
+                    apply_move_requests,
+                    apply_move_pin_requests,
+                    apply_reorder_pin_requests,
+                    apply_create_folder_requests,
+                    apply_move_folder_requests,
+                    apply_remove_folder_requests,
+                    apply_rename_folder_requests,
+                    apply_toggle_folder_requests,
+                    apply_pin_requests,
+                    apply_pin_url_requests,
+                    apply_unpin_requests,
                 )
-                    .chain(),
-            );
+                    .chain()
+                    .in_set(BookmarkRequestSet),
+                sync_bookmark_metadata,
+            )
+                .chain(),
+        );
     }
 }
 
@@ -178,25 +176,10 @@ impl TryFrom<&CommandInvocation> for CreateFolderRequest {
     }
 }
 
-fn spawn_bookmark_commands(mut commands: Commands) {
-    let mut definitions =
-        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "bookmark");
-    commands.spawn(
-        definitions
-            .take("bookmark_toggle_active")
-            .message::<BookmarkToggleActiveRequest>(),
-    );
-    commands.spawn(
-        definitions
-            .take("bookmark_pin_active")
-            .message::<BookmarkPinActiveRequest>(),
-    );
-    commands.spawn(
-        definitions
-            .take("bookmark_new_folder")
-            .message::<CreateFolderRequest>(),
-    );
-    definitions.assert_all_registered();
+fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+    registry.message::<BookmarkToggleActiveRequest>(&mut commands, "bookmark_toggle_active");
+    registry.message::<BookmarkPinActiveRequest>(&mut commands, "bookmark_pin_active");
+    registry.message::<CreateFolderRequest>(&mut commands, "bookmark_new_folder");
 }
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
@@ -1140,12 +1123,13 @@ mod tests {
     #[test]
     fn command_id_dispatches_the_typed_bookmark_request() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_command::CommandRuntimePlugin))
-            .add_message::<BookmarkToggleActiveRequest>()
-            .add_systems(
-                Startup,
-                spawn_bookmark_commands.in_set(vmux_command::RegisterCommandDefinitions),
-            );
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_core::host::manifest::FeatureManifestPlugin::new(include_str!("../feature.ron")),
+            vmux_command::CommandRuntimePlugin,
+        ))
+        .add_message::<BookmarkToggleActiveRequest>()
+        .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands));
         let caller = app.world_mut().spawn_empty().id();
         app.world_mut()
             .resource_mut::<Messages<vmux_command::CommandInvocation>>()

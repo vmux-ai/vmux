@@ -6,6 +6,7 @@ use bevy::app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
+use vmux_core::host::manifest::FeatureManifestPlugin;
 
 #[cfg(target_os = "macos")]
 use super::LaunchAgent;
@@ -15,9 +16,10 @@ pub struct ServiceCliPlugin;
 
 impl Plugin for ServiceCliPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(CliManifestPlugin::from_feature(include_str!(
-            "../feature.ron"
-        )))
+        app.add_plugins((
+            FeatureManifestPlugin::new(include_str!("../feature.ron")),
+            CliManifestPlugin,
+        ))
         .add_systems(
             Update,
             (route_service_cli, execute_service_cli, execute_remote_cli).chain(),

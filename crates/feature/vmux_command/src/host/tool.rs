@@ -5,10 +5,11 @@ use vmux_api::protocol::{
     AgentListCommands, AgentNotify, AgentQueryResult, AgentRequest, ClientMessage, JsonValue,
 };
 use vmux_core::JsonArguments;
+use vmux_core::host::manifest::FeatureManifestPlugin;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQueryHandled,
-    ToolQueryRequest, ToolQueryRouteSet, UnclaimedToolInvocation,
+    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQueryHandled, ToolQueryRequest,
+    ToolQueryRouteSet, UnclaimedToolInvocation,
 };
 
 #[vmux_api::agent]
@@ -22,25 +23,22 @@ pub struct CommandToolPlugin;
 
 impl Plugin for CommandToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("../feature.ron"),
-            "default",
-        ))
-        .register_tool::<OpenCommandBarArgs>("open_command_bar")
-        .register_tool::<NotifyArgs>("notify")
-        .add_message::<ToolQueryRequest>()
-        .add_message::<ToolQueryHandled>()
-        .add_message::<ServiceRequest>()
-        .add_systems(
-            Update,
-            (open_command_bar, notify, dispatch_unclaimed_tools).in_set(ToolDispatchSet),
-        )
-        .add_systems(
-            Update,
-            answer_command_queries
-                .in_set(ToolQueryRouteSet)
-                .after(ServiceMessageSet),
-        );
+        app.add_plugins(FeatureManifestPlugin::new(include_str!("../feature.ron")))
+            .register_tool::<OpenCommandBarArgs>()
+            .register_tool::<NotifyArgs>()
+            .add_message::<ToolQueryRequest>()
+            .add_message::<ToolQueryHandled>()
+            .add_message::<ServiceRequest>()
+            .add_systems(
+                Update,
+                (open_command_bar, notify, dispatch_unclaimed_tools).in_set(ToolDispatchSet),
+            )
+            .add_systems(
+                Update,
+                answer_command_queries
+                    .in_set(ToolQueryRouteSet)
+                    .after(ServiceMessageSet),
+            );
     }
 }
 
@@ -87,12 +85,14 @@ fn answer_command_queries(
     }
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OpenCommandBarArgs {
     mode: Option<String>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NotifyArgs {

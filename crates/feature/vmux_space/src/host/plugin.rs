@@ -1,8 +1,9 @@
 use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
+#[cfg(test)]
+use vmux_command::CommandManifest;
 use vmux_command::{
-    CommandDefinitions, CommandInvocation, CommandRuntimePlugin, ReadCommandRequests,
-    RegisterCommandDefinitions,
+    BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
 };
 use vmux_core::host::{UiStateWrite, persistence::WorkspaceRestore};
 use vmux_core::page::{PageReady, SpacesPageSpawnRequest};
@@ -51,7 +52,10 @@ impl Plugin for SpacePlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins((
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_plugins((
             SpaceAgentPlugin,
             super::composer::SpaceComposerPlugin,
             super::persistence::WorkspacePersistencePlugin,
@@ -65,10 +69,7 @@ impl Plugin for SpacePlugin {
         .add_message::<SpaceOpenPageRequest>()
         .add_message::<SpaceRenameRequest>()
         .add_message::<OpenRequest>()
-        .add_systems(
-            Startup,
-            spawn_space_commands.in_set(RegisterCommandDefinitions),
-        )
+        .add_systems(Startup, bind_command.in_set(BindCommands))
         .add_systems(
             Update,
             (
@@ -158,15 +159,8 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
     }
 }
 
-fn spawn_space_commands(mut commands: Commands) {
-    let mut definitions =
-        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "plugin");
-    commands.spawn(
-        definitions
-            .take("open_in_new_space")
-            .message::<OpenRequest>(),
-    );
-    definitions.assert_all_registered();
+fn bind_command(registry: CommandRegistry, mut commands: Commands) {
+    registry.message::<OpenRequest>(&mut commands, "open_in_new_space");
 }
 
 fn update_effective_startup(
@@ -914,11 +908,14 @@ mod tests {
     #[test]
     fn space_mcp_definition_dispatches_to_the_typed_request() {
         let definitions =
-            CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "plugin")
-                .into_vec();
+            CommandManifest::from_feature_ron(include_str!("../feature.ron")).into_vec();
         let tools = definitions
             .iter()
             .filter_map(vmux_command::CommandDefinition::agent_tool)
+            .filter(|tool| {
+                let invocation = CommandInvocation::new(Entity::PLACEHOLDER, &tool.name);
+                OpenRequest::try_from(&invocation).is_ok()
+            })
             .collect::<Vec<_>>();
         assert_eq!(
             tools

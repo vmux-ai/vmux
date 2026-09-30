@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsString;
 
 use bevy::app::{App, Plugin, Startup};
@@ -7,52 +7,32 @@ use serde::Deserialize;
 
 use crate::host::manifest::FeatureManifestSource;
 
-pub struct CliManifestPlugin {
-    source: FeatureManifestSource,
-    feature: bool,
-}
-
-impl CliManifestPlugin {
-    pub const fn new(source: &'static str) -> Self {
-        Self {
-            source: FeatureManifestSource::new(source),
-            feature: false,
-        }
-    }
-
-    pub const fn from_feature(source: &'static str) -> Self {
-        Self {
-            source: FeatureManifestSource::new(source),
-            feature: true,
-        }
-    }
-}
+pub struct CliManifestPlugin;
 
 impl Plugin for CliManifestPlugin {
     fn build(&self, app: &mut App) {
-        let source = self.source;
-        let feature = self.feature;
-        app.add_systems(Startup, move |mut commands: Commands| {
-            let manifest = if feature {
-                ron::from_str::<FeatureCliManifest>(source.as_str())
-                    .expect("embedded feature manifest must contain valid CLI metadata")
-                    .cli
-            } else {
-                ron::from_str::<CliManifest>(source.as_str())
-                    .expect("embedded CLI manifest must be valid RON")
-            };
-            commands.spawn(manifest);
-        });
+        app.add_systems(Startup, register_feature_cli_manifests);
     }
+}
 
-    fn is_unique(&self) -> bool {
-        false
+fn register_feature_cli_manifests(sources: Query<&FeatureManifestSource>, mut commands: Commands) {
+    let mut seen = HashSet::new();
+    for source in &sources {
+        if !seen.insert(source.as_str()) {
+            continue;
+        }
+        let feature = ron::from_str::<FeatureCliManifest>(source.as_str())
+            .expect("embedded feature manifest must contain valid CLI metadata");
+        if let Some(manifest) = feature.cli {
+            commands.spawn(manifest);
+        }
     }
 }
 
 #[derive(Deserialize)]
 struct FeatureCliManifest {
-    cli: CliManifest,
+    #[serde(default)]
+    cli: Option<CliManifest>,
 }
 
 #[derive(Clone, Component, Debug, Deserialize, PartialEq, Eq)]
@@ -190,6 +170,6 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(manifest.cli.commands[0].id, "tool");
+        assert_eq!(manifest.cli.unwrap().commands[0].id, "tool");
     }
 }

@@ -1,7 +1,6 @@
 use proc_macro2::{TokenStream, TokenTree};
 use quote::quote;
 use serde::Deserialize;
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use syn::parse::{Parse, ParseStream};
 use syn::{
@@ -11,6 +10,8 @@ use syn::{
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PageManifestFile {
+    #[serde(default)]
+    name: String,
     url: String,
     title: String,
     #[serde(default)]
@@ -39,7 +40,7 @@ struct PageManifestFile {
 
 #[derive(Deserialize)]
 struct FeatureManifestFile {
-    pages: BTreeMap<String, PageManifestFile>,
+    pages: Vec<PageManifestFile>,
 }
 
 fn default_manifest_file() -> LitStr {
@@ -69,7 +70,7 @@ impl PageManifestFile {
         if let Ok(manifest) = ron::from_str(&source) {
             return Ok(manifest);
         }
-        let mut feature: FeatureManifestFile = ron::from_str(&source).map_err(|error| {
+        let feature: FeatureManifestFile = ron::from_str(&source).map_err(|error| {
             syn::Error::new(
                 file.span(),
                 format!(
@@ -81,11 +82,24 @@ impl PageManifestFile {
         let key = page
             .map(LitStr::value)
             .unwrap_or_else(|| "default".to_string());
-        if let Some(manifest) = feature.pages.remove(&key) {
-            return Ok(manifest);
+        let mut selected = None;
+        for manifest in feature.pages {
+            if manifest.name != key {
+                continue;
+            }
+            if selected.is_some() {
+                return Err(syn::Error::new(
+                    page.map(LitStr::span).unwrap_or_else(|| file.span()),
+                    format!(
+                        "feature manifest {} contains duplicate page {key}",
+                        path.display()
+                    ),
+                ));
+            }
+            selected = Some(manifest);
         }
-        if page.is_none() && feature.pages.len() == 1 {
-            return Ok(feature.pages.into_values().next().expect("one page"));
+        if let Some(manifest) = selected {
+            return Ok(manifest);
         }
         Err(syn::Error::new(
             page.map(LitStr::span).unwrap_or_else(|| file.span()),
@@ -696,15 +710,15 @@ mod tests {
     fn feature_manifest_file_parses_named_pages() {
         let manifest = ron::from_str::<FeatureManifestFile>(
             r#"(
-                pages: {
-                    "default": (url: "vmux://tools/", title: "Tools"),
-                    "detail": (url: "vmux://tools/detail", title: "Detail"),
-                },
+                pages: [
+                    (name: "default", url: "vmux://tools/", title: "Tools"),
+                    (name: "detail", url: "vmux://tools/detail", title: "Detail"),
+                ],
             )"#,
         )
         .unwrap();
 
-        assert_eq!(manifest.pages["default"].title, "Tools");
-        assert_eq!(manifest.pages["detail"].title, "Detail");
+        assert_eq!(manifest.pages[0].title, "Tools");
+        assert_eq!(manifest.pages[1].title, "Detail");
     }
 }

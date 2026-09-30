@@ -7,10 +7,11 @@ use vmux_api::protocol::{
 };
 use vmux_command::AgentInvokeCommand;
 use vmux_core::ProcessAnchor;
+use vmux_core::host::manifest::FeatureManifestPlugin;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
-    ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
+    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled,
+    ToolQueryRequest, ToolQueryRouteSet,
 };
 
 use super::agent::{AgentOpenBeside, AgentPaneDirection, AgentReadLayout, AgentUpdateLayout};
@@ -20,37 +21,34 @@ pub struct LayoutToolPlugin;
 
 impl Plugin for LayoutToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("../feature.ron"),
-            "default",
-        ))
-        .register_tool::<OpenPageArgs>("open_page")
-        .register_tool::<ReadLayoutArgs>("read_layout")
-        .register_tool::<UpdateLayoutArgs>("update_layout")
-        .register_tool::<SelectTabArgs>("select_tab")
-        .add_message::<ToolQueryRequest>()
-        .add_message::<ToolQueryHandled>()
-        .add_message::<ServiceRequest>()
-        .add_message::<LayoutSnapshotRequest>()
-        .add_message::<LayoutSnapshotResponse>()
-        .add_message::<LayoutApplyResponse>()
-        .add_systems(
-            Update,
-            (open_page, read_layout, update_layout, select_tab).in_set(ToolDispatchSet),
-        )
-        .add_systems(
-            Update,
-            route_layout_queries
-                .in_set(ToolQueryRouteSet)
-                .after(ServiceMessageSet),
-        )
-        .add_systems(
-            Update,
-            (
-                forward_layout_apply_responses,
-                forward_layout_snapshot_responses,
-            ),
-        );
+        app.add_plugins(FeatureManifestPlugin::new(include_str!("../feature.ron")))
+            .register_tool::<OpenPageArgs>()
+            .register_tool::<ReadLayoutArgs>()
+            .register_tool::<UpdateLayoutArgs>()
+            .register_tool::<SelectTabArgs>()
+            .add_message::<ToolQueryRequest>()
+            .add_message::<ToolQueryHandled>()
+            .add_message::<ServiceRequest>()
+            .add_message::<LayoutSnapshotRequest>()
+            .add_message::<LayoutSnapshotResponse>()
+            .add_message::<LayoutApplyResponse>()
+            .add_systems(
+                Update,
+                (open_page, read_layout, update_layout, select_tab).in_set(ToolDispatchSet),
+            )
+            .add_systems(
+                Update,
+                route_layout_queries
+                    .in_set(ToolQueryRouteSet)
+                    .after(ServiceMessageSet),
+            )
+            .add_systems(
+                Update,
+                (
+                    forward_layout_apply_responses,
+                    forward_layout_snapshot_responses,
+                ),
+            );
     }
 }
 
@@ -74,6 +72,7 @@ impl From<PaneDirection> for AgentPaneDirection {
     }
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OpenPageArgs {
@@ -161,16 +160,19 @@ fn forward_layout_snapshot_responses(
     }
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ReadLayoutArgs {}
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SelectTabArgs {
     index: u8,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(transparent)]
 struct UpdateLayoutArgs(layout::LayoutSnapshot);

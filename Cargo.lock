@@ -11166,6 +11166,7 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_core",
+ "vmux_macro",
  "vmux_native",
  "vmux_path",
  "vmux_profile",

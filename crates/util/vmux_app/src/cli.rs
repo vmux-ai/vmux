@@ -3,13 +3,15 @@ use std::io;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
+use vmux_core::host::manifest::FeatureManifestPlugin;
 
 pub struct VmuxCliPlugin;
 
 impl Plugin for VmuxCliPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            CliManifestPlugin::from_feature(include_str!("feature.ron")),
+            FeatureManifestPlugin::new(include_str!("feature.ron")),
+            CliManifestPlugin,
             vmux_agent::AgentCliPlugin,
             vmux_service::ServiceCliPlugin,
             vmux_tool::ToolCliPlugin,

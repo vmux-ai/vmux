@@ -3,8 +3,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{CommandBarPick, CommandBarPicker};
 use vmux_command::host::FileStatusPicked;
 use vmux_command::{
-    CommandDefinitions, CommandDispatch, CommandInvocation, CommandRuntimePlugin,
-    RegisterCommandDefinitions,
+    BindCommands, CommandDispatch, CommandInvocation, CommandRegistry, CommandRuntimePlugin,
 };
 use vmux_core::event::{
     ExplorerGoto, FileEncoding, FileEncodingReopenRequest, FileEncodingSaveRequest, FileIndent,
@@ -28,18 +27,21 @@ impl Plugin for KeyPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(UiEventPlugin::<(FileStatusPickerOpen,)>::default())
-            .add_systems(Startup, spawn_commands.in_set(RegisterCommandDefinitions))
-            .add_systems(Update, apply_status_picks)
-            .add_observer(toggle_explorer)
-            .add_observer(reveal_in_explorer)
-            .add_observer(open_find)
-            .add_observer(open_find_in_files)
-            .add_observer(dispatch_panel_next_command)
-            .add_observer(dispatch_panel_previous_command)
-            .add_observer(dispatch_panel_choose_command)
-            .add_observer(dispatch_panel_dismiss_command)
-            .add_observer(open_status_picker);
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_plugins(UiEventPlugin::<(FileStatusPickerOpen,)>::default())
+        .add_systems(Startup, bind_commands.in_set(BindCommands))
+        .add_systems(Update, apply_status_picks)
+        .add_observer(toggle_explorer)
+        .add_observer(reveal_in_explorer)
+        .add_observer(open_find)
+        .add_observer(open_find_in_files)
+        .add_observer(dispatch_panel_next_command)
+        .add_observer(dispatch_panel_previous_command)
+        .add_observer(dispatch_panel_choose_command)
+        .add_observer(dispatch_panel_dismiss_command)
+        .add_observer(open_status_picker);
     }
 }
 
@@ -67,36 +69,39 @@ struct FilePanelChooseKeyBinding;
 #[derive(Component)]
 struct FilePanelDismissKeyBinding;
 
-fn spawn_commands(mut commands: Commands) {
-    let mut definitions =
-        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "app_key");
-    commands.spawn((
-        definitions.take("file_toggle_explorer"),
+fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+    registry.bind(
+        &mut commands,
+        "file_toggle_explorer",
         FileToggleExplorerKeyBinding,
-    ));
-    commands.spawn((
-        definitions.take("file_reveal_in_explorer"),
+    );
+    registry.bind(
+        &mut commands,
+        "file_reveal_in_explorer",
         FileRevealExplorerKeyBinding,
-    ));
-    commands.spawn((definitions.take("file_find"), FileFindKeyBinding));
-    commands.spawn((
-        definitions.take("file_find_in_files"),
+    );
+    registry.bind(&mut commands, "file_find", FileFindKeyBinding);
+    registry.bind(
+        &mut commands,
+        "file_find_in_files",
         FileFindInFilesKeyBinding,
-    ));
-    commands.spawn((definitions.take("file_panel_next"), FilePanelNextKeyBinding));
-    commands.spawn((
-        definitions.take("file_panel_previous"),
+    );
+    registry.bind(&mut commands, "file_panel_next", FilePanelNextKeyBinding);
+    registry.bind(
+        &mut commands,
+        "file_panel_previous",
         FilePanelPreviousKeyBinding,
-    ));
-    commands.spawn((
-        definitions.take("file_panel_choose"),
+    );
+    registry.bind(
+        &mut commands,
+        "file_panel_choose",
         FilePanelChooseKeyBinding,
-    ));
-    commands.spawn((
-        definitions.take("file_panel_dismiss"),
+    );
+    registry.bind(
+        &mut commands,
+        "file_panel_dismiss",
         FilePanelDismissKeyBinding,
-    ));
-    definitions.assert_all_registered();
+    );
 }
 
 fn toggle_explorer(

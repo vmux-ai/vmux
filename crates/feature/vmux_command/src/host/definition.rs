@@ -1,10 +1,11 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
-use bevy::prelude::*;
+use bevy::{ecs::system::SystemParam, prelude::*};
 use vmux_api::InputSchema;
 use vmux_api::json::JsonValue;
 use vmux_api::protocol::AgentCommandTool;
 use vmux_core::JsonArguments;
+use vmux_core::host::manifest::FeatureManifestSource;
 use vmux_ui::i18n::Locale;
 
 use crate::shortcut::{Binding, KeyCombo, Modifiers, Shortcut, Source, When, resolve_key};
@@ -20,7 +21,23 @@ pub struct CommandRuntimePlugin;
 impl Plugin for CommandRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CommandInvocation>()
-            .add_systems(Startup, spawn_keymap.before(RegisterCommandDefinitions))
+            .configure_sets(
+                Startup,
+                (
+                    CommandStartupSet::Manifest,
+                    CommandStartupSet::Flush,
+                    BindCommands,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Startup,
+                (
+                    spawn_keymap.before(BindCommands),
+                    register_command_manifests.in_set(CommandStartupSet::Manifest),
+                    ApplyDeferred.in_set(CommandStartupSet::Flush),
+                ),
+            )
             .configure_sets(
                 Update,
                 (
@@ -77,9 +94,6 @@ impl CommandMcpManifest {
     }
 }
 
-#[derive(serde::Deserialize)]
-struct NoCommandKind;
-
 struct CommandDefinitionDefaults;
 
 impl CommandDefinitionDefaults {
@@ -88,19 +102,9 @@ impl CommandDefinitionDefaults {
     }
 }
 
-fn deserialize_command_kind<'de, D, K>(deserializer: D) -> Result<Option<K>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    K: serde::Deserialize<'de>,
-{
-    K::deserialize(deserializer).map(Some)
-}
-
 #[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields, bound(deserialize = "K: serde::Deserialize<'de>"))]
-struct CommandDefinitionManifest<K = NoCommandKind> {
-    #[serde(default, deserialize_with = "deserialize_command_kind")]
-    kind: Option<K>,
+#[serde(deny_unknown_fields)]
+struct CommandDefinitionManifest {
     id: String,
     #[serde(default)]
     aliases: Vec<String>,
@@ -120,7 +124,7 @@ struct CommandDefinitionManifest<K = NoCommandKind> {
     mcp: Option<CommandMcpManifest>,
 }
 
-impl<K> CommandDefinitionManifest<K> {
+impl CommandDefinitionManifest {
     fn into_definition(self) -> CommandDefinition {
         CommandDefinition {
             id: self.id,
@@ -147,67 +151,19 @@ impl<K> CommandDefinitionManifest<K> {
     }
 }
 
-pub struct CommandManifest<K>(Vec<CommandDefinitionManifest<K>>);
-
 #[derive(serde::Deserialize)]
-#[serde(bound(deserialize = "K: serde::Deserialize<'de>"))]
-struct FeatureCommandManifest<K = NoCommandKind> {
-    commands: BTreeMap<String, Vec<CommandDefinitionManifest<K>>>,
+struct FeatureCommandManifest {
+    #[serde(default)]
+    commands: Vec<CommandDefinitionManifest>,
 }
 
-impl<K: serde::de::DeserializeOwned> CommandManifest<K> {
-    pub fn from_ron(source: &str) -> Self {
-        let entries: Vec<CommandDefinitionManifest<K>> =
-            ron::from_str(source).expect("embedded command definitions must be valid RON");
-        for entry in &entries {
-            entry.validate();
-        }
-        Self(entries)
-    }
+pub struct CommandManifest(Vec<CommandDefinitionManifest>);
 
-    pub fn from_feature_ron(source: &str, section: &str) -> Self {
-        let mut manifest: FeatureCommandManifest<K> =
+impl CommandManifest {
+    pub fn from_feature_ron(source: &str) -> Self {
+        let manifest: FeatureCommandManifest =
             ron::from_str(source).expect("embedded feature manifest must contain valid commands");
-        let entries = manifest
-            .commands
-            .remove(section)
-            .unwrap_or_else(|| panic!("feature manifest has no command section {section}"));
-        for entry in &entries {
-            entry.validate();
-        }
-        Self(entries)
-    }
-
-    pub fn into_commands(self) -> impl Iterator<Item = (CommandDefinition, K)> {
-        self.0.into_iter().map(|mut entry| {
-            let kind = entry
-                .kind
-                .take()
-                .expect("embedded command definitions must include kind");
-            (entry.into_definition(), kind)
-        })
-    }
-}
-
-pub struct CommandDefinitions(Vec<CommandDefinitionManifest>);
-
-impl CommandDefinitions {
-    pub fn from_ron(source: &str) -> Self {
-        let definitions: Vec<CommandDefinitionManifest> =
-            ron::from_str(source).expect("embedded command definitions must be valid RON");
-        for definition in &definitions {
-            definition.validate();
-        }
-        Self(definitions)
-    }
-
-    pub fn from_feature_ron(source: &str, section: &str) -> Self {
-        let mut manifest: FeatureCommandManifest =
-            ron::from_str(source).expect("embedded feature manifest must contain valid commands");
-        let definitions = manifest
-            .commands
-            .remove(section)
-            .unwrap_or_else(|| panic!("feature manifest has no command section {section}"));
+        let definitions = manifest.commands;
         for definition in &definitions {
             definition.validate();
         }
@@ -219,27 +175,6 @@ impl CommandDefinitions {
             .into_iter()
             .map(CommandDefinitionManifest::into_definition)
             .collect()
-    }
-
-    pub fn take(&mut self, id: &str) -> CommandDefinition {
-        let index = self
-            .0
-            .iter()
-            .position(|definition| definition.id == id)
-            .unwrap_or_else(|| panic!("embedded command manifest does not define {id}"));
-        self.0.remove(index).into_definition()
-    }
-
-    pub fn assert_all_registered(self) {
-        assert!(
-            self.0.is_empty(),
-            "embedded command manifest contains unregistered definitions: {}",
-            self.0
-                .iter()
-                .map(|definition| definition.id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
     }
 }
 
@@ -663,13 +598,62 @@ impl CommandInvocation {
 pub struct DispatchCommandInvocations;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct RegisterCommandDefinitions;
+pub struct BindCommands;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+enum CommandStartupSet {
+    Manifest,
+    Flush,
+}
+
+#[derive(SystemParam)]
+pub struct CommandRegistry<'w, 's> {
+    definitions: Query<'w, 's, (Entity, &'static CommandDefinition)>,
+}
+
+impl CommandRegistry<'_, '_> {
+    pub fn bind<B: Bundle>(&self, commands: &mut Commands, id: &str, bundle: B) {
+        let entity = self.entity(id);
+        commands.entity(entity).insert(bundle);
+    }
+
+    pub fn message<T>(&self, commands: &mut Commands, id: &str)
+    where
+        T: Message + for<'a> TryFrom<&'a CommandInvocation>,
+    {
+        self.bind(commands, id, CommandMessage::of::<T>());
+    }
+
+    fn entity(&self, id: &str) -> Entity {
+        let Some((entity, _)) = self
+            .definitions
+            .iter()
+            .find(|(_, definition)| definition.id == id)
+        else {
+            panic!("feature manifest does not define command {id}");
+        };
+        entity
+    }
+}
 
 fn spawn_keymap(mut commands: Commands) {
     commands.spawn((
         Name::new("Command keymap"),
         crate::shortcut::Keymap::default(),
     ));
+}
+
+fn register_command_manifests(sources: Query<&FeatureManifestSource>, mut commands: Commands) {
+    let mut seen = HashSet::new();
+    for source in &sources {
+        if !seen.insert(source.as_str()) {
+            continue;
+        }
+        let definitions = CommandManifest::from_feature_ron(source.as_str());
+        for definition in definitions.into_vec() {
+            commands.spawn(definition);
+        }
+    }
 }
 
 fn validate_command_definitions(
@@ -779,14 +763,11 @@ mod tests {
 
     #[test]
     fn parses_commands_from_feature_manifest() {
-        let definitions = CommandDefinitions::from_feature_ron(
+        let definitions = CommandManifest::from_feature_ron(
             r#"(
-                commands: {
-                    "test": [(id: "test", label: "Test", group: "Test")],
-                },
+                commands: [(id: "test", label: "Test", group: "Test")],
                 ignored: true,
             )"#,
-            "test",
         )
         .into_vec();
 

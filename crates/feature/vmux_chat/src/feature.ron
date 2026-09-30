@@ -1,7 +1,7 @@
 (
-    pages: {
-        "default":
+    pages: [
         (
+            name: "default",
             url: "vmux://sessions/",
             title: "Sessions",
             owns_subtree: true,
@@ -51,12 +51,9 @@
                 "KeyStroke",
                 "KeyClaims",
             ],
-        )
-        ,
-    },
-    tools: {
-        "default":
-        [
+        ),
+    ],
+    tools: [
             (
                 name: "set_conversation_title",
                 description: r#"Set the agent conversation header to a concise model-written summary without asking permission. Always call first after the first user message to replace the provisional raw-prompt title. On later messages, call first only when the topic materially changes. Use 3 to 7 words, correct spelling and grammar, and never copy the user's prompt verbatim."#,
@@ -89,12 +86,8 @@
                     },
                 ),
             ),
-        ]
-        ,
-    },
-    commands: {
-        "key":
-        [
+    ],
+    commands: [
           (
             id: "chat_list_next",
             label: "Next Option",
@@ -203,7 +196,5 @@
               (shortcut: Direct("Ctrl+c"), when: Some("chat")),
             ],
           ),
-        ]
-        ,
-    },
+    ],
 )

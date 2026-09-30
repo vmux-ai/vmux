@@ -1,48 +1,49 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
+use vmux_core::host::manifest::FeatureManifestPlugin;
 
 use super::{
     AgentSimulatorButtonPress, AgentSimulatorKeyPress, AgentSimulatorScreenshot,
     AgentSimulatorSwipe, AgentSimulatorTap, AgentSimulatorTypeText, SimulatorButton,
 };
-use vmux_tool::{AddedTool, ToolAppExt, ToolDispatchSet, ToolManifestPlugin, ToolQuery};
+use vmux_tool::{AddedTool, ToolAppExt, ToolDispatchSet, ToolQuery};
 
 pub struct SimulatorToolPlugin;
 
 impl Plugin for SimulatorToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("../feature.ron"),
-            "default",
-        ))
-        .register_tool::<SimulatorScreenshotArgs>("simulator_screenshot")
-        .register_tool::<TapArgs>("simulator_tap")
-        .register_tool::<SwipeArgs>("simulator_swipe")
-        .register_tool::<TypeArgs>("simulator_type")
-        .register_tool::<KeyArgs>("simulator_key")
-        .register_tool::<ButtonArgs>("simulator_button")
-        .add_systems(
-            Update,
-            (screenshot, tap, swipe, type_text, key, button).in_set(ToolDispatchSet),
-        );
+        app.add_plugins(FeatureManifestPlugin::new(include_str!("../feature.ron")))
+            .register_tool::<SimulatorScreenshotArgs>()
+            .register_tool::<SimulatorTapArgs>()
+            .register_tool::<SimulatorSwipeArgs>()
+            .register_tool::<SimulatorTypeArgs>()
+            .register_tool::<SimulatorKeyArgs>()
+            .register_tool::<SimulatorButtonArgs>()
+            .add_systems(
+                Update,
+                (screenshot, tap, swipe, type_text, key, button).in_set(ToolDispatchSet),
+            );
     }
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SimulatorScreenshotArgs {}
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct TapArgs {
+struct SimulatorTapArgs {
     x: u32,
     y: u32,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SwipeArgs {
+struct SimulatorSwipeArgs {
     start_x: u32,
     start_y: u32,
     end_x: u32,
@@ -50,15 +51,17 @@ struct SwipeArgs {
     duration_ms: Option<u32>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct TypeArgs {
+struct SimulatorTypeArgs {
     text: String,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct KeyArgs {
+struct SimulatorKeyArgs {
     keycode: u8,
 }
 
@@ -80,9 +83,10 @@ impl From<ButtonArg> for SimulatorButton {
     }
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ButtonArgs {
+struct SimulatorButtonArgs {
     button: ButtonArg,
 }
 
@@ -94,7 +98,10 @@ fn screenshot(mut commands: Commands, calls: Query<Entity, AddedTool<SimulatorSc
     }
 }
 
-fn tap(mut commands: Commands, requests: Query<(Entity, &TapArgs), AddedTool<TapArgs>>) {
+fn tap(
+    mut commands: Commands,
+    requests: Query<(Entity, &SimulatorTapArgs), AddedTool<SimulatorTapArgs>>,
+) {
     for (entity, args) in &requests {
         commands
             .entity(entity)
@@ -105,7 +112,10 @@ fn tap(mut commands: Commands, requests: Query<(Entity, &TapArgs), AddedTool<Tap
     }
 }
 
-fn swipe(mut commands: Commands, requests: Query<(Entity, &SwipeArgs), AddedTool<SwipeArgs>>) {
+fn swipe(
+    mut commands: Commands,
+    requests: Query<(Entity, &SimulatorSwipeArgs), AddedTool<SimulatorSwipeArgs>>,
+) {
     for (entity, args) in &requests {
         let duration_ms = args.duration_ms.unwrap_or(300);
         let query = if (1..=10_000).contains(&duration_ms) {
@@ -123,7 +133,10 @@ fn swipe(mut commands: Commands, requests: Query<(Entity, &SwipeArgs), AddedTool
     }
 }
 
-fn type_text(mut commands: Commands, requests: Query<(Entity, &TypeArgs), AddedTool<TypeArgs>>) {
+fn type_text(
+    mut commands: Commands,
+    requests: Query<(Entity, &SimulatorTypeArgs), AddedTool<SimulatorTypeArgs>>,
+) {
     for (entity, args) in &requests {
         let query = if args.text.is_empty() {
             Err("simulator_type.text is empty".to_string())
@@ -136,7 +149,10 @@ fn type_text(mut commands: Commands, requests: Query<(Entity, &TypeArgs), AddedT
     }
 }
 
-fn key(mut commands: Commands, requests: Query<(Entity, &KeyArgs), AddedTool<KeyArgs>>) {
+fn key(
+    mut commands: Commands,
+    requests: Query<(Entity, &SimulatorKeyArgs), AddedTool<SimulatorKeyArgs>>,
+) {
     for (entity, args) in &requests {
         commands
             .entity(entity)
@@ -146,7 +162,10 @@ fn key(mut commands: Commands, requests: Query<(Entity, &KeyArgs), AddedTool<Key
     }
 }
 
-fn button(mut commands: Commands, requests: Query<(Entity, &ButtonArgs), AddedTool<ButtonArgs>>) {
+fn button(
+    mut commands: Commands,
+    requests: Query<(Entity, &SimulatorButtonArgs), AddedTool<SimulatorButtonArgs>>,
+) {
     for (entity, args) in &requests {
         commands
             .entity(entity)

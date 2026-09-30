@@ -147,8 +147,10 @@ mod tests {
     use super::*;
     use serde::Deserialize;
     use vmux_api::protocol::AgentRequest;
-    use vmux_tool::{AddedTool, ToolAppExt, ToolDispatchSet, ToolManifestPlugin, ToolQuery};
+    use vmux_core::host::manifest::FeatureManifestPlugin;
+    use vmux_tool::{AddedTool, ToolAppExt, ToolDispatchSet, ToolQuery};
 
+    #[vmux_tool::input]
     #[derive(Component, Deserialize)]
     struct TestQueryArgs {}
 
@@ -180,12 +182,12 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            ToolManifestPlugin::new(
-                r#"[(name: "test_query", description: "test", input_schema: (type: Object))]"#,
+            FeatureManifestPlugin::new(
+                r#"(tools: [(name: "test_query", description: "test", input_schema: (type: Object))])"#,
             ),
             ToolCallPlugin,
         ))
-        .register_tool::<TestQueryArgs>("test_query")
+        .register_tool::<TestQueryArgs>()
         .add_message::<AgentToolCallRequest>()
         .add_message::<AgentRequestInput>()
         .add_message::<ToolQueryRequest>()

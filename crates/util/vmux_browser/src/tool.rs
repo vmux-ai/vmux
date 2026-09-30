@@ -2,45 +2,41 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
 use vmux_core::ProcessAnchor;
+use vmux_core::host::manifest::FeatureManifestPlugin;
 
 use crate::host::{
     AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch,
     AgentBrowserInstallExtension, AgentBrowserNavigate, AgentBrowserScroll, AgentBrowserSnapshot,
 };
 
-use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
-};
+use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery};
 
 pub struct BrowserToolPlugin;
 
 impl Plugin for BrowserToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("feature.ron"),
-            "default",
-        ))
-        .add_systems(Startup, register_agent_policy)
-        .register_tool::<BrowserNavigateArgs>("browser_navigate")
-        .register_tool::<BrowserBackArgs>("browser_go_back")
-        .register_tool::<BrowserForwardArgs>("browser_go_forward")
-        .register_tool::<BrowserHistorySearchArgs>("browser_history_search")
-        .register_tool::<BrowserInstallExtensionArgs>("browser_install_extension")
-        .register_tool::<BrowserSnapshotArgs>("browser_snapshot")
-        .register_tool::<BrowserScrollArgs>("browser_scroll")
-        .add_systems(
-            Update,
-            (
-                navigate,
-                go_back,
-                go_forward,
-                history_search,
-                install_extension,
-                snapshot,
-                scroll,
-            )
-                .in_set(ToolDispatchSet),
-        );
+        app.add_plugins(FeatureManifestPlugin::new(include_str!("feature.ron")))
+            .add_systems(Startup, register_agent_policy)
+            .register_tool::<BrowserNavigateArgs>()
+            .register_tool::<BrowserGoBackArgs>()
+            .register_tool::<BrowserGoForwardArgs>()
+            .register_tool::<BrowserHistorySearchArgs>()
+            .register_tool::<BrowserInstallExtensionArgs>()
+            .register_tool::<BrowserSnapshotArgs>()
+            .register_tool::<BrowserScrollArgs>()
+            .add_systems(
+                Update,
+                (
+                    navigate,
+                    go_back,
+                    go_forward,
+                    history_search,
+                    install_extension,
+                    snapshot,
+                    scroll,
+                )
+                    .in_set(ToolDispatchSet),
+            );
     }
 }
 
@@ -63,6 +59,7 @@ fn register_agent_policy(mut commands: Commands) {
     ));
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BrowserNavigateArgs {
@@ -70,18 +67,21 @@ struct BrowserNavigateArgs {
     pane: Option<String>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BrowserBackArgs {
+struct BrowserGoBackArgs {
     pane: Option<String>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BrowserForwardArgs {
+struct BrowserGoForwardArgs {
     pane: Option<String>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BrowserHistorySearchArgs {
@@ -89,12 +89,14 @@ struct BrowserHistorySearchArgs {
     limit: Option<u32>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BrowserInstallExtensionArgs {
     source: String,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BrowserSnapshotArgs {
@@ -131,6 +133,7 @@ struct BrowserScrollDeltaArgs {
     target: Option<String>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(untagged)]
 enum BrowserScrollArgs {
@@ -175,7 +178,7 @@ fn navigate(
 
 fn go_back(
     mut commands: Commands,
-    requests: Query<(Entity, &BrowserBackArgs), AddedTool<BrowserBackArgs>>,
+    requests: Query<(Entity, &BrowserGoBackArgs), AddedTool<BrowserGoBackArgs>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -188,7 +191,7 @@ fn go_back(
 
 fn go_forward(
     mut commands: Commands,
-    requests: Query<(Entity, &BrowserForwardArgs), AddedTool<BrowserForwardArgs>>,
+    requests: Query<(Entity, &BrowserGoForwardArgs), AddedTool<BrowserGoForwardArgs>>,
 ) {
     for (entity, args) in &requests {
         commands

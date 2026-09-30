@@ -18,9 +18,7 @@ use vmux_core::host::{UiState, UiStateWrite};
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
 use vmux_tool::McpSnapshotRequest;
 
-use crate::{
-    CommandDefinitions, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
-};
+use crate::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
 
 use super::CloseCommandBar;
 
@@ -37,7 +35,10 @@ impl Plugin for PalettePlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins((
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../../feature.ron"),
+        ))
+        .add_plugins((
             UiEventPlugin::<(
                 CommandPaletteDraftRequest,
                 CommandPaletteHistoryMoveRequest,
@@ -67,10 +68,7 @@ impl Plugin for PalettePlugin {
         .add_observer(move_palette_media)
         .add_observer(choose_palette_media)
         .add_observer(dismiss_palette_media)
-        .add_systems(
-            Startup,
-            spawn_palette_commands.in_set(RegisterCommandDefinitions),
-        )
+        .add_systems(Startup, bind_commands.in_set(BindCommands))
         .add_systems(
             PreUpdate,
             (attach_palette_snapshot, detach_palette_snapshot),
@@ -229,59 +227,68 @@ struct PaletteDecisionReady {
     decision: PaletteDecision,
 }
 
-fn spawn_palette_commands(mut commands: Commands) {
-    let mut definitions =
-        CommandDefinitions::from_feature_ron(include_str!("../../feature.ron"), "palette");
-    commands.spawn((
-        definitions.take("command_bar_next"),
+fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+    registry.bind(
+        &mut commands,
+        "command_bar_next",
         PaletteKeyBinding(PaletteKey::Next),
-    ));
-    commands.spawn((
-        definitions.take("command_bar_previous"),
+    );
+    registry.bind(
+        &mut commands,
+        "command_bar_previous",
         PaletteKeyBinding(PaletteKey::Previous),
-    ));
-    commands.spawn((
-        definitions.take("command_bar_complete"),
+    );
+    registry.bind(
+        &mut commands,
+        "command_bar_complete",
         PaletteKeyBinding(PaletteKey::Complete),
-    ));
-    commands.spawn((
-        definitions.take("command_bar_dismiss"),
+    );
+    registry.bind(
+        &mut commands,
+        "command_bar_dismiss",
         PaletteKeyBinding(PaletteKey::Dismiss),
-    ));
-    commands.spawn((definitions.take("command_bar_submit"), PaletteSubmitBinding));
-    commands.spawn((
-        definitions.take("command_bar_menu_next"),
+    );
+    registry.bind(&mut commands, "command_bar_submit", PaletteSubmitBinding);
+    registry.bind(
+        &mut commands,
+        "command_bar_menu_next",
         PaletteMenuNextBinding,
-    ));
-    commands.spawn((
-        definitions.take("command_bar_menu_previous"),
+    );
+    registry.bind(
+        &mut commands,
+        "command_bar_menu_previous",
         PaletteMenuPreviousBinding,
-    ));
-    commands.spawn((
-        definitions.take("command_bar_menu_choose"),
+    );
+    registry.bind(
+        &mut commands,
+        "command_bar_menu_choose",
         PaletteMenuChooseBinding,
-    ));
-    commands.spawn((
-        definitions.take("command_bar_menu_dismiss"),
+    );
+    registry.bind(
+        &mut commands,
+        "command_bar_menu_dismiss",
         PaletteMenuDismissBinding,
-    ));
-    commands.spawn((
-        definitions.take("command_bar_media_next"),
+    );
+    registry.bind(
+        &mut commands,
+        "command_bar_media_next",
         PaletteMediaNextBinding,
-    ));
-    commands.spawn((
-        definitions.take("command_bar_media_previous"),
+    );
+    registry.bind(
+        &mut commands,
+        "command_bar_media_previous",
         PaletteMediaPreviousBinding,
-    ));
-    commands.spawn((
-        definitions.take("command_bar_media_choose"),
+    );
+    registry.bind(
+        &mut commands,
+        "command_bar_media_choose",
         PaletteMediaChooseBinding,
-    ));
-    commands.spawn((
-        definitions.take("command_bar_media_dismiss"),
+    );
+    registry.bind(
+        &mut commands,
+        "command_bar_media_dismiss",
         PaletteMediaDismissBinding,
-    ));
-    definitions.assert_all_registered();
+    );
 }
 
 fn attach_palette_snapshot(

@@ -4,13 +4,14 @@ use bevy_cef::prelude::HostWindow;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentSpace, ClientMessage};
+use vmux_core::host::manifest::FeatureManifestPlugin;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_core::{Active, Order, ProcessAnchor};
 use vmux_layout::space::{Space, SpaceId};
 use vmux_layout::window::{FocusedWindow, WindowHierarchy};
 use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
-    ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
+    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled,
+    ToolQueryRequest, ToolQueryRouteSet,
 };
 
 use super::{
@@ -23,37 +24,34 @@ pub struct SpaceToolPlugin;
 
 impl Plugin for SpaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("../feature.ron"),
-            "default",
-        ))
-        .register_tool::<ListSpacesArgs>("list_spaces")
-        .register_tool::<CreateSpaceArgs>("create_space")
-        .register_tool::<RenameSpaceArgs>("rename_space")
-        .register_tool::<DeleteSpaceArgs>("delete_space")
-        .register_tool::<SelectProjectArgs>("select_project")
-        .register_tool::<CreateWorktreeArgs>("create_worktree")
-        .add_message::<ToolQueryRequest>()
-        .add_message::<ToolQueryHandled>()
-        .add_message::<ServiceRequest>()
-        .add_systems(
-            Update,
-            (
-                list_spaces,
-                create,
-                rename,
-                delete,
-                select_project,
-                create_worktree,
+        app.add_plugins(FeatureManifestPlugin::new(include_str!("../feature.ron")))
+            .register_tool::<ListSpacesArgs>()
+            .register_tool::<CreateSpaceArgs>()
+            .register_tool::<RenameSpaceArgs>()
+            .register_tool::<DeleteSpaceArgs>()
+            .register_tool::<SelectProjectArgs>()
+            .register_tool::<CreateWorktreeArgs>()
+            .add_message::<ToolQueryRequest>()
+            .add_message::<ToolQueryHandled>()
+            .add_message::<ServiceRequest>()
+            .add_systems(
+                Update,
+                (
+                    list_spaces,
+                    create,
+                    rename,
+                    delete,
+                    select_project,
+                    create_worktree,
+                )
+                    .in_set(ToolDispatchSet),
             )
-                .in_set(ToolDispatchSet),
-        )
-        .add_systems(
-            Update,
-            answer_space_queries
-                .in_set(ToolQueryRouteSet)
-                .after(ServiceMessageSet),
-        );
+            .add_systems(
+                Update,
+                answer_space_queries
+                    .in_set(ToolQueryRouteSet)
+                    .after(ServiceMessageSet),
+            );
     }
 }
 
@@ -110,16 +108,19 @@ fn answer_space_queries(
     }
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ListSpacesArgs {}
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreateSpaceArgs {
     name: Option<String>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RenameSpaceArgs {
@@ -127,18 +128,21 @@ struct RenameSpaceArgs {
     name: String,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DeleteSpaceArgs {
     space_id: String,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SelectProjectArgs {
     path: Option<String>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreateWorktreeArgs {

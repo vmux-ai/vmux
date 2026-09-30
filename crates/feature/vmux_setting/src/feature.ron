@@ -1,7 +1,7 @@
 (
-    pages: {
-        "default":
+    pages: [
         (
+            name: "default",
             url: "vmux://settings/",
             title: "Settings",
             title_message_id: "settings-title",
@@ -15,12 +15,9 @@
                 "CheckForUpdatesEvent",
                 "SettingsRequest",
             ],
-        )
-        ,
-    },
-    tools: {
-        "default":
-        [
+        ),
+    ],
+    tools: [
             (
                 name: "get_settings",
                 description: "Return the full vmux settings as a JSON snapshot.",
@@ -38,12 +35,8 @@
                     },
                 ),
             ),
-        ]
-        ,
-    },
-    commands: {
-        "state":
-        [
+    ],
+    commands: [
             (
                 id: "open_settings",
                 label: "Settings",
@@ -51,9 +44,7 @@
                 hidden: true,
                 shortcuts: [(shortcut: Direct("Super+,"), when: None)],
             ),
-        ]
-        ,
-    },
+    ],
     policy: (
         defaults: (
             browser: (

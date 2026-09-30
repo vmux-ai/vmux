@@ -1,6 +1,5 @@
 (
-    commands: {
-        "navigation": [
+    commands: [
             (
                 id: "browser_prev_page",
                 label: "Back",
@@ -39,8 +38,6 @@
                 hidden: true,
                 mcp: Some((description: "Stop Loading", allow_agent: true)),
             ),
-        ],
-        "open": [
             (
                 id: "open_in_place",
                 label: "Open Here",
@@ -58,8 +55,6 @@
                     )),
                 )),
             ),
-        ],
-        "zoom": [
             (
                 id: "browser_zoom_in",
                 label: "Zoom In",
@@ -81,8 +76,6 @@
                 accelerator: Some("super+0"),
                 mcp: Some((description: "Actual Size", allow_agent: true)),
             ),
-        ],
-        "dev_tools": [
             (
                 id: "browser_dev_tools",
                 label: "Developer Tools",
@@ -90,8 +83,6 @@
                 accelerator: Some("super+alt+i"),
                 mcp: Some((description: "Developer Tools", allow_agent: true)),
             ),
-        ],
-        "history": [
             (
                 id: "browser_open_history",
                 label: "History",
@@ -99,10 +90,8 @@
                 accelerator: Some("super+y"),
                 mcp: Some((description: "History")),
             ),
-        ],
-    },
-    tools: {
-        "default": [
+    ],
+    tools: [
             (
                 name: "browser_navigate",
                 description: "Navigate the active webview to a URL, or open a URL in a target pane. This is the primary tool for web access. When navigating the focused browser page, it returns the page semantic snapshot after loading. vmux://terminal/ opens a terminal, vmux://spaces/ opens spaces, and vmux://services/ opens the process monitor. Other vmux:// URLs are rejected.",
@@ -205,7 +194,7 @@
                 ),
             ),
         ],
-    },
+    ],
     policy: (
         extension: (
             chromium_major: 148,

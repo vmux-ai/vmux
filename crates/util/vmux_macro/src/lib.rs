@@ -4,6 +4,7 @@ mod contract;
 mod native_page;
 mod service_message;
 mod string_id;
+mod tool_input;
 mod ui_event_variants;
 mod ui_state;
 mod variant_names;
@@ -123,6 +124,15 @@ pub fn service_message(args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn string_id(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match string_id::expand(input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn input(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match tool_input::expand(input) {
         Ok(tokens) => tokens.into(),
         Err(error) => error.to_compile_error().into(),
     }

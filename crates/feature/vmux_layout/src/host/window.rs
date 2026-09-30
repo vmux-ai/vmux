@@ -13,9 +13,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_command::{
-    CommandDefinitions, CommandInvocation, CommandRuntimePlugin, RegisterCommandDefinitions,
-};
+use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
 use vmux_core::agent::SpawnAgentInStackRequest;
 use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_core::page::PageEmbedSet;
@@ -34,59 +32,59 @@ impl Plugin for WindowLayoutPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(LayoutSpawnPlugin)
-            .add_message::<MinimizeWindowRequest>()
-            .add_message::<NewWindowRequest>()
-            .add_message::<CloseFocusedWindowRequest>()
-            .add_message::<ToggleFullscreenRequest>()
-            .register_persisted::<WindowGeometry>()
-            .register_type::<Option<IVec2>>()
-            .register_type::<Option<Vec2>>()
-            .add_systems(
-                Startup,
-                setup_window_shells
-                    .in_set(LayoutStartupSet::Window)
-                    .after(PageEmbedSet),
-            )
-            .add_systems(
-                Startup,
-                request_default_layout.in_set(LayoutStartupSet::DefaultTab),
-            )
-            .add_systems(
-                Startup,
-                spawn_window_commands.in_set(RegisterCommandDefinitions),
-            )
-            .add_systems(
-                Startup,
-                fit_window_to_screen
-                    .in_set(LayoutStartupSet::Post)
-                    .after(crate::stack::OpenStartupPageSet),
-            )
-            .add_systems(
-                PostUpdate,
-                (
-                    fit_window_to_screen,
-                    sync_window_layout_to_settings,
-                    sync_main_column_gap_to_pane_count,
-                ),
-            )
-            .add_systems(
-                Update,
-                (sync_focused_window, bevy::ecs::schedule::ApplyDeferred)
-                    .chain()
-                    .in_set(WindowFocusSet),
-            )
-            .add_systems(
-                Update,
-                (setup_window_shells, bevy::ecs::schedule::ApplyDeferred)
-                    .chain()
-                    .in_set(WindowShellSet)
-                    .after(WindowFocusSet),
-            )
-            .add_systems(
-                Update,
-                minimize_focused_window.in_set(LayoutRequestSet::Handle),
-            );
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_plugins(LayoutSpawnPlugin)
+        .add_message::<MinimizeWindowRequest>()
+        .add_message::<NewWindowRequest>()
+        .add_message::<CloseFocusedWindowRequest>()
+        .add_message::<ToggleFullscreenRequest>()
+        .register_persisted::<WindowGeometry>()
+        .register_type::<Option<IVec2>>()
+        .register_type::<Option<Vec2>>()
+        .add_systems(
+            Startup,
+            setup_window_shells
+                .in_set(LayoutStartupSet::Window)
+                .after(PageEmbedSet),
+        )
+        .add_systems(
+            Startup,
+            request_default_layout.in_set(LayoutStartupSet::DefaultTab),
+        )
+        .add_systems(Startup, bind_commands.in_set(BindCommands))
+        .add_systems(
+            Startup,
+            fit_window_to_screen
+                .in_set(LayoutStartupSet::Post)
+                .after(crate::stack::OpenStartupPageSet),
+        )
+        .add_systems(
+            PostUpdate,
+            (
+                fit_window_to_screen,
+                sync_window_layout_to_settings,
+                sync_main_column_gap_to_pane_count,
+            ),
+        )
+        .add_systems(
+            Update,
+            (sync_focused_window, bevy::ecs::schedule::ApplyDeferred)
+                .chain()
+                .in_set(WindowFocusSet),
+        )
+        .add_systems(
+            Update,
+            (setup_window_shells, bevy::ecs::schedule::ApplyDeferred)
+                .chain()
+                .in_set(WindowShellSet)
+                .after(WindowFocusSet),
+        )
+        .add_systems(
+            Update,
+            minimize_focused_window.in_set(LayoutRequestSet::Handle),
+        );
 
         app.init_resource::<Assets<WindowMaterial>>()
             .init_resource::<WindowBackground>();
@@ -176,26 +174,11 @@ impl TryFrom<&CommandInvocation> for ToggleFullscreenRequest {
     }
 }
 
-fn spawn_window_commands(mut commands: Commands) {
-    let mut definitions =
-        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "window");
-    commands.spawn(
-        definitions
-            .take("minimize_window")
-            .message::<MinimizeWindowRequest>(),
-    );
-    commands.spawn(definitions.take("new_window").message::<NewWindowRequest>());
-    commands.spawn(
-        definitions
-            .take("close_window")
-            .message::<CloseFocusedWindowRequest>(),
-    );
-    commands.spawn(
-        definitions
-            .take("toggle_fullscreen")
-            .message::<ToggleFullscreenRequest>(),
-    );
-    definitions.assert_all_registered();
+fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+    registry.message::<MinimizeWindowRequest>(&mut commands, "minimize_window");
+    registry.message::<NewWindowRequest>(&mut commands, "new_window");
+    registry.message::<CloseFocusedWindowRequest>(&mut commands, "close_window");
+    registry.message::<ToggleFullscreenRequest>(&mut commands, "toggle_fullscreen");
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]

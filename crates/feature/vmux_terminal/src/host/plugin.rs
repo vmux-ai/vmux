@@ -14,7 +14,7 @@ use vmux_clipboard::Clipboard;
 use vmux_command::CommandDefinition;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_command::{
-    CommandDefinitions, CommandRuntimePlugin, ReadCommandRequests, WriteCommandRequests,
+    CommandRegistry, CommandRuntimePlugin, ReadCommandRequests, WriteCommandRequests,
 };
 #[cfg(test)]
 use vmux_core::PageOpenId;
@@ -82,7 +82,10 @@ impl Plugin for TerminalPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins(
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_plugins(
             Self::MANIFEST
                 .plugin()
                 .route(vmux_core::HostSpawnRoute::page("vmux://terminal/")),
@@ -93,10 +96,7 @@ impl Plugin for TerminalPlugin {
         .add_message::<super::command::TerminalPrevRequest>()
         .add_message::<super::command::TerminalClearRequest>()
         .add_message::<super::command::CopyModeRequest>()
-        .add_systems(
-            Startup,
-            spawn_terminal_commands.in_set(vmux_command::RegisterCommandDefinitions),
-        )
+        .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands))
         .add_plugins((
             vmux_core::host::UiStatePlugin::<TerminalUiState>::default(),
             super::agent::AgentTerminalPlugin,
@@ -122,35 +122,12 @@ impl Plugin for TerminalPlugin {
     }
 }
 
-fn spawn_terminal_commands(mut commands: Commands) {
-    let mut definitions =
-        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "command");
-    commands.spawn(
-        definitions
-            .take("terminal_close")
-            .message::<super::command::TerminalCloseRequest>(),
-    );
-    commands.spawn(
-        definitions
-            .take("terminal_next")
-            .message::<super::command::TerminalNextRequest>(),
-    );
-    commands.spawn(
-        definitions
-            .take("terminal_prev")
-            .message::<super::command::TerminalPrevRequest>(),
-    );
-    commands.spawn(
-        definitions
-            .take("terminal_clear")
-            .message::<super::command::TerminalClearRequest>(),
-    );
-    commands.spawn(
-        definitions
-            .take("terminal_copy_mode")
-            .message::<super::command::CopyModeRequest>(),
-    );
-    definitions.assert_all_registered();
+fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+    registry.message::<super::command::TerminalCloseRequest>(&mut commands, "terminal_close");
+    registry.message::<super::command::TerminalNextRequest>(&mut commands, "terminal_next");
+    registry.message::<super::command::TerminalPrevRequest>(&mut commands, "terminal_prev");
+    registry.message::<super::command::TerminalClearRequest>(&mut commands, "terminal_clear");
+    registry.message::<super::command::CopyModeRequest>(&mut commands, "terminal_copy_mode");
 }
 
 struct TerminalServicePlugin;

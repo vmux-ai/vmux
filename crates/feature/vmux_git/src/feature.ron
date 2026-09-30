@@ -1,7 +1,7 @@
 (
-    pages: {
-        "default":
+    pages: [
         (
+            name: "default",
             url: "git://",
             title: "Git",
             manifest_url: "vmux://git/",
@@ -64,8 +64,8 @@
             ],
         )
         ,
-        "document":
         (
+            name: "document",
             url: "vmux://git/",
             title: "Git",
             permissions: [
@@ -121,7 +121,6 @@
                 "KeyStroke",
                 "KeyClaims",
             ],
-        )
-        ,
-    },
+        ),
+    ],
 )

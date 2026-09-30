@@ -16,19 +16,19 @@ impl Plugin for TogglePlugin {
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
-        app.add_message::<ToggleLayoutRequest>()
-            .add_systems(
-                Startup,
-                spawn_toggle_command.in_set(vmux_command::RegisterCommandDefinitions),
-            )
-            .add_systems(
-                Update,
-                handle_visibility_requests.in_set(LayoutRequestSet::Handle),
-            )
-            .add_systems(
-                PostUpdate,
-                sync_window_padding_to_layout_hidden.before(LayoutSystems::Layout),
-            );
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_message::<ToggleLayoutRequest>()
+        .add_systems(Startup, bind_command.in_set(vmux_command::BindCommands))
+        .add_systems(
+            Update,
+            handle_visibility_requests.in_set(LayoutRequestSet::Handle),
+        )
+        .add_systems(
+            PostUpdate,
+            sync_window_padding_to_layout_hidden.before(LayoutSystems::Layout),
+        );
     }
 }
 
@@ -43,17 +43,8 @@ impl TryFrom<&vmux_command::CommandInvocation> for ToggleLayoutRequest {
     }
 }
 
-fn spawn_toggle_command(mut commands: Commands) {
-    let mut definitions = vmux_command::CommandDefinitions::from_feature_ron(
-        include_str!("../feature.ron"),
-        "toggle",
-    );
-    commands.spawn(
-        definitions
-            .take("toggle_layout")
-            .message::<ToggleLayoutRequest>(),
-    );
-    definitions.assert_all_registered();
+fn bind_command(registry: vmux_command::CommandRegistry, mut commands: Commands) {
+    registry.message::<ToggleLayoutRequest>(&mut commands, "toggle_layout");
 }
 
 #[derive(Component, Default, Debug)]

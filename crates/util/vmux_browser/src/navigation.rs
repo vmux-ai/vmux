@@ -4,7 +4,7 @@ use vmux_api::VmuxRoute;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
 use vmux_command::{
-    CommandDispatch, CommandRuntimePlugin, ReadCommandRequests, RegisterCommandDefinitions,
+    BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
 };
 use vmux_core::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
@@ -29,35 +29,35 @@ impl Plugin for NavigationPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_message::<OpenHistoryRequest>()
-            .configure_sets(
-                Update,
-                crate::BrowserSystemSet::Navigate
-                    .after(vmux_core::service::ServiceMessageSet)
-                    .before(vmux_core::PageOpenSet::ResolveTarget),
-            )
-            .add_systems(
-                Startup,
-                spawn_history_command.in_set(RegisterCommandDefinitions),
-            )
-            .add_observer(issue_open_history)
-            .add_systems(
-                Update,
-                (
-                    drain_committed_navigation,
-                    handle_browser_navigate_requests.in_set(crate::BrowserSystemSet::Navigate),
-                    handle_browser_go_back_requests,
-                    handle_browser_go_forward_requests,
-                    handle_open_in_new_stack_requests,
-                    handle_browser_open_history.in_set(ReadCommandRequests),
-                ),
-            )
-            .add_systems(
-                Update,
-                (sync_page_metadata_to_tab, spawn_visit_on_navigation)
-                    .chain()
-                    .after(vmux_layout::LayoutCefStateSet::Apply),
-            );
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("feature.ron"),
+        ))
+        .add_message::<OpenHistoryRequest>()
+        .configure_sets(
+            Update,
+            crate::BrowserSystemSet::Navigate
+                .after(vmux_core::service::ServiceMessageSet)
+                .before(vmux_core::PageOpenSet::ResolveTarget),
+        )
+        .add_systems(Startup, bind_command.in_set(BindCommands))
+        .add_observer(issue_open_history)
+        .add_systems(
+            Update,
+            (
+                drain_committed_navigation,
+                handle_browser_navigate_requests.in_set(crate::BrowserSystemSet::Navigate),
+                handle_browser_go_back_requests,
+                handle_browser_go_forward_requests,
+                handle_open_in_new_stack_requests,
+                handle_browser_open_history.in_set(ReadCommandRequests),
+            ),
+        )
+        .add_systems(
+            Update,
+            (sync_page_metadata_to_tab, spawn_visit_on_navigation)
+                .chain()
+                .after(vmux_layout::LayoutCefStateSet::Apply),
+        );
     }
 }
 
@@ -67,11 +67,8 @@ pub struct OpenHistoryRequest;
 #[derive(Component)]
 struct OpenHistoryBinding;
 
-fn spawn_history_command(mut commands: Commands) {
-    let mut definitions =
-        vmux_command::CommandDefinitions::from_feature_ron(include_str!("feature.ron"), "history");
-    commands.spawn((definitions.take("browser_open_history"), OpenHistoryBinding));
-    definitions.assert_all_registered();
+fn bind_command(registry: CommandRegistry, mut commands: Commands) {
+    registry.bind(&mut commands, "browser_open_history", OpenHistoryBinding);
 }
 
 fn issue_open_history(
@@ -495,9 +492,12 @@ mod command_definition_tests {
     fn history_mcp_definition_dispatches_to_the_typed_request() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+                include_str!("feature.ron"),
+            ))
             .add_plugins(CommandRuntimePlugin)
             .add_message::<OpenHistoryRequest>()
-            .add_systems(Startup, spawn_history_command)
+            .add_systems(Startup, bind_command.in_set(BindCommands))
             .add_observer(issue_open_history);
         app.update();
 

@@ -1,7 +1,5 @@
 (
-    tools: {
-        "default":
-        [
+    tools: [
             (
                 name: "bookmark_list",
                 description: r#"List all pins (favicon quick-access) and bookmarks (saved pages, optionally inside folders) for the current profile. Returns JSON: {pins:[{uuid,url,title,favicon_url}], roots:[ {kind:"entry",...} | {kind:"folder",uuid,name,collapsed,children:[...]} ]}."#,
@@ -69,7 +67,5 @@
                     properties: {"name": (type: String)},
                 ),
             ),
-        ]
-        ,
-    },
+    ],
 )

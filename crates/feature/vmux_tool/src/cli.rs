@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
+use vmux_core::host::manifest::FeatureManifestPlugin;
 
 use crate::DotfileLinkState;
 
@@ -11,22 +12,25 @@ pub struct ToolCliPlugin;
 
 impl Plugin for ToolCliPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(CliManifestPlugin::from_feature(include_str!("feature.ron")))
-            .add_systems(
-                Update,
-                (
-                    route_tool_cli,
-                    execute_status,
-                    execute_apply,
-                    execute_homebrew_import,
-                    execute_npm_import,
-                    execute_mcp_import,
-                    execute_dotfile_import,
-                    execute_adopt,
-                    execute_unlink,
-                )
-                    .chain(),
-            );
+        app.add_plugins((
+            FeatureManifestPlugin::new(include_str!("feature.ron")),
+            CliManifestPlugin,
+        ))
+        .add_systems(
+            Update,
+            (
+                route_tool_cli,
+                execute_status,
+                execute_apply,
+                execute_homebrew_import,
+                execute_npm_import,
+                execute_mcp_import,
+                execute_dotfile_import,
+                execute_adopt,
+                execute_unlink,
+            )
+                .chain(),
+        );
     }
 }
 

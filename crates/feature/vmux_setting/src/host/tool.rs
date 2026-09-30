@@ -2,10 +2,11 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, ClientMessage, JsonValue};
+use vmux_core::host::manifest::FeatureManifestPlugin;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
-    ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
+    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled,
+    ToolQueryRequest, ToolQueryRouteSet,
 };
 
 use super::agent::{AgentGetSettings, AgentUpdateSettings};
@@ -14,25 +15,22 @@ pub struct SettingToolPlugin;
 
 impl Plugin for SettingToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("../feature.ron"),
-            "default",
-        ))
-        .register_tool::<GetSettingsArgs>("get_settings")
-        .register_tool::<UpdateSettingsArgs>("update_settings")
-        .add_message::<ToolQueryRequest>()
-        .add_message::<ToolQueryHandled>()
-        .add_message::<ServiceRequest>()
-        .add_systems(
-            Update,
-            (get_settings, update_settings).in_set(ToolDispatchSet),
-        )
-        .add_systems(
-            Update,
-            answer_settings_queries
-                .in_set(ToolQueryRouteSet)
-                .after(ServiceMessageSet),
-        );
+        app.add_plugins(FeatureManifestPlugin::new(include_str!("../feature.ron")))
+            .register_tool::<GetSettingsArgs>()
+            .register_tool::<UpdateSettingsArgs>()
+            .add_message::<ToolQueryRequest>()
+            .add_message::<ToolQueryHandled>()
+            .add_message::<ServiceRequest>()
+            .add_systems(
+                Update,
+                (get_settings, update_settings).in_set(ToolDispatchSet),
+            )
+            .add_systems(
+                Update,
+                answer_settings_queries
+                    .in_set(ToolQueryRouteSet)
+                    .after(ServiceMessageSet),
+            );
     }
 }
 
@@ -56,10 +54,12 @@ fn answer_settings_queries(
     }
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct GetSettingsArgs {}
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct UpdateSettingsArgs {

@@ -1,7 +1,5 @@
 (
-    tools: {
-        "default":
-        [
+    tools: [
             (
                 name: "open_command_bar",
                 description: "Open the Vmux command bar.",
@@ -23,12 +21,8 @@
                     },
                 ),
             ),
-        ]
-        ,
-    },
-    commands: {
-        "handler":
-        [
+    ],
+    commands: [
             (
                 id: "space_open",
                 label: "Open",
@@ -111,10 +105,6 @@
                 group: "Browser > Bar",
                 mcp: Some((description: "Save with Encoding")),
             ),
-        ]
-        ,
-        "palette":
-        [
             (
                 id: "command_bar_next",
                 label: "Next Result",
@@ -239,7 +229,5 @@
                     (shortcut: Direct("Ctrl+c"), when: Some("command-bar.media")),
                 ],
             ),
-        ]
-        ,
-    },
+    ],
 )

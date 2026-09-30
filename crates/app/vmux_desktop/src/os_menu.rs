@@ -18,7 +18,7 @@ use vmux_browser::OpenRequest;
 #[cfg(target_os = "macos")]
 use vmux_command::ReadCommandRequests;
 use vmux_command::{
-    CommandDefinition, CommandInvocation, DispatchCommandInvocations, RegisterCommandDefinitions,
+    BindCommands, CommandDefinition, CommandInvocation, DispatchCommandInvocations,
     WriteCommandRequests,
 };
 use vmux_core::host::page::BindsEditingChords;
@@ -60,7 +60,7 @@ impl Plugin for OsMenuPlugin {
             (spawn_runtime, setup)
                 .chain()
                 .after(SettingsLoadSet)
-                .after(RegisterCommandDefinitions),
+                .after(BindCommands),
         )
         .add_systems(
             Update,

@@ -18,10 +18,10 @@ pub use vmux_api::InputSchema;
 
 pub use bundle::CommandBar;
 pub use definition::{
-    AgentAccess, CommandDefinition, CommandDefinitions, CommandDispatch, CommandInvocation,
-    CommandManifest, CommandMcp, CommandMessage, CommandRuntimePlugin, CommandShortcut,
-    DispatchCommandInvocations, ReadCommandRequests, RegisterCommandDefinitions,
-    ShortcutDefinition, WriteCommandRequests,
+    AgentAccess, BindCommands, CommandDefinition, CommandDispatch, CommandInvocation,
+    CommandManifest, CommandMcp, CommandMessage, CommandRegistry, CommandRuntimePlugin,
+    CommandShortcut, DispatchCommandInvocations, ReadCommandRequests, ShortcutDefinition,
+    WriteCommandRequests,
 };
 pub use issued::{ExLineSubmitted, FileStatusPicked};
 pub use page_key::KeyPlugin;

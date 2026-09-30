@@ -1,7 +1,7 @@
 (
-    pages: {
-        "default":
+    pages: [
         (
+            name: "default",
             url: "vmux://team/",
             title: "Team",
             title_message_id: "team-title",
@@ -18,12 +18,9 @@
                 "TeamProfileSwitchRequest",
                 "TeamProfileUpdateRequest",
             ],
-        )
-        ,
-    },
-    tools: {
-        "default":
-        [
+        ),
+    ],
+    tools: [
             (
                 name: "rename_profile",
                 description: "Rename the active profile display name without changing its storage.",
@@ -33,7 +30,5 @@
                     properties: {"name": (type: String)},
                 ),
             ),
-        ]
-        ,
-    },
+    ],
 )

@@ -1,8 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
-use vmux_command::{
-    CommandDefinitions, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
-};
+use vmux_command::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
 use vmux_core::host::UiStateWrite;
 
 use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
@@ -15,11 +13,14 @@ impl Plugin for SpaceKeyPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_systems(Startup, spawn_commands.in_set(RegisterCommandDefinitions))
-            .add_observer(select_next_space)
-            .add_observer(select_previous_space)
-            .add_observer(attach_selected_space)
-            .add_observer(delete_selected_space);
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_systems(Startup, bind_commands.in_set(BindCommands))
+        .add_observer(select_next_space)
+        .add_observer(select_previous_space)
+        .add_observer(attach_selected_space)
+        .add_observer(delete_selected_space);
     }
 }
 
@@ -35,14 +36,11 @@ struct AttachSelectedSpace;
 #[derive(Component)]
 struct DeleteSelectedSpace;
 
-fn spawn_commands(mut commands: Commands) {
-    let mut definitions =
-        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "key");
-    commands.spawn((definitions.take("space_next"), SelectNextSpace));
-    commands.spawn((definitions.take("space_previous"), SelectPreviousSpace));
-    commands.spawn((definitions.take("space_attach"), AttachSelectedSpace));
-    commands.spawn((definitions.take("space_delete"), DeleteSelectedSpace));
-    definitions.assert_all_registered();
+fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+    registry.bind(&mut commands, "space_next", SelectNextSpace);
+    registry.bind(&mut commands, "space_previous", SelectPreviousSpace);
+    registry.bind(&mut commands, "space_attach", AttachSelectedSpace);
+    registry.bind(&mut commands, "space_delete", DeleteSelectedSpace);
 }
 
 fn select_next_space(

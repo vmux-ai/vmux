@@ -7,9 +7,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
-use vmux_command::{
-    CommandDefinitions, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
-};
+use vmux_command::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
 use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
 use vmux_core::terminal::{TerminalLaunch, TerminalSpawnRequest, TerminalSpawnTarget};
 #[cfg(test)]
@@ -45,11 +43,8 @@ struct ReopenClosedPage;
 #[derive(Component)]
 struct ReopenClosedPageBinding;
 
-fn spawn_reopen_closed_page_command(mut commands: Commands) {
-    let mut definitions =
-        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "archive");
-    commands.spawn((definitions.take("stack_reopen"), ReopenClosedPageBinding));
-    definitions.assert_all_registered();
+fn bind_command(registry: CommandRegistry, mut commands: Commands) {
+    registry.bind(&mut commands, "stack_reopen", ReopenClosedPageBinding);
 }
 
 fn issue_reopen_closed_page(
@@ -69,28 +64,28 @@ impl Plugin for ArchivePlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_message::<ReopenClosedPage>()
-            .add_message::<PageArchiveRequest>()
-            .add_message::<CloseTabRequest>()
-            .add_systems(
-                Startup,
-                spawn_reopen_closed_page_command.in_set(RegisterCommandDefinitions),
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_message::<ReopenClosedPage>()
+        .add_message::<PageArchiveRequest>()
+        .add_message::<CloseTabRequest>()
+        .add_systems(Startup, bind_command.in_set(BindCommands))
+        .add_observer(issue_reopen_closed_page)
+        .add_systems(Update, (capture_archived_pages, maintain_archive))
+        .add_systems(
+            Update,
+            (
+                archive_on_stack_close
+                    .after(StackCommandSet)
+                    .before(CloseStackSet),
+                handle_reopen_closed_page,
+                handle_close_tab_requests
+                    .after(TabCommandSet)
+                    .after(StackCommandSet),
             )
-            .add_observer(issue_reopen_closed_page)
-            .add_systems(Update, (capture_archived_pages, maintain_archive))
-            .add_systems(
-                Update,
-                (
-                    archive_on_stack_close
-                        .after(StackCommandSet)
-                        .before(CloseStackSet),
-                    handle_reopen_closed_page,
-                    handle_close_tab_requests
-                        .after(TabCommandSet)
-                        .after(StackCommandSet),
-                )
-                    .in_set(LayoutRequestSet::Handle),
-            );
+                .in_set(LayoutRequestSet::Handle),
+        );
     }
 }
 

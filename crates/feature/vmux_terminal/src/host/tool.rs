@@ -5,14 +5,13 @@ use std::time::{Duration, Instant};
 use vmux_api::protocol::{
     AgentRequest, AgentRequestId, AgentRunCompletion, ClientMessage, ProcessId, ServiceMessage,
 };
+use vmux_core::host::manifest::FeatureManifestPlugin;
 use vmux_core::service::ServiceConnection;
 use vmux_core::{HostShell, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 
 use vmux_process::{AgentProcessRunCompletion, AgentReadProcessOutput, AgentReadProcessTranscript};
-use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
-};
+use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery};
 
 use super::{AgentRun, AgentRunWithPlacementOverride, AgentTerminalSend, PlacementMode};
 use vmux_layout::AgentPaneDirection;
@@ -24,17 +23,14 @@ pub struct TerminalToolPlugin;
 
 impl Plugin for TerminalToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("../feature.ron"),
-            "default",
-        ))
-        .register_tool::<RunArgs>("run")
-        .register_tool::<ReadTerminalArgs>("read_terminal")
-        .register_tool::<TerminalSendArgs>("terminal_send")
-        .add_systems(
-            Update,
-            (run, read_terminal, dispatch).in_set(ToolDispatchSet),
-        );
+        app.add_plugins(FeatureManifestPlugin::new(include_str!("../feature.ron")))
+            .register_tool::<RunArgs>()
+            .register_tool::<ReadTerminalArgs>()
+            .register_tool::<TerminalSendArgs>()
+            .add_systems(
+                Update,
+                (run, read_terminal, dispatch).in_set(ToolDispatchSet),
+            );
     }
 }
 
@@ -76,6 +72,7 @@ impl From<RunMode> for PlacementMode {
     }
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RunArgs {
@@ -89,12 +86,14 @@ struct RunArgs {
     mode: Option<RunMode>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ReadTerminalArgs {
     terminal: String,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TerminalSendArgs {

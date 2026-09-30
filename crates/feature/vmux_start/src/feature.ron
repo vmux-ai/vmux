@@ -1,7 +1,7 @@
 (
-    pages: {
-        "default":
+    pages: [
         (
+            name: "default",
             url: "vmux://start/",
             title: "Start",
             title_message_id: "start-title",
@@ -51,7 +51,6 @@
                 "KeyStroke",
                 "KeyClaims",
             ],
-        )
-        ,
-    },
+        ),
+    ],
 )

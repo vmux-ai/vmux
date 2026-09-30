@@ -1,7 +1,7 @@
 (
-    pages: {
-        "default":
+    pages: [
         (
+            name: "default",
             url: "vmux://spaces/",
             title: "Spaces",
             title_message_id: "spaces-title",
@@ -29,12 +29,9 @@
                 "KeyStroke",
                 "KeyClaims",
             ],
-        )
-        ,
-    },
-    tools: {
-        "default":
-        [
+        ),
+    ],
+    tools: [
             (
                 name: "select_project",
                 aliases: ["select_workspace", "choose_workspace"],
@@ -91,12 +88,8 @@
                     properties: {"space_id": (type: String)},
                 ),
             ),
-        ]
-        ,
-    },
-    commands: {
-        "key":
-        [
+    ],
+    commands: [
             (
                 id: "space_next",
                 label: "Next Space",
@@ -136,10 +129,6 @@
                     (shortcut: Direct("Backspace"), when: Some("spaces")),
                 ],
             ),
-        ]
-        ,
-        "plugin":
-        [
             (
                 id: "open_in_new_space",
                 label: "Open in New Space",
@@ -158,7 +147,5 @@
                     )),
                 )),
             ),
-        ]
-        ,
-    },
+    ],
 )

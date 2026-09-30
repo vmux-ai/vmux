@@ -1,7 +1,7 @@
 (
-    pages: {
-        "default":
+    pages: [
         (
+            name: "default",
             url: "vmux://layout/",
             title: "vmux",
             manifest_title: "Layout",
@@ -106,18 +106,15 @@
             ],
         )
         ,
-        "error":
         (
+            name: "error",
             url: "vmux://error/",
             title: "Error",
             asset_host: "error",
             permissions: ["PageReady", "ThemeEvent"],
-        )
-        ,
-    },
-    tools: {
-        "default":
-        [
+        ),
+    ],
+    tools: [
             (
                 name: "open_page",
                 description: r#"Open a page using vmux auto placement. Omit `direction` so vmux reuses the existing matching bucket first (terminal pages with terminals, browser pages with browsers) and otherwise spirals off the latest non-agent pane. url uses the same rules as browser_navigate (vmux://terminal/ opens a terminal; anything else loads as a browser). direction is an override for a forced adjacent open: right|left|top|bottom. focus defaults false."#,
@@ -265,12 +262,8 @@
                     },
                 ),
             ),
-        ]
-        ,
-    },
-    commands: {
-        "archive":
-        [
+    ],
+    commands: [
             (
                 id: "stack_reopen",
                 label: "Reopen Closed Page",
@@ -278,10 +271,6 @@
                 accelerator: Some("super+shift+t"),
                 shortcuts: [(shortcut: Direct("Ctrl+Shift+T"), when: None)],
             ),
-        ]
-        ,
-        "bookmark":
-        [
             (
                 id: "bookmark_toggle_active",
                 label: "Toggle Active",
@@ -295,10 +284,6 @@
                 group: "Bookmark",
                 hidden: true,
             ),
-        ]
-        ,
-        "pane":
-        [
             (
                 id: "open_in_pane_top",
                 label: "Open in Pane Top",
@@ -482,10 +467,6 @@
                 hidden: true,
                 shortcuts: [(shortcut: Chord("Ctrl+b, z"), when: None)],
             ),
-        ]
-        ,
-        "stack":
-        [
             (
                 id: "open_in_new_stack",
                 label: "Open in New Stack",
@@ -537,10 +518,6 @@
                 group: "Layout > Stack",
                 shortcuts: [(shortcut: Chord("Ctrl+b, >"), when: None)],
             ),
-        ]
-        ,
-        "tab":
-        [
             (
                 id: "open_in_new_tab",
                 label: "Open in New Tab",
@@ -602,20 +579,12 @@
             (id: "tab_select_last", label: "Select Last Tab", group: "Layout > Tab", accelerator: Some("super+9")),
             (id: "swap_tab_prev", label: "Move Tab Left", group: "Layout > Tab", hidden: true),
             (id: "swap_tab_next", label: "Move Tab Right", group: "Layout > Tab", hidden: true),
-        ]
-        ,
-        "toggle":
-        [
             (
                 id: "toggle_layout",
                 label: "Toggle Layout",
                 group: "Layout > Layout",
                 shortcuts: [(shortcut: Direct("Super+Shift+S"), when: None)],
             ),
-        ]
-        ,
-        "window":
-        [
             (
                 id: "minimize_window",
                 label: "Minimize Window",
@@ -644,7 +613,5 @@
                 accelerator: Some("ctrl+super+f"),
                 hidden: true,
             ),
-        ]
-        ,
-    },
+    ],
 )

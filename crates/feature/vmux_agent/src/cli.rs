@@ -7,26 +7,30 @@ use vmux_api::protocol::{
     AgentRequestId, AgentTurnEnded, ClientMessage, FileTouchKind, ProcessId, ServiceMessage,
 };
 use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
+use vmux_core::host::manifest::FeatureManifestPlugin;
 use vmux_core::service::ServiceConnection;
 
 pub struct AgentCliPlugin;
 
 impl Plugin for AgentCliPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(CliManifestPlugin::from_feature(include_str!("feature.ron")))
-            .add_systems(
-                Update,
-                (
-                    route_agent_cli,
-                    start_notify,
-                    start_file_touch,
-                    start_turn_end,
-                    poll_notify,
-                    poll_file_touch,
-                    poll_turn_end,
-                )
-                    .chain(),
-            );
+        app.add_plugins((
+            FeatureManifestPlugin::new(include_str!("feature.ron")),
+            CliManifestPlugin,
+        ))
+        .add_systems(
+            Update,
+            (
+                route_agent_cli,
+                start_notify,
+                start_file_touch,
+                start_turn_end,
+                poll_notify,
+                poll_file_touch,
+                poll_turn_end,
+            )
+                .chain(),
+        );
     }
 }
 

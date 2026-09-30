@@ -19,9 +19,7 @@ use bevy::{
 };
 use moonshine_save::prelude::*;
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
-use vmux_command::{
-    CommandDefinitions, CommandInvocation, CommandRuntimePlugin, RegisterCommandDefinitions,
-};
+use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
 #[cfg(test)]
 use vmux_core::{
     Active, EffectiveStartupUrl, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget,
@@ -236,18 +234,16 @@ impl TryFrom<&CommandInvocation> for ToggleZoomRequest {
     }
 }
 
-fn spawn_pane_commands(mut commands: Commands) {
-    let mut definitions =
-        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "pane");
+fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
     for id in [
         "open_in_pane_top",
         "open_in_pane_right",
         "open_in_pane_bottom",
         "open_in_pane_left",
     ] {
-        commands.spawn(definitions.take(id).message::<OpenRequest>());
+        registry.message::<OpenRequest>(&mut commands, id);
     }
-    commands.spawn(definitions.take("close_pane").message::<CloseRequest>());
+    registry.message::<CloseRequest>(&mut commands, "close_pane");
     for id in [
         "toggle_pane",
         "select_pane_left",
@@ -255,7 +251,7 @@ fn spawn_pane_commands(mut commands: Commands) {
         "select_pane_up",
         "select_pane_down",
     ] {
-        commands.spawn(definitions.take(id).message::<FocusRequest>());
+        registry.message::<FocusRequest>(&mut commands, id);
     }
     for id in [
         "swap_pane_prev",
@@ -266,7 +262,7 @@ fn spawn_pane_commands(mut commands: Commands) {
         "mirror_panes_horizontal",
         "mirror_panes_vertical",
     ] {
-        commands.spawn(definitions.take(id).message::<ArrangeRequest>());
+        registry.message::<ArrangeRequest>(&mut commands, id);
     }
     for id in [
         "equalize_pane_size",
@@ -275,10 +271,9 @@ fn spawn_pane_commands(mut commands: Commands) {
         "resize_pane_up",
         "resize_pane_down",
     ] {
-        commands.spawn(definitions.take(id).message::<ResizeRequest>());
+        registry.message::<ResizeRequest>(&mut commands, id);
     }
-    commands.spawn(definitions.take("zoom_pane").message::<ToggleZoomRequest>());
-    definitions.assert_all_registered();
+    registry.message::<ToggleZoomRequest>(&mut commands, "zoom_pane");
 }
 
 pub struct PaneCommandPlugin;
@@ -288,16 +283,16 @@ impl Plugin for PaneCommandPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_message::<OpenRequest>()
-            .add_message::<CloseRequest>()
-            .add_message::<FocusRequest>()
-            .add_message::<ArrangeRequest>()
-            .add_message::<ResizeRequest>()
-            .add_message::<ToggleZoomRequest>()
-            .add_systems(
-                Startup,
-                spawn_pane_commands.in_set(RegisterCommandDefinitions),
-            );
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_message::<OpenRequest>()
+        .add_message::<CloseRequest>()
+        .add_message::<FocusRequest>()
+        .add_message::<ArrangeRequest>()
+        .add_message::<ResizeRequest>()
+        .add_message::<ToggleZoomRequest>()
+        .add_systems(Startup, bind_commands.in_set(BindCommands));
     }
 }
 

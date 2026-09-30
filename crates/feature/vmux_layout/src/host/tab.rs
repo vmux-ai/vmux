@@ -12,9 +12,9 @@ use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
-use vmux_command::{
-    CommandDefinitions, CommandInvocation, CommandRuntimePlugin, RegisterCommandDefinitions,
-};
+#[cfg(test)]
+use vmux_command::CommandManifest;
+use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
 use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_core::launcher::LauncherDismissRequest;
 pub use vmux_core::workspace::TabCommandSet;
@@ -78,15 +78,15 @@ impl Plugin for TabCommandPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_message::<OpenRequest>()
-            .add_message::<CreateRequest>()
-            .add_message::<CloseRequest>()
-            .add_message::<FocusRequest>()
-            .add_message::<MoveRequest>()
-            .add_systems(
-                Startup,
-                spawn_tab_commands.in_set(RegisterCommandDefinitions),
-            );
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_message::<OpenRequest>()
+        .add_message::<CreateRequest>()
+        .add_message::<CloseRequest>()
+        .add_message::<FocusRequest>()
+        .add_message::<MoveRequest>()
+        .add_systems(Startup, bind_commands.in_set(BindCommands));
     }
 }
 
@@ -185,12 +185,10 @@ impl TryFrom<&CommandInvocation> for MoveRequest {
     }
 }
 
-fn spawn_tab_commands(mut commands: Commands) {
-    let mut definitions =
-        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "tab");
-    commands.spawn(definitions.take("open_in_new_tab").message::<OpenRequest>());
-    commands.spawn(definitions.take("new_task").message::<CreateRequest>());
-    commands.spawn(definitions.take("close_tab").message::<CloseRequest>());
+fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+    registry.message::<OpenRequest>(&mut commands, "open_in_new_tab");
+    registry.message::<CreateRequest>(&mut commands, "new_task");
+    registry.message::<CloseRequest>(&mut commands, "close_tab");
     for id in [
         "next_tab",
         "prev_tab",
@@ -204,12 +202,11 @@ fn spawn_tab_commands(mut commands: Commands) {
         "tab_select_8",
         "tab_select_last",
     ] {
-        commands.spawn(definitions.take(id).message::<FocusRequest>());
+        registry.message::<FocusRequest>(&mut commands, id);
     }
     for id in ["swap_tab_prev", "swap_tab_next"] {
-        commands.spawn(definitions.take(id).message::<MoveRequest>());
+        registry.message::<MoveRequest>(&mut commands, id);
     }
-    definitions.assert_all_registered();
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -692,10 +689,14 @@ mod tests {
     #[test]
     fn tab_mcp_definition_dispatches_to_the_typed_request() {
         let definitions =
-            CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "tab").into_vec();
+            CommandManifest::from_feature_ron(include_str!("../feature.ron")).into_vec();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)
+            .filter(|tool| {
+                let invocation = CommandInvocation::new(Entity::PLACEHOLDER, &tool.name);
+                OpenRequest::try_from(&invocation).is_ok()
+            })
             .collect::<Vec<_>>();
         assert_eq!(
             tools

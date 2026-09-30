@@ -7,7 +7,9 @@ use bevy_cef::prelude::*;
 use vmux_api::VmuxRoute;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
-use vmux_command::{CommandDefinitions, CommandInvocation, ReadCommandRequests};
+#[cfg(test)]
+use vmux_command::CommandManifest;
+use vmux_command::{CommandInvocation, CommandRegistry, ReadCommandRequests};
 use vmux_core::{
     HostSpawnRoute, PageMetadata, PageOpenRequest, PageOpenTarget,
     host::{UiStateWrite, page::NativelyHosted},
@@ -39,37 +41,37 @@ impl Plugin for CommandPlugin {
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
-        app.add_message::<NavigationRequest>()
-            .add_message::<OpenRequest>()
-            .add_message::<ZoomRequest>()
-            .add_message::<ShowDevToolsRequest>()
-            .add_systems(
-                Startup,
-                spawn_browser_commands.in_set(vmux_command::RegisterCommandDefinitions),
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("feature.ron"),
+        ))
+        .add_message::<NavigationRequest>()
+        .add_message::<OpenRequest>()
+        .add_message::<ZoomRequest>()
+        .add_message::<ShowDevToolsRequest>()
+        .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands))
+        .add_observer(on_header_back)
+        .add_observer(on_header_forward)
+        .add_observer(on_header_reload)
+        .add_observer(on_header_address_focus)
+        .add_observer(on_side_sheet_stack_activate)
+        .add_observer(on_side_sheet_stack_close)
+        .add_observer(on_side_sheet_stack_create)
+        .add_observer(on_side_sheet_project_open)
+        .add_observer(on_side_sheet_section)
+        .add_observer(on_side_sheet_resize)
+        .add_observer(on_reload_notify_header)
+        .add_observer(on_hard_reload_notify_header)
+        .add_systems(
+            Update,
+            (
+                handle_navigation_requests,
+                handle_open_requests,
+                handle_zoom_requests,
+                show_dev_tools,
             )
-            .add_observer(on_header_back)
-            .add_observer(on_header_forward)
-            .add_observer(on_header_reload)
-            .add_observer(on_header_address_focus)
-            .add_observer(on_side_sheet_stack_activate)
-            .add_observer(on_side_sheet_stack_close)
-            .add_observer(on_side_sheet_stack_create)
-            .add_observer(on_side_sheet_project_open)
-            .add_observer(on_side_sheet_section)
-            .add_observer(on_side_sheet_resize)
-            .add_observer(on_reload_notify_header)
-            .add_observer(on_hard_reload_notify_header)
-            .add_systems(
-                Update,
-                (
-                    handle_navigation_requests,
-                    handle_open_requests,
-                    handle_zoom_requests,
-                    show_dev_tools,
-                )
-                    .chain()
-                    .in_set(ReadCommandRequests),
-            );
+                .chain()
+                .in_set(ReadCommandRequests),
+        );
     }
 }
 
@@ -160,20 +162,21 @@ impl TryFrom<&CommandInvocation> for ShowDevToolsRequest {
     }
 }
 
-fn spawn_browser_commands(mut commands: Commands) {
-    let manifest = include_str!("feature.ron");
-    for definition in CommandDefinitions::from_feature_ron(manifest, "navigation").into_vec() {
-        commands.spawn(definition.message::<NavigationRequest>());
+fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+    for id in [
+        "browser_prev_page",
+        "browser_next_page",
+        "browser_reload",
+        "browser_hard_reload",
+        "browser_stop",
+    ] {
+        registry.message::<NavigationRequest>(&mut commands, id);
     }
-    for definition in CommandDefinitions::from_feature_ron(manifest, "open").into_vec() {
-        commands.spawn(definition.message::<OpenRequest>());
+    registry.message::<OpenRequest>(&mut commands, "open_in_place");
+    for id in ["browser_zoom_in", "browser_zoom_out", "browser_zoom_reset"] {
+        registry.message::<ZoomRequest>(&mut commands, id);
     }
-    for definition in CommandDefinitions::from_feature_ron(manifest, "zoom").into_vec() {
-        commands.spawn(definition.message::<ZoomRequest>());
-    }
-    for definition in CommandDefinitions::from_feature_ron(manifest, "dev_tools").into_vec() {
-        commands.spawn(definition.message::<ShowDevToolsRequest>());
-    }
+    registry.message::<ShowDevToolsRequest>(&mut commands, "browser_dev_tools");
 }
 
 fn handle_navigation_requests(
@@ -668,12 +671,9 @@ mod tests {
 
     #[test]
     fn browser_mcp_definitions_are_the_dispatchable_command_set() {
-        let manifest = include_str!("feature.ron");
-        let mut definitions =
-            CommandDefinitions::from_feature_ron(manifest, "navigation").into_vec();
-        definitions.extend(CommandDefinitions::from_feature_ron(manifest, "open").into_vec());
-        definitions.extend(CommandDefinitions::from_feature_ron(manifest, "zoom").into_vec());
-        definitions.extend(CommandDefinitions::from_feature_ron(manifest, "dev_tools").into_vec());
+        let definitions = CommandManifest::from_feature_ron(include_str!("feature.ron"));
+        let mut definitions = definitions.into_vec();
+        definitions.retain(|definition| definition.id != "browser_open_history");
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)
@@ -774,15 +774,16 @@ mod tests {
     #[test]
     fn command_invocations_dispatch_to_concrete_requests() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_command::CommandRuntimePlugin))
-            .add_message::<NavigationRequest>()
-            .add_message::<OpenRequest>()
-            .add_message::<ZoomRequest>()
-            .add_message::<ShowDevToolsRequest>()
-            .add_systems(
-                Startup,
-                spawn_browser_commands.in_set(vmux_command::RegisterCommandDefinitions),
-            );
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_core::host::manifest::FeatureManifestPlugin::new(include_str!("feature.ron")),
+            vmux_command::CommandRuntimePlugin,
+        ))
+        .add_message::<NavigationRequest>()
+        .add_message::<OpenRequest>()
+        .add_message::<ZoomRequest>()
+        .add_message::<ShowDevToolsRequest>()
+        .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands));
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()
             .write_batch([

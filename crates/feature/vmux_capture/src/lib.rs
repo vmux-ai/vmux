@@ -4,10 +4,11 @@ use vmux_api::BinEvent;
 use vmux_api::protocol::{
     AgentImage, AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage,
 };
+use vmux_core::host::manifest::FeatureManifestPlugin;
 use vmux_core::service::ServiceRequest;
 use vmux_tool::{
-    AddedTool, ToolAppExt, ToolDispatchSet, ToolManifestPlugin, ToolQuery, ToolQueryHandled,
-    ToolQueryRequest, ToolQueryRouteSet,
+    AddedTool, ToolAppExt, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest,
+    ToolQueryRouteSet,
 };
 
 #[vmux_api::agent(Eq)]
@@ -32,35 +33,32 @@ pub struct CapturePlugin;
 
 impl Plugin for CapturePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("feature.ron"),
-            "default",
-        ))
-        .add_message::<ToolQueryRequest>()
-        .add_message::<ToolQueryHandled>()
-        .add_message::<ServiceRequest>()
-        .register_tool::<ScreenshotArgs>("screenshot")
-        .register_tool::<RecordStartArgs>("record_start")
-        .register_tool::<RecordStopArgs>("record_stop")
-        .add_message::<ScreenshotRequest>()
-        .add_message::<ScreenshotResponse>()
-        .add_message::<RecordStartRequest>()
-        .add_message::<RecordStartResponse>()
-        .add_message::<RecordStopRequest>()
-        .add_message::<RecordStopResponse>()
-        .add_systems(
-            Update,
-            (screenshot, record_start, record_stop).in_set(ToolDispatchSet),
-        )
-        .add_systems(Update, route_capture_queries.in_set(ToolQueryRouteSet))
-        .add_systems(
-            Update,
-            (
-                forward_screenshot_responses,
-                forward_record_start_responses,
-                forward_record_stop_responses,
-            ),
-        );
+        app.add_plugins(FeatureManifestPlugin::new(include_str!("feature.ron")))
+            .add_message::<ToolQueryRequest>()
+            .add_message::<ToolQueryHandled>()
+            .add_message::<ServiceRequest>()
+            .register_tool::<ScreenshotArgs>()
+            .register_tool::<RecordStartArgs>()
+            .register_tool::<RecordStopArgs>()
+            .add_message::<ScreenshotRequest>()
+            .add_message::<ScreenshotResponse>()
+            .add_message::<RecordStartRequest>()
+            .add_message::<RecordStartResponse>()
+            .add_message::<RecordStopRequest>()
+            .add_message::<RecordStopResponse>()
+            .add_systems(
+                Update,
+                (screenshot, record_start, record_stop).in_set(ToolDispatchSet),
+            )
+            .add_systems(Update, route_capture_queries.in_set(ToolQueryRouteSet))
+            .add_systems(
+                Update,
+                (
+                    forward_screenshot_responses,
+                    forward_record_start_responses,
+                    forward_record_stop_responses,
+                ),
+            );
     }
 }
 
@@ -120,12 +118,14 @@ pub struct RecordStopResponse {
     pub result: Result<RecordingInfo, String>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ScreenshotArgs {
     pane: Option<String>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RecordStartArgs {
@@ -135,6 +135,7 @@ struct RecordStartArgs {
     pane: Option<String>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RecordStopArgs {

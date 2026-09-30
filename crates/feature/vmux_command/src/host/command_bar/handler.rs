@@ -24,7 +24,7 @@ use crate::snapshot::{
     ClaimedUrls, CommandBarProjection, ContributedCommand, ContributedPages,
     WriteCommandBarSnapshots,
 };
-use crate::{CommandInvocation, ReadCommandRequests};
+use crate::{CommandInvocation, CommandRegistry, ReadCommandRequests};
 use bevy::{
     ecs::{message::MessageReader, system::SystemParam},
     prelude::*,
@@ -49,83 +49,83 @@ pub(crate) struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<CommandBarToggleRequest>()
-            .add_plugins(WorkSnapshotPlugin)
-            .add_message::<CommandBarEditPageRequest>()
-            .add_message::<CommandBarPathRequest>()
-            .add_message::<CommandBarCommandsRequest>()
-            .add_message::<CommandBarExRequest>()
-            .add_message::<CommandBarPickerRequest>()
-            .add_message::<SpaceOpenRequest>()
-            .add_systems(
-                Startup,
-                spawn_command_bar_commands.in_set(crate::RegisterCommandDefinitions),
-            )
-            .add_message::<LauncherDismissRequest>()
-            .add_message::<vmux_core::ContributedCommandChosen>()
-            .add_message::<InlineTransitionRequested>()
-            .add_message::<StackInPaneChosen>()
-            .add_message::<RestoreKeyboardToStack>()
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .add_message::<SettingsPageSpawnRequest>()
-            .add_message::<SpacesPageSpawnRequest>()
-            .add_plugins(UiEventPlugin::<(
-                PromptRequest,
-                CommandBarPageOpenRequest,
-                TerminalRequest,
-                InvokeRequest,
-                SwitchSpaceRequest,
-                SwitchTabRequest,
-                ExRequest,
-                PickRequest,
-                DismissRequest,
-                CommandBarReadyEvent,
-                CommandBarRenderedEvent,
-                CommandBarSizeEvent,
-            )>::default())
-            .add_observer(on_prompt_request)
-            .add_observer(on_page_open_request)
-            .add_observer(on_terminal_request)
-            .add_observer(on_invoke_request)
-            .add_observer(on_switch_space_request)
-            .add_observer(on_switch_tab_request)
-            .add_observer(on_ex_request)
-            .add_observer(on_pick_request)
-            .add_observer(on_dismiss_request)
-            .add_observer(close_command_bar)
-            .add_observer(on_command_bar_ready)
-            .add_observer(on_command_bar_rendered)
-            .add_observer(on_command_bar_size)
-            .add_systems(
-                Update,
-                prewarm_command_bar_modal.before(CefSystems::CreateAndResize),
-            )
-            .add_systems(
-                Update,
-                handle_open_command_bar
-                    .in_set(ReadCommandRequests)
-                    .after(prewarm_command_bar_modal)
-                    .after(vmux_core::workspace::TabCommandSet)
-                    .after(vmux_core::workspace::StackCommandSet),
-            )
-            .add_systems(
-                Update,
-                retry_pending_command_bar_open.after(handle_open_command_bar),
-            )
-            .add_systems(
-                Update,
-                mirror_project_roots.in_set(WriteCommandBarSnapshots),
-            )
-            .add_systems(
-                Update,
-                deferred_dismiss_modal
-                    .after(ReadCommandRequests)
-                    .before(vmux_core::workspace::ComputeFocusSet),
-            )
-            .add_systems(
-                PostUpdate,
-                reveal_command_bar.chain().after(LayoutSystems::Layout),
-            );
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../../feature.ron"),
+        ))
+        .add_message::<CommandBarToggleRequest>()
+        .add_plugins(WorkSnapshotPlugin)
+        .add_message::<CommandBarEditPageRequest>()
+        .add_message::<CommandBarPathRequest>()
+        .add_message::<CommandBarCommandsRequest>()
+        .add_message::<CommandBarExRequest>()
+        .add_message::<CommandBarPickerRequest>()
+        .add_message::<SpaceOpenRequest>()
+        .add_systems(Startup, bind_commands.in_set(crate::BindCommands))
+        .add_message::<LauncherDismissRequest>()
+        .add_message::<vmux_core::ContributedCommandChosen>()
+        .add_message::<InlineTransitionRequested>()
+        .add_message::<StackInPaneChosen>()
+        .add_message::<RestoreKeyboardToStack>()
+        .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+        .add_message::<SettingsPageSpawnRequest>()
+        .add_message::<SpacesPageSpawnRequest>()
+        .add_plugins(UiEventPlugin::<(
+            PromptRequest,
+            CommandBarPageOpenRequest,
+            TerminalRequest,
+            InvokeRequest,
+            SwitchSpaceRequest,
+            SwitchTabRequest,
+            ExRequest,
+            PickRequest,
+            DismissRequest,
+            CommandBarReadyEvent,
+            CommandBarRenderedEvent,
+            CommandBarSizeEvent,
+        )>::default())
+        .add_observer(on_prompt_request)
+        .add_observer(on_page_open_request)
+        .add_observer(on_terminal_request)
+        .add_observer(on_invoke_request)
+        .add_observer(on_switch_space_request)
+        .add_observer(on_switch_tab_request)
+        .add_observer(on_ex_request)
+        .add_observer(on_pick_request)
+        .add_observer(on_dismiss_request)
+        .add_observer(close_command_bar)
+        .add_observer(on_command_bar_ready)
+        .add_observer(on_command_bar_rendered)
+        .add_observer(on_command_bar_size)
+        .add_systems(
+            Update,
+            prewarm_command_bar_modal.before(CefSystems::CreateAndResize),
+        )
+        .add_systems(
+            Update,
+            handle_open_command_bar
+                .in_set(ReadCommandRequests)
+                .after(prewarm_command_bar_modal)
+                .after(vmux_core::workspace::TabCommandSet)
+                .after(vmux_core::workspace::StackCommandSet),
+        )
+        .add_systems(
+            Update,
+            retry_pending_command_bar_open.after(handle_open_command_bar),
+        )
+        .add_systems(
+            Update,
+            mirror_project_roots.in_set(WriteCommandBarSnapshots),
+        )
+        .add_systems(
+            Update,
+            deferred_dismiss_modal
+                .after(ReadCommandRequests)
+                .before(vmux_core::workspace::ComputeFocusSet),
+        )
+        .add_systems(
+            PostUpdate,
+            reveal_command_bar.chain().after(LayoutSystems::Layout),
+        );
     }
 }
 
@@ -224,35 +224,14 @@ impl TryFrom<&CommandInvocation> for CommandBarPickerRequest {
     }
 }
 
-fn spawn_command_bar_commands(mut commands: Commands) {
-    let mut definitions =
-        crate::CommandDefinitions::from_feature_ron(include_str!("../../feature.ron"), "handler");
-    commands.spawn(definitions.take("space_open").message::<SpaceOpenRequest>());
-    commands.spawn(
-        definitions
-            .take("browser_open_command_bar")
-            .message::<CommandBarToggleRequest>(),
-    );
-    commands.spawn(
-        definitions
-            .take("browser_open_page_in_command_bar")
-            .message::<CommandBarEditPageRequest>(),
-    );
-    commands.spawn(
-        definitions
-            .take("browser_open_path_bar")
-            .message::<CommandBarPathRequest>(),
-    );
-    commands.spawn(
-        definitions
-            .take("browser_open_commands")
-            .message::<CommandBarCommandsRequest>(),
-    );
-    commands.spawn(
-        definitions
-            .take("browser_open_ex_bar")
-            .message::<CommandBarExRequest>(),
-    );
+fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+    registry.message::<SpaceOpenRequest>(&mut commands, "space_open");
+    registry.message::<CommandBarToggleRequest>(&mut commands, "browser_open_command_bar");
+    registry
+        .message::<CommandBarEditPageRequest>(&mut commands, "browser_open_page_in_command_bar");
+    registry.message::<CommandBarPathRequest>(&mut commands, "browser_open_path_bar");
+    registry.message::<CommandBarCommandsRequest>(&mut commands, "browser_open_commands");
+    registry.message::<CommandBarExRequest>(&mut commands, "browser_open_ex_bar");
     for id in [
         "browser_open_goto_line",
         "browser_open_indentation",
@@ -261,9 +240,8 @@ fn spawn_command_bar_commands(mut commands: Commands) {
         "browser_open_reopen_with_encoding",
         "browser_open_save_with_encoding",
     ] {
-        commands.spawn(definitions.take(id).message::<CommandBarPickerRequest>());
+        registry.message::<CommandBarPickerRequest>(&mut commands, id);
     }
-    definitions.assert_all_registered();
 }
 
 #[derive(Component)]
@@ -1316,14 +1294,20 @@ mod tests {
 
     #[test]
     fn command_bar_mcp_definitions_are_the_dispatchable_command_set() {
-        let definitions = crate::CommandDefinitions::from_feature_ron(
-            include_str!("../../feature.ron"),
-            "handler",
-        )
-        .into_vec();
+        let definitions =
+            crate::CommandManifest::from_feature_ron(include_str!("../../feature.ron")).into_vec();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)
+            .filter(|tool| {
+                let invocation = CommandInvocation::new(Entity::PLACEHOLDER, &tool.name);
+                CommandBarToggleRequest::try_from(&invocation).is_ok()
+                    || CommandBarEditPageRequest::try_from(&invocation).is_ok()
+                    || CommandBarPathRequest::try_from(&invocation).is_ok()
+                    || CommandBarCommandsRequest::try_from(&invocation).is_ok()
+                    || CommandBarExRequest::try_from(&invocation).is_ok()
+                    || CommandBarPickerRequest::try_from(&invocation).is_ok()
+            })
             .collect::<Vec<_>>();
         assert_eq!(
             tools

@@ -1,7 +1,7 @@
 (
-    pages: {
-        "default":
+    pages: [
         (
+            name: "default",
             url: "vmux://tools/",
             title: "Tools",
             title_message_id: "tools-title",
@@ -38,9 +38,8 @@
                 "ToolApplyRequest",
                 "ToolImportRequest",
             ],
-        )
-        ,
-    },
+        ),
+    ],
     cli:
     (
         commands: [

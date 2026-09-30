@@ -1,5 +1,7 @@
 #![allow(clippy::type_complexity)]
 
+extern crate self as vmux_tool;
+
 #[cfg(host)]
 mod cli;
 #[cfg(not(target_os = "ios"))]
@@ -40,6 +42,7 @@ pub use provider::*;
 #[cfg(host)]
 pub use query::*;
 pub use registry::*;
+pub use vmux_macro::input;
 
 pub struct ToolPlugin;
 

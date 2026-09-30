@@ -7,26 +7,23 @@ use vmux_api::protocol::{
     ProcessId, ServiceMessage,
 };
 use vmux_core::ProcessAnchor;
+use vmux_core::host::manifest::FeatureManifestPlugin;
 use vmux_core::service::ServiceConnection;
 use vmux_layout::{AgentOpenBeside, AgentPaneDirection};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 use vmux_tool::{
     AgentWorkingDirectory, ToolAppExt, ToolCommand, ToolDispatchError, ToolDispatchSet,
-    ToolManifestPlugin,
 };
 
 pub struct FileToolPlugin;
 
 impl Plugin for FileToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("../feature.ron"),
-            "default",
-        ))
-        .register_tool::<OpenFileArgs>("open_file")
-        .register_tool::<ReadFileArgs>("read_file")
-        .register_tool::<GrepArgs>("grep")
-        .add_systems(Update, (open_file, read_file, grep).in_set(ToolDispatchSet));
+        app.add_plugins(FeatureManifestPlugin::new(include_str!("../feature.ron")))
+            .register_tool::<OpenFileArgs>()
+            .register_tool::<ReadFileArgs>()
+            .register_tool::<GrepArgs>()
+            .add_systems(Update, (open_file, read_file, grep).in_set(ToolDispatchSet));
     }
 }
 
@@ -50,6 +47,7 @@ impl From<PaneDirection> for AgentPaneDirection {
     }
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OpenFileArgs {
@@ -59,6 +57,7 @@ struct OpenFileArgs {
     focus: bool,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ReadFileArgs {
@@ -67,6 +66,7 @@ struct ReadFileArgs {
     limit: Option<usize>,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct GrepArgs {

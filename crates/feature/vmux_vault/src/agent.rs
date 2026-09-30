@@ -3,11 +3,12 @@ use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage};
 use vmux_core::ProcessAnchor;
+use vmux_core::host::manifest::FeatureManifestPlugin;
 use vmux_core::service::ServiceRequest;
 use vmux_layout::AgentOpenBeside;
 use vmux_tool::{
-    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
-    ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
+    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled,
+    ToolQueryRequest, ToolQueryRouteSet,
 };
 
 #[vmux_api::agent(Copy, Eq)]
@@ -17,16 +18,13 @@ pub struct VaultToolPlugin;
 
 impl Plugin for VaultToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::from_feature(
-            include_str!("feature.ron"),
-            "default",
-        ))
-        .add_message::<ToolQueryRequest>()
-        .add_message::<ToolQueryHandled>()
-        .add_message::<ServiceRequest>()
-        .register_tool::<VaultStatusArgs>("vault_status")
-        .register_tool::<OpenVaultArgs>("open_vault")
-        .add_systems(Update, (vault_status, open_vault).in_set(ToolDispatchSet));
+        app.add_plugins(FeatureManifestPlugin::new(include_str!("feature.ron")))
+            .add_message::<ToolQueryRequest>()
+            .add_message::<ToolQueryHandled>()
+            .add_message::<ServiceRequest>()
+            .register_tool::<VaultStatusArgs>()
+            .register_tool::<OpenVaultArgs>()
+            .add_systems(Update, (vault_status, open_vault).in_set(ToolDispatchSet));
     }
 }
 
@@ -41,6 +39,7 @@ impl Plugin for VaultAgentPlugin {
     }
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct VaultStatusArgs {}
@@ -53,6 +52,7 @@ enum VaultProvider {
     CloudFolder,
 }
 
+#[vmux_tool::input]
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OpenVaultArgs {

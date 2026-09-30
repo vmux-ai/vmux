@@ -67,14 +67,23 @@ mod tests {
 
     #[test]
     fn terminal_mcp_definitions_are_the_dispatchable_command_set() {
-        let definitions = vmux_command::CommandDefinitions::from_feature_ron(
-            include_str!("../feature.ron"),
-            "command",
-        )
-        .into_vec();
+        let definitions =
+            vmux_command::CommandManifest::from_feature_ron(include_str!("../feature.ron"))
+                .into_vec();
         let tools = definitions
             .iter()
             .filter_map(vmux_command::CommandDefinition::agent_tool)
+            .filter(|tool| {
+                let invocation = vmux_command::CommandInvocation::new(
+                    bevy::prelude::Entity::PLACEHOLDER,
+                    &tool.name,
+                );
+                TerminalCloseRequest::try_from(&invocation).is_ok()
+                    || TerminalNextRequest::try_from(&invocation).is_ok()
+                    || TerminalPrevRequest::try_from(&invocation).is_ok()
+                    || TerminalClearRequest::try_from(&invocation).is_ok()
+                    || CopyModeRequest::try_from(&invocation).is_ok()
+            })
             .collect::<Vec<_>>();
 
         assert_eq!(

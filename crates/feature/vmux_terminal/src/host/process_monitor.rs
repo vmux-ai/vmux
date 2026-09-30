@@ -4,7 +4,7 @@ use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_api::service::*;
-use vmux_command::{CommandDefinitions, CommandInvocation};
+use vmux_command::{CommandInvocation, CommandRegistry};
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_core::page::PageReady;
 use vmux_core::service::ServiceConnected;
@@ -29,42 +29,45 @@ impl Plugin for ProcessMonitorPlugin {
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
-        app.add_message::<ServiceProcessSnapshot>()
-            .add_message::<OpenServicesRequest>()
-            .add_systems(
-                Startup,
-                (
-                    spawn_process_monitor,
-                    spawn_process_monitor_commands.in_set(vmux_command::RegisterCommandDefinitions),
-                ),
+        app.add_plugins(vmux_core::host::manifest::FeatureManifestPlugin::new(
+            include_str!("../feature.ron"),
+        ))
+        .add_message::<ServiceProcessSnapshot>()
+        .add_message::<OpenServicesRequest>()
+        .add_systems(
+            Startup,
+            (
+                spawn_process_monitor,
+                bind_commands.in_set(vmux_command::BindCommands),
+            ),
+        )
+        .add_plugins(UiEventPlugin::<(
+            ProcessNavigateEvent,
+            ProcessKillEvent,
+            ProcessKillAllEvent,
+        )>::default())
+        .add_plugins(UiStatePlugin::<ProcessesUiState>::default())
+        .add_systems(
+            Update,
+            (
+                reconcile_service_processes,
+                request_process_list,
+                sample_process_usage,
+                broadcast_to_monitors,
             )
-            .add_plugins(UiEventPlugin::<(
-                ProcessNavigateEvent,
-                ProcessKillEvent,
-                ProcessKillAllEvent,
-            )>::default())
-            .add_plugins(UiStatePlugin::<ProcessesUiState>::default())
-            .add_systems(
-                Update,
-                (
-                    reconcile_service_processes,
-                    request_process_list,
-                    sample_process_usage,
-                    broadcast_to_monitors,
-                )
-                    .chain()
-                    .after(vmux_core::service::ServiceMessageSet),
-            )
-            .add_systems(
-                Update,
-                open_services.before(vmux_core::workspace::StackCommandSet),
-            )
-            .add_observer(on_process_navigate)
-            .add_observer(on_process_kill)
-            .add_observer(on_process_kill_all)
-            .add_plugins(HostedUiPlugin::<ProcessMonitorView>::new(
-                crate::ui::monitor::ProcessMonitorPage::MANIFEST,
-            ));
+                .chain()
+                .after(vmux_core::service::ServiceMessageSet),
+        )
+        .add_systems(
+            Update,
+            open_services.before(vmux_core::workspace::StackCommandSet),
+        )
+        .add_observer(on_process_navigate)
+        .add_observer(on_process_kill)
+        .add_observer(on_process_kill_all)
+        .add_plugins(HostedUiPlugin::<ProcessMonitorView>::new(
+            crate::ui::monitor::ProcessMonitorPage::MANIFEST,
+        ));
     }
 }
 
@@ -86,15 +89,8 @@ impl TryFrom<&CommandInvocation> for OpenServicesRequest {
     }
 }
 
-fn spawn_process_monitor_commands(mut commands: Commands) {
-    let mut definitions =
-        CommandDefinitions::from_feature_ron(include_str!("../feature.ron"), "process_monitor");
-    commands.spawn(
-        definitions
-            .take("service_open")
-            .message::<OpenServicesRequest>(),
-    );
-    definitions.assert_all_registered();
+fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+    registry.message::<OpenServicesRequest>(&mut commands, "service_open");
 }
 
 fn open_services(
