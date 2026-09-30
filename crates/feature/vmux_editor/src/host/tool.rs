@@ -3,14 +3,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use vmux_api::protocol::{
-    AgentFileSearch, AgentFileTouched, AgentRequest, AgentRequestId, AgentWorkingDirectory,
-    ClientMessage, FileTouchKind, ProcessId, ServiceMessage,
+    AgentFileSearch, AgentFileTouched, AgentRequest, AgentRequestId, ClientMessage, FileTouchKind,
+    ProcessId, ServiceMessage,
 };
 use vmux_core::ProcessAnchor;
 use vmux_core::service::ServiceConnection;
 use vmux_layout::{AgentOpenBeside, AgentPaneDirection};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
-use vmux_tool::{ToolAppExt, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin};
+use vmux_tool::{
+    AgentWorkingDirectory, ToolAppExt, ToolCommand, ToolDispatchError, ToolDispatchSet,
+    ToolManifestPlugin,
+};
 
 pub struct FileToolPlugin;
 

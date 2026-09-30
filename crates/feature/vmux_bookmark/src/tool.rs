@@ -2,16 +2,18 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{
-    AgentBookmark, AgentBookmarkAdd, AgentBookmarkFolderCreate, AgentBookmarkList,
-    AgentBookmarkNode, AgentBookmarkPage, AgentBookmarkPin, AgentBookmarkPinUrl,
-    AgentBookmarkRemove, AgentBookmarkUnpin, AgentBookmarks, AgentRequest, AgentRequestId,
-    ClientMessage,
+    AgentBookmark, AgentBookmarkNode, AgentBookmarks, AgentRequest, AgentRequestId, ClientMessage,
 };
 use vmux_core::service::ServiceRequest;
 use vmux_core::{Bookmark, BookmarkOrder, Collapsed, Folder, PageMetadata, Pin, Uuid};
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
     ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
+};
+
+use crate::agent::{
+    AgentBookmarkAdd, AgentBookmarkFolderCreate, AgentBookmarkList, AgentBookmarkPage,
+    AgentBookmarkPin, AgentBookmarkPinUrl, AgentBookmarkRemove, AgentBookmarkUnpin,
 };
 
 pub struct BookmarkToolPlugin;

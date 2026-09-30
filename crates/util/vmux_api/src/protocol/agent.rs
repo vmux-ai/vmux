@@ -81,13 +81,6 @@ pub struct FileSearchMatch {
     pub preview: String,
 }
 
-#[vmux_api::contract(Eq)]
-pub struct AgentBookmarkPage {
-    pub url: String,
-    pub title: Option<String>,
-    pub favicon_url: Option<String>,
-}
-
 #[vmux_api::agent]
 pub struct AgentInvokeCommand {
     pub id: String,
@@ -96,24 +89,9 @@ pub struct AgentInvokeCommand {
 }
 
 #[vmux_api::agent]
-pub struct AgentFocusPane {
-    pub pane: String,
-}
-
-#[vmux_api::agent]
 pub struct AgentUpdateSettings {
     pub path: String,
     pub value: JsonValue,
-}
-
-#[vmux_api::agent]
-pub struct AgentUpdateLayout {
-    pub layout: crate::protocol::layout::LayoutSnapshot,
-}
-
-#[vmux_api::agent]
-pub struct AgentOpenInNewStack {
-    pub url: String,
 }
 
 #[vmux_api::agent]
@@ -140,37 +118,6 @@ pub struct AgentTurnEnded {
 #[vmux_api::agent(Copy, Eq)]
 pub struct AgentResumeInAcp {
     pub anchor: ProcessId,
-}
-
-#[vmux_api::agent]
-pub struct AgentBookmarkAdd {
-    pub page: AgentBookmarkPage,
-    pub folder: Option<String>,
-}
-
-#[vmux_api::agent]
-pub struct AgentBookmarkRemove {
-    pub uuid: String,
-}
-
-#[vmux_api::agent]
-pub struct AgentBookmarkPin {
-    pub uuid: String,
-}
-
-#[vmux_api::agent]
-pub struct AgentBookmarkUnpin {
-    pub uuid: String,
-}
-
-#[vmux_api::agent]
-pub struct AgentBookmarkPinUrl {
-    pub page: AgentBookmarkPage,
-}
-
-#[vmux_api::agent]
-pub struct AgentBookmarkFolderCreate {
-    pub name: String,
 }
 
 #[vmux_api::agent]

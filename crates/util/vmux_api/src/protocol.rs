@@ -161,26 +161,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_read_layout_routes_and_decodes() {
-        let request = AgentRequest::encode(&AgentReadLayout { anchor: None }).unwrap();
-        assert_eq!(
-            request.decode::<AgentReadLayout>().unwrap(),
-            Some(AgentReadLayout { anchor: None })
-        );
-    }
-
-    #[test]
-    fn agent_working_directory_routes_and_decodes() {
-        let query = AgentWorkingDirectory {
-            anchor: ProcessId::new(),
-        };
-        let request = AgentRequest::encode(&query).unwrap();
-        let recovered = request.decode::<AgentWorkingDirectory>().unwrap();
-
-        assert_eq!(recovered, Some(query));
-    }
-
-    #[test]
     fn agent_command_catalog_rkyv_round_trip() {
         let request = AgentRequest::encode(&AgentListCommands).unwrap();
         assert_eq!(

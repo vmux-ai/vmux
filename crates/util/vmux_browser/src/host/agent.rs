@@ -1,8 +1,5 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{
-    AgentCommandResult, AgentOpenInNewStack, AgentQueryResult, AgentRequestId,
-    AgentWorkingDirectory, ClientMessage,
-};
+use vmux_api::protocol::{AgentCommandResult, AgentQueryResult, AgentRequestId, ClientMessage};
 use vmux_core::agent::{
     AgentCommandResponse, AgentReply, AgentRequestAppExt, AgentRequestMessage,
     AgentRequestRouteSet, CommandOrigin,
@@ -20,6 +17,7 @@ use vmux_layout::{
     BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, OpenBesideRequest,
     OpenInNewStackRequest,
 };
+use vmux_tool::AgentWorkingDirectory;
 use vmux_tool::{ToolQueryAppExt, ToolQueryMessage, ToolQueryRouteSet};
 
 use super::agent_pane::AgentBrowserResolve;
@@ -63,6 +61,11 @@ pub(crate) struct AgentBrowserScroll {
     pub to: Option<String>,
     pub delta: Option<i32>,
     pub anchor: Option<vmux_core::ProcessId>,
+}
+
+#[vmux_api::agent]
+pub(crate) struct AgentOpenInNewStack {
+    pub url: String,
 }
 
 pub(crate) struct AgentBrowserPlugin;

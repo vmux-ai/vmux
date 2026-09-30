@@ -2,11 +2,6 @@ use super::AgentRequestId;
 use crate::{ProcessId, json::JsonValue};
 
 #[vmux_api::agent(Copy, Eq)]
-pub struct AgentReadLayout {
-    pub anchor: Option<ProcessId>,
-}
-
-#[vmux_api::agent(Copy, Eq)]
 pub struct AgentReadProcessOutput {
     pub process_id: ProcessId,
 }
@@ -45,14 +40,6 @@ pub struct AgentRecordStart {
 pub struct AgentRecordStop {
     pub dir: Option<String>,
     pub name: Option<String>,
-}
-
-#[vmux_api::agent(Copy, Eq)]
-pub struct AgentBookmarkList;
-
-#[vmux_api::agent(Copy, Eq)]
-pub struct AgentWorkingDirectory {
-    pub anchor: ProcessId,
 }
 
 #[vmux_api::agent(Copy, Eq)]

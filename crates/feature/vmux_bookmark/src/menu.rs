@@ -5,6 +5,7 @@ pub struct BookmarkPlugin;
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            crate::agent::BookmarkAgentPlugin,
             crate::persistence::BookmarkPersistencePlugin,
             crate::tool::BookmarkToolPlugin,
         ));

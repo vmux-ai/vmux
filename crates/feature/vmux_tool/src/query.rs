@@ -7,6 +7,11 @@ use vmux_core::service::{
     ServiceMessagePlugin, ServiceMessageSet, ServiceMessageVariant, ServiceRequest,
 };
 
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentWorkingDirectory {
+    pub anchor: vmux_api::ProcessId,
+}
+
 pub struct ToolQueryPlugin;
 
 impl Plugin for ToolQueryPlugin {
@@ -130,7 +135,7 @@ fn reject_unhandled(
 mod tests {
     use super::*;
     use vmux_api::ProcessId;
-    use vmux_api::protocol::{AgentWorkingDirectory, ServiceMessage};
+    use vmux_api::protocol::ServiceMessage;
     use vmux_core::service::ServiceInbound;
 
     fn handle_known(

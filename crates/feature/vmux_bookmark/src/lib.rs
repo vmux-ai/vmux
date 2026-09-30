@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+mod agent;
 mod menu;
 mod persistence;
 mod tool;

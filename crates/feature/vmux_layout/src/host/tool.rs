@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{
-    AgentCommandResult, AgentInvokeCommand, AgentReadLayout, AgentRequest, AgentRequestId,
-    AgentUpdateLayout, ClientMessage, JsonValue, layout,
+    AgentCommandResult, AgentInvokeCommand, AgentRequest, AgentRequestId, ClientMessage, JsonValue,
+    layout,
 };
 use vmux_core::ProcessAnchor;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
@@ -12,7 +12,7 @@ use vmux_tool::{
     ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
 };
 
-use super::agent::{AgentOpenBeside, AgentPaneDirection};
+use super::agent::{AgentOpenBeside, AgentPaneDirection, AgentReadLayout, AgentUpdateLayout};
 use crate::apply::{LayoutApplyResponse, LayoutSnapshotRequest, LayoutSnapshotResponse};
 
 pub struct LayoutToolPlugin;

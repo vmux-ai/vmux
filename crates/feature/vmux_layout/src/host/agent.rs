@@ -1,9 +1,5 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{
-    AgentBookmarkAdd, AgentBookmarkFolderCreate, AgentBookmarkPin, AgentBookmarkPinUrl,
-    AgentBookmarkRemove, AgentBookmarkUnpin, AgentCommandResult, AgentFocusPane, AgentUpdateLayout,
-    ProcessId,
-};
+use vmux_api::protocol::{AgentCommandResult, ProcessId};
 use vmux_core::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestApplySet, AgentRequestBlocked,
     AgentRequestMessage, AgentRequestRouteSet,
@@ -38,32 +34,29 @@ pub struct AgentOpenBeside {
     pub focus: bool,
 }
 
+#[vmux_api::agent]
+pub(super) struct AgentFocusPane {
+    pub pane: String,
+}
+
+#[vmux_api::agent]
+pub(super) struct AgentUpdateLayout {
+    pub layout: vmux_api::protocol::layout::LayoutSnapshot,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub(super) struct AgentReadLayout {
+    pub anchor: Option<ProcessId>,
+}
+
 pub(super) struct LayoutAgentPlugin;
 
 impl Plugin for LayoutAgentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_agent_request::<AgentBookmarkAdd>()
-            .add_agent_request::<AgentBookmarkRemove>()
-            .add_agent_request::<AgentBookmarkPin>()
-            .add_agent_request::<AgentBookmarkPinUrl>()
-            .add_agent_request::<AgentBookmarkUnpin>()
-            .add_agent_request::<AgentBookmarkFolderCreate>()
-            .add_agent_request::<AgentFocusPane>()
+        app.add_agent_request::<AgentFocusPane>()
             .add_agent_request::<AgentUpdateLayout>()
             .add_agent_request::<AgentOpenBeside>()
             .add_message::<FocusPaneRequest>()
-            .add_systems(
-                Update,
-                (
-                    add_bookmark,
-                    remove_bookmark,
-                    pin_bookmark,
-                    pin_bookmark_url,
-                    unpin_bookmark,
-                    create_bookmark_folder,
-                )
-                    .after(AgentRequestRouteSet),
-            )
             .add_systems(
                 Update,
                 (request_focus, focus_pane, update_layout)
@@ -197,99 +190,6 @@ fn update_layout(
             request_id: request.reply.request_id.0,
             snapshot,
         });
-    }
-}
-
-fn add_bookmark(
-    mut requests: MessageReader<AgentRequestMessage<AgentBookmarkAdd>>,
-    mut add: MessageWriter<crate::bookmark::AddRequest>,
-    mut responses: MessageWriter<AgentCommandResponse>,
-) {
-    for request in requests.read() {
-        add.write(crate::bookmark::AddRequest {
-            metadata: vmux_core::PageMetadata {
-                title: request.payload.page.title.clone().unwrap_or_default(),
-                url: request.payload.page.url.clone(),
-                icon: vmux_core::PageIcon::favicon(
-                    request.payload.page.favicon_url.clone().unwrap_or_default(),
-                ),
-                bg_color: None,
-            },
-            folder: request.payload.folder.clone(),
-        });
-        responses.write(request.reply.ok());
-    }
-}
-
-fn remove_bookmark(
-    mut requests: MessageReader<AgentRequestMessage<AgentBookmarkRemove>>,
-    mut remove: MessageWriter<crate::bookmark::RemoveRequest>,
-    mut responses: MessageWriter<AgentCommandResponse>,
-) {
-    for request in requests.read() {
-        remove.write(crate::bookmark::RemoveRequest {
-            uuid: request.payload.uuid.clone(),
-        });
-        responses.write(request.reply.ok());
-    }
-}
-
-fn pin_bookmark(
-    mut requests: MessageReader<AgentRequestMessage<AgentBookmarkPin>>,
-    mut pin: MessageWriter<crate::bookmark::PinRequest>,
-    mut responses: MessageWriter<AgentCommandResponse>,
-) {
-    for request in requests.read() {
-        pin.write(crate::bookmark::PinRequest {
-            uuid: request.payload.uuid.clone(),
-        });
-        responses.write(request.reply.ok());
-    }
-}
-
-fn pin_bookmark_url(
-    mut requests: MessageReader<AgentRequestMessage<AgentBookmarkPinUrl>>,
-    mut pin: MessageWriter<crate::bookmark::PinUrlRequest>,
-    mut responses: MessageWriter<AgentCommandResponse>,
-) {
-    for request in requests.read() {
-        pin.write(crate::bookmark::PinUrlRequest {
-            metadata: vmux_core::PageMetadata {
-                title: request.payload.page.title.clone().unwrap_or_default(),
-                url: request.payload.page.url.clone(),
-                icon: vmux_core::PageIcon::favicon(
-                    request.payload.page.favicon_url.clone().unwrap_or_default(),
-                ),
-                bg_color: None,
-            },
-        });
-        responses.write(request.reply.ok());
-    }
-}
-
-fn unpin_bookmark(
-    mut requests: MessageReader<AgentRequestMessage<AgentBookmarkUnpin>>,
-    mut unpin: MessageWriter<crate::bookmark::UnpinRequest>,
-    mut responses: MessageWriter<AgentCommandResponse>,
-) {
-    for request in requests.read() {
-        unpin.write(crate::bookmark::UnpinRequest {
-            uuid: request.payload.uuid.clone(),
-        });
-        responses.write(request.reply.ok());
-    }
-}
-
-fn create_bookmark_folder(
-    mut requests: MessageReader<AgentRequestMessage<AgentBookmarkFolderCreate>>,
-    mut create: MessageWriter<crate::bookmark::CreateFolderRequest>,
-    mut responses: MessageWriter<AgentCommandResponse>,
-) {
-    for request in requests.read() {
-        create.write(crate::bookmark::CreateFolderRequest::root(
-            request.payload.name.clone(),
-        ));
-        responses.write(request.reply.ok());
     }
 }
 
