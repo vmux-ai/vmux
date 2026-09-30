@@ -21,7 +21,7 @@ use vmux_layout::{
     tab::Tab,
     window::{
         VmuxWindow, WEBVIEW_Z_BASE, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL,
-        WEBVIEW_Z_SIDE_SHEET,
+        WEBVIEW_Z_SIDE_SHEET, WindowHierarchy,
     },
 };
 
@@ -90,20 +90,9 @@ type LayoutKeyboardCapture = Or<(
 pub(crate) type LayoutKeyboardHost = (With<LayoutCef>, LayoutKeyboardCapture);
 
 #[derive(bevy::ecs::system::SystemParam)]
-struct WindowHierarchy<'w, 's> {
-    child_of: Query<'w, 's, &'static ChildOf>,
-    host_windows: Query<'w, 's, &'static HostWindow>,
-}
-
-impl WindowHierarchy<'_, '_> {
-    fn host_of(&self, entity: Entity) -> Option<Entity> {
-        vmux_layout::window::host_window_of(entity, &self.child_of, &self.host_windows)
-    }
-}
-
-#[derive(bevy::ecs::system::SystemParam)]
 struct WindowFrameQueries<'w, 's> {
     hierarchy: WindowHierarchy<'w, 's>,
+    child_of: Query<'w, 's, &'static ChildOf>,
     focus: LayoutFocus<'w, 's>,
     pane_rect: Query<'w, 's, &'static ComputedNode, With<Pane>>,
     header_rect: Query<'w, 's, (Entity, &'static ComputedNode), (With<Header>, With<Open>)>,
@@ -208,6 +197,7 @@ fn sync_children_to_ui(
         With<Browser>,
     >,
     hierarchy: WindowHierarchy,
+    parents: Query<&ChildOf>,
     layout_focus: LayoutFocus,
     pane_rect: Query<&ComputedNode, With<Pane>>,
     all_children: Query<&Children>,
@@ -231,7 +221,7 @@ fn sync_children_to_ui(
         is_windowed,
     ) in browser_q.iter_mut()
     {
-        let Some(host_window) = hierarchy.host_of(browser) else {
+        let Some(host_window) = hierarchy.get(browser) else {
             continue;
         };
         let Some((glass_entity, _, glass_node)) =
@@ -242,11 +232,7 @@ fn sync_children_to_ui(
         let glass_rect = *glass_node;
         let glass_size_px = glass_rect.padding_box();
         let parent = child_of.get();
-        let pane_entity = hierarchy
-            .child_of
-            .get(parent)
-            .map(|co| co.get())
-            .unwrap_or(parent);
+        let pane_entity = parents.get(parent).map(|co| co.get()).unwrap_or(parent);
         let computed = match pane_rect.get(pane_entity) {
             Ok(cn) => cn,
             Err(_) => self_computed,
@@ -260,10 +246,9 @@ fn sync_children_to_ui(
 
         let under_inactive_tab = parent != glass_entity
             && !is_cef_ui
-            && match tab_ancestor(parent, &hierarchy.child_of, &tabs_q) {
+            && match tab_ancestor(parent, &parents, &tabs_q) {
                 Some(tab) => {
-                    active_tab_in_space(tab, &hierarchy.child_of, &all_children, &tabs_q)
-                        != Some(tab)
+                    active_tab_in_space(tab, &parents, &all_children, &tabs_q) != Some(tab)
                 }
                 None => false,
             };
@@ -459,19 +444,14 @@ fn sync_windowed_frames(
     for (entity, self_computed, child_of, visibility, pending_reveal) in &browser_q {
         let parent = child_of.get();
         let pane_entity = queries
-            .hierarchy
             .child_of
             .get(parent)
             .map(|co| co.get())
             .unwrap_or(parent);
         let computed = queries.pane_rect.get(pane_entity).unwrap_or(self_computed);
-        let tab = tab_ancestor(parent, &queries.hierarchy.child_of, &queries.tabs);
-        let tab_active = active_tab_is_visible(
-            tab,
-            &queries.hierarchy.child_of,
-            &queries.all_children,
-            &queries.tabs,
-        );
+        let tab = tab_ancestor(parent, &queries.child_of, &queries.tabs);
+        let tab_active =
+            active_tab_is_visible(tab, &queries.child_of, &queries.all_children, &queries.tabs);
         let stack_active = active_candidate(queries.focus.stack(pane_entity), parent);
         let focused_stack = focus.stack == Some(parent);
         let renderable = computed.size.x > 0.0 && computed.size.y > 0.0;
@@ -508,11 +488,11 @@ fn sync_windowed_frames(
             continue;
         }
         visible.push(entity);
-        let host_window = queries.hierarchy.host_of(entity);
+        let host_window = queries.hierarchy.get(entity);
         let layout_is_hidden = host_window.is_some_and(|window| hidden_windows.contains(window));
         let header_frame = host_window.and_then(|host_window| {
             queries.header_rect.iter().find_map(|(header, rect)| {
-                if queries.hierarchy.host_of(header) == Some(host_window) {
+                if queries.hierarchy.get(header) == Some(host_window) {
                     WindowedFrameRect::from_node(rect)
                 } else {
                     None

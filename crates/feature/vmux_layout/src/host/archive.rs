@@ -233,7 +233,7 @@ struct TabArchiveLayout<'w, 's> {
     splits: Query<'w, 's, &'static PaneSplit>,
     pane_sizes: Query<'w, 's, &'static PaneSize>,
     panes: Query<'w, 's, (), With<Pane>>,
-    host_windows: Query<'w, 's, &'static HostWindow>,
+    window_hierarchy: crate::window::WindowHierarchy<'w, 's>,
 }
 
 impl TabArchiveLayout<'_, '_> {
@@ -365,12 +365,12 @@ fn handle_close_tab_requests(
                 .filter(|active| siblings.contains(active) && closing.contains(active))
                 .unwrap_or(request.tab);
             if request.tab == preferred_source && !replacement_spaces.contains(&tab_space) {
-                let Some(window) = crate::window::host_window_of(
-                    request.tab,
-                    &layout.archive.child_of,
-                    &layout.archive.host_windows,
-                )
-                .or_else(|| layout.primary_window.single().ok()) else {
+                let Some(window) = layout
+                    .archive
+                    .window_hierarchy
+                    .get(request.tab)
+                    .or_else(|| layout.primary_window.single().ok())
+                else {
                     continue;
                 };
                 layout.layout_requests.write(TabLayoutSpawnRequest {
@@ -484,7 +484,7 @@ struct ReopenLayout<'w, 's> {
     pane_ids: Query<'w, 's, (Entity, &'static PaneId)>,
     leaf_panes: Query<'w, 's, (), (With<Pane>, Without<PaneSplit>)>,
     child_of: Query<'w, 's, &'static ChildOf>,
-    host_windows: Query<'w, 's, &'static HostWindow>,
+    window_hierarchy: crate::window::WindowHierarchy<'w, 's>,
     children_q: Query<'w, 's, &'static Children>,
     stacks_q: Query<'w, 's, (), With<Stack>>,
     tabs: Query<'w, 's, (), With<Tab>>,
@@ -510,10 +510,8 @@ impl ReopenLayout<'_, '_> {
             .iter()
             .filter(|(_, id)| id.0 == space_id)
             .find(|(space, _)| {
-                focused_window.is_some_and(|focused| {
-                    crate::window::host_window_of(*space, &self.child_of, &self.host_windows)
-                        == Some(focused)
-                })
+                focused_window
+                    .is_some_and(|focused| self.window_hierarchy.get(*space) == Some(focused))
             })
             .or_else(|| self.spaces.iter().find(|(_, id)| id.0 == space_id))
             .map(|(entity, _)| entity);
@@ -524,7 +522,9 @@ impl ReopenLayout<'_, '_> {
                     .find(|entity| self.any_space.contains(*entity))
             })
             .or_else(|| self.any_space.iter().next())?;
-        let window = crate::window::host_window_of(space, &self.child_of, &self.host_windows)
+        let window = self
+            .window_hierarchy
+            .get(space)
             .or(focused_window)
             .or_else(|| self.primary_window.single().ok())?;
         Some(ReopenTarget {

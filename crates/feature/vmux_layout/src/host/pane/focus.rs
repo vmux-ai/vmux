@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+#[cfg(test)]
 use bevy_cef::prelude::HostWindow;
 use std::time::Instant;
 use vmux_flex::prelude::*;
@@ -131,8 +132,7 @@ fn on_pane_select(
 fn poll_cursor_pane_focus(
     windows: Query<(Entity, &Window)>,
     focused_window: crate::window::FocusedWindow,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
+    hierarchy: crate::window::WindowHierarchy,
     leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
     pane_cooldowns: Query<&PaneHoverCooldown>,
     pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -160,7 +160,7 @@ fn poll_cursor_pane_focus(
     let mut window_panes = Vec::new();
     let mut hovered_pane = None;
     for (entity, layout) in &leaf_panes {
-        if crate::window::host_window_of(entity, &child_of, &host_windows) == Some(window_entity) {
+        if hierarchy.get(entity) == Some(window_entity) {
             window_panes.push(entity);
             if layout.contains(cursor) {
                 hovered_pane = Some(entity);
@@ -253,8 +253,7 @@ fn native_window_cursor_position(window_entity: Entity, window: &Window) -> Opti
 #[cfg(target_os = "macos")]
 fn apply_pending_hover(
     focused_window: crate::window::FocusedWindow,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
+    hierarchy: crate::window::WindowHierarchy,
     leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
     pane_cooldowns: Query<&PaneHoverCooldown>,
     pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -275,7 +274,7 @@ fn apply_pending_hover(
     let mut target = None;
     let mut window_panes = Vec::new();
     for (entity, layout) in leaf_panes.iter() {
-        if crate::window::host_window_of(entity, &child_of, &host_windows) == Some(window_entity) {
+        if hierarchy.get(entity) == Some(window_entity) {
             window_panes.push(entity);
             if layout.contains(pointer.position_px) {
                 target = Some(entity);
@@ -312,8 +311,7 @@ fn warp_cursor_to_active_pane(
         (Entity, &ComputedNode),
         (With<Pane>, Without<PaneSplit>, With<PendingCursorWarp>),
     >,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
+    hierarchy: crate::window::WindowHierarchy,
     mut windows: Query<&mut Window>,
     mut commands: Commands,
 ) {
@@ -321,8 +319,7 @@ fn warp_cursor_to_active_pane(
         if layout.is_empty() {
             continue;
         }
-        let Some(window_entity) = crate::window::host_window_of(target, &child_of, &host_windows)
-        else {
+        let Some(window_entity) = hierarchy.get(target) else {
             commands.entity(target).remove::<PendingCursorWarp>();
             continue;
         };

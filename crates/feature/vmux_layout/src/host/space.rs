@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::HostWindow;
 use moonshine_save::prelude::*;
 use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_core::{Active, EffectiveStartupUrl};
@@ -139,8 +138,7 @@ impl FocusedSpace<'_, '_> {
 fn sync_current_space(
     spaces: Query<(Entity, Has<Active>, Has<CurrentSpace>), With<Space>>,
     focused_window: crate::window::FocusedWindow,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
+    hierarchy: crate::window::WindowHierarchy,
     mut commands: Commands,
 ) {
     let current = focused_window
@@ -150,9 +148,7 @@ fn sync_current_space(
                 .iter()
                 .filter(|(_, active, _)| *active)
                 .map(|(entity, _, _)| entity)
-                .find(|space| {
-                    crate::window::host_window_of(*space, &child_of, &host_windows) == Some(focused)
-                })
+                .find(|space| hierarchy.get(*space) == Some(focused))
         })
         .or_else(|| {
             spaces

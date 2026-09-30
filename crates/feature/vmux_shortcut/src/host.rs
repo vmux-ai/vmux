@@ -7,7 +7,9 @@ use crate::{
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
+#[cfg(test)]
+use bevy_cef::prelude::HostWindow;
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use std::collections::{BTreeMap, HashMap};
 use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap, Shortcut};
 use vmux_command::{CommandDefinition, ResolvedLocale};
@@ -16,7 +18,7 @@ use vmux_core::page::PageReady;
 use vmux_core::{PageOpenSet, PageOpenTask, workspace::ComputeFocusSet};
 use vmux_layout::native_open::HostedUiPlugin;
 use vmux_layout::stack::FocusedStack;
-use vmux_layout::window::host_window_of;
+use vmux_layout::window::WindowHierarchy;
 use vmux_ui::i18n::Locale;
 
 #[vmux_native::page]
@@ -79,8 +81,7 @@ pub struct ShortcutCaptureSet;
 #[derive(SystemParam)]
 struct ShortcutCaptureFocus<'w, 's> {
     views: Query<'w, 's, (Entity, &'static ChildOf), With<Shortcuts>>,
-    child_of: Query<'w, 's, &'static ChildOf>,
-    host_windows: Query<'w, 's, &'static HostWindow>,
+    hierarchy: WindowHierarchy<'w, 's>,
     windows: Query<'w, 's, &'static Window>,
     focus: FocusedStack<'w, 's>,
 }
@@ -93,7 +94,7 @@ impl ShortcutCaptureFocus<'_, '_> {
         if self.focus.stack != Some(parent.parent()) {
             return false;
         }
-        let Some(window) = host_window_of(webview, &self.child_of, &self.host_windows) else {
+        let Some(window) = self.hierarchy.get(webview) else {
             return false;
         };
         self.windows

@@ -328,17 +328,21 @@ fn sync_focused_window(
     }
 }
 
-pub fn host_window_of(
-    entity: Entity,
-    child_of: &Query<&ChildOf>,
-    host_windows: &Query<&HostWindow>,
-) -> Option<Entity> {
-    let mut current = entity;
-    loop {
-        if let Ok(host) = host_windows.get(current) {
-            return Some(host.0);
+#[derive(SystemParam)]
+pub struct WindowHierarchy<'w, 's> {
+    child_of: Query<'w, 's, &'static ChildOf>,
+    host_windows: Query<'w, 's, &'static HostWindow>,
+}
+
+impl WindowHierarchy<'_, '_> {
+    pub fn get(&self, entity: Entity) -> Option<Entity> {
+        let mut current = entity;
+        loop {
+            if let Ok(host) = self.host_windows.get(current) {
+                return Some(host.0);
+            }
+            current = self.child_of.get(current).ok()?.parent();
         }
-        current = child_of.get(current).ok()?.parent();
     }
 }
 
@@ -559,8 +563,7 @@ fn spawn_new_window_workspace(
 
 fn request_default_layout(
     tab_q: Query<(), With<Tab>>,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
+    hierarchy: WindowHierarchy,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     focused_space: crate::space::FocusedSpace,
     mut requests: MessageWriter<TabLayoutSpawnRequest>,
@@ -574,7 +577,8 @@ fn request_default_layout(
     };
     requests.write(TabLayoutSpawnRequest {
         space,
-        primary_window: host_window_of(space, &child_of, &host_windows)
+        primary_window: hierarchy
+            .get(space)
             .or_else(|| primary_window.single().ok())
             .unwrap_or(Entity::PLACEHOLDER),
         name: None,

@@ -2,7 +2,6 @@ use bevy::{
     ecs::{relationship::Relationship, system::SystemParam},
     prelude::*,
 };
-use bevy_cef::prelude::HostWindow;
 #[cfg(feature = "recording")]
 use std::path::Path;
 use std::path::PathBuf;
@@ -105,8 +104,8 @@ pub(crate) struct ResolvedCapture {
 #[derive(SystemParam)]
 pub(crate) struct CaptureSource<'w, 's> {
     focused_window: vmux_layout::window::FocusedWindow<'w, 's>,
+    hierarchy: vmux_layout::window::WindowHierarchy<'w, 's>,
     windows: Query<'w, 's, (Entity, &'static Window)>,
-    host_windows: Query<'w, 's, &'static HostWindow>,
     nodes: Query<'w, 's, &'static ComputedNode>,
     parents: Query<'w, 's, &'static ChildOf>,
 }
@@ -115,11 +114,7 @@ impl CaptureSource<'_, '_> {
     pub(crate) fn resolve(&self, pane: Option<&str>) -> Result<ResolvedCapture, String> {
         let pane_window = pane.and_then(|id| {
             let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
-            vmux_layout::window::host_window_of(
-                Entity::from_bits(bits),
-                &self.parents,
-                &self.host_windows,
-            )
+            self.hierarchy.get(Entity::from_bits(bits))
         });
         let window = pane_window
             .or(self.focused_window.entity())

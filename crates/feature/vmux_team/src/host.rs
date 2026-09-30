@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use vmux_api::avatar::hash_color;
 use vmux_api::protocol::{AgentCommandResult, AgentListTeam};
@@ -22,7 +22,7 @@ use vmux_layout::profile::Profile as SpaceProfile;
 use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
 use vmux_layout::space::{CurrentSpace, FocusedSpace, Space, space_of};
 use vmux_layout::stack::{OpenRequest, Stack};
-use vmux_layout::window::host_window_of;
+use vmux_layout::window::WindowHierarchy;
 use vmux_session::AgentRunState;
 use vmux_space::Spaces;
 
@@ -317,7 +317,7 @@ fn project_team(
         Option<&AgentDoneUnseen>,
     )>,
     child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
+    hierarchy: WindowHierarchy,
     space_marker: Query<(), With<Space>>,
     meta_q: Query<&PageMetadata>,
     children_q: Query<&Children>,
@@ -326,10 +326,10 @@ fn project_team(
 ) {
     for entity in &views {
         let target_space = space_of(entity, &child_of, &space_marker).or_else(|| {
-            let window = host_window_of(entity, &child_of, &host_windows)?;
+            let window = hierarchy.get(entity)?;
             active_spaces
                 .iter()
-                .find(|space| host_window_of(*space, &child_of, &host_windows) == Some(window))
+                .find(|space| hierarchy.get(*space) == Some(window))
         });
         let presentation = TeamPresentation(TeamStateProjection::build(
             build_team_members(

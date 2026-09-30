@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+#[cfg(test)]
 use bevy_cef::prelude::HostWindow;
 use vmux_command::snapshot::{CommandBarProjection, CommandBarSpacesSnapshot, SpaceSummary};
 use vmux_core::Order;
@@ -29,8 +30,7 @@ fn update_spaces_snapshot(
         With<Space>,
     >,
     focused_window: vmux_layout::window::FocusedWindow,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
+    hierarchy: vmux_layout::window::WindowHierarchy,
     mut state: Single<&mut CommandBarProjection>,
 ) {
     let profile = crate::model::bootstrap_profile_name();
@@ -38,8 +38,7 @@ fn update_spaces_snapshot(
     let mut active_space_id = String::new();
     let mut active_space_name = String::new();
     for (entity, id, name, is_active, order) in &spaces {
-        let local = vmux_layout::window::host_window_of(entity, &child_of, &host_windows)
-            == focused_window.entity();
+        let local = hierarchy.get(entity) == focused_window.entity();
         if local && is_active {
             active_space_id.clone_from(&id.0);
             active_space_name = name.to_string();

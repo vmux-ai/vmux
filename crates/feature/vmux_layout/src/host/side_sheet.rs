@@ -3,8 +3,6 @@ use crate::settings::LayoutSettings;
 use bevy::prelude::*;
 #[cfg(target_os = "macos")]
 use bevy::{ecs::system::NonSendMarker, winit::WINIT_WINDOWS};
-#[cfg(target_os = "macos")]
-use bevy_cef::prelude::HostWindow;
 use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
 
@@ -122,18 +120,14 @@ fn sync_side_sheet_visibility(
 #[cfg(target_os = "macos")]
 fn sync_window_buttons_visibility(
     side_sheet_q: Query<(Entity, &SideSheetPosition, Has<Open>), With<SideSheet>>,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
+    hierarchy: crate::window::WindowHierarchy,
     window_q: Query<Entity, With<Window>>,
     mut last_open: Local<std::collections::HashMap<Entity, bool>>,
     _non_send: NonSendMarker,
 ) {
     for entity in &window_q {
         let is_open = side_sheet_q.iter().any(|(side_sheet, pos, open)| {
-            *pos == SideSheetPosition::Left
-                && open
-                && crate::window::host_window_of(side_sheet, &child_of, &host_windows)
-                    == Some(entity)
+            *pos == SideSheetPosition::Left && open && hierarchy.get(side_sheet) == Some(entity)
         });
         if last_open.get(&entity) == Some(&is_open) {
             continue;

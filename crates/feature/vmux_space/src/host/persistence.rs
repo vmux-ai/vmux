@@ -1,7 +1,8 @@
 use bevy::ecs::schedule::common_conditions::any_with_component;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use bevy_cef::prelude::*;
+#[cfg(test)]
+use bevy_cef::prelude::HostWindow;
 use bevy_world_serialization::WorldFilter;
 use moonshine_save::prelude::*;
 use moonshine_save::save::EntityFilter;
@@ -20,7 +21,7 @@ use vmux_core::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadat
 use vmux_layout::space::Space;
 #[cfg(test)]
 use vmux_layout::space::SpaceId;
-use vmux_layout::window::host_window_of;
+use vmux_layout::window::WindowHierarchy;
 use vmux_layout::{LayoutPersistenceSet, LayoutStartupSet};
 #[cfg(test)]
 use vmux_layout::{
@@ -123,8 +124,7 @@ struct AutoSave {
 #[derive(bevy::ecs::system::SystemParam)]
 struct SpaceSaveEntities<'w, 's> {
     saved: Query<'w, 's, Entity, With<Save>>,
-    child_of: Query<'w, 's, &'static ChildOf>,
-    host_windows: Query<'w, 's, &'static HostWindow>,
+    hierarchy: WindowHierarchy<'w, 's>,
     windows: Query<'w, 's, (), With<Window>>,
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
 }
@@ -140,7 +140,8 @@ impl SpaceSaveEntities<'_, '_> {
                 if self.windows.contains(*entity) {
                     return *entity != primary_window;
                 }
-                host_window_of(*entity, &self.child_of, &self.host_windows)
+                self.hierarchy
+                    .get(*entity)
                     .is_some_and(|window| window != primary_window)
             })
             .collect()

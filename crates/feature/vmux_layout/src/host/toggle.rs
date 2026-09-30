@@ -85,8 +85,7 @@ fn handle_visibility_requests(
     hidden_windows: Query<(), With<LayoutHidden>>,
     header_q: Query<Entity, With<Header>>,
     sidesheet_q: Query<Entity, With<SideSheet>>,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
+    hierarchy: crate::window::WindowHierarchy,
     mut commands: Commands,
 ) {
     for _ in reader.read() {
@@ -101,15 +100,19 @@ fn handle_visibility_requests(
         }
 
         if is_hidden {
-            for entity in header_q.iter().chain(sidesheet_q.iter()).filter(|entity| {
-                crate::window::host_window_of(*entity, &child_of, &host_windows) == Some(window)
-            }) {
+            for entity in header_q
+                .iter()
+                .chain(sidesheet_q.iter())
+                .filter(|entity| hierarchy.get(*entity) == Some(window))
+            {
                 commands.entity(entity).remove::<Open>();
             }
         } else {
-            for entity in header_q.iter().chain(sidesheet_q.iter()).filter(|entity| {
-                crate::window::host_window_of(*entity, &child_of, &host_windows) == Some(window)
-            }) {
+            for entity in header_q
+                .iter()
+                .chain(sidesheet_q.iter())
+                .filter(|entity| hierarchy.get(*entity) == Some(window))
+            {
                 commands.entity(entity).insert(Open);
             }
         }

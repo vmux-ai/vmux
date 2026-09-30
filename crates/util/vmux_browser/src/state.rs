@@ -32,7 +32,7 @@ use vmux_layout::{
     stack::{ActiveTabParam, FocusedStack, LayoutFocus, Stack},
     state::LayoutUiState,
     tab::{Tab, active_tab_siblings},
-    window::{FocusedWindow, VmuxWindow, host_window_of},
+    window::{FocusedWindow, VmuxWindow, WindowHierarchy},
 };
 
 use vmux_setting::AppSettings;
@@ -156,7 +156,7 @@ impl TabProjectionData<'_, '_> {
 struct FocusedLayout<'w, 's> {
     focused: FocusedWindow<'w, 's>,
     layouts: Query<'w, 's, (Entity, Ref<'static, PageReady>), With<LayoutCef>>,
-    host_windows: Query<'w, 's, &'static HostWindow>,
+    hierarchy: WindowHierarchy<'w, 's>,
 }
 
 impl FocusedLayout<'_, '_> {
@@ -166,10 +166,7 @@ impl FocusedLayout<'_, '_> {
             .entity()
             .and_then(|window| {
                 self.layouts.iter().find_map(|(entity, _)| {
-                    self.host_windows
-                        .get(entity)
-                        .is_ok_and(|host| host.0 == window)
-                        .then_some(entity)
+                    (self.hierarchy.get(entity) == Some(window)).then_some(entity)
                 })
             })
             .or_else(|| self.layouts.iter().next().map(|(entity, _)| entity))?;
@@ -537,7 +534,6 @@ fn mark_page_state_dirty(
 
 fn push_layout_state_emit(
     mut projection: LayoutProjection,
-    child_of: Query<&ChildOf>,
     header_q: Query<(Entity, Has<Open>, Option<&ComputedNode>), With<Header>>,
     side_sheet_q: Query<(Entity, &SideSheetPosition, Has<Open>, &Node), With<SideSheet>>,
     window_q: Query<(&HostWindow, &Node), With<VmuxWindow>>,
@@ -548,13 +544,7 @@ fn push_layout_state_emit(
         return;
     };
     let cef_e = target.entity;
-    let Some(host_window) = projection
-        .layout
-        .host_windows
-        .get(cef_e)
-        .ok()
-        .map(|host| host.0)
-    else {
+    let Some(host_window) = projection.layout.hierarchy.get(cef_e) else {
         return;
     };
     let window_padding = window_q
@@ -563,9 +553,7 @@ fn push_layout_state_emit(
         .map(layout_window_padding_from_node)
         .unwrap_or_else(|| layout_window_padding_from_settings(&settings));
     let header_open = header_q.iter().any(|(entity, is_open, _)| {
-        is_open
-            && host_window_of(entity, &child_of, &projection.layout.host_windows)
-                == Some(host_window)
+        is_open && projection.layout.hierarchy.get(entity) == Some(host_window)
     });
     let window_width_px = windows
         .get(host_window)
@@ -573,7 +561,7 @@ fn push_layout_state_emit(
         .map(|window| window.resolution.physical_width() as f32)
         .unwrap_or(0.0);
     let header_offsets = header_q.iter().find_map(|(entity, _, computed)| {
-        if host_window_of(entity, &child_of, &projection.layout.host_windows) == Some(host_window) {
+        if projection.layout.hierarchy.get(entity) == Some(host_window) {
             LayoutFixedOffsets::from_node(computed?, window_width_px)
         } else {
             None
@@ -585,8 +573,7 @@ fn push_layout_state_emit(
         vmux_layout::event::SideSheetResizeEvent::live(settings.layout.side_sheet.width).clamped();
     for (entity, position, is_open, node) in &side_sheet_q {
         if *position != SideSheetPosition::Left
-            || host_window_of(entity, &child_of, &projection.layout.host_windows)
-                != Some(host_window)
+            || projection.layout.hierarchy.get(entity) != Some(host_window)
         {
             continue;
         }

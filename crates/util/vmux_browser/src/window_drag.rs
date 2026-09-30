@@ -4,7 +4,10 @@ use std::sync::{LazyLock, Mutex};
 use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_flex::prelude::{ComputedNode, LayoutSystems};
 use vmux_layout::event::WindowDragRegionEvent;
-use vmux_layout::{LayoutCef, window::VmuxWindow};
+use vmux_layout::{
+    LayoutCef,
+    window::{VmuxWindow, WindowHierarchy},
+};
 
 use crate::host::LayoutPointerCapture;
 
@@ -136,8 +139,7 @@ fn on_window_drag_region(
 fn publish_window_drag_region(
     reported: Query<(Entity, &ReportedWindowDragRegions)>,
     window_q: Query<(Entity, &ComputedNode), With<VmuxWindow>>,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
+    hierarchy: WindowHierarchy,
     focused_window: vmux_layout::window::FocusedWindow,
     overlay_q: OverlayStateQuery,
     pointer_capture_q: Query<(Entity, &HostWindow), (With<LayoutCef>, LayoutPointerCapture)>,
@@ -150,15 +152,11 @@ fn publish_window_drag_region(
     let mut regions = PublishedWindowDragRegions::default();
     if !overlay_owns_input {
         for (entity, viewport) in window_q.iter() {
-            if vmux_layout::window::host_window_of(entity, &child_of, &host_windows)
-                != focused_window.entity()
-            {
+            if hierarchy.get(entity) != focused_window.entity() {
                 continue;
             }
             for (webview, reported) in &reported {
-                if vmux_layout::window::host_window_of(webview, &child_of, &host_windows)
-                    != focused_window.entity()
-                {
+                if hierarchy.get(webview) != focused_window.entity() {
                     continue;
                 }
                 for reported in reported.0.values() {

@@ -22,7 +22,7 @@ use vmux_layout::space::{
 use vmux_layout::stack::{FocusedStack, Stack, stack_bundle};
 use vmux_layout::state::LayoutUiState;
 use vmux_layout::tab::Tab;
-use vmux_layout::window::{FocusedWindow, Main, host_window_of};
+use vmux_layout::window::{FocusedWindow, Main, WindowHierarchy};
 use vmux_layout::{
     LayoutCef, LayoutContractPlugin, LayoutStartupSet, LayoutUiStateUpdates, TabLayoutSpawnContent,
     TabLayoutSpawnRequest,
@@ -457,7 +457,7 @@ struct SpaceWindow<'w, 's> {
     mains: Query<'w, 's, Entity, With<Main>>,
     host_windows: Query<'w, 's, &'static HostWindow>,
     focused: FocusedWindow<'w, 's>,
-    child_of: Query<'w, 's, &'static ChildOf>,
+    hierarchy: WindowHierarchy<'w, 's>,
 }
 
 impl SpaceWindow<'_, '_> {
@@ -479,11 +479,11 @@ impl SpaceWindow<'_, '_> {
     fn main(&self, window: Entity) -> Option<Entity> {
         self.mains
             .iter()
-            .find(|main| host_window_of(*main, &self.child_of, &self.host_windows) == Some(window))
+            .find(|main| self.hierarchy.get(*main) == Some(window))
     }
 
     fn window_of(&self, entity: Entity) -> Option<Entity> {
-        host_window_of(entity, &self.child_of, &self.host_windows)
+        self.hierarchy.get(entity)
     }
 }
 

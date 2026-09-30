@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+#[cfg(test)]
 use bevy_cef::prelude::HostWindow;
 use serde::Deserialize;
 use vmux_api::BinEvent;
@@ -6,7 +7,7 @@ use vmux_api::protocol::{AgentRequest, AgentSpace, ClientMessage};
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_core::{Active, Order, ProcessAnchor};
 use vmux_layout::space::{Space, SpaceId};
-use vmux_layout::window::{FocusedWindow, host_window_of};
+use vmux_layout::window::{FocusedWindow, WindowHierarchy};
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
     ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet,
@@ -60,8 +61,7 @@ fn answer_space_queries(
     mut queries: MessageReader<ToolQueryRequest>,
     spaces: Query<(Entity, &SpaceId, &Name, Has<Active>, Option<&Order>), With<Space>>,
     focused_window: FocusedWindow,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
+    hierarchy: WindowHierarchy,
     mut handled: MessageWriter<ToolQueryHandled>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -79,9 +79,9 @@ fn answer_space_queries(
         }
         let mut rows: Vec<(u32, AgentSpace)> = Vec::new();
         for (entity, id, name, is_active, order) in &spaces {
-            let local = focused_window.entity().is_some_and(|focused| {
-                host_window_of(entity, &child_of, &host_windows) == Some(focused)
-            });
+            let local = focused_window
+                .entity()
+                .is_some_and(|focused| hierarchy.get(entity) == Some(focused));
             let order = order.map(|order| order.0).unwrap_or(u32::MAX);
             if let Some((existing_order, row)) =
                 rows.iter_mut().find(|(_, existing)| existing.id == id.0)
