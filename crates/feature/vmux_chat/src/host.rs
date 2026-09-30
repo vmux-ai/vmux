@@ -16,8 +16,6 @@ mod state;
 mod tool;
 
 #[cfg(host)]
-pub use composer::ChatCliRequest;
-#[cfg(host)]
 pub use media::ChatAttachmentHydrationRequest;
 pub use model::{ChatModeStateChanged, ChatModelStateChanged, Models};
 pub use prompt::{Attach, Attachments, Browsed, RemoveAttachment};

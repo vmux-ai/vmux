@@ -70,7 +70,6 @@ impl SlashRows {
             SlashCommand::Resume => "resume",
             SlashCommand::Mcp => "mcp",
             SlashCommand::Model => "model",
-            SlashCommand::Cli => "cli",
         }
     }
 

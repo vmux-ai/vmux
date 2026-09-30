@@ -20,7 +20,7 @@ use vmux_chat::event::{
     ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort,
 };
 use vmux_chat::host::{ChatModeStateChanged, ChatModelStateChanged, ChatView};
-use vmux_command::snapshot::{AgentPromptTarget, CommandBarProjection};
+use vmux_command::snapshot::CommandBarProjection;
 use vmux_core::page::PageReady;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_session::AcpSession;
@@ -50,7 +50,6 @@ impl Plugin for AcpSessionConfigPlugin {
                 Update,
                 (
                     answer_remote_model_commands.after(ServiceMessageSet),
-                    seed_cli_model_lists,
                     apply_session_config_selection,
                     push_acp_config_state_to_page,
                     remove_acp_config_state,
@@ -303,24 +302,6 @@ fn on_start_select_mode(
     last_used.select(&request.agent_key, &request.mode_id);
 }
 
-fn seed_cli_model_lists(
-    sources: Query<
-        (&crate::CliSessionSource, &crate::host::cli::CliModelCatalog),
-        Added<crate::host::cli::CliModelCatalog>,
-    >,
-    mut selections: Single<&mut AgentModelSelections>,
-) {
-    for (source, catalog) in &sources {
-        if catalog.models.is_empty() {
-            continue;
-        }
-        let kind = source.kind;
-        let agent_key = format!("cli:{}", kind.as_url_segment());
-        let url = AgentPromptTarget::Cli(kind).url();
-        selections.remember_catalog(&agent_key, &url, &catalog.selected, &catalog.models);
-    }
-}
-
 fn remember_acp_model_lists(
     sessions: Query<(&AcpSession, &AcpSessionConfigState), Changed<AcpSessionConfigState>>,
     mut last_used: Single<&mut AgentModelSelections>,
@@ -434,7 +415,6 @@ fn push_acp_config_state_to_page(
         commands.trigger(ChatModelStateChanged::new(
             webview,
             projection.model_state(),
-            false,
         ));
         commands.trigger(ChatModeStateChanged::new(webview, projection.mode_state()));
     }
@@ -464,7 +444,6 @@ fn remove_acp_config_state(
         commands.trigger(ChatModelStateChanged::new(
             webview,
             projection.model_state(),
-            false,
         ));
         commands.trigger(ChatModeStateChanged::new(webview, projection.mode_state()));
     }
@@ -487,7 +466,6 @@ fn sync_page_model_state(
     commands.trigger(ChatModelStateChanged::new(
         webview,
         projection.model_state(),
-        false,
     ));
     commands.trigger(ChatModeStateChanged::new(webview, projection.mode_state()));
 }
@@ -808,39 +786,6 @@ mod tests {
 
         assert_eq!(models.selected_for("claude"), "fable");
         assert_eq!(models.selected_for("codex"), "gpt");
-    }
-
-    #[test]
-    fn cli_catalog_is_published_for_its_launcher_url() {
-        let mut selections = AgentModelSelections::default();
-        selections.remember_catalog(
-            "cli:codex",
-            "vmux://sessions/codex/cli",
-            "gpt-next",
-            &[ModelOptionEntry {
-                id: "gpt-next".into(),
-                name: "GPT Next".into(),
-                description: String::new(),
-            }],
-        );
-        let mut app = App::new();
-        app.world_mut().spawn(selections);
-        app.world_mut()
-            .spawn(vmux_command::snapshot::CommandBarProjection::default());
-        app.add_systems(Update, publish_agent_models);
-
-        app.update();
-
-        let published = app
-            .world()
-            .iter_entities()
-            .find_map(|entity| entity.get::<vmux_command::snapshot::CommandBarProjection>())
-            .unwrap();
-        let published = &published.agent_models;
-        assert_eq!(published.agents.len(), 1);
-        assert_eq!(published.agents[0].agent_key, "cli:codex");
-        assert_eq!(published.agents[0].url, "vmux://sessions/codex/cli");
-        assert_eq!(published.agents[0].selected, "gpt-next");
     }
 
     #[test]

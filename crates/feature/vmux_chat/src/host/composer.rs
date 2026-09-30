@@ -47,7 +47,7 @@ impl ComposerState {
             SlashCommand::Resume => "/resume ",
             SlashCommand::Mcp => "/mcp ",
             SlashCommand::Model => "/model ",
-            SlashCommand::Upload | SlashCommand::Cli => "",
+            SlashCommand::Upload => "",
         };
         self.effect(draft, true)
     }
@@ -105,12 +105,6 @@ pub(super) struct ComposerChanged {
     target: Entity,
 }
 
-#[derive(EntityEvent)]
-pub struct ChatCliRequest {
-    #[event_target]
-    webview: Entity,
-}
-
 impl ComposerChanged {
     pub(super) fn new(target: Entity) -> Self {
         Self { target }
@@ -165,7 +159,6 @@ fn on_slash_command(
             webview,
             payload: ChatPickFiles,
         }),
-        SlashCommand::Cli => commands.trigger(ChatCliRequest { webview }),
         SlashCommand::Resume | SlashCommand::Mcp | SlashCommand::Model => {}
     }
 }

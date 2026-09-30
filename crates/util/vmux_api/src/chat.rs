@@ -412,7 +412,6 @@ pub enum SlashCommand {
     Resume,
     Mcp,
     Model,
-    Cli,
 }
 
 #[vmux_api::contract(Default, Eq)]

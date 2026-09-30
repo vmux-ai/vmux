@@ -1,10 +1,8 @@
 use bevy::prelude::*;
 use crossbeam_channel::Receiver;
 use vmux_api::protocol::{AcpSessionConfig, ClientMessage, SharedMessage};
-use vmux_chat::host::ChatCliRequest;
 #[cfg(test)]
 use vmux_core::ProcessId;
-use vmux_core::agent::SwapStackSession;
 use vmux_core::service::ServiceRequest;
 use vmux_core::team::Profile;
 use vmux_core::{LastActivatedAt, PageMetadata};
@@ -61,57 +59,8 @@ impl Plugin for AcpAgentPlugin {
                 ),
             )
             .add_observer(close_acp_session_on_remove)
-            .add_observer(switch_to_cli)
             .add_observer(auto_allow_acp_approval);
     }
-}
-
-fn switch_to_cli(
-    trigger: On<ChatCliRequest>,
-    child_of: Query<&ChildOf>,
-    acp_sessions: Query<&AcpSession>,
-    mut swap: MessageWriter<SwapStackSession>,
-) {
-    let webview = trigger.event_target();
-    let Ok(parent) = child_of.get(webview) else {
-        return;
-    };
-    let stack = parent.parent();
-    let Ok(acp) = acp_sessions.get(stack) else {
-        bevy::log::warn!("runtime switch: current pane is not an ACP session");
-        return;
-    };
-    let Some((target_url, cwd)) = cli_target(&acp.agent_id, acp.resume.as_deref(), &acp.cwd) else {
-        bevy::log::warn!(
-            "runtime switch to CLI unavailable for ACP agent '{}' (no shared session id yet)",
-            acp.agent_id
-        );
-        return;
-    };
-    swap.write(SwapStackSession {
-        stack,
-        target_url,
-        cwd,
-        handoff: None,
-    });
-}
-
-fn cli_target(
-    agent_id: &str,
-    resume: Option<&str>,
-    cwd: &std::path::Path,
-) -> Option<(String, std::path::PathBuf)> {
-    let kind =
-        crate::AgentKind::from_url_segment(crate::acp_registry::RegistryAgent::url_id(agent_id))?;
-    if !kind.supports_cross_runtime() {
-        return None;
-    }
-    let sid = resume?;
-    let target = crate::AgentUrl::Cli {
-        kind,
-        sid: sid.to_string(),
-    };
-    Some((target.format(), cwd.to_path_buf()))
 }
 
 impl AcpWorkspaceState {
@@ -1301,39 +1250,5 @@ mod tests {
             resume: None,
         });
         app.update();
-    }
-
-    #[test]
-    fn builtin_acp_agents_switch_to_cli() {
-        let cases = [
-            ("claude", "claude"),
-            ("claude-acp", "claude"),
-            ("codex", "codex"),
-            ("codex-acp", "codex"),
-            ("vibe", "vibe"),
-        ];
-        for (agent_id, cli_segment) in cases {
-            let got = cli_target(agent_id, Some("sid-9"), std::path::Path::new("/w"));
-            assert_eq!(
-                got,
-                Some((
-                    format!("vmux://sessions/{cli_segment}/cli/sid-9"),
-                    std::path::PathBuf::from("/w")
-                ))
-            );
-        }
-    }
-
-    #[test]
-    fn cli_switch_requires_shared_session() {
-        assert_eq!(cli_target("claude", None, std::path::Path::new("/w")), None);
-        assert_eq!(
-            cli_target("mistral-vibe", Some("s"), std::path::Path::new("/w")),
-            None
-        );
-        assert_eq!(
-            cli_target("custom", Some("s"), std::path::Path::new("/w")),
-            None
-        );
     }
 }

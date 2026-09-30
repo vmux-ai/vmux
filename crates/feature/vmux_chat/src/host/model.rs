@@ -83,7 +83,6 @@ impl SlashCommandProjection {
             SlashCommand::Resume => "resume",
             SlashCommand::Mcp => "mcp",
             SlashCommand::Model => "model",
-            SlashCommand::Cli => "cli",
         }
     }
 }
@@ -93,16 +92,11 @@ pub struct ChatModelStateChanged {
     #[event_target]
     webview: Entity,
     state: ModelState,
-    cross_runtime: bool,
 }
 
 impl ChatModelStateChanged {
-    pub fn new(webview: Entity, state: ModelState, cross_runtime: bool) -> Self {
-        Self {
-            webview,
-            state,
-            cross_runtime,
-        }
+    pub fn new(webview: Entity, state: ModelState) -> Self {
+        Self { webview, state }
     }
 }
 
@@ -193,12 +187,6 @@ fn publish_model_state(trigger: On<ChatModelStateChanged>, mut commands: Command
             description: "Select model".to_string(),
         });
     }
-    if event.cross_runtime {
-        commands_list.push(SlashCommandEntry {
-            command: SlashCommand::Cli,
-            description: "Continue this session in the CLI".to_string(),
-        });
-    }
     commands
         .entity(event.webview)
         .insert(SlashCommandProjection(SlashCommands {
@@ -262,7 +250,6 @@ mod tests {
                 }],
                 ..ModelState::default()
             },
-            true,
         ));
         app.world_mut().flush();
 
@@ -281,7 +268,6 @@ mod tests {
                 SlashCommand::Resume,
                 SlashCommand::Mcp,
                 SlashCommand::Model,
-                SlashCommand::Cli,
             ]
         );
     }

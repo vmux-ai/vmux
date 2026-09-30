@@ -62,9 +62,6 @@ pub(super) struct AgentSelectionKey;
 
 impl AgentSelectionKey {
     pub(super) fn normalize(agent_id: &str) -> &str {
-        if agent_id.starts_with("cli:") {
-            return agent_id;
-        }
         RegistryAgent::url_id(agent_id)
     }
 
@@ -125,7 +122,7 @@ fn load_agent_model_selections(mut models: Single<&mut AgentModelSelections>) {
     for (agent, entry) in saved {
         let key = AgentSelectionKey::normalize(&agent).to_string();
         let mut memory = entry.memory();
-        if !key.starts_with("cli:") && !memory.url.is_empty() {
+        if !memory.url.is_empty() {
             memory.url = AgentSelectionKey::acp_url(&agent);
         }
         models.by_agent.insert(key, memory);
