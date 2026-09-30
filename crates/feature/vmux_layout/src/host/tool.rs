@@ -2,9 +2,9 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{
-    AgentCommandResult, AgentInvokeCommand, AgentRequest, AgentRequestId, ClientMessage, JsonValue,
-    layout,
+    AgentCommandResult, AgentRequest, AgentRequestId, ClientMessage, JsonValue, layout,
 };
+use vmux_command::AgentInvokeCommand;
 use vmux_core::ProcessAnchor;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{

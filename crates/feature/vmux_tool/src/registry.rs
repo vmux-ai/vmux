@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
-use vmux_api::protocol::{AgentCommandTool, AgentInvokeCommand, AgentRequest, JsonValue};
+use vmux_api::protocol::{AgentCommandTool, AgentRequest};
 use vmux_core::host::manifest::FeatureManifestSource;
 use vmux_core::{HostShell, JsonArguments, RegistrationOrder};
 
@@ -51,7 +51,6 @@ impl Plugin for ToolRegistryPlugin {
             Update,
             bevy_ecs::schedule::ApplyDeferred.in_set(ToolRequestFlush),
         )
-        .add_systems(Update, dispatch_command_calls.in_set(ToolDispatchSet))
         .add_systems(
             Update,
             bevy_ecs::schedule::ApplyDeferred.in_set(ToolDispatchFlush),
@@ -274,6 +273,9 @@ pub struct ToolInvocation;
 pub struct ToolCommandFallback;
 
 #[derive(Component, Clone, Copy)]
+pub struct UnclaimedToolInvocation;
+
+#[derive(Component, Clone, Copy)]
 pub struct AcpSessionContext;
 
 #[derive(Component, Clone, Copy)]
@@ -369,9 +371,11 @@ fn resolve_tool_invocations(
             continue;
         }
         if command_fallback {
-            commands
-                .entity(request_entity)
-                .insert((Name::new(normalized.to_string()), ToolCall));
+            commands.entity(request_entity).insert((
+                Name::new(normalized.to_string()),
+                ToolCall,
+                UnclaimedToolInvocation,
+            ));
         } else {
             commands
                 .entity(request_entity)
@@ -473,24 +477,6 @@ pub struct ToolCall;
 pub type AddedTool<T> = (With<ToolCall>, Added<T>);
 
 type ToolTarget = vmux_core::EntityTarget<RegisteredTool>;
-
-type PendingCommandCalls<'w, 's> = Query<
-    'w,
-    's,
-    (Entity, &'static Name, &'static JsonArguments),
-    (Added<ToolCall>, Without<ToolTarget>, Without<ToolCommand>),
->;
-
-fn dispatch_command_calls(mut commands: Commands, calls: PendingCommandCalls) {
-    for (entity, name, arguments) in &calls {
-        commands
-            .entity(entity)
-            .insert(ToolCommand(AgentRequest::encode(&AgentInvokeCommand {
-                id: name.as_str().to_string(),
-                args: JsonValue::from(arguments.0.clone()),
-            })));
-    }
-}
 
 struct ToolSeed {
     name: String,

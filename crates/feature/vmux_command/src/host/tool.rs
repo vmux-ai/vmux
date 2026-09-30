@@ -1,14 +1,20 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
-use vmux_api::protocol::{
-    AgentInvokeCommand, AgentListCommands, AgentNotify, AgentRequest, ClientMessage, JsonValue,
-};
+use vmux_api::protocol::{AgentListCommands, AgentNotify, AgentRequest, ClientMessage, JsonValue};
+use vmux_core::JsonArguments;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQueryHandled,
-    ToolQueryRequest, ToolQueryRouteSet,
+    ToolQueryRequest, ToolQueryRouteSet, UnclaimedToolInvocation,
 };
+
+#[vmux_api::agent]
+pub struct AgentInvokeCommand {
+    pub id: String,
+    #[rkyv(attr(allow(dead_code)))]
+    pub args: JsonValue,
+}
 
 pub struct CommandToolPlugin;
 
@@ -23,13 +29,30 @@ impl Plugin for CommandToolPlugin {
         .add_message::<ToolQueryRequest>()
         .add_message::<ToolQueryHandled>()
         .add_message::<ServiceRequest>()
-        .add_systems(Update, (open_command_bar, notify).in_set(ToolDispatchSet))
+        .add_systems(
+            Update,
+            (open_command_bar, notify, dispatch_unclaimed_tools).in_set(ToolDispatchSet),
+        )
         .add_systems(
             Update,
             answer_command_queries
                 .in_set(ToolQueryRouteSet)
                 .after(ServiceMessageSet),
         );
+    }
+}
+
+fn dispatch_unclaimed_tools(
+    mut commands: Commands,
+    calls: Query<(Entity, &Name, &JsonArguments), Added<UnclaimedToolInvocation>>,
+) {
+    for (entity, name, arguments) in &calls {
+        commands
+            .entity(entity)
+            .insert(ToolCommand(AgentRequest::encode(&AgentInvokeCommand {
+                id: name.as_str().to_string(),
+                args: JsonValue::from(arguments.0.clone()),
+            })));
     }
 }
 

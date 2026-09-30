@@ -38,4 +38,5 @@ pub use snapshot::{
     CommandBarWorkspaceSnapshot, ContributedCommand, ContributedPage, ContributedPages,
     RegisteredPage, SpaceSummary, UiStatePlugin, WriteCommandBarSnapshots,
 };
+pub use tool::AgentInvokeCommand;
 pub use tool::CommandToolPlugin;

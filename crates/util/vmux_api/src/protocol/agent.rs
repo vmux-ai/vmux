@@ -1,5 +1,5 @@
+use crate::ProcessId;
 use crate::room::ClientOpId;
-use crate::{ProcessId, json::JsonValue};
 
 #[vmux_api::contract(Eq)]
 pub struct AgentRequest {
@@ -79,13 +79,6 @@ pub struct FileSearchMatch {
     pub col: u32,
     pub end_col: u32,
     pub preview: String,
-}
-
-#[vmux_api::agent]
-pub struct AgentInvokeCommand {
-    pub id: String,
-    #[rkyv(attr(allow(dead_code)))]
-    pub args: JsonValue,
 }
 
 #[vmux_api::agent]

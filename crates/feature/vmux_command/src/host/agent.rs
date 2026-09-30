@@ -1,10 +1,11 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{AgentCommandResult, AgentInvokeCommand};
+use vmux_api::protocol::AgentCommandResult;
 use vmux_core::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
     CommandOrigin,
 };
 
+use super::tool::AgentInvokeCommand;
 use crate::{CommandDefinition, CommandInvocation};
 
 pub(super) struct AgentCommandPlugin;
