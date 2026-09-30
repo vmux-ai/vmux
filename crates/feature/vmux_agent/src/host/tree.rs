@@ -57,15 +57,14 @@ impl Plugin for AgentSessionPlugin {
             super::attach::AttachPlugin,
             super::attention::AttentionPlugin,
             super::command::CommandPlugin,
+            super::continuation::AgentContinuationPlugin,
             super::follow::FollowPlugin,
             super::ingress::AgentIngressPlugin,
             super::page_open::PageOpenPlugin,
             super::provider::ProviderPlugin,
-            super::self_command::SelfCommandPlugin,
             session::AgentSessionLifecyclePlugin,
             super::snapshot_updater::SnapshotPlugin,
             super::spawn::SpawnPlugin,
-            super::workspace::WorkspacePlugin,
         ))
         .add_message::<AgentRequestInput>()
         .add_message::<ToolQueryRequest>()

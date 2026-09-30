@@ -1,9 +1,6 @@
 mod tree;
 pub use tree::{AgentPagesPlugin, AgentPlugin, AgentSessionPlugin};
 
-#[derive(bevy::prelude::SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct AgentContinuationSet;
-
 pub mod acp_registry;
 pub mod acp_tool;
 pub(crate) mod approval;
@@ -12,6 +9,7 @@ pub mod attention;
 mod cli;
 pub mod command;
 pub mod command_bar;
+mod continuation;
 pub mod echo;
 pub mod event;
 pub mod follow;
@@ -26,7 +24,6 @@ pub mod provider;
 mod resume;
 pub mod run_state_kind;
 pub mod runtime;
-pub mod self_command;
 pub mod session;
 pub mod session_source;
 pub mod snapshot_updater;
@@ -35,16 +32,11 @@ pub mod toast;
 mod tool;
 mod transcript;
 pub mod url;
-pub mod workspace;
 
 #[cfg(test)]
 pub mod test_support;
 
 pub(crate) mod tidy;
-
-pub use vmux_space::cwd::valid_cwd;
-
-pub(crate) use self::workspace::{PendingAgentProject, RepositoryNeedsWorktree};
 
 pub use vmux_api::room as message;
 
@@ -66,13 +58,3 @@ pub use vmux_session::{
     AcpSession, AgentApprovalPolicy, AgentMessages, AgentSession, AgentVariant, PromptQueue,
     QueuedPrompt,
 };
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn blank_cwd_is_accepted() {
-        assert_eq!(valid_cwd("").unwrap(), None);
-    }
-}

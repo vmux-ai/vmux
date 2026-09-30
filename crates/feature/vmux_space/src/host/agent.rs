@@ -63,25 +63,29 @@ pub(super) struct SpaceAgentPlugin;
 
 impl Plugin for SpaceAgentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_agent_request::<AgentSpaceCreate>()
-            .add_agent_request::<AgentSpaceRename>()
-            .add_agent_request::<AgentSpaceDelete>()
-            .add_agent_request::<AgentRenameProfile>()
-            .add_message::<RenameProfileRequest>()
-            .add_systems(
-                Update,
+        app.add_plugins((
+            super::agent_workspace::AgentWorkspaceRequestPlugin,
+            super::workspace::WorkspaceAgentPlugin,
+        ))
+        .add_agent_request::<AgentSpaceCreate>()
+        .add_agent_request::<AgentSpaceRename>()
+        .add_agent_request::<AgentSpaceDelete>()
+        .add_agent_request::<AgentRenameProfile>()
+        .add_message::<RenameProfileRequest>()
+        .add_systems(
+            Update,
+            (
                 (
-                    (
-                        create_space,
-                        rename_space,
-                        delete_space,
-                        request_profile_rename,
-                    )
-                        .after(AgentRequestRouteSet),
-                    rename_profile,
+                    create_space,
+                    rename_space,
+                    delete_space,
+                    request_profile_rename,
                 )
-                    .chain(),
-            );
+                    .after(AgentRequestRouteSet),
+                rename_profile,
+            )
+                .chain(),
+        );
     }
 }
 

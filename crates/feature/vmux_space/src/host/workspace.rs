@@ -7,10 +7,10 @@ use vmux_api::protocol::ClientMessage;
 use vmux_chat::event::ChatChoiceSelected;
 use vmux_chat::host::{ChatSynced, ChatView, PendingAgentChoice};
 use vmux_command::WriteCommandRequests;
-use vmux_core::agent::{AgentContinuationRequest, AgentSessionRoot};
-use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
 #[cfg(test)]
-use vmux_core::{AgentWorkingDir, agent::AgentKind};
+use vmux_core::AgentWorkingDir;
+use vmux_core::agent::{AgentContinuationRequest, AgentSessionRoot};
+use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_git::worktree::{
     CheckoutInfo, is_linked_worktree, repository_init, worktree_registrations,
 };
@@ -20,29 +20,22 @@ use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktre
 use vmux_layout::worktree::{
     ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady, is_generated_tab_name,
 };
-use vmux_session::{AcpSession, AgentRunState, AgentSession as PageAgentSession};
-use vmux_terminal::BufferedAgentPrompt;
+use vmux_session::AcpSession;
 
-use crate::session::AgentSession;
-
-use super::self_command::{ancestor_acp_stack, rebind_acp_workspace};
+use super::agent_workspace::{AgentWorkspaceRequestSet, ancestor_acp_stack, rebind_acp_workspace};
 use vmux_core::profile::ProjectsDirectory;
 
-pub(super) struct WorkspacePlugin;
+pub(super) struct WorkspaceAgentPlugin;
 
-impl Plugin for WorkspacePlugin {
+impl Plugin for WorkspaceAgentPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
             .add_message::<AgentContinuationRequest>()
             .add_observer(initialize_git_agent_choice)
             .add_systems(
                 Update,
-                (
-                    drain_workspace_picker_tasks.after(super::self_command::SelfCommandSet),
-                    queue_agent_continuations,
-                    send_pending_agent_continuations.in_set(super::AgentContinuationSet),
-                )
-                    .chain()
+                drain_workspace_picker_tasks
+                    .after(AgentWorkspaceRequestSet)
                     .in_set(WriteCommandRequests)
                     .after(ServiceMessageSet),
             );
@@ -58,10 +51,7 @@ const INITIALIZE_GIT_QUESTION: &str = "Initialize Git repository?";
 const INITIALIZE_GIT_OPTIONS: [&str; 2] = ["Initialize Git", "Not now"];
 
 #[derive(Component, Clone, Debug)]
-pub(crate) struct PendingAgentProject(pub(crate) PathBuf);
-
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-struct PendingAgentContinuation(String);
+pub struct PendingProject(pub PathBuf);
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 struct InitializeGitAgentChoice {
@@ -70,7 +60,7 @@ struct InitializeGitAgentChoice {
 }
 
 #[derive(Component, Clone, Copy)]
-pub(crate) struct RepositoryNeedsWorktree;
+pub struct RepositoryNeedsWorktree;
 
 #[derive(Component)]
 pub(crate) struct PendingWorkspacePicker {
@@ -120,17 +110,6 @@ fn initialize_git_agent_choice(
         .entity(event.webview)
         .remove::<(PendingAgentChoice, InitializeGitAgentChoice)>()
         .remove::<ChatSynced>();
-}
-
-fn queue_agent_continuations(
-    mut requests: MessageReader<AgentContinuationRequest>,
-    mut commands: Commands,
-) {
-    for request in requests.read() {
-        commands
-            .entity(request.session)
-            .insert(PendingAgentContinuation(request.context.clone()));
-    }
 }
 
 pub(crate) fn workspace_picker_task(
@@ -220,23 +199,12 @@ fn failed_workspace_continuation(message: &str) -> String {
     )
 }
 
-fn chat_agent_continuation_message(sid: &str, context: &str) -> ClientMessage {
-    vmux_api::protocol::SharedMessage::AgentInput {
-        sid: sid.to_string(),
-        text: String::new(),
-        context: Some(context.to_string()),
-        attachments: Vec::new(),
-        preferred_mode: None,
-    }
-    .into()
-}
-
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentTabWorkspace<'w, 's> {
     pub(crate) tabs: Query<'w, 's, &'static mut Tab>,
     pub(crate) worktrees: Query<'w, 's, &'static TabWorktree>,
     pub(crate) workspaces: Query<'w, 's, &'static TabWorkspace>,
-    pub(crate) pending_projects: Query<'w, 's, &'static PendingAgentProject>,
+    pub(crate) pending_projects: Query<'w, 's, &'static PendingProject>,
     pub(crate) managed_root: Option<Res<'w, ManagedWorktreeRoot>>,
 }
 
@@ -267,7 +235,7 @@ pub(crate) fn activate_agent_worktree(
             activation.ready,
             TabDirDecided,
         ))
-        .remove::<PendingAgentProject>()
+        .remove::<PendingProject>()
         .remove::<RepositoryNeedsWorktree>()
         .remove::<TabWorktreeUnavailable>();
     let rebind = ancestor_acp_stack(agent_entity, acp_sessions, child_of)
@@ -300,7 +268,7 @@ pub(crate) fn activate_agent_directory(
             },
             TabDirDecided,
         ))
-        .remove::<PendingAgentProject>()
+        .remove::<PendingProject>()
         .remove::<RepositoryNeedsWorktree>()
         .remove::<TabWorktree>()
         .remove::<TabWorktreeReady>()
@@ -446,12 +414,9 @@ fn drain_workspace_picker_tasks(
     mut acp_sessions: Query<&mut AcpSession>,
     child_of: Query<&ChildOf>,
     mut commands: Commands,
-    connected: Option<Single<(), With<ServiceConnected>>>,
+    mut continuations: MessageWriter<AgentContinuationRequest>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    if connected.is_none() {
-        return;
-    }
     for (picker_entity, mut picker) in &mut pickers {
         let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
             continue;
@@ -527,66 +492,51 @@ fn drain_workspace_picker_tasks(
             },
         };
         if let Some(continuation) = continuation {
-            commands
-                .entity(picker.session_entity)
-                .insert(PendingAgentContinuation(continuation));
+            continuations.write(AgentContinuationRequest {
+                session: picker.session_entity,
+                context: continuation,
+            });
         }
         commands.entity(picker_entity).despawn();
-    }
-}
-
-fn send_pending_agent_continuations(
-    mut sessions: Query<(
-        Entity,
-        &PendingAgentContinuation,
-        Option<&AcpSession>,
-        Option<&PageAgentSession>,
-        Option<&AgentSession>,
-        Option<&mut AgentRunState>,
-    )>,
-    connected: Option<Single<(), With<ServiceConnected>>>,
-    mut commands: Commands,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    for (entity, continuation, acp, page, cli, state) in &mut sessions {
-        if cli.is_some() {
-            commands
-                .entity(entity)
-                .insert(BufferedAgentPrompt {
-                    text: continuation.0.clone(),
-                    submit: true,
-                })
-                .remove::<PendingAgentContinuation>();
-            continue;
-        }
-        if connected.is_none() {
-            continue;
-        }
-        let sid = acp
-            .map(|session| session.sid.as_str())
-            .or_else(|| page.map(|session| session.sid.as_str()));
-        let (Some(sid), Some(mut state)) = (sid, state) else {
-            continue;
-        };
-        if !matches!(*state, AgentRunState::Idle | AgentRunState::Errored(_)) {
-            continue;
-        }
-        service_requests.write(ServiceRequest(chat_agent_continuation_message(
-            sid,
-            &continuation.0,
-        )));
-        *state = AgentRunState::Streaming;
-        commands.entity(entity).remove::<PendingAgentContinuation>();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::test_support::init_worktree_test_repo;
-    use vmux_api::protocol::SharedMessage;
     use vmux_core::ProcessId;
-    use vmux_terminal::agent_run::AgentCwd;
+
+    struct TestRepository(tempfile::TempDir);
+
+    impl TestRepository {
+        fn new() -> Self {
+            let repo = tempfile::tempdir().unwrap();
+            let git = |args: &[&str]| {
+                let status = std::process::Command::new("git")
+                    .current_dir(repo.path())
+                    .args(args)
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                    .env_remove("GIT_DIR")
+                    .env_remove("GIT_WORK_TREE")
+                    .status()
+                    .unwrap();
+                assert!(status.success(), "git {args:?} failed");
+            };
+            git(&["init", "-q", "-b", "main"]);
+            git(&["config", "user.email", "t@example.com"]);
+            git(&["config", "user.name", "Test"]);
+            git(&["config", "commit.gpgsign", "false"]);
+            std::fs::write(repo.path().join("seed.txt"), "seed\n").unwrap();
+            git(&["add", "seed.txt"]);
+            git(&["commit", "-qm", "init"]);
+            Self(repo)
+        }
+
+        fn path(&self) -> &Path {
+            self.0.path()
+        }
+    }
 
     #[test]
     fn workspace_selection_continuations_resume_original_request() {
@@ -609,8 +559,7 @@ mod tests {
         let workspace_path = workspace.path().canonicalize().unwrap();
         let mut app = App::new();
         app.add_message::<AgentContinuationRequest>()
-            .add_observer(initialize_git_agent_choice)
-            .add_systems(Update, queue_agent_continuations);
+            .add_observer(initialize_git_agent_choice);
         let session = app.world_mut().spawn_empty().id();
         let tab = app
             .world_mut()
@@ -645,68 +594,25 @@ mod tests {
 
         assert!(workspace_path.join(".git").is_dir());
         assert!(app.world().get::<RepositoryNeedsWorktree>(tab).is_none());
+        let continuations = app
+            .world_mut()
+            .resource_mut::<Messages<AgentContinuationRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(continuations.len(), 1);
+        assert_eq!(continuations[0].session, session);
         assert!(
-            app.world()
-                .get::<PendingAgentContinuation>(session)
-                .unwrap()
-                .0
+            continuations[0]
+                .context
                 .contains("Do not call create_worktree")
         );
-    }
-
-    #[test]
-    fn cli_workspace_continuation_queues_terminal_prompt_without_service_wait() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<ServiceRequest>()
-            .add_systems(Update, send_pending_agent_continuations);
-        let entity = app
-            .world_mut()
-            .spawn((
-                AgentSession {
-                    kind: AgentKind::Codex,
-                },
-                PendingAgentContinuation("continue original request".to_string()),
-            ))
-            .id();
-
-        app.update();
-
-        assert!(
-            app.world()
-                .get::<PendingAgentContinuation>(entity)
-                .is_none()
-        );
-        assert_eq!(
-            app.world().get::<BufferedAgentPrompt>(entity).unwrap(),
-            &BufferedAgentPrompt {
-                text: "continue original request".to_string(),
-                submit: true,
-            }
-        );
-    }
-
-    #[test]
-    fn chat_workspace_continuation_is_private_same_session_input() {
-        assert!(matches!(
-            chat_agent_continuation_message("sid-1", "continue original request"),
-            ClientMessage::Shared(SharedMessage::AgentInput {
-                sid,
-                text,
-                context,
-                ..
-            })
-                if sid == "sid-1"
-                    && text.is_empty()
-                    && context.as_deref() == Some("continue original request")
-        ));
     }
 
     #[test]
     fn worktree_activation_rebinds_existing_acp_session_without_replacing_view() {
         use bevy::ecs::system::RunSystemOnce;
 
-        let repo = init_worktree_test_repo();
+        let repo = TestRepository::new();
         let project_dir = repo.path().canonicalize().unwrap();
         let managed_root = tempfile::tempdir().unwrap();
         let activation = vmux_layout::worktree::create_worktree_for_branch_blocking(
@@ -717,6 +623,7 @@ mod tests {
         .unwrap();
         let execution_dir = activation.execution_dir.clone();
         let anchor = ProcessId::new();
+        let projects = ProjectsDirectory::ensure().unwrap().into_path();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         let tab = app
@@ -726,7 +633,7 @@ mod tests {
                     name: "Tab 1".into(),
                     startup_dir: None,
                 },
-                PendingAgentProject(project_dir.clone()),
+                PendingProject(project_dir.clone()),
             ))
             .id();
         let pane = app.world_mut().spawn(ChildOf(tab)).id();
@@ -736,11 +643,11 @@ mod tests {
                 AcpSession {
                     agent_id: "claude".into(),
                     sid: "routing-session".into(),
-                    cwd: AgentCwd::projects().unwrap(),
+                    cwd: projects.clone(),
                     anchor,
                     resume: None,
                 },
-                AgentWorkingDir(AgentCwd::projects().unwrap().to_string_lossy().into_owned()),
+                AgentWorkingDir(projects.to_string_lossy().into_owned()),
                 ChildOf(pane),
             ))
             .id();
@@ -788,7 +695,7 @@ mod tests {
             "feature/fun-terminal"
         );
         assert!(app.world().get::<TabWorktreeReady>(tab).is_some());
-        assert!(app.world().get::<PendingAgentProject>(tab).is_none());
+        assert!(app.world().get::<PendingProject>(tab).is_none());
         let session = app.world().get::<AcpSession>(stack).unwrap();
         assert_eq!(session.sid, "routing-session");
         assert_eq!(session.anchor, anchor);
@@ -810,7 +717,7 @@ mod tests {
     fn selected_workspace_binds_repository_without_eager_worktree_creation() {
         use bevy::ecs::system::RunSystemOnce;
 
-        let repo = init_worktree_test_repo();
+        let repo = TestRepository::new();
         let project_dir = repo.path().canonicalize().unwrap();
         let external_root = tempfile::tempdir().unwrap();
         let external = external_root.path().join("existing");
@@ -964,7 +871,7 @@ mod tests {
 
     #[test]
     fn worktree_candidates_resolve_known_path_and_offer_create_when_ambiguous() {
-        let repo = init_worktree_test_repo();
+        let repo = TestRepository::new();
         let project_dir = repo.path().canonicalize().unwrap();
         let roots = tempfile::tempdir().unwrap();
         let first = roots.path().join("first");

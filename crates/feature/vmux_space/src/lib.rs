@@ -16,7 +16,8 @@ mod host;
 pub use host::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktree,
     AgentCreateWorktreeOnBranch, AgentListSpaces, AgentPrepareWorktree, AgentRenameProfile,
-    AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename, ExpandedProjectDirs, SpaceAttachRequest,
-    SpaceCreateRequest, SpaceDeleteRequest, SpaceOpenPageRequest, SpacePlugin, SpaceProjects,
-    SpaceRenameRequest, SpaceToolPlugin, Spaces, cwd, plugin, project, snapshot_updater, spaces,
+    AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename, ExpandedProjectDirs, PendingProject,
+    RepositoryNeedsWorktree, SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest,
+    SpaceOpenPageRequest, SpacePlugin, SpaceProjects, SpaceRenameRequest, SpaceToolPlugin, Spaces,
+    cwd, plugin, project, snapshot_updater, spaces,
 };

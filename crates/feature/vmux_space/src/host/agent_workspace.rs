@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use vmux_api::BinEvent;
@@ -7,16 +7,16 @@ use vmux_api::protocol::{AgentRequest, AgentRequestId};
 use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_chat::host::USER_CHOICE_REQUESTED;
 use vmux_command::WriteCommandRequests;
-use vmux_core::agent::{AgentRequestBlocked, AgentRequestPrerequisiteSet};
+#[cfg(test)]
+use vmux_core::agent::CommandOrigin;
+use vmux_core::agent::{AgentRequestBlocked, AgentRequestInput, AgentRequestPrerequisiteSet};
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
-use vmux_setting::AppSettings;
-use vmux_space::{
+use vmux_setting::{AppSettings, StartupDir};
+
+use super::agent::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktree,
     AgentCreateWorktreeOnBranch, AgentPrepareWorktree,
 };
-
-use crate::event::AgentRequestInput;
-
 use super::workspace::{
     AgentTabWorkspace, AgentWorkspacePicker, PendingWorkspacePicker, WORKSPACE_SELECTION_PENDING,
     WORKSPACE_SELECTION_REQUESTED, activate_agent_directory, activate_agent_worktree,
@@ -24,24 +24,37 @@ use super::workspace::{
     workspace_path_task, workspace_picker_task,
 };
 use vmux_core::profile::ProjectsDirectory;
-use vmux_terminal::agent_run::AgentCwd;
 
-pub(super) struct SelfCommandPlugin;
+struct WorkspaceDirectory;
+
+impl WorkspaceDirectory {
+    fn stored(path: Option<&str>) -> Result<Option<PathBuf>, String> {
+        let Some(path) = path else {
+            return Ok(None);
+        };
+        StartupDir::from_tab(path).map(|directory| Some(directory.path))
+    }
+}
+
+pub(super) struct AgentWorkspaceRequestPlugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(super) struct SelfCommandSet;
+pub(super) struct AgentWorkspaceRequestSet;
 
-impl Plugin for SelfCommandPlugin {
+impl Plugin for AgentWorkspaceRequestPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            handle_agent_self_commands
-                .in_set(SelfCommandSet)
-                .in_set(AgentRequestPrerequisiteSet)
-                .in_set(WriteCommandRequests)
-                .after(ServiceMessageSet)
-                .after(vmux_layout::worktree::TabDirectoryRebindSet),
-        );
+        app.add_message::<AgentRequestInput>()
+            .add_message::<AgentRequestBlocked>()
+            .add_message::<ServiceRequest>()
+            .add_systems(
+                Update,
+                handle_agent_workspace_requests
+                    .in_set(AgentWorkspaceRequestSet)
+                    .in_set(AgentRequestPrerequisiteSet)
+                    .in_set(WriteCommandRequests)
+                    .after(ServiceMessageSet)
+                    .after(vmux_layout::worktree::TabDirectoryRebindSet),
+            );
     }
 }
 
@@ -119,7 +132,7 @@ pub(crate) fn rebind_acp_workspace(
     })
 }
 
-fn self_command_anchor(request: &AgentRequestInput) -> Option<ProcessId> {
+fn workspace_request_anchor(request: &AgentRequestInput) -> Option<ProcessId> {
     if let Ok(Some(command)) = request.decode::<AgentCreateWorktree>() {
         Some(command.anchor)
     } else if let Some(command) = WorkspaceChoice::decode(request) {
@@ -158,7 +171,7 @@ impl WorkspaceChoice {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn handle_agent_self_commands(
+fn handle_agent_workspace_requests(
     mut reader: MessageReader<AgentRequestInput>,
     agent_terms: Query<(Entity, &ProcessId, &ChildOf)>,
     mut acp_sessions: Query<&mut vmux_session::AcpSession>,
@@ -186,7 +199,7 @@ fn handle_agent_self_commands(
         .map(|picker| picker.tab_entity)
         .collect();
     for request in reader.read() {
-        let request_anchor = self_command_anchor(request);
+        let request_anchor = workspace_request_anchor(request);
         let result = if let Some(command) = WorkspaceChoice::decode(request) {
             let anchor = command.anchor;
             match resolve_self_pane(anchor, &agent_terms, &ctx.child_of_q) {
@@ -271,8 +284,7 @@ fn handle_agent_self_commands(
                         continue;
                     };
                     let current_dir = tab_worktree.tabs.get(tab_entity).ok().and_then(|tab| {
-                        AgentCwd::from_tab(tab.startup_dir.as_deref())
-                            .stored()
+                        WorkspaceDirectory::stored(tab.startup_dir.as_deref())
                             .ok()
                             .flatten()
                     });
@@ -286,8 +298,7 @@ fn handle_agent_self_commands(
                             .get(tab_entity)
                             .ok()
                             .and_then(|workspace| {
-                                AgentCwd::from_tab(Some(&workspace.project_dir))
-                                    .stored()
+                                WorkspaceDirectory::stored(Some(&workspace.project_dir))
                                     .ok()
                                     .flatten()
                             })
@@ -439,7 +450,7 @@ fn handle_agent_self_commands(
                                 .get(tab_e)
                                 .ok()
                                 .and_then(|t| t.startup_dir.clone());
-                            match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
+                            match WorkspaceDirectory::stored(tab_dir.as_deref()) {
                                 Ok(Some(path)) => {
                                     AgentCommandResult::Text(path.to_string_lossy().into_owned())
                                 }
@@ -460,21 +471,21 @@ fn handle_agent_self_commands(
                                 .get(tab_e)
                                 .map(|t| t.name.clone())
                                 .unwrap_or_default();
-                            match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
+                            match WorkspaceDirectory::stored(tab_dir.as_deref()) {
                                 Err(message) => AgentCommandResult::Error(message),
                                 Ok(stored) => 'create_worktree: {
                                     let configured_dir = active_space
                                         .id()
                                         .and_then(|space_id| settings.startup_dir(space_id));
-                                    let workspace_dir =
-                                        tab_worktree.workspaces.get(tab_e).ok().and_then(
-                                            |workspace| {
-                                                AgentCwd::from_tab(Some(&workspace.project_dir))
-                                                    .stored()
-                                                    .ok()
-                                                    .flatten()
-                                            },
-                                        );
+                                    let workspace_dir = tab_worktree
+                                        .workspaces
+                                        .get(tab_e)
+                                        .ok()
+                                        .and_then(|workspace| {
+                                            WorkspaceDirectory::stored(Some(&workspace.project_dir))
+                                                .ok()
+                                                .flatten()
+                                        });
                                     let Some(current_dir) =
                                         stored.or(configured_dir).or_else(|| workspace_dir.clone())
                                     else {
@@ -590,7 +601,7 @@ fn handle_agent_self_commands(
                             project
                                 .as_ref()
                                 .and_then(|picked| {
-                                    AgentCwd::from_tab(Some(picked)).stored().ok().flatten()
+                                    WorkspaceDirectory::stored(Some(picked)).ok().flatten()
                                 })
                                 .or_else(|| {
                                     tab_worktree
@@ -602,8 +613,7 @@ fn handle_agent_self_commands(
                                 .or_else(|| {
                                     tab_worktree.workspaces.get(tab_entity).ok().and_then(
                                         |workspace| {
-                                            AgentCwd::from_tab(Some(&workspace.project_dir))
-                                                .stored()
+                                            WorkspaceDirectory::stored(Some(&workspace.project_dir))
                                                 .ok()
                                                 .flatten()
                                         },
@@ -690,7 +700,7 @@ mod tests {
         let anchor = ProcessId::new();
         let create = AgentRequestInput {
             request_id: AgentRequestId::new(),
-            origin: crate::event::CommandOrigin::User,
+            origin: CommandOrigin::User,
             request: AgentRequest::encode(&AgentCreateWorktreeOnBranch {
                 anchor,
                 branch: "feature/test".into(),
@@ -698,6 +708,6 @@ mod tests {
             })
             .unwrap(),
         };
-        assert_eq!(self_command_anchor(&create), Some(anchor));
+        assert_eq!(workspace_request_anchor(&create), Some(anchor));
     }
 }

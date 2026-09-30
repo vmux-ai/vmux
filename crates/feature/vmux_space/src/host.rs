@@ -1,4 +1,5 @@
 mod agent;
+mod agent_workspace;
 mod composer;
 pub mod cwd;
 mod key;
@@ -8,6 +9,7 @@ pub mod project;
 pub mod snapshot_updater;
 pub mod spaces;
 mod tool;
+mod workspace;
 
 type SpacesUiStateUpdates = vmux_core::host::UiState<vmux_api::space::SpacesUiState>;
 
@@ -24,3 +26,4 @@ pub use vmux_api::space::{
     SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest, SpaceOpenPageRequest,
     SpaceRenameRequest,
 };
+pub use workspace::{PendingProject, RepositoryNeedsWorktree};

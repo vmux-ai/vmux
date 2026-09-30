@@ -323,7 +323,7 @@ fn prepare_agent_tab_worktrees(
                 .remove::<TabWorkspace>()
                 .remove::<TabDirDecided>()
                 .remove::<TabWorktreeUnavailable>()
-                .remove::<crate::host::RepositoryNeedsWorktree>();
+                .remove::<vmux_space::RepositoryNeedsWorktree>();
             continue;
         }
         if !has_workspace {
@@ -332,7 +332,7 @@ fn prepare_agent_tab_worktrees(
         let pending_worktree = if let Some(metadata) = metadata {
             commands
                 .entity(tab_entity)
-                .remove::<crate::host::RepositoryNeedsWorktree>();
+                .remove::<vmux_space::RepositoryNeedsWorktree>();
             if ready.is_some_and(|ready| ready.is_current(&tab, &workspace, metadata)) {
                 None
             } else {
@@ -359,9 +359,9 @@ fn prepare_agent_tab_worktrees(
                     .is_ok();
             let mut entity = commands.entity(tab_entity);
             if needs_worktree {
-                entity.insert(crate::host::RepositoryNeedsWorktree);
+                entity.insert(vmux_space::RepositoryNeedsWorktree);
             } else {
-                entity.remove::<crate::host::RepositoryNeedsWorktree>();
+                entity.remove::<vmux_space::RepositoryNeedsWorktree>();
             }
             None
         };
@@ -1300,7 +1300,7 @@ mod tests {
         assert_eq!(worktree_list(repo.path()).unwrap().len(), 1);
         assert!(
             app.world()
-                .get::<crate::host::RepositoryNeedsWorktree>(tab)
+                .get::<vmux_space::RepositoryNeedsWorktree>(tab)
                 .is_some()
         );
         let first_spawns: Vec<_> = app
@@ -1404,7 +1404,7 @@ mod tests {
         assert!(app.world().get::<AcpSession>(stack).is_none());
         assert!(
             app.world()
-                .get::<crate::host::RepositoryNeedsWorktree>(tab)
+                .get::<vmux_space::RepositoryNeedsWorktree>(tab)
                 .is_none()
         );
         assert_eq!(
@@ -1424,7 +1424,7 @@ mod tests {
         assert!(app.world().get::<AcpSession>(stack).is_some());
         assert!(
             app.world()
-                .get::<crate::host::RepositoryNeedsWorktree>(tab)
+                .get::<vmux_space::RepositoryNeedsWorktree>(tab)
                 .is_some()
         );
         assert_eq!(worktree_list(repo.path()).unwrap().len(), 1);
@@ -1568,7 +1568,7 @@ mod tests {
         assert!(app.world().get::<TabWorktree>(tab).is_none());
         assert!(
             app.world()
-                .get::<crate::host::RepositoryNeedsWorktree>(tab)
+                .get::<vmux_space::RepositoryNeedsWorktree>(tab)
                 .is_none()
         );
         let spawns: Vec<_> = app
@@ -1624,7 +1624,7 @@ mod tests {
         assert!(app.world().get::<TabWorktree>(tab).is_none());
         assert!(
             app.world()
-                .get::<crate::host::RepositoryNeedsWorktree>(tab)
+                .get::<vmux_space::RepositoryNeedsWorktree>(tab)
                 .is_none()
         );
         let spawns: Vec<_> = app
