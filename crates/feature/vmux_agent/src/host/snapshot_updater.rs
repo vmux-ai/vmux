@@ -6,6 +6,7 @@ use vmux_command::snapshot::{
 use vmux_core::agent::AgentProviderTargetKind;
 use vmux_core::{ArchivedPage, LastActivatedAt, Ready};
 
+use crate::acp_registry::RegistryAgent;
 use crate::runtime::strategy::{Strategy, StrategyKey};
 
 pub(super) struct SnapshotPlugin;
@@ -79,9 +80,7 @@ fn update_agents_snapshot(
         .as_ref()
         .map(|c| c.agents.as_slice())
         .unwrap_or_default();
-    let acp = acp_agent_summaries(catalog_agents, |agent| {
-        crate::acp_tool::is_agent_installed(agent)
-    });
+    let acp = acp_agent_summaries(catalog_agents, RegistryAgent::is_installed);
 
     let mut providers: Vec<AgentProviderSummary> = providers_q
         .iter()
@@ -121,10 +120,7 @@ fn acp_agent_summaries(
         .map(|agent| AgentProviderSummary {
             id: agent.id.clone(),
             name: agent.name.clone(),
-            url: format!(
-                "vmux://sessions/{}",
-                crate::acp_tool::agent_url_id(&agent.id)
-            ),
+            url: format!("vmux://sessions/{}", RegistryAgent::url_id(&agent.id)),
             icon: agent.icon.clone().unwrap_or_default(),
         })
         .collect();
@@ -153,10 +149,8 @@ fn update_recent_agents(
         consider(
             timestamp.map(|timestamp| timestamp.0).unwrap_or(i64::MIN),
             AgentPromptTarget::Acp {
-                id: crate::acp_tool::agent_url_id(crate::acp_tool::registry_id_alias(
-                    &session.agent_id,
-                ))
-                .to_string(),
+                id: RegistryAgent::url_id(RegistryAgent::canonical_id(&session.agent_id))
+                    .to_string(),
             },
         );
     }
@@ -173,8 +167,7 @@ fn update_recent_agents(
         let target = match crate::url::AgentUrl::parse(&page.url) {
             Some(crate::url::AgentUrl::Cli { kind, .. }) => AgentPromptTarget::Cli(kind),
             Some(crate::url::AgentUrl::Acp { id, .. }) => AgentPromptTarget::Acp {
-                id: crate::acp_tool::agent_url_id(crate::acp_tool::registry_id_alias(&id))
-                    .to_string(),
+                id: RegistryAgent::url_id(RegistryAgent::canonical_id(&id)).to_string(),
             },
             _ => continue,
         };

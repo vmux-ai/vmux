@@ -4,6 +4,7 @@ use vmux_core::ProcessId;
 pub use vmux_core::agent::McpServerConfig;
 
 use crate::AgentKind;
+use crate::acp_registry::RegistryAgent;
 
 const DEFAULT_RUN_TIMEOUT_SECS: u64 = 50;
 const LONG_RUN_TIMEOUT_SECS: u64 = 600;
@@ -49,7 +50,7 @@ fn run_timeout_secs_for_kind(kind: AgentKind) -> u64 {
 }
 
 fn run_timeout_secs_for_agent_id(agent_id: &str) -> u64 {
-    match crate::acp_tool::registry_id_alias(agent_id) {
+    match RegistryAgent::canonical_id(agent_id) {
         "claude-acp" | "codex-acp" => LONG_RUN_TIMEOUT_SECS,
         _ => DEFAULT_RUN_TIMEOUT_SECS,
     }
@@ -57,7 +58,7 @@ fn run_timeout_secs_for_agent_id(agent_id: &str) -> u64 {
 
 fn acp_uses_native_terminals(agent_id: &str) -> bool {
     !matches!(
-        crate::acp_tool::registry_id_alias(agent_id),
+        RegistryAgent::canonical_id(agent_id),
         "claude-acp" | "codex-acp" | "mistral-vibe"
     )
 }

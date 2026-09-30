@@ -13,6 +13,7 @@ use vmux_terminal::Terminal;
 use vmux_terminal::launch::TerminalLaunch;
 
 use crate::AgentVariant;
+use crate::acp_registry::RegistryAgent;
 use crate::event::{AgentRequestInput, CommandOrigin};
 use crate::runtime::strategy::{Strategy, StrategyKey, StrategyKind};
 use crate::session::{AgentSession, SessionId};
@@ -212,7 +213,7 @@ fn attach_acp_agents(
             resume,
             webview,
         } = request;
-        let agent_id = crate::acp_tool::agent_url_id(agent_id);
+        let agent_id = RegistryAgent::url_id(agent_id);
         let url = match resume.as_deref() {
             Some(acp_sid) => format!("vmux://sessions/{agent_id}/{acp_sid}"),
             None => format!("vmux://sessions/{agent_id}"),
@@ -289,7 +290,7 @@ pub(crate) fn acp_registry_agent_for_id<'a>(
     catalog?
         .agents
         .iter()
-        .find(|agent| crate::acp_tool::agent_ids_match(&agent.id, id))
+        .find(|agent| RegistryAgent::ids_match(&agent.id, id))
 }
 
 pub(crate) fn acp_icon_for_id(

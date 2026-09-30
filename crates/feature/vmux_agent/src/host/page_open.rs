@@ -44,6 +44,7 @@ use super::attach::{
     acp_profile_name_for_id, acp_registry_agent_for_id,
 };
 use super::spawn::PendingPageOpen;
+use crate::acp_registry::RegistryAgent;
 use vmux_terminal::agent_run::AgentCwd;
 
 pub(super) struct PageOpenPlugin;
@@ -136,7 +137,7 @@ impl AgentChatTarget {
                 })
             }
             crate::AgentUrl::Acp { id, sid } => {
-                let id = crate::acp_tool::agent_url_id(&id);
+                let id = RegistryAgent::url_id(&id);
                 let url = match sid {
                     Some(sid) => format!("vmux://sessions/{id}/{sid}"),
                     None => format!("vmux://sessions/{id}"),
@@ -609,7 +610,7 @@ fn handle_swap_stack_session(
                 .agent
                 .acp
                 .iter()
-                .any(|cfg| crate::acp_tool::agent_ids_match(&cfg.id, id))
+                .any(|cfg| RegistryAgent::ids_match(&cfg.id, id))
             && acp_registry_agent_for_id(catalog, id).is_none()
         {
             bevy::log::warn!("swap: ACP agent unavailable for '{id}'");
@@ -668,7 +669,7 @@ fn handle_swap_stack_session(
                     .agent
                     .acp
                     .iter()
-                    .find(|cfg| crate::acp_tool::agent_ids_match(&cfg.id, &id));
+                    .find(|cfg| RegistryAgent::ids_match(&cfg.id, &id));
                 let routing_sid = uuid::Uuid::new_v4().to_string();
                 let icon = acp_icon_for_id(catalog, &id);
                 let name = acp_profile_name_for_id(&id, cfg, catalog);
@@ -775,7 +776,7 @@ fn handle_agent_page_open_task(
         Some(crate::AgentUrl::Acp { id, sid }) => {
             let cfg = acp_configs
                 .iter()
-                .find(|config| crate::acp_tool::agent_ids_match(&config.id, &id));
+                .find(|config| RegistryAgent::ids_match(&config.id, &id));
             if cfg.is_none() && acp_registry_agent_for_id(catalog, &id).is_none() {
                 if sid.is_none()
                     && let Some(kind) = AgentKind::from_url_segment(&id)
@@ -796,7 +797,7 @@ fn handle_agent_page_open_task(
             }
             if acp_sessions
                 .get(task.stack)
-                .is_ok_and(|session| crate::acp_tool::agent_ids_match(&session.agent_id, &id))
+                .is_ok_and(|session| RegistryAgent::ids_match(&session.agent_id, &id))
             {
                 return Ok(());
             }

@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
+use crate::acp_registry::RegistryAgent;
 use crate::event::AgentRequestInput;
 use crate::runtime::acp::{AcpModeState, AcpModelState};
 use crate::session_source::{acp_agent_kind, kind_supports_cross_runtime};
@@ -271,7 +272,7 @@ impl AgentSelectionKey {
         if agent_id.starts_with("cli:") {
             return agent_id;
         }
-        crate::acp_tool::agent_url_id(agent_id)
+        RegistryAgent::url_id(agent_id)
     }
 
     fn acp_url(agent_id: &str) -> String {

@@ -7,6 +7,8 @@ use vmux_core::profile::mcp_credentials::McpCredentialAccess;
 use vmux_core::profile::mcp_credentials::McpCredentialStorage;
 use vmux_tool::{McpServerManifest, McpTransport};
 
+use crate::acp_registry::RegistryAgent;
+
 pub(crate) struct ManagedMcpServers(BTreeMap<String, McpServerManifest>);
 
 impl ManagedMcpServers {
@@ -61,7 +63,7 @@ impl PreparedManagedMcpServers {
             let revision = McpCredentialAccess::stable_revision()?;
             let mut servers = Vec::new();
             for (name, server) in ManagedMcpServers::current() {
-                if crate::acp_tool::registry_id_alias(agent_id) == "codex-acp"
+                if RegistryAgent::canonical_id(agent_id) == "codex-acp"
                     && server.transport == McpTransport::Sse
                 {
                     bevy::log::warn!(
@@ -84,7 +86,7 @@ fn acp_server(mut name: String, server: McpServerManifest, agent_id: &str) -> Ma
     let headers = McpAuthorization::headers(&name, &server)
         .into_iter()
         .collect();
-    if crate::acp_tool::registry_id_alias(agent_id) == "codex-acp" {
+    if RegistryAgent::canonical_id(agent_id) == "codex-acp" {
         name = format!("vmux_{name}");
     }
     ManagedMcpServer {
