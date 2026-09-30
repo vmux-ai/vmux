@@ -795,7 +795,7 @@ fn flush_lsp_changes(
         if let Some(request) = manager.semantic_tokens(entity, &view.path) {
             commands.spawn(request);
         }
-        if !crate::explorer_model::is_markdown(&view.path)
+        if !crate::markdown::is_markdown_path(&view.path)
             && let Some(request) = manager.document_symbol(entity, &view.path)
         {
             commands.spawn(request);

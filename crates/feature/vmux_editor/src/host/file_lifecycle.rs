@@ -428,7 +428,7 @@ fn reset_file_sent_markers_on_page_ready(
         .remove::<ExplorerPanelSent>()
         .insert(ExplorerTreeDirty)
         .insert(OpenEditorsDirty);
-    if crate::explorer_model::is_markdown(&file.path) {
+    if crate::markdown::is_markdown_path(&file.path) {
         commands.entity(entity).insert(OutlineDirty);
     }
 }

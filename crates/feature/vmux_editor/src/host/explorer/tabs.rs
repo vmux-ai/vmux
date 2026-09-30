@@ -27,7 +27,7 @@ fn sync_open_editors(
         {
             state.open_editors.retain(|open| open != &previous);
         }
-        crate::explorer_model::note_open(&mut state.open_editors, &file_view.path);
+        state.note_open(&file_view.path);
         state.active_editor = Some(file_view.path.clone());
         state.active_editor_is_dir = file_view.path.is_dir();
         commands.entity(entity).insert(OpenEditorsDirty);

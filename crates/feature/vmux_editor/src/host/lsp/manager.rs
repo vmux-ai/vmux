@@ -1015,7 +1015,7 @@ fn lsp_open_documents(
         if let Some(request) = manager.semantic_tokens(entity, &fv.path) {
             commands.spawn(request);
         }
-        if !crate::explorer_model::is_markdown(&fv.path)
+        if !crate::markdown::is_markdown_path(&fv.path)
             && let Some(request) = manager.document_symbol(entity, &fv.path)
         {
             commands.spawn(request);
@@ -1170,7 +1170,7 @@ fn drain_lsp_requests(
                 });
             }
             ReqKind::DocumentSymbol => {
-                let items = crate::explorer_model::flatten_symbols(&value);
+                let items = crate::host::explorer::OutlineRows::from_lsp(&value).into_vec();
                 if ready {
                     commands.trigger(FileUiStateWrite::from_event(
                         request.target,

@@ -43,6 +43,63 @@ fn closing_an_editor_that_was_never_open_changes_nothing() {
     assert_eq!(state.open_editors, vec![PathBuf::from("/a")]);
 }
 
+#[test]
+fn noting_an_open_editor_deduplicates_and_preserves_order() {
+    let mut state = ExplorerState::default();
+    state.note_open(Path::new("/a"));
+    state.note_open(Path::new("/b"));
+    state.note_open(Path::new("/a"));
+    assert_eq!(
+        state.open_editors,
+        vec![PathBuf::from("/a"), PathBuf::from("/b")]
+    );
+}
+
+#[test]
+fn explorer_tree_rows_follow_expanded_directories() {
+    let root = PathBuf::from("/r");
+    let source = root.join("src");
+    let tree = ExplorerTree {
+        root: root.clone(),
+        expanded: HashSet::from([source.clone()]),
+        loading: HashSet::from([source.clone()]),
+        children: std::collections::HashMap::from([
+            (
+                root.clone(),
+                vec![
+                    FileDirEntry {
+                        name: "src".into(),
+                        path: source.to_string_lossy().into_owned(),
+                        is_dir: true,
+                    },
+                    FileDirEntry {
+                        name: "a.rs".into(),
+                        path: root.join("a.rs").to_string_lossy().into_owned(),
+                        is_dir: false,
+                    },
+                ],
+            ),
+            (
+                source.clone(),
+                vec![FileDirEntry {
+                    name: "b.rs".into(),
+                    path: source.join("b.rs").to_string_lossy().into_owned(),
+                    is_dir: false,
+                }],
+            ),
+        ]),
+        used: std::time::Instant::now(),
+    };
+    let rows = tree.rows(&root);
+    let actual = rows
+        .iter()
+        .map(|row| (row.name.as_str(), row.depth))
+        .collect::<Vec<_>>();
+    assert_eq!(actual, vec![("src", 0), ("b.rs", 1), ("a.rs", 0)]);
+    assert!(rows[0].expanded);
+    assert!(rows[0].loading);
+}
+
 fn git_repo() -> tempfile::TempDir {
     let tmp = tempfile::tempdir().unwrap();
     fs::create_dir(tmp.path().join(".git")).unwrap();

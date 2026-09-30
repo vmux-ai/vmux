@@ -6,7 +6,7 @@ use bevy_cef::prelude::*;
 use vmux_core::event::{
     ExplorerCloseEditor, ExplorerCollapseAll, ExplorerPanelSetVisible, ExplorerPanelViewSet,
     ExplorerPanelWidth, ExplorerRevealCurrent, ExplorerTreePrefetch, ExplorerTreeRefresh,
-    ExplorerTreeToggle, FileDirEntry,
+    ExplorerTreeToggle, FileDirEntry, TreeRow,
 };
 
 mod fs;
@@ -22,6 +22,7 @@ mod tests;
 
 use mutation::MutationPlugin;
 use outline::OutlinePlugin;
+pub(crate) use outline::OutlineRows;
 use panel::PanelPlugin;
 pub use panel::StackExplorerVisibility;
 pub(crate) use panel::{ExplorerFindInFilesRequest, ExplorerRevealRequest, ExplorerToggleRequest};
@@ -97,8 +98,31 @@ impl ExplorerTree {
         self.used = std::time::Instant::now();
     }
 
-    fn rows(&self, root: &Path) -> Vec<vmux_core::event::TreeRow> {
-        crate::explorer_model::flatten_tree(root, &self.expanded, &self.loading, &self.children)
+    fn rows(&self, root: &Path) -> Vec<TreeRow> {
+        let mut rows = Vec::new();
+        self.append_rows(root, 0, &mut rows);
+        rows
+    }
+
+    fn append_rows(&self, directory: &Path, depth: u16, rows: &mut Vec<TreeRow>) {
+        let Some(entries) = self.children.get(directory) else {
+            return;
+        };
+        for entry in entries {
+            let path = PathBuf::from(&entry.path);
+            let expanded = entry.is_dir && self.expanded.contains(&path);
+            rows.push(TreeRow {
+                name: entry.name.clone(),
+                path: entry.path.clone(),
+                depth,
+                is_dir: entry.is_dir,
+                expanded,
+                loading: self.loading.contains(&path),
+            });
+            if expanded {
+                self.append_rows(&path, depth + 1, rows);
+            }
+        }
     }
 
     fn is_loading(&self, path: &Path) -> bool {
@@ -189,6 +213,12 @@ pub(super) struct ExplorerState {
 }
 
 impl ExplorerState {
+    fn note_open(&mut self, path: &Path) {
+        if !self.open_editors.iter().any(|open| open == path) {
+            self.open_editors.push(path.to_path_buf());
+        }
+    }
+
     pub(super) fn focus_effect(
         &mut self,
         path: &Path,

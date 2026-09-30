@@ -9,6 +9,6 @@ pub mod host;
 #[cfg(host)]
 pub use host::{
     ContractPlugin, EditorPlugin, FileToolPlugin, FileView, FileViewModeRequest,
-    GlobalSearchRequest, LspPlugin, StackExplorerVisibility, contract, edit, encoding,
-    explorer_model, fold, fold_store, highlight, keymap, lsp, markdown, palette, shape, tool,
+    GlobalSearchRequest, LspPlugin, StackExplorerVisibility, contract, edit, encoding, fold,
+    fold_store, highlight, keymap, lsp, markdown, palette, shape, tool,
 };
