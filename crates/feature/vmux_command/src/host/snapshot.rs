@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use vmux_api::command_bar::{
     CommandBarPage, CommandBarRecentFile, CommandBarWorkDir, SearchEngine,
 };
-use vmux_core::agent::AgentKind;
 use vmux_core::launcher::RendersLauncherPanel;
 use vmux_core::page::PageManifest;
 
@@ -80,7 +79,6 @@ pub struct CommandBarAgentModes {
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct CommandBarAgentsSnapshot {
-    pub cli: Vec<AgentSummary>,
     pub acp: Vec<AgentSummary>,
     pub recent: Vec<AgentPromptTarget>,
 }
@@ -153,17 +151,17 @@ pub struct ContributedCommand {
 pub struct ClaimedUrl(pub String);
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub enum AgentPromptTarget {
-    Cli(AgentKind),
-    Acp { id: String },
+pub struct AgentPromptTarget {
+    pub id: String,
 }
 
 impl AgentPromptTarget {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self { id: id.into() }
+    }
+
     pub fn url(&self) -> String {
-        match self {
-            Self::Cli(kind) => format!("{}cli", kind.cli_url_prefix()),
-            Self::Acp { id } => format!("vmux://sessions/{id}"),
-        }
+        format!("vmux://sessions/{}", self.id)
     }
 }
 
@@ -193,7 +191,6 @@ pub struct SpaceSummary {
 #[derive(Default, Clone, Debug)]
 pub struct CommandBarTerminalsSnapshot {
     pub running: HashMap<String, Entity>,
-    pub agent_session_to_entity: HashMap<(AgentKind, String), Entity>,
     pub terminal_page_url: String,
 }
 
@@ -305,7 +302,6 @@ mod tests {
     #[test]
     fn agents_snapshot_default_is_empty() {
         let s = CommandBarAgentsSnapshot::default();
-        assert!(s.cli.is_empty());
         assert!(s.acp.is_empty());
         assert!(s.recent.is_empty());
     }

@@ -66,10 +66,7 @@ impl AgentSelectionKey {
     }
 
     pub(super) fn acp_url(agent_id: &str) -> String {
-        AgentPromptTarget::Acp {
-            id: Self::normalize(agent_id).to_string(),
-        }
-        .url()
+        AgentPromptTarget::new(Self::normalize(agent_id)).url()
     }
 }
 

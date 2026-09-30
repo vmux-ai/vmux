@@ -32,7 +32,7 @@ struct AgentContribution;
 
 impl AgentContribution {
     fn launcher_pages(agents: &CommandBarAgentsSnapshot) -> Vec<ContributedPage> {
-        let mut pages = Vec::with_capacity(agents.acp.len() + agents.cli.len());
+        let mut pages = Vec::with_capacity(agents.acp.len());
         for agent in &agents.acp {
             pages.push(ContributedPage {
                 id: agent.id.clone(),
@@ -46,20 +46,6 @@ impl AgentContribution {
                     } else {
                         vmux_core::PageIcon::Favicon(agent.icon.clone())
                     },
-                    shortcut: String::new(),
-                    prompt_target: true,
-                },
-            });
-        }
-        for agent in &agents.cli {
-            pages.push(ContributedPage {
-                id: agent.id.clone(),
-                rank: 0,
-                page: CommandBarPage {
-                    url: agent.url.clone(),
-                    title: format!("{} (CLI)", agent.name),
-                    keywords: vec![agent.id.clone(), "cli".to_string(), "agent".to_string()],
-                    icon: vmux_core::PageIcon::None,
                     shortcut: String::new(),
                     prompt_target: true,
                 },
@@ -113,28 +99,27 @@ mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
     use vmux_command::snapshot::AgentSummary;
-    use vmux_core::agent::AgentKind;
 
     #[test]
     fn launcher_pages_list_only_installed_agents_in_recent_order() {
         let snapshot = CommandBarAgentsSnapshot {
-            cli: vec![AgentSummary {
-                id: "codex".to_string(),
-                name: "Codex".to_string(),
-                url: "vmux://sessions/codex/cli".to_string(),
-                icon: String::new(),
-            }],
-            acp: vec![AgentSummary {
-                id: "claude-acp".to_string(),
-                name: "Claude Agent".to_string(),
-                url: "vmux://sessions/claude".to_string(),
-                icon: "https://cdn.example/claude-acp.svg".to_string(),
-            }],
-            recent: vec![
-                AgentPromptTarget::Cli(AgentKind::Codex),
-                AgentPromptTarget::Acp {
-                    id: "claude".to_string(),
+            acp: vec![
+                AgentSummary {
+                    id: "claude-acp".to_string(),
+                    name: "Claude Agent".to_string(),
+                    url: "vmux://sessions/claude".to_string(),
+                    icon: "https://cdn.example/claude-acp.svg".to_string(),
                 },
+                AgentSummary {
+                    id: "codex".to_string(),
+                    name: "Codex".to_string(),
+                    url: "vmux://sessions/codex".to_string(),
+                    icon: String::new(),
+                },
+            ],
+            recent: vec![
+                AgentPromptTarget::new("codex"),
+                AgentPromptTarget::new("claude"),
             ],
             ..Default::default()
         };
@@ -144,8 +129,8 @@ mod tests {
         assert_eq!(pages.len(), 2);
         assert_eq!(pages[0].id, "codex");
         assert_eq!(pages[0].rank, 0);
-        assert_eq!(pages[0].page.url, "vmux://sessions/codex/cli");
-        assert_eq!(pages[0].page.title, "Codex (CLI)");
+        assert_eq!(pages[0].page.url, "vmux://sessions/codex");
+        assert_eq!(pages[0].page.title, "Codex");
         assert_eq!(pages[1].rank, 1);
         assert_eq!(pages[1].page.title, "Claude Agent");
         assert!(matches!(

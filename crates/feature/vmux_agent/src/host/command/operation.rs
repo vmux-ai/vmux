@@ -100,14 +100,6 @@ fn list_agents(
                 icon: agent.icon.clone(),
             });
         }
-        for agent in &command_bar.agents.cli {
-            agents.push(vmux_api::room::RemoteAgent {
-                id: agent.id.clone(),
-                name: format!("{} (CLI)", agent.name),
-                url: agent.url.clone(),
-                icon: agent.icon.clone(),
-            });
-        }
         let result = match serde_json::to_string(&agents) {
             Ok(json) => AgentCommandResult::Text(json),
             Err(error) => AgentCommandResult::Error(format!("list_agents: {error}")),
