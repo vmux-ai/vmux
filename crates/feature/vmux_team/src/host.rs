@@ -20,7 +20,7 @@ use vmux_layout::cef::LayoutCef;
 use vmux_layout::native_open::HostedUiPlugin;
 use vmux_layout::profile::Profile as SpaceProfile;
 use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
-use vmux_layout::space::{CurrentSpace, FocusedSpace, Space, space_of};
+use vmux_layout::space::{CurrentSpace, FocusedSpace, Space, SpaceHierarchy};
 use vmux_layout::stack::{OpenRequest, Stack};
 use vmux_layout::window::WindowHierarchy;
 use vmux_session::AgentRunState;
@@ -193,7 +193,7 @@ fn build_team_members(
         Option<&AgentDoneUnseen>,
     )>,
     child_of: &Query<&ChildOf>,
-    space_marker: &Query<(), With<Space>>,
+    space_hierarchy: &SpaceHierarchy,
     meta_q: &Query<&PageMetadata>,
     children_q: &Query<&Children>,
 ) -> Vec<TeamMemberRow> {
@@ -213,7 +213,7 @@ fn build_team_members(
     }
     if let Some(active) = active_space {
         for (entity, profile, agent, run, session, done) in agent_q {
-            if space_of(entity, child_of, space_marker) == Some(active) {
+            if space_hierarchy.get(entity) == Some(active) {
                 let is_running = matches!(run, Some(AgentRunState::Streaming));
                 let is_done_unseen = done.is_some();
                 let (icon, title) = agent_page(entity, meta_q, children_q, child_of);
@@ -279,7 +279,7 @@ fn answer_list_team(
         Option<&AgentDoneUnseen>,
     )>,
     child_of: Query<&ChildOf>,
-    space_marker: Query<(), With<Space>>,
+    space_hierarchy: SpaceHierarchy,
     meta_q: Query<&PageMetadata>,
     children_q: Query<&Children>,
     mut responses: MessageWriter<AgentCommandResponse>,
@@ -290,7 +290,7 @@ fn answer_list_team(
             &user_q,
             &agent_q,
             &child_of,
-            &space_marker,
+            &space_hierarchy,
             &meta_q,
             &children_q,
         );
@@ -317,19 +317,19 @@ fn project_team(
         Option<&AgentDoneUnseen>,
     )>,
     child_of: Query<&ChildOf>,
-    hierarchy: WindowHierarchy,
-    space_marker: Query<(), With<Space>>,
+    window_hierarchy: WindowHierarchy,
+    space_hierarchy: SpaceHierarchy,
     meta_q: Query<&PageMetadata>,
     children_q: Query<&Children>,
     profile_labels: Query<(&ProfileId, &Name, Has<Active>), With<ProfileLabel>>,
     mut commands: Commands,
 ) {
     for entity in &views {
-        let target_space = space_of(entity, &child_of, &space_marker).or_else(|| {
-            let window = hierarchy.get(entity)?;
+        let target_space = space_hierarchy.get(entity).or_else(|| {
+            let window = window_hierarchy.get(entity)?;
             active_spaces
                 .iter()
-                .find(|space| hierarchy.get(*space) == Some(window))
+                .find(|space| window_hierarchy.get(*space) == Some(window))
         });
         let presentation = TeamPresentation(TeamStateProjection::build(
             build_team_members(
@@ -337,7 +337,7 @@ fn project_team(
                 &user_q,
                 &agent_q,
                 &child_of,
-                &space_marker,
+                &space_hierarchy,
                 &meta_q,
                 &children_q,
             ),
@@ -401,12 +401,10 @@ fn replay_team(
 fn open_team_stack_in_space(
     space: Entity,
     stacks: &Query<(Entity, &PageMetadata), With<Stack>>,
-    child_of: &Query<&ChildOf>,
-    spaces: &Query<(), With<Space>>,
+    hierarchy: &SpaceHierarchy,
 ) -> Option<Entity> {
     stacks.iter().find_map(|(stack, meta)| {
-        (meta.url == TEAM_PAGE_URL && space_of(stack, child_of, spaces) == Some(space))
-            .then_some(stack)
+        (meta.url == TEAM_PAGE_URL && hierarchy.get(stack) == Some(space)).then_some(stack)
     })
 }
 
@@ -420,12 +418,11 @@ fn on_team_open_request(
     mut stack_requests: MessageWriter<OpenRequest>,
     current_space: Query<Entity, With<CurrentSpace>>,
     stacks: Query<(Entity, &PageMetadata), With<Stack>>,
-    child_of: Query<&ChildOf>,
-    spaces: Query<(), With<Space>>,
+    hierarchy: SpaceHierarchy,
     mut commands: Commands,
 ) {
     if let Some(space) = current_space.iter().next()
-        && let Some(stack) = open_team_stack_in_space(space, &stacks, &child_of, &spaces)
+        && let Some(stack) = open_team_stack_in_space(space, &stacks, &hierarchy)
     {
         commands.trigger(ActivateRequest { entity: stack });
         return;
@@ -535,9 +532,8 @@ mod tests {
         app.world_mut()
             .run_system_once(
                 move |stacks: Query<(Entity, &PageMetadata), With<Stack>>,
-                      child_of: Query<&ChildOf>,
-                      spaces: Query<(), With<Space>>| {
-                    open_team_stack_in_space(space, &stacks, &child_of, &spaces)
+                      hierarchy: SpaceHierarchy| {
+                    open_team_stack_in_space(space, &stacks, &hierarchy)
                 },
             )
             .unwrap()
@@ -754,7 +750,7 @@ mod tests {
                     Option<&vmux_core::notify::AgentDoneUnseen>,
                 )>,
                  child_of: Query<&ChildOf>,
-                 space_marker: Query<(), With<Space>>,
+                 space_hierarchy: SpaceHierarchy,
                  meta_q: Query<&PageMetadata>,
                  children_q: Query<&Children>| {
                     build_team_members(
@@ -762,7 +758,7 @@ mod tests {
                         &user_q,
                         &agent_q,
                         &child_of,
-                        &space_marker,
+                        &space_hierarchy,
                         &meta_q,
                         &children_q,
                     )

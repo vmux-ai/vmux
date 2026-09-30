@@ -88,8 +88,7 @@ fn serve_snapshot_requests(
     zoomed_q: Query<&crate::pane::Zoomed>,
     focused: crate::stack::FocusedStack,
     process_ids: Query<(&vmux_core::ProcessId, &ChildOf)>,
-    child_of_q: Query<&ChildOf>,
-    space_q: Query<(), With<crate::space::Space>>,
+    space_hierarchy: crate::space::SpaceHierarchy,
     active_space_q: Query<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>,
     mut writer: MessageWriter<LayoutSnapshotResponse>,
 ) {
@@ -105,7 +104,7 @@ fn serve_snapshot_requests(
                 .map(|(_, co)| co.get())
         });
         let target_space = self_stack
-            .and_then(|stack| crate::space::space_of(stack, &child_of_q, &space_q))
+            .and_then(|stack| space_hierarchy.get(stack))
             .or_else(|| active_space_q.iter().next());
         let mut snapshot = crate::snapshot::build_layout_snapshot(
             &tabs_q,
@@ -122,10 +121,7 @@ fn serve_snapshot_requests(
                 tab.id
                     .as_deref()
                     .and_then(|id| crate::protocol::parse_id(id).ok())
-                    .map(|(_, bits)| {
-                        crate::space::space_of(Entity::from_bits(bits), &child_of_q, &space_q)
-                            == Some(target)
-                    })
+                    .map(|(_, bits)| space_hierarchy.get(Entity::from_bits(bits)) == Some(target))
                     .unwrap_or(true)
             });
         }

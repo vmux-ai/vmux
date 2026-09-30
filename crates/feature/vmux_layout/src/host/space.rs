@@ -168,43 +168,42 @@ fn sync_current_space(
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct SpaceOfPane<'w, 's> {
     leaf_panes: Query<'w, 's, Entity, (With<crate::pane::Pane>, Without<crate::pane::PaneSplit>)>,
+    hierarchy: SpaceHierarchy<'w, 's>,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct SpaceHierarchy<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
     spaces: Query<'w, 's, (), With<Space>>,
+    ids: Query<'w, 's, &'static SpaceId>,
 }
 
 impl SpaceOfPane<'_, '_> {
     pub fn resolve(&self, pane_id: &str) -> Option<Entity> {
         let bits = pane_id.parse::<u64>().ok()?;
         let pane = self.leaf_panes.iter().find(|pane| pane.to_bits() == bits)?;
-        space_of(pane, &self.child_of, &self.spaces)
+        self.hierarchy.get(pane)
     }
 }
 
-pub fn space_of(
-    entity: Entity,
-    child_of: &Query<&ChildOf>,
-    spaces: &Query<(), With<Space>>,
-) -> Option<Entity> {
-    let mut current = entity;
-    loop {
-        if spaces.get(current).is_ok() {
-            return Some(current);
-        }
-        match child_of.get(current) {
-            Ok(parent) => current = parent.parent(),
-            Err(_) => return None,
+impl SpaceHierarchy<'_, '_> {
+    pub fn get(&self, entity: Entity) -> Option<Entity> {
+        let mut current = entity;
+        loop {
+            if self.spaces.get(current).is_ok() {
+                return Some(current);
+            }
+            match self.child_of.get(current) {
+                Ok(parent) => current = parent.parent(),
+                Err(_) => return None,
+            }
         }
     }
-}
 
-pub fn space_id_of(
-    entity: Entity,
-    child_of: &Query<&ChildOf>,
-    spaces: &Query<(), With<Space>>,
-    ids: &Query<&SpaceId>,
-) -> Option<String> {
-    let space = space_of(entity, child_of, spaces)?;
-    ids.get(space).ok().map(|id| id.0.clone())
+    pub fn id(&self, entity: Entity) -> Option<String> {
+        let space = self.get(entity)?;
+        self.ids.get(space).ok().map(|id| id.0.clone())
+    }
 }
 
 pub fn space_container_node() -> Node {
@@ -305,11 +304,7 @@ mod tests {
         let stack = app.world_mut().spawn(ChildOf(tab)).id();
         let found = app
             .world_mut()
-            .run_system_once(
-                move |child_of: Query<&ChildOf>, spaces: Query<(), With<Space>>| {
-                    space_of(stack, &child_of, &spaces)
-                },
-            )
+            .run_system_once(move |hierarchy: SpaceHierarchy| hierarchy.get(stack))
             .unwrap();
         assert_eq!(found, Some(space));
     }

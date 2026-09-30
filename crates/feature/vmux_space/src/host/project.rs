@@ -9,7 +9,7 @@ use vmux_git::worktree::LinkedRepoRoot;
 #[cfg(test)]
 use vmux_layout::pane::Pane;
 use vmux_layout::space::{
-    EffectiveStartupSet, FocusedSpace, Space, SpaceId, SpaceOfPane, space_id_of, space_of,
+    EffectiveStartupSet, FocusedSpace, Space, SpaceHierarchy, SpaceId, SpaceOfPane,
 };
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
 #[cfg(test)]
@@ -164,15 +164,14 @@ const UNLISTED_DIRS: &[&str] = &[
 pub struct SpaceProjects<'w, 's> {
     settings: Option<Res<'w, AppSettings>>,
     active_space: FocusedSpace<'w, 's>,
-    child_of: Query<'w, 's, &'static ChildOf>,
-    spaces: Query<'w, 's, (), With<Space>>,
+    hierarchy: SpaceHierarchy<'w, 's>,
     space_ids: Query<'w, 's, &'static SpaceId>,
     expanded: Query<'w, 's, &'static ExpandedProjectDirs, With<Space>>,
 }
 
 impl SpaceProjects<'_, '_> {
     pub fn rows(&self, entity: Entity) -> Vec<ProjectRow> {
-        let Some(space) = space_of(entity, &self.child_of, &self.spaces) else {
+        let Some(space) = self.hierarchy.get(entity) else {
             return self.active_rows();
         };
         let Ok(space_id) = self.space_ids.get(space) else {
@@ -230,14 +229,12 @@ impl SpaceProjects<'_, '_> {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct SpaceOfTab<'w, 's> {
-    child_of: Query<'w, 's, &'static ChildOf>,
-    spaces: Query<'w, 's, (), With<Space>>,
-    ids: Query<'w, 's, &'static SpaceId>,
+    hierarchy: SpaceHierarchy<'w, 's>,
 }
 
 impl SpaceOfTab<'_, '_> {
     fn find(&self, tab: Entity) -> Option<String> {
-        space_id_of(tab, &self.child_of, &self.spaces, &self.ids)
+        self.hierarchy.id(tab)
     }
 }
 

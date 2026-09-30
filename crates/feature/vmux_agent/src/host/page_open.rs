@@ -22,7 +22,9 @@ use vmux_git::worktree::worktree_list;
 use vmux_layout::Browser as LayoutBrowser;
 #[cfg(test)]
 use vmux_layout::space::CurrentSpace;
-use vmux_layout::space::{FocusedSpace, Space, SpaceId};
+use vmux_layout::space::FocusedSpace;
+#[cfg(test)]
+use vmux_layout::space::{Space, SpaceId};
 #[cfg(test)]
 use vmux_layout::stack::stack_bundle;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
@@ -71,8 +73,21 @@ impl Plugin for PageOpenPlugin {
 struct AgentPageOpenWorkspace<'w, 's> {
     active_space: FocusedSpace<'w, 's>,
     tabs: Query<'w, 's, &'static Tab>,
-    spaces: Query<'w, 's, (), With<Space>>,
-    space_ids: Query<'w, 's, &'static SpaceId>,
+    hierarchy: vmux_layout::space::SpaceHierarchy<'w, 's>,
+}
+
+impl AgentPageOpenWorkspace<'_, '_> {
+    fn startup_dir(
+        &self,
+        entity: Entity,
+        settings: &AppSettings,
+    ) -> Option<vmux_setting::StartupDir> {
+        let space_id = self
+            .hierarchy
+            .id(entity)
+            .or_else(|| self.active_space.id().map(str::to_string))?;
+        vmux_setting::StartupDir::resolve(settings, &space_id, None)
+    }
 }
 
 #[derive(Component)]
@@ -181,28 +196,13 @@ fn ancestor_agent_tab(
     }
 }
 
-fn resolved_space_startup_dir(
-    entity: Entity,
-    child_of: &Query<&ChildOf>,
-    spaces: &Query<(), With<Space>>,
-    space_ids: &Query<&SpaceId>,
-    settings: &AppSettings,
-    active_space: &FocusedSpace,
-) -> Option<vmux_setting::StartupDir> {
-    let space_id = vmux_layout::space::space_id_of(entity, child_of, spaces, space_ids)
-        .map(|space_id| space_id.to_string())
-        .or_else(|| active_space.id().map(str::to_string))?;
-    vmux_setting::StartupDir::resolve(settings, &space_id, None)
-}
-
 fn prepare_agent_tab_worktrees(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     pending: Query<(Entity, &PendingAgentWorktree)>,
     transitions: Query<&StartInlineTransition>,
     preparing_views: Query<(Entity, &ChildOf), With<PreparingAgentChatView>>,
     child_of: Query<&ChildOf>,
-    spaces: Query<(), With<Space>>,
-    space_ids: Query<&SpaceId>,
+    space_hierarchy: vmux_layout::space::SpaceHierarchy,
     mut tabs: Query<(
         Entity,
         &mut Tab,
@@ -279,15 +279,11 @@ fn prepare_agent_tab_worktrees(
             continue;
         }
         let configured_project_dir = settings.as_deref().and_then(|settings| {
-            resolved_space_startup_dir(
-                task.stack,
-                &child_of,
-                &spaces,
-                &space_ids,
-                settings,
-                &active_space,
-            )
-            .map(|dir| dir.path.to_string_lossy().into_owned())
+            let space_id = space_hierarchy
+                .id(task.stack)
+                .or_else(|| active_space.id().map(str::to_string))?;
+            vmux_setting::StartupDir::resolve(settings, &space_id, None)
+                .map(|dir| dir.path.to_string_lossy().into_owned())
         });
         let Ok((_, mut tab, workspace, metadata, ready, decided)) = tabs.get_mut(tab_entity) else {
             continue;
@@ -516,14 +512,7 @@ fn handle_agent_page_open(
         let tab_dir = tab
             .as_ref()
             .and_then(|(_, startup_dir)| startup_dir.clone());
-        let space_startup_dir = resolved_space_startup_dir(
-            task.stack,
-            &child_of_q,
-            &workspace.spaces,
-            &workspace.space_ids,
-            &settings,
-            &workspace.active_space,
-        );
+        let space_startup_dir = workspace.startup_dir(task.stack, &settings);
         let restored_cwd = restoring
             .then(|| launches.get(task.stack).ok())
             .flatten()

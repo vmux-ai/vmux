@@ -872,8 +872,7 @@ fn resolve_pending_terminal_cwd(
     >,
     child_of: Query<&ChildOf>,
     tabs: Query<&Tab>,
-    spaces: Query<(), With<vmux_layout::space::Space>>,
-    space_ids: Query<&vmux_layout::space::SpaceId>,
+    space_hierarchy: vmux_layout::space::SpaceHierarchy,
     settings: Res<AppSettings>,
     active_space: FocusedSpace,
 ) {
@@ -882,7 +881,8 @@ fn resolve_pending_terminal_cwd(
             continue;
         }
         let tab_dir = ancestor_tab_startup_dir(entity, &child_of, &tabs);
-        let space_id = vmux_layout::space::space_id_of(entity, &child_of, &spaces, &space_ids)
+        let space_id = space_hierarchy
+            .id(entity)
             .or_else(|| active_space.id().map(str::to_string))
             .unwrap_or_else(|| BOOTSTRAP_SPACE_ID.to_string());
         let Ok(Some(cwd)) = settings.workspace_dir(&space_id, tab_dir.as_deref()) else {

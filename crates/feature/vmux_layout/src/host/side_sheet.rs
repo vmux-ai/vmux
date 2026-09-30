@@ -53,14 +53,13 @@ impl SideSheetSectionsExpanded {
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct SideSheetSections<'w, 's> {
-    spaces: Query<'w, 's, (), With<super::space::Space>>,
-    child_of: Query<'w, 's, &'static ChildOf>,
+    hierarchy: super::space::SpaceHierarchy<'w, 's>,
     expanded: Query<'w, 's, &'static SideSheetSectionsExpanded, With<super::space::Space>>,
 }
 
 impl SideSheetSections<'_, '_> {
     pub fn space_of(&self, entity: Entity) -> Option<Entity> {
-        super::space::space_of(entity, &self.child_of, &self.spaces)
+        self.hierarchy.get(entity)
     }
 
     pub fn under(&self, entity: Entity) -> SideSheetSectionsExpanded {

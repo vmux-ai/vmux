@@ -218,8 +218,7 @@ struct ResumeAsk<'w, 's> {
     acp_sessions: Query<'w, 's, &'static AcpSession>,
     agent_sessions: Query<'w, 's, &'static AgentSession>,
     profiles: Query<'w, 's, &'static Profile>,
-    spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
-    ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
+    space_hierarchy: vmux_layout::space::SpaceHierarchy<'w, 's>,
     settings: Option<Res<'w, vmux_setting::AppSettings>>,
 }
 
@@ -247,8 +246,7 @@ impl ResumeAsk<'_, '_> {
 
     fn project_of(&self, webview: Entity) -> Option<std::path::PathBuf> {
         let settings = self.settings.as_deref()?;
-        let space_id =
-            vmux_layout::space::space_id_of(webview, &self.child_of, &self.spaces, &self.ids)?;
+        let space_id = self.space_hierarchy.id(webview)?;
         let dir = settings.space(&space_id)?.active_dir()?;
         (!dir.is_empty()).then(|| std::path::PathBuf::from(dir))
     }

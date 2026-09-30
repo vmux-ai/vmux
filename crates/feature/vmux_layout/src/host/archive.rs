@@ -26,7 +26,7 @@ use crate::pane::{
     Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection, leaf_pane_bundle, split_root_bundle,
 };
 use crate::settings::LayoutSettings;
-use crate::space::{CurrentSpace, Space, SpaceId, space_of};
+use crate::space::{CurrentSpace, Space, SpaceHierarchy, SpaceId};
 #[cfg(test)]
 use crate::stack::CloseRequest;
 use crate::stack::{
@@ -113,11 +113,8 @@ fn archive_on_stack_close(
         if meta.url.is_empty() {
             continue;
         }
-        let space = space_of(stack, &layout.child_of, &layout.spaces);
-        let space_id = space
-            .and_then(|space| layout.space_ids.get(space).ok())
-            .map(|id| id.0.clone())
-            .unwrap_or_default();
+        let space = layout.space_hierarchy.get(stack);
+        let space_id = layout.space_hierarchy.id(stack).unwrap_or_default();
         let tab_index = space.and_then(|space| layout.tab_index(stack, space));
         let (leaf_pane_id, stack_index, pane_path) = layout.pane_path(stack).unwrap_or_default();
         writer.write(PageArchiveRequest {
@@ -225,8 +222,7 @@ struct TabArchiveLayout<'w, 's> {
     >,
     child_of: Query<'w, 's, &'static ChildOf>,
     children_q: Query<'w, 's, &'static Children>,
-    spaces: Query<'w, 's, (), With<Space>>,
-    space_ids: Query<'w, 's, &'static SpaceId>,
+    space_hierarchy: SpaceHierarchy<'w, 's>,
     tabs: Query<'w, 's, (), With<Tab>>,
     stacks: Query<'w, 's, (), With<Stack>>,
     pane_ids: Query<'w, 's, &'static PaneId>,
@@ -404,14 +400,10 @@ fn handle_close_tab_requests(
 }
 
 fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, commands: &mut Commands) {
-    let Some(space) = space_of(tab_entity, &layout.child_of, &layout.spaces) else {
+    let Some(space) = layout.space_hierarchy.get(tab_entity) else {
         return;
     };
-    let space_id = layout
-        .space_ids
-        .get(space)
-        .map(|id| id.0.clone())
-        .unwrap_or_default();
+    let space_id = layout.space_hierarchy.id(tab_entity).unwrap_or_default();
     let tab_index = layout.children_q.get(space).ok().and_then(|children| {
         children
             .iter()

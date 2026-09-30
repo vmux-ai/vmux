@@ -64,7 +64,7 @@ struct PaneOpenResolver<'w, 's> {
     node_q: Query<'w, 's, &'static ComputedNode>,
     page_q: Query<'w, 's, &'static PageMetadata, With<Stack>>,
     open_task_q: Query<'w, 's, &'static PageOpenTask>,
-    spaces: Query<'w, 's, (), With<crate::space::Space>>,
+    space_hierarchy: crate::space::SpaceHierarchy<'w, 's>,
     tab_q: Query<'w, 's, Entity, With<Tab>>,
 }
 
@@ -91,18 +91,17 @@ fn handle_open_beside_requests(
     let mut retired_leaf_panes: std::collections::HashSet<Entity> =
         std::collections::HashSet::new();
     for req in reader.read() {
-        let reuse =
-            crate::space::space_of(req.pane, &child_of_q, &resolver.spaces).and_then(|space| {
-                find_reuse_in_space(
-                    &req.url,
-                    space,
-                    &resolver.tab_q,
-                    &resolver.all_children,
-                    &resolver.page_q,
-                    &resolver.open_task_q,
-                    &child_of_q,
-                )
-            });
+        let reuse = resolver.space_hierarchy.get(req.pane).and_then(|space| {
+            find_reuse_in_space(
+                &req.url,
+                space,
+                &resolver.tab_q,
+                &resolver.all_children,
+                &resolver.page_q,
+                &resolver.open_task_q,
+                &child_of_q,
+            )
+        });
         if let Some(hit) = reuse {
             if let Ok(meta) = resolver.page_q.get(hit.stack)
                 && meta.url != req.url
