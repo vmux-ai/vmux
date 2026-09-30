@@ -3,13 +3,13 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 use vmux_api::protocol::{
-    AgentProcessRunCompletion, AgentReadProcessOutput, AgentReadProcessTranscript, AgentRequest,
-    AgentRequestId, AgentRunCompletion, ClientMessage, ProcessId, ServiceMessage,
+    AgentRequest, AgentRequestId, AgentRunCompletion, ClientMessage, ProcessId, ServiceMessage,
 };
 use vmux_core::service::ServiceConnection;
 use vmux_core::{HostShell, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 
+use vmux_process::{AgentProcessRunCompletion, AgentReadProcessOutput, AgentReadProcessTranscript};
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
 };

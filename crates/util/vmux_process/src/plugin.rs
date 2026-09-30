@@ -3,13 +3,32 @@ use std::sync::Mutex;
 use bevy::prelude::{App, Bundle, Component, IntoScheduleConfigs, Plugin, Query, Update};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use vmux_api::protocol::{
-    AgentCommandExit, AgentProcessCommandExit, AgentProcessRunCompletion, AgentReadProcessOutput,
-    AgentReadProcessTranscript, AgentRequest, AgentRequestId, AgentRunCompletion, CopyModeKey,
-    ProcessInfo, ServiceMessage,
+    AgentCommandExit, AgentRequest, AgentRequestId, AgentRunCompletion, CopyModeKey, ProcessInfo,
+    ServiceMessage,
 };
 use vmux_api::{ProcessId, TermSelectionRange};
 
 use crate::{Process, ProcessManager, ProcessSnapshot, ProcessUpdate};
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentReadProcessOutput {
+    pub process_id: ProcessId,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentReadProcessTranscript {
+    pub process_id: ProcessId,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentProcessCommandExit {
+    pub process_id: ProcessId,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentProcessRunCompletion {
+    pub process_id: ProcessId,
+}
 
 pub struct ProcessPlugin;
 
