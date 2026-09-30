@@ -29,8 +29,7 @@ use vmux_core::KeyboardOwner;
 use vmux_setting::AppSettings;
 
 use crate::host::{
-    CLAUDE_LOGO_PNG, CODEX_LOGO_PNG, CommandBarRoute, LayoutPointerCapture, LogoBitmap,
-    NATIVE_COMMAND_BAR_ROUTE, VIBE_LOGO_PNG, agent_ring_rgb, decode_premultiplied, hex_to_rgb,
+    CommandBarRoute, LayoutPointerCapture, NATIVE_COMMAND_BAR_ROUTE, agent_ring_rgb,
 };
 
 #[cfg(target_os = "macos")]
@@ -366,43 +365,16 @@ fn windowed_ring_for(
     agent: Option<(&str, vmux_layout::active_pane::ActiveStack)>,
     settings: &AppSettings,
     scale: f32,
-) -> (f32, [f32; 3], Option<vmux_core::agent::AgentKind>) {
+) -> (f32, [f32; 3]) {
     let width = settings.layout.focus_ring.width * scale;
     let user = &settings.layout.focus_ring.color;
     if focus.stack == Some(stack) && visible_pane_count > 1 {
-        return (width, [user.r, user.g, user.b], None);
+        return (width, [user.r, user.g, user.b]);
     }
-    if let Some((profile, active)) = agent {
-        return (width, agent_ring_rgb(profile), active.kind);
+    if let Some((profile, _)) = agent {
+        return (width, agent_ring_rgb(profile));
     }
-    (0.0, [user.r, user.g, user.b], None)
-}
-
-fn agent_logo(kind: vmux_core::agent::AgentKind) -> Option<&'static LogoBitmap> {
-    use std::sync::OnceLock;
-    use vmux_core::agent::AgentKind;
-    static CLAUDE: OnceLock<Option<LogoBitmap>> = OnceLock::new();
-    static CODEX: OnceLock<Option<LogoBitmap>> = OnceLock::new();
-    static VIBE: OnceLock<Option<LogoBitmap>> = OnceLock::new();
-    let (cell, png) = match kind {
-        AgentKind::Claude => (&CLAUDE, CLAUDE_LOGO_PNG),
-        AgentKind::Codex => (&CODEX, CODEX_LOGO_PNG),
-        AgentKind::Vibe => (&VIBE, VIBE_LOGO_PNG),
-    };
-    cell.get_or_init(|| decode_premultiplied(png)).as_ref()
-}
-
-fn agent_kind_tag(kind: vmux_core::agent::AgentKind) -> u8 {
-    use vmux_core::agent::AgentKind;
-    match kind {
-        AgentKind::Claude => 1,
-        AgentKind::Codex => 2,
-        AgentKind::Vibe => 3,
-    }
-}
-
-fn agent_brand_rgb(kind: vmux_core::agent::AgentKind) -> [f32; 3] {
-    hex_to_rgb(&kind.avatar().color).unwrap_or([0.5, 0.5, 0.5])
+    (0.0, [user.r, user.g, user.b])
 }
 
 fn sync_windowed_frames(
@@ -545,7 +517,7 @@ fn sync_windowed_frames(
             scale,
             all_corners,
         );
-        let (focus_ring_width, focus_ring_rgb, focus_ring_kind) = windowed_ring_for(
+        let (focus_ring_width, focus_ring_rgb) = windowed_ring_for(
             parent,
             &focus,
             visible_pane_count,
@@ -562,18 +534,7 @@ fn sync_windowed_frames(
             },
             AllCorners(all_corners),
         ));
-        let badge = focus_ring_kind.and_then(|kind| {
-            agent_logo(kind).map(|logo| {
-                (
-                    logo.rgba.as_slice(),
-                    logo.width,
-                    logo.height,
-                    agent_brand_rgb(kind),
-                    agent_kind_tag(kind),
-                )
-            })
-        });
-        browsers.set_agent_badge(&entity, scale, badge);
+        browsers.set_agent_badge(&entity, scale, None);
         let cover_rgb = clear_color.0.to_srgba();
         browsers.set_windowed_corner_cover(
             &entity,
@@ -1464,15 +1425,12 @@ mod tests {
                 tab: None,
                 pane: None,
                 stack: Some(stack),
-                kind: Some(vmux_core::agent::AgentKind::Claude),
             },
         );
         let unfocused = ActiveStack::default();
 
-        let (width, rgb, kind) =
-            windowed_ring_for(stack, &unfocused, 2, Some(agent), &settings, 1.0);
+        let (width, rgb) = windowed_ring_for(stack, &unfocused, 2, Some(agent), &settings, 1.0);
         assert!(width > 0.0, "an agent's active pane draws a ring");
-        assert_eq!(kind, Some(vmux_core::agent::AgentKind::Claude));
         assert_ne!(
             rgb,
             [user.r, user.g, user.b],
@@ -1483,12 +1441,11 @@ mod tests {
             stack: Some(stack),
             ..Default::default()
         };
-        let (width, rgb, kind) = windowed_ring_for(stack, &focused, 2, Some(agent), &settings, 1.0);
+        let (width, rgb) = windowed_ring_for(stack, &focused, 2, Some(agent), &settings, 1.0);
         assert!(width > 0.0);
         assert_eq!(rgb, [user.r, user.g, user.b]);
-        assert_eq!(kind, None, "no agent badge on the user's own ring");
 
-        let (width, _, _) = windowed_ring_for(stack, &focused, 1, None, &settings, 1.0);
+        let (width, _) = windowed_ring_for(stack, &focused, 1, None, &settings, 1.0);
         assert_eq!(width, 0.0);
     }
 

@@ -92,17 +92,9 @@ fn attach_acp_agents(
                 resume: resume.clone(),
             },
             vmux_core::team::Profile::registry(name, agent_id),
-            vmux_core::team::Agent {
-                sid: sid.clone(),
-                kind: None,
-            },
+            vmux_core::team::Agent { sid: sid.clone() },
             vmux_core::AgentWorkingDir(cwd.to_string_lossy().to_string()),
         ));
-        if let Some(resume) = resume.as_deref()
-            && let Some(imported) = crate::handoff::ImportedConversation::load(agent_id, resume)
-        {
-            commands.entity(entity).insert(imported);
-        }
         let view = if let Some(webview) = *webview {
             webview
         } else {
@@ -193,7 +185,6 @@ mod tests {
         assert_eq!(profile.name, "Mistral Vibe");
         let agent = world.get::<vmux_core::team::Agent>(stack).expect("agent");
         assert_eq!(agent.sid, "sid-1");
-        assert_eq!(agent.kind, None);
         let meta = world.get::<PageMetadata>(stack).expect("meta");
         assert_eq!(meta.icon.favicon_url(), "https://cdn.example/vibe.svg");
     }

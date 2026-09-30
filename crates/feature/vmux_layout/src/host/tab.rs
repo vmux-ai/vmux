@@ -923,7 +923,6 @@ mod tests {
             .add_message::<crate::NewTabRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<crate::LauncherDismissRequest>()
             .insert_resource(test_settings())
             .init_resource::<CollectedSpawns>()

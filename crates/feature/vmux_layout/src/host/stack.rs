@@ -516,12 +516,7 @@ fn compute_focused_stack(
 ) {
     let tab = active_tab_param.get();
     let (_, pane, stack) = focus.resolve(tab);
-    let next = ActiveStack {
-        tab,
-        pane,
-        stack,
-        kind: None,
-    };
+    let next = ActiveStack { tab, pane, stack };
     for (profile, mut active) in &mut profiles {
         if *profile == ProfileId::Local {
             if *active != next {

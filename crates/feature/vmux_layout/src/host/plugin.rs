@@ -53,8 +53,6 @@ impl Plugin for LayoutPlugin {
             .init_resource::<settings::ResolvedLocale>()
             .add_message::<TerminalLayoutSpawnRequest>()
             .add_message::<vmux_core::PageOpenRequest>()
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .add_message::<vmux_core::agent::RestartAgentPty>()
             .configure_sets(
                 Startup,
                 (

@@ -31,7 +31,6 @@ pub mod terminal;
 mod ui_state;
 pub mod vault;
 
-pub use agent::AgentKind;
 pub use bin_event::{AgentRequestContract, BinEvent, HostEvent, PageReady, UiEvent};
 pub use icon::{BuiltinIcon, PageIcon};
 pub use input_schema::{InputSchema, InputSchemaType};

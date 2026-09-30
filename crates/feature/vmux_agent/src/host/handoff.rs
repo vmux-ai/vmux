@@ -1,8 +1,21 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::{AssistantBlock, Message};
+
+pub(super) struct HandoffPlugin;
+
+impl Plugin for HandoffPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, spawn_handoff_directory)
+            .add_systems(Update, load_imported_conversation)
+            .add_systems(
+                Update,
+                persist_imported_conversation.after(vmux_core::service::ServiceMessageSet),
+            );
+    }
+}
 
 pub const HANDOFF_PROMPT_PREFIX: &str = vmux_api::protocol::PRIVATE_CONTEXT_PREFIX;
 pub const OMITTED_MARKER: &str = "[Older source turns omitted]";
@@ -19,10 +32,33 @@ pub struct ImportedConversation {
     pub first_prompt: Option<String>,
 }
 
-impl ImportedConversation {
-    pub fn sanitize_replay(messages: &mut [Message], first_prompt: Option<&str>) {
-        let mut fallback = first_prompt;
-        for message in messages {
+#[derive(Component)]
+struct HandoffDirectory(PathBuf);
+
+impl HandoffDirectory {
+    fn save(
+        &self,
+        imported: &ImportedConversation,
+        agent_id: &str,
+        session_id: &str,
+    ) -> Result<(), String> {
+        let path = self.record_path(agent_id, session_id);
+        let parent = path
+            .parent()
+            .ok_or_else(|| format!("invalid handoff path {}", path.display()))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("create handoff directory {}: {error}", parent.display()))?;
+        let bytes = serde_json::to_vec(imported)
+            .map_err(|error| format!("serialize handoff record: {error}"))?;
+        std::fs::write(&path, bytes)
+            .map_err(|error| format!("write handoff record {}: {error}", path.display()))
+    }
+
+    fn load(&self, agent_id: &str, session_id: &str) -> Option<ImportedConversation> {
+        let bytes = std::fs::read(self.record_path(agent_id, session_id)).ok()?;
+        let mut imported = serde_json::from_slice::<ImportedConversation>(&bytes).ok()?;
+        let mut fallback = imported.first_prompt.as_deref();
+        for message in &mut imported.messages {
             let Message::User { text, .. } = message else {
                 continue;
             };
@@ -36,48 +72,12 @@ impl ImportedConversation {
                 *text = display_text.to_string();
             }
         }
+        Some(imported)
     }
 
-    pub fn save(&self, agent_id: &str, session_id: &str) -> Result<(), String> {
-        self.save_in(
-            &vmux_core::profile::ProfilePaths::current()
-                .profile()
-                .join("handoffs"),
-            agent_id,
-            session_id,
-        )
-    }
-
-    pub fn load(agent_id: &str, session_id: &str) -> Option<Self> {
-        Self::load_in(
-            &vmux_core::profile::ProfilePaths::current()
-                .profile()
-                .join("handoffs"),
-            agent_id,
-            session_id,
-        )
-    }
-
-    fn save_in(&self, root: &Path, agent_id: &str, session_id: &str) -> Result<(), String> {
-        let path = Self::record_path(root, agent_id, session_id);
-        let parent = path
-            .parent()
-            .ok_or_else(|| format!("invalid handoff path {}", path.display()))?;
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("create handoff directory {}: {error}", parent.display()))?;
-        let bytes = serde_json::to_vec(self)
-            .map_err(|error| format!("serialize handoff record: {error}"))?;
-        std::fs::write(&path, bytes)
-            .map_err(|error| format!("write handoff record {}: {error}", path.display()))
-    }
-
-    fn load_in(root: &Path, agent_id: &str, session_id: &str) -> Option<Self> {
-        let bytes = std::fs::read(Self::record_path(root, agent_id, session_id)).ok()?;
-        serde_json::from_slice(&bytes).ok()
-    }
-
-    fn record_path(root: &Path, agent_id: &str, session_id: &str) -> PathBuf {
-        root.join(Self::hex_component(agent_id))
+    fn record_path(&self, agent_id: &str, session_id: &str) -> PathBuf {
+        self.0
+            .join(Self::hex_component(agent_id))
             .join(format!("{}.json", Self::hex_component(session_id)))
     }
 
@@ -87,6 +87,56 @@ impl ImportedConversation {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect()
+    }
+}
+
+fn spawn_handoff_directory(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Agent handoff directory"),
+        HandoffDirectory(
+            vmux_core::profile::ProfilePaths::current()
+                .profile()
+                .join("handoffs"),
+        ),
+    ));
+}
+
+fn load_imported_conversation(
+    directory: Single<&HandoffDirectory>,
+    sessions: Query<
+        (Entity, &vmux_session::AcpSession),
+        (
+            Added<vmux_session::AcpSession>,
+            Without<ImportedConversation>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, session) in &sessions {
+        let Some(session_id) = session.resume.as_deref() else {
+            continue;
+        };
+        let Some(imported) = directory.load(&session.agent_id, session_id) else {
+            continue;
+        };
+        commands.entity(entity).insert(imported);
+    }
+}
+
+fn persist_imported_conversation(
+    directory: Single<&HandoffDirectory>,
+    mut created: MessageReader<crate::event::UiAgentSessionCreated>,
+    sessions: Query<(&vmux_session::AcpSession, &ImportedConversation)>,
+) {
+    for event in created.read() {
+        for (session, imported) in &sessions {
+            if session.sid != event.sid || imported.first_prompt.is_none() {
+                continue;
+            }
+            if let Err(error) = directory.save(imported, &session.agent_id, &event.acp_session_id) {
+                bevy::log::warn!("acp: failed to persist handoff metadata: {error}");
+            }
+        }
     }
 }
 
@@ -184,6 +234,32 @@ mod tests {
     use super::*;
     use crate::{AssistantBlock, Message};
 
+    struct TestHandoffDirectory {
+        directory: HandoffDirectory,
+    }
+
+    impl TestHandoffDirectory {
+        fn new(name: &str) -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "vmux-handoff-{name}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            Self {
+                directory: HandoffDirectory(root),
+            }
+        }
+    }
+
+    impl Drop for TestHandoffDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.directory.0);
+        }
+    }
+
     fn user(text: &str) -> Message {
         Message::user(text)
     }
@@ -278,12 +354,28 @@ mod tests {
 
     #[test]
     fn replay_private_prompt_is_replaced_with_display_prompt() {
-        let mut messages = vec![
+        let messages = vec![
             user(&wire_prompt("prior conversation", "continue here")),
             assistant("done"),
         ];
 
-        ImportedConversation::sanitize_replay(&mut messages, Some("continue here"));
+        let directory = TestHandoffDirectory::new("replay");
+        let imported = ImportedConversation {
+            source_agent: String::new(),
+            source_sid: String::new(),
+            messages,
+            truncated: false,
+            first_prompt: Some("continue here".into()),
+        };
+        directory
+            .directory
+            .save(&imported, "agent", "session")
+            .unwrap();
+        let messages = directory
+            .directory
+            .load("agent", "session")
+            .unwrap()
+            .messages;
 
         assert_eq!(messages[0], user("continue here"));
         assert_eq!(messages[1], assistant("done"));
@@ -291,12 +383,24 @@ mod tests {
 
     #[test]
     fn replay_sanitizes_every_retried_private_prompt_from_its_own_payload() {
-        let mut messages = vec![
+        let messages = vec![
             user(&wire_prompt("prior conversation", "first try")),
             user(&wire_prompt("prior conversation", "second try")),
         ];
 
-        ImportedConversation::sanitize_replay(&mut messages, Some("stale sidecar text"));
+        let directory = TestHandoffDirectory::new("retry");
+        let imported = ImportedConversation {
+            source_agent: String::new(),
+            source_sid: String::new(),
+            messages,
+            truncated: false,
+            first_prompt: Some("stale sidecar text".into()),
+        };
+        directory
+            .directory
+            .save(&imported, "agent", "retry")
+            .unwrap();
+        let messages = directory.directory.load("agent", "retry").unwrap().messages;
 
         assert_eq!(messages, vec![user("first try"), user("second try")]);
     }
@@ -304,9 +408,21 @@ mod tests {
     #[test]
     fn replay_preserves_plain_prompt_starting_with_private_prefix() {
         let text = format!("{HANDOFF_PROMPT_PREFIX} ordinary user text");
-        let mut messages = vec![user(&text)];
+        let messages = vec![user(&text)];
 
-        ImportedConversation::sanitize_replay(&mut messages, Some("fallback"));
+        let directory = TestHandoffDirectory::new("plain");
+        let imported = ImportedConversation {
+            source_agent: String::new(),
+            source_sid: String::new(),
+            messages,
+            truncated: false,
+            first_prompt: Some("fallback".into()),
+        };
+        directory
+            .directory
+            .save(&imported, "agent", "plain")
+            .unwrap();
+        let messages = directory.directory.load("agent", "plain").unwrap().messages;
 
         assert_eq!(messages, vec![user(&text)]);
     }
@@ -348,14 +464,16 @@ mod tests {
             first_prompt: Some("continue".into()),
         };
 
-        imported
-            .save_in(&root, "claude/custom", "target?1")
+        let directory = HandoffDirectory(root.clone());
+        directory
+            .save(&imported, "claude/custom", "target?1")
             .unwrap();
-        let loaded = ImportedConversation::load_in(&root, "claude/custom", "target?1").unwrap();
+        let loaded = directory.load("claude/custom", "target?1").unwrap();
 
         assert_eq!(loaded, imported);
         assert!(
-            ImportedConversation::record_path(&root, "claude/custom", "target?1")
+            directory
+                .record_path("claude/custom", "target?1")
                 .starts_with(&root)
         );
         let _ = std::fs::remove_dir_all(root);
@@ -372,11 +490,12 @@ mod tests {
                 .as_nanos()
         ));
 
-        assert!(ImportedConversation::load_in(&root, "claude", "missing").is_none());
-        let path = ImportedConversation::record_path(&root, "claude", "bad");
+        let directory = HandoffDirectory(root.clone());
+        assert!(directory.load("claude", "missing").is_none());
+        let path = directory.record_path("claude", "bad");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, "not json").unwrap();
-        assert!(ImportedConversation::load_in(&root, "claude", "bad").is_none());
+        assert!(directory.load("claude", "bad").is_none());
         let _ = std::fs::remove_dir_all(root);
     }
 

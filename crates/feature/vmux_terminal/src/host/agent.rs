@@ -187,7 +187,6 @@ fn respond_process_stack_spawn(
             args: request.args.clone(),
             cwd: request.cwd.to_string_lossy().to_string(),
             env: request.env.clone(),
-            kind: crate::launch::TerminalKind::Plain,
         };
         let terminal = commands
             .spawn((

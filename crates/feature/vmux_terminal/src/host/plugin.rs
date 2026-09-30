@@ -21,9 +21,6 @@ use vmux_command::{
 };
 #[cfg(test)]
 use vmux_core::PageOpenId;
-use vmux_core::agent::{
-    AgentKind as CoreAgentKind, AgentSession as CoreAgentSession, RestartAgentPty,
-};
 use vmux_core::event::TerminalUiState;
 use vmux_core::host::UiStateWrite;
 use vmux_core::host::page::{BindsEditingChords, HostsPage};
@@ -58,10 +55,8 @@ use super::input_queue::InputQueuePlugin;
 #[cfg(test)]
 use super::input_queue::pending_terminal_input;
 use super::input_queue::{QueueTerminalInput, TerminalProcessIndex};
-use super::loading::AgentLoading;
 use super::mouse::TerminalMouseState;
 use super::process_control::{PendingTerminalSnapshot, ProcessControlPlugin, TerminalGridSize};
-use super::prompt::PromptCapture;
 use super::service::{
     ServiceIngressPlugin, TerminalProcessCreateFailed, TerminalProcessCreated,
     TerminalSelectionText, TerminalServiceError, TerminalViewportUpdate,
@@ -110,7 +105,6 @@ impl Plugin for TerminalPlugin {
         .add_plugins(UiEventPlugin::<(CommandBarTerminalRequest,)>::default())
         .add_observer(open_from_command_bar)
         .register_persisted::<crate::launch::TerminalLaunch>()
-        .register_type::<crate::launch::TerminalKind>()
         .add_systems(Update, sync_launch_to_stack)
         .add_message::<TerminalStackSpawnRequest>()
         .add_message::<TerminalSpawnRequest>()
@@ -121,7 +115,6 @@ impl Plugin for TerminalPlugin {
             TerminalInputPlugin,
             crate::process_monitor::ProcessMonitorPlugin,
             super::loading::LoadingPlugin,
-            super::prompt::PromptPlugin,
             crate::snapshot_updater::SnapshotPlugin,
             crate::theme::TerminalThemePlugin,
         ));
@@ -282,7 +275,6 @@ impl Plugin for TerminalUpdatePlugin {
         .add_message::<vmux_core::notify::BellReceived>()
         .add_systems(Update, apply_osc_title.after(ServiceMessageSet))
         .add_systems(Update, clear_osc_title_on_exit.after(ServiceMessageSet))
-        .add_systems(Update, sync_agent_focus.after(ServiceMessageSet))
         .add_systems(
             Update,
             handle_terminal_page_open.in_set(PageOpenSet::HandleKnownPages),
@@ -360,9 +352,6 @@ impl<'a> CopyModeKeyInput<'a> {
     }
 }
 
-#[derive(Component)]
-pub struct AgentFocusBlurred;
-
 #[derive(Event)]
 pub struct RestartPty {
     pub entity: Entity,
@@ -385,11 +374,7 @@ pub struct TerminalStackSpawnSet;
 fn format_terminal_url(
     mut q: Query<
         (Option<&Pid>, &mut PageMetadata),
-        (
-            With<Terminal>,
-            Without<CoreAgentSession>,
-            Or<(Changed<Pid>, Added<PageMetadata>)>,
-        ),
+        (With<Terminal>, Or<(Changed<Pid>, Added<PageMetadata>)>),
     >,
 ) {
     for (pid, mut meta) in &mut q {
@@ -615,7 +600,6 @@ fn new_terminal_bundle_with_cwd_and_shell(
         args: vec![],
         cwd: cwd_str,
         env: vec![],
-        kind: crate::launch::TerminalKind::Plain,
     };
 
     let process_id = ProcessId::new();
@@ -844,73 +828,6 @@ fn line_has_content(line: &vmux_core::event::TermLine) -> bool {
     line.spans.iter().any(|s| !s.text.trim().is_empty())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AgentFocusTransition {
-    FocusIn,
-    FocusOut,
-}
-
-fn agent_focus_transition(
-    focus_reporting: bool,
-    active: bool,
-    blurred: bool,
-) -> Option<AgentFocusTransition> {
-    if !focus_reporting {
-        None
-    } else if active && blurred {
-        Some(AgentFocusTransition::FocusIn)
-    } else if !active && !blurred {
-        Some(AgentFocusTransition::FocusOut)
-    } else {
-        None
-    }
-}
-
-#[allow(clippy::type_complexity)]
-fn sync_agent_focus(
-    agents: Query<
-        (Entity, &ProcessId, &TerminalMode, Has<AgentFocusBlurred>),
-        With<CoreAgentSession>,
-    >,
-    terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    focus: FocusedStack,
-    mut commands: Commands,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    let mut active_pid = None;
-    if let Some(stack) = focus.stack {
-        for (entity, _, child_of) in &terminals {
-            if child_of.get() != stack {
-                continue;
-            }
-            if let Ok((_, process_id, _, _)) = agents.get(entity) {
-                active_pid = Some(*process_id);
-            }
-            break;
-        }
-    }
-    for (entity, process_id, mode, blurred) in &agents {
-        let active = Some(*process_id) == active_pid;
-        match agent_focus_transition(mode.focus_reporting, active, blurred) {
-            Some(AgentFocusTransition::FocusIn) => {
-                service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
-                    process_id: *process_id,
-                    data: b"\x1b[I".to_vec(),
-                }));
-                commands.entity(entity).remove::<AgentFocusBlurred>();
-            }
-            Some(AgentFocusTransition::FocusOut) => {
-                service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
-                    process_id: *process_id,
-                    data: b"\x1b[O".to_vec(),
-                }));
-                commands.entity(entity).insert(AgentFocusBlurred);
-            }
-            None => {}
-        }
-    }
-}
-
 fn resolve_pending_terminal_cwd(
     mut pending: Query<
         (Entity, &mut crate::launch::TerminalLaunch),
@@ -953,7 +870,6 @@ fn send_service_requests(
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
     settings: Res<AppSettings>,
-    agent_sessions: Query<&CoreAgentSession>,
 ) {
     if connected.is_none() {
         return;
@@ -965,7 +881,7 @@ fn send_service_requests(
     );
     for (entity, process_id, launch, agent_run) in pending_create.iter().take(create_budget) {
         let mut env = launch.env.clone();
-        if should_merge_login_shell_env(agent_sessions.contains(entity), agent_run) {
+        if should_merge_login_shell_env(agent_run) {
             crate::shell_env::merge_login_shell_env(&mut env, &terminal_shell(&settings));
         }
         service_requests.write(ServiceRequest(ClientMessage::CreateProcess {
@@ -1085,7 +1001,6 @@ fn apply_process_exits(
         With<Terminal>,
     >,
     process_index: Single<&TerminalProcessIndex>,
-    agent_sessions: Query<&CoreAgentSession>,
     mut stack_close_requests: MessageWriter<StackCloseRequest>,
     mut commands: Commands,
 ) {
@@ -1108,21 +1023,8 @@ fn apply_process_exits(
             .entity(entity)
             .insert(ProcessExited)
             .remove::<CloseRequiresConfirmation>()
-            .remove::<AgentLoading>();
-        let is_agent = if let Ok(session) = agent_sessions.get(entity) {
-            commands.trigger(UiStateWrite::<TerminalUiState>::from_event(
-                entity,
-                &crate::event::TermLoadingEvent {
-                    loading: false,
-                    label: session.kind.display_name().to_string(),
-                    segment: session.kind.as_url_segment().to_string(),
-                },
-            ));
-            true
-        } else {
-            false
-        };
-        if should_close_terminal_stack_on_exit(is_agent, retain_on_exit) {
+            .remove::<super::loading::ShellLoading>();
+        if should_close_terminal_stack_on_exit(retain_on_exit) {
             let tab = child_of.get();
             commands.entity(tab).insert(LastActivatedAt::now());
             stack_close_requests.write(StackCloseRequest);
@@ -1136,7 +1038,6 @@ fn apply_service_errors(
     process_index: Single<&TerminalProcessIndex>,
     launches: Query<&crate::launch::TerminalLaunch>,
     settings: Res<AppSettings>,
-    agent_sessions: Query<&CoreAgentSession>,
     mut service_requests: MessageWriter<ServiceRequest>,
     mut commands: Commands,
 ) {
@@ -1156,11 +1057,8 @@ fn apply_service_errors(
                         args: vec![],
                         cwd: String::new(),
                         env: vec![],
-                        kind: crate::launch::TerminalKind::Plain,
                     });
-            let agent_kind = agent_sessions.get(entity).ok().map(|session| session.kind);
             let new_id = ProcessId::new();
-            let cwd = launch.cwd.clone();
             restarted_missing_processes.push(stale_pid);
             service_requests.write(ServiceRequest(ClientMessage::CreateProcess {
                 process_id: new_id,
@@ -1173,15 +1071,6 @@ fn apply_service_errors(
             }));
             commands.entity(entity).insert(new_id);
             commands.trigger(TerminalRestartRequest { terminal: entity });
-            if let Some(kind) = agent_kind {
-                commands
-                    .entity(entity)
-                    .insert(vmux_core::agent::PendingAgentSession {
-                        kind,
-                        spawn_time: std::time::SystemTime::now(),
-                        cwd: std::path::PathBuf::from(cwd),
-                    });
-            }
         }
         warn!("Service error: {}", error.message);
     }
@@ -1198,8 +1087,8 @@ fn copy_service_selection(
     }
 }
 
-fn should_merge_login_shell_env(agent_session: bool, agent_run: bool) -> bool {
-    agent_session || agent_run
+fn should_merge_login_shell_env(agent_run: bool) -> bool {
+    agent_run
 }
 
 type ServiceTerminalFilter = (
@@ -1208,8 +1097,8 @@ type ServiceTerminalFilter = (
     Without<AwaitingProcessCreated>,
 );
 
-fn should_close_terminal_stack_on_exit(is_agent: bool, retain_on_exit: bool) -> bool {
-    !is_agent && !retain_on_exit
+fn should_close_terminal_stack_on_exit(retain_on_exit: bool) -> bool {
+    !retain_on_exit
 }
 
 #[cfg(test)]
@@ -1542,52 +1431,15 @@ fn bracketed_paste(payload: &[u8]) -> Vec<u8> {
     data
 }
 
-pub fn image_path_payload(is_vibe: bool, path: &str) -> String {
-    if is_vibe {
-        format!("'{}'", path.replace('\'', "'\\''"))
-    } else {
-        path.to_string()
-    }
-}
-
-fn write_clipboard_image_temp(process_id: ProcessId, png: &[u8]) -> Option<std::path::PathBuf> {
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!("vmux-clip-{process_id}-{seq}.png"));
-    std::fs::write(&path, png).ok()?;
-    Some(path)
-}
-
-fn resolve_paste(is_vibe: bool, process_id: ProcessId) -> Option<Vec<u8>> {
+fn resolve_paste() -> Option<Vec<u8>> {
     if let Some(path) = Clipboard::image_file_path() {
-        return Some(bracketed_paste(
-            image_path_payload(is_vibe, &path).as_bytes(),
-        ));
+        return Some(bracketed_paste(path.as_bytes()));
     }
     if Clipboard::has_image() {
-        if is_vibe {
-            let png = Clipboard::read_image_png()?;
-            let path = write_clipboard_image_temp(process_id, &png)?;
-            let payload = image_path_payload(true, &path.to_string_lossy());
-            return Some(bracketed_paste(payload.as_bytes()));
-        }
         return Some(vec![CTRL_V]);
     }
     let text = Clipboard::read_text()?;
     (!text.is_empty()).then(|| bracketed_paste(text.as_bytes()))
-}
-
-fn resolve_paste_text(is_vibe: bool, process_id: ProcessId) -> Option<String> {
-    if let Some(path) = Clipboard::image_file_path() {
-        return Some(image_path_payload(is_vibe, &path));
-    }
-    if Clipboard::has_image() {
-        let png = Clipboard::read_image_png()?;
-        let path = write_clipboard_image_temp(process_id, &png)?;
-        return Some(image_path_payload(is_vibe, &path.to_string_lossy()));
-    }
-    let text = Clipboard::read_text()?;
-    (!text.is_empty()).then_some(text)
 }
 
 fn term_key_event_to_bytes(event: &KeyStroke) -> Vec<u8> {
@@ -1761,14 +1613,10 @@ fn on_term_key(
         ),
         With<Terminal>,
     >,
-    agents: Query<&CoreAgentSession>,
-    launches: Query<&crate::launch::TerminalLaunch>,
     keymap: Single<&Keymap>,
     mut command_invocations: MessageWriter<vmux_command::CommandInvocation>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut capture_q: Query<&mut PromptCapture, With<Terminal>>,
-    mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let entity = trigger.event_target();
@@ -1792,31 +1640,11 @@ fn on_term_key(
         return;
     }
     let process_id = *pid;
-    let is_vibe = agents.get(entity).ok().map(|session| session.kind) == Some(CoreAgentKind::Vibe)
-        || launches.get(entity).ok().map(|launch| launch.kind.clone())
-            == Some(crate::launch::TerminalKind::Vibe);
-    if let Ok(mut capture) = capture_q.get_mut(entity) {
-        let pasted = PromptCapture::wants_paste(event)
-            .then(|| resolve_paste_text(is_vibe, process_id))
-            .flatten();
-        if capture.apply(event, pasted) {
-            let (draft, skipped) = (capture.draft.clone(), capture.skipped);
-            commands.trigger(UiStateWrite::<TerminalUiState>::from_event(
-                entity,
-                &AgentPromptDraftEvent { draft, skipped },
-            ));
-        }
-        return;
-    }
     let super_key = event.mods.super_key;
     if super_key {
         match event.code.as_str() {
             "KeyV" => {
-                let agent_kind = agents.get(entity).ok().map(|session| session.kind);
-                let launch_kind = launches.get(entity).ok().map(|launch| launch.kind.clone());
-                let is_vibe = agent_kind == Some(CoreAgentKind::Vibe)
-                    || launch_kind == Some(crate::launch::TerminalKind::Vibe);
-                if let Some(data) = resolve_paste(is_vibe, process_id) {
+                if let Some(data) = resolve_paste() {
                     service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
                         process_id,
                         data,
@@ -1872,25 +1700,17 @@ fn on_restart_pty(
         &mut ProcessId,
         &mut PageMetadata,
         Option<&mut crate::launch::TerminalLaunch>,
-        Option<&CoreAgentSession>,
         Option<&TerminalGridSize>,
         Has<crate::AgentRunTerminal>,
     )>,
     settings: Res<AppSettings>,
-    mut restart_agent: MessageWriter<RestartAgentPty>,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let entity = trigger.event().entity;
-    let Ok((mut pid, mut meta, mut launch, agent_session, grid, agent_run)) = q.get_mut(entity)
-    else {
+    let Ok((mut pid, mut meta, mut launch, grid, agent_run)) = q.get_mut(entity) else {
         return;
     };
-
-    if agent_session.is_some() {
-        restart_agent.write(RestartAgentPty { entity });
-        return;
-    }
 
     service_requests.write(ServiceRequest(ClientMessage::KillProcess {
         process_id: *pid,
@@ -1912,7 +1732,7 @@ fn on_restart_pty(
             (shell, vec![], String::new(), Vec::new())
         }
     };
-    if should_merge_login_shell_env(false, agent_run) {
+    if should_merge_login_shell_env(agent_run) {
         crate::shell_env::merge_login_shell_env(&mut env, &terminal_shell(&settings));
     }
 
@@ -2134,24 +1954,6 @@ mod tests {
     #[test]
     fn bracketed_paste_wraps_payload() {
         assert_eq!(bracketed_paste(b"hi"), b"\x1b[200~hi\x1b[201~".to_vec());
-    }
-
-    #[test]
-    fn image_path_payload_uses_vibe_attach_syntax() {
-        assert_eq!(image_path_payload(true, "/tmp/a b.png"), "'/tmp/a b.png'");
-        assert_eq!(image_path_payload(false, "/tmp/a b.png"), "/tmp/a b.png");
-        assert_eq!(
-            image_path_payload(true, "/tmp/bob's.png"),
-            "'/tmp/bob'\\''s.png'"
-        );
-    }
-
-    #[test]
-    fn write_clipboard_image_temp_writes_png_bytes() {
-        let png = [137u8, 80, 78, 71, 1, 2, 3];
-        let path = write_clipboard_image_temp(process_id(7), &png).expect("temp write");
-        assert_eq!(std::fs::read(&path).unwrap(), png);
-        let _ = std::fs::remove_file(&path);
     }
 
     fn process_id(byte: u8) -> ProcessId {
@@ -2652,14 +2454,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_focus_transition_restores_focus_to_active_blurred_agent() {
-        assert_eq!(
-            agent_focus_transition(true, true, true),
-            Some(AgentFocusTransition::FocusIn)
-        );
-    }
-
-    #[test]
     fn web_terminal_key_events_delegate_text_to_pty_bytes() {
         let event = KeyStroke {
             key: "a".to_string(),
@@ -2974,7 +2768,7 @@ mod tests {
 
     #[test]
     fn process_created_matches_by_id_not_by_position() {
-        use crate::launch::{TerminalKind, TerminalLaunch};
+        use crate::launch::TerminalLaunch;
 
         let mut app = bevy::prelude::App::new();
         let id1 = ProcessId::new();
@@ -2992,7 +2786,6 @@ mod tests {
                     args: vec![],
                     cwd: "/tmp/1".into(),
                     env: vec![],
-                    kind: TerminalKind::Plain,
                 },
             ))
             .id();
@@ -3007,7 +2800,6 @@ mod tests {
                     args: vec![],
                     cwd: "/tmp/2".into(),
                     env: vec![],
-                    kind: TerminalKind::Plain,
                 },
             ))
             .id();
@@ -3022,7 +2814,6 @@ mod tests {
                     args: vec![],
                     cwd: "/tmp/3".into(),
                     env: vec![],
-                    kind: TerminalKind::Plain,
                 },
             ))
             .id();
@@ -3167,13 +2958,12 @@ mod tests {
 
     #[test]
     fn retained_terminal_does_not_close_stack_on_exit() {
-        assert!(!should_close_terminal_stack_on_exit(false, true));
+        assert!(!should_close_terminal_stack_on_exit(true));
     }
 
     #[test]
     fn agent_run_terminal_inherits_login_shell_environment() {
-        assert!(should_merge_login_shell_env(false, true));
-        assert!(should_merge_login_shell_env(true, false));
-        assert!(!should_merge_login_shell_env(false, false));
+        assert!(should_merge_login_shell_env(true));
+        assert!(!should_merge_login_shell_env(false));
     }
 }

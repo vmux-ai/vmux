@@ -284,44 +284,6 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
     [r + m, g + m, b + m]
 }
 
-pub(crate) const CLAUDE_LOGO_PNG: &[u8] = include_bytes!("../assets/agent-logos/claude.png");
-pub(crate) const CODEX_LOGO_PNG: &[u8] = include_bytes!("../assets/agent-logos/codex.png");
-pub(crate) const VIBE_LOGO_PNG: &[u8] = include_bytes!("../assets/agent-logos/vibe.png");
-
-pub(crate) struct LogoBitmap {
-    pub(crate) rgba: Vec<u8>,
-    pub(crate) width: u32,
-    pub(crate) height: u32,
-}
-
-pub(crate) fn decode_premultiplied(png: &[u8]) -> Option<LogoBitmap> {
-    let img = image::load_from_memory(png).ok()?.into_rgba8();
-    let (width, height) = img.dimensions();
-    let mut rgba = img.into_raw();
-    for px in rgba.chunks_exact_mut(4) {
-        let a = px[3] as u16;
-        px[0] = (px[0] as u16 * a / 255) as u8;
-        px[1] = (px[1] as u16 * a / 255) as u8;
-        px[2] = (px[2] as u16 * a / 255) as u8;
-    }
-    Some(LogoBitmap {
-        rgba,
-        width,
-        height,
-    })
-}
-
-pub(crate) fn hex_to_rgb(hex: &str) -> Option<[f32; 3]> {
-    let h = hex.trim_start_matches('#');
-    if h.len() != 6 {
-        return None;
-    }
-    let r = u8::from_str_radix(&h[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&h[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&h[4..6], 16).ok()?;
-    Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
-}
-
 #[cfg(not(target_os = "macos"))]
 #[derive(Default)]
 pub(crate) struct LayoutHoverRefreshState {

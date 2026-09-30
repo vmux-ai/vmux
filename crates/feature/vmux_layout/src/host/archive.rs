@@ -8,10 +8,9 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
 use vmux_command::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
-use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
-use vmux_core::terminal::{TerminalLaunch, TerminalSpawnRequest, TerminalSpawnTarget};
 #[cfg(test)]
-use vmux_core::{Active, terminal::TerminalKind};
+use vmux_core::Active;
+use vmux_core::terminal::{TerminalLaunch, TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_core::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
     PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, TabCommandSet, now_millis,
@@ -616,33 +615,7 @@ fn reopen_page_content(page: &ArchivedPage, stack: Entity, commands: &mut Comman
     if page.url.is_empty() {
         return;
     }
-    let agent_cli = AgentKind::all().into_iter().find_map(|k| {
-        let rest = page.url.strip_prefix(&k.cli_url_prefix())?;
-        if rest == "cli" {
-            Some((k, None))
-        } else {
-            rest.strip_prefix("cli/")
-                .map(|sid| (k, Some(sid.to_string())))
-        }
-    });
-    if let Some((kind, session_id)) = agent_cli {
-        let cwd = page
-            .launch
-            .as_ref()
-            .map(|l| PathBuf::from(&l.cwd))
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
-        let request = SpawnAgentInStackRequest {
-            kind,
-            cwd,
-            session_id,
-            stack,
-            initial_prompt: None,
-            initial_attachments: Vec::new(),
-        };
-        commands.queue(move |world: &mut World| {
-            world.write_message(request);
-        });
-    } else if page.url.starts_with(TERMINAL_PAGE_URL) {
+    if page.url.starts_with(TERMINAL_PAGE_URL) {
         let cwd = page
             .launch
             .as_ref()
@@ -1747,7 +1720,6 @@ mod tests {
         let mut app = App::new();
         app.add_message::<ReopenClosedPage>()
             .add_message::<PageOpenRequest>()
-            .add_message::<SpawnAgentInStackRequest>()
             .add_message::<TerminalSpawnRequest>()
             .init_resource::<crate::settings::LayoutSettings>()
             .add_systems(Update, super::handle_reopen_closed_page);
@@ -1792,7 +1764,6 @@ mod tests {
         let mut app = App::new();
         app.add_message::<ReopenClosedPage>()
             .add_message::<PageOpenRequest>()
-            .add_message::<SpawnAgentInStackRequest>()
             .add_message::<TerminalSpawnRequest>()
             .init_resource::<crate::settings::LayoutSettings>()
             .init_resource::<CapturedTerminalSpawnTargets>()
@@ -2110,7 +2081,6 @@ mod tests {
                 args: vec![],
                 cwd: "/work".to_string(),
                 env: vec![],
-                kind: TerminalKind::Plain,
             }),
             tab_index: None,
         });
@@ -2124,68 +2094,6 @@ mod tests {
         assert_eq!(spawns.len(), 1);
         assert_eq!(spawns[0].cwd, Some(PathBuf::from("/work")));
         assert!(matches!(spawns[0].target, TerminalSpawnTarget::Stack(_)));
-    }
-
-    fn drain_agent_spawns(app: &mut App) -> Vec<SpawnAgentInStackRequest> {
-        app.world_mut()
-            .resource_mut::<Messages<SpawnAgentInStackRequest>>()
-            .drain()
-            .collect()
-    }
-
-    #[test]
-    fn reopen_agent_starts_fresh_when_no_session_id() {
-        let mut app = reopen_app();
-        app.world_mut()
-            .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
-        app.world_mut().spawn(ArchivedPage {
-            url: format!("{}cli", AgentKind::Claude.cli_url_prefix()),
-            title: String::new(),
-            space_id: "s1".to_string(),
-            closed_at: 5,
-            launch: Some(TerminalLaunch {
-                command: "claude".to_string(),
-                args: vec![],
-                cwd: "/proj".to_string(),
-                env: vec![],
-                kind: TerminalKind::Claude,
-            }),
-            tab_index: None,
-        });
-        dispatch_reopen(&mut app);
-        assert!(drain_opens(&mut app).is_empty());
-        let spawns = drain_agent_spawns(&mut app);
-        assert_eq!(spawns.len(), 1);
-        assert_eq!(spawns[0].kind, AgentKind::Claude);
-        assert_eq!(spawns[0].cwd, PathBuf::from("/proj"));
-        assert!(spawns[0].session_id.is_none());
-    }
-
-    #[test]
-    fn reopen_agent_recovers_session_id_from_url() {
-        let mut app = reopen_app();
-        app.world_mut()
-            .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
-        app.world_mut().spawn(ArchivedPage {
-            url: format!("{}cli/sess-123", AgentKind::Claude.cli_url_prefix()),
-            title: String::new(),
-            space_id: "s1".to_string(),
-            closed_at: 5,
-            launch: Some(TerminalLaunch {
-                command: "claude".to_string(),
-                args: vec![],
-                cwd: "/proj".to_string(),
-                env: vec![],
-                kind: TerminalKind::Claude,
-            }),
-            tab_index: None,
-        });
-        dispatch_reopen(&mut app);
-        assert!(drain_opens(&mut app).is_empty());
-        let spawns = drain_agent_spawns(&mut app);
-        assert_eq!(spawns.len(), 1);
-        assert_eq!(spawns[0].kind, AgentKind::Claude);
-        assert_eq!(spawns[0].session_id.as_deref(), Some("sess-123"));
     }
 
     #[test]

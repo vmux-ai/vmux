@@ -6,13 +6,13 @@ use vmux_api::service::RUN_OSC;
 #[cfg(test)]
 use vmux_api::terminal::CursorStyle;
 use vmux_command::open_target::PaneDirection;
+#[cfg(test)]
+use vmux_core::LastActivatedAt;
 use vmux_core::PageMetadata;
 use vmux_core::agent::{
     AgentCommandResponse, AgentReply, AgentRequestApplySet, AgentRequestBlocked, AgentRequestInput,
 };
 use vmux_core::profile::ProjectsDirectory;
-#[cfg(test)]
-use vmux_core::{LastActivatedAt, terminal::TerminalKind as CoreTerminalKind};
 use vmux_layout::AgentPaneDirection;
 use vmux_layout::pane::{
     Pane, PaneSplit, PaneSplitDirection, SpawnCounter, SpawnSeq, direction_to_split,
@@ -26,12 +26,12 @@ use vmux_setting::{AppSettings, StartupDir};
 #[cfg(test)]
 use vmux_setting::{TerminalSettings, TerminalTheme};
 
+#[cfg(test)]
+use crate::TerminalContractPlugin;
 use crate::launch::TerminalLaunch;
 use crate::{
     AgentRunTerminal, ProcessExited, Terminal, TerminalReinputRequest, TerminalStackSpawnRequest,
 };
-#[cfg(test)]
-use crate::{TerminalContractPlugin, launch::TerminalKind as LaunchTerminalKind};
 use vmux_space::cwd::valid_cwd;
 
 #[vmux_api::contract(Copy, Eq)]
@@ -969,7 +969,6 @@ mod tests {
                 args: Vec::new(),
                 cwd: std::env::temp_dir().to_string_lossy().into_owned(),
                 env: Vec::new(),
-                kind: crate::launch::TerminalKind::Plain,
             },
         ));
         app.update();
@@ -1205,7 +1204,6 @@ mod tests {
             args: vec![],
             cwd: String::new(),
             env: vec![],
-            kind: LaunchTerminalKind::Plain,
         };
 
         let input = RunCommand::new("pwd", Some("tok2")).input(&launch.command, PagerEnv::Set);
@@ -1281,7 +1279,6 @@ mod tests {
                     args: vec![],
                     cwd: String::new(),
                     env: vec![],
-                    kind: LaunchTerminalKind::Plain,
                 },
             })
             .init_resource::<Captured>()
@@ -1351,7 +1348,6 @@ mod tests {
                 args: vec![],
                 cwd: desired_cwd.to_string_lossy().into_owned(),
                 env: vec![],
-                kind: LaunchTerminalKind::Plain,
             },
             ChildOf(stack),
         ));
@@ -1403,7 +1399,6 @@ mod tests {
                         args: vec![],
                         cwd: desired_cwd.to_string_lossy().into_owned(),
                         env: vec![],
-                        kind: LaunchTerminalKind::Plain,
                     },
                     ChildOf(stack),
                 ))
@@ -1463,7 +1458,6 @@ mod tests {
                 args: vec![],
                 cwd: current.to_string_lossy().into_owned(),
                 env: vec![],
-                kind: CoreTerminalKind::Plain,
             },
             ChildOf(current_stack),
         ));
@@ -1484,7 +1478,6 @@ mod tests {
                 args: vec![],
                 cwd: stale.to_string_lossy().into_owned(),
                 env: vec![],
-                kind: CoreTerminalKind::Plain,
             },
             ChildOf(stale_stack),
         ));

@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 
-use crate::agent::AgentKind;
 pub use vmux_api::avatar::{AvatarSpec, hash_color, initials_of};
 
 #[derive(Component, Clone, Debug)]
@@ -18,7 +17,6 @@ pub struct Tester;
 #[derive(Component, Clone, Debug)]
 pub struct Agent {
     pub sid: String,
-    pub kind: Option<AgentKind>,
 }
 
 impl Profile {
@@ -34,13 +32,6 @@ impl Profile {
         Self { name, avatar }
     }
 
-    pub fn agent(kind: AgentKind) -> Self {
-        Self {
-            name: kind.display_name().to_string(),
-            avatar: kind.avatar(),
-        }
-    }
-
     pub fn registry(name: &str, seed: &str) -> Self {
         Self {
             name: name.to_string(),
@@ -54,8 +45,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn agent_profile_name_is_display_name() {
-        assert_eq!(Profile::agent(AgentKind::Claude).name, "Claude");
+    fn user_profile_has_default_name() {
         assert_eq!(Profile::user().name, "You");
     }
 

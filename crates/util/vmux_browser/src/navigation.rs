@@ -311,7 +311,6 @@ fn navigate(
                                 tab: None,
                                 pane: Some(target),
                                 stack: Some(stack),
-                                kind: None,
                             },
                         });
                     }

@@ -370,7 +370,6 @@ fn handle_agent_file_touch(
                         tab: None,
                         pane: Some(pane),
                         stack: None,
-                        kind: None,
                     },
                 });
             }

@@ -14,7 +14,6 @@ use bevy::{
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
-use vmux_core::agent::SpawnAgentInStackRequest;
 use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_core::page::PageEmbedSet;
 use vmux_core::{
@@ -99,7 +98,6 @@ impl Plugin for LayoutSpawnPlugin {
         app.add_message::<crate::LauncherDismissRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
-            .add_message::<SpawnAgentInStackRequest>()
             .add_systems(
                 Update,
                 spawn_requested_tab_layouts
@@ -1035,7 +1033,6 @@ mod tests {
         app.add_plugins((MinimalPlugins, LayoutSpawnPlugin))
             .add_message::<crate::LauncherDismissRequest>()
             .add_message::<PageOpenRequest>()
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: crate::settings::WindowSettings { padding: 0.0 },
@@ -1079,7 +1076,6 @@ mod tests {
         app.add_plugins((MinimalPlugins, LayoutSpawnPlugin))
             .add_message::<crate::LauncherDismissRequest>()
             .add_message::<PageOpenRequest>()
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(test_settings(0.0))
             .add_systems(Update, request_default_layout.before(TabLayoutSpawnSet));
 
@@ -1111,7 +1107,6 @@ mod tests {
         app.add_plugins((MinimalPlugins, LayoutSpawnPlugin))
             .add_message::<crate::LauncherDismissRequest>()
             .add_message::<PageOpenRequest>()
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(test_settings(0.0))
             .add_systems(Update, request_default_layout.before(TabLayoutSpawnSet));
 
@@ -1138,7 +1133,6 @@ mod tests {
         app.add_plugins((MinimalPlugins, LayoutSpawnPlugin))
             .add_message::<crate::LauncherDismissRequest>()
             .add_message::<PageOpenRequest>()
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(test_settings(0.0));
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let main = app.world_mut().spawn(Main).id();
@@ -1171,7 +1165,6 @@ mod tests {
         app.add_plugins((MinimalPlugins, LayoutSpawnPlugin))
             .add_message::<crate::LauncherDismissRequest>()
             .add_message::<PageOpenRequest>()
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(test_settings(0.0));
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let main = app.world_mut().spawn(Main).id();
@@ -1224,7 +1217,6 @@ mod tests {
         app.add_plugins((MinimalPlugins, LayoutSpawnPlugin))
             .add_message::<crate::LauncherDismissRequest>()
             .add_message::<PageOpenRequest>()
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: crate::settings::WindowSettings { padding: 0.0 },
@@ -1264,7 +1256,6 @@ mod tests {
         app.add_plugins((MinimalPlugins, LayoutSpawnPlugin))
             .add_message::<crate::LauncherDismissRequest>()
             .add_message::<PageOpenRequest>()
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: crate::settings::WindowSettings { padding: 0.0 },

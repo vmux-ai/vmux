@@ -1,11 +1,10 @@
 use bevy::prelude::*;
-use vmux_core::agent::{AgentKind, AgentSession, CommandOrigin};
+use vmux_core::agent::CommandOrigin;
 use vmux_layout::pane::Pane;
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct AgentBrowserResolve<'w, 's> {
     agent_terms: Query<'w, 's, (Entity, &'static vmux_core::ProcessId, &'static ChildOf)>,
-    kinds: Query<'w, 's, &'static AgentSession>,
     child_of: Query<'w, 's, &'static ChildOf>,
     pane_children: Query<'w, 's, &'static Children, With<Pane>>,
     stack_q: Query<'w, 's, Entity, With<vmux_layout::stack::Stack>>,
@@ -74,20 +73,11 @@ impl AgentBrowserResolve<'_, '_> {
             .map(|dir| dir.path)
     }
 
-    fn agent_kind(&self, anchor: vmux_core::ProcessId) -> Option<AgentKind> {
-        let (entity, _, _) = self
-            .agent_terms
-            .iter()
-            .find(|(_, pid, _)| **pid == anchor)?;
-        self.kinds.get(entity).ok().map(|session| session.kind)
-    }
-
     pub(super) fn claim_browser_pane(
         &self,
         anchor: vmux_core::ProcessId,
     ) -> Option<AgentBrowserPaneClaim> {
         let pane = self.browser_pane_for(self.agent_pane(anchor)?)?;
-        let kind = self.agent_kind(anchor);
         let profile = vmux_layout::active_pane::ProfileId::Agent(format!("{anchor:?}"));
         let stack = self
             .active
@@ -103,7 +93,6 @@ impl AgentBrowserResolve<'_, '_> {
                     tab: None,
                     pane: Some(pane),
                     stack,
-                    kind,
                 },
             },
         })

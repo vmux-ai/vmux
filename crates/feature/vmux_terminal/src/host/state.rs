@@ -11,12 +11,6 @@ pub(crate) struct TerminalMode {
     pub(crate) focus_reporting: bool,
 }
 
-impl TerminalMode {
-    pub(crate) fn agent_ready(&self) -> bool {
-        self.alt_screen || self.mouse_capture || self.focus_reporting
-    }
-}
-
 #[derive(Component, Default)]
 pub(crate) struct TerminalCopyMode {
     pub(crate) active: bool,

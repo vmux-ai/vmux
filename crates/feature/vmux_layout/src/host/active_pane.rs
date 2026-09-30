@@ -30,7 +30,6 @@ pub struct ActiveStack {
     pub tab: Option<Entity>,
     pub pane: Option<Entity>,
     pub stack: Option<Entity>,
-    pub kind: Option<vmux_core::agent::AgentKind>,
 }
 
 impl ActiveStack {
@@ -43,7 +42,6 @@ const EMPTY_ACTIVE_STACK: ActiveStack = ActiveStack {
     tab: None,
     pane: None,
     stack: None,
-    kind: None,
 };
 
 #[derive(SystemParam)]
@@ -128,11 +126,7 @@ fn apply_active_pane_requests(
             if *profile != request.profile {
                 continue;
             }
-            let kind = request.active.kind.or(active.kind);
-            *active = ActiveStack {
-                kind,
-                ..request.active
-            };
+            *active = request.active;
             applied = true;
             break;
         }
@@ -143,11 +137,7 @@ fn apply_active_pane_requests(
             if *profile != request.profile {
                 continue;
             }
-            let kind = request.active.kind.or(active.kind);
-            *active = ActiveStack {
-                kind,
-                ..request.active
-            };
+            *active = request.active;
             applied = true;
             break;
         }
@@ -195,7 +185,6 @@ mod tests {
                 tab: None,
                 pane: Some(user_pane),
                 stack: None,
-                kind: None,
             },
         });
         app.world_mut().write_message(ActivatePane {
@@ -204,7 +193,6 @@ mod tests {
                 tab: None,
                 pane: Some(agent_pane),
                 stack: None,
-                kind: None,
             },
         });
         app.update();
@@ -237,7 +225,6 @@ mod tests {
                 tab: None,
                 pane: Some(agent_pane),
                 stack: None,
-                kind: None,
             },
         });
         app.update();
@@ -255,42 +242,5 @@ mod tests {
             .unwrap();
         assert_eq!(local.pane, None);
         assert_eq!(agent.pane, Some(agent_pane));
-    }
-
-    #[test]
-    fn activation_without_kind_preserves_profile_kind() {
-        let mut app = App::new();
-        app.add_plugins(ActivePanePlugin);
-        app.update();
-
-        let profile = ProfileId::Agent("a1".to_string());
-        let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().spawn((
-            profile.clone(),
-            ActiveStack {
-                tab: None,
-                pane: Some(pane),
-                stack: None,
-                kind: Some(vmux_core::agent::AgentKind::Codex),
-            },
-        ));
-        app.world_mut().write_message(ActivatePane {
-            profile: profile.clone(),
-            active: ActiveStack {
-                tab: None,
-                pane: Some(pane),
-                stack: None,
-                kind: None,
-            },
-        });
-
-        app.update();
-
-        let mut profiles = app.world_mut().query::<(&ProfileId, &ActiveStack)>();
-        let active = profiles
-            .iter(app.world())
-            .find_map(|(candidate, active)| (candidate == &profile).then_some(*active))
-            .unwrap();
-        assert_eq!(active.kind, Some(vmux_core::agent::AgentKind::Codex));
     }
 }

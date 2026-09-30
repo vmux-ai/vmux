@@ -442,30 +442,16 @@ fn auto_allow_acp_approval(
 #[allow(clippy::type_complexity)]
 fn apply_acp_session_created(
     mut reader: MessageReader<crate::event::UiAgentSessionCreated>,
-    mut sessions: Query<
-        (
-            Entity,
-            &mut AcpSession,
-            &mut PageMetadata,
-            Option<&ImportedConversation>,
-        ),
-        Without<ChatView>,
-    >,
+    mut sessions: Query<(Entity, &mut AcpSession, &mut PageMetadata), Without<ChatView>>,
     children: Query<&Children>,
     mut page_meta: Query<&mut PageMetadata, With<ChatView>>,
 ) {
     for ev in reader.read() {
-        for (stack, mut session, mut stack_meta, imported) in &mut sessions {
+        for (stack, mut session, mut stack_meta) in &mut sessions {
             if session.sid != ev.sid {
                 continue;
             }
             session.resume = Some(ev.acp_session_id.clone());
-            if let Some(imported) = imported
-                && imported.first_prompt.is_some()
-                && let Err(err) = imported.save(&session.agent_id, &ev.acp_session_id)
-            {
-                bevy::log::warn!("acp: failed to persist handoff metadata: {err}");
-            }
             let url = format!("vmux://sessions/{}/{}", session.agent_id, ev.acp_session_id);
             if stack_meta.url != url {
                 stack_meta.url = url.clone();

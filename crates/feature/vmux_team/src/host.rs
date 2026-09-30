@@ -4,7 +4,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::avatar::hash_color;
 use vmux_api::protocol::{AgentCommandResult, AgentListTeam};
 use vmux_core::agent::{
-    AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet, SessionId,
+    AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
 use vmux_core::event::team::{
     ProfileRow, TEAM_PAGE_URL, TeamEvent, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest,
@@ -192,7 +192,6 @@ fn build_team_members(
         &Profile,
         &Agent,
         Option<&AgentRunState>,
-        Option<&SessionId>,
         Option<&AgentDoneUnseen>,
     )>,
     child_of: &Query<&ChildOf>,
@@ -215,28 +214,22 @@ fn build_team_members(
         ));
     }
     if let Some(active) = active_space {
-        for (entity, profile, agent, run, session, done) in agent_q {
+        for (entity, profile, agent, run, done) in agent_q {
             if space_hierarchy.get(entity) == Some(active) {
                 let is_running = matches!(run, Some(AgentRunState::Streaming));
                 let is_done_unseen = done.is_some();
                 let (icon, title) = agent_page(entity, meta_q, children_q, child_of);
-                let url = agent.kind.map(|k| k.cli_url_prefix()).unwrap_or_else(|| {
-                    meta_q
-                        .get(entity)
-                        .map(|m| m.url.clone())
-                        .unwrap_or_default()
-                });
-                let sid = session
-                    .map(|s| s.0.clone())
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| agent.sid.clone());
+                let url = meta_q
+                    .get(entity)
+                    .map(|m| m.url.clone())
+                    .unwrap_or_default();
                 members.push(team_member_row(
                     entity,
                     profile,
                     icon,
                     url,
                     title,
-                    sid,
+                    agent.sid.clone(),
                     false,
                     is_running,
                     is_done_unseen,
@@ -278,7 +271,6 @@ fn answer_list_team(
         &Profile,
         &Agent,
         Option<&AgentRunState>,
-        Option<&SessionId>,
         Option<&AgentDoneUnseen>,
     )>,
     child_of: Query<&ChildOf>,
@@ -316,7 +308,6 @@ fn project_team(
         &Profile,
         &Agent,
         Option<&AgentRunState>,
-        Option<&SessionId>,
         Option<&AgentDoneUnseen>,
     )>,
     child_of: Query<&ChildOf>,
@@ -516,7 +507,6 @@ mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
     use vmux_core::LastActivatedAt;
-    use vmux_core::agent::AgentKind;
 
     fn spawn_team_stack(world: &mut World, space: Entity) -> Entity {
         world
@@ -546,7 +536,7 @@ mod tests {
     fn done_unseen_sets_row_flag() {
         let row = team_member_row(
             Entity::PLACEHOLDER,
-            &Profile::agent(AgentKind::Claude),
+            &Profile::registry("Claude", "claude-acp"),
             String::new(),
             String::new(),
             String::new(),
@@ -568,11 +558,8 @@ mod tests {
             .id();
         app.world_mut().spawn((Profile::user(), User));
         app.world_mut().spawn((
-            Profile::agent(AgentKind::Codex),
-            Agent {
-                sid: String::new(),
-                kind: Some(AgentKind::Codex),
-            },
+            Profile::registry("Codex", "codex-acp"),
+            Agent { sid: String::new() },
             ChildOf(space),
         ));
         app.world_mut().spawn((
@@ -687,7 +674,6 @@ mod tests {
                 Stack::default(),
                 Agent {
                     sid: "s".to_string(),
-                    kind: Some(AgentKind::Claude),
                 },
                 ChildOf(space),
             ))
@@ -729,7 +715,6 @@ mod tests {
             Profile::registry("Mistral Vibe", "mistral-vibe"),
             Agent {
                 sid: "sid-1".to_string(),
-                kind: None,
             },
             PageMetadata {
                 url: "vmux://sessions/mistral-vibe".to_string(),
@@ -749,7 +734,6 @@ mod tests {
                     &Profile,
                     &Agent,
                     Option<&AgentRunState>,
-                    Option<&SessionId>,
                     Option<&vmux_core::notify::AgentDoneUnseen>,
                 )>,
                  child_of: Query<&ChildOf>,

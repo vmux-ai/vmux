@@ -1,32 +1,24 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
-use syn::{Data, DeriveInput, Fields, Ident, Path, parenthesized};
+use syn::{Data, DeriveInput, Fields, Ident, Path};
 
 struct Args {
-    outer: Ident,
-    nested: Option<Path>,
+    path: Path,
 }
 
 impl Parse for Args {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let outer = input.parse()?;
-        let nested = if input.peek(syn::token::Paren) {
-            let content;
-            parenthesized!(content in input);
-            Some(content.parse()?)
-        } else {
-            None
-        };
+        let path = input.parse()?;
         if !input.is_empty() {
             return Err(input.error("expected one service message variant"));
         }
-        Ok(Self { outer, nested })
+        Ok(Self { path })
     }
 }
 
 pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStream> {
-    let Args { outer, nested } = syn::parse2(args)?;
+    let Args { path } = syn::parse2(args)?;
     let ident = &input.ident;
     let fields = match &input.data {
         Data::Struct(data) => match &data.fields {
@@ -50,16 +42,33 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
         .iter()
         .map(|field| field.ident.as_ref().expect("named field"))
         .collect::<Vec<_>>();
-    let pattern = if let Some(nested) = nested {
+    let segments = path.segments.iter().collect::<Vec<_>>();
+    let pattern = if let [variant] = segments.as_slice() {
+        let variant = &variant.ident;
+        quote! {
+            ::vmux_api::protocol::ServiceMessage::#variant { #(#names,)* .. }
+        }
+    } else if let [event, variant] = segments.as_slice() {
+        let event_name = event.ident.to_string();
+        let Some(outer_name) = event_name.strip_suffix("Event") else {
+            return Err(syn::Error::new_spanned(
+                &path,
+                "nested service message enums must end in `Event`",
+            ));
+        };
+        let outer = Ident::new(outer_name, event.ident.span());
+        let event = &event.ident;
+        let variant = &variant.ident;
         quote! {
             ::vmux_api::protocol::ServiceMessage::#outer(
-                ::vmux_api::protocol::#nested { #(#names,)* .. }
+                ::vmux_api::protocol::#event::#variant { #(#names,)* .. }
             )
         }
     } else {
-        quote! {
-            ::vmux_api::protocol::ServiceMessage::#outer { #(#names,)* .. }
-        }
+        return Err(syn::Error::new_spanned(
+            &path,
+            "expected `Variant` or `Event::Variant`",
+        ));
     };
 
     Ok(quote! {
@@ -110,7 +119,7 @@ mod tests {
                 pub text: String,
             }
         };
-        let output = expand(quote!(Shared(SharedEvent::AgentDelta)), input)
+        let output = expand(quote!(SharedEvent::AgentDelta), input)
             .unwrap()
             .to_string();
 

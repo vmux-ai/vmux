@@ -18,7 +18,7 @@ struct InboundAgentRequest {
     request: vmux_api::protocol::AgentRequest,
 }
 
-#[vmux_core::service_message(Shared(SharedEvent::AgentAwaitingApproval))]
+#[vmux_core::service_message(SharedEvent::AgentAwaitingApproval)]
 struct InboundAgentAwaitingApproval {
     sid: String,
     call_id: String,

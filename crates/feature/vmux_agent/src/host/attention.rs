@@ -214,7 +214,6 @@ mod tests {
             .spawn((
                 Agent {
                     sid: "s".to_string(),
-                    kind: None,
                 },
                 pid,
             ))

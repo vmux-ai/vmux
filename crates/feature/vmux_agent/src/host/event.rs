@@ -14,13 +14,13 @@ pub struct AgentToolCallRequest {
     pub args: JsonValue,
 }
 
-#[vmux_core::service_message(Shared(SharedEvent::AgentDelta))]
+#[vmux_core::service_message(SharedEvent::AgentDelta)]
 pub struct UiAgentDelta {
     pub sid: String,
     pub text: String,
 }
 
-#[vmux_core::service_message(Shared(SharedEvent::AgentRunStatusChanged))]
+#[vmux_core::service_message(SharedEvent::AgentRunStatusChanged)]
 pub struct UiAgentRunStatus {
     pub sid: String,
     pub status: AgentRunStatus,
@@ -34,25 +34,25 @@ pub struct UiAgentAwaitingApproval {
     pub args: Value,
 }
 
-#[vmux_core::service_message(Shared(SharedEvent::AgentApprovalResolved))]
+#[vmux_core::service_message(SharedEvent::AgentApprovalResolved)]
 pub struct UiAgentApprovalResolved {
     pub sid: String,
     pub call_id: String,
 }
 
-#[vmux_core::service_message(Shared(SharedEvent::AgentMessagesSnapshot))]
+#[vmux_core::service_message(SharedEvent::AgentMessagesSnapshot)]
 pub struct UiAgentSnapshot {
     pub sid: String,
     pub messages: Vec<vmux_api::room::Message>,
 }
 
-#[vmux_core::service_message(Shared(SharedEvent::AcpAgentInfo))]
+#[vmux_core::service_message(SharedEvent::AcpAgentInfo)]
 pub struct UiAgentInfo {
     pub sid: String,
     pub name: String,
 }
 
-#[vmux_core::service_message(Shared(SharedEvent::AcpWorkspaceChanged))]
+#[vmux_core::service_message(SharedEvent::AcpWorkspaceChanged)]
 pub struct UiAgentWorkspaceChanged {
     pub sid: String,
     pub name: String,

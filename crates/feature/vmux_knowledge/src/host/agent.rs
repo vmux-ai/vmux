@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, ProcessId};
 use vmux_core::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
-    AgentSession,
 };
 use vmux_core::knowledge::{KnowledgeIndex, KnowledgeVault};
 
@@ -45,7 +44,7 @@ impl Plugin for KnowledgeAgentPlugin {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct AgentPaneQuery<'w, 's> {
-    agents: Query<'w, 's, (&'static ProcessId, &'static ChildOf), With<AgentSession>>,
+    agents: Query<'w, 's, (&'static ProcessId, &'static ChildOf)>,
     child_of: Query<'w, 's, &'static ChildOf>,
 }
 

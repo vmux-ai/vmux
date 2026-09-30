@@ -31,6 +31,7 @@ impl Plugin for AgentPlugin {
         ))
         .add_plugins((
             super::follow::FollowPlugin,
+            super::handoff::HandoffPlugin,
             super::ingress::AgentIngressPlugin,
             super::page_open::PageOpenPlugin,
             super::snapshot::SnapshotPlugin,
