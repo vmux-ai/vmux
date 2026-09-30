@@ -11,6 +11,7 @@ use vmux_command::snapshot::{
 };
 use vmux_core::KeyboardOwner;
 use vmux_core::PageMetadata;
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_ui::i18n::Locale;
 
 use crate::START_PAGE_URL;
@@ -26,7 +27,7 @@ pub struct StartPlugin;
 
 impl Plugin for StartPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         #[cfg(ui)]
         app.add_plugins(crate::ui::StartPage::plugin());
         app.add_plugins(Self::MANIFEST.plugin().hosted(

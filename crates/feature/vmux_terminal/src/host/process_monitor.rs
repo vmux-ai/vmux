@@ -5,6 +5,8 @@ use bevy_cef::prelude::*;
 use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_api::service::*;
 use vmux_command::{CommandInvocation, CommandRegistry};
+#[cfg(test)]
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_core::page::PageReady;
 use vmux_core::service::ServiceConnected;
@@ -27,7 +29,7 @@ impl Plugin for ProcessMonitorPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::monitor::ProcessMonitorPage::plugin());
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }

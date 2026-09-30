@@ -5,6 +5,7 @@ mod state;
 pub mod transition;
 
 use bevy::prelude::*;
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::host::page::NativelyHosted;
 
 pub use query::HistoryOpenIntent;
@@ -14,7 +15,7 @@ pub struct HistoryPlugin;
 
 impl Plugin for HistoryPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         #[cfg(ui)]
         app.add_plugins(crate::ui::HistoryPage::plugin());
         app.add_plugins(

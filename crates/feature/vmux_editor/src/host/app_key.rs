@@ -11,6 +11,8 @@ use vmux_core::event::{
     ExplorerGoto, FileEncoding, FileEncodingReopenRequest, FileEncodingSaveRequest, FileIndent,
     FileLineEnding, FileShapeSet, FileStatusPickerOpen,
 };
+#[cfg(test)]
+use vmux_core::host::manifest::FeaturePlugin;
 
 use crate::host::editing::FileFindOpenRequest;
 use crate::host::editor::{Editor, FileView};
@@ -27,7 +29,7 @@ pub(crate) struct KeyPlugin;
 impl Plugin for KeyPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

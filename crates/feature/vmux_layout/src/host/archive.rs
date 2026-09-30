@@ -10,6 +10,8 @@ use bevy_cef::prelude::HostWindow;
 use vmux_command::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
 #[cfg(test)]
 use vmux_core::Active;
+#[cfg(test)]
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::terminal::{TerminalLaunch, TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_core::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
@@ -62,7 +64,7 @@ pub struct ArchivePlugin;
 impl Plugin for ArchivePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

@@ -4,6 +4,8 @@ use crossbeam_channel::RecvTimeoutError;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
+#[cfg(test)]
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_extension::protocol::{
     ApiEvent, ApiRequest, ApiResponse, BridgeClientMessage, BridgeServerMessage, ExtensionApiError,
     ExtensionCallerContext,
@@ -22,7 +24,7 @@ pub(crate) struct ExtensionBrokerPlugin;
 impl Plugin for ExtensionBrokerPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         app.add_systems(Startup, spawn_extension_broker)
             .add_systems(
                 Update,

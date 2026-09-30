@@ -30,6 +30,7 @@ mod ui;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_tasks::{Task, futures_lite::future};
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::tool::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolLinkRequest, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
@@ -54,7 +55,7 @@ pub struct ToolPlugin;
 
 impl Plugin for ToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<Feature>::default());
+        app.add_plugins(FeaturePlugin::<Feature>::default());
         #[cfg(ui)]
         app.add_plugins(ui::ToolsPage::plugin());
 

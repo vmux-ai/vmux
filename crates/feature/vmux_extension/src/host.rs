@@ -1,11 +1,12 @@
 use bevy::prelude::*;
+use vmux_core::host::manifest::FeaturePlugin;
 
 #[vmux_native::page]
 pub struct ExtensionPlugin;
 
 impl Plugin for ExtensionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         #[cfg(ui)]
         app.add_plugins(crate::ui::ExtensionPage::plugin());
 

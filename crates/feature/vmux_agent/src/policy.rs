@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_core::host::manifest::FeatureManifest;
+#[cfg(test)]
+use vmux_core::host::manifest::FeaturePlugin;
 
 pub(crate) struct AgentPolicyPlugin;
 
@@ -63,7 +65,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default(),
+            FeaturePlugin::<crate::Feature>::default(),
             AgentPolicyPlugin,
         ));
         app.update();

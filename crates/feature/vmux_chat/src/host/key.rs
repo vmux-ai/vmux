@@ -21,6 +21,8 @@ use vmux_command::{
     BindCommands, CommandBinding, CommandDispatch, CommandRegistry, CommandRuntimePlugin,
 };
 use vmux_core::host::UiState;
+#[cfg(test)]
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::prompt_media::MediaPath;
 use vmux_ui::hooks::{MenuDirection, move_selection};
 use vmux_ui::prompt_recall::PromptHistoryDirection;
@@ -1056,7 +1058,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((
                 MinimalPlugins,
-                vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default(),
+                FeaturePlugin::<crate::Feature>::default(),
                 ChatKeyPlugin,
             ))
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()

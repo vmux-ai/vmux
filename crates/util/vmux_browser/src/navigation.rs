@@ -6,6 +6,8 @@ use vmux_command::CommandDefinition;
 use vmux_command::{
     BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
 };
+#[cfg(test)]
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
@@ -26,7 +28,7 @@ pub(crate) struct NavigationPlugin;
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         app.add_message::<vmux_core::service::ServiceRequest>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
@@ -491,7 +493,7 @@ mod command_definition_tests {
     fn history_mcp_definition_dispatches_to_the_typed_request() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default())
+            .add_plugins(FeaturePlugin::<crate::Feature>::default())
             .add_plugins(CommandRuntimePlugin)
             .add_message::<OpenHistoryRequest>()
             .add_systems(Startup, bind_command.in_set(BindCommands))

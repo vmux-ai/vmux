@@ -3,6 +3,7 @@ use crossbeam_channel::Receiver;
 use vmux_api::protocol::{AcpSessionConfig, ApprovalDecision, ClientMessage, SharedMessage};
 #[cfg(test)]
 use vmux_core::ProcessId;
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_core::team::Profile;
 use vmux_core::{LastActivatedAt, PageMetadata};
@@ -35,7 +36,7 @@ pub(crate) struct AcpSessionConfigSet;
 impl Plugin for AgentRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default(),
+            FeaturePlugin::<crate::Feature>::default(),
             AgentPolicyPlugin,
         ))
         .add_message::<ServiceRequest>()

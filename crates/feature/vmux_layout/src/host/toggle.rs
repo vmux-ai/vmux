@@ -5,6 +5,8 @@ use crate::side_sheet::SideSheet;
 use crate::window::VmuxWindow;
 use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
+#[cfg(test)]
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_flex::prelude::*;
 
 use super::command::LayoutRequestSet;
@@ -14,7 +16,7 @@ pub struct TogglePlugin;
 impl Plugin for TogglePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }

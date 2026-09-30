@@ -16,6 +16,8 @@ use vmux_api::command_bar::{
     StartSelectWorkspace,
 };
 use vmux_api::mcp::{McpServerRequest, McpServers};
+#[cfg(test)]
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::host::{UiState, UiStateWrite};
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
 use vmux_tool::McpSnapshotRequest;
@@ -35,7 +37,7 @@ pub struct PalettePlugin;
 impl Plugin for PalettePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

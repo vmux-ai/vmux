@@ -14,6 +14,8 @@ use bevy::{
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
+#[cfg(test)]
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_core::page::PageEmbedSet;
 use vmux_core::{
@@ -29,7 +31,7 @@ pub struct WindowLayoutPlugin;
 impl Plugin for WindowLayoutPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

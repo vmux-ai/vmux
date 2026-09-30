@@ -19,6 +19,8 @@ use vmux_api::bookmark::{
     BookmarkToggleRequest, BookmarkUnpinRequest as BookmarkUnpinUiRequest,
 };
 use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
+#[cfg(test)]
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::host::page::PageManifest;
 use vmux_core::{Bookmark, BookmarkOrder, Collapsed, Folder, PageIcon, PageMetadata, Pin, Uuid};
 
@@ -32,7 +34,7 @@ pub struct BookmarkRequestSet;
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -1116,7 +1118,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default(),
+            FeaturePlugin::<crate::Feature>::default(),
             vmux_command::CommandRuntimePlugin,
         ))
         .add_message::<BookmarkToggleActiveRequest>()

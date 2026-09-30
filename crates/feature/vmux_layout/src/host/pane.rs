@@ -21,6 +21,8 @@ use moonshine_save::prelude::*;
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
 use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
 #[cfg(test)]
+use vmux_core::host::manifest::FeaturePlugin;
+#[cfg(test)]
 use vmux_core::{
     Active, EffectiveStartupUrl, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget,
     PageOpenTask,
@@ -248,7 +250,7 @@ pub struct PaneCommandPlugin;
 impl Plugin for PaneCommandPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }

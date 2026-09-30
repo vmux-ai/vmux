@@ -17,6 +17,8 @@ use vmux_command::snapshot::{
     ClaimedUrls, CommandBarProjection, ContributedCommand, ContributedPages,
 };
 use vmux_command::{CommandInvocation, CommandRegistry, ReadCommandRequests, ResolvedLocale};
+#[cfg(test)]
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_core::{
     HostSpawnRoute, PageMetadata, PageOpenRequest, PageOpenTarget,
@@ -50,7 +52,7 @@ pub(crate) struct CommandPlugin;
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }
@@ -986,7 +988,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default(),
+            FeaturePlugin::<crate::Feature>::default(),
             vmux_command::CommandRuntimePlugin,
         ))
         .add_message::<NavigationRequest>()

@@ -15,6 +15,8 @@ use vmux_command::CommandDefinition;
 #[cfg(test)]
 use vmux_command::CommandManifest;
 use vmux_command::{CommandInvocation, CommandRegistry};
+#[cfg(test)]
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::host::persistence::PersistenceAppExt;
 pub use vmux_core::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
@@ -30,7 +32,7 @@ pub struct StackPlugin;
 impl Plugin for StackPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
             app.add_plugins(vmux_command::CommandRuntimePlugin);
         }

@@ -13,6 +13,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use std::collections::{BTreeMap, HashMap};
 use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap, Shortcut};
 use vmux_command::{CommandDefinition, ResolvedLocale};
+use vmux_core::host::manifest::FeaturePlugin;
 use vmux_core::input::{NativeKeyCapture, NativeKeyInput, NativeKeyInputSet};
 use vmux_core::page::PageReady;
 use vmux_core::{PageOpenSet, PageOpenTask, workspace::ComputeFocusSet};
@@ -26,7 +27,7 @@ pub struct ShortcutPlugin;
 
 impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default());
+        app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         #[cfg(ui)]
         app.add_plugins(crate::ui::ShortcutPage::plugin());
         app.add_plugins((
