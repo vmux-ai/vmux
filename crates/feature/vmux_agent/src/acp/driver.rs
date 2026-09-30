@@ -135,6 +135,94 @@ impl AcpFileContents {
     }
 }
 
+struct AcpAttachment<'a>(&'a AgentAttachment);
+
+impl AcpAttachment<'_> {
+    fn uri(&self) -> String {
+        let path = &self.0.path;
+        url::Url::from_file_path(path)
+            .map(|url| url.to_string())
+            .unwrap_or_else(|_| format!("file://{path}"))
+    }
+}
+
+struct AcpAgentInfo<'a>(Option<&'a Implementation>);
+
+impl AcpAgentInfo<'_> {
+    fn display_name(&self) -> Option<String> {
+        let info = self.0?;
+        info.title
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .or_else(|| {
+                let name = info.name.trim();
+                (!name.is_empty()).then_some(name)
+            })
+            .map(str::to_string)
+    }
+}
+
+struct AcpPermissionOptions<'a>(&'a [PermissionOption]);
+
+impl AcpPermissionOptions<'_> {
+    fn select(&self, decision: ApprovalDecision) -> Option<PermissionOptionId> {
+        use agent_client_protocol::schema::v1::PermissionOptionKind as Kind;
+        let preferred: &[Kind] = match decision {
+            ApprovalDecision::Allow => &[Kind::AllowOnce, Kind::AllowAlways],
+            ApprovalDecision::Deny => &[Kind::RejectOnce, Kind::RejectAlways],
+            ApprovalDecision::AllowAlways => &[Kind::AllowAlways],
+        };
+        preferred
+            .iter()
+            .find_map(|kind| self.0.iter().find(|option| &option.kind == kind))
+            .map(|option| option.option_id.clone())
+    }
+}
+
+struct AcpToolName<'a>(&'a str);
+
+impl AcpToolName<'_> {
+    fn permissionless(&self) -> bool {
+        if is_conversation_title_tool(self.0) {
+            return true;
+        }
+        let normalized = self.0.trim().to_ascii_lowercase();
+        let parts = normalized
+            .split(|character: char| {
+                character.is_ascii_whitespace() || matches!(character, '-' | '.' | ':' | '_')
+            })
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        matches!(
+            parts.as_slice(),
+            ["mcp", "vmux", "request", "user", "choice"]
+                | ["vmux", "request", "user", "choice"]
+                | ["request", "user", "choice"]
+                | ["mcp", "vmux", "search" | "read", "knowledge"]
+                | ["vmux", "search" | "read", "knowledge"]
+                | ["search" | "read", "knowledge"]
+        )
+    }
+}
+
+struct PromptCompletion {
+    cancelled: bool,
+    error: Option<String>,
+}
+
+impl PromptCompletion {
+    fn status(self) -> AgentRunStatus {
+        if self.cancelled {
+            AgentRunStatus::Interrupted
+        } else if let Some(error) = self.error {
+            AgentRunStatus::Errored(error)
+        } else {
+            AgentRunStatus::Idle
+        }
+    }
+}
+
 #[derive(Default)]
 struct AcpStderrTail(Mutex<VecDeque<String>>);
 
@@ -412,6 +500,22 @@ impl AcpShared {
         self.project(AcpProjectionInput::Status(status));
     }
 
+    fn publish_config_selection_result(
+        &self,
+        request_id: u64,
+        config_id: Option<&str>,
+        value: &str,
+        succeeded: bool,
+    ) {
+        self.emit(ServiceMessage::AcpSessionConfigSelectionResult {
+            sid: self.sid.clone(),
+            request_id,
+            config_id: config_id.map(str::to_string),
+            value: value.to_string(),
+            succeeded,
+        });
+    }
+
     async fn selection_snapshot(&self) -> super::AcpSelectionSnapshot {
         let (response, receiver) = oneshot::channel();
         self.project(AcpProjectionInput::SelectionSnapshot(response));
@@ -421,10 +525,6 @@ impl AcpShared {
     fn stderr_detail(&self) -> String {
         self.stderr_tail.detail(STDERR_TAIL_SHOWN)
     }
-}
-
-fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
-    shared.project(AcpProjectionInput::Update(update));
 }
 
 async fn resolve_approval_details(
@@ -453,12 +553,6 @@ async fn resolve_approval_details(
             return Some(fallback);
         }
     }
-}
-
-fn attachment_uri(path: &str) -> String {
-    url::Url::from_file_path(path)
-        .map(|url| url.to_string())
-        .unwrap_or_else(|_| format!("file://{path}"))
 }
 
 async fn encoded_media(path: String, limit: u64) -> Option<(String, u64)> {
@@ -499,7 +593,7 @@ async fn prompt_content_blocks(
         blocks.push(ContentBlock::Text(TextContent::new(text)));
     }
     for attachment in attachments {
-        let uri = attachment_uri(&attachment.path);
+        let uri = AcpAttachment(attachment).uri();
         let media_supported = (capabilities.image && attachment.mime_type.starts_with("image/"))
             || (capabilities.audio && attachment.mime_type.starts_with("audio/"));
         let limit = PROMPT_MEDIA_FILE_LIMIT.min(remaining_media_bytes);
@@ -595,9 +689,9 @@ pub async fn run(
                         RequestPermissionOutcome::Cancelled,
                     ));
                 };
-                if is_permissionless_host_tool(&name) {
+                if AcpToolName(&name).permissionless() {
                     let outcome =
-                        match pick_permission_option(&req.options, ApprovalDecision::Allow) {
+                        match AcpPermissionOptions(&req.options).select(ApprovalDecision::Allow) {
                             Some(id) => RequestPermissionOutcome::Selected(
                                 SelectedPermissionOutcome::new(id),
                             ),
@@ -618,7 +712,7 @@ pub async fn run(
                 }));
                 let decision = rx.await.unwrap_or(ApprovalDecision::Deny);
                 perm_shared.project(AcpProjectionInput::ApprovalResolved(call_id));
-                let outcome = match pick_permission_option(&req.options, decision) {
+                let outcome = match AcpPermissionOptions(&req.options).select(decision) {
                     Some(id) => {
                         RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(id))
                     }
@@ -713,7 +807,7 @@ pub async fn run(
         )
         .on_receive_notification(
             async move |note: SessionNotification, _cx| {
-                project_session_update(&update_shared, note.update);
+                update_shared.project(AcpProjectionInput::Update(note.update));
                 Ok(())
             },
             agent_client_protocol::on_receive_notification!(),
@@ -747,7 +841,7 @@ pub async fn run(
             tracing::info!(target: "acp", sid = %main_shared.sid, "initialize answered");
             let prompt_capabilities = init_resp.agent_capabilities.prompt_capabilities.clone();
 
-            if let Some(name) = acp_display_name(init_resp.agent_info.as_ref()) {
+            if let Some(name) = AcpAgentInfo(init_resp.agent_info.as_ref()).display_name() {
                 main_shared.publish_agent_info(name);
             }
 
@@ -959,7 +1053,13 @@ pub async fn run(
                             };
                             let cancelled = shared.cancel_requested.swap(false, Ordering::SeqCst);
                             shared.project(AcpProjectionInput::Snapshot);
-                            shared.emit_status(status_after_prompt(cancelled, errored));
+                            shared.emit_status(
+                                PromptCompletion {
+                                    cancelled,
+                                    error: errored,
+                                }
+                                .status(),
+                            );
                             Ok(())
                         })?;
                     }
@@ -975,8 +1075,7 @@ pub async fn run(
                         value,
                     } => {
                         let Some(sid) = session_id.clone() else {
-                            publish_config_selection_result(
-                                &main_shared,
+                            main_shared.publish_config_selection_result(
                                 request_id,
                                 config_id.as_deref(),
                                 &value,
@@ -1006,8 +1105,7 @@ pub async fn run(
                                     &value,
                                     &config_options,
                                 );
-                                publish_config_selection_result(
-                                    &main_shared,
+                                main_shared.publish_config_selection_result(
                                     request_id,
                                     config_id.as_deref(),
                                     &value,
@@ -1015,8 +1113,7 @@ pub async fn run(
                                 );
                             }
                             Err(err) => {
-                                publish_config_selection_result(
-                                    &main_shared,
+                                main_shared.publish_config_selection_result(
                                     request_id,
                                     config_id.as_deref(),
                                     &value,
@@ -1054,35 +1151,6 @@ pub async fn run(
         )));
     }
     let _ = child.kill().await;
-}
-
-fn acp_display_name(info: Option<&Implementation>) -> Option<String> {
-    let info = info?;
-    info.title
-        .as_deref()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .or_else(|| {
-            let name = info.name.trim();
-            (!name.is_empty()).then_some(name)
-        })
-        .map(str::to_string)
-}
-
-fn publish_config_selection_result(
-    shared: &AcpShared,
-    request_id: u64,
-    config_id: Option<&str>,
-    value: &str,
-    succeeded: bool,
-) {
-    shared.emit(ServiceMessage::AcpSessionConfigSelectionResult {
-        sid: shared.sid.clone(),
-        request_id,
-        config_id: config_id.map(str::to_string),
-        value: value.to_string(),
-        succeeded,
-    });
 }
 
 async fn load_requested_session<F, Fut, E>(
@@ -1346,84 +1414,6 @@ async fn release_terminal(
     Ok(ReleaseTerminalResponse::new())
 }
 
-fn pick_permission_option(
-    options: &[PermissionOption],
-    decision: ApprovalDecision,
-) -> Option<PermissionOptionId> {
-    use agent_client_protocol::schema::v1::PermissionOptionKind as Kind;
-    let preferred: &[Kind] = match decision {
-        ApprovalDecision::Allow => &[Kind::AllowOnce, Kind::AllowAlways],
-        ApprovalDecision::Deny => &[Kind::RejectOnce, Kind::RejectAlways],
-        ApprovalDecision::AllowAlways => &[Kind::AllowAlways],
-    };
-    preferred
-        .iter()
-        .find_map(|kind| options.iter().find(|option| &option.kind == kind))
-        .map(|option| option.option_id.clone())
-}
-
-fn is_permissionless_host_tool(name: &str) -> bool {
-    if is_conversation_title_tool(name) {
-        return true;
-    }
-    let parts = name
-        .trim()
-        .to_ascii_lowercase()
-        .split(|character: char| {
-            character.is_ascii_whitespace() || matches!(character, '-' | '.' | ':' | '_')
-        })
-        .filter(|part| !part.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    matches!(
-        parts.as_slice(),
-        [mcp, vmux, request, user, choice]
-            if mcp == "mcp"
-                && vmux == "vmux"
-                && request == "request"
-                && user == "user"
-                && choice == "choice"
-    ) || matches!(
-        parts.as_slice(),
-        [vmux, request, user, choice]
-            if vmux == "vmux"
-                && request == "request"
-                && user == "user"
-                && choice == "choice"
-    ) || matches!(
-        parts.as_slice(),
-        [request, user, choice]
-            if request == "request" && user == "user" && choice == "choice"
-    ) || matches!(
-        parts.as_slice(),
-        [mcp, vmux, operation, knowledge]
-            if mcp == "mcp"
-                && vmux == "vmux"
-                && matches!(operation.as_str(), "search" | "read")
-                && knowledge == "knowledge"
-    ) || matches!(
-        parts.as_slice(),
-        [vmux, operation, knowledge]
-            if vmux == "vmux"
-                && matches!(operation.as_str(), "search" | "read")
-                && knowledge == "knowledge"
-    ) || matches!(
-        parts.as_slice(),
-        [operation, knowledge]
-            if matches!(operation.as_str(), "search" | "read") && knowledge == "knowledge"
-    )
-}
-
-fn status_after_prompt(cancelled: bool, errored: Option<String>) -> AgentRunStatus {
-    if cancelled {
-        AgentRunStatus::Interrupted
-    } else if let Some(err) = errored {
-        AgentRunStatus::Errored(err)
-    } else {
-        AgentRunStatus::Idle
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1588,13 +1578,13 @@ mod tests {
     fn acp_display_name_prefers_title_then_name() {
         let titled = Implementation::new("antigravity", "1.0").title("Antigravity");
         assert_eq!(
-            acp_display_name(Some(&titled)).as_deref(),
+            AcpAgentInfo(Some(&titled)).display_name().as_deref(),
             Some("Antigravity")
         );
 
         let named = Implementation::new("claude-code-acp", "1.0");
         assert_eq!(
-            acp_display_name(Some(&named)).as_deref(),
+            AcpAgentInfo(Some(&named)).display_name().as_deref(),
             Some("claude-code-acp")
         );
     }
@@ -1603,13 +1593,13 @@ mod tests {
     fn acp_display_name_ignores_blank_metadata() {
         let blank_title = Implementation::new("codex-acp", "1.0").title("   ");
         assert_eq!(
-            acp_display_name(Some(&blank_title)).as_deref(),
+            AcpAgentInfo(Some(&blank_title)).display_name().as_deref(),
             Some("codex-acp")
         );
 
         let blank = Implementation::new("   ", "1.0");
-        assert_eq!(acp_display_name(Some(&blank)), None);
-        assert_eq!(acp_display_name(None), None);
+        assert_eq!(AcpAgentInfo(Some(&blank)).display_name(), None);
+        assert_eq!(AcpAgentInfo(None).display_name(), None);
     }
 
     #[test]
@@ -1731,7 +1721,7 @@ mod tests {
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
         );
-        publish_config_selection_result(&shared, 9, Some("approval"), "auto", true);
+        shared.publish_config_selection_result(9, Some("approval"), "auto", true);
 
         match stream_rx.try_recv().expect("selection result") {
             ServiceMessage::AcpSessionConfigSelectionResult {
@@ -1812,12 +1802,11 @@ mod tests {
         harness.shared.begin_history_replay();
         harness.update();
 
-        project_session_update(
-            &harness.shared,
-            SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(
-                TextContent::new("hello"),
-            ))),
-        );
+        harness
+            .shared
+            .project(AcpProjectionInput::Update(SessionUpdate::UserMessageChunk(
+                ContentChunk::new(ContentBlock::Text(TextContent::new("hello"))),
+            )));
         harness.update();
         let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) = harness
             .stream
@@ -1828,12 +1817,11 @@ mod tests {
         };
         assert_eq!(messages.len(), 1);
         for _ in 0..300 {
-            project_session_update(
-                &harness.shared,
+            harness.shared.project(AcpProjectionInput::Update(
                 SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
                     TextContent::new("x"),
                 ))),
-            );
+            ));
         }
         harness.update();
 
@@ -1866,12 +1854,11 @@ mod tests {
         let mut harness = ProjectionHarness::new(64);
         harness.shared.begin_history_replay();
         harness.update();
-        project_session_update(
-            &harness.shared,
-            SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(
-                TextContent::new("partial"),
-            ))),
-        );
+        harness
+            .shared
+            .project(AcpProjectionInput::Update(SessionUpdate::UserMessageChunk(
+                ContentChunk::new(ContentBlock::Text(TextContent::new("partial"))),
+            )));
         harness.update();
 
         let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
@@ -2011,13 +1998,12 @@ mod tests {
 
         tokio::task::yield_now().await;
         harness.update();
-        project_session_update(
-            &harness.shared,
-            SessionUpdate::ToolCall(
+        harness
+            .shared
+            .project(AcpProjectionInput::Update(SessionUpdate::ToolCall(
                 ToolCall::new("call-1", "vmux.run")
                     .raw_input(serde_json::json!({"command": "echo hi"})),
-            ),
-        );
+            )));
         harness.update();
         tokio::task::yield_now().await;
         harness.update();
@@ -2034,13 +2020,12 @@ mod tests {
     #[tokio::test]
     async fn conversation_title_permission_resolves_as_host_owned_tool() {
         let mut harness = ProjectionHarness::new(2);
-        project_session_update(
-            &harness.shared,
-            SessionUpdate::ToolCall(
+        harness
+            .shared
+            .project(AcpProjectionInput::Update(SessionUpdate::ToolCall(
                 ToolCall::new("title-1", "mcp__vmux__set_conversation_title")
                     .raw_input(serde_json::json!({"title": "Paris Izakaya Website"})),
-            ),
-        );
+            )));
         harness.update();
         let request = RequestPermissionRequest::new(
             "session-1",
@@ -2071,9 +2056,9 @@ mod tests {
             "vmux:request-user-choice",
             "request_user_choice",
         ] {
-            assert!(is_permissionless_host_tool(name), "{name}");
+            assert!(AcpToolName(name).permissionless(), "{name}");
         }
-        assert!(!is_permissionless_host_tool("other_request_user_choice"));
+        assert!(!AcpToolName("other_request_user_choice").permissionless());
     }
 
     #[test]
@@ -2084,10 +2069,10 @@ mod tests {
             "vmux:search-knowledge",
             "read_knowledge",
         ] {
-            assert!(is_permissionless_host_tool(name), "{name}");
+            assert!(AcpToolName(name).permissionless(), "{name}");
         }
-        assert!(!is_permissionless_host_tool("write_knowledge"));
-        assert!(!is_permissionless_host_tool("other_search_knowledge"));
+        assert!(!AcpToolName("write_knowledge").permissionless());
+        assert!(!AcpToolName("other_search_knowledge").permissionless());
     }
 
     #[tokio::test]
@@ -2158,15 +2143,29 @@ mod tests {
     }
 
     #[test]
-    fn status_after_prompt_cancel_wins() {
-        assert_eq!(status_after_prompt(false, None), AgentRunStatus::Idle);
+    fn prompt_completion_cancel_wins() {
         assert_eq!(
-            status_after_prompt(false, Some("boom".into())),
+            PromptCompletion {
+                cancelled: false,
+                error: None,
+            }
+            .status(),
+            AgentRunStatus::Idle
+        );
+        assert_eq!(
+            PromptCompletion {
+                cancelled: false,
+                error: Some("boom".into()),
+            }
+            .status(),
             AgentRunStatus::Errored("boom".into())
         );
-        assert_eq!(status_after_prompt(true, None), AgentRunStatus::Interrupted);
         assert_eq!(
-            status_after_prompt(true, Some("boom".into())),
+            PromptCompletion {
+                cancelled: true,
+                error: Some("boom".into()),
+            }
+            .status(),
             AgentRunStatus::Interrupted
         );
     }
@@ -2189,19 +2188,22 @@ mod tests {
             opt("rej", PermissionOptionKind::RejectOnce),
         ];
         assert_eq!(
-            pick_permission_option(&opts, ApprovalDecision::Allow)
+            AcpPermissionOptions(&opts)
+                .select(ApprovalDecision::Allow)
                 .unwrap()
                 .to_string(),
             "once"
         );
         assert_eq!(
-            pick_permission_option(&opts, ApprovalDecision::AllowAlways)
+            AcpPermissionOptions(&opts)
+                .select(ApprovalDecision::AllowAlways)
                 .unwrap()
                 .to_string(),
             "always"
         );
         assert_eq!(
-            pick_permission_option(&opts, ApprovalDecision::Deny)
+            AcpPermissionOptions(&opts)
+                .select(ApprovalDecision::Deny)
                 .unwrap()
                 .to_string(),
             "rej"
@@ -2212,16 +2214,15 @@ mod tests {
             opt("ra", PermissionOptionKind::RejectAlways),
         ];
         assert_eq!(
-            pick_permission_option(&always_only, ApprovalDecision::Allow)
+            AcpPermissionOptions(&always_only)
+                .select(ApprovalDecision::Allow)
                 .unwrap()
                 .to_string(),
             "aa"
         );
         assert_eq!(
-            pick_permission_option(
-                &[opt("once", PermissionOptionKind::AllowOnce)],
-                ApprovalDecision::AllowAlways,
-            ),
+            AcpPermissionOptions(&[opt("once", PermissionOptionKind::AllowOnce)])
+                .select(ApprovalDecision::AllowAlways),
             None
         );
     }
