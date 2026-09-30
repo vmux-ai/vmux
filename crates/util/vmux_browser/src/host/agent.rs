@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use vmux_api::BinEvent;
 use vmux_api::protocol::{
     AgentCommandResult, AgentOpenInNewStack, AgentQueryResult, AgentRequestId,
     AgentWorkingDirectory, ClientMessage,
@@ -21,7 +20,7 @@ use vmux_layout::{
     BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, OpenBesideRequest,
     OpenInNewStackRequest,
 };
-use vmux_tool::{ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet};
+use vmux_tool::{ToolQueryAppExt, ToolQueryMessage, ToolQueryRouteSet};
 
 use super::agent_pane::AgentBrowserResolve;
 
@@ -76,8 +75,9 @@ impl Plugin for AgentBrowserPlugin {
             .add_agent_request::<AgentBrowserGoForward>()
             .add_agent_request::<AgentBrowserHistorySearch>()
             .add_agent_request::<AgentOpenInNewStack>()
-            .add_message::<ToolQueryRequest>()
-            .add_message::<ToolQueryHandled>()
+            .add_tool_query::<AgentBrowserSnapshot>()
+            .add_tool_query::<AgentBrowserScroll>()
+            .add_tool_query::<AgentWorkingDirectory>()
             .add_message::<ServiceRequest>()
             .add_message::<BrowserSnapshotRequest>()
             .add_message::<BrowserSnapshotResponse>()
@@ -85,14 +85,17 @@ impl Plugin for AgentBrowserPlugin {
             .add_message::<BrowserScrollResponse>()
             .add_message::<BrowserNavigationSnapshotResponse>()
             .add_message::<ActivatePane>()
-            .add_message::<WorkingDirectoryRequest>()
             .add_message::<ExtensionInstallRequest>()
             .add_systems(Update, open_history)
             .add_systems(
                 Update,
                 (
-                    route_browser_queries.in_set(ToolQueryRouteSet),
-                    answer_working_directory_queries.after(ToolQueryRouteSet),
+                    (
+                        route_snapshot_queries,
+                        route_scroll_queries,
+                        answer_working_directory_queries,
+                    )
+                        .after(ToolQueryRouteSet),
                     forward_snapshot_responses,
                     forward_scroll_responses,
                     forward_navigation_snapshot_responses,
@@ -114,101 +117,55 @@ impl Plugin for AgentBrowserPlugin {
     }
 }
 
-#[derive(Message)]
-struct WorkingDirectoryRequest {
-    request_id: AgentRequestId,
-    anchor: vmux_core::ProcessId,
-}
-
-fn route_browser_queries(
-    mut queries: MessageReader<ToolQueryRequest>,
-    mut handled: MessageWriter<ToolQueryHandled>,
+fn route_snapshot_queries(
+    mut queries: MessageReader<ToolQueryMessage<AgentBrowserSnapshot>>,
     mut snapshots: MessageWriter<BrowserSnapshotRequest>,
-    mut scrolls: MessageWriter<BrowserScrollRequest>,
-    mut working_directories: MessageWriter<WorkingDirectoryRequest>,
     mut activate: MessageWriter<ActivatePane>,
-    mut service_requests: MessageWriter<ServiceRequest>,
     browse: AgentBrowserResolve,
 ) {
     for request in queries.read() {
-        if request.query.id != AgentBrowserSnapshot::id()
-            && request.query.id != AgentBrowserScroll::id()
-            && request.query.id != AgentWorkingDirectory::id()
-        {
-            continue;
+        let resolved = browse.resolve_pane(&request.payload.pane, &request.payload.anchor);
+        if let Some(request) = resolved.activation {
+            activate.write(request);
         }
-        handled.write(ToolQueryHandled(request.request_id));
-        match request.query.decode::<AgentBrowserSnapshot>() {
-            Ok(Some(query)) => {
-                let resolved = browse.resolve_pane(&query.pane, &query.anchor);
-                if let Some(request) = resolved.activation {
-                    activate.write(request);
-                }
-                snapshots.write(BrowserSnapshotRequest {
-                    request_id: request.request_id.0,
-                    pane: resolved.pane,
-                    webview: None,
-                });
-                continue;
-            }
-            Err(message) => {
-                service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
-                    request_id: request.request_id,
-                    message,
-                }));
-                continue;
-            }
-            Ok(None) => {}
+        snapshots.write(BrowserSnapshotRequest {
+            request_id: request.request_id.0,
+            pane: resolved.pane,
+            webview: None,
+        });
+    }
+}
+
+fn route_scroll_queries(
+    mut queries: MessageReader<ToolQueryMessage<AgentBrowserScroll>>,
+    mut scrolls: MessageWriter<BrowserScrollRequest>,
+    mut activate: MessageWriter<ActivatePane>,
+    browse: AgentBrowserResolve,
+) {
+    for request in queries.read() {
+        let resolved = browse.resolve_pane(&request.payload.pane, &request.payload.anchor);
+        if let Some(request) = resolved.activation {
+            activate.write(request);
         }
-        match request.query.decode::<AgentBrowserScroll>() {
-            Ok(Some(query)) => {
-                let resolved = browse.resolve_pane(&query.pane, &query.anchor);
-                if let Some(request) = resolved.activation {
-                    activate.write(request);
-                }
-                scrolls.write(BrowserScrollRequest {
-                    request_id: request.request_id.0,
-                    pane: resolved.pane,
-                    to: query.to,
-                    delta: query.delta,
-                });
-            }
-            Err(message) => {
-                service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
-                    request_id: request.request_id,
-                    message,
-                }));
-            }
-            Ok(None) => {}
-        }
-        match request.query.decode::<AgentWorkingDirectory>() {
-            Ok(Some(query)) => {
-                working_directories.write(WorkingDirectoryRequest {
-                    request_id: request.request_id,
-                    anchor: query.anchor,
-                });
-            }
-            Err(message) => {
-                service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
-                    request_id: request.request_id,
-                    message,
-                }));
-            }
-            Ok(None) => {}
-        }
+        scrolls.write(BrowserScrollRequest {
+            request_id: request.request_id.0,
+            pane: resolved.pane,
+            to: request.payload.to.clone(),
+            delta: request.payload.delta,
+        });
     }
 }
 
 fn answer_working_directory_queries(
-    mut requests: MessageReader<WorkingDirectoryRequest>,
+    mut requests: MessageReader<ToolQueryMessage<AgentWorkingDirectory>>,
     browse: AgentBrowserResolve,
     tabs: Query<&vmux_layout::tab::Tab>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in requests.read() {
-        let result = if browse.agent_pane(request.anchor).is_none() {
+        let result = if browse.agent_pane(request.payload.anchor).is_none() {
             Err("agent pane not found".to_string())
-        } else if let Some(path) = browse.working_directory(request.anchor, &tabs) {
+        } else if let Some(path) = browse.working_directory(request.payload.anchor, &tabs) {
             Ok(path.to_string_lossy().into_owned())
         } else {
             ProjectsDirectory::ensure()

@@ -10,7 +10,6 @@ use vmux_core::agent::AgentCommandResponse;
 use vmux_core::service::{
     ServiceConnected, ServiceMessagePlugin, ServiceMessageSet, ServiceRequest,
 };
-use vmux_tool::ToolQueryRequest;
 
 #[vmux_core::service_message(AgentRequest)]
 struct InboundAgentRequest {
@@ -36,7 +35,6 @@ impl Plugin for AgentIngressPlugin {
         }
         app.add_plugins((
             ServiceMessagePlugin::<InboundAgentRequest>::default(),
-            ServiceMessagePlugin::<ToolQueryRequest>::default(),
             ServiceMessagePlugin::<AgentToolCallRequest>::default(),
             ServiceMessagePlugin::<UiAgentDelta>::default(),
             ServiceMessagePlugin::<UiAgentRunStatus>::default(),
@@ -131,6 +129,7 @@ mod tests {
     };
     use vmux_core::service::ServiceInbound;
     use vmux_space::AgentRenameProfile;
+    use vmux_tool::ToolQueryRequest;
 
     #[test]
     fn routes_agent_messages_without_terminal_ownership() {

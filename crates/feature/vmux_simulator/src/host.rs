@@ -13,15 +13,14 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use hid::HidBroker;
 use stream::StreamServer;
-use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentImage, AgentQueryResult, AgentRequestId, ClientMessage};
 use vmux_core::PageMetadata;
 use vmux_core::host::page::{NativelyHosted, PageReady};
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_core::input::{NativeKeyClaimSet, NativeKeyInputSet};
-use vmux_core::service::{ServiceMessageSet, ServiceRequest};
+use vmux_core::service::ServiceRequest;
 use vmux_layout::stack::{ComputeFocusSet, FocusedStack};
-use vmux_tool::{ToolQueryHandled, ToolQueryRequest, ToolQueryRouteSet};
+use vmux_tool::{ToolQueryAppExt, ToolQueryMessage, ToolQueryRouteSet};
 
 pub use device::{Axe, SimulatorDevice};
 pub use tool::SimulatorToolPlugin;
@@ -101,8 +100,12 @@ impl Plugin for SimulatorPlugin {
         .add_message::<SimulatorControlResponse>()
         .add_message::<SimulatorScreenshotRequest>()
         .add_message::<SimulatorScreenshotResponse>()
-        .add_message::<ToolQueryRequest>()
-        .add_message::<ToolQueryHandled>()
+        .add_tool_query::<AgentSimulatorScreenshot>()
+        .add_tool_query::<AgentSimulatorTap>()
+        .add_tool_query::<AgentSimulatorSwipe>()
+        .add_tool_query::<AgentSimulatorTypeText>()
+        .add_tool_query::<AgentSimulatorKeyPress>()
+        .add_tool_query::<AgentSimulatorButtonPress>()
         .add_message::<ServiceRequest>()
         .add_systems(
             Update,
@@ -129,9 +132,15 @@ impl Plugin for SimulatorPlugin {
         .add_systems(Update, handle_screenshot_requests.in_set(SimulatorInputSet))
         .add_systems(
             Update,
-            route_agent_queries
-                .in_set(ToolQueryRouteSet)
-                .after(ServiceMessageSet),
+            (
+                route_screenshot_queries,
+                route_tap_queries,
+                route_swipe_queries,
+                route_text_queries,
+                route_key_queries,
+                route_button_queries,
+            )
+                .after(ToolQueryRouteSet),
         )
         .add_systems(
             Update,
@@ -144,104 +153,79 @@ impl Plugin for SimulatorPlugin {
     }
 }
 
-fn route_agent_queries(
-    mut queries: MessageReader<ToolQueryRequest>,
-    mut handled: MessageWriter<ToolQueryHandled>,
+fn route_screenshot_queries(
+    mut queries: MessageReader<ToolQueryMessage<AgentSimulatorScreenshot>>,
     mut screenshots: MessageWriter<SimulatorScreenshotRequest>,
-    mut taps: MessageWriter<SimulatorTapRequest>,
-    mut swipes: MessageWriter<SimulatorSwipeRequest>,
-    mut text: MessageWriter<SimulatorTypeTextRequest>,
-    mut keys: MessageWriter<SimulatorKeyPressRequest>,
-    mut buttons: MessageWriter<SimulatorButtonPressRequest>,
-    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in queries.read() {
-        let recognized = matches!(
-            request.query.id.as_str(),
-            AgentSimulatorScreenshot::ID
-                | AgentSimulatorTap::ID
-                | AgentSimulatorSwipe::ID
-                | AgentSimulatorTypeText::ID
-                | AgentSimulatorKeyPress::ID
-                | AgentSimulatorButtonPress::ID
-        );
-        if !recognized {
-            continue;
-        }
-        handled.write(ToolQueryHandled(request.request_id));
-        let result = match request.query.id.as_str() {
-            AgentSimulatorScreenshot::ID => {
-                serde_json::from_slice::<AgentSimulatorScreenshot>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|_| {
-                        screenshots.write(SimulatorScreenshotRequest {
-                            request_id: request.request_id.0,
-                        });
-                    })
-            }
-            AgentSimulatorTap::ID => {
-                serde_json::from_slice::<AgentSimulatorTap>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|query| {
-                        taps.write(SimulatorTapRequest {
-                            request_id: request.request_id.0,
-                            x: query.x,
-                            y: query.y,
-                        });
-                    })
-            }
-            AgentSimulatorSwipe::ID => {
-                serde_json::from_slice::<AgentSimulatorSwipe>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|query| {
-                        swipes.write(SimulatorSwipeRequest {
-                            request_id: request.request_id.0,
-                            start_x: query.start_x,
-                            start_y: query.start_y,
-                            end_x: query.end_x,
-                            end_y: query.end_y,
-                            duration_ms: query.duration_ms,
-                        });
-                    })
-            }
-            AgentSimulatorTypeText::ID => {
-                serde_json::from_slice::<AgentSimulatorTypeText>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|query| {
-                        text.write(SimulatorTypeTextRequest {
-                            request_id: request.request_id.0,
-                            text: query.text,
-                        });
-                    })
-            }
-            AgentSimulatorKeyPress::ID => {
-                serde_json::from_slice::<AgentSimulatorKeyPress>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|query| {
-                        keys.write(SimulatorKeyPressRequest {
-                            request_id: request.request_id.0,
-                            keycode: query.keycode,
-                        });
-                    })
-            }
-            AgentSimulatorButtonPress::ID => {
-                serde_json::from_slice::<AgentSimulatorButtonPress>(&request.query.body)
-                    .map_err(|error| error.to_string())
-                    .map(|query| {
-                        buttons.write(SimulatorButtonPressRequest {
-                            request_id: request.request_id.0,
-                            button: query.button,
-                        });
-                    })
-            }
-            _ => unreachable!(),
-        };
-        if let Err(message) = result {
-            service_requests.write(ServiceRequest(ClientMessage::AgentQueryError {
-                request_id: request.request_id,
-                message,
-            }));
-        }
+        screenshots.write(SimulatorScreenshotRequest {
+            request_id: request.request_id.0,
+        });
+    }
+}
+
+fn route_tap_queries(
+    mut queries: MessageReader<ToolQueryMessage<AgentSimulatorTap>>,
+    mut taps: MessageWriter<SimulatorTapRequest>,
+) {
+    for request in queries.read() {
+        taps.write(SimulatorTapRequest {
+            request_id: request.request_id.0,
+            x: request.payload.x,
+            y: request.payload.y,
+        });
+    }
+}
+
+fn route_swipe_queries(
+    mut queries: MessageReader<ToolQueryMessage<AgentSimulatorSwipe>>,
+    mut swipes: MessageWriter<SimulatorSwipeRequest>,
+) {
+    for request in queries.read() {
+        swipes.write(SimulatorSwipeRequest {
+            request_id: request.request_id.0,
+            start_x: request.payload.start_x,
+            start_y: request.payload.start_y,
+            end_x: request.payload.end_x,
+            end_y: request.payload.end_y,
+            duration_ms: request.payload.duration_ms,
+        });
+    }
+}
+
+fn route_text_queries(
+    mut queries: MessageReader<ToolQueryMessage<AgentSimulatorTypeText>>,
+    mut text: MessageWriter<SimulatorTypeTextRequest>,
+) {
+    for request in queries.read() {
+        text.write(SimulatorTypeTextRequest {
+            request_id: request.request_id.0,
+            text: request.payload.text.clone(),
+        });
+    }
+}
+
+fn route_key_queries(
+    mut queries: MessageReader<ToolQueryMessage<AgentSimulatorKeyPress>>,
+    mut keys: MessageWriter<SimulatorKeyPressRequest>,
+) {
+    for request in queries.read() {
+        keys.write(SimulatorKeyPressRequest {
+            request_id: request.request_id.0,
+            keycode: request.payload.keycode,
+        });
+    }
+}
+
+fn route_button_queries(
+    mut queries: MessageReader<ToolQueryMessage<AgentSimulatorButtonPress>>,
+    mut buttons: MessageWriter<SimulatorButtonPressRequest>,
+) {
+    for request in queries.read() {
+        buttons.write(SimulatorButtonPressRequest {
+            request_id: request.request_id.0,
+            button: request.payload.button,
+        });
     }
 }
 
