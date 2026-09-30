@@ -649,7 +649,7 @@ fn send_acp_input(
     pending_projects: Query<(), With<vmux_space::PendingProject>>,
     repositories_needing_worktrees: Query<(), With<vmux_space::RepositoryNeedsWorktree>>,
     policy: Single<&AcpWorkspacePolicy>,
-    modes: Option<Single<&crate::host::model::AgentModeSelections>>,
+    modes: Option<Single<&crate::host::model_selection::AgentModeSelections>>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for (entity, session, mut state, mut queue, install_started, mut pending, mut imported) in

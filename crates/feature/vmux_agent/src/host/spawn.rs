@@ -178,7 +178,7 @@ fn handle_spawn_agent_requests(
     mut reader: MessageReader<SpawnAgentInStackRequest>,
     settings: Res<AppSettings>,
     sources: CliSessionSources,
-    models: Option<Single<&crate::host::model::AgentModelSelections>>,
+    models: Option<Single<&crate::host::model_selection::AgentModelSelections>>,
     executables: AgentExecutables,
     mut metadata: Query<&mut PageMetadata>,
     mut commands: Commands,

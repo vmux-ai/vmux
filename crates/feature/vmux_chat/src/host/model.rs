@@ -3,7 +3,7 @@ use bevy_ecs::prelude::*;
 use vmux_api::room::RemoteModelState;
 
 use super::state::{ChatRuntime, ChatUiStatePlugin, ChatUiStateProjection, RepublishChatUiState};
-use crate::event::ModelState;
+use crate::event::{ModeState, ModelState, SlashCommand, SlashCommandEntry, SlashCommands};
 
 pub struct ChatModelPlugin;
 
@@ -12,14 +12,17 @@ impl Plugin for ChatModelPlugin {
         if !app.is_plugin_added::<ChatUiStatePlugin>() {
             app.add_plugins(ChatUiStatePlugin);
         }
-        app.add_message::<Models>().add_systems(
-            Update,
-            (
-                receive_models,
-                project_model_picker.in_set(ModelProjection),
-                emit_model_picker.after(ModelProjection),
-            ),
-        );
+        app.add_message::<Models>()
+            .add_systems(
+                Update,
+                (
+                    receive_models,
+                    project_model_picker.in_set(ModelProjection),
+                    emit_model_picker.after(ModelProjection),
+                ),
+            )
+            .add_observer(publish_model_state)
+            .add_observer(publish_mode_state);
     }
 }
 
@@ -31,6 +34,37 @@ pub struct Models(pub RemoteModelState);
 
 #[derive(Component, Default)]
 pub struct Picker(pub ModelState);
+
+#[derive(EntityEvent)]
+pub struct ChatModelStateChanged {
+    #[event_target]
+    webview: Entity,
+    state: ModelState,
+    cross_runtime: bool,
+}
+
+impl ChatModelStateChanged {
+    pub fn new(webview: Entity, state: ModelState, cross_runtime: bool) -> Self {
+        Self {
+            webview,
+            state,
+            cross_runtime,
+        }
+    }
+}
+
+#[derive(EntityEvent)]
+pub struct ChatModeStateChanged {
+    #[event_target]
+    webview: Entity,
+    state: ModeState,
+}
+
+impl ChatModeStateChanged {
+    pub fn new(webview: Entity, state: ModeState) -> Self {
+        Self { webview, state }
+    }
+}
 
 type ChangedModelPicker<'w, 's> =
     Query<'w, 's, (&'static Models, &'static mut Picker), (With<ChatRuntime>, Changed<Models>)>;
@@ -72,5 +106,119 @@ fn emit_model_picker(
     };
     if refresh || picker.is_changed() {
         projection.write(&picker.0);
+    }
+}
+
+fn publish_model_state(trigger: On<ChatModelStateChanged>, mut commands: Commands) {
+    let event = trigger.event();
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+            event.webview,
+            &event.state,
+        ),
+    );
+    let mut commands_list = vec![
+        SlashCommandEntry {
+            command: SlashCommand::Upload,
+            description: "Attach files".to_string(),
+        },
+        SlashCommandEntry {
+            command: SlashCommand::Resume,
+            description: "Resume a past session".to_string(),
+        },
+        SlashCommandEntry {
+            command: SlashCommand::Mcp,
+            description: String::new(),
+        },
+    ];
+    if !event.state.models.is_empty() {
+        commands_list.push(SlashCommandEntry {
+            command: SlashCommand::Model,
+            description: "Select model".to_string(),
+        });
+    }
+    if event.cross_runtime {
+        commands_list.push(SlashCommandEntry {
+            command: SlashCommand::Cli,
+            description: "Continue this session in the CLI".to_string(),
+        });
+    }
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+            event.webview,
+            &SlashCommands {
+                commands: commands_list,
+            },
+        ),
+    );
+}
+
+fn publish_mode_state(trigger: On<ChatModeStateChanged>, mut commands: Commands) {
+    let event = trigger.event();
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+            event.webview,
+            &event.state,
+        ),
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vmux_core::host::UiStateWrite;
+
+    #[derive(Resource, Default)]
+    struct Published(Vec<super::super::state::ChatUiStatePatch>);
+
+    impl Published {
+        fn record(
+            trigger: On<UiStateWrite<super::super::state::ChatUiState>>,
+            mut published: ResMut<Self>,
+        ) {
+            published.0.push(trigger.event().patch().clone());
+        }
+    }
+
+    #[test]
+    fn chat_owns_model_and_slash_command_projection() {
+        let mut app = App::new();
+        app.init_resource::<Published>()
+            .add_observer(Published::record)
+            .add_observer(publish_model_state);
+        let webview = app.world_mut().spawn_empty().id();
+
+        app.world_mut().trigger(ChatModelStateChanged::new(
+            webview,
+            ModelState {
+                models: vec![crate::event::ModelOptionEntry {
+                    id: "model".to_string(),
+                    name: "Model".to_string(),
+                    description: String::new(),
+                }],
+                ..ModelState::default()
+            },
+            true,
+        ));
+        app.world_mut().flush();
+
+        let published = &app.world().resource::<Published>().0;
+        assert_eq!(published.len(), 2);
+        assert!(published[0].model.is_some());
+        let commands = published[1].slash_commands.as_ref().unwrap();
+        assert_eq!(
+            commands
+                .commands
+                .iter()
+                .map(|entry| entry.command)
+                .collect::<Vec<_>>(),
+            [
+                SlashCommand::Upload,
+                SlashCommand::Resume,
+                SlashCommand::Mcp,
+                SlashCommand::Model,
+                SlashCommand::Cli,
+            ]
+        );
     }
 }

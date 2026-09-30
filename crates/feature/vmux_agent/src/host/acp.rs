@@ -20,6 +20,7 @@ use vmux_tool::{
 
 mod environment;
 mod install;
+pub(super) mod model;
 pub mod registry;
 
 use self::environment::AcpEnvironment;

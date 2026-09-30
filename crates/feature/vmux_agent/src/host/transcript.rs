@@ -1,10 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use super::model::{ModeProjection, ModelProjection};
-use crate::acp_registry::RegistryAgent;
 use crate::handoff::ImportedConversation;
-use crate::runtime::acp::{AcpModeState, AcpModelState};
 #[cfg(test)]
 use vmux_chat::event::ChatItem;
 use vmux_chat::event::{
@@ -18,10 +15,8 @@ use vmux_chat::host::{
     TranscriptTail,
 };
 use vmux_core::PageMetadata;
-use vmux_core::agent::AgentKind;
 use vmux_core::chat::{group_turns_before, group_turns_tail, grouped_item_count};
 use vmux_core::team::{Profile, User};
-use vmux_session::AcpSession;
 use vmux_session::{AgentConversationTitle, AgentMessageTimes, AgentMessages, PromptQueue};
 use vmux_session::{AgentRunState, AgentTurnMeta};
 
@@ -353,10 +348,8 @@ fn sync_chat_to_ready_views(
         Option<&ImportedConversation>,
         Option<&AgentConversationTitle>,
     )>,
-    acp_sessions: Query<(&AcpSession, Option<&AcpModelState>, Option<&AcpModeState>)>,
     choices: Query<&PendingAgentChoice>,
     user_profiles: Query<&Profile, With<User>>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
     mut commands: Commands,
 ) {
     let user_profile = user_profiles.single().ok();
@@ -409,39 +402,6 @@ fn sync_chat_to_ready_views(
         if !paths.is_empty() {
             commands.trigger(ChatAttachmentHydrationRequest { webview, paths });
         }
-        let (cross, model_state, mode_state, agent_key) = acp_sessions
-            .get(stack)
-            .ok()
-            .map(|(acp, model, mode)| {
-                (
-                    RegistryAgent::kind(&acp.agent_id)
-                        .map(AgentKind::supports_cross_runtime)
-                        .unwrap_or(false),
-                    model,
-                    mode,
-                    acp.agent_id.clone(),
-                )
-            })
-            .unwrap_or((false, None, None, String::new()));
-        let model = ModelProjection::new(model_state, cross, &agent_key, settings.as_deref());
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
-                webview,
-                &model.state,
-            ),
-        );
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
-                webview,
-                &model.slash_commands,
-            ),
-        );
-        let mode = ModeProjection::from(mode_state);
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
-                webview, &mode.0,
-            ),
-        );
         commands.entity(webview).insert(ChatSynced);
     }
 }

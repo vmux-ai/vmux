@@ -1,14 +1,13 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
+use crate::event::AgentRequestInput;
 #[cfg(test)]
-use super::model_selection::SavedAgentModel;
-use super::model_selection::{
+use crate::host::model_selection::SavedAgentModel;
+use crate::host::model_selection::{
     AcpModeRequestCounter, AcpModelRequestCounter, AgentSelectionKey, ModelSelectionPlugin,
 };
-pub(crate) use super::model_selection::{AgentModeSelections, AgentModelSelections};
-use crate::acp_registry::RegistryAgent;
-use crate::event::AgentRequestInput;
+use crate::host::model_selection::{AgentModeSelections, AgentModelSelections};
 use crate::runtime::acp::{AcpModeState, AcpModelState};
 use vmux_api::command_bar::{AgentModels, AgentModes};
 use vmux_api::protocol::{
@@ -16,22 +15,20 @@ use vmux_api::protocol::{
 };
 use vmux_api::room::RemoteModelState;
 use vmux_chat::event::{
-    ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort, SlashCommand,
-    SlashCommandEntry, SlashCommands,
+    ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort,
 };
-use vmux_chat::host::ChatUiState;
-use vmux_chat::host::ChatView;
+use vmux_chat::host::{ChatModeStateChanged, ChatModelStateChanged, ChatView};
 use vmux_command::event::{StartSelectMode, StartSelectModel};
 use vmux_command::snapshot::{AgentPromptTarget, CommandBarProjection};
 use vmux_core::agent::{AgentKind, default_effort, effort_levels};
-use vmux_core::host::UiStateWrite;
+use vmux_core::page::PageReady;
 use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_session::AcpSession;
 use vmux_setting::{AppSettings, SettingsWriteRequest};
 
-pub(super) struct ChatModelPlugin;
+pub(super) struct AcpModelPlugin;
 
-impl Plugin for ChatModelPlugin {
+impl Plugin for AcpModelPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(ModelSelectionPlugin)
             .add_message::<ServiceRequest>()
@@ -40,13 +37,19 @@ impl Plugin for ChatModelPlugin {
             .add_message::<ModeSelectRequest>()
             .add_message::<ModelSelectRequest>()
             .add_message::<EffortSetRequest>()
-            .add_plugins(UiEventPlugin::<(SelectModel, SetAgentEffort, SelectMode)>::default())
+            .add_plugins(UiEventPlugin::<(
+                SelectModel,
+                SetAgentEffort,
+                SelectMode,
+                PageReady,
+            )>::default())
             .add_plugins(UiEventPlugin::<(StartSelectModel, StartSelectMode)>::default())
             .add_observer(on_select_model)
             .add_observer(on_select_mode)
             .add_observer(on_set_agent_effort)
             .add_observer(on_start_select_model)
             .add_observer(on_start_select_mode)
+            .add_observer(sync_page_model_state)
             .add_systems(
                 Update,
                 (
@@ -225,19 +228,16 @@ struct ModeSelectRequest {
     mode_id: String,
 }
 
-pub(super) struct ModelProjection {
-    pub(super) state: ModelState,
-    pub(super) slash_commands: SlashCommands,
+struct AcpModelProjection<'a> {
+    model: Option<&'a AcpModelState>,
+    session: &'a AcpSession,
+    settings: Option<&'a AppSettings>,
 }
 
-impl ModelProjection {
-    pub(super) fn new(
-        model: Option<&AcpModelState>,
-        cross_runtime: bool,
-        agent_key: &str,
-        settings: Option<&AppSettings>,
-    ) -> Self {
-        let mut state = match model {
+impl AcpModelProjection<'_> {
+    fn state(&self) -> ModelState {
+        let agent_key = self.session.agent_id.as_str();
+        let mut state = match self.model {
             Some(model) => ModelState {
                 current_model_id: model.display_model_id().to_string(),
                 current_model_name: model.current_name().to_string(),
@@ -248,7 +248,8 @@ impl ModelProjection {
             None => ModelState::default(),
         };
         state.agent_key = agent_key.to_string();
-        state.effort_current = settings
+        state.effort_current = self
+            .settings
             .and_then(|settings| settings.agent.effort_for(agent_key))
             .unwrap_or("")
             .to_string();
@@ -257,40 +258,13 @@ impl ModelProjection {
             .iter()
             .map(|level| level.to_string())
             .collect();
-        Self {
-            state,
-            slash_commands: Self::slash_commands(cross_runtime, model.is_some()),
-        }
+        state
     }
 
-    fn slash_commands(cross_runtime: bool, has_models: bool) -> SlashCommands {
-        let mut commands = vec![
-            SlashCommandEntry {
-                command: SlashCommand::Upload,
-                description: "Attach files".to_string(),
-            },
-            SlashCommandEntry {
-                command: SlashCommand::Resume,
-                description: "Resume a past session".to_string(),
-            },
-            SlashCommandEntry {
-                command: SlashCommand::Mcp,
-                description: String::new(),
-            },
-        ];
-        if has_models {
-            commands.push(SlashCommandEntry {
-                command: SlashCommand::Model,
-                description: "Select model".to_string(),
-            });
-        }
-        if cross_runtime {
-            commands.push(SlashCommandEntry {
-                command: SlashCommand::Cli,
-                description: "Continue this session in the CLI".to_string(),
-            });
-        }
-        SlashCommands { commands }
+    fn cross_runtime(&self) -> bool {
+        super::registry::RegistryAgent::kind(&self.session.agent_id)
+            .map(AgentKind::supports_cross_runtime)
+            .unwrap_or(false)
     }
 
     fn options(model: &AcpModelState) -> Vec<ModelOptionEntry> {
@@ -306,17 +280,17 @@ impl ModelProjection {
     }
 }
 
-pub(super) struct ModeProjection(pub(super) ModeState);
+struct AcpModeProjection<'a>(Option<&'a AcpModeState>);
 
-impl From<Option<&AcpModeState>> for ModeProjection {
-    fn from(mode: Option<&AcpModeState>) -> Self {
-        Self(match mode {
+impl AcpModeProjection<'_> {
+    fn state(&self) -> ModeState {
+        match self.0 {
             Some(mode) => ModeState {
                 current_mode_id: mode.display_mode_id().to_string(),
                 modes: mode.modes.clone(),
             },
             None => ModeState::default(),
-        })
+        }
     }
 }
 
@@ -365,7 +339,7 @@ fn remember_acp_model_lists(
     mut last_used: Single<&mut AgentModelSelections>,
 ) {
     for (session, state) in &sessions {
-        let listed = ModelProjection::options(state);
+        let listed = AcpModelProjection::options(state);
         let current = state.display_model_id().to_string();
         let url = AgentSelectionKey::acp_url(&session.agent_id);
         last_used.remember_catalog(&session.agent_id, &url, &current, &listed);
@@ -449,22 +423,15 @@ fn push_acp_model_state_to_page(
         let Some(webview) = kids.iter().find(|&entity| chat_views.contains(entity)) else {
             continue;
         };
-        let cross = RegistryAgent::kind(&session.agent_id)
-            .map(AgentKind::supports_cross_runtime)
-            .unwrap_or(false);
-        let projection = ModelProjection::new(
-            Some(model_state),
-            cross,
-            &session.agent_id,
-            settings.as_deref(),
-        );
-        commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+        let projection = AcpModelProjection {
+            model: Some(model_state),
+            session,
+            settings: settings.as_deref(),
+        };
+        commands.trigger(ChatModelStateChanged::new(
             webview,
-            &projection.state,
-        ));
-        commands.trigger(UiStateWrite::<ChatUiState>::from_event(
-            webview,
-            &projection.slash_commands,
+            projection.state(),
+            projection.cross_runtime(),
         ));
     }
 }
@@ -487,17 +454,15 @@ fn remove_model_state(
         let Some(webview) = kids.iter().find(|&entity| chat_views.contains(entity)) else {
             continue;
         };
-        let cross = RegistryAgent::kind(&session.agent_id)
-            .map(AgentKind::supports_cross_runtime)
-            .unwrap_or(false);
-        let projection = ModelProjection::new(None, cross, &session.agent_id, settings.as_deref());
-        commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+        let projection = AcpModelProjection {
+            model: None,
+            session,
+            settings: settings.as_deref(),
+        };
+        commands.trigger(ChatModelStateChanged::new(
             webview,
-            &projection.state,
-        ));
-        commands.trigger(UiStateWrite::<ChatUiState>::from_event(
-            webview,
-            &projection.slash_commands,
+            projection.state(),
+            projection.cross_runtime(),
         ));
     }
 }
@@ -515,10 +480,9 @@ fn push_acp_mode_state_to_page(
         let Some(webview) = kids.iter().find(|&entity| chat_views.contains(entity)) else {
             continue;
         };
-        let projection = ModeProjection::from(Some(mode_state));
-        commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+        commands.trigger(ChatModeStateChanged::new(
             webview,
-            &projection.0,
+            AcpModeProjection(Some(mode_state)).state(),
         ));
     }
 }
@@ -536,12 +500,41 @@ fn remove_mode_state(
         let Some(webview) = kids.iter().find(|&entity| chat_views.contains(entity)) else {
             continue;
         };
-        let projection = ModeProjection::from(None);
-        commands.trigger(UiStateWrite::<ChatUiState>::from_event(
+        commands.trigger(ChatModeStateChanged::new(
             webview,
-            &projection.0,
+            AcpModeProjection(None).state(),
         ));
     }
+}
+
+fn sync_page_model_state(
+    trigger: On<UiInput<PageReady>>,
+    views: Query<&ChildOf, With<ChatView>>,
+    sessions: Query<(&AcpSession, Option<&AcpModelState>, Option<&AcpModeState>)>,
+    settings: Option<Res<AppSettings>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok(parent) = views.get(webview) else {
+        return;
+    };
+    let Ok((session, model, mode)) = sessions.get(parent.parent()) else {
+        return;
+    };
+    let projection = AcpModelProjection {
+        model,
+        session,
+        settings: settings.as_deref(),
+    };
+    commands.trigger(ChatModelStateChanged::new(
+        webview,
+        projection.state(),
+        projection.cross_runtime(),
+    ));
+    commands.trigger(ChatModeStateChanged::new(
+        webview,
+        AcpModeProjection(mode).state(),
+    ));
 }
 
 fn on_select_model(
@@ -731,53 +724,6 @@ fn send_acp_mode_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn slash_commands_include_mcp_and_gate_cli_by_runtime() {
-        let commands = |cross, models| {
-            ModelProjection::slash_commands(cross, models)
-                .commands
-                .iter()
-                .map(|entry| entry.command)
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            commands(false, false),
-            [
-                SlashCommand::Upload,
-                SlashCommand::Resume,
-                SlashCommand::Mcp
-            ]
-        );
-        assert_eq!(
-            commands(false, true),
-            [
-                SlashCommand::Upload,
-                SlashCommand::Resume,
-                SlashCommand::Mcp,
-                SlashCommand::Model,
-            ]
-        );
-        assert_eq!(
-            commands(true, false),
-            [
-                SlashCommand::Upload,
-                SlashCommand::Resume,
-                SlashCommand::Mcp,
-                SlashCommand::Cli,
-            ]
-        );
-        assert_eq!(
-            commands(true, true),
-            [
-                SlashCommand::Upload,
-                SlashCommand::Resume,
-                SlashCommand::Mcp,
-                SlashCommand::Model,
-                SlashCommand::Cli,
-            ]
-        );
-    }
 
     #[test]
     fn model_selection_updates_cached_state_before_response() {
