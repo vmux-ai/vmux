@@ -93,66 +93,6 @@ pub struct AcpTerminal {
 #[derive(Clone)]
 struct AcpFsScope {
     cwd: PathBuf,
-    vibe_temp_root: Option<PathBuf>,
-}
-
-struct AcpSessionContinuity {
-    fresh_on_model_change: bool,
-    prompted: bool,
-}
-
-impl AcpSessionContinuity {
-    fn for_agent(agent_id: &str) -> Self {
-        Self {
-            fresh_on_model_change: matches!(agent_id, "codex" | "codex-acp"),
-            prompted: false,
-        }
-    }
-
-    fn record_prompt(&mut self) {
-        self.prompted = true;
-    }
-
-    fn needs_fresh_session(&self, current_model_id: Option<&str>, next_model_id: &str) -> bool {
-        self.fresh_on_model_change && self.prompted && current_model_id != Some(next_model_id)
-    }
-
-    fn reset(&mut self) {
-        self.prompted = false;
-    }
-}
-
-struct VibeTempRoot(tempfile::TempDir);
-
-impl VibeTempRoot {
-    fn create(agent_id: &str) -> std::io::Result<Option<Self>> {
-        if !matches!(agent_id, "mistral-vibe" | "vibe") {
-            return Ok(None);
-        }
-        tempfile::Builder::new()
-            .prefix("vmux-vibe-")
-            .tempdir()
-            .map(Self)
-            .map(Some)
-    }
-
-    fn path(&self) -> &std::path::Path {
-        self.0.path()
-    }
-
-    fn apply_env(&self, mut env: Vec<(String, String)>) -> Vec<(String, String)> {
-        env.retain(|(key, _)| key != "TMPDIR");
-        env.push((
-            "TMPDIR".to_string(),
-            self.path().to_string_lossy().into_owned(),
-        ));
-        env
-    }
-
-    async fn cleanup(self) {
-        let path = self.0.keep();
-        let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(path)).await;
-    }
 }
 
 #[derive(Clone)]
@@ -568,40 +508,15 @@ async fn prompt_content_blocks(
     blocks
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn run(
     command: String,
     args: Vec<String>,
     env: Vec<(String, String)>,
-    agent_id: String,
     mcp_servers: Vec<McpServer>,
     resume: Option<String>,
-    effort: Option<String>,
     shared: Arc<AcpShared>,
     mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
 ) {
-    let vibe_temp_root = match VibeTempRoot::create(&agent_id) {
-        Ok(root) => root,
-        Err(err) => {
-            shared.emit_status(AgentRunStatus::Errored(format!(
-                "vibe temp directory failed: {err}"
-            )));
-            return;
-        }
-    };
-    let fs_scope = AcpFsScope {
-        cwd: shared.cwd(),
-        vibe_temp_root: vibe_temp_root
-            .as_ref()
-            .map(|root| root.path().to_path_buf()),
-    };
-    let env = apply_vibe_mcp_env(&agent_id, env, &mcp_servers);
-    let env = match &vibe_temp_root {
-        Some(root) => root.apply_env(env),
-        None => env,
-    };
-    let session_meta = session_meta_for_agent(&agent_id, effort.as_deref());
-    let mut continuity = AcpSessionContinuity::for_agent(&agent_id);
     let agent_cwd = shared.cwd();
     let mut child = match Command::new(&command)
         .args(&args)
@@ -633,8 +548,6 @@ pub async fn run(
     let wait_shared = shared.clone();
     let kill_shared = shared.clone();
     let release_shared = shared.clone();
-    let read_scope = fs_scope.clone();
-    let write_scope = fs_scope;
     let read_shared = shared.clone();
     let write_shared = shared.clone();
 
@@ -696,7 +609,6 @@ pub async fn run(
                         _cx| {
                 let scope = AcpFsScope {
                     cwd: read_shared.cwd(),
-                    vibe_temp_root: read_scope.vibe_temp_root.clone(),
                 };
                 match read_text_file(&scope, &req) {
                     Ok(content) => responder.respond(ReadTextFileResponse::new(content)),
@@ -711,7 +623,6 @@ pub async fn run(
                         _cx| {
                 let scope = AcpFsScope {
                     cwd: write_shared.cwd(),
-                    vibe_temp_root: write_scope.vibe_temp_root.clone(),
                 };
                 match write_text_file(&scope, &req) {
                     Ok(()) => responder.respond(WriteTextFileResponse::new()),
@@ -823,7 +734,6 @@ pub async fn run(
                 load_requested_session(resume, init_resp.agent_capabilities.load_session, |sid| {
                     let mut load = LoadSessionRequest::new(sid, main_shared.cwd());
                     load.mcp_servers = mcp_servers.clone();
-                    load.meta = session_meta.clone();
                     let shared = main_shared.clone();
                     let cx = cx.clone();
                     async move {
@@ -861,7 +771,6 @@ pub async fn run(
                 let ensured = ensure_session(&mut session_id, || {
                     let mut new_session = NewSessionRequest::new(main_shared.cwd());
                     new_session.mcp_servers = mcp_servers.clone();
-                    new_session.meta = session_meta.clone();
                     let shared = main_shared.clone();
                     let cx = cx.clone();
                     async move {
@@ -925,7 +834,6 @@ pub async fn run(
                         let ensured = ensure_session(&mut session_id, || {
                             let mut new_session = NewSessionRequest::new(main_shared.cwd());
                             new_session.mcp_servers = mcp_servers.clone();
-                            new_session.meta = session_meta.clone();
                             let shared = main_shared.clone();
                             let cx = cx.clone();
                             async move {
@@ -997,7 +905,6 @@ pub async fn run(
                                 }
                             }
                         }
-                        continuity.record_prompt();
                         let cx_prompt = cx.clone();
                         let shared = main_shared.clone();
                         let prompt_capabilities = prompt_capabilities.clone();
@@ -1039,64 +946,9 @@ pub async fn run(
                             ));
                             continue;
                         };
-                        let current_model_id = main_shared
-                            .selection_snapshot()
-                            .await
-                            .model
-                            .as_ref()
-                            .map(|state| state.current_model_id.clone());
-                        let needs_fresh_session = continuity
-                            .needs_fresh_session(current_model_id.as_deref(), &model_id);
-                        let mut fresh_session = None;
-                        let target_sid = if needs_fresh_session {
-                            let mut new_session = NewSessionRequest::new(main_shared.cwd());
-                            new_session.mcp_servers = mcp_servers.clone();
-                            new_session.meta = session_meta.clone();
-                            match tokio::time::timeout(
-                                ACP_STARTUP_TIMEOUT,
-                                cx.send_request(new_session).block_task(),
-                            )
-                            .await
-                            {
-                                Ok(Ok(response)) => {
-                                    fresh_session = Some((
-                                        response.config_options.unwrap_or_default(),
-                                        response.modes,
-                                    ));
-                                    response.session_id
-                                }
-                                Ok(Err(err)) => {
-                                    publish_model_selection_result(
-                                        &main_shared,
-                                        request_id,
-                                        &model_id,
-                                        false,
-                                    );
-                                    main_shared.emit_status(AgentRunStatus::Errored(format!(
-                                        "acp session restart failed: {err}"
-                                    )));
-                                    continue;
-                                }
-                                Err(_) => {
-                                    publish_model_selection_result(
-                                        &main_shared,
-                                        request_id,
-                                        &model_id,
-                                        false,
-                                    );
-                                    main_shared.emit_status(AgentRunStatus::Errored(format!(
-                                        "acp session restart did not answer within {}s",
-                                        ACP_STARTUP_TIMEOUT.as_secs()
-                                    )));
-                                    continue;
-                                }
-                            }
-                        } else {
-                            current_sid
-                        };
                         match cx
                             .send_request(SetSessionConfigOptionRequest::new(
-                                target_sid.clone(),
+                                current_sid,
                                 config_id.clone(),
                                 model_id.clone(),
                             ))
@@ -1104,15 +956,6 @@ pub async fn run(
                             .await
                         {
                             Ok(response) => {
-                                if let Some((config_options, modes)) = fresh_session {
-                                    session_id = Some(target_sid.clone());
-                                    continuity.reset();
-                                    main_shared.publish_mode_info(&config_options, modes.as_ref());
-                                    main_shared.emit(ServiceMessage::AcpSessionCreated {
-                                        sid: main_shared.sid.clone(),
-                                        acp_session_id: target_sid.to_string(),
-                                    });
-                                }
                                 main_shared.publish_selected_model(
                                     &config_id,
                                     &model_id,
@@ -1224,64 +1067,6 @@ pub async fn run(
         )));
     }
     let _ = child.kill().await;
-    if let Some(root) = vibe_temp_root {
-        root.cleanup().await;
-    }
-}
-
-fn apply_vibe_mcp_env(
-    agent_id: &str,
-    mut env: Vec<(String, String)>,
-    mcp_servers: &[McpServer],
-) -> Vec<(String, String)> {
-    if !matches!(agent_id, "mistral-vibe" | "vibe") || mcp_servers.is_empty() {
-        return env;
-    }
-    let mut configured = env
-        .iter()
-        .rev()
-        .find(|(key, _)| key == "VIBE_MCP_SERVERS")
-        .and_then(
-            |(_, value)| match serde_json::from_str::<Vec<serde_json::Value>>(value) {
-                Ok(servers) => Some(servers),
-                Err(err) => {
-                    tracing::warn!("invalid VIBE_MCP_SERVERS JSON; discarding it: {err}");
-                    None
-                }
-            },
-        )
-        .unwrap_or_default();
-    for server in mcp_servers {
-        let McpServer::Stdio(server) = server else {
-            continue;
-        };
-        configured.retain(|existing| {
-            existing.get("name").and_then(serde_json::Value::as_str) != Some(&server.name)
-        });
-        let server_env: serde_json::Map<String, serde_json::Value> = server
-            .env
-            .iter()
-            .map(|var| {
-                (
-                    var.name.clone(),
-                    serde_json::Value::String(var.value.clone()),
-                )
-            })
-            .collect();
-        configured.push(serde_json::json!({
-            "name": server.name,
-            "transport": "stdio",
-            "command": server.command.to_string_lossy(),
-            "args": server.args,
-            "env": server_env,
-        }));
-    }
-    env.retain(|(key, _)| key != "VIBE_MCP_SERVERS");
-    env.push((
-        "VIBE_MCP_SERVERS".to_string(),
-        serde_json::to_string(&configured).unwrap(),
-    ));
-    env
 }
 
 fn acp_display_name(info: Option<&Implementation>) -> Option<String> {
@@ -1353,83 +1138,6 @@ where
     let sid = create().await?;
     *session_id = Some(sid.clone());
     Ok((sid, true))
-}
-
-const CLAUDE_ACP_STEER_PROMPT: &str = "The native Bash, WebSearch, and WebFetch tools are disabled. \
-Use the available vmux MCP tools for shell and web access and follow their descriptions. \
-If you invoke a required Skill tool, continue the original user request in the same turn after \
-the skill loads. Never end the turn after skill activation or answer only Ready.";
-const CONVERSATION_TITLE_STEER_PROMPT: &str = "On the first user message, always call mcp__vmux__set_conversation_title as the first tool of the turn. The host immediately shows the raw first prompt as a provisional title; replace it with a concise 3 to 7 word summary with corrected spelling and grammar. On later user messages, call the tool only when the conversation topic materially changes; keep the current title for same-topic follow-ups. When needed, call it before reading skills, calling any other tool, or answering. Never copy the user's prompt verbatim. This tool never needs user permission.";
-
-fn session_meta_for_agent(
-    agent_id: &str,
-    effort: Option<&str>,
-) -> Option<serde_json::Map<String, serde_json::Value>> {
-    if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
-        tracing::warn!("external agent Knowledge sync failed: {error}");
-    }
-    session_meta_for_agent_with_knowledge(
-        agent_id,
-        &vmux_core::knowledge::AgentPrompt::from("").into_string(),
-        effort,
-    )
-}
-
-fn session_meta_for_agent_with_knowledge(
-    agent_id: &str,
-    knowledge: &str,
-    effort: Option<&str>,
-) -> Option<serde_json::Map<String, serde_json::Value>> {
-    let prompt = if agent_id == "claude" {
-        if knowledge.is_empty() {
-            CLAUDE_ACP_STEER_PROMPT.to_string()
-        } else {
-            format!("{CLAUDE_ACP_STEER_PROMPT}\n\n{knowledge}")
-        }
-    } else {
-        knowledge.to_string()
-    };
-    let prompt = if prompt.is_empty() {
-        CONVERSATION_TITLE_STEER_PROMPT.to_string()
-    } else {
-        format!("{prompt}\n\n{CONVERSATION_TITLE_STEER_PROMPT}")
-    };
-    if agent_id != "claude" {
-        let serde_json::Value::Object(meta) = serde_json::json!({
-            "systemPrompt": {
-                "append": prompt,
-            },
-        }) else {
-            unreachable!()
-        };
-        return Some(meta);
-    }
-    let serde_json::Value::Object(mut meta) = serde_json::json!({
-        "systemPrompt": {
-            "append": prompt,
-        },
-        "claudeCode": {
-            "options": {
-                "disallowedTools": ["Bash", "Monitor", "WebSearch", "WebFetch"],
-                "allowedTools": ["mcp__vmux__*"],
-            },
-        },
-    }) else {
-        unreachable!()
-    };
-    if let Some(level) =
-        effort.filter(|level| vmux_core::agent::effort_levels("claude").contains(level))
-        && let Some(options) = meta
-            .get_mut("claudeCode")
-            .and_then(|claude_code| claude_code.get_mut("options"))
-            .and_then(|options| options.as_object_mut())
-    {
-        options.insert(
-            "effort".to_string(),
-            serde_json::Value::String(level.to_string()),
-        );
-    }
-    Some(meta)
 }
 
 async fn drain_stderr(stderr: tokio::process::ChildStderr, shared: Arc<AcpShared>) {
@@ -1737,51 +1445,6 @@ fn resolve_in_cwd(cwd: &std::path::Path, path: &std::path::Path) -> Option<PathB
 
 fn resolve_acp_fs_path(scope: &AcpFsScope, path: &std::path::Path) -> Option<PathBuf> {
     resolve_in_cwd(&scope.cwd, path)
-        .or_else(|| resolve_vibe_scratchpad(scope.vibe_temp_root.as_ref()?, path))
-}
-
-fn resolve_vibe_scratchpad(temp_root: &std::path::Path, path: &std::path::Path) -> Option<PathBuf> {
-    if !path.is_absolute()
-        || path
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
-        return None;
-    }
-    let prefix = "vibe-scratchpad-";
-    let real_temp = temp_root.canonicalize().ok()?;
-    for base in [temp_root, real_temp.as_path()] {
-        let Ok(relative) = path.strip_prefix(base) else {
-            continue;
-        };
-        let Some(std::path::Component::Normal(root_name)) = relative.components().next() else {
-            continue;
-        };
-        let Some(root_name_str) = root_name.to_str() else {
-            continue;
-        };
-        if !root_name_str.starts_with(prefix) || root_name_str.len() == prefix.len() {
-            continue;
-        }
-        let scratchpad = base.join(root_name);
-        let Ok(real_scratchpad) = scratchpad.canonicalize() else {
-            continue;
-        };
-        if !real_scratchpad.starts_with(&real_temp) {
-            continue;
-        }
-        let Some(real_root_name) = real_scratchpad.file_name().and_then(|name| name.to_str())
-        else {
-            continue;
-        };
-        if !real_root_name.starts_with(prefix) || real_root_name.len() == prefix.len() {
-            continue;
-        }
-        if let Some(path) = resolve_in_cwd(&scratchpad, path) {
-            return Some(path);
-        }
-    }
-    None
 }
 
 fn slice_lines(text: &str, line: Option<u32>, limit: Option<u32>) -> String {
@@ -1994,60 +1657,6 @@ mod tests {
             acp_display_name(Some(&named)).as_deref(),
             Some("claude-code-acp")
         );
-    }
-
-    #[test]
-    fn vibe_acp_injects_session_mcp_servers_into_vibe_config() {
-        let server = McpServer::Stdio(
-            agent_client_protocol::schema::v1::McpServerStdio::new("vmux", "/tmp/vmux")
-                .args(vec!["mcp".to_string(), "--profile".to_string()])
-                .env(vec![agent_client_protocol::schema::v1::EnvVariable::new(
-                    "VMUX_PROFILE",
-                    "dev",
-                )]),
-        );
-        let env = apply_vibe_mcp_env(
-            "mistral-vibe",
-            vec![(
-                "VIBE_MCP_SERVERS".to_string(),
-                r#"[{"name":"other","transport":"stdio","command":"other"}]"#.to_string(),
-            )],
-            &[server],
-        );
-        let value = env
-            .iter()
-            .find(|(key, _)| key == "VIBE_MCP_SERVERS")
-            .map(|(_, value)| serde_json::from_str::<serde_json::Value>(value).unwrap())
-            .unwrap();
-
-        assert_eq!(value[0]["name"], "other");
-        assert_eq!(value[1]["name"], "vmux");
-        assert_eq!(value[1]["command"], "/tmp/vmux");
-        assert_eq!(value[1]["args"], serde_json::json!(["mcp", "--profile"]));
-        assert_eq!(value[1]["env"]["VMUX_PROFILE"], "dev");
-    }
-
-    #[test]
-    fn vibe_temp_root_overrides_child_tmpdir() {
-        let root = VibeTempRoot::create("mistral-vibe").unwrap().unwrap();
-        let env = root.apply_env(vec![
-            ("TMPDIR".to_string(), "/old".to_string()),
-            ("HOME".to_string(), "/home/test".to_string()),
-        ]);
-        let expected = root.path().to_string_lossy().into_owned();
-
-        assert_eq!(
-            env.iter()
-                .filter(|(key, _)| key == "TMPDIR")
-                .map(|(_, value)| value.as_str())
-                .collect::<Vec<_>>(),
-            vec![expected.as_str()]
-        );
-        assert!(
-            env.iter()
-                .any(|(key, value)| key == "HOME" && value == "/home/test")
-        );
-        assert!(VibeTempRoot::create("codex").unwrap().is_none());
     }
 
     #[test]
@@ -2363,26 +1972,6 @@ mod tests {
             }
             other => panic!("expected ACP model info, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn codex_model_change_after_a_prompt_requires_a_fresh_session() {
-        let mut continuity = AcpSessionContinuity::for_agent("codex-acp");
-
-        assert!(!continuity.needs_fresh_session(Some("gpt-5.6-sol"), "gpt-5.6-luna"));
-        continuity.record_prompt();
-        assert!(continuity.needs_fresh_session(Some("gpt-5.6-sol"), "gpt-5.6-luna"));
-        assert!(!continuity.needs_fresh_session(Some("gpt-5.6-sol"), "gpt-5.6-sol"));
-        continuity.reset();
-        assert!(!continuity.needs_fresh_session(Some("gpt-5.6-sol"), "gpt-5.6-luna"));
-    }
-
-    #[test]
-    fn other_agents_keep_their_session_when_the_model_changes() {
-        let mut continuity = AcpSessionContinuity::for_agent("claude-acp");
-        continuity.record_prompt();
-
-        assert!(!continuity.needs_fresh_session(Some("sonnet"), "opus"));
     }
 
     #[test]
@@ -2761,52 +2350,6 @@ mod tests {
     }
 
     #[test]
-    fn claude_acp_disables_native_shell_and_steers_skill_continuation() {
-        let meta = session_meta_for_agent_with_knowledge("claude", "memory context", Some("high"))
-            .expect("Claude ACP metadata");
-        let options = &meta["claudeCode"]["options"];
-
-        assert_eq!(options["effort"], "high");
-        assert_eq!(
-            options["disallowedTools"],
-            serde_json::json!(["Bash", "Monitor", "WebSearch", "WebFetch"])
-        );
-        assert!(
-            options["allowedTools"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|tool| tool == "mcp__vmux__*")
-        );
-        let prompt = meta["systemPrompt"]["append"].as_str().unwrap();
-        assert!(prompt.contains("available vmux MCP tools"));
-        assert!(prompt.contains("continue the original user request"));
-        assert!(prompt.contains("memory context"));
-        assert!(prompt.contains("mcp__vmux__set_conversation_title"));
-        let unset = session_meta_for_agent_with_knowledge("claude", "memory context", None)
-            .expect("Claude ACP metadata");
-        assert!(unset["claudeCode"]["options"].get("effort").is_none());
-        let bogus =
-            session_meta_for_agent_with_knowledge("claude", "memory context", Some("turbo"))
-                .expect("Claude ACP metadata");
-        assert!(bogus["claudeCode"]["options"].get("effort").is_none());
-        let generic = session_meta_for_agent_with_knowledge("vibe-acp", "skill context", None)
-            .unwrap()["systemPrompt"]["append"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        assert!(generic.starts_with("skill context\n\n"));
-        assert!(generic.contains("mcp__vmux__set_conversation_title"));
-        assert!(generic.contains("first tool of the turn"));
-        assert!(generic.contains("raw first prompt as a provisional title"));
-        assert!(generic.contains("topic materially changes"));
-        assert!(generic.contains("same-topic follow-ups"));
-        assert!(generic.contains("corrected spelling and grammar"));
-        assert!(generic.contains("Never copy the user's prompt verbatim"));
-        assert!(generic.contains("never needs user permission"));
-    }
-
-    #[test]
     fn pick_permission_option_preserves_decision_scope() {
         let opts = vec![
             opt("once", PermissionOptionKind::AllowOnce),
@@ -2860,52 +2403,6 @@ mod tests {
         );
         assert!(resolve_in_cwd(cwd, std::path::Path::new("/etc/passwd")).is_none());
         assert!(resolve_in_cwd(cwd, std::path::Path::new("/work/../etc/passwd")).is_none());
-    }
-
-    #[test]
-    fn vibe_fs_scope_allows_only_process_temp_root() {
-        let temp_root = tempfile::tempdir().unwrap();
-        let scratchpad = temp_root.path().join("vibe-scratchpad-cafebabe-runtime");
-        std::fs::create_dir_all(&scratchpad).unwrap();
-        let scope = AcpFsScope {
-            cwd: PathBuf::from("/work"),
-            vibe_temp_root: Some(temp_root.path().to_path_buf()),
-        };
-
-        assert!(resolve_acp_fs_path(&scope, &scratchpad.join("test.nu")).is_some());
-        assert!(
-            resolve_acp_fs_path(
-                &scope,
-                &scratchpad.canonicalize().unwrap().join("canonical.nu")
-            )
-            .is_some()
-        );
-        assert!(
-            resolve_acp_fs_path(
-                &scope,
-                &std::env::temp_dir().join("vibe-scratchpad-deadbeef-foreign/test.nu")
-            )
-            .is_none()
-        );
-        assert!(resolve_acp_fs_path(&scope, std::path::Path::new("/etc/passwd")).is_none());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn vibe_fs_scope_rejects_scratchpad_symlink_outside_process_root() {
-        use std::os::unix::fs::symlink;
-
-        let temp_root = tempfile::tempdir().unwrap();
-        let foreign_root = tempfile::tempdir().unwrap();
-        let target = foreign_root.path().join("vibe-scratchpad-cafebabe-target");
-        let alias = temp_root.path().join("vibe-scratchpad-deadbeef-alias");
-        std::fs::create_dir_all(&target).unwrap();
-        std::fs::write(target.join("secret.nu"), "secret").unwrap();
-        symlink(&target, &alias).unwrap();
-
-        assert!(resolve_vibe_scratchpad(temp_root.path(), &alias.join("secret.nu")).is_none());
-
-        std::fs::remove_file(alias).unwrap();
     }
 
     #[test]
@@ -3014,10 +2511,7 @@ mod tests {
 
         let worktree = worktree.canonicalize().unwrap();
         assert_eq!(shared.cwd(), worktree);
-        let scope = AcpFsScope {
-            cwd: shared.cwd(),
-            vibe_temp_root: None,
-        };
+        let scope = AcpFsScope { cwd: shared.cwd() };
         assert_eq!(
             read_text_file(&scope, &ReadTextFileRequest::new("s1", &worktree_file)),
             Ok("worktree".into())

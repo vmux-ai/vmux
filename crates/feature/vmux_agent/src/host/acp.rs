@@ -28,8 +28,6 @@ pub(super) use model::AcpModelPlugin;
 use self::environment::AcpEnvironment;
 use self::install::{resolve_from_registry, uninstall};
 use self::registry::{Registry, RegistryAgent};
-use crate::host::launch::{AgentLaunchPolicy, AgentLaunchPolicyQuery};
-use crate::manifest::{CliProviderManifest, CliProviderManifests};
 use vmux_session::AgentRunState;
 
 pub(crate) struct AcpToolPlugin;
@@ -183,7 +181,6 @@ struct AcpInstallKey {
     fallback_args: Vec<String>,
     fallback_env: Vec<(String, String)>,
     shell: String,
-    policy: AgentLaunchPolicy,
 }
 
 #[derive(Component)]
@@ -203,8 +200,6 @@ struct AcpInstallRequest {
     agent_id: String,
     fallback: Option<AcpAgentConfig>,
     shell: String,
-    policy: AgentLaunchPolicy,
-    provider: CliProviderManifest,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -227,7 +222,6 @@ struct AcpLaunch {
     env: Vec<(String, String)>,
     managed_mcp_servers: Vec<ManagedMcpServer>,
     mcp_revision: u64,
-    direct_only_namespace: String,
 }
 
 #[derive(Clone)]
@@ -242,8 +236,6 @@ fn start_acp_installs(
     jobs: Query<(Entity, &AcpInstallKey)>,
     focused: vmux_layout::stack::FocusedStack,
     settings: Option<Res<AppSettings>>,
-    policy: AgentLaunchPolicyQuery,
-    providers: Single<&CliProviderManifests>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
 ) {
     let Some(settings) = settings else {
@@ -253,7 +245,6 @@ fn start_acp_installs(
         return;
     };
     let shell = vmux_terminal::agent_run::AgentTerminalShell::configured(&settings).into_string();
-    let policy = policy.snapshot();
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let mut active_jobs: Vec<(AcpInstallKey, Entity)> = jobs
         .iter()
@@ -269,15 +260,10 @@ fn start_acp_installs(
             .iter()
             .find(|config| RegistryAgent::ids_match(&config.id, &session.agent_id))
             .cloned();
-        let Some(kind) = RegistryAgent::kind(&session.agent_id) else {
-            continue;
-        };
         let request = AcpInstallRequest {
             agent_id: session.agent_id.clone(),
             fallback,
             shell: shell.clone(),
-            policy: policy.clone(),
-            provider: providers.get(kind).clone(),
         };
         let key = request.key();
         let job = match active_jobs
@@ -490,37 +476,30 @@ fn resolve_acp_install(
         .map(|resolved| resolved.package_added)
         .unwrap_or(false);
     let login_env = vmux_terminal::shell_env::login_shell_env(&request.shell);
-    let managed_mcp =
-        match crate::managed_mcp::PreparedManagedMcpServers::for_agent(&request.agent_id) {
-            Ok(managed_mcp) => managed_mcp,
-            Err(message) => {
-                return AcpInstallOutcome {
-                    package_added,
-                    launch: Err(message),
-                };
-            }
-        };
+    let managed_mcp = match crate::managed_mcp::PreparedManagedMcpServers::prepare() {
+        Ok(managed_mcp) => managed_mcp,
+        Err(message) => {
+            return AcpInstallOutcome {
+                package_added,
+                launch: Err(message),
+            };
+        }
+    };
     let launch = match resolved {
         Ok(resolved) => Ok(AcpLaunch {
             command: resolved.command,
             args: resolved.args,
-            env: AcpEnvironment::build(resolved.env, login_env, resolved.path_prepend)
-                .for_agent(&request.agent_id, &request.policy, &request.provider)
-                .into_inner(),
+            env: AcpEnvironment::build(resolved.env, login_env, resolved.path_prepend).into_inner(),
             managed_mcp_servers: managed_mcp.servers,
             mcp_revision: managed_mcp.revision,
-            direct_only_namespace: request.provider.direct_only_namespace.clone(),
         }),
         Err(registry_error) => match request.fallback {
             Some(config) if !config.command.is_empty() => Ok(AcpLaunch {
                 command: config.command,
                 args: config.args,
-                env: AcpEnvironment::build(config.env, login_env, None)
-                    .for_agent(&request.agent_id, &request.policy, &request.provider)
-                    .into_inner(),
+                env: AcpEnvironment::build(config.env, login_env, None).into_inner(),
                 managed_mcp_servers: managed_mcp.servers,
                 mcp_revision: managed_mcp.revision,
-                direct_only_namespace: request.provider.direct_only_namespace.clone(),
             }),
             _ => Err(registry_error),
         },
@@ -547,7 +526,6 @@ impl AcpInstallRequest {
                 .map(|config| config.env.clone())
                 .unwrap_or_default(),
             shell: self.shell.clone(),
-            policy: self.policy.clone(),
         }
     }
 }
@@ -565,39 +543,26 @@ impl AcpLaunch {
                 vmux_terminal::agent_run::AgentTerminalShell::configured(settings).into_string()
             })
             .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_default());
-        let mcp =
-            crate::mcp::McpLaunchSpec::acp(&session.cwd, session.anchor, &session.agent_id, &shell)
-                .resolve()
-                .inspect_err(|error| {
-                    bevy::log::warn!(
-                        "acp: vmux_mcp sidecar unresolved; agent runs without vmux tools: {error}"
-                    );
-                })
-                .ok();
-        let env = AcpEnvironment::from(self.env.clone())
-            .with_managed_servers(
-                &session.agent_id,
-                &self.direct_only_namespace,
-                self.managed_mcp_servers
-                    .iter()
-                    .map(|server| server.name.clone()),
-            )
-            .into_inner();
+        let mcp = crate::mcp::McpLaunchSpec::acp(&session.cwd, session.anchor, &shell)
+            .resolve()
+            .inspect_err(|error| {
+                bevy::log::warn!(
+                    "acp: vmux_mcp sidecar unresolved; agent runs without vmux tools: {error}"
+                );
+            })
+            .ok();
         ClientMessage::SpawnAcpAgent {
             sid: session.sid.clone(),
             agent_id: session.agent_id.clone(),
             command: self.command.clone(),
             args: self.args.clone(),
-            env,
+            env: self.env.clone(),
             cwd: session.cwd.to_string_lossy().into_owned(),
             anchor: session.anchor,
             mcp_command: mcp.as_ref().map(|mcp| mcp.command.clone()),
             mcp_args: mcp.map(|mcp| mcp.args).unwrap_or_default(),
             resume_acp_session_id: session.resume.clone(),
             managed_mcp_servers: self.managed_mcp_servers.clone(),
-            effort: settings
-                .and_then(|settings| settings.agent.effort_for(&session.agent_id))
-                .map(str::to_string),
         }
     }
 }
@@ -696,8 +661,6 @@ mod tests {
             agent_id: agent_id.to_string(),
             fallback: None,
             shell: String::new(),
-            policy: AgentLaunchPolicy::default(),
-            provider: CliProviderManifest::bundled(RegistryAgent::kind(agent_id).unwrap()),
         }
         .key()
     }

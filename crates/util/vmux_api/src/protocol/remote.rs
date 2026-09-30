@@ -133,7 +133,6 @@ pub enum ClientMessage {
         mcp_args: Vec<String>,
         resume_acp_session_id: Option<String>,
         managed_mcp_servers: Vec<ManagedMcpServer>,
-        effort: Option<String>,
     },
     AcpSetMode {
         sid: String,

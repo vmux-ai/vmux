@@ -526,7 +526,6 @@ mod tests {
                 url: Some("https://example.com/mcp".into()),
                 headers: Vec::new(),
             }],
-            effort: Some("high".into()),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&client).unwrap();
         let decoded = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();

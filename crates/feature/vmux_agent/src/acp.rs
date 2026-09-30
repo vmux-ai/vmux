@@ -246,7 +246,6 @@ impl AcpModeInfo {
 
 #[derive(Clone, Default)]
 struct AcpSelectionSnapshot {
-    model: Option<AcpModelInfo>,
     mode: Option<AcpModeInfo>,
 }
 
@@ -382,7 +381,6 @@ impl AcpSessions {
             ),
         )
     }
-    #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         &self,
         sid: String,
@@ -397,7 +395,6 @@ impl AcpSessions {
         mcp_args: Vec<String>,
         managed_mcp_servers: Vec<ManagedMcpServer>,
         resume: Option<String>,
-        effort: Option<String>,
     ) -> Result<(), String> {
         let mcp_servers = AcpMcpServers::from_sources(mcp_command, mcp_args, managed_mcp_servers);
         let (response, receiver) = oneshot::channel();
@@ -413,7 +410,6 @@ impl AcpSessions {
                 processes,
                 mcp_servers: mcp_servers.0,
                 resume,
-                effort,
                 response: Some(response),
             })
             .map_err(|_| "ACP session runtime unavailable".to_string())?;
@@ -611,7 +607,6 @@ struct SpawnAcpSession {
     processes: ProcessRuntime,
     mcp_servers: Vec<agent_client_protocol::schema::v1::McpServer>,
     resume: Option<String>,
-    effort: Option<String>,
     response: Option<oneshot::Sender<()>>,
 }
 
@@ -868,10 +863,8 @@ fn spawn_acp_sessions(
                 std::mem::take(&mut request.command),
                 std::mem::take(&mut request.args),
                 std::mem::take(&mut request.env),
-                request.agent_id.clone(),
                 std::mem::take(&mut request.mcp_servers),
                 request.resume.take(),
-                request.effort.take(),
                 Arc::clone(&shared),
                 input_rx,
             ));
@@ -1162,7 +1155,6 @@ fn project_acp_sessions(
                 }
                 AcpProjectionInput::SelectionSnapshot(response) => {
                     let _ = response.send(AcpSelectionSnapshot {
-                        model: model.0.clone(),
                         mode: mode.0.clone(),
                     });
                 }

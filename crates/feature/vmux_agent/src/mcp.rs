@@ -4,7 +4,6 @@ use vmux_core::ProcessId;
 pub use vmux_core::agent::McpServerConfig;
 
 use crate::AgentKind;
-use crate::acp_registry::RegistryAgent;
 
 const DEFAULT_RUN_TIMEOUT_SECS: u64 = 50;
 const LONG_RUN_TIMEOUT_SECS: u64 = 600;
@@ -34,17 +33,13 @@ impl McpLaunchSpec {
         }
     }
 
-    pub fn acp(cwd: &Path, anchor: ProcessId, agent_id: &str, shell: &str) -> Self {
-        let canonical_id = RegistryAgent::canonical_id(agent_id);
+    pub fn acp(cwd: &Path, anchor: ProcessId, shell: &str) -> Self {
         Self {
             cwd: cwd.to_path_buf(),
             anchor,
             acp_session: true,
-            acp_terminals: !matches!(canonical_id, "claude-acp" | "codex-acp" | "mistral-vibe"),
-            run_timeout_secs: match canonical_id {
-                "claude-acp" | "codex-acp" => LONG_RUN_TIMEOUT_SECS,
-                _ => DEFAULT_RUN_TIMEOUT_SECS,
-            },
+            acp_terminals: true,
+            run_timeout_secs: LONG_RUN_TIMEOUT_SECS,
             shell: shell.to_string(),
         }
     }
@@ -147,8 +142,7 @@ mod tests {
         let anchor = ProcessId::new();
         let plain = McpLaunchSpec::cli(Path::new("/workspace"), anchor, AgentKind::Vibe, "")
             .args("personal");
-        let acp =
-            McpLaunchSpec::acp(Path::new("/workspace"), anchor, "vibe-acp", "").args("personal");
+        let acp = McpLaunchSpec::acp(Path::new("/workspace"), anchor, "").args("personal");
         assert!(!plain.iter().any(|a| a == "--acp-session"));
         assert!(acp.iter().any(|a| a == "--acp-session"));
         assert!(!plain.iter().any(|a| a == "--acp-terminals"));
@@ -156,24 +150,14 @@ mod tests {
     }
 
     #[test]
-    fn compatibility_acp_agents_keep_vmux_terminal_tools() {
-        assert!(!McpLaunchSpec::acp(Path::new("/"), ProcessId::new(), "codex", "").acp_terminals);
-        assert!(
-            !McpLaunchSpec::acp(Path::new("/"), ProcessId::new(), "codex-acp", "").acp_terminals
-        );
-        assert!(!McpLaunchSpec::acp(Path::new("/"), ProcessId::new(), "claude", "").acp_terminals);
-        assert!(
-            !McpLaunchSpec::acp(Path::new("/"), ProcessId::new(), "claude-acp", "").acp_terminals
-        );
-        assert!(
-            !McpLaunchSpec::acp(Path::new("/"), ProcessId::new(), "mistral-vibe", "").acp_terminals
-        );
-        assert!(!McpLaunchSpec::acp(Path::new("/"), ProcessId::new(), "vibe", "").acp_terminals);
-        assert!(McpLaunchSpec::acp(Path::new("/"), ProcessId::new(), "vibe-acp", "").acp_terminals);
+    fn acp_uses_protocol_terminal_and_long_timeout() {
+        let acp = McpLaunchSpec::acp(Path::new("/"), ProcessId::new(), "");
+        assert!(acp.acp_terminals);
+        assert_eq!(acp.run_timeout_secs, LONG_RUN_TIMEOUT_SECS);
     }
 
     #[test]
-    fn codex_and_claude_use_long_run_timeout() {
+    fn direct_cli_timeout_matches_provider_runtime() {
         assert_eq!(
             McpLaunchSpec::cli(Path::new("/"), ProcessId::new(), AgentKind::Codex, "")
                 .run_timeout_secs,
@@ -184,25 +168,12 @@ mod tests {
                 .run_timeout_secs,
             LONG_RUN_TIMEOUT_SECS
         );
-        assert_eq!(
-            McpLaunchSpec::acp(Path::new("/"), ProcessId::new(), "codex", "").run_timeout_secs,
-            LONG_RUN_TIMEOUT_SECS
-        );
-        assert_eq!(
-            McpLaunchSpec::acp(Path::new("/"), ProcessId::new(), "claude", "").run_timeout_secs,
-            LONG_RUN_TIMEOUT_SECS
-        );
     }
 
     #[test]
     fn vibe_keeps_default_run_timeout() {
         assert_eq!(
             McpLaunchSpec::cli(Path::new("/"), ProcessId::new(), AgentKind::Vibe, "")
-                .run_timeout_secs,
-            DEFAULT_RUN_TIMEOUT_SECS
-        );
-        assert_eq!(
-            McpLaunchSpec::acp(Path::new("/"), ProcessId::new(), "mistral-vibe", "")
                 .run_timeout_secs,
             DEFAULT_RUN_TIMEOUT_SECS
         );

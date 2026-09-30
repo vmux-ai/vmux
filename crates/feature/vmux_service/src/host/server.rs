@@ -905,7 +905,6 @@ async fn handle_client(
                 mcp_args,
                 resume_acp_session_id,
                 managed_mcp_servers,
-                effort,
             } => {
                 if let Err(message) = acp_sessions
                     .spawn(
@@ -921,7 +920,6 @@ async fn handle_client(
                         mcp_args,
                         managed_mcp_servers,
                         resume_acp_session_id,
-                        effort,
                     )
                     .await
                 {

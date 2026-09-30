@@ -26,8 +26,6 @@ pub(crate) struct CliProviderManifest {
     #[serde(default)]
     pub(crate) direct_only_namespace: String,
     pub(crate) run_prompt: String,
-    #[serde(default)]
-    pub(crate) conversation_title_prompt: String,
     pub(crate) file_touch_matcher: String,
 }
 

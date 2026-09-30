@@ -7,8 +7,6 @@ use vmux_core::profile::mcp_credentials::McpCredentialAccess;
 use vmux_core::profile::mcp_credentials::McpCredentialStorage;
 use vmux_tool::{McpServerManifest, McpTransport};
 
-use crate::acp_registry::RegistryAgent;
-
 pub(crate) struct ManagedMcpServers(BTreeMap<String, McpServerManifest>);
 
 impl ManagedMcpServers {
@@ -58,20 +56,12 @@ pub(super) struct PreparedManagedMcpServers {
 }
 
 impl PreparedManagedMcpServers {
-    pub(super) fn for_agent(agent_id: &str) -> Result<Self, String> {
+    pub(super) fn prepare() -> Result<Self, String> {
         for _ in 0..3 {
             let revision = McpCredentialAccess::stable_revision()?;
             let mut servers = Vec::new();
             for (name, server) in ManagedMcpServers::current() {
-                if RegistryAgent::canonical_id(agent_id) == "codex-acp"
-                    && server.transport == McpTransport::Sse
-                {
-                    bevy::log::warn!(
-                        "managed MCP server {name} skipped for Codex because SSE is unsupported"
-                    );
-                    continue;
-                }
-                servers.push(acp_server(name, server, agent_id));
+                servers.push(acp_server(name, server));
             }
             if McpCredentialAccess::revision() != revision {
                 continue;
@@ -82,13 +72,10 @@ impl PreparedManagedMcpServers {
     }
 }
 
-fn acp_server(mut name: String, server: McpServerManifest, agent_id: &str) -> ManagedMcpServer {
+fn acp_server(name: String, server: McpServerManifest) -> ManagedMcpServer {
     let headers = McpAuthorization::headers(&name, &server)
         .into_iter()
         .collect();
-    if RegistryAgent::canonical_id(agent_id) == "codex-acp" {
-        name = format!("vmux_{name}");
-    }
     ManagedMcpServer {
         name,
         transport: match server.transport {
@@ -522,7 +509,7 @@ mod tests {
         };
 
         assert_eq!(
-            acp_server("local".to_string(), server, "claude-acp"),
+            acp_server("local".to_string(), server),
             ManagedMcpServer {
                 name: "local".to_string(),
                 transport: ManagedMcpTransport::Stdio,
@@ -533,26 +520,6 @@ mod tests {
                 url: None,
                 headers: Vec::new(),
             }
-        );
-    }
-
-    #[test]
-    fn codex_acp_namespaces_managed_servers() {
-        let server = McpServerManifest {
-            transport: McpTransport::Http,
-            command: None,
-            args: Vec::new(),
-            env: BTreeMap::new(),
-            cwd: None,
-            url: Some("https://example.com/mcp".to_string()),
-            headers: BTreeMap::new(),
-            header_env: BTreeMap::new(),
-            bearer_token_env_var: None,
-        };
-
-        assert_eq!(
-            acp_server("linear".to_string(), server, "codex-acp").name,
-            "vmux_linear"
         );
     }
 
