@@ -644,7 +644,7 @@ fn handle_open_command_bar(
         &definitions,
     );
     payload.picker = picker;
-    payload.caret_at_end = crate::palette::PaletteRows::opens_at_end(&payload.url, payload.picker);
+    payload.caret_at_end = super::model::PaletteRows::opens_at_end(&payload.url, payload.picker);
     if let Some(picker) = picker {
         payload.picks = CommandBarPicks::for_picker(picker, &locale);
     }

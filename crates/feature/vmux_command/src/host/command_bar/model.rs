@@ -1,13 +1,14 @@
 use vmux_api::command_bar::{
     AgentModels, AgentModes, CommandBarOpenEvent, CommandBarPick, CommandBarPicker,
-    CommandBarPromptContext, CommandPaletteAgent, CommandPaletteComposer, CommandPaletteProjection,
-    ExRequest, HistoryEntry, InvokeRequest, OpenRequest, PathEntry, PickRequest, PromptRequest,
-    SwitchSpaceRequest, SwitchTabRequest, TerminalRequest,
+    CommandPaletteAgent, CommandPaletteComposer, CommandPaletteProjection, ExRequest, HistoryEntry,
+    InvokeRequest, OpenRequest, PathEntry, PickRequest, PromptRequest, SwitchSpaceRequest,
+    SwitchTabRequest, TerminalRequest,
 };
 use vmux_api::open_target::OpenTarget;
 use vmux_api::prompt_media::{ChatAttachment, ChatSubmitAttachment};
 
 use vmux_ui::i18n::translate;
+#[cfg(test)]
 use vmux_ui::list_nav::MenuDirection;
 
 use self::results::{
@@ -16,13 +17,12 @@ use self::results::{
     space_switch_results, start_page_results, terminal_matches_query,
 };
 
-pub mod keyboard;
-pub(crate) mod query;
-pub mod results;
+mod query;
+mod results;
 
-pub use query::PaletteQuery;
+pub(super) use query::PaletteQuery;
 
-pub use vmux_api::command_bar::{PaletteGlyph, PaletteMode};
+use vmux_api::command_bar::{PaletteGlyph, PaletteMode};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaletteSurface {
@@ -50,6 +50,7 @@ pub struct PaletteDraft {
     pub sessions_pending: bool,
 }
 
+#[cfg(test)]
 impl PaletteDraft {
     pub fn typed(query: impl Into<String>) -> Self {
         Self {
@@ -330,6 +331,7 @@ impl PaletteRows {
         full[typed.len()..].to_string()
     }
 
+    #[cfg(test)]
     pub fn completed(&self, query: &str) -> String {
         format!("{query}{}", self.ghost)
     }
@@ -338,6 +340,7 @@ impl PaletteRows {
         stored.min(self.items.len().saturating_sub(1))
     }
 
+    #[cfg(test)]
     pub fn step(&self, from: usize, direction: MenuDirection) -> usize {
         match direction {
             MenuDirection::Next => (from + 1).min(self.items.len().saturating_sub(1)),
@@ -452,10 +455,6 @@ impl ExLine {
         },
     ];
 
-    pub fn claims(query: &str) -> bool {
-        query.starts_with(':')
-    }
-
     pub fn parse(query: &str) -> Option<String> {
         let body = query.strip_prefix(':')?.trim();
         (!body.is_empty()).then(|| body.to_string())
@@ -560,7 +559,7 @@ impl Composer {
             branch_label,
             branch_title,
             worktree_title,
-            project: ActiveProject::resolve(context),
+            project: workspace_path.to_string(),
             projects: context.projects.clone(),
             cwd: context.cwd.clone(),
             is_git_repo: context.is_git_repo,
@@ -690,6 +689,7 @@ pub struct PaletteState {
 }
 
 impl PaletteState {
+    #[cfg(test)]
     pub fn resolve(
         state: &CommandBarOpenEvent,
         draft: &PaletteDraft,
@@ -783,6 +783,7 @@ impl PaletteState {
         }
     }
 
+    #[cfg(test)]
     pub fn step(&self, direction: MenuDirection) -> usize {
         match direction {
             MenuDirection::Next => (self.selected + 1).min(self.rows.len().saturating_sub(1)),
@@ -790,6 +791,7 @@ impl PaletteState {
         }
     }
 
+    #[cfg(test)]
     pub fn space_digit(&self, digit: usize) -> Option<usize> {
         let spaces = self
             .rows
@@ -1104,19 +1106,6 @@ impl AgentSegment {
     }
 }
 
-pub struct ActiveProject;
-
-impl ActiveProject {
-    pub fn resolve(context: &CommandBarPromptContext) -> String {
-        for project in &context.projects {
-            if project.is_active {
-                return project.path.clone();
-            }
-        }
-        context.cwd.clone()
-    }
-}
-
 pub struct SelectedAgentModels;
 
 struct AgentCatalogUrl;
@@ -1353,7 +1342,8 @@ impl ProjectPath {
 mod tests {
     use super::*;
     use vmux_api::command_bar::{
-        CommandBarCommandEntry, CommandBarPage, CommandBarSpace, CommandBarTab, SearchEngine,
+        CommandBarCommandEntry, CommandBarPage, CommandBarPromptContext, CommandBarSpace,
+        CommandBarTab, SearchEngine,
     };
     use vmux_api::protocol::AcpModeOption;
     use vmux_api::room::ModelOptionEntry;
@@ -2502,11 +2492,12 @@ mod tests {
             "Choose project · /work/two"
         );
 
-        let unrooted = CommandBarPromptContext {
+        state.prompt_context = CommandBarPromptContext {
             cwd: "/tmp/scratch".into(),
             ..CommandBarPromptContext::default()
         };
-        assert_eq!(ActiveProject::resolve(&unrooted), "/tmp/scratch");
+        let unrooted = PaletteState::start(&state, PaletteDraft::typed("fix it"));
+        assert_eq!(unrooted.composer.project, "/tmp/scratch");
     }
 
     #[test]

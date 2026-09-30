@@ -4,8 +4,8 @@ use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use unicode_width::UnicodeWidthChar;
-use vmux_command::palette::PaletteQuery;
 use vmux_core::event::{LinkRange, TermLine};
+use vmux_core::input::NavigationText;
 use vmux_layout::stack::OpenRequest;
 
 use crate::event::TermLinkOpenRequest;
@@ -124,7 +124,7 @@ fn may_hold_link(text: &str) -> bool {
 }
 
 fn resolve_target(token: &str, cwd: Option<&Path>) -> Option<String> {
-    let query = PaletteQuery::new(token);
+    let query = NavigationText::new(token);
     if query.is_data_uri() || token.contains("://") {
         return Some(token.to_string());
     }

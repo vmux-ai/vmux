@@ -7,7 +7,7 @@ use vmux_api::command_bar::{
 use vmux_core::host::UiStateWrite;
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
 
-use crate::palette::PaletteQuery;
+use super::super::model::PaletteQuery;
 
 use super::{OpenVersion, PaletteSnapshot, RequestGeneration};
 

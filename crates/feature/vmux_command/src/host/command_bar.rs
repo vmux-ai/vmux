@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 mod completion;
 mod controller;
+mod model;
 mod palette;
 pub mod panel;
 pub mod project_files;

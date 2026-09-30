@@ -1,4 +1,5 @@
 use vmux_api::open_target::OpenTarget;
+use vmux_core::input::NavigationText;
 
 #[derive(Clone, Copy, Debug)]
 pub struct PaletteQuery<'a>(&'a str);
@@ -57,41 +58,15 @@ impl<'a> PaletteQuery<'a> {
     }
 
     pub fn is_data_uri(&self) -> bool {
-        self.0
-            .get(..5)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("data:"))
+        NavigationText::new(self.0).is_data_uri()
     }
 
     pub fn looks_like_url(&self) -> bool {
-        let value = self.0.trim();
-        if Self::new(value).is_data_uri() {
-            return true;
-        }
-        if value.chars().any(char::is_whitespace)
-            || value.starts_with('/')
-            || value.starts_with("~/")
-            || value.starts_with("./")
-            || value.starts_with("../")
-        {
-            return false;
-        }
-        if value.contains("://") {
-            return true;
-        }
-        let before_slash = value.split('/').next().unwrap_or(value);
-        before_slash.contains('.')
+        NavigationText::new(self.0).looks_like_url()
     }
 
     pub fn looks_like_path(&self) -> bool {
-        if self.looks_like_url() {
-            return false;
-        }
-        let value = self.0;
-        value.starts_with('/')
-            || value.starts_with("~/")
-            || value.starts_with("./")
-            || value.starts_with("../")
-            || (value.contains('/') && !value.contains(' '))
+        NavigationText::new(self.0).looks_like_path()
     }
 
     fn looks_like_explicit_path(&self) -> bool {

@@ -1,4 +1,4 @@
-use crate::palette::keyboard::TextEditCommand;
+use super::readline::TextEditCommand;
 use dioxus::prelude::*;
 use vmux_api::command_bar::{CommandBarOpenEvent, OpenId};
 use vmux_ui::caret::{EventSelection, TextCaret};

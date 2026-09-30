@@ -1,5 +1,5 @@
+use super::PaletteSurface;
 use super::{CommandPalette, use_command_bar_ui};
-use crate::palette::PaletteSurface;
 use dioxus::prelude::InteractionLocation;
 use dioxus::prelude::*;
 use vmux_api::command_bar::CommandBarPanelRequest;

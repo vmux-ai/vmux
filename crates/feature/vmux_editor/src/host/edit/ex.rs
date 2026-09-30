@@ -168,7 +168,6 @@ impl ExLine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_command::palette::ExLine as CommandPaletteExLine;
 
     #[test]
     fn bare_commands() {
@@ -308,16 +307,5 @@ mod tests {
     fn a_substitute_with_no_pattern_leaves_the_buffer_alone() {
         assert_eq!(ExLine::edits("s/"), Vec::new());
         assert_eq!(ExLine::edits("%s//x/g"), Vec::new());
-    }
-
-    #[test]
-    fn every_offered_ex_command_is_one_the_parser_accepts() {
-        for entry in CommandPaletteExLine::COMMANDS {
-            assert!(
-                ExCommand::parse(entry.name).is_some(),
-                "`:{}` is offered as a completion but the parser rejects it",
-                entry.name
-            );
-        }
     }
 }

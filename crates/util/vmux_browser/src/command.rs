@@ -162,7 +162,7 @@ impl Home {
 
 fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
     let value = value.trim();
-    let query = vmux_command::palette::PaletteQuery::new(value);
+    let query = vmux_core::input::NavigationText::new(value);
     if query.is_data_uri() || (value.contains("://") && query.looks_like_url()) {
         value.to_string()
     } else if query.looks_like_url() {

@@ -1,4 +1,3 @@
-use crate::palette::{PaletteGlyph, PaletteMode, PaletteSurface};
 use crate::prompt_media::{ChatPasteMedia, ChatPickFiles};
 use crate::ui::composer::{CommandComposerMenus, ComposerChips, ComposerMenuView};
 use crate::ui::media::PromptMedia;
@@ -14,7 +13,7 @@ use vmux_api::command_bar::{
     CommandPaletteMediaHighlightRequest, CommandPaletteMediaMoveRequest,
     CommandPaletteMenuActivateRequest, CommandPaletteMenuDismissRequest,
     CommandPaletteMenuMoveRequest, CommandPaletteRemoveAttachmentRequest, CommandPaletteState,
-    CommandPaletteSubmitRequest,
+    CommandPaletteSubmitRequest, PaletteGlyph, PaletteMode,
 };
 use vmux_core::input::{UiKeyContext, Unclaimed};
 use vmux_ui::agent_accent::agent_accent;
@@ -34,11 +33,24 @@ use vmux_ui::scroll::ScrollIntoView;
 mod composer;
 mod media;
 mod panel;
+mod readline;
 mod row;
 mod signals;
 
 pub use panel::CommandBarPanel;
 pub use row::ResultRow;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaletteSurface {
+    Modal,
+    Start,
+}
+
+impl PaletteSurface {
+    pub const fn is_start(self) -> bool {
+        matches!(self, Self::Start)
+    }
+}
 
 pub fn use_command_bar_ui() -> Signal<CommandBarOpenEvent> {
     let mut state = use_signal(CommandBarOpenEvent::default);

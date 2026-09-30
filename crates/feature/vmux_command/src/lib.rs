@@ -7,7 +7,6 @@ pub(crate) const FEATURE_MANIFEST: &str = include_str!("feature.ron");
 #[cfg(ui)]
 pub mod ui;
 
-pub mod palette;
 pub mod size;
 pub use vmux_api::open_target;
 pub use vmux_api::prompt_media;

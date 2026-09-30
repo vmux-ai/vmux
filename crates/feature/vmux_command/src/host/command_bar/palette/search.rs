@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::palette::CompletionQuery;
+use super::super::model::CompletionQuery;
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_api::command_bar::{

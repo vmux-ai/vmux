@@ -1,7 +1,8 @@
 use std::time::Duration;
 
-use crate::palette::{
-    PaletteDecision, PaletteDraft, PaletteQuery, PaletteRows, PaletteState, PaletteSurface,
+use super::model::{
+    AgentSegment, PaletteDecision, PaletteDraft, PaletteQuery, PaletteRows, PaletteState,
+    PaletteSurface,
 };
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
@@ -1032,8 +1033,7 @@ fn project_palette(
         projection.close_revision = input.close_revision;
         let next_context = PaletteContext {
             open_id: opened.0.open_id,
-            agent: crate::palette::AgentSegment::in_url(&palette.composer.agent_url)
-                .unwrap_or_default(),
+            agent: AgentSegment::in_url(&palette.composer.agent_url).unwrap_or_default(),
             cwd: palette.composer.cwd,
             project: palette.composer.project,
         };

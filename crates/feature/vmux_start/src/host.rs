@@ -578,7 +578,13 @@ fn sync_live_start_pages(
         &locale,
         &definitions,
     );
-    let project = vmux_command::palette::ActiveProject::resolve(&payload.prompt_context);
+    let project = payload
+        .prompt_context
+        .projects
+        .iter()
+        .find(|project| project.is_active)
+        .map(|project| project.path.clone())
+        .unwrap_or_else(|| payload.prompt_context.cwd.clone());
     let warm_branches = !project.is_empty() && *prompt_context.warmed_branches_for != project;
     if warm_branches {
         *prompt_context.warmed_branches_for = project.clone();
