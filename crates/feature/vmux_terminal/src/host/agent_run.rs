@@ -6,7 +6,6 @@ use vmux_api::service::RUN_OSC;
 #[cfg(test)]
 use vmux_api::terminal::CursorStyle;
 use vmux_command::open_target::PaneDirection;
-#[cfg(test)]
 use vmux_core::LastActivatedAt;
 use vmux_core::PageMetadata;
 use vmux_core::agent::{
@@ -16,12 +15,13 @@ use vmux_core::profile::ProjectsDirectory;
 use vmux_layout::AgentPaneDirection;
 use vmux_layout::pane::{
     Pane, PaneSplit, PaneSplitDirection, SpawnCounter, SpawnSeq, direction_to_split,
+    split_or_extend,
 };
 use vmux_layout::placement::{PageKind, page_kind_for_url};
 use vmux_layout::stack::Stack;
 use vmux_layout::tab::Tab;
 #[cfg(test)]
-use vmux_layout::{LayoutContractPlugin, pane::split_or_extend, stack::stack_bundle};
+use vmux_layout::{LayoutContractPlugin, stack::stack_bundle};
 use vmux_setting::{AppSettings, StartupDir};
 #[cfg(test)]
 use vmux_setting::{TerminalSettings, TerminalTheme};

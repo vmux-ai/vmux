@@ -11,6 +11,7 @@ impl vmux_core::host::manifest::FeatureManifestSource for Feature {
 pub mod activity;
 pub mod event;
 pub mod host;
+pub mod state;
 pub mod tab;
 
 pub mod selector;

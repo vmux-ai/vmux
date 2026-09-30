@@ -1,11 +1,12 @@
 use bevy::prelude::*;
 use crossbeam_channel::Receiver;
-use vmux_api::protocol::{AcpSessionConfig, ClientMessage, SharedMessage};
+use vmux_api::protocol::{AcpSessionConfig, ApprovalDecision, ClientMessage, SharedMessage};
 #[cfg(test)]
 use vmux_core::ProcessId;
-use vmux_core::service::ServiceRequest;
+use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_core::team::Profile;
 use vmux_core::{LastActivatedAt, PageMetadata};
+use vmux_git::worktree::ValidatedLinkedWorkspace;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::pane::PanePlacement;
 use vmux_layout::stack::stack_bundle;
@@ -13,9 +14,15 @@ use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktre
 use vmux_layout::worktree::TabWorktreeReady;
 use vmux_terminal::reattach_terminal_bundle;
 
-use crate::event::AgentApprovalRequest;
+use crate::acp_registry::{Registry, RegistryAgent};
+use crate::acp_tool::{AcpLaunchStarted, AcpToolPlugin};
+use crate::event::{
+    AgentApprovalRequest, UiAgentAcpTerminalCreated, UiAgentInfo,
+    UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState, UiAgentSessionCreated,
+    UiAgentWorkspaceChanged,
+};
 use crate::handoff::{ImportedConversation, PendingHandoff};
-use crate::policy::AcpWorkspacePolicy;
+use crate::policy::{AcpWorkspacePolicy, AgentPolicyPlugin};
 use vmux_chat::host::ChatView;
 use vmux_session::AgentRunState;
 use vmux_session::{AcpSession, AgentApprovalPolicy, PromptQueue};
@@ -29,16 +36,16 @@ impl Plugin for AgentRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default(),
-            crate::policy::AgentPolicyPlugin,
+            AgentPolicyPlugin,
         ))
         .add_message::<ServiceRequest>()
-        .add_plugins(crate::acp_tool::AcpToolPlugin)
-        .add_message::<crate::event::UiAgentInfo>()
-        .add_message::<crate::event::UiAgentWorkspaceChanged>()
-        .add_message::<crate::event::UiAgentSessionConfigState>()
-        .add_message::<crate::event::UiAgentSessionConfigSelectionResult>()
-        .add_message::<crate::event::UiAgentSessionCreated>()
-        .add_message::<crate::event::UiAgentAcpTerminalCreated>()
+        .add_plugins(AcpToolPlugin)
+        .add_message::<UiAgentInfo>()
+        .add_message::<UiAgentWorkspaceChanged>()
+        .add_message::<UiAgentSessionConfigState>()
+        .add_message::<UiAgentSessionConfigSelectionResult>()
+        .add_message::<UiAgentSessionCreated>()
+        .add_message::<UiAgentAcpTerminalCreated>()
         .add_systems(Startup, (spawn_acp_catalog, start_catalog_fetch))
         .add_systems(
             Update,
@@ -56,7 +63,7 @@ impl Plugin for AgentRuntimePlugin {
                     apply_acp_session_created,
                     apply_acp_terminal_created,
                 )
-                    .after(vmux_core::service::ServiceMessageSet),
+                    .after(ServiceMessageSet),
             ),
         )
         .add_observer(close_acp_session_on_remove)
@@ -179,12 +186,12 @@ impl AcpSessionConfigState {
 
 #[derive(Component, Default)]
 pub struct AcpCatalog {
-    pub agents: Vec<crate::acp_registry::RegistryAgent>,
+    pub agents: Vec<RegistryAgent>,
 }
 
 #[derive(Component)]
 struct AcpCatalogFetch {
-    rx: Receiver<Vec<crate::acp_registry::RegistryAgent>>,
+    rx: Receiver<Vec<RegistryAgent>>,
 }
 
 fn spawn_acp_catalog(mut commands: Commands) {
@@ -194,9 +201,9 @@ fn spawn_acp_catalog(mut commands: Commands) {
 fn start_catalog_fetch(mut commands: Commands) {
     let (tx, rx) = crossbeam_channel::unbounded();
     std::thread::spawn(move || {
-        let agents = crate::acp_registry::Registry::fetch_blocking()
+        let agents = Registry::fetch_blocking()
             .ok()
-            .or_else(crate::acp_registry::Registry::cached)
+            .or_else(Registry::cached)
             .map(|r| r.agents)
             .unwrap_or_default();
         let _ = tx.send(agents);
@@ -219,7 +226,7 @@ fn receive_catalog(
 }
 
 fn apply_acp_agent_info(
-    mut reader: MessageReader<crate::event::UiAgentInfo>,
+    mut reader: MessageReader<UiAgentInfo>,
     mut sessions: Query<(&AcpSession, &mut Profile)>,
 ) {
     for event in reader.read() {
@@ -236,8 +243,8 @@ fn apply_acp_agent_info(
 }
 
 fn validate_acp_workspace(
-    event: &crate::event::UiAgentWorkspaceChanged,
-) -> Result<vmux_git::worktree::ValidatedLinkedWorkspace, String> {
+    event: &UiAgentWorkspaceChanged,
+) -> Result<ValidatedLinkedWorkspace, String> {
     vmux_git::worktree::validate_linked_workspace(
         std::path::Path::new(&event.cwd),
         std::path::Path::new(&event.workspace_cwd),
@@ -260,7 +267,7 @@ fn ancestor_tab(
 }
 
 fn apply_acp_workspace_changed(
-    mut reader: MessageReader<crate::event::UiAgentWorkspaceChanged>,
+    mut reader: MessageReader<UiAgentWorkspaceChanged>,
     mut sessions: Query<(Entity, &mut AcpSession)>,
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<Tab>>,
@@ -325,7 +332,7 @@ fn apply_acp_workspace_changed(
 }
 
 fn apply_acp_session_config_state(
-    mut reader: MessageReader<crate::event::UiAgentSessionConfigState>,
+    mut reader: MessageReader<UiAgentSessionConfigState>,
     mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpSessionConfigState>)>,
     mut commands: Commands,
 ) {
@@ -383,7 +390,7 @@ fn apply_acp_session_config_state(
 }
 
 fn apply_acp_session_config_selection(
-    mut reader: MessageReader<crate::event::UiAgentSessionConfigSelectionResult>,
+    mut reader: MessageReader<UiAgentSessionConfigSelectionResult>,
     mut sessions: Query<(&AcpSession, &mut AcpSessionConfigState)>,
 ) {
     for event in reader.read() {
@@ -420,7 +427,7 @@ fn acp_auto_approval_message(
         ClientMessage::Shared(SharedMessage::AgentApprove {
             sid: session.sid.clone(),
             call_id: request.call_id.clone(),
-            decision: vmux_api::protocol::ApprovalDecision::AllowAlways,
+            decision: ApprovalDecision::AllowAlways,
         })
     })
 }
@@ -442,7 +449,7 @@ fn auto_allow_acp_approval(
 
 #[allow(clippy::type_complexity)]
 fn apply_acp_session_created(
-    mut reader: MessageReader<crate::event::UiAgentSessionCreated>,
+    mut reader: MessageReader<UiAgentSessionCreated>,
     mut sessions: Query<(Entity, &mut AcpSession, &mut PageMetadata), Without<ChatView>>,
     children: Query<&Children>,
     mut page_meta: Query<&mut PageMetadata, With<ChatView>>,
@@ -471,7 +478,7 @@ fn apply_acp_session_created(
 }
 
 fn apply_acp_terminal_created(
-    mut reader: MessageReader<crate::event::UiAgentAcpTerminalCreated>,
+    mut reader: MessageReader<UiAgentAcpTerminalCreated>,
     sessions: Query<(Entity, &AcpSession)>,
     ctx: PanePlacement,
     mut commands: Commands,
@@ -512,7 +519,7 @@ fn send_acp_input(
         &AcpSession,
         &mut AgentRunState,
         &mut PromptQueue,
-        Has<crate::acp_tool::AcpLaunchStarted>,
+        Has<AcpLaunchStarted>,
         Option<&mut PendingHandoff>,
         Option<&mut ImportedConversation>,
     )>,
@@ -627,7 +634,7 @@ mod tests {
             }))
                 if sid == "s1"
                     && call_id == "call-1"
-                    && decision == vmux_api::protocol::ApprovalDecision::AllowAlways
+                    && decision == ApprovalDecision::AllowAlways
         ));
     }
 
@@ -663,7 +670,7 @@ mod tests {
         app.add_systems(Update, receive_catalog);
         let (tx, rx) = crossbeam_channel::unbounded();
         let fetch = app.world_mut().spawn(AcpCatalogFetch { rx }).id();
-        tx.send(vec![crate::acp_registry::RegistryAgent {
+        tx.send(vec![RegistryAgent {
             id: "agent".into(),
             name: "Agent".into(),
             version: None,

@@ -170,14 +170,14 @@ fn push_chat_to_page(
             );
         }
         commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                 webview,
                 &snapshot.0,
             ),
         );
         if transcript_changed {
             commands.trigger(
-                vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                     webview,
                     &transcript.state,
                 ),
@@ -381,19 +381,19 @@ fn sync_chat_to_ready_views(
         attachments.hydrate_snapshot(&mut projection.snapshot);
         snapshot.0 = projection.snapshot;
         commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                 webview,
                 &snapshot.0,
             ),
         );
         commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                 webview,
                 &transcript.state,
             ),
         );
         commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                 webview,
                 &attachments.state(),
             ),
@@ -431,7 +431,7 @@ fn on_chat_history_more_request(
     };
     commands.spawn(query);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
             webview,
             &transcript.state,
         ),
@@ -509,7 +509,7 @@ fn apply_chat_history_results(
         commands.entity(entity).despawn();
         if changed {
             commands.trigger(
-                vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                     result.webview,
                     &transcript.state,
                 ),

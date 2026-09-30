@@ -7,13 +7,13 @@ use bevy_ecs::system::SystemParam;
 
 use super::composer::{ComposerSelectors, ComposerState};
 use super::key::{ChatListSelection, ChatSelectorProjection};
-use super::state::ChatUiState;
 use crate::activity::ActivityIcon;
 use crate::event::{
     CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_HISTORY_PAGE_SIZE, ChatAttachment, ChatBranch,
     ChatBranchesState, ChatItem, ChatMediaState, ChatOpenPage, ChatResumeState, ChatSnapshot,
     ChatTranscriptState, ComposerContext, ResumableSessions,
 };
+use crate::state::ChatUiState;
 use vmux_api::ProcessId;
 use vmux_api::command_bar::PromptRequest;
 use vmux_api::protocol::AgentCommandResult;

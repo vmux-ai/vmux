@@ -10,7 +10,7 @@ use crate::event::{
     ChatSelectorState, ChatSnapshot, ChatStop, ChatSubmit, ChatTranscriptState, ComposerContext,
     ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry, SelectMode, SlashCommandEntry,
 };
-use crate::host::{ChatUiState, ChatUiStatePatch};
+use crate::state::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
 use dioxus::prelude::*;
 use vmux_api::prompt_media::{inline_media_query, replace_inline_media_query};

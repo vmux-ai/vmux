@@ -104,7 +104,7 @@ fn push_composer_context_to_page(
         }
         if changed || ready.is_changed() {
             commands.trigger(
-                vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                     webview, &context,
                 ),
             );
@@ -216,7 +216,7 @@ fn on_chat_branches_request(
     }
     let request_id = projection.start(project.clone());
     commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
             webview,
             &projection.0,
         ),
@@ -273,7 +273,7 @@ fn drain_branch_reads(
             continue;
         }
         commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                 read.webview,
                 &projection.0,
             ),

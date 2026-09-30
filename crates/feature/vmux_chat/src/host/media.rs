@@ -605,7 +605,7 @@ fn on_query(
         return;
     };
     commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
             webview,
             &projection.0,
         ),
@@ -674,13 +674,13 @@ fn on_remove_attachment(
         return;
     }
     commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
             webview,
             &projection.state(),
         ),
     );
     commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
             webview,
             &focus.next(),
         ),
@@ -770,10 +770,10 @@ fn drain_chat_attachment_tasks(
                     let incoming = ChatAttachments { attachments };
                     if projection.merge_selected(&incoming) {
                         commands.trigger(vmux_core::host::UiStateWrite::<
-                            vmux_chat::host::ChatUiState,
+                            vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &projection.state()));
                         commands.trigger(vmux_core::host::UiStateWrite::<
-                            vmux_chat::host::ChatUiState,
+                            vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &focus.next()));
                     }
                 }
@@ -784,17 +784,17 @@ fn drain_chat_attachment_tasks(
                     let snapshot_changed = projection.hydrate_snapshot(&mut snapshot.0);
                     if selected_changed {
                         commands.trigger(vmux_core::host::UiStateWrite::<
-                            vmux_chat::host::ChatUiState,
+                            vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &projection.state()));
                     }
                     if transcript_changed {
                         commands.trigger(vmux_core::host::UiStateWrite::<
-                            vmux_chat::host::ChatUiState,
+                            vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &transcript.state));
                     }
                     if snapshot_changed {
                         commands.trigger(vmux_core::host::UiStateWrite::<
-                            vmux_chat::host::ChatUiState,
+                            vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &snapshot.0));
                     }
                 }
@@ -848,7 +848,7 @@ fn drain_chat_media_list_tasks(
                 continue;
             }
             commands.trigger(
-                vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                     pending.webview,
                     &projection.0,
                 ),
@@ -889,7 +889,7 @@ fn drain_chat_media_preview_tasks(
         if let Ok(mut projection) = projections.get_mut(pending.webview) {
             if projection.finish(&entries) {
                 commands.trigger(
-                    vmux_core::host::UiStateWrite::<vmux_chat::host::ChatUiState>::from_event(
+                    vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                         pending.webview,
                         &projection.0,
                     ),

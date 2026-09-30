@@ -126,12 +126,12 @@ fn on_submit(
     enqueue_prompt(&mut queue, &mut state, text, attachments);
     let effect = composer.effect(String::new(), true);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(webview, &effect),
+        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
     );
     commands.trigger(ComposerChanged::new(webview));
     if selected.clear_selected() {
         commands.trigger(
-            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
                 webview,
                 &selected.state(),
             ),
@@ -251,7 +251,7 @@ fn on_escape(
     if !running && queue.items.is_empty() && !composer.draft().is_empty() {
         let effect = composer.effect(String::new(), true);
         commands.trigger(
-            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
                 webview, &effect,
             ),
         );

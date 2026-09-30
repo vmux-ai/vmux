@@ -422,7 +422,7 @@ fn project_selector(
         }
         projection.0 = state.clone();
         commands.trigger(
-            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(webview, &state),
+            vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &state),
         );
     }
 }
@@ -463,7 +463,7 @@ fn move_list(
     let selected = selection.current(&list);
     *selected = move_selection(*selected, len, direction);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
             caller,
             &ChatListSelectionState {
                 kind,
@@ -515,7 +515,7 @@ fn choose(
     let selected = if let Some(index) = trigger.event().index {
         selection.update(&list, index);
         commands.trigger(
-            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
                 caller,
                 &ChatListSelectionState {
                     kind,
@@ -762,7 +762,7 @@ fn choose(
             .entity(caller)
             .insert(ActiveComposerMenu::default());
         commands.trigger(
-            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
                 caller,
                 &ChatComposerMenuState {
                     menu: None,
@@ -773,13 +773,13 @@ fn choose(
         let draft = composer.draft().to_string();
         let effect = composer.effect(draft, true);
         commands.trigger(
-            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(caller, &effect),
+            vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(caller, &effect),
         );
     }
     if let Some(draft) = change_composer {
         let effect = composer.effect(draft, true);
         commands.trigger(
-            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(caller, &effect),
+            vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(caller, &effect),
         );
         commands.trigger(ComposerChanged::new(caller));
     }
@@ -804,7 +804,7 @@ fn select_list(
     };
     selection.update(&list, trigger.event().payload.index as usize);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
             webview,
             &ChatListSelectionState {
                 kind: list.kind,
@@ -906,7 +906,7 @@ fn move_history(
     let history = transcript.prompt_history(snapshot);
     let effect = composer.recall(&history, direction);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(caller, &effect),
+        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(caller, &effect),
     );
     commands.trigger(ComposerChanged::new(caller));
 }
@@ -954,7 +954,7 @@ fn dismiss_selector(
             selection.close_composer_menu();
         }
         commands.trigger(
-            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+            vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
                 caller,
                 &ChatComposerMenuState {
                     menu: None,
@@ -966,7 +966,7 @@ fn dismiss_selector(
             let draft = composer.draft().to_string();
             let effect = composer.effect(draft, true);
             commands.trigger(
-                vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(
+                vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
                     caller, &effect,
                 ),
             );
@@ -977,7 +977,7 @@ fn dismiss_selector(
         && let Some(effect) = composer.dismiss_selector()
     {
         commands.trigger(
-            vmux_core::host::UiStateWrite::<super::state::ChatUiState>::from_event(caller, &effect),
+            vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(caller, &effect),
         );
         commands.trigger(ComposerChanged::new(caller));
     }
@@ -1017,9 +1017,9 @@ fn cancel(
 
 #[cfg(test)]
 mod tests {
-    use super::super::state::ChatUiState;
     use super::*;
     use crate::event::{ModelOptionEntry, ModelState};
+    use crate::state::ChatUiState;
     use bevy::MinimalPlugins;
     use vmux_command::CommandInvocation;
     use vmux_core::host::UiStateWrite;

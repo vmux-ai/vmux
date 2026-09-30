@@ -1,11 +1,8 @@
 use super::model::{Models, Picker};
 use super::prompt::{AttachmentPreviews, Attachments, Browsed, Media};
 use super::room::{Agents, Conversation, LiveTurn, Log, RoomTranscript, Snapshot};
-use crate::event::{
-    ChatAttachments, ChatBranchesState, ChatComposerEffect, ChatComposerMenuState,
-    ChatListSelectionState, ChatMediaState, ChatPromptFocusEffect, ChatResumeState,
-    ChatSelectorState, ChatSnapshot, ChatTranscriptState, ComposerContext, ModeState, ModelState,
-};
+use crate::event::ChatComposerEffect;
+use crate::state::{ChatUiState, ChatUiStatePatch};
 use bevy_app::{App, Last, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::page::UiStateEmit;
@@ -31,30 +28,6 @@ pub struct PublishComposerEffect(pub ChatComposerEffect);
 
 #[derive(Message)]
 pub struct RepublishChatUiState;
-
-#[vmux_api::ui_state_patch(Default)]
-pub struct ChatUiStatePatch {
-    pub snapshot: Option<Box<ChatSnapshot>>,
-    pub composer: Option<ComposerContext>,
-    pub mode: Option<ModeState>,
-    pub model: Option<ModelState>,
-    pub list_selection: Option<ChatListSelectionState>,
-    pub composer_menu: Option<ChatComposerMenuState>,
-    pub selector: Option<ChatSelectorState>,
-    pub transcript: Option<Box<ChatTranscriptState>>,
-    pub attachments: Option<Box<ChatAttachments>>,
-    pub media: Option<Box<ChatMediaState>>,
-    pub branches: Option<Box<ChatBranchesState>>,
-    pub resume: Option<Box<ChatResumeState>>,
-    pub composer_effect: Option<ChatComposerEffect>,
-    pub prompt_focus: Option<ChatPromptFocusEffect>,
-}
-
-#[vmux_api::ui_state(Default)]
-pub struct ChatUiState {
-    pub sequence: u64,
-    pub patches: Vec<ChatUiStatePatch>,
-}
 
 #[derive(Component, Default)]
 pub struct ChatUiStateProjection {
@@ -127,6 +100,7 @@ fn emit_ui_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::{ChatSnapshot, ModelState};
 
     #[test]
     fn batches_preserve_patch_order() {
