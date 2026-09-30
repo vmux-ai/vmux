@@ -535,9 +535,13 @@ fn send_acp_input(
             continue;
         };
         let text = prompt.text;
-        let handoff = pending
-            .as_deref_mut()
-            .and_then(PendingHandoff::context_for_send);
+        let handoff = pending.as_deref_mut().and_then(|pending| {
+            if pending.sent {
+                return None;
+            }
+            pending.sent = true;
+            Some(pending.context.clone())
+        });
         if handoff.is_some()
             && let Some(imported) = imported.as_deref_mut()
             && imported.first_prompt.is_none()

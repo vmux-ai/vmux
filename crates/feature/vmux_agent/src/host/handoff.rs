@@ -146,20 +146,6 @@ pub struct PendingHandoff {
     pub sent: bool,
 }
 
-impl PendingHandoff {
-    pub fn context_for_send(&mut self) -> Option<String> {
-        if self.sent {
-            return None;
-        }
-        self.sent = true;
-        Some(self.context.clone())
-    }
-
-    pub fn retry(&mut self) {
-        self.sent = false;
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BuiltContext {
     pub text: String,
@@ -425,25 +411,6 @@ mod tests {
         let messages = directory.directory.load("agent", "plain").unwrap().messages;
 
         assert_eq!(messages, vec![user(&text)]);
-    }
-
-    #[test]
-    fn pending_context_sends_once_and_can_retry_after_error() {
-        let mut pending = PendingHandoff {
-            context: "prior conversation".into(),
-            sent: false,
-        };
-
-        assert_eq!(
-            pending.context_for_send().as_deref(),
-            Some("prior conversation")
-        );
-        assert!(pending.context_for_send().is_none());
-        pending.retry();
-        assert_eq!(
-            pending.context_for_send().as_deref(),
-            Some("prior conversation")
-        );
     }
 
     #[test]

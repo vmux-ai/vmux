@@ -338,7 +338,7 @@ fn poll_acp_installs(
                 if invalid_waiters.contains(&entity) || !waiter.matches(session) {
                     continue;
                 }
-                progress.apply(&mut state);
+                *state = (&progress).into();
             }
         }
         if job
@@ -390,23 +390,23 @@ fn poll_acp_installs(
                     ) {
                         Ok(Some(())) => {
                             service_requests.write(ServiceRequest(message));
-                            AcpInstallProgress::ready(session.resume.as_deref()).apply(&mut state);
+                            *state = AcpInstallProgress::ready(session.resume.as_deref()).into();
                             commands.entity(entity).remove::<AcpInstallWaiter>();
                         }
                         Ok(None) => {
-                            AcpInstallProgress::preparing().apply(&mut state);
+                            *state = AcpInstallProgress::preparing().into();
                             commands
                                 .entity(entity)
                                 .remove::<(AcpInstallWaiter, AcpLaunchStarted)>();
                         }
                         Err(error) => {
-                            AcpInstallProgress::error(error).apply(&mut state);
+                            *state = AcpInstallProgress::error(error).into();
                             commands.entity(entity).remove::<AcpInstallWaiter>();
                         }
                     }
                 }
                 Err(message) => {
-                    AcpInstallProgress::error(message.clone()).apply(&mut state);
+                    *state = AcpInstallProgress::error(message.clone()).into();
                     commands.entity(entity).remove::<AcpInstallWaiter>();
                 }
             }
@@ -620,16 +620,24 @@ impl AcpInstallProgress {
             errored: true,
         }
     }
+}
 
-    fn apply(&self, state: &mut AgentRunState) {
-        if self.errored {
-            *state = AgentRunState::Errored(self.message.clone());
+impl From<AcpInstallProgress> for AgentRunState {
+    fn from(progress: AcpInstallProgress) -> Self {
+        if progress.errored {
+            Self::Errored(progress.message)
         } else {
-            *state = AgentRunState::Installing {
-                pct: self.pct,
-                message: self.message.clone(),
-            };
+            Self::Installing {
+                pct: progress.pct,
+                message: progress.message,
+            }
         }
+    }
+}
+
+impl From<&AcpInstallProgress> for AgentRunState {
+    fn from(progress: &AcpInstallProgress) -> Self {
+        progress.clone().into()
     }
 }
 
