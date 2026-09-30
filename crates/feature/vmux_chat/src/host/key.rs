@@ -8,8 +8,8 @@ use crate::event::{
     ApprovalDecision, ChatApproval, ChatAttachPaths, ChatCancel, ChatChoiceSelected,
     ChatComposerMenuChanged, ChatComposerMenuKind, ChatComposerMenuState, ChatEscape,
     ChatGoToBranch, ChatListKind, ChatListSelectionChanged, ChatListSelectionState,
-    ChatSelectWorkspace, ChatSelectorKind, ChatSelectorState, ChatSlashCommandRequest, ChatSubmit,
-    ResumeSession, SelectMode, SelectModel, SetAgentEffort,
+    ChatSelectWorkspace, ChatSelectorState, ChatSlashCommandRequest, ChatSubmit, ResumeSession,
+    SelectMode, SelectModel, SetAgentEffort,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_cef::prelude::UiInput;
@@ -190,49 +190,56 @@ struct ChatLists<'w, 's> {
 
 impl ChatLists<'_, '_> {
     fn selector(&self, webview: Entity, draft: &str) -> ChatSelectorState {
-        if inline_media_query(draft).is_some() {
-            return ChatSelectorState {
-                kind: ChatSelectorKind::Media,
-                ..Default::default()
-            };
-        }
-        match SelectorMode::from_draft(draft) {
-            SelectorMode::Mcp(query) => ChatSelectorState {
-                kind: ChatSelectorKind::Mcp,
-                mcp_servers: self.mcp_entries(webview, query),
-                ..Default::default()
-            },
-            SelectorMode::Resume(_) => ChatSelectorState {
-                kind: ChatSelectorKind::Resume,
+        let Some(active) = self.active(webview, draft) else {
+            return ChatSelectorState::default();
+        };
+        match active.kind {
+            ChatListKind::Approval
+            | ChatListKind::Choice
+            | ChatListKind::Composer
+            | ChatListKind::Media
+            | ChatListKind::Session => ChatSelectorState {
+                active: Some(active.kind),
                 ..Default::default()
             },
-            SelectorMode::Models(query) => ChatSelectorState {
-                kind: ChatSelectorKind::Model,
-                models: self
-                    .models
-                    .get(webview)
-                    .map(|projection| projection.filtered(query))
-                    .unwrap_or_default(),
-                ..Default::default()
-            },
-            SelectorMode::Commands(query) => {
-                let commands = self
-                    .commands
-                    .get(webview)
-                    .map(|projection| projection.filtered(query))
-                    .unwrap_or_default();
-                let kind = if commands.is_empty() {
-                    ChatSelectorKind::None
-                } else {
-                    ChatSelectorKind::Command
+            ChatListKind::Mcp => {
+                let SelectorMode::Mcp(query) = SelectorMode::from_draft(draft) else {
+                    return ChatSelectorState::default();
                 };
                 ChatSelectorState {
-                    kind,
-                    commands,
+                    active: Some(active.kind),
+                    mcp_servers: self.mcp_entries(webview, query),
                     ..Default::default()
                 }
             }
-            SelectorMode::None => ChatSelectorState::default(),
+            ChatListKind::Model => {
+                let SelectorMode::Models(query) = SelectorMode::from_draft(draft) else {
+                    return ChatSelectorState::default();
+                };
+                ChatSelectorState {
+                    active: Some(active.kind),
+                    models: self
+                        .models
+                        .get(webview)
+                        .map(|projection| projection.filtered(query))
+                        .unwrap_or_default(),
+                    ..Default::default()
+                }
+            }
+            ChatListKind::Command => {
+                let SelectorMode::Commands(query) = SelectorMode::from_draft(draft) else {
+                    return ChatSelectorState::default();
+                };
+                ChatSelectorState {
+                    active: Some(active.kind),
+                    commands: self
+                        .commands
+                        .get(webview)
+                        .map(|projection| projection.filtered(query))
+                        .unwrap_or_default(),
+                    ..Default::default()
+                }
+            }
         }
     }
 
@@ -1135,7 +1142,7 @@ mod tests {
         app.update();
 
         let selector = &app.world().get::<ChatSelectorProjection>(page).unwrap().0;
-        assert_eq!(selector.kind, ChatSelectorKind::Model);
+        assert_eq!(selector.active, Some(ChatListKind::Model));
         assert_eq!(selector.models.len(), 1);
         assert_eq!(selector.models[0].id, "claude-sonnet");
     }

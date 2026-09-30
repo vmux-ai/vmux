@@ -1,5 +1,6 @@
 use super::format::{PromptEdit, PromptHistoryDirection, prompt_history_direction};
 use super::state::Chat;
+use crate::event::ChatListKind;
 use dioxus::prelude::*;
 use vmux_core::input::{KeyStroke, UiKeyContext, Unclaimed};
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
@@ -59,7 +60,7 @@ impl ChatKeyHandler {
         if !Self::moves_the_caret(stroke) {
             return false;
         }
-        if ChatList::current(self.0).is_some() {
+        if self.0.active_list().is_some() {
             return false;
         }
         self.history_direction(&stroke.key, stroke.mods.ctrl)
@@ -116,60 +117,14 @@ impl ChatKeyHandler {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ChatList {
-    Approval,
-    Choice,
-    ComposerMenu,
-    Media,
-    Mcp,
-    Session,
-    Model,
-    Command,
-}
-
-impl ChatList {
-    fn current(chat: Chat) -> Option<Self> {
-        if chat.run.approval.read().is_some() {
-            return Some(Self::Approval);
-        }
-        if !chat.run.choice_options.read().is_empty() {
-            return Some(Self::Choice);
-        }
-        if chat.menu.opened().is_some() {
-            return Some(Self::ComposerMenu);
-        }
-        if chat.media_menu_open() {
-            return Some(Self::Media);
-        }
-        if chat.mcp_menu_open() {
-            return Some(Self::Mcp);
-        }
-        if chat.resume_menu_open() {
-            return Some(Self::Session);
-        }
-        if chat.model_menu_open() {
-            return Some(Self::Model);
-        }
-        if chat.command_menu_open() {
-            return Some(Self::Command);
-        }
-        None
-    }
-
-    fn is_selector(self) -> bool {
-        !matches!(self, Self::Approval | Self::Choice)
-    }
-}
-
 impl Chat {
     fn key_context(&self) -> Vec<String> {
         let mut keys = vec!["chat".to_string()];
-        let Some(list) = ChatList::current(*self) else {
+        let Some(list) = self.active_list() else {
             return keys;
         };
         keys.push("chat.list".to_string());
-        if matches!(list, ChatList::Approval | ChatList::Choice) {
+        if matches!(list, ChatListKind::Approval | ChatListKind::Choice) {
             keys.push("chat.choice".to_string());
         }
         if list.is_selector() {

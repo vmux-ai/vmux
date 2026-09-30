@@ -6,7 +6,7 @@ use crate::event::{
     ChatBranchesRequest, ChatBranchesState, ChatChoiceSelected, ChatComposerEffect,
     ChatComposerMenuChanged, ChatComposerMenuKind, ChatComposerMenuState, ChatDraftChanged,
     ChatHistoryMoreRequest, ChatItem, ChatListKind, ChatListSelectionChanged,
-    ChatListSelectionState, ChatMediaEntry, ChatMediaState, ChatRemoveAttachment, ChatSelectorKind,
+    ChatListSelectionState, ChatMediaEntry, ChatMediaState, ChatRemoveAttachment,
     ChatSelectorState, ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit,
     ChatTranscriptState, ComposerContext, ModelOptionEntry, QueuedPromptSnapshot,
     ResumableSessionEntry, ResumeSession, SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
@@ -257,12 +257,12 @@ impl Chat {
             scroll::to_bottom(chat.transcript.scroll_container);
         });
         use_selector(chat.slash.menu_sel, move |selected| {
-            let selector = chat.selector.read().kind;
+            let selector = chat.selector.read().active;
             let _ = chat.resume.sessions.read().len();
             let _ = chat.media.entries.read().len();
             if !chat.run.choice_options.read().is_empty() {
                 format!("agent-choice-item-{selected}")
-            } else if selector == ChatSelectorKind::Media {
+            } else if selector == Some(ChatListKind::Media) {
                 format!("prompt-media-item-{selected}")
             } else {
                 format!("agent-selector-item-{selected}")
@@ -400,27 +400,30 @@ impl Chat {
     }
 
     pub fn command_menu_open(&self) -> bool {
-        self.selector.read().kind == ChatSelectorKind::Command
+        self.selector.read().active == Some(ChatListKind::Command)
+    }
+
+    pub(crate) fn active_list(&self) -> Option<ChatListKind> {
+        self.selector.read().active
     }
 
     pub fn resume_menu_open(&self) -> bool {
-        self.selector.read().kind == ChatSelectorKind::Resume
+        self.selector.read().active == Some(ChatListKind::Session)
     }
 
     pub fn model_menu_open(&self) -> bool {
-        self.selector.read().kind == ChatSelectorKind::Model
+        self.selector.read().active == Some(ChatListKind::Model)
     }
 
     pub fn mcp_menu_open(&self) -> bool {
-        self.selector.read().kind == ChatSelectorKind::Mcp
+        self.selector.read().active == Some(ChatListKind::Mcp)
     }
 
     pub fn selector_open(&self) -> bool {
-        self.media_menu_open()
-            || self.command_menu_open()
-            || self.mcp_menu_open()
-            || self.resume_menu_open()
-            || self.model_menu_open()
+        self.selector
+            .read()
+            .active
+            .is_some_and(ChatListKind::is_selector)
     }
 
     pub fn resume_state(&self) -> Option<ResumeMenuState> {
@@ -436,7 +439,7 @@ impl Chat {
     }
 
     pub fn media_menu_open(&self) -> bool {
-        self.selector.read().kind == ChatSelectorKind::Media
+        self.selector.read().active == Some(ChatListKind::Media)
     }
 
     pub fn media_options(&self) -> Vec<PromptMediaOption> {
