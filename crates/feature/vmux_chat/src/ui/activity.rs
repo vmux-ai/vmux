@@ -12,30 +12,15 @@ pub(super) fn ActivityIconView(kind: ActivityIcon) -> Element {
             span { class: "flex h-6 w-6 shrink-0 items-center justify-center text-[17px] leading-none", aria_hidden: "true", "🧠" }
         };
     }
-    if kind == ActivityIcon::Python {
-        return rsx! {
-            span { class: "python-activity-icon flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset", aria_hidden: "true",
-                svg {
-                    class: "h-[17px] w-[17px]",
-                    view_box: "0 0 24 24",
-                    path {
-                        fill: "#3776ab",
-                        d: "M11.7 2C7 2 7.3 4 7.3 4v2.1h4.5V7H5.5S2 6.6 2 12.2s3.1 5.4 3.1 5.4h1.8v-2.5s-.1-3 2.9-3h4.7s2.7 0 2.7-2.7V4.8S17.6 2 11.7 2Zm-2.5 1.5a.8.8 0 1 1 0 1.6.8.8 0 0 1 0-1.6Z",
-                    }
-                    path {
-                        fill: "#ffd43b",
-                        d: "M12.3 22c4.7 0 4.4-2 4.4-2v-2.1h-4.5V17h6.3s3.5.4 3.5-5.2-3.1-5.4-3.1-5.4h-1.8v2.5s.1 3-2.9 3H9.5s-2.7 0-2.7 2.7v4.6S6.4 22 12.3 22Zm2.5-1.5a.8.8 0 1 1 0-1.6.8.8 0 0 1 0 1.6Z",
-                    }
-                }
-            }
-        };
+    if let ActivityIcon::Language(path) = &kind {
+        return rsx! { FileActivityIcon { path: path.clone(), write: false } };
     }
-    let tone = match kind {
+    let tone = match &kind {
         ActivityIcon::Thinking
         | ActivityIcon::Writing
         | ActivityIcon::Installing
         | ActivityIcon::Awaiting => "agent-themed-activity",
-        ActivityIcon::Python => unreachable!(),
+        ActivityIcon::Language(_) => unreachable!(),
         ActivityIcon::ReadFile => "bg-sky-500/10 text-sky-600 ring-sky-500/20 dark:text-sky-300",
         ActivityIcon::WriteFile => {
             "bg-green-500/10 text-green-600 ring-green-500/20 dark:text-green-300"
@@ -109,7 +94,7 @@ pub(super) fn ToolActivityIcon(
     activity: ChatActivityKind,
 ) -> Element {
     if matches!(
-        activity,
+        &activity,
         ChatActivityKind::ReadFile | ChatActivityKind::WriteFile | ChatActivityKind::Tool
     ) && let Some(path) = file_path
     {

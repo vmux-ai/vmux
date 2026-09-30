@@ -38,6 +38,7 @@ use crate::event::{
     SpaceCreateRequest, SpaceDeleteRequest, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow,
     SpacesListEvent, SpacesUiState,
 };
+use crate::model::SpaceRecord;
 use crate::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 
 #[vmux_native::page]
@@ -137,9 +138,7 @@ fn ensure_bootstrap_space(
     if !spaces.is_empty() || restore.single().is_ok_and(|restore| restore.store_present) {
         return;
     }
-    commands.spawn(crate::spaces::space_profile_bundle(
-        &crate::model::bootstrap_space_record(),
-    ));
+    commands.spawn(SpaceRecord::bootstrap().bundle());
 }
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
@@ -254,7 +253,7 @@ fn space_rows_from_world(
     settings: Option<&AppSettings>,
     main: Option<Entity>,
 ) -> Vec<SpaceRow> {
-    let profile = crate::model::bootstrap_profile_name();
+    let profile = SpaceRecord::current_profile_name();
     let mut rows: Vec<(u32, SpaceRow)> = Vec::new();
     for (_, sid, name, is_active, order, children, parent) in spaces.iter() {
         let local = main.is_none_or(|main| parent.parent() == main);
@@ -592,7 +591,7 @@ fn on_space_rename(
         .filter(|(_, id, _, _, _)| id.0 != request.space_id)
         .map(|(_, id, _, _, _)| id.0.clone())
         .collect();
-    let new_id = crate::model::unique_space_id_among(&existing, name);
+    let new_id = SpaceRecord::unique_id(&existing, name);
     for (entity, id, _, _, _) in &graph.spaces {
         if id.0 != request.space_id {
             continue;
@@ -766,7 +765,7 @@ fn on_space_create(
         .iter()
         .map(|(_, id, _, _, _)| id.0.clone())
         .collect();
-    let id = crate::model::unique_space_id_among(&existing, &name);
+    let id = SpaceRecord::unique_id(&existing, &name);
     let order = graph
         .spaces
         .iter()
@@ -829,7 +828,7 @@ fn handle_open_in_new_space(
             .iter()
             .map(|(_, sid, _, _, _)| sid.0.clone())
             .collect();
-        let id = crate::model::unique_space_id_among(&existing, &name);
+        let id = SpaceRecord::unique_id(&existing, &name);
         let order = graph
             .spaces
             .iter()
@@ -905,8 +904,7 @@ fn respond_spaces_spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{SpaceRecord, bootstrap_profile_name};
-    use crate::spaces::space_profile_bundle;
+    use crate::model::SpaceRecord;
     use bevy::ecs::system::RunSystemOnce;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
@@ -964,7 +962,7 @@ mod tests {
         SpaceRecord {
             id: "work".to_string(),
             name: "Work".to_string(),
-            profile: bootstrap_profile_name(),
+            profile: SpaceRecord::current_profile_name(),
         }
     }
 
@@ -1020,7 +1018,7 @@ mod tests {
             .add_systems(Update, update_effective_startup);
         let space = app
             .world_mut()
-            .spawn((space_profile_bundle(&work_space_record()), CurrentSpace))
+            .spawn((work_space_record().bundle(), CurrentSpace))
             .id();
 
         app.update();
@@ -1185,7 +1183,7 @@ mod tests {
         app.add_plugins(MinimalPlugins).insert_resource(settings);
         let space = app
             .world_mut()
-            .spawn((space_profile_bundle(&work_space_record()), CurrentSpace))
+            .spawn((work_space_record().bundle(), CurrentSpace))
             .id();
         let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
 
@@ -1273,11 +1271,12 @@ mod tests {
             .add_observer(on_project_activate)
             .add_observer(on_project_forget);
         app.world_mut().spawn((
-            space_profile_bundle(&SpaceRecord {
+            SpaceRecord {
                 id: "work".into(),
                 name: "Work".into(),
-                profile: bootstrap_profile_name(),
-            }),
+                profile: SpaceRecord::current_profile_name(),
+            }
+            .bundle(),
             CurrentSpace,
         ));
         app

@@ -1,12 +1,13 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
+use vmux_core::LanguageIconPath;
 use vmux_core::event::*;
 use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
     ManagerPage, ManagerRow, ManagerSpinner, ManagerTone,
 };
-use vmux_ui::file_icon::{FileIcon, TypeIcon, file_icon_kind};
+use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
@@ -147,43 +148,9 @@ impl PackageStatus {
 }
 
 fn language_icon_path(languages: &[String]) -> Option<String> {
-    languages.iter().find_map(|language| {
-        let normalized = language.trim().to_ascii_lowercase();
-        let extension = match normalized.as_str() {
-            "rust" => "rs",
-            "typescript" => "ts",
-            "typescriptreact" | "typescript react" => "tsx",
-            "javascript" => "js",
-            "javascriptreact" | "javascript react" => "jsx",
-            "python" => "py",
-            "ruby" => "rb",
-            "shell" | "bash" | "zsh" => "sh",
-            "c++" | "cpp" => "cpp",
-            "kotlin" => "kt",
-            "elixir" => "ex",
-            "haskell" => "hs",
-            "ocaml" => "ml",
-            "clojure" => "clj",
-            "erlang" => "erl",
-            "julia" => "jl",
-            "perl" => "pl",
-            "f#" | "fsharp" => "fs",
-            "markdown" => "md",
-            "sass" => "scss",
-            "graphql" => "graphql",
-            "yml" => "yaml",
-            "docker" => "dockerfile",
-            "terraform" | "hcl" => "tf",
-            "nix" | "nixos" => "nix",
-            "jupyter" => "ipynb",
-            "webassembly" => "wasm",
-            "powershell" => "ps1",
-            "sql" => "sqlite",
-            other => other,
-        };
-        let path = format!("language.{extension}");
-        matches!(file_icon_kind(&path, false), FileIcon::Logo(_)).then_some(path)
-    })
+    languages
+        .iter()
+        .find_map(|language| LanguageIconPath::from_hint(language))
 }
 
 fn localized_status(status: LspPkgStatus) -> String {

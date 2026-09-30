@@ -936,7 +936,6 @@ pub const MD_CSS: &str = r#"
 .chat-assistant-turn .disclosure>summary{transition:color 160ms ease}
 .chat-assistant-turn .disclosure>summary:hover{color:color-mix(in srgb,currentColor 68%,var(--agent-accent))}
 .agent-themed-activity{color:var(--agent-accent);background:color-mix(in srgb,var(--agent-accent) 11%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--agent-accent) 18%,transparent)}
-.python-activity-icon{background:linear-gradient(145deg,rgba(55,118,171,0.15),rgba(255,212,59,0.11));color:#3776ab;box-shadow:inset 0 0 0 1px rgba(55,118,171,0.3)}
 .agent-working-label{color:color-mix(in srgb,var(--agent-accent) 82%,currentColor)}
 .agent-row-hover:hover{background:color-mix(in srgb,var(--agent-accent) 4%,transparent)}
 .agent-code-panel,.user-context-content{background:rgba(127,127,127,0.07);box-shadow:inset 0 0 0 1px rgba(127,127,127,0.14)}

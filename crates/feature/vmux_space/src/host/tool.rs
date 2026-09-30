@@ -17,7 +17,7 @@ use super::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch, AgentListSpaces,
     AgentPrepareWorktree, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
 };
-use crate::model::bootstrap_profile_name;
+use crate::model::SpaceRecord;
 
 pub struct SpaceToolPlugin;
 
@@ -96,7 +96,7 @@ fn answer_space_queries(
                 AgentSpace {
                     id: id.0.clone(),
                     name: name.to_string(),
-                    profile: bootstrap_profile_name(),
+                    profile: SpaceRecord::current_profile_name(),
                     is_active: local && is_active,
                 },
             ));

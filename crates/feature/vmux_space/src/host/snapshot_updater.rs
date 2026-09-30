@@ -6,6 +6,7 @@ use vmux_core::Order;
 use vmux_layout::space::{Space, SpaceId};
 
 use crate::event::SPACES_PAGE_URL;
+use crate::model::SpaceRecord;
 
 pub struct SnapshotPlugin;
 
@@ -33,7 +34,7 @@ fn update_spaces_snapshot(
     hierarchy: vmux_layout::window::WindowHierarchy,
     mut state: Single<&mut CommandBarProjection>,
 ) {
-    let profile = crate::model::bootstrap_profile_name();
+    let profile = SpaceRecord::current_profile_name();
     let mut rows: Vec<(u32, SpaceSummary)> = Vec::new();
     let mut active_space_id = String::new();
     let mut active_space_name = String::new();

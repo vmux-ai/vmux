@@ -2,7 +2,7 @@ use super::composer::options::ChatMenuSet;
 use super::state::Chat;
 use crate::event::ChatItem;
 use crate::format::{
-    PromptEdit, PromptHistoryDirection, edit_prompt, move_prompt_history, prompt_history_direction,
+    PromptEdit, PromptHistoryDirection, move_prompt_history, prompt_history_direction,
 };
 use dioxus::prelude::*;
 use vmux_core::input::{KeyStroke, UiKeyContext, Unclaimed};
@@ -252,13 +252,13 @@ impl ChatKeyHandler {
         let edit = match key.as_str() {
             "Backspace" => PromptEdit::Backspace,
             "Delete" => PromptEdit::Delete,
-            _ if key.chars().count() == 1 => PromptEdit::Insert(&key),
+            _ if key.chars().count() == 1 => PromptEdit::Insert(key),
             _ => return,
         };
         event.prevent_default();
         let current = self.0.composer.draft.peek().clone();
         let end = current.encode_utf16().count() as u32;
-        let (value, _caret) = edit_prompt(&current, end, end, edit);
+        let (value, _caret) = edit.apply(&current, end, end);
         self.0.edit_draft(value);
         focus_prompt_end(PROMPT_INPUT_ID);
     }

@@ -3,7 +3,6 @@ use super::error::ChatErrorCard;
 use super::item::ChatItemRow;
 use super::state::Chat;
 use crate::event::{ChatCancelQueuedPrompt, ChatClearQueue, ChatResume};
-use crate::format::is_handoff_boundary;
 use dioxus::prelude::*;
 use vmux_api::prompt_media::ChatAttachment;
 use vmux_ui::agent_accent::agent_accent;
@@ -59,7 +58,6 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let items = chat.transcript.items;
     let handoff_source = (chat.handoff.source)();
     let handoff_truncated = (chat.handoff.truncated)();
-    let handoff_count = (chat.handoff.message_count)();
     let agent = chat.agent();
     let agent_name = chat.header_name();
     let agent_avatar = favicon_src_for_url(
@@ -113,9 +111,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                         user_name: user_name.clone(),
                         user_color: user_color.clone(),
                     }
-                    if !handoff_source.is_empty()
-                        && is_handoff_boundary(loaded_start() as usize + i, handoff_count)
-                    {
+                    if !handoff_source.is_empty() && chat.handoff.boundary(loaded_start() as usize + i) {
                         HandoffDivider { source: handoff_source.clone(), truncated: handoff_truncated }
                     }
                 }

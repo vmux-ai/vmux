@@ -10,8 +10,8 @@ use crate::event::{
     ResumableSessionEntry, ResumeSession, SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
 };
 use crate::format::{
-    PromptHistoryDirection, ResumeMenuState, SelectorMode, chat_page_title, filter_models,
-    resume_menu_state, selector_mode,
+    ChatPageTitle, ImportedMessages, ModelOptions, PromptHistoryDirection, ResumeMenuState,
+    SelectorMode, selector_mode,
 };
 use crate::state::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
@@ -345,7 +345,7 @@ impl Chat {
     }
 
     pub fn title(&self) -> String {
-        chat_page_title(&(self.identity.conversation_title)(), &self.header_name())
+        ChatPageTitle::resolve(&(self.identity.conversation_title)(), &self.header_name())
     }
 
     pub fn accent(&self) -> Accent {
@@ -404,7 +404,7 @@ impl Chat {
         let SelectorMode::Models(query) = selector_mode(&draft) else {
             return Vec::new();
         };
-        filter_models(&self.models.models.read(), query)
+        self.models.filtered(query)
     }
 
     pub fn filtered_mcp_servers(&self) -> Vec<vmux_api::mcp::McpServerEntry> {
@@ -450,7 +450,7 @@ impl Chat {
         if !self.resume_menu_open() {
             return None;
         }
-        Some(resume_menu_state(
+        Some(ResumeMenuState::resolve(
             (self.resume.active)(),
             (self.resume.loading)(),
             &(self.resume.query)(),
@@ -931,6 +931,12 @@ pub struct Handoff {
     pub message_count: Signal<u32>,
 }
 
+impl Handoff {
+    pub fn boundary(&self, message_index: usize) -> bool {
+        ImportedMessages::new((self.message_count)()).boundary(message_index)
+    }
+}
+
 pub fn use_handoff() -> Handoff {
     Handoff {
         source: use_signal(String::new),
@@ -999,6 +1005,12 @@ pub struct ModelPicker {
     pub default_model_id: Signal<String>,
     pub current_model: Signal<String>,
     pub loaded: Signal<bool>,
+}
+
+impl ModelPicker {
+    fn filtered(&self, query: &str) -> Vec<ModelOptionEntry> {
+        ModelOptions::new(self.models.read().clone()).filtered(query)
+    }
 }
 
 pub fn use_model_picker() -> ModelPicker {

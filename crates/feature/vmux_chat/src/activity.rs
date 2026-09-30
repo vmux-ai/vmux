@@ -1,4 +1,5 @@
 use vmux_api::chat::{ChatActivityKind, ChatToolKind};
+use vmux_ui::file_icon::{FileIcon, FilePath};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::LineIcon;
 
@@ -31,13 +32,13 @@ impl ToolPresentation {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ActivityIcon {
     Thinking,
     Writing,
     Installing,
     Awaiting,
-    Python,
+    Language(String),
     ReadFile,
     WriteFile,
     Layout,
@@ -59,9 +60,9 @@ pub enum ActivityIcon {
 }
 
 impl ActivityIcon {
-    pub fn line_icon(self) -> Option<LineIcon> {
+    pub fn line_icon(&self) -> Option<LineIcon> {
         let icon = match self {
-            Self::Python => return None,
+            Self::Language(_) => return None,
             Self::Thinking => LineIcon::Brain,
             Self::Writing | Self::WriteFile => LineIcon::Pencil,
             Self::Installing => LineIcon::Package,
@@ -87,11 +88,15 @@ impl ActivityIcon {
         Some(icon)
     }
 
-    pub fn favicon(self, accent: &str) -> String {
-        if self == Self::Python {
-            return Self::svg_data_url(
-                "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='1' y='1' width='30' height='30' rx='8' fill='#151515' stroke='#3776ab' stroke-opacity='.7'/><path fill='#3776ab' d='M15.6 4C9.3 4 9.7 6.7 9.7 6.7v2.8h6v1.2H7.3s-4.6-.5-4.6 6.9 4.1 7.1 4.1 7.1h2.4v-3.3s-.1-4 3.9-4h6.3s3.6 0 3.6-3.6V7.7S23.4 4 15.6 4Zm-3.3 2a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z'/><path fill='#ffd43b' d='M16.4 28c6.3 0 5.9-2.7 5.9-2.7v-2.8h-6v-1.2h8.4s4.6.5 4.6-6.9-4.1-7.1-4.1-7.1h-2.4v3.3s.1 4-3.9 4h-6.3S9 14.6 9 18.2v6.1S8.6 28 16.4 28Zm3.3-2a1.1 1.1 0 1 1 0-2.2 1.1 1.1 0 0 1 0 2.2Z'/></svg>",
-            );
+    pub fn favicon(&self, accent: &str) -> String {
+        if let Self::Language(path) = self
+            && let FileIcon::Logo(logo) = FilePath(path).icon(false)
+        {
+            return Self::svg_data_url(&format!(
+                "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='1' y='1' width='30' height='30' rx='8' fill='{accent}' fill-opacity='.15' stroke='{accent}' stroke-opacity='.45'/><g transform='translate(4 4)' fill='{colour}'><path d='{path}'/></g></svg>",
+                colour = logo.colour,
+                path = logo.path,
+            ));
         }
         let mut paths = String::new();
         for path in self.paths() {
@@ -120,7 +125,7 @@ impl ActivityIcon {
         encoded
     }
 
-    pub fn paths(self) -> &'static [&'static str] {
+    pub fn paths(&self) -> &'static [&'static str] {
         match self.line_icon() {
             Some(icon) => icon.paths(),
             None => &[],
@@ -135,7 +140,7 @@ impl From<ChatActivityKind> for ActivityIcon {
             ChatActivityKind::Writing => Self::Writing,
             ChatActivityKind::Installing => Self::Installing,
             ChatActivityKind::Awaiting => Self::Awaiting,
-            ChatActivityKind::Python => Self::Python,
+            ChatActivityKind::Language(path) => Self::Language(path),
             ChatActivityKind::ReadFile => Self::ReadFile,
             ChatActivityKind::WriteFile => Self::WriteFile,
             ChatActivityKind::Layout => Self::Layout,
@@ -169,8 +174,8 @@ mod tests {
             ActivityIcon::Guardian
         );
         assert_eq!(
-            ActivityIcon::from(ChatActivityKind::Python),
-            ActivityIcon::Python
+            ActivityIcon::from(ChatActivityKind::Language("language.py".into())),
+            ActivityIcon::Language("language.py".into())
         );
         assert_eq!(
             ActivityIcon::from(ChatActivityKind::Reconnect),

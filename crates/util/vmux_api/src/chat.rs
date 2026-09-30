@@ -240,7 +240,7 @@ pub enum ChatToolKind {
     Other,
 }
 
-#[vmux_api::contract(Copy, Default, Eq)]
+#[vmux_api::contract(Default, Eq)]
 pub enum ChatActivityKind {
     #[default]
     None,
@@ -248,7 +248,7 @@ pub enum ChatActivityKind {
     Writing,
     Installing,
     Awaiting,
-    Python,
+    Language(String),
     ReadFile,
     WriteFile,
     Layout,

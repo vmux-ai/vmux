@@ -5,6 +5,8 @@ use vmux_api::chat::{
     ChatToolChildCall, ChatToolKind, ChatTurn, ChatTurnRow,
 };
 
+use crate::LanguageIconPath;
+
 pub fn project_turn(turn: &mut ChatTurn) {
     let mut copy_text = Vec::new();
     let mut active_subagents = 0u32;
@@ -88,7 +90,7 @@ pub fn current_activity(items: &[ChatItem], status: &str) -> Option<ChatActivity
         "awaiting" => Some(ChatActivityKind::Awaiting),
         "errored" => Some(ChatActivityKind::Error),
         "streaming" => items.iter().rev().find_map(|item| match item {
-            ChatItem::Turn(turn) if turn.running => Some(turn.activity),
+            ChatItem::Turn(turn) if turn.running => Some(turn.activity.clone()),
             _ => None,
         }),
         _ => None,
@@ -409,8 +411,13 @@ fn tool_kind(name: &str, args: &str) -> ChatToolKind {
 }
 
 fn activity_for_tool(name: &str, args: &str) -> ChatActivityKind {
-    if is_python(args) || is_python(name) {
-        return ChatActivityKind::Python;
+    if let Some(path) = tool_file_path(args).and_then(|path| LanguageIconPath::from_hint(&path)) {
+        return ChatActivityKind::Language(path);
+    }
+    if let Some(path) =
+        LanguageIconPath::from_text(name).or_else(|| LanguageIconPath::from_text(args))
+    {
+        return ChatActivityKind::Language(path);
     }
     match tool_kind(name, args) {
         ChatToolKind::Guardian => ChatActivityKind::Guardian,
@@ -435,8 +442,8 @@ fn activity_for_block(block: &ChatBlock) -> ChatActivityKind {
         ChatBlock::ToolUse { name, args, .. } => activity_for_tool(name, args),
         ChatBlock::Subagent(_) => ChatActivityKind::Subagent,
         ChatBlock::Diff { path, .. } => {
-            if is_python(path) {
-                ChatActivityKind::Python
+            if let Some(path) = LanguageIconPath::from_hint(path) {
+                ChatActivityKind::Language(path)
             } else {
                 ChatActivityKind::Diff
             }
@@ -550,11 +557,6 @@ fn file_path_from_text(text: &str) -> Option<String> {
                 .is_some_and(|(_, extension)| !extension.is_empty() && extension.len() <= 12)
         })
         .map(ToOwned::to_owned)
-}
-
-fn is_python(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    lower.contains(".py") || lower == "py" || lower.contains("python")
 }
 
 pub(crate) fn parent_tool_index(turn: &ChatTurn, index: usize) -> Option<usize> {
@@ -702,7 +704,10 @@ mod tests {
 
         project_turn(&mut turn);
 
-        assert_eq!(turn.activity, ChatActivityKind::Python);
+        assert_eq!(
+            turn.activity,
+            ChatActivityKind::Language("language.py".into())
+        );
         let ChatTurnRow::Tool(call) = &turn.rows[0] else {
             panic!("expected live tool");
         };

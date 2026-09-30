@@ -48,9 +48,7 @@ use vmux_setting::AppSettings;
 use vmux_setting::SpaceOverrides;
 use vmux_space::model::BOOTSTRAP_SPACE_ID;
 #[cfg(test)]
-use vmux_space::model::{SpaceRecord, bootstrap_space_record};
-#[cfg(test)]
-use vmux_space::spaces::space_profile_bundle;
+use vmux_space::model::SpaceRecord;
 
 #[cfg(test)]
 use super::input_queue::InputQueuePlugin;
@@ -2081,10 +2079,8 @@ mod tests {
     use vmux_setting::{BrowserSettings, ShortcutSettings};
 
     fn spawn_active_space(app: &mut App, record: &SpaceRecord) {
-        app.world_mut().spawn((
-            space_profile_bundle(record),
-            vmux_layout::space::CurrentSpace,
-        ));
+        app.world_mut()
+            .spawn((record.bundle(), vmux_layout::space::CurrentSpace));
     }
 
     #[test]
@@ -2259,7 +2255,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .add_systems(Update, handle_terminal_page_open);
-        spawn_active_space(&mut app, &bootstrap_space_record());
+        spawn_active_space(&mut app, &SpaceRecord::bootstrap());
 
         let stack = app.world_mut().spawn(stack_bundle()).id();
         let task = app
@@ -2288,7 +2284,7 @@ mod tests {
     #[test]
     fn open_terminal_page_uses_per_space_startup_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let record = bootstrap_space_record();
+        let record = SpaceRecord::bootstrap();
         let mut settings = test_settings();
         settings.spaces.insert(
             record.id.clone(),
@@ -2324,7 +2320,7 @@ mod tests {
 
     #[test]
     fn open_terminal_page_without_workspace_uses_shell_default() {
-        let record = bootstrap_space_record();
+        let record = SpaceRecord::bootstrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
@@ -2352,7 +2348,7 @@ mod tests {
     fn open_terminal_page_prefers_ancestor_tab_startup_dir() {
         let space_dir = tempfile::tempdir().unwrap();
         let tab_dir = tempfile::tempdir().unwrap();
-        let record = bootstrap_space_record();
+        let record = SpaceRecord::bootstrap();
         let mut settings = test_settings();
         settings.spaces.insert(
             record.id.clone(),
@@ -2399,7 +2395,7 @@ mod tests {
     #[test]
     fn open_terminal_page_rejects_invalid_ancestor_tab_startup_dir() {
         let fallback_dir = tempfile::tempdir().unwrap();
-        let record = bootstrap_space_record();
+        let record = SpaceRecord::bootstrap();
         let mut settings = test_settings();
         settings.spaces.insert(
             record.id.clone(),
@@ -2449,7 +2445,7 @@ mod tests {
     #[test]
     fn layout_terminal_rejects_invalid_ancestor_tab_startup_dir() {
         let fallback_dir = tempfile::tempdir().unwrap();
-        let record = bootstrap_space_record();
+        let record = SpaceRecord::bootstrap();
         let mut settings = test_settings();
         settings.spaces.insert(
             record.id.clone(),

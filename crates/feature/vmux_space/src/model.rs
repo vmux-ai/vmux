@@ -1,14 +1,3 @@
-pub fn bootstrap_profile_name() -> String {
-    #[cfg(host)]
-    {
-        vmux_core::profile::Profile::current().display_name()
-    }
-    #[cfg(not(host))]
-    {
-        "Personal".to_string()
-    }
-}
-
 pub const BOOTSTRAP_SPACE_ID: &str = "space-1";
 pub const BOOTSTRAP_SPACE_NAME: &str = "space-1";
 
@@ -21,60 +10,73 @@ pub struct SpaceRecord {
 
 impl Default for SpaceRecord {
     fn default() -> Self {
-        bootstrap_space_record()
+        Self::bootstrap()
     }
 }
 
-pub fn bootstrap_space_record() -> SpaceRecord {
-    SpaceRecord {
-        id: BOOTSTRAP_SPACE_ID.to_string(),
-        name: BOOTSTRAP_SPACE_NAME.to_string(),
-        profile: bootstrap_profile_name(),
+impl SpaceRecord {
+    pub fn bootstrap() -> Self {
+        Self {
+            id: BOOTSTRAP_SPACE_ID.to_string(),
+            name: BOOTSTRAP_SPACE_NAME.to_string(),
+            profile: Self::current_profile_name(),
+        }
     }
-}
 
-fn slug_segment(input: &str) -> String {
-    let mut out = String::new();
-    let mut pending_dash = false;
-    for ch in input.chars().flat_map(char::to_lowercase) {
-        if ch.is_ascii_alphanumeric() {
-            if pending_dash && !out.is_empty() {
-                out.push('-');
+    pub fn current_profile_name() -> String {
+        #[cfg(host)]
+        {
+            vmux_core::profile::Profile::current().display_name()
+        }
+        #[cfg(not(host))]
+        {
+            "Personal".to_string()
+        }
+    }
+
+    pub fn normalized_id(input: &str) -> String {
+        let segments: Vec<String> = input
+            .split('/')
+            .map(Self::slug_segment)
+            .filter(|segment| !segment.is_empty())
+            .collect();
+        if segments.is_empty() {
+            "space".to_string()
+        } else {
+            segments.join("/")
+        }
+    }
+
+    pub fn unique_id(existing: &std::collections::HashSet<String>, name: &str) -> String {
+        let base = Self::normalized_id(name);
+        if !existing.contains(&base) {
+            return base;
+        }
+        for idx in 2usize.. {
+            let candidate = format!("{base}-{idx}");
+            if !existing.contains(&candidate) {
+                return candidate;
             }
-            out.push(ch);
-            pending_dash = false;
-        } else if !out.is_empty() {
-            pending_dash = true;
         }
+        unreachable!()
     }
-    out
-}
 
-pub fn normalize_space_id(input: &str) -> String {
-    let segments: Vec<String> = input
-        .split('/')
-        .map(slug_segment)
-        .filter(|segment| !segment.is_empty())
-        .collect();
-    if segments.is_empty() {
-        "space".to_string()
-    } else {
-        segments.join("/")
-    }
-}
-
-pub fn unique_space_id_among(existing: &std::collections::HashSet<String>, name: &str) -> String {
-    let base = normalize_space_id(name);
-    if !existing.contains(&base) {
-        return base;
-    }
-    for idx in 2usize.. {
-        let candidate = format!("{base}-{idx}");
-        if !existing.contains(&candidate) {
-            return candidate;
+    fn slug_segment(input: &str) -> String {
+        let mut output = String::new();
+        let mut pending_dash = false;
+        for character in input.chars().flat_map(char::to_lowercase) {
+            if character.is_ascii_alphanumeric() {
+                if pending_dash && !output.is_empty() {
+                    output.push('-');
+                }
+                output.push(character);
+                pending_dash = false;
+            } else if !output.is_empty() {
+                pending_dash = true;
+            }
         }
+        output
     }
-    unreachable!()
 }
 
 #[cfg(test)]
@@ -83,15 +85,18 @@ mod tests {
 
     #[test]
     fn space_ids_are_slugged() {
-        assert_eq!(normalize_space_id("Client A!"), "client-a");
-        assert_eq!(normalize_space_id("  "), "space");
+        assert_eq!(SpaceRecord::normalized_id("Client A!"), "client-a");
+        assert_eq!(SpaceRecord::normalized_id("  "), "space");
     }
 
     #[test]
     fn normalize_keeps_slash_as_nested_separator() {
-        assert_eq!(normalize_space_id("vmux-ai/vmux"), "vmux-ai/vmux");
-        assert_eq!(normalize_space_id("Org Name/Repo!"), "org-name/repo");
-        assert_eq!(normalize_space_id("a//b/"), "a/b");
+        assert_eq!(SpaceRecord::normalized_id("vmux-ai/vmux"), "vmux-ai/vmux");
+        assert_eq!(
+            SpaceRecord::normalized_id("Org Name/Repo!"),
+            "org-name/repo"
+        );
+        assert_eq!(SpaceRecord::normalized_id("a//b/"), "a/b");
     }
 
     #[test]
@@ -100,6 +105,6 @@ mod tests {
             ["work".to_string(), "work-2".to_string()]
                 .into_iter()
                 .collect();
-        assert_eq!(unique_space_id_among(&existing, "Work"), "work-3");
+        assert_eq!(SpaceRecord::unique_id(&existing, "Work"), "work-3");
     }
 }
