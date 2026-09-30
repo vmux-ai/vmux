@@ -1,7 +1,7 @@
 use crate::{
     active_pane::{ActiveStack, ProfileId},
     host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
-    pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
+    pane::{Pane, PaneSplit, PaneStacks, PendingCursorWarp, first_leaf_descendant},
     tab::{CloseTabRequest, Tab},
 };
 use bevy::{
@@ -218,6 +218,7 @@ struct StackCloser<'w, 's> {
     pane_children: Query<'w, 's, &'static Children, With<Pane>>,
     stack_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
     stacks: Query<'w, 's, Entity, With<Stack>>,
+    pane_stacks: PaneStacks<'w, 's>,
     child_of: Query<'w, 's, &'static ChildOf>,
     splits: Query<'w, 's, &'static PaneSplit>,
     focused_space: crate::space::FocusedSpace<'w, 's>,
@@ -380,7 +381,7 @@ fn close_last_stack_in_pane(
 
 fn first_stack_to_activate(pane: Entity, closer: &StackCloser) -> Option<Entity> {
     active_stack_in_pane(pane, &closer.pane_children, &closer.stack_ts)
-        .or_else(|| first_stack_in_pane(pane, &closer.pane_children, &closer.stacks))
+        .or_else(|| closer.pane_stacks.first(pane))
 }
 
 fn closes_tab(tab: Entity, stack: Entity, closer: &mut StackCloser) -> bool {

@@ -39,7 +39,9 @@ use vmux_layout::space::FocusedSpace;
 use vmux_layout::stack::{
     CloseRequest as StackCloseRequest, FocusRequest, FocusedStack, Stack, stack_bundle,
 };
-use vmux_layout::tab::{Tab, ancestor_tab_startup_dir};
+#[cfg(test)]
+use vmux_layout::tab::Tab;
+use vmux_layout::tab::TabHierarchy;
 use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
 use vmux_setting::AppSettings;
 #[cfg(test)]
@@ -373,13 +375,12 @@ fn spawn_layout_requested_content(
     mut reader: MessageReader<TerminalLayoutSpawnRequest>,
     settings: Res<AppSettings>,
     active_space: FocusedSpace,
-    child_of: Query<&ChildOf>,
-    tabs: Query<&Tab>,
+    tabs: TabHierarchy,
     mut commands: Commands,
 ) {
     let space_id = active_space.id().unwrap_or(BOOTSTRAP_SPACE_ID);
     for request in reader.read() {
-        let tab_dir = ancestor_tab_startup_dir(request.stack, &child_of, &tabs);
+        let tab_dir = tabs.startup_dir(request.stack);
         let Ok(cwd) = settings.workspace_dir(space_id, tab_dir.as_deref()) else {
             continue;
         };
@@ -398,8 +399,7 @@ type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 fn handle_terminal_page_open(
     tasks: Query<(Entity, &PageOpenTask, Has<PageRestore>), PendingPageOpen>,
     pid_indexes: Query<&pid::PidToEntity>,
-    child_of_q: Query<&ChildOf>,
-    tabs: Query<&Tab>,
+    tabs: TabHierarchy,
     saved_launches: Query<&crate::launch::TerminalLaunch, With<Stack>>,
     settings: Res<AppSettings>,
     active_space: FocusedSpace,
@@ -462,7 +462,7 @@ fn handle_terminal_page_open(
                 }
             }
         } else {
-            let tab_dir = ancestor_tab_startup_dir(task.stack, &child_of_q, &tabs);
+            let tab_dir = tabs.startup_dir(task.stack);
             match settings.workspace_dir(space_id, tab_dir.as_deref()) {
                 Ok(cwd) => cwd,
                 Err(message) => {
@@ -870,8 +870,7 @@ fn resolve_pending_terminal_cwd(
         (Entity, &mut crate::launch::TerminalLaunch),
         (With<Terminal>, With<PendingServiceCreate>),
     >,
-    child_of: Query<&ChildOf>,
-    tabs: Query<&Tab>,
+    tabs: TabHierarchy,
     space_hierarchy: vmux_layout::space::SpaceHierarchy,
     settings: Res<AppSettings>,
     active_space: FocusedSpace,
@@ -880,7 +879,7 @@ fn resolve_pending_terminal_cwd(
         if !launch.cwd.is_empty() {
             continue;
         }
-        let tab_dir = ancestor_tab_startup_dir(entity, &child_of, &tabs);
+        let tab_dir = tabs.startup_dir(entity);
         let space_id = space_hierarchy
             .id(entity)
             .or_else(|| active_space.id().map(str::to_string))

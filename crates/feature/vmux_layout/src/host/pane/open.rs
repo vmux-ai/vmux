@@ -10,7 +10,7 @@ use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 use super::{
-    OpenRequest, first_stack_in_pane,
+    OpenRequest, PaneStacks,
     focus::PendingCursorWarp,
     identity::{SpawnCounter, SpawnSeq},
     tree::{
@@ -883,6 +883,7 @@ fn handle_open_in_pane(
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
     tab_filter: Query<Entity, With<Stack>>,
+    pane_stacks: PaneStacks,
     focused_space: crate::space::FocusedSpace,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
@@ -955,7 +956,7 @@ fn handle_open_in_pane(
                 PaneOpenMode::InPlace => {
                     let active_stack = focus
                         .stack(target_pane)
-                        .or_else(|| first_stack_in_pane(target_pane, &pane_children, &tab_filter));
+                        .or_else(|| pane_stacks.first(target_pane));
                     if let Some(stack) = active_stack {
                         open_stack(stack, resolved, None, &mut page_open_requests);
                     }

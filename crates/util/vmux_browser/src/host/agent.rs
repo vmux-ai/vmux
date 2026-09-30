@@ -162,13 +162,12 @@ fn route_scroll_queries(
 fn answer_working_directory_queries(
     mut requests: MessageReader<ToolQueryMessage<AgentWorkingDirectory>>,
     browse: AgentBrowserResolve,
-    tabs: Query<&vmux_layout::tab::Tab>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in requests.read() {
         let result = if browse.agent_pane(request.payload.anchor).is_none() {
             Err("agent pane not found".to_string())
-        } else if let Some(path) = browse.working_directory(request.payload.anchor, &tabs) {
+        } else if let Some(path) = browse.working_directory(request.payload.anchor) {
             Ok(path.to_string_lossy().into_owned())
         } else {
             ProjectsDirectory::ensure()

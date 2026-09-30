@@ -264,17 +264,26 @@ pub struct TabWorktreeUnavailable {
 #[require(Save)]
 pub struct TabDirDecided;
 
-pub fn ancestor_tab_startup_dir(
-    entity: Entity,
-    child_of: &Query<&ChildOf>,
-    tabs: &Query<&Tab>,
-) -> Option<String> {
-    let mut cur = entity;
-    loop {
-        if let Ok(tab) = tabs.get(cur) {
-            return tab.startup_dir.clone();
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct TabHierarchy<'w, 's> {
+    child_of: Query<'w, 's, &'static ChildOf>,
+    tabs: Query<'w, 's, &'static Tab>,
+}
+
+impl TabHierarchy<'_, '_> {
+    pub fn entity(&self, entity: Entity) -> Option<Entity> {
+        let mut current = entity;
+        loop {
+            if self.tabs.contains(current) {
+                return Some(current);
+            }
+            current = self.child_of.get(current).ok()?.parent();
         }
-        cur = child_of.get(cur).ok()?.parent();
+    }
+
+    pub fn startup_dir(&self, entity: Entity) -> Option<String> {
+        let tab = self.entity(entity)?;
+        self.tabs.get(tab).ok()?.startup_dir.clone()
     }
 }
 

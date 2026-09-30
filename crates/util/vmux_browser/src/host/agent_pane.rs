@@ -11,6 +11,7 @@ pub struct AgentBrowserResolve<'w, 's> {
     stack_q: Query<'w, 's, Entity, With<vmux_layout::stack::Stack>>,
     browser_stacks: Query<'w, 's, &'static ChildOf, With<vmux_layout::Browser>>,
     active: vmux_layout::active_pane::ActivePaneQuery<'w, 's>,
+    tabs: vmux_layout::tab::TabHierarchy<'w, 's>,
 }
 
 pub(super) struct AgentBrowserPaneClaim {
@@ -65,13 +66,9 @@ impl AgentBrowserResolve<'_, '_> {
         self.child_of.get(term_co.get()).ok().map(|co| co.get())
     }
 
-    pub fn working_directory(
-        &self,
-        anchor: vmux_core::ProcessId,
-        tabs: &Query<&vmux_layout::tab::Tab>,
-    ) -> Option<std::path::PathBuf> {
+    pub fn working_directory(&self, anchor: vmux_core::ProcessId) -> Option<std::path::PathBuf> {
         let pane = self.agent_pane(anchor)?;
-        let path = vmux_layout::tab::ancestor_tab_startup_dir(pane, &self.child_of, tabs)?;
+        let path = self.tabs.startup_dir(pane)?;
         vmux_setting::StartupDir::from_tab(&path)
             .ok()
             .map(|dir| dir.path)

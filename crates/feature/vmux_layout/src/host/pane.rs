@@ -307,13 +307,17 @@ impl Plugin for PaneCommandPlugin {
 #[require(Save)]
 pub struct SideSheetCardCollapsed;
 
-pub fn first_stack_in_pane(
-    pane: Entity,
-    pane_children: &Query<&Children, With<Pane>>,
-    tab_q: &Query<Entity, With<Stack>>,
-) -> Option<Entity> {
-    let children = pane_children.get(pane).ok()?;
-    children.iter().find(|&e| tab_q.contains(e))
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct PaneStacks<'w, 's> {
+    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    stacks: Query<'w, 's, Entity, With<Stack>>,
+}
+
+impl PaneStacks<'_, '_> {
+    pub fn first(&self, pane: Entity) -> Option<Entity> {
+        let children = self.pane_children.get(pane).ok()?;
+        children.iter().find(|&entity| self.stacks.contains(entity))
+    }
 }
 
 #[cfg(test)]

@@ -7,7 +7,9 @@ use vmux_core::page::PageReady;
 use vmux_git::state::{GitPageContext, GitWorkspaceChanged};
 
 use crate::space::FocusedSpace;
-use crate::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
+use crate::tab::{
+    Tab, TabDirDecided, TabHierarchy, TabWorkspace, TabWorktree, TabWorktreeUnavailable,
+};
 use crate::worktree::{ManagedWorktreeRoot, TabWorktreeReady};
 
 pub struct PageContextPlugin;
@@ -145,8 +147,7 @@ fn apply_tab_workspace_selection(
 
 fn on_git_page_ready(
     trigger: On<UiInput<PageReady>>,
-    child_of: Query<&ChildOf>,
-    tabs: Query<&Tab>,
+    tabs: TabHierarchy,
     pages: Query<&vmux_core::PageMetadata>,
     focused_space: FocusedSpace,
     mut commands: Commands,
@@ -158,7 +159,8 @@ fn on_git_page_ready(
     if !page.url.starts_with(vmux_git::GIT_PAGE_URL) && page.url != vmux_git::GIT_DOCUMENT_URL {
         return;
     }
-    let path = crate::tab::ancestor_tab_startup_dir(webview, &child_of, &tabs)
+    let path = tabs
+        .startup_dir(webview)
         .map(PathBuf::from)
         .or_else(|| focused_space.startup_dir().map(PathBuf::from))
         .or_else(|| std::env::current_dir().ok())

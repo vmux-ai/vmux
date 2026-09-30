@@ -17,9 +17,7 @@ use crate::{
 
 #[cfg(test)]
 use super::PaneSplitDirection;
-use super::{
-    CloseRequest, Pane, PaneSplit, first_leaf_descendant, first_stack_in_pane, leaf_pane_bundle,
-};
+use super::{CloseRequest, Pane, PaneSplit, PaneStacks, first_leaf_descendant, leaf_pane_bundle};
 use crate::host::command::LayoutRequestSet;
 
 pub(super) struct ClosePlugin;
@@ -115,6 +113,7 @@ fn close_panes(
     pane_children: Query<&Children, With<Pane>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_times: Query<(Entity, &LastActivatedAt), With<Pane>>,
+    pane_stacks: PaneStacks,
     focus: LayoutFocus,
     child_of: Query<&ChildOf>,
     splits: Query<&PaneSplit>,
@@ -164,10 +163,7 @@ fn close_panes(
                 .unwrap_or(siblings[0]);
             let leaf = first_leaf_descendant(newest, &pane_children, &leaf_panes);
             commands.entity(leaf).insert(LastActivatedAt::now());
-            if let Some(stack) = focus
-                .stack(leaf)
-                .or_else(|| first_stack_in_pane(leaf, &pane_children, &stacks))
-            {
+            if let Some(stack) = focus.stack(leaf).or_else(|| pane_stacks.first(leaf)) {
                 commands.entity(stack).insert(LastActivatedAt::now());
             }
             continue;
@@ -215,7 +211,7 @@ fn close_panes(
             .insert(LastActivatedAt::now());
         let active_stack = focus
             .stack(new_active_pane)
-            .or_else(|| first_stack_in_pane(new_active_pane, &pane_children, &stacks))
+            .or_else(|| pane_stacks.first(new_active_pane))
             .or_else(|| {
                 sibling_children
                     .iter()
