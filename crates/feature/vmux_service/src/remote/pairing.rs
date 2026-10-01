@@ -1,7 +1,5 @@
 use std::time::{Duration, Instant};
 
-use std::path::Path;
-
 use crate::RemotePaths;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -84,7 +82,7 @@ impl Relay {
     }
 
     pub fn base_url(&self) -> Result<Option<String>, String> {
-        if recorded_device().is_none() {
+        if RemoteRegistration::current().device().is_none() {
             return Ok(None);
         }
         let parsed = url::Url::parse(&self.url).map_err(|error| error.to_string())?;
@@ -97,7 +95,7 @@ impl Relay {
     }
 
     pub fn registered_device(&self) -> Option<String> {
-        recorded_device()
+        RemoteRegistration::current().device()
     }
 
     pub fn pairing(
@@ -105,9 +103,12 @@ impl Relay {
         relay_token: &str,
         pairing_token: &str,
     ) -> Result<Option<PairingInfo>, String> {
-        let (Some(base_url), Some(device), Some(fingerprint)) =
-            (self.base_url()?, recorded_device(), recorded_fingerprint())
-        else {
+        let registration = RemoteRegistration::current();
+        let (Some(base_url), Some(device), Some(fingerprint)) = (
+            self.base_url()?,
+            registration.device(),
+            registration.fingerprint(),
+        ) else {
             return Ok(None);
         };
         PairingInfo::new(&base_url, relay_token, pairing_token, &fingerprint, &device).map(Some)
@@ -215,18 +216,26 @@ impl PairingInfo {
     }
 }
 
-fn recorded_device() -> Option<String> {
-    read_trimmed(&RemotePaths::current().relay_registration())
-}
+struct RemoteRegistration(RemotePaths);
 
-fn recorded_fingerprint() -> Option<String> {
-    read_trimmed(&RemotePaths::current().fingerprint())
-}
+impl RemoteRegistration {
+    fn current() -> Self {
+        Self(RemotePaths::current())
+    }
 
-fn read_trimmed(path: &Path) -> Option<String> {
-    let contents = std::fs::read_to_string(path).ok()?;
-    let trimmed = contents.trim();
-    (!trimmed.is_empty()).then(|| trimmed.to_string())
+    fn device(&self) -> Option<String> {
+        Self::read(&self.0.relay_registration())
+    }
+
+    fn fingerprint(&self) -> Option<String> {
+        Self::read(&self.0.fingerprint())
+    }
+
+    fn read(path: &std::path::Path) -> Option<String> {
+        let contents = std::fs::read_to_string(path).ok()?;
+        let trimmed = contents.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    }
 }
 
 #[cfg(test)]

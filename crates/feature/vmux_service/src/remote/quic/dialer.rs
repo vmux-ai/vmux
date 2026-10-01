@@ -34,7 +34,7 @@ struct Registration {
 
 impl Registration {
     async fn hold(state: &RemoteState, liveness: &watch::Receiver<bool>) -> SessionEnd {
-        let identity = match super::ensure_identity() {
+        let identity = match super::IdentityStore::current().load_or_create() {
             Ok(identity) => identity,
             Err(error) => {
                 return SessionEnd::Unregistered(format!("desktop identity: {error}"));
@@ -48,9 +48,11 @@ impl Registration {
 
     async fn open(token: &str) -> Result<Self, String> {
         let relay = Relay::configured();
-        let device_id = ensure_device_id().map_err(|error| error.to_string())?;
-        let address = resolve(relay.url()).await?;
-        let server_name = host_of(relay.url())?;
+        let device_id = RelayDevice::current()
+            .load_or_create()
+            .map_err(|error| error.to_string())?;
+        let address = relay.address().await?;
+        let server_name = relay.host()?;
 
         let endpoint = vmux_transport::quic::endpoint::Trust::Relay
             .endpoint(address)
@@ -108,6 +110,23 @@ impl Registration {
             held: self.since.elapsed(),
             reason: reason.into(),
         }
+    }
+}
+
+impl Relay {
+    async fn address(&self) -> Result<std::net::SocketAddr, String> {
+        let parsed = url::Url::parse(self.url()).map_err(|error| format!("relay url: {error}"))?;
+        let host = parsed.host_str().ok_or("relay url has no host")?;
+        let port = parsed.port().unwrap_or(443);
+        vmux_transport::quic::endpoint::resolve_preferring_ipv4(host, port).await
+    }
+
+    fn host(&self) -> Result<String, String> {
+        let parsed = url::Url::parse(self.url()).map_err(|error| format!("relay url: {error}"))?;
+        Ok(parsed
+            .host_str()
+            .ok_or("relay url has no host")?
+            .to_string())
     }
 }
 
@@ -196,6 +215,30 @@ impl Drop for RegisteredDevice {
     }
 }
 
+struct RelayDevice {
+    path: PathBuf,
+}
+
+impl RelayDevice {
+    fn current() -> Self {
+        Self {
+            path: RemotePaths::current().relay_device(),
+        }
+    }
+
+    fn load_or_create(&self) -> std::io::Result<DeviceId> {
+        if let Ok(existing) = std::fs::read_to_string(&self.path) {
+            let existing = existing.trim();
+            if !existing.is_empty() {
+                return Ok(DeviceId::new(existing));
+            }
+        }
+        let minted = uuid::Uuid::new_v4().simple().to_string();
+        super::super::write_private(&self.path, &minted)?;
+        Ok(DeviceId::new(minted))
+    }
+}
+
 const SETUP: FrameStream = FrameStream::new(16 * 1024);
 
 async fn register(
@@ -227,34 +270,6 @@ async fn register(
         .read_json::<Accepted>(MessageType::RELAY_ACCEPTED)
         .map_err(|error| format!("decode acceptance: {error:?}"))?;
     Ok(())
-}
-
-async fn resolve(relay_url: &str) -> Result<std::net::SocketAddr, String> {
-    let parsed = url::Url::parse(relay_url).map_err(|error| format!("relay url: {error}"))?;
-    let host = parsed.host_str().ok_or("relay url has no host")?;
-    let port = parsed.port().unwrap_or(443);
-    vmux_transport::quic::endpoint::resolve_preferring_ipv4(host, port).await
-}
-
-fn host_of(relay_url: &str) -> Result<String, String> {
-    let parsed = url::Url::parse(relay_url).map_err(|error| format!("relay url: {error}"))?;
-    Ok(parsed
-        .host_str()
-        .ok_or("relay url has no host")?
-        .to_string())
-}
-
-fn ensure_device_id() -> std::io::Result<DeviceId> {
-    let path = RemotePaths::current().relay_device();
-    if let Ok(existing) = std::fs::read_to_string(&path) {
-        let existing = existing.trim();
-        if !existing.is_empty() {
-            return Ok(DeviceId::new(existing));
-        }
-    }
-    let minted = uuid::Uuid::new_v4().simple().to_string();
-    super::super::write_private(&path, &minted)?;
-    Ok(DeviceId::new(minted))
 }
 
 #[cfg(test)]

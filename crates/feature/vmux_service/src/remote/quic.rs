@@ -17,56 +17,59 @@ use vmux_transport::quic::{
     ClientCredential, ClientSetup, CloseCode, MessageType, SessionAccepted,
 };
 
+use crate::RemotePaths;
+
 const AUTHORIZATION_POLL: Duration = Duration::from_secs(1);
 
 const MAX_HELLO_BYTES: usize = 16 * 1024;
 
-pub fn ensure_identity() -> std::io::Result<SelfSignedIdentity> {
-    let remote = crate::RemotePaths::current();
-    let cert_path = remote.certificate();
-    let key_path = remote.key();
+pub(crate) struct IdentityStore(RemotePaths);
 
-    if let (Ok(certificate_pem), Ok(private_key_pem)) = (
-        std::fs::read_to_string(&cert_path),
-        std::fs::read_to_string(&key_path),
-    ) && !certificate_pem.trim().is_empty()
-        && !private_key_pem.trim().is_empty()
-    {
-        let identity = SelfSignedIdentity::from_pem(certificate_pem, private_key_pem)
-            .map_err(std::io::Error::other)?;
-        persist_fingerprint(&identity.fingerprint)?;
-        return Ok(identity);
+impl IdentityStore {
+    pub(crate) fn current() -> Self {
+        Self(RemotePaths::current())
     }
 
-    let identity =
-        SelfSignedIdentity::generate(subject_alt_names()).map_err(std::io::Error::other)?;
-    if let Some(parent) = cert_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&cert_path, &identity.certificate_pem)?;
-    super::write_private(&key_path, &identity.private_key_pem)?;
-    persist_fingerprint(&identity.fingerprint)?;
-    Ok(identity)
-}
+    pub(crate) fn load_or_create(&self) -> std::io::Result<SelfSignedIdentity> {
+        let cert_path = self.0.certificate();
+        let key_path = self.0.key();
+        if let (Ok(certificate_pem), Ok(private_key_pem)) = (
+            std::fs::read_to_string(&cert_path),
+            std::fs::read_to_string(&key_path),
+        ) && !certificate_pem.trim().is_empty()
+            && !private_key_pem.trim().is_empty()
+        {
+            let identity = SelfSignedIdentity::from_pem(certificate_pem, private_key_pem)
+                .map_err(std::io::Error::other)?;
+            self.persist_fingerprint(&identity.fingerprint)?;
+            return Ok(identity);
+        }
 
-fn persist_fingerprint(fingerprint: &str) -> std::io::Result<()> {
-    let path = crate::RemotePaths::current().fingerprint();
-    if std::fs::read_to_string(&path).is_ok_and(|existing| existing.trim() == fingerprint) {
-        return Ok(());
+        let identity =
+            SelfSignedIdentity::generate(Self::names()).map_err(std::io::Error::other)?;
+        if let Some(parent) = cert_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&cert_path, &identity.certificate_pem)?;
+        super::write_private(&key_path, &identity.private_key_pem)?;
+        self.persist_fingerprint(&identity.fingerprint)?;
+        Ok(identity)
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+
+    fn persist_fingerprint(&self, fingerprint: &str) -> std::io::Result<()> {
+        let path = self.0.fingerprint();
+        if std::fs::read_to_string(&path).is_ok_and(|existing| existing.trim() == fingerprint) {
+            return Ok(());
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, fingerprint)
     }
-    std::fs::write(&path, fingerprint)
-}
 
-pub fn identity_fingerprint() -> Option<String> {
-    let pem = std::fs::read_to_string(crate::RemotePaths::current().certificate()).ok()?;
-    SelfSignedIdentity::fingerprint_of_pem(&pem).ok()
-}
-
-fn subject_alt_names() -> Vec<String> {
-    vec!["localhost".to_string(), "127.0.0.1".to_string()]
+    fn names() -> Vec<String> {
+        vec!["localhost".to_string(), "127.0.0.1".to_string()]
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
