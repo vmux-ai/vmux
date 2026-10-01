@@ -8,6 +8,7 @@ use vmux_setting::{AppSettings, SettingsSaveRequest};
 use crate::host::editor::{Editor, FileDocumentRevision, FileView};
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileBuffer};
 use crate::host::keymap::KeymapConfig;
+use crate::host::markdown::ParsedNote;
 use crate::host::note::{NoteRevealLine, NoteSent};
 use crate::host::viewport::{CursorRenderRequest, FileViewport, ViewportRenderRequest};
 
@@ -277,7 +278,7 @@ fn file_view_mode_set(
     let (mut mode, mut revision) = state.into_inner();
     mode.0 = trigger.event().payload.mode;
     revision.0 = revision.0.wrapping_add(1).max(1);
-    if mode.0 != FileViewMode::Note || !crate::markdown::is_markdown_path(&file.path) {
+    if mode.0 != FileViewMode::Note || !ParsedNote::supports(&file.path) {
         return;
     }
     let reveal_line = edit.map(Editor::cursor_line);

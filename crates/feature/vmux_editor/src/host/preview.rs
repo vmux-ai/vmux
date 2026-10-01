@@ -5,94 +5,100 @@ use vmux_ecs::event::{FileLine, PreviewKind};
 use super::directory::list_dir;
 use crate::host::highlight::{Highlighter, LoadError};
 
-pub const IMAGE_BYTES_CAP: u64 = 25 * 1024 * 1024;
-pub const THUMB_MAX_EDGE: u32 = 64;
 const TEXT_PREVIEW_LINES: usize = 200;
 
-pub fn image_mime(path: &Path) -> Option<&'static str> {
-    vmux_api::media::MediaKind::image_mime(&path.to_string_lossy())
-}
+pub(crate) struct PreviewBuilder;
 
-pub fn is_image_path(path: &Path) -> bool {
-    image_mime(path).is_some()
-}
+impl PreviewBuilder {
+    pub(crate) const IMAGE_BYTES_CAP: u64 = 25 * 1024 * 1024;
+    pub(crate) const THUMB_MAX_EDGE: u32 = 64;
 
-pub fn downscale_to_png(bytes: &[u8], max_edge: u32) -> Result<Vec<u8>, String> {
-    let img = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
-    let thumb = img.thumbnail(max_edge, max_edge);
-    let mut out = std::io::Cursor::new(Vec::new());
-    thumb
-        .write_to(&mut out, image::ImageFormat::Png)
-        .map_err(|e| e.to_string())?;
-    Ok(out.into_inner())
-}
-
-fn raw_preview_url(path: &Path) -> String {
-    url::Url::from_file_path(path)
-        .map(|u| {
-            let mut s = u.to_string();
-            s.push_str("?vmux-raw=1");
-            s
-        })
-        .unwrap_or_default()
-}
-
-pub fn build_preview_sync(path: &Path) -> PreviewKind {
-    build_preview_with_cap(path, false, IMAGE_BYTES_CAP)
-}
-
-pub fn build_preview_with_cap(path: &Path, _thumb: bool, cap: u64) -> PreviewKind {
-    if path.is_dir() {
-        return PreviewKind::Dir(list_dir(path));
+    pub(crate) fn is_image(path: &Path) -> bool {
+        Self::image_mime(path).is_some()
     }
-    let meta = match std::fs::metadata(path) {
-        Ok(m) => m,
-        Err(e) => return PreviewKind::Error(e.to_string()),
-    };
-    if let Some(mime) = image_mime(path) {
-        if meta.len() > cap {
-            return info_kind(&meta, "image (too large to preview)");
+
+    pub(crate) fn thumbnail(bytes: &[u8], max_edge: u32) -> Result<Vec<u8>, String> {
+        let image = image::load_from_memory(bytes).map_err(|error| error.to_string())?;
+        let thumbnail = image.thumbnail(max_edge, max_edge);
+        let mut output = std::io::Cursor::new(Vec::new());
+        thumbnail
+            .write_to(&mut output, image::ImageFormat::Png)
+            .map_err(|error| error.to_string())?;
+        Ok(output.into_inner())
+    }
+
+    pub(crate) fn build(path: &Path) -> PreviewKind {
+        Self::build_with_cap(path, Self::IMAGE_BYTES_CAP)
+    }
+
+    fn build_with_cap(path: &Path, cap: u64) -> PreviewKind {
+        if path.is_dir() {
+            return PreviewKind::Dir(list_dir(path));
         }
-        return match std::fs::read(path) {
-            Ok(bytes) => PreviewKind::Image {
-                mime: mime.to_string(),
-                bytes,
-            },
-            Err(e) => PreviewKind::Error(e.to_string()),
+        let metadata = match std::fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) => return PreviewKind::Error(error.to_string()),
         };
-    }
-    if vmux_api::media::MediaKind::from_path(&path.to_string_lossy())
-        == Some(vmux_api::media::MediaKind::Video)
-    {
-        let path_str = path.to_string_lossy();
-        return PreviewKind::Video {
-            url: raw_preview_url(path),
-            path: path_str.clone().into_owned(),
-            native: cfg!(target_os = "macos")
-                && vmux_api::media::MediaKind::requires_native_video(&path_str),
-        };
-    }
-    match Highlighter::new().load_file(path) {
-        Ok(out) => {
-            let lines: Vec<FileLine> = out.lines.into_iter().take(TEXT_PREVIEW_LINES).collect();
-            PreviewKind::Text(lines)
+        if let Some(mime) = Self::image_mime(path) {
+            if metadata.len() > cap {
+                return Self::info(&metadata, "image (too large to preview)");
+            }
+            return match std::fs::read(path) {
+                Ok(bytes) => PreviewKind::Image {
+                    mime: mime.to_string(),
+                    bytes,
+                },
+                Err(error) => PreviewKind::Error(error.to_string()),
+            };
         }
-        Err(LoadError::Binary) => info_kind(&meta, "binary"),
-        Err(LoadError::Unreadable(_)) => info_kind(&meta, "file"),
+        if vmux_api::media::MediaKind::from_path(&path.to_string_lossy())
+            == Some(vmux_api::media::MediaKind::Video)
+        {
+            let path_string = path.to_string_lossy();
+            return PreviewKind::Video {
+                url: Self::raw_url(path),
+                path: path_string.clone().into_owned(),
+                native: cfg!(target_os = "macos")
+                    && vmux_api::media::MediaKind::requires_native_video(&path_string),
+            };
+        }
+        match Highlighter::new().load_file(path) {
+            Ok(output) => {
+                let lines: Vec<FileLine> =
+                    output.lines.into_iter().take(TEXT_PREVIEW_LINES).collect();
+                PreviewKind::Text(lines)
+            }
+            Err(LoadError::Binary) => Self::info(&metadata, "binary"),
+            Err(LoadError::Unreadable(_)) => Self::info(&metadata, "file"),
+        }
     }
-}
 
-fn info_kind(meta: &std::fs::Metadata, kind: &str) -> PreviewKind {
-    let modified = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_default();
-    PreviewKind::Info {
-        size: meta.len(),
-        modified,
-        kind: kind.to_string(),
+    fn image_mime(path: &Path) -> Option<&'static str> {
+        vmux_api::media::MediaKind::image_mime(&path.to_string_lossy())
+    }
+
+    fn raw_url(path: &Path) -> String {
+        url::Url::from_file_path(path)
+            .map(|url| {
+                let mut value = url.to_string();
+                value.push_str("?vmux-raw=1");
+                value
+            })
+            .unwrap_or_default()
+    }
+
+    fn info(metadata: &std::fs::Metadata, kind: &str) -> PreviewKind {
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs().to_string())
+            .unwrap_or_default();
+        PreviewKind::Info {
+            size: metadata.len(),
+            modified,
+            kind: kind.to_string(),
+        }
     }
 }
 
@@ -112,7 +118,7 @@ mod tests {
     #[test]
     fn downscale_caps_longest_edge_and_is_valid_png() {
         let src = png_bytes(200, 100);
-        let thumb = downscale_to_png(&src, 64).unwrap();
+        let thumb = PreviewBuilder::thumbnail(&src, 64).unwrap();
         let decoded = image::load_from_memory(&thumb).unwrap();
         assert!(decoded.width() <= 64 && decoded.height() <= 64);
         assert_eq!(decoded.width().max(decoded.height()), 64);
@@ -120,7 +126,7 @@ mod tests {
 
     #[test]
     fn downscale_rejects_garbage() {
-        assert!(downscale_to_png(&[0, 1, 2, 3], 64).is_err());
+        assert!(PreviewBuilder::thumbnail(&[0, 1, 2, 3], 64).is_err());
     }
 
     #[test]
@@ -128,19 +134,25 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let d = tmp.path().join("sub");
         std::fs::create_dir(&d).unwrap();
-        assert!(matches!(build_preview_sync(&d), PreviewKind::Dir(_)));
+        assert!(matches!(PreviewBuilder::build(&d), PreviewKind::Dir(_)));
 
         let t = tmp.path().join("a.rs");
         std::fs::write(&t, "fn main() {}\n").unwrap();
-        assert!(matches!(build_preview_sync(&t), PreviewKind::Text(_)));
+        assert!(matches!(PreviewBuilder::build(&t), PreviewKind::Text(_)));
 
         let p = tmp.path().join("p.png");
         std::fs::write(&p, png_bytes(8, 8)).unwrap();
-        assert!(matches!(build_preview_sync(&p), PreviewKind::Image { .. }));
+        assert!(matches!(
+            PreviewBuilder::build(&p),
+            PreviewKind::Image { .. }
+        ));
 
         let b = tmp.path().join("blob.bin");
         std::fs::write(&b, [0u8; 4]).unwrap();
-        assert!(matches!(build_preview_sync(&b), PreviewKind::Info { .. }));
+        assert!(matches!(
+            PreviewBuilder::build(&b),
+            PreviewKind::Info { .. }
+        ));
     }
 
     #[test]
@@ -148,7 +160,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("huge.png");
         std::fs::write(&p, png_bytes(8, 8)).unwrap();
-        let k = build_preview_with_cap(&p, false, 1);
+        let k = PreviewBuilder::build_with_cap(&p, 1);
         assert!(matches!(k, PreviewKind::Info { .. }));
     }
 }

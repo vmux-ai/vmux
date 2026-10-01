@@ -13,6 +13,7 @@ use vmux_ecs::event::{
 use crate::host::editor::{FileNavigateRequest, FileView};
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileDir};
 use crate::host::media::FilePreviewLoad;
+use crate::host::preview::PreviewBuilder;
 use crate::host::status::FileInitialMetaSent;
 
 pub(crate) struct DirectoryPlugin;
@@ -191,7 +192,7 @@ fn publish(directories: DirectoryProjection, browsers: NonSend<Browsers>, mut co
             });
         }
         for entry in &state.entries {
-            if entry.is_dir || !super::preview::is_image_path(Path::new(&entry.path)) {
+            if entry.is_dir || !PreviewBuilder::is_image(Path::new(&entry.path)) {
                 continue;
             }
             commands.trigger(FilePreviewLoad {

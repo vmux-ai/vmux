@@ -171,7 +171,7 @@ impl SearchPattern {
             return None;
         }
         let mut source = match request.regex {
-            true => crate::edit::search::translate(&request.query),
+            true => crate::edit::search::Search::translate(&request.query),
             false => regex::escape(&request.query),
         };
         if request.whole_word {

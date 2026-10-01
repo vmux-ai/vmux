@@ -593,10 +593,10 @@ impl EditCore {
             && *rev == self.rev
             && *pattern == search.pattern
         {
-            return crate::edit::search::step(cached, from, forward);
+            return crate::edit::search::Search::step(cached, from, forward);
         }
         let matches = self.search_matches();
-        crate::edit::search::step(&matches, from, forward)
+        crate::edit::search::Search::step(&matches, from, forward)
     }
 
     pub fn word_highlight_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
@@ -1001,7 +1001,7 @@ impl EditCore {
         if span.start >= span.end {
             return false;
         }
-        let Ok(re) = regex::Regex::new(&crate::edit::search::translate(pattern)) else {
+        let Ok(re) = regex::Regex::new(&crate::edit::search::Search::translate(pattern)) else {
             return false;
         };
         let source: String = self.buffer.rope.slice(span.clone()).chars().collect();

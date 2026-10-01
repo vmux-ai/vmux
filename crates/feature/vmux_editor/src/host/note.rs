@@ -3,6 +3,7 @@ use bevy_cef::prelude::*;
 use vmux_ecs::event::{FileNoteEvent, FileViewMode, NoteBlock};
 
 use crate::host::editor::{Editor, FileView};
+use crate::host::markdown::ParsedNote;
 use crate::host::status::{FileInitialMetaSent, SharedFileViewMode};
 
 pub(crate) struct NotePlugin;
@@ -52,7 +53,7 @@ fn send(
     }
     let index = indexes.single().ok();
     for (entity, file, edit, reveal) in &notes {
-        if !crate::markdown::is_markdown_path(&file.path) {
+        if !ParsedNote::supports(&file.path) {
             commands.entity(entity).insert(NoteSent);
             continue;
         }

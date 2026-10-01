@@ -15,6 +15,7 @@ use vmux_setting::AppSettings;
 
 use crate::host::editor::{Editor, FileView};
 use crate::host::highlight::{HIGHLIGHT_MAX_BYTES, Highlighter};
+use crate::host::markdown::ParsedNote;
 use crate::host::viewport::ViewportRenderRequest;
 use crate::lsp::client::ServerClient;
 use crate::lsp::registry::{ServerSpec, resolve_spec, workspace_root};
@@ -1016,7 +1017,7 @@ fn open_documents(
         if let Some(request) = manager.semantic_tokens(entity, &fv.path) {
             commands.spawn(request);
         }
-        if !crate::markdown::is_markdown_path(&fv.path)
+        if !ParsedNote::supports(&fv.path)
             && let Some(request) = manager.document_symbol(entity, &fv.path)
         {
             commands.spawn(request);

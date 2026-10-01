@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use super::wrap::WrapView;
 use crate::host::edit::EditCore;
 use crate::host::edit::highlight_cache::HighlightCache;
+use crate::host::markdown::ParsedNote;
 use crate::host::viewport::FileViewport;
 
 #[derive(Component, Clone, Debug)]
@@ -92,7 +93,7 @@ impl FileView {
     }
 
     pub(crate) fn document_kind(&self) -> vmux_ecs::event::FileDocumentKind {
-        match crate::markdown::is_markdown_path(&self.path) {
+        match ParsedNote::supports(&self.path) {
             true => vmux_ecs::event::FileDocumentKind::Markdown,
             false => vmux_ecs::event::FileDocumentKind::Text,
         }
@@ -116,15 +117,15 @@ pub struct Editor {
     pub hl: HighlightCache,
     pub folds: crate::fold::FoldState,
     indent_width: u16,
-    parsed_note: Option<crate::markdown::ParsedNote>,
+    parsed_note: Option<ParsedNote>,
     wrap_generation: u64,
     wrap_cache: Option<CachedWrapView>,
 }
 
 impl Editor {
     pub(crate) fn new(core: EditCore, hl: HighlightCache, folds: crate::fold::FoldState) -> Self {
-        let parsed_note = crate::markdown::is_markdown_path(&core.buffer.path)
-            .then(|| crate::markdown::parse_note_document(&core.buffer.text()));
+        let parsed_note =
+            ParsedNote::supports(&core.buffer.path).then(|| ParsedNote::parse(&core.buffer.text()));
         let indent_width = crate::shape::BufferShape::detect(&core.buffer.rope)
             .indent
             .width;
@@ -139,7 +140,7 @@ impl Editor {
         }
     }
 
-    pub(crate) fn parsed_note(&self) -> Option<crate::markdown::ParsedNote> {
+    pub(crate) fn parsed_note(&self) -> Option<ParsedNote> {
         self.parsed_note.clone()
     }
 
@@ -197,8 +198,8 @@ impl Editor {
     }
 
     pub(super) fn refresh_parsed_note(&mut self) {
-        self.parsed_note = crate::markdown::is_markdown_path(&self.core.buffer.path)
-            .then(|| crate::markdown::parse_note_document(&self.core.buffer.text()));
+        self.parsed_note = ParsedNote::supports(&self.core.buffer.path)
+            .then(|| ParsedNote::parse(&self.core.buffer.text()));
     }
 }
 

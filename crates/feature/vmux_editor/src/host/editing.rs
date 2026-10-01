@@ -18,6 +18,7 @@ use crate::host::language::{
     EditorCompletionRequest, EditorDefinitionRequest, EditorHoverRequest, EditorReferencesRequest,
     EditorRenameRequest, LspEditDirty, WikiCompletionRequest,
 };
+use crate::host::markdown::ParsedNote;
 use crate::host::note::NoteSent;
 use crate::host::status::SharedFileViewMode;
 use crate::host::viewport::{CursorRenderRequest, FileViewport, FoldsDirty, ViewportRenderRequest};
@@ -261,8 +262,7 @@ impl EditRequest {
                     continue;
                 }
             };
-            let Some(target) = crate::markdown::note_vertical_target(blocks, line, direction)
-            else {
+            let Some(target) = ParsedNote::vertical_target(blocks, line, direction) else {
                 line = if direction > 0 {
                     line.saturating_add(1)
                 } else {
@@ -687,7 +687,7 @@ fn file_property_edit(
     let Ok(edit) = q.get(entity) else {
         return;
     };
-    if !crate::markdown::is_markdown_path(&edit.core.buffer.path) {
+    if !ParsedNote::supports(&edit.core.buffer.path) {
         return;
     }
     let text = edit.core.buffer.text();
@@ -759,7 +759,7 @@ fn file_find_request(
         }));
     } else {
         let pattern = match request.regex {
-            true => crate::edit::search::translate(&request.query),
+            true => crate::edit::search::Search::translate(&request.query),
             false => regex::escape(&request.query),
         };
         edit.core.apply(EditCommand::SetSearch {
@@ -921,7 +921,7 @@ mod edit_flow_tests {
 
     #[test]
     fn repeated_note_navigation_skips_a_separator_after_the_first_step() {
-        let blocks = crate::markdown::parse_note("- one\n- two\n\nnext\n");
+        let blocks = ParsedNote::parse("- one\n- two\n\nnext\n").blocks;
         let commands = EditRequest::new(Entity::PLACEHOLDER, vec![EditCommand::Move(Motion::Down)])
             .accelerated_navigation(true)
             .remapped_for_note(&blocks, 0)

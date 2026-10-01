@@ -16,6 +16,7 @@ use super::explorer::{
 };
 use super::highlight::{FILE_VIEW_MAX_BYTES, HIGHLIGHT_MAX_BYTES};
 use super::keymap::KeymapConfig;
+use super::markdown::ParsedNote;
 use super::media::FileMedia;
 use super::note::NoteSent;
 use super::status::{FileInitialMetaSent, FileKeymapSent, FileThemeSent, FileViewModeSent};
@@ -293,7 +294,7 @@ fn load_file_buffers(
     let keymap = KeymapConfig::resolve(settings.as_deref());
     for (entity, file, mut parked, forced) in &mut files {
         let forced = forced.and_then(|encoding| encoding.for_path(&file.path));
-        let markdown = crate::markdown::is_markdown_path(&file.path);
+        let markdown = ParsedNote::supports(&file.path);
         if forced.is_none()
             && let Some(parked) = parked.as_mut()
             && let Some(resumed) = parked.resume(&file.path)
@@ -365,7 +366,7 @@ fn apply_loaded_file_buffers(
                 }
             }
             FileLoad::Text { decoded, heavy } => {
-                let markdown = crate::markdown::is_markdown_path(&view.path);
+                let markdown = ParsedNote::supports(&view.path);
                 let crate::encoding::DecodedText { text, encoding } = decoded;
                 let highlight = match heavy {
                     true => HighlightCache::plain(&view.path),
@@ -426,7 +427,7 @@ fn reset_sent(
         .remove::<ExplorerPanelSent>()
         .insert(ExplorerTreeDirty)
         .insert(OpenEditorsDirty);
-    if crate::markdown::is_markdown_path(&file.path) {
+    if ParsedNote::supports(&file.path) {
         commands.entity(entity).insert(OutlineDirty);
     }
 }

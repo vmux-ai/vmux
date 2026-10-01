@@ -6,6 +6,7 @@ use crate::edit::EditCommand;
 use crate::event::*;
 use crate::host::editing::EditRequest;
 use crate::host::editor::{Editor, FileView};
+use crate::host::markdown::ParsedNote;
 use crate::text::DisplayCells;
 
 pub(super) struct LanguagePlugin;
@@ -244,7 +245,7 @@ impl WikiCompletion {
     fn for_edit(edit: &Editor, index: &vmux_knowledge::KnowledgeIndex) -> Option<Self> {
         if !index.loaded()
             || !edit.core.buffer.path.starts_with(index.root())
-            || !crate::markdown::is_markdown_path(&edit.core.buffer.path)
+            || !ParsedNote::supports(&edit.core.buffer.path)
         {
             return None;
         }
@@ -783,7 +784,7 @@ fn flush_lsp_changes(
         if let Some(request) = manager.semantic_tokens(entity, &view.path) {
             commands.spawn(request);
         }
-        if !crate::markdown::is_markdown_path(&view.path)
+        if !ParsedNote::supports(&view.path)
             && let Some(request) = manager.document_symbol(entity, &view.path)
         {
             commands.spawn(request);

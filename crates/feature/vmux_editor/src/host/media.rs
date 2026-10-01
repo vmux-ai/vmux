@@ -11,7 +11,7 @@ use vmux_ecs::event::{
 use crate::host::directory::FileDirectoryNavigation;
 use crate::host::editor::FileView;
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileDir};
-use crate::host::preview;
+use crate::host::preview::PreviewBuilder;
 use crate::host::status::FileInitialMetaSent;
 
 pub(crate) struct MediaPlugin;
@@ -182,9 +182,9 @@ fn load_file_preview(
     if !needs_native_video(&path) {
         browsers.detach_media_overlay(&entity);
     }
-    if request.thumb && preview::is_image_path(&path) {
+    if request.thumb && PreviewBuilder::is_image(&path) {
         let within_cap = std::fs::metadata(&path)
-            .map(|metadata| metadata.len() <= preview::IMAGE_BYTES_CAP)
+            .map(|metadata| metadata.len() <= PreviewBuilder::IMAGE_BYTES_CAP)
             .unwrap_or(false);
         if !within_cap {
             return;
@@ -193,7 +193,9 @@ fn load_file_preview(
         let task = IoTaskPool::get().spawn(async move {
             let result = std::fs::read(&path)
                 .map_err(|error| error.to_string())
-                .and_then(|bytes| preview::downscale_to_png(&bytes, preview::THUMB_MAX_EDGE));
+                .and_then(|bytes| {
+                    PreviewBuilder::thumbnail(&bytes, PreviewBuilder::THUMB_MAX_EDGE)
+                });
             (path, result)
         });
         commands.spawn(ThumbTask {
@@ -205,7 +207,7 @@ fn load_file_preview(
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    let mut kind = preview::build_preview_sync(&path);
+    let mut kind = PreviewBuilder::build(&path);
     if let PreviewKind::Dir(entries) = &mut kind
         && let Some(navigation) = selected_navigation
     {
