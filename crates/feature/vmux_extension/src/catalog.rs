@@ -28,12 +28,12 @@ impl Plugin for ExtensionCatalogPlugin {
                 )>::default(),
             ))
             .add_observer(page_ready)
-            .add_observer(toggle_request)
-            .add_observer(uninstall_request)
-            .add_observer(pin_request)
-            .add_observer(open_manager_request)
+            .add_observer(toggle)
+            .add_observer(uninstall)
+            .add_observer(pin)
+            .add_observer(open_manager)
             .add_systems(Startup, spawn)
-            .add_systems(Update, (finish_tasks, emit_extensions_snapshot).chain());
+            .add_systems(Update, (finish, publish).chain());
 
         #[cfg(ui)]
         app.add_plugins(
@@ -44,7 +44,7 @@ impl Plugin for ExtensionCatalogPlugin {
                     crate::ui::ExtensionPage::NATIVE.title,
                 )),
         )
-        .add_systems(Update, open_manager);
+        .add_systems(Update, open_page);
     }
 }
 
@@ -140,7 +140,7 @@ fn page_ready(
     }
 }
 
-fn toggle_request(
+fn toggle(
     trigger: On<UiInput<ExtToggleRequest>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -165,7 +165,7 @@ fn toggle_request(
     commands.spawn((Name::new("Toggle extension"), ExtensionCatalogTask(task)));
 }
 
-fn uninstall_request(
+fn uninstall(
     trigger: On<UiInput<ExtUninstallRequest>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -185,7 +185,7 @@ fn uninstall_request(
     commands.spawn((Name::new("Uninstall extension"), ExtensionCatalogTask(task)));
 }
 
-fn pin_request(
+fn pin(
     trigger: On<UiInput<ExtPinRequest>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -212,7 +212,7 @@ fn pin_request(
     ));
 }
 
-fn finish_tasks(
+fn finish(
     mut tasks: Query<(
         Entity,
         &Name,
@@ -251,7 +251,7 @@ fn finish_tasks(
     }
 }
 
-fn open_manager_request(
+fn open_manager(
     _trigger: On<UiInput<ExtOpenManagerRequest>>,
     mut requests: MessageWriter<OpenManagerRequest>,
 ) {
@@ -259,7 +259,7 @@ fn open_manager_request(
 }
 
 #[cfg(ui)]
-fn open_manager(
+fn open_page(
     mut requests: MessageReader<OpenManagerRequest>,
     mut pages: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
@@ -270,7 +270,7 @@ fn open_manager(
     }
 }
 
-fn emit_extensions_snapshot(
+fn publish(
     catalog: Query<&ExtensionCatalog>,
     mut subscribers: Query<(Entity, &mut ExtensionSubscriber)>,
     layout_ui: Query<(), With<LayoutUiStateUpdates>>,
