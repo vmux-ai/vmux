@@ -1,8 +1,10 @@
 use dioxus::prelude::*;
 use vmux_api::command_bar::{
-    CommandPaletteComposer, CommandPaletteMenu, CommandPaletteMenuActivateRequest,
-    CommandPaletteMenuDismissRequest, CommandPaletteMenuHighlightRequest,
-    CommandPaletteMenuToggleRequest, CommandPaletteState, OpenId,
+    CommandPaletteAgentMenuToggleRequest, CommandPaletteBranchMenuToggleRequest,
+    CommandPaletteComposer, CommandPaletteMenuActivateRequest, CommandPaletteMenuDismissRequest,
+    CommandPaletteMenuHighlightRequest, CommandPaletteMenus, CommandPaletteModelMenuToggleRequest,
+    CommandPalettePermissionMenuToggleRequest, CommandPaletteProjectMenuToggleRequest,
+    CommandPaletteState, OpenId,
 };
 use vmux_ui::components::agent_menu::AgentMenu;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
@@ -39,14 +41,16 @@ impl ComposerChips {
             translate("composer-choose-agent"),
         )
         .opens(EventHandler::new(move |()| {
-            MenuSelection(open_id).toggle(CommandPaletteMenu::Agent);
+            let _ = send(&CommandPaletteAgentMenuToggleRequest { open_id });
+            focus_prompt_end(PROMPT_INPUT_ID);
         }));
         let model = match composer.model_name.is_empty() {
             true => None,
             false => Some(
                 ComposerChip::ready(composer.model_name.clone(), translate("agent-change-model"))
                     .opens(EventHandler::new(move |()| {
-                        MenuSelection(open_id).toggle(CommandPaletteMenu::Model);
+                        let _ = send(&CommandPaletteModelMenuToggleRequest { open_id });
+                        focus_prompt_end(PROMPT_INPUT_ID);
                     })),
             ),
         };
@@ -55,14 +59,16 @@ impl ComposerChips {
             composer.workspace_title.clone(),
         )
         .opens(EventHandler::new(move |()| {
-            MenuSelection(open_id).toggle(CommandPaletteMenu::Project);
+            let _ = send(&CommandPaletteProjectMenuToggleRequest { open_id });
+            focus_prompt_end(PROMPT_INPUT_ID);
         }));
         let branch = match composer.is_git_repo {
             false => None,
             true => Some(
                 ComposerChip::ready(composer.branch_label.clone(), composer.branch_title.clone())
                     .opens(EventHandler::new(move |()| {
-                        MenuSelection(open_id).toggle(CommandPaletteMenu::Branch);
+                        let _ = send(&CommandPaletteBranchMenuToggleRequest { open_id });
+                        focus_prompt_end(PROMPT_INPUT_ID);
                     })),
             ),
         };
@@ -82,7 +88,8 @@ impl ComposerChips {
                 .unwrap_or_else(|| translate("composer-permission-change"));
             Some(
                 ComposerChip::ready(label, title).opens(EventHandler::new(move |()| {
-                    MenuSelection(open_id).toggle(CommandPaletteMenu::Permission);
+                    let _ = send(&CommandPalettePermissionMenuToggleRequest { open_id });
+                    focus_prompt_end(PROMPT_INPUT_ID);
                 })),
             )
         };
@@ -101,14 +108,6 @@ impl ComposerChips {
 struct MenuSelection(OpenId);
 
 impl MenuSelection {
-    fn toggle(self, menu: CommandPaletteMenu) {
-        let _ = send(&CommandPaletteMenuToggleRequest {
-            open_id: self.0,
-            menu,
-        });
-        focus_prompt_end(PROMPT_INPUT_ID);
-    }
-
     fn activate(self, index: usize) {
         let _ = send(&CommandPaletteMenuActivateRequest {
             open_id: self.0,
@@ -166,15 +165,23 @@ impl MenuSelection {
 pub struct ComposerMenuView;
 
 impl ComposerMenuView {
-    pub const fn kind(menu: Option<CommandPaletteMenu>) -> Option<ComposerMenuKind> {
-        match menu {
-            Some(CommandPaletteMenu::Agent) => Some(ComposerMenuKind::Agent),
-            Some(CommandPaletteMenu::Model) => Some(ComposerMenuKind::Model),
-            Some(CommandPaletteMenu::Permission) => Some(ComposerMenuKind::Permission),
-            Some(CommandPaletteMenu::Project) => Some(ComposerMenuKind::Project),
-            Some(CommandPaletteMenu::Branch) => Some(ComposerMenuKind::Branch),
-            None => None,
+    pub const fn kind(menus: CommandPaletteMenus) -> Option<ComposerMenuKind> {
+        if menus.agent {
+            return Some(ComposerMenuKind::Agent);
         }
+        if menus.model {
+            return Some(ComposerMenuKind::Model);
+        }
+        if menus.permission {
+            return Some(ComposerMenuKind::Permission);
+        }
+        if menus.project {
+            return Some(ComposerMenuKind::Project);
+        }
+        if menus.branch {
+            return Some(ComposerMenuKind::Branch);
+        }
+        None
     }
 }
 
@@ -183,7 +190,7 @@ pub fn CommandComposerMenus(
     composer: CommandPaletteComposer,
     palette: CommandPaletteState,
     open_id: OpenId,
-    opened: Option<CommandPaletteMenu>,
+    menus: CommandPaletteMenus,
     cursor: usize,
 ) -> Element {
     let selection = MenuSelection(open_id);
@@ -195,7 +202,7 @@ pub fn CommandComposerMenus(
     let project_count = projects.iter().filter(|project| project.depth == 0).count();
 
     rsx! {
-        if opened == Some(CommandPaletteMenu::Agent) {
+        if menus.agent {
             AgentMenu {
                 placement: PromptPopupPlacement::Downward,
                 options: agents.clone(),
@@ -213,7 +220,7 @@ pub fn CommandComposerMenus(
                 },
             }
         }
-        if opened == Some(CommandPaletteMenu::Model) {
+        if menus.model {
             ModelMenu {
                 placement: PromptPopupPlacement::Downward,
                 models: models.clone(),
@@ -233,7 +240,7 @@ pub fn CommandComposerMenus(
                 },
             }
         }
-        if opened == Some(CommandPaletteMenu::Permission) {
+        if menus.permission {
             PermissionMenu {
                 placement: PromptPopupPlacement::Downward,
                 modes: modes.clone(),
@@ -253,7 +260,7 @@ pub fn CommandComposerMenus(
                 },
             }
         }
-        if opened == Some(CommandPaletteMenu::Project) {
+        if menus.project {
             ProjectPicker {
                 placement: PromptPopupPlacement::Downward,
                 projects: projects.clone(),
@@ -272,7 +279,7 @@ pub fn CommandComposerMenus(
                 },
             }
         }
-        if opened == Some(CommandPaletteMenu::Branch) {
+        if menus.branch {
             BranchPicker {
                 placement: PromptPopupPlacement::Downward,
                 project: composer.project.clone(),

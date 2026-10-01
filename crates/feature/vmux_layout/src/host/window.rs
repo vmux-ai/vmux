@@ -665,7 +665,7 @@ fn spawn_requested_tab_layouts(
             TabLayoutSpawnContent::StartupUrlOrPrompt => {
                 page_open_requests.write(PageOpenRequest {
                     target: PageOpenTarget::Stack(stack),
-                    url: EffectiveStartupUrl::resolve(Some(startup_url)),
+                    url: startup_url.0.clone(),
                     request_id: None,
                 });
             }
@@ -1056,7 +1056,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             opened.iter().map(|r| r.url.as_str()).collect::<Vec<_>>(),
-            [vmux_core::EffectiveStartupUrl::START_PAGE],
+            ["vmux://start/"],
             "a tab with nothing configured still opens a page rather than staging an empty stack"
         );
     }

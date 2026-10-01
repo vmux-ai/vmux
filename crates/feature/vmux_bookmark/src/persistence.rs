@@ -488,8 +488,6 @@ enum ToolBookmarkUrl {
     Other,
 }
 
-const TOOL_ROOT_URL: &str = "vmux://tools/";
-
 impl From<&str> for ToolBookmarkUrl {
     fn from(url: &str) -> Self {
         let url = url
@@ -526,7 +524,7 @@ fn migrate_tool_page_bookmarks(
     let original_urls = std::mem::take(&mut offered.urls);
     for url in &original_urls {
         let normalized = match ToolBookmarkUrl::from(url.as_str()) {
-            ToolBookmarkUrl::Root => TOOL_ROOT_URL.to_string(),
+            ToolBookmarkUrl::Root => vmux_tool::ToolPlugin::URL.to_string(),
             ToolBookmarkUrl::Child => {
                 changed = true;
                 continue;
@@ -549,14 +547,14 @@ fn migrate_tool_page_bookmarks(
     for (entity, metadata) in &items {
         match ToolBookmarkUrl::from(metadata.url.as_str()) {
             ToolBookmarkUrl::Root => {
-                if metadata.url == TOOL_ROOT_URL {
+                if metadata.url == vmux_tool::ToolPlugin::URL {
                     continue;
                 }
                 let mut metadata = metadata.clone();
                 if metadata.title.trim() == metadata.url.trim() {
-                    metadata.title = TOOL_ROOT_URL.to_string();
+                    metadata.title = vmux_tool::ToolPlugin::URL.to_string();
                 }
-                metadata.url = TOOL_ROOT_URL.to_string();
+                metadata.url = vmux_tool::ToolPlugin::URL.to_string();
                 commands.entity(entity).insert(metadata);
                 changed = true;
             }
@@ -880,14 +878,14 @@ mod tests {
 
         assert_eq!(
             app.world().entity(root).get::<PageMetadata>().unwrap().url,
-            TOOL_ROOT_URL
+            vmux_tool::ToolPlugin::URL
         );
         assert!(app.world().get_entity(lsp).is_err());
         assert!(app.world().get_entity(extensions).is_err());
         assert!(app.world().get_entity(agents).is_err());
         assert_eq!(
             app.world().resource::<OfferedBookmarkDefaults>().urls,
-            [TOOL_ROOT_URL]
+            [vmux_tool::ToolPlugin::URL]
         );
         assert!(
             app.world()

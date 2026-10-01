@@ -213,14 +213,3 @@ pub enum TransitionType {
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct EffectiveStartupUrl(pub String);
-
-impl EffectiveStartupUrl {
-    pub const START_PAGE: &'static str = "vmux://start/";
-
-    pub fn resolve(resolved: Option<&Self>) -> String {
-        match resolved {
-            Some(url) if !url.0.is_empty() => url.0.clone(),
-            _ => Self::START_PAGE.to_string(),
-        }
-    }
-}

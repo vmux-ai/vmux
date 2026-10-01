@@ -1,7 +1,10 @@
 use super::{CommandBarOpenEvent, PathCompleteResponse, StartProjectBranches};
 use crate::chat::{PromptHistory, ResumableSessionEntry, ResumableSessions};
 use crate::history::{HistoryEntry, HistorySuggestionsResponse};
-use crate::prompt_media::{ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry};
+use crate::prompt_media::{
+    ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry, PromptComposerAttachment,
+    PromptMediaOption,
+};
 use crate::space::ProjectBranch;
 
 #[vmux_api::contract(Copy, Eq)]
@@ -44,9 +47,11 @@ pub struct CommandPaletteState {
     pub sessions_loading: bool,
     pub media_query: Option<String>,
     pub media_entries: Vec<ChatMediaEntry>,
+    pub media_options: Vec<PromptMediaOption>,
     pub media_loading: bool,
     pub media_selected: u32,
     pub attachments: Vec<ChatAttachment>,
+    pub composer_attachments: Vec<PromptComposerAttachment>,
     pub attachment_sequence: u64,
 }
 

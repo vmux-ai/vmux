@@ -3,9 +3,10 @@ use std::collections::BTreeMap;
 use dioxus::prelude::*;
 
 use crate::event::{
-    TermCursor, TermLine, TermThemeEvent, TermViewportPatch, TerminalUiState, TerminalUiStatePatch,
+    AgentPromptDraftEvent, ServiceUnavailableEvent, TermCursor, TermLine, TermLoadingEvent,
+    TermThemeEvent, TermTitleEvent, TermViewportPatch, TerminalUiState,
 };
-use vmux_ui::hooks::use_ui_state_patches;
+use vmux_ui::hooks::{UiStateBinding, use_ui_state_binding};
 
 #[derive(Clone, PartialEq)]
 pub(crate) struct TerminalRowState {
@@ -33,6 +34,7 @@ pub(crate) struct TerminalState {
 
 impl TerminalState {
     pub(crate) fn use_state() -> Self {
+        let ui = use_ui_state_binding::<TerminalUiState>();
         let state = Self {
             rows: use_signal(BTreeMap::new),
             first_row: use_signal(|| 0),
@@ -49,46 +51,38 @@ impl TerminalState {
             loading: use_signal(|| None),
             prompt_draft: use_signal(|| (String::new(), false)),
         };
-        state.listen();
+        state.listen(ui);
         state
     }
 
-    fn listen(self) {
-        let _error = use_ui_state_patches::<TerminalUiState>(move |patch| {
-            self.apply(patch);
-        });
-    }
-
-    fn apply(self, patch: &TerminalUiStatePatch) {
-        if let Some(event) = &patch.service_unavailable {
+    fn listen(self, ui: UiStateBinding<TerminalUiState>) {
+        ui.use_updates::<ServiceUnavailableEvent>(move |event| {
             let mut service_error = self.service_error;
-            service_error.set(event.message.clone());
-        }
-        if let Some(viewport) = &patch.viewport {
-            self.apply_viewport(viewport);
-        }
-        if let Some(event) = &patch.theme {
+            service_error.set(event.message);
+        });
+        ui.use_updates::<TermViewportPatch>(move |viewport| self.apply_viewport(&viewport));
+        ui.use_updates::<TermThemeEvent>(move |event| {
             let mut theme = self.theme;
-            theme.set(Some(event.clone()));
-        }
-        if let Some(event) = &patch.title {
+            theme.set(Some(event));
+        });
+        ui.use_updates::<TermTitleEvent>(move |event| {
             let mut raw_title = self.raw_title;
-            raw_title.set(event.title.clone());
-        }
-        if let Some(event) = &patch.loading {
+            raw_title.set(event.title);
+        });
+        ui.use_updates::<TermLoadingEvent>(move |event| {
             let mut loading = self.loading;
             let mut prompt_draft = self.prompt_draft;
             loading.set(if event.loading {
-                Some((event.label.clone(), event.segment.clone()))
+                Some((event.label, event.segment))
             } else {
                 prompt_draft.set((String::new(), false));
                 None
             });
-        }
-        if let Some(event) = &patch.prompt_draft {
+        });
+        ui.use_updates::<AgentPromptDraftEvent>(move |event| {
             let mut prompt_draft = self.prompt_draft;
-            prompt_draft.set((event.draft.clone(), event.skipped));
-        }
+            prompt_draft.set((event.draft, event.skipped));
+        });
     }
 
     fn apply_viewport(self, patch: &TermViewportPatch) {

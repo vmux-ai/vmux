@@ -5,14 +5,20 @@ use crate::event::ChatComposerEffect;
 use crate::state::{ChatUiState, ChatUiStatePatch};
 use bevy_app::{App, Last, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
+#[cfg(not(host))]
 use vmux_api::page::UiStateEmit;
+#[cfg(host)]
+use vmux_core::host::{UiStatePlugin, UiStateWrite};
 
 pub struct ChatUiStatePlugin;
 
 impl Plugin for ChatUiStatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<UiStateEmit>()
-            .add_message::<PublishComposerEffect>()
+        #[cfg(not(host))]
+        app.add_message::<UiStateEmit>();
+        #[cfg(host)]
+        app.add_plugins(UiStatePlugin::<ChatUiState>::default());
+        app.add_message::<PublishComposerEffect>()
             .add_message::<RepublishChatUiState>()
             .add_systems(Startup, spawn_runtime)
             .add_systems(Update, publish_composer_effects)
@@ -31,6 +37,7 @@ pub struct RepublishChatUiState;
 
 #[derive(Component, Default)]
 pub struct ChatUiStateProjection {
+    #[cfg(not(host))]
     sequence: u64,
     patches: Vec<ChatUiStatePatch>,
 }
@@ -76,6 +83,7 @@ fn publish_composer_effects(
     }
 }
 
+#[cfg(not(host))]
 fn emit_ui(
     mut runtimes: Query<&mut ChatUiStateProjection, With<ChatRuntime>>,
     mut emits: MessageWriter<UiStateEmit>,
@@ -95,6 +103,27 @@ fn emit_ui(
         return;
     };
     emits.write(emit);
+}
+
+#[cfg(host)]
+fn emit_ui(
+    mut runtimes: Query<&mut ChatUiStateProjection, With<ChatRuntime>>,
+    targets: Query<Entity, With<super::session::ChatView>>,
+    mut commands: Commands,
+) {
+    let mut targets = targets.iter().peekable();
+    if targets.peek().is_none() {
+        return;
+    }
+    let Ok(mut projection) = runtimes.single_mut() else {
+        return;
+    };
+    let patches = std::mem::take(&mut projection.patches);
+    for target in targets {
+        for patch in &patches {
+            commands.trigger(UiStateWrite::<ChatUiState>::from_event(target, patch));
+        }
+    }
 }
 
 #[cfg(test)]

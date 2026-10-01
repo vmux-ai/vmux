@@ -99,7 +99,7 @@ impl AppSettings {
         space_override(self, space_id)
     }
 
-    pub fn startup_url(&self, space_id: &str) -> String {
+    pub fn startup_url(&self, space_id: &str, default_url: &str) -> String {
         let per_space = space_override(self, space_id)
             .and_then(|o| o.startup_url.as_deref())
             .map(str::trim)
@@ -114,7 +114,7 @@ impl AppSettings {
             ]
             .contains(&chosen)
         {
-            default_browser_startup_url()
+            default_url.to_string()
         } else {
             chosen.to_string()
         }
@@ -826,7 +826,7 @@ impl KeyComboDef {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BrowserSettings {
-    #[serde(default = "default_browser_startup_url")]
+    #[serde(default)]
     pub startup_url: String,
     #[serde(default)]
     pub search_engine: SearchEngine,
@@ -845,7 +845,7 @@ pub struct BookmarkFolderSettings {
 
 fn default_browser_settings() -> BrowserSettings {
     BrowserSettings {
-        startup_url: default_browser_startup_url(),
+        startup_url: String::new(),
         search_engine: SearchEngine::default(),
         bookmarks: Vec::new(),
         bookmark_folders: Vec::new(),
@@ -856,10 +856,6 @@ impl Default for BrowserSettings {
     fn default() -> Self {
         default_browser_settings()
     }
-}
-
-fn default_browser_startup_url() -> String {
-    "vmux://start/".to_string()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1735,7 +1731,7 @@ mod tests {
     fn base_settings() -> AppSettings {
         AppSettings {
             browser: BrowserSettings {
-                startup_url: default_browser_startup_url(),
+                startup_url: String::new(),
                 search_engine: SearchEngine::default(),
                 bookmarks: Default::default(),
                 bookmark_folders: Default::default(),
@@ -1815,20 +1811,23 @@ mod tests {
     fn resolve_startup_url_returns_browser_override() {
         let mut s = base_settings();
         s.browser.startup_url = "vmux://services/".into();
-        assert_eq!(s.startup_url("space-1"), "vmux://services/");
+        assert_eq!(
+            s.startup_url("space-1", "vmux://start/"),
+            "vmux://services/"
+        );
     }
 
     #[test]
     fn resolve_startup_url_defaults_to_start() {
         let s = base_settings();
-        assert_eq!(s.startup_url("space-1"), "vmux://start/");
+        assert_eq!(s.startup_url("space-1", "vmux://start/"), "vmux://start/");
     }
 
     #[test]
     fn resolve_startup_url_uses_start_for_empty_browser_url() {
         let mut s = base_settings();
         s.browser.startup_url.clear();
-        assert_eq!(s.startup_url("space-1"), "vmux://start/");
+        assert_eq!(s.startup_url("space-1", "vmux://start/"), "vmux://start/");
     }
 
     #[test]
@@ -1841,7 +1840,11 @@ mod tests {
         ] {
             let mut s = base_settings();
             s.browser.startup_url = url.into();
-            assert_eq!(s.startup_url("space-1"), "vmux://start/", "{url}");
+            assert_eq!(
+                s.startup_url("space-1", "vmux://start/"),
+                "vmux://start/",
+                "{url}"
+            );
         }
     }
 
@@ -1863,7 +1866,7 @@ mod tests {
     #[test]
     fn embedded_settings_default_to_start() {
         let s = load_embedded_settings();
-        assert_eq!(s.startup_url("space-1"), "vmux://start/");
+        assert_eq!(s.startup_url("space-1", "vmux://start/"), "vmux://start/");
     }
 
     #[test]
@@ -1915,8 +1918,14 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(s.startup_url("work"), "https://work.example");
-        assert_eq!(s.startup_url("other"), "https://global.example");
+        assert_eq!(
+            s.startup_url("work", "vmux://start/"),
+            "https://work.example"
+        );
+        assert_eq!(
+            s.startup_url("other", "vmux://start/"),
+            "https://global.example"
+        );
     }
 
     #[test]
@@ -1931,7 +1940,10 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(s.startup_url("work"), "https://global.example");
+        assert_eq!(
+            s.startup_url("work", "vmux://start/"),
+            "https://global.example"
+        );
     }
 
     #[test]
@@ -2468,7 +2480,7 @@ mod tests {
     fn parse_settings_empty_uses_embedded_defaults() {
         let s = parse_settings("()").unwrap();
         assert_eq!(s.shortcuts.leader.key, "b");
-        assert_eq!(s.browser.startup_url, "vmux://start/");
+        assert!(s.browser.startup_url.is_empty());
         assert_eq!(s.browser.search_engine, SearchEngine::Google);
     }
 

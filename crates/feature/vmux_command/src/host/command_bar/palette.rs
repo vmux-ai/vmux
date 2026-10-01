@@ -8,12 +8,14 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch, CommandPaletteActivateRequest,
+    CommandPaletteAgentMenuToggleRequest, CommandPaletteBranchMenuToggleRequest,
     CommandPaletteDraftRequest, CommandPaletteHighlightRequest, CommandPaletteHistoryMoveRequest,
-    CommandPaletteMenu, CommandPaletteMenuActivateRequest, CommandPaletteMenuDismissRequest,
+    CommandPaletteMenuActivateRequest, CommandPaletteMenuDismissRequest,
     CommandPaletteMenuHighlightRequest, CommandPaletteMenuMoveRequest,
-    CommandPaletteMenuToggleRequest, CommandPaletteRemoveAttachmentRequest, CommandPaletteState,
-    CommandPaletteSubmitRequest, OpenId, StartGoToBranch, StartSelectMode, StartSelectModel,
-    StartSelectWorkspace,
+    CommandPaletteModelMenuToggleRequest, CommandPalettePermissionMenuToggleRequest,
+    CommandPaletteProjectMenuToggleRequest, CommandPaletteRemoveAttachmentRequest,
+    CommandPaletteState, CommandPaletteSubmitRequest, OpenId, StartGoToBranch, StartSelectMode,
+    StartSelectModel, StartSelectWorkspace,
 };
 use vmux_api::mcp::{McpServerRequest, McpServers};
 #[cfg(test)]
@@ -22,7 +24,7 @@ use vmux_core::host::{UiState, UiStateWrite};
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
 use vmux_tool::McpSnapshotRequest;
 
-use crate::{BindCommands, CommandBinding, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
+use crate::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
 
 use super::CommandBarDismiss;
 
@@ -41,12 +43,17 @@ impl Plugin for PalettePlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins((
-            UiEventPlugin::<(
-                CommandPaletteDraftRequest,
-                CommandPaletteHighlightRequest,
-                CommandPaletteHistoryMoveRequest,
-                CommandPaletteMenuToggleRequest,
+        app.add_plugins(UiEventPlugin::<(
+            CommandPaletteDraftRequest,
+            CommandPaletteHighlightRequest,
+            CommandPaletteHistoryMoveRequest,
+            CommandPaletteAgentMenuToggleRequest,
+            CommandPaletteModelMenuToggleRequest,
+            CommandPalettePermissionMenuToggleRequest,
+            CommandPaletteProjectMenuToggleRequest,
+            CommandPaletteBranchMenuToggleRequest,
+        )>::default())
+            .add_plugins(UiEventPlugin::<(
                 CommandPaletteMenuMoveRequest,
                 CommandPaletteMenuHighlightRequest,
                 CommandPaletteMenuActivateRequest,
@@ -54,49 +61,44 @@ impl Plugin for PalettePlugin {
                 CommandPaletteSubmitRequest,
                 CommandPaletteActivateRequest,
                 CommandPaletteRemoveAttachmentRequest,
-            )>::default(),
-            vmux_core::host::UiStatePlugin::<CommandPaletteState>::default(),
-            search::PaletteSearchPlugin,
-            prompt::PalettePromptPlugin,
-            branch::PaletteBranchPlugin,
-            media::PaletteMediaPlugin,
-            resume::PaletteResumePlugin,
-        ))
-        .add_observer(receive_open)
-        .add_observer(receive_mcp_servers)
-        .add_observer(update_draft)
-        .add_observer(highlight)
-        .add_observer(move_history)
-        .add_observer(toggle_menu)
-        .add_observer(move_menu_request)
-        .add_observer(highlight_menu)
-        .add_observer(activate_menu)
-        .add_observer(dismiss_menu_request)
-        .add_observer(dispatch_submit)
-        .add_observer(activate_row)
-        .add_observer(apply_decision)
-        .add_observer(apply_key)
-        .add_observer(submit)
-        .add_observer(move_menu)
-        .add_observer(choose_menu)
-        .add_observer(dismiss_menu)
-        .add_systems(Startup, bind_commands.in_set(BindCommands))
-        .add_systems(PreUpdate, (attach_snapshot, detach_snapshot))
-        .configure_sets(
-            PostUpdate,
-            (
-                PaletteProjectionSet::Project,
-                PaletteProjectionSet::Context,
-                PaletteProjectionSet::Publish,
-            )
-                .chain(),
-        )
-        .add_systems(PostUpdate, project.in_set(PaletteProjectionSet::Project))
-        .add_systems(
-            PostUpdate,
-            publish_snapshot.in_set(PaletteProjectionSet::Publish),
-        )
-        .add_systems(Last, keep_frames_coming);
+            )>::default())
+            .add_plugins((
+                vmux_core::host::UiStatePlugin::<CommandPaletteState>::default(),
+                search::PaletteSearchPlugin,
+                prompt::PalettePromptPlugin,
+                branch::PaletteBranchPlugin,
+                media::PaletteMediaPlugin,
+                resume::PaletteResumePlugin,
+            ))
+            .add_observer(receive_open)
+            .add_observer(receive_mcp_servers)
+            .add_observer(update_draft)
+            .add_observer(highlight)
+            .add_observer(move_history)
+            .add_observer(toggle_agent_menu)
+            .add_observer(toggle_model_menu)
+            .add_observer(toggle_permission_menu)
+            .add_observer(toggle_project_menu)
+            .add_observer(toggle_branch_menu)
+            .add_observer(move_menu_request)
+            .add_observer(highlight_menu)
+            .add_observer(activate_menu)
+            .add_observer(dismiss_menu_request)
+            .add_observer(dispatch_submit)
+            .add_observer(activate_row)
+            .add_observer(apply_decision)
+            .add_observer(next)
+            .add_observer(previous)
+            .add_observer(complete)
+            .add_observer(dismiss)
+            .add_observer(submit)
+            .add_observer(move_menu)
+            .add_observer(choose_menu)
+            .add_observer(dismiss_menu)
+            .add_systems(Startup, bind_commands.in_set(BindCommands))
+            .add_systems(PreUpdate, (attach_snapshot, detach_snapshot))
+            .add_systems(PostUpdate, (project, publish_snapshot).chain())
+            .add_systems(Last, keep_frames_coming);
     }
 }
 
@@ -166,102 +168,86 @@ impl PaletteDraftInput {
         self.input_revision = self.input_revision.wrapping_add(1).max(1);
         true
     }
+
+    fn next(&mut self, snapshot: &CommandPaletteState) {
+        let rows = if snapshot.projection.mcp_open {
+            snapshot.projection.mcp_entries.len()
+        } else {
+            snapshot.projection.rows.len()
+        };
+        self.selected = (self.selected + 1).min(rows.saturating_sub(1));
+        self.navigating = true;
+        self.changed();
+    }
+
+    fn previous(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+        self.navigating = true;
+        self.changed();
+    }
+
+    fn complete(&mut self, snapshot: &CommandPaletteState) {
+        if snapshot.projection.mcp_open || snapshot.projection.ghost.is_empty() {
+            return;
+        }
+        self.query.push_str(&snapshot.projection.ghost);
+        self.selected = 0;
+        self.navigating = false;
+        self.changed();
+    }
+
+    fn dismiss(&mut self, snapshot: &CommandPaletteState) -> bool {
+        if snapshot.projection.mcp_open {
+            self.query.clear();
+            self.selected = 0;
+            self.navigating = false;
+            self.changed();
+            return false;
+        }
+        self.close_revision = self.close_revision.wrapping_add(1).max(1);
+        true
+    }
+
+    fn changed(&mut self) {
+        self.input_revision = self.input_revision.wrapping_add(1).max(1);
+    }
 }
+
+#[derive(Component)]
+struct AgentMenuOpen;
+
+#[derive(Component)]
+struct ModelMenuOpen;
+
+#[derive(Component)]
+struct PermissionMenuOpen;
+
+#[derive(Component)]
+struct ProjectMenuOpen;
+
+#[derive(Component)]
+struct BranchMenuOpen;
 
 #[derive(Component, Default)]
-struct PaletteMenuState {
-    opened: Option<CommandPaletteMenu>,
-    cursor: usize,
-}
+struct PaletteMenuCursor(usize);
 
-impl PaletteMenuState {
-    fn rows(menu: CommandPaletteMenu, snapshot: &CommandPaletteState) -> usize {
-        let composer = &snapshot.projection.composer;
-        match menu {
-            CommandPaletteMenu::Agent => composer.agents.len(),
-            CommandPaletteMenu::Model => composer.model_options.len(),
-            CommandPaletteMenu::Permission => composer.permission_modes.len(),
-            CommandPaletteMenu::Project => {
-                composer
-                    .projects
-                    .iter()
-                    .filter(|project| project.depth == 0)
-                    .count()
-                    + 1
-            }
-            CommandPaletteMenu::Branch => snapshot.branches.len(),
-        }
-    }
-
-    fn initial(menu: CommandPaletteMenu, snapshot: &CommandPaletteState) -> usize {
-        let composer = &snapshot.projection.composer;
-        match menu {
-            CommandPaletteMenu::Agent => composer
-                .agents
-                .iter()
-                .position(|agent| agent.url == composer.agent_url)
-                .unwrap_or(0),
-            CommandPaletteMenu::Model => composer
-                .model_options
-                .iter()
-                .position(|model| model.id == composer.model_current_id)
-                .unwrap_or(0),
-            CommandPaletteMenu::Permission => composer
-                .permission_modes
-                .iter()
-                .position(|mode| mode.id == composer.permission_current_id)
-                .unwrap_or(0),
-            CommandPaletteMenu::Project => composer
-                .projects
-                .iter()
-                .filter(|project| project.depth == 0)
-                .position(|project| project.is_active)
-                .unwrap_or(0),
-            CommandPaletteMenu::Branch => snapshot
-                .branches
-                .iter()
-                .position(|branch| branch.branch == composer.branch_label)
-                .unwrap_or(0),
-        }
-    }
-
-    fn toggle(&mut self, menu: CommandPaletteMenu, snapshot: &CommandPaletteState) {
-        if self.opened == Some(menu) {
-            self.dismiss();
-            return;
-        }
-        self.opened = Some(menu);
-        self.cursor = Self::initial(menu, snapshot);
-    }
-
-    fn step(&mut self, next: bool, snapshot: &CommandPaletteState) {
-        let Some(menu) = self.opened else {
-            return;
-        };
-        let rows = Self::rows(menu, snapshot);
+impl PaletteMenuCursor {
+    fn step(&mut self, next: bool, rows: usize) {
         if rows == 0 {
             return;
         }
-        let at = self.cursor.min(rows - 1);
-        self.cursor = if next {
+        let at = self.0.min(rows - 1);
+        self.0 = if next {
             (at + 1).min(rows - 1)
         } else {
             at.saturating_sub(1)
         };
     }
 
-    fn highlight(&mut self, index: usize, snapshot: &CommandPaletteState) {
-        let Some(menu) = self.opened else {
-            return;
-        };
-        if index < Self::rows(menu, snapshot) {
-            self.cursor = index;
+    fn highlight(&mut self, index: usize, rows: usize) {
+        if index < rows {
+            self.0 = index;
         }
-    }
-
-    fn dismiss(&mut self) {
-        self.opened = None;
-        self.cursor = 0;
     }
 }
 
@@ -271,55 +257,32 @@ struct PaletteMcp(McpServers);
 #[derive(Component)]
 struct PaletteMcpActive;
 
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum PaletteProjectionSet {
-    Project,
-    Context,
-    Publish,
-}
+#[vmux_command::command]
+struct CommandBarNextBinding;
 
-#[derive(Clone, Copy)]
-enum PaletteKey {
-    Next,
-    Previous,
-    Complete,
-    Dismiss,
-}
+#[vmux_command::command]
+struct CommandBarPreviousBinding;
 
-#[derive(Component)]
-struct PaletteKeyBinding(PaletteKey);
+#[vmux_command::command]
+struct CommandBarCompleteBinding;
 
-impl CommandBinding for PaletteKeyBinding {
-    fn for_command(id: &str) -> Option<Self> {
-        match id {
-            "command_bar_next" => Some(Self(PaletteKey::Next)),
-            "command_bar_previous" => Some(Self(PaletteKey::Previous)),
-            "command_bar_complete" => Some(Self(PaletteKey::Complete)),
-            "command_bar_dismiss" => Some(Self(PaletteKey::Dismiss)),
-            _ => None,
-        }
-    }
-}
+#[vmux_command::command]
+struct CommandBarDismissBinding;
 
-#[vmux_command::command(id = "command_bar_submit")]
-#[derive(Component)]
-struct PaletteSubmitBinding;
+#[vmux_command::command]
+struct CommandBarSubmitBinding;
 
-#[vmux_command::command(id = "command_bar_menu_next")]
-#[derive(Component)]
-struct PaletteMenuNextBinding;
+#[vmux_command::command]
+struct CommandBarMenuNextBinding;
 
-#[vmux_command::command(id = "command_bar_menu_previous")]
-#[derive(Component)]
-struct PaletteMenuPreviousBinding;
+#[vmux_command::command]
+struct CommandBarMenuPreviousBinding;
 
-#[vmux_command::command(id = "command_bar_menu_choose")]
-#[derive(Component)]
-struct PaletteMenuChooseBinding;
+#[vmux_command::command]
+struct CommandBarMenuChooseBinding;
 
-#[vmux_command::command(id = "command_bar_menu_dismiss")]
-#[derive(Component)]
-struct PaletteMenuDismissBinding;
+#[vmux_command::command]
+struct CommandBarMenuDismissBinding;
 
 #[derive(EntityEvent)]
 struct PaletteDecisionReady {
@@ -329,12 +292,15 @@ struct PaletteDecisionReady {
 }
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<PaletteKeyBinding>(&mut commands);
-    registry.bind::<PaletteSubmitBinding>(&mut commands);
-    registry.bind::<PaletteMenuNextBinding>(&mut commands);
-    registry.bind::<PaletteMenuPreviousBinding>(&mut commands);
-    registry.bind::<PaletteMenuChooseBinding>(&mut commands);
-    registry.bind::<PaletteMenuDismissBinding>(&mut commands);
+    registry.bind::<CommandBarNextBinding>(&mut commands);
+    registry.bind::<CommandBarPreviousBinding>(&mut commands);
+    registry.bind::<CommandBarCompleteBinding>(&mut commands);
+    registry.bind::<CommandBarDismissBinding>(&mut commands);
+    registry.bind::<CommandBarSubmitBinding>(&mut commands);
+    registry.bind::<CommandBarMenuNextBinding>(&mut commands);
+    registry.bind::<CommandBarMenuPreviousBinding>(&mut commands);
+    registry.bind::<CommandBarMenuChooseBinding>(&mut commands);
+    registry.bind::<CommandBarMenuDismissBinding>(&mut commands);
 }
 
 fn attach_snapshot(
@@ -353,7 +319,6 @@ fn attach_snapshot(
             PaletteOpen::default(),
             PaletteContext::default(),
             PaletteDraftInput::default(),
-            PaletteMenuState::default(),
             PaletteMcp::default(),
             UiState::<CommandPaletteState>::default(),
         ));
@@ -375,9 +340,9 @@ fn receive_open(
     mut palettes: Query<(
         &mut PaletteOpen,
         &mut PaletteDraftInput,
-        &mut PaletteMenuState,
         &mut PaletteSnapshot,
     )>,
+    mut commands: Commands,
 ) {
     let Some(opened) =
         <CommandBarUiStatePatch as vmux_api::UiStatePatch<CommandBarOpenEvent>>::payload(
@@ -386,8 +351,7 @@ fn receive_open(
     else {
         return;
     };
-    let Ok((mut current, mut draft, mut menu, mut snapshot)) =
-        palettes.get_mut(trigger.event().webview())
+    let Ok((mut current, mut draft, mut snapshot)) = palettes.get_mut(trigger.event().webview())
     else {
         return;
     };
@@ -402,7 +366,14 @@ fn receive_open(
     draft.navigating = false;
     draft.history_cursor = None;
     draft.history_scratch.clear();
-    menu.dismiss();
+    commands.entity(trigger.event().webview()).remove::<(
+        AgentMenuOpen,
+        ModelMenuOpen,
+        PermissionMenuOpen,
+        ProjectMenuOpen,
+        BranchMenuOpen,
+        PaletteMenuCursor,
+    )>();
     draft.input_revision = draft.input_revision.wrapping_add(1).max(1);
     draft.close_revision = 0;
     snapshot.0.open_id = opened.open_id;
@@ -411,12 +382,12 @@ fn receive_open(
 
 fn update_draft(
     trigger: On<UiInput<CommandPaletteDraftRequest>>,
-    mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput, &mut PaletteMenuState)>,
+    mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput)>,
     active: Query<(), With<PaletteMcpActive>>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
-    let Ok((opened, mut draft, mut menu)) = palettes.get_mut(target) else {
+    let Ok((opened, mut draft)) = palettes.get_mut(target) else {
         return;
     };
     let request = &trigger.event().payload;
@@ -430,7 +401,14 @@ fn update_draft(
         draft.query.clone_from(&request.query);
         draft.selected = 0;
         draft.navigating = false;
-        menu.dismiss();
+        commands.entity(target).remove::<(
+            AgentMenuOpen,
+            ModelMenuOpen,
+            PermissionMenuOpen,
+            ProjectMenuOpen,
+            BranchMenuOpen,
+            PaletteMenuCursor,
+        )>();
     }
     draft.start = request.start;
     let wants_mcp = PaletteQuery::new(&request.query).mcp_filter().is_some();
@@ -481,46 +459,256 @@ fn move_history(
     input.move_history(&snapshot.0.prompt_history, request.older);
 }
 
-fn toggle_menu(
-    trigger: On<UiInput<CommandPaletteMenuToggleRequest>>,
-    mut palettes: Query<(&PaletteOpen, &PaletteSnapshot, &mut PaletteMenuState)>,
+fn toggle_agent_menu(
+    trigger: On<UiInput<CommandPaletteAgentMenuToggleRequest>>,
+    palettes: Query<(&PaletteOpen, &PaletteSnapshot, Has<AgentMenuOpen>)>,
+    mut commands: Commands,
 ) {
-    let Ok((opened, snapshot, mut menu)) = palettes.get_mut(trigger.event().webview) else {
+    let target = trigger.event().webview;
+    let Ok((opened, snapshot, active)) = palettes.get(target) else {
         return;
     };
-    let request = &trigger.event().payload;
-    if request.open_id != opened.0.open_id {
+    if trigger.event().payload.open_id != opened.0.open_id {
         return;
     }
-    menu.toggle(request.menu, &snapshot.0);
+    let mut entity = commands.entity(target);
+    entity.remove::<(
+        AgentMenuOpen,
+        ModelMenuOpen,
+        PermissionMenuOpen,
+        ProjectMenuOpen,
+        BranchMenuOpen,
+        PaletteMenuCursor,
+    )>();
+    if !active {
+        let composer = &snapshot.0.projection.composer;
+        let cursor = composer
+            .agents
+            .iter()
+            .position(|agent| agent.url == composer.agent_url)
+            .unwrap_or(0);
+        entity.insert((AgentMenuOpen, PaletteMenuCursor(cursor)));
+    }
+}
+
+fn toggle_model_menu(
+    trigger: On<UiInput<CommandPaletteModelMenuToggleRequest>>,
+    palettes: Query<(&PaletteOpen, &PaletteSnapshot, Has<ModelMenuOpen>)>,
+    mut commands: Commands,
+) {
+    let target = trigger.event().webview;
+    let Ok((opened, snapshot, active)) = palettes.get(target) else {
+        return;
+    };
+    if trigger.event().payload.open_id != opened.0.open_id {
+        return;
+    }
+    let mut entity = commands.entity(target);
+    entity.remove::<(
+        AgentMenuOpen,
+        ModelMenuOpen,
+        PermissionMenuOpen,
+        ProjectMenuOpen,
+        BranchMenuOpen,
+        PaletteMenuCursor,
+    )>();
+    if !active {
+        let composer = &snapshot.0.projection.composer;
+        let cursor = composer
+            .model_options
+            .iter()
+            .position(|model| model.id == composer.model_current_id)
+            .unwrap_or(0);
+        entity.insert((ModelMenuOpen, PaletteMenuCursor(cursor)));
+    }
+}
+
+fn toggle_permission_menu(
+    trigger: On<UiInput<CommandPalettePermissionMenuToggleRequest>>,
+    palettes: Query<(&PaletteOpen, &PaletteSnapshot, Has<PermissionMenuOpen>)>,
+    mut commands: Commands,
+) {
+    let target = trigger.event().webview;
+    let Ok((opened, snapshot, active)) = palettes.get(target) else {
+        return;
+    };
+    if trigger.event().payload.open_id != opened.0.open_id {
+        return;
+    }
+    let mut entity = commands.entity(target);
+    entity.remove::<(
+        AgentMenuOpen,
+        ModelMenuOpen,
+        PermissionMenuOpen,
+        ProjectMenuOpen,
+        BranchMenuOpen,
+        PaletteMenuCursor,
+    )>();
+    if !active {
+        let composer = &snapshot.0.projection.composer;
+        let cursor = composer
+            .permission_modes
+            .iter()
+            .position(|mode| mode.id == composer.permission_current_id)
+            .unwrap_or(0);
+        entity.insert((PermissionMenuOpen, PaletteMenuCursor(cursor)));
+    }
+}
+
+fn toggle_project_menu(
+    trigger: On<UiInput<CommandPaletteProjectMenuToggleRequest>>,
+    palettes: Query<(&PaletteOpen, &PaletteSnapshot, Has<ProjectMenuOpen>)>,
+    mut commands: Commands,
+) {
+    let target = trigger.event().webview;
+    let Ok((opened, snapshot, active)) = palettes.get(target) else {
+        return;
+    };
+    if trigger.event().payload.open_id != opened.0.open_id {
+        return;
+    }
+    let mut entity = commands.entity(target);
+    entity.remove::<(
+        AgentMenuOpen,
+        ModelMenuOpen,
+        PermissionMenuOpen,
+        ProjectMenuOpen,
+        BranchMenuOpen,
+        PaletteMenuCursor,
+    )>();
+    if !active {
+        let cursor = snapshot
+            .0
+            .projection
+            .composer
+            .projects
+            .iter()
+            .filter(|project| project.depth == 0)
+            .position(|project| project.is_active)
+            .unwrap_or(0);
+        entity.insert((ProjectMenuOpen, PaletteMenuCursor(cursor)));
+    }
+}
+
+fn toggle_branch_menu(
+    trigger: On<UiInput<CommandPaletteBranchMenuToggleRequest>>,
+    palettes: Query<(&PaletteOpen, &PaletteSnapshot, Has<BranchMenuOpen>)>,
+    mut commands: Commands,
+) {
+    let target = trigger.event().webview;
+    let Ok((opened, snapshot, active)) = palettes.get(target) else {
+        return;
+    };
+    if trigger.event().payload.open_id != opened.0.open_id {
+        return;
+    }
+    let mut entity = commands.entity(target);
+    entity.remove::<(
+        AgentMenuOpen,
+        ModelMenuOpen,
+        PermissionMenuOpen,
+        ProjectMenuOpen,
+        BranchMenuOpen,
+        PaletteMenuCursor,
+    )>();
+    if !active {
+        let composer = &snapshot.0.projection.composer;
+        let cursor = snapshot
+            .0
+            .branches
+            .iter()
+            .position(|branch| branch.branch == composer.branch_label)
+            .unwrap_or(0);
+        entity.insert((BranchMenuOpen, PaletteMenuCursor(cursor)));
+    }
 }
 
 fn move_menu_request(
     trigger: On<UiInput<CommandPaletteMenuMoveRequest>>,
-    mut palettes: Query<(&PaletteOpen, &PaletteSnapshot, &mut PaletteMenuState)>,
+    mut palettes: Query<(
+        &PaletteOpen,
+        &PaletteSnapshot,
+        &mut PaletteMenuCursor,
+        Has<AgentMenuOpen>,
+        Has<ModelMenuOpen>,
+        Has<PermissionMenuOpen>,
+        Has<ProjectMenuOpen>,
+        Has<BranchMenuOpen>,
+    )>,
 ) {
-    let Ok((opened, snapshot, mut menu)) = palettes.get_mut(trigger.event().webview) else {
+    let Ok((opened, snapshot, mut cursor, agent, model, permission, project, branch)) =
+        palettes.get_mut(trigger.event().webview)
+    else {
         return;
     };
     let request = &trigger.event().payload;
     if request.open_id != opened.0.open_id {
         return;
     }
-    menu.step(request.next, &snapshot.0);
+    let composer = &snapshot.0.projection.composer;
+    let rows = if agent {
+        composer.agents.len()
+    } else if model {
+        composer.model_options.len()
+    } else if permission {
+        composer.permission_modes.len()
+    } else if project {
+        composer
+            .projects
+            .iter()
+            .filter(|project| project.depth == 0)
+            .count()
+            + 1
+    } else if branch {
+        snapshot.0.branches.len()
+    } else {
+        return;
+    };
+    cursor.step(request.next, rows);
 }
 
 fn highlight_menu(
     trigger: On<UiInput<CommandPaletteMenuHighlightRequest>>,
-    mut palettes: Query<(&PaletteOpen, &PaletteSnapshot, &mut PaletteMenuState)>,
+    mut palettes: Query<(
+        &PaletteOpen,
+        &PaletteSnapshot,
+        &mut PaletteMenuCursor,
+        Has<AgentMenuOpen>,
+        Has<ModelMenuOpen>,
+        Has<PermissionMenuOpen>,
+        Has<ProjectMenuOpen>,
+        Has<BranchMenuOpen>,
+    )>,
 ) {
-    let Ok((opened, snapshot, mut menu)) = palettes.get_mut(trigger.event().webview) else {
+    let Ok((opened, snapshot, mut cursor, agent, model, permission, project, branch)) =
+        palettes.get_mut(trigger.event().webview)
+    else {
         return;
     };
     let request = &trigger.event().payload;
     if request.open_id != opened.0.open_id {
         return;
     }
-    menu.highlight(request.index as usize, &snapshot.0);
+    let composer = &snapshot.0.projection.composer;
+    let rows = if agent {
+        composer.agents.len()
+    } else if model {
+        composer.model_options.len()
+    } else if permission {
+        composer.permission_modes.len()
+    } else if project {
+        composer
+            .projects
+            .iter()
+            .filter(|project| project.depth == 0)
+            .count()
+            + 1
+    } else if branch {
+        snapshot.0.branches.len()
+    } else {
+        return;
+    };
+    cursor.highlight(request.index as usize, rows);
 }
 
 fn activate_menu(
@@ -528,121 +716,136 @@ fn activate_menu(
     mut palettes: Query<(
         &PaletteOpen,
         &mut PaletteDraftInput,
-        &mut PaletteMenuState,
         &PaletteSnapshot,
+        Has<AgentMenuOpen>,
+        Has<ModelMenuOpen>,
+        Has<PermissionMenuOpen>,
+        Has<ProjectMenuOpen>,
+        Has<BranchMenuOpen>,
     )>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
-    let Ok((opened, mut input, mut menu, snapshot)) = palettes.get_mut(target) else {
+    let Ok((opened, mut input, snapshot, agent, model, permission, project, branch)) =
+        palettes.get_mut(target)
+    else {
         return;
     };
     let request = &trigger.event().payload;
     if request.open_id != opened.0.open_id {
         return;
     }
-    let Some(kind) = menu.opened else {
-        return;
-    };
     let index = request.index as usize;
     let composer = &snapshot.0.projection.composer;
-    let handled = match kind {
-        CommandPaletteMenu::Agent => {
-            let Some(agent) = composer.agents.get(index) else {
-                return;
-            };
-            input.target_url.clone_from(&agent.url);
-            input.selected = 0;
-            input.navigating = false;
-            input.input_revision = input.input_revision.wrapping_add(1).max(1);
-            true
-        }
-        CommandPaletteMenu::Model => {
-            let Some(model) = composer.model_options.get(index) else {
-                return;
-            };
+    let handled = if agent {
+        let Some(agent) = composer.agents.get(index) else {
+            return;
+        };
+        input.target_url.clone_from(&agent.url);
+        input.selected = 0;
+        input.navigating = false;
+        input.changed();
+        true
+    } else if model {
+        let Some(model) = composer.model_options.get(index) else {
+            return;
+        };
+        commands.trigger(UiInput {
+            webview: target,
+            payload: StartSelectModel {
+                agent_key: composer.model_agent_key.clone(),
+                model_id: model.id.clone(),
+            },
+        });
+        true
+    } else if permission {
+        let Some(mode) = composer.permission_modes.get(index) else {
+            return;
+        };
+        commands.trigger(UiInput {
+            webview: target,
+            payload: StartSelectMode {
+                agent_key: composer.permission_agent_key.clone(),
+                mode_id: mode.id.clone(),
+            },
+        });
+        true
+    } else if project {
+        let projects = composer
+            .projects
+            .iter()
+            .filter(|project| project.depth == 0);
+        let count = projects.clone().count();
+        if index == count {
             commands.trigger(UiInput {
                 webview: target,
-                payload: StartSelectModel {
-                    agent_key: composer.model_agent_key.clone(),
-                    model_id: model.id.clone(),
+                payload: StartSelectWorkspace {
+                    current_dir: composer.cwd.clone(),
                 },
             });
             true
-        }
-        CommandPaletteMenu::Permission => {
-            let Some(mode) = composer.permission_modes.get(index) else {
-                return;
-            };
-            commands.trigger(UiInput {
-                webview: target,
-                payload: StartSelectMode {
-                    agent_key: composer.permission_agent_key.clone(),
-                    mode_id: mode.id.clone(),
-                },
-            });
-            true
-        }
-        CommandPaletteMenu::Project => {
-            let projects = composer
-                .projects
-                .iter()
-                .filter(|project| project.depth == 0);
-            let count = projects.clone().count();
-            if index == count {
-                commands.trigger(UiInput {
-                    webview: target,
-                    payload: StartSelectWorkspace {
-                        current_dir: composer.cwd.clone(),
-                    },
-                });
-                true
-            } else {
-                let Some(project) = projects.into_iter().nth(index) else {
-                    return;
-                };
-                commands.trigger(UiInput {
-                    webview: target,
-                    payload: StartGoToBranch {
-                        project: project.path.clone(),
-                        branch: String::new(),
-                        checkout: String::new(),
-                    },
-                });
-                true
-            }
-        }
-        CommandPaletteMenu::Branch => {
-            let Some(branch) = snapshot.0.branches.get(index) else {
+        } else {
+            let Some(project) = projects.into_iter().nth(index) else {
                 return;
             };
             commands.trigger(UiInput {
                 webview: target,
                 payload: StartGoToBranch {
-                    project: composer.project.clone(),
-                    branch: branch.branch.clone(),
-                    checkout: branch.checkout.clone(),
+                    project: project.path.clone(),
+                    branch: String::new(),
+                    checkout: String::new(),
                 },
             });
             true
         }
+    } else if branch {
+        let Some(branch) = snapshot.0.branches.get(index) else {
+            return;
+        };
+        commands.trigger(UiInput {
+            webview: target,
+            payload: StartGoToBranch {
+                project: composer.project.clone(),
+                branch: branch.branch.clone(),
+                checkout: branch.checkout.clone(),
+            },
+        });
+        true
+    } else {
+        false
     };
     if handled {
-        menu.dismiss();
+        commands.entity(target).remove::<(
+            AgentMenuOpen,
+            ModelMenuOpen,
+            PermissionMenuOpen,
+            ProjectMenuOpen,
+            BranchMenuOpen,
+            PaletteMenuCursor,
+        )>();
     }
 }
 
 fn dismiss_menu_request(
     trigger: On<UiInput<CommandPaletteMenuDismissRequest>>,
-    mut palettes: Query<(&PaletteOpen, &mut PaletteMenuState)>,
+    palettes: Query<&PaletteOpen>,
+    mut commands: Commands,
 ) {
-    let Ok((opened, mut menu)) = palettes.get_mut(trigger.event().webview) else {
+    let target = trigger.event().webview;
+    let Ok(opened) = palettes.get(target) else {
         return;
     };
     if trigger.event().payload.open_id != opened.0.open_id {
         return;
     }
-    menu.dismiss();
+    commands.entity(target).remove::<(
+        AgentMenuOpen,
+        ModelMenuOpen,
+        PermissionMenuOpen,
+        ProjectMenuOpen,
+        BranchMenuOpen,
+        PaletteMenuCursor,
+    )>();
 }
 
 fn dispatch_submit(
@@ -818,70 +1021,72 @@ fn apply_decision(
     }
 }
 
-fn apply_key(
+fn next(
     trigger: On<CommandDispatch>,
-    keys: Query<&PaletteKeyBinding>,
+    bindings: Query<(), With<CommandBarNextBinding>>,
     mut palettes: Query<(&mut PaletteDraftInput, &PaletteSnapshot)>,
-    mut commands: Commands,
 ) {
-    let Ok(key) = keys.get(trigger.event().command()) else {
+    if !bindings.contains(trigger.event().command()) {
         return;
-    };
+    }
     let target = trigger.event().invocation().caller;
     let Ok((mut input, snapshot)) = palettes.get_mut(target) else {
         return;
     };
-    if snapshot.0.projection.mcp_open {
-        match key.0 {
-            PaletteKey::Next => {
-                input.selected = (input.selected + 1)
-                    .min(snapshot.0.projection.mcp_entries.len().saturating_sub(1));
-                input.navigating = true;
-            }
-            PaletteKey::Previous => {
-                input.selected = input.selected.saturating_sub(1);
-                input.navigating = true;
-            }
-            PaletteKey::Complete => return,
-            PaletteKey::Dismiss => {
-                input.query.clear();
-                input.selected = 0;
-                input.navigating = false;
-            }
-        }
-        input.input_revision = input.input_revision.wrapping_add(1).max(1);
+    input.next(&snapshot.0);
+}
+
+fn previous(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<CommandBarPreviousBinding>>,
+    mut palettes: Query<&mut PaletteDraftInput>,
+) {
+    if !bindings.contains(trigger.event().command()) {
         return;
     }
-    match key.0 {
-        PaletteKey::Next => {
-            input.selected =
-                (input.selected + 1).min(snapshot.0.projection.rows.len().saturating_sub(1));
-            input.navigating = true;
-        }
-        PaletteKey::Previous => {
-            input.selected = input.selected.saturating_sub(1);
-            input.navigating = true;
-        }
-        PaletteKey::Complete => {
-            if snapshot.0.projection.ghost.is_empty() {
-                return;
-            }
-            input.query.push_str(&snapshot.0.projection.ghost);
-            input.selected = 0;
-            input.navigating = false;
-        }
-        PaletteKey::Dismiss => {
-            input.close_revision = input.close_revision.wrapping_add(1).max(1);
-            commands.trigger(CommandBarDismiss::new(target, true));
-            return;
-        }
+    let target = trigger.event().invocation().caller;
+    let Ok(mut input) = palettes.get_mut(target) else {
+        return;
+    };
+    input.previous();
+}
+
+fn complete(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<CommandBarCompleteBinding>>,
+    mut palettes: Query<(&mut PaletteDraftInput, &PaletteSnapshot)>,
+) {
+    if !bindings.contains(trigger.event().command()) {
+        return;
     }
-    input.input_revision = input.input_revision.wrapping_add(1).max(1);
+    let target = trigger.event().invocation().caller;
+    let Ok((mut input, snapshot)) = palettes.get_mut(target) else {
+        return;
+    };
+    input.complete(&snapshot.0);
+}
+
+fn dismiss(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<CommandBarDismissBinding>>,
+    mut palettes: Query<(&mut PaletteDraftInput, &PaletteSnapshot)>,
+    mut commands: Commands,
+) {
+    if !bindings.contains(trigger.event().command()) {
+        return;
+    }
+    let target = trigger.event().invocation().caller;
+    let Ok((mut input, snapshot)) = palettes.get_mut(target) else {
+        return;
+    };
+    if input.dismiss(&snapshot.0) {
+        commands.trigger(CommandBarDismiss::new(target, true));
+    }
 }
 
 fn submit(
     trigger: On<CommandDispatch>,
-    bindings: Query<(), With<PaletteSubmitBinding>>,
+    bindings: Query<(), With<CommandBarSubmitBinding>>,
     palettes: Query<&PaletteOpen>,
     mut commands: Commands,
 ) {
@@ -902,8 +1107,8 @@ fn submit(
 
 fn move_menu(
     trigger: On<CommandDispatch>,
-    next: Query<(), With<PaletteMenuNextBinding>>,
-    previous: Query<(), With<PaletteMenuPreviousBinding>>,
+    next: Query<(), With<CommandBarMenuNextBinding>>,
+    previous: Query<(), With<CommandBarMenuPreviousBinding>>,
     palettes: Query<&PaletteOpen>,
     mut commands: Commands,
 ) {
@@ -930,8 +1135,8 @@ fn move_menu(
 
 fn choose_menu(
     trigger: On<CommandDispatch>,
-    bindings: Query<(), With<PaletteMenuChooseBinding>>,
-    palettes: Query<(&PaletteOpen, &PaletteMenuState)>,
+    bindings: Query<(), With<CommandBarMenuChooseBinding>>,
+    palettes: Query<(&PaletteOpen, &PaletteMenuCursor)>,
     mut commands: Commands,
 ) {
     if !bindings.contains(trigger.event().command()) {
@@ -945,14 +1150,14 @@ fn choose_menu(
         webview: target,
         payload: CommandPaletteMenuActivateRequest {
             open_id: opened.0.open_id,
-            index: menu.cursor as u32,
+            index: menu.0 as u32,
         },
     });
 }
 
 fn dismiss_menu(
     trigger: On<CommandDispatch>,
-    bindings: Query<(), With<PaletteMenuDismissBinding>>,
+    bindings: Query<(), With<CommandBarMenuDismissBinding>>,
     palettes: Query<&PaletteOpen>,
     mut commands: Commands,
 ) {
@@ -975,13 +1180,31 @@ fn project(
     mut palettes: Query<(
         &PaletteOpen,
         &PaletteDraftInput,
-        &PaletteMenuState,
+        Option<&PaletteMenuCursor>,
         &PaletteMcp,
         &mut PaletteContext,
         &mut PaletteSnapshot,
+        Has<AgentMenuOpen>,
+        Has<ModelMenuOpen>,
+        Has<PermissionMenuOpen>,
+        Has<ProjectMenuOpen>,
+        Has<BranchMenuOpen>,
     )>,
 ) {
-    for (opened, input, menu, mcp, mut context, mut snapshot) in &mut palettes {
+    for (
+        opened,
+        input,
+        cursor,
+        mcp,
+        mut context,
+        mut snapshot,
+        agent_menu,
+        model_menu,
+        permission_menu,
+        project_menu,
+        branch_menu,
+    ) in &mut palettes
+    {
         if input.open_id != opened.0.open_id || snapshot.0.open_id != opened.0.open_id {
             continue;
         }
@@ -1025,8 +1248,12 @@ fn project(
             projection.selected = rows.selected(input.selected) as u32;
         }
         projection.navigating = input.navigating;
-        projection.menu = menu.opened;
-        projection.menu_cursor = menu.cursor as u32;
+        projection.menus.agent = agent_menu;
+        projection.menus.model = model_menu;
+        projection.menus.permission = permission_menu;
+        projection.menus.project = project_menu;
+        projection.menus.branch = branch_menu;
+        projection.menu_cursor = cursor.map_or(0, |cursor| cursor.0 as u32);
         projection.input_revision = input.input_revision;
         projection.close_revision = input.close_revision;
         let next_context = PaletteContext {
@@ -1069,12 +1296,21 @@ fn detach_snapshot(
     mut commands: Commands,
 ) {
     for page in &pages {
-        commands.entity(page).remove::<(
+        let mut page = commands.entity(page);
+        page.remove::<(
             PaletteSnapshot,
             PaletteOpen,
             PaletteContext,
             PaletteDraftInput,
             PaletteMcp,
+            AgentMenuOpen,
+            ModelMenuOpen,
+            PermissionMenuOpen,
+            ProjectMenuOpen,
+        )>();
+        page.remove::<(
+            BranchMenuOpen,
+            PaletteMenuCursor,
             UiState<CommandPaletteState>,
             search::PaletteSearch,
             prompt::PalettePrompt,
@@ -1327,17 +1563,15 @@ mod tests {
             },
         ];
         app.world_mut()
-            .get_mut::<PaletteMenuState>(page)
-            .unwrap()
-            .opened = Some(CommandPaletteMenu::Agent);
+            .entity_mut(page)
+            .insert((AgentMenuOpen, PaletteMenuCursor(0)));
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()
             .write(CommandInvocation::new(page, "command_bar_menu_next"));
         app.update();
 
-        let menu = app.world().get::<PaletteMenuState>(page).unwrap();
-        assert_eq!(menu.opened, Some(CommandPaletteMenu::Agent));
-        assert_eq!(menu.cursor, 1);
+        assert!(app.world().get::<AgentMenuOpen>(page).is_some());
+        assert_eq!(app.world().get::<PaletteMenuCursor>(page).unwrap().0, 1);
     }
 
     #[test]

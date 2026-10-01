@@ -34,7 +34,7 @@ use vmux_core::{
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
-use vmux_layout::event::{TERMINAL_CEF_BG_COLOR, TERMINAL_PAGE_URL};
+use vmux_layout::event::TERMINAL_CEF_BG_COLOR;
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::stack::{
     CloseRequest as StackCloseRequest, FocusRequest, FocusedStack, Stack, stack_bundle,
@@ -141,7 +141,7 @@ fn open_from_command_bar(
         return;
     }
 
-    if value.starts_with(TERMINAL_PAGE_URL) {
+    if value.starts_with(TerminalPlugin::URL) {
         warn!("no terminal pane for {}; spawning new", value);
     }
     let cwd = if value.is_empty() || value.contains("://") {
@@ -168,7 +168,7 @@ fn open_from_command_bar(
             cwd,
             target: TerminalSpawnTarget::NewStackInPane(pane),
             metadata: Some(PageMetadata {
-                url: TERMINAL_PAGE_URL.to_string(),
+                url: TerminalPlugin::URL.to_string(),
                 title: locale.translate("command-terminal"),
                 ..default()
             }),
@@ -177,7 +177,7 @@ fn open_from_command_bar(
         let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
         invocations.write(
             CommandInvocation::new(caller, "open_in_new_stack")
-                .with_arguments(serde_json::json!({ "url": TERMINAL_PAGE_URL })),
+                .with_arguments(serde_json::json!({ "url": TerminalPlugin::URL })),
         );
     }
     commands.trigger(CommandBarDismiss::new(webview, true));
@@ -377,7 +377,7 @@ fn format_url(
     for (pid, mut meta) in &mut q {
         let next = match pid {
             Some(pid) => pid.page_url(),
-            None => TERMINAL_PAGE_URL.to_string(),
+            None => TerminalPlugin::URL.to_string(),
         };
         if meta.url != next {
             meta.url = next;
@@ -435,8 +435,8 @@ fn handle_page_open(
 ) {
     let space_id = active_space.id().unwrap_or(BOOTSTRAP_SPACE_ID);
     for (entity, task, restoring) in &tasks {
-        if task.url != TERMINAL_PAGE_URL.trim_end_matches('/')
-            && !task.url.starts_with(TERMINAL_PAGE_URL)
+        if task.url != TerminalPlugin::URL.trim_end_matches('/')
+            && !task.url.starts_with(TerminalPlugin::URL)
         {
             continue;
         }
@@ -505,7 +505,7 @@ fn handle_page_open(
             .map(|cwd| format!("Terminal ({})", cwd.display()))
             .unwrap_or_else(|| "Terminal".to_string());
         commands.entity(task.stack).insert(PageMetadata {
-            url: TERMINAL_PAGE_URL.to_string(),
+            url: TerminalPlugin::URL.to_string(),
             title,
             bg_color: Some(TERMINAL_CEF_BG_COLOR.to_string()),
             ..default()
@@ -611,7 +611,7 @@ fn new_terminal_bundle_with_cwd_and_shell(
             PendingServiceCreate,
             PageMetadata {
                 title: format!("Terminal ({})", &process_id.to_string()[..8]),
-                url: TERMINAL_PAGE_URL.to_string(),
+                url: TerminalPlugin::URL.to_string(),
                 icon: PageIcon::None,
                 bg_color: None,
             },
@@ -657,7 +657,7 @@ fn respond_stack_spawn(
             .map(|cwd| format!("Terminal ({})", cwd.display()))
             .unwrap_or_else(|| "Terminal".to_string());
         commands.entity(stack).insert(PageMetadata {
-            url: TERMINAL_PAGE_URL.to_string(),
+            url: TerminalPlugin::URL.to_string(),
             title,
             bg_color: Some(TERMINAL_CEF_BG_COLOR.to_string()),
             ..default()
@@ -695,7 +695,7 @@ pub fn reattach_terminal_bundle(process_id: ProcessId) -> impl Bundle {
             PendingServiceAttach,
             PageMetadata {
                 title: format!("Terminal ({})", &process_id.to_string()[..8]),
-                url: TERMINAL_PAGE_URL.to_string(),
+                url: TerminalPlugin::URL.to_string(),
                 icon: PageIcon::None,
                 bg_color: None,
             },
@@ -1750,7 +1750,7 @@ fn restart_pty(
     if let Some(l) = launch.as_mut() {
         l.args = args;
     } else {
-        meta.url = TERMINAL_PAGE_URL.to_string();
+        meta.url = TerminalPlugin::URL.to_string();
         meta.title = format!("Terminal ({})", &new_id.to_string()[..8]);
     }
 }

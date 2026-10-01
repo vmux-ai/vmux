@@ -5,7 +5,7 @@ use vmux_api::command_bar::{CommandBarUiState, CommandBarUiStatePatch};
 use vmux_core::host::UiStateWrite;
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
 
-use super::{OpenVersion, PaletteContext, PaletteProjectionSet, PaletteSnapshot};
+use super::{OpenVersion, PaletteContext, PaletteSnapshot};
 
 pub(super) struct PalettePromptPlugin;
 
@@ -15,9 +15,7 @@ impl Plugin for PalettePromptPlugin {
             .add_systems(PreUpdate, attach)
             .add_systems(
                 PostUpdate,
-                (update, request_history)
-                    .chain()
-                    .in_set(PaletteProjectionSet::Context),
+                (update, request_history).chain().before(super::project),
             );
     }
 }

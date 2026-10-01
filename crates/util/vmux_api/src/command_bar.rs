@@ -134,6 +134,7 @@ mod tests {
                 icon: crate::icon::PageIcon::Builtin(crate::icon::BuiltinIcon::Settings),
                 shortcut: String::new(),
                 prompt_target: false,
+                startup: false,
             }],
             ..Default::default()
         };

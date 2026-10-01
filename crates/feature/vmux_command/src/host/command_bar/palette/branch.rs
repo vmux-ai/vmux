@@ -6,7 +6,7 @@ use vmux_api::command_bar::{
 use vmux_core::host::UiStateWrite;
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
 
-use super::{OpenVersion, PaletteContext, PaletteProjectionSet, PaletteSnapshot};
+use super::{OpenVersion, PaletteContext, PaletteSnapshot};
 
 pub(super) struct PaletteBranchPlugin;
 
@@ -16,9 +16,7 @@ impl Plugin for PaletteBranchPlugin {
             .add_systems(PreUpdate, attach)
             .add_systems(
                 PostUpdate,
-                (update, request_branches)
-                    .chain()
-                    .in_set(PaletteProjectionSet::Context),
+                (update, request_branches).chain().before(super::project),
             );
     }
 }

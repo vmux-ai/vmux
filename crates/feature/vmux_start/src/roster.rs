@@ -125,6 +125,7 @@ impl Launcher {
                 icon: PageIcon::favicon(agent.icon.clone()),
                 shortcut: String::new(),
                 prompt_target: true,
+                startup: false,
             });
         }
         CommandBarOpenEvent {

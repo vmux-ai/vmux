@@ -12,8 +12,8 @@ use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_core::page::PageReady;
 use vmux_layout::native_open::HostedUiPlugin;
 
-use crate::lsp::catalog::{Catalog, Package};
-use crate::lsp::{purl::Purl, store, target::PlatformTarget};
+use crate::lsp::catalog::{CatalogOutput, CatalogReady, CatalogSearch, Package};
+use crate::lsp::{store, target::PlatformTarget};
 
 #[vmux_native::page(page = "lsp")]
 pub struct ManagerPlugin;
@@ -38,16 +38,12 @@ impl Plugin for ManagerPlugin {
                 Update,
                 (
                     enqueue_package_installs,
-                    start_catalog_jobs,
                     start_install_jobs,
                     start_uninstall_jobs,
                 )
                     .chain(),
             )
-            .add_systems(
-                Update,
-                (poll_catalog_jobs, poll_install_jobs, poll_uninstall_jobs),
-            )
+            .add_systems(Update, (poll_install_jobs, poll_uninstall_jobs))
             .add_systems(
                 PostUpdate,
                 (
@@ -75,7 +71,7 @@ fn page_ready(
     }
     commands.spawn((
         Name::new("LSP catalog"),
-        PendingCatalogJob {
+        CatalogSearch {
             target,
             request: LspCatalogRequest::for_query("", false),
         },
@@ -163,12 +159,6 @@ impl ManagerState {
 }
 
 #[derive(Component)]
-struct CatalogOutput {
-    target: Entity,
-    catalog: LspCatalog,
-}
-
-#[derive(Component)]
 struct PackageProgressOutput {
     target: Entity,
     progress: LspInstallProgress,
@@ -208,50 +198,6 @@ impl PackageTargets<'_, '_> {
 }
 
 #[derive(Component)]
-struct PendingCatalogJob {
-    target: Entity,
-    request: LspCatalogRequest,
-}
-
-#[derive(Component)]
-struct CatalogJob {
-    target: Entity,
-    task: Task<LspCatalog>,
-}
-
-fn start_catalog_jobs(
-    pending: Query<(Entity, &PendingCatalogJob), Added<PendingCatalogJob>>,
-    mut commands: Commands,
-) {
-    for (entity, pending) in &pending {
-        let target = pending.target;
-        let request = pending.request.clone();
-        let task = IoTaskPool::get().spawn(async move {
-            let store = store::PackageStore::lsp();
-            let catalog = Catalog::load(&store, request.refresh).unwrap_or_default();
-            let mut packages = catalog
-                .search(&request.query, &request.language, &request.category)
-                .iter()
-                .map(|package| package.to_lsp_package(&store))
-                .collect::<Vec<_>>();
-            if request.installed_only {
-                packages.retain(|package| {
-                    matches!(
-                        package.status,
-                        LspPkgStatus::Installed | LspPkgStatus::Outdated
-                    )
-                });
-            }
-            LspCatalog { packages }
-        });
-        commands
-            .entity(entity)
-            .remove::<PendingCatalogJob>()
-            .insert(CatalogJob { target, task });
-    }
-}
-
-#[derive(Component)]
 struct PendingPackageInstall {
     target: Entity,
     name: String,
@@ -279,19 +225,11 @@ struct PackageUninstallJob {
 }
 
 fn install_package(
-    name: String,
+    package: Package,
     progress: Sender<LspInstallProgress>,
 ) -> Result<LspPackageStatus, LspInstallProgress> {
     let store = store::PackageStore::lsp();
-    let catalog = Catalog::load(&store, false).unwrap_or_default();
-    let Some(package) = catalog.find(&name).cloned() else {
-        return Err(LspInstallProgress {
-            name,
-            phase: InstallPhase::Failed,
-            pct: None,
-            message: "package not found in catalog".into(),
-        });
-    };
+    let name = package.name.as_str().to_string();
     let target = PlatformTarget::current();
     let progress_name = name.clone();
     let result = package.install(&store, target, |phase, pct, message| {
@@ -348,11 +286,16 @@ fn uninstall_package(name: String) -> Result<LspPackageStatus, LspInstallProgres
 }
 
 fn start_install_jobs(
-    pending: Query<(Entity, &PendingPackageInstall), Added<PendingPackageInstall>>,
+    pending: Query<(Entity, &PendingPackageInstall)>,
+    catalogs: Query<(), With<CatalogReady>>,
+    packages: Query<&Package>,
     install_jobs: Query<&PackageInstallJob>,
     uninstall_jobs: Query<&PackageUninstallJob>,
     mut commands: Commands,
 ) {
+    if catalogs.is_empty() {
+        return;
+    }
     let mut names = install_jobs
         .iter()
         .map(|job| job.name.clone())
@@ -363,11 +306,26 @@ fn start_install_jobs(
         if !names.insert(request.name.clone()) {
             continue;
         }
+        let Some(package) = packages
+            .iter()
+            .find(|package| package.name.as_str() == request.name)
+            .cloned()
+        else {
+            commands.spawn(PackageProgressOutput {
+                target: request.target,
+                progress: LspInstallProgress {
+                    name: request.name.clone(),
+                    phase: InstallPhase::Failed,
+                    pct: None,
+                    message: "package not found in catalog".into(),
+                },
+            });
+            continue;
+        };
         let (progress_sender, progress) = crossbeam_channel::unbounded();
         let name = request.name.clone();
-        let task_name = name.clone();
         let task =
-            IoTaskPool::get().spawn(async move { install_package(task_name, progress_sender) });
+            IoTaskPool::get().spawn(async move { install_package(package, progress_sender) });
         commands.spawn((
             Name::new(format!("LSP install: {name}")),
             PackageInstallJob {
@@ -410,84 +368,24 @@ fn start_uninstall_jobs(
     }
 }
 
-impl Package {
-    fn to_lsp_package(&self, store: &store::PackageStore) -> LspPackage {
-        let source = Purl::parse(&self.source_id);
-        let kind = source
-            .as_ref()
-            .map(|source| source.kind.as_str())
-            .unwrap_or_default();
-        let installed = store.is_installed(&self.name);
-        let on_path = !installed
-            && matches!(
-                store.resolve_command(self.name.as_str()),
-                store::Resolution::OnPath
-            );
-        let catalog_version = source.as_ref().and_then(|source| source.version.clone());
-        let installed_version = installed
-            .then(|| {
-                store
-                    .read_receipt(&self.name)
-                    .and_then(|receipt| receipt.version)
-            })
-            .flatten();
-        let outdated = installed
-            && installed_version.is_some()
-            && catalog_version.is_some()
-            && installed_version != catalog_version;
-        let status = if outdated {
-            LspPkgStatus::Outdated
-        } else if installed {
-            LspPkgStatus::Installed
-        } else if on_path {
-            LspPkgStatus::OnPath
-        } else {
-            LspPkgStatus::Available
-        };
-        let toolchain = source.as_ref().and_then(Purl::toolchain);
-        let installable =
-            kind == "github" || toolchain.is_some_and(crate::lsp::registry::executable_on_path);
-        let requires = if installable {
-            None
-        } else {
-            toolchain.map(String::from)
-        };
-        let version = if installed {
-            installed_version
-        } else {
-            catalog_version
-        };
-        LspPackage {
-            name: self.name.as_str().to_string(),
-            description: self.description.clone(),
-            languages: self.languages.clone(),
-            categories: self.categories.clone(),
-            status,
-            version,
-            installable,
-            requires,
-        }
-    }
-}
-
 fn catalog_request(
     trigger: On<UiInput<LspCatalogRequest>>,
     mut states: Query<&mut ManagerState>,
-    jobs: Query<(Entity, &CatalogJob)>,
+    searches: Query<(Entity, &CatalogSearch)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     if let Ok(mut state) = states.get_mut(entity) {
         state.start_loading();
     }
-    for (job_entity, job) in &jobs {
-        if job.target == entity {
-            commands.entity(job_entity).despawn();
+    for (search_entity, search) in &searches {
+        if search.target == entity {
+            commands.entity(search_entity).despawn();
         }
     }
     commands.spawn((
         Name::new("LSP catalog"),
-        PendingCatalogJob {
+        CatalogSearch {
             target: entity,
             request: trigger.event().payload.clone(),
         },
@@ -540,19 +438,6 @@ impl crate::host::editor::FileView {
             .and_then(|extension| extension.to_str())
             .and_then(crate::lsp::registry::preferred_package)
             == Some(package)
-    }
-}
-
-fn poll_catalog_jobs(mut jobs: Query<(Entity, &mut CatalogJob)>, mut commands: Commands) {
-    for (entity, mut job) in &mut jobs {
-        let Some(catalog) = block_on(future::poll_once(&mut job.task)) else {
-            continue;
-        };
-        commands.spawn(CatalogOutput {
-            target: job.target,
-            catalog,
-        });
-        commands.entity(entity).despawn();
     }
 }
 
@@ -717,11 +602,11 @@ mod tests {
         });
         app.update();
 
-        let mut jobs = app.world_mut().query::<&PendingCatalogJob>();
-        let job = jobs.single(app.world()).unwrap();
-        assert_eq!(job.target, webview);
-        assert!(job.request.query.is_empty());
-        assert!(!job.request.refresh);
+        let mut searches = app.world_mut().query::<&CatalogSearch>();
+        let search = searches.single(app.world()).unwrap();
+        assert_eq!(search.target, webview);
+        assert!(search.request.query.is_empty());
+        assert!(!search.request.refresh);
     }
 
     fn pkg(name: &str, source_id: &str) -> Package {
@@ -740,17 +625,17 @@ mod tests {
     fn installability_by_source() {
         let tmp = tempfile::tempdir().unwrap();
         let store = store::PackageStore::at(tmp.path());
-        let gh = pkg("zzz-fake-lsp", "pkg:github/x/zzz-fake-lsp@1").to_lsp_package(&store);
+        let gh = pkg("zzz-fake-lsp", "pkg:github/x/zzz-fake-lsp@1").snapshot(&store);
         assert!(gh.installable);
         assert_eq!(gh.requires, None);
         assert_eq!(gh.status, LspPkgStatus::Available);
 
-        let np = pkg("zzz-fake-ts", "pkg:npm/zzz-fake-ts@1").to_lsp_package(&store);
+        let np = pkg("zzz-fake-ts", "pkg:npm/zzz-fake-ts@1").snapshot(&store);
         let npm_present = crate::lsp::registry::executable_on_path("npm");
         assert_eq!(np.installable, npm_present);
         assert_eq!(np.requires.is_some(), !npm_present);
 
-        let uk = pkg("weird", "pkg:weirdsrc/weird@1").to_lsp_package(&store);
+        let uk = pkg("weird", "pkg:weirdsrc/weird@1").snapshot(&store);
         assert!(!uk.installable);
         assert_eq!(uk.requires, None);
     }
@@ -777,7 +662,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let lp = pkg("foo", "pkg:github/x/foo@2.0").to_lsp_package(&store);
+        let lp = pkg("foo", "pkg:github/x/foo@2.0").snapshot(&store);
         assert_eq!(lp.status, LspPkgStatus::Outdated);
         assert_eq!(lp.version.as_deref(), Some("1.0"));
     }

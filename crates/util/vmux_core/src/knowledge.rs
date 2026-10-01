@@ -1,5 +1,3 @@
-pub const KNOWLEDGE_PAGE_URL: &str = "vmux://knowledge/";
-
 #[vmux_api::contract(Default, Eq)]
 pub struct KnowledgeReference {
     pub title: String,

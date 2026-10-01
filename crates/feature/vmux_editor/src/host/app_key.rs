@@ -57,35 +57,27 @@ impl Plugin for KeyPlugin {
 }
 
 #[vmux_command::command(id = "file_toggle_explorer")]
-#[derive(Component)]
 struct FileToggleExplorerKeyBinding;
 
 #[vmux_command::command(id = "file_reveal_in_explorer")]
-#[derive(Component)]
 struct FileRevealExplorerKeyBinding;
 
 #[vmux_command::command(id = "file_find")]
-#[derive(Component)]
 struct FileFindKeyBinding;
 
 #[vmux_command::command(id = "file_find_in_files")]
-#[derive(Component)]
 struct FileFindInFilesKeyBinding;
 
 #[vmux_command::command(id = "file_panel_next")]
-#[derive(Component)]
 struct FilePanelNextKeyBinding;
 
 #[vmux_command::command(id = "file_panel_previous")]
-#[derive(Component)]
 struct FilePanelPreviousKeyBinding;
 
 #[vmux_command::command(id = "file_panel_choose")]
-#[derive(Component)]
 struct FilePanelChooseKeyBinding;
 
 #[vmux_command::command(id = "file_panel_dismiss")]
-#[derive(Component)]
 struct FilePanelDismissKeyBinding;
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]

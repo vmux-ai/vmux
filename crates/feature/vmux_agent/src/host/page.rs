@@ -74,13 +74,13 @@ impl AgentChatTarget {
     fn parse(url: &str) -> Option<Self> {
         match crate::host::url::AgentUrl::parse(url)? {
             crate::host::url::AgentUrl::AcpDefault => Some(Self {
-                url: "vmux://sessions/".to_string(),
+                url: vmux_chat::ChatPlugin::URL.to_string(),
                 title: "Agent".to_string(),
             }),
             crate::host::url::AgentUrl::Acp { id, sid } => {
                 let url = match sid {
-                    Some(sid) => format!("vmux://sessions/{id}/{sid}"),
-                    None => format!("vmux://sessions/{id}"),
+                    Some(sid) => format!("{}{id}/{sid}", vmux_chat::ChatPlugin::URL),
+                    None => format!("{}{id}", vmux_chat::ChatPlugin::URL),
                 };
                 Some(Self {
                     url,

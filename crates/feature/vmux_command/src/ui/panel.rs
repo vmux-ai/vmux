@@ -7,22 +7,19 @@ use vmux_ui::hooks::send;
 #[component]
 pub fn CommandBarPanel() -> Element {
     let state = use_command_bar_ui();
-    use_drop(move || {
+    let close = EventHandler::new(move |()| {
         let _ = send(&CommandBarPanelRequest { active: false });
     });
+    use_drop(move || close.call(()));
 
     if !state().open_id.is_open() {
         return rsx! {};
     }
 
-    let close = move || {
-        let _ = send(&CommandBarPanelRequest { active: false });
-    };
-
     rsx! {
         div {
             class: "pointer-events-auto fixed inset-0",
-            onclick: move |_| close(),
+            onclick: move |_| close.call(()),
             div {
                 class: "absolute left-1/2 top-1/2 w-[576px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2",
                 "data-command-bar-card": "",
@@ -35,7 +32,7 @@ pub fn CommandBarPanel() -> Element {
                         CommandPalette {
                             state: ReadSignal::from(state),
                             surface: PaletteSurface::Modal,
-                            on_close: move |_| close(),
+                            on_close: close,
                             on_activity: move |_| {},
                         }
                     }

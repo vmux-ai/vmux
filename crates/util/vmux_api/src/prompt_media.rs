@@ -49,6 +49,25 @@ pub struct ChatMediaEntries {
     pub entries: Vec<ChatMediaEntry>,
 }
 
+#[vmux_api::contract(Default, Eq)]
+pub struct PromptMediaOption {
+    pub key: String,
+    pub name: String,
+    pub display_path: String,
+    pub preview_data_url: String,
+    pub label: String,
+    pub is_dir: bool,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct PromptComposerAttachment {
+    pub key: String,
+    pub name: String,
+    pub label: String,
+    pub preview_data_url: String,
+    pub remove_index: Option<u32>,
+}
+
 #[vmux_api::ui_event]
 pub struct ChatPickFiles;
 

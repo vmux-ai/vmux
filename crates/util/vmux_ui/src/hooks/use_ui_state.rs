@@ -36,7 +36,7 @@ pub struct UiStatePatchBatch<S, T> {
     payload: PhantomData<fn() -> T>,
 }
 
-pub struct UiStateRoot<T> {
+pub struct UiStateBinding<T> {
     pub state: Signal<T>,
     pub error: Signal<Option<String>>,
 }
@@ -94,13 +94,13 @@ where
     UiStateListener { error }
 }
 
-impl<T> Clone for UiStateRoot<T> {
+impl<T> Clone for UiStateBinding<T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T> Copy for UiStateRoot<T> {}
+impl<T> Copy for UiStateBinding<T> {}
 
 impl<T> Clone for UiStateValue<T> {
     fn clone(&self) -> Self {
@@ -156,11 +156,11 @@ where
     }
 }
 
-impl<S> UiStateRoot<S>
+impl<S> UiStateBinding<S>
 where
     S: BatchedUiState,
 {
-    fn patch<T>(self) -> UiStatePatchBatch<S, T>
+    pub fn use_patch<T>(self) -> UiStatePatchBatch<S, T>
     where
         S::Patch: UiStatePatch<T>,
         T: Clone + 'static,
@@ -177,7 +177,7 @@ where
         S::Patch: UiStatePatch<T>,
         T: Clone + Default + PartialEq + 'static,
     {
-        let patches = self.patch::<T>();
+        let patches = self.use_patch::<T>();
         let mut value = use_signal(T::default);
         let mut ready = use_signal(|| false);
         use_effect(move || {
@@ -198,8 +198,38 @@ where
         S::Patch: UiStatePatch<T>,
         T: Clone + 'static,
     {
-        let patches = self.patch::<T>();
+        let patches = self.use_patch::<T>();
         use_effect(move || patches.for_each(&mut apply));
+    }
+
+    pub fn use_patches(self, mut apply: impl FnMut(&S::Patch) + 'static) -> Signal<Option<String>> {
+        let mut handled_sequence = use_signal(|| 0);
+        use_effect(move || {
+            let event = self.state.read();
+            let sequence = event.sequence();
+            if sequence == 0 || sequence == *handled_sequence.peek() {
+                return;
+            }
+            handled_sequence.set(sequence);
+            for patch in event.patches() {
+                apply(patch);
+            }
+        });
+        self.error
+    }
+
+    pub fn use_projection<T>(
+        self,
+        mut apply: impl FnMut(&mut T, &S::Patch) + 'static,
+    ) -> UiStateBinding<T>
+    where
+        T: Default + 'static,
+    {
+        let mut state = use_signal(T::default);
+        let error = self.use_patches(move |patch| {
+            state.with_mut(|state| apply(state, patch));
+        });
+        UiStateBinding { state, error }
     }
 }
 
@@ -214,7 +244,7 @@ where
     state
 }
 
-pub fn use_ui_state_root<T>() -> UiStateRoot<T>
+pub fn use_ui_state_binding<T>() -> UiStateBinding<T>
 where
     T: BatchedUiState + rkyv::Archive + Default + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
@@ -222,78 +252,10 @@ where
 {
     let mut state = use_signal(T::default);
     let listener = use_ui_state_listener::<T, _>(move |event| state.set(event));
-    use_context_provider(|| state);
-    UiStateRoot {
+    let binding = UiStateBinding {
         state,
         error: listener.error,
-    }
-}
-
-fn use_ui_state_batch<S>(mut callback: impl FnMut(&[S::Patch]) + 'static) -> Signal<Option<String>>
-where
-    S: BatchedUiState + rkyv::Archive + Default + 'static,
-    S::Archived: rkyv::Deserialize<S, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
-        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
-{
-    let root = use_ui_state_root::<S>();
-    let mut handled_sequence = use_signal(|| 0);
-    use_effect(move || {
-        let event = root.state.read();
-        let sequence = event.sequence();
-        if sequence == 0 || sequence == *handled_sequence.peek() {
-            return;
-        }
-        handled_sequence.set(sequence);
-        callback(event.patches());
-    });
-    root.error
-}
-
-pub fn use_ui_state_patches<S>(
-    mut callback: impl FnMut(&S::Patch) + 'static,
-) -> Signal<Option<String>>
-where
-    S: BatchedUiState + rkyv::Archive + Default + 'static,
-    S::Archived: rkyv::Deserialize<S, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
-        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
-{
-    use_ui_state_batch::<S>(move |patches| {
-        for patch in patches {
-            callback(patch);
-        }
-    })
-}
-
-pub fn use_ui_state_projection<S, T>(
-    mut apply: impl FnMut(&mut T, &S::Patch) + 'static,
-) -> UiStateRoot<T>
-where
-    S: BatchedUiState + rkyv::Archive + Default + 'static,
-    S::Archived: rkyv::Deserialize<S, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
-        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
-    T: Default + 'static,
-{
-    let mut state = use_signal(T::default);
-    let error = use_ui_state_batch::<S>(move |patches| {
-        state.with_mut(|state| {
-            for patch in patches {
-                apply(state, patch);
-            }
-        });
-    });
-    UiStateRoot { state, error }
-}
-
-pub fn use_ui_state_patch<S, T>() -> UiStatePatchBatch<S, T>
-where
-    S: BatchedUiState,
-    S::Patch: UiStatePatch<T>,
-    T: Clone + 'static,
-{
-    let state = use_context::<Signal<S>>();
-    UiStatePatchBatch {
-        state,
-        handled_sequence: use_signal(|| 0),
-        payload: PhantomData,
-    }
+    };
+    use_context_provider(|| binding);
+    binding
 }

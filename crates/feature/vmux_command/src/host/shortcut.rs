@@ -182,10 +182,13 @@ impl KeymapView<'_> {
                 Shortcut::Direct(combo) => combo,
                 Shortcut::Chord(prefix, _) => prefix,
             };
-            let Some(claimed) = combo.claimed() else {
+            let Some(claimed) = combo.claimed(&binding.command) else {
                 continue;
             };
-            if keys.contains(&claimed) {
+            if keys
+                .iter()
+                .any(|key| key.code == claimed.code && key.mods == claimed.mods)
+            {
                 continue;
             }
             keys.push(claimed);
@@ -353,13 +356,14 @@ impl KeyCombo {
                 && !self.modifiers.super_key)
     }
 
-    pub fn claimed(&self) -> Option<ClaimedKey> {
+    pub fn claimed(&self, command: &str) -> Option<ClaimedKey> {
         if self.is_text_input() {
             return None;
         }
         Some(ClaimedKey {
             code: self.web_code(),
             mods: KeyModifiers::from(self.modifiers),
+            command: command.to_string(),
         })
     }
 
@@ -896,16 +900,16 @@ mod tests {
 
     #[test]
     fn only_strokes_a_page_cannot_decide_for_itself_are_claimable() {
-        assert_eq!(combo(KeyCode::KeyX).claimed(), None);
-        assert_eq!(combo(KeyCode::Space).claimed(), None);
-        assert_eq!(combo(KeyCode::Digit5).claimed(), None);
-        assert_eq!(modified(KeyCode::KeyX, SHIFT).claimed(), None);
+        assert_eq!(combo(KeyCode::KeyX).claimed("test"), None);
+        assert_eq!(combo(KeyCode::Space).claimed("test"), None);
+        assert_eq!(combo(KeyCode::Digit5).claimed("test"), None);
+        assert_eq!(modified(KeyCode::KeyX, SHIFT).claimed("test"), None);
 
-        assert!(modified(KeyCode::KeyX, CTRL).claimed().is_some());
-        assert!(combo(KeyCode::Escape).claimed().is_some());
-        assert!(combo(KeyCode::Enter).claimed().is_some());
-        assert!(combo(KeyCode::ArrowUp).claimed().is_some());
-        assert!(combo(KeyCode::F5).claimed().is_some());
+        assert!(modified(KeyCode::KeyX, CTRL).claimed("test").is_some());
+        assert!(combo(KeyCode::Escape).claimed("test").is_some());
+        assert!(combo(KeyCode::Enter).claimed("test").is_some());
+        assert!(combo(KeyCode::ArrowUp).claimed("test").is_some());
+        assert!(combo(KeyCode::F5).claimed("test").is_some());
     }
 
     #[test]
@@ -970,7 +974,7 @@ mod tests {
     #[test]
     fn a_claim_matches_the_stroke_that_produced_it() {
         let claims = KeyClaims {
-            keys: vec![modified(KeyCode::KeyX, CTRL).claimed().unwrap()],
+            keys: vec![modified(KeyCode::KeyX, CTRL).claimed("test").unwrap()],
         };
         let stroke = |mods: KeyModifiers| vmux_core::input::KeyStroke {
             key: "x".to_string(),
@@ -1038,7 +1042,9 @@ mod tests {
                 Some(expected.to_string()),
                 "{pressed:?}"
             );
-            let claimed = pressed.claimed().expect("a bound chord is claimable");
+            let claimed = pressed
+                .claimed(expected)
+                .expect("a bound chord is claimable");
             assert!(
                 keymap
                     .in_context(&on_spaces)

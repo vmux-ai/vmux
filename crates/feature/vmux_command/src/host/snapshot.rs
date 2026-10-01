@@ -124,7 +124,7 @@ pub struct ClaimedUrls<'w, 's> {
 
 impl ClaimedUrls<'_, '_> {
     pub fn contains(&self, url: &str) -> bool {
-        self.urls.iter().any(|claimed| claimed.0 == url)
+        self.urls.iter().any(|claimed| claimed.matches(url))
     }
 }
 
@@ -144,6 +144,18 @@ pub struct ContributedCommand {
 
 #[derive(Component, Clone, Debug)]
 pub struct ClaimedUrl(pub String);
+
+impl ClaimedUrl {
+    fn matches(&self, url: &str) -> bool {
+        match (
+            vmux_api::VmuxRoute::canonical(&self.0),
+            vmux_api::VmuxRoute::canonical(url),
+        ) {
+            (Some(claimed), Some(candidate)) => claimed == candidate,
+            _ => self.0 == url,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct AgentPromptTarget {
@@ -233,6 +245,7 @@ fn update_pages(manifests: Query<&PageManifest>, mut state: Single<&mut CommandB
                     .unwrap_or_default(),
                 shortcut: String::new(),
                 prompt_target: false,
+                startup: manifest.startup,
             },
             title_message_id: manifest.title_message_id.map(str::to_string),
             replaces_command: manifest.replaces_command.map(str::to_string),
@@ -394,6 +407,7 @@ mod tests {
             keywords: &["daemon"],
             icon: Some(vmux_core::BuiltinIcon::Settings),
             command_bar: true,
+            startup: false,
         });
         app.world_mut().spawn(PageManifest {
             url: "vmux://layout/",
@@ -405,6 +419,7 @@ mod tests {
             keywords: &[],
             icon: None,
             command_bar: false,
+            startup: false,
         });
 
         app.update();

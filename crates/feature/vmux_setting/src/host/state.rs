@@ -64,7 +64,6 @@ type SettingsUiStateUpdates = UiState<SettingsUiState>;
 struct OpenSettingsRequest;
 
 #[vmux_command::command(id = "open_settings")]
-#[derive(Component)]
 struct OpenSettingsBinding;
 
 fn bind_command(registry: CommandRegistry, mut commands: Commands) {

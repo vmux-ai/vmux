@@ -1102,7 +1102,7 @@ mod tests {
         let [request] = opened.as_slice() else {
             panic!("the replacement tab opens exactly one page");
         };
-        assert_eq!(request.url, vmux_core::EffectiveStartupUrl::START_PAGE);
+        assert_eq!(request.url, "vmux://start/");
         let PageOpenTarget::Stack(new_stack) = request.target else {
             panic!("the page is opened into a stack");
         };
@@ -1406,7 +1406,7 @@ mod tests {
         let [request] = opened.as_slice() else {
             panic!("an empty active pane opens exactly one page");
         };
-        assert_eq!(request.url, vmux_core::EffectiveStartupUrl::START_PAGE);
+        assert_eq!(request.url, "vmux://start/");
         let PageOpenTarget::Stack(new_stack) = request.target else {
             panic!("the page is opened into a stack");
         };
@@ -1623,7 +1623,7 @@ mod tests {
         let [request] = opened.as_slice() else {
             panic!("a new stack opens exactly one page");
         };
-        assert_eq!(request.url, vmux_core::EffectiveStartupUrl::START_PAGE);
+        assert_eq!(request.url, "vmux://start/");
         let PageOpenTarget::Stack(opened_stack) = request.target else {
             panic!("a new stack is opened by entity");
         };

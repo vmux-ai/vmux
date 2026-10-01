@@ -33,6 +33,8 @@ struct PageManifestFile {
     #[serde(default)]
     command_bar: bool,
     #[serde(default)]
+    startup: bool,
+    #[serde(default)]
     manifest: bool,
     #[serde(default)]
     permissions: Vec<String>,
@@ -169,6 +171,7 @@ impl PageManifestFile {
             None => quote! { ::core::option::Option::None },
         };
         let command_bar = self.command_bar;
+        let startup = self.startup;
         Ok(quote! {
             ::vmux_core::page::PageManifest {
                 url: #url,
@@ -180,6 +183,7 @@ impl PageManifestFile {
                 keywords: &[#(#keywords),*],
                 icon: #icon,
                 command_bar: #command_bar,
+                startup: #startup,
             }
         })
     }
@@ -627,9 +631,10 @@ fn expand_native(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStre
                     title_message_id: #title_message_id,
                     replaces_command: #replaces_command,
                     keywords: #keywords,
-                    icon: #icon,
-                    command_bar: #command_bar,
-                };
+                icon: #icon,
+                command_bar: #command_bar,
+                startup: false,
+            };
         }
     });
 

@@ -164,6 +164,7 @@ mod tests {
                 keywords: &[],
                 icon: Some(BuiltinIcon::Smartphone),
                 command_bar: true,
+                startup: false,
             },
         ));
         let stack = app.world_mut().spawn_empty().id();

@@ -6,7 +6,15 @@ use vmux_macro::app_plugin;
 pub enum VmuxPlugin {
     #[plugin(feature = "core", desktop)]
     Core(VmuxCorePlugin),
-    #[plugin(feature = "layout", desktop, requires(core))]
+    #[plugin(feature = "command", desktop, requires(core))]
+    Command(vmux_command::CommandPlugin),
+    #[plugin(feature = "setting", desktop, requires(core))]
+    Setting(vmux_setting::SettingsPlugin),
+    #[plugin(feature = "session", desktop)]
+    Session(vmux_session::SessionPlugin),
+    #[plugin(feature = "chat", desktop, mobile)]
+    Chat(vmux_chat::ChatPlugin),
+    #[plugin(feature = "layout", desktop, requires(command, setting))]
     Layout(vmux_layout::LayoutPlugin),
     #[plugin(feature = "bookmark", desktop, requires(layout))]
     Bookmark(vmux_bookmark::BookmarkPlugin),
@@ -27,7 +35,9 @@ pub enum VmuxPlugin {
     #[plugin(
         feature = "agent",
         desktop,
-        requires(editor, history, knowledge, service, space, terminal)
+        requires(
+            chat, command, editor, history, knowledge, service, session, space, terminal
+        )
     )]
     Agent(vmux_agent::AgentPlugin),
     #[plugin(feature = "knowledge", desktop, requires(core))]
@@ -66,8 +76,6 @@ impl Plugin for VmuxCorePlugin {
             vmux_flex::FlexPlugin,
             vmux_core::CorePlugin,
             vmux_core::page::PagePlugin,
-            vmux_command::CommandPlugin,
-            vmux_setting::SettingsPlugin,
         ));
     }
 }
@@ -100,12 +108,15 @@ mod tests {
         let options = VmuxPluginOptions::none().agent(true);
 
         assert!(options.agent);
+        assert!(options.chat);
+        assert!(options.command);
         assert!(options.core);
         assert!(options.layout);
         assert!(options.editor);
         assert!(options.history);
         assert!(options.knowledge);
         assert!(options.service);
+        assert!(options.session);
         assert!(options.space);
         assert!(options.terminal);
     }

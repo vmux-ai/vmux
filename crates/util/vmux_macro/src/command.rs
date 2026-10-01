@@ -4,7 +4,7 @@ use quote::quote;
 use serde::Deserialize;
 use std::path::PathBuf;
 use syn::parse::{Parse, ParseStream};
-use syn::{Data, DeriveInput, Fields, Ident, LitStr, Token};
+use syn::{Data, DeriveInput, Fields, Ident, LitStr, Token, parse_quote};
 
 #[derive(Deserialize)]
 struct FeatureManifest {
@@ -45,7 +45,7 @@ impl Parse for Args {
     }
 }
 
-pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStream> {
+pub(crate) fn expand(args: TokenStream, mut input: DeriveInput) -> syn::Result<TokenStream> {
     let args = syn::parse2::<Args>(args)?;
     let ident = &input.ident;
     if !matches!(&input.data, Data::Struct(data) if matches!(data.fields, Fields::Unit)) {
@@ -102,6 +102,9 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
         ));
     }
     let file = args.file;
+    input
+        .attrs
+        .push(parse_quote!(#[derive(::bevy::prelude::Component)]));
     let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
     Ok(quote! {
         const _: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/", #file));

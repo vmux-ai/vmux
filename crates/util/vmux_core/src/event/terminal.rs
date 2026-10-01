@@ -2,8 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use super::{AnsiPalette, CursorStyle, RgbColor, TermCursor, TermLine, TermSelectionRange};
 
-pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
-
 #[vmux_api::contract]
 pub struct ServiceUnavailableEvent {
     pub message: String,

@@ -177,7 +177,7 @@ fn respond_process_stack_spawn(
             .unwrap_or(&request.command)
             .to_string();
         commands.entity(stack).insert(PageMetadata {
-            url: crate::event::TERMINAL_PAGE_URL.to_string(),
+            url: crate::TerminalPlugin::URL.to_string(),
             title,
             bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
             ..default()

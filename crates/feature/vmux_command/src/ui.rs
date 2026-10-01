@@ -3,18 +3,16 @@ use crate::ui::composer::{CommandComposerMenus, ComposerChips, ComposerMenuView}
 use crate::ui::input::{
     COMMAND_BAR_INPUT_ID, CommandBarField, Readline, TypedDigit, use_palette_input,
 };
-use crate::ui::media::PromptMedia;
 use dioxus::prelude::*;
 use vmux_api::command_bar::CommandBarPicker;
 use vmux_api::command_bar::{
-    CommandBarFocusEffect, CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch,
-    CommandPaletteActivateRequest, CommandPaletteDraftRequest, CommandPaletteHighlightRequest,
-    CommandPaletteHistoryMoveRequest, CommandPaletteMediaActivateRequest,
-    CommandPaletteMediaDismissRequest, CommandPaletteMediaHighlightRequest,
-    CommandPaletteMediaMoveRequest, CommandPaletteMenuActivateRequest,
-    CommandPaletteMenuDismissRequest, CommandPaletteMenuMoveRequest,
-    CommandPaletteRemoveAttachmentRequest, CommandPaletteState, CommandPaletteSubmitRequest,
-    PaletteGlyph, PaletteMode,
+    CommandBarFocusEffect, CommandBarOpenEvent, CommandBarUiState, CommandPaletteActivateRequest,
+    CommandPaletteDraftRequest, CommandPaletteHighlightRequest, CommandPaletteHistoryMoveRequest,
+    CommandPaletteMediaActivateRequest, CommandPaletteMediaDismissRequest,
+    CommandPaletteMediaHighlightRequest, CommandPaletteMediaMoveRequest,
+    CommandPaletteMenuActivateRequest, CommandPaletteMenuDismissRequest,
+    CommandPaletteMenuMoveRequest, CommandPaletteRemoveAttachmentRequest, CommandPaletteState,
+    CommandPaletteSubmitRequest, PaletteGlyph, PaletteMode,
 };
 use vmux_core::input::{UiKeyContext, Unclaimed};
 use vmux_ui::agent_accent::agent_accent;
@@ -25,7 +23,7 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::components::mcp_menu::{McpMenu, use_mcp_connections};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
-use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_ui_state, use_ui_state_patches};
+use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_ui_state, use_ui_state_binding};
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::prompt_recall::{PromptHistoryDirection, prompt_history_direction};
@@ -33,7 +31,6 @@ use vmux_ui::scroll::ScrollIntoView;
 
 mod composer;
 mod input;
-mod media;
 mod panel;
 mod readline;
 mod row;
@@ -54,20 +51,10 @@ impl PaletteSurface {
 }
 
 pub fn use_command_bar_ui() -> Signal<CommandBarOpenEvent> {
-    let mut state = use_signal(CommandBarOpenEvent::default);
+    let ui = use_ui_state_binding::<CommandBarUiState>();
+    let state = ui.use_value::<CommandBarOpenEvent>().value;
     let mut handled_focus_revision = use_signal(|| 0);
-    let _error = use_ui_state_patches::<CommandBarUiState>(move |patch| {
-        if let Some(snapshot) =
-            <CommandBarUiStatePatch as vmux_api::UiStatePatch<CommandBarOpenEvent>>::payload(patch)
-        {
-            state.set(snapshot.clone());
-            return;
-        }
-        let Some(effect) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<
-            CommandBarFocusEffect,
-        >>::payload(patch) else {
-            return;
-        };
+    ui.use_updates::<CommandBarFocusEffect>(move |effect| {
         if effect.revision <= *handled_focus_revision.peek() {
             return;
         }
@@ -179,7 +166,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let keys = use_key_claim(Unclaimed::Types, move || {
         let mut context = vec!["command-bar".to_string()];
         let snapshot = host_state.read();
-        if snapshot.open_id == state().open_id && snapshot.projection.menu.is_some() {
+        if snapshot.open_id == state().open_id && snapshot.projection.menus.is_open() {
             context.push("command-bar.menu".to_string());
         } else {
             if is_start && snapshot.open_id == state().open_id && snapshot.media_query.is_some() {
@@ -204,11 +191,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mcp_entries = std::rc::Rc::new(projection.mcp_entries.clone());
     let mcp_selected = (projection.selected as usize).min(mcp_entries.len().saturating_sub(1));
     let media_menu_open = is_start && palette_data.media_query.is_some();
-    let media_entries = palette_data.media_entries.clone();
-    let media_sel =
-        (palette_data.media_selected as usize).min(media_entries.len().saturating_sub(1));
+    let media_sel = (palette_data.media_selected as usize)
+        .min(palette_data.media_options.len().saturating_sub(1));
     let media_loading = palette_data.media_loading;
-    let media_options = PromptMedia::options(&media_entries);
+    let media_options = palette_data.media_options.clone();
 
     use_effect(move || {
         let snapshot = host_state.read();
@@ -232,10 +218,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let composer = projection.composer.clone();
     let accent = projection.accent_agent.as_deref().map(agent_accent);
     let start_accent = accent.unwrap_or_else(|| agent_accent("vibe"));
-    let start_prompt_attachments = PromptMedia::composer_attachments(attachments.as_ref());
+    let start_prompt_attachments = palette_data.composer_attachments.clone();
     let start_submission_enabled = !q.trim().is_empty() || !attachments.is_empty();
     let chips = ComposerChips::build(&composer, state_val.open_id);
-    let opened_menu = ComposerMenuView::kind(projection.menu);
+    let opened_menu = ComposerMenuView::kind(projection.menus);
 
     let start_composer_footer = rsx! {
         ComposerBar {
@@ -256,7 +242,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             composer: composer.clone(),
             palette: palette_data.clone(),
             open_id: state_val.open_id,
-            opened: projection.menu,
+            menus: projection.menus,
             cursor: projection.menu_cursor as usize,
         }
     };
@@ -265,7 +251,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         let projection = projection.clone();
         let query = q.clone();
         move |e: KeyboardEvent| {
-            if Readline::chord(&e, input.query, &projection.ghost, PROMPT_INPUT_ID) {
+            if Readline::chord(&e, keys, input.query, &projection.ghost, PROMPT_INPUT_ID) {
                 return;
             }
             if e.key() == Key::Tab {
@@ -309,7 +295,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             }
 
-            if projection.menu.is_some() {
+            if projection.menus.is_open() {
                 let handled = direction.is_some()
                     || e.key() == Key::Enter && !e.modifiers().shift()
                     || e.key() == Key::Escape
@@ -431,7 +417,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if ime.swallows(&e) {
                 return;
             }
-            if Readline::chord(&e, input.query, &projection.ghost, COMMAND_BAR_INPUT_ID) {
+            if Readline::chord(
+                &e,
+                keys,
+                input.query,
+                &projection.ghost,
+                COMMAND_BAR_INPUT_ID,
+            ) {
                 return;
             }
             let ctrl = e.modifiers().contains(Modifiers::CONTROL);
@@ -559,7 +551,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
             }
-            if projection.menu.is_none() && mcp_open {
+            if !projection.menus.is_open() && mcp_open {
                 McpMenu {
                     connections: mcp,
                     entries: mcp_entries.as_ref().clone(),
@@ -580,7 +572,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     on_dismiss: move |()| input.retype(String::new()),
                 }
             }
-            if projection.menu.is_none() && !mcp_open && media_menu_open {
+            if !projection.menus.is_open() && !mcp_open && media_menu_open {
                 PromptPopup {
                     placement: PromptPopupPlacement::Downward,
                     id: "command-bar-results",
@@ -605,7 +597,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
             }
-            if projection.menu.is_none() && !mcp_open && !media_menu_open && !projection.rows.is_empty() {
+            if !projection.menus.is_open() && !mcp_open && !media_menu_open && !projection.rows.is_empty() {
                 PromptPopup {
                     placement: if is_start { PromptPopupPlacement::Downward } else { PromptPopupPlacement::Inline },
                     id: "command-bar-results",

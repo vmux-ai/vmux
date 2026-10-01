@@ -127,6 +127,8 @@ pub struct Page {
     #[serde(default)]
     pub command_bar: bool,
     #[serde(default)]
+    pub startup: bool,
+    #[serde(default)]
     pub manifest: bool,
     #[serde(default)]
     pub permissions: Vec<String>,

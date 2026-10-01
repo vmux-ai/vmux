@@ -66,7 +66,6 @@ impl Plugin for NavigationPlugin {
 pub struct OpenHistoryRequest;
 
 #[vmux_command::command(id = "browser_open_history")]
-#[derive(Component)]
 struct OpenHistoryBinding;
 
 fn bind_command(registry: CommandRegistry, mut commands: Commands) {

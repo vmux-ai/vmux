@@ -20,7 +20,7 @@ use super::composer::{ComposerChanged, ComposerState};
 use super::room::Submitted;
 #[cfg(host)]
 use super::session::{ChatAttachmentProjection, ChatView};
-use super::state::{ChatRuntime, ChatUiStatePlugin, ChatUiStateProjection, RepublishChatUiState};
+use super::state::{ChatRuntime, ChatUiStateProjection, RepublishChatUiState};
 #[cfg(host)]
 use crate::event::{
     ChatApproval, ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue,
@@ -32,9 +32,6 @@ pub struct ChatPromptPlugin;
 
 impl Plugin for ChatPromptPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<ChatUiStatePlugin>() {
-            app.add_plugins(ChatUiStatePlugin);
-        }
         app.add_message::<Attach>()
             .add_message::<RemoveAttachment>()
             .add_message::<Submitted>()
@@ -506,7 +503,7 @@ mod tests {
     impl Started {
         fn empty() -> Self {
             let mut app = App::new();
-            app.add_plugins(ChatPromptPlugin);
+            app.add_plugins((crate::host::state::ChatUiStatePlugin, ChatPromptPlugin));
             app.update();
             Self(app)
         }

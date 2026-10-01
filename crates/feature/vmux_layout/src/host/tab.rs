@@ -1048,7 +1048,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             opened.iter().map(|r| r.url.as_str()).collect::<Vec<_>>(),
-            [vmux_core::EffectiveStartupUrl::START_PAGE]
+            ["vmux://start/"]
         );
     }
 

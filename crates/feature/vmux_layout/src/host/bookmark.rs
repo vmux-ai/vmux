@@ -1590,6 +1590,7 @@ mod tests {
             keywords: &[],
             icon: Some(vmux_core::BuiltinIcon::Smartphone),
             command_bar: true,
+            startup: false,
         });
 
         app.update();

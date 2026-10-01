@@ -2,15 +2,28 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::Path;
 
+use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 use serde_json::Value;
+use vmux_core::event::{LspCatalog, LspCatalogRequest, LspPackage, LspPkgStatus};
 
 use crate::lsp::archive::ArchiveKind;
 use crate::lsp::download::{self, RemoteArtifact};
 use crate::lsp::package_path::{PackageName, PackagePath, Sha256Digest};
+use crate::lsp::purl::Purl;
 use crate::lsp::store;
 use crate::lsp::target::Asset;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CatalogPlugin;
+
+impl Plugin for CatalogPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, spawn)
+            .add_systems(Update, (refresh, poll, search).chain());
+    }
+}
+
+#[derive(Debug, Clone, Component, PartialEq, Eq)]
 pub struct Package {
     pub name: PackageName,
     pub description: String,
@@ -21,9 +34,41 @@ pub struct Package {
     pub bin: BTreeMap<PackageName, String>,
 }
 
-#[derive(Default)]
-pub struct Catalog {
-    packages: Vec<Package>,
+#[derive(Component)]
+pub(crate) struct CatalogSearch {
+    pub target: Entity,
+    pub request: LspCatalogRequest,
+}
+
+#[derive(Component)]
+pub(crate) struct CatalogOutput {
+    pub target: Entity,
+    pub catalog: LspCatalog,
+}
+
+#[derive(Component)]
+pub(crate) struct CatalogReady;
+
+#[derive(Component)]
+struct CatalogRoot;
+
+#[derive(Component)]
+struct CatalogRefreshQueued;
+
+#[derive(Component)]
+struct CatalogTask {
+    refresh: bool,
+    task: Task<Result<Vec<Package>, String>>,
+}
+
+impl CatalogTask {
+    fn new(refresh: bool) -> Self {
+        Self {
+            refresh,
+            task: IoTaskPool::get()
+                .spawn(async move { CatalogSource::load(&store::PackageStore::lsp(), refresh) }),
+        }
+    }
 }
 
 impl Package {
@@ -140,9 +185,92 @@ impl Package {
         }
         Ok(bin)
     }
+
+    fn matches(&self, request: &LspCatalogRequest) -> bool {
+        let query = request.query.to_ascii_lowercase();
+        if !query.is_empty()
+            && !self.name.as_str().to_ascii_lowercase().contains(&query)
+            && !self.description.to_ascii_lowercase().contains(&query)
+        {
+            return false;
+        }
+        let language = request.language.to_ascii_lowercase();
+        if !language.is_empty()
+            && !self
+                .languages
+                .iter()
+                .any(|item| item.to_ascii_lowercase() == language)
+        {
+            return false;
+        }
+        let category = request.category.to_ascii_lowercase();
+        category.is_empty()
+            || self
+                .categories
+                .iter()
+                .any(|item| item.to_ascii_lowercase() == category)
+    }
+
+    pub(crate) fn snapshot(&self, store: &store::PackageStore) -> LspPackage {
+        let source = Purl::parse(&self.source_id);
+        let kind = source
+            .as_ref()
+            .map(|source| source.kind.as_str())
+            .unwrap_or_default();
+        let installed = store.is_installed(&self.name);
+        let on_path = !installed
+            && matches!(
+                store.resolve_command(self.name.as_str()),
+                store::Resolution::OnPath
+            );
+        let catalog_version = source.as_ref().and_then(|source| source.version.clone());
+        let installed_version = if installed {
+            store
+                .read_receipt(&self.name)
+                .and_then(|receipt| receipt.version)
+        } else {
+            None
+        };
+        let outdated = installed
+            && installed_version.is_some()
+            && catalog_version.is_some()
+            && installed_version != catalog_version;
+        let status = if outdated {
+            LspPkgStatus::Outdated
+        } else if installed {
+            LspPkgStatus::Installed
+        } else if on_path {
+            LspPkgStatus::OnPath
+        } else {
+            LspPkgStatus::Available
+        };
+        let toolchain = source.as_ref().and_then(Purl::toolchain);
+        let installable =
+            kind == "github" || toolchain.is_some_and(crate::lsp::registry::executable_on_path);
+        let requires = if installable {
+            None
+        } else {
+            toolchain.map(String::from)
+        };
+        let version = if installed {
+            installed_version
+        } else {
+            catalog_version
+        };
+        LspPackage {
+            name: self.name.as_str().to_string(),
+            description: self.description.clone(),
+            languages: self.languages.clone(),
+            categories: self.categories.clone(),
+            status,
+            version,
+            installable,
+            requires,
+        }
+    }
 }
 
-struct CatalogSource(Vec<u8>);
+pub(crate) struct CatalogSource(Vec<u8>);
 
 impl CatalogSource {
     fn read(path: &Path) -> Result<Self, String> {
@@ -164,30 +292,28 @@ impl CatalogSource {
         Ok(Self(bytes))
     }
 
-    fn catalog(&self) -> Result<Catalog, String> {
+    fn packages(&self) -> Result<Vec<Package>, String> {
         let source = std::str::from_utf8(&self.0).map_err(|error| error.to_string())?;
-        Catalog::parse(source)
+        Self::parse(source)
     }
 
     fn bytes(&self) -> &[u8] {
         &self.0
     }
-}
 
-impl Catalog {
-    pub fn parse(source: &str) -> Result<Self, String> {
+    pub(crate) fn parse(source: &str) -> Result<Vec<Package>, String> {
         let entries: Vec<Value> =
             serde_json::from_str(source).map_err(|error| error.to_string())?;
         let mut packages = Vec::with_capacity(entries.len());
         for entry in &entries {
             packages.push(Package::parse(entry)?);
         }
-        Ok(Self { packages })
+        Ok(packages)
     }
 
-    pub fn load(store: &store::PackageStore, refresh: bool) -> Result<Self, String> {
+    pub(crate) fn load(store: &store::PackageStore, refresh: bool) -> Result<Vec<Package>, String> {
         if !refresh && store.catalog_path().is_file() {
-            return CatalogSource::read(&store.catalog_path())?.catalog();
+            return Self::read(&store.catalog_path())?.packages();
         }
         let artifact = RemoteArtifact::github_release(
             "mason-org",
@@ -199,52 +325,133 @@ impl Catalog {
         Self::fetch(&artifact, store)
     }
 
-    fn fetch(artifact: &RemoteArtifact, store: &store::PackageStore) -> Result<Self, String> {
+    fn fetch(
+        artifact: &RemoteArtifact,
+        store: &store::PackageStore,
+    ) -> Result<Vec<Package>, String> {
         let registry_dir = store.registries_dir();
         std::fs::create_dir_all(&registry_dir).map_err(|error| error.to_string())?;
         let staging = tempfile::tempdir_in(&registry_dir).map_err(|error| error.to_string())?;
         let archive_path = staging.path().join("registry.json.zip");
         artifact.download_to(&archive_path, download::CATALOG_MAX_BYTES, |_, _| {})?;
         ArchiveKind::Zip.extract(&archive_path, staging.path(), "registry.json")?;
-        let source = CatalogSource::read(&staging.path().join("registry.json"))?;
-        let catalog = source.catalog()?;
+        let source = Self::read(&staging.path().join("registry.json"))?;
+        let packages = source.packages()?;
         vmux_path::AtomicFile::write(store.catalog_path(), source.bytes())
             .map_err(|error| error.to_string())?;
-        Ok(catalog)
+        Ok(packages)
     }
+}
 
-    pub fn packages(&self) -> &[Package] {
-        &self.packages
+fn spawn(mut commands: Commands) {
+    commands.spawn((
+        Name::new("LSP catalog"),
+        CatalogRoot,
+        CatalogTask::new(false),
+    ));
+}
+
+fn refresh(
+    requests: Query<&CatalogSearch, Added<CatalogSearch>>,
+    catalogs: Query<(Entity, Option<&CatalogTask>), With<CatalogRoot>>,
+    mut commands: Commands,
+) {
+    if !requests.iter().any(|search| search.request.refresh) {
+        return;
     }
-
-    pub fn find(&self, name: &str) -> Option<&Package> {
-        self.packages
-            .iter()
-            .find(|package| package.name.as_str() == name)
+    let Ok((entity, task)) = catalogs.single() else {
+        return;
+    };
+    commands.entity(entity).remove::<CatalogReady>();
+    match task {
+        Some(task) if !task.refresh => {
+            commands.entity(entity).insert(CatalogRefreshQueued);
+        }
+        Some(_) => {}
+        None => {
+            commands.entity(entity).insert(CatalogTask::new(true));
+        }
     }
+}
 
-    pub fn search(&self, query: &str, language: &str, category: &str) -> Vec<&Package> {
-        let query = query.to_ascii_lowercase();
-        let language = language.to_ascii_lowercase();
-        let category = category.to_ascii_lowercase();
-        self.packages
-            .iter()
-            .filter(|package| {
-                (query.is_empty()
-                    || package.name.as_str().to_ascii_lowercase().contains(&query)
-                    || package.description.to_ascii_lowercase().contains(&query))
-                    && (language.is_empty()
-                        || package
-                            .languages
-                            .iter()
-                            .any(|item| item.to_ascii_lowercase() == language))
-                    && (category.is_empty()
-                        || package
-                            .categories
-                            .iter()
-                            .any(|item| item.to_ascii_lowercase() == category))
-            })
-            .collect()
+fn poll(
+    mut catalogs: Query<(Entity, &mut CatalogTask, Has<CatalogRefreshQueued>), With<CatalogRoot>>,
+    packages: Query<(Entity, &ChildOf), With<Package>>,
+    mut commands: Commands,
+) {
+    let Ok((entity, mut task, refresh_queued)) = catalogs.single_mut() else {
+        return;
+    };
+    let Some(result) = block_on(future::poll_once(&mut task.task)) else {
+        return;
+    };
+    let refreshed = task.refresh;
+    match result {
+        Ok(loaded) => {
+            for (package, parent) in &packages {
+                if parent.parent() == entity {
+                    commands.entity(package).despawn();
+                }
+            }
+            for package in loaded {
+                commands.spawn((
+                    Name::new(package.name.as_str().to_string()),
+                    package,
+                    ChildOf(entity),
+                ));
+            }
+        }
+        Err(error) => {
+            bevy::log::warn!("LSP catalog load failed: {error}");
+        }
+    }
+    let mut catalog = commands.entity(entity);
+    catalog.remove::<CatalogTask>();
+    if refresh_queued && !refreshed {
+        catalog
+            .remove::<CatalogRefreshQueued>()
+            .insert(CatalogTask::new(true));
+    } else {
+        catalog
+            .remove::<CatalogRefreshQueued>()
+            .insert(CatalogReady);
+    }
+}
+
+fn search(
+    catalogs: Query<Entity, With<CatalogReady>>,
+    packages: Query<(&Package, &ChildOf)>,
+    requests: Query<(Entity, &CatalogSearch)>,
+    mut commands: Commands,
+) {
+    let Ok(catalog) = catalogs.single() else {
+        return;
+    };
+    let store = store::PackageStore::lsp();
+    for (entity, search) in &requests {
+        let mut snapshots = Vec::new();
+        for (package, parent) in &packages {
+            if parent.parent() != catalog || !package.matches(&search.request) {
+                continue;
+            }
+            let snapshot = package.snapshot(&store);
+            if search.request.installed_only
+                && !matches!(
+                    snapshot.status,
+                    LspPkgStatus::Installed | LspPkgStatus::Outdated
+                )
+            {
+                continue;
+            }
+            snapshots.push(snapshot);
+        }
+        commands.spawn(CatalogOutput {
+            target: search.target,
+            catalog: LspCatalog {
+                packages: snapshots,
+            },
+        });
+        commands.entity(entity).despawn();
     }
 }
 
@@ -286,9 +493,12 @@ mod tests {
 
     #[test]
     fn parses_three_packages() {
-        let catalog = Catalog::parse(SAMPLE).unwrap();
-        assert_eq!(catalog.packages().len(), 3);
-        let ra = catalog.find("rust-analyzer").unwrap();
+        let packages = CatalogSource::parse(SAMPLE).unwrap();
+        assert_eq!(packages.len(), 3);
+        let ra = packages
+            .iter()
+            .find(|package| package.name.as_str() == "rust-analyzer")
+            .unwrap();
         assert_eq!(ra.description, "Rust LSP");
         assert!(ra.categories.contains(&"LSP".to_string()));
         assert_eq!(ra.assets.len(), 3);
@@ -306,22 +516,38 @@ mod tests {
 
     #[test]
     fn npm_and_pypi_have_no_github_assets() {
-        let catalog = Catalog::parse(SAMPLE).unwrap();
-        let ts = catalog.find("typescript-language-server").unwrap();
+        let packages = CatalogSource::parse(SAMPLE).unwrap();
+        let ts = packages
+            .iter()
+            .find(|package| package.name.as_str() == "typescript-language-server")
+            .unwrap();
         assert!(ts.assets.is_empty());
         assert!(ts.source_id.starts_with("pkg:npm/"));
     }
 
     #[test]
     fn search_filters() {
-        let catalog = Catalog::parse(SAMPLE).unwrap();
-        assert_eq!(catalog.search("rust", "", "").len(), 1);
-        assert_eq!(catalog.search("", "python", "").len(), 1);
-        assert_eq!(catalog.search("", "", "lsp").len(), 2);
-        assert_eq!(catalog.search("", "", "formatter").len(), 1);
-        assert_eq!(catalog.search("lsp", "", "").len(), 2);
-        assert_eq!(catalog.search("linter", "", "").len(), 1);
-        assert_eq!(catalog.search("zzz", "", "").len(), 0);
+        let packages = CatalogSource::parse(SAMPLE).unwrap();
+        let count = |query: &str, language: &str, category: &str| {
+            let request = LspCatalogRequest {
+                query: query.to_string(),
+                language: language.to_string(),
+                category: category.to_string(),
+                installed_only: false,
+                refresh: false,
+            };
+            packages
+                .iter()
+                .filter(|package| package.matches(&request))
+                .count()
+        };
+        assert_eq!(count("rust", "", ""), 1);
+        assert_eq!(count("", "python", ""), 1);
+        assert_eq!(count("", "", "lsp"), 2);
+        assert_eq!(count("", "", "formatter"), 1);
+        assert_eq!(count("lsp", "", ""), 2);
+        assert_eq!(count("linter", "", ""), 1);
+        assert_eq!(count("zzz", "", ""), 0);
     }
 
     #[test]
@@ -330,8 +556,8 @@ mod tests {
         let store = store::PackageStore::at(tmp.path());
         std::fs::create_dir_all(store.registries_dir()).unwrap();
         std::fs::write(store.catalog_path(), SAMPLE).unwrap();
-        let catalog = Catalog::load(&store, false).unwrap();
-        assert_eq!(catalog.packages().len(), 3);
+        let packages = CatalogSource::load(&store, false).unwrap();
+        assert_eq!(packages.len(), 3);
     }
 
     #[test]
@@ -377,8 +603,8 @@ mod tests {
             sha256: digest,
         };
         let store = store::PackageStore::at(tmp.path());
-        let catalog = Catalog::fetch(&artifact, &store).unwrap();
-        assert_eq!(catalog.packages().len(), 3);
+        let packages = CatalogSource::fetch(&artifact, &store).unwrap();
+        assert_eq!(packages.len(), 3);
         assert!(store.catalog_path().is_file());
     }
 }

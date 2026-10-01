@@ -8,7 +8,6 @@ use vmux_core::service::{ServiceMessageSet, ServiceRequest};
 use vmux_core::team::Profile;
 use vmux_core::{LastActivatedAt, PageMetadata};
 use vmux_git::worktree::ValidatedLinkedWorkspace;
-use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::pane::PanePlacement;
 use vmux_layout::stack::stack_bundle;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
@@ -495,7 +494,7 @@ fn apply_terminal(
         let target_pane = ctx.resolve_spiral(
             &mut commands,
             agent_pane,
-            TERMINAL_PAGE_URL,
+            vmux_terminal::TerminalPlugin::URL,
             false,
             &mut split_batch,
         );

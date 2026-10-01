@@ -3,6 +3,7 @@ use dioxus::prelude::*;
 use vmux_api::command_bar::{CommandBarOpenEvent, OpenId};
 use vmux_ui::caret::{EventSelection, TextCaret};
 use vmux_ui::focus::FocusClaim;
+use vmux_ui::hooks::KeyClaim;
 
 pub const COMMAND_BAR_INPUT_ID: &str = "command-bar-input";
 
@@ -94,6 +95,7 @@ pub struct Readline;
 impl Readline {
     pub fn chord(
         event: &KeyboardEvent,
+        keys: KeyClaim,
         mut query: Signal<String>,
         ghost: &str,
         input_id: &'static str,
@@ -101,11 +103,10 @@ impl Readline {
         if Self::select_all(event, input_id) {
             return true;
         }
-        if !event.modifiers().contains(Modifiers::CONTROL) {
+        let Some(command) = keys.command(event) else {
             return false;
-        }
-
-        let Some(edit) = TextEditCommand::from_code(&event.code().to_string()) else {
+        };
+        let Some(edit) = TextEditCommand::from_command(&command) else {
             return false;
         };
 

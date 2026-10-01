@@ -12,19 +12,20 @@ use crate::event::{
 use crate::state::ChatUiState;
 use crate::tab::Accent;
 use dioxus::prelude::*;
-use vmux_api::prompt_media::{inline_media_query, replace_inline_media_query};
+use vmux_api::prompt_media::{
+    PromptComposerAttachment, PromptMediaOption, inline_media_query, replace_inline_media_query,
+};
 use vmux_core::prompt_media::MediaPath;
 use vmux_ui::agent_accent::agent_accent;
-use vmux_ui::components::composer::{
-    PROMPT_INPUT_ID, PromptComposerAttachment, PromptComposerMode, focus_prompt_end,
-};
+use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, focus_prompt_end};
 use vmux_ui::components::composer_bar::{
     ComposerChip, ComposerMenu, ComposerMenuKind, use_composer_menu,
 };
 use vmux_ui::components::mcp_menu::{McpConnections, use_mcp_connections};
-use vmux_ui::components::prompt_media_options::PromptMediaOption;
 use vmux_ui::file_icon::FilePath;
-use vmux_ui::hooks::{UiStateRoot, UiStateValue, send, use_selector, use_theme, use_ui_state_root};
+use vmux_ui::hooks::{
+    UiStateBinding, UiStateValue, send, use_selector, use_theme, use_ui_state_binding,
+};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -51,7 +52,7 @@ pub struct Chat {
 
 pub fn use_chat() -> Chat {
     use_theme();
-    let ui = use_ui_state_root::<ChatUiState>();
+    let ui = use_ui_state_binding::<ChatUiState>();
     let snapshot = ui.use_value::<ChatSnapshot>();
     let composer_context = ui.use_value::<ComposerContext>();
     let mode = ui.use_value::<crate::event::ModeState>();
@@ -90,7 +91,7 @@ pub fn use_chat() -> Chat {
 }
 
 impl Chat {
-    fn listen(&self, ui: UiStateRoot<ChatUiState>) {
+    fn listen(&self, ui: UiStateBinding<ChatUiState>) {
         let chat = *self;
         let mut previous_snapshot = use_signal(ChatSnapshot::default);
         ui.use_updates::<ChatSnapshot>(move |snapshot| {
@@ -357,7 +358,18 @@ impl Chat {
     }
 
     pub fn composer_attachments(&self) -> Vec<PromptComposerAttachment> {
-        PromptComposerAttachment::removable(&self.composer.attachments.value.read().attachments)
+        let attachments = self.composer.attachments.value.read();
+        let mut rendered = Vec::with_capacity(attachments.attachments.len());
+        for (index, attachment) in attachments.attachments.iter().enumerate() {
+            rendered.push(PromptComposerAttachment {
+                key: format!("attachment-{}", attachment.path),
+                name: attachment.name.clone(),
+                label: FilePath(&attachment.name).extension_label(),
+                preview_data_url: attachment.preview_data_url.clone(),
+                remove_index: Some(index as u32),
+            });
+        }
+        rendered
     }
 
     pub fn streaming(&self) -> bool {
@@ -667,7 +679,7 @@ pub struct Transcript {
     pub scroll_container: scroll::Container,
 }
 
-pub fn use_transcript(ui: UiStateRoot<ChatUiState>) -> Transcript {
+pub fn use_transcript(ui: UiStateBinding<ChatUiState>) -> Transcript {
     let transcript = Transcript {
         state: use_signal(ChatTranscriptState::default),
         at_bottom: use_signal(|| true),

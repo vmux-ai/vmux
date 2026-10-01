@@ -34,7 +34,7 @@ use vmux_git::ui::{DiffView, GitFooter};
 use vmux_ui::diff::DiffTone;
 use vmux_ui::directory::DirectoryNavigator;
 use vmux_ui::focus::FocusClaim;
-use vmux_ui::hooks::{PressedKey, send, use_theme, use_ui_state_root};
+use vmux_ui::hooks::{PressedKey, send, use_theme, use_ui_state_binding};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::platform::sleep_ms;
@@ -43,7 +43,7 @@ use vmux_ui::scroll::ScrollIntoView;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    use_ui_state_root::<FileUiState>();
+    use_ui_state_binding::<FileUiState>();
     let mut path = use_signal(String::new);
     let mut document_revision = use_signal(|| 0u64);
     let mut document_kind = use_signal(FileDocumentKind::default);

@@ -129,9 +129,7 @@ impl FocusedSpace<'_, '_> {
     }
 
     pub fn resolved_startup_url(&self) -> String {
-        self.startup_url()
-            .unwrap_or(EffectiveStartupUrl::START_PAGE)
-            .to_string()
+        self.startup_url().unwrap_or_default().to_string()
     }
 }
 

@@ -2,7 +2,7 @@ use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::room::RemoteModelState;
 
-use super::state::{ChatRuntime, ChatUiStatePlugin, ChatUiStateProjection, RepublishChatUiState};
+use super::state::{ChatRuntime, ChatUiStateProjection, RepublishChatUiState};
 use crate::event::{
     ModeState, ModelOptionEntry, ModelState, SlashCommand, SlashCommandEntry, SlashCommands,
 };
@@ -11,9 +11,6 @@ pub struct ChatModelPlugin;
 
 impl Plugin for ChatModelPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<ChatUiStatePlugin>() {
-            app.add_plugins(ChatUiStatePlugin);
-        }
         app.add_message::<Models>()
             .add_systems(
                 Update,

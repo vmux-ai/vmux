@@ -83,7 +83,7 @@ fn page_ready(
     let Ok(page) = pages.get(webview) else {
         return;
     };
-    if !page.url.starts_with(crate::ui::ToolsPage::URL) {
+    if !page.url.starts_with(crate::ToolPlugin::URL) {
         return;
     }
     if !subscribers.contains(webview) {

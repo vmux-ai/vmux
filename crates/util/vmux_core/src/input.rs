@@ -133,9 +133,14 @@ pub struct KeyClaims {
 
 impl KeyClaims {
     pub fn contains(&self, stroke: &KeyStroke) -> bool {
+        self.command(stroke).is_some()
+    }
+
+    pub fn command(&self, stroke: &KeyStroke) -> Option<&str> {
         self.keys
             .iter()
-            .any(|claimed| claimed.code == stroke.code && claimed.mods == stroke.mods)
+            .find(|claimed| claimed.code == stroke.code && claimed.mods == stroke.mods)
+            .map(|claimed| claimed.command.as_str())
     }
 }
 
@@ -175,6 +180,7 @@ pub enum Unclaimed {
 pub struct ClaimedKey {
     pub code: String,
     pub mods: KeyModifiers,
+    pub command: String,
 }
 
 #[vmux_api::contract(Copy, Default, Eq, Hash)]
@@ -249,6 +255,7 @@ mod tests {
             keys.push(ClaimedKey {
                 code: (*code).to_string(),
                 mods: *mods,
+                command: String::new(),
             });
         }
         KeyClaims { keys }

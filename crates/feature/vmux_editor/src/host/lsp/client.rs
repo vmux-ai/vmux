@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use std::collections::HashMap;
 
-use crate::lsp::framing;
+use crate::lsp::framing::LspFrame;
 use crate::lsp::reader::Reader;
 use crate::lsp::registry::ServerSpec;
 use crate::lsp::server_request::ServerInputSender;
@@ -136,7 +136,7 @@ impl ServerClient {
         let writer = std::thread::spawn(move || {
             let mut w = stdin;
             while let Ok(msg) = out_rx.recv() {
-                if framing::write_message(&mut w, &msg).is_err() {
+                if LspFrame::new(msg).write(&mut w).is_err() {
                     break;
                 }
             }

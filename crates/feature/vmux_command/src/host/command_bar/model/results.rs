@@ -360,9 +360,7 @@ impl PaletteRows {
         }
         let mut app_pages: Vec<_> = pages
             .iter()
-            .filter(|page| {
-                !page.prompt_target && page.url != "vmux://start/" && page.url != "vmux://terminal/"
-            })
+            .filter(|page| !page.prompt_target && !page.startup && page.url != "vmux://terminal/")
             .filter(|page| Self::page_matches(page, &search_lower))
             .collect();
         app_pages.sort_by_cached_key(|page| page.url.to_lowercase());
@@ -721,6 +719,7 @@ mod tests {
                 icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Settings),
                 shortcut: String::new(),
                 prompt_target: false,
+                startup: false,
             },
             CommandBarPage {
                 url: "vmux://spaces/".into(),
@@ -729,6 +728,7 @@ mod tests {
                 icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Layers),
                 shortcut: String::new(),
                 prompt_target: false,
+                startup: false,
             },
             CommandBarPage {
                 url: "vmux://history/".into(),
@@ -737,6 +737,7 @@ mod tests {
                 icon: vmux_api::PageIcon::Builtin(vmux_api::BuiltinIcon::Clock),
                 shortcut: "\u{2318}Y".into(),
                 prompt_target: false,
+                startup: false,
             },
             CommandBarPage {
                 url: "vmux://sessions/vibe/".into(),
@@ -745,6 +746,7 @@ mod tests {
                 icon: vmux_api::PageIcon::None,
                 shortcut: String::new(),
                 prompt_target: true,
+                startup: false,
             },
         ]
     }
@@ -979,6 +981,7 @@ mod tests {
             icon: vmux_api::PageIcon::None,
             shortcut: String::new(),
             prompt_target: true,
+            startup: false,
         });
 
         let results = PaletteRows::prompt_targets(&pages, "");
@@ -1006,6 +1009,7 @@ mod tests {
             icon: vmux_api::PageIcon::None,
             shortcut: String::new(),
             prompt_target: true,
+            startup: false,
         });
 
         let results = PaletteRows::prompt_targets(&pages, "vibe");
@@ -1027,6 +1031,7 @@ mod tests {
             icon: vmux_api::PageIcon::None,
             shortcut: String::new(),
             prompt_target: true,
+            startup: false,
         });
         let codex = PaletteRows::prompt_targets(&pages, "cod").remove(0);
 
@@ -1049,6 +1054,7 @@ mod tests {
             icon: vmux_api::PageIcon::None,
             shortcut: String::new(),
             prompt_target: true,
+            startup: false,
         });
 
         let results = PaletteRows::prompt_targets(&pages, "show me something fun in terminal");
@@ -1143,6 +1149,7 @@ mod tests {
                 icon: vmux_api::PageIcon::None,
                 shortcut: String::new(),
                 prompt_target: true,
+                startup: false,
             },
             CommandBarPage {
                 url: "vmux://sessions/claude".into(),
@@ -1151,6 +1158,7 @@ mod tests {
                 icon: vmux_api::PageIcon::None,
                 shortcut: String::new(),
                 prompt_target: true,
+                startup: false,
             },
         ]);
         let agents = PaletteRows::prompt_targets(&pages, "");
@@ -1242,6 +1250,7 @@ mod tests {
             icon: vmux_api::PageIcon::None,
             shortcut: String::new(),
             prompt_target: false,
+            startup: false,
         });
         let results = PaletteRows::start(&pages, &[], &[], &[], "terminal");
         assert!(matches!(

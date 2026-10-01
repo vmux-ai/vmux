@@ -116,15 +116,12 @@ pub(super) struct ActiveComposerMenu {
 }
 
 #[vmux_command::command(id = "chat_list_next")]
-#[derive(Component)]
 struct ListNextBinding;
 
 #[vmux_command::command(id = "chat_list_previous")]
-#[derive(Component)]
 struct ListPreviousBinding;
 
 #[vmux_command::command(id = "chat_list_choose")]
-#[derive(Component)]
 struct ListChooseBinding;
 
 #[derive(EntityEvent)]
@@ -149,27 +146,21 @@ impl CommandBinding for ChoiceNumberBinding {
 }
 
 #[vmux_command::command(id = "chat_history_older")]
-#[derive(Component)]
 struct HistoryOlderBinding;
 
 #[vmux_command::command(id = "chat_history_newer")]
-#[derive(Component)]
 struct HistoryNewerBinding;
 
 #[vmux_command::command(id = "chat_submit")]
-#[derive(Component)]
 struct SubmitBinding;
 
 #[vmux_command::command(id = "chat_dismiss_selector")]
-#[derive(Component)]
 struct DismissSelectorBinding;
 
 #[vmux_command::command(id = "chat_interrupt")]
-#[derive(Component)]
 struct InterruptBinding;
 
 #[vmux_command::command(id = "chat_cancel")]
-#[derive(Component)]
 struct CancelBinding;
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {

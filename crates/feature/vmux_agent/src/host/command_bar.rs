@@ -20,13 +20,6 @@ impl Plugin for CommandBarPlugin {
     }
 }
 
-const DEFAULT_AGENT_URLS: [&str; 4] = [
-    "vmux://sessions/",
-    "vmux://sessions",
-    "vmux://agent/",
-    "vmux://agent",
-];
-
 #[derive(Component)]
 struct AgentContribution;
 
@@ -48,6 +41,7 @@ impl AgentContribution {
                     },
                     shortcut: String::new(),
                     prompt_target: true,
+                    startup: false,
                 },
             });
         }
@@ -89,9 +83,10 @@ fn publish_contributions(
     for page in AgentContribution::launcher_pages(agents) {
         commands.spawn((AgentContribution, page));
     }
-    for url in DEFAULT_AGENT_URLS {
-        commands.spawn((AgentContribution, ClaimedUrl(url.to_string())));
-    }
+    commands.spawn((
+        AgentContribution,
+        ClaimedUrl(vmux_chat::ChatPlugin::URL.to_string()),
+    ));
 }
 
 #[cfg(test)]
@@ -142,9 +137,7 @@ mod tests {
     #[test]
     fn only_bare_agent_urls_are_claimed() {
         let mut world = World::new();
-        for url in DEFAULT_AGENT_URLS {
-            world.spawn(ClaimedUrl(url.to_string()));
-        }
+        world.spawn(ClaimedUrl(vmux_chat::ChatPlugin::URL.to_string()));
 
         let claimed = world
             .run_system_once(|claimed: ClaimedUrls| {

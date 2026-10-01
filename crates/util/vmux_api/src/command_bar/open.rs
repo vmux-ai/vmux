@@ -135,6 +135,8 @@ pub struct CommandBarPage {
     pub shortcut: String,
     #[serde(default)]
     pub prompt_target: bool,
+    #[serde(default)]
+    pub startup: bool,
 }
 
 #[vmux_api::contract(Eq)]

@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 #[cfg(host)]
 use std::io::{self, BufReader, Write};
 #[cfg(host)]
-use vmux_editor::lsp::framing::{read_message, write_message};
+use vmux_editor::lsp::framing::LspFrame;
 
 #[cfg(host)]
 struct Diagnostic;
@@ -35,7 +35,8 @@ fn main() {
     let mut stdout = io::stdout();
     let mut probe_uri = String::new();
 
-    while let Ok(Some(msg)) = read_message(&mut reader) {
+    while let Ok(Some(frame)) = LspFrame::read(&mut reader) {
+        let msg = frame.into_message();
         let method = msg.get("method").and_then(Value::as_str).unwrap_or("");
         let id = msg.get("id").cloned();
         match method {
@@ -45,7 +46,7 @@ fn main() {
                     "id": id,
                     "result": {"capabilities": {"foldingRangeProvider": true}}
                 });
-                let _ = write_message(&mut stdout, &resp);
+                let _ = LspFrame::new(resp).write(&mut stdout);
             }
             "textDocument/foldingRange" => {
                 let resp = json!({
@@ -53,7 +54,7 @@ fn main() {
                     "id": id,
                     "result": [{"startLine": 0, "endLine": 2}]
                 });
-                let _ = write_message(&mut stdout, &resp);
+                let _ = LspFrame::new(resp).write(&mut stdout);
             }
             "textDocument/didOpen" => {
                 let uri = msg
@@ -61,26 +62,22 @@ fn main() {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                let _ = write_message(
-                    &mut stdout,
-                    &Diagnostic::message(&uri, "mock diagnostic".into()),
-                );
+                let _ = LspFrame::new(Diagnostic::message(&uri, "mock diagnostic".into()))
+                    .write(&mut stdout);
                 if uri.contains("probe-requests") {
                     probe_uri = uri;
-                    let _ = write_message(
-                        &mut stdout,
-                        &json!({
-                            "jsonrpc": "2.0",
-                            "id": 1000,
-                            "method": "window/showDocument",
-                            "params": {"uri": probe_uri},
-                        }),
-                    );
+                    let _ = LspFrame::new(json!({
+                        "jsonrpc": "2.0",
+                        "id": 1000,
+                        "method": "window/showDocument",
+                        "params": {"uri": probe_uri},
+                    }))
+                    .write(&mut stdout);
                 }
             }
             "shutdown" => {
                 let resp = json!({"jsonrpc": "2.0", "id": id, "result": null});
-                let _ = write_message(&mut stdout, &resp);
+                let _ = LspFrame::new(resp).write(&mut stdout);
             }
             "exit" => break,
             "" if id.is_some() => {
@@ -89,10 +86,8 @@ fn main() {
                     .and_then(Value::as_i64)
                     .map(|c| c.to_string())
                     .unwrap_or_else(|| "ok".to_string());
-                let _ = write_message(
-                    &mut stdout,
-                    &Diagnostic::message(&probe_uri, format!("answered {code}")),
-                );
+                let _ = LspFrame::new(Diagnostic::message(&probe_uri, format!("answered {code}")))
+                    .write(&mut stdout);
             }
             _ => {}
         }

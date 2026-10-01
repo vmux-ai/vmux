@@ -9,7 +9,7 @@ use vmux_command::{
     BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
 };
 use vmux_core::host::{UiStateWrite, persistence::WorkspaceRestore};
-use vmux_core::page::{PageReady, SpacesPageSpawnRequest};
+use vmux_core::page::{PageReady, SpacesPageSpawnRequest, StartupPageUrl};
 use vmux_core::{
     ActivateRequest, Active, EffectiveStartupUrl, Order, PageMetadata, PageOpenRequest,
     PageOpenTarget,
@@ -188,6 +188,7 @@ fn open_command_bar(
 
 fn update_effective_startup(
     settings: Option<Res<AppSettings>>,
+    startup_page: StartupPageUrl,
     mut spaces: Query<
         (
             Ref<SpaceId>,
@@ -203,8 +204,8 @@ fn update_effective_startup(
     for (id, mut effective_url, mut effective_dir) in &mut spaces {
         let next_url = settings
             .as_deref()
-            .map(|settings| settings.startup_url(&id.0))
-            .unwrap_or_default();
+            .map(|settings| settings.startup_url(&id.0, startup_page.get().unwrap_or_default()))
+            .unwrap_or_else(|| startup_page.get().unwrap_or_default().to_string());
         if effective_url.0 != next_url {
             effective_url.0 = next_url;
         }
@@ -553,10 +554,12 @@ impl SpaceViewTemplate {
         space: Entity,
         window: Entity,
         settings: Option<&AppSettings>,
+        startup_page: &str,
     ) -> TabLayoutSpawnRequest {
         let startup_dir = settings.and_then(|settings| settings.startup_dir(&self.id));
         let content = settings
-            .map(|settings| settings.startup_url(&self.id))
+            .map(|settings| settings.startup_url(&self.id, startup_page))
+            .or_else(|| Some(startup_page.to_string()))
             .filter(|url| !url.is_empty())
             .map(|url| TabLayoutSpawnContent::Url {
                 url,
@@ -660,6 +663,7 @@ fn delete(
     space_window: SpaceWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     settings: Option<Res<AppSettings>>,
+    startup_page: StartupPageUrl,
     mut commands: Commands,
 ) {
     if space_window.for_webview(trigger.event().webview).is_none() {
@@ -710,7 +714,12 @@ fn delete(
             continue;
         };
         let space = commands.spawn(fallback.bundle(affected_main)).id();
-        layout_requests.write(fallback.layout_request(space, affected_window, settings.as_deref()));
+        layout_requests.write(fallback.layout_request(
+            space,
+            affected_window,
+            settings.as_deref(),
+            startup_page.get().unwrap_or_default(),
+        ));
     }
 }
 
@@ -720,6 +729,7 @@ fn attach(
     space_window: SpaceWindow,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     settings: Option<Res<AppSettings>>,
+    startup_page: StartupPageUrl,
     mut commands: Commands,
 ) {
     let Some((window, main)) = space_window.for_webview(trigger.event().webview) else {
@@ -736,7 +746,12 @@ fn attach(
         };
         graph.deactivate_in_main(main, &mut commands);
         let space = commands.spawn(template.bundle(main)).id();
-        layout_requests.write(template.layout_request(space, window, settings.as_deref()));
+        layout_requests.write(template.layout_request(
+            space,
+            window,
+            settings.as_deref(),
+            startup_page.get().unwrap_or_default(),
+        ));
         return;
     };
     if is_active {
@@ -834,6 +849,7 @@ fn handle_open_in_new(
     graph: SpaceGraph,
     space_window: SpaceWindow,
     settings: Option<Res<AppSettings>>,
+    startup_page: StartupPageUrl,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
 ) {
@@ -880,8 +896,8 @@ fn handle_open_in_new(
             .and_then(|settings| settings.startup_dir(&id));
         let startup_url = settings
             .as_deref()
-            .map(|settings| settings.startup_url(&id))
-            .unwrap_or_default();
+            .map(|settings| settings.startup_url(&id, startup_page.get().unwrap_or_default()))
+            .unwrap_or_else(|| startup_page.get().unwrap_or_default().to_string());
         commands.entity(space).insert((
             EffectiveStartupDir(startup_dir.clone()),
             EffectiveStartupUrl(startup_url.clone()),

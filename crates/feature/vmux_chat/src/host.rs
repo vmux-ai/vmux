@@ -1,4 +1,6 @@
 use bevy_app::{App, Plugin};
+#[cfg(host)]
+use vmux_core::host::manifest::FeaturePlugin;
 
 #[cfg(host)]
 mod composer;
@@ -27,22 +29,29 @@ pub use room::{Agents, Conversation, LiveTurn, Log, Reported, Submitted};
 #[cfg(host)]
 pub use session::{
     ChatAttachmentProjection, ChatBranchesProjection, ChatComposerContext, ChatHistoryQuery,
-    ChatHistoryResult, ChatMediaProjection, ChatPlugin, ChatResumeProjection,
-    ChatSnapshotProjection, ChatSynced, ChatTranscriptProjection, ChatView, PendingAgentChoice,
-    TranscriptPage, TranscriptTail, USER_CHOICE_REQUESTED,
+    ChatHistoryResult, ChatMediaProjection, ChatResumeProjection, ChatSnapshotProjection,
+    ChatSynced, ChatTranscriptProjection, ChatView, PendingAgentChoice, TranscriptPage,
+    TranscriptTail, USER_CHOICE_REQUESTED,
 };
 pub use state::{ChatRuntime, PublishComposerEffect, RepublishChatUiState};
 #[cfg(host)]
 pub use tool::ChatToolPlugin;
 
-pub struct ChatStatePlugin;
+#[vmux_native::page]
+pub struct ChatPlugin;
 
-impl Plugin for ChatStatePlugin {
+impl Plugin for ChatPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            state::ChatUiStatePlugin,
             model::ChatModelPlugin,
             prompt::ChatPromptPlugin,
             room::ChatRoomPlugin,
+        ));
+        #[cfg(host)]
+        app.add_plugins((
+            FeaturePlugin::<crate::Feature>::default(),
+            session::ChatHostPlugin,
         ));
     }
 }

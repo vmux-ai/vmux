@@ -77,10 +77,29 @@ pub struct CommandPaletteHistoryMoveRequest {
     pub older: bool,
 }
 
-#[vmux_api::ui_event(Copy, Eq)]
-pub struct CommandPaletteMenuToggleRequest {
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPaletteAgentMenuToggleRequest {
     pub open_id: super::OpenId,
-    pub menu: super::CommandPaletteMenu,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPaletteModelMenuToggleRequest {
+    pub open_id: super::OpenId,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPalettePermissionMenuToggleRequest {
+    pub open_id: super::OpenId,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPaletteProjectMenuToggleRequest {
+    pub open_id: super::OpenId,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPaletteBranchMenuToggleRequest {
+    pub open_id: super::OpenId,
 }
 
 #[vmux_api::ui_event(Copy, Default, Eq)]

@@ -9,12 +9,13 @@ use vmux_api::command_bar::{
     CommandPaletteRemoveAttachmentRequest, CommandPaletteState,
 };
 use vmux_api::prompt_media::{
-    ChatAttachPaths, ChatAttachments, ChatMediaEntries, ChatMediaListRequest, inline_media_query,
-    replace_inline_media_query,
+    ChatAttachPaths, ChatAttachments, ChatMediaEntries, ChatMediaListRequest,
+    PromptComposerAttachment, PromptMediaOption, inline_media_query, replace_inline_media_query,
 };
 use vmux_core::host::UiStateWrite;
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
 use vmux_core::prompt_media::{AttachmentSelection, MediaPath};
+use vmux_ui::file_icon::FilePath;
 
 use crate::{BindCommands, CommandDispatch, CommandRegistry};
 
@@ -24,6 +25,37 @@ use super::{
 };
 
 const MEDIA_DEBOUNCE: Duration = Duration::from_millis(300);
+
+impl PaletteSnapshot {
+    fn project_media(&mut self) {
+        let mut options = Vec::with_capacity(self.0.media_entries.len());
+        for entry in &self.0.media_entries {
+            options.push(PromptMediaOption {
+                key: format!("media-{}", entry.path),
+                name: entry.name.clone(),
+                display_path: MediaPath::new(entry).display(),
+                preview_data_url: entry.preview_data_url.clone(),
+                label: FilePath(&entry.name).extension_label(),
+                is_dir: entry.is_dir,
+            });
+        }
+        self.0.media_options = options;
+    }
+
+    fn project_attachments(&mut self) {
+        let mut attachments = Vec::with_capacity(self.0.attachments.len());
+        for (index, attachment) in self.0.attachments.iter().enumerate() {
+            attachments.push(PromptComposerAttachment {
+                key: format!("attachment-{}", attachment.path),
+                name: attachment.name.clone(),
+                label: FilePath(&attachment.name).extension_label(),
+                preview_data_url: attachment.preview_data_url.clone(),
+                remove_index: Some(index as u32),
+            });
+        }
+        self.0.composer_attachments = attachments;
+    }
+}
 
 pub(super) struct PaletteMediaPlugin;
 
@@ -75,6 +107,7 @@ impl PaletteMedia {
         let generation = self.generation.advance();
         snapshot.media_query = query.clone();
         snapshot.media_entries.clear();
+        snapshot.media_options.clear();
         snapshot.media_loading = query.is_some();
         snapshot.media_selected = 0;
         let Some(query) = query else {
@@ -89,19 +122,15 @@ impl PaletteMedia {
 }
 
 #[vmux_command::command(id = "command_bar_media_next")]
-#[derive(Component)]
 struct PaletteMediaNextBinding;
 
 #[vmux_command::command(id = "command_bar_media_previous")]
-#[derive(Component)]
 struct PaletteMediaPreviousBinding;
 
 #[vmux_command::command(id = "command_bar_media_choose")]
-#[derive(Component)]
 struct PaletteMediaActivateBinding;
 
 #[vmux_command::command(id = "command_bar_media_dismiss")]
-#[derive(Component)]
 struct PaletteMediaDismissBinding;
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
@@ -145,9 +174,11 @@ fn update_draft(
         snapshot.0.open_id = request.open_id;
         snapshot.0.media_query = None;
         snapshot.0.media_entries.clear();
+        snapshot.0.media_options.clear();
         snapshot.0.media_loading = false;
         snapshot.0.media_selected = 0;
         snapshot.0.attachments.clear();
+        snapshot.0.composer_attachments.clear();
         snapshot.0.attachment_sequence = 0;
     }
     media.start = request.start;
@@ -350,6 +381,7 @@ fn remove_attachment(
         .0
         .attachments
         .retain(|attachment| attachment.path != request.path);
+    snapshot.project_attachments();
 }
 
 fn receive_attachments(
@@ -371,6 +403,7 @@ fn receive_attachments(
     }
     if AttachmentSelection::new(&mut snapshot.0.attachments).merge(response) {
         snapshot.0.attachment_sequence = snapshot.0.attachment_sequence.wrapping_add(1).max(1);
+        snapshot.project_attachments();
     }
 }
 
@@ -403,6 +436,7 @@ fn receive_entries(
         return;
     }
     snapshot.0.media_entries.clone_from(&response.entries);
+    snapshot.project_media();
     snapshot.0.media_loading = false;
     snapshot.0.media_selected = snapshot
         .0

@@ -1,54 +1,12 @@
 use dioxus::prelude::*;
-use vmux_api::prompt_media::ChatAttachment;
+pub use vmux_api::prompt_media::PromptComposerAttachment;
 
 use crate::components::prompt_box::PromptBox;
-use crate::file_icon::FilePath;
 use crate::i18n::translate;
 use crate::ime::use_ime_guard;
 use crate::util::cn;
 
 pub const PROMPT_INPUT_ID: &str = "vmux-prompt-input";
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PromptComposerAttachment {
-    pub key: String,
-    pub name: String,
-    pub label: String,
-    pub preview_data_url: String,
-    pub remove_index: Option<usize>,
-}
-
-impl PromptComposerAttachment {
-    pub fn from_attachment(attachment: &ChatAttachment, remove_index: Option<usize>) -> Self {
-        let held = match remove_index {
-            Some(_) => "attachment",
-            None => "pinned-attachment",
-        };
-        Self {
-            key: format!("{held}-{}", attachment.path),
-            name: attachment.name.clone(),
-            label: FilePath(&attachment.name).extension_label(),
-            preview_data_url: attachment.preview_data_url.clone(),
-            remove_index,
-        }
-    }
-
-    pub fn removable(attachments: &[ChatAttachment]) -> Vec<Self> {
-        let mut listed = Vec::with_capacity(attachments.len());
-        for (index, attachment) in attachments.iter().enumerate() {
-            listed.push(Self::from_attachment(attachment, Some(index)));
-        }
-        listed
-    }
-
-    pub fn pinned(attachments: &[ChatAttachment]) -> Vec<Self> {
-        let mut listed = Vec::with_capacity(attachments.len());
-        for attachment in attachments {
-            listed.push(Self::from_attachment(attachment, None));
-        }
-        listed
-    }
-}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PromptComposerMode {
@@ -165,7 +123,7 @@ pub fn PromptComposer(
                                     title: "{remove_attachment_title}",
                                     onmousedown: move |event| event.prevent_default(),
                                     onclick: move |_| {
-                                        on_remove_attachment.call(remove_index);
+                                        on_remove_attachment.call(remove_index as usize);
                                         focus_prompt_end(PROMPT_INPUT_ID);
                                     },
                                     svg {

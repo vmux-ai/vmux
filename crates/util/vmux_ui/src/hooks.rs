@@ -9,8 +9,7 @@ pub use use_key_claim::{KeyClaim, use_key_claim};
 pub use use_selector::use_selector;
 pub use use_theme::use_theme;
 pub use use_ui_state::{
-    UiStatePatchBatch, UiStateRoot, UiStateValue, use_ui_state, use_ui_state_patch,
-    use_ui_state_patches, use_ui_state_projection, use_ui_state_root,
+    UiStateBinding, UiStatePatchBatch, UiStateValue, use_ui_state, use_ui_state_binding,
 };
 pub use vmux_api::UiStatePatch;
 

@@ -9,7 +9,7 @@ use vmux_api::room::{
 use crate::acp::AcpSession;
 use crate::session::{AgentConversationTitle, AgentMessages};
 
-pub struct RoomPlugin;
+pub(crate) struct RoomPlugin;
 
 impl Plugin for RoomPlugin {
     fn build(&self, app: &mut App) {

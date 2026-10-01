@@ -51,14 +51,13 @@ pub(crate) struct AgentSetConversationTitle {
 }
 
 #[cfg(host)]
-pub struct ChatPlugin;
+pub(super) struct ChatHostPlugin;
 
 #[cfg(host)]
-impl Plugin for ChatPlugin {
+impl Plugin for ChatHostPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             ChatAgentPlugin,
-            super::ChatStatePlugin,
             super::key::ChatKeyPlugin,
             super::media::ChatMediaPlugin,
             super::tool::ChatToolPlugin,

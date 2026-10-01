@@ -48,7 +48,7 @@
     policy: Some((
         defaults: (
             browser: (
-                startup_url: "vmux://start/",
+                startup_url: "",
                 search_engine: google,
                 bookmarks: [
                     "vmux://start/",

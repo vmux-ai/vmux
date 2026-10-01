@@ -214,7 +214,7 @@ fn open_from_bar(
                 cwd: Some(directory.to_path_buf()),
                 target: TerminalSpawnTarget::NewStackInPane(pane),
                 metadata: Some(PageMetadata {
-                    url: vmux_layout::event::TERMINAL_PAGE_URL.to_string(),
+                    url: vmux_terminal::TerminalPlugin::URL.to_string(),
                     title: locale.translate_with(
                         "command-terminal-path",
                         &[(

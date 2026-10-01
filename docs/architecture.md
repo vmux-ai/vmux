@@ -374,6 +374,12 @@ cannot be bypassed by another module.
 override feature availability through one builder; individual feature plugins remain usable
 without the facade.
 
+Every product feature appears exactly once in that graph and exposes one crate-level plugin.
+That root plugin installs only its own manifest, components, systems, and private subplugins. It
+never installs a sibling feature plugin. Cross-feature requirements belong to the `vmux_app`
+builder. `vmux_desktop` and `vmux_mobile` add only platform adapters and select a shared profile;
+they do not become alternate feature registries.
+
 ```rust
 app.add_plugins(
     VmuxPlugin::builder()

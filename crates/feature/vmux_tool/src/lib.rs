@@ -51,6 +51,7 @@ pub use query::*;
 pub use registry::*;
 pub use vmux_macro::input;
 
+#[vmux_native::page]
 pub struct ToolPlugin;
 
 impl Plugin for ToolPlugin {
@@ -60,11 +61,8 @@ impl Plugin for ToolPlugin {
         app.add_plugins(ui::ToolsPage::plugin());
 
         #[cfg(all(host, ui))]
-        app.add_plugins(ui::ToolsPage::MANIFEST.plugin().hosted(
-            vmux_core::host::page::NativelyHosted::subtree(
-                ui::ToolsPage::URL,
-                ui::ToolsPage::NATIVE.title,
-            ),
+        app.add_plugins(Self::MANIFEST.plugin().hosted(
+            vmux_core::host::page::NativelyHosted::subtree(Self::URL, ui::ToolsPage::NATIVE.title),
         ));
 
         app.add_plugins((

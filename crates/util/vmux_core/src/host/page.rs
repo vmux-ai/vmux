@@ -1,8 +1,9 @@
+use bevy::ecs::system::SystemParam;
 use bevy::{
     asset::io::embedded::EmbeddedAssetRegistry,
     prelude::{
         App, Commands, Component, Entity, IntoScheduleConfigs, Message, MessageReader,
-        MessageWriter, On, Plugin, PreStartup, Query, ResMut, Startup, SystemSet, Update,
+        MessageWriter, On, Plugin, PreStartup, Query, ResMut, Startup, SystemSet, Update, With,
     },
 };
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
@@ -32,10 +33,34 @@ pub struct PageManifest {
     pub keywords: &'static [&'static str],
     pub icon: Option<crate::icon::BuiltinIcon>,
     pub command_bar: bool,
+    pub startup: bool,
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HostsPage;
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StartupPage;
+
+#[derive(SystemParam)]
+pub struct StartupPageUrl<'w, 's> {
+    pages: Query<'w, 's, &'static PageManifest, With<StartupPage>>,
+}
+
+impl StartupPageUrl<'_, '_> {
+    pub fn get(&self) -> Option<&'static str> {
+        self.pages.single().ok().map(|page| page.url)
+    }
+
+    pub fn resolve(&self, candidate: Option<&str>) -> String {
+        candidate
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+            .or_else(|| self.get())
+            .unwrap_or_default()
+            .to_string()
+    }
+}
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BindsEditingChords;
@@ -138,6 +163,9 @@ impl Plugin for PageManifestPlugin {
                 commands.spawn(alias);
             }
             let mut registration = commands.spawn(manifest);
+            if manifest.startup {
+                registration.insert(StartupPage);
+            }
             if let Some(hosted) = hosted {
                 registration.insert(hosted);
             }
@@ -595,6 +623,7 @@ mod tests {
             keywords: &["preferences"],
             icon: Some(crate::icon::BuiltinIcon::Settings),
             command_bar: true,
+            startup: false,
         };
         assert_eq!(manifest.url(), "vmux://settings/");
     }
@@ -611,6 +640,7 @@ mod tests {
             keywords: &[],
             icon: Some(crate::BuiltinIcon::Smartphone),
             command_bar: true,
+            startup: false,
         };
 
         assert!(manifest.answers_for("vmux://simulator/"));
@@ -673,6 +703,7 @@ mod tests {
             keywords: &["recent", "visited"],
             icon: Some(crate::icon::BuiltinIcon::Clock),
             command_bar: true,
+            startup: false,
         };
         app.add_plugins(
             manifest
@@ -708,6 +739,7 @@ mod tests {
             keywords: &["recent", "visited"],
             icon: Some(crate::icon::BuiltinIcon::Clock),
             command_bar: true,
+            startup: false,
         };
 
         assert_eq!(

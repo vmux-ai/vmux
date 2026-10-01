@@ -1,11 +1,9 @@
-use bevy::prelude::*;
-use std::collections::HashMap;
-use vmux_command::snapshot::{CommandBarProjection, CommandBarWorkDirectory};
-use vmux_layout::event::TERMINAL_PAGE_URL;
-
 use crate::Terminal;
 use crate::launch::TerminalLaunch;
 use crate::pid::{Pid, PidToEntity};
+use bevy::prelude::*;
+use std::collections::HashMap;
+use vmux_command::snapshot::{CommandBarProjection, CommandBarWorkDirectory};
 
 pub struct SnapshotPlugin;
 
@@ -54,7 +52,7 @@ fn update_terminals_snapshot(
         }
     }
     state.terminals.running = running;
-    state.terminals.terminal_page_url = TERMINAL_PAGE_URL.to_string();
+    state.terminals.terminal_page_url = crate::TerminalPlugin::URL.to_string();
 }
 
 #[cfg(test)]
@@ -75,7 +73,7 @@ mod tests {
         app.world_mut().spawn(CommandBarProjection::default());
         app.update();
         let snap = &projection(&app).terminals;
-        assert_eq!(snap.terminal_page_url, TERMINAL_PAGE_URL);
+        assert_eq!(snap.terminal_page_url, crate::TerminalPlugin::URL);
         assert!(snap.running.is_empty());
     }
 

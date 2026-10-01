@@ -35,20 +35,23 @@ impl AgentUrl {
     pub fn format(&self) -> String {
         match self {
             Self::Acp { id, sid } => match sid {
-                Some(sid) => format!("vmux://sessions/{id}/{sid}"),
-                None => format!("vmux://sessions/{id}"),
+                Some(sid) => format!("{}{id}/{sid}", vmux_chat::ChatPlugin::URL),
+                None => format!("{}{id}", vmux_chat::ChatPlugin::URL),
             },
-            Self::AcpDefault => "vmux://sessions/".to_string(),
+            Self::AcpDefault => vmux_chat::ChatPlugin::URL.to_string(),
         }
     }
 
     pub(crate) fn rejects_persisted_store(body: &str) -> bool {
-        for prefix in ["vmux://sessions/", "vmux://agent/"] {
+        let current_root = vmux_chat::ChatPlugin::URL.trim_end_matches('/');
+        let legacy_root = "vmux://agent";
+        for prefix in [vmux_chat::ChatPlugin::URL, "vmux://agent/"] {
             if body.split(prefix).skip(1).any(|tail| {
                 let suffix = tail.split('"').next().unwrap_or_default();
                 let url = format!("{prefix}{suffix}");
                 let normalized = url.trim_end_matches('/');
-                !matches!(normalized, "vmux://sessions" | "vmux://agent")
+                normalized != current_root
+                    && normalized != legacy_root
                     && Self::parse(normalized).is_none()
             }) {
                 return true;

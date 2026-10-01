@@ -1,5 +1,7 @@
 #![allow(clippy::type_complexity)]
 
+use bevy_app::{App, Plugin};
+
 pub mod acp;
 pub mod room;
 pub mod run_state;
@@ -11,3 +13,11 @@ pub use session::{
     AgentApprovalPolicy, AgentConversationTitle, AgentMessageTimes, AgentMessages, PromptQueue,
     QueuedPrompt, approval_tool_key, provisional_conversation_title,
 };
+
+pub struct SessionPlugin;
+
+impl Plugin for SessionPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(room::RoomPlugin);
+    }
+}

@@ -8,6 +8,7 @@
             keywords: ["start", "home", "new tab", "launcher"],
             icon: "Sparkles",
             command_bar: true,
+            startup: true,
             permissions: [
                 "PageReady",
                 "ThemeEvent",

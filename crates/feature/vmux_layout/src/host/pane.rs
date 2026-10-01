@@ -23,10 +23,7 @@ use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRunt
 #[cfg(test)]
 use vmux_core::host::manifest::FeaturePlugin;
 #[cfg(test)]
-use vmux_core::{
-    Active, EffectiveStartupUrl, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget,
-    PageOpenTask,
-};
+use vmux_core::{Active, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget, PageOpenTask};
 #[cfg(test)]
 use vmux_flex::prelude::*;
 #[cfg(test)]
@@ -2826,7 +2823,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             opened.iter().map(|r| r.url.as_str()).collect::<Vec<_>>(),
-            [EffectiveStartupUrl::START_PAGE]
+            ["vmux://start/"]
         );
     }
 

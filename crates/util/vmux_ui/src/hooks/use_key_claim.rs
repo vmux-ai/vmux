@@ -37,6 +37,11 @@ impl KeyClaim {
         self.resolves
     }
 
+    pub fn command(&self, event: &Event<KeyboardData>) -> Option<String> {
+        let stroke = PressedKey::new(&event.data()).stroke()?;
+        self.claims.read().command(&stroke).map(str::to_string)
+    }
+
     pub fn on_keydown(
         &self,
         event: &Event<KeyboardData>,

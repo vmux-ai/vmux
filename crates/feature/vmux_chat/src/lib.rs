@@ -16,7 +16,6 @@ pub mod tab;
 
 pub mod selector;
 
-#[cfg(host)]
 pub use host::ChatPlugin;
 
 #[cfg(ui)]

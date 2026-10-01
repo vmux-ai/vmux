@@ -8,16 +8,13 @@ use vmux_api::room::{
 use vmux_core::chat::group_turns_tail;
 
 use super::prompt::AttachmentPreviews;
-use super::state::{ChatRuntime, ChatUiStatePlugin, ChatUiStateProjection, RepublishChatUiState};
+use super::state::{ChatRuntime, ChatUiStateProjection, RepublishChatUiState};
 use crate::event::{ChatSnapshot, ChatTranscriptState, PendingApproval};
 
 pub struct ChatRoomPlugin;
 
 impl Plugin for ChatRoomPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<ChatUiStatePlugin>() {
-            app.add_plugins(ChatUiStatePlugin);
-        }
         #[cfg(all(ui, host))]
         app.add_plugins(crate::ui::ChatPage::plugin());
         app.add_message::<Reported>()
@@ -327,7 +324,7 @@ mod tests {
     impl Started {
         fn open() -> Self {
             let mut app = App::new();
-            app.add_plugins(ChatRoomPlugin);
+            app.add_plugins((crate::host::state::ChatUiStatePlugin, ChatRoomPlugin));
             app.update();
             let mut started = Self(app);
             started.insert(Conversation::with_agent("ada"));

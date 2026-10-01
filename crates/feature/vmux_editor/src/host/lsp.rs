@@ -9,7 +9,7 @@ use vmux_tool::{
     ToolScanner, ToolStore, ToolsManifest,
 };
 
-use crate::lsp::catalog::Catalog;
+use crate::lsp::catalog::CatalogSource;
 use crate::lsp::purl::Purl;
 use crate::lsp::target::PlatformTarget;
 
@@ -38,7 +38,7 @@ pub struct LspPlugin;
 impl Plugin for LspPlugin {
     fn build(&self, app: &mut App) {
         let (diagnostics, inbox) = LspDiagnosticsSender::channel();
-        app.add_plugins(server_request::ServerRequestPlugin)
+        app.add_plugins((catalog::CatalogPlugin, server_request::ServerRequestPlugin))
             .add_systems(Startup, spawn_tool_provider);
         manager::build(app, diagnostics, inbox);
         app.add_plugins(manager_page::ManagerPlugin);
@@ -60,17 +60,16 @@ fn scan_tools(
     refresh: bool,
 ) -> Result<ToolProviderSnapshot, String> {
     let store = store::PackageStore::lsp();
-    let catalog = if refresh {
-        Catalog::load(&store, true).unwrap_or_default()
+    let packages = if refresh {
+        CatalogSource::load(&store, true).unwrap_or_default()
     } else if store.catalog_path().is_file() {
         let source =
             std::fs::read_to_string(store.catalog_path()).map_err(|error| error.to_string())?;
-        Catalog::parse(&source).unwrap_or_default()
+        CatalogSource::parse(&source).unwrap_or_default()
     } else {
-        Catalog::default()
+        Vec::new()
     };
-    let catalog_by_name = catalog
-        .packages()
+    let catalog_by_name = packages
         .iter()
         .map(|package| (package.name.clone(), package))
         .collect::<BTreeMap<_, _>>();
@@ -107,7 +106,7 @@ fn scan_tools(
         .iter()
         .map(|item| item.id.clone())
         .collect::<BTreeSet<_>>();
-    for package in catalog.packages() {
+    for package in &packages {
         if installed.contains(package.name.as_str()) {
             continue;
         }
@@ -146,9 +145,10 @@ fn operate_tool(
                 return Err("package name is required".to_string());
             }
             let store = store::PackageStore::lsp();
-            let catalog = Catalog::load(&store, false)?;
-            let package = catalog
-                .find(id)
+            let packages = CatalogSource::load(&store, false)?;
+            let package = packages
+                .iter()
+                .find(|package| package.name.as_str() == id)
                 .ok_or_else(|| format!("language tool not found: {id}"))?;
             package.install(&store, PlatformTarget::current(), |_, _, _| {})?;
             tool_store.set_managed_package(ToolProvider::Lsp, id, true)?;

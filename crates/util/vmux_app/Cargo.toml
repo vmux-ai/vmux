@@ -25,7 +25,6 @@ cli = [
     "tool",
     "vault",
     "dep:bevy_ecs",
-    "dep:vmux_chat",
     "dep:vmux_mcp",
 ]
 desktop = [
@@ -33,6 +32,8 @@ desktop = [
     "bookmark",
     "browser",
     "capture",
+    "chat",
+    "command",
     "editor",
     "extension",
     "git",
@@ -42,6 +43,8 @@ desktop = [
     "remote",
     "tool",
     "service",
+    "session",
+    "setting",
     "shortcut",
     "simulator",
     "space",
@@ -50,27 +53,32 @@ desktop = [
     "terminal",
     "vault",
 ]
-mobile = ["dep:vmux_chat", "dep:vmux_start", "dep:vmux_team"]
+mobile = ["chat", "dep:vmux_start", "dep:vmux_team"]
 tool = ["dep:vmux_tool"]
 capture = ["tool", "dep:vmux_input"]
 bookmark = ["layout", "dep:vmux_bookmark"]
 core = [
-    "dep:vmux_command",
     "dep:vmux_core",
     "dep:vmux_flex",
-    "dep:vmux_setting",
 ]
-layout = ["core", "dep:vmux_layout"]
-browser = ["layout", "extension", "dep:vmux_browser"]
+chat = ["dep:vmux_chat"]
+command = ["core", "dep:vmux_command"]
+setting = ["core", "dep:vmux_setting"]
+session = ["dep:vmux_session"]
+layout = ["command", "setting", "dep:vmux_layout"]
+browser = ["command", "layout", "extension", "dep:vmux_browser"]
 extension = ["layout", "dep:vmux_extension"]
 terminal = ["layout", "service", "dep:vmux_terminal"]
 editor = ["layout", "dep:vmux_editor"]
 git = ["layout", "dep:vmux_git"]
 agent = [
+    "chat",
+    "command",
     "editor",
     "history",
     "knowledge",
     "service",
+    "session",
     "space",
     "terminal",
     "dep:vmux_agent",
@@ -107,6 +115,7 @@ vmux_mcp = { path = "../vmux_mcp", optional = true }
 vmux_macro = { path = "../vmux_macro" }
 vmux_remote = { path = "../../feature/vmux_remote", optional = true }
 vmux_service = { path = "../../feature/vmux_service", optional = true }
+vmux_session = { path = "../vmux_session", optional = true }
 vmux_setting = { path = "../../feature/vmux_setting", optional = true }
 vmux_shortcut = { path = "../../feature/vmux_shortcut", optional = true }
 vmux_simulator = { path = "../../feature/vmux_simulator", optional = true }

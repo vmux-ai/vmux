@@ -6,9 +6,10 @@ use std::sync::mpsc;
 use serde_json::Value;
 
 use crate::lsp::client::path_from_uri;
+use crate::lsp::framing::LspFrame;
 use crate::lsp::server_request::{ApplyEditInput, ReplyHandle, ServerInputSender, ServerLogInput};
 use crate::lsp::wire::{ErrorCode, Incoming, RequestId};
-use crate::lsp::{LspDiagnosticsSender, PendingMap, framing};
+use crate::lsp::{LspDiagnosticsSender, PendingMap};
 
 pub struct Reader {
     pending: PendingMap,
@@ -49,8 +50,8 @@ impl Reader {
 
     pub fn run(self, stdout: ChildStdout) {
         let mut r = BufReader::new(stdout);
-        while let Ok(Some(msg)) = framing::read_message(&mut r) {
-            self.dispatch(msg);
+        while let Ok(Some(frame)) = LspFrame::read(&mut r) {
+            self.dispatch(frame.into_message());
         }
     }
 

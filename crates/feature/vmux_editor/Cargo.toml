@@ -20,6 +20,7 @@ unicode-width = "0.2"
 vmux_core = { path = "../../util/vmux_core" }
 vmux_native = { path = "../../util/vmux_native" }
 vmux_git = { path = "../vmux_git" }
+vmux_knowledge = { path = "../vmux_knowledge" }
 vmux_api = { path = "../../util/vmux_api" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]

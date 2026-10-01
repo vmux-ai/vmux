@@ -1,16 +1,7 @@
 use dioxus::prelude::*;
+pub use vmux_api::prompt_media::PromptMediaOption;
 
 use crate::i18n::translate;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PromptMediaOption {
-    pub key: String,
-    pub name: String,
-    pub display_path: String,
-    pub preview_data_url: String,
-    pub label: String,
-    pub is_dir: bool,
-}
 
 #[component]
 pub fn PromptMediaOptions(

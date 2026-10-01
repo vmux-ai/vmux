@@ -862,7 +862,7 @@ fn run_agent_commands(
                 (None, _) => context.panes.resolve_spiral(
                     &mut commands,
                     agent_pane,
-                    crate::event::TERMINAL_PAGE_URL,
+                    crate::TerminalPlugin::URL,
                     focus,
                     &mut split_this_batch,
                 ),

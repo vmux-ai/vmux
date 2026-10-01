@@ -59,13 +59,19 @@ pub struct CommandPaletteComposer {
     pub ahead: u32,
 }
 
-#[vmux_api::contract(Copy, Eq)]
-pub enum CommandPaletteMenu {
-    Agent,
-    Model,
-    Permission,
-    Project,
-    Branch,
+#[vmux_api::contract(Copy, Default, Eq)]
+pub struct CommandPaletteMenus {
+    pub agent: bool,
+    pub model: bool,
+    pub permission: bool,
+    pub project: bool,
+    pub branch: bool,
+}
+
+impl CommandPaletteMenus {
+    pub const fn is_open(self) -> bool {
+        self.agent || self.model || self.permission || self.project || self.branch
+    }
 }
 
 #[vmux_api::contract(Eq)]
@@ -182,7 +188,7 @@ pub struct CommandPaletteProjection {
     pub space_name: String,
     pub accent_agent: Option<String>,
     pub composer: CommandPaletteComposer,
-    pub menu: Option<CommandPaletteMenu>,
+    pub menus: CommandPaletteMenus,
     pub menu_cursor: u32,
     pub input_revision: u64,
     pub close_revision: u64,

@@ -20,7 +20,6 @@ use vmux_core::{
 use vmux_history::LastActivatedAt;
 
 use super::command::LayoutRequestSet;
-use crate::event::TERMINAL_PAGE_URL;
 use crate::pane::{
     Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection, leaf_pane_bundle, split_root_bundle,
 };
@@ -42,7 +41,6 @@ use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 struct ReopenClosedPage;
 
 #[vmux_command::command(id = "stack_reopen")]
-#[derive(Component)]
 struct ReopenClosedPageBinding;
 
 fn bind_command(registry: CommandRegistry, mut commands: Commands) {
@@ -613,7 +611,7 @@ fn reopen_page_content(page: &ArchivedPage, stack: Entity, commands: &mut Comman
     if page.url.is_empty() {
         return;
     }
-    if page.url.starts_with(TERMINAL_PAGE_URL) {
+    if vmux_api::VmuxRoute::parse(&page.url).is_some_and(|route| route.is_terminal()) {
         let cwd = page
             .launch
             .as_ref()
@@ -1777,7 +1775,7 @@ mod tests {
             .spawn((bevy::window::Window::default(), bevy::window::PrimaryWindow));
         app.world_mut().spawn((Space, SpaceId("s1".to_string())));
         app.world_mut().spawn(ArchivedPage {
-            url: TERMINAL_PAGE_URL.to_string(),
+            url: "vmux://terminal/".to_string(),
             space_id: "s1".to_string(),
             closed_at: 5,
             ..default()

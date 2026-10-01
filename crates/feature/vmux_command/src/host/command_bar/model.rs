@@ -299,6 +299,11 @@ impl PaletteRows {
         if !is_start {
             return matched;
         }
+        let startup_url = state
+            .pages
+            .iter()
+            .find(|page| page.startup)
+            .map(|page| page.url.trim_end_matches('/'));
         let mut kept = Vec::with_capacity(matched.len());
         for item in matched {
             let (CommandBarResultItem::Stack { url, .. } | CommandBarResultItem::Page { url, .. }) =
@@ -307,7 +312,7 @@ impl PaletteRows {
                 kept.push(item);
                 continue;
             };
-            if url.trim_end_matches('/') == "vmux://start" {
+            if startup_url == Some(url.trim_end_matches('/')) {
                 continue;
             }
             kept.push(item);
@@ -1393,6 +1398,7 @@ mod tests {
                         icon: vmux_api::PageIcon::None,
                         shortcut: String::new(),
                         prompt_target: false,
+                        startup: false,
                     },
                     CommandBarPage {
                         url: "vmux://sessions/vibe/".into(),
@@ -1401,6 +1407,7 @@ mod tests {
                         icon: vmux_api::PageIcon::None,
                         shortcut: String::new(),
                         prompt_target: true,
+                        startup: false,
                     },
                     CommandBarPage {
                         url: "vmux://sessions/codex/cli".into(),
@@ -1409,6 +1416,7 @@ mod tests {
                         icon: vmux_api::PageIcon::None,
                         shortcut: String::new(),
                         prompt_target: true,
+                        startup: false,
                     },
                 ],
                 commands: vec![CommandBarCommandEntry {
@@ -1689,6 +1697,11 @@ mod tests {
     #[test]
     fn the_start_surface_rests_on_open_stacks_and_hides_itself() {
         let mut state = Launcher::with_open_stack();
+        state.pages.push(CommandBarPage {
+            url: "vmux://start/".into(),
+            startup: true,
+            ..Default::default()
+        });
         state.tabs.push(CommandBarTab {
             title: "Start".into(),
             url: "vmux://start".into(),

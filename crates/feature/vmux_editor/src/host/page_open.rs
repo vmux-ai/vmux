@@ -95,7 +95,7 @@ fn handle_file(
         };
         let clean_url = task.url.split('#').next().unwrap_or(&task.url).to_string();
         let page_url = if clean_url.trim_end_matches('/')
-            == vmux_core::knowledge::KNOWLEDGE_PAGE_URL.trim_end_matches('/')
+            == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/')
         {
             FileView { path: path.clone() }.url()
         } else {
@@ -166,9 +166,7 @@ impl FilePageTarget {
                 error: String::new(),
             });
         }
-        if url.trim_end_matches('/')
-            == vmux_core::knowledge::KNOWLEDGE_PAGE_URL.trim_end_matches('/')
-        {
+        if url.trim_end_matches('/') == vmux_knowledge::KnowledgePlugin::URL.trim_end_matches('/') {
             return Some(Self {
                 path: Some(knowledge_root.to_path_buf()),
                 error: String::new(),
@@ -370,7 +368,7 @@ mod tests {
 
     #[test]
     fn knowledge_page_redirects_to_its_directory() {
-        let mut stack = EditorStack::showing(vmux_core::knowledge::KNOWLEDGE_PAGE_URL);
+        let mut stack = EditorStack::showing(vmux_knowledge::KnowledgePlugin::URL);
         let page = stack.page();
 
         assert_eq!(
@@ -381,7 +379,7 @@ mod tests {
 
     #[test]
     fn selecting_a_note_updates_the_file_url() {
-        let mut stack = EditorStack::showing(vmux_core::knowledge::KNOWLEDGE_PAGE_URL);
+        let mut stack = EditorStack::showing(vmux_knowledge::KnowledgePlugin::URL);
         let page = stack.page();
 
         stack.select(page, Path::new("/tmp/note.md"));

@@ -19,16 +19,16 @@ pub(crate) struct Edited {
 }
 
 impl TextEditCommand {
-    pub(crate) fn from_code(code: &str) -> Option<Self> {
-        match code {
-            "KeyA" => Some(Self::Home),
-            "KeyE" => Some(Self::End),
-            "KeyF" => Some(Self::Forward),
-            "KeyB" => Some(Self::Back),
-            "KeyD" => Some(Self::Delete),
-            "KeyH" => Some(Self::Backspace),
-            "KeyW" => Some(Self::DeleteWord),
-            "KeyU" => Some(Self::DeleteToBeginning),
+    pub(crate) fn from_command(command: &str) -> Option<Self> {
+        match command {
+            "command_bar_home" => Some(Self::Home),
+            "command_bar_end" => Some(Self::End),
+            "command_bar_forward" => Some(Self::Forward),
+            "command_bar_back" => Some(Self::Back),
+            "command_bar_delete" => Some(Self::Delete),
+            "command_bar_backspace" => Some(Self::Backspace),
+            "command_bar_delete_word" => Some(Self::DeleteWord),
+            "command_bar_delete_to_beginning" => Some(Self::DeleteToBeginning),
             _ => None,
         }
     }
@@ -94,25 +94,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn readline_chords_map_to_text_edits() {
+    fn readline_commands_map_to_text_edits() {
         let edits = [
-            ("KeyA", TextEditCommand::Home),
-            ("KeyE", TextEditCommand::End),
-            ("KeyF", TextEditCommand::Forward),
-            ("KeyB", TextEditCommand::Back),
-            ("KeyD", TextEditCommand::Delete),
-            ("KeyH", TextEditCommand::Backspace),
-            ("KeyW", TextEditCommand::DeleteWord),
-            ("KeyU", TextEditCommand::DeleteToBeginning),
+            ("command_bar_home", TextEditCommand::Home),
+            ("command_bar_end", TextEditCommand::End),
+            ("command_bar_forward", TextEditCommand::Forward),
+            ("command_bar_back", TextEditCommand::Back),
+            ("command_bar_delete", TextEditCommand::Delete),
+            ("command_bar_backspace", TextEditCommand::Backspace),
+            ("command_bar_delete_word", TextEditCommand::DeleteWord),
+            (
+                "command_bar_delete_to_beginning",
+                TextEditCommand::DeleteToBeginning,
+            ),
         ];
-        for (code, command) in edits {
-            assert_eq!(TextEditCommand::from_code(code), Some(command), "{code}");
+        for (id, command) in edits {
+            assert_eq!(TextEditCommand::from_command(id), Some(command), "{id}");
         }
 
-        for code in [
-            "KeyC", "KeyJ", "KeyK", "KeyN", "KeyP", "KeyG", "KeyZ", "Enter", "Tab", "",
-        ] {
-            assert_eq!(TextEditCommand::from_code(code), None, "{code}");
+        for id in ["command_bar_next", "command_bar_submit", ""] {
+            assert_eq!(TextEditCommand::from_command(id), None, "{id}");
         }
     }
 

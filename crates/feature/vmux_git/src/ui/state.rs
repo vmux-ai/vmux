@@ -1,10 +1,11 @@
 use dioxus::prelude::*;
-use vmux_ui::hooks::use_ui_state_patches;
+use vmux_ui::hooks::use_ui_state_binding;
 use vmux_ui::scroll::ScrollIntoView;
 
 use crate::event::GitOperation;
 use crate::state::{
-    GitBranchPrompt, GitDirectoryState, GitPageControllerState, GitPageSnapshot, GitUiState,
+    GitBranchPrompt, GitBranchPromptRequested, GitDirectoryState, GitPageContext,
+    GitPageControllerState, GitPageSnapshot, GitSelectionReveal, GitUiState, GitWorkspaceChanged,
 };
 
 #[derive(Clone, Copy)]
@@ -22,10 +23,11 @@ pub(super) struct GitPageState {
 
 impl GitPageState {
     pub(super) fn use_state() -> Self {
+        let ui = use_ui_state_binding::<GitUiState>();
         let state = Self {
-            snapshot: use_signal(GitPageSnapshot::default),
-            controller: use_signal(GitPageControllerState::default),
-            directory: use_signal(GitDirectoryState::default),
+            snapshot: ui.use_value::<GitPageSnapshot>().value,
+            controller: ui.use_value::<GitPageControllerState>().value,
+            directory: ui.use_value::<GitDirectoryState>().value,
             branch_prompt: use_signal(|| None),
             branch_draft: use_signal(String::new),
             commit_message: use_signal(String::new),
@@ -33,56 +35,37 @@ impl GitPageState {
             handled_result_sequence: use_signal(|| 0),
             handled_selection_reveal: use_signal(|| 0),
         };
-        state.subscribe();
+        state.subscribe(ui);
         state
     }
 
-    fn subscribe(self) {
-        let _error = use_ui_state_patches::<GitUiState>(move |patch| {
-            if let Some(snapshot) = &patch.snapshot {
-                self.apply_snapshot(*snapshot.clone());
+    fn subscribe(self, ui: vmux_ui::hooks::UiStateBinding<GitUiState>) {
+        ui.use_updates::<GitPageSnapshot>(move |snapshot| self.apply_result(&snapshot));
+        ui.use_updates::<GitBranchPromptRequested>(move |request| {
+            if matches!(&request.prompt, GitBranchPrompt::Create { .. }) {
+                let mut draft = self.branch_draft;
+                draft.set(String::new());
             }
-            if let Some(directory) = &patch.directory {
-                let mut current = self.directory;
-                current.set(*directory.clone());
+            let mut prompt = self.branch_prompt;
+            prompt.set(Some(request.prompt));
+        });
+        ui.use_updates::<GitSelectionReveal>(move |request| {
+            if request.revision <= (self.handled_selection_reveal)() {
+                return;
             }
-            if let Some(controller) = &patch.controller {
-                let mut current = self.controller;
-                current.set(*controller.clone());
-            }
-            if let Some(request) = &patch.branch_prompt {
-                if matches!(&request.prompt, GitBranchPrompt::Create { .. }) {
-                    let mut draft = self.branch_draft;
-                    draft.set(String::new());
-                }
-                let mut prompt = self.branch_prompt;
-                prompt.set(Some(request.prompt.clone()));
-            }
-            if let Some(request) = &patch.selection_reveal {
-                if request.revision <= (self.handled_selection_reveal)() {
-                    return;
-                }
-                let mut handled = self.handled_selection_reveal;
-                handled.set(request.revision);
-                ScrollIntoView::nearest(&request.id);
-            }
-            if patch.context.is_some() {
-                self.reset_local_render_state();
-            }
-            if let Some(workspace) = &patch.workspace
-                && workspace.error.is_empty()
+            let mut handled = self.handled_selection_reveal;
+            handled.set(request.revision);
+            ScrollIntoView::nearest(&request.id);
+        });
+        ui.use_updates::<GitPageContext>(move |_| self.reset_local_render_state());
+        ui.use_updates::<GitWorkspaceChanged>(move |workspace| {
+            if workspace.error.is_empty()
                 && !workspace.path.is_empty()
                 && workspace.path != self.workspace()
             {
                 self.reset_local_render_state();
             }
         });
-    }
-
-    fn apply_snapshot(self, snapshot: GitPageSnapshot) {
-        self.apply_result(&snapshot);
-        let mut current = self.snapshot;
-        current.set(snapshot);
     }
 
     fn apply_result(self, snapshot: &GitPageSnapshot) {
