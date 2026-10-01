@@ -31,7 +31,7 @@ pub use host::{
     QueuedPrompt, RoomAgentBinding, RoomEventIdentity, RoomMember, RoomMessageContent,
     RoomMetadata, RoomOpCommitted, RoomOpReceived, RoomPlugin, RoomProjection, StreamingMessage,
     ToastLevel, acp_registry, acp_tool, attach, attention, command, command_bar, event, follow,
-    handoff, message, page_open, run_state_kind, runtime, snapshot, toast, url,
+    message, page_open, run_state_kind, runtime, snapshot, toast, url,
 };
 #[cfg(all(host, feature = "app"))]
 pub use mcp::McpServerConfig;

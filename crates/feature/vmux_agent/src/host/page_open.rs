@@ -568,7 +568,7 @@ fn handle_swap_stack_session(
                     truncated: handoff.truncated,
                     first_prompt: None,
                 },
-                crate::handoff::PendingHandoff {
+                super::handoff::PendingHandoff {
                     context: handoff.context.clone(),
                     sent: false,
                 },
@@ -583,7 +583,7 @@ fn handle_swap_stack_session(
             .remove::<crate::AgentApprovalPolicy>()
             .remove::<vmux_session::AgentRunState>()
             .remove::<ImportedConversation>()
-            .remove::<crate::handoff::PendingHandoff>()
+            .remove::<super::handoff::PendingHandoff>()
             .remove::<vmux_core::AgentWorkingDir>()
             .remove::<vmux_core::team::Agent>()
             .remove::<vmux_core::team::Profile>();

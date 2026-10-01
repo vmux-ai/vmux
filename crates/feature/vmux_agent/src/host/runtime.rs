@@ -15,6 +15,7 @@ use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktre
 use vmux_layout::worktree::TabWorktreeReady;
 use vmux_terminal::reattach_terminal_bundle;
 
+use super::handoff::PendingHandoff;
 use crate::acp_registry::{Registry, RegistryAgent};
 use crate::acp_tool::{AcpLaunchStarted, AcpToolPlugin};
 use crate::event::{
@@ -22,7 +23,6 @@ use crate::event::{
     UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState, UiAgentSessionCreated,
     UiAgentWorkspaceChanged,
 };
-use crate::handoff::PendingHandoff;
 use crate::policy::{AcpWorkspacePolicy, AgentPolicyPlugin};
 use vmux_chat::host::{ChatView, ImportedConversation};
 use vmux_session::AgentRunState;

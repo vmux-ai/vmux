@@ -17,12 +17,12 @@ use vmux_setting::{AppSettings, SettingsSaveRequest};
 
 use crate::follow::AgentFileLayout;
 
-pub(crate) struct TidyPlugin;
+pub struct Plugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct TidySet;
+pub struct TidySet;
 
-impl Plugin for TidyPlugin {
+impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AgentAttention>()
             .add_message::<CloseStackRequest>()
@@ -31,12 +31,12 @@ impl Plugin for TidyPlugin {
             .add_observer(on_request)
             .add_systems(
                 Update,
-                on_attention
+                attention
                     .in_set(TidySet)
                     .after(ComputeFocusSet)
                     .after(crate::attention::TurnEndedSet),
             )
-            .add_systems(Update, on_idle.after(ComputeFocusSet));
+            .add_systems(Update, idle.after(ComputeFocusSet));
     }
 }
 
@@ -229,7 +229,7 @@ fn tidy_follow_pane(
     }
 }
 
-fn on_attention(
+fn attention(
     mut reader: MessageReader<AgentAttention>,
     settings: Option<Res<AppSettings>>,
     agents: Query<&ProcessId, With<Agent>>,
@@ -266,7 +266,7 @@ fn on_attention(
     }
 }
 
-fn on_idle(
+fn idle(
     settings: Option<Res<AppSettings>>,
     sessions: Query<(&AcpSession, &AgentRunState), Changed<AgentRunState>>,
     layout: AgentFileLayout,

@@ -4,16 +4,13 @@ use vmux_chat::host::ImportedConversation;
 
 use crate::Message;
 
-pub(super) struct HandoffPlugin;
+pub struct Plugin;
 
-impl Plugin for HandoffPlugin {
+impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_handoff_directory)
-            .add_systems(Update, load_imported_conversation)
-            .add_systems(
-                Update,
-                persist_imported_conversation.after(vmux_core::service::ServiceMessageSet),
-            );
+        app.add_systems(Startup, spawn)
+            .add_systems(Update, load)
+            .add_systems(Update, persist.after(vmux_core::service::ServiceMessageSet));
     }
 }
 
@@ -75,7 +72,7 @@ impl HandoffDirectory {
     }
 }
 
-fn spawn_handoff_directory(mut commands: Commands) {
+fn spawn(mut commands: Commands) {
     commands.spawn((
         Name::new("Agent handoff directory"),
         HandoffDirectory(
@@ -86,7 +83,7 @@ fn spawn_handoff_directory(mut commands: Commands) {
     ));
 }
 
-fn load_imported_conversation(
+fn load(
     directory: Single<&HandoffDirectory>,
     sessions: Query<
         (Entity, &vmux_session::AcpSession),
@@ -108,7 +105,7 @@ fn load_imported_conversation(
     }
 }
 
-fn persist_imported_conversation(
+fn persist(
     directory: Single<&HandoffDirectory>,
     mut created: MessageReader<crate::event::UiAgentSessionCreated>,
     sessions: Query<(&vmux_session::AcpSession, &ImportedConversation)>,
@@ -129,20 +126,6 @@ fn persist_imported_conversation(
 pub struct PendingHandoff {
     pub context: String,
     pub sent: bool,
-}
-
-#[cfg(test)]
-fn wire_prompt(context: &str, display_text: &str) -> String {
-    vmux_api::protocol::compose_agent_prompt(display_text, Some(context))
-}
-
-#[cfg(test)]
-fn visible_messages(imported: Option<&ImportedConversation>, live: &[Message]) -> Vec<Message> {
-    let mut messages = imported
-        .map(|imported| imported.messages.clone())
-        .unwrap_or_default();
-    messages.extend_from_slice(live);
-    messages
 }
 
 #[cfg(test)]
@@ -188,7 +171,8 @@ mod tests {
 
     #[test]
     fn private_wire_prompt_keeps_display_prompt_separate() {
-        let prompt = wire_prompt("prior conversation", "continue here");
+        let prompt =
+            vmux_api::protocol::compose_agent_prompt("continue here", Some("prior conversation"));
 
         assert!(prompt.starts_with(vmux_api::protocol::PRIVATE_CONTEXT_PREFIX));
         assert!(prompt.contains("prior conversation"));
@@ -198,7 +182,10 @@ mod tests {
     #[test]
     fn replay_private_prompt_is_replaced_with_display_prompt() {
         let messages = vec![
-            user(&wire_prompt("prior conversation", "continue here")),
+            user(&vmux_api::protocol::compose_agent_prompt(
+                "continue here",
+                Some("prior conversation"),
+            )),
             assistant("done"),
         ];
 
@@ -227,8 +214,14 @@ mod tests {
     #[test]
     fn replay_sanitizes_every_retried_private_prompt_from_its_own_payload() {
         let messages = vec![
-            user(&wire_prompt("prior conversation", "first try")),
-            user(&wire_prompt("prior conversation", "second try")),
+            user(&vmux_api::protocol::compose_agent_prompt(
+                "first try",
+                Some("prior conversation"),
+            )),
+            user(&vmux_api::protocol::compose_agent_prompt(
+                "second try",
+                Some("prior conversation"),
+            )),
         ];
 
         let directory = TestHandoffDirectory::new("retry");
@@ -336,9 +329,8 @@ mod tests {
             first_prompt: Some("new".into()),
         };
 
-        assert_eq!(
-            visible_messages(Some(&imported), &[assistant("reply")]),
-            vec![user("old"), assistant("reply")]
-        );
+        let mut messages = imported.messages.clone();
+        messages.push(assistant("reply"));
+        assert_eq!(messages, vec![user("old"), assistant("reply")]);
     }
 }

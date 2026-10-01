@@ -4,7 +4,7 @@ pub use tree::AgentPlugin;
 pub mod acp;
 pub use acp as acp_tool;
 pub use acp::registry as acp_registry;
-pub(crate) mod approval;
+mod approval;
 pub mod attach;
 pub mod attention;
 pub mod command;
@@ -12,7 +12,7 @@ pub mod command_bar;
 mod continuation;
 pub mod event;
 pub mod follow;
-pub mod handoff;
+mod handoff;
 mod ingress;
 mod model_selection;
 pub mod page_open;
@@ -26,7 +26,7 @@ pub mod url;
 #[cfg(test)]
 pub mod test_support;
 
-pub(crate) mod tidy;
+mod tidy;
 
 pub use vmux_api::room as message;
 

@@ -12,26 +12,22 @@ use vmux_session::AcpSession;
 use vmux_session::AgentRunState;
 use vmux_session::{AgentApprovalPolicy, approval_tool_key};
 
-pub(crate) struct ApprovalPlugin;
+pub struct Plugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ApprovalSyncSet;
 
-impl Plugin for ApprovalPlugin {
+impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
-            .add_systems(Startup, spawn_agent_approval_store)
-            .add_observer(receive_chat_approval)
-            .add_observer(handle_approval_reply)
+            .add_systems(Startup, spawn)
+            .add_observer(receive)
+            .add_observer(reply)
             .add_systems(Update, sync_policy.in_set(ApprovalSyncSet));
     }
 }
 
-fn receive_chat_approval(
-    trigger: On<UiInput<ChatApproval>>,
-    child_of: Query<&ChildOf>,
-    mut commands: Commands,
-) {
+fn receive(trigger: On<UiInput<ChatApproval>>, child_of: Query<&ChildOf>, mut commands: Commands) {
     let webview = trigger.event().webview;
     let payload = &trigger.event().payload;
     let Ok(parent) = child_of.get(webview) else {
@@ -44,7 +40,7 @@ fn receive_chat_approval(
     });
 }
 
-fn spawn_agent_approval_store(mut commands: Commands) {
+fn spawn(mut commands: Commands) {
     commands.spawn((
         Name::new("Agent approval store"),
         AgentApprovalStore::load(),
@@ -80,8 +76,8 @@ impl AgentApprovalStore {
     }
 
     fn policy_for(&self, agent: &str, cwd: &Path) -> AgentApprovalPolicy {
-        let agent = canonical_agent_id(agent);
-        let auto = approval_scope_key(cwd)
+        let agent = Self::agent_id(agent);
+        let auto = Self::scope(cwd)
             .and_then(|repository| {
                 self.grants
                     .by_agent
@@ -96,13 +92,13 @@ impl AgentApprovalStore {
     }
 
     fn remember(&mut self, agent: &str, cwd: &Path, tool: &str) {
-        let Some(scope) = approval_scope_key(cwd) else {
+        let Some(scope) = Self::scope(cwd) else {
             return;
         };
         let inserted = self
             .grants
             .by_agent
-            .entry(canonical_agent_id(agent))
+            .entry(Self::agent_id(agent))
             .or_default()
             .entry(scope)
             .or_default()
@@ -116,18 +112,18 @@ impl AgentApprovalStore {
         let bytes = serde_json::to_vec_pretty(&self.grants).map_err(std::io::Error::other)?;
         vmux_path::AtomicFile::write(&self.path, &bytes)
     }
-}
 
-fn approval_scope_key(cwd: &Path) -> Option<String> {
-    vmux_git::worktree::CheckoutInfo::try_from(cwd)
-        .map(|checkout| checkout.common_dir)
-        .ok()
-        .or_else(|| std::fs::canonicalize(cwd).ok())
-        .map(|path| path.to_string_lossy().into_owned())
-}
+    fn scope(cwd: &Path) -> Option<String> {
+        vmux_git::worktree::CheckoutInfo::try_from(cwd)
+            .map(|checkout| checkout.common_dir)
+            .ok()
+            .or_else(|| std::fs::canonicalize(cwd).ok())
+            .map(|path| path.to_string_lossy().into_owned())
+    }
 
-fn canonical_agent_id(agent: &str) -> String {
-    agent.trim().to_ascii_lowercase()
+    fn agent_id(agent: &str) -> String {
+        agent.trim().to_ascii_lowercase()
+    }
 }
 
 fn sync_policy(
@@ -140,7 +136,7 @@ fn sync_policy(
 }
 
 #[allow(clippy::type_complexity)]
-fn handle_approval_reply(
+fn reply(
     trigger: On<AgentApprovalReply>,
     mut q: Query<(&mut AgentRunState, &mut AgentApprovalPolicy, &AcpSession)>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -194,7 +190,7 @@ mod tests {
     fn make_app() -> App {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_plugins(ApprovalPlugin);
+            .add_plugins(Plugin);
         app.update();
         let path =
             std::env::temp_dir().join(format!("vmux-agent-approval-{}.json", uuid::Uuid::new_v4()));

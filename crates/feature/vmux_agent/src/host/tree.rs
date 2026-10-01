@@ -20,7 +20,7 @@ impl Plugin for AgentPlugin {
             vmux_terminal::TerminalContractPlugin,
             vmux_session::room::RoomPlugin,
             crate::command_bar::CommandBarPlugin,
-            super::approval::ApprovalPlugin,
+            super::approval::Plugin,
             super::attach::AttachPlugin,
             super::attention::AttentionPlugin,
             super::command::CommandPlugin,
@@ -28,11 +28,11 @@ impl Plugin for AgentPlugin {
         ))
         .add_plugins((
             super::follow::FollowPlugin,
-            super::handoff::HandoffPlugin,
+            super::handoff::Plugin,
             super::ingress::AgentIngressPlugin,
             super::page_open::PageOpenPlugin,
             super::snapshot::SnapshotPlugin,
-            super::tidy::TidyPlugin,
+            super::tidy::Plugin,
             super::toast::ToastPlugin,
         ))
         .add_systems(PreStartup, spawn_agent_store_validator)
