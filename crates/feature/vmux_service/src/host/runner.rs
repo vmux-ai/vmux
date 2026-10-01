@@ -7,52 +7,63 @@ use tokio::sync::mpsc;
 const HOUSEKEEPING_FLOOR: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParkOutcome {
+enum ParkOutcome {
     Woken,
     TimedOut,
     Shutdown,
 }
 
-pub fn park_for_wake(
-    runtime: &Handle,
-    wake_rx: &mut mpsc::UnboundedReceiver<()>,
-    signal_rx: &mut mpsc::Receiver<()>,
-    floor: Duration,
-) -> ParkOutcome {
-    let outcome = runtime.block_on(async {
-        tokio::select! {
-            wake = wake_rx.recv() => match wake {
-                Some(_) => ParkOutcome::Woken,
-                None => ParkOutcome::Shutdown,
-            },
-            _ = signal_rx.recv() => ParkOutcome::Shutdown,
-            _ = tokio::time::sleep(floor) => ParkOutcome::TimedOut,
-        }
-    });
-
-    if outcome == ParkOutcome::Woken {
-        while wake_rx.try_recv().is_ok() {}
-    }
-    outcome
+pub struct WakeDrivenRunner {
+    runtime: Handle,
+    wake_rx: mpsc::UnboundedReceiver<()>,
+    signal_rx: mpsc::Receiver<()>,
 }
 
-pub fn wake_driven_runner(
-    runtime: Handle,
-    mut wake_rx: mpsc::UnboundedReceiver<()>,
-    mut signal_rx: mpsc::Receiver<()>,
-) -> impl FnOnce(App) -> AppExit {
-    move |mut app: App| {
+impl WakeDrivenRunner {
+    pub fn new(
+        runtime: Handle,
+        wake_rx: mpsc::UnboundedReceiver<()>,
+        signal_rx: mpsc::Receiver<()>,
+    ) -> Self {
+        Self {
+            runtime,
+            wake_rx,
+            signal_rx,
+        }
+    }
+
+    pub fn into_runner(mut self) -> impl FnOnce(App) -> AppExit {
+        move |mut app: App| self.run(&mut app)
+    }
+
+    fn run(&mut self, app: &mut App) -> AppExit {
         loop {
             app.update();
             if let Some(exit) = app.should_exit() {
                 return exit;
             }
-            if park_for_wake(&runtime, &mut wake_rx, &mut signal_rx, HOUSEKEEPING_FLOOR)
-                == ParkOutcome::Shutdown
-            {
+            if self.park(HOUSEKEEPING_FLOOR) == ParkOutcome::Shutdown {
                 return AppExit::Success;
             }
         }
+    }
+
+    fn park(&mut self, floor: Duration) -> ParkOutcome {
+        let outcome = self.runtime.block_on(async {
+            tokio::select! {
+                wake = self.wake_rx.recv() => match wake {
+                    Some(_) => ParkOutcome::Woken,
+                    None => ParkOutcome::Shutdown,
+                },
+                _ = self.signal_rx.recv() => ParkOutcome::Shutdown,
+                _ = tokio::time::sleep(floor) => ParkOutcome::TimedOut,
+            }
+        });
+
+        if outcome == ParkOutcome::Woken {
+            while self.wake_rx.try_recv().is_ok() {}
+        }
+        outcome
     }
 }
 
@@ -71,22 +82,18 @@ mod tests {
     #[test]
     fn a_burst_of_wakes_costs_one_update() {
         let rt = runtime();
-        let (wake_tx, mut wake_rx) = mpsc::unbounded_channel();
-        let (_signal_tx, mut signal_rx) = mpsc::channel(1);
+        let (wake_tx, wake_rx) = mpsc::unbounded_channel();
+        let (_signal_tx, signal_rx) = mpsc::channel(1);
         for _ in 0..5 {
             wake_tx.send(()).unwrap();
         }
 
-        let outcome = park_for_wake(
-            rt.handle(),
-            &mut wake_rx,
-            &mut signal_rx,
-            Duration::from_secs(30),
-        );
+        let mut runner = WakeDrivenRunner::new(rt.handle().clone(), wake_rx, signal_rx);
+        let outcome = runner.park(Duration::from_secs(30));
 
         assert_eq!(outcome, ParkOutcome::Woken);
         assert!(
-            wake_rx.try_recv().is_err(),
+            runner.wake_rx.try_recv().is_err(),
             "the other four wakes should have been coalesced into this update"
         );
     }
@@ -94,15 +101,11 @@ mod tests {
     #[test]
     fn an_idle_daemon_wakes_only_on_the_housekeeping_floor() {
         let rt = runtime();
-        let (_wake_tx, mut wake_rx) = mpsc::unbounded_channel();
-        let (_signal_tx, mut signal_rx) = mpsc::channel(1);
+        let (_wake_tx, wake_rx) = mpsc::unbounded_channel();
+        let (_signal_tx, signal_rx) = mpsc::channel(1);
 
-        let outcome = park_for_wake(
-            rt.handle(),
-            &mut wake_rx,
-            &mut signal_rx,
-            Duration::from_millis(10),
-        );
+        let mut runner = WakeDrivenRunner::new(rt.handle().clone(), wake_rx, signal_rx);
+        let outcome = runner.park(Duration::from_millis(10));
 
         assert_eq!(outcome, ParkOutcome::TimedOut);
     }
@@ -110,16 +113,12 @@ mod tests {
     #[test]
     fn a_signal_stops_the_runner() {
         let rt = runtime();
-        let (_wake_tx, mut wake_rx) = mpsc::unbounded_channel();
-        let (signal_tx, mut signal_rx) = mpsc::channel(1);
+        let (_wake_tx, wake_rx) = mpsc::unbounded_channel();
+        let (signal_tx, signal_rx) = mpsc::channel(1);
         signal_tx.try_send(()).unwrap();
 
-        let outcome = park_for_wake(
-            rt.handle(),
-            &mut wake_rx,
-            &mut signal_rx,
-            Duration::from_secs(30),
-        );
+        let mut runner = WakeDrivenRunner::new(rt.handle().clone(), wake_rx, signal_rx);
+        let outcome = runner.park(Duration::from_secs(30));
 
         assert_eq!(outcome, ParkOutcome::Shutdown);
     }
@@ -127,16 +126,12 @@ mod tests {
     #[test]
     fn the_server_dropping_its_wake_sender_stops_the_runner() {
         let rt = runtime();
-        let (wake_tx, mut wake_rx) = mpsc::unbounded_channel::<()>();
-        let (_signal_tx, mut signal_rx) = mpsc::channel(1);
+        let (wake_tx, wake_rx) = mpsc::unbounded_channel::<()>();
+        let (_signal_tx, signal_rx) = mpsc::channel(1);
         drop(wake_tx);
 
-        let outcome = park_for_wake(
-            rt.handle(),
-            &mut wake_rx,
-            &mut signal_rx,
-            Duration::from_secs(30),
-        );
+        let mut runner = WakeDrivenRunner::new(rt.handle().clone(), wake_rx, signal_rx);
+        let outcome = runner.park(Duration::from_secs(30));
 
         assert_eq!(outcome, ParkOutcome::Shutdown);
     }
@@ -149,7 +144,9 @@ mod tests {
         signal_tx.try_send(()).unwrap();
 
         let mut app = App::new();
-        app.set_runner(wake_driven_runner(rt.handle().clone(), wake_rx, signal_rx));
+        app.set_runner(
+            WakeDrivenRunner::new(rt.handle().clone(), wake_rx, signal_rx).into_runner(),
+        );
 
         assert_eq!(app.run(), AppExit::Success);
         drop(wake_tx);

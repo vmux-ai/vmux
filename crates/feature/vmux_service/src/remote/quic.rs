@@ -52,7 +52,7 @@ impl IdentityStore {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&cert_path, &identity.certificate_pem)?;
-        super::write_private(&key_path, &identity.private_key_pem)?;
+        super::PrivateFile::new(key_path).write(&identity.private_key_pem)?;
         self.persist_fingerprint(&identity.fingerprint)?;
         Ok(identity)
     }

@@ -18,21 +18,21 @@ pub mod server;
 pub(crate) use server::RemotePlugin;
 
 #[cfg(host)]
-pub(crate) fn write_private(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
-    let _ = std::fs::remove_file(path);
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
+pub(crate) struct PrivateFile(std::path::PathBuf);
 
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)?;
-        file.write_all(contents.as_bytes())
+#[cfg(host)]
+impl PrivateFile {
+    pub(crate) fn new(path: impl Into<std::path::PathBuf>) -> Self {
+        Self(path.into())
     }
-    #[cfg(not(unix))]
-    std::fs::write(path, contents)
+
+    pub(crate) fn write(&self, contents: impl AsRef<[u8]>) -> std::io::Result<()> {
+        vmux_path::AtomicFile::write(&self.0, contents.as_ref())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600))?;
+        }
+        Ok(())
+    }
 }

@@ -3,7 +3,7 @@ use tokio::sync::mpsc;
 use tracing_subscriber::{EnvFilter, fmt};
 use vmux_core::service::ServicePaths;
 use vmux_service::DaemonBinary;
-use vmux_service::runner::wake_driven_runner;
+use vmux_service::runner::WakeDrivenRunner;
 
 fn main() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -24,7 +24,7 @@ fn main() {
 
     let mut app = App::new();
     app.add_plugins(vmux_service::server::ServiceDaemonPlugin)
-        .set_runner(wake_driven_runner(handle, wake_rx, signal_rx));
+        .set_runner(WakeDrivenRunner::new(handle, wake_rx, signal_rx).into_runner());
     app.world_mut().spawn(daemon);
     app.run();
 }

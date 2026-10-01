@@ -22,7 +22,7 @@ impl RelayToken {
             return Ok(Self(token));
         }
         let token = Token::generate();
-        PrivateFile::new(path).write(token.as_bytes())?;
+        super::PrivateFile::new(path).write(token.as_bytes())?;
         Ok(Self(token))
     }
 
@@ -347,25 +347,7 @@ impl RemoteAuthorizationStore {
 
     fn save(&self, file: &StoredAuthorizations) -> std::io::Result<()> {
         let bytes = serde_json::to_vec_pretty(file).map_err(std::io::Error::other)?;
-        PrivateFile::new(self.path.clone()).write(&bytes)
-    }
-}
-
-struct PrivateFile(PathBuf);
-
-impl PrivateFile {
-    fn new(path: impl Into<PathBuf>) -> Self {
-        Self(path.into())
-    }
-
-    fn write(&self, bytes: &[u8]) -> std::io::Result<()> {
-        vmux_path::AtomicFile::write(&self.0, bytes)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600))?;
-        }
-        Ok(())
+        super::PrivateFile::new(self.path.clone()).write(&bytes)
     }
 }
 

@@ -221,7 +221,7 @@ struct RegisteredDevice {
 impl RegisteredDevice {
     fn claim(device_id: &DeviceId) -> std::io::Result<Self> {
         let path = RemotePaths::current().relay_registration();
-        super::super::write_private(&path, device_id.as_str())?;
+        super::super::PrivateFile::new(&path).write(device_id.as_str())?;
         Ok(Self { path })
     }
 
@@ -267,7 +267,7 @@ impl RelayDevice {
             }
         }
         let minted = uuid::Uuid::new_v4().simple().to_string();
-        super::super::write_private(&self.path, &minted)?;
+        super::super::PrivateFile::new(&self.path).write(&minted)?;
         Ok(DeviceId::new(minted))
     }
 }

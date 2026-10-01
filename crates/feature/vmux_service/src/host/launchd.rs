@@ -53,7 +53,7 @@ impl LaunchAgent {
         std::fs::create_dir_all(ServicePaths::log_dir())?;
         let log = ServicePaths::current().log();
         self.reconcile_plist_at(&plist, binary_path, &log)?;
-        bootstrap(&plist)?;
+        self.bootstrap(&plist)?;
         Ok(plist)
     }
 
@@ -67,7 +67,7 @@ impl LaunchAgent {
     }
 
     pub fn bootout(&self) -> std::io::Result<()> {
-        let uid = current_uid();
+        let uid = self.uid();
         let label = self.label();
         let status = Command::new("launchctl")
             .args(["bootout", &format!("gui/{uid}/{label}")])
@@ -87,7 +87,7 @@ impl LaunchAgent {
         if rewrote {
             let _ = self.bootout();
         }
-        bootstrap(&plist)?;
+        self.bootstrap(&plist)?;
         self.kickstart()
     }
 
@@ -114,7 +114,7 @@ impl LaunchAgent {
     }
 
     pub fn kickstart(&self) -> std::io::Result<()> {
-        let uid = current_uid();
+        let uid = self.uid();
         let label = self.label();
         let status = Command::new("launchctl")
             .args(["kickstart", "-k", &format!("gui/{uid}/{label}")])
@@ -124,22 +124,22 @@ impl LaunchAgent {
         }
         Ok(())
     }
-}
 
-fn current_uid() -> u32 {
-    unsafe { libc::getuid() }
-}
-
-fn bootstrap(plist: &Path) -> std::io::Result<()> {
-    let uid = current_uid();
-    let status = Command::new("launchctl")
-        .args(["bootstrap", &format!("gui/{uid}")])
-        .arg(plist)
-        .status()?;
-    if !status.success() {
-        tracing::warn!(code = ?status.code(), "launchctl bootstrap exited nonzero");
+    fn uid(&self) -> u32 {
+        unsafe { libc::getuid() }
     }
-    Ok(())
+
+    fn bootstrap(&self, plist: &Path) -> std::io::Result<()> {
+        let uid = self.uid();
+        let status = Command::new("launchctl")
+            .args(["bootstrap", &format!("gui/{uid}")])
+            .arg(plist)
+            .status()?;
+        if !status.success() {
+            tracing::warn!(code = ?status.code(), "launchctl bootstrap exited nonzero");
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
