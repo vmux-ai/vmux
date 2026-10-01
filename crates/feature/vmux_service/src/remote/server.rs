@@ -187,268 +187,288 @@ pub(crate) struct RemoteState {
     pub(crate) client_ops: ClientOperations,
 }
 
-pub(crate) async fn broker_result(
-    state: &RemoteState,
-    request: vmux_api::protocol::AgentRequest,
-) -> Option<vmux_api::protocol::AgentCommandResult> {
-    state
-        .broker
-        .command(vmux_api::protocol::AgentRequestId::new(), None, request)
-        .await
-        .ok()
-}
-
-pub(crate) async fn session_messages(state: &RemoteState, sid: &str) -> Option<Vec<Message>> {
-    state.acp.remote_messages(sid.to_string()).await
-}
-
-pub(crate) async fn current_session(state: &RemoteState, sid: &str) -> Option<RemoteSession> {
-    let mut session = state.acp.remote_session(sid.to_string()).await?;
-    if let Some(messages) = session_messages(state, sid).await {
-        session.title = vmux_core::room::ConversationTitle::from_messages(&messages, &session.name);
+impl RemoteState {
+    pub(crate) async fn broker_result(
+        &self,
+        request: vmux_api::protocol::AgentRequest,
+    ) -> Option<vmux_api::protocol::AgentCommandResult> {
+        self.broker
+            .command(vmux_api::protocol::AgentRequestId::new(), None, request)
+            .await
+            .ok()
     }
-    Some(session)
-}
 
-pub(crate) fn valid_client_op_id(client_op_id: &ClientOpId) -> bool {
-    let value = client_op_id.as_str();
-    !value.trim().is_empty() && value.len() <= MAX_CLIENT_OP_ID_BYTES
-}
+    pub(crate) async fn session_messages(&self, sid: &str) -> Option<Vec<Message>> {
+        self.acp.remote_messages(sid.to_string()).await
+    }
 
-pub(crate) fn validate_remote_attachments(
-    attachments: Vec<AgentAttachment>,
-) -> Option<Vec<AgentAttachment>> {
-    if attachments.len() > MAX_ATTACHMENTS {
-        return None;
-    }
-    let home = std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)?
-        .canonicalize()
-        .ok()?;
-    let mut total = 0_u64;
-    attachments
-        .into_iter()
-        .map(|attachment| {
-            let path = std::path::PathBuf::from(&attachment.path)
-                .canonicalize()
-                .ok()?;
-            if !path.starts_with(&home) {
-                return None;
-            }
-            let metadata = path.metadata().ok()?;
-            if !metadata.is_file() || metadata.len() > MAX_ATTACHMENT_BYTES {
-                return None;
-            }
-            total = total.checked_add(metadata.len())?;
-            if total > MAX_ATTACHMENT_TOTAL_BYTES {
-                return None;
-            }
-            Some(AgentAttachment {
-                name: path.file_name()?.to_string_lossy().into_owned(),
-                mime_type: attachment_mime(&path),
-                path: path.to_string_lossy().into_owned(),
-                size: metadata.len(),
-            })
-        })
-        .collect()
-}
-
-fn attachment_mime(path: &std::path::Path) -> String {
-    let path_str = path.to_string_lossy();
-    if let Some(mime) = vmux_core::media::media_mime(&path_str) {
-        return mime.to_string();
-    }
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    match extension.as_str() {
-        "tif" | "tiff" => "image/tiff",
-        "heic" | "heif" => "image/heic",
-        "json" => "application/json",
-        "csv" => "text/csv",
-        "html" | "htm" => "text/html",
-        "md" | "markdown" => "text/markdown",
-        "txt" | "rs" | "toml" | "ron" | "yaml" | "yml" | "js" | "ts" | "tsx" | "jsx" | "css"
-        | "sh" | "zsh" | "bash" | "py" | "go" | "c" | "h" | "cc" | "cpp" | "hpp" | "java"
-        | "kt" | "swift" => "text/plain",
-        "zip" => "application/zip",
-        "gz" => "application/gzip",
-        "tar" => "application/x-tar",
-        _ => "application/octet-stream",
-    }
-    .to_string()
-}
-
-fn media_thumbnail_data_url(path: &std::path::Path, source_size: u64) -> String {
-    if source_size > MEDIA_THUMBNAIL_SOURCE_LIMIT {
-        return String::new();
-    }
-    let Some(mime) = vmux_core::media::image_mime(&path.to_string_lossy()) else {
-        return String::new();
-    };
-    if mime == "image/svg+xml" || mime == "image/avif" {
-        return String::new();
-    }
-    let Ok(bytes) = std::fs::read(path) else {
-        return String::new();
-    };
-    let Ok(image) = image::load_from_memory(&bytes) else {
-        return String::new();
-    };
-    let thumbnail = image.thumbnail(MEDIA_THUMBNAIL_MAX_EDGE, MEDIA_THUMBNAIL_MAX_EDGE);
-    let mut output = std::io::Cursor::new(Vec::new());
-    if thumbnail
-        .write_to(&mut output, image::ImageFormat::Png)
-        .is_err()
-    {
-        return String::new();
-    }
-    format!(
-        "data:image/png;base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(output.into_inner())
-    )
-}
-
-fn decode_media_query_path(value: &str) -> std::path::PathBuf {
-    let bytes = value.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%'
-            && index + 2 < bytes.len()
-            && let (Some(high), Some(low)) = (
-                char::from(bytes[index + 1]).to_digit(16),
-                char::from(bytes[index + 2]).to_digit(16),
-            )
-        {
-            decoded.push(((high << 4) | low) as u8);
-            index += 3;
-        } else {
-            decoded.push(bytes[index]);
-            index += 1;
+    pub(crate) async fn current_session(&self, sid: &str) -> Option<RemoteSession> {
+        let mut session = self.acp.remote_session(sid.to_string()).await?;
+        if let Some(messages) = self.session_messages(sid).await {
+            session.title =
+                vmux_core::room::ConversationTitle::from_messages(&messages, &session.name);
         }
+        Some(session)
     }
-    std::path::PathBuf::from(String::from_utf8_lossy(&decoded).into_owned())
 }
 
-pub(crate) fn remote_media_entries(query: &str) -> Vec<RemoteMediaEntry> {
-    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
-        return Vec::new();
-    };
-    let candidate = if let Some(rest) = query.strip_prefix("file://") {
-        decode_media_query_path(rest)
-    } else if let Some(rest) = query.strip_prefix("~/") {
-        home.join(decode_media_query_path(rest))
-    } else if query == "~" {
-        home.clone()
-    } else {
-        let path = decode_media_query_path(query);
-        if path.is_absolute() {
-            path
-        } else {
-            home.join(path)
-        }
-    };
-    let query_is_dir = query.is_empty() || query.ends_with('/') || candidate.is_dir();
-    let (directory, filter) = if query_is_dir {
-        (candidate, String::new())
-    } else {
-        (
-            candidate
-                .parent()
-                .map(std::path::Path::to_path_buf)
-                .unwrap_or_else(|| home.clone()),
-            candidate
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default()
-                .to_ascii_lowercase(),
-        )
-    };
-    let Ok(home) = home.canonicalize() else {
-        return Vec::new();
-    };
-    let Ok(directory) = directory.canonicalize() else {
-        return Vec::new();
-    };
-    if !directory.starts_with(&home) {
-        return Vec::new();
+pub(crate) struct RemoteClientOpId<'a>(pub(crate) &'a ClientOpId);
+
+impl RemoteClientOpId<'_> {
+    pub(crate) fn valid(&self) -> bool {
+        let value = self.0.as_str();
+        !value.trim().is_empty() && value.len() <= MAX_CLIENT_OP_ID_BYTES
     }
-    let mut entries = std::fs::read_dir(&directory)
-        .ok()
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.')
-                || (!filter.is_empty() && !name.to_ascii_lowercase().contains(&filter))
-            {
-                return None;
-            }
-            let is_dir = entry.file_type().ok()?.is_dir();
-            let metadata = (!is_dir).then(|| path.metadata().ok()).flatten();
-            let mime_type = if is_dir {
-                String::new()
-            } else {
-                attachment_mime(&path)
-            };
-            if !is_dir
-                && !mime_type.starts_with("image/")
-                && !mime_type.starts_with("audio/")
-                && !mime_type.starts_with("video/")
-                && mime_type != "application/pdf"
-            {
-                return None;
-            }
-            let parent = path
-                .parent()
-                .and_then(|parent| parent.strip_prefix(&home).ok())
-                .map(|parent| {
-                    if parent.as_os_str().is_empty() {
-                        "~".to_string()
-                    } else {
-                        format!("~/{}", parent.to_string_lossy())
-                    }
+}
+
+pub(crate) struct RemoteAttachments(Vec<AgentAttachment>);
+
+impl RemoteAttachments {
+    pub(crate) fn validated(attachments: Vec<AgentAttachment>) -> Option<Vec<AgentAttachment>> {
+        if attachments.len() > MAX_ATTACHMENTS {
+            return None;
+        }
+        let home = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)?
+            .canonicalize()
+            .ok()?;
+        let mut total = 0_u64;
+        let attachments = Self(attachments);
+        attachments
+            .0
+            .into_iter()
+            .map(|attachment| {
+                let path = std::path::PathBuf::from(&attachment.path)
+                    .canonicalize()
+                    .ok()?;
+                if !path.starts_with(&home) {
+                    return None;
+                }
+                let metadata = path.metadata().ok()?;
+                if !metadata.is_file() || metadata.len() > MAX_ATTACHMENT_BYTES {
+                    return None;
+                }
+                total = total.checked_add(metadata.len())?;
+                if total > MAX_ATTACHMENT_TOTAL_BYTES {
+                    return None;
+                }
+                Some(AgentAttachment {
+                    name: path.file_name()?.to_string_lossy().into_owned(),
+                    mime_type: RemoteMediaPath(&path).mime(),
+                    path: path.to_string_lossy().into_owned(),
+                    size: metadata.len(),
                 })
-                .unwrap_or_else(|| "~".to_string());
-            Some(RemoteMediaEntry {
-                path: path.to_string_lossy().into_owned(),
-                name,
-                parent,
-                mime_type,
-                size: metadata.map(|metadata| metadata.len()).unwrap_or_default(),
-                is_dir,
-                preview_data_url: String::new(),
             })
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by(|left, right| {
-        right.is_dir.cmp(&left.is_dir).then_with(|| {
-            left.name
-                .to_ascii_lowercase()
-                .cmp(&right.name.to_ascii_lowercase())
-        })
-    });
-    entries.truncate(100);
-    let mut remaining_thumbnail_bytes = MEDIA_THUMBNAIL_TOTAL_LIMIT;
-    for entry in &mut entries {
-        if entry.is_dir || !entry.mime_type.starts_with("image/") {
-            continue;
-        }
-        if entry.size > remaining_thumbnail_bytes {
-            continue;
-        }
-        entry.preview_data_url =
-            media_thumbnail_data_url(std::path::Path::new(&entry.path), entry.size);
-        if !entry.preview_data_url.is_empty() {
-            remaining_thumbnail_bytes = remaining_thumbnail_bytes.saturating_sub(entry.size);
-        }
+            .collect()
     }
-    entries
+}
+
+struct RemoteMediaPath<'a>(&'a std::path::Path);
+
+impl RemoteMediaPath<'_> {
+    fn mime(&self) -> String {
+        let path = self.0.to_string_lossy();
+        if let Some(mime) = vmux_core::media::media_mime(&path) {
+            return mime.to_string();
+        }
+        let extension = self
+            .0
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        match extension.as_str() {
+            "tif" | "tiff" => "image/tiff",
+            "heic" | "heif" => "image/heic",
+            "json" => "application/json",
+            "csv" => "text/csv",
+            "html" | "htm" => "text/html",
+            "md" | "markdown" => "text/markdown",
+            "txt" | "rs" | "toml" | "ron" | "yaml" | "yml" | "js" | "ts" | "tsx" | "jsx"
+            | "css" | "sh" | "zsh" | "bash" | "py" | "go" | "c" | "h" | "cc" | "cpp" | "hpp"
+            | "java" | "kt" | "swift" => "text/plain",
+            "zip" => "application/zip",
+            "gz" => "application/gzip",
+            "tar" => "application/x-tar",
+            _ => "application/octet-stream",
+        }
+        .to_string()
+    }
+
+    fn thumbnail(&self, source_size: u64) -> String {
+        if source_size > MEDIA_THUMBNAIL_SOURCE_LIMIT {
+            return String::new();
+        }
+        let Some(mime) = vmux_core::media::image_mime(&self.0.to_string_lossy()) else {
+            return String::new();
+        };
+        if mime == "image/svg+xml" || mime == "image/avif" {
+            return String::new();
+        }
+        let Ok(bytes) = std::fs::read(self.0) else {
+            return String::new();
+        };
+        let Ok(image) = image::load_from_memory(&bytes) else {
+            return String::new();
+        };
+        let thumbnail = image.thumbnail(MEDIA_THUMBNAIL_MAX_EDGE, MEDIA_THUMBNAIL_MAX_EDGE);
+        let mut output = std::io::Cursor::new(Vec::new());
+        if thumbnail
+            .write_to(&mut output, image::ImageFormat::Png)
+            .is_err()
+        {
+            return String::new();
+        }
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(output.into_inner())
+        )
+    }
+}
+
+pub(crate) struct RemoteMediaQuery<'a>(pub(crate) &'a str);
+
+impl RemoteMediaQuery<'_> {
+    fn decode(value: &str) -> std::path::PathBuf {
+        let bytes = value.as_bytes();
+        let mut decoded = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] == b'%'
+                && index + 2 < bytes.len()
+                && let (Some(high), Some(low)) = (
+                    char::from(bytes[index + 1]).to_digit(16),
+                    char::from(bytes[index + 2]).to_digit(16),
+                )
+            {
+                decoded.push(((high << 4) | low) as u8);
+                index += 3;
+            } else {
+                decoded.push(bytes[index]);
+                index += 1;
+            }
+        }
+        std::path::PathBuf::from(String::from_utf8_lossy(&decoded).into_owned())
+    }
+
+    pub(crate) fn entries(&self) -> Vec<RemoteMediaEntry> {
+        let query = self.0;
+        let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+            return Vec::new();
+        };
+        let candidate = if let Some(rest) = query.strip_prefix("file://") {
+            Self::decode(rest)
+        } else if let Some(rest) = query.strip_prefix("~/") {
+            home.join(Self::decode(rest))
+        } else if query == "~" {
+            home.clone()
+        } else {
+            let path = Self::decode(query);
+            if path.is_absolute() {
+                path
+            } else {
+                home.join(path)
+            }
+        };
+        let query_is_dir = query.is_empty() || query.ends_with('/') || candidate.is_dir();
+        let (directory, filter) = if query_is_dir {
+            (candidate, String::new())
+        } else {
+            (
+                candidate
+                    .parent()
+                    .map(std::path::Path::to_path_buf)
+                    .unwrap_or_else(|| home.clone()),
+                candidate
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default()
+                    .to_ascii_lowercase(),
+            )
+        };
+        let Ok(home) = home.canonicalize() else {
+            return Vec::new();
+        };
+        let Ok(directory) = directory.canonicalize() else {
+            return Vec::new();
+        };
+        if !directory.starts_with(&home) {
+            return Vec::new();
+        }
+        let mut entries = std::fs::read_dir(&directory)
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with('.')
+                    || (!filter.is_empty() && !name.to_ascii_lowercase().contains(&filter))
+                {
+                    return None;
+                }
+                let is_dir = entry.file_type().ok()?.is_dir();
+                let metadata = (!is_dir).then(|| path.metadata().ok()).flatten();
+                let mime_type = if is_dir {
+                    String::new()
+                } else {
+                    RemoteMediaPath(&path).mime()
+                };
+                if !is_dir
+                    && !mime_type.starts_with("image/")
+                    && !mime_type.starts_with("audio/")
+                    && !mime_type.starts_with("video/")
+                    && mime_type != "application/pdf"
+                {
+                    return None;
+                }
+                let parent = path
+                    .parent()
+                    .and_then(|parent| parent.strip_prefix(&home).ok())
+                    .map(|parent| {
+                        if parent.as_os_str().is_empty() {
+                            "~".to_string()
+                        } else {
+                            format!("~/{}", parent.to_string_lossy())
+                        }
+                    })
+                    .unwrap_or_else(|| "~".to_string());
+                Some(RemoteMediaEntry {
+                    path: path.to_string_lossy().into_owned(),
+                    name,
+                    parent,
+                    mime_type,
+                    size: metadata.map(|metadata| metadata.len()).unwrap_or_default(),
+                    is_dir,
+                    preview_data_url: String::new(),
+                })
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| {
+            right.is_dir.cmp(&left.is_dir).then_with(|| {
+                left.name
+                    .to_ascii_lowercase()
+                    .cmp(&right.name.to_ascii_lowercase())
+            })
+        });
+        entries.truncate(100);
+        let mut remaining_thumbnail_bytes = MEDIA_THUMBNAIL_TOTAL_LIMIT;
+        for entry in &mut entries {
+            if entry.is_dir || !entry.mime_type.starts_with("image/") {
+                continue;
+            }
+            if entry.size > remaining_thumbnail_bytes {
+                continue;
+            }
+            entry.preview_data_url =
+                RemoteMediaPath(std::path::Path::new(&entry.path)).thumbnail(entry.size);
+            if !entry.preview_data_url.is_empty() {
+                remaining_thumbnail_bytes = remaining_thumbnail_bytes.saturating_sub(entry.size);
+            }
+        }
+        entries
+    }
 }
 
 #[cfg(test)]
@@ -457,11 +477,11 @@ mod tests {
 
     #[test]
     fn client_operation_ids_are_bounded() {
-        assert!(valid_client_op_id(&ClientOpId::new("mobile:1:1")));
-        assert!(!valid_client_op_id(&ClientOpId::new("  ")));
-        assert!(!valid_client_op_id(&ClientOpId::new(
-            "x".repeat(MAX_CLIENT_OP_ID_BYTES + 1)
-        )));
+        assert!(RemoteClientOpId(&ClientOpId::new("mobile:1:1")).valid());
+        assert!(!RemoteClientOpId(&ClientOpId::new("  ")).valid());
+        assert!(
+            !RemoteClientOpId(&ClientOpId::new("x".repeat(MAX_CLIENT_OP_ID_BYTES + 1))).valid()
+        );
     }
 
     #[test]
@@ -478,7 +498,7 @@ mod tests {
     #[test]
     fn media_query_paths_decode_percent_escapes() {
         assert_eq!(
-            decode_media_query_path("Pictures/My%20Photo.png"),
+            RemoteMediaQuery::decode("Pictures/My%20Photo.png"),
             std::path::PathBuf::from("Pictures/My Photo.png")
         );
     }
@@ -493,6 +513,6 @@ mod tests {
                 size: 1,
             })
             .collect();
-        assert!(validate_remote_attachments(attachments).is_none());
+        assert!(RemoteAttachments::validated(attachments).is_none());
     }
 }

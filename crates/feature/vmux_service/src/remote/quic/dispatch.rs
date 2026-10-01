@@ -4,7 +4,9 @@ use vmux_api::protocol::{
 };
 use vmux_api::room::{ClientOpId, RemoteSession};
 
-use super::super::server::{MAX_PROMPT_BYTES, RemoteState};
+use super::super::server::{
+    MAX_PROMPT_BYTES, RemoteAttachments, RemoteClientOpId, RemoteMediaQuery, RemoteState,
+};
 use vmux_agent::acp::AcpInput;
 
 pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> SharedResponse {
@@ -36,7 +38,7 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
             prompt,
             agent_url,
         } => {
-            if !super::super::server::valid_client_op_id(&client_op_id) {
+            if !RemoteClientOpId(&client_op_id).valid() {
                 return SharedResponse::Failed(SharedFailure::Invalid);
             }
             if !claim_once(state, &client_op_id).await {
@@ -88,9 +90,7 @@ async fn media(state: &RemoteState, sid: &str, query: String) -> SharedResponse 
     if query.len() > super::super::server::MAX_MEDIA_QUERY_BYTES {
         return SharedResponse::Failed(SharedFailure::Invalid);
     }
-    match tokio::task::spawn_blocking(move || super::super::server::remote_media_entries(&query))
-        .await
-    {
+    match tokio::task::spawn_blocking(move || RemoteMediaQuery(&query).entries()).await {
         Ok(entries) => SharedResponse::Media(entries),
         Err(_) => SharedResponse::Failed(SharedFailure::Internal),
     }
@@ -99,7 +99,7 @@ async fn media(state: &RemoteState, sid: &str, query: String) -> SharedResponse 
 async fn sessions(state: &RemoteState) -> Vec<RemoteSession> {
     let mut sessions = state.acp.remote_sessions().await;
     for session in &mut sessions {
-        if let Some(messages) = super::super::server::session_messages(state, &session.sid).await {
+        if let Some(messages) = state.session_messages(&session.sid).await {
             session.title =
                 vmux_core::room::ConversationTitle::from_messages(&messages, &session.name);
         }
@@ -130,7 +130,7 @@ async fn prompt(
     if text.trim().is_empty() || text.len() > MAX_PROMPT_BYTES {
         return SharedResponse::Failed(SharedFailure::Invalid);
     }
-    let Some(attachments) = super::super::server::validate_remote_attachments(attachments) else {
+    let Some(attachments) = RemoteAttachments::validated(attachments) else {
         return SharedResponse::Failed(SharedFailure::Invalid);
     };
     push_input(
@@ -154,7 +154,7 @@ where
     let Ok(request) = AgentRequest::encode(&payload) else {
         return SharedResponse::Failed(SharedFailure::Invalid);
     };
-    match super::super::server::broker_result(state, request).await {
+    match state.broker_result(request).await {
         Some(AgentCommandResult::Text(json)) => SharedResponse::BrokerJson(json),
         Some(AgentCommandResult::Ok) => SharedResponse::Ok,
         Some(AgentCommandResult::Error(message)) => {

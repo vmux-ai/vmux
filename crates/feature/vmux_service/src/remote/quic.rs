@@ -349,7 +349,7 @@ async fn resolve(
     use vmux_api::protocol::SharedEvent as Shared;
     match event {
         Shared::AcpAgentInfo { .. } | Shared::AcpWorkspaceChanged { .. } => {
-            let session = super::server::current_session(state, sid).await?;
+            let session = state.current_session(sid).await?;
             Some(Shared::Session { session })
         }
         other => Some(other),
