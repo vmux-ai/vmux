@@ -1,15 +1,12 @@
-#[cfg(target_os = "macos")]
-use std::path::Path;
 use std::time::Duration;
 
 use bevy::app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use bevy_ecs::system::SystemParam;
 use vmux_core::cli::{CliInvocation, CliResult};
 use vmux_core::host::manifest::FeaturePlugin;
 
 #[cfg(target_os = "macos")]
-use super::LaunchAgent;
+use super::{DaemonBinary, LaunchAgent};
 use vmux_core::service::ServicePaths;
 
 pub struct ServiceCliPlugin;
@@ -17,9 +14,13 @@ pub struct ServiceCliPlugin;
 impl Plugin for ServiceCliPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
+            .add_systems(Update, route_service_cli)
             .add_systems(
                 Update,
-                (route_service_cli, execute_service_cli, execute_remote_cli).chain(),
+                (
+                    status, start, stop, restart, logs, install, uninstall, pair, list, revoke,
+                )
+                    .after(route_service_cli),
             );
     }
 }
@@ -102,75 +103,203 @@ fn route_service_cli(
     }
 }
 
-#[derive(SystemParam)]
-struct ServiceCliRequests<'w, 's> {
-    status: Query<'w, 's, Entity, Added<ServiceStatusRequest>>,
-    start: Query<'w, 's, Entity, Added<ServiceStartRequest>>,
-    stop: Query<'w, 's, Entity, Added<ServiceStopRequest>>,
-    restart: Query<'w, 's, Entity, Added<ServiceRestartRequest>>,
-    logs: Query<'w, 's, (Entity, &'static ServiceLogsRequest), Added<ServiceLogsRequest>>,
-    install: Query<'w, 's, Entity, Added<ServiceInstallRequest>>,
-    uninstall: Query<'w, 's, Entity, Added<ServiceUninstallRequest>>,
-}
-
-fn execute_service_cli(requests: ServiceCliRequests, mut commands: Commands) {
-    for entity in &requests.status {
+fn status(requests: Query<Entity, Added<ServiceStatusRequest>>, mut commands: Commands) {
+    for entity in &requests {
+        let (info, live) = StatusInfo::current();
+        print!("{}", info.render());
         commands
             .entity(entity)
-            .insert(CliResult::from_io(cmd_status()));
-    }
-    for entity in &requests.start {
-        commands
-            .entity(entity)
-            .insert(CliResult::from_io(cmd_start_current()));
-    }
-    for entity in &requests.stop {
-        commands
-            .entity(entity)
-            .insert(CliResult::from_io(cmd_stop_current()));
-    }
-    for entity in &requests.restart {
-        commands
-            .entity(entity)
-            .insert(CliResult::from_io(cmd_restart_current()));
-    }
-    for (entity, request) in &requests.logs {
-        commands
-            .entity(entity)
-            .insert(CliResult::from_io(cmd_logs(request.0)));
-    }
-    for entity in &requests.install {
-        commands
-            .entity(entity)
-            .insert(CliResult::from_io(cmd_install_current()));
-    }
-    for entity in &requests.uninstall {
-        commands
-            .entity(entity)
-            .insert(CliResult::from_io(cmd_uninstall_current()));
+            .insert(CliResult::from_io(Ok(if live { 0 } else { 1 })));
     }
 }
 
-fn execute_remote_cli(
-    pair: Query<(Entity, &RemotePairRequest), Added<RemotePairRequest>>,
-    list: Query<Entity, Added<RemoteListRequest>>,
-    revoke: Query<(Entity, &RemoteRevokeRequest), Added<RemoteRevokeRequest>>,
+fn start(requests: Query<Entity, Added<ServiceStartRequest>>, mut commands: Commands) {
+    for entity in &requests {
+        #[cfg(target_os = "macos")]
+        let result = DaemonBinary::current()
+            .and_then(|binary| LaunchAgent::current().ensure_running(binary.path()))
+            .map(|_| 0);
+        #[cfg(not(target_os = "macos"))]
+        let result = {
+            eprintln!("vmux service: launchd commands are macOS-only");
+            Ok(2)
+        };
+        commands.entity(entity).insert(CliResult::from_io(result));
+    }
+}
+
+fn stop(requests: Query<Entity, Added<ServiceStopRequest>>, mut commands: Commands) {
+    for entity in &requests {
+        #[cfg(target_os = "macos")]
+        let result = LaunchAgent::current().bootout().map(|_| 0);
+        #[cfg(not(target_os = "macos"))]
+        let result = {
+            eprintln!("vmux service: launchd commands are macOS-only");
+            Ok(2)
+        };
+        commands.entity(entity).insert(CliResult::from_io(result));
+    }
+}
+
+fn restart(requests: Query<Entity, Added<ServiceRestartRequest>>, mut commands: Commands) {
+    for entity in &requests {
+        #[cfg(target_os = "macos")]
+        let result = DaemonBinary::current().and_then(|binary| {
+            let agent = LaunchAgent::current();
+            let _ = agent.bootout();
+            agent.ensure_running(binary.path())?;
+            Ok(0)
+        });
+        #[cfg(not(target_os = "macos"))]
+        let result = {
+            eprintln!("vmux service: launchd commands are macOS-only");
+            Ok(2)
+        };
+        commands.entity(entity).insert(CliResult::from_io(result));
+    }
+}
+
+fn logs(
+    requests: Query<(Entity, &ServiceLogsRequest), Added<ServiceLogsRequest>>,
     mut commands: Commands,
 ) {
-    for (entity, request) in &pair {
+    for (entity, request) in &requests {
+        use std::os::unix::process::CommandExt;
+        let mut command = std::process::Command::new("tail");
+        if request.0 {
+            command.arg("-f");
+        }
+        command.arg(ServicePaths::current().current_log());
         commands
             .entity(entity)
-            .insert(CliResult::from_io(remote_pair(request.reset)));
+            .insert(CliResult::from_io(Err(command.exec())));
     }
-    for entity in &list {
-        commands
-            .entity(entity)
-            .insert(CliResult::from_io(remote_list()));
+}
+
+fn install(requests: Query<Entity, Added<ServiceInstallRequest>>, mut commands: Commands) {
+    for entity in &requests {
+        #[cfg(target_os = "macos")]
+        let result = DaemonBinary::current().and_then(|binary| {
+            let plist = LaunchAgent::current().install(binary.path())?;
+            println!("installed: {}", plist.display());
+            Ok(0)
+        });
+        #[cfg(not(target_os = "macos"))]
+        let result = {
+            eprintln!("vmux service: launchd commands are macOS-only");
+            Ok(2)
+        };
+        commands.entity(entity).insert(CliResult::from_io(result));
     }
-    for (entity, request) in &revoke {
-        commands
-            .entity(entity)
-            .insert(CliResult::from_io(remote_revoke(&request.0)));
+}
+
+fn uninstall(requests: Query<Entity, Added<ServiceUninstallRequest>>, mut commands: Commands) {
+    for entity in &requests {
+        #[cfg(target_os = "macos")]
+        let result = {
+            let agent = LaunchAgent::current();
+            agent.uninstall().map(|_| {
+                println!("uninstalled: {}", agent.plist_path().display());
+                0
+            })
+        };
+        #[cfg(not(target_os = "macos"))]
+        let result = {
+            eprintln!("vmux service: launchd commands are macOS-only");
+            Ok(2)
+        };
+        commands.entity(entity).insert(CliResult::from_io(result));
+    }
+}
+
+fn pair(
+    requests: Query<(Entity, &RemotePairRequest), Added<RemotePairRequest>>,
+    mut commands: Commands,
+) {
+    for (entity, request) in &requests {
+        #[cfg(target_os = "macos")]
+        let result = (|| {
+            let agent = LaunchAgent::current();
+            if request.reset {
+                let remote = super::RemotePaths::current();
+                let _ = agent.bootout();
+                let _ = std::fs::remove_file(remote.relay_token());
+                let _ = crate::RemoteAuthorizationStore::current().reset();
+                let _ = std::fs::remove_file(remote.relay_device());
+                let _ = std::fs::remove_file(remote.relay_url());
+                let _ = std::fs::remove_file(remote.relay_registration());
+            }
+            agent.ensure_running(super::DaemonBinary::current()?.path())?;
+            let relay_token = crate::RelayToken::wait(Duration::from_secs(5))?;
+            let pairing_token = crate::RemoteAuthorizationStore::current().pairing_token()?;
+            std::fs::write(super::RemotePaths::current().state(), b"enabled\n")?;
+            let relay = crate::pairing::Relay::from_env();
+            relay.persist()?;
+            let pairing_url = relay.wait_for_pairing(
+                relay_token.as_str(),
+                &pairing_token,
+                Duration::from_secs(20),
+            )?;
+            println!("paste into Vmux Remote: {pairing_url}");
+            Ok(0)
+        })();
+        #[cfg(not(target_os = "macos"))]
+        let result = {
+            let _ = request;
+            eprintln!("vmux remote is currently macOS-only");
+            Ok(2)
+        };
+        commands.entity(entity).insert(CliResult::from_io(result));
+    }
+}
+
+fn list(requests: Query<Entity, Added<RemoteListRequest>>, mut commands: Commands) {
+    for entity in &requests {
+        #[cfg(target_os = "macos")]
+        let result = crate::RemoteAuthorizationStore::current()
+            .devices()
+            .map(|devices| {
+                for device in devices {
+                    println!("{}\t{}", device.id.as_str(), device.authorized_at_unix);
+                }
+                0
+            });
+        #[cfg(not(target_os = "macos"))]
+        let result = {
+            eprintln!("vmux remote is currently macOS-only");
+            Ok(2)
+        };
+        commands.entity(entity).insert(CliResult::from_io(result));
+    }
+}
+
+fn revoke(
+    requests: Query<(Entity, &RemoteRevokeRequest), Added<RemoteRevokeRequest>>,
+    mut commands: Commands,
+) {
+    for (entity, request) in &requests {
+        #[cfg(target_os = "macos")]
+        let result = {
+            let client_id = vmux_transport::DeviceId::new(&request.0);
+            crate::RemoteAuthorizationStore::current()
+                .revoke(&client_id)
+                .map(|revoked| {
+                    if revoked {
+                        println!("revoked {}", client_id.as_str());
+                        0
+                    } else {
+                        eprintln!("device not found: {}", client_id.as_str());
+                        1
+                    }
+                })
+        };
+        #[cfg(not(target_os = "macos"))]
+        let result = {
+            let _ = request;
+            eprintln!("vmux remote is currently macOS-only");
+            Ok(2)
+        };
+        commands.entity(entity).insert(CliResult::from_io(result));
     }
 }
 
@@ -185,6 +314,19 @@ struct StatusInfo {
 }
 
 impl StatusInfo {
+    fn current() -> (Self, bool) {
+        let live = Self::live();
+        let info = Self {
+            profile: ServicePaths::build_profile().to_string(),
+            pid: Self::pid(),
+            uptime: live.map(|(seconds, _)| Duration::from_secs(seconds)),
+            socket: ServicePaths::current().socket(),
+            identity_short: Self::identity_short(),
+            process_count: live.map(|(_, count)| count),
+        };
+        (info, live.is_some())
+    }
+
     fn render(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!("profile     {}\n", self.profile));
@@ -196,7 +338,9 @@ impl StatusInfo {
         ));
         out.push_str(&format!(
             "uptime      {}\n",
-            self.uptime.map(format_uptime).unwrap_or_else(|| "-".into())
+            self.uptime
+                .map(Self::format_uptime)
+                .unwrap_or_else(|| "-".into())
         ));
         out.push_str(&format!("socket      {}\n", self.socket.display()));
         out.push_str(&format!(
@@ -211,241 +355,58 @@ impl StatusInfo {
         ));
         out
     }
-}
 
-fn format_uptime(d: Duration) -> String {
-    let s = d.as_secs();
-    let (h, rem) = (s / 3600, s % 3600);
-    let (m, sec) = (rem / 60, rem % 60);
-    if h > 0 {
-        format!("{h}h {m}m {sec}s")
-    } else if m > 0 {
-        format!("{m}m {sec}s")
-    } else {
-        format!("{sec}s")
+    fn format_uptime(duration: Duration) -> String {
+        let seconds = duration.as_secs();
+        let (hours, remaining) = (seconds / 3600, seconds % 3600);
+        let (minutes, seconds) = (remaining / 60, remaining % 60);
+        if hours > 0 {
+            format!("{hours}h {minutes}m {seconds}s")
+        } else if minutes > 0 {
+            format!("{minutes}m {seconds}s")
+        } else {
+            format!("{seconds}s")
+        }
     }
-}
 
-fn read_pid() -> Option<i32> {
-    std::fs::read_to_string(ServicePaths::current().pid())
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-}
-
-fn read_identity_short() -> Option<String> {
-    std::fs::read_to_string(ServicePaths::current().identity())
-        .ok()
-        .map(|s| {
-            let mut hash: u64 = 5381;
-            for b in s.trim().bytes() {
-                hash = hash.wrapping_mul(33).wrapping_add(b as u64);
-            }
-            let folded = (hash as u32) ^ ((hash >> 32) as u32);
-            format!("{folded:08x}")
-        })
-}
-
-fn live_status() -> Option<(u64, u32)> {
-    live_status_inner().ok().flatten()
-}
-
-fn live_status_inner() -> std::io::Result<Option<(u64, u32)>> {
-    use vmux_api::protocol::{ClientMessage, ServiceMessage};
-    let stream = std::os::unix::net::UnixStream::connect(ServicePaths::current().socket())?;
-    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
-    let mut stream = stream;
-    vmux_core::service::write_client_message_blocking(&mut stream, &ClientMessage::Status)?;
-    let mut reader = std::io::BufReader::new(&mut stream);
-    let msg = vmux_core::service::read_service_message_blocking(&mut reader)?;
-    Ok(match msg {
-        Some(ServiceMessage::StatusResponse {
-            uptime_secs,
-            process_count,
-        }) => Some((uptime_secs, process_count)),
-        _ => None,
-    })
-}
-
-fn cmd_status() -> std::io::Result<i32> {
-    let pid = read_pid();
-    let live = live_status();
-    let info = StatusInfo {
-        profile: ServicePaths::build_profile().to_string(),
-        pid,
-        uptime: live.map(|(s, _)| Duration::from_secs(s)),
-        socket: ServicePaths::current().socket(),
-        identity_short: read_identity_short(),
-        process_count: live.map(|(_, c)| c),
-    };
-    print!("{}", info.render());
-    Ok(if live.is_some() { 0 } else { 1 })
-}
-
-#[cfg(target_os = "macos")]
-fn cmd_install(binary_path: &Path) -> std::io::Result<i32> {
-    let plist = LaunchAgent::current().install(binary_path)?;
-    println!("installed: {}", plist.display());
-    Ok(0)
-}
-
-#[cfg(target_os = "macos")]
-fn cmd_uninstall() -> std::io::Result<i32> {
-    let agent = LaunchAgent::current();
-    agent.uninstall()?;
-    println!("uninstalled: {}", agent.plist_path().display());
-    Ok(0)
-}
-
-#[cfg(target_os = "macos")]
-fn cmd_start(binary_path: &Path) -> std::io::Result<i32> {
-    LaunchAgent::current().ensure_running(binary_path)?;
-    Ok(0)
-}
-
-#[cfg(target_os = "macos")]
-fn cmd_stop() -> std::io::Result<i32> {
-    LaunchAgent::current().bootout()?;
-    Ok(0)
-}
-
-#[cfg(target_os = "macos")]
-fn cmd_restart(binary_path: &Path) -> std::io::Result<i32> {
-    let agent = LaunchAgent::current();
-    let _ = agent.bootout();
-    agent.ensure_running(binary_path)?;
-    Ok(0)
-}
-
-fn cmd_logs(follow: bool) -> std::io::Result<i32> {
-    use std::os::unix::process::CommandExt;
-    let mut cmd = std::process::Command::new("tail");
-    if follow {
-        cmd.arg("-f");
+    fn pid() -> Option<i32> {
+        std::fs::read_to_string(ServicePaths::current().pid())
+            .ok()
+            .and_then(|value| value.trim().parse().ok())
     }
-    cmd.arg(ServicePaths::current().current_log());
-    let err = cmd.exec();
-    Err(err)
-}
 
-#[cfg(target_os = "macos")]
-fn cmd_start_current() -> std::io::Result<i32> {
-    cmd_start(super::DaemonBinary::current()?.path())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn cmd_start_current() -> std::io::Result<i32> {
-    unsupported_launchd()
-}
-
-#[cfg(target_os = "macos")]
-fn cmd_stop_current() -> std::io::Result<i32> {
-    cmd_stop()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn cmd_stop_current() -> std::io::Result<i32> {
-    unsupported_launchd()
-}
-
-#[cfg(target_os = "macos")]
-fn cmd_restart_current() -> std::io::Result<i32> {
-    cmd_restart(super::DaemonBinary::current()?.path())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn cmd_restart_current() -> std::io::Result<i32> {
-    unsupported_launchd()
-}
-
-#[cfg(target_os = "macos")]
-fn cmd_install_current() -> std::io::Result<i32> {
-    cmd_install(super::DaemonBinary::current()?.path())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn cmd_install_current() -> std::io::Result<i32> {
-    unsupported_launchd()
-}
-
-#[cfg(target_os = "macos")]
-fn cmd_uninstall_current() -> std::io::Result<i32> {
-    cmd_uninstall()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn cmd_uninstall_current() -> std::io::Result<i32> {
-    unsupported_launchd()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn unsupported_launchd() -> std::io::Result<i32> {
-    eprintln!("vmux service: launchd commands are macOS-only");
-    Ok(2)
-}
-
-#[cfg(target_os = "macos")]
-fn remote_pair(reset: bool) -> std::io::Result<i32> {
-    let agent = LaunchAgent::current();
-    if reset {
-        let remote = super::RemotePaths::current();
-        let _ = agent.bootout();
-        let _ = std::fs::remove_file(remote.relay_token());
-        let _ = crate::RemoteAuthorizationStore::current().reset();
-        let _ = std::fs::remove_file(remote.relay_device());
-        let _ = std::fs::remove_file(remote.relay_url());
-        let _ = std::fs::remove_file(remote.relay_registration());
+    fn identity_short() -> Option<String> {
+        std::fs::read_to_string(ServicePaths::current().identity())
+            .ok()
+            .map(|value| {
+                let mut hash: u64 = 5381;
+                for byte in value.trim().bytes() {
+                    hash = hash.wrapping_mul(33).wrapping_add(byte as u64);
+                }
+                let folded = (hash as u32) ^ ((hash >> 32) as u32);
+                format!("{folded:08x}")
+            })
     }
-    agent.ensure_running(super::DaemonBinary::current()?.path())?;
-    let relay_token = crate::RelayToken::wait(Duration::from_secs(5))?;
-    let pairing_token = crate::RemoteAuthorizationStore::current().pairing_token()?;
-    std::fs::write(super::RemotePaths::current().state(), b"enabled\n")?;
-    let relay = crate::pairing::Relay::from_env();
-    relay.persist()?;
-    let pairing_url = relay.wait_for_pairing(
-        relay_token.as_str(),
-        &pairing_token,
-        Duration::from_secs(20),
-    )?;
-    println!("paste into Vmux Remote: {pairing_url}");
-    Ok(0)
-}
 
-#[cfg(not(target_os = "macos"))]
-fn remote_pair(_reset: bool) -> std::io::Result<i32> {
-    eprintln!("vmux remote is currently macOS-only");
-    Ok(2)
-}
-
-#[cfg(target_os = "macos")]
-fn remote_list() -> std::io::Result<i32> {
-    for device in crate::RemoteAuthorizationStore::current().devices()? {
-        println!("{}\t{}", device.id.as_str(), device.authorized_at_unix);
+    fn live() -> Option<(u64, u32)> {
+        use vmux_api::protocol::{ClientMessage, ServiceMessage};
+        let result = (|| {
+            let stream = std::os::unix::net::UnixStream::connect(ServicePaths::current().socket())?;
+            stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+            stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+            let mut stream = stream;
+            vmux_core::service::write_client_message_blocking(&mut stream, &ClientMessage::Status)?;
+            let mut reader = std::io::BufReader::new(&mut stream);
+            vmux_core::service::read_service_message_blocking(&mut reader)
+        })();
+        match result {
+            Ok(Some(ServiceMessage::StatusResponse {
+                uptime_secs,
+                process_count,
+            })) => Some((uptime_secs, process_count)),
+            _ => None,
+        }
     }
-    Ok(0)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn remote_list() -> std::io::Result<i32> {
-    eprintln!("vmux remote is currently macOS-only");
-    Ok(2)
-}
-
-#[cfg(target_os = "macos")]
-fn remote_revoke(client_id: &str) -> std::io::Result<i32> {
-    let client_id = vmux_transport::DeviceId::new(client_id);
-    if crate::RemoteAuthorizationStore::current().revoke(&client_id)? {
-        println!("revoked {}", client_id.as_str());
-        return Ok(0);
-    }
-    eprintln!("device not found: {}", client_id.as_str());
-    Ok(1)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn remote_revoke(_client_id: &str) -> std::io::Result<i32> {
-    eprintln!("vmux remote is currently macOS-only");
-    Ok(2)
 }
 
 #[cfg(test)]
@@ -455,10 +416,13 @@ mod tests {
 
     #[test]
     fn format_uptime_formats_segments() {
-        assert_eq!(format_uptime(Duration::from_secs(0)), "0s");
-        assert_eq!(format_uptime(Duration::from_secs(45)), "45s");
-        assert_eq!(format_uptime(Duration::from_secs(75)), "1m 15s");
-        assert_eq!(format_uptime(Duration::from_secs(3601)), "1h 0m 1s");
+        assert_eq!(StatusInfo::format_uptime(Duration::from_secs(0)), "0s");
+        assert_eq!(StatusInfo::format_uptime(Duration::from_secs(45)), "45s");
+        assert_eq!(StatusInfo::format_uptime(Duration::from_secs(75)), "1m 15s");
+        assert_eq!(
+            StatusInfo::format_uptime(Duration::from_secs(3601)),
+            "1h 0m 1s"
+        );
     }
 
     #[test]
