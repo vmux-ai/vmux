@@ -4,7 +4,7 @@ use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Par
 use vmux_ecs::event::{MdBlock, MdInline, MdListItem, MdTableAlign, NoteBlock};
 use vmux_knowledge::{KnowledgeProperty, MarkdownMetadata, WikiLink};
 
-use crate::highlight::highlight_snippet;
+use crate::host::highlight::Highlighter;
 
 pub fn is_markdown_path(path: &Path) -> bool {
     matches!(
@@ -344,7 +344,7 @@ pub fn parse_note_document(text: &str) -> ParsedNote {
                             &mut stack,
                             MdBlock::CodeBlock {
                                 lang: language,
-                                lines: highlight_snippet(&code, &token),
+                                lines: Highlighter::snippet(&code, &token),
                             },
                         );
                     }

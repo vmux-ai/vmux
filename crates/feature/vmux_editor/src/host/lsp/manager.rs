@@ -14,6 +14,7 @@ use vmux_path::PathIdentity;
 use vmux_setting::AppSettings;
 
 use crate::host::editor::{Editor, FileView};
+use crate::host::highlight::{HIGHLIGHT_MAX_BYTES, Highlighter};
 use crate::host::viewport::ViewportRenderRequest;
 use crate::lsp::client::ServerClient;
 use crate::lsp::registry::{ServerSpec, resolve_spec, workspace_root};
@@ -109,7 +110,7 @@ fn rope_line_text(rope: &ropey::Rope, line: u32) -> String {
 
 type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
 
-const LSP_MAX_BYTES: u64 = crate::highlight::HIGHLIGHT_MAX_BYTES;
+const LSP_MAX_BYTES: u64 = HIGHLIGHT_MAX_BYTES;
 
 enum ReqKind {
     Hover { line: u32, col: u32 },
@@ -724,7 +725,7 @@ fn markdown_to_hover_blocks(md: &str) -> Vec<HoverBlock> {
                 blocks.push(HoverBlock {
                     code: true,
                     text: String::new(),
-                    lines: crate::highlight::highlight_snippet(&buf, lang.trim()),
+                    lines: Highlighter::snippet(&buf, lang.trim()),
                 });
                 buf.clear();
                 in_code = false;
@@ -742,7 +743,7 @@ fn markdown_to_hover_blocks(md: &str) -> Vec<HoverBlock> {
         blocks.push(HoverBlock {
             code: true,
             text: String::new(),
-            lines: crate::highlight::highlight_snippet(&buf, lang.trim()),
+            lines: Highlighter::snippet(&buf, lang.trim()),
         });
     } else {
         flush_prose(&mut buf, &mut blocks);

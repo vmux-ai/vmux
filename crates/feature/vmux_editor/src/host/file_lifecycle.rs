@@ -14,6 +14,7 @@ use super::explorer::OutlineDirty;
 use super::explorer::{
     ExplorerPanelSent, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty, OpenEditorsDirty,
 };
+use super::highlight::{FILE_VIEW_MAX_BYTES, HIGHLIGHT_MAX_BYTES};
 use super::keymap::KeymapConfig;
 use super::media::FileMedia;
 use super::note::NoteSent;
@@ -198,13 +199,10 @@ impl FileLoad {
                 };
             }
         };
-        if size > crate::highlight::FILE_VIEW_MAX_BYTES {
+        if size > FILE_VIEW_MAX_BYTES {
             return Self::Failed {
                 reason: LoadFailure::Fatal,
-                message: format!(
-                    "file too large ({size} bytes, max {})",
-                    crate::highlight::FILE_VIEW_MAX_BYTES
-                ),
+                message: format!("file too large ({size} bytes, max {})", FILE_VIEW_MAX_BYTES),
                 missing: false,
             };
         }
@@ -234,7 +232,7 @@ impl FileLoad {
         };
         Self::Text {
             decoded,
-            heavy: size > crate::highlight::HIGHLIGHT_MAX_BYTES,
+            heavy: size > HIGHLIGHT_MAX_BYTES,
         }
     }
 }

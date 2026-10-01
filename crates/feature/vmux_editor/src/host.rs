@@ -62,7 +62,7 @@ pub mod edit;
 pub mod encoding;
 pub mod fold;
 pub mod fold_store;
-pub mod highlight;
+pub(crate) mod highlight;
 pub mod keymap;
 pub mod lsp;
 pub mod markdown;

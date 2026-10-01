@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 
-pub(crate) use input::{FIND_INPUT_ID, focus_file_input};
-pub(super) use input::{INPUT_ID, focus_container};
+pub(crate) use input::EditorFocus;
 pub(crate) use lsp::LspPage;
 pub use page::Page;
 pub(super) use page::{

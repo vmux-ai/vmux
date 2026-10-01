@@ -14,8 +14,7 @@ use super::diagnostic::DiagnosticPresentation;
 use super::text_geometry::{CellMetrics, ColumnRuler, column_in_line, gutter_px};
 use super::text_style::StyledSpanStyle;
 use super::{
-    HOVER_DELAY_MS, diff_marker_row_class, diff_marker_sign, diff_marker_text_class,
-    focus_file_input,
+    EditorFocus, HOVER_DELAY_MS, diff_marker_row_class, diff_marker_sign, diff_marker_text_class,
 };
 
 #[component]
@@ -236,7 +235,7 @@ fn EditorLineRow(
                         add: e.modifiers().alt(),
                     });
                 }
-                focus_file_input();
+                EditorFocus::file();
             },
             oncontextmenu: move |e: Event<MouseData>| {
                 e.prevent_default();

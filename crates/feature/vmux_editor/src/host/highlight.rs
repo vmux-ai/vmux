@@ -8,88 +8,20 @@ use vmux_ecs::event::{FileLine, StyledSpan};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub const FILE_VIEW_MAX_BYTES: u64 = 50 * 1024 * 1024;
+pub(crate) const FILE_VIEW_MAX_BYTES: u64 = 50 * 1024 * 1024;
 
-pub const HIGHLIGHT_MAX_BYTES: u64 = 5 * 1024 * 1024;
-
-fn syntaxes() -> &'static SyntaxSet {
-    static SET: OnceLock<SyntaxSet> = OnceLock::new();
-    SET.get_or_init(two_face::syntax::extra_newlines)
-}
-
-pub fn syntax_set() -> &'static SyntaxSet {
-    syntaxes()
-}
-
-pub fn select_syntax(path: &Path) -> &'static syntect::parsing::SyntaxReference {
-    let ss = syntaxes();
-    path.extension()
-        .and_then(|e| e.to_str())
-        .and_then(|ext| ss.find_syntax_by_extension(ext))
-        .unwrap_or_else(|| ss.find_syntax_plain_text())
-}
+pub(crate) const HIGHLIGHT_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
 static DARK_THEME: AtomicBool = AtomicBool::new(true);
 
-pub fn set_dark_theme(dark: bool) -> bool {
-    DARK_THEME.swap(dark, Ordering::Relaxed) != dark
-}
-
-pub fn is_dark_theme() -> bool {
-    DARK_THEME.load(Ordering::Relaxed)
-}
-
-pub fn default_theme() -> syntect::highlighting::Theme {
-    crate::palette::Palette::for_scheme(is_dark_theme()).theme()
-}
-
-pub fn theme_foreground(theme: &syntect::highlighting::Theme) -> [u8; 3] {
-    theme
-        .settings
-        .foreground
-        .map(|c| [c.r, c.g, c.b])
-        .unwrap_or_else(|| crate::palette::Palette::for_scheme(is_dark_theme()).foreground_rgb())
-}
-
-pub(crate) fn styled_span(style: Style, text: &str) -> StyledSpan {
-    to_styled_span(style, text)
-}
-
-pub fn highlight_snippet(code: &str, lang_token: &str) -> Vec<FileLine> {
-    let ss = syntaxes();
-    let syntax = ss
-        .find_syntax_by_token(lang_token)
-        .or_else(|| ss.find_syntax_by_extension(lang_token))
-        .unwrap_or_else(|| ss.find_syntax_plain_text());
-    let theme = default_theme();
-    let mut h = HighlightLines::new(syntax, &theme);
-    LinesWithEndings::from(code)
-        .enumerate()
-        .map(|(idx, line)| {
-            let ranges = h.highlight_line(line, ss).unwrap_or_default();
-            FileLine {
-                line_no: idx as u32,
-                fold: vmux_ecs::event::FoldGutter::None,
-                indent_levels: 0,
-                spans: ranges
-                    .into_iter()
-                    .map(|(style, text)| to_styled_span(style, text))
-                    .filter(|s| !s.text.is_empty())
-                    .collect(),
-            }
-        })
-        .collect()
-}
-
 #[derive(Debug)]
-pub struct HighlightedFile {
-    pub language: String,
+pub(crate) struct HighlightedFile {
     pub lines: Vec<FileLine>,
     pub encoding: vmux_ecs::event::FileEncoding,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LoadError {
+pub(crate) enum LoadError {
     Binary,
     Unreadable(String),
 }
@@ -103,7 +35,7 @@ impl std::fmt::Display for LoadError {
     }
 }
 
-pub struct Highlighter;
+pub(crate) struct Highlighter;
 
 impl Default for Highlighter {
     fn default() -> Self {
@@ -112,18 +44,86 @@ impl Default for Highlighter {
 }
 
 impl Highlighter {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 
-    pub fn highlight(&self, content: &str, path: &Path) -> HighlightedFile {
-        let syntaxes = syntaxes();
-        let syntax = path
-            .extension()
+    pub(crate) fn syntax_set() -> &'static SyntaxSet {
+        static SET: OnceLock<SyntaxSet> = OnceLock::new();
+        SET.get_or_init(two_face::syntax::extra_newlines)
+    }
+
+    pub(crate) fn syntax(path: &Path) -> &'static syntect::parsing::SyntaxReference {
+        let syntaxes = Self::syntax_set();
+        path.extension()
             .and_then(|e| e.to_str())
             .and_then(|ext| syntaxes.find_syntax_by_extension(ext))
+            .unwrap_or_else(|| syntaxes.find_syntax_plain_text())
+    }
+
+    pub(crate) fn set_dark(dark: bool) -> bool {
+        DARK_THEME.swap(dark, Ordering::Relaxed) != dark
+    }
+
+    pub(crate) fn is_dark() -> bool {
+        DARK_THEME.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn theme() -> syntect::highlighting::Theme {
+        crate::palette::Palette::for_scheme(Self::is_dark()).theme()
+    }
+
+    pub(crate) fn foreground(theme: &syntect::highlighting::Theme) -> [u8; 3] {
+        theme
+            .settings
+            .foreground
+            .map(|color| [color.r, color.g, color.b])
+            .unwrap_or_else(|| {
+                crate::palette::Palette::for_scheme(Self::is_dark()).foreground_rgb()
+            })
+    }
+
+    pub(crate) fn span(style: Style, text: &str) -> StyledSpan {
+        StyledSpan {
+            text: text.trim_end_matches(['\n', '\r']).to_string(),
+            fg: [style.foreground.r, style.foreground.g, style.foreground.b],
+            bold: style.font_style.contains(FontStyle::BOLD),
+            italic: style.font_style.contains(FontStyle::ITALIC),
+        }
+    }
+
+    pub(crate) fn snippet(code: &str, lang_token: &str) -> Vec<FileLine> {
+        let syntaxes = Self::syntax_set();
+        let syntax = syntaxes
+            .find_syntax_by_token(lang_token)
+            .or_else(|| syntaxes.find_syntax_by_extension(lang_token))
             .unwrap_or_else(|| syntaxes.find_syntax_plain_text());
-        let theme = default_theme();
+        let theme = Self::theme();
+        let mut highlighter = HighlightLines::new(syntax, &theme);
+        LinesWithEndings::from(code)
+            .enumerate()
+            .map(|(index, line)| {
+                let ranges = highlighter
+                    .highlight_line(line, syntaxes)
+                    .unwrap_or_default();
+                FileLine {
+                    line_no: index as u32,
+                    fold: vmux_ecs::event::FoldGutter::None,
+                    indent_levels: 0,
+                    spans: ranges
+                        .into_iter()
+                        .map(|(style, text)| Self::span(style, text))
+                        .filter(|span| !span.text.is_empty())
+                        .collect(),
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn highlight(&self, content: &str, path: &Path) -> HighlightedFile {
+        let syntaxes = Self::syntax_set();
+        let syntax = Self::syntax(path);
+        let theme = Self::theme();
         let mut h = HighlightLines::new(syntax, &theme);
 
         let mut lines = Vec::new();
@@ -131,7 +131,7 @@ impl Highlighter {
             let ranges: Vec<(Style, &str)> = h.highlight_line(line, syntaxes).unwrap_or_default();
             let spans = ranges
                 .into_iter()
-                .map(|(style, text)| to_styled_span(style, text))
+                .map(|(style, text)| Self::span(style, text))
                 .filter(|s| !s.text.is_empty())
                 .collect();
             lines.push(FileLine {
@@ -142,13 +142,12 @@ impl Highlighter {
             });
         }
         HighlightedFile {
-            language: syntax.name.clone(),
             lines,
             encoding: vmux_ecs::event::FileEncoding::Utf8,
         }
     }
 
-    pub fn load_file(&self, path: &Path) -> Result<HighlightedFile, LoadError> {
+    pub(crate) fn load_file(&self, path: &Path) -> Result<HighlightedFile, LoadError> {
         let meta = std::fs::metadata(path)
             .map_err(|e| LoadError::Unreadable(format!("cannot open {}: {e}", path.display())))?;
         if !meta.is_file() {
@@ -170,16 +169,16 @@ impl Highlighter {
             return Err(LoadError::Binary);
         };
         let mut out = match meta.len() > HIGHLIGHT_MAX_BYTES {
-            true => self.plain(&decoded.text, path),
+            true => self.plain(&decoded.text),
             false => self.highlight(&decoded.text, path),
         };
         out.encoding = decoded.encoding;
         Ok(out)
     }
 
-    fn plain(&self, content: &str, path: &Path) -> HighlightedFile {
-        let theme = default_theme();
-        let fg = theme_foreground(&theme);
+    fn plain(&self, content: &str) -> HighlightedFile {
+        let theme = Self::theme();
+        let fg = Self::foreground(&theme);
         let lines = LinesWithEndings::from(content)
             .enumerate()
             .map(|(idx, line)| FileLine {
@@ -195,19 +194,9 @@ impl Highlighter {
             })
             .collect();
         HighlightedFile {
-            language: select_syntax(path).name.clone(),
             lines,
             encoding: vmux_ecs::event::FileEncoding::Utf8,
         }
-    }
-}
-
-fn to_styled_span(style: Style, text: &str) -> StyledSpan {
-    StyledSpan {
-        text: text.trim_end_matches(['\n', '\r']).to_string(),
-        fg: [style.foreground.r, style.foreground.g, style.foreground.b],
-        bold: style.font_style.contains(FontStyle::BOLD),
-        italic: style.font_style.contains(FontStyle::ITALIC),
     }
 }
 
@@ -219,7 +208,10 @@ mod tests {
     fn highlights_rust_keywords_distinctly() {
         let hl = Highlighter::new();
         let out = hl.highlight("fn main() {}\n", std::path::Path::new("a.rs"));
-        assert_eq!(out.language, "Rust");
+        assert_eq!(
+            Highlighter::syntax(std::path::Path::new("a.rs")).name,
+            "Rust"
+        );
         assert_eq!(out.lines.len(), 1);
         assert_eq!(out.lines[0].line_no, 0);
         let joined: String = out.lines[0].spans.iter().map(|s| s.text.as_str()).collect();
@@ -239,7 +231,10 @@ mod tests {
             "[package]\nname = \"x\"\n",
             std::path::Path::new("Cargo.toml"),
         );
-        assert_eq!(out.language, "TOML");
+        assert_eq!(
+            Highlighter::syntax(std::path::Path::new("Cargo.toml")).name,
+            "TOML"
+        );
         let colors: std::collections::HashSet<_> = out
             .lines
             .iter()
@@ -250,18 +245,12 @@ mod tests {
 
     #[test]
     fn recognizes_languages_beyond_syntect_defaults() {
-        let hl = Highlighter::new();
-        for (file, sample) in [
-            ("a.ts", "const x = 1;\n"),
-            ("a.tsx", "const x = <div/>;\n"),
-            ("a.go", "package main\n"),
-            ("a.py", "import os\n"),
-            ("a.kt", "fun main() {}\n"),
-            ("a.swift", "let x = 1\n"),
-            ("a.zig", "const x = 1;\n"),
-        ] {
-            let out = hl.highlight(sample, std::path::Path::new(file));
-            assert_ne!(out.language, "Plain Text", "{file} not recognized");
+        for file in ["a.ts", "a.tsx", "a.go", "a.py", "a.kt", "a.swift", "a.zig"] {
+            assert_ne!(
+                Highlighter::syntax(std::path::Path::new(file)).name,
+                "Plain Text",
+                "{file} not recognized"
+            );
         }
     }
 
@@ -269,7 +258,10 @@ mod tests {
     fn unknown_extension_is_plaintext_single_span() {
         let hl = Highlighter::new();
         let out = hl.highlight("just text\n", std::path::Path::new("notes.xyzzy"));
-        assert_eq!(out.language, "Plain Text");
+        assert_eq!(
+            Highlighter::syntax(std::path::Path::new("notes.xyzzy")).name,
+            "Plain Text"
+        );
         assert_eq!(out.lines.len(), 1);
     }
 
@@ -314,7 +306,11 @@ mod tests {
         .unwrap();
         let out = hl.load_file(&p).unwrap();
         let _ = std::fs::remove_file(&p);
-        assert_eq!(out.language, "Rust", "the language is still recognised");
+        assert_eq!(
+            Highlighter::syntax(&p).name,
+            "Rust",
+            "the language is still recognised"
+        );
         assert!(
             out.lines.iter().all(|l| l.spans.len() <= 1),
             "a line past the cap is one span, not a syntect parse"
@@ -329,7 +325,7 @@ mod tests {
         std::fs::write(&p, "fn x() {}\n").unwrap();
         let out = hl.load_file(&p).unwrap();
         let _ = std::fs::remove_file(&p);
-        assert_eq!(out.language, "Rust");
+        assert_eq!(Highlighter::syntax(&p).name, "Rust");
         assert_eq!(out.lines.len(), 1);
     }
 }

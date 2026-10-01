@@ -9,6 +9,7 @@ use vmux_ecs::scroll::{clamp_top_line, rows_from_viewport, window_range};
 use crate::host::edit::Selection;
 use crate::host::editor::{Editor, FileView};
 use crate::host::file_lifecycle::EditorFileLoadedSet;
+use crate::host::highlight::Highlighter;
 use crate::host::keymap::EditorKeymap;
 
 const STICKY_SCROLL_DEPTH: usize = 5;
@@ -370,7 +371,7 @@ fn rehighlight_on_color_scheme(
     let Some(change) = changes.read().last().copied() else {
         return;
     };
-    crate::host::highlight::set_dark_theme(matches!(change.0, vmux_setting::ResolvedScheme::Dark));
+    Highlighter::set_dark(matches!(change.0, vmux_setting::ResolvedScheme::Dark));
     for entity in &views {
         commands.trigger(ViewportRenderRequest::new(entity));
     }

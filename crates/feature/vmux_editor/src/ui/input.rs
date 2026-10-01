@@ -4,43 +4,51 @@ use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send};
 use vmux_ui::ime::ImeGuard;
 
-pub(super) const CONTAINER_ID: &str = "file-container";
-pub(crate) const INPUT_ID: &str = "file-input";
-pub(crate) const FIND_INPUT_ID: &str = "file-find-input";
+pub(crate) struct EditorFocus;
 
-pub(crate) fn focus_container() {
-    FocusClaim::new(CONTAINER_ID).request();
-}
+impl EditorFocus {
+    pub(crate) const CONTAINER_ID: &'static str = "file-container";
+    pub(crate) const FILE_INPUT_ID: &'static str = "file-input";
+    pub(crate) const FIND_INPUT_ID: &'static str = "file-find-input";
 
-pub(crate) fn focus_file_input() {
-    FocusClaim::new(INPUT_ID).request();
-}
-
-pub(crate) fn focus_find_input() {
-    FocusClaim::new(FIND_INPUT_ID).request();
-}
-
-pub(super) fn send_committed_text(mut field: Signal<String>, text: String) {
-    if text.is_empty() {
-        return;
+    pub(crate) fn container() {
+        FocusClaim::new(Self::CONTAINER_ID).request();
     }
-    let _ = send(&FileTextInput { text });
-    field.set(String::new());
+
+    pub(crate) fn file() {
+        FocusClaim::new(Self::FILE_INPUT_ID).request();
+    }
+
+    pub(crate) fn find() {
+        FocusClaim::new(Self::FIND_INPUT_ID).request();
+    }
 }
 
-pub(super) fn forward_file_key(
-    event: &Event<KeyboardData>,
-    mode: vmux_api::editor::EditMode,
-) -> bool {
-    let Some(stroke) = PressedKey::new(&event.data()).stroke() else {
-        return false;
-    };
-    if mode.accepts_text() && stroke.is_text_input() {
-        return false;
+pub(super) struct EditorInput;
+
+impl EditorInput {
+    pub(super) fn commit(mut field: Signal<String>, text: String) {
+        if text.is_empty() {
+            return;
+        }
+        let _ = send(&FileTextInput { text });
+        field.set(String::new());
     }
-    event.prevent_default();
-    let _ = send(&stroke);
-    true
+
+    pub(super) fn forward_key(
+        event: &Event<KeyboardData>,
+        mode: vmux_api::editor::EditMode,
+    ) -> bool {
+        let Some(stroke) = PressedKey::new(&event.data()).stroke() else {
+            return false;
+        };
+        if mode.accepts_text() && stroke.is_text_input() {
+            return false;
+        }
+        event.prevent_default();
+        let _ = send(&stroke);
+        true
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

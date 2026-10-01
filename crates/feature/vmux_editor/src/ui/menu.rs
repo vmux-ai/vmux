@@ -7,7 +7,7 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::ime::use_ime_guard;
 
-use super::focus_file_input;
+use super::EditorFocus;
 use super::key::FileKeys;
 use crate::event::FileEditorOperation;
 
@@ -51,12 +51,12 @@ pub(super) fn CodeActionMenu(
                         event.prevent_default();
                         let _ = send(&FileCodeActionPick { index: chosen as u32 });
                         titles.set(Vec::new());
-                        focus_file_input();
+                        EditorFocus::file();
                     }
                     Key::Escape => {
                         event.prevent_default();
                         titles.set(Vec::new());
-                        focus_file_input();
+                        EditorFocus::file();
                     }
                     _ => {}
                 }
@@ -70,7 +70,7 @@ pub(super) fn CodeActionMenu(
                         event.prevent_default();
                         let _ = send(&FileCodeActionPick { index: index as u32 });
                         titles.set(Vec::new());
-                        focus_file_input();
+                        EditorFocus::file();
                     },
                     "{title}"
                 }
@@ -153,12 +153,12 @@ pub(super) fn RenameInput(state: Signal<Option<RenameBox>>, top: f64, left: f64)
                             open.submit();
                         }
                         state.set(None);
-                        focus_file_input();
+                        EditorFocus::file();
                     }
                     Key::Escape => {
                         event.prevent_default();
                         state.set(None);
-                        focus_file_input();
+                        EditorFocus::file();
                     }
                     _ => {}
                 }

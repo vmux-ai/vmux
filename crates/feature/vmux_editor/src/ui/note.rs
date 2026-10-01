@@ -20,7 +20,7 @@ use super::markdown::{
     HeadingStyle, ListEditLine, ListLineHit, MdBlockView, NoteLineChunk, NoteSourceLine,
 };
 use super::note_text::{NoteInlineKind, NoteInlineNode, NoteText};
-use super::{diff_tone, focus_file_input};
+use super::{EditorFocus, diff_tone};
 
 const NOTE_CARET_ID: &str = "note-caret";
 
@@ -98,7 +98,7 @@ impl NoteCursor {
         self.activate_line(block_index, line);
         spawn(async move {
             sleep_ms(0).await;
-            focus_file_input();
+            EditorFocus::file();
             if center {
                 NoteCaretAnchor::new(block_index, line).center();
             }
@@ -221,7 +221,7 @@ fn place_note_caret(element_id: String, line: u32, prefix: u32, at: ClientPoint,
             extend,
             add: false,
         });
-        focus_file_input();
+        EditorFocus::file();
     });
 }
 
@@ -238,7 +238,7 @@ fn place_note_block_caret(index: usize, start_line: u32, source: String, at: Cli
             extend: false,
             add: false,
         });
-        focus_file_input();
+        EditorFocus::file();
     });
 }
 

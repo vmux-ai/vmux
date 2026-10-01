@@ -63,18 +63,94 @@ pub struct RepositoryNeedsWorktree;
 
 #[derive(Component)]
 pub(crate) struct PendingWorkspacePicker {
-    pub(crate) tab_entity: Entity,
-    pub(crate) agent_entity: Entity,
-    pub(crate) session_entity: Entity,
-    pub(crate) task: Task<Option<PathBuf>>,
+    tab_entity: Entity,
+    agent_entity: Entity,
+    session_entity: Entity,
+    task: Task<Option<PathBuf>>,
+}
+
+impl PendingWorkspacePicker {
+    pub(crate) fn new(
+        tab_entity: Entity,
+        agent_entity: Entity,
+        session_entity: Entity,
+        task: Task<Option<PathBuf>>,
+    ) -> Self {
+        Self {
+            tab_entity,
+            agent_entity,
+            session_entity,
+            task,
+        }
+    }
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentWorkspacePicker<'w, 's> {
-    pub(crate) pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
-    pub(crate) choices: Query<'w, 's, &'static PendingAgentChoice>,
-    pub(crate) session_roots: Query<'w, 's, (), With<AgentSessionRoot>>,
-    pub(crate) proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
+    pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
+    choices: Query<'w, 's, &'static PendingAgentChoice>,
+    session_roots: Query<'w, 's, (), With<AgentSessionRoot>>,
+    proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
+}
+
+impl AgentWorkspacePicker<'_, '_> {
+    pub(crate) fn pending_tabs(&self) -> std::collections::HashSet<Entity> {
+        self.pickers
+            .iter()
+            .map(|picker| picker.tab_entity)
+            .collect()
+    }
+
+    pub(crate) fn choice_pending(&self, agent: Entity) -> bool {
+        self.choices.contains(agent)
+    }
+
+    pub(crate) fn session(&self, entity: Entity, child_of: &Query<&ChildOf>) -> Option<Entity> {
+        let mut current = entity;
+        loop {
+            if self.session_roots.contains(current) {
+                return Some(current);
+            }
+            current = child_of.get(current).ok()?.parent();
+        }
+    }
+
+    pub(crate) fn choose(&self, requested: Option<PathBuf>) -> Task<Option<PathBuf>> {
+        let wake = self.proxy.as_deref().map(|proxy| (**proxy).clone());
+        let initial_dir = requested
+            .filter(|path| path.is_dir())
+            .or_else(|| {
+                ProjectsDirectory::ensure()
+                    .ok()
+                    .map(ProjectsDirectory::into_path)
+            })
+            .or_else(|| std::env::current_dir().ok().filter(|path| path.is_dir()))
+            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+            .filter(|path| path.is_dir())
+            .unwrap_or_else(|| PathBuf::from("/"));
+        IoTaskPool::get().spawn(async move {
+            let selected = rfd::AsyncFileDialog::new()
+                .set_title("Choose existing project")
+                .set_directory(initial_dir)
+                .pick_folder()
+                .await
+                .map(|handle| handle.path().to_path_buf());
+            if let Some(wake) = wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            selected
+        })
+    }
+
+    pub(crate) fn accept(&self, path: PathBuf) -> Task<Option<PathBuf>> {
+        let wake = self.proxy.as_deref().map(|proxy| (**proxy).clone());
+        IoTaskPool::get().spawn(async move {
+            if let Some(wake) = wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            Some(path)
+        })
+    }
 }
 
 fn initialize_git_agent_choice(
@@ -109,49 +185,6 @@ fn initialize_git_agent_choice(
         .entity(event.webview)
         .remove::<(PendingAgentChoice, InitializeGitAgentChoice)>()
         .remove::<ChatSynced>();
-}
-
-pub(crate) fn workspace_picker_task(
-    requested: Option<PathBuf>,
-    proxy: Option<&bevy::winit::EventLoopProxyWrapper>,
-) -> Task<Option<PathBuf>> {
-    let wake = proxy.map(|proxy| (**proxy).clone());
-    let initial_dir = requested
-        .filter(|path| path.is_dir())
-        .or_else(|| {
-            ProjectsDirectory::ensure()
-                .ok()
-                .map(ProjectsDirectory::into_path)
-        })
-        .or_else(|| std::env::current_dir().ok().filter(|path| path.is_dir()))
-        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
-        .filter(|path| path.is_dir())
-        .unwrap_or_else(|| PathBuf::from("/"));
-    IoTaskPool::get().spawn(async move {
-        let selected = rfd::AsyncFileDialog::new()
-            .set_title("Choose existing project")
-            .set_directory(initial_dir)
-            .pick_folder()
-            .await
-            .map(|handle| handle.path().to_path_buf());
-        if let Some(wake) = wake {
-            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-        }
-        selected
-    })
-}
-
-pub(crate) fn workspace_path_task(
-    path: PathBuf,
-    proxy: Option<&bevy::winit::EventLoopProxyWrapper>,
-) -> Task<Option<PathBuf>> {
-    let wake = proxy.map(|proxy| (**proxy).clone());
-    IoTaskPool::get().spawn(async move {
-        if let Some(wake) = wake {
-            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-        }
-        Some(path)
-    })
 }
 
 fn bind_tab_workspace(tab: &mut Tab, project_dir: &Path, execution_dir: &Path) {

@@ -6,7 +6,7 @@ use vmux_ui::hooks::send;
 use vmux_ui::scroll::ScrollIntoView;
 
 use super::text_geometry::{CellMetrics, gutter_px};
-use super::{INPUT_ID, SCROLL_ID};
+use super::{EditorFocus, SCROLL_ID};
 
 pub(super) struct ScrolledLineHeight;
 
@@ -142,7 +142,7 @@ impl EditorDom {
     }
 
     pub(super) fn reveal_caret(self) {
-        ScrollIntoView::nearest(INPUT_ID);
+        ScrollIntoView::nearest(EditorFocus::FILE_INPUT_ID);
     }
 
     pub(super) fn center_row(self, row: u32, char_height: f64) {

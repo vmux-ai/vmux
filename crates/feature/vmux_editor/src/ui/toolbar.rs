@@ -8,7 +8,7 @@ use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::scroll::ScrollIntoView;
 
-use super::{FIND_INPUT_ID, focus_file_input};
+use super::EditorFocus;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(super) struct EditorTabItem {
@@ -90,7 +90,7 @@ pub(super) fn FindBar(
             done: true,
             ..Default::default()
         });
-        focus_file_input();
+        EditorFocus::file();
     };
     let ask = move |text: String| {
         let _ = send(&FileFindRequest {
@@ -119,7 +119,7 @@ pub(super) fn FindBar(
     let confirm = move |reverse: bool| {
         step(reverse);
         if vim {
-            focus_file_input();
+            EditorFocus::file();
         }
     };
     let count = match (total, index) {
@@ -132,7 +132,7 @@ pub(super) fn FindBar(
         div {
             class: "flex h-6 shrink-0 items-center gap-1 rounded-md bg-foreground/[0.06] pl-1 pr-1 ring-1 ring-inset ring-foreground/10",
             input {
-                id: FIND_INPUT_ID,
+                id: EditorFocus::FIND_INPUT_ID,
                 r#type: "text",
                 class: "w-40 bg-transparent font-sans text-[11px] text-foreground outline-none placeholder:text-muted-foreground",
                 placeholder: translate("editor-find-placeholder"),

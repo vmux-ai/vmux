@@ -2,7 +2,7 @@
 pub use host::{
     ContractPlugin, EditorPlugin, FileToolPlugin, FileView, FileViewModeRequest,
     GlobalSearchRequest, LspPlugin, StackExplorerVisibility, contract, edit, encoding, fold,
-    fold_store, highlight, keymap, lsp, markdown, palette, shape, tool,
+    fold_store, keymap, lsp, markdown, palette, shape, tool,
 };
 
 #[cfg(host)]

@@ -6,7 +6,7 @@ use vmux_ui::platform::{now_millis, random_index, sleep_ms};
 
 use super::explorer::{ExplorerPanel, SidebarView};
 use super::key::FileKeys;
-use super::{Mode, focus_container, focus_file_input};
+use super::{EditorFocus, Mode};
 
 const EXPLORER_SQUEEZE_TOLERANCE_PX: u32 = 160;
 const EDITOR_MIN_WIDTH_PX: u32 = 320;
@@ -155,8 +155,8 @@ impl ExplorerPane {
             return;
         }
         match mode() {
-            Mode::Text => focus_file_input(),
-            Mode::Dir | Mode::Media(_) => focus_container(),
+            Mode::Text => EditorFocus::file(),
+            Mode::Dir | Mode::Media(_) => EditorFocus::container(),
         }
     }
 

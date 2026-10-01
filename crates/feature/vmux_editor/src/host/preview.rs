@@ -3,7 +3,7 @@ use std::path::Path;
 use vmux_ecs::event::{FileLine, PreviewKind};
 
 use super::directory::list_dir;
-use crate::highlight::{Highlighter, LoadError};
+use crate::host::highlight::{Highlighter, LoadError};
 
 pub const IMAGE_BYTES_CAP: u64 = 25 * 1024 * 1024;
 pub const THUMB_MAX_EDGE: u32 = 64;

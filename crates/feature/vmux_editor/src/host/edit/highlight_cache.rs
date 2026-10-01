@@ -1,9 +1,11 @@
 use ropey::Rope;
-use syntect::highlighting::{HighlightIterator, HighlightState, Highlighter, Theme};
+use syntect::highlighting::{
+    HighlightIterator, HighlightState, Highlighter as SyntectHighlighter, Theme,
+};
 use syntect::parsing::{ParseState, ScopeStack, SyntaxReference};
 use vmux_ecs::event::{FileLine, StyledSpan};
 
-use crate::highlight::{default_theme, is_dark_theme, select_syntax, styled_span, syntax_set};
+use crate::host::highlight::Highlighter;
 
 pub struct HighlightCache {
     syntax: &'static SyntaxReference,
@@ -18,12 +20,12 @@ pub struct HighlightCache {
 
 impl HighlightCache {
     pub fn new(path: &std::path::Path) -> Self {
-        let syntax = select_syntax(path);
+        let syntax = Highlighter::syntax(path);
         Self {
             language: syntax.name.clone(),
             syntax,
-            theme: default_theme(),
-            dark: is_dark_theme(),
+            theme: Highlighter::theme(),
+            dark: Highlighter::is_dark(),
             befores: Vec::new(),
             spans: Vec::new(),
             semantic: Default::default(),
@@ -47,16 +49,16 @@ impl HighlightCache {
     }
 
     fn refresh_theme(&mut self) {
-        if is_dark_theme() != self.dark {
-            self.theme = default_theme();
-            self.dark = is_dark_theme();
+        if Highlighter::is_dark() != self.dark {
+            self.theme = Highlighter::theme();
+            self.dark = Highlighter::is_dark();
             self.befores.clear();
             self.spans.clear();
         }
     }
 
     fn initial(&self) -> (ParseState, HighlightState) {
-        let hl = Highlighter::new(&self.theme);
+        let hl = SyntectHighlighter::new(&self.theme);
         (
             ParseState::new(self.syntax),
             HighlightState::new(&hl, ScopeStack::new()),
@@ -76,15 +78,15 @@ impl HighlightCache {
         if self.befores.len() > line || self.befores.len() > total {
             return;
         }
-        let ss = syntax_set();
-        let hl = Highlighter::new(&self.theme);
+        let ss = Highlighter::syntax_set();
+        let hl = SyntectHighlighter::new(&self.theme);
         while self.befores.len() <= line && self.befores.len() - 1 < total {
             let i = self.befores.len() - 1;
             let (mut ps, mut hs) = self.befores[i].clone();
             let text: String = rope.line(i).chars().collect();
             let ops = ps.parse_line(&text, ss).unwrap_or_default();
             let spans: Vec<StyledSpan> = HighlightIterator::new(&mut hs, &ops, &text, &hl)
-                .map(|(style, t)| styled_span(style, t))
+                .map(|(style, text)| Highlighter::span(style, text))
                 .filter(|s| !s.text.is_empty())
                 .collect();
             if self.spans.len() <= i {
@@ -121,7 +123,7 @@ impl HighlightCache {
     }
 
     fn plain_window(&self, rope: &Rope, start: usize, end: usize) -> Vec<FileLine> {
-        let fg = crate::highlight::theme_foreground(&self.theme);
+        let fg = Highlighter::foreground(&self.theme);
         let mut out = Vec::with_capacity(end - start);
         for i in start..end {
             let text: String = rope

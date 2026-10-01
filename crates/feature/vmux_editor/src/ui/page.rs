@@ -6,10 +6,7 @@ use super::directory::{Preview, PreviewPane, clear_preview, image_data_url, togg
 use super::dom::{EditorDom, ScrolledLineHeight};
 use super::editor::{EditorLines, StickyScope};
 use super::explorer::SidebarView;
-use super::input::{
-    CONTAINER_ID, INPUT_ID, PreeditField, focus_container, forward_file_key, send_committed_text,
-};
-use super::input::{focus_file_input, focus_find_input};
+use super::input::{EditorFocus, EditorInput, PreeditField};
 use super::key::use_file_keys;
 use super::menu::{CodeActionMenu, EditorContextMenu, ReferencesPanel, RenameBox, RenameInput};
 use super::note::{NoteBlankLine, NoteBlockView, NoteBlocks, NoteCursor, NoteProperties};
@@ -201,7 +198,7 @@ pub fn Page() -> Element {
             if event.open {
                 spawn(async move {
                     sleep_ms(0).await;
-                    focus_find_input();
+                    EditorFocus::find();
                 });
             }
         })
@@ -420,16 +417,16 @@ pub fn Page() -> Element {
                         note_cursor.activate_centered(index, line);
                     }
                     if note_cursor.editing() {
-                        focus_file_input();
+                        EditorFocus::file();
                     } else {
-                        focus_container();
+                        EditorFocus::container();
                     }
                 }
                 FileViewMode::Editor => {
                     dom.center_row(cursor().row, cell_dims().height);
-                    focus_file_input();
+                    EditorFocus::file();
                 }
-                FileViewMode::Note | FileViewMode::Diff => focus_container(),
+                FileViewMode::Note | FileViewMode::Diff => EditorFocus::container(),
             }
         })
     });
@@ -518,7 +515,7 @@ pub fn Page() -> Element {
                     FilePanelFocusTarget::References => {
                         FocusClaim::new("refs-panel").request();
                     }
-                    FilePanelFocusTarget::Editor => focus_file_input(),
+                    FilePanelFocusTarget::Editor => EditorFocus::file(),
                 }
             });
         })
@@ -785,7 +782,7 @@ pub fn Page() -> Element {
             }
 
         div {
-            id: CONTAINER_ID,
+            id: EditorFocus::CONTAINER_ID,
             tabindex: "0",
             class: "relative flex h-full min-w-[320px] flex-1 flex-col overflow-hidden bg-background bg-[radial-gradient(120%_80%_at_50%_-10%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_60%)] text-foreground font-mono text-sm leading-normal outline-none",
             style: "--iw:{indent().width};{cell_dims().vars()}{theme_style}",
@@ -798,19 +795,19 @@ pub fn Page() -> Element {
                             && is_markdown()
                         {
                             if note_cursor.editing() {
-                                focus_file_input();
+                                EditorFocus::file();
                             } else {
-                                focus_container();
+                                EditorFocus::container();
                             }
                         } else {
-                            focus_file_input();
+                            EditorFocus::file();
                         }
                     }
                     Mode::Dir => {
                         e.prevent_default();
-                        focus_container();
+                        EditorFocus::container();
                     }
-                    Mode::Media(_) => focus_container(),
+                    Mode::Media(_) => EditorFocus::container(),
                 }
             },
 
@@ -825,7 +822,7 @@ pub fn Page() -> Element {
                     && is_markdown()
                     && !note_cursor.editing()
                 {
-                    let _ = forward_file_key(&e, ed_mode());
+                    let _ = EditorInput::forward_key(&e, ed_mode());
                     return;
                 }
                 match current_mode {
@@ -931,7 +928,7 @@ pub fn Page() -> Element {
                                     file_view_mode.set(FileViewMode::Editor);
                                     dom.center_row(cursor().row, cell_dims().height);
                                     let _ = send(&FileViewModeSet { mode: FileViewMode::Editor });
-                                    focus_file_input();
+                                    EditorFocus::file();
                                 },
                                 {translate("editor-editor")}
                             }
@@ -963,9 +960,9 @@ pub fn Page() -> Element {
                                     && is_markdown()
                                     && !note_cursor.editing()
                                 {
-                                    focus_container();
+                                    EditorFocus::container();
                                 } else {
-                                    focus_file_input();
+                                    EditorFocus::file();
                                 }
                             },
                             {translate("editor-keymap-standard")}
@@ -983,9 +980,9 @@ pub fn Page() -> Element {
                                     && is_markdown()
                                     && !note_cursor.editing()
                                 {
-                                    focus_container();
+                                    EditorFocus::container();
                                 } else {
-                                    focus_file_input();
+                                    EditorFocus::file();
                                 }
                             },
                             {translate("editor-keymap-vim")}
@@ -1189,7 +1186,7 @@ pub fn Page() -> Element {
                                         }
                                         if note_cursor.editing() {
                                             note_cursor.reset();
-                                            focus_container();
+                                            EditorFocus::container();
                                         }
                                     },
                                     onpointermove: move |event: Event<PointerData>| {
@@ -1257,7 +1254,7 @@ pub fn Page() -> Element {
                                             }
                                         }
                                         textarea {
-                                            id: INPUT_ID,
+                                            id: EditorFocus::FILE_INPUT_ID,
                                             value: "{typed}",
                                             onmounted: move |event: Event<MountedData>| {
                                                 dom.field_mounted(event.data());
@@ -1269,13 +1266,13 @@ pub fn Page() -> Element {
                                             oncompositionstart: move |_| ime.start(),
                                             oncompositionend: move |event: Event<CompositionData>| {
                                                 ime.commit();
-                                                send_committed_text(typed, event.data().data());
+                                                EditorInput::commit(typed, event.data().data());
                                             },
                                             oninput: move |event: Event<FormData>| {
                                                 if ime.active() {
                                                     return;
                                                 }
-                                                send_committed_text(typed, event.value());
+                                                EditorInput::commit(typed, event.value());
                                             },
                                             onkeydown: move |event: Event<KeyboardData>| {
                                                 event.stop_propagation();
@@ -1294,13 +1291,13 @@ pub fn Page() -> Element {
                                                         let _ = send(&stroke);
                                                     }
                                                     if keymap() == KeymapKind::Vim {
-                                                        focus_file_input();
+                                                        EditorFocus::file();
                                                     } else {
-                                                        focus_container();
+                                                        EditorFocus::container();
                                                     }
                                                     return;
                                                 }
-                                                let _ = forward_file_key(&event, ed_mode());
+                                                let _ = EditorInput::forward_key(&event, ed_mode());
                                             },
                                         }
                                         if !note_references().is_empty() {
@@ -1584,7 +1581,7 @@ pub fn Page() -> Element {
                                         }
 
                                         textarea {
-                                            id: INPUT_ID,
+                                            id: EditorFocus::FILE_INPUT_ID,
                                             value: "{typed}",
                                             onmounted: move |event: Event<MountedData>| {
                                                 dom.field_mounted(event.data());
@@ -1597,13 +1594,13 @@ pub fn Page() -> Element {
                                             oncompositionstart: move |_| ime.start(),
                                             oncompositionend: move |event: Event<CompositionData>| {
                                                 ime.commit();
-                                                send_committed_text(typed, event.data().data());
+                                                EditorInput::commit(typed, event.data().data());
                                             },
                                             oninput: move |event: Event<FormData>| {
                                                 if ime.active() {
                                                     return;
                                                 }
-                                                send_committed_text(typed, event.value());
+                                                EditorInput::commit(typed, event.value());
                                             },
                                             onkeydown: move |e: Event<KeyboardData>| {
                                                 e.stop_propagation();
@@ -1613,7 +1610,7 @@ pub fn Page() -> Element {
                                                 if keys.offer(&e) {
                                                     return;
                                                 }
-                                                let _ = forward_file_key(&e, ed_mode());
+                                                let _ = EditorInput::forward_key(&e, ed_mode());
                                             },
                                         }
 

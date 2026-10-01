@@ -19,8 +19,7 @@ use super::agent::{
 };
 use super::workspace::{
     AgentWorkspacePicker, AgentWorkspaceState, ExistingWorktreeCandidates, PendingWorkspacePicker,
-    WORKSPACE_SELECTION_PENDING, WORKSPACE_SELECTION_REQUESTED, workspace_path_task,
-    workspace_picker_task,
+    WORKSPACE_SELECTION_PENDING, WORKSPACE_SELECTION_REQUESTED,
 };
 use vmux_ecs::profile::ProjectsDirectory;
 
@@ -79,20 +78,6 @@ fn ancestor_self_tab(
     let mut current = pane;
     loop {
         if tabs.contains(current) {
-            return Some(current);
-        }
-        current = child_of.get(current).ok()?.parent();
-    }
-}
-
-fn ancestor_agent_session(
-    entity: Entity,
-    session_roots: &Query<(), With<vmux_ecs::agent::AgentSessionRoot>>,
-    child_of: &Query<&ChildOf>,
-) -> Option<Entity> {
-    let mut current = entity;
-    loop {
-        if session_roots.contains(current) {
             return Some(current);
         }
         current = child_of.get(current).ok()?.parent();
@@ -158,11 +143,7 @@ fn handle_requests(
         .0;
     let mut worktree_created_this_batch: std::collections::HashMap<Entity, String> =
         std::collections::HashMap::new();
-    let mut workspace_picker_tabs: std::collections::HashSet<Entity> = workspace_picker
-        .pickers
-        .iter()
-        .map(|picker| picker.tab_entity)
-        .collect();
+    let mut workspace_picker_tabs = workspace_picker.pending_tabs();
     for request in reader.read() {
         let request_anchor = workspace_request_anchor(request);
         let result = if let Some(command) = WorkspaceChoice::decode(request) {
@@ -181,11 +162,9 @@ fn handle_requests(
                         ));
                         continue;
                     };
-                    let Some(session_entity) = ancestor_agent_session(
-                        agent_entity,
-                        &workspace_picker.session_roots,
-                        &ctx.child_of_q,
-                    ) else {
+                    let Some(session_entity) =
+                        workspace_picker.session(agent_entity, &ctx.child_of_q)
+                    else {
                         service_requests.write(ServiceRequest(
                             ClientMessage::AgentCommandResponse {
                                 request_id: request.request_id,
@@ -196,7 +175,7 @@ fn handle_requests(
                         ));
                         continue;
                     };
-                    if workspace_picker.choices.get(agent_entity).is_ok() {
+                    if workspace_picker.choice_pending(agent_entity) {
                         AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
                     } else if !workspace_picker_tabs.insert(tab_entity) {
                         AgentCommandResult::Text(WORKSPACE_SELECTION_PENDING.to_string())
@@ -207,24 +186,24 @@ fn handle_requests(
                         let trusted = ProjectsDirectory::ensure()
                             .is_ok_and(|projects| projects.contains(&selected));
                         let task = if trusted {
-                            workspace_path_task(selected, workspace_picker.proxy.as_deref())
+                            workspace_picker.accept(selected)
                         } else {
-                            workspace_picker_task(Some(selected), workspace_picker.proxy.as_deref())
+                            workspace_picker.choose(Some(selected))
                         };
-                        commands.spawn(PendingWorkspacePicker {
+                        commands.spawn(PendingWorkspacePicker::new(
                             tab_entity,
                             agent_entity,
                             session_entity,
                             task,
-                        });
+                        ));
                         AgentCommandResult::Text(WORKSPACE_SELECTION_REQUESTED.to_string())
                     } else {
-                        commands.spawn(PendingWorkspacePicker {
+                        commands.spawn(PendingWorkspacePicker::new(
                             tab_entity,
                             agent_entity,
                             session_entity,
-                            task: workspace_picker_task(None, workspace_picker.proxy.as_deref()),
-                        });
+                            workspace_picker.choose(None),
+                        ));
                         AgentCommandResult::Text(WORKSPACE_SELECTION_REQUESTED.to_string())
                     }
                 }
