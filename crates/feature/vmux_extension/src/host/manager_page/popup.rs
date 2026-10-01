@@ -1,13 +1,18 @@
-use bevy::prelude::*;
-use bevy_cef::prelude::{Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput};
+use crate::store;
+use bevy::{prelude::*, window::WindowResized};
+use bevy_cef::prelude::{
+    Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput, WebviewWindowed,
+};
 use vmux_api::extension::{
     ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent,
     ExtensionPopupOpenRequest, ExtensionPopupSizeEvent,
 };
+use vmux_core::overlay::WindowOverlay;
 use vmux_core::{KeyboardOwner, host::UiStateWrite};
-use vmux_extension::store;
-use vmux_flex::prelude::Visibility;
+use vmux_flex::prelude::{LayoutSystems, Visibility};
 use vmux_layout::{Browser, LayoutCef, state::LayoutUiState};
+
+use super::super::model::ExtensionPopup;
 
 pub(super) struct PopupPlugin;
 
@@ -23,17 +28,14 @@ impl Plugin for PopupPlugin {
             .add_observer(bounds_request)
             .add_observer(close_request)
             .add_observer(size)
+            .add_systems(Update, inject_sizing.after(vmux_browser::BrowserLoadSet))
             .add_systems(
-                Update,
-                inject_sizing.after(crate::BrowserSystemSet::DrainLoadingState),
+                PostUpdate,
+                present
+                    .in_set(vmux_browser::BrowserOverlaySet)
+                    .after(LayoutSystems::Layout),
             );
     }
-}
-
-#[derive(Component)]
-pub(crate) struct ExtensionPopup {
-    pub(crate) owner: Entity,
-    pub(crate) extension_id: String,
 }
 
 fn close_extension_popup(
@@ -140,6 +142,7 @@ fn open_request(
                 owner,
                 extension_id: id.clone(),
             },
+            vmux_browser::PopupWebview,
             Visibility::Hidden,
         ));
     commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
@@ -180,7 +183,7 @@ fn close_request(
 }
 
 fn inject_sizing(
-    mut events: MessageReader<crate::host::WebviewLoadCompleted>,
+    mut events: MessageReader<vmux_browser::WebviewLoadCompleted>,
     popups: Query<(), With<ExtensionPopup>>,
     browsers: NonSend<Browsers>,
 ) {
@@ -253,6 +256,66 @@ fn inject_sizing(
 })();
 "#,
         );
+    }
+}
+
+fn present(
+    browsers: NonSend<Browsers>,
+    popups: Query<
+        (
+            Entity,
+            &ExtensionPopupBounds,
+            Option<&HostWindow>,
+            Has<ExtensionPopupPresented>,
+        ),
+        (
+            With<ExtensionPopup>,
+            With<WindowOverlay>,
+            With<WebviewWindowed>,
+        ),
+    >,
+    windows: Query<&Window>,
+    focused_window: vmux_layout::window::FocusedWindow,
+    mut resized: MessageReader<WindowResized>,
+    mut commands: Commands,
+) {
+    if resized.read().next().is_some() {
+        for (entity, ..) in &popups {
+            browsers.hide_child_window(&entity);
+            commands.entity(entity).try_despawn();
+        }
+        return;
+    }
+    for (entity, bounds, host_window, presented) in &popups {
+        let window_entity = host_window.map(|host| host.0).or(focused_window.entity());
+        let Some(window_entity) = window_entity else {
+            continue;
+        };
+        let Ok(window) = windows.get(window_entity) else {
+            continue;
+        };
+        if !browsers.has_browser(entity) {
+            continue;
+        }
+        let scale = window.resolution.scale_factor();
+        browsers.resize(&entity, Vec2::new(bounds.width, bounds.height), scale);
+        browsers.set_windowed_corner_radius(&entity, 14.0 * scale, scale, true);
+        if !browsers.host_in_child_window(
+            &entity,
+            bounds.left as f64,
+            bounds.top as f64,
+            bounds.width as f64,
+            bounds.height as f64,
+        ) {
+            continue;
+        }
+        browsers.set_windowed_hidden(&entity, false);
+        if presented {
+            continue;
+        }
+        browsers.set_windowed_focus(&entity, true);
+        browsers.nudge_windowed_repaint(&entity);
+        commands.entity(entity).insert(ExtensionPopupPresented);
     }
 }
 

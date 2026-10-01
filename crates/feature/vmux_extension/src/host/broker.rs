@@ -1,3 +1,7 @@
+use crate::protocol::{
+    ApiEvent, ApiRequest, ApiResponse, BridgeClientMessage, BridgeServerMessage, ExtensionApiError,
+    ExtensionCallerContext,
+};
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::RecvTimeoutError;
@@ -6,10 +10,6 @@ use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 #[cfg(test)]
 use vmux_core::host::manifest::FeaturePlugin;
-use vmux_extension::protocol::{
-    ApiEvent, ApiRequest, ApiResponse, BridgeClientMessage, BridgeServerMessage, ExtensionApiError,
-    ExtensionCallerContext,
-};
 
 use super::bridge::{BridgeAuthorization, BridgeInbound, ExtensionBridgeServer};
 use super::capability::{CapabilityKind, CapabilityMatrix, CapabilityStatus};
@@ -167,8 +167,8 @@ fn drain_bridge_requests(
         }
         seen.0
             .retain(|(id, seen_session), _| id != &extension_id || *seen_session == session_id);
-        if context_id != vmux_extension::protocol::BRIDGE_CONTEXT_ID
-            || context_kind != vmux_extension::protocol::ExtensionContextKind::BridgePage
+        if context_id != crate::protocol::BRIDGE_CONTEXT_ID
+            || context_kind != crate::protocol::ExtensionContextKind::BridgePage
         {
             send_fatal_to_session(
                 &server,
@@ -1060,18 +1060,16 @@ pub(crate) const fn current_platform() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extension::bridge::{
-        BridgeAuthorization, BridgeRegistration, ExtensionBridgeServer,
+    use crate::host::bridge::{BridgeAuthorization, BridgeRegistration, ExtensionBridgeServer};
+    use crate::protocol::{
+        ApiRequest, ApiResponse, BRIDGE_PROTOCOL_VERSION, BridgeClientMessage, BridgeHello,
+        BridgeServerMessage, EventSubscribe, ExtensionApiError, ExtensionCallerContext,
+        ExtensionContextKind,
     };
     use std::time::Duration;
     use tungstenite::{
         Message, WebSocket, client::IntoClientRequest, connect, http::HeaderValue,
         stream::MaybeTlsStream,
-    };
-    use vmux_extension::protocol::{
-        ApiRequest, ApiResponse, BRIDGE_PROTOCOL_VERSION, BridgeClientMessage, BridgeHello,
-        BridgeServerMessage, EventSubscribe, ExtensionApiError, ExtensionCallerContext,
-        ExtensionContextKind,
     };
 
     const EXTENSION_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -1405,7 +1403,7 @@ mod tests {
                 authorization: BridgeAuthorization {
                     permissions: ["storage".into(), "scripting".into()].into_iter().collect(),
                     host_permissions: vec![
-                        vmux_extension::match_pattern::ExtensionMatchPattern::parse(
+                        crate::match_pattern::ExtensionMatchPattern::parse(
                             "https://*.example.com/*",
                         )
                         .unwrap(),

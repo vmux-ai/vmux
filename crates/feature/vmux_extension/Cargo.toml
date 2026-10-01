@@ -9,6 +9,9 @@ build = "../../build_cfg.rs"
 [lib]
 path = "src/lib.rs"
 
+[features]
+conformance = []
+
 [dependencies]
 base64 = "0.22"
 serde = { workspace = true }
@@ -24,16 +27,23 @@ bevy = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_cef = { workspace = true }
 crossbeam-channel = { workspace = true }
+libc = "0.2"
+polling = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+rkyv = { workspace = true }
 sha2 = "0.10"
+tempfile = "3"
+tungstenite = { workspace = true }
 url = { workspace = true }
+uuid = { workspace = true }
+vmux_browser = { path = "../../util/vmux_browser" }
+vmux_flex = { path = "../../util/vmux_flex" }
+vmux_history = { path = "../vmux_history" }
+vmux_tool = { path = "../vmux_tool" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
-
-[dev-dependencies]
-tempfile = "3"
 
 [lints]
 workspace = true

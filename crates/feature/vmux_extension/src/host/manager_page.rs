@@ -3,8 +3,6 @@ mod web_store;
 
 use bevy::prelude::*;
 
-pub(crate) use popup::{ExtensionPopup, ExtensionPopupBounds, ExtensionPopupPresented};
-
 pub(super) struct ManagerPagePlugin;
 
 impl Plugin for ManagerPagePlugin {

@@ -35,22 +35,6 @@ pub enum ExtensionBridgeRole {
 }
 
 #[derive(Component)]
-pub(crate) struct ExtensionInfrastructureWebview;
-
-#[derive(Component)]
-pub(crate) struct RetiredExtensionInfrastructureWebview(Entity);
-
-impl RetiredExtensionInfrastructureWebview {
-    pub(crate) fn new(entity: Entity) -> Self {
-        Self(entity)
-    }
-
-    pub(crate) fn contains(&self, entity: Entity) -> bool {
-        self.0 == entity
-    }
-}
-
-#[derive(Component)]
 struct ExtensionBridgeStopping;
 
 fn stop_bridge_pages(
@@ -66,7 +50,7 @@ fn stop_bridge_pages(
         commands.spawn(ExtensionBridgeStopping);
     }
     for entity in &pages {
-        commands.spawn(RetiredExtensionInfrastructureWebview::new(entity));
+        commands.spawn(vmux_browser::RetiredInfrastructureWebview::new(entity));
         commands.entity(entity).despawn();
     }
 }
@@ -118,7 +102,7 @@ fn spawn_bridge_pages(
         if desired.remove(&key) {
             continue;
         }
-        commands.spawn(RetiredExtensionInfrastructureWebview::new(entity));
+        commands.spawn(vmux_browser::RetiredInfrastructureWebview::new(entity));
         commands.entity(entity).despawn();
     }
     for runtime in &prepared.0 {
@@ -141,7 +125,7 @@ fn spawn_bridge_pages(
                     extension_id: runtime.extension_id.clone(),
                     role,
                 },
-                ExtensionInfrastructureWebview,
+                vmux_browser::InfrastructureWebview,
                 WebviewSize(Vec2::ONE),
                 WebviewMaxFrameRate(1),
                 Visibility::Hidden,
@@ -189,9 +173,9 @@ fn bridge_config_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extension::bridge::ExtensionBridgeServer;
-    use crate::extension::load::PreparedExtensions;
-    use crate::extension::runtime::PreparedRuntime;
+    use crate::host::bridge::ExtensionBridgeServer;
+    use crate::host::load::PreparedExtensions;
+    use crate::host::runtime::PreparedRuntime;
     use bevy::window::PrimaryWindow;
     use bevy_cef::prelude::{
         PrivatePreloadScripts, WebviewMaxFrameRate, WebviewSize, WebviewSource,
@@ -265,7 +249,7 @@ mod tests {
         assert!(app.world().get::<vmux_layout::Browser>(entity).is_none());
         assert!(
             app.world()
-                .get::<ExtensionInfrastructureWebview>(entity)
+                .get::<vmux_browser::InfrastructureWebview>(entity)
                 .is_some()
         );
         assert_eq!(
@@ -290,7 +274,7 @@ mod tests {
         );
         assert!(
             app.world_mut()
-                .query::<&RetiredExtensionInfrastructureWebview>()
+                .query::<&vmux_browser::RetiredInfrastructureWebview>()
                 .iter(app.world())
                 .any(|retired| retired.contains(entity))
         );

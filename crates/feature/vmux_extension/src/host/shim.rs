@@ -1,6 +1,6 @@
+use crate::protocol::{BRIDGE_CHANNEL, KEEPALIVE_CHANNEL};
 use serde_json::Value;
 use std::path::{Component, Path};
-use vmux_extension::protocol::{BRIDGE_CHANNEL, KEEPALIVE_CHANNEL};
 
 const PATCH_TEMPLATE: &str = include_str!("shim.js");
 const PATCH_FILE: &str = "vmux_patch.js";

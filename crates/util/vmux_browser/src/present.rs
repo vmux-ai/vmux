@@ -49,8 +49,6 @@ impl Plugin for PresentPlugin {
                 sync_windowed_layout,
                 sync_windowed_frames.in_set(crate::BrowserSystemSet::SyncWindowedFrames),
                 sync_windowed_command_bar.in_set(crate::BrowserSystemSet::SyncWindowedCommandBar),
-                sync_windowed_extension_popups
-                    .in_set(crate::BrowserSystemSet::SyncWindowedExtensionPopups),
                 flush_command_bar_pointer,
                 apply_repaint_nudge,
                 sync_webview_resize,
@@ -995,68 +993,6 @@ fn sync_windowed_command_bar(
     if !*was_open || native_size_changed.contains(entity) {
         browsers.nudge_windowed_repaint(&entity);
         *was_open = true;
-    }
-}
-
-fn sync_windowed_extension_popups(
-    browsers: NonSend<Browsers>,
-    popups: Query<
-        (
-            Entity,
-            &crate::extension::ExtensionPopupBounds,
-            Option<&HostWindow>,
-            Has<crate::extension::ExtensionPopupPresented>,
-        ),
-        (
-            With<crate::extension::ExtensionPopup>,
-            With<WindowOverlay>,
-            With<WebviewWindowed>,
-        ),
-    >,
-    windows: Query<&Window>,
-    focused_window: vmux_layout::window::FocusedWindow,
-    mut resized: MessageReader<WindowResized>,
-    mut commands: Commands,
-) {
-    if resized.read().next().is_some() {
-        for (entity, ..) in &popups {
-            browsers.hide_child_window(&entity);
-            commands.entity(entity).try_despawn();
-        }
-        return;
-    }
-    for (entity, bounds, host_window, presented) in &popups {
-        let window_entity = host_window.map(|host| host.0).or(focused_window.entity());
-        let Some(window_entity) = window_entity else {
-            continue;
-        };
-        let Ok(window) = windows.get(window_entity) else {
-            continue;
-        };
-        if !browsers.has_browser(entity) {
-            continue;
-        }
-        let scale = window.resolution.scale_factor();
-        browsers.resize(&entity, Vec2::new(bounds.width, bounds.height), scale);
-        browsers.set_windowed_corner_radius(&entity, 14.0 * scale, scale, true);
-        if !browsers.host_in_child_window(
-            &entity,
-            bounds.left as f64,
-            bounds.top as f64,
-            bounds.width as f64,
-            bounds.height as f64,
-        ) {
-            continue;
-        }
-        browsers.set_windowed_hidden(&entity, false);
-        if presented {
-            continue;
-        }
-        browsers.set_windowed_focus(&entity, true);
-        browsers.nudge_windowed_repaint(&entity);
-        commands
-            .entity(entity)
-            .insert(crate::extension::ExtensionPopupPresented);
     }
 }
 

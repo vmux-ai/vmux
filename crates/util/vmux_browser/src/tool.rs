@@ -5,8 +5,8 @@ use vmux_core::ProcessAnchor;
 use vmux_core::host::manifest::FeaturePlugin;
 
 use crate::host::{
-    AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch,
-    AgentBrowserInstallExtension, AgentBrowserNavigate, AgentBrowserScroll, AgentBrowserSnapshot,
+    AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch, AgentBrowserNavigate,
+    AgentBrowserScroll, AgentBrowserSnapshot,
 };
 
 use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery};
@@ -21,7 +21,6 @@ impl Plugin for BrowserToolPlugin {
             .bind_tool::<BrowserGoBackArgs>()
             .bind_tool::<BrowserGoForwardArgs>()
             .bind_tool::<BrowserHistorySearchArgs>()
-            .bind_tool::<BrowserInstallExtensionArgs>()
             .bind_tool::<BrowserSnapshotArgs>()
             .bind_tool::<BrowserScrollArgs>()
             .add_systems(
@@ -31,7 +30,6 @@ impl Plugin for BrowserToolPlugin {
                     go_back,
                     go_forward,
                     history_search,
-                    install_extension,
                     snapshot,
                     scroll,
                 )
@@ -87,13 +85,6 @@ struct BrowserGoForwardArgs {
 struct BrowserHistorySearchArgs {
     query: String,
     limit: Option<u32>,
-}
-
-#[vmux_tool::input]
-#[derive(Component, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BrowserInstallExtensionArgs {
-    source: String,
 }
 
 #[vmux_tool::input]
@@ -213,23 +204,6 @@ fn history_search(
             AgentRequest::encode(&AgentBrowserHistorySearch {
                 query: args.query.clone(),
                 limit: args.limit.unwrap_or(20).min(100),
-            })
-        };
-        commands.entity(entity).insert(ToolCommand(command));
-    }
-}
-
-fn install_extension(
-    mut commands: Commands,
-    requests: Query<(Entity, &BrowserInstallExtensionArgs), AddedTool<BrowserInstallExtensionArgs>>,
-) {
-    for (entity, args) in &requests {
-        let source = &args.source;
-        let command = if source.trim().is_empty() {
-            Err("browser_install_extension.source is empty".to_string())
-        } else {
-            AgentRequest::encode(&AgentBrowserInstallExtension {
-                source: source.clone(),
             })
         };
         commands.entity(entity).insert(ToolCommand(command));

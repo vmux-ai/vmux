@@ -9,6 +9,7 @@ repository.workspace = true
 
 [features]
 default = []
+conformance = ["extension", "vmux_extension/conformance"]
 cli = [
     "agent",
     "bookmark",
@@ -66,8 +67,8 @@ command = ["core", "dep:vmux_command"]
 setting = ["core", "dep:vmux_setting"]
 session = ["dep:vmux_session"]
 layout = ["command", "setting", "dep:vmux_layout"]
-browser = ["command", "layout", "extension", "dep:vmux_browser"]
-extension = ["layout", "dep:vmux_extension"]
+browser = ["command", "layout", "dep:vmux_browser"]
+extension = ["browser", "dep:vmux_extension"]
 terminal = ["layout", "service", "dep:vmux_terminal"]
 editor = ["layout", "dep:vmux_editor"]
 git = ["layout", "dep:vmux_git"]

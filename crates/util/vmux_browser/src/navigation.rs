@@ -84,10 +84,8 @@ fn issue_open_history(
 
 fn drain_committed(
     receiver: Res<WebviewCommittedNavigationReceiver>,
-    infrastructure: Query<(), With<crate::extension::bridge_page::ExtensionInfrastructureWebview>>,
-    retired_infrastructure: Query<
-        &crate::extension::bridge_page::RetiredExtensionInfrastructureWebview,
-    >,
+    infrastructure: Query<(), With<crate::InfrastructureWebview>>,
+    retired_infrastructure: Query<&crate::RetiredInfrastructureWebview>,
     mut writer: MessageWriter<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>,
 ) {
     while let Ok(ev) = receiver.0.try_recv() {
@@ -443,16 +441,7 @@ mod committed_navigation_tests {
     #[test]
     fn infrastructure_navigation_is_not_forwarded() {
         let mut app = App::new();
-        let infrastructure = app
-            .world_mut()
-            .spawn((
-                crate::extension::bridge_page::ExtensionBridgeWebview {
-                    extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-                    role: crate::extension::bridge_page::ExtensionBridgeRole::Transport,
-                },
-                crate::extension::bridge_page::ExtensionInfrastructureWebview,
-            ))
-            .id();
+        let infrastructure = app.world_mut().spawn((crate::InfrastructureWebview,)).id();
         let visible = app.world_mut().spawn_empty().id();
         let (sender, receiver) = async_channel::unbounded();
         app.insert_resource(WebviewCommittedNavigationReceiver(receiver))
@@ -460,11 +449,8 @@ mod committed_navigation_tests {
             .add_message::<WebviewCommittedNavigationEvent>()
             .add_systems(Update, (drain_committed, collect).chain());
         app.world_mut().despawn(infrastructure);
-        app.world_mut().spawn(
-            crate::extension::bridge_page::RetiredExtensionInfrastructureWebview::new(
-                infrastructure,
-            ),
-        );
+        app.world_mut()
+            .spawn(crate::RetiredInfrastructureWebview::new(infrastructure));
         for webview in [infrastructure, visible] {
             sender
                 .send_blocking(WebviewCommittedNavigationEvent {

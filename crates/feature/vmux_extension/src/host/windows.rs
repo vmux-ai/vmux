@@ -1,3 +1,4 @@
+use crate::protocol::{ApiRequest, ExtensionApiError, ExtensionCallerContext};
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, WindowMode, WindowPosition};
 use bevy_cef::prelude::RequestNavigate;
@@ -5,12 +6,11 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
 use vmux_core::PageMetadata;
-use vmux_extension::protocol::{ApiRequest, ExtensionApiError, ExtensionCallerContext};
 use vmux_history::LastActivatedAt;
 use vmux_layout::stack::{CloseStackRequest, Stack};
 
-use super::ExtensionPopup;
 use super::bridge::BridgeAuthorization;
+use super::model::ExtensionPopup;
 use super::model::{
     ExtensionModel, ExtensionModelEvent, ExtensionTabId, ExtensionTabSnapshot, ExtensionWindowId,
     ExtensionWindowSnapshot,

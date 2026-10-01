@@ -10,7 +10,6 @@ use vmux_core::browser::{
 };
 use vmux_core::profile::ProjectsDirectory;
 use vmux_core::service::ServiceRequest;
-use vmux_extension::ExtensionInstallRequest;
 use vmux_history::HistoryOpenIntent;
 use vmux_layout::active_pane::ActivatePane;
 use vmux_layout::{
@@ -26,11 +25,6 @@ use super::agent_pane::AgentBrowserResolve;
 pub(crate) struct AgentBrowserNavigate {
     pub url: String,
     pub pane: Option<String>,
-}
-
-#[vmux_api::agent]
-pub(crate) struct AgentBrowserInstallExtension {
-    pub source: String,
 }
 
 #[vmux_api::agent]
@@ -73,7 +67,6 @@ pub(crate) struct AgentBrowserPlugin;
 impl Plugin for AgentBrowserPlugin {
     fn build(&self, app: &mut App) {
         app.add_agent_request::<AgentBrowserNavigate>()
-            .add_agent_request::<AgentBrowserInstallExtension>()
             .add_agent_request::<AgentBrowserGoBack>()
             .add_agent_request::<AgentBrowserGoForward>()
             .add_agent_request::<AgentBrowserHistorySearch>()
@@ -88,7 +81,6 @@ impl Plugin for AgentBrowserPlugin {
             .add_message::<BrowserScrollResponse>()
             .add_message::<BrowserNavigationSnapshotResponse>()
             .add_message::<ActivatePane>()
-            .add_message::<ExtensionInstallRequest>()
             .add_systems(Update, open_history)
             .add_systems(
                 Update,
@@ -108,7 +100,6 @@ impl Plugin for AgentBrowserPlugin {
                 Update,
                 ((
                     navigate,
-                    install_extension,
                     go_back,
                     go_forward,
                     search_history,
@@ -310,20 +301,6 @@ fn navigate(
             new_stack,
             profile,
         });
-    }
-}
-
-fn install_extension(
-    mut requests: MessageReader<AgentRequestMessage<AgentBrowserInstallExtension>>,
-    mut install: MessageWriter<ExtensionInstallRequest>,
-    mut responses: MessageWriter<AgentCommandResponse>,
-) {
-    for request in requests.read() {
-        install.write(ExtensionInstallRequest {
-            source: request.payload.source.clone(),
-            requester: None,
-        });
-        responses.write(request.reply.ok());
     }
 }
 

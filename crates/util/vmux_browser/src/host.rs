@@ -20,15 +20,14 @@ use vmux_ui::i18n::Locale;
 use vmux_ui::theme::ThemeEvent;
 
 pub(crate) use agent::{
-    AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch,
-    AgentBrowserInstallExtension, AgentBrowserNavigate, AgentBrowserPlugin, AgentBrowserScroll,
-    AgentBrowserSnapshot,
+    AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch, AgentBrowserNavigate,
+    AgentBrowserPlugin, AgentBrowserScroll, AgentBrowserSnapshot,
 };
 pub use agent_pane::AgentBrowserResolve;
 
 #[derive(Clone, Copy, Debug, Message)]
-pub(crate) struct WebviewLoadCompleted {
-    pub(crate) webview: Entity,
+pub struct WebviewLoadCompleted {
+    pub webview: Entity,
 }
 
 pub(crate) fn configure_cef_backend_sync(app: &mut App) -> &mut App {

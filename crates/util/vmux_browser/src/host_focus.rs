@@ -32,7 +32,7 @@ impl Plugin for HostFocusPlugin {
                     .in_set(crate::BrowserSystemSet::HostFocusApplied)
                     .after(crate::BrowserSystemSet::SyncWindowedFrames)
                     .after(crate::BrowserSystemSet::SyncWindowedCommandBar)
-                    .after(crate::BrowserSystemSet::SyncWindowedExtensionPopups),
+                    .after(crate::BrowserOverlaySet),
             )
             .add_plugins(platform::HostFocusPlatformPlugin);
     }

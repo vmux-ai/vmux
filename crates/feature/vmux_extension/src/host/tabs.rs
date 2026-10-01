@@ -1,6 +1,6 @@
+use crate::match_pattern::ExtensionMatchPattern;
+use crate::protocol::{ApiRequest, ExtensionApiError};
 use serde_json::Value;
-use vmux_extension::match_pattern::ExtensionMatchPattern;
-use vmux_extension::protocol::{ApiRequest, ExtensionApiError};
 
 use super::bridge::BridgeAuthorization;
 use super::model::{ExtensionModel, ExtensionTabSnapshot};
@@ -252,9 +252,9 @@ impl TabFilter {
 mod tests {
     use super::super::model::ExtensionWindowSnapshot;
     use super::*;
+    use crate::protocol::ExtensionCallerContext;
     use serde_json::json;
     use std::collections::HashSet;
-    use vmux_extension::protocol::ExtensionCallerContext;
 
     impl ExtensionModel {
         fn fixture() -> Self {

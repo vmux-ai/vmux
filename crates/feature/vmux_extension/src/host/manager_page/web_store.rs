@@ -1,11 +1,11 @@
+use crate::{
+    ExtensionInstallCompleted, ExtensionInstallRequest, OpenManagerRequest, store, webstore,
+};
 use bevy::prelude::*;
 use bevy_cef::prelude::{
     Browsers, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput, WebviewCommittedNavigationEvent,
 };
 use vmux_api::extension::ExtBrowseStoreRequest;
-use vmux_extension::{
-    ExtensionInstallCompleted, ExtensionInstallRequest, OpenManagerRequest, store, webstore,
-};
 
 pub(super) struct WebStorePlugin;
 
@@ -20,7 +20,7 @@ impl Plugin for WebStorePlugin {
                 (
                     inject_on_navigation,
                     bevy::ecs::schedule::ApplyDeferred,
-                    inject_on_load.after(crate::BrowserSystemSet::DrainLoadingState),
+                    inject_on_load.after(vmux_browser::BrowserLoadSet),
                     emit_install_result,
                 )
                     .chain(),
@@ -172,7 +172,7 @@ fn inject_on_navigation(
 }
 
 fn inject_on_load(
-    mut events: MessageReader<crate::host::WebviewLoadCompleted>,
+    mut events: MessageReader<vmux_browser::WebviewLoadCompleted>,
     browsers: NonSend<Browsers>,
     browser_meta: Query<&vmux_core::PageMetadata, With<vmux_layout::Browser>>,
     injectors: Query<&WebStoreInjector>,

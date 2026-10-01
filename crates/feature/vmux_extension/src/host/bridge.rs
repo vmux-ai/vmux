@@ -1,3 +1,8 @@
+use crate::match_pattern::ExtensionMatchPattern;
+use crate::protocol::{
+    BRIDGE_CONTEXT_ID, BRIDGE_MAX_FRAME_SIZE, BRIDGE_MAX_MESSAGE_SIZE, BRIDGE_PROTOCOL_VERSION,
+    BridgeClientMessage, BridgeServerMessage, ExtensionApiError, ExtensionContextKind,
+};
 use bevy::prelude::Component;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use polling::{Event, Events, Poller};
@@ -11,11 +16,6 @@ use std::time::{Duration, Instant};
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http::StatusCode;
 use tungstenite::{Message, WebSocket, protocol::WebSocketConfig};
-use vmux_extension::match_pattern::ExtensionMatchPattern;
-use vmux_extension::protocol::{
-    BRIDGE_CONTEXT_ID, BRIDGE_MAX_FRAME_SIZE, BRIDGE_MAX_MESSAGE_SIZE, BRIDGE_PROTOCOL_VERSION,
-    BridgeClientMessage, BridgeServerMessage, ExtensionApiError, ExtensionContextKind,
-};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
@@ -854,14 +854,14 @@ fn write_server_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::{
+        ApiRequest, ApiResponse, BRIDGE_PROTOCOL_VERSION, BridgeClientMessage, BridgeHello,
+        BridgeServerMessage, ExtensionApiError, ExtensionContextKind,
+    };
     use std::time::{Duration, Instant};
     use tungstenite::{
         Message, WebSocket, client::IntoClientRequest, connect, http::HeaderValue,
         stream::MaybeTlsStream,
-    };
-    use vmux_extension::protocol::{
-        ApiRequest, ApiResponse, BRIDGE_PROTOCOL_VERSION, BridgeClientMessage, BridgeHello,
-        BridgeServerMessage, ExtensionApiError, ExtensionContextKind,
     };
 
     const EXTENSION_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -955,7 +955,7 @@ mod tests {
             namespace: "tabs".into(),
             method: "query".into(),
             arguments: serde_json::json!({}),
-            caller_context: vmux_extension::protocol::ExtensionCallerContext::ServiceWorker {
+            caller_context: crate::protocol::ExtensionCallerContext::ServiceWorker {
                 extension_id: EXTENSION_ID.into(),
                 context_id: "service-worker".into(),
                 url: None,
@@ -1004,7 +1004,7 @@ mod tests {
             namespace: "tabs".into(),
             method: "query".into(),
             arguments: serde_json::json!({}),
-            caller_context: vmux_extension::protocol::ExtensionCallerContext::ServiceWorker {
+            caller_context: crate::protocol::ExtensionCallerContext::ServiceWorker {
                 extension_id: EXTENSION_ID.into(),
                 context_id: "service-worker".into(),
                 url: None,
@@ -1102,7 +1102,7 @@ mod tests {
             namespace: "tabs".into(),
             method: "query".into(),
             arguments: serde_json::json!({}),
-            caller_context: vmux_extension::protocol::ExtensionCallerContext::ServiceWorker {
+            caller_context: crate::protocol::ExtensionCallerContext::ServiceWorker {
                 extension_id: EXTENSION_ID.into(),
                 context_id: "service-worker".into(),
                 url: None,

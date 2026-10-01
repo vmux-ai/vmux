@@ -8,10 +8,10 @@ impl vmux_core::host::manifest::FeatureManifestSource for Feature {
 
 mod appearance;
 mod command;
-mod extension;
 mod frame_rate;
 mod host;
 mod host_focus;
+mod infrastructure;
 mod input;
 mod native_bridge;
 mod native_layout;
@@ -27,7 +27,9 @@ mod tool;
 mod window_drag;
 pub use command::{NavigationRequest, OpenRequest, ShowDevToolsRequest, ZoomRequest};
 pub use host::AgentBrowserResolve;
+pub use host::WebviewLoadCompleted;
 pub use host_focus::HostFocusIntent;
+pub use infrastructure::{InfrastructureWebview, PopupWebview, RetiredInfrastructureWebview};
 pub use navigation::OpenHistoryRequest;
 pub use tool::BrowserToolPlugin;
 pub use window_drag::WindowDragRegion;
@@ -64,9 +66,14 @@ pub(crate) enum BrowserSystemSet {
     SpawnPopupStacks,
     SyncCefBackend,
     SyncWindowedCommandBar,
-    SyncWindowedExtensionPopups,
     SyncWindowedFrames,
 }
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct BrowserLoadSet;
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct BrowserOverlaySet;
 
 pub struct BrowserPlugin;
 
@@ -81,7 +88,6 @@ impl Plugin for BrowserPlugin {
             vmux_command::command_bar::CommandBarPlugin,
             BrowserToolPlugin,
             platform::BrowserPlatformPlugin,
-            extension::ExtensionPlugin,
         ));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(

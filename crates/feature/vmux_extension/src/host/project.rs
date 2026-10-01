@@ -10,11 +10,11 @@ use vmux_layout::space::Space;
 use vmux_layout::stack::{FocusedStack, Stack};
 use vmux_layout::tab::Tab;
 
+use super::bridge_page::ExtensionBridgeWebview;
 use super::model::{
     ExtensionIdSequence, ExtensionModel, ExtensionModelEvent, ExtensionTabId, ExtensionTabSnapshot,
     ExtensionWindowId, ExtensionWindowSnapshot, extension_visible_url,
 };
-use crate::extension::bridge_page::ExtensionBridgeWebview;
 
 pub(crate) struct ExtensionProjectPlugin;
 
@@ -302,7 +302,7 @@ impl PageCandidate {
             host_window: Self::host_window(hierarchy, entity),
             activated_at: activated.map_or(0, |activated| activated.0),
             url: metadata.url.clone(),
-            title: crate::state::PagePresentation::title(metadata, identity),
+            title: Self::title(metadata, identity),
             status: if loading || child_loading {
                 "loading"
             } else {
@@ -342,6 +342,13 @@ impl PageCandidate {
             current = parent;
         }
         None
+    }
+
+    fn title(metadata: &PageMetadata, identity: Option<&vmux_core::PageIdentity>) -> String {
+        match identity.and_then(|identity| identity.title.as_deref()) {
+            Some(title) if !title.is_empty() => title.to_string(),
+            _ => metadata.title.clone(),
+        }
     }
 }
 

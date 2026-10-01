@@ -1,4 +1,4 @@
-use vmux_extension::{manifest, store};
+use crate::{manifest, store};
 
 use bevy::prelude::Component;
 

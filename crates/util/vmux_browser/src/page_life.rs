@@ -18,7 +18,9 @@ impl Plugin for PageLifePlugin {
             Update,
             (
                 apply_fallback_page_icons.after(vmux_layout::LayoutCefStateSet::Apply),
-                drain_loading_state.in_set(crate::BrowserSystemSet::DrainLoadingState),
+                drain_loading_state
+                    .in_set(crate::BrowserSystemSet::DrainLoadingState)
+                    .in_set(crate::BrowserLoadSet),
                 spawn_popup_stacks.in_set(crate::BrowserSystemSet::SpawnPopupStacks),
             ),
         );
@@ -51,7 +53,7 @@ fn drain_loading_state(
 
 fn spawn_popup_stacks(
     popup_rx: Res<WebviewPopupReceiver>,
-    extension_popups: Query<(), With<crate::extension::ExtensionPopup>>,
+    popup_webviews: Query<(), With<crate::PopupWebview>>,
     child_of_q: Query<&ChildOf>,
     stack_q: Query<(), With<Stack>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -61,7 +63,7 @@ fn spawn_popup_stacks(
         if ev.target_url.is_empty() {
             continue;
         }
-        if extension_popups.contains(ev.webview) {
+        if popup_webviews.contains(ev.webview) {
             commands.trigger(RequestNavigate {
                 webview: ev.webview,
                 url: ev.target_url,

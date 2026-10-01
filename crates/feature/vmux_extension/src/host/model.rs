@@ -35,7 +35,7 @@ impl ExtensionTabSnapshot {
         mut self,
         window_id: i32,
         index: u32,
-        request: &vmux_extension::protocol::ApiRequest,
+        request: &crate::protocol::ApiRequest,
         authorization: &super::bridge::BridgeAuthorization,
     ) -> serde_json::Value {
         self.window_id = window_id;
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn projects_ordered_visible_pages_with_stable_ids_and_removals() {
         let mut app = App::new();
-        app.add_plugins(crate::extension::project::ExtensionProjectPlugin);
+        app.add_plugins(crate::host::project::ExtensionProjectPlugin);
         app.world_mut().spawn((
             Window {
                 resolution: (1200, 800).into(),
@@ -303,4 +303,9 @@ mod tests {
         assert!(!extension_visible_url("vmux://terminal/"));
         assert!(!extension_visible_url("file:///Users/x/notes.md"));
     }
+}
+#[derive(Component)]
+pub(super) struct ExtensionPopup {
+    pub(super) owner: Entity,
+    pub(super) extension_id: String,
 }

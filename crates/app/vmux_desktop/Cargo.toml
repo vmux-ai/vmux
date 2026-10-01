@@ -8,7 +8,7 @@ publish = false
 
 [features]
 default = ["full"]
-conformance = ["bevy_cef/debug", "vmux_browser/conformance"]
+conformance = ["bevy_cef/debug", "vmux_app/conformance"]
 dev = ["bevy_cef/debug", "bevy/dynamic_linking"]
 full = [
     "bevy_cef_core/native-video-overlay",
