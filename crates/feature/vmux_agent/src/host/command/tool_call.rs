@@ -24,7 +24,7 @@ impl Plugin for ToolCallPlugin {
             )
             .add_systems(
                 Update,
-                (finish_tool_commands, finish_tool_queries, fail_tool_calls)
+                (forward_commands, forward_queries, report_errors)
                     .after(ToolDispatchFlush)
                     .before(CommandSet::Commands),
             );
@@ -67,7 +67,7 @@ fn handle_tool_calls(
     }
 }
 
-fn finish_tool_commands(
+fn forward_commands(
     mut commands: Commands,
     calls: Query<(Entity, &PendingAgentToolCall, &ToolCommand), Added<ToolCommand>>,
     mut request_writer: MessageWriter<AgentRequestInput>,
@@ -97,7 +97,7 @@ fn finish_tool_commands(
     }
 }
 
-fn finish_tool_queries(
+fn forward_queries(
     mut commands: Commands,
     calls: Query<(Entity, &PendingAgentToolCall, &ToolQuery), Added<ToolQuery>>,
     mut query_writer: MessageWriter<ToolQueryRequest>,
@@ -123,7 +123,7 @@ fn finish_tool_queries(
     }
 }
 
-fn fail_tool_calls(
+fn report_errors(
     mut commands: Commands,
     calls: Query<(Entity, &PendingAgentToolCall, &ToolDispatchError), Added<ToolDispatchError>>,
     mut service_requests: MessageWriter<ServiceRequest>,
