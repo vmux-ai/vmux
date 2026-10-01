@@ -233,20 +233,9 @@ where
     }
 }
 
-pub fn use_ui_state<T>() -> Signal<T>
+pub fn use_ui_state<T>() -> UiStateBinding<T>
 where
     T: UiState + rkyv::Archive + Default + 'static,
-    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
-        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
-{
-    let mut state = use_signal(T::default);
-    let _listener = use_ui_state_listener::<T, _>(move |event| state.set(event));
-    state
-}
-
-pub fn use_ui_state_binding<T>() -> UiStateBinding<T>
-where
-    T: BatchedUiState + rkyv::Archive + Default + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {

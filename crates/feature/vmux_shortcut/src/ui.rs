@@ -17,7 +17,8 @@ pub(crate) struct ShortcutPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<ShortcutUiState>()();
+    let state = use_ui_state::<ShortcutUiState>().state;
+    let state = state();
     let probe = state.probe;
     let groups = state.groups;
     let (status_label, status_tone) = probe_presentation(&probe.status);

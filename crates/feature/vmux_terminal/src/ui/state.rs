@@ -6,7 +6,7 @@ use crate::event::{
     AgentPromptDraftEvent, ServiceUnavailableEvent, TermCursor, TermLine, TermLoadingEvent,
     TermThemeEvent, TermTitleEvent, TermViewportPatch, TerminalUiState,
 };
-use vmux_ui::hooks::{UiStateBinding, use_ui_state_binding};
+use vmux_ui::hooks::{UiStateBinding, use_ui_state};
 
 #[derive(Clone, PartialEq)]
 pub(crate) struct TerminalRowState {
@@ -34,7 +34,7 @@ pub(crate) struct TerminalState {
 
 impl TerminalState {
     pub(crate) fn use_state() -> Self {
-        let ui = use_ui_state_binding::<TerminalUiState>();
+        let ui = use_ui_state::<TerminalUiState>();
         let state = Self {
             rows: use_signal(BTreeMap::new),
             first_row: use_signal(|| 0),

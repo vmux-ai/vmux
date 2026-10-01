@@ -42,7 +42,7 @@ impl From<&ExtRow> for Approval {
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<ExtensionsEvent>();
+    let state = use_ui_state::<ExtensionsEvent>().state;
     let mut search = use_signal(String::new);
 
     let snapshot = state();

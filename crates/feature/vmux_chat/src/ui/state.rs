@@ -23,9 +23,7 @@ use vmux_ui::components::composer_bar::{
 };
 use vmux_ui::components::mcp_menu::{McpConnections, use_mcp_connections};
 use vmux_ui::file_icon::FilePath;
-use vmux_ui::hooks::{
-    UiStateBinding, UiStateValue, send, use_selector, use_theme, use_ui_state_binding,
-};
+use vmux_ui::hooks::{UiStateBinding, UiStateValue, send, use_selector, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -52,7 +50,7 @@ pub struct Chat {
 
 pub fn use_chat() -> Chat {
     use_theme();
-    let ui = use_ui_state_binding::<ChatUiState>();
+    let ui = use_ui_state::<ChatUiState>();
     let snapshot = ui.use_value::<ChatSnapshot>();
     let composer_context = ui.use_value::<ComposerContext>();
     let mode = ui.use_value::<crate::event::ModeState>();

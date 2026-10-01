@@ -25,7 +25,7 @@ struct ProcessMonitorUi {
 
 fn use_process_monitor_ui() -> ProcessMonitorUi {
     use_theme();
-    let snapshot = use_ui_state::<ProcessesUiState>();
+    let snapshot = use_ui_state::<ProcessesUiState>().state;
     let mut history = use_signal(ServiceHistory::default);
     let search = use_signal(String::new);
 

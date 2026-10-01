@@ -45,11 +45,12 @@ impl SettingsRenderCatalog {
 #[component]
 pub fn Page() -> Element {
     use_theme();
+    let state = use_ui_state::<SettingsUiState>().state;
     let SettingsUiState {
         mut sections,
         fields,
         items,
-    } = use_ui_state::<SettingsUiState>()();
+    } = state();
     let mut search = use_signal(String::new);
 
     if sections.is_empty() {

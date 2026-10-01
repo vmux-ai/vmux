@@ -24,7 +24,7 @@ pub(crate) struct TeamPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let team = use_ui_state::<TeamEvent>();
+    let team = use_ui_state::<TeamEvent>().state;
 
     let snapshot = team();
     let profiles = snapshot.profiles;

@@ -23,7 +23,7 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::components::mcp_menu::{McpMenu, use_mcp_connections};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
-use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_ui_state, use_ui_state_binding};
+use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_ui_state};
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::prompt_recall::{PromptHistoryDirection, prompt_history_direction};
@@ -51,7 +51,7 @@ impl PaletteSurface {
 }
 
 pub fn use_command_bar_ui() -> Signal<CommandBarOpenEvent> {
-    let ui = use_ui_state_binding::<CommandBarUiState>();
+    let ui = use_ui_state::<CommandBarUiState>();
     let state = ui.use_value::<CommandBarOpenEvent>().value;
     let mut handled_focus_revision = use_signal(|| 0);
     ui.use_updates::<CommandBarFocusEffect>(move |effect| {
@@ -75,7 +75,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let on_activity = props.on_activity;
 
     let mut input = use_palette_input();
-    let host_state = use_ui_state::<CommandPaletteState>();
+    let host_state = use_ui_state::<CommandPaletteState>().state;
     let mcp = use_mcp_connections();
     let ime = use_ime_guard();
     let mut handled_close = use_signal(|| None);

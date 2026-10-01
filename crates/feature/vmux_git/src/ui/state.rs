@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_ui::hooks::use_ui_state_binding;
+use vmux_ui::hooks::use_ui_state;
 use vmux_ui::scroll::ScrollIntoView;
 
 use crate::event::GitOperation;
@@ -23,7 +23,7 @@ pub(super) struct GitPageState {
 
 impl GitPageState {
     pub(super) fn use_state() -> Self {
-        let ui = use_ui_state_binding::<GitUiState>();
+        let ui = use_ui_state::<GitUiState>();
         let state = Self {
             snapshot: ui.use_value::<GitPageSnapshot>().value,
             controller: ui.use_value::<GitPageControllerState>().value,

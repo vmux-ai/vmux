@@ -22,7 +22,7 @@ pub(crate) struct HistoryPage;
 pub fn Page() -> Element {
     use_theme();
     let mut query: Signal<String> = use_signal(String::new);
-    let state = use_ui_state::<HistoryUiState>();
+    let state = use_ui_state::<HistoryUiState>().state;
     let snapshot = state();
     let has_more = snapshot.has_more;
 

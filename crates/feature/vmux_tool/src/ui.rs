@@ -136,7 +136,7 @@ fn ToolsManagerTabs(mut active_route: Signal<ToolsRoute>) -> Element {
 #[component]
 fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
     use_theme();
-    let state = use_ui_state::<ToolsUiState>();
+    let state = use_ui_state::<ToolsUiState>().state;
     let mut query = use_signal(String::new);
 
     let current = state();

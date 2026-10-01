@@ -12,7 +12,7 @@ pub struct McpConnections {
 
 pub fn use_mcp_connections() -> McpConnections {
     McpConnections {
-        state: use_ui_state::<McpServers>(),
+        state: use_ui_state::<McpServers>().state,
     }
 }
 

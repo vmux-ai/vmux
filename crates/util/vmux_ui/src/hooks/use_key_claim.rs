@@ -8,7 +8,7 @@ pub fn use_key_claim(
     unclaimed: Unclaimed,
     context: impl Fn() -> Vec<String> + 'static,
 ) -> KeyClaim {
-    let claims = use_ui_state::<KeyClaims>();
+    let claims = use_ui_state::<KeyClaims>().state;
     let resolves = use_hook(crate::transport::Host::resolves_keys);
 
     use_effect(move || {

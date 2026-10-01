@@ -27,7 +27,7 @@ pub struct VaultPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<VaultUiState>();
+    let state = use_ui_state::<VaultUiState>().state;
     let mut recovery_key_copied = use_signal(|| false);
     let mut github_device_code_copied = use_signal(|| false);
 

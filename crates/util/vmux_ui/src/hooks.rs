@@ -8,9 +8,7 @@ mod use_ui_state;
 pub use use_key_claim::{KeyClaim, use_key_claim};
 pub use use_selector::use_selector;
 pub use use_theme::use_theme;
-pub use use_ui_state::{
-    UiStateBinding, UiStatePatchBatch, UiStateValue, use_ui_state, use_ui_state_binding,
-};
+pub use use_ui_state::{UiStateBinding, UiStatePatchBatch, UiStateValue, use_ui_state};
 pub use vmux_api::UiStatePatch;
 
 pub use crate::transport;

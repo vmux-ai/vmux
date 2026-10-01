@@ -17,7 +17,7 @@ pub(crate) struct LspPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<LspManagerUiState>();
+    let state = use_ui_state::<LspManagerUiState>().state;
     let mut query = use_signal(String::new);
 
     let state = state();

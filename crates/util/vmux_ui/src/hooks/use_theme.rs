@@ -5,7 +5,7 @@ use crate::transport::Host;
 use dioxus::prelude::*;
 
 pub fn use_theme() -> Signal<String> {
-    let state = use_ui_state::<ThemeEvent>();
+    let state = use_ui_state::<ThemeEvent>().state;
     let mut locale = use_signal(|| Locale::preferred().into_string());
     apply_locale(&Locale::from(locale().as_str()));
     use_effect(move || {

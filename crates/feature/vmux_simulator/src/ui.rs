@@ -28,7 +28,7 @@ pub(crate) struct SimulatorPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let ready = use_ui_state::<SimulatorReady>();
+    let ready = use_ui_state::<SimulatorReady>().state;
     let route = try_consume_context::<vmux_core::PageMetadata>()
         .and_then(|metadata| SimulatorRoute::try_from(metadata.url.as_str()).ok());
 
