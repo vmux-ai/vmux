@@ -3,10 +3,11 @@ use crate::open_target::OpenTarget;
 use crate::snapshot::{
     CommandBarPagesSnapshot, CommandBarSpacesSnapshot, ContributedCommand, ContributedPages,
 };
-use bevy::prelude::{Query, default};
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::Query;
 use vmux_api::command_bar::{
-    CommandBarCommandEntry, CommandBarPage, CommandBarPick, CommandBarPickRow, CommandBarPicker,
-    CommandBarSpace, CommandBarTab, SearchEngine,
+    CommandBarCommandEntry, CommandBarPick, CommandBarPickRow, CommandBarPicker, CommandBarSpace,
+    CommandBarTab,
 };
 use vmux_api::command_bar::{CommandBarOpenEvent, OpenId};
 use vmux_ui::i18n::{Locale, TranslationValue};
@@ -15,6 +16,41 @@ pub struct CommandBarEntry {
     pub id: String,
     pub name: String,
     pub shortcut: String,
+}
+
+impl CommandBarEntry {
+    fn list(
+        locale: &Locale,
+        contributed: Vec<Self>,
+        superseded: &[&str],
+        definitions: &Query<&CommandDefinition>,
+    ) -> Vec<Self> {
+        let mut entries = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for definition in definitions {
+            if definition.hidden
+                || superseded.contains(&definition.id.as_str())
+                || !seen.insert(definition.id.as_str())
+            {
+                continue;
+            }
+            entries.push(Self {
+                id: definition.id.to_string(),
+                name: definition.localized_name(locale.as_str()),
+                shortcut: definition.shortcut_label(),
+            });
+        }
+        entries.extend(contributed);
+        entries
+    }
+
+    fn shortcut(id: &str, definitions: &Query<&CommandDefinition>) -> String {
+        definitions
+            .iter()
+            .find(|definition| definition.id == id)
+            .map(CommandDefinition::shortcut_label)
+            .unwrap_or_default()
+    }
 }
 
 pub struct CommandBarPicks;
@@ -93,164 +129,110 @@ impl CommandBarPicks {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn build_command_bar_open_payload(
-    open_id: OpenId,
-    native_windowed: bool,
-    space_name: String,
-    url: String,
-    spaces_snapshot: &CommandBarSpacesSnapshot,
-    contributed_pages: &ContributedPages,
-    contributed_commands: &Query<&ContributedCommand>,
-    pages_snapshot: &CommandBarPagesSnapshot,
-    work_snapshot: &crate::snapshot::CommandBarWorkSnapshot,
-    locale: &Locale,
-    active_stack_count: usize,
-    tabs: Vec<CommandBarTab>,
-    target: Option<OpenTarget>,
-    definitions: &[CommandDefinition],
-) -> CommandBarOpenEvent {
-    let mut contributed = Vec::new();
-    for command in contributed_commands {
-        let args: Vec<(&str, TranslationValue<'_>)> = command
-            .args
-            .iter()
-            .map(|(name, value)| (name.as_str(), TranslationValue::String(value)))
-            .collect();
-        contributed.push(CommandBarEntry {
-            id: command.id.clone(),
-            name: locale.translate_with(&command.message_id, &args),
-            shortcut: String::new(),
-        });
-    }
-    let mut pages = Vec::with_capacity(pages_snapshot.pages.len());
-    let mut superseded = Vec::new();
-    for entry in &pages_snapshot.pages {
-        let mut page = entry.page.clone();
-        if let Some(message_id) = entry.title_message_id.as_deref() {
-            page.title = locale.translate(message_id);
+#[derive(SystemParam)]
+pub struct CommandBarProjector<'w, 's> {
+    pages: ContributedPages<'w, 's>,
+    commands: Query<'w, 's, &'static ContributedCommand>,
+    definitions: Query<'w, 's, &'static CommandDefinition>,
+}
+
+pub struct CommandBarOpenProjection {
+    pub open_id: OpenId,
+    pub native_windowed: bool,
+    pub space_name: String,
+    pub url: String,
+    pub spaces: CommandBarSpacesSnapshot,
+    pub pages: CommandBarPagesSnapshot,
+    pub work: crate::snapshot::CommandBarWorkSnapshot,
+    pub locale: Locale,
+    pub active_stack_count: usize,
+    pub tabs: Vec<CommandBarTab>,
+    pub target: Option<OpenTarget>,
+}
+
+impl CommandBarProjector<'_, '_> {
+    pub fn project(&self, projection: CommandBarOpenProjection) -> CommandBarOpenEvent {
+        let mut contributed = Vec::new();
+        for command in &self.commands {
+            let mut args = Vec::new();
+            for (name, value) in &command.args {
+                args.push((name.as_str(), TranslationValue::String(value)));
+            }
+            contributed.push(CommandBarEntry {
+                id: command.id.clone(),
+                name: projection.locale.translate_with(&command.message_id, &args),
+                shortcut: String::new(),
+            });
         }
-        if let Some(command_id) = entry.replaces_command.as_deref() {
-            page.shortcut = command_shortcut(command_id, definitions);
-            superseded.push(command_id);
+
+        let mut pages = Vec::with_capacity(projection.pages.pages.len());
+        let mut superseded = Vec::new();
+        for entry in &projection.pages.pages {
+            let mut page = entry.page.clone();
+            if let Some(message_id) = entry.title_message_id.as_deref() {
+                page.title = projection.locale.translate(message_id);
+            }
+            if let Some(command_id) = entry.replaces_command.as_deref() {
+                page.shortcut = CommandBarEntry::shortcut(command_id, &self.definitions);
+                superseded.push(command_id);
+            }
+            pages.push(page);
         }
-        pages.push(page);
-    }
-    for entry in contributed_pages.sorted() {
-        pages.push(entry.page);
-    }
-    let commands: Vec<CommandBarCommandEntry> =
-        command_list(locale, contributed, &superseded, definitions)
-            .into_iter()
-            .map(|e| CommandBarCommandEntry {
-                id: e.id,
-                name: e.name,
-                shortcut: e.shortcut,
-            })
-            .collect();
-    let spaces = spaces_snapshot
-        .spaces
-        .iter()
-        .map(|s| {
-            let is_active = s.id == spaces_snapshot.active_space_id;
-            CommandBarSpace {
-                id: s.id.clone(),
-                name: s.name.clone(),
-                profile: s.profile.clone(),
+        for entry in self.pages.sorted() {
+            pages.push(entry.page);
+        }
+
+        let entries = CommandBarEntry::list(
+            &projection.locale,
+            contributed,
+            &superseded,
+            &self.definitions,
+        );
+        let mut commands = Vec::new();
+        for entry in entries {
+            commands.push(CommandBarCommandEntry {
+                id: entry.id,
+                name: entry.name,
+                shortcut: entry.shortcut,
+            });
+        }
+
+        let mut spaces = Vec::new();
+        for space in &projection.spaces.spaces {
+            let is_active = space.id == projection.spaces.active_space_id;
+            spaces.push(CommandBarSpace {
+                id: space.id.clone(),
+                name: space.name.clone(),
+                profile: space.profile.clone(),
                 is_active,
                 tab_count: if is_active {
-                    active_stack_count as u32
+                    projection.active_stack_count as u32
                 } else {
                     0
                 },
-            }
-        })
-        .collect();
-    command_bar_open_payload(
-        open_id,
-        native_windowed,
-        space_name,
-        url,
-        spaces,
-        tabs,
-        commands,
-        target,
-        pages,
-        work_snapshot.work_dirs.clone(),
-        work_snapshot.recent_files.clone(),
-        work_snapshot.search_engines.clone(),
-        work_snapshot.projects.clone(),
-    )
-}
-
-pub fn command_list(
-    locale: &Locale,
-    contributed: Vec<CommandBarEntry>,
-    superseded: &[&str],
-    definitions: &[CommandDefinition],
-) -> Vec<CommandBarEntry> {
-    let mut entries = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for definition in definitions {
-        if definition.hidden
-            || superseded.contains(&definition.id.as_str())
-            || !seen.insert(definition.id.as_str())
-        {
-            continue;
+            });
         }
-        entries.push(CommandBarEntry {
-            id: definition.id.to_string(),
-            name: definition.localized_name(locale.as_str()),
-            shortcut: definition.shortcut_label(),
-        });
-    }
-    entries.extend(contributed);
-    entries
-}
 
-fn command_shortcut(id: &str, definitions: &[CommandDefinition]) -> String {
-    definitions
-        .iter()
-        .find(|definition| definition.id == id)
-        .map(CommandDefinition::shortcut_label)
-        .unwrap_or_default()
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn command_bar_open_payload(
-    open_id: OpenId,
-    native_windowed: bool,
-    space_name: String,
-    url: String,
-    spaces: Vec<CommandBarSpace>,
-    tabs: Vec<CommandBarTab>,
-    commands: Vec<CommandBarCommandEntry>,
-    target: Option<OpenTarget>,
-    pages: Vec<CommandBarPage>,
-    work_dirs: Vec<vmux_api::command_bar::CommandBarWorkDir>,
-    recent_files: Vec<vmux_api::command_bar::CommandBarRecentFile>,
-    search_engines: Vec<SearchEngine>,
-    projects: Vec<String>,
-) -> CommandBarOpenEvent {
-    CommandBarOpenEvent {
-        open_id,
-        native_windowed,
-        caret_at_end: false,
-        url,
-        space_name,
-        spaces,
-        tabs,
-        commands,
-        pages,
-        work_dirs,
-        recent_files,
-        projects,
-        search_engines,
-        prompt_context: default(),
-        agent_models: Vec::new(),
-        agent_modes: Vec::new(),
-        target,
-        picker: None,
-        picks: Vec::new(),
+        CommandBarOpenEvent {
+            open_id: projection.open_id,
+            native_windowed: projection.native_windowed,
+            caret_at_end: false,
+            url: projection.url,
+            space_name: projection.space_name,
+            spaces,
+            tabs: projection.tabs,
+            commands,
+            pages,
+            work_dirs: projection.work.work_dirs,
+            recent_files: projection.work.recent_files,
+            projects: projection.work.projects,
+            search_engines: projection.work.search_engines,
+            prompt_context: Default::default(),
+            agent_models: Vec::new(),
+            agent_modes: Vec::new(),
+            target: projection.target,
+            picker: None,
+            picks: Vec::new(),
+        }
     }
 }

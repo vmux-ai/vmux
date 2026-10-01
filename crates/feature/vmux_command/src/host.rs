@@ -23,8 +23,7 @@ pub use definition::{
 };
 pub use page_key::KeyPlugin;
 pub use payload::{
-    CommandBarEntry, CommandBarPicks, build_command_bar_open_payload, command_bar_open_payload,
-    command_list,
+    CommandBarEntry, CommandBarOpenProjection, CommandBarPicks, CommandBarProjector,
 };
 pub use settings::ResolvedLocale;
 pub use snapshot::{

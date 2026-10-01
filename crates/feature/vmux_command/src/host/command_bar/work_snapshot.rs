@@ -7,85 +7,116 @@ use vmux_history::LastActivatedAt;
 const WORK_DIR_ENTRIES_CAP: usize = 40;
 const RECENT_FILES_CAP: usize = 20;
 
-pub(super) struct WorkSnapshotPlugin;
+pub struct Plugin;
 
-impl Plugin for WorkSnapshotPlugin {
+impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (update_work_dirs_snapshot, update_recent_files_snapshot)
-                .in_set(crate::snapshot::WriteCommandBarSnapshots),
+            (directories, recent).in_set(crate::snapshot::WriteCommandBarSnapshots),
         );
     }
 }
 
-fn frecency(visit_count: u32, last_visited_at: i64, now: i64) -> f32 {
-    let age_hours = ((now - last_visited_at).max(0) as f32) / 3_600_000.0;
-    let decay = 1.0 / (1.0 + age_hours / 24.0);
-    (visit_count as f32) * decay
+struct WorkDirectories(Vec<(String, i64)>);
+
+impl WorkDirectories {
+    fn add(&mut self, path: &str, activated_at: i64) {
+        if path.is_empty() {
+            return;
+        }
+        if let Some(existing) = self.0.iter_mut().find(|(candidate, _)| candidate == path) {
+            existing.1 = existing.1.max(activated_at);
+            return;
+        }
+        self.0.push((path.to_string(), activated_at));
+    }
+
+    fn paths(mut self) -> Vec<String> {
+        self.0
+            .sort_by_key(|(_, activated_at)| std::cmp::Reverse(*activated_at));
+        self.0.into_iter().map(|(path, _)| path).collect()
+    }
 }
 
-fn url_is_directory(url: &str) -> bool {
-    url.strip_prefix("file://")
-        .map(|p| std::path::Path::new(p).is_dir())
-        .unwrap_or(false)
+impl CommandBarWorkDirectory {
+    fn entries(&self) -> Vec<CommandBarWorkDir> {
+        let Ok(read) = std::fs::read_dir(&self.0) else {
+            return Vec::new();
+        };
+        let mut rows = Vec::new();
+        for entry in read.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let is_dir = entry.file_type().is_ok_and(|file_type| file_type.is_dir());
+            let path = entry.path().to_string_lossy().to_string();
+            rows.push((name, is_dir, path));
+        }
+        rows.sort_by(|a, b| {
+            let a_hidden = a.0.starts_with('.');
+            let b_hidden = b.0.starts_with('.');
+            b.1.cmp(&a.1)
+                .then(a_hidden.cmp(&b_hidden))
+                .then(a.0.to_lowercase().cmp(&b.0.to_lowercase()))
+        });
+        rows.into_iter()
+            .map(|(_, is_dir, path)| CommandBarWorkDir { path, is_dir })
+            .collect()
+    }
 }
 
-fn list_dir_entries(dir: &str) -> Vec<CommandBarWorkDir> {
-    let Ok(read) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut rows: Vec<(String, bool, String)> = read
-        .flatten()
-        .map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            let path = e.path().to_string_lossy().to_string();
-            (name, is_dir, path)
+struct RecentFile {
+    score: f32,
+    value: CommandBarRecentFile,
+}
+
+impl RecentFile {
+    fn from_page(
+        metadata: &PageMetadata,
+        visit_count: VisitCount,
+        last_visited_at: LastVisitedAt,
+        now: i64,
+    ) -> Option<Self> {
+        let path = metadata.url.strip_prefix("file://")?;
+        if std::path::Path::new(path).is_dir() {
+            return None;
+        }
+        let age_hours = ((now - last_visited_at.0).max(0) as f32) / 3_600_000.0;
+        let decay = 1.0 / (1.0 + age_hours / 24.0);
+        Some(Self {
+            score: (visit_count.0 as f32) * decay,
+            value: CommandBarRecentFile {
+                url: metadata.url.clone(),
+                title: metadata.title.clone(),
+            },
         })
-        .collect();
-    rows.sort_by(|a, b| {
-        let a_hidden = a.0.starts_with('.');
-        let b_hidden = b.0.starts_with('.');
-        b.1.cmp(&a.1)
-            .then(a_hidden.cmp(&b_hidden))
-            .then(a.0.to_lowercase().cmp(&b.0.to_lowercase()))
-    });
-    rows.into_iter()
-        .map(|(_, is_dir, path)| CommandBarWorkDir { path, is_dir })
-        .collect()
+    }
 }
 
-fn update_work_dirs_snapshot(
+fn directories(
     directories: Query<(&CommandBarWorkDirectory, Option<&LastActivatedAt>)>,
     mut last_cwds: Local<Vec<String>>,
     mut state: Single<&mut CommandBarProjection>,
 ) {
-    let mut by_cwd: Vec<(String, i64)> = Vec::new();
-    let merge = |cwd: &str, ts: i64, acc: &mut Vec<(String, i64)>| {
-        if cwd.is_empty() {
-            return;
-        }
-        if let Some(existing) = acc.iter_mut().find(|(p, _)| p == cwd) {
-            existing.1 = existing.1.max(ts);
-        } else {
-            acc.push((cwd.to_string(), ts));
-        }
-    };
-    for (dir, last) in &directories {
-        merge(&dir.0, last.map(|l| l.0).unwrap_or(0), &mut by_cwd);
+    let mut current = WorkDirectories(Vec::new());
+    for (directory, activated_at) in &directories {
+        current.add(
+            &directory.0,
+            activated_at.map(|activated_at| activated_at.0).unwrap_or(0),
+        );
     }
-    by_cwd.sort_by_key(|(_, ts)| std::cmp::Reverse(*ts));
-    let cwds: Vec<String> = by_cwd.into_iter().map(|(p, _)| p).collect();
+    let cwds = current.paths();
     if *last_cwds == cwds {
         return;
     }
     *last_cwds = cwds.clone();
 
-    let mut entries: Vec<CommandBarWorkDir> = Vec::new();
+    let mut entries = Vec::new();
     for cwd in &cwds {
-        for entry in list_dir_entries(cwd) {
-            if entries.iter().any(|e| e.path == entry.path) {
+        for entry in CommandBarWorkDirectory(cwd.clone()).entries() {
+            if entries
+                .iter()
+                .any(|existing: &CommandBarWorkDir| existing.path == entry.path)
+            {
                 continue;
             }
             entries.push(entry);
@@ -102,7 +133,7 @@ fn update_work_dirs_snapshot(
     }
 }
 
-fn update_recent_files_snapshot(
+fn recent(
     changed: Query<(), Or<(Added<Url>, Changed<LastVisitedAt>)>>,
     urls: Query<(&PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
     mut initialized: Local<bool>,
@@ -113,43 +144,37 @@ fn update_recent_files_snapshot(
     }
     *initialized = true;
     let now = vmux_core::now_millis();
-    let mut scored: Vec<(f32, CommandBarRecentFile)> = urls
-        .iter()
-        .filter(|(meta, _, _)| meta.url.starts_with("file://") && !url_is_directory(&meta.url))
-        .map(|(meta, count, last)| {
-            (
-                frecency(count.0, last.0, now),
-                CommandBarRecentFile {
-                    url: meta.url.clone(),
-                    title: meta.title.clone(),
-                },
-            )
-        })
-        .collect();
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    let recent_files: Vec<CommandBarRecentFile> = scored
-        .into_iter()
-        .take(RECENT_FILES_CAP)
-        .map(|(_, f)| f)
-        .collect();
-    let mut engine_recency = SearchEngine::ALL
-        .into_iter()
-        .map(|engine| {
-            let latest = urls
-                .iter()
-                .filter_map(|(meta, _, visited)| {
-                    (SearchEngine::from_url(&meta.url) == Some(engine)).then_some(visited.0)
-                })
-                .max()
-                .unwrap_or(i64::MIN);
-            (engine, latest)
-        })
-        .collect::<Vec<_>>();
+    let mut scored = Vec::new();
+    for (metadata, visit_count, last_visited_at) in &urls {
+        if let Some(file) = RecentFile::from_page(metadata, *visit_count, *last_visited_at, now) {
+            scored.push(file);
+        }
+    }
+    scored.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut recent_files = Vec::new();
+    for file in scored.into_iter().take(RECENT_FILES_CAP) {
+        recent_files.push(file.value);
+    }
+
+    let mut engine_recency = Vec::new();
+    for engine in SearchEngine::ALL {
+        let mut latest = i64::MIN;
+        for (metadata, _, visited) in &urls {
+            if SearchEngine::from_url(&metadata.url) == Some(engine) {
+                latest = latest.max(visited.0);
+            }
+        }
+        engine_recency.push((engine, latest));
+    }
     engine_recency.sort_by_key(|(_, visited)| std::cmp::Reverse(*visited));
-    let search_engines = engine_recency
-        .into_iter()
-        .map(|(engine, _)| engine)
-        .collect::<Vec<_>>();
+    let mut search_engines = Vec::new();
+    for (engine, _) in engine_recency {
+        search_engines.push(engine);
+    }
     if recent_files != state.work.recent_files {
         state.work.recent_files = recent_files;
     }
@@ -162,10 +187,12 @@ fn update_recent_files_snapshot(
 mod tests {
     use super::*;
 
-    fn projection(app: &mut App) -> CommandBarProjection {
-        let world = app.world_mut();
-        let mut query = world.query::<&CommandBarProjection>();
-        query.single(world).unwrap().clone()
+    impl CommandBarProjection {
+        fn read(app: &mut App) -> Self {
+            let world = app.world_mut();
+            let mut query = world.query::<&Self>();
+            query.single(world).unwrap().clone()
+        }
     }
 
     #[test]
@@ -179,12 +206,12 @@ mod tests {
         let cwd = root.to_string_lossy().to_string();
 
         let mut app = App::new();
-        app.add_systems(Update, update_work_dirs_snapshot);
+        app.add_plugins(Plugin);
         app.world_mut().spawn(CommandBarProjection::default());
         app.world_mut().spawn(CommandBarWorkDirectory(cwd));
         app.update();
 
-        let snap = projection(&mut app).work;
+        let snap = CommandBarProjection::read(&mut app).work;
         assert!(
             snap.work_dirs
                 .iter()
@@ -207,12 +234,12 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("changed.rs"), "").unwrap();
         let mut app = App::new();
-        app.add_systems(Update, update_work_dirs_snapshot);
+        app.add_plugins(Plugin);
         app.world_mut().spawn(CommandBarProjection::default());
         app.world_mut()
             .spawn(CommandBarWorkDirectory(root.to_string_lossy().into_owned()));
         app.update();
-        let snap = projection(&mut app).work;
+        let snap = CommandBarProjection::read(&mut app).work;
         assert!(
             snap.work_dirs
                 .iter()
@@ -232,12 +259,12 @@ mod tests {
         let cwd = root.to_string_lossy().to_string();
 
         let mut app = App::new();
-        app.add_systems(Update, update_work_dirs_snapshot);
+        app.add_plugins(Plugin);
         app.world_mut().spawn(CommandBarProjection::default());
         app.world_mut().spawn(CommandBarWorkDirectory(cwd.clone()));
         app.update();
 
-        let snap = projection(&mut app).work;
+        let snap = CommandBarProjection::read(&mut app).work;
         assert!(
             snap.work_dirs
                 .iter()
@@ -251,7 +278,7 @@ mod tests {
     fn recent_files_only_file_urls_ranked() {
         use vmux_core::CreatedAt;
         let mut app = App::new();
-        app.add_systems(Update, update_recent_files_snapshot);
+        app.add_plugins(Plugin);
         app.world_mut().spawn(CommandBarProjection::default());
         app.world_mut().spawn((
             Url,
@@ -275,7 +302,7 @@ mod tests {
             CreatedAt(0),
         ));
         app.update();
-        let snap = projection(&mut app).work;
+        let snap = CommandBarProjection::read(&mut app).work;
         assert_eq!(snap.recent_files.len(), 1);
         assert_eq!(snap.recent_files[0].title, "main.rs");
     }
@@ -284,7 +311,7 @@ mod tests {
     fn search_engines_are_ordered_by_most_recent_visit() {
         use vmux_core::CreatedAt;
         let mut app = App::new();
-        app.add_systems(Update, update_recent_files_snapshot);
+        app.add_plugins(Plugin);
         app.world_mut().spawn(CommandBarProjection::default());
         for (url, visited) in [
             ("https://www.google.com/search?q=old", 1000),
@@ -304,7 +331,7 @@ mod tests {
         }
         app.update();
 
-        let snapshot = projection(&mut app);
+        let snapshot = CommandBarProjection::read(&mut app);
         let engines = &snapshot.work.search_engines;
         assert_eq!(engines.len(), SearchEngine::ALL.len());
         assert_eq!(

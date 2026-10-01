@@ -571,7 +571,7 @@ impl ShortcutStroke {
             .key
             .map(|key| KeyCombo { key, modifiers })
             .or_else(|| {
-                vmux_command::shortcut::resolve_key(&input.text).map(|key| KeyCombo {
+                vmux_command::shortcut::ResolvedKey::parse(&input.text).map(|key| KeyCombo {
                     key: key.key,
                     modifiers,
                 })

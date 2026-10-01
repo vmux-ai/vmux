@@ -811,7 +811,7 @@ pub struct KeyComboDef {
 
 impl KeyComboDef {
     pub fn to_key_combo(&self) -> Option<vmux_command::shortcut::KeyCombo> {
-        let resolved = vmux_command::shortcut::resolve_key(&self.key)?;
+        let resolved = vmux_command::shortcut::ResolvedKey::parse(&self.key)?;
         Some(vmux_command::shortcut::KeyCombo {
             key: resolved.key,
             modifiers: vmux_command::shortcut::Modifiers {

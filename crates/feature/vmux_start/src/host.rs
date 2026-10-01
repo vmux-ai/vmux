@@ -7,8 +7,9 @@ use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPromptContext, OpenId
 use vmux_api::space::ProjectBranch;
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    ClaimedUrl, CommandBarProjection, ContributedCommand, ContributedPage, ContributedPages,
+    ClaimedUrl, CommandBarProjection, ContributedCommand, ContributedPage,
 };
+use vmux_command::{CommandBarOpenProjection, CommandBarProjector};
 use vmux_core::KeyboardOwner;
 use vmux_core::PageMetadata;
 use vmux_core::host::manifest::FeaturePlugin;
@@ -16,7 +17,6 @@ use vmux_ui::i18n::Locale;
 
 use crate::START_PAGE_URL;
 use crate::event::StartSelectWorkspace;
-use vmux_command::build_command_bar_open_payload;
 use vmux_core::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_layout::settings::ResolvedLocale;
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
@@ -188,6 +188,40 @@ impl StartPromptContext<'_, '_> {
             projects: Vec::new(),
             ..Self::unrooted()
         }
+    }
+
+    fn project(
+        &self,
+        projector: &CommandBarProjector,
+        tabs: &TabGather,
+        active_tab: Option<Entity>,
+        git: Option<&vmux_git::worktree::RepoInfo>,
+        projects: Vec<vmux_api::space::ProjectRow>,
+        agent_models: Vec<vmux_api::command_bar::AgentModels>,
+        agent_modes: Vec<vmux_api::command_bar::AgentModes>,
+        locale: &Locale,
+    ) -> CommandBarOpenEvent {
+        let active_stack_count = tabs.stack_q.iter().count();
+        let space_name = self.command_bar.spaces.active_space_name.clone();
+        let tab_rows = tabs.tabs(active_tab, &space_name, locale);
+        let mut payload = projector.project(CommandBarOpenProjection {
+            open_id: OpenId::NONE,
+            native_windowed: false,
+            space_name,
+            url: String::new(),
+            spaces: self.command_bar.spaces.clone(),
+            pages: self.command_bar.pages.clone(),
+            work: self.command_bar.work.clone(),
+            locale: locale.clone(),
+            active_stack_count,
+            tabs: tab_rows,
+            target: Some(OpenTarget::InPlace),
+        });
+        payload.prompt_context = self.context(active_tab, git);
+        payload.prompt_context.projects = projects;
+        payload.agent_models = agent_models;
+        payload.agent_modes = agent_modes;
+        payload
     }
 }
 
@@ -473,8 +507,6 @@ fn sync_live_start_pages(
     tab_gather: TabGather,
     mut prompt_context: StartPromptContext,
     contributions: (
-        ContributedPages,
-        Query<&ContributedCommand>,
         Query<
             (),
             Or<(
@@ -503,17 +535,11 @@ fn sync_live_start_pages(
     mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
     mut last_git: Local<(String, Option<vmux_git::worktree::RepoInfo>)>,
     space_projects: vmux_space::SpaceProjects,
-    definitions: Query<&vmux_command::CommandDefinition>,
+    projector: CommandBarProjector,
     mut commands: Commands,
 ) {
-    let (
-        contributed_pages,
-        contributed_commands,
-        contribution_changes,
-        mut removed_pages,
-        mut removed_commands,
-        mut removed_claims,
-    ) = contributions;
+    let (contribution_changes, mut removed_pages, mut removed_commands, mut removed_claims) =
+        contributions;
     let cwd = prompt_context.cwd(tab_gather.active_tab.get());
     let git_info = (!cwd.is_empty())
         .then(|| {
@@ -530,11 +556,10 @@ fn sync_live_start_pages(
         || removed_pages.read().next().is_some()
         || removed_commands.read().next().is_some()
         || removed_claims.read().next().is_some();
-    let changed = should_refresh_start_payload(
-        prompt_context.command_bar.is_changed(),
-        contributions_changed,
-        focus_changed,
-    ) || prompt_context.changed(tab_gather.active_tab.get())
+    let changed = prompt_context.command_bar.is_changed()
+        || contributions_changed
+        || focus_changed
+        || prompt_context.changed(tab_gather.active_tab.get())
         || git_changed
         || locale.as_ref().is_some_and(|locale| locale.is_changed());
     let locale = locale
@@ -550,12 +575,8 @@ fn sync_live_start_pages(
             if !browsers.can_emit_to(&e) {
                 return None;
             }
-            let focus_requested = should_focus_start_sync(
-                synced,
-                keyboard_target,
-                added_keyboard_targets.contains(e),
-                focus_changed,
-            );
+            let focus_requested =
+                keyboard_target && (!synced || added_keyboard_targets.contains(e) || focus_changed);
             (changed || !synced || focus_requested).then_some((e, focus_requested))
         })
         .collect();
@@ -565,20 +586,15 @@ fn sync_live_start_pages(
     if git_changed {
         *last_git = (cwd.clone(), git_info.clone());
     }
-    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
-    let payload = build_start_payload(
+    let payload = prompt_context.project(
+        &projector,
         &tab_gather,
-        &prompt_context.command_bar,
-        &contributed_pages,
-        &contributed_commands,
-        &prompt_context,
         tab_gather.active_tab.get(),
         git_info.as_ref(),
         space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
         prompt_context.command_bar.agent_models.agents.clone(),
         prompt_context.command_bar.agent_modes.agents.clone(),
         &locale,
-        &definitions,
     );
     let project = payload
         .prompt_context
@@ -608,23 +624,6 @@ fn sync_live_start_pages(
     }
 }
 
-fn should_refresh_start_payload(
-    command_bar_changed: bool,
-    contributions_changed: bool,
-    focus_changed: bool,
-) -> bool {
-    command_bar_changed || contributions_changed || focus_changed
-}
-
-fn should_focus_start_sync(
-    synced: bool,
-    keyboard_target: bool,
-    keyboard_target_added: bool,
-    focus_changed: bool,
-) -> bool {
-    keyboard_target && (!synced || keyboard_target_added || focus_changed)
-}
-
 fn publish_command_bar_focus(
     trigger: On<CommandBarFocusRequested>,
     mut revisions: Query<&mut CommandBarFocusRevision>,
@@ -643,46 +642,6 @@ fn publish_command_bar_focus(
     commands.trigger(vmux_core::host::UiStateWrite::<
         vmux_api::command_bar::CommandBarUiState,
     >::from_event(webview, &effect));
-}
-
-fn build_start_payload(
-    tab_gather: &TabGather,
-    command_bar: &CommandBarProjection,
-    contributed_pages: &ContributedPages,
-    contributed_commands: &Query<&ContributedCommand>,
-    prompt_context: &StartPromptContext,
-    active_tab: Option<Entity>,
-    git_info: Option<&vmux_git::worktree::RepoInfo>,
-    projects: Vec<vmux_api::space::ProjectRow>,
-    agent_models: Vec<vmux_api::command_bar::AgentModels>,
-    agent_modes: Vec<vmux_api::command_bar::AgentModes>,
-    locale: &Locale,
-    definitions: &[vmux_command::CommandDefinition],
-) -> CommandBarOpenEvent {
-    let active_stack_count = tab_gather.stack_q.iter().count();
-    let space_name = command_bar.spaces.active_space_name.clone();
-    let tabs = tab_gather.tabs(active_tab, &space_name, locale);
-    let mut payload = build_command_bar_open_payload(
-        OpenId::NONE,
-        false,
-        space_name,
-        String::new(),
-        &command_bar.spaces,
-        contributed_pages,
-        contributed_commands,
-        &command_bar.pages,
-        &command_bar.work,
-        locale,
-        active_stack_count,
-        tabs,
-        Some(OpenTarget::InPlace),
-        definitions,
-    );
-    payload.prompt_context = prompt_context.context(active_tab, git_info);
-    payload.prompt_context.projects = projects;
-    payload.agent_models = agent_models;
-    payload.agent_modes = agent_modes;
-    payload
 }
 
 fn mark_launcher_hosts(

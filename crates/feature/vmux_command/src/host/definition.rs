@@ -8,7 +8,7 @@ use vmux_core::JsonArguments;
 use vmux_core::host::manifest::{self, FeatureManifest};
 use vmux_ui::i18n::Locale;
 
-use crate::shortcut::{Binding, KeyCombo, Modifiers, Shortcut, Source, When, resolve_key};
+use crate::shortcut::{Binding, KeyCombo, Modifiers, ResolvedKey, Shortcut, Source, When};
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WriteCommandRequests;
@@ -704,7 +704,7 @@ impl KeyCombo {
                     if key.is_some() {
                         return None;
                     }
-                    let resolved = resolve_key(part)?;
+                    let resolved = ResolvedKey::parse(part)?;
                     key = Some(resolved.key);
                     modifiers.shift |= resolved.implicit_shift;
                 }

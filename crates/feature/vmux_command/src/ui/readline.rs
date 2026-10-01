@@ -70,25 +70,23 @@ impl TextEditCommand {
             Self::Back => kept(prev()),
             Self::Delete => cut(caret, next()),
             Self::Backspace => cut(prev(), caret),
-            Self::DeleteWord => cut(word_start_before(value, caret), caret),
+            Self::DeleteWord => {
+                let bytes = value.as_bytes();
+                let mut start = caret.saturating_sub(1);
+                while start > 0 && bytes[start - 1] == b' ' {
+                    start -= 1;
+                }
+                while start > 0 && bytes[start - 1] != b' ' {
+                    start -= 1;
+                }
+                cut(floor_char_boundary(value, start), caret)
+            }
             Self::DeleteToBeginning => Edited {
                 value: value[caret..].to_string(),
                 caret: 0,
             },
         }
     }
-}
-
-fn word_start_before(value: &str, caret: usize) -> usize {
-    let bytes = value.as_bytes();
-    let mut i = caret.saturating_sub(1);
-    while i > 0 && bytes[i - 1] == b' ' {
-        i -= 1;
-    }
-    while i > 0 && bytes[i - 1] != b' ' {
-        i -= 1;
-    }
-    floor_char_boundary(value, i)
 }
 
 #[cfg(test)]

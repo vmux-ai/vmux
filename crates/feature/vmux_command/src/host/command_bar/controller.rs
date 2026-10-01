@@ -1,6 +1,6 @@
 use crate::CommandBar;
-use crate::build_command_bar_open_payload;
 use crate::host::payload::CommandBarPicks;
+use crate::{CommandBarOpenProjection, CommandBarProjector};
 use std::time::{Duration, Instant};
 use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarPicker, CommandBarReadyEvent, CommandBarRenderedEvent,
@@ -10,11 +10,8 @@ use vmux_core::launcher::{LauncherDismissRequest, RendersLauncherPanel, RestoreK
 
 use crate::command_bar::CommandBarDismiss;
 use crate::command_bar::panel::CommandBarPanelActive;
-use crate::command_bar::work_snapshot::WorkSnapshotPlugin;
-use crate::snapshot::{
-    CommandBarProjection, ContributedCommand, ContributedPages, WriteCommandBarSnapshots,
-};
-use crate::{CommandDefinition, CommandInvocation, CommandRegistry, ReadCommandRequests};
+use crate::snapshot::{CommandBarProjection, WriteCommandBarSnapshots};
+use crate::{CommandInvocation, CommandRegistry, ReadCommandRequests};
 use bevy::{
     ecs::{message::MessageReader, system::SystemParam},
     prelude::*,
@@ -34,7 +31,7 @@ pub struct Plugin;
 impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CommandBarToggleRequest>()
-            .add_plugins(WorkSnapshotPlugin)
+            .add_plugins(super::work_snapshot::Plugin)
             .add_message::<CommandBarEditPageRequest>()
             .add_message::<CommandBarPathRequest>()
             .add_message::<CommandBarCommandsRequest>()
@@ -528,9 +525,7 @@ fn open(
     browser_meta: Query<&PageMetadata, Or<(With<WebviewSource>, With<HostsPage>)>>,
     state: Single<&CommandBarProjection>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
-    contributed_pages: ContributedPages,
-    contributed_commands: Query<&ContributedCommand>,
-    definitions: Query<&CommandDefinition>,
+    projector: CommandBarProjector,
     locale: Option<Res<ResolvedLocale>>,
     mut commands: Commands,
 ) {
@@ -563,8 +558,6 @@ fn open(
         .as_deref()
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
-    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
-
     let toggle_closes = request.closes_visible_bar(is_open);
     let should_toggle = request.should_toggle;
     let should_dismiss = request.should_dismiss;
@@ -608,22 +601,19 @@ fn open(
     let bar_tabs = focus.tabs.clone();
 
     let target = replace_active_stack.then_some(crate::open_target::OpenTarget::InPlace);
-    let mut payload = build_command_bar_open_payload(
-        OpenId(now_millis() as u64),
-        false,
+    let mut payload = projector.project(CommandBarOpenProjection {
+        open_id: OpenId(now_millis() as u64),
+        native_windowed: false,
         space_name,
-        current_url,
-        spaces_snapshot,
-        &contributed_pages,
-        &contributed_commands,
-        &state.pages,
-        &state.work,
-        &locale,
+        url: current_url,
+        spaces: spaces_snapshot.clone(),
+        pages: state.pages.clone(),
+        work: state.work.clone(),
+        locale: locale.clone(),
         active_stack_count,
-        bar_tabs,
+        tabs: bar_tabs,
         target,
-        &definitions,
-    );
+    });
     payload.picker = picker;
     payload.caret_at_end = super::model::PaletteRows::opens_at_end(&payload.url, payload.picker);
     if let Some(picker) = picker {
@@ -819,13 +809,11 @@ fn sync_project_roots(mut state: Single<&mut CommandBarProjection>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command_bar_open_payload;
+    use crate::CommandDefinition;
     use crate::{CommandPlugin, ReadCommandRequests};
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_api::command_bar::{
-        CommandBarOpenEvent, CommandBarSpace, CommandBarUiState, CommandBarUiStatePatch,
-    };
+    use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch};
     use vmux_api::open_target::OpenTarget;
     use vmux_core::host::UiStateWrite;
     use vmux_core::launcher::HostsLauncher;
@@ -880,39 +868,34 @@ mod tests {
     #[test]
     fn build_payload_includes_commands_and_target() {
         let mut world = World::new();
+        world.spawn(CommandDefinition {
+            id: "test_command".to_string(),
+            aliases: Vec::new(),
+            label: "Test Command".to_string(),
+            group: "Test".to_string(),
+            accelerator: None,
+            hidden: false,
+            native_menu: false,
+            shortcut_label: None,
+            shortcuts: Vec::new(),
+            mcp: None,
+        });
         let payload = world
-            .run_system_once(
-                |pages: ContributedPages, commands: Query<&ContributedCommand>| {
-                    let definitions = [CommandDefinition {
-                        id: "test_command".to_string(),
-                        aliases: Vec::new(),
-                        label: "Test Command".to_string(),
-                        group: "Test".to_string(),
-                        accelerator: None,
-                        hidden: false,
-                        native_menu: false,
-                        shortcut_label: None,
-                        shortcuts: Vec::new(),
-                        mcp: None,
-                    }];
-                    build_command_bar_open_payload(
-                        OpenId(7),
-                        false,
-                        String::new(),
-                        String::new(),
-                        &Default::default(),
-                        &pages,
-                        &commands,
-                        &Default::default(),
-                        &crate::snapshot::CommandBarWorkSnapshot::default(),
-                        &Locale::from("en-US"),
-                        0,
-                        Vec::new(),
-                        Some(OpenTarget::InPlace),
-                        &definitions,
-                    )
-                },
-            )
+            .run_system_once(|projector: CommandBarProjector| {
+                projector.project(CommandBarOpenProjection {
+                    open_id: OpenId(7),
+                    native_windowed: false,
+                    space_name: String::new(),
+                    url: String::new(),
+                    spaces: Default::default(),
+                    pages: Default::default(),
+                    work: Default::default(),
+                    locale: Locale::from("en-US"),
+                    active_stack_count: 0,
+                    tabs: Vec::new(),
+                    target: Some(OpenTarget::InPlace),
+                })
+            })
             .expect("payload system runs");
         assert_eq!(payload.open_id, OpenId(7));
         assert_eq!(payload.target, Some(OpenTarget::InPlace));
@@ -1271,58 +1254,6 @@ mod tests {
 
         assert!(pending.accepts_size());
         assert_eq!(pending.next_frame(None, true, false, true), Some(1));
-    }
-
-    #[test]
-    fn command_bar_payload_includes_space_name() {
-        let payload = command_bar_open_payload(
-            OpenId(7),
-            false,
-            "Work".to_string(),
-            "https://example.com".to_string(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            None,
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-        );
-
-        assert_eq!(payload.space_name, "Work");
-        assert_eq!(payload.open_id, OpenId(7));
-    }
-
-    #[test]
-    fn command_bar_payload_includes_spaces() {
-        let spaces = vec![CommandBarSpace {
-            id: "work".to_string(),
-            name: "Work".to_string(),
-            profile: "Personal".to_string(),
-            is_active: true,
-            tab_count: 2,
-        }];
-
-        let payload = command_bar_open_payload(
-            OpenId(8),
-            true,
-            "Work".to_string(),
-            "vmux://spaces/".to_string(),
-            spaces.clone(),
-            Vec::new(),
-            Vec::new(),
-            None,
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-        );
-
-        assert_eq!(payload.spaces, spaces);
-        assert!(payload.native_windowed);
     }
 
     #[test]

@@ -1,214 +1,41 @@
 use super::PaletteSurface;
 use super::{CommandPalette, use_command_bar_ui};
-use dioxus::prelude::InteractionLocation;
 use dioxus::prelude::*;
 use vmux_api::command_bar::CommandBarPanelRequest;
 use vmux_ui::hooks::send;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct PanelPlacement {
-    left: f64,
-    top: f64,
-    width: f64,
-    height: f64,
-}
-
-const PANEL_MIN_WIDTH: f64 = 320.0;
-const PANEL_MIN_HEIGHT: f64 = 120.0;
-
-impl PanelPlacement {
-    fn clamped(self, viewport_width: f64, viewport_height: f64) -> Self {
-        let width = self
-            .width
-            .clamp(PANEL_MIN_WIDTH, viewport_width.max(PANEL_MIN_WIDTH));
-        let height = self
-            .height
-            .clamp(PANEL_MIN_HEIGHT, viewport_height.max(PANEL_MIN_HEIGHT));
-        Self {
-            left: self.left.clamp(0.0, (viewport_width - width).max(0.0)),
-            top: self.top.clamp(0.0, (viewport_height - height).max(0.0)),
-            width,
-            height,
-        }
-    }
-}
-
-fn set_command_bar_panel_active(active: bool) {
-    let _ = send(&CommandBarPanelRequest { active });
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PanelDragMode {
-    Move,
-    Resize,
-}
-
-#[derive(Clone, Copy)]
-struct DragOrigin {
-    mode: PanelDragMode,
-    pointer_x: f64,
-    pointer_y: f64,
-    start: PanelPlacement,
-}
-
-#[derive(Clone, Copy)]
-struct PanelDrag {
-    origin: Signal<Option<DragOrigin>>,
-    placement: Signal<Option<PanelPlacement>>,
-}
-
-fn use_panel_drag() -> PanelDrag {
-    PanelDrag {
-        origin: use_signal(|| None),
-        placement: use_signal(|| None),
-    }
-}
-
-impl PanelDrag {
-    fn placement(&self) -> Option<PanelPlacement> {
-        (self.placement)()
-    }
-
-    fn begin(&mut self, event: Event<PointerData>, mode: PanelDragMode) {
-        event.stop_propagation();
-        let Some(start) = panel_card_rect(&event) else {
-            return;
-        };
-        let (pointer_x, pointer_y) = panel_pointer_at(&event);
-
-        self.origin.set(Some(DragOrigin {
-            mode,
-            pointer_x,
-            pointer_y,
-            start,
-        }));
-        self.placement.set(Some(start));
-    }
-
-    fn listeners(&self) -> Vec<Attribute> {
-        if self.origin.read().is_none() {
-            return Vec::new();
-        }
-
-        let mut advancing = *self;
-        let mut finishing = *self;
-        let mut cancelling = *self;
-        vec![
-            dioxus_elements::events::onpointermove(move |event| advancing.advance(event)),
-            dioxus_elements::events::onpointerup(move |_| finishing.finish()),
-            dioxus_elements::events::onpointercancel(move |_| cancelling.finish()),
-        ]
-    }
-
-    fn advance(&mut self, event: Event<PointerData>) {
-        let Some(origin) = (self.origin)() else {
-            return;
-        };
-        let Some((viewport_width, viewport_height)) = panel_viewport() else {
-            return;
-        };
-        let (x, y) = panel_pointer_at(&event);
-
-        self.placement.set(Some(
-            origin.apply(x, y).clamped(viewport_width, viewport_height),
-        ));
-    }
-
-    fn finish(&mut self) {
-        self.origin.set(None);
-    }
-}
-
-impl DragOrigin {
-    fn apply(self, pointer_x: f64, pointer_y: f64) -> PanelPlacement {
-        let dx = pointer_x - self.pointer_x;
-        let dy = pointer_y - self.pointer_y;
-        match self.mode {
-            PanelDragMode::Move => PanelPlacement {
-                left: self.start.left + dx,
-                top: self.start.top + dy,
-                ..self.start
-            },
-            PanelDragMode::Resize => PanelPlacement {
-                width: self.start.width + dx,
-                height: self.start.height + dy,
-                ..self.start
-            },
-        }
-    }
-}
-
-fn panel_pointer_at(event: &Event<PointerData>) -> (f64, f64) {
-    let point = event.data().client_coordinates();
-    (point.x, point.y)
-}
-
-fn panel_card_rect(_event: &Event<PointerData>) -> Option<PanelPlacement> {
-    None
-}
-
-fn panel_viewport() -> Option<(f64, f64)> {
-    None
-}
 
 #[component]
 pub fn CommandBarPanel() -> Element {
     let state = use_command_bar_ui();
     let mut open = use_signal(|| false);
-    let mut drag = use_panel_drag();
 
     let mut set_open = move |showing: bool| {
         open.set(showing);
-        set_command_bar_panel_active(showing);
+        let _ = send(&CommandBarPanelRequest { active: showing });
     };
 
     use_effect(move || {
         set_open(state().open_id.is_open());
     });
-    use_drop(move || set_command_bar_panel_active(false));
+    use_drop(move || {
+        let _ = send(&CommandBarPanelRequest { active: false });
+    });
 
     if !open() {
         return rsx! {};
     }
 
-    let placed = drag.placement();
-    let card_class = if placed.is_some() {
-        "absolute"
-    } else {
-        "absolute left-1/2 top-1/2 w-[576px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2"
-    };
-    let shell_class = if placed.is_some() {
-        "relative flex h-full w-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
-    } else {
-        "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
-    };
-    let card_style = placed
-        .map(|p| {
-            format!(
-                "left:{}px;top:{}px;width:{}px;height:{}px;",
-                p.left, p.top, p.width, p.height
-            )
-        })
-        .unwrap_or_default();
-
     rsx! {
         div {
             class: "pointer-events-auto fixed inset-0",
             onclick: move |_| set_open(false),
-            ..drag.listeners(),
             div {
-                class: card_class,
-                style: card_style,
+                class: "absolute left-1/2 top-1/2 w-[576px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2",
                 "data-command-bar-card": "",
                 onclick: move |e| e.stop_propagation(),
                 div {
                     id: "command-bar-shell",
-                    class: shell_class,
-                    div {
-                        class: "flex h-3 w-full shrink-0 cursor-grab items-center justify-center active:cursor-grabbing",
-                        onpointerdown: move |e| drag.begin(e, PanelDragMode::Move),
-                        div { class: "h-1 w-8 rounded-full bg-border" }
-                    }
+                    class: "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl",
                     div {
                         class: "flex min-h-0 flex-1 flex-col",
                         CommandPalette {
@@ -218,49 +45,8 @@ pub fn CommandBarPanel() -> Element {
                             on_activity: move |_| {},
                         }
                     }
-                    div {
-                        class: "absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize",
-                        onpointerdown: move |e| drag.begin(e, PanelDragMode::Resize),
-                    }
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn panel_placement_stays_in_viewport() {
-        let placement = PanelPlacement {
-            left: 5000.0,
-            top: 5000.0,
-            width: 576.0,
-            height: 400.0,
-        }
-        .clamped(1440.0, 900.0);
-
-        assert_eq!(placement.left, 864.0);
-        assert_eq!(placement.top, 500.0);
-        assert_eq!(placement.width, 576.0);
-        assert_eq!(placement.height, 400.0);
-    }
-
-    #[test]
-    fn panel_placement_respects_minimum_size() {
-        let placement = PanelPlacement {
-            left: 40.0,
-            top: 40.0,
-            width: 10.0,
-            height: 10.0,
-        }
-        .clamped(200.0, 100.0);
-
-        assert_eq!(placement.left, 0.0);
-        assert_eq!(placement.top, 0.0);
-        assert_eq!(placement.width, PANEL_MIN_WIDTH);
-        assert_eq!(placement.height, PANEL_MIN_HEIGHT);
     }
 }
