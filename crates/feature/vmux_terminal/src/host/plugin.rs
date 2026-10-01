@@ -201,10 +201,7 @@ impl Plugin for TerminalServicePlugin {
                     .after(ServiceMessageSet),
             )
             .add_systems(Update, respond_spawn.in_set(ReadCommandRequests))
-            .add_systems(
-                Update,
-                prewarm_login_shell_env.run_if(resource_added::<AppSettings>),
-            )
+            .add_systems(Update, prewarm.run_if(resource_added::<AppSettings>))
             .add_observer(restart)
             .add_observer(restart_pty)
             .add_observer(removed);
@@ -226,8 +223,8 @@ impl Plugin for TerminalInputPlugin {
     }
 }
 
-fn prewarm_login_shell_env(settings: Res<AppSettings>) {
-    crate::shell_env::prewarm_login_shell_env(terminal_shell(&settings));
+fn prewarm(settings: Res<AppSettings>) {
+    super::LoginShellEnvironment::prewarm(terminal_shell(&settings));
 }
 
 fn initialize_state(terminals: Query<Entity, Added<Terminal>>, mut commands: Commands) {
@@ -901,8 +898,8 @@ fn send_service_requests(
     );
     for (entity, process_id, launch, agent_run) in pending_create.iter().take(create_budget) {
         let mut env = launch.env.clone();
-        if should_merge_login_shell_env(agent_run) {
-            crate::shell_env::merge_login_shell_env(&mut env, &terminal_shell(&settings));
+        if agent_run {
+            super::LoginShellEnvironment::merge(&mut env, &terminal_shell(&settings));
         }
         service_requests.write(ServiceRequest(ClientMessage::CreateProcess {
             process_id: *process_id,
@@ -1105,10 +1102,6 @@ fn copy_service_selection(
             Clipboard::write(selection.text.clone());
         }
     }
-}
-
-fn should_merge_login_shell_env(agent_run: bool) -> bool {
-    agent_run
 }
 
 type ServiceTerminalFilter = (
@@ -1752,8 +1745,8 @@ fn restart_pty(
             (shell, vec![], String::new(), Vec::new())
         }
     };
-    if should_merge_login_shell_env(agent_run) {
-        crate::shell_env::merge_login_shell_env(&mut env, &terminal_shell(&settings));
+    if agent_run {
+        super::LoginShellEnvironment::merge(&mut env, &terminal_shell(&settings));
     }
 
     let (cols, rows) = grid.map(|g| (g.cols, g.rows)).unwrap_or((80, 24));
@@ -2979,11 +2972,5 @@ mod tests {
     #[test]
     fn retained_terminal_does_not_close_stack_on_exit() {
         assert!(!should_close_terminal_stack_on_exit(true));
-    }
-
-    #[test]
-    fn agent_run_terminal_inherits_login_shell_environment() {
-        assert!(should_merge_login_shell_env(true));
-        assert!(!should_merge_login_shell_env(false));
     }
 }

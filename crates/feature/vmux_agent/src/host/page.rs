@@ -21,7 +21,7 @@ use super::attach::{
     AcpAgentAttachment, acp_icon_for_id, acp_profile_name_for_id, acp_registry_agent_for_id,
 };
 use crate::host::acp::registry::RegistryAgent;
-use vmux_terminal::agent_run::AgentCwd;
+use vmux_terminal::AgentCwd;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 

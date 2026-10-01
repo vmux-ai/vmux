@@ -244,7 +244,7 @@ fn start_installs(
     let Some(focused) = focused.as_ref() else {
         return;
     };
-    let shell = vmux_terminal::agent_run::AgentTerminalShell::configured(&settings).into_string();
+    let shell = vmux_terminal::AgentTerminalShell::configured(&settings).into_string();
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let mut active_jobs: Vec<(AcpInstallKey, Entity)> = jobs
         .iter()
@@ -474,7 +474,7 @@ fn resolve_acp_install(
         .as_ref()
         .map(|resolved| resolved.package_added)
         .unwrap_or(false);
-    let login_env = vmux_terminal::shell_env::login_shell_env(&request.shell);
+    let login_env = vmux_terminal::LoginShellEnvironment::get(&request.shell);
     let managed_mcp = match crate::managed_mcp::PreparedManagedMcpServers::prepare() {
         Ok(managed_mcp) => managed_mcp,
         Err(message) => {
@@ -538,9 +538,7 @@ impl AcpInstallWaiter {
 impl AcpLaunch {
     fn message_for(&self, session: &AcpSession, settings: Option<&AppSettings>) -> ClientMessage {
         let shell = settings
-            .map(|settings| {
-                vmux_terminal::agent_run::AgentTerminalShell::configured(settings).into_string()
-            })
+            .map(|settings| vmux_terminal::AgentTerminalShell::configured(settings).into_string())
             .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_default());
         let mcp = crate::mcp::McpLaunchSpec::acp(&session.cwd, session.anchor, &shell)
             .resolve()
