@@ -27,5 +27,5 @@ pub use host::{
     AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename, ExpandedProjectDirs, PendingProject,
     RepositoryNeedsWorktree, SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest,
     SpaceOpenPageRequest, SpacePlugin, SpaceProjects, SpaceRenameRequest, SpaceToolPlugin, Spaces,
-    cwd, plugin, project, snapshot_updater, spaces,
+    valid_cwd,
 };

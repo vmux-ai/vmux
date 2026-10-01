@@ -79,7 +79,7 @@ fn open_tab(
         let activate = !request.origin.is_agent();
         let result = match focus.pane.filter(|pane| panes.contains(*pane)) {
             None => AgentCommandResult::Error("no active pane".to_string()),
-            Some(pane) => match vmux_space::cwd::valid_cwd(&request.payload.cwd) {
+            Some(pane) => match vmux_space::valid_cwd(&request.payload.cwd) {
                 Err(message) => AgentCommandResult::Error(message),
                 Ok(cwd) => {
                     let cwd = cwd.or_else(|| {

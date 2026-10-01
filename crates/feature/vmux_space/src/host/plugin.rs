@@ -37,13 +37,13 @@ use vmux_setting::{AppSettings, SettingsLoadSet, SettingsSaveRequest};
 
 use super::SpacesUiStateUpdates;
 use super::agent::SpaceAgentPlugin;
+use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 use crate::event::{
     ProjectActivateRequest, ProjectForgetRequest, SpaceAttachRequest, SpaceCreateRequest,
     SpaceDeleteRequest, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow, SpacesListEvent,
     SpacesUiState,
 };
 use crate::model::SpaceRecord;
-use crate::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 use vmux_api::command_bar::{CommandBarPicker, SwitchSpaceRequest};
 
 #[vmux_native::page]
@@ -106,7 +106,7 @@ impl Plugin for SpacePlugin {
             HostedUiPlugin::<Spaces>::new(Self::MANIFEST),
             super::key::SpaceKeyPlugin,
             super::project::SpaceProjectPlugin,
-            crate::snapshot_updater::SnapshotPlugin,
+            super::snapshot_updater::SnapshotPlugin,
             UiEventPlugin::<(
                 SpaceAttachRequest,
                 SpaceCreateRequest,

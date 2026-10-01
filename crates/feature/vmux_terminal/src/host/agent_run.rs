@@ -32,7 +32,7 @@ use crate::launch::TerminalLaunch;
 use crate::{
     AgentRunTerminal, ProcessExited, Terminal, TerminalReinputRequest, TerminalStackSpawnRequest,
 };
-use vmux_space::cwd::valid_cwd;
+use vmux_space::valid_cwd;
 
 #[vmux_api::contract(Copy, Eq)]
 pub enum PlacementMode {

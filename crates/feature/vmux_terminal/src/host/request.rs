@@ -123,7 +123,7 @@ fn handle_run_shell_requests(
         let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane)) else {
             continue;
         };
-        let Ok(cwd) = vmux_space::cwd::valid_cwd(&cwd) else {
+        let Ok(cwd) = vmux_space::valid_cwd(&cwd) else {
             continue;
         };
         terminal_stack_spawns.write(TerminalStackSpawnRequest {

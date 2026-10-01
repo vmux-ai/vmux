@@ -482,7 +482,7 @@ fn handle_page_open(
         let cwd = if let Some(launch) = saved_launch.as_ref() {
             Some(PathBuf::from(&launch.cwd))
         } else if let Some(cwd) = cwd_param.as_deref() {
-            match vmux_space::cwd::valid_cwd(cwd) {
+            match vmux_space::valid_cwd(cwd) {
                 Ok(cwd) => cwd,
                 Err(message) => {
                     commands.entity(entity).insert(PageOpenError { message });

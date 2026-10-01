@@ -1,13 +1,13 @@
 mod agent;
 mod agent_workspace;
 mod composer;
-pub mod cwd;
+mod cwd;
 mod key;
 mod persistence;
-pub mod plugin;
-pub mod project;
-pub mod snapshot_updater;
-pub mod spaces;
+mod plugin;
+mod project;
+mod snapshot_updater;
+mod spaces;
 mod tool;
 mod workspace;
 
@@ -18,6 +18,7 @@ pub use agent::{
     AgentCreateWorktreeOnBranch, AgentListSpaces, AgentPrepareWorktree, AgentRenameProfile,
     AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
 };
+pub use cwd::valid_cwd;
 pub use plugin::SpacePlugin;
 pub use project::{ExpandedProjectDirs, SpaceProjects};
 pub use spaces::Spaces;
