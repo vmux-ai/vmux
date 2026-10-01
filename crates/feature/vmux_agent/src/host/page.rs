@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_api::protocol::AgentAttachment;
 use vmux_chat::host::{ChatView, ImportedConversation};
@@ -17,13 +18,46 @@ use vmux_session::{AcpSession, AgentConversationTitle, PromptQueue};
 use vmux_setting::AppSettings;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
 
-use super::attach::{
-    AcpAgentAttachment, acp_icon_for_id, acp_profile_name_for_id, acp_registry_agent_for_id,
-};
+use super::attach::AcpAgentAttachment;
 use crate::host::acp::registry::RegistryAgent;
+use crate::route::AcpRoute;
 use vmux_terminal::AgentCwd;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
+
+#[derive(SystemParam)]
+struct AcpCatalog<'w, 's> {
+    agents: Query<'w, 's, &'static RegistryAgent>,
+}
+
+impl AcpCatalog<'_, '_> {
+    fn agent(&self, id: &str) -> Option<&RegistryAgent> {
+        self.agents.iter().find(|agent| agent.id == id)
+    }
+
+    fn installed_id(&self) -> Option<String> {
+        self.agents
+            .iter()
+            .find(|agent| agent.is_installed())
+            .map(|agent| agent.id.clone())
+    }
+
+    fn icon(&self, id: &str) -> Option<String> {
+        self.agent(id).and_then(|agent| agent.icon.clone())
+    }
+
+    fn profile_name(&self, id: &str, config: Option<&vmux_setting::AcpAgentConfig>) -> String {
+        self.agent(id)
+            .map(|agent| agent.name.trim())
+            .filter(|name| !name.is_empty())
+            .or_else(|| {
+                let name = config?.name.trim();
+                (!name.is_empty()).then_some(name)
+            })
+            .unwrap_or(id)
+            .to_string()
+    }
+}
 
 pub struct PagePlugin;
 
@@ -72,12 +106,12 @@ struct AgentChatTarget {
 
 impl AgentChatTarget {
     fn parse(url: &str) -> Option<Self> {
-        match crate::acp::route::AcpRoute::parse(url)? {
-            crate::acp::route::AcpRoute::AcpDefault => Some(Self {
+        match AcpRoute::parse(url)? {
+            AcpRoute::AcpDefault => Some(Self {
                 url: vmux_chat::ChatPlugin::URL.to_string(),
                 title: "Agent".to_string(),
             }),
-            crate::acp::route::AcpRoute::Acp { id, sid } => {
+            AcpRoute::Acp { id, sid } => {
                 let url = match sid {
                     Some(sid) => format!("{}{id}/{sid}", vmux_chat::ChatPlugin::URL),
                     None => format!("{}{id}", vmux_chat::ChatPlugin::URL),
@@ -92,7 +126,7 @@ impl AgentChatTarget {
 }
 
 fn agent_url_uses_local_workspace(url: &str) -> bool {
-    crate::acp::route::AcpRoute::parse(url).is_some()
+    AcpRoute::parse(url).is_some()
 }
 
 fn ancestor_tab_entity(
@@ -315,11 +349,10 @@ fn open(
     mut commands: Commands,
     settings: Res<AppSettings>,
     workspace: AgentPageOpenWorkspace,
-    catalog: Option<Single<&crate::host::runtime::AcpCatalog>>,
+    catalog: AcpCatalog,
     transitions: Query<&StartInlineTransition>,
     launches: Query<&TerminalLaunch>,
 ) {
-    let catalog = catalog.as_ref().map(|catalog| **catalog);
     let tasks: Vec<(Entity, PageOpenTask, bool)> = open_q
         .p0()
         .iter()
@@ -388,7 +421,7 @@ fn open(
             &mut commands,
             &default_cwd,
             &settings.agent.acp,
-            catalog,
+            &catalog,
         ) {
             Ok(()) => {
                 commands.entity(entity).insert(PageOpenHandled);
@@ -409,21 +442,20 @@ fn open(
 fn swap(
     mut reader: MessageReader<SwapStackSession>,
     settings: Res<AppSettings>,
-    catalog: Option<Single<&crate::host::runtime::AcpCatalog>>,
+    catalog: AcpCatalog,
     mut commands: Commands,
 ) {
-    let catalog = catalog.as_ref().map(|catalog| **catalog);
     for ev in reader.read() {
-        let target = match crate::acp::route::AcpRoute::parse(&ev.target_url) {
-            Some(target @ crate::acp::route::AcpRoute::Acp { .. }) => target,
+        let target = match AcpRoute::parse(&ev.target_url) {
+            Some(target @ AcpRoute::Acp { .. }) => target,
             other => {
                 bevy::log::warn!("swap: unsupported target url {other:?} ({})", ev.target_url);
                 continue;
             }
         };
-        if let crate::acp::route::AcpRoute::Acp { id, .. } = &target
+        if let AcpRoute::Acp { id, .. } = &target
             && !settings.agent.acp.iter().any(|cfg| cfg.id == *id)
-            && acp_registry_agent_for_id(catalog, id).is_none()
+            && catalog.agent(id).is_none()
         {
             bevy::log::warn!("swap: ACP agent unavailable for '{id}'");
             continue;
@@ -459,11 +491,11 @@ fn swap(
         commands.entity(ev.stack).despawn_children();
 
         match target {
-            crate::acp::route::AcpRoute::Acp { id, sid } => {
+            AcpRoute::Acp { id, sid } => {
                 let cfg = settings.agent.acp.iter().find(|cfg| cfg.id == id);
                 let routing_sid = uuid::Uuid::new_v4().to_string();
-                let icon = acp_icon_for_id(catalog, &id);
-                let name = acp_profile_name_for_id(&id, cfg, catalog);
+                let icon = catalog.icon(&id);
+                let name = catalog.profile_name(&id, cfg);
                 let request =
                     AcpAgentAttachment::new(id, name, routing_sid, ev.cwd.clone(), icon, sid);
                 commands.entity(ev.stack).insert(request);
@@ -485,32 +517,24 @@ fn handle_agent_page_open_task(
     commands: &mut Commands,
     default_cwd: &Path,
     acp_configs: &[vmux_setting::AcpAgentConfig],
-    catalog: Option<&crate::host::runtime::AcpCatalog>,
+    catalog: &AcpCatalog,
 ) -> Result<(), String> {
-    let target = match crate::acp::route::AcpRoute::parse(&task.url) {
-        Some(crate::acp::route::AcpRoute::AcpDefault) => {
+    let target = match AcpRoute::parse(&task.url) {
+        Some(AcpRoute::AcpDefault) => {
             let id = acp_configs
                 .first()
                 .map(|config| config.id.clone())
-                .or_else(|| {
-                    catalog.and_then(|catalog| {
-                        catalog
-                            .agents
-                            .iter()
-                            .find(|agent| RegistryAgent::is_installed(agent))
-                            .map(|agent| agent.id.clone())
-                    })
-                })
+                .or_else(|| catalog.installed_id())
                 .ok_or_else(|| "no ACP agent is configured or installed".to_string())?;
-            crate::acp::route::AcpRoute::Acp { id, sid: None }
+            AcpRoute::Acp { id, sid: None }
         }
         Some(target) => target,
         None => return Err(format!("malformed agent URL '{}'", task.url)),
     };
     match target {
-        crate::acp::route::AcpRoute::Acp { id, sid } => {
+        AcpRoute::Acp { id, sid } => {
             let cfg = acp_configs.iter().find(|config| config.id == id);
-            if cfg.is_none() && acp_registry_agent_for_id(catalog, &id).is_none() {
+            if cfg.is_none() && catalog.agent(&id).is_none() {
                 return Err(format!("ACP agent unavailable for '{id}'"));
             }
             if acp_sessions
@@ -523,8 +547,8 @@ fn handle_agent_page_open_task(
                 commands.entity(task.stack).despawn_children();
             }
             let routing_sid = uuid::Uuid::new_v4().to_string();
-            let icon = acp_icon_for_id(catalog, &id);
-            let name = acp_profile_name_for_id(&id, cfg, catalog);
+            let icon = catalog.icon(&id);
+            let name = catalog.profile_name(&id, cfg);
             let request = AcpAgentAttachment::new(
                 id,
                 name,
@@ -542,7 +566,7 @@ fn handle_agent_page_open_task(
             insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
             Ok(())
         }
-        crate::acp::route::AcpRoute::AcpDefault => unreachable!(),
+        AcpRoute::AcpDefault => unreachable!(),
     }
 }
 
@@ -565,4 +589,83 @@ fn insert_initial_prompt_queue(
         .entity(stack)
         .insert(queue)
         .remove::<(PendingPrompt, PendingPromptAttachments)>();
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::ecs::system::RunSystemOnce;
+    use vmux_setting::AcpAgentConfig;
+
+    use super::*;
+    use crate::host::acp::registry::Distribution;
+
+    fn registry_agent(id: &str, name: &str, icon: Option<&str>) -> RegistryAgent {
+        RegistryAgent {
+            id: id.to_string(),
+            name: name.to_string(),
+            version: None,
+            description: None,
+            icon: icon.map(str::to_string),
+            repository: None,
+            distribution: Distribution::default(),
+        }
+    }
+
+    #[test]
+    fn catalog_reads_agent_icons_from_entities() {
+        let mut world = World::new();
+        world.spawn(registry_agent(
+            "mistral-vibe",
+            "Mistral Vibe",
+            Some("https://cdn.example/vibe.svg"),
+        ));
+        world.spawn(registry_agent(
+            "claude-acp",
+            "Claude Agent",
+            Some("https://cdn.example/claude.svg"),
+        ));
+
+        let icons = world
+            .run_system_once(|catalog: AcpCatalog| {
+                (
+                    catalog.icon("mistral-vibe"),
+                    catalog.icon("claude-acp"),
+                    catalog.icon("absent"),
+                )
+            })
+            .unwrap();
+
+        assert_eq!(icons.0.as_deref(), Some("https://cdn.example/vibe.svg"));
+        assert_eq!(icons.1.as_deref(), Some("https://cdn.example/claude.svg"));
+        assert_eq!(icons.2, None);
+    }
+
+    #[test]
+    fn catalog_prefers_registry_name_then_config_then_id() {
+        let mut world = World::new();
+        world.spawn(registry_agent("claude-acp", "Claude", None));
+
+        let names = world
+            .run_system_once(|catalog: AcpCatalog| {
+                let mut config = AcpAgentConfig {
+                    id: "claude-acp".into(),
+                    name: "Configured Claude".into(),
+                    command: "npx".into(),
+                    args: vec![],
+                    env: vec![],
+                    cwd: None,
+                    version: None,
+                };
+                let registry = catalog.profile_name(&config.id, Some(&config));
+                let configured = catalog.profile_name("configured", Some(&config));
+                config.name = "   ".into();
+                let fallback = catalog.profile_name("fallback", Some(&config));
+                (registry, configured, fallback)
+            })
+            .unwrap();
+
+        assert_eq!(names.0, "Claude");
+        assert_eq!(names.1, "Configured Claude");
+        assert_eq!(names.2, "fallback");
+    }
 }

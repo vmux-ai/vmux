@@ -1,6 +1,8 @@
-use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+
+use bevy::prelude::Component;
+use serde::Deserialize;
 use vmux_editor::lsp::package_path::Sha256Digest;
 
 pub const REGISTRY_URL: &str =
@@ -53,7 +55,7 @@ impl Registry {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Component, Debug, Clone, Deserialize)]
 pub struct RegistryAgent {
     pub id: String,
     pub name: String,

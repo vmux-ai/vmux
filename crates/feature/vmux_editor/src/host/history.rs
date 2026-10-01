@@ -1,5 +1,7 @@
 use bevy::prelude::*;
+use vmux_ecs::host::page::{HostHistory, HostHistorySet, HostHistoryTraversed};
 use vmux_ecs::PageMetadata;
+use vmux_path::FileUrl;
 
 use crate::host::editor::{FileNavigateRequest, FileView};
 use crate::host::viewport::FileViewport;
@@ -11,20 +13,19 @@ impl Plugin for HistoryPlugin {
         app.add_systems(
             Update,
             (
-                show_traversed_file_view.in_set(vmux_ecs::host::page::HostHistorySet::Apply),
-                record_file_view_visit.in_set(vmux_ecs::host::page::HostHistorySet::Record),
+                show_traversed_file_view.in_set(HostHistorySet::Apply),
+                record_file_view_visit.in_set(HostHistorySet::Record),
             ),
         );
     }
 }
 
 fn show_traversed_file_view(
-    mut traversed: MessageReader<vmux_ecs::host::page::HostHistoryTraversed>,
+    mut traversed: MessageReader<HostHistoryTraversed>,
     mut commands: Commands,
 ) {
     for event in traversed.read() {
-        let Some(path) = vmux_path::FileUrl::parse(&event.entry.url).and_then(|url| url.path())
-        else {
+        let Some(path) = FileUrl::parse(&event.entry.url).and_then(|url| url.path()) else {
             continue;
         };
         commands.trigger(FileNavigateRequest::new(
@@ -37,11 +38,7 @@ fn show_traversed_file_view(
 
 fn record_file_view_visit(
     mut views: Query<
-        (
-            &PageMetadata,
-            &FileViewport,
-            &mut vmux_ecs::host::page::HostHistory,
-        ),
+        (&PageMetadata, &FileViewport, &mut HostHistory),
         With<FileView>,
     >,
 ) {
@@ -59,7 +56,7 @@ mod tests {
     use bevy_cef::prelude::UiInput;
     use vmux_ecs::PageOpenId;
     use vmux_ecs::event::FileOpenEvent;
-    use vmux_ecs::host::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
+    use vmux_ecs::host::page::{HostHistoryDelta, HostHistoryStep};
     use vmux_ecs::page_open::PageOpenTask;
 
     use crate::host::navigation::NavigationPlugin;

@@ -21,5 +21,7 @@ mod managed_mcp;
 mod mcp;
 #[cfg(all(host, feature = "app"))]
 mod policy;
+#[cfg(host)]
+pub(crate) mod route;
 #[cfg(all(host, feature = "app"))]
 pub use host::AgentPlugin;

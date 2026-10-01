@@ -6,6 +6,7 @@ use vmux_command::snapshot::{
 use vmux_ecs::{ArchivedPage, LastActivatedAt};
 
 use crate::host::acp::registry::RegistryAgent;
+use crate::route::AcpRoute;
 
 pub(super) struct SnapshotPlugin;
 
@@ -49,24 +50,33 @@ fn sync_work_directories(
 
 #[allow(clippy::type_complexity)]
 fn update_agents(
-    catalog: Option<Single<Ref<crate::host::runtime::AcpCatalog>>>,
+    catalog: Query<Ref<RegistryAgent>>,
+    mut removed: RemovedComponents<RegistryAgent>,
     mut package_changes: MessageReader<crate::host::acp::AcpPackageChanged>,
     mut state: Single<&mut CommandBarProjection>,
 ) {
     let catalog_changed = catalog
-        .as_ref()
-        .map(|r| r.is_changed() || r.is_added())
-        .unwrap_or(false);
-    let installs_changed = package_changes.read().next().is_some();
+        .iter()
+        .any(|agent| agent.is_changed() || agent.is_added())
+        || removed.read().next().is_some();
+    let installs_changed = package_changes.read().count() > 0;
     if !catalog_changed && !installs_changed && !state.agents.acp.is_empty() {
         return;
     }
 
-    let catalog_agents = catalog
-        .as_ref()
-        .map(|c| c.agents.as_slice())
-        .unwrap_or_default();
-    let acp = acp_agent_summaries(catalog_agents, RegistryAgent::is_installed);
+    let mut acp = Vec::new();
+    for agent in &catalog {
+        if !agent.is_installed() {
+            continue;
+        }
+        acp.push(AgentSummary {
+            id: agent.id.clone(),
+            name: agent.name.clone(),
+            url: format!("{}{}", vmux_chat::ChatPlugin::URL, agent.id),
+            icon: agent.icon.clone().unwrap_or_default(),
+        });
+    }
+    acp.sort_by_key(|agent| agent.name.to_lowercase());
 
     let next = vmux_command::snapshot::CommandBarAgentsSnapshot {
         acp,
@@ -75,24 +85,6 @@ fn update_agents(
     if state.agents != next {
         state.agents = next;
     }
-}
-
-fn acp_agent_summaries(
-    catalog: &[RegistryAgent],
-    is_installed: impl Fn(&RegistryAgent) -> bool,
-) -> Vec<AgentSummary> {
-    let mut agents: Vec<AgentSummary> = catalog
-        .iter()
-        .filter(|agent| is_installed(agent))
-        .map(|agent| AgentSummary {
-            id: agent.id.clone(),
-            name: agent.name.clone(),
-            url: format!("{}{}", vmux_chat::ChatPlugin::URL, agent.id),
-            icon: agent.icon.clone().unwrap_or_default(),
-        })
-        .collect();
-    agents.sort_by_key(|agent| agent.name.to_lowercase());
-    agents
 }
 
 fn update_recent_agents(
@@ -117,8 +109,8 @@ fn update_recent_agents(
         );
     }
     for page in &archived_pages {
-        let target = match crate::acp::route::AcpRoute::parse(&page.url) {
-            Some(crate::acp::route::AcpRoute::Acp { id, .. }) => {
+        let target = match AcpRoute::parse(&page.url) {
+            Some(AcpRoute::Acp { id, .. }) => {
                 AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, id)
             }
             _ => continue,
@@ -164,48 +156,12 @@ mod tests {
         app
     }
 
-    fn registry_agent(id: &str, name: &str) -> RegistryAgent {
-        RegistryAgent {
-            id: id.to_string(),
-            name: name.to_string(),
-            version: None,
-            description: None,
-            icon: None,
-            repository: None,
-            distribution: crate::host::acp::registry::Distribution::default(),
-        }
-    }
-
     #[test]
     fn writes_empty_snapshot_when_no_resources() {
         let mut app = app();
         app.update();
         let snap = &projection(&app).agents;
         assert!(snap.acp.is_empty());
-    }
-
-    #[test]
-    fn installed_unconfigured_acp_is_in_snapshot() {
-        let catalog = vec![registry_agent("new-agent-acp", "New Agent")];
-
-        let agents = acp_agent_summaries(&catalog, |_| true);
-
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].id, "new-agent-acp");
-        assert_eq!(agents[0].url, "vmux://sessions/new-agent-acp");
-    }
-
-    #[test]
-    fn uninstalled_acp_is_not_in_snapshot() {
-        let catalog = vec![
-            registry_agent("installed", "Installed"),
-            registry_agent("available", "Available"),
-        ];
-
-        let agents = acp_agent_summaries(&catalog, |agent| agent.id == "installed");
-
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].id, "installed");
     }
 
     #[test]

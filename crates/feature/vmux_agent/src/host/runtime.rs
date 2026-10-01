@@ -46,7 +46,7 @@ impl Plugin for AgentRuntimePlugin {
         .add_message::<UiAgentSessionConfigSelectionResult>()
         .add_message::<UiAgentSessionCreated>()
         .add_message::<UiAgentAcpTerminalCreated>()
-        .add_systems(Startup, (spawn_catalog, fetch_catalog))
+        .add_systems(Startup, fetch_catalog)
         .add_systems(
             Update,
             (
@@ -180,18 +180,9 @@ impl AcpSessionConfigState {
     }
 }
 
-#[derive(Component, Default)]
-pub struct AcpCatalog {
-    pub agents: Vec<RegistryAgent>,
-}
-
 #[derive(Component)]
 struct AcpCatalogFetch {
     rx: Receiver<Vec<RegistryAgent>>,
-}
-
-fn spawn_catalog(mut commands: Commands) {
-    commands.spawn((Name::new("ACP catalog"), AcpCatalog::default()));
 }
 
 fn fetch_catalog(mut commands: Commands) {
@@ -209,15 +200,26 @@ fn fetch_catalog(mut commands: Commands) {
 
 fn receive_catalog(
     fetches: Query<(Entity, &AcpCatalogFetch)>,
-    mut catalog: Single<&mut AcpCatalog>,
+    current: Query<Entity, With<RegistryAgent>>,
     mut commands: Commands,
 ) {
+    let mut received = None;
     for (entity, fetch) in &fetches {
         let Ok(agents) = fetch.rx.try_recv() else {
             continue;
         };
-        catalog.agents = agents;
+        received = Some(agents);
         commands.entity(entity).despawn();
+    }
+    let Some(agents) = received else {
+        return;
+    };
+    for entity in &current {
+        commands.entity(entity).despawn();
+    }
+    for agent in agents {
+        let name = Name::new(format!("ACP agent {}", agent.id));
+        commands.spawn((name, agent));
     }
 }
 
@@ -601,6 +603,10 @@ fn close_on_remove(
 
 #[cfg(test)]
 mod tests {
+    use bevy::ecs::system::RunSystemOnce;
+    use vmux_api::protocol::AcpSessionConfigValue;
+    use vmux_layout::pane::Pane;
+
     use super::*;
 
     #[test]
@@ -662,7 +668,6 @@ mod tests {
     #[test]
     fn catalog_fetch_entity_is_consumed_after_delivery() {
         let mut app = App::new();
-        let catalog = app.world_mut().spawn(AcpCatalog::default()).id();
         app.add_systems(Update, receive_catalog);
         let (tx, rx) = crossbeam_channel::unbounded();
         let fetch = app.world_mut().spawn(AcpCatalogFetch { rx }).id();
@@ -680,10 +685,8 @@ mod tests {
         app.update();
 
         assert!(app.world().get_entity(fetch).is_err());
-        assert_eq!(
-            app.world().get::<AcpCatalog>(catalog).unwrap().agents[0].id,
-            "agent"
-        );
+        let mut agents = app.world_mut().query::<&RegistryAgent>();
+        assert_eq!(agents.single(app.world()).unwrap().id, "agent");
     }
 
     #[test]
@@ -753,8 +756,6 @@ mod tests {
 
     #[test]
     fn ancestor_workspace_state_tracks_pending_and_bound_tab() {
-        use bevy::ecs::system::RunSystemOnce;
-
         let mut app = App::new();
         let tab = app
             .world_mut()
@@ -911,8 +912,6 @@ mod tests {
 
     #[test]
     fn live_acp_identity_updates_only_matching_profile() {
-        use crate::host::event::UiAgentInfo;
-
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
             .add_plugins(AgentRuntimePlugin);
@@ -972,9 +971,6 @@ mod tests {
 
     #[test]
     fn live_acp_config_state_updates_only_matching_session() {
-        use crate::host::event::UiAgentSessionConfigState;
-        use vmux_api::protocol::{AcpSessionConfig, AcpSessionConfigValue};
-
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
             .add_plugins(AgentRuntimePlugin);
@@ -1030,9 +1026,6 @@ mod tests {
 
     #[test]
     fn config_results_preserve_latest_pending_selection() {
-        use crate::host::event::{UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState};
-        use vmux_api::protocol::{AcpSessionConfig, AcpSessionConfigValue};
-
         let values = ["default", "opus", "fable"]
             .into_iter()
             .map(|value| AcpSessionConfigValue {
@@ -1157,11 +1150,6 @@ mod tests {
 
     #[test]
     fn acp_terminal_stack_does_not_take_focus_from_agent() {
-        use crate::host::event::UiAgentAcpTerminalCreated;
-        use vmux_layout::pane::Pane;
-        use vmux_layout::stack::Stack;
-        use vmux_layout::tab::Tab;
-
         let mut app = App::new();
         app.add_message::<UiAgentAcpTerminalCreated>()
             .add_systems(Update, apply_terminal);

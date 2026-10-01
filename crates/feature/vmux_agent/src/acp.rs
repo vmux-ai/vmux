@@ -1,6 +1,5 @@
 mod driver;
 mod projector;
-pub(crate) mod route;
 
 pub use driver::AcpInput;
 use driver::AcpShared;
