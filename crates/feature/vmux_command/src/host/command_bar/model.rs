@@ -11,11 +11,7 @@ use vmux_ui::i18n::translate;
 #[cfg(test)]
 use vmux_ui::list_nav::MenuDirection;
 
-use self::results::{
-    CommandBarResultItem, PickerRows, SlashRows, filter_results, open_session_results,
-    prepend_prompt_targets, prompt_target_matches_query, prompt_target_results, prompt_target_url,
-    space_switch_results, start_page_results, terminal_matches_query,
-};
+use self::results::{CommandBarResultItem, PickerRows, SlashRows};
 
 mod query;
 mod results;
@@ -125,13 +121,13 @@ impl PaletteRows {
         let slash_commands = state.prompt_context.slash_commands.as_slice();
         let mode = Self::mode(query, state.picker, slash_commands);
         let prompt_targets = if is_start {
-            prompt_target_results(&state.pages, "")
+            PaletteRows::prompt_targets(&state.pages, "")
         } else {
             Vec::new()
         };
         let default_target = prompt_targets
             .iter()
-            .find(|item| prompt_target_url(item) == Some(draft.target_url.as_str()))
+            .find(|item| PaletteRows::prompt_target_url(item) == Some(draft.target_url.as_str()))
             .cloned()
             .or_else(|| prompt_targets.first().cloned());
         let start_prompt_mode = is_start && PaletteQuery::new(query).is_start_prompt();
@@ -141,12 +137,17 @@ impl PaletteRows {
             &state.projects,
         );
         if start_prompt_mode {
-            prepend_prompt_targets(&mut items, default_target.as_ref(), &prompt_targets, query);
+            PaletteRows::prepend_targets(
+                &mut items,
+                default_target.as_ref(),
+                &prompt_targets,
+                query,
+            );
         }
         for item in &mut items {
             let show_hint = start_prompt_mode
-                && prompt_target_url(item).is_some()
-                && !prompt_target_matches_query(item, query);
+                && PaletteRows::prompt_target_url(item).is_some()
+                && !PaletteRows::prompt_target_matches(item, query);
             if let CommandBarResultItem::Page { prompt_hint, .. } = item {
                 *prompt_hint = show_hint;
             }
@@ -251,7 +252,7 @@ impl PaletteRows {
         let is_start = surface.is_start();
         if let Some(picker) = Self::picker(mode) {
             if Self::is_space(mode) {
-                return space_switch_results(&state.spaces, &state.pages, query);
+                return PaletteRows::space_switch(&state.spaces, &state.pages, query);
             }
             return PickerRows::filtered(picker, &state.picks, query);
         }
@@ -270,10 +271,10 @@ impl PaletteRows {
             );
         }
         if is_start && query.trim().is_empty() {
-            return open_session_results(&state.tabs, &state.pages);
+            return PaletteRows::open_sessions(&state.tabs, &state.pages);
         }
         if start_prompt_mode {
-            let matched = start_page_results(
+            let matched = PaletteRows::start(
                 &state.pages,
                 &state.work_dirs,
                 &state.recent_files,
@@ -283,7 +284,7 @@ impl PaletteRows {
             return Self::with_completions(query, draft, matched);
         }
         let is_new_tab = matches!(state.target, Some(OpenTarget::InNewStack));
-        let matched = filter_results(
+        let matched = PaletteRows::filter(
             query,
             &state.tabs,
             &state.commands,
@@ -481,7 +482,7 @@ impl Composer {
     ) -> CommandPaletteComposer {
         let context = &state.prompt_context;
         let agent_url = effective_target
-            .and_then(prompt_target_url)
+            .and_then(PaletteRows::prompt_target_url)
             .unwrap_or_default()
             .to_string();
         let agent_title = match effective_target {
@@ -708,7 +709,7 @@ impl PaletteState {
         let active = rows.items.get(selected);
         let navigating = if draft.nav_mode { active } else { None };
         let effective_target = active
-            .filter(|item| prompt_target_url(item).is_some())
+            .filter(|item| PaletteRows::prompt_target_url(item).is_some())
             .or(rows.default_target.as_ref())
             .cloned();
         let accent_agent = AgentSegment::from_item(if draft.nav_mode {
@@ -790,9 +791,9 @@ impl PaletteState {
 
     pub fn accepts_typed(&self, item: &CommandBarResultItem) -> bool {
         self.nav_mode
-            || prompt_target_matches_query(item, &self.query)
+            || PaletteRows::prompt_target_matches(item, &self.query)
             || (matches!(item, CommandBarResultItem::Terminal { .. })
-                && terminal_matches_query(&self.query))
+                && PaletteRows::terminal_matches(&self.query))
     }
 
     pub fn activate(
@@ -802,9 +803,11 @@ impl PaletteState {
     ) -> PaletteDecision {
         if self.surface.is_start()
             && (PaletteQuery::new(&self.query).is_start_prompt() || !attachments.is_empty())
-            && let Some(target_url) = prompt_target_url(item)
+            && let Some(target_url) = PaletteRows::prompt_target_url(item)
         {
-            return if prompt_target_matches_query(item, &self.query) && attachments.is_empty() {
+            return if PaletteRows::prompt_target_matches(item, &self.query)
+                && attachments.is_empty()
+            {
                 PaletteDecision::open(true, target_url, self.open_target)
             } else {
                 PaletteDecision::prompt(true, self.query.trim(), target_url, attachments)
@@ -1081,7 +1084,7 @@ pub struct AgentSegment;
 
 impl AgentSegment {
     fn from_item(item: Option<&CommandBarResultItem>) -> Option<String> {
-        Self::in_url(prompt_target_url(item?)?)
+        Self::in_url(PaletteRows::prompt_target_url(item?)?)
     }
 
     pub fn in_url(url: &str) -> Option<String> {
@@ -1723,7 +1726,7 @@ mod tests {
 
         let defaulted = PaletteState::start(&state, PaletteDraft::typed("fix the failing test"));
         assert_eq!(
-            prompt_target_url(&defaulted.rows[0]),
+            PaletteRows::prompt_target_url(&defaulted.rows[0]),
             Some("vmux://sessions/vibe/")
         );
 
@@ -1732,7 +1735,7 @@ mod tests {
             PaletteDraft::typed("fix the failing test").targeting("vmux://sessions/codex/cli"),
         );
         assert_eq!(
-            prompt_target_url(&chosen.rows[0]),
+            PaletteRows::prompt_target_url(&chosen.rows[0]),
             Some("vmux://sessions/codex/cli")
         );
         assert_eq!(chosen.composer.agent_title, "Codex");

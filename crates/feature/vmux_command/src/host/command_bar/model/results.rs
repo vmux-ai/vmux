@@ -10,7 +10,7 @@ use vmux_ui::i18n::translate;
 
 pub use vmux_api::command_bar::CommandBarResultItem;
 
-use super::query::PaletteQuery;
+use super::{PaletteRows, query::PaletteQuery};
 
 pub struct SlashRows;
 
@@ -139,229 +139,53 @@ impl PickerRows {
     }
 }
 
-fn space_result(space: &CommandBarSpace) -> CommandBarResultItem {
-    CommandBarResultItem::Space {
-        id: space.id.clone(),
-        name: space.name.clone(),
-        profile: space.profile.clone(),
-        is_active: space.is_active,
-        tab_count: space.tab_count as usize,
+impl PaletteRows {
+    fn space_result(space: &CommandBarSpace) -> CommandBarResultItem {
+        CommandBarResultItem::Space {
+            id: space.id.clone(),
+            name: space.name.clone(),
+            profile: space.profile.clone(),
+            is_active: space.is_active,
+            tab_count: space.tab_count as usize,
+        }
     }
-}
 
-fn space_matches(space: &CommandBarSpace, search_lower: &str) -> bool {
-    search_lower.is_empty()
-        || space.name.to_lowercase().contains(search_lower)
-        || space.id.to_lowercase().contains(search_lower)
-        || space.profile.to_lowercase().contains(search_lower)
-}
+    fn space_matches(space: &CommandBarSpace, search_lower: &str) -> bool {
+        search_lower.is_empty()
+            || space.name.to_lowercase().contains(search_lower)
+            || space.id.to_lowercase().contains(search_lower)
+            || space.profile.to_lowercase().contains(search_lower)
+    }
 
-fn urls_match(a: &str, b: &str) -> bool {
-    a == b || a.trim_end_matches('/') == b.trim_end_matches('/')
-}
+    fn urls_match(a: &str, b: &str) -> bool {
+        a == b || a.trim_end_matches('/') == b.trim_end_matches('/')
+    }
 
-fn stack_icon_for(pages: &[CommandBarPage], url: &str) -> PageIcon {
-    pages
-        .iter()
-        .find(|p| urls_match(&p.url, url))
-        .map(|p| p.icon.clone())
-        .unwrap_or_default()
-}
-
-fn page_matches(page: &CommandBarPage, search_lower: &str) -> bool {
-    search_lower.is_empty()
-        || page.title.to_lowercase().contains(search_lower)
-        || page.url.to_lowercase().contains(search_lower)
-        || page
-            .keywords
+    fn stack_icon_for(pages: &[CommandBarPage], url: &str) -> PageIcon {
+        pages
             .iter()
-            .any(|k| k.to_lowercase().contains(search_lower))
-}
-
-fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarResultItem> {
-    let mut matched: Vec<&CommandBarPage> = pages
-        .iter()
-        .filter(|page| page_matches(page, search_lower))
-        .collect();
-    matched.sort_by_key(|page| page.url.to_lowercase());
-    matched
-        .into_iter()
-        .map(|page| CommandBarResultItem::Page {
-            url: page.url.clone(),
-            title: page.title.clone(),
-            icon: page.icon.clone(),
-            shortcut: page.shortcut.clone(),
-            prompt_target: false,
-            prompt_hint: false,
-        })
-        .collect()
-}
-
-pub fn prompt_target_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandBarResultItem> {
-    let search_lower = query.trim().to_lowercase();
-    let targets: Vec<_> = pages.iter().filter(|page| page.prompt_target).collect();
-    let matches: Vec<_> = targets
-        .iter()
-        .copied()
-        .filter(|page| page_matches(page, &search_lower))
-        .collect();
-    let visible = if matches.is_empty() { targets } else { matches };
-    visible
-        .into_iter()
-        .map(|page| CommandBarResultItem::Page {
-            url: page.url.clone(),
-            title: page.title.clone(),
-            icon: page.icon.clone(),
-            shortcut: page.shortcut.clone(),
-            prompt_target: true,
-            prompt_hint: false,
-        })
-        .collect()
-}
-
-pub fn prompt_target_url(item: &CommandBarResultItem) -> Option<&str> {
-    match item {
-        CommandBarResultItem::Page {
-            url,
-            prompt_target: true,
-            ..
-        } => Some(url),
-        _ => None,
+            .find(|p| Self::urls_match(&p.url, url))
+            .map(|p| p.icon.clone())
+            .unwrap_or_default()
     }
-}
 
-pub fn prompt_target_matches_query(item: &CommandBarResultItem, query: &str) -> bool {
-    let CommandBarResultItem::Page {
-        url,
-        title,
-        prompt_target: true,
-        ..
-    } = item
-    else {
-        return false;
-    };
-    let search_lower = query.trim().to_lowercase();
-    !search_lower.is_empty()
-        && (title.to_lowercase().contains(&search_lower)
-            || url.to_lowercase().contains(&search_lower))
-}
-
-pub fn terminal_matches_query(query: &str) -> bool {
-    let query = query.trim().to_lowercase();
-    !query.is_empty() && "terminal".starts_with(&query)
-}
-
-pub fn prepend_prompt_targets(
-    results: &mut Vec<CommandBarResultItem>,
-    selected_target: Option<&CommandBarResultItem>,
-    recent_targets: &[CommandBarResultItem],
-    query: &str,
-) {
-    if !PaletteQuery::new(query).is_start_prompt()
-        || results.iter().any(|item| prompt_target_url(item).is_some())
-    {
-        return;
+    fn page_matches(page: &CommandBarPage, search_lower: &str) -> bool {
+        search_lower.is_empty()
+            || page.title.to_lowercase().contains(search_lower)
+            || page.url.to_lowercase().contains(search_lower)
+            || page
+                .keywords
+                .iter()
+                .any(|k| k.to_lowercase().contains(search_lower))
     }
-    let mut suggestions = Vec::new();
-    for target in selected_target.into_iter().chain(recent_targets) {
-        let Some(url) = prompt_target_url(target) else {
-            continue;
-        };
-        if suggestions
+
+    fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarResultItem> {
+        let mut matched: Vec<&CommandBarPage> = pages
             .iter()
-            .any(|existing| prompt_target_url(existing) == Some(url))
-        {
-            continue;
-        }
-        suggestions.push(target.clone());
-        if suggestions.len() == 3 {
-            break;
-        }
-    }
-    let at = results
-        .iter()
-        .take_while(|item| matches!(item, CommandBarResultItem::Terminal { .. }))
-        .count();
-    let mut leading = Vec::new();
-    let mut rest = Vec::new();
-    for target in suggestions {
-        match leading.is_empty() {
-            true => leading.push(target),
-            false => rest.push(target),
-        }
-    }
-    let mut after = at + leading.len();
-    results.splice(at..at, leading);
-    for (index, item) in results.iter().enumerate() {
-        if matches!(item, CommandBarResultItem::File { .. }) {
-            after = index + 1;
-        }
-    }
-    let tail = results.split_off(after);
-    results.extend(rest);
-    results.extend(tail);
-}
-
-pub fn open_session_results(
-    tabs: &[CommandBarTab],
-    pages: &[CommandBarPage],
-) -> Vec<CommandBarResultItem> {
-    tabs.iter()
-        .filter(|tab| !tab.is_active)
-        .map(|tab| CommandBarResultItem::Stack {
-            title: tab.title.clone(),
-            url: tab.url.clone(),
-            icon: stack_icon_for(pages, &tab.url),
-            pane_id: tab.pane_id,
-            tab_index: tab.tab_index as usize,
-            location: tab.location.clone(),
-        })
-        .collect()
-}
-
-pub fn start_page_results(
-    pages: &[CommandBarPage],
-    work_dirs: &[CommandBarWorkDir],
-    recent_files: &[CommandBarRecentFile],
-    search_engines: &[SearchEngine],
-    query: &str,
-) -> Vec<CommandBarResultItem> {
-    let search_lower = query.trim().to_lowercase();
-    let mut results = Vec::new();
-    if terminal_matches_query(query) {
-        results.push(CommandBarResultItem::Terminal {
-            path: String::new(),
-        });
-    }
-    results.extend(
-        prompt_target_results(pages, query)
-            .into_iter()
-            .filter(|item| prompt_target_matches_query(item, query)),
-    );
-    let trimmed = query.trim();
-    if PaletteQuery::new(trimmed).is_start_prompt() {
-        let engines = if search_engines.is_empty() {
-            SearchEngine::ALL.as_slice()
-        } else {
-            search_engines
-        };
-        results.extend(engines.iter().take(3).copied().map(|engine| {
-            CommandBarResultItem::Search {
-                engine,
-                query: trimmed.to_string(),
-            }
-        }));
-    }
-    let mut app_pages: Vec<_> = pages
-        .iter()
-        .filter(|page| {
-            !page.prompt_target && page.url != "vmux://start/" && page.url != "vmux://terminal/"
-        })
-        .filter(|page| page_matches(page, &search_lower))
-        .collect();
-    app_pages.sort_by_cached_key(|page| page.url.to_lowercase());
-    results.extend(
-        app_pages
+            .filter(|page| Self::page_matches(page, search_lower))
+            .collect();
+        matched.sort_by_key(|page| page.url.to_lowercase());
+        matched
             .into_iter()
             .map(|page| CommandBarResultItem::Page {
                 url: page.url.clone(),
@@ -370,255 +194,442 @@ pub fn start_page_results(
                 shortcut: page.shortcut.clone(),
                 prompt_target: false,
                 prompt_hint: false,
-            }),
-    );
-    results.extend(work_dir_results(work_dirs, &search_lower));
-    results.extend(recent_file_results(recent_files, &search_lower));
-    if !PaletteQuery::new(trimmed).is_start_prompt() && !trimmed.is_empty() {
-        results.push(CommandBarResultItem::Navigate {
-            url: trimmed.to_string(),
-            is_url: PaletteQuery::new(trimmed).looks_like_url(),
-        });
-    }
-    results
-}
-
-fn work_dir_results(dirs: &[CommandBarWorkDir], search_lower: &str) -> Vec<CommandBarResultItem> {
-    dirs.iter()
-        .filter(|d| search_lower.is_empty() || d.path.to_lowercase().contains(search_lower))
-        .map(|d| CommandBarResultItem::WorkDir {
-            path: d.path.clone(),
-            is_dir: d.is_dir,
-        })
-        .collect()
-}
-
-fn recent_file_results(
-    files: &[CommandBarRecentFile],
-    search_lower: &str,
-) -> Vec<CommandBarResultItem> {
-    files
-        .iter()
-        .filter(|f| {
-            search_lower.is_empty()
-                || f.title.to_lowercase().contains(search_lower)
-                || f.url.to_lowercase().contains(search_lower)
-        })
-        .map(|f| CommandBarResultItem::RecentFile {
-            url: f.url.clone(),
-            title: f.title.clone(),
-        })
-        .collect()
-}
-
-fn space_list_items(spaces: &[CommandBarSpace], search_lower: &str) -> Vec<CommandBarResultItem> {
-    spaces
-        .iter()
-        .filter(|space| space_matches(space, search_lower))
-        .map(space_result)
-        .collect()
-}
-
-pub fn space_switch_results(
-    spaces: &[CommandBarSpace],
-    pages: &[CommandBarPage],
-    query: &str,
-) -> Vec<CommandBarResultItem> {
-    let search_lower = query.trim().to_lowercase();
-    let mut items = space_list_items(spaces, &search_lower);
-    if let Some(page) = pages.iter().find(|page| page.url == "vmux://spaces/") {
-        items.push(CommandBarResultItem::Page {
-            url: page.url.clone(),
-            title: translate("command-manage-spaces"),
-            icon: page.icon.clone(),
-            shortcut: String::new(),
-            prompt_target: false,
-            prompt_hint: false,
-        });
-    }
-    items
-}
-
-fn query_targets_spaces_page(q: &str, pages: &[CommandBarPage]) -> bool {
-    let Some(url) = pages
-        .iter()
-        .find(|page| page.url == "vmux://spaces/")
-        .map(|p| p.url.as_str())
-    else {
-        return false;
-    };
-    q == url || q == url.trim_end_matches('/') || q.starts_with(url)
-}
-
-fn command_results(
-    commands: &[CommandBarCommandEntry],
-) -> impl Iterator<Item = CommandBarResultItem> + '_ {
-    commands.iter().map(|c| CommandBarResultItem::Command {
-        id: c.id.clone(),
-        name: c.name.clone(),
-        shortcut: c.shortcut.clone(),
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn filter_results(
-    query: &str,
-    tabs: &[CommandBarTab],
-    commands: &[CommandBarCommandEntry],
-    spaces: &[CommandBarSpace],
-    pages: &[CommandBarPage],
-    new_tab: bool,
-    history: &[HistoryEntry],
-    work_dirs: &[CommandBarWorkDir],
-    recent_files: &[CommandBarRecentFile],
-) -> Vec<CommandBarResultItem> {
-    let q = query.trim();
-
-    if query_targets_spaces_page(q, pages) {
-        let mut items = page_results(pages, &q.to_lowercase());
-        items.extend(space_list_items(spaces, ""));
-        items.extend(command_results(commands));
-        return items;
+            })
+            .collect()
     }
 
-    if q.is_empty() {
-        let mut items: Vec<CommandBarResultItem> = Vec::new();
-        items.push(CommandBarResultItem::Navigate {
-            url: String::new(),
-            is_url: false,
-        });
-        if new_tab {
+    pub(super) fn prompt_targets(
+        pages: &[CommandBarPage],
+        query: &str,
+    ) -> Vec<CommandBarResultItem> {
+        let search_lower = query.trim().to_lowercase();
+        let targets: Vec<_> = pages.iter().filter(|page| page.prompt_target).collect();
+        let matches: Vec<_> = targets
+            .iter()
+            .copied()
+            .filter(|page| Self::page_matches(page, &search_lower))
+            .collect();
+        let visible = if matches.is_empty() { targets } else { matches };
+        visible
+            .into_iter()
+            .map(|page| CommandBarResultItem::Page {
+                url: page.url.clone(),
+                title: page.title.clone(),
+                icon: page.icon.clone(),
+                shortcut: page.shortcut.clone(),
+                prompt_target: true,
+                prompt_hint: false,
+            })
+            .collect()
+    }
+
+    pub(super) fn prompt_target_url(item: &CommandBarResultItem) -> Option<&str> {
+        match item {
+            CommandBarResultItem::Page {
+                url,
+                prompt_target: true,
+                ..
+            } => Some(url),
+            _ => None,
+        }
+    }
+
+    pub(super) fn prompt_target_matches(item: &CommandBarResultItem, query: &str) -> bool {
+        let CommandBarResultItem::Page {
+            url,
+            title,
+            prompt_target: true,
+            ..
+        } = item
+        else {
+            return false;
+        };
+        let search_lower = query.trim().to_lowercase();
+        !search_lower.is_empty()
+            && (title.to_lowercase().contains(&search_lower)
+                || url.to_lowercase().contains(&search_lower))
+    }
+
+    pub(super) fn terminal_matches(query: &str) -> bool {
+        let query = query.trim().to_lowercase();
+        !query.is_empty() && "terminal".starts_with(&query)
+    }
+
+    pub(super) fn prepend_targets(
+        results: &mut Vec<CommandBarResultItem>,
+        selected_target: Option<&CommandBarResultItem>,
+        recent_targets: &[CommandBarResultItem],
+        query: &str,
+    ) {
+        if !PaletteQuery::new(query).is_start_prompt()
+            || results
+                .iter()
+                .any(|item| PaletteRows::prompt_target_url(item).is_some())
+        {
+            return;
+        }
+        let mut suggestions = Vec::new();
+        for target in selected_target.into_iter().chain(recent_targets) {
+            let Some(url) = PaletteRows::prompt_target_url(target) else {
+                continue;
+            };
+            if suggestions
+                .iter()
+                .any(|existing| PaletteRows::prompt_target_url(existing) == Some(url))
+            {
+                continue;
+            }
+            suggestions.push(target.clone());
+            if suggestions.len() == 3 {
+                break;
+            }
+        }
+        let at = results
+            .iter()
+            .take_while(|item| matches!(item, CommandBarResultItem::Terminal { .. }))
+            .count();
+        let mut leading = Vec::new();
+        let mut rest = Vec::new();
+        for target in suggestions {
+            match leading.is_empty() {
+                true => leading.push(target),
+                false => rest.push(target),
+            }
+        }
+        let mut after = at + leading.len();
+        results.splice(at..at, leading);
+        for (index, item) in results.iter().enumerate() {
+            if matches!(item, CommandBarResultItem::File { .. }) {
+                after = index + 1;
+            }
+        }
+        let tail = results.split_off(after);
+        results.extend(rest);
+        results.extend(tail);
+    }
+
+    pub(super) fn open_sessions(
+        tabs: &[CommandBarTab],
+        pages: &[CommandBarPage],
+    ) -> Vec<CommandBarResultItem> {
+        tabs.iter()
+            .filter(|tab| !tab.is_active)
+            .map(|tab| CommandBarResultItem::Stack {
+                title: tab.title.clone(),
+                url: tab.url.clone(),
+                icon: Self::stack_icon_for(pages, &tab.url),
+                pane_id: tab.pane_id,
+                tab_index: tab.tab_index as usize,
+                location: tab.location.clone(),
+            })
+            .collect()
+    }
+
+    pub(super) fn start(
+        pages: &[CommandBarPage],
+        work_dirs: &[CommandBarWorkDir],
+        recent_files: &[CommandBarRecentFile],
+        search_engines: &[SearchEngine],
+        query: &str,
+    ) -> Vec<CommandBarResultItem> {
+        let search_lower = query.trim().to_lowercase();
+        let mut results = Vec::new();
+        if PaletteRows::terminal_matches(query) {
+            results.push(CommandBarResultItem::Terminal {
+                path: String::new(),
+            });
+        }
+        results.extend(
+            PaletteRows::prompt_targets(pages, query)
+                .into_iter()
+                .filter(|item| PaletteRows::prompt_target_matches(item, query)),
+        );
+        let trimmed = query.trim();
+        if PaletteQuery::new(trimmed).is_start_prompt() {
+            let engines = if search_engines.is_empty() {
+                SearchEngine::ALL.as_slice()
+            } else {
+                search_engines
+            };
+            results.extend(engines.iter().take(3).copied().map(|engine| {
+                CommandBarResultItem::Search {
+                    engine,
+                    query: trimmed.to_string(),
+                }
+            }));
+        }
+        let mut app_pages: Vec<_> = pages
+            .iter()
+            .filter(|page| {
+                !page.prompt_target && page.url != "vmux://start/" && page.url != "vmux://terminal/"
+            })
+            .filter(|page| Self::page_matches(page, &search_lower))
+            .collect();
+        app_pages.sort_by_cached_key(|page| page.url.to_lowercase());
+        results.extend(
+            app_pages
+                .into_iter()
+                .map(|page| CommandBarResultItem::Page {
+                    url: page.url.clone(),
+                    title: page.title.clone(),
+                    icon: page.icon.clone(),
+                    shortcut: page.shortcut.clone(),
+                    prompt_target: false,
+                    prompt_hint: false,
+                }),
+        );
+        results.extend(Self::work_dir_results(work_dirs, &search_lower));
+        results.extend(Self::recent_file_results(recent_files, &search_lower));
+        if !PaletteQuery::new(trimmed).is_start_prompt() && !trimmed.is_empty() {
+            results.push(CommandBarResultItem::Navigate {
+                url: trimmed.to_string(),
+                is_url: PaletteQuery::new(trimmed).looks_like_url(),
+            });
+        }
+        results
+    }
+
+    fn work_dir_results(
+        dirs: &[CommandBarWorkDir],
+        search_lower: &str,
+    ) -> Vec<CommandBarResultItem> {
+        dirs.iter()
+            .filter(|d| search_lower.is_empty() || d.path.to_lowercase().contains(search_lower))
+            .map(|d| CommandBarResultItem::WorkDir {
+                path: d.path.clone(),
+                is_dir: d.is_dir,
+            })
+            .collect()
+    }
+
+    fn recent_file_results(
+        files: &[CommandBarRecentFile],
+        search_lower: &str,
+    ) -> Vec<CommandBarResultItem> {
+        files
+            .iter()
+            .filter(|f| {
+                search_lower.is_empty()
+                    || f.title.to_lowercase().contains(search_lower)
+                    || f.url.to_lowercase().contains(search_lower)
+            })
+            .map(|f| CommandBarResultItem::RecentFile {
+                url: f.url.clone(),
+                title: f.title.clone(),
+            })
+            .collect()
+    }
+
+    fn space_list_items(
+        spaces: &[CommandBarSpace],
+        search_lower: &str,
+    ) -> Vec<CommandBarResultItem> {
+        spaces
+            .iter()
+            .filter(|space| Self::space_matches(space, search_lower))
+            .map(Self::space_result)
+            .collect()
+    }
+
+    pub(super) fn space_switch(
+        spaces: &[CommandBarSpace],
+        pages: &[CommandBarPage],
+        query: &str,
+    ) -> Vec<CommandBarResultItem> {
+        let search_lower = query.trim().to_lowercase();
+        let mut items = Self::space_list_items(spaces, &search_lower);
+        if let Some(page) = pages.iter().find(|page| page.url == "vmux://spaces/") {
+            items.push(CommandBarResultItem::Page {
+                url: page.url.clone(),
+                title: translate("command-manage-spaces"),
+                icon: page.icon.clone(),
+                shortcut: String::new(),
+                prompt_target: false,
+                prompt_hint: false,
+            });
+        }
+        items
+    }
+
+    fn query_targets_spaces_page(q: &str, pages: &[CommandBarPage]) -> bool {
+        let Some(url) = pages
+            .iter()
+            .find(|page| page.url == "vmux://spaces/")
+            .map(|p| p.url.as_str())
+        else {
+            return false;
+        };
+        q == url || q == url.trim_end_matches('/') || q.starts_with(url)
+    }
+
+    fn command_results(
+        commands: &[CommandBarCommandEntry],
+    ) -> impl Iterator<Item = CommandBarResultItem> + '_ {
+        commands.iter().map(|c| CommandBarResultItem::Command {
+            id: c.id.clone(),
+            name: c.name.clone(),
+            shortcut: c.shortcut.clone(),
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn filter(
+        query: &str,
+        tabs: &[CommandBarTab],
+        commands: &[CommandBarCommandEntry],
+        spaces: &[CommandBarSpace],
+        pages: &[CommandBarPage],
+        new_tab: bool,
+        history: &[HistoryEntry],
+        work_dirs: &[CommandBarWorkDir],
+        recent_files: &[CommandBarRecentFile],
+    ) -> Vec<CommandBarResultItem> {
+        let q = query.trim();
+
+        if Self::query_targets_spaces_page(q, pages) {
+            let mut items = Self::page_results(pages, &q.to_lowercase());
+            items.extend(Self::space_list_items(spaces, ""));
+            items.extend(Self::command_results(commands));
+            return items;
+        }
+
+        if q.is_empty() {
+            let mut items: Vec<CommandBarResultItem> = Vec::new();
+            items.push(CommandBarResultItem::Navigate {
+                url: String::new(),
+                is_url: false,
+            });
+            if new_tab {
+                items.push(CommandBarResultItem::Terminal {
+                    path: String::new(),
+                });
+            }
+            items.extend(tabs.iter().filter(|t| !t.is_active).map(|t| {
+                CommandBarResultItem::Stack {
+                    title: t.title.clone(),
+                    url: t.url.clone(),
+                    icon: Self::stack_icon_for(pages, &t.url),
+                    pane_id: t.pane_id,
+                    tab_index: t.tab_index as usize,
+                    location: t.location.clone(),
+                }
+            }));
+            items.extend(Self::page_results(pages, ""));
+            items.extend(Self::work_dir_results(work_dirs, ""));
+            items.extend(Self::recent_file_results(recent_files, ""));
+            items.extend(Self::command_results(commands));
+            return items;
+        }
+
+        let starts_with_cmd = q.starts_with('>');
+        let search = if starts_with_cmd { q[1..].trim() } else { q };
+        let search_lower = search.to_lowercase();
+
+        let mut items = Vec::new();
+
+        let is_path = PaletteQuery::new(search).looks_like_path();
+
+        if !starts_with_cmd && is_path {
+            let names_a_directory = search.ends_with('/');
+            let editor = CommandBarResultItem::Editor {
+                path: search.to_string(),
+            };
+            let terminal = CommandBarResultItem::Terminal {
+                path: search.to_string(),
+            };
+            match names_a_directory {
+                true => items.extend([terminal, editor]),
+                false => items.extend([editor, terminal]),
+            }
+        }
+
+        let terminal_label = translate("command-terminal").to_lowercase();
+        if !starts_with_cmd
+            && !is_path
+            && new_tab
+            && ("terminal".contains(&search_lower) || terminal_label.contains(&search_lower))
+        {
             items.push(CommandBarResultItem::Terminal {
                 path: String::new(),
             });
         }
-        items.extend(
-            tabs.iter()
-                .filter(|t| !t.is_active)
-                .map(|t| CommandBarResultItem::Stack {
-                    title: t.title.clone(),
-                    url: t.url.clone(),
-                    icon: stack_icon_for(pages, &t.url),
-                    pane_id: t.pane_id,
-                    tab_index: t.tab_index as usize,
-                    location: t.location.clone(),
-                }),
-        );
-        items.extend(page_results(pages, ""));
-        items.extend(work_dir_results(work_dirs, ""));
-        items.extend(recent_file_results(recent_files, ""));
-        items.extend(command_results(commands));
-        return items;
-    }
 
-    let starts_with_cmd = q.starts_with('>');
-    let search = if starts_with_cmd { q[1..].trim() } else { q };
-    let search_lower = search.to_lowercase();
-
-    let mut items = Vec::new();
-
-    let is_path = PaletteQuery::new(search).looks_like_path();
-
-    if !starts_with_cmd && is_path {
-        let names_a_directory = search.ends_with('/');
-        let editor = CommandBarResultItem::Editor {
-            path: search.to_string(),
-        };
-        let terminal = CommandBarResultItem::Terminal {
-            path: search.to_string(),
-        };
-        match names_a_directory {
-            true => items.extend([terminal, editor]),
-            false => items.extend([editor, terminal]),
+        if starts_with_cmd {
+            for c in commands {
+                if search.is_empty()
+                    || c.name.to_lowercase().contains(&search_lower)
+                    || c.id.contains(&search_lower)
+                {
+                    items.push(CommandBarResultItem::Command {
+                        id: c.id.clone(),
+                        name: c.name.clone(),
+                        shortcut: c.shortcut.clone(),
+                    });
+                }
+            }
         }
-    }
 
-    let terminal_label = translate("command-terminal").to_lowercase();
-    if !starts_with_cmd
-        && !is_path
-        && new_tab
-        && ("terminal".contains(&search_lower) || terminal_label.contains(&search_lower))
-    {
-        items.push(CommandBarResultItem::Terminal {
-            path: String::new(),
-        });
-    }
+        if !starts_with_cmd && !is_path {
+            items.extend(Self::page_results(pages, &search_lower));
+            items.extend(Self::space_list_items(spaces, &search_lower));
+            items.extend(Self::work_dir_results(work_dirs, &search_lower));
+            items.extend(Self::recent_file_results(recent_files, &search_lower));
+        }
 
-    if starts_with_cmd {
-        for c in commands {
-            if search.is_empty()
-                || c.name.to_lowercase().contains(&search_lower)
-                || c.id.contains(&search_lower)
-            {
-                items.push(CommandBarResultItem::Command {
-                    id: c.id.clone(),
-                    name: c.name.clone(),
-                    shortcut: c.shortcut.clone(),
+        if !starts_with_cmd || !search.is_empty() {
+            for t in tabs {
+                if t.is_active {
+                    continue;
+                }
+                if search.is_empty()
+                    || t.title.to_lowercase().contains(&search_lower)
+                    || t.url.to_lowercase().contains(&search_lower)
+                {
+                    items.push(CommandBarResultItem::Stack {
+                        title: t.title.clone(),
+                        url: t.url.clone(),
+                        icon: Self::stack_icon_for(pages, &t.url),
+                        pane_id: t.pane_id,
+                        tab_index: t.tab_index as usize,
+                        location: t.location.clone(),
+                    });
+                }
+            }
+        }
+
+        if !starts_with_cmd {
+            for h in history.iter().take(5) {
+                items.push(CommandBarResultItem::History {
+                    url: h.url.clone(),
+                    title: h.title.clone(),
+                    favicon_url: h.favicon_url.clone(),
+                    visit_count: h.visit_count,
+                    last_visited_at: h.last_visited_at,
                 });
             }
         }
-    }
 
-    if !starts_with_cmd && !is_path {
-        items.extend(page_results(pages, &search_lower));
-        items.extend(space_list_items(spaces, &search_lower));
-        items.extend(work_dir_results(work_dirs, &search_lower));
-        items.extend(recent_file_results(recent_files, &search_lower));
-    }
-
-    if !starts_with_cmd || !search.is_empty() {
-        for t in tabs {
-            if t.is_active {
-                continue;
-            }
-            if search.is_empty()
-                || t.title.to_lowercase().contains(&search_lower)
-                || t.url.to_lowercase().contains(&search_lower)
-            {
-                items.push(CommandBarResultItem::Stack {
-                    title: t.title.clone(),
-                    url: t.url.clone(),
-                    icon: stack_icon_for(pages, &t.url),
-                    pane_id: t.pane_id,
-                    tab_index: t.tab_index as usize,
-                    location: t.location.clone(),
-                });
+        if !starts_with_cmd {
+            for c in commands {
+                if c.name.to_lowercase().contains(&search_lower) || c.id.contains(&search_lower) {
+                    items.push(CommandBarResultItem::Command {
+                        id: c.id.clone(),
+                        name: c.name.clone(),
+                        shortcut: c.shortcut.clone(),
+                    });
+                }
             }
         }
-    }
 
-    if !starts_with_cmd {
-        for h in history.iter().take(5) {
-            items.push(CommandBarResultItem::History {
-                url: h.url.clone(),
-                title: h.title.clone(),
-                favicon_url: h.favicon_url.clone(),
-                visit_count: h.visit_count,
-                last_visited_at: h.last_visited_at,
+        if !search.is_empty() {
+            items.push(CommandBarResultItem::Navigate {
+                url: search.to_string(),
+                is_url: PaletteQuery::new(search).looks_like_url(),
             });
         }
-    }
 
-    if !starts_with_cmd {
-        for c in commands {
-            if c.name.to_lowercase().contains(&search_lower) || c.id.contains(&search_lower) {
-                items.push(CommandBarResultItem::Command {
-                    id: c.id.clone(),
-                    name: c.name.clone(),
-                    shortcut: c.shortcut.clone(),
-                });
-            }
-        }
+        items
     }
-
-    if !search.is_empty() {
-        items.push(CommandBarResultItem::Navigate {
-            url: search.to_string(),
-            is_url: PaletteQuery::new(search).looks_like_url(),
-        });
-    }
-
-    items
 }
 
 #[cfg(test)]
@@ -744,7 +755,7 @@ mod tests {
             space("space-1", "Space 1", false),
             space("work", "Work", true),
         ];
-        let results = space_switch_results(&spaces, &sample_pages(), "");
+        let results = PaletteRows::space_switch(&spaces, &sample_pages(), "");
         assert!(matches!(&results[0], CommandBarResultItem::Space { id, .. } if id == "space-1"));
         assert!(matches!(&results[1], CommandBarResultItem::Space { id, .. } if id == "work"));
         assert!(matches!(
@@ -759,7 +770,7 @@ mod tests {
             space("space-1", "Space 1", false),
             space("work", "Work", true),
         ];
-        let results = space_switch_results(&spaces, &sample_pages(), "wor");
+        let results = PaletteRows::space_switch(&spaces, &sample_pages(), "wor");
         let ids: Vec<_> = results
             .iter()
             .filter_map(|r| match r {
@@ -781,7 +792,7 @@ mod tests {
             space("work", "Work", true),
         ];
 
-        let results = filter_results(
+        let results = PaletteRows::filter(
             "vmux://spaces/",
             &[],
             &[] as &[CommandBarCommandEntry],
@@ -817,7 +828,7 @@ mod tests {
             shortcut: "super+k".to_string(),
         }];
 
-        let results = filter_results(
+        let results = PaletteRows::filter(
             "vmux://spaces/",
             &[],
             &commands,
@@ -852,7 +863,7 @@ mod tests {
             shortcut: "<leader> s".to_string(),
         }];
 
-        let results = filter_results(
+        let results = PaletteRows::filter(
             "spaces",
             &[],
             &commands,
@@ -887,7 +898,7 @@ mod tests {
         ];
         let tabs: Vec<CommandBarTab> = Vec::new();
 
-        let results = filter_results(
+        let results = PaletteRows::filter(
             "client",
             &tabs,
             &[],
@@ -906,7 +917,7 @@ mod tests {
 
     #[test]
     fn page_matched_by_keyword() {
-        let results = filter_results(
+        let results = PaletteRows::filter(
             "preferences",
             &[],
             &[],
@@ -929,7 +940,7 @@ mod tests {
 
     #[test]
     fn agent_page_matched_by_vmux_prefix_carries_favicon() {
-        let results = filter_results(
+        let results = PaletteRows::filter(
             "vmux://",
             &[],
             &[],
@@ -949,7 +960,8 @@ mod tests {
 
     #[test]
     fn agent_page_matched_by_name() {
-        let results = filter_results("vibe", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
+        let results =
+            PaletteRows::filter("vibe", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
         assert!(results.iter().any(|r| matches!(
             r,
             CommandBarResultItem::Page { title, icon, .. }
@@ -969,7 +981,7 @@ mod tests {
             prompt_target: true,
         });
 
-        let results = prompt_target_results(&pages, "");
+        let results = PaletteRows::prompt_targets(&pages, "");
         let urls: Vec<_> = results
             .iter()
             .filter_map(|result| match result {
@@ -996,7 +1008,7 @@ mod tests {
             prompt_target: true,
         });
 
-        let results = prompt_target_results(&pages, "vibe");
+        let results = PaletteRows::prompt_targets(&pages, "vibe");
 
         assert_eq!(results.len(), 1);
         assert!(matches!(
@@ -1016,12 +1028,15 @@ mod tests {
             shortcut: String::new(),
             prompt_target: true,
         });
-        let codex = prompt_target_results(&pages, "cod").remove(0);
+        let codex = PaletteRows::prompt_targets(&pages, "cod").remove(0);
 
-        assert!(prompt_target_matches_query(&codex, "cod"));
-        assert!(prompt_target_matches_query(&codex, "codex"));
-        assert!(prompt_target_matches_query(&codex, "codex-acp"));
-        assert!(!prompt_target_matches_query(&codex, "fix the failing test"));
+        assert!(PaletteRows::prompt_target_matches(&codex, "cod"));
+        assert!(PaletteRows::prompt_target_matches(&codex, "codex"));
+        assert!(PaletteRows::prompt_target_matches(&codex, "codex-acp"));
+        assert!(!PaletteRows::prompt_target_matches(
+            &codex,
+            "fix the failing test"
+        ));
     }
 
     #[test]
@@ -1036,8 +1051,11 @@ mod tests {
             prompt_target: true,
         });
 
-        let results = prompt_target_results(&pages, "show me something fun in terminal");
-        let urls: Vec<_> = results.iter().filter_map(prompt_target_url).collect();
+        let results = PaletteRows::prompt_targets(&pages, "show me something fun in terminal");
+        let urls: Vec<_> = results
+            .iter()
+            .filter_map(PaletteRows::prompt_target_url)
+            .collect();
 
         assert_eq!(
             urls,
@@ -1047,7 +1065,7 @@ mod tests {
 
     #[test]
     fn start_page_does_not_show_unmatched_agents() {
-        let results = start_page_results(&sample_pages(), &[], &[], &[], "settings");
+        let results = PaletteRows::start(&sample_pages(), &[], &[], &[], "settings");
         let urls: Vec<_> = results
             .iter()
             .filter_map(|result| match result {
@@ -1068,7 +1086,7 @@ mod tests {
             SearchEngine::DuckDuckGo,
         ];
         let results =
-            start_page_results(&sample_pages(), &[], &[], &engines, "fix the failing test");
+            PaletteRows::start(&sample_pages(), &[], &[], &engines, "fix the failing test");
         let actual = results
             .iter()
             .filter_map(|result| match result {
@@ -1090,7 +1108,7 @@ mod tests {
             url: "file:///work/failing%20test.txt".into(),
             title: "failing test.txt".into(),
         }];
-        let results = start_page_results(
+        let results = PaletteRows::start(
             &sample_pages(),
             &work_dirs,
             &recent_files,
@@ -1135,9 +1153,9 @@ mod tests {
                 prompt_target: true,
             },
         ]);
-        let agents = prompt_target_results(&pages, "");
+        let agents = PaletteRows::prompt_targets(&pages, "");
         let selected = agents[1].clone();
-        let mut results = start_page_results(
+        let mut results = PaletteRows::start(
             &pages,
             &[],
             &[],
@@ -1145,7 +1163,7 @@ mod tests {
             "show me something fun",
         );
 
-        prepend_prompt_targets(
+        PaletteRows::prepend_targets(
             &mut results,
             Some(&selected),
             &agents,
@@ -1153,15 +1171,15 @@ mod tests {
         );
 
         assert_eq!(
-            prompt_target_url(&results[0]),
+            PaletteRows::prompt_target_url(&results[0]),
             Some("vmux://sessions/codex/cli")
         );
         assert_eq!(
-            prompt_target_url(&results[1]),
+            PaletteRows::prompt_target_url(&results[1]),
             Some("vmux://sessions/vibe/")
         );
         assert_eq!(
-            prompt_target_url(&results[2]),
+            PaletteRows::prompt_target_url(&results[2]),
             Some("vmux://sessions/claude")
         );
         assert!(matches!(results[3], CommandBarResultItem::Search { .. }));
@@ -1169,17 +1187,19 @@ mod tests {
 
     #[test]
     fn terminal_leads_but_agents_and_search_stay_available() {
-        let agent = prompt_target_results(&sample_pages(), "").remove(0);
-        let mut results = start_page_results(&sample_pages(), &[], &[], &[], "terminal");
+        let agent = PaletteRows::prompt_targets(&sample_pages(), "").remove(0);
+        let mut results = PaletteRows::start(&sample_pages(), &[], &[], &[], "terminal");
 
-        prepend_prompt_targets(&mut results, Some(&agent), &[], "terminal");
+        PaletteRows::prepend_targets(&mut results, Some(&agent), &[], "terminal");
 
         assert!(
             matches!(results.first(), Some(CommandBarResultItem::Terminal { .. })),
             "terminal keeps the default selection: {results:?}"
         );
         assert!(
-            results.iter().any(|item| prompt_target_url(item).is_some()),
+            results
+                .iter()
+                .any(|item| PaletteRows::prompt_target_url(item).is_some()),
             "asking an agent stays reachable: {results:?}"
         );
         assert!(
@@ -1192,7 +1212,7 @@ mod tests {
 
     #[test]
     fn a_terminal_prefix_offers_terminal_alongside_the_other_options() {
-        let results = start_page_results(&sample_pages(), &[], &[], &[], "ter");
+        let results = PaletteRows::start(&sample_pages(), &[], &[], &[], "ter");
         assert!(matches!(
             results.first(),
             Some(CommandBarResultItem::Terminal { .. })
@@ -1202,14 +1222,14 @@ mod tests {
 
     #[test]
     fn terminal_query_predicate_matches_display_and_activation() {
-        assert!(terminal_matches_query("t"));
-        assert!(terminal_matches_query("ter"));
-        assert!(terminal_matches_query("Terminal"));
-        assert!(terminal_matches_query("  term  "));
-        assert!(!terminal_matches_query(""));
-        assert!(!terminal_matches_query("   "));
-        assert!(!terminal_matches_query("terminals"));
-        assert!(!terminal_matches_query("xterm"));
+        assert!(PaletteRows::terminal_matches("t"));
+        assert!(PaletteRows::terminal_matches("ter"));
+        assert!(PaletteRows::terminal_matches("Terminal"));
+        assert!(PaletteRows::terminal_matches("  term  "));
+        assert!(!PaletteRows::terminal_matches(""));
+        assert!(!PaletteRows::terminal_matches("   "));
+        assert!(!PaletteRows::terminal_matches("terminals"));
+        assert!(!PaletteRows::terminal_matches("xterm"));
     }
 
     #[test]
@@ -1223,7 +1243,7 @@ mod tests {
             shortcut: String::new(),
             prompt_target: false,
         });
-        let results = start_page_results(&pages, &[], &[], &[], "terminal");
+        let results = PaletteRows::start(&pages, &[], &[], &[], "terminal");
         assert!(matches!(
             results.first(),
             Some(CommandBarResultItem::Terminal { .. })
@@ -1256,13 +1276,13 @@ mod tests {
             title: "README.md".into(),
         }];
         let dir_results =
-            start_page_results(&sample_pages(), &work_dirs, &recent_files, &[], "vmux");
+            PaletteRows::start(&sample_pages(), &work_dirs, &recent_files, &[], "vmux");
         assert!(dir_results.iter().any(|result| matches!(
             result,
             CommandBarResultItem::WorkDir { path, .. } if path == "/work/vmux"
         )));
         let file_results =
-            start_page_results(&sample_pages(), &work_dirs, &recent_files, &[], "readme");
+            PaletteRows::start(&sample_pages(), &work_dirs, &recent_files, &[], "readme");
         assert!(file_results.iter().any(|result| matches!(
             result,
             CommandBarResultItem::RecentFile { url, .. }
@@ -1272,7 +1292,7 @@ mod tests {
 
     #[test]
     fn prompt_agent_url_only_accepts_agent_page_rows() {
-        let agent = prompt_target_results(&sample_pages(), "").remove(0);
+        let agent = PaletteRows::prompt_targets(&sample_pages(), "").remove(0);
         let settings = CommandBarResultItem::Page {
             url: "vmux://settings/".into(),
             title: "Settings".into(),
@@ -1282,13 +1302,16 @@ mod tests {
             prompt_hint: false,
         };
 
-        assert_eq!(prompt_target_url(&agent), Some("vmux://sessions/vibe/"));
-        assert_eq!(prompt_target_url(&settings), None);
+        assert_eq!(
+            PaletteRows::prompt_target_url(&agent),
+            Some("vmux://sessions/vibe/")
+        );
+        assert_eq!(PaletteRows::prompt_target_url(&settings), None);
     }
 
     #[test]
     fn settings_page_reachable_by_name() {
-        let results = filter_results(
+        let results = PaletteRows::filter(
             "setti",
             &[],
             &[],
@@ -1313,7 +1336,7 @@ mod tests {
             shortcut: String::new(),
         }];
 
-        let results = filter_results(
+        let results = PaletteRows::filter(
             "",
             &[],
             &commands,
@@ -1344,7 +1367,7 @@ mod tests {
 
     #[test]
     fn pages_listed_alphabetically_by_url() {
-        let results = filter_results("", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
+        let results = PaletteRows::filter("", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
         let urls: Vec<String> = results
             .iter()
             .filter_map(|r| match r {
@@ -1365,7 +1388,7 @@ mod tests {
 
     #[test]
     fn page_carries_shortcut() {
-        let results = filter_results(
+        let results = PaletteRows::filter(
             "history",
             &[],
             &[],
@@ -1385,7 +1408,7 @@ mod tests {
 
     #[test]
     fn command_prefix_excludes_pages() {
-        let results = filter_results(
+        let results = PaletteRows::filter(
             "> set",
             &[],
             &[],
@@ -1419,7 +1442,7 @@ mod tests {
 
     #[test]
     fn empty_query_puts_work_after_pages() {
-        let results = filter_results(
+        let results = PaletteRows::filter(
             "",
             &[],
             &[],
@@ -1447,7 +1470,7 @@ mod tests {
     }
 
     fn path_results(query: &str) -> Vec<CommandBarResultItem> {
-        filter_results(query, &[], &[], &[], &sample_pages(), false, &[], &[], &[])
+        PaletteRows::filter(query, &[], &[], &[], &sample_pages(), false, &[], &[], &[])
     }
 
     #[test]
@@ -1496,7 +1519,7 @@ mod tests {
 
     #[test]
     fn work_dir_matched_by_query() {
-        let results = filter_results(
+        let results = PaletteRows::filter(
             "proj",
             &[],
             &[],
@@ -1536,7 +1559,7 @@ mod tests {
             },
         ];
 
-        let items = open_session_results(&tabs, &[]);
+        let items = PaletteRows::open_sessions(&tabs, &[]);
 
         assert_eq!(items.len(), 1, "the stack already on screen is not offered");
         assert!(matches!(
@@ -1544,6 +1567,6 @@ mod tests {
             CommandBarResultItem::Stack { title, pane_id, .. }
                 if title == "Docs" && *pane_id == 8
         ));
-        assert!(open_session_results(&[], &[]).is_empty());
+        assert!(PaletteRows::open_sessions(&[], &[]).is_empty());
     }
 }
