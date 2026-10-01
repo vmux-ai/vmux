@@ -3,7 +3,7 @@ use bevy_ecs::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use vmux_api::protocol::{ClientMessage, ServiceMessage};
-use vmux_ecs::service::ServiceConnection;
+use vmux_transport::service::{ServiceCodec, ServiceConnection};
 
 use super::supervisor::{RunningDaemon, ServiceRuntimeFiles};
 
@@ -221,10 +221,7 @@ impl ServiceHandle {
                 let stream = std::os::unix::net::UnixStream::connect(&sock)?;
                 stream.set_write_timeout(Some(std::time::Duration::from_millis(500)))?;
                 let mut stream = stream;
-                vmux_ecs::service::write_client_message_blocking(
-                    &mut stream,
-                    &ClientMessage::Shutdown,
-                )
+                ServiceCodec::write_client_blocking(&mut stream, &ClientMessage::Shutdown)
             });
             tracing::info!(?outcome, "replaced running daemon");
             ServiceRuntimeFiles::remove();

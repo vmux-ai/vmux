@@ -8,12 +8,12 @@ use vmux_api::protocol::{
 };
 use vmux_ecs::ProcessAnchor;
 use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_ecs::service::ServiceConnection;
 use vmux_layout::{AgentOpenBeside, AgentPaneDirection};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 use vmux_tool::{
     AgentWorkingDirectory, ToolAppExt, ToolCommand, ToolDispatchError, ToolDispatchSet,
 };
+use vmux_transport::service::ServiceConnection;
 
 pub struct FileToolPlugin;
 

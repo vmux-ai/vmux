@@ -56,6 +56,7 @@ vmux_flex = { path = "../../util/vmux_flex" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_mcp = { path = "../../util/vmux_mcp" }
 vmux_tool = { path = "../vmux_tool" }
+vmux_transport = { path = "../../util/vmux_transport" }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }

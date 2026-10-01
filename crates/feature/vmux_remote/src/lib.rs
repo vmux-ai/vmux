@@ -6,13 +6,12 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{Browsers, UiInput};
 use vmux_ecs::host::UiStateWrite;
 use vmux_ecs::page::PageReady;
-use vmux_ecs::service::RemotePaths;
 use vmux_layout::event::{
     RemoteCopyEvent, RemoteDevice, RemotePairingDismissRequest, RemotePairingShowRequest,
     RemotePhase, RemoteRequest, RemoteRevokeRequest, RemoteUiState,
 };
 use vmux_layout::{LayoutCef, state::LayoutUiState};
-use vmux_service::{RelayToken, RemoteAuthorizationStore};
+use vmux_service::{RelayToken, RemoteAuthorizationStore, RemotePaths};
 
 pub struct RemotePlugin;
 

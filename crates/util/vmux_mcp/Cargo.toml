@@ -18,6 +18,7 @@ tokio = { workspace = true }
 vmux_api = { path = "../vmux_api" }
 vmux_ecs = { path = "../vmux_ecs" }
 vmux_tool = { path = "../../feature/vmux_tool" }
+vmux_transport = { path = "../vmux_transport" }
 
 [dev-dependencies]
 tempfile = "3"

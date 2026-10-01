@@ -68,7 +68,8 @@ pub fn build_preview_with_cap(path: &Path, _thumb: bool, cap: u64) -> PreviewKin
         return PreviewKind::Video {
             url: raw_preview_url(path),
             path: path_str.clone().into_owned(),
-            native: cfg!(target_os = "macos") && vmux_api::media::MediaKind::requires_native_video(&path_str),
+            native: cfg!(target_os = "macos")
+                && vmux_api::media::MediaKind::requires_native_video(&path_str),
         };
     }
     match Highlighter::new().load_file(path) {

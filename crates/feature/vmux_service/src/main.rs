@@ -1,7 +1,7 @@
 use bevy_app::prelude::*;
 use tokio::sync::mpsc;
 use tracing_subscriber::{EnvFilter, fmt};
-use vmux_ecs::service::ServicePaths;
+use vmux_profile::ServicePaths;
 use vmux_service::DaemonBinary;
 use vmux_service::runner::WakeDrivenRunner;
 

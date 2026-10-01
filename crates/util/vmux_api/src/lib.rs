@@ -16,8 +16,8 @@ pub mod json;
 pub mod json_schema;
 pub mod knowledge;
 pub mod layout;
-pub mod media;
 pub mod mcp;
+pub mod media;
 pub mod open_target;
 #[cfg(feature = "bevy")]
 pub mod page;

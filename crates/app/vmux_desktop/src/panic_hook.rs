@@ -1,6 +1,7 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::panic::PanicHookInfo;
+use vmux_profile::ServicePaths;
 
 pub fn install() {
     let previous = std::panic::take_hook();
@@ -32,11 +33,11 @@ fn crash_record_from(info: &PanicHookInfo<'_>) -> String {
 }
 
 fn write_crash(record: &str) {
-    let _ = std::fs::create_dir_all(vmux_ecs::service::ServicePaths::log_dir());
+    let _ = std::fs::create_dir_all(ServicePaths::log_dir());
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(vmux_ecs::service::ServicePaths::current().current_log())
+        .open(ServicePaths::current().current_log())
     {
         let _ = file.write_all(record.as_bytes());
     }

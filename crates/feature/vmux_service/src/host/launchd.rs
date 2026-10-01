@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::LaunchAgent;
-use vmux_ecs::service::ServicePaths;
+use vmux_profile::ServicePaths;
 
 impl LaunchAgent {
     pub fn plist_xml(&self, binary_path: &Path, log_path: &Path) -> String {

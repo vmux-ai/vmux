@@ -9,9 +9,7 @@ pub enum MediaKind {
 impl MediaKind {
     pub fn from_path(path: &str) -> Option<Self> {
         Some(match MediaPath::extension(path).as_str() {
-            "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "bmp" | "ico" | "svg" => {
-                Self::Image
-            }
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "bmp" | "ico" | "svg" => Self::Image,
             "mp4" | "m4v" | "mov" | "webm" | "ogv" => Self::Video,
             "mp3" | "m4a" | "aac" | "wav" | "flac" | "ogg" | "opus" => Self::Audio,
             "pdf" => Self::Pdf,

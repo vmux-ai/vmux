@@ -11,13 +11,13 @@ use vmux_api::protocol::{
     AgentCommandResult, AgentListCommands, AgentRequest, AgentRequestId, ClientMessage, ProcessId,
     ServiceMessage,
 };
-use vmux_ecs::service::ServiceConnection;
 use vmux_ecs::{HostShell, JsonArguments, ProcessAnchor};
 use vmux_tool::{
     AcpSessionContext, AcpTerminalContext, ToolCall, ToolCatalog, ToolCatalogRequest, ToolCommand,
     ToolCommandFallback, ToolDefinition, ToolDispatchError, ToolDispatchFlush, ToolDispatchSet,
     ToolInvocation, ToolQuery, ToolRegistryPlugin, ToolRequestSet, ToolResolveSet,
 };
+use vmux_transport::service::ServiceConnection;
 
 pub struct McpPlugin;
 

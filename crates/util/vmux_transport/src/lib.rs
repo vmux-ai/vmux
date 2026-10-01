@@ -1,6 +1,8 @@
 pub mod device;
 pub mod framing;
 pub mod quic;
+#[cfg(host)]
+pub mod service;
 
 pub use device::DeviceId;
 pub use quic::{

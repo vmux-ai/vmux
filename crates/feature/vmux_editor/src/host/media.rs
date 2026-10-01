@@ -128,7 +128,10 @@ fn file_video_rect(
         return;
     }
     let rect = &trigger.event().payload;
-    if !vmux_api::media::MediaKind::requires_native_video(&rect.path) || rect.w <= 0.0 || rect.h <= 0.0 {
+    if !vmux_api::media::MediaKind::requires_native_video(&rect.path)
+        || rect.w <= 0.0
+        || rect.h <= 0.0
+    {
         return;
     }
     browsers.set_media_overlay(&entity, &rect.path, (rect.x, rect.y, rect.w, rect.h));

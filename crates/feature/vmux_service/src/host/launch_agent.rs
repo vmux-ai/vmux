@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use vmux_ecs::service::ServicePaths;
+use vmux_profile::ServicePaths;
 use vmux_profile::git_hash;
 
 #[derive(Clone, Debug)]

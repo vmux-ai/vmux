@@ -10451,6 +10451,7 @@ dependencies = [
  "vmux_knowledge",
  "vmux_layout",
  "vmux_native",
+ "vmux_profile",
  "vmux_setting",
  "vmux_shortcut",
  "vmux_simulator",
@@ -10472,7 +10473,6 @@ dependencies = [
  "bevy_ecs",
  "bevy_reflect",
  "bevy_world_serialization",
- "chrono",
  "moonshine-save",
  "rkyv",
  "ron 0.12.1",
@@ -10480,7 +10480,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
- "tokio",
  "toml",
  "url",
  "uuid",
@@ -10488,7 +10487,6 @@ dependencies = [
  "vmux_flex",
  "vmux_path",
  "vmux_profile",
- "vmux_transport",
  "zip",
 ]
 
@@ -10542,6 +10540,7 @@ dependencies = [
  "vmux_setting",
  "vmux_space",
  "vmux_tool",
+ "vmux_transport",
  "vmux_ui",
  "zip",
 ]
@@ -10738,6 +10737,7 @@ dependencies = [
  "vmux_api",
  "vmux_ecs",
  "vmux_tool",
+ "vmux_transport",
 ]
 
 [[package]]
@@ -10830,6 +10830,7 @@ dependencies = [
  "tokio",
  "vmux_api",
  "vmux_ecs",
+ "vmux_profile",
  "vte",
 ]
 
@@ -11105,6 +11106,7 @@ dependencies = [
  "vmux_setting",
  "vmux_space",
  "vmux_tool",
+ "vmux_transport",
  "vmux_ui",
 ]
 
@@ -11146,12 +11148,15 @@ dependencies = [
  "quinn",
  "rcgen",
  "ring",
+ "rkyv",
  "rustls",
  "rustls-pemfile",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
+ "vmux_api",
+ "vmux_profile",
  "webpki-roots",
 ]
 

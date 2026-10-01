@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 pub mod mcp_credentials;
 pub mod safe_storage;
+mod service;
 pub mod vault;
+
+pub use service::{RemotePaths, ServicePaths};
 
 pub const fn build_profile() -> &'static str {
     env!("VMUX_BUILD_PROFILE")

@@ -1,16 +1,14 @@
 use bevy::app::App;
 use bevy::log::BoxedLayer;
 use tracing_subscriber::Layer;
+use vmux_profile::ServicePaths;
 
 pub fn file_log_layer(_app: &mut App) -> Option<BoxedLayer> {
-    let dir = vmux_ecs::service::ServicePaths::log_dir();
+    let dir = ServicePaths::log_dir();
     std::fs::create_dir_all(&dir).ok()?;
     let appender = tracing_appender::rolling::Builder::new()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_prefix(format!(
-            "vmux-{}",
-            vmux_ecs::service::ServicePaths::build_profile()
-        ))
+        .filename_prefix(format!("vmux-{}", ServicePaths::build_profile()))
         .filename_suffix("log")
         .max_log_files(7)
         .build(&dir)

@@ -21,6 +21,8 @@ use vmux_ecs::host::page::NativelyHosted;
 use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 
 use crate::event::{GitConfigEditRequest, GitUpdateCheckRequest};
+#[cfg(ui)]
+use crate::ui::{GitPage, LegacyGitPage};
 
 pub use diff::GitDiffSource;
 pub use repository::{GitError, GitRepository};
@@ -43,10 +45,7 @@ impl Plugin for GitPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default());
         #[cfg(ui)]
-        app.add_plugins((
-            crate::ui::GitPage::plugin(),
-            crate::ui::LegacyGitPage::plugin(),
-        ));
+        app.add_plugins((GitPage::plugin(), LegacyGitPage::plugin()));
         app.add_message::<GitCheckForUpdatesRequest>()
             .add_plugins(UiEventPlugin::<(GitConfigEditRequest, GitUpdateCheckRequest)>::default())
             .add_observer(config_edit_request)

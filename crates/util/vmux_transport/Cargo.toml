@@ -11,6 +11,7 @@ bytes = { workspace = true }
 quinn = { workspace = true }
 rcgen = { workspace = true }
 ring = { workspace = true }
+rkyv = { workspace = true }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 webpki-roots = { workspace = true }
@@ -18,6 +19,8 @@ tokio = { workspace = true }
 tracing = "0.1"
 serde = { workspace = true }
 serde_json = { workspace = true }
+vmux_api = { path = "../vmux_api" }
+vmux_profile = { path = "../vmux_profile" }
 
 [dev-dependencies]
 quinn = { workspace = true }

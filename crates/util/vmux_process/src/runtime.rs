@@ -20,7 +20,7 @@ use std::{os::unix::ffi::OsStrExt, path::Component};
 use tokio::sync::{broadcast, mpsc};
 use vmux_api::protocol::{ProcessId, ProcessInfo};
 use vmux_ecs::event::*;
-use vmux_ecs::service::ServicePaths;
+use vmux_profile::ServicePaths;
 
 use crate::render::{build_line, hash_grid_row};
 

@@ -1,23 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-pub const SNAPSHOT_ATTRS: &[&str] = &[
-    "role",
-    "aria-label",
-    "aria-expanded",
-    "aria-selected",
-    "alt",
-    "title",
-    "placeholder",
-    "type",
-    "name",
-    "href",
-    "id",
-    "tabindex",
-    "disabled",
-    "required",
-    "checked",
-];
-
 pub const SNAPSHOT_NODE_CAP: usize = 600;
 pub const SNAPSHOT_NAME_CAP: usize = 200;
 

@@ -3,7 +3,7 @@ use std::time::UNIX_EPOCH;
 
 use bevy::prelude::Component;
 
-use vmux_ecs::service::ServicePaths;
+use vmux_profile::ServicePaths;
 
 #[derive(Component, Clone, Debug, Eq, PartialEq)]
 pub struct DaemonBinary(PathBuf);
