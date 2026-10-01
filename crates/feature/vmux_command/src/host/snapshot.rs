@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use std::collections::HashMap;
 use vmux_api::command_bar::{
     CommandBarPage, CommandBarRecentFile, CommandBarWorkDir, SearchEngine,
 };
@@ -36,7 +35,6 @@ pub struct WriteCommandBarSnapshots;
 
 #[derive(Component, Default, Clone, Debug)]
 pub struct CommandBarProjection {
-    pub agents: CommandBarAgentsSnapshot,
     pub workspace: CommandBarWorkspaceSnapshot,
     pub projects: CommandBarProjectRoots,
     pub agent_models: CommandBarAgentModels,
@@ -70,22 +68,6 @@ pub struct CommandBarAgentModels {
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct CommandBarAgentModes {
     pub agents: Vec<vmux_api::command_bar::AgentModes>,
-}
-
-#[derive(Default, Clone, Debug, PartialEq)]
-pub struct CommandBarAgentsSnapshot {
-    pub acp: Vec<AgentSummary>,
-    pub recent: Vec<AgentPromptTarget>,
-}
-
-impl AgentPromptTarget {
-    pub fn recency_ranks(targets: &[Self]) -> HashMap<String, usize> {
-        let mut ranks = HashMap::new();
-        for (rank, target) in targets.iter().enumerate() {
-            ranks.entry(target.url.clone()).or_insert(rank);
-        }
-        ranks
-    }
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -128,7 +110,7 @@ impl ClaimedUrls<'_, '_> {
     }
 }
 
-#[derive(Component, Clone, Debug)]
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ContributedPage {
     pub id: String,
     pub page: CommandBarPage,
@@ -157,56 +139,6 @@ impl ClaimedUrl {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct AgentPromptTarget {
-    pub id: String,
-    url: String,
-}
-
-impl AgentPromptTarget {
-    pub fn under(root: &str, id: impl Into<String>) -> Self {
-        let id = id.into();
-        Self {
-            url: format!("{root}{id}"),
-            id,
-        }
-    }
-
-    pub fn url(&self) -> &str {
-        &self.url
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct AgentSummary {
-    pub id: String,
-    pub name: String,
-    pub url: String,
-    pub icon: String,
-}
-
-impl From<&AgentSummary> for ContributedPage {
-    fn from(agent: &AgentSummary) -> Self {
-        Self {
-            id: agent.id.clone(),
-            rank: 0,
-            page: CommandBarPage {
-                url: agent.url.clone(),
-                title: agent.name.clone(),
-                keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
-                icon: if agent.icon.is_empty() {
-                    vmux_ecs::PageIcon::None
-                } else {
-                    vmux_ecs::PageIcon::Favicon(agent.icon.clone())
-                },
-                shortcut: String::new(),
-                prompt_target: true,
-                startup: false,
-            },
-        }
-    }
-}
-
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct CommandBarSpacesSnapshot {
     pub spaces: Vec<SpaceSummary>,
@@ -224,7 +156,6 @@ pub struct SpaceSummary {
 
 #[derive(Default, Clone, Debug)]
 pub struct CommandBarTerminalsSnapshot {
-    pub running: HashMap<String, Entity>,
     pub terminal_page_url: String,
 }
 
@@ -329,13 +260,6 @@ mod tests {
                 })
                 .expect("prompt_url system runs")
         }
-    }
-
-    #[test]
-    fn agents_snapshot_default_is_empty() {
-        let s = CommandBarAgentsSnapshot::default();
-        assert!(s.acp.is_empty());
-        assert!(s.recent.is_empty());
     }
 
     #[test]

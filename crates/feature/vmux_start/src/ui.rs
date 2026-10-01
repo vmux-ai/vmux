@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, StartHero};
 use vmux_ui::hooks::use_theme;
 
-use vmux_command::ui::PaletteSurface;
+use vmux_command::CommandPaletteSurface;
 use vmux_command::ui::{CommandPalette, use_command_bar_ui};
 
 #[vmux_native::page(
@@ -31,7 +31,7 @@ pub fn Page() -> Element {
                     div { class: "relative w-full",
                         CommandPalette {
                             state,
-                            surface: PaletteSurface::Start,
+                            surface: CommandPaletteSurface::Start,
                             on_close: move |_| {},
                             on_activity: move |_| {},
                         }

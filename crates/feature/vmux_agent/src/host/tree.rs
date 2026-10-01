@@ -14,7 +14,6 @@ use super::follow::FollowPlugin;
 use super::handoff::Plugin as HandoffPlugin;
 use super::ingress::AgentIngressPlugin;
 use super::page::PagePlugin;
-use super::snapshot::SnapshotPlugin;
 use super::tidy::Plugin as TidyPlugin;
 use super::toast::ToastPlugin;
 use crate::host::command_bar::CommandBarPlugin;
@@ -41,7 +40,6 @@ impl Plugin for AgentPlugin {
             HandoffPlugin,
             AgentIngressPlugin,
             PagePlugin,
-            SnapshotPlugin,
             TidyPlugin,
             ToastPlugin,
         ))

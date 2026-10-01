@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use vmux_ecs::host::page::{HostHistory, HostHistorySet, HostHistoryTraversed};
 use vmux_ecs::PageMetadata;
+use vmux_ecs::host::page::{HostHistory, HostHistorySet, HostHistoryTraversed};
 use vmux_path::FileUrl;
 
 use crate::host::editor::{FileNavigateRequest, FileView};
@@ -37,10 +37,7 @@ fn show_traversed_file_view(
 }
 
 fn record_file_view_visit(
-    mut views: Query<
-        (&PageMetadata, &FileViewport, &mut HostHistory),
-        With<FileView>,
-    >,
+    mut views: Query<(&PageMetadata, &FileViewport, &mut HostHistory), With<FileView>>,
 ) {
     for (metadata, viewport, mut history) in &mut views {
         if metadata.url.is_empty() || history.showing(&metadata.url, viewport.top_row) {

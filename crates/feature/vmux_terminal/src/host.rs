@@ -15,7 +15,7 @@ mod request;
 mod service;
 mod shell_env;
 pub(crate) mod shell_input;
-pub(crate) mod snapshot_updater;
+pub(crate) mod snapshot;
 mod state;
 pub(crate) mod theme;
 mod tool;

@@ -110,7 +110,7 @@ impl Plugin for TerminalPlugin {
             TerminalInputPlugin,
             crate::process_monitor::ProcessMonitorPlugin,
             super::loading::LoadingPlugin,
-            crate::snapshot_updater::SnapshotPlugin,
+            crate::snapshot::Plugin,
             crate::theme::TerminalThemePlugin,
         ));
     }

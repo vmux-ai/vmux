@@ -11,6 +11,8 @@ use vmux_ui::i18n::translate;
 #[cfg(test)]
 use vmux_ui::list_nav::MenuDirection;
 
+use crate::CommandPaletteSurface;
+
 pub use self::results::ResumeRows;
 use self::results::{
     CommandBarResultItem, PageRows, PickerRows, SearchRows, SlashRows, SpaceRows, StartRows,
@@ -22,18 +24,6 @@ mod results;
 pub(super) use query::PaletteQuery;
 
 use vmux_api::command_bar::{PaletteGlyph, PaletteMode};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PaletteSurface {
-    Modal,
-    Start,
-}
-
-impl PaletteSurface {
-    pub const fn is_start(self) -> bool {
-        matches!(self, Self::Start)
-    }
-}
 
 #[derive(Clone, Debug, Default)]
 pub struct PaletteDraft {
@@ -117,7 +107,7 @@ impl PaletteRows {
     pub fn build(
         state: &CommandBarOpenEvent,
         draft: &PaletteDraft,
-        surface: PaletteSurface,
+        surface: CommandPaletteSurface,
     ) -> Self {
         let query = draft.query.as_str();
         let is_start = surface.is_start();
@@ -242,7 +232,7 @@ impl PaletteRows {
     fn listed(
         state: &CommandBarOpenEvent,
         draft: &PaletteDraft,
-        surface: PaletteSurface,
+        surface: CommandPaletteSurface,
         mode: PaletteMode,
         start_prompt_mode: bool,
     ) -> Vec<CommandBarResultItem> {
@@ -673,7 +663,7 @@ impl PaletteDecision {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaletteState {
-    pub surface: PaletteSurface,
+    pub surface: CommandPaletteSurface,
     pub query: String,
     pub rows: Vec<CommandBarResultItem>,
     pub selected: usize,
@@ -699,7 +689,7 @@ impl PaletteState {
     pub fn resolve(
         state: &CommandBarOpenEvent,
         draft: &PaletteDraft,
-        surface: PaletteSurface,
+        surface: CommandPaletteSurface,
     ) -> Self {
         Self::from_rows(
             &PaletteRows::build(state, draft, surface),
@@ -713,7 +703,7 @@ impl PaletteState {
         rows: &PaletteRows,
         state: &CommandBarOpenEvent,
         draft: &PaletteDraft,
-        surface: PaletteSurface,
+        surface: CommandPaletteSurface,
     ) -> Self {
         let selected = rows.selected(draft.selected);
         let active = rows.items.get(selected);
@@ -1007,7 +997,11 @@ impl TypedRow {
 struct Placeholder;
 
 impl Placeholder {
-    fn resolve(mode: PaletteMode, state: &CommandBarOpenEvent, surface: PaletteSurface) -> String {
+    fn resolve(
+        mode: PaletteMode,
+        state: &CommandBarOpenEvent,
+        surface: CommandPaletteSurface,
+    ) -> String {
         if let Some(picker) = PaletteRows::picker(mode) {
             return translate(PickerRows::placeholder(picker));
         }
@@ -1015,8 +1009,8 @@ impl Placeholder {
             return translate("command-ex-placeholder");
         }
         match surface {
-            PaletteSurface::Start => translate("command-search-ask"),
-            PaletteSurface::Modal => {
+            CommandPaletteSurface::Start => translate("command-search-ask"),
+            CommandPaletteSurface::Modal => {
                 if matches!(state.target, Some(OpenTarget::InNewStack)) {
                     translate("command-new-tab-placeholder")
                 } else {
@@ -1523,11 +1517,11 @@ mod tests {
 
     impl PaletteState {
         fn start(state: &CommandBarOpenEvent, draft: PaletteDraft) -> Self {
-            Self::resolve(state, &draft, PaletteSurface::Start)
+            Self::resolve(state, &draft, CommandPaletteSurface::Start)
         }
 
         fn modal(state: &CommandBarOpenEvent, draft: PaletteDraft) -> Self {
-            Self::resolve(state, &draft, PaletteSurface::Modal)
+            Self::resolve(state, &draft, CommandPaletteSurface::Modal)
         }
     }
 
@@ -2132,7 +2126,7 @@ mod tests {
         let rows = PaletteRows::build(
             &state,
             &PaletteDraft::typed("fix the failing test"),
-            PaletteSurface::Start,
+            CommandPaletteSurface::Start,
         );
         let last = rows.items.len() - 1;
 

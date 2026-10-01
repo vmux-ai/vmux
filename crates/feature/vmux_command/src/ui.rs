@@ -30,6 +30,8 @@ use vmux_ui::ime::use_ime_guard;
 use vmux_ui::prompt_recall::{PromptHistoryDirection, prompt_history_direction};
 use vmux_ui::scroll::ScrollIntoView;
 
+use crate::CommandPaletteSurface;
+
 mod composer;
 mod input;
 mod panel;
@@ -38,18 +40,6 @@ mod row;
 
 pub use panel::CommandBarPanel;
 pub use row::ResultRow;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PaletteSurface {
-    Modal,
-    Start,
-}
-
-impl PaletteSurface {
-    pub const fn is_start(self) -> bool {
-        matches!(self, Self::Start)
-    }
-}
 
 pub fn use_command_bar_ui() -> Signal<CommandBarOpenEvent> {
     let ui = use_ui_state::<CommandBarUiState>();
@@ -721,11 +711,11 @@ fn BookmarkButton() -> Element {
 #[derive(Props, Clone, PartialEq)]
 pub struct PaletteProps {
     pub state: ReadSignal<CommandBarOpenEvent>,
-    pub surface: PaletteSurface,
+    pub surface: CommandPaletteSurface,
     pub on_close: EventHandler<()>,
     pub on_activity: EventHandler<()>,
 }
 
-pub fn focus_prompt_input() {
+fn focus_prompt_input() {
     focus_prompt_end(PROMPT_INPUT_ID);
 }

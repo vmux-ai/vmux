@@ -185,6 +185,10 @@ fn recent(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use vmux_ecs::CreatedAt;
+
     use super::*;
 
     impl CommandBarProjection {
@@ -197,7 +201,6 @@ mod tests {
 
     #[test]
     fn work_dirs_list_open_pane_dir_contents() {
-        use std::fs;
         let root = std::env::temp_dir().join(format!("vmux-work-contents-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
@@ -251,7 +254,6 @@ mod tests {
 
     #[test]
     fn work_dirs_list_acp_agent_cwd_contents() {
-        use std::fs;
         let root = std::env::temp_dir().join(format!("vmux-acp-work-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
@@ -276,7 +278,6 @@ mod tests {
 
     #[test]
     fn recent_files_only_file_urls_ranked() {
-        use vmux_ecs::CreatedAt;
         let mut app = App::new();
         app.add_plugins(Plugin);
         app.world_mut().spawn(CommandBarProjection::default());
@@ -309,7 +310,6 @@ mod tests {
 
     #[test]
     fn search_engines_are_ordered_by_most_recent_visit() {
-        use vmux_ecs::CreatedAt;
         let mut app = App::new();
         app.add_plugins(Plugin);
         app.world_mut().spawn(CommandBarProjection::default());

@@ -1,136 +1,233 @@
+use std::cmp::Reverse;
+
 use bevy::prelude::*;
 use vmux_api::command_bar::CommandBarPage;
 #[cfg(test)]
 use vmux_command::snapshot::ClaimedUrls;
 use vmux_command::snapshot::{
-    AgentPromptTarget, ClaimedUrl, CommandBarAgentsSnapshot, CommandBarProjection, ContributedPage,
-    WriteCommandBarSnapshots,
+    ClaimedUrl, CommandBarWorkDirectory, ContributedPage, WriteCommandBarSnapshots,
 };
+use vmux_ecs::{AgentWorkingDir, ArchivedPage, LastActivatedAt};
+use vmux_session::AcpSession;
+
+use super::acp::AcpPackageChanged;
+use super::acp::registry::RegistryAgent;
+use crate::route::AcpRoute;
 
 pub(crate) struct CommandBarPlugin;
 
 impl Plugin for CommandBarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            publish_contributions
-                .in_set(WriteCommandBarSnapshots)
-                .after(crate::host::snapshot::SnapshotSet::AgentSessions),
-        );
+        app.add_message::<AcpPackageChanged>()
+            .add_systems(Startup, claim)
+            .add_systems(
+                Update,
+                (
+                    sync_work_directories,
+                    sync_installed,
+                    ApplyDeferred,
+                    publish,
+                )
+                    .chain()
+                    .in_set(WriteCommandBarSnapshots),
+            );
     }
 }
 
 #[derive(Component)]
-struct AgentContribution;
+struct InstalledAgent;
 
-impl AgentContribution {
-    fn launcher_pages(agents: &CommandBarAgentsSnapshot) -> Vec<ContributedPage> {
-        let mut pages = Vec::with_capacity(agents.acp.len());
-        for agent in &agents.acp {
-            pages.push(ContributedPage {
-                id: agent.id.clone(),
-                rank: 0,
-                page: CommandBarPage {
-                    url: agent.url.clone(),
-                    title: agent.name.clone(),
-                    keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
-                    icon: if agent.icon.is_empty() {
-                        vmux_ecs::PageIcon::None
-                    } else {
-                        vmux_ecs::PageIcon::Favicon(agent.icon.clone())
-                    },
-                    shortcut: String::new(),
-                    prompt_target: true,
-                    startup: false,
-                },
-            });
-        }
-        let recency = AgentPromptTarget::recency_ranks(&agents.recent);
-        pages.sort_by(|left, right| {
-            recency
-                .get(&left.page.url)
-                .copied()
-                .unwrap_or(usize::MAX)
-                .cmp(&recency.get(&right.page.url).copied().unwrap_or(usize::MAX))
-                .then_with(|| {
-                    left.page
-                        .title
-                        .to_lowercase()
-                        .cmp(&right.page.title.to_lowercase())
-                })
-        });
-        for (rank, page) in pages.iter_mut().enumerate() {
-            page.rank = rank;
-        }
-        pages
-    }
-}
-
-fn publish_contributions(
-    state: Single<&CommandBarProjection>,
-    mut previous: Local<Option<CommandBarAgentsSnapshot>>,
-    mine: Query<Entity, With<AgentContribution>>,
-    mut commands: Commands,
-) {
-    if previous.as_ref() == Some(&state.agents) {
-        return;
-    }
-    let agents = &state.agents;
-    *previous = Some(agents.clone());
-    for entity in mine.iter() {
-        commands.entity(entity).despawn();
-    }
-    for page in AgentContribution::launcher_pages(agents) {
-        commands.spawn((AgentContribution, page));
-    }
+fn claim(mut commands: Commands) {
     commands.spawn((
-        AgentContribution,
+        Name::new("Agent command-bar contribution"),
         ClaimedUrl(vmux_chat::ChatPlugin::URL.to_string()),
     ));
 }
 
+fn sync_work_directories(
+    changed: Query<(Entity, &AgentWorkingDir), Changed<AgentWorkingDir>>,
+    mut removed: RemovedComponents<AgentWorkingDir>,
+    mut commands: Commands,
+) {
+    for (entity, directory) in &changed {
+        commands.entity(entity).insert(CommandBarWorkDirectory(
+            directory.0.to_string_lossy().into_owned(),
+        ));
+    }
+    for entity in removed.read() {
+        if let Ok(mut entity) = commands.get_entity(entity) {
+            entity.remove::<CommandBarWorkDirectory>();
+        }
+    }
+}
+
+fn sync_installed(
+    agents: Query<(Entity, Ref<RegistryAgent>, Has<InstalledAgent>)>,
+    mut packages: MessageReader<AcpPackageChanged>,
+    mut commands: Commands,
+) {
+    let refresh = packages.read().count() > 0;
+    for (entity, agent, installed) in &agents {
+        if !refresh && !agent.is_added() && !agent.is_changed() {
+            continue;
+        }
+        match (agent.is_installed(), installed) {
+            (true, false) => {
+                commands.entity(entity).insert(InstalledAgent);
+            }
+            (false, true) => {
+                commands
+                    .entity(entity)
+                    .remove::<(InstalledAgent, ContributedPage)>();
+            }
+            _ => {}
+        }
+    }
+}
+
+fn publish(
+    agents: Query<(Entity, &RegistryAgent, Option<&ContributedPage>), With<InstalledAgent>>,
+    sessions: Query<(&AcpSession, Option<&LastActivatedAt>)>,
+    archived: Query<&ArchivedPage>,
+    mut commands: Commands,
+) {
+    let mut recent = Vec::<(String, i64)>::new();
+    for (session, timestamp) in &sessions {
+        let url = AcpRoute::agent(&session.agent_id).url();
+        let timestamp = timestamp.map_or(i64::MIN, |timestamp| timestamp.0);
+        if let Some((_, current)) = recent.iter_mut().find(|(candidate, _)| *candidate == url) {
+            *current = (*current).max(timestamp);
+        } else {
+            recent.push((url, timestamp));
+        }
+    }
+    for page in &archived {
+        let Some(AcpRoute::Acp { id, .. }) = AcpRoute::parse(&page.url) else {
+            continue;
+        };
+        let url = AcpRoute::agent(id).url();
+        if let Some((_, current)) = recent.iter_mut().find(|(candidate, _)| *candidate == url) {
+            *current = (*current).max(page.closed_at);
+        } else {
+            recent.push((url, page.closed_at));
+        }
+    }
+    recent.sort_by(|(left_url, left_time), (right_url, right_time)| {
+        Reverse(*left_time)
+            .cmp(&Reverse(*right_time))
+            .then_with(|| left_url.cmp(right_url))
+    });
+
+    let mut pages = Vec::new();
+    for (entity, agent, _) in &agents {
+        pages.push((
+            entity,
+            ContributedPage {
+                id: agent.id.clone(),
+                rank: 0,
+                page: CommandBarPage {
+                    url: AcpRoute::agent(&agent.id).url(),
+                    title: agent.name.clone(),
+                    keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
+                    icon: agent
+                        .icon
+                        .as_ref()
+                        .map(|icon| vmux_ecs::PageIcon::Favicon(icon.clone()))
+                        .unwrap_or_default(),
+                    shortcut: String::new(),
+                    prompt_target: true,
+                    startup: false,
+                },
+            },
+        ));
+    }
+    pages.sort_by(|(_, left), (_, right)| {
+        let left_rank = recent
+            .iter()
+            .position(|(url, _)| url == &left.page.url)
+            .unwrap_or(usize::MAX);
+        let right_rank = recent
+            .iter()
+            .position(|(url, _)| url == &right.page.url)
+            .unwrap_or(usize::MAX);
+        left_rank.cmp(&right_rank).then_with(|| {
+            left.page
+                .title
+                .to_lowercase()
+                .cmp(&right.page.title.to_lowercase())
+        })
+    });
+    for (rank, (entity, mut page)) in pages.into_iter().enumerate() {
+        page.rank = rank;
+        let Ok((_, _, current)) = agents.get(entity) else {
+            continue;
+        };
+        if current != Some(&page) {
+            commands.entity(entity).insert(page);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_command::snapshot::AgentSummary;
+    use vmux_command::snapshot::ContributedPage;
+    use vmux_ecs::ProcessId;
+
+    use super::*;
+    use crate::host::acp::registry::Distribution;
+
+    impl RegistryAgent {
+        fn test(id: &str, name: &str, icon: Option<&str>) -> Self {
+            Self {
+                id: id.to_string(),
+                name: name.to_string(),
+                version: None,
+                description: None,
+                icon: icon.map(str::to_string),
+                repository: None,
+                distribution: Distribution::default(),
+            }
+        }
+    }
 
     #[test]
-    fn launcher_pages_list_only_installed_agents_in_recent_order() {
-        let snapshot = CommandBarAgentsSnapshot {
-            acp: vec![
-                AgentSummary {
-                    id: "claude-acp".to_string(),
-                    name: "Claude Agent".to_string(),
-                    url: "vmux://sessions/claude".to_string(),
-                    icon: "https://cdn.example/claude-acp.svg".to_string(),
-                },
-                AgentSummary {
-                    id: "codex".to_string(),
-                    name: "Codex".to_string(),
-                    url: "vmux://sessions/codex".to_string(),
-                    icon: String::new(),
-                },
-            ],
-            recent: vec![
-                AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, "codex"),
-                AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, "claude"),
-            ],
-            ..Default::default()
-        };
+    fn installed_agents_contribute_pages_in_recent_order() {
+        let mut app = App::new();
+        app.add_systems(Update, publish);
+        app.world_mut().spawn((
+            RegistryAgent::test(
+                "claude-acp",
+                "Claude Agent",
+                Some("https://cdn.example/claude-acp.svg"),
+            ),
+            InstalledAgent,
+        ));
+        app.world_mut()
+            .spawn((RegistryAgent::test("codex", "Codex", None), InstalledAgent));
+        app.world_mut().spawn((
+            AcpSession {
+                agent_id: "codex".to_string(),
+                sid: "session".to_string(),
+                cwd: std::path::PathBuf::new(),
+                anchor: ProcessId::new(),
+                resume: None,
+            },
+            LastActivatedAt(20),
+        ));
 
-        let pages = AgentContribution::launcher_pages(&snapshot);
+        app.update();
 
+        let mut query = app.world_mut().query::<&ContributedPage>();
+        let mut pages = query.iter(app.world()).cloned().collect::<Vec<_>>();
+        pages.sort_by_key(|page| page.rank);
         assert_eq!(pages.len(), 2);
         assert_eq!(pages[0].id, "codex");
-        assert_eq!(pages[0].rank, 0);
-        assert_eq!(pages[0].page.url, "vmux://sessions/codex");
-        assert_eq!(pages[0].page.title, "Codex");
-        assert_eq!(pages[1].rank, 1);
-        assert_eq!(pages[1].page.title, "Claude Agent");
+        assert_eq!(pages[1].id, "claude-acp");
         assert!(matches!(
             pages[1].page.icon,
-            vmux_ecs::PageIcon::Favicon(ref u) if u == "https://cdn.example/claude-acp.svg"
+            vmux_ecs::PageIcon::Favicon(ref icon)
+                if icon == "https://cdn.example/claude-acp.svg"
         ));
     }
 

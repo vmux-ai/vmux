@@ -6,6 +6,8 @@ use vmux_api::protocol::{
 use vmux_ecs::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
 
 use super::CommandSet;
+use crate::host::acp::registry::RegistryAgent;
+use crate::route::AcpRoute;
 
 pub(super) struct AgentOperationPlugin;
 
@@ -84,7 +86,7 @@ fn new_chat(
 
 fn list_agents(
     mut requests: MessageReader<AgentRequestInput>,
-    command_bar: Single<&vmux_command::snapshot::CommandBarProjection>,
+    catalog: Query<&RegistryAgent>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
@@ -92,12 +94,15 @@ fn list_agents(
             continue;
         };
         let mut agents = Vec::new();
-        for agent in &command_bar.agents.acp {
+        for agent in &catalog {
+            if !agent.is_installed() {
+                continue;
+            }
             agents.push(vmux_api::room::RemoteAgent {
                 id: agent.id.clone(),
                 name: agent.name.clone(),
-                url: agent.url.clone(),
-                icon: agent.icon.clone(),
+                url: AcpRoute::agent(&agent.id).url(),
+                icon: agent.icon.clone().unwrap_or_default(),
             });
         }
         let result = match serde_json::to_string(&agents) {

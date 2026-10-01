@@ -16,7 +16,6 @@ mod model_selection;
 mod page;
 mod run_state_kind;
 mod runtime;
-mod snapshot;
 mod toast;
 
 #[cfg(test)]

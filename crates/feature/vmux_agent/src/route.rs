@@ -5,6 +5,23 @@ pub enum AcpRoute {
 }
 
 impl AcpRoute {
+    pub(crate) fn agent(id: impl Into<String>) -> Self {
+        Self::Acp {
+            id: id.into(),
+            sid: None,
+        }
+    }
+
+    pub(crate) fn url(&self) -> String {
+        match self {
+            Self::AcpDefault => vmux_chat::ChatPlugin::URL.to_string(),
+            Self::Acp { id, sid: None } => format!("{}{id}", vmux_chat::ChatPlugin::URL),
+            Self::Acp { id, sid: Some(sid) } => {
+                format!("{}{id}/{sid}", vmux_chat::ChatPlugin::URL)
+            }
+        }
+    }
+
     pub fn parse(url: &str) -> Option<Self> {
         let route = vmux_api::VmuxRoute::parse(url)?;
         if !route.is_agent() {

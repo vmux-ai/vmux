@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use super::model::{
     AgentSegment, PaletteDecision, PaletteDraft, PaletteQuery, PaletteRows, PaletteState,
-    PaletteSurface,
 };
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
@@ -24,7 +23,9 @@ use vmux_ecs::host::{UiState, UiStateWrite};
 use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
 use vmux_tool::McpSnapshotRequest;
 
-use crate::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
+use crate::{
+    BindCommands, CommandDispatch, CommandPaletteSurface, CommandRegistry, CommandRuntimePlugin,
+};
 
 use super::CommandBarDismiss;
 
@@ -886,13 +887,13 @@ fn dispatch_submit(
         ..Default::default()
     };
     let surface = match input.start {
-        true => PaletteSurface::Start,
-        false => PaletteSurface::Modal,
+        true => CommandPaletteSurface::Start,
+        false => CommandPaletteSurface::Modal,
     };
     let palette = PaletteState::from_rows(&rows, &opened.0, &draft, surface);
     let decision = match surface {
-        PaletteSurface::Start => palette.submit_start(&snapshot.0.attachments),
-        PaletteSurface::Modal => palette.submit_modal(&snapshot.0.attachments),
+        CommandPaletteSurface::Start => palette.submit_start(&snapshot.0.attachments),
+        CommandPaletteSurface::Modal => palette.submit_modal(&snapshot.0.attachments),
     };
     commands.trigger(PaletteDecisionReady { target, decision });
 }
@@ -931,8 +932,8 @@ fn activate_row(
         ..Default::default()
     };
     let surface = match input.start {
-        true => PaletteSurface::Start,
-        false => PaletteSurface::Modal,
+        true => CommandPaletteSurface::Start,
+        false => CommandPaletteSurface::Modal,
     };
     let palette = PaletteState::from_rows(&rows, &opened.0, &draft, surface);
     let Some(row) = palette.row(index) else {
@@ -1221,8 +1222,8 @@ fn project(
             sessions_pending: snapshot.0.sessions_loading,
         };
         let surface = match input.start {
-            true => PaletteSurface::Start,
-            false => PaletteSurface::Modal,
+            true => CommandPaletteSurface::Start,
+            false => CommandPaletteSurface::Modal,
         };
         let rows = PaletteRows::build(&opened.0, &draft, surface);
         let palette = PaletteState::from_rows(&rows, &opened.0, &draft, surface);

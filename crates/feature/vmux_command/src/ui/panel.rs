@@ -1,8 +1,9 @@
-use super::PaletteSurface;
 use super::{CommandPalette, use_command_bar_ui};
 use dioxus::prelude::*;
 use vmux_api::command_bar::CommandBarPanelRequest;
 use vmux_ui::hooks::send;
+
+use crate::CommandPaletteSurface;
 
 #[component]
 pub fn CommandBarPanel() -> Element {
@@ -31,7 +32,7 @@ pub fn CommandBarPanel() -> Element {
                         class: "flex min-h-0 flex-1 flex-col",
                         CommandPalette {
                             state: ReadSignal::from(state),
-                            surface: PaletteSurface::Modal,
+                            surface: CommandPaletteSurface::Modal,
                             on_close: close,
                             on_activity: move |_| {},
                         }

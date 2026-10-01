@@ -18,10 +18,12 @@ use vmux_chat::event::{
     ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort,
 };
 use vmux_chat::host::{ChatModeStateChanged, ChatModelStateChanged, ChatView};
-use vmux_command::snapshot::{AgentPromptTarget, CommandBarProjection};
+use vmux_command::snapshot::CommandBarProjection;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_session::AcpSession;
+
+use crate::route::AcpRoute;
 
 pub struct AcpSessionConfigPlugin;
 
@@ -318,9 +320,7 @@ fn remember_model_lists(
             })
             .collect::<Vec<_>>();
         let current = state.display_value(model).to_string();
-        let url = AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, &session.agent_id)
-            .url()
-            .to_string();
+        let url = AcpRoute::agent(&session.agent_id).url();
         last_used.remember_catalog(&session.agent_id, &url, &current, &listed);
     }
 }
@@ -342,9 +342,7 @@ fn remember_mode_lists(
                 description: option.description.clone(),
             })
             .collect::<Vec<_>>();
-        let url = AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, &session.agent_id)
-            .url()
-            .to_string();
+        let url = AcpRoute::agent(&session.agent_id).url();
         last_used.remember_catalog(&session.agent_id, &url, state.display_value(mode), &modes);
     }
 }

@@ -1,9 +1,10 @@
 use bevy::prelude::*;
 use vmux_api::protocol::AcpModeOption;
 use vmux_chat::event::ModelOptionEntry;
-use vmux_command::snapshot::AgentPromptTarget;
 use vmux_ecs::profile::ProfilePaths;
 use vmux_path::AtomicFile;
+
+use crate::route::AcpRoute;
 
 pub(super) struct ModelSelectionPlugin;
 
@@ -102,9 +103,7 @@ fn load_model_selections(mut models: Single<&mut AgentModelSelections>) {
     for (agent, entry) in saved {
         let mut memory = entry.memory();
         if !memory.url.is_empty() {
-            memory.url = AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, &agent)
-                .url()
-                .to_string();
+            memory.url = AcpRoute::agent(&agent).url();
         }
         models.by_agent.insert(agent, memory);
     }
@@ -121,9 +120,7 @@ fn load_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
         return;
     };
     for (agent, mut memory) in saved {
-        memory.url = AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, &agent)
-            .url()
-            .to_string();
+        memory.url = AcpRoute::agent(&agent).url();
         modes.by_agent.insert(agent, memory);
     }
     modes.dirty = false;

@@ -1517,8 +1517,6 @@ mod tests {
 
     #[test]
     fn dismiss_action_closes_command_bar_modal_in_one_pass() {
-        use bevy::ecs::system::RunSystemOnce;
-
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_plugins(Plugin)

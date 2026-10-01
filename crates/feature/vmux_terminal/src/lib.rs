@@ -33,5 +33,5 @@ pub use host::{
 };
 #[cfg(host)]
 pub(crate) use host::{
-    contract, launch, pid, plugin, process_monitor, shell_input, snapshot_updater, theme,
+    contract, launch, pid, plugin, process_monitor, shell_input, snapshot, theme,
 };
