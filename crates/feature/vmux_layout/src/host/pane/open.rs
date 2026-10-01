@@ -13,10 +13,7 @@ use super::{
     OpenRequest, PaneStacks,
     focus::PendingCursorWarp,
     identity::{SpawnCounter, SpawnSeq},
-    tree::{
-        Pane, PaneSplit, PaneSplitDirection, direction_to_split, first_leaf_descendant,
-        split_leaf_into_two, split_or_extend,
-    },
+    tree::{Pane, PaneSplit, PaneSplitDirection},
 };
 use crate::host::command::LayoutRequestSet;
 
@@ -160,7 +157,7 @@ fn handle_beside_requests(
                         &resolver.page_q,
                         &spawn_seq_overrides,
                     );
-                    let split_dir = direction_to_split(&direction);
+                    let split_dir = PaneSplitDirection::from(direction);
                     let already_split =
                         !split_this_batch.insert(req.pane) || split_dir_q.contains(req.pane);
                     let split = split_or_extend_for_batch(
@@ -338,7 +335,7 @@ fn split_or_extend_for_batch(
 ) -> BatchSplit {
     if already_split {
         return BatchSplit {
-            target: split_or_extend(
+            target: Pane::split_or_extend(
                 commands,
                 anchor,
                 split_dir,
@@ -354,7 +351,7 @@ fn split_or_extend_for_batch(
     let pending_info = pending_leaf_infos.remove(&anchor);
     pending_leaf_stacks.remove(&anchor);
     let (holder, target) =
-        super::spawn_split_from_leaf(commands, anchor, split_dir, existing_tabs, activate_new);
+        Pane::spawn_split(commands, anchor, split_dir, existing_tabs, activate_new);
     retired_leaf_panes.insert(anchor);
     let target_size = pending_info
         .as_ref()
@@ -805,7 +802,7 @@ impl PanePlacement<'_, '_> {
                     .unwrap_or_default();
                 let already_split =
                     !split_batch.insert(anchor) || self.split_dir_q.contains(anchor);
-                split_or_extend(commands, anchor, axis, &existing_tabs, focus, already_split)
+                Pane::split_or_extend(commands, anchor, axis, &existing_tabs, focus, already_split)
             }
             crate::placement::Placement::Focus { .. } => anchor_pane,
         }
@@ -841,7 +838,7 @@ fn find_sibling_pane(
     pane_children: &Query<&Children, With<Pane>>,
     leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
 ) -> Option<Entity> {
-    let target_split = direction_to_split(direction);
+    let target_split = PaneSplitDirection::from(*direction);
     let after = is_after_direction(direction);
 
     let mut cur = active;
@@ -869,7 +866,7 @@ fn find_sibling_pane(
         };
         let sibling_idx = if after { idx + 1 } else { idx.wrapping_sub(1) };
         let sibling = sibs.get(sibling_idx).copied()?;
-        return Some(first_leaf_descendant(sibling, pane_children, leaf_panes));
+        return Some(Pane::first_leaf(sibling, pane_children, leaf_panes));
     }
     None
 }
@@ -906,7 +903,7 @@ fn handle_in(
             .filter(|url| !url.is_empty())
             .unwrap_or_else(|| focused_space.resolved_startup_url());
 
-        let split_dir = direction_to_split(direction);
+        let split_dir = PaneSplitDirection::from(*direction);
 
         let (target_pane, was_split) = match target {
             PaneTarget::Existing => {
@@ -924,7 +921,7 @@ fn handle_in(
                             .get(active)
                             .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                             .unwrap_or_default();
-                        let p2 = split_leaf_into_two(
+                        let p2 = Pane::split_leaf(
                             &mut commands,
                             active,
                             split_dir,
@@ -940,8 +937,7 @@ fn handle_in(
                     .get(active)
                     .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                     .unwrap_or_default();
-                let p2 =
-                    split_leaf_into_two(&mut commands, active, split_dir, &existing_tabs, true);
+                let p2 = Pane::split_leaf(&mut commands, active, split_dir, &existing_tabs, true);
                 (p2, true)
             }
         };

@@ -25,13 +25,9 @@ use open::OpenPlugin;
 use open::{BesideOpenPlugin, DirectionalOpenPlugin};
 pub use open::{OpenBesideRequest, PanePlacement};
 use resize::ResizePlugin;
-pub use resize::{PaneDrag, PaneSize, PaneSplitGaps, apply_pane_split_gaps, pane_split_gaps};
+pub use resize::{PaneDrag, PaneSize, PaneSplitGaps};
 use tree::TreePlugin;
-pub use tree::{
-    Pane, PaneSplit, PaneSplitDirection, direction_to_split, first_leaf_descendant,
-    split_leaf_into_two, split_or_extend,
-};
-pub(crate) use tree::{set_split_direction, spawn_split_from_leaf};
+pub use tree::{Pane, PaneSplit, PaneSplitDirection};
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
 use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
 #[cfg(test)]

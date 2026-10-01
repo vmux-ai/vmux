@@ -1,7 +1,7 @@
 use crate::{
     active_pane::{ActiveStack, ProfileId},
     host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
-    pane::{Pane, PaneSplit, PaneStacks, PendingCursorWarp, first_leaf_descendant},
+    pane::{Pane, PaneSplit, PaneStacks, PendingCursorWarp},
     tab::{CloseTabRequest, Tab},
 };
 use bevy::{
@@ -309,7 +309,7 @@ fn close_last_stack_in_pane(
             })
             .unwrap_or(pane_siblings[0]);
         let focus_leaf =
-            first_leaf_descendant(new_active_pane, &closer.pane_children, &closer.leaf_panes);
+            Pane::first_leaf(new_active_pane, &closer.pane_children, &closer.leaf_panes);
         commands.entity(focus_leaf).insert(LastActivatedAt::now());
         if let Some(next) = first_stack_to_activate(focus_leaf, closer) {
             commands.entity(next).insert(LastActivatedAt::now());
@@ -337,11 +337,11 @@ fn close_last_stack_in_pane(
             .get(sibling)
             .map(|split| split.direction)
             .unwrap_or_default();
-        new_active_pane = first_leaf_descendant(sibling, &closer.pane_children, &closer.leaf_panes);
+        new_active_pane = Pane::first_leaf(sibling, &closer.pane_children, &closer.leaf_panes);
         commands.entity(sibling).remove::<ChildOf>();
         commands.queue(move |world: &mut World| {
             world.despawn(sibling);
-            crate::pane::set_split_direction(world, parent, sibling_direction);
+            sibling_direction.apply(world, parent);
         });
     } else {
         new_active_pane = parent;

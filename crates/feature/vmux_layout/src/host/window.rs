@@ -1,7 +1,7 @@
 use crate::{
     Header, LayoutStartupSet, TabLayoutSpawnContent, TabLayoutSpawnRequest,
     cef::LayoutCef,
-    pane::{Pane, PaneSplit, PaneSplitDirection, pane_split_gaps},
+    pane::{Pane, PaneSplit, PaneSplitDirection},
     settings::LayoutSettings,
     side_sheet::{SideSheet, SideSheetPosition},
     stack::Stack,
@@ -584,7 +584,7 @@ pub fn spawn_tab_scaffold_in_space(
         ))
         .id();
 
-    let gap = pane_split_gaps(PaneSplitDirection::Row, gap_px);
+    let gap = PaneSplitDirection::Row.gaps(gap_px);
     let split_root = commands
         .spawn((
             Pane,

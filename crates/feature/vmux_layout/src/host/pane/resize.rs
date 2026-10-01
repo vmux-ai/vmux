@@ -60,23 +60,27 @@ pub struct PaneDrag {
     next_grow: f32,
 }
 
-pub fn pane_split_gaps(direction: PaneSplitDirection, gap: f32) -> PaneSplitGaps {
-    match direction {
-        PaneSplitDirection::Row => PaneSplitGaps {
-            column_gap: Val::Px(gap),
-            row_gap: Val::Px(0.0),
-        },
-        PaneSplitDirection::Column => PaneSplitGaps {
-            column_gap: Val::Px(0.0),
-            row_gap: Val::Px(gap),
-        },
+impl PaneSplitDirection {
+    pub fn gaps(self, gap: f32) -> PaneSplitGaps {
+        match self {
+            Self::Row => PaneSplitGaps {
+                column_gap: Val::Px(gap),
+                row_gap: Val::Px(0.0),
+            },
+            Self::Column => PaneSplitGaps {
+                column_gap: Val::Px(0.0),
+                row_gap: Val::Px(gap),
+            },
+        }
     }
 }
 
-pub fn apply_pane_split_gaps(split: &PaneSplit, node: &mut Node, gap: f32) {
-    let gaps = pane_split_gaps(split.direction, gap);
-    node.column_gap = gaps.column_gap;
-    node.row_gap = gaps.row_gap;
+impl PaneSplit {
+    pub fn apply_gaps(&self, node: &mut Node, gap: f32) {
+        let gaps = self.direction.gaps(gap);
+        node.column_gap = gaps.column_gap;
+        node.row_gap = gaps.row_gap;
+    }
 }
 
 fn from_commands(
@@ -375,7 +379,7 @@ fn sync_split_gaps(
         return;
     }
     for (split, mut node) in &mut splits {
-        apply_pane_split_gaps(split, &mut node, crate::event::PANE_GAP_PX);
+        split.apply_gaps(&mut node, crate::event::PANE_GAP_PX);
     }
 }
 
@@ -460,8 +464,8 @@ mod tests {
 
     #[test]
     fn split_gap_only_applies_on_split_axis() {
-        let row = pane_split_gaps(PaneSplitDirection::Row, 8.0);
-        let column = pane_split_gaps(PaneSplitDirection::Column, 8.0);
+        let row = PaneSplitDirection::Row.gaps(8.0);
+        let column = PaneSplitDirection::Column.gaps(8.0);
 
         assert_eq!(row.column_gap, Val::Px(8.0));
         assert_eq!(row.row_gap, Val::Px(0.0));
@@ -480,7 +484,7 @@ mod tests {
             ..default()
         };
 
-        apply_pane_split_gaps(&split, &mut node, 8.0);
+        split.apply_gaps(&mut node, 8.0);
 
         assert_eq!(node.column_gap, Val::Px(8.0));
         assert_eq!(node.row_gap, Val::Px(0.0));

@@ -17,7 +17,7 @@ use crate::{
 
 #[cfg(test)]
 use super::PaneSplitDirection;
-use super::{CloseRequest, Pane, PaneSplit, PaneStacks, first_leaf_descendant};
+use super::{CloseRequest, Pane, PaneSplit, PaneStacks};
 use crate::host::command::LayoutRequestSet;
 
 pub(super) struct ClosePlugin;
@@ -159,7 +159,7 @@ fn close(
                 .copied()
                 .max_by_key(|&entity| pane_times.get(entity).map(|(_, time)| time.0).unwrap_or(0))
                 .unwrap_or(siblings[0]);
-            let leaf = first_leaf_descendant(newest, &pane_children, &leaf_panes);
+            let leaf = Pane::first_leaf(newest, &pane_children, &leaf_panes);
             commands.entity(leaf).insert(LastActivatedAt::now());
             if let Some(stack) = focus.stack(leaf).or_else(|| pane_stacks.first(leaf)) {
                 commands.entity(stack).insert(LastActivatedAt::now());
@@ -184,11 +184,11 @@ fn close(
                 .get(sibling)
                 .map(|split| split.direction)
                 .unwrap_or_default();
-            new_active_pane = first_leaf_descendant(sibling, &pane_children, &leaf_panes);
+            new_active_pane = Pane::first_leaf(sibling, &pane_children, &leaf_panes);
             commands.entity(sibling).remove::<ChildOf>();
             commands.queue(move |world: &mut World| {
                 world.despawn(sibling);
-                super::set_split_direction(world, parent, direction);
+                direction.apply(world, parent);
             });
         } else {
             new_active_pane = parent;

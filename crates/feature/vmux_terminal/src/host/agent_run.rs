@@ -16,10 +16,7 @@ use vmux_ecs::profile::ProjectsDirectory;
 use vmux_layout::AgentPaneDirection;
 #[cfg(test)]
 use vmux_layout::LayoutContractPlugin;
-use vmux_layout::pane::{
-    Pane, PaneSplit, PaneSplitDirection, SpawnCounter, SpawnSeq, direction_to_split,
-    split_or_extend,
-};
+use vmux_layout::pane::{Pane, PaneSplit, PaneSplitDirection, SpawnCounter, SpawnSeq};
 use vmux_layout::placement::{PageKind, page_kind_for_url};
 use vmux_layout::stack::Stack;
 use vmux_layout::tab::Tab;
@@ -284,7 +281,7 @@ impl AgentPane {
             .get(self.0)
             .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
             .unwrap_or_default();
-        let split_dir = direction_to_split(&Self::direction(direction));
+        let split_dir = PaneSplitDirection::from(Self::direction(direction));
         let already_split = !split_this_batch.insert(self.0) || split_dir_q.contains(self.0);
         AgentPaneSplit {
             pane: self.0,
@@ -846,7 +843,7 @@ fn run_agent_commands(
                             &context.panes.split_dir_q,
                             &mut split_this_batch,
                         );
-                        split_or_extend(
+                        Pane::split_or_extend(
                             &mut commands,
                             split.pane,
                             split.direction,
@@ -1698,7 +1695,7 @@ mod tests {
             &split_dir_q,
             &mut split_batch,
         );
-        let target = split_or_extend(
+        let target = Pane::split_or_extend(
             &mut commands,
             split.pane,
             split.direction,

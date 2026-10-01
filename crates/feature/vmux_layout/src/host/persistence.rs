@@ -7,7 +7,7 @@ use vmux_ecs::{CreatedAt, Order, PageMetadata, PageOpenId, PageOpenTask};
 use vmux_flex::prelude::*;
 
 use crate::LayoutStartupSet;
-use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps};
+use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
 use crate::space::Space;
 use crate::stack::Stack;
 use crate::tab::Tab;
@@ -140,7 +140,7 @@ fn restore_views(layout: PersistedLayout, mut commands: Commands) {
             PaneSplitDirection::Row => FlexDirection::Row,
             PaneSplitDirection::Column => FlexDirection::Column,
         };
-        let gap = pane_split_gaps(split.direction, crate::event::PANE_GAP_PX);
+        let gap = split.direction.gaps(crate::event::PANE_GAP_PX);
         commands.entity(entity).insert((
             HostWindow(primary_window),
             Transform::default(),

@@ -4,7 +4,7 @@ use std::collections::HashSet as ApplyHashSet;
 use crate::protocol::{LayoutNode, LayoutSnapshot, NodeKind, parse_id};
 use crate::reconcile::*;
 
-use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps};
+use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
 use crate::protocol as proto;
 use crate::protocol::format_id;
 use crate::stack::Stack;
@@ -482,7 +482,7 @@ fn set_split_direction(
                 PaneSplitDirection::Row => FlexDirection::Row,
                 PaneSplitDirection::Column => FlexDirection::Column,
             };
-            let gap = pane_split_gaps(pane_split_dir, PANE_GAP_PX);
+            let gap = pane_split_dir.gaps(PANE_GAP_PX);
             node.column_gap = gap.column_gap;
             node.row_gap = gap.row_gap;
         }
@@ -648,7 +648,7 @@ fn apply_node(
                             PaneSplitDirection::Row => FlexDirection::Row,
                             PaneSplitDirection::Column => FlexDirection::Column,
                         };
-                        let gap = pane_split_gaps(pane_split_dir, PANE_GAP_PX);
+                        let gap = pane_split_dir.gaps(PANE_GAP_PX);
                         node.column_gap = gap.column_gap;
                         node.row_gap = gap.row_gap;
                     }
