@@ -1,13 +1,14 @@
 use crate::definition::CommandDefinition;
 use crate::open_target::OpenTarget;
 use crate::snapshot::{
-    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, ContributedCommand, ContributedPages,
+    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, ContributedAgentModels,
+    ContributedAgentModes, ContributedCommand, ContributedPages,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::Query;
 use vmux_api::command_bar::{
-    CommandBarCommandEntry, CommandBarPick, CommandBarPickRow, CommandBarPicker, CommandBarSpace,
-    CommandBarTab,
+    AgentModels, AgentModes, CommandBarCommandEntry, CommandBarPick, CommandBarPickRow,
+    CommandBarPicker, CommandBarSpace, CommandBarTab,
 };
 use vmux_api::command_bar::{CommandBarOpenEvent, OpenId};
 use vmux_ui::i18n::{Locale, TranslationValue};
@@ -134,6 +135,8 @@ pub struct CommandBarProjector<'w, 's> {
     pages: ContributedPages<'w, 's>,
     commands: Query<'w, 's, &'static ContributedCommand>,
     definitions: Query<'w, 's, &'static CommandDefinition>,
+    agent_models: Query<'w, 's, &'static ContributedAgentModels>,
+    agent_modes: Query<'w, 's, &'static ContributedAgentModes>,
 }
 
 pub struct CommandBarOpenProjection {
@@ -214,6 +217,19 @@ impl CommandBarProjector<'_, '_> {
             });
         }
 
+        let mut agent_models = self
+            .agent_models
+            .iter()
+            .map(|models| models.0.clone())
+            .collect::<Vec<AgentModels>>();
+        agent_models.sort_by(|left, right| left.agent_key.cmp(&right.agent_key));
+        let mut agent_modes = self
+            .agent_modes
+            .iter()
+            .map(|modes| modes.0.clone())
+            .collect::<Vec<AgentModes>>();
+        agent_modes.sort_by(|left, right| left.agent_key.cmp(&right.agent_key));
+
         CommandBarOpenEvent {
             open_id: projection.open_id,
             native_windowed: projection.native_windowed,
@@ -231,8 +247,8 @@ impl CommandBarProjector<'_, '_> {
             projects: projection.work.projects,
             search_engines: projection.work.search_engines,
             prompt_context: Default::default(),
-            agent_models: Vec::new(),
-            agent_modes: Vec::new(),
+            agent_models,
+            agent_modes,
             target: projection.target,
             picker: None,
             picks: Vec::new(),

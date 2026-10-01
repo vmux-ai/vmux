@@ -18,7 +18,7 @@ use vmux_chat::event::{
     ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort,
 };
 use vmux_chat::host::{ChatModeStateChanged, ChatModelStateChanged, ChatView};
-use vmux_command::snapshot::CommandBarProjection;
+use vmux_command::snapshot::{ContributedAgentModels, ContributedAgentModes};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_session::AcpSession;
@@ -347,51 +347,65 @@ fn remember_mode_lists(
     }
 }
 
+#[derive(Component)]
+struct ModelContribution;
+
+#[derive(Component)]
+struct ModeContribution;
+
 fn publish_models(
     last_used: Single<Ref<AgentModelSelections>>,
-    mut state: Single<&mut CommandBarProjection>,
+    existing: Query<Entity, With<ModelContribution>>,
+    mut commands: Commands,
 ) {
     if !last_used.is_changed() {
         return;
     }
-    let mut next = Vec::new();
+    for entity in &existing {
+        commands.entity(entity).despawn();
+    }
     for (agent_key, memory) in &last_used.by_agent {
         if memory.url.is_empty() || memory.models.is_empty() {
             continue;
         }
-        next.push(AgentModels {
-            agent_key: agent_key.clone(),
-            url: memory.url.clone(),
-            selected: memory.selected.clone(),
-            models: memory.models.clone(),
-        });
-    }
-    if state.agent_models.agents != next {
-        state.agent_models.agents = next;
+        commands.spawn((
+            Name::new(format!("Agent model catalog {agent_key}")),
+            ModelContribution,
+            ContributedAgentModels(AgentModels {
+                agent_key: agent_key.clone(),
+                url: memory.url.clone(),
+                selected: memory.selected.clone(),
+                models: memory.models.clone(),
+            }),
+        ));
     }
 }
 
 fn publish_modes(
     last_used: Single<Ref<AgentModeSelections>>,
-    mut state: Single<&mut CommandBarProjection>,
+    existing: Query<Entity, With<ModeContribution>>,
+    mut commands: Commands,
 ) {
     if !last_used.is_changed() {
         return;
     }
-    let mut next = Vec::new();
+    for entity in &existing {
+        commands.entity(entity).despawn();
+    }
     for (agent_key, memory) in &last_used.by_agent {
         if memory.url.is_empty() || memory.modes.is_empty() {
             continue;
         }
-        next.push(AgentModes {
-            agent_key: agent_key.clone(),
-            url: memory.url.clone(),
-            selected: memory.selected.clone(),
-            modes: memory.modes.clone(),
-        });
-    }
-    if state.agent_modes.agents != next {
-        state.agent_modes.agents = next;
+        commands.spawn((
+            Name::new(format!("Agent mode catalog {agent_key}")),
+            ModeContribution,
+            ContributedAgentModes(AgentModes {
+                agent_key: agent_key.clone(),
+                url: memory.url.clone(),
+                selected: memory.selected.clone(),
+                modes: memory.modes.clone(),
+            }),
+        ));
     }
 }
 
@@ -789,8 +803,6 @@ mod tests {
     fn acp_mode_catalog_uses_the_canonical_launcher_identity() {
         let mut app = App::new();
         let registry = app.world_mut().spawn(AgentModeSelections::default()).id();
-        app.world_mut()
-            .spawn(vmux_command::snapshot::CommandBarProjection::default());
         app.add_systems(
             Update,
             (
@@ -830,13 +842,11 @@ mod tests {
         let published = app
             .world()
             .iter_entities()
-            .find_map(|entity| entity.get::<vmux_command::snapshot::CommandBarProjection>())
+            .find_map(|entity| entity.get::<ContributedAgentModes>())
             .unwrap();
-        let published = &published.agent_modes;
-        assert_eq!(published.agents.len(), 1);
-        assert_eq!(published.agents[0].agent_key, "codex");
-        assert_eq!(published.agents[0].url, "vmux://sessions/codex");
-        assert_eq!(published.agents[0].selected, "agent");
+        assert_eq!(published.0.agent_key, "codex");
+        assert_eq!(published.0.url, "vmux://sessions/codex");
+        assert_eq!(published.0.selected, "agent");
         assert_eq!(
             app.world()
                 .get::<AgentModeSelections>(registry)

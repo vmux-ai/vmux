@@ -37,8 +37,6 @@ pub struct WriteCommandBarSnapshots;
 pub struct CommandBarProjection {
     pub workspace: CommandBarWorkspaceSnapshot,
     pub projects: CommandBarProjectRoots,
-    pub agent_models: CommandBarAgentModels,
-    pub agent_modes: CommandBarAgentModes,
     pub spaces: CommandBarSpacesSnapshot,
     pub terminals: CommandBarTerminalsSnapshot,
     pub pages: CommandBarPagesSnapshot,
@@ -58,16 +56,6 @@ pub struct CommandBarWorkspaceSnapshot {
 pub struct CommandBarProjectRoots {
     pub roots: Vec<String>,
     pub active: Option<String>,
-}
-
-#[derive(Default, Clone, Debug, PartialEq)]
-pub struct CommandBarAgentModels {
-    pub agents: Vec<vmux_api::command_bar::AgentModels>,
-}
-
-#[derive(Default, Clone, Debug, PartialEq)]
-pub struct CommandBarAgentModes {
-    pub agents: Vec<vmux_api::command_bar::AgentModes>,
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -116,6 +104,12 @@ pub struct ContributedPage {
     pub page: CommandBarPage,
     pub rank: usize,
 }
+
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct ContributedAgentModels(pub vmux_api::command_bar::AgentModels);
+
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct ContributedAgentModes(pub vmux_api::command_bar::AgentModes);
 
 #[derive(Component, Clone, Debug)]
 pub struct ContributedCommand {

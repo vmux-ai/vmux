@@ -7,7 +7,8 @@ use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPromptContext, OpenId
 use vmux_api::space::ProjectBranch;
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    ClaimedUrl, CommandBarProjection, ContributedCommand, ContributedPage,
+    ClaimedUrl, CommandBarProjection, ContributedAgentModels, ContributedAgentModes,
+    ContributedCommand, ContributedPage,
 };
 use vmux_command::{CommandBarOpenProjection, CommandBarProjector};
 use vmux_ecs::KeyboardOwner;
@@ -196,8 +197,6 @@ impl StartPromptContext<'_, '_> {
         active_tab: Option<Entity>,
         git: Option<&vmux_git::worktree::RepoInfo>,
         projects: Vec<vmux_api::space::ProjectRow>,
-        agent_models: Vec<vmux_api::command_bar::AgentModels>,
-        agent_modes: Vec<vmux_api::command_bar::AgentModes>,
         locale: &Locale,
     ) -> CommandBarOpenEvent {
         let active_stack_count = tabs.stack_q.iter().count();
@@ -219,8 +218,6 @@ impl StartPromptContext<'_, '_> {
         });
         payload.prompt_context = self.context(active_tab, git);
         payload.prompt_context.projects = projects;
-        payload.agent_models = agent_models;
-        payload.agent_modes = agent_modes;
         payload
     }
 }
@@ -513,11 +510,15 @@ fn sync_pages(
                 Changed<ContributedPage>,
                 Changed<ContributedCommand>,
                 Changed<ClaimedUrl>,
+                Changed<ContributedAgentModels>,
+                Changed<ContributedAgentModes>,
             )>,
         >,
         RemovedComponents<ContributedPage>,
         RemovedComponents<ContributedCommand>,
         RemovedComponents<ClaimedUrl>,
+        RemovedComponents<ContributedAgentModels>,
+        RemovedComponents<ContributedAgentModes>,
     ),
     locale: Option<Res<ResolvedLocale>>,
     focused: vmux_layout::stack::FocusedStack,
@@ -538,8 +539,14 @@ fn sync_pages(
     projector: CommandBarProjector,
     mut commands: Commands,
 ) {
-    let (contribution_changes, mut removed_pages, mut removed_commands, mut removed_claims) =
-        contributions;
+    let (
+        contribution_changes,
+        mut removed_pages,
+        mut removed_commands,
+        mut removed_claims,
+        mut removed_models,
+        mut removed_modes,
+    ) = contributions;
     let cwd = prompt_context.cwd(tab_gather.active_tab.get());
     let git_info = (!cwd.is_empty())
         .then(|| {
@@ -555,7 +562,9 @@ fn sync_pages(
     let contributions_changed = !contribution_changes.is_empty()
         || removed_pages.read().next().is_some()
         || removed_commands.read().next().is_some()
-        || removed_claims.read().next().is_some();
+        || removed_claims.read().next().is_some()
+        || removed_models.read().next().is_some()
+        || removed_modes.read().next().is_some();
     let changed = prompt_context.command_bar.is_changed()
         || contributions_changed
         || focus_changed
@@ -592,8 +601,6 @@ fn sync_pages(
         tab_gather.active_tab.get(),
         git_info.as_ref(),
         space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
-        prompt_context.command_bar.agent_models.agents.clone(),
-        prompt_context.command_bar.agent_modes.agents.clone(),
         &locale,
     );
     let project = payload
