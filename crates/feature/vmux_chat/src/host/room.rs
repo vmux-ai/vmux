@@ -229,9 +229,9 @@ fn project_snapshot(mut runtimes: ChangedChatProjection) {
         RemoteStatus::Errored(message) => message.clone(),
         _ => String::new(),
     };
-    let (agent_icon, agent_segment) = match speaker {
-        Some(agent) => (agent.icon.clone(), agent.id.as_str()),
-        None => (String::new(), ""),
+    let (agent_id, agent_icon) = match speaker {
+        Some(agent) => (agent.id.clone(), agent.icon.clone()),
+        None => (session.name.clone(), String::new()),
     };
     let generation = if transcript.room_id.as_ref() == Some(&session.room_id) {
         transcript.state.generation.max(1)
@@ -254,10 +254,11 @@ fn project_snapshot(mut runtimes: ChangedChatProjection) {
         status: conversation.status.page_status().to_string(),
         error,
         approval,
+        agent_id: agent_id.clone(),
         agent_name: session.name.clone(),
         conversation_title: session.name.clone(),
         agent_icon,
-        accent_color: vmux_api::avatar::agent_color(agent_segment),
+        accent_color: vmux_api::avatar::agent_color(&agent_id),
         ..ChatSnapshot::default()
     };
 }

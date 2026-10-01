@@ -27,6 +27,8 @@ pub struct ChatSnapshot {
     pub approval: Option<PendingApproval>,
     pub queued: Vec<QueuedPromptSnapshot>,
     pub paused: bool,
+    #[serde(default)]
+    pub agent_id: String,
     pub agent_name: String,
     pub conversation_title: String,
     pub agent_icon: String,

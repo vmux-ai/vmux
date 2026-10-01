@@ -16,7 +16,9 @@ use crate::host::{
 };
 use vmux_ecs::PageMetadata;
 use vmux_ecs::team::{Profile, User};
-use vmux_session::{AgentConversationTitle, AgentMessageTimes, AgentMessages, PromptQueue};
+use vmux_session::{
+    AcpSession, AgentConversationTitle, AgentMessageTimes, AgentMessages, PromptQueue,
+};
 use vmux_session::{AgentRunState, AgentTurnMeta};
 
 pub(super) struct Plugin;
@@ -71,6 +73,7 @@ fn track_turn_duration(
 fn push_to_page(
     sessions: Query<(
         Entity,
+        &AcpSession,
         Ref<AgentMessages>,
         Ref<AgentMessageTimes>,
         Ref<AgentRunState>,
@@ -105,8 +108,19 @@ fn push_to_page(
         last_push.remove(&stack);
         owed.remove(&stack);
     }
-    for (stack, messages, message_times, state, turn_meta, profile, meta, queue, imported, title) in
-        &sessions
+    for (
+        stack,
+        session,
+        messages,
+        message_times,
+        state,
+        turn_meta,
+        profile,
+        meta,
+        queue,
+        imported,
+        title,
+    ) in &sessions
     {
         let moved = user_moved
             || state.is_changed()
@@ -139,6 +153,7 @@ fn push_to_page(
         }
         owed.remove(&stack);
         let mut projection = ChatProjection::new(
+            session,
             &messages,
             &message_times,
             &state,
@@ -199,6 +214,7 @@ fn chat_snapshot_due(streaming: bool, urgent: bool, elapsed: Option<std::time::D
 impl ChatProjection {
     #[allow(clippy::too_many_arguments)]
     fn new(
+        session: &AcpSession,
         messages: &AgentMessages,
         message_times: &AgentMessageTimes,
         state: &AgentRunState,
@@ -266,6 +282,7 @@ impl ChatProjection {
                 status: state.status().to_string(),
                 error,
                 approval,
+                agent_id: session.agent_id.clone(),
                 agent_name,
                 conversation_title: conversation_title
                     .map(|title| title.0.clone())
@@ -340,6 +357,7 @@ fn sync_ready_views(
     >,
     child_of: Query<&ChildOf>,
     sessions: Query<(
+        &AcpSession,
         &AgentMessages,
         &AgentMessageTimes,
         &AgentRunState,
@@ -360,12 +378,23 @@ fn sync_ready_views(
             continue;
         };
         let stack = parent.parent();
-        let Ok((messages, message_times, state, turn_meta, profile, meta, queue, imported, title)) =
-            sessions.get(stack)
+        let Ok((
+            session,
+            messages,
+            message_times,
+            state,
+            turn_meta,
+            profile,
+            meta,
+            queue,
+            imported,
+            title,
+        )) = sessions.get(stack)
         else {
             continue;
         };
         let mut projection = ChatProjection::new(
+            session,
             messages,
             message_times,
             state,
@@ -559,6 +588,13 @@ mod tests {
 
     #[test]
     fn snapshot_reports_grouped_imported_item_boundary() {
+        let session = AcpSession {
+            agent_id: "codex".into(),
+            sid: "session".into(),
+            cwd: std::path::PathBuf::new(),
+            anchor: vmux_ecs::ProcessId::new(),
+            resume: None,
+        };
         let imported = ImportedConversation {
             source_agent: "Codex".into(),
             source_sid: "codex-1".into(),
@@ -582,6 +618,7 @@ mod tests {
             first_prompt: None,
         };
         let snapshot = ChatProjection::new(
+            &session,
             &AgentMessages::default(),
             &AgentMessageTimes::default(),
             &AgentRunState::Idle,
@@ -601,7 +638,15 @@ mod tests {
 
     #[test]
     fn snapshot_includes_approval_tool_and_input() {
+        let session = AcpSession {
+            agent_id: "codex".into(),
+            sid: "session".into(),
+            cwd: std::path::PathBuf::new(),
+            anchor: vmux_ecs::ProcessId::new(),
+            resume: None,
+        };
         let snapshot = ChatProjection::new(
+            &session,
             &AgentMessages::default(),
             &AgentMessageTimes::default(),
             &AgentRunState::AwaitingApproval {
@@ -630,8 +675,16 @@ mod tests {
 
     #[test]
     fn snapshot_includes_model_written_conversation_title() {
+        let session = AcpSession {
+            agent_id: "codex".into(),
+            sid: "session".into(),
+            cwd: std::path::PathBuf::new(),
+            anchor: vmux_ecs::ProcessId::new(),
+            resume: None,
+        };
         let title = AgentConversationTitle("Refine generated chat summaries".into());
         let snapshot = ChatProjection::new(
+            &session,
             &AgentMessages::default(),
             &AgentMessageTimes::default(),
             &AgentRunState::Idle,
@@ -654,8 +707,16 @@ mod tests {
 
     #[test]
     fn snapshot_uses_the_active_user_profile_avatar() {
+        let session = AcpSession {
+            agent_id: "codex".into(),
+            sid: "session".into(),
+            cwd: std::path::PathBuf::new(),
+            anchor: vmux_ecs::ProcessId::new(),
+            resume: None,
+        };
         let profile = Profile::user_named("Personal".into());
         let snapshot = ChatProjection::new(
+            &session,
             &AgentMessages::default(),
             &AgentMessageTimes::default(),
             &AgentRunState::Idle,

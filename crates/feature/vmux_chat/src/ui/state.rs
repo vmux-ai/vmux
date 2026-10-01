@@ -27,7 +27,6 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Chat {
-    pub agent: Signal<String>,
     pub transcript: Transcript,
     pub run: RunState,
     pub identity: AgentIdentity,
@@ -60,7 +59,6 @@ pub fn use_chat() -> Chat {
     let resume = ui.use_value::<ChatResumeState>();
     let selector = ui.use_value::<ChatSelectorState>();
     let chat = Chat {
-        agent: use_signal(CurrentAgent::read),
         transcript: use_transcript(ui),
         run: use_run_state(snapshot),
         identity: AgentIdentity { snapshot },
@@ -242,7 +240,7 @@ impl Chat {
 
 impl Chat {
     pub fn agent(&self) -> String {
-        (self.agent)()
+        self.identity.id()
     }
 
     pub fn header_name(&self) -> String {
@@ -759,6 +757,10 @@ pub struct AgentIdentity {
 }
 
 impl AgentIdentity {
+    pub fn id(self) -> String {
+        self.snapshot.value.read().agent_id.clone()
+    }
+
     pub fn name(self) -> String {
         self.snapshot.value.read().agent_name.clone()
     }
@@ -950,26 +952,5 @@ impl Resume {
 fn set_if_changed<T: PartialEq + 'static>(mut signal: Signal<T>, value: T) {
     if signal.peek().ne(&value) {
         signal.set(value);
-    }
-}
-
-struct CurrentAgent;
-
-impl CurrentAgent {
-    fn read() -> String {
-        if let Some(meta) = try_consume_context::<vmux_ecs::PageMetadata>()
-            && let Some(rest) = meta
-                .url
-                .strip_prefix(crate::ChatPlugin::URL)
-                .or_else(|| meta.url.strip_prefix("vmux://agent/"))
-            && let Some(agent) = Self::provider(rest)
-        {
-            return agent;
-        }
-        "agent".to_string()
-    }
-
-    fn provider(path: &str) -> Option<String> {
-        Some(path.split('/').find(|part| !part.is_empty())?.to_string())
     }
 }
