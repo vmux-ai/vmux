@@ -363,7 +363,7 @@ fn attach_error_pages(
             ..default()
         });
         commands.spawn((
-            Browser::native_page(vmux_api::error::ERROR_PAGE_URL, &attachment.failure.title),
+            Browser::native_page(vmux_layout::ErrorPage::URL, &attachment.failure.title),
             attachment.failure.clone(),
             ChildOf(attachment.stack),
         ));

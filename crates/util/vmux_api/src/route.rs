@@ -45,6 +45,18 @@ impl VmuxRoute {
         self.is_host("terminal")
     }
 
+    pub fn supports_inline_transition(&self) -> bool {
+        if !self.is_agent() {
+            return false;
+        }
+        let segments = self.path_segments().collect::<Vec<_>>();
+        match segments.as_slice() {
+            [] | [_] => true,
+            [_, session] => !matches!(*session, "cli" | "setup"),
+            _ => false,
+        }
+    }
+
     pub fn path_segments(&self) -> impl Iterator<Item = &str> {
         self.path().split('/').filter(|segment| !segment.is_empty())
     }
@@ -239,5 +251,32 @@ mod tests {
         assert!(root.same_page(&VmuxRoute::try_from("vmux://tools/acp").expect("canonical root")));
         assert!(child.in_subtree(&root));
         assert!(!sibling.in_subtree(&root));
+    }
+
+    #[test]
+    fn inline_transition_accepts_only_page_agent_routes() {
+        for url in [
+            "vmux://sessions/",
+            "vmux://sessions/codex",
+            "vmux://sessions/openai/session-1",
+        ] {
+            assert!(
+                VmuxRoute::try_from(url)
+                    .expect("route")
+                    .supports_inline_transition()
+            );
+        }
+        for url in [
+            "vmux://sessions/codex/cli",
+            "vmux://sessions/vibe/setup",
+            "vmux://sessions/provider/model/session",
+            "vmux://terminal/",
+        ] {
+            assert!(
+                !VmuxRoute::try_from(url)
+                    .expect("route")
+                    .supports_inline_transition()
+            );
+        }
     }
 }

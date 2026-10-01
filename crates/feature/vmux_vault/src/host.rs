@@ -30,18 +30,19 @@ use vmux_core::vault::{
     VaultWorkflowState,
 };
 
+#[vmux_native::page]
 pub struct VaultPlugin;
 
 impl Plugin for VaultPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::VaultPage::plugin()).add_plugins(
-            crate::ui::VaultPage::MANIFEST.plugin().hosted(
-                vmux_core::host::page::NativelyHosted::page(
-                    crate::ui::VaultPage::URL,
+            Self::MANIFEST
+                .plugin()
+                .hosted(vmux_core::host::page::NativelyHosted::page(
+                    Self::URL,
                     crate::ui::VaultPage::NATIVE.title,
-                ),
-            ),
+                )),
         );
 
         app.add_plugins((
@@ -130,7 +131,7 @@ fn page_ready(
     let Ok(page) = pages.get(webview) else {
         return;
     };
-    if !page.url.starts_with(crate::VAULT_PAGE_URL) {
+    if !page.url.starts_with(VaultPlugin::URL) {
         return;
     }
     let requested = VaultWorkflow::for_url(&page.url);

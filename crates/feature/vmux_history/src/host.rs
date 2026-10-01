@@ -21,7 +21,7 @@ impl Plugin for HistoryPlugin {
         app.add_plugins(
             Self::MANIFEST
                 .plugin()
-                .hosted(NativelyHosted::page(crate::PAGE_URL, "History")),
+                .hosted(NativelyHosted::page(Self::URL, "History")),
         )
         .add_plugins((
             spawn::HistorySpawnPlugin,

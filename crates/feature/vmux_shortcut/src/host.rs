@@ -1,5 +1,3 @@
-#[cfg(test)]
-use crate::PAGE_URL;
 use crate::{
     ShortcutBinding, ShortcutCatalog, ShortcutEntry, ShortcutGroup, ShortcutProbeClearRequest,
     ShortcutProbePress, ShortcutProbePressRequest, ShortcutProbeStatus, ShortcutProbeView,
@@ -847,7 +845,7 @@ mod tests {
         app.world_mut().spawn(PageOpenTask {
             id: PageOpenId::new(),
             stack,
-            url: PAGE_URL.to_string(),
+            url: ShortcutPlugin::URL.to_string(),
             request_id: None,
         });
 
@@ -881,7 +879,7 @@ mod tests {
         app.update();
 
         let metadata = app.world().get::<PageMetadata>(stack).unwrap();
-        assert_eq!(metadata.url, PAGE_URL);
+        assert_eq!(metadata.url, ShortcutPlugin::URL);
     }
 
     #[test]

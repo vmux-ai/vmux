@@ -11,7 +11,6 @@ pub mod state;
 
 pub const FILES_HOST: &str = "files";
 pub const GIT_PAGE_URL: &str = "git://";
-pub const GIT_DOCUMENT_URL: &str = "vmux://git/";
 
 pub struct GitUrl;
 

@@ -11,7 +11,7 @@ use vmux_core::{
 };
 use vmux_layout::LayoutStartupSet;
 use vmux_setting::{AppSettings, BookmarkFolderSettings};
-use vmux_shortcut::{PAGE_URL, ShortcutUrl};
+use vmux_shortcut::{ShortcutPlugin, ShortcutUrl};
 
 pub(super) struct BookmarkPersistencePlugin;
 
@@ -444,10 +444,10 @@ fn migrate_shortcut_aliases(
     let original_metadata = metadata.clone();
     let original_url = metadata.url.clone();
     if metadata.title.trim() == original_url.trim() {
-        metadata.title = PAGE_URL.to_string();
+        metadata.title = ShortcutPlugin::URL.to_string();
     }
-    if metadata.url != PAGE_URL {
-        metadata.url = PAGE_URL.to_string();
+    if metadata.url != ShortcutPlugin::URL {
+        metadata.url = ShortcutPlugin::URL.to_string();
     }
     let pinned = aliases.iter().any(|(_, _, pinned, _, _, _)| *pinned);
     let bookmarked = aliases
@@ -753,7 +753,7 @@ mod tests {
         let mut app = App::new();
         let auto_save = app.world_mut().spawn(BookmarkAutoSave::default()).id();
         app.insert_resource(OfferedBookmarkDefaults {
-            urls: vec!["vmux://cheatsheet/".into(), vmux_shortcut::PAGE_URL.into()],
+            urls: vec!["vmux://cheatsheet/".into(), ShortcutPlugin::URL.into()],
             ..default()
         })
         .add_systems(Update, migrate_shortcut_aliases);
@@ -775,7 +775,7 @@ mod tests {
                 Bookmark,
                 PageMetadata {
                     title: "Keyboard Shortcuts".into(),
-                    url: vmux_shortcut::PAGE_URL.into(),
+                    url: ShortcutPlugin::URL.into(),
                     ..default()
                 },
                 BookmarkOrder(8),
@@ -789,12 +789,12 @@ mod tests {
         assert!(entity.contains::<Bookmark>());
         assert_eq!(
             entity.get::<PageMetadata>().unwrap().url,
-            vmux_shortcut::PAGE_URL
+            ShortcutPlugin::URL
         );
         assert!(app.world().get_entity(duplicate).is_err());
         assert_eq!(
             app.world().resource::<OfferedBookmarkDefaults>().urls,
-            [vmux_shortcut::PAGE_URL]
+            [ShortcutPlugin::URL]
         );
         assert!(
             app.world()

@@ -26,7 +26,6 @@ pub(crate) use error::ErrorPage;
 #[vmux_native::page(
     component = Page,
     placement = layout,
-    document_url = crate::event::LAYOUT_PAGE_URL,
     transparent,
     stylesheet = "./assets/index.css",
     body_class = "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 text-foreground antialiased"

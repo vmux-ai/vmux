@@ -235,7 +235,8 @@ fn open_from_bar(
         let inline_transitioned = if matches!(
             request.open,
             None | Some(vmux_api::open_target::OpenTarget::InPlace)
-        ) && vmux_api::agent::supports_inline_agent_transition(&url)
+        ) && VmuxRoute::parse(&url)
+            .is_some_and(|route| route.supports_inline_transition())
             && let Some(stack) = inline_stack
         {
             inline_transition.write(InlineTransitionRequested { stack, webview });

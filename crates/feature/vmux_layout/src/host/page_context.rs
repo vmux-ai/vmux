@@ -156,7 +156,9 @@ fn git_page_ready(
     let Ok(page) = pages.get(webview) else {
         return;
     };
-    if !page.url.starts_with(vmux_git::GIT_PAGE_URL) && page.url != vmux_git::GIT_DOCUMENT_URL {
+    if !page.url.starts_with(vmux_git::GIT_PAGE_URL)
+        && page.url != vmux_git::GitPlugin::MANIFEST.url
+    {
         return;
     }
     let path = tabs

@@ -7,7 +7,7 @@ mod stream;
 mod tool;
 
 use crate::event::{HardwareButton, SimulatorClipboardOperation, SimulatorReady};
-use crate::url::{PAGE_URL, SimulatorRoute};
+use crate::url::SimulatorRoute;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
@@ -75,7 +75,7 @@ impl Plugin for SimulatorPlugin {
         app.add_plugins(
             Self::MANIFEST
                 .plugin()
-                .hosted(NativelyHosted::subtree(PAGE_URL, Self::MANIFEST.title)),
+                .hosted(NativelyHosted::subtree(Self::URL, Self::MANIFEST.title)),
         )
         .add_plugins(UiStatePlugin::<SimulatorReady>::default())
         .add_plugins(SimulatorToolPlugin)
@@ -583,7 +583,7 @@ fn announce(
     mut commands: Commands,
 ) {
     for (entity, meta, child_of, announced) in views.iter() {
-        if !meta.url.starts_with(PAGE_URL) {
+        if !meta.url.starts_with(SimulatorPlugin::URL) {
             continue;
         }
         let payload = match attachments.get(entity) {

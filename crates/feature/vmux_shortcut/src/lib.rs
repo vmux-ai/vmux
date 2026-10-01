@@ -6,16 +6,17 @@ impl vmux_core::host::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
-pub const PAGE_URL: &str = "vmux://shortcuts/";
+#[cfg(host)]
 pub struct ShortcutUrl;
 
+#[cfg(host)]
 impl ShortcutUrl {
     pub fn canonical(url: &str) -> Option<&'static str> {
         matches!(
             url.trim().trim_end_matches('/'),
             "vmux://shortcuts" | "vmux://cheatsheet" | "vmux://cheetsheet"
         )
-        .then_some(PAGE_URL)
+        .then_some(ShortcutPlugin::URL)
     }
 }
 

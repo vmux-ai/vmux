@@ -281,7 +281,7 @@ fn navigate(
                     && active_stack.is_some_and(|stack| {
                         stack_metadata.get(stack).is_ok_and(|metadata| {
                             VmuxRoute::parse(&metadata.url).is_some_and(|route| {
-                                VmuxRoute::parse(vmux_start::START_PAGE_URL)
+                                VmuxRoute::parse(vmux_start::StartPlugin::URL)
                                     .is_some_and(|start| route.same_page(&start))
                             })
                         })
@@ -364,7 +364,7 @@ fn navigate(
             !new_stack
                 && stack_metadata.get(*stack).is_ok_and(|metadata| {
                     VmuxRoute::parse(&metadata.url).is_some_and(|route| {
-                        VmuxRoute::parse(vmux_start::START_PAGE_URL)
+                        VmuxRoute::parse(vmux_start::StartPlugin::URL)
                             .is_some_and(|start| route.same_page(&start))
                     })
                 })

@@ -3,10 +3,7 @@ use std::cmp::Ordering;
 use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 
 pub const PAGE_HOST: &str = "simulator";
-pub const PAGE_URL: &str = "vmux://simulator/";
 pub const PLATFORM: &str = "ios";
-
-pub const UNPINNED_URL: &str = "vmux://simulator/ios";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IosVersion(String);
@@ -200,7 +197,7 @@ mod tests {
     #[test]
     fn whole_urls_route_here_only_for_this_host() {
         assert_eq!(
-            SimulatorRoute::try_from(UNPINNED_URL),
+            SimulatorRoute::try_from("vmux://simulator/ios"),
             Ok(SimulatorRoute::Unpinned)
         );
         assert_eq!(

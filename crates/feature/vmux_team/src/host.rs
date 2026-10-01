@@ -8,7 +8,7 @@ use vmux_core::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
 use vmux_core::event::team::{
-    ProfileRow, TEAM_PAGE_URL, TeamEvent, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest,
+    ProfileRow, TeamEvent, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest,
     TeamProfileCreateRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest,
 };
 use vmux_core::host::{UiStatePlugin, UiStateWrite};
@@ -338,7 +338,7 @@ fn open_team_stack_in_space(
     hierarchy: &SpaceHierarchy,
 ) -> Option<Entity> {
     stacks.iter().find_map(|(stack, meta)| {
-        (meta.url == TEAM_PAGE_URL && hierarchy.get(stack) == Some(space)).then_some(stack)
+        (meta.url == TeamPlugin::URL && hierarchy.get(stack) == Some(space)).then_some(stack)
     })
 }
 
@@ -363,7 +363,7 @@ fn open_request(
     }
 
     stack_requests.write(OpenRequest {
-        url: Some(TEAM_PAGE_URL.to_string()),
+        url: Some(TeamPlugin::URL.to_string()),
     });
 }
 
@@ -453,7 +453,7 @@ mod tests {
             .spawn((
                 Stack::default(),
                 PageMetadata {
-                    url: TEAM_PAGE_URL.to_string(),
+                    url: TeamPlugin::URL.to_string(),
                     ..default()
                 },
                 ChildOf(space),
@@ -584,7 +584,7 @@ mod tests {
         app.world_mut().spawn(PageOpenTask {
             id: PageOpenId::new(),
             stack,
-            url: TEAM_PAGE_URL.to_string(),
+            url: TeamPlugin::URL.to_string(),
             request_id: None,
         });
         app.update();

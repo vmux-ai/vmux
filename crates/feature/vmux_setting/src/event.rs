@@ -1,4 +1,3 @@
-pub const SETTINGS_PAGE_URL: &str = "vmux://settings/";
 #[vmux_api::ui_event]
 pub struct CheckForUpdatesEvent;
 

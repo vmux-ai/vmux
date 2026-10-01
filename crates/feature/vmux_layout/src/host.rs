@@ -47,7 +47,7 @@ pub use cef::{
 pub use contract::LayoutContractPlugin;
 pub use pane::OpenBesideRequest;
 pub use persistence::LayoutPersistenceSet;
-pub use plugin::LayoutPlugin;
+pub use plugin::{ErrorPage, LayoutPlugin};
 pub use stack::{CloseStackReason, CloseStackRequest};
 pub use vmux_core::ContributedCommandChosen;
 pub use vmux_core::launcher::LauncherDismissRequest;

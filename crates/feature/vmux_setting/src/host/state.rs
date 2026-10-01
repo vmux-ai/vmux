@@ -15,9 +15,7 @@ use vmux_layout::{
     stack::FocusedStack,
 };
 
-use crate::event::{
-    CheckForUpdatesEvent, CheckForUpdatesRequest, SETTINGS_PAGE_URL, SettingsRequest,
-};
+use crate::event::{CheckForUpdatesEvent, CheckForUpdatesRequest, SettingsRequest};
 use crate::state::SettingsUiState;
 use crate::{AppSettings, SettingsWriteRequest};
 use vmux_flex::prelude::*;
@@ -89,11 +87,11 @@ impl Settings {
             (
                 Self,
                 Browser,
-                WebviewSource::new(SETTINGS_PAGE_URL),
-                ResolvedWebviewUri(SETTINGS_PAGE_URL.to_string()),
+                WebviewSource::new(crate::SettingsPlugin::URL),
+                ResolvedWebviewUri(crate::SettingsPlugin::URL.to_string()),
                 PageMetadata {
                     title: "Settings".to_string(),
-                    url: SETTINGS_PAGE_URL.to_string(),
+                    url: crate::SettingsPlugin::URL.to_string(),
                     icon: PageIcon::None,
                     bg_color: None,
                 },
@@ -158,7 +156,7 @@ fn handle_open_settings_command(
         };
         page_open.write(PageOpenRequest {
             target: PageOpenTarget::NewStackInPane(pane),
-            url: SETTINGS_PAGE_URL.to_string(),
+            url: crate::SettingsPlugin::URL.to_string(),
             request_id: None,
         });
     }
@@ -184,7 +182,7 @@ mod page_open_tests {
             .spawn(PageOpenTask {
                 id: PageOpenId::new(),
                 stack,
-                url: SETTINGS_PAGE_URL.to_string(),
+                url: crate::SettingsPlugin::URL.to_string(),
                 request_id: None,
             })
             .id();
@@ -217,7 +215,7 @@ mod page_open_tests {
             app.world_mut().spawn(PageOpenTask {
                 id: PageOpenId::new(),
                 stack,
-                url: SETTINGS_PAGE_URL.to_string(),
+                url: crate::SettingsPlugin::URL.to_string(),
                 request_id: None,
             });
         }

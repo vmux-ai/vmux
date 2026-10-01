@@ -119,4 +119,4 @@ fn sync_header_visibility(
 }
 
 #[vmux_native::page(page = "error")]
-struct ErrorPage;
+pub struct ErrorPage;

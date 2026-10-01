@@ -171,7 +171,7 @@ fn page_ready(
     let Ok(page) = pages.get(entity) else {
         return;
     };
-    if !page.url.starts_with(crate::GIT_PAGE_URL) && page.url != crate::GIT_DOCUMENT_URL {
+    if !page.url.starts_with(crate::GIT_PAGE_URL) && page.url != super::GitPlugin::MANIFEST.url {
         return;
     }
     commands.entity(entity).insert(GitState::default());

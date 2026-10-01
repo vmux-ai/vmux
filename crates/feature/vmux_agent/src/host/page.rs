@@ -375,7 +375,10 @@ fn open(
             .get(task.stack)
             .ok()
             .map(|transition| transition.webview)
-            .filter(|_| vmux_start::supports_inline_agent_transition(&task.url));
+            .filter(|_| {
+                vmux_api::VmuxRoute::parse(&task.url)
+                    .is_some_and(|route| route.supports_inline_transition())
+            });
         match handle_agent_page_open_task(
             &task,
             initial_prompt,

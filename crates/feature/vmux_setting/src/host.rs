@@ -53,7 +53,7 @@ fn respond_settings_spawn(
     for req in reader.read() {
         page_open.write(PageOpenRequest {
             target: PageOpenTarget::Stack(req.target_stack),
-            url: crate::event::SETTINGS_PAGE_URL.to_string(),
+            url: SettingsPlugin::URL.to_string(),
             request_id: None,
         });
     }

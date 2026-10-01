@@ -106,7 +106,10 @@ fn submit_from_command_bar(
         && let Some(stack) = command_bar.workspace.stack
         && let Some(url) = contributed_pages.prompt_url(request.target_url.as_deref())
     {
-        if inline_stack == Some(stack) && vmux_api::agent::supports_inline_agent_transition(&url) {
+        if inline_stack == Some(stack)
+            && vmux_api::VmuxRoute::parse(&url)
+                .is_some_and(|route| route.supports_inline_transition())
+        {
             inline_transition.write(InlineTransitionRequested { stack, webview });
             if let Some(proxy) = proxy.as_deref() {
                 let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);

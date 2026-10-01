@@ -8,8 +8,7 @@ use vmux_command::ui::PaletteSurface;
 use vmux_command::ui::{CommandPalette, use_command_bar_ui};
 
 #[vmux_native::page(
-    component = Page,
-    document_url = crate::START_PAGE_URL
+    component = Page
 )]
 pub(crate) struct StartPage;
 

@@ -1,8 +1,6 @@
 #[cfg(bevy_linked)]
 use bevy_ecs::component::Component;
 
-pub const ERROR_PAGE_URL: &str = "vmux://error/";
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(bevy_linked, derive(Component))]
 pub struct ErrorPageData {

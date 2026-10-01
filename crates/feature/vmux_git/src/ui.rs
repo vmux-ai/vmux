@@ -20,7 +20,6 @@ pub use shared::{DiffView, GitFooter};
 
 #[vmux_native::page(
     component = Page,
-    document_url = crate::GIT_DOCUMENT_URL,
     subtree
 )]
 pub(crate) struct GitPage;

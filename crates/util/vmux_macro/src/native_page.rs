@@ -215,7 +215,9 @@ impl Parse for ManifestArgs {
 
 fn expand_manifest(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStream> {
     let args = syn::parse2::<ManifestArgs>(args)?;
-    let manifest = PageManifestFile::read(&args.file, args.page.as_ref())?.manifest(&args.file)?;
+    let page = PageManifestFile::read(&args.file, args.page.as_ref())?;
+    let url = LitStr::new(&page.url, args.file.span());
+    let manifest = page.manifest(&args.file)?;
     let ident = &input.ident;
     let file = &args.file;
     Ok(quote! {
@@ -224,6 +226,7 @@ fn expand_manifest(args: TokenStream, input: DeriveInput) -> syn::Result<TokenSt
         #input
 
         impl #ident {
+            pub const URL: &'static str = #url;
             pub const MANIFEST: ::vmux_core::page::PageManifest = #manifest;
         }
     })
@@ -409,6 +412,10 @@ impl Parse for Args {
             if title.is_none() {
                 title = Some(LitStr::new(&page_manifest.title, manifest_file.span()));
             }
+            if document_url.is_none() && !page_manifest.manifest_url.is_empty() {
+                let value = LitStr::new(&page_manifest.manifest_url, manifest_file.span());
+                document_url = Some(parse_quote!(#value));
+            }
             if title_message_id.is_none() && !page_manifest.title_message_id.is_empty() {
                 title_message_id = Some(LitStr::new(
                     &page_manifest.title_message_id,
@@ -553,11 +560,15 @@ fn expand_native(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStre
     } else {
         None
     };
+    let placement = args.placement;
     let url = args.url;
     let title = args.title;
     let component = args.component;
     let document_url = match args.document_url {
         Some(url) => quote! { ::core::option::Option::Some(#url) },
+        None if matches!(placement, Placement::Layout) => {
+            quote! { ::core::option::Option::Some(#url) }
+        }
         None => quote! { ::core::option::Option::Some("vmux://start/") },
     };
     let dom_group = match args.dom_group {
@@ -574,7 +585,7 @@ fn expand_native(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStre
     let transparent = args.transparent;
     let owns_subtree = args.owns_subtree;
     let permissions = args.permissions;
-    let plugin = match args.placement {
+    let plugin = match placement {
         Placement::Layout => quote! { ::vmux_native::NativePagePlugin::as_layout(&Self::NATIVE) },
         Placement::Pane => quote! { ::vmux_native::NativePagePlugin::in_pane(&Self::NATIVE) },
         Placement::Modal => quote! { ::vmux_native::NativePagePlugin::as_modal(&Self::NATIVE) },

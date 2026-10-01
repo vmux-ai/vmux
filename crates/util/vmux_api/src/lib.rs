@@ -1,6 +1,5 @@
 extern crate self as vmux_api;
 
-pub mod agent;
 pub mod avatar;
 pub mod bin_event;
 pub mod bookmark;

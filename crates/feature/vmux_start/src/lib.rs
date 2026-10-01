@@ -20,8 +20,6 @@ pub use host::StartPlugin;
 
 pub mod roster;
 
-pub use vmux_api::agent::supports_inline_agent_transition;
-
 #[cfg(host)]
 #[derive(bevy::prelude::Component, Clone, Copy, Debug)]
 pub struct StartInlineTransition {
@@ -31,5 +29,3 @@ pub struct StartInlineTransition {
 #[cfg(host)]
 #[derive(bevy::prelude::Component)]
 pub struct StartInlineTransitionView;
-
-pub const START_PAGE_URL: &str = "vmux://start/";

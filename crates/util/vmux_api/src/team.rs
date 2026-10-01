@@ -1,5 +1,3 @@
-pub const TEAM_PAGE_URL: &str = "vmux://team/";
-
 #[vmux_api::ui_state(Default, Eq)]
 pub struct TeamEvent {
     pub members: Vec<TeamMemberRow>,

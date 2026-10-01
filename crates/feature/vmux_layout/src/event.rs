@@ -3,7 +3,6 @@ use std::path::Path;
 use vmux_api::bookmark::{BookmarkFolderChoice, BookmarkRow};
 use vmux_core::{PageIcon, PageMetadata};
 
-pub const LAYOUT_PAGE_URL: &str = "vmux://layout/";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 #[vmux_api::contract(Default, Eq)]
 pub struct ReloadEffect {

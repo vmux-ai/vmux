@@ -15,7 +15,6 @@ use vmux_core::PageMetadata;
 use vmux_core::host::manifest::FeaturePlugin;
 use vmux_ui::i18n::Locale;
 
-use crate::START_PAGE_URL;
 use crate::event::StartSelectWorkspace;
 use vmux_core::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_layout::settings::ResolvedLocale;
@@ -31,7 +30,7 @@ impl Plugin for StartPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::StartPage::plugin());
         app.add_plugins(Self::MANIFEST.plugin().hosted(
-            vmux_core::host::page::NativelyHosted::page(START_PAGE_URL, "Start"),
+            vmux_core::host::page::NativelyHosted::page(Self::URL, "Start"),
         ))
         .add_message::<InlineTransitionRequested>()
         .add_systems(Update, (mark_launcher, begin_inline));
@@ -569,7 +568,7 @@ fn sync_pages(
     let targets: Vec<(Entity, bool)> = starts
         .iter()
         .filter_map(|(e, meta, synced, keyboard_target)| {
-            if !meta.url.starts_with(START_PAGE_URL) {
+            if !meta.url.starts_with(StartPlugin::URL) {
                 return None;
             }
             if !browsers.can_emit_to(&e) {
@@ -649,7 +648,7 @@ fn mark_launcher(
     mut commands: Commands,
 ) {
     for (entity, meta) in starts.iter() {
-        if meta.url.starts_with(START_PAGE_URL) {
+        if meta.url.starts_with(StartPlugin::URL) {
             commands.entity(entity).try_insert((
                 HostsLauncher,
                 vmux_command::snapshot::CommandBarUiStateUpdates::default(),
@@ -725,7 +724,7 @@ mod tests {
         app.add_plugins(StartPlugin);
         app.world_mut().run_schedule(PreStartup);
         let mut q = app.world_mut().query::<&PageManifest>();
-        assert!(q.iter(app.world()).any(|m| m.url == START_PAGE_URL));
+        assert!(q.iter(app.world()).any(|m| m.url == StartPlugin::URL));
     }
 
     #[test]
@@ -747,28 +746,6 @@ mod tests {
                 .is_some(),
             "the surviving half of the transition still applies"
         );
-    }
-
-    #[test]
-    fn inline_transition_only_supports_page_agents() {
-        assert!(crate::supports_inline_agent_transition(
-            "vmux://sessions/codex"
-        ));
-        assert!(crate::supports_inline_agent_transition(
-            "vmux://sessions/openai/gpt-5/session"
-        ));
-        assert!(!crate::supports_inline_agent_transition(
-            "vmux://sessions/codex/cli"
-        ));
-        assert!(!crate::supports_inline_agent_transition(
-            "vmux://sessions/vibe/setup"
-        ));
-        assert!(crate::supports_inline_agent_transition(
-            "vmux://sessions/cliff"
-        ));
-        assert!(crate::supports_inline_agent_transition(
-            "vmux://sessions/setupwizard"
-        ));
     }
 
     #[test]
