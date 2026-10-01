@@ -416,20 +416,6 @@ fn apply_selection(
     }
 }
 
-fn acp_auto_approval_message(
-    session: &AcpSession,
-    policy: &AgentApprovalPolicy,
-    request: &AgentApprovalRequest,
-) -> Option<ClientMessage> {
-    policy.allows(&request.name).then(|| {
-        ClientMessage::Shared(SharedMessage::AgentApprove {
-            sid: session.sid.clone(),
-            call_id: request.call_id.clone(),
-            decision: ApprovalDecision::AllowAlways,
-        })
-    })
-}
-
 fn auto_allow(
     trigger: On<AgentApprovalRequest>,
     sessions: Query<(&AcpSession, &AgentApprovalPolicy)>,
@@ -439,10 +425,16 @@ fn auto_allow(
     let Ok((session, policy)) = sessions.get(request.session) else {
         return;
     };
-    let Some(message) = acp_auto_approval_message(session, policy, request) else {
+    if !policy.allows(&request.name) {
         return;
-    };
-    service_requests.write(ServiceRequest(message));
+    }
+    service_requests.write(ServiceRequest(ClientMessage::Shared(
+        SharedMessage::AgentApprove {
+            sid: session.sid.clone(),
+            call_id: request.call_id.clone(),
+            decision: ApprovalDecision::AllowAlways,
+        },
+    )));
 }
 
 #[allow(clippy::type_complexity)]
@@ -610,7 +602,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auto_approval_message_targets_requested_session_and_call() {
+    fn auto_approval_targets_requested_session_and_call() {
+        let mut app = App::new();
+        app.add_message::<ServiceRequest>().add_observer(auto_allow);
         let session = AcpSession {
             agent_id: "claude".into(),
             sid: "s1".into(),
@@ -620,23 +614,29 @@ mod tests {
         };
         let mut policy = AgentApprovalPolicy::default();
         policy.allow("run");
-        let request = AgentApprovalRequest {
-            session: Entity::PLACEHOLDER,
+        let session = app.world_mut().spawn((session, policy)).id();
+        app.world_mut().trigger(AgentApprovalRequest {
+            session,
             call_id: "call-1".into(),
             name: "run".into(),
-            args: serde_json::json!({}),
-        };
+        });
+        app.update();
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<ServiceRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
 
         assert!(matches!(
-            acp_auto_approval_message(&session, &policy, &request),
-            Some(ClientMessage::Shared(SharedMessage::AgentApprove {
+            requests.as_slice(),
+            [ServiceRequest(ClientMessage::Shared(SharedMessage::AgentApprove {
                 sid,
                 call_id,
                 decision,
-            }))
+            }))]
                 if sid == "s1"
                     && call_id == "call-1"
-                    && decision == ApprovalDecision::AllowAlways
+                    && *decision == ApprovalDecision::AllowAlways
         ));
     }
 
@@ -677,7 +677,6 @@ mod tests {
             version: None,
             description: None,
             icon: None,
-            repository: None,
             distribution: crate::host::acp::registry::Distribution::default(),
         }])
         .unwrap();
@@ -884,7 +883,6 @@ mod tests {
             .resource_mut::<Messages<crate::host::event::UiAgentWorkspaceChanged>>()
             .write(crate::host::event::UiAgentWorkspaceChanged {
                 sid: "matching-sid".into(),
-                name: "quiet-amber-wolf".into(),
                 branch: "vibe/quiet-amber-wolf".into(),
                 cwd: worktree_dir.to_string_lossy().into_owned(),
                 workspace_cwd: project_dir.to_string_lossy().into_owned(),
@@ -1176,11 +1174,7 @@ mod tests {
         });
         app.world_mut().write_message(UiAgentAcpTerminalCreated {
             sid: "s1".into(),
-            terminal_id: "terminal-1".into(),
             process_id: ProcessId::new(),
-            command: "echo".into(),
-            args: vec!["hi".into()],
-            cwd: Some("/tmp".into()),
         });
 
         app.update();

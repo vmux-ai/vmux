@@ -10,7 +10,6 @@ pub const REGISTRY_URL: &str =
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Registry {
-    pub version: String,
     #[serde(default)]
     pub agents: Vec<RegistryAgent>,
 }
@@ -65,8 +64,6 @@ pub struct RegistryAgent {
     pub description: Option<String>,
     #[serde(default)]
     pub icon: Option<String>,
-    #[serde(default)]
-    pub repository: Option<String>,
     pub distribution: Distribution,
 }
 
@@ -185,7 +182,6 @@ mod tests {
     #[test]
     fn parses_all_distribution_types() {
         let reg: Registry = SAMPLE.parse().unwrap();
-        assert_eq!(reg.version, "1.0.0");
         assert_eq!(reg.agents.len(), 3);
 
         let claude = &reg.agents[0];

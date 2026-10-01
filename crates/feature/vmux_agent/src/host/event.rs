@@ -1,7 +1,6 @@
 use bevy::prelude::*;
-use serde_json::Value;
 use vmux_api::ProcessId;
-use vmux_api::protocol::{AcpSessionConfig, AgentRequestId, AgentRunStatus, JsonValue};
+use vmux_api::protocol::{AcpSessionConfig, AgentRequestId, JsonValue};
 
 pub use vmux_api::protocol::ApprovalDecision;
 pub use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
@@ -14,38 +13,6 @@ pub struct AgentToolCallRequest {
     pub args: JsonValue,
 }
 
-#[vmux_api::service_message(SharedEvent::AgentDelta)]
-pub struct UiAgentDelta {
-    pub sid: String,
-    pub text: String,
-}
-
-#[vmux_api::service_message(SharedEvent::AgentRunStatusChanged)]
-pub struct UiAgentRunStatus {
-    pub sid: String,
-    pub status: AgentRunStatus,
-}
-
-#[derive(Message)]
-pub struct UiAgentAwaitingApproval {
-    pub sid: String,
-    pub call_id: String,
-    pub name: String,
-    pub args: Value,
-}
-
-#[vmux_api::service_message(SharedEvent::AgentApprovalResolved)]
-pub struct UiAgentApprovalResolved {
-    pub sid: String,
-    pub call_id: String,
-}
-
-#[vmux_api::service_message(SharedEvent::AgentMessagesSnapshot)]
-pub struct UiAgentSnapshot {
-    pub sid: String,
-    pub messages: Vec<vmux_api::room::Message>,
-}
-
 #[vmux_api::service_message(SharedEvent::AcpAgentInfo)]
 pub struct UiAgentInfo {
     pub sid: String,
@@ -55,7 +22,6 @@ pub struct UiAgentInfo {
 #[vmux_api::service_message(SharedEvent::AcpWorkspaceChanged)]
 pub struct UiAgentWorkspaceChanged {
     pub sid: String,
-    pub name: String,
     pub branch: String,
     pub cwd: String,
     pub workspace_cwd: String,
@@ -85,11 +51,7 @@ pub struct UiAgentSessionCreated {
 #[vmux_api::service_message(AcpTerminalCreated)]
 pub struct UiAgentAcpTerminalCreated {
     pub sid: String,
-    pub terminal_id: String,
     pub process_id: ProcessId,
-    pub command: String,
-    pub args: Vec<String>,
-    pub cwd: Option<String>,
 }
 
 #[derive(Event, Clone, Debug)]
@@ -97,7 +59,6 @@ pub struct AgentApprovalRequest {
     pub session: Entity,
     pub call_id: String,
     pub name: String,
-    pub args: Value,
 }
 
 #[derive(Event, Clone, Debug)]

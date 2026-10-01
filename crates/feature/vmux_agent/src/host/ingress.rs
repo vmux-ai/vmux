@@ -1,8 +1,7 @@
 use crate::host::event::{
-    AgentRequestInput, AgentToolCallRequest, CommandOrigin, UiAgentAcpTerminalCreated,
-    UiAgentApprovalResolved, UiAgentAwaitingApproval, UiAgentDelta, UiAgentInfo, UiAgentRunStatus,
-    UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState, UiAgentSessionCreated,
-    UiAgentSnapshot, UiAgentWorkspaceChanged,
+    AgentApprovalRequest, AgentRequestInput, AgentToolCallRequest, CommandOrigin,
+    UiAgentAcpTerminalCreated, UiAgentInfo, UiAgentSessionConfigSelectionResult,
+    UiAgentSessionConfigState, UiAgentSessionCreated, UiAgentWorkspaceChanged,
 };
 use bevy::prelude::*;
 use vmux_api::protocol::ClientMessage;
@@ -10,6 +9,7 @@ use vmux_ecs::agent::AgentCommandResponse;
 use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
+use vmux_session::AcpSession;
 
 #[vmux_api::service_message(AgentRequest)]
 struct InboundAgentRequest {
@@ -23,7 +23,6 @@ struct InboundAgentAwaitingApproval {
     sid: String,
     call_id: String,
     name: String,
-    args: vmux_api::protocol::JsonValue,
 }
 
 pub(crate) struct AgentIngressPlugin;
@@ -32,11 +31,7 @@ impl Plugin for AgentIngressPlugin {
     fn build(&self, app: &mut App) {
         app.add_service_message::<InboundAgentRequest>()
             .add_service_message::<AgentToolCallRequest>()
-            .add_service_message::<UiAgentDelta>()
-            .add_service_message::<UiAgentRunStatus>()
             .add_service_message::<InboundAgentAwaitingApproval>()
-            .add_service_message::<UiAgentApprovalResolved>()
-            .add_service_message::<UiAgentSnapshot>()
             .add_service_message::<UiAgentInfo>()
             .add_service_message::<UiAgentWorkspaceChanged>()
             .add_service_message::<UiAgentSessionConfigState>()
@@ -46,7 +41,6 @@ impl Plugin for AgentIngressPlugin {
             .add_message::<ServiceRequest>()
             .add_message::<AgentCommandResponse>()
             .add_message::<AgentRequestInput>()
-            .add_message::<UiAgentAwaitingApproval>()
             .add_systems(
                 Update,
                 (
@@ -98,16 +92,20 @@ fn route_requests(
 
 fn route_approval_requests(
     mut inbound: MessageReader<InboundAgentAwaitingApproval>,
-    mut approvals: MessageWriter<UiAgentAwaitingApproval>,
+    sessions: Query<(Entity, &AcpSession)>,
+    mut commands: Commands,
 ) {
     for inbound in inbound.read() {
-        let args = serde_json::Value::try_from(&inbound.args)
-            .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
-        approvals.write(UiAgentAwaitingApproval {
-            sid: inbound.sid.clone(),
+        let Some(session) = sessions
+            .iter()
+            .find_map(|(entity, session)| (session.sid == inbound.sid).then_some(entity))
+        else {
+            continue;
+        };
+        commands.trigger(AgentApprovalRequest {
+            session,
             call_id: inbound.call_id.clone(),
             name: inbound.name.clone(),
-            args,
         });
     }
 }
@@ -115,12 +113,12 @@ fn route_approval_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::protocol::{AgentRequest, AgentRequestId, ServiceMessage, SharedEvent};
+    use vmux_api::protocol::{AgentRequest, AgentRequestId, ServiceMessage};
     use vmux_ecs::service::ServiceInbound;
     use vmux_space::AgentRenameProfile;
 
     #[test]
-    fn routes_agent_messages_without_terminal_ownership() {
+    fn routes_agent_requests_without_terminal_ownership() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AgentIngressPlugin));
         let request_id = AgentRequestId([7; 16]);
@@ -133,13 +131,6 @@ mod tests {
                 })
                 .unwrap(),
             }));
-        app.world_mut()
-            .write_message(ServiceInbound(ServiceMessage::Shared(
-                SharedEvent::AgentDelta {
-                    sid: "session".into(),
-                    text: "hello".into(),
-                },
-            )));
         app.update();
 
         let commands = app
@@ -147,15 +138,7 @@ mod tests {
             .resource_mut::<Messages<AgentRequestInput>>()
             .drain()
             .collect::<Vec<_>>();
-        let deltas = app
-            .world_mut()
-            .resource_mut::<Messages<UiAgentDelta>>()
-            .drain()
-            .collect::<Vec<_>>();
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].request_id, request_id);
-        assert_eq!(deltas.len(), 1);
-        assert_eq!(deltas[0].sid, "session");
-        assert_eq!(deltas[0].text, "hello");
     }
 }

@@ -581,7 +581,6 @@ mod tests {
             version: Some("1.0.0".to_string()),
             description: None,
             icon: None,
-            repository: None,
             distribution: Distribution {
                 binary: None,
                 npx: Some(PackageDist {

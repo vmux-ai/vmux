@@ -606,7 +606,6 @@ mod tests {
             version: None,
             description: None,
             icon: icon.map(str::to_string),
-            repository: None,
             distribution: Distribution::default(),
         }
     }
