@@ -10,7 +10,6 @@ pub use definition::{
     CommandRuntimePlugin, CommandShortcut, DispatchCommandInvocations, ReadCommandRequests,
     ShortcutDefinition, WriteCommandRequests,
 };
-pub use page_key::KeyPlugin;
 pub use payload::{
     CommandBarEntry, CommandBarOpenProjection, CommandBarPicks, CommandBarProjector,
 };
@@ -28,17 +27,13 @@ pub use snapshot::{
 };
 pub use tool::AgentInvokeCommand;
 pub use tool::CommandToolPlugin;
-pub use vmux_api::JsonSchema;
-
 mod plugin;
 
 mod bundle;
 mod command_bar;
 mod definition;
-mod page_key;
 mod payload;
 mod settings;
 mod shortcut;
 mod snapshot;
-mod surface;
 mod tool;

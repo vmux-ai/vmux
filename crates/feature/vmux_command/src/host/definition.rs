@@ -8,7 +8,7 @@ use vmux_ecs::JsonArguments;
 use vmux_ecs::host::manifest::{self, FeatureManifest};
 use vmux_ui::i18n::Locale;
 
-use crate::host::shortcut::{Binding, KeyCombo, Modifiers, ResolvedKey, Shortcut, Source, When};
+use crate::host::shortcut::{Binding, KeyCombo, Shortcut, Source, When};
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WriteCommandRequests;
@@ -681,35 +681,6 @@ fn dispatch(
             command,
             invocation,
         });
-    }
-}
-
-impl KeyCombo {
-    fn parse(value: &str) -> Option<Self> {
-        let mut modifiers = Modifiers::default();
-        let mut key = None;
-        for part in value.split('+').map(str::trim) {
-            match part.to_ascii_lowercase().as_str() {
-                "ctrl" | "control" => modifiers.ctrl = true,
-                "shift" => modifiers.shift = true,
-                "alt" | "option" => modifiers.alt = true,
-                "super" | "cmd" | "command" | "meta" | "cmdorctrl" => {
-                    modifiers.super_key = true;
-                }
-                _ => {
-                    if key.is_some() {
-                        return None;
-                    }
-                    let resolved = ResolvedKey::parse(part)?;
-                    key = Some(resolved.key);
-                    modifiers.shift |= resolved.implicit_shift;
-                }
-            }
-        }
-        Some(Self {
-            key: key?,
-            modifiers,
-        })
     }
 }
 

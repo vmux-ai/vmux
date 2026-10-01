@@ -437,9 +437,11 @@ async fn read_full_text(connection: &ServiceConnection, process_id: ProcessId) -
         };
         match message {
             ServiceMessage::AgentQueryResult(result) if result.request_id == request_id => {
-                return (!result.is_error)
-                    .then_some(result.content)
-                    .unwrap_or_default();
+                return if result.is_error {
+                    String::new()
+                } else {
+                    result.content
+                };
             }
             ServiceMessage::Error { .. } => return String::new(),
             _ => {}

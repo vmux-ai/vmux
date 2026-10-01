@@ -6,6 +6,7 @@ use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarPicker, CommandBarReadyEvent, CommandBarRenderedEvent,
     CommandBarSizeEvent, DismissRequest, OpenId,
 };
+use vmux_api::open_target::OpenTarget;
 use vmux_ecs::launcher::{LauncherDismissRequest, RendersLauncherPanel, RestoreKeyboardToStack};
 
 use crate::host::command_bar::CommandBarDismiss;
@@ -663,7 +664,7 @@ fn open(
 
     let bar_tabs = focus.tabs.clone();
 
-    let target = replace_active_stack.then_some(crate::open_target::OpenTarget::InPlace);
+    let target = replace_active_stack.then_some(OpenTarget::InPlace);
     let mut payload = sources.projector.project(CommandBarOpenProjection {
         open_id: OpenId(now_millis() as u64),
         native_windowed: false,

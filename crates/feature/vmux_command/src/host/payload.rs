@@ -3,7 +3,6 @@ use crate::host::snapshot::{
     CommandBarPagesSnapshot, CommandBarProjectRoots, CommandBarSpacesSnapshot,
     ContributedAgentModels, ContributedAgentModes, ContributedCommand, ContributedPages,
 };
-use crate::open_target::OpenTarget;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::Query;
 use vmux_api::command_bar::{
@@ -11,6 +10,7 @@ use vmux_api::command_bar::{
     CommandBarPicker, CommandBarSpace, CommandBarTab,
 };
 use vmux_api::command_bar::{CommandBarOpenEvent, OpenId};
+use vmux_api::open_target::OpenTarget;
 use vmux_ui::i18n::{Locale, TranslationValue};
 
 pub struct CommandBarEntry {

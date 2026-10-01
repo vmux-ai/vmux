@@ -4,8 +4,8 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use vmux_api::chat::{SlashCommand, SlashCommandEntry};
 use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
+use vmux_api::open_target::OpenTarget;
 use vmux_api::space::ProjectBranch;
-use vmux_command::open_target::OpenTarget;
 use vmux_command::{
     ClaimedUrl, CommandBarPagesSnapshot, CommandBarProjectRoots, CommandBarSpacesSnapshot,
     CommandBarTerminalPage, CommandBarWorkSnapshot, ContributedAgentModels, ContributedAgentModes,

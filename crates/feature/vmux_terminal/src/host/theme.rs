@@ -167,13 +167,14 @@ mod tests {
     }
 
     fn settings_with_font(font_size: f32) -> AppSettings {
-        let mut settings = AppSettings::default();
-        settings.terminal = Some(vmux_setting::TerminalSettings {
-            default_theme: "default".to_string(),
-            themes: vec![terminal_theme(font_size)],
+        AppSettings {
+            terminal: Some(vmux_setting::TerminalSettings {
+                default_theme: "default".to_string(),
+                themes: vec![terminal_theme(font_size)],
+                ..Default::default()
+            }),
             ..Default::default()
-        });
-        settings
+        }
     }
 
     fn run_font_size_command(start: f32, command: TerminalFontSizeCommand) -> (f32, usize) {
@@ -205,12 +206,14 @@ mod tests {
 
     #[test]
     fn font_size_materializes_missing_default_theme() {
-        let mut settings = AppSettings::default();
-        settings.terminal = Some(vmux_setting::TerminalSettings {
-            default_theme: "default".to_string(),
-            themes: Vec::new(),
+        let settings = AppSettings {
+            terminal: Some(vmux_setting::TerminalSettings {
+                default_theme: "default".to_string(),
+                themes: Vec::new(),
+                ..Default::default()
+            }),
             ..Default::default()
-        });
+        };
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)

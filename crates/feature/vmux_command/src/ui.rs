@@ -1,4 +1,3 @@
-use crate::prompt_media::{ChatPasteMedia, ChatPickFiles};
 use crate::ui::composer::{CommandComposerMenus, ComposerChips, ComposerMenuView};
 use crate::ui::input::{
     COMMAND_BAR_INPUT_ID, CommandBarField, Readline, TypedDigit, use_palette_input,
@@ -15,6 +14,7 @@ use vmux_api::command_bar::{
     CommandPaletteSubmitRequest, CommandPaletteUiState, PaletteGlyph, PaletteMode,
 };
 use vmux_api::input::UiKeyContext;
+use vmux_api::prompt_media::{ChatPasteMedia, ChatPickFiles};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposer, focus_prompt_end};

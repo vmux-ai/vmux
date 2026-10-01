@@ -2,11 +2,11 @@ use std::path::{Path, PathBuf};
 
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
+use vmux_api::open_target::PaneDirection;
 use vmux_api::protocol::{AgentCommandResult, ProcessId};
 use vmux_api::service::RUN_OSC;
 #[cfg(test)]
 use vmux_api::terminal::CursorStyle;
-use vmux_command::open_target::PaneDirection;
 use vmux_ecs::LastActivatedAt;
 use vmux_ecs::PageMetadata;
 use vmux_ecs::agent::{

@@ -11,17 +11,14 @@ pub use host::{
     CommandDefinition, CommandDispatch, CommandInvocation, CommandManifest, CommandMcp,
     CommandMessage, CommandPlugin, CommandRegistry, CommandRuntimePlugin, CommandShortcut,
     CommandToolPlugin, ContributedAgentModels, ContributedAgentModes, ContributedCommand,
-    ContributedPage, ContributedPages, DispatchCommandInvocations, JsonSchema, KeyCombo,
-    KeyContext, KeyPlugin, Keymap, Modifiers, PendingCommandBarReveal, ReadCommandRequests,
-    RegisteredPage, ResolvedKey, ResolvedLocale, ResumeRows, Shortcut, ShortcutDefinition, Source,
-    SpaceSummary, UiStatePlugin, When, WriteCommandBarRequests, WriteCommandBarSnapshots,
-    WriteCommandRequests,
+    ContributedPage, ContributedPages, DispatchCommandInvocations, KeyCombo, KeyContext, Keymap,
+    Modifiers, PendingCommandBarReveal, ReadCommandRequests, RegisteredPage, ResolvedKey,
+    ResolvedLocale, ResumeRows, Shortcut, ShortcutDefinition, Source, SpaceSummary, UiStatePlugin,
+    When, WriteCommandBarRequests, WriteCommandBarSnapshots, WriteCommandRequests,
 };
 pub use palette_surface::CommandPaletteSurface;
 #[cfg(ui)]
 pub use ui::{CommandBarPanel, CommandPalette, PaletteProps, ResultRow, use_command_bar_ui};
-pub use vmux_api::open_target;
-pub use vmux_api::prompt_media;
 pub use vmux_macro::command;
 
 extern crate self as vmux_command;
