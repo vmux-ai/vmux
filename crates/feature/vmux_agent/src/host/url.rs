@@ -25,23 +25,6 @@ impl AgentUrl {
         }
     }
 
-    pub fn sid(&self) -> &str {
-        match self {
-            Self::Acp { sid, .. } => sid.as_deref().unwrap_or(""),
-            Self::AcpDefault => "",
-        }
-    }
-
-    pub fn format(&self) -> String {
-        match self {
-            Self::Acp { id, sid } => match sid {
-                Some(sid) => format!("{}{id}/{sid}", vmux_chat::ChatPlugin::URL),
-                None => format!("{}{id}", vmux_chat::ChatPlugin::URL),
-            },
-            Self::AcpDefault => vmux_chat::ChatPlugin::URL.to_string(),
-        }
-    }
-
     pub(crate) fn rejects_persisted_store(body: &str) -> bool {
         let current_root = vmux_chat::ChatPlugin::URL.trim_end_matches('/');
         let legacy_root = "vmux://agent";
@@ -92,23 +75,6 @@ mod tests {
         assert_eq!(AgentUrl::parse("vmux://sessions/claude/cli"), None);
         assert_eq!(AgentUrl::parse("vmux://sessions/codex/cli/session-1"), None);
         assert_eq!(AgentUrl::parse("vmux://sessions/a/b/c"), None);
-    }
-
-    #[test]
-    fn acp_urls_round_trip() {
-        for url in [
-            AgentUrl::Acp {
-                id: "claude".into(),
-                sid: None,
-            },
-            AgentUrl::Acp {
-                id: "mistral-vibe".into(),
-                sid: Some("session-9".into()),
-            },
-            AgentUrl::AcpDefault,
-        ] {
-            assert_eq!(AgentUrl::parse(&url.format()), Some(url));
-        }
     }
 
     #[test]

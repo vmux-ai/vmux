@@ -6,7 +6,6 @@ use vmux_session::AgentRunState;
 pub enum AgentRunStateKind {
     Idle,
     Streaming,
-    RunningTool,
     AwaitingApproval,
     Errored,
 }
