@@ -32,7 +32,7 @@ use vmux_core::host::workspace::WorkspaceLocation;
 use super::AcpProjectionInput;
 #[cfg(test)]
 use super::projector::AcpProjector;
-use super::projector::{ApprovalDetailsQuery, is_conversation_title_tool};
+use super::projector::{AcpToolTitle, ApprovalDetailsQuery};
 use vmux_api::protocol::{
     AgentAttachment, AgentRunStatus, ApprovalDecision, ServiceMessage, SharedEvent,
     compose_agent_prompt,
@@ -286,7 +286,7 @@ struct AcpToolName<'a>(&'a str);
 
 impl AcpToolName<'_> {
     fn permissionless(&self) -> bool {
-        if is_conversation_title_tool(self.0) {
+        if AcpToolTitle::is_conversation_title(self.0) {
             return true;
         }
         let normalized = self.0.trim().to_ascii_lowercase();
@@ -2095,7 +2095,7 @@ mod tests {
         tokio::task::yield_now().await;
         harness.update();
         let (name, _) = waiting.await.unwrap().unwrap();
-        assert!(is_conversation_title_tool(&name));
+        assert!(AcpToolTitle::is_conversation_title(&name));
     }
 
     #[test]

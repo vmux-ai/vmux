@@ -36,69 +36,29 @@ struct AcpWorktreeMetadata {
     workspace_cwd: String,
 }
 
-fn workspace_changed_intent(
-    update: agent_client_protocol::schema::v1::SessionInfoUpdate,
-) -> Vec<Intent> {
-    let Some(value) = update
-        .meta
-        .as_ref()
-        .and_then(|meta| meta.get("worktree"))
-        .cloned()
-    else {
-        return Vec::new();
-    };
-    let Ok(worktree) = serde_json::from_value::<AcpWorktreeMetadata>(value) else {
-        return Vec::new();
-    };
-    let Ok(workspace) = WorkspaceLocation::new(
-        worktree.name,
-        worktree.branch,
-        worktree.cwd,
-        worktree.workspace_cwd,
-    ) else {
-        return Vec::new();
-    };
-    vec![Intent::WorkspaceChanged(workspace)]
-}
-
-fn file_touch_kind(kind: ToolKind) -> Option<vmux_api::protocol::FileTouchKind> {
-    use vmux_api::protocol::FileTouchKind;
-    match kind {
-        ToolKind::Read => Some(FileTouchKind::Read),
-        ToolKind::Edit | ToolKind::Delete | ToolKind::Move => Some(FileTouchKind::Edit),
-        _ => None,
+impl AcpWorktreeMetadata {
+    fn intents(update: agent_client_protocol::schema::v1::SessionInfoUpdate) -> Vec<Intent> {
+        let Some(value) = update
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get("worktree"))
+            .cloned()
+        else {
+            return Vec::new();
+        };
+        let Ok(worktree) = serde_json::from_value::<Self>(value) else {
+            return Vec::new();
+        };
+        let Ok(workspace) = WorkspaceLocation::new(
+            worktree.name,
+            worktree.branch,
+            worktree.cwd,
+            worktree.workspace_cwd,
+        ) else {
+            return Vec::new();
+        };
+        vec![Intent::WorkspaceChanged(workspace)]
     }
-}
-
-fn file_touch_intents(kind: ToolKind, locations: &[ToolCallLocation]) -> Vec<Intent> {
-    let Some(kind) = file_touch_kind(kind) else {
-        return Vec::new();
-    };
-    locations
-        .iter()
-        .map(|loc| Intent::FileTouched {
-            path: loc.path.to_string_lossy().into_owned(),
-            line: loc.line,
-            kind,
-        })
-        .collect()
-}
-
-fn locations_from_diffs(content: &[ToolCallContent]) -> Vec<ToolCallLocation> {
-    let mut paths = HashSet::new();
-    let mut locations = Vec::new();
-    for item in content {
-        if let ToolCallContent::Diff(diff) = item
-            && paths.insert(diff.path.clone())
-        {
-            locations.push(ToolCallLocation::new(diff.path.clone()));
-        }
-    }
-    locations
-}
-
-fn edit_tool_kind(kind: ToolKind) -> bool {
-    matches!(kind, ToolKind::Edit | ToolKind::Delete | ToolKind::Move)
 }
 
 const ACTIVE_FILE_TOUCH_LIMIT: usize = 1024;
@@ -111,45 +71,134 @@ struct FileTouchState {
     pending_edits: Vec<Intent>,
 }
 
-fn project_file_touches(
-    state: &mut FileTouchState,
-    kind: Option<ToolKind>,
-    locations: Option<&[ToolCallLocation]>,
-    status: Option<ToolCallStatus>,
-    full_update: bool,
-) -> (Vec<Intent>, bool) {
-    let identity_changed = full_update
-        || kind.is_some_and(|kind| kind != state.kind)
-        || locations.is_some_and(|locations| locations != state.locations);
-    if let Some(kind) = kind {
-        state.kind = kind;
-    }
-    if let Some(locations) = locations {
-        state.locations = locations.to_vec();
-    }
-    let current = file_touch_intents(state.kind, &state.locations);
-    match status {
-        Some(ToolCallStatus::Failed) => {
-            state.pending_edits.clear();
-            (Vec::new(), true)
+impl FileTouchState {
+    fn project(
+        &mut self,
+        kind: Option<ToolKind>,
+        locations: Option<&[ToolCallLocation]>,
+        status: Option<ToolCallStatus>,
+        full_update: bool,
+    ) -> (Vec<Intent>, bool) {
+        let identity_changed = full_update
+            || kind.is_some_and(|kind| kind != self.kind)
+            || locations.is_some_and(|locations| locations != self.locations);
+        if let Some(kind) = kind {
+            self.kind = kind;
         }
-        Some(ToolCallStatus::Completed) => {
-            let intents = if identity_changed {
-                current
-            } else {
-                std::mem::take(&mut state.pending_edits)
-            };
-            (intents, true)
+        if let Some(locations) = locations {
+            self.locations = locations.to_vec();
         }
-        _ if identity_changed => {
-            if edit_tool_kind(state.kind) {
-                state.pending_edits.clone_from(&current);
-            } else {
-                state.pending_edits.clear();
+        let current = self.intents();
+        match status {
+            Some(ToolCallStatus::Failed) => {
+                self.pending_edits.clear();
+                (Vec::new(), true)
             }
-            (current, false)
+            Some(ToolCallStatus::Completed) => {
+                let intents = if identity_changed {
+                    current
+                } else {
+                    std::mem::take(&mut self.pending_edits)
+                };
+                (intents, true)
+            }
+            _ if identity_changed => {
+                if Self::is_edit(self.kind) {
+                    self.pending_edits.clone_from(&current);
+                } else {
+                    self.pending_edits.clear();
+                }
+                (current, false)
+            }
+            _ => (Vec::new(), false),
         }
-        _ => (Vec::new(), false),
+    }
+
+    fn kind(kind: ToolKind) -> Option<vmux_api::protocol::FileTouchKind> {
+        use vmux_api::protocol::FileTouchKind;
+        match kind {
+            ToolKind::Read => Some(FileTouchKind::Read),
+            ToolKind::Edit | ToolKind::Delete | ToolKind::Move => Some(FileTouchKind::Edit),
+            _ => None,
+        }
+    }
+
+    fn intents(&self) -> Vec<Intent> {
+        let Some(kind) = Self::kind(self.kind) else {
+            return Vec::new();
+        };
+        self.locations
+            .iter()
+            .map(|location| Intent::FileTouched {
+                path: location.path.to_string_lossy().into_owned(),
+                line: location.line,
+                kind,
+            })
+            .collect()
+    }
+
+    fn is_edit(kind: ToolKind) -> bool {
+        matches!(kind, ToolKind::Edit | ToolKind::Delete | ToolKind::Move)
+    }
+}
+
+struct ToolContent;
+
+impl ToolContent {
+    fn locations(content: &[ToolCallContent]) -> Vec<ToolCallLocation> {
+        let mut paths = HashSet::new();
+        let mut locations = Vec::new();
+        for item in content {
+            if let ToolCallContent::Diff(diff) = item
+                && paths.insert(diff.path.clone())
+            {
+                locations.push(ToolCallLocation::new(diff.path.clone()));
+            }
+        }
+        locations
+    }
+
+    fn text(content: &[ToolCallContent]) -> String {
+        let mut output = String::new();
+        for item in content {
+            if let ToolCallContent::Content(inner) = item
+                && let ContentBlock::Text(text) = &inner.content
+            {
+                if !output.is_empty() {
+                    output.push('\n');
+                }
+                output.push_str(&text.text);
+            }
+        }
+        output
+    }
+}
+
+pub(crate) struct AcpToolTitle;
+
+impl AcpToolTitle {
+    pub(crate) fn is_conversation_title(title: &str) -> bool {
+        title
+            .trim()
+            .to_ascii_lowercase()
+            .split(|character: char| {
+                character.is_ascii_whitespace() || matches!(character, '-' | '.' | ':' | '_')
+            })
+            .filter(|part| !part.is_empty())
+            .eq(["mcp", "vmux", "set", "conversation", "title"])
+    }
+}
+
+struct AcpJson;
+
+impl AcpJson {
+    fn pretty(value: &serde_json::Value) -> String {
+        serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+    }
+
+    fn input(raw: Option<&serde_json::Value>) -> String {
+        raw.map(serde_json::Value::to_string)
+            .unwrap_or_else(|| "{}".to_string())
     }
 }
 
@@ -277,7 +326,7 @@ impl AcpProjector {
             SessionUpdate::ToolCall(tc) => self.apply_tool_call(tc),
             SessionUpdate::ToolCallUpdate(update) => self.apply_tool_call_update(update),
             SessionUpdate::Plan(plan) => self.upsert_plan(plan),
-            SessionUpdate::SessionInfoUpdate(update) => workspace_changed_intent(update),
+            SessionUpdate::SessionInfoUpdate(update) => AcpWorktreeMetadata::intents(update),
             _ => Vec::new(),
         }
     }
@@ -374,21 +423,17 @@ impl AcpProjector {
             return Vec::new();
         }
         let should_track = self.file_touches.contains_key(call_id)
-            || kind.is_some_and(|kind| file_touch_kind(kind).is_some())
+            || kind.is_some_and(|kind| FileTouchState::kind(kind).is_some())
             || locations.is_some_and(|locations| !locations.is_empty());
         if !should_track {
             return Vec::new();
         }
         self.track_file_touch(call_id);
-        let (intents, finalized) = project_file_touches(
-            self.file_touches
-                .get_mut(call_id)
-                .expect("tracked file touch state"),
-            kind,
-            locations,
-            status,
-            full_update,
-        );
+        let (intents, finalized) = self
+            .file_touches
+            .get_mut(call_id)
+            .expect("tracked file touch state")
+            .project(kind, locations, status, full_update);
         if finalized {
             self.remove_file_touch(call_id);
             self.mark_file_touch_finalized(call_id);
@@ -436,27 +481,27 @@ impl AcpProjector {
 
     fn apply_tool_call(&mut self, tc: ToolCall) -> Vec<Intent> {
         let call_id = tc.tool_call_id.to_string();
-        if is_conversation_title_tool(&tc.title) {
+        if AcpToolTitle::is_conversation_title(&tc.title) {
             if !matches!(
                 tc.status,
                 ToolCallStatus::Completed | ToolCallStatus::Failed
             ) {
                 self.hidden_tool_calls.insert(call_id.clone());
                 self.hidden_tool_details
-                    .insert(call_id, (tc.title, raw_input_json(tc.raw_input.as_ref())));
+                    .insert(call_id, (tc.title, AcpJson::input(tc.raw_input.as_ref())));
             }
             return Vec::new();
         }
         self.upsert_tool_use(
             &call_id,
             &tc.title,
-            &raw_input_json(tc.raw_input.as_ref()),
+            &AcpJson::input(tc.raw_input.as_ref()),
             None,
         );
         let diff_locations = tc
             .locations
             .is_empty()
-            .then(|| locations_from_diffs(&tc.content));
+            .then(|| ToolContent::locations(&tc.content));
         let locations = diff_locations.as_deref().unwrap_or(&tc.locations);
         let mut intents = vec![Intent::Snapshot];
         intents.extend(self.project_tool_file_touches(
@@ -468,7 +513,7 @@ impl AcpProjector {
         ));
         let failed = matches!(tc.status, ToolCallStatus::Failed);
         intents.extend(self.record_tool_content(&call_id, &tc.content, failed));
-        if tool_output_text(&tc.content).is_empty() {
+        if ToolContent::text(&tc.content).is_empty() {
             self.record_raw_output(&call_id, tc.raw_output.as_ref(), failed);
         }
         intents
@@ -477,7 +522,8 @@ impl AcpProjector {
     fn apply_tool_call_update(&mut self, update: ToolCallUpdate) -> Vec<Intent> {
         let call_id = update.tool_call_id.to_string();
         let title = update.fields.title.clone().unwrap_or_default();
-        if self.hidden_tool_calls.contains(&call_id) || is_conversation_title_tool(&title) {
+        if self.hidden_tool_calls.contains(&call_id) || AcpToolTitle::is_conversation_title(&title)
+        {
             if matches!(
                 update.fields.status,
                 Some(ToolCallStatus::Completed | ToolCallStatus::Failed)
@@ -502,14 +548,14 @@ impl AcpProjector {
         self.upsert_tool_use(
             &call_id,
             &title,
-            &raw_input_json(update.fields.raw_input.as_ref()),
+            &AcpJson::input(update.fields.raw_input.as_ref()),
             None,
         );
         let diff_locations = update
             .fields
             .content
             .as_deref()
-            .map(locations_from_diffs)
+            .map(ToolContent::locations)
             .unwrap_or_default();
         let locations = update.fields.locations.as_deref();
         let locations = if locations.is_none_or(|locations| locations.is_empty())
@@ -530,7 +576,7 @@ impl AcpProjector {
         if let Some(content) = &update.fields.content {
             let failed = matches!(update.fields.status, Some(ToolCallStatus::Failed));
             intents.extend(self.record_tool_content(&call_id, content, failed));
-            if tool_output_text(content).is_empty() {
+            if ToolContent::text(content).is_empty() {
                 self.record_raw_output(&call_id, update.fields.raw_output.as_ref(), failed);
             }
         } else if matches!(
@@ -570,7 +616,7 @@ impl AcpProjector {
                 _ => {}
             }
         }
-        let output = tool_output_text(content);
+        let output = ToolContent::text(content);
         if !output.is_empty() {
             self.upsert_tool_result(call_id, output, failed);
         } else if has_terminal {
@@ -613,7 +659,7 @@ impl AcpProjector {
         let Some(raw_output) = raw_output.filter(|value| !value.is_null()) else {
             return;
         };
-        self.upsert_tool_result(call_id, pretty_json(raw_output), is_error);
+        self.upsert_tool_result(call_id, AcpJson::pretty(raw_output), is_error);
     }
 
     fn upsert_tool_use(
@@ -700,41 +746,6 @@ impl AcpProjector {
             }),
         }
     }
-}
-
-pub(crate) fn is_conversation_title_tool(title: &str) -> bool {
-    title
-        .trim()
-        .to_ascii_lowercase()
-        .split(|character: char| {
-            character.is_ascii_whitespace() || matches!(character, '-' | '.' | ':' | '_')
-        })
-        .filter(|part| !part.is_empty())
-        .eq(["mcp", "vmux", "set", "conversation", "title"])
-}
-
-fn pretty_json(value: &serde_json::Value) -> String {
-    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
-}
-
-fn raw_input_json(raw: Option<&serde_json::Value>) -> String {
-    raw.map(|v| v.to_string())
-        .unwrap_or_else(|| "{}".to_string())
-}
-
-fn tool_output_text(content: &[ToolCallContent]) -> String {
-    let mut out = String::new();
-    for item in content {
-        if let ToolCallContent::Content(inner) = item
-            && let ContentBlock::Text(text) = &inner.content
-        {
-            if !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(&text.text);
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -962,12 +973,14 @@ mod tests {
             "mcp:vmux:set:conversation:title",
             "mcp__vmux.set-conversation title",
         ] {
-            assert!(is_conversation_title_tool(title));
+            assert!(AcpToolTitle::is_conversation_title(title));
         }
-        assert!(!is_conversation_title_tool(
+        assert!(!AcpToolTitle::is_conversation_title(
             "mcp__other__set_conversation_title"
         ));
-        assert!(!is_conversation_title_tool("set_conversation_title"));
+        assert!(!AcpToolTitle::is_conversation_title(
+            "set_conversation_title"
+        ));
     }
 
     #[test]
