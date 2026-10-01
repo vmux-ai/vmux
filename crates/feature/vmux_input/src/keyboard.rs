@@ -14,8 +14,8 @@ use crossbeam_channel::{Receiver, Sender};
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
 use parking_lot::Mutex;
 use vmux_api::input::KeyModifiers;
-use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_command::{CommandInvocation, WriteCommandRequests};
+use vmux_command::{KeyCombo, Keymap, Modifiers};
 use vmux_ecs::team::User;
 use vmux_ecs::{Active, WindowFullscreen, WindowFullscreenSet, now_millis};
 
@@ -556,7 +556,7 @@ fn publish_shortcuts(
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
-    use vmux_command::shortcut::{Binding, Shortcut, Source};
+    use vmux_command::{Binding, Shortcut, Source};
 
     fn map() -> Keymap {
         let mut map = Keymap::defaults();

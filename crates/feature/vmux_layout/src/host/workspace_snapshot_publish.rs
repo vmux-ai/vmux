@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_command::snapshot::{
+use vmux_command::{
     CommandBarSpacesSnapshot, CommandBarWorkspaceSnapshot, WriteCommandBarSnapshots,
 };
 use vmux_ui::i18n::Locale;

@@ -1,20 +1,25 @@
-pub mod plugin;
+mod plugin;
 pub use plugin::CommandPlugin;
 
-pub mod bundle;
-pub mod command_bar;
-pub mod definition;
-pub mod page_key;
-pub mod payload;
-pub mod settings;
-pub mod shortcut;
-pub mod snapshot;
-pub mod surface;
+mod bundle;
+mod command_bar;
+mod definition;
+mod page_key;
+mod payload;
+mod settings;
+mod shortcut;
+mod snapshot;
+mod surface;
 mod tool;
 
 pub use vmux_api::JsonSchema;
 
 pub use bundle::CommandBar;
+pub use command_bar::{
+    ApplyCommandBarRequests, CommandBarDismiss, CommandBarNativeSize, CommandBarOpenRequest,
+    CommandBarPanelActive, CommandBarPlugin, PendingCommandBarReveal, ResumeRows,
+    WriteCommandBarRequests,
+};
 pub use definition::{
     AgentAccess, BindCommands, CommandBinding, CommandDefinition, CommandDispatch,
     CommandInvocation, CommandManifest, CommandMcp, CommandMessage, CommandRegistry,
@@ -26,6 +31,9 @@ pub use payload::{
     CommandBarEntry, CommandBarOpenProjection, CommandBarPicks, CommandBarProjector,
 };
 pub use settings::ResolvedLocale;
+pub use shortcut::{
+    Binding, KeyCombo, KeyContext, Keymap, Modifiers, ResolvedKey, Shortcut, Source, When,
+};
 pub use snapshot::{
     ClaimedUrl, ClaimedUrls, CommandBarPagesSnapshot, CommandBarProjectRoots,
     CommandBarSpacesSnapshot, CommandBarState, CommandBarTerminalPage, CommandBarWorkDirectory,

@@ -802,12 +802,12 @@ pub enum ShortcutDef {
 }
 
 impl ShortcutDef {
-    pub fn to_shortcut(&self) -> Option<vmux_command::shortcut::Shortcut> {
+    pub fn to_shortcut(&self) -> Option<vmux_command::Shortcut> {
         match self {
-            ShortcutDef::Direct(combo) => Some(vmux_command::shortcut::Shortcut::Direct(
-                combo.to_key_combo()?,
-            )),
-            ShortcutDef::Chord(prefix, second) => Some(vmux_command::shortcut::Shortcut::Chord(
+            ShortcutDef::Direct(combo) => {
+                Some(vmux_command::Shortcut::Direct(combo.to_key_combo()?))
+            }
+            ShortcutDef::Chord(prefix, second) => Some(vmux_command::Shortcut::Chord(
                 prefix.to_key_combo()?,
                 second.to_key_combo()?,
             )),
@@ -817,17 +817,17 @@ impl ShortcutDef {
 
     pub fn to_shortcut_with_leader(
         &self,
-        leader: &vmux_command::shortcut::KeyCombo,
-    ) -> Option<vmux_command::shortcut::Shortcut> {
+        leader: &vmux_command::KeyCombo,
+    ) -> Option<vmux_command::Shortcut> {
         match self {
-            ShortcutDef::Direct(combo) => Some(vmux_command::shortcut::Shortcut::Direct(
-                combo.to_key_combo()?,
-            )),
-            ShortcutDef::Chord(prefix, second) => Some(vmux_command::shortcut::Shortcut::Chord(
+            ShortcutDef::Direct(combo) => {
+                Some(vmux_command::Shortcut::Direct(combo.to_key_combo()?))
+            }
+            ShortcutDef::Chord(prefix, second) => Some(vmux_command::Shortcut::Chord(
                 prefix.to_key_combo()?,
                 second.to_key_combo()?,
             )),
-            ShortcutDef::Leader(second) => Some(vmux_command::shortcut::Shortcut::Chord(
+            ShortcutDef::Leader(second) => Some(vmux_command::Shortcut::Chord(
                 leader.clone(),
                 second.to_key_combo()?,
             )),
@@ -849,11 +849,11 @@ pub struct KeyComboDef {
 }
 
 impl KeyComboDef {
-    pub fn to_key_combo(&self) -> Option<vmux_command::shortcut::KeyCombo> {
-        let resolved = vmux_command::shortcut::ResolvedKey::parse(&self.key)?;
-        Some(vmux_command::shortcut::KeyCombo {
+    pub fn to_key_combo(&self) -> Option<vmux_command::KeyCombo> {
+        let resolved = vmux_command::ResolvedKey::parse(&self.key)?;
+        Some(vmux_command::KeyCombo {
             key: resolved.key,
-            modifiers: vmux_command::shortcut::Modifiers {
+            modifiers: vmux_command::Modifiers {
                 ctrl: self.ctrl,
                 shift: self.shift || resolved.implicit_shift,
                 alt: self.alt,

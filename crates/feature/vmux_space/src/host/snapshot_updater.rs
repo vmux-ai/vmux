@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 #[cfg(test)]
 use bevy_cef::prelude::HostWindow;
-use vmux_command::snapshot::{CommandBarSpacesSnapshot, SpaceSummary};
+use vmux_command::{CommandBarSpacesSnapshot, SpaceSummary};
 use vmux_ecs::Order;
 use vmux_layout::space::{Space, SpaceId};
 
@@ -14,7 +14,7 @@ impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn).add_systems(
             Update,
-            update_spaces_snapshot.in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
+            update_spaces_snapshot.in_set(vmux_command::WriteCommandBarSnapshots),
         );
     }
 }

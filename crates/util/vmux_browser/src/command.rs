@@ -8,12 +8,12 @@ use vmux_api::VmuxRoute;
 use vmux_api::command_bar::{
     InvokeRequest, OpenRequest as CommandBarPageOpenRequest, SearchEngine,
 };
+use vmux_command::CommandBarDismiss;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
 #[cfg(test)]
 use vmux_command::CommandManifest;
-use vmux_command::command_bar::CommandBarDismiss;
-use vmux_command::snapshot::{
+use vmux_command::{
     ClaimedUrls, CommandBarWorkspaceSnapshot, ContributedCommand, ContributedPages,
 };
 use vmux_command::{CommandInvocation, CommandRegistry, ReadCommandRequests, ResolvedLocale};

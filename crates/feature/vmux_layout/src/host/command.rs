@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::SwitchTabRequest;
+use vmux_command::CommandBarDismiss;
 use vmux_command::ReadCommandRequests;
-use vmux_command::command_bar::CommandBarDismiss;
 use vmux_ecs::launcher::StackInPaneChosen;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]

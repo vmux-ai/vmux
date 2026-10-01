@@ -62,7 +62,7 @@ fn acknowledge_turn_ended(
 
 fn new_chat(
     mut requests: MessageReader<AgentRequestInput>,
-    contributed_pages: vmux_command::snapshot::ContributedPages,
+    contributed_pages: vmux_command::ContributedPages,
     mut new_tabs: MessageWriter<vmux_layout::NewTabRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {

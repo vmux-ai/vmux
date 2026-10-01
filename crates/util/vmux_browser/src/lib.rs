@@ -85,7 +85,7 @@ impl Plugin for BrowserPlugin {
         let startup_accept_language_list = host::browser_accept_language_list(&startup_locale);
         app.add_plugins((
             host::AgentBrowserPlugin,
-            vmux_command::command_bar::CommandBarPlugin,
+            vmux_command::CommandBarPlugin,
             BrowserToolPlugin,
             platform::BrowserPlatformPlugin,
         ));

@@ -2,12 +2,10 @@ use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
 #[cfg(test)]
 use vmux_command::CommandManifest;
-use vmux_command::command_bar::{
-    CommandBarDismiss, CommandBarOpenRequest, WriteCommandBarRequests,
-};
 use vmux_command::{
     BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
 };
+use vmux_command::{CommandBarDismiss, CommandBarOpenRequest, WriteCommandBarRequests};
 use vmux_ecs::host::{UiStateWrite, persistence::WorkspaceRestore};
 use vmux_ecs::page::{PageReady, SpacesPageSpawnRequest, StartupPageUrl};
 use vmux_ecs::{

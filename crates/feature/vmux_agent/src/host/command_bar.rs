@@ -3,8 +3,8 @@ use std::cmp::Reverse;
 use bevy::prelude::*;
 use vmux_api::command_bar::CommandBarPage;
 #[cfg(test)]
-use vmux_command::snapshot::ClaimedUrls;
-use vmux_command::snapshot::{
+use vmux_command::ClaimedUrls;
+use vmux_command::{
     ClaimedUrl, CommandBarWorkDirectory, ContributedPage, WriteCommandBarSnapshots,
 };
 use vmux_ecs::{AgentWorkingDir, ArchivedPage, LastActivatedAt};
@@ -171,7 +171,7 @@ fn publish(
 #[cfg(test)]
 mod tests {
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_command::snapshot::ContributedPage;
+    use vmux_command::ContributedPage;
     use vmux_ecs::ProcessId;
 
     use super::*;

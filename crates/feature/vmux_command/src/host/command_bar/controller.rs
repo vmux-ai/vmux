@@ -8,9 +8,9 @@ use vmux_api::command_bar::{
 };
 use vmux_ecs::launcher::{LauncherDismissRequest, RendersLauncherPanel, RestoreKeyboardToStack};
 
-use crate::command_bar::CommandBarDismiss;
-use crate::command_bar::panel::CommandBarPanelActive;
-use crate::snapshot::{
+use crate::host::command_bar::CommandBarDismiss;
+use crate::host::command_bar::panel::CommandBarPanelActive;
+use crate::host::snapshot::{
     CommandBarPagesSnapshot, CommandBarProjectRoots, CommandBarSpacesSnapshot,
     CommandBarTerminalPage, CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot,
 };
@@ -29,7 +29,7 @@ use crate::ResolvedLocale;
 use vmux_ecs::KeyboardOwner;
 use vmux_flex::prelude::*;
 
-pub struct Plugin;
+pub(super) struct Plugin;
 
 impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {

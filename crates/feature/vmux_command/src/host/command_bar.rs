@@ -5,11 +5,12 @@ mod completion;
 mod controller;
 mod model;
 mod palette;
-pub mod panel;
-pub mod project_files;
-pub mod work_snapshot;
+mod panel;
+mod project_files;
+mod work_snapshot;
 
 pub use model::ResumeRows;
+pub use panel::CommandBarPanelActive;
 
 pub use controller::{
     ApplyCommandBarRequests, CommandBarNativeSize, CommandBarOpenRequest, PendingCommandBarReveal,

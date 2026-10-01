@@ -19,8 +19,8 @@ use crate::state::ChatUiState;
 use vmux_api::ProcessId;
 use vmux_api::command_bar::PromptRequest;
 use vmux_api::protocol::AgentCommandResult;
-use vmux_command::command_bar::CommandBarDismiss;
-use vmux_command::snapshot::{CommandBarWorkspaceSnapshot, ContributedPages};
+use vmux_command::CommandBarDismiss;
+use vmux_command::{CommandBarWorkspaceSnapshot, ContributedPages};
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentContinuationRequest, AgentRequestAppExt, AgentRequestMessage,
     AgentRequestRouteSet, AgentSessionRoot,
@@ -547,7 +547,7 @@ impl ChatResumeProjection {
             return false;
         }
         self.0.sessions.clone_from(&sessions.sessions);
-        self.0.rows = vmux_command::command_bar::ResumeRows::all(&sessions.sessions);
+        self.0.rows = vmux_command::ResumeRows::all(&sessions.sessions);
         self.0.total = sessions.total;
         self.0.loading = false;
         true

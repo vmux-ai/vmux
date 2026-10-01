@@ -33,9 +33,9 @@ impl Keymap {
         }
     }
 
-    pub fn defaults_with(definitions: &[crate::definition::CommandDefinition]) -> Self {
+    pub fn defaults_with(definitions: &[crate::host::definition::CommandDefinition]) -> Self {
         let mut keymap = Self::defaults();
-        crate::definition::CommandDefinition::extend_keymap(definitions, &mut keymap);
+        crate::host::definition::CommandDefinition::extend_keymap(definitions, &mut keymap);
         keymap
     }
 

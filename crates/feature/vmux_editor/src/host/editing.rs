@@ -2,11 +2,9 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_api::command_bar::ExRequest;
 use vmux_api::input::KeyStroke;
-use vmux_command::command_bar::{
-    CommandBarDismiss, CommandBarOpenRequest, WriteCommandBarRequests,
-};
-use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap};
 use vmux_command::{BindCommands, CommandInvocation, CommandRegistry};
+use vmux_command::{CommandBarDismiss, CommandBarOpenRequest, WriteCommandBarRequests};
+use vmux_command::{KeyCombo, KeyContext, Keymap};
 use vmux_ecs::event::*;
 
 #[cfg(test)]

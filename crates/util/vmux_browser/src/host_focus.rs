@@ -199,7 +199,7 @@ fn apply_windowed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_command::command_bar::panel::CommandBarPanelActive;
+    use vmux_command::CommandBarPanelActive;
     use vmux_layout::active_pane::ActiveStack;
     use vmux_layout::bookmark::{BookmarkContextMenuActive, BookmarkTextInputActive};
     use vmux_layout::cef::LayoutCef;

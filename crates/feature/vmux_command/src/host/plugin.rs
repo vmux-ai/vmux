@@ -6,13 +6,13 @@ use vmux_ecs::agent::{
 };
 
 use super::tool::AgentInvokeCommand;
-use crate::definition::{
+use crate::host::definition::{
     CommandDefinition, CommandInvocation, CommandRuntimePlugin, DispatchCommandInvocations,
     WriteCommandRequests,
 };
-use crate::page_key::KeyPlugin;
-use crate::snapshot::UiStatePlugin;
-use crate::surface::SurfacePlugin;
+use crate::host::page_key::KeyPlugin;
+use crate::host::snapshot::UiStatePlugin;
+use crate::host::surface::SurfacePlugin;
 use vmux_ecs::team::{Agent, Profile, User};
 
 pub struct CommandPlugin;

@@ -3,8 +3,8 @@ use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use std::time::Instant;
 use vmux_command::WriteCommandRequests;
-use vmux_command::shortcut::{Binding, Source, When};
-use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
+use vmux_command::{Binding, Source, When};
+use vmux_command::{KeyCombo, Keymap, Modifiers};
 use vmux_input::NativeKeyCapture;
 use vmux_setting::{AppSettings, SettingsLoadSet};
 

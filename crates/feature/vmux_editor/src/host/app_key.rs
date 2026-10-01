@@ -1,12 +1,10 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{CommandBarPick, CommandBarPicker, PickRequest};
-use vmux_command::command_bar::{
-    CommandBarDismiss, CommandBarOpenRequest, WriteCommandBarRequests,
-};
 use vmux_command::{
     BindCommands, CommandDispatch, CommandInvocation, CommandRegistry, CommandRuntimePlugin,
 };
+use vmux_command::{CommandBarDismiss, CommandBarOpenRequest, WriteCommandBarRequests};
 use vmux_ecs::event::{
     ExplorerGoto, FileEncoding, FileEncodingReopenRequest, FileEncodingSaveRequest, FileIndent,
     FileLineEnding, FileShapeSet, FileStatusPickerOpen,

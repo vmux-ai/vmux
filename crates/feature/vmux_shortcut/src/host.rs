@@ -9,8 +9,8 @@ use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use std::collections::{BTreeMap, HashMap};
-use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap, Shortcut};
 use vmux_command::{CommandDefinition, ResolvedLocale};
+use vmux_command::{KeyCombo, KeyContext, Keymap, Shortcut};
 use vmux_ecs::host::manifest::FeaturePlugin;
 use vmux_ecs::page::PageReady;
 use vmux_ecs::{PageOpenSet, PageOpenTask, workspace::ComputeFocusSet};
@@ -553,7 +553,7 @@ impl ShortcutStroke {
     }
 
     fn from_native_input(input: &NativeKeyInput) -> Self {
-        let modifiers = vmux_command::shortcut::Modifiers {
+        let modifiers = vmux_command::Modifiers {
             ctrl: input.modifiers.ctrl,
             shift: input.modifiers.shift,
             alt: input.modifiers.alt,
@@ -563,7 +563,7 @@ impl ShortcutStroke {
             .key
             .map(|key| KeyCombo { key, modifiers })
             .or_else(|| {
-                vmux_command::shortcut::ResolvedKey::parse(&input.text).map(|key| KeyCombo {
+                vmux_command::ResolvedKey::parse(&input.text).map(|key| KeyCombo {
                     key: key.key,
                     modifiers,
                 })
@@ -592,7 +592,7 @@ mod tests {
     use bevy::input::keyboard::KeyCode;
     use vmux_api::input::KeyModifiers;
     use vmux_command::CommandManifest;
-    use vmux_command::shortcut::{Binding, Modifiers, Source, When};
+    use vmux_command::{Binding, Modifiers, Source, When};
     use vmux_ecs::{PageMetadata, PageOpenId, PageOpenTask};
     use vmux_layout::native_open::NativeOpenPlugin;
 

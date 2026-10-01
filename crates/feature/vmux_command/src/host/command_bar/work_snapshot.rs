@@ -1,4 +1,4 @@
-use crate::snapshot::{CommandBarWorkDirectory, CommandBarWorkSnapshot};
+use crate::host::snapshot::{CommandBarWorkDirectory, CommandBarWorkSnapshot};
 use bevy::prelude::*;
 use vmux_api::command_bar::{CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
 use vmux_ecs::{LastVisitedAt, PageMetadata, Url, VisitCount};
@@ -7,13 +7,13 @@ use vmux_history::LastActivatedAt;
 const WORK_DIR_ENTRIES_CAP: usize = 40;
 const RECENT_FILES_CAP: usize = 20;
 
-pub struct Plugin;
+pub(super) struct Plugin;
 
 impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn).add_systems(
             Update,
-            (directories, recent).in_set(crate::snapshot::WriteCommandBarSnapshots),
+            (directories, recent).in_set(crate::host::snapshot::WriteCommandBarSnapshots),
         );
     }
 }

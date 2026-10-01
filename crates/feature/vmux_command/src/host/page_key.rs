@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_api::input::KeyStroke;
 
-use crate::definition::CommandInvocation;
-use crate::shortcut::{KeyCombo, KeyContext, Keymap};
+use crate::host::definition::CommandInvocation;
+use crate::host::shortcut::{KeyCombo, KeyContext, Keymap};
 
 pub struct KeyPlugin;
 
@@ -36,8 +36,8 @@ fn resolve(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::definition::CommandInvocation;
-    use crate::shortcut::{Binding, Modifiers, Shortcut, Source, When};
+    use crate::host::definition::CommandInvocation;
+    use crate::host::shortcut::{Binding, Modifiers, Shortcut, Source, When};
     use bevy::ecs::message::Messages;
     use bevy::input::keyboard::KeyCode;
     use vmux_api::input::KeyModifiers;

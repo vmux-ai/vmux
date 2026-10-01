@@ -18,7 +18,7 @@ use vmux_chat::event::{
     ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort,
 };
 use vmux_chat::host::{ChatModeStateChanged, ChatModelStateChanged, ChatView};
-use vmux_command::snapshot::{ContributedAgentModels, ContributedAgentModes};
+use vmux_command::{ContributedAgentModels, ContributedAgentModes};
 use vmux_ecs::page::PageReady;
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_session::AcpSession;

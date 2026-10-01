@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiInput, WebviewSource};
 use vmux_api::input::{KeyClaims, UiKeyContext};
-use vmux_command::shortcut::{KeyContext, Keymap};
+use vmux_command::{KeyContext, Keymap};
 use vmux_ecs::host::page::HostsPage;
 use vmux_ecs::host::{UiState, UiStatePlugin, UiStateWrite};
 
@@ -62,7 +62,7 @@ mod tests {
     use bevy::input::keyboard::KeyCode;
     use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
     use vmux_api::BinEvent;
-    use vmux_command::shortcut::{Binding, KeyCombo, Modifiers, Shortcut, Source, When};
+    use vmux_command::{Binding, KeyCombo, Modifiers, Shortcut, Source, When};
 
     #[derive(Resource, Default)]
     struct Pushed(Vec<(Entity, KeyClaims)>);

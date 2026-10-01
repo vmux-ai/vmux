@@ -5,7 +5,7 @@ use crate::CommandBar;
 use vmux_api::command_bar::CommandBarPanelRequest;
 use vmux_ecs::overlay::OverlayShownInline;
 
-pub struct PanelPlugin;
+pub(super) struct PanelPlugin;
 
 impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {

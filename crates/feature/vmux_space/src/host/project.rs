@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
-use vmux_command::snapshot::{CommandBarProjectRoots, WriteCommandBarSnapshots};
+use vmux_command::{CommandBarProjectRoots, WriteCommandBarSnapshots};
 use vmux_ecs::event::{ProjectRow, ProjectRowKind, ProjectTreeToggle};
 use vmux_ecs::host::persistence::PersistenceAppExt;
 use vmux_git::worktree::LinkedRepoRoot;

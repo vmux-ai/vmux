@@ -12,14 +12,14 @@ use vmux_api::command_bar::TerminalRequest as CommandBarTerminalRequest;
 use vmux_api::input::KeyStroke;
 use vmux_api::protocol::{ClientMessage, CopyModeKey, ProcessId};
 use vmux_clipboard::Clipboard;
+use vmux_command::CommandBarDismiss;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
-use vmux_command::command_bar::CommandBarDismiss;
-use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_command::{
     CommandInvocation, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
     WriteCommandRequests,
 };
+use vmux_command::{KeyCombo, Keymap, Modifiers};
 #[cfg(test)]
 use vmux_ecs::PageOpenId;
 use vmux_ecs::event::TerminalUiState;

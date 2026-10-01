@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_ecs::overlay::WindowOverlay;
 
-use crate::bundle::CommandBar;
+use crate::host::bundle::CommandBar;
 use vmux_flex::prelude::*;
 
 pub(crate) struct SurfacePlugin;

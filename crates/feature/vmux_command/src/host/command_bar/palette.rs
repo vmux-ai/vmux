@@ -35,7 +35,7 @@ mod prompt;
 mod resume;
 mod search;
 
-pub struct PalettePlugin;
+pub(super) struct PalettePlugin;
 
 impl Plugin for PalettePlugin {
     fn build(&self, app: &mut App) {

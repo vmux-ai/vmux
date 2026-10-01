@@ -1,7 +1,7 @@
 use crate::Terminal;
 use crate::launch::TerminalLaunch;
 use bevy::prelude::*;
-use vmux_command::snapshot::{CommandBarTerminalPage, CommandBarWorkDirectory};
+use vmux_command::{CommandBarTerminalPage, CommandBarWorkDirectory};
 
 pub struct Plugin;
 
@@ -9,7 +9,7 @@ impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn).add_systems(
             Update,
-            sync_work_directories.in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
+            sync_work_directories.in_set(vmux_command::WriteCommandBarSnapshots),
         );
     }
 }

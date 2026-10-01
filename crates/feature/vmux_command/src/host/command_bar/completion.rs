@@ -6,10 +6,10 @@ use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use vmux_ecs::host::UiStateWrite;
 
-use crate::command_bar::project_files::{
+use crate::host::command_bar::project_files::{
     MAX_RESULTS, PendingProjectCompletion, ProjectCompletions, ProjectIndex, RankBias,
 };
-use crate::snapshot::{
+use crate::host::snapshot::{
     CommandBarProjectRoots, CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot,
     WriteCommandBarSnapshots,
 };

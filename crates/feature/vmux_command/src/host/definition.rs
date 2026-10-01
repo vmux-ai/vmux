@@ -8,7 +8,7 @@ use vmux_ecs::JsonArguments;
 use vmux_ecs::host::manifest::{self, FeatureManifest};
 use vmux_ui::i18n::Locale;
 
-use crate::shortcut::{Binding, KeyCombo, Modifiers, ResolvedKey, Shortcut, Source, When};
+use crate::host::shortcut::{Binding, KeyCombo, Modifiers, ResolvedKey, Shortcut, Source, When};
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WriteCommandRequests;
@@ -43,7 +43,7 @@ impl Plugin for CommandRuntimePlugin {
                 (
                     WriteCommandRequests,
                     DispatchCommandInvocations,
-                    crate::snapshot::WriteCommandBarSnapshots,
+                    crate::host::snapshot::WriteCommandBarSnapshots,
                     ReadCommandRequests,
                 )
                     .chain(),
@@ -433,7 +433,7 @@ impl CommandDefinition {
         bindings
     }
 
-    pub fn extend_keymap(definitions: &[Self], keymap: &mut crate::shortcut::Keymap) {
+    pub fn extend_keymap(definitions: &[Self], keymap: &mut crate::host::shortcut::Keymap) {
         for definition in definitions {
             keymap.register(
                 std::iter::once(definition.id.as_str())
@@ -599,7 +599,7 @@ impl CommandRegistry<'_, '_> {
 fn spawn_keymap(mut commands: Commands) {
     commands.spawn((
         Name::new("Command keymap"),
-        crate::shortcut::Keymap::default(),
+        crate::host::shortcut::Keymap::default(),
     ));
 }
 

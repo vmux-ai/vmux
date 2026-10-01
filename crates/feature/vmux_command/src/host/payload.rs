@@ -1,9 +1,9 @@
-use crate::definition::CommandDefinition;
-use crate::open_target::OpenTarget;
-use crate::snapshot::{
+use crate::host::definition::CommandDefinition;
+use crate::host::snapshot::{
     CommandBarPagesSnapshot, CommandBarProjectRoots, CommandBarSpacesSnapshot,
     ContributedAgentModels, ContributedAgentModes, ContributedCommand, ContributedPages,
 };
+use crate::open_target::OpenTarget;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::Query;
 use vmux_api::command_bar::{
@@ -148,7 +148,7 @@ pub struct CommandBarOpenProjection {
     pub terminal_page_url: String,
     pub pages: CommandBarPagesSnapshot,
     pub projects: CommandBarProjectRoots,
-    pub work: crate::snapshot::CommandBarWorkSnapshot,
+    pub work: crate::host::snapshot::CommandBarWorkSnapshot,
     pub locale: Locale,
     pub active_stack_count: usize,
     pub tabs: Vec<CommandBarTab>,

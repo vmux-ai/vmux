@@ -6,7 +6,7 @@ use vmux_api::chat::{SlashCommand, SlashCommandEntry};
 use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_api::space::ProjectBranch;
 use vmux_command::open_target::OpenTarget;
-use vmux_command::snapshot::{
+use vmux_command::{
     ClaimedUrl, CommandBarPagesSnapshot, CommandBarProjectRoots, CommandBarSpacesSnapshot,
     CommandBarTerminalPage, CommandBarWorkSnapshot, ContributedAgentModels, ContributedAgentModes,
     ContributedCommand, ContributedPage,
@@ -672,10 +672,9 @@ fn mark_launcher(
 ) {
     for (entity, meta) in starts.iter() {
         if meta.url.starts_with(StartPlugin::URL) {
-            commands.entity(entity).try_insert((
-                HostsLauncher,
-                vmux_command::snapshot::CommandBarState::default(),
-            ));
+            commands
+                .entity(entity)
+                .try_insert((HostsLauncher, vmux_command::CommandBarState::default()));
         }
     }
 }

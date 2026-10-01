@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use bevy::prelude::*;
-use vmux_command::shortcut::KeyCombo;
+use vmux_command::KeyCombo;
 
 #[derive(Component, Default, Clone, Copy, Debug)]
 pub(crate) struct TerminalMode {
