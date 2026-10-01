@@ -235,12 +235,12 @@ fn git_watch_targets(
 ) -> Result<(PathBuf, Vec<GitWatchTarget>), super::repository::GitError> {
     let repository = super::repository::GitRepository::discover(file)?;
     let root = repository.path().to_path_buf();
-    let (stdout, stderr, ok) = super::repository::git(
+    let (stdout, stderr, ok) = super::repository::GitCommand::run(
         &root,
         &["rev-parse", "--absolute-git-dir", "--git-common-dir"],
     )?;
     if !ok {
-        return Err(super::repository::git_err(&stdout, &stderr));
+        return Err(super::repository::GitCommand::error(&stdout, &stderr));
     }
     let mut lines = stdout.lines();
     let git_dir = lines

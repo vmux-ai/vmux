@@ -22,7 +22,8 @@ impl GitRepository {
     }
 
     pub fn discover(file: &Path) -> Result<Self, GitError> {
-        let (stdout, stderr, ok) = git(&Self::start_dir(file), &["rev-parse", "--show-toplevel"])?;
+        let (stdout, stderr, ok) =
+            GitCommand::run(&Self::start_dir(file), &["rev-parse", "--show-toplevel"])?;
         if !ok {
             return Err(GitError(stderr.trim().to_string()));
         }
@@ -59,7 +60,7 @@ impl GitRepository {
     }
 
     pub(crate) fn statuses(&self, files: &[PathBuf]) -> Result<Vec<GitFileStatus>, GitError> {
-        let (stdout, stderr, ok) = git_read_bytes(
+        let (stdout, stderr, ok) = GitCommand::read_bytes(
             &self.0,
             &[
                 "status",
@@ -93,7 +94,7 @@ impl GitRepository {
     }
 
     pub fn file_statuses(&self) -> Result<std::collections::HashMap<String, FileStatus>, GitError> {
-        let (stdout, stderr, ok) = git_read_bytes(
+        let (stdout, stderr, ok) = GitCommand::read_bytes(
             &self.0,
             &[
                 "status",
@@ -110,7 +111,7 @@ impl GitRepository {
     }
 
     pub fn dirty_paths(&self) -> Result<HashSet<String>, GitError> {
-        let (stdout, stderr, ok) = git_read_bytes(
+        let (stdout, stderr, ok) = GitCommand::read_bytes(
             &self.0,
             &["status", "--porcelain=v2", "-z", "--untracked-files=all"],
         )?;
@@ -121,7 +122,7 @@ impl GitRepository {
     }
 
     pub(crate) fn config_path(&self) -> Result<PathBuf, GitError> {
-        let (stdout, stderr, ok) = git_read(
+        let (stdout, stderr, ok) = GitCommand::read(
             &self.0,
             &[
                 "rev-parse",
@@ -131,7 +132,7 @@ impl GitRepository {
             ],
         )?;
         if !ok {
-            return Err(git_err(&stdout, &stderr));
+            return Err(GitCommand::error(&stdout, &stderr));
         }
         let path = stdout.trim();
         if path.is_empty() {
@@ -250,7 +251,7 @@ impl GitRepository {
     }
 
     pub fn commit_diff_lines(&self, reference: &str) -> Result<Vec<DiffLine>, GitError> {
-        let (stdout, stderr, ok) = git_read(
+        let (stdout, stderr, ok) = GitCommand::read(
             &self.0,
             &[
                 "show",
@@ -262,7 +263,7 @@ impl GitRepository {
             ],
         )?;
         if !ok {
-            return Err(git_err(&stdout, &stderr));
+            return Err(GitCommand::error(&stdout, &stderr));
         }
         Ok(parse::parse_unified_diff(&stdout))
     }
@@ -367,18 +368,18 @@ impl GitRepository {
     }
 
     fn run(&self, args: &[&str]) -> Result<String, GitError> {
-        let (stdout, stderr, ok) = git(&self.0, args)?;
+        let (stdout, stderr, ok) = GitCommand::run(&self.0, args)?;
         if ok {
             Ok(stdout)
         } else {
-            Err(git_err(&stdout, &stderr))
+            Err(GitCommand::error(&stdout, &stderr))
         }
     }
 
     fn operation(&self, args: &[&str]) -> Result<String, GitError> {
-        let (stdout, stderr, ok) = git(&self.0, args)?;
+        let (stdout, stderr, ok) = GitCommand::run(&self.0, args)?;
         if !ok {
-            return Err(git_err(&stdout, &stderr));
+            return Err(GitCommand::error(&stdout, &stderr));
         }
         let message = if stdout.trim().is_empty() {
             stderr.trim()
@@ -409,7 +410,7 @@ impl GitRepository {
 
     fn diff_text(&self, target: &Path, cached: bool, context: u32) -> Result<String, GitError> {
         let unified = format!("--unified={context}");
-        let mut command = git_command(&self.0);
+        let mut command = GitCommand::new(&self.0);
         command.arg("diff");
         if cached {
             command.arg("--cached");
@@ -507,7 +508,7 @@ impl GitRepository {
         #[cfg(not(unix))]
         let spec = OsString::from(format!(":{}", target.to_string_lossy()));
 
-        let output = git_command(&self.0)
+        let output = GitCommand::new(&self.0)
             .arg("show")
             .arg(spec)
             .output()
@@ -529,7 +530,7 @@ impl GitRepository {
             args.push("--cached");
         }
         args.push("--unidiff-zero");
-        let mut child = git_command(&self.0)
+        let mut child = GitCommand::new(&self.0)
             .args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -548,7 +549,7 @@ impl GitRepository {
         if output.status.success() {
             return Ok(());
         }
-        Err(git_err(
+        Err(GitCommand::error(
             &String::from_utf8_lossy(&output.stdout),
             &String::from_utf8_lossy(&output.stderr),
         ))
@@ -556,7 +557,7 @@ impl GitRepository {
 
     fn file_operation(&self, file: &Path, verb: &[&str]) -> Result<(), GitError> {
         let target = self.relative_path(file);
-        let output = git_command(&self.0)
+        let output = GitCommand::new(&self.0)
             .args(verb)
             .arg(&target)
             .output()
@@ -564,7 +565,7 @@ impl GitRepository {
         if output.status.success() {
             return Ok(());
         }
-        Err(git_err(
+        Err(GitCommand::error(
             &String::from_utf8_lossy(&output.stdout),
             &String::from_utf8_lossy(&output.stderr),
         ))
@@ -589,78 +590,82 @@ const FALLBACK_LOCAL_ENV_VARS: &[&str] = &[
     "GIT_WORK_TREE",
 ];
 
-fn local_env_vars() -> &'static [String] {
-    static VARS: OnceLock<Vec<String>> = OnceLock::new();
-    VARS.get_or_init(|| {
-        Command::new("git")
-            .args(["rev-parse", "--local-env-vars"])
-            .output()
-            .ok()
-            .filter(|out| out.status.success())
-            .map(|out| {
-                String::from_utf8_lossy(&out.stdout)
-                    .lines()
-                    .map(str::trim)
-                    .filter(|line| !line.is_empty())
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>()
-            })
-            .filter(|vars| !vars.is_empty())
-            .unwrap_or_else(|| {
-                FALLBACK_LOCAL_ENV_VARS
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect()
-            })
-    })
-}
+pub(crate) struct GitCommand;
 
-fn git_command(root: &Path) -> Command {
-    let mut cmd = Command::new("git");
-    cmd.current_dir(root).env("GIT_TERMINAL_PROMPT", "0");
-    for var in local_env_vars() {
-        cmd.env_remove(var);
+impl GitCommand {
+    fn local_env_vars() -> &'static [String] {
+        static VARS: OnceLock<Vec<String>> = OnceLock::new();
+        VARS.get_or_init(|| {
+            Command::new("git")
+                .args(["rev-parse", "--local-env-vars"])
+                .output()
+                .ok()
+                .filter(|out| out.status.success())
+                .map(|out| {
+                    String::from_utf8_lossy(&out.stdout)
+                        .lines()
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .filter(|vars| !vars.is_empty())
+                .unwrap_or_else(|| {
+                    FALLBACK_LOCAL_ENV_VARS
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect()
+                })
+        })
     }
-    cmd
-}
 
-pub(crate) fn git(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
-    let out = git_command(root)
-        .args(args)
-        .output()
-        .map_err(|e| GitError(format!("failed to run git: {e}")))?;
-    Ok((
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
-        out.status.success(),
-    ))
-}
+    fn new(root: &Path) -> Command {
+        let mut command = Command::new("git");
+        command.current_dir(root).env("GIT_TERMINAL_PROMPT", "0");
+        for variable in Self::local_env_vars() {
+            command.env_remove(variable);
+        }
+        command
+    }
 
-pub(crate) fn git_read(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
-    let (stdout, stderr, ok) = git_read_bytes(root, args)?;
-    Ok((String::from_utf8_lossy(&stdout).into_owned(), stderr, ok))
-}
+    pub(crate) fn run(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
+        let output = Self::new(root)
+            .args(args)
+            .output()
+            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        Ok((
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+            output.status.success(),
+        ))
+    }
 
-fn git_read_bytes(root: &Path, args: &[&str]) -> Result<(Vec<u8>, String, bool), GitError> {
-    let out = git_command(root)
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .args(args)
-        .output()
-        .map_err(|e| GitError(format!("failed to run git: {e}")))?;
-    Ok((
-        out.stdout,
-        String::from_utf8_lossy(&out.stderr).into_owned(),
-        out.status.success(),
-    ))
-}
+    pub(crate) fn read(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
+        let (stdout, stderr, ok) = Self::read_bytes(root, args)?;
+        Ok((String::from_utf8_lossy(&stdout).into_owned(), stderr, ok))
+    }
 
-pub(crate) fn git_err(stdout: &str, stderr: &str) -> GitError {
-    let s = stderr.trim();
-    GitError(if s.is_empty() {
-        stdout.trim().to_string()
-    } else {
-        s.to_string()
-    })
+    fn read_bytes(root: &Path, args: &[&str]) -> Result<(Vec<u8>, String, bool), GitError> {
+        let output = Self::new(root)
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .args(args)
+            .output()
+            .map_err(|error| GitError(format!("failed to run git: {error}")))?;
+        Ok((
+            output.stdout,
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+            output.status.success(),
+        ))
+    }
+
+    pub(crate) fn error(stdout: &str, stderr: &str) -> GitError {
+        let error = stderr.trim();
+        GitError(if error.is_empty() {
+            stdout.trim().to_string()
+        } else {
+            error.to_string()
+        })
+    }
 }
 
 #[cfg(unix)]
@@ -707,11 +712,11 @@ impl<'a> RequestPath<'a> {
 
 impl GitCommitEntry {
     fn recent(root: &Path) -> Result<Vec<Self>, GitError> {
-        let (_, _, has_head) = git_read(root, &["rev-parse", "--verify", "HEAD"])?;
+        let (_, _, has_head) = GitCommand::read(root, &["rev-parse", "--verify", "HEAD"])?;
         if !has_head {
             return Ok(Vec::new());
         }
-        let (stdout, stderr, ok) = git_read(
+        let (stdout, stderr, ok) = GitCommand::read(
             root,
             &[
                 "log",
@@ -721,7 +726,7 @@ impl GitCommitEntry {
             ],
         )?;
         if !ok {
-            return Err(git_err(&stdout, &stderr));
+            return Err(GitCommand::error(&stdout, &stderr));
         }
         let mut commits = Vec::new();
         for line in stdout.lines() {
@@ -743,7 +748,7 @@ impl GitCommitEntry {
     }
 
     pub(crate) fn for_reference(root: &Path, reference: &str) -> Result<Vec<Self>, GitError> {
-        let (stdout, stderr, ok) = git_read(
+        let (stdout, stderr, ok) = GitCommand::read(
             root,
             &[
                 "log",
@@ -755,7 +760,7 @@ impl GitCommitEntry {
             ],
         )?;
         if !ok {
-            return Err(git_err(&stdout, &stderr));
+            return Err(GitCommand::error(&stdout, &stderr));
         }
         let mut commits = Vec::new();
         for record in stdout.split('\x1e') {
@@ -784,13 +789,13 @@ impl GitCommitEntry {
 impl GitBranchEntry {
     fn local(root: &Path, current: &str) -> Result<Vec<Self>, GitError> {
         let registrations = crate::host::worktree::worktree_registrations(root)?;
-        let (_, _, has_head) = git_read(root, &["rev-parse", "--verify", "HEAD"])?;
+        let (_, _, has_head) = GitCommand::read(root, &["rev-parse", "--verify", "HEAD"])?;
         let format = if has_head {
             "--format=%(refname:short)%00%(HEAD)%00%(upstream:short)%00%(objectname:short)%00%(ahead-behind:HEAD)"
         } else {
             "--format=%(refname:short)%00%(HEAD)%00%(upstream:short)%00%(objectname:short)%00"
         };
-        let (stdout, stderr, ok) = git_read(
+        let (stdout, stderr, ok) = GitCommand::read(
             root,
             &[
                 "for-each-ref",
@@ -800,7 +805,7 @@ impl GitBranchEntry {
             ],
         )?;
         if !ok {
-            return Err(git_err(&stdout, &stderr));
+            return Err(GitCommand::error(&stdout, &stderr));
         }
         let mut branches = Vec::new();
         for line in stdout.lines() {
@@ -838,13 +843,13 @@ impl GitBranchEntry {
     }
 
     fn remote(root: &Path) -> Result<Vec<Self>, GitError> {
-        let (_, _, has_head) = git_read(root, &["rev-parse", "--verify", "HEAD"])?;
+        let (_, _, has_head) = GitCommand::read(root, &["rev-parse", "--verify", "HEAD"])?;
         let format = if has_head {
             "--format=%(refname:short)%00%(symref)%00%(objectname:short)%00%(ahead-behind:HEAD)"
         } else {
             "--format=%(refname:short)%00%(symref)%00%(objectname:short)%00"
         };
-        let (stdout, stderr, ok) = git_read(
+        let (stdout, stderr, ok) = GitCommand::read(
             root,
             &[
                 "for-each-ref",
@@ -854,7 +859,7 @@ impl GitBranchEntry {
             ],
         )?;
         if !ok {
-            return Err(git_err(&stdout, &stderr));
+            return Err(GitCommand::error(&stdout, &stderr));
         }
         let mut branches = Vec::new();
         for line in stdout.lines() {
@@ -892,7 +897,7 @@ impl GitBranchEntry {
 
 impl GitTagEntry {
     fn list(root: &Path) -> Result<Vec<Self>, GitError> {
-        let (stdout, stderr, ok) = git_read(
+        let (stdout, stderr, ok) = GitCommand::read(
             root,
             &[
                 "for-each-ref",
@@ -902,7 +907,7 @@ impl GitTagEntry {
             ],
         )?;
         if !ok {
-            return Err(git_err(&stdout, &stderr));
+            return Err(GitCommand::error(&stdout, &stderr));
         }
         let mut tags = Vec::new();
         for line in stdout.lines() {
@@ -923,9 +928,10 @@ impl GitTagEntry {
 
 impl GitStashEntry {
     fn list(root: &Path) -> Result<Vec<Self>, GitError> {
-        let (stdout, stderr, ok) = git_read(root, &["stash", "list", "--format=%gd%x00%gs"])?;
+        let (stdout, stderr, ok) =
+            GitCommand::read(root, &["stash", "list", "--format=%gd%x00%gs"])?;
         if !ok {
-            return Err(git_err(&stdout, &stderr));
+            return Err(GitCommand::error(&stdout, &stderr));
         }
         let mut entries = Vec::new();
         for line in stdout.lines() {
@@ -952,7 +958,7 @@ impl GitRepositorySnapshot {
         let requested_path = path.to_string_lossy().into_owned();
         let repository = GitRepository::discover(path)?;
         let repo_root = repository.path();
-        let (stdout, stderr, ok) = git_read_bytes(
+        let (stdout, stderr, ok) = GitCommand::read_bytes(
             repo_root,
             &[
                 "status",
@@ -963,7 +969,10 @@ impl GitRepositorySnapshot {
             ],
         )?;
         if !ok {
-            return Err(git_err(&String::from_utf8_lossy(&stdout), &stderr));
+            return Err(GitCommand::error(
+                &String::from_utf8_lossy(&stdout),
+                &stderr,
+            ));
         }
         let parsed = parse::parse_porcelain_v2_statuses(&stdout);
         let branch = parsed.branch.clone();
@@ -1004,7 +1013,7 @@ pub(crate) mod test_repo {
     use super::*;
 
     pub fn run(dir: &Path, args: &[&str]) {
-        let status = git_command(dir)
+        let status = GitCommand::new(dir)
             .args(args)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
@@ -1037,13 +1046,13 @@ mod tests {
     #[test]
     fn git_command_scrubs_all_local_env_vars() {
         use std::ffi::OsStr;
-        let cmd = git_command(Path::new("."));
+        let cmd = GitCommand::new(Path::new("."));
         let removed: HashSet<&OsStr> = cmd
             .get_envs()
             .filter(|(_, v)| v.is_none())
             .map(|(k, _)| k)
             .collect();
-        let vars = local_env_vars();
+        let vars = GitCommand::local_env_vars();
         assert!(!vars.is_empty(), "local_env_vars must not be empty");
         for var in vars {
             assert!(
@@ -1275,7 +1284,7 @@ mod tests {
         test_repo::write(repo.path(), "feature.txt", "feature\n");
         test_repo::run(repo.path(), &["add", "."]);
         test_repo::run(repo.path(), &["commit", "-qm", "feature"]);
-        let (commit, _, ok) = git_read(repo.path(), &["rev-parse", "HEAD"]).unwrap();
+        let (commit, _, ok) = GitCommand::read(repo.path(), &["rev-parse", "HEAD"]).unwrap();
         assert!(ok);
         let commit = commit.trim().to_string();
         test_repo::run(repo.path(), &["switch", "main"]);
@@ -1308,7 +1317,7 @@ mod tests {
 
         GitRepository::at(repo.path()).rebase("main").unwrap();
 
-        let (_, _, ancestor) = git_read(
+        let (_, _, ancestor) = GitCommand::read(
             repo.path(),
             &["merge-base", "--is-ancestor", "main", "HEAD"],
         )
@@ -1343,14 +1352,15 @@ mod tests {
         test_repo::write(ff_repo.path(), "feature.txt", "feature\n");
         test_repo::run(ff_repo.path(), &["add", "."]);
         test_repo::run(ff_repo.path(), &["commit", "-qm", "feature"]);
-        let (feature_head, _, ok) = git_read(ff_repo.path(), &["rev-parse", "HEAD"]).unwrap();
+        let (feature_head, _, ok) =
+            GitCommand::read(ff_repo.path(), &["rev-parse", "HEAD"]).unwrap();
         assert!(ok);
         test_repo::run(ff_repo.path(), &["switch", "main"]);
 
         GitRepository::at(ff_repo.path())
             .fast_forward("feature")
             .unwrap();
-        let (head, _, ok) = git_read(ff_repo.path(), &["rev-parse", "HEAD"]).unwrap();
+        let (head, _, ok) = GitCommand::read(ff_repo.path(), &["rev-parse", "HEAD"]).unwrap();
         assert!(ok);
         assert_eq!(head.trim(), feature_head.trim());
     }
@@ -1620,7 +1630,7 @@ mod tests {
         repository.stage(&file).unwrap();
         repository.commit("add a").unwrap();
         assert_eq!(repository.status(&file).unwrap().staged_count, 0);
-        let (log, _, ok) = git(repo.path(), &["log", "--oneline"]).unwrap();
+        let (log, _, ok) = GitCommand::run(repo.path(), &["log", "--oneline"]).unwrap();
         assert!(ok && log.contains("add a"));
     }
 
@@ -1654,7 +1664,7 @@ mod tests {
         repository.commit("second").unwrap();
         repository.push().unwrap();
 
-        let (log, _, ok) = git(remote.path(), &["log", "--oneline", "main"]).unwrap();
+        let (log, _, ok) = GitCommand::run(remote.path(), &["log", "--oneline", "main"]).unwrap();
         assert!(ok && log.contains("second"));
     }
 

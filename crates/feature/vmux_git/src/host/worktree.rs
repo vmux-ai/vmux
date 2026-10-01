@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::host::repository::{GitError, git, git_err, git_read};
+use crate::host::repository::{GitCommand, GitError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeInfo {
@@ -132,10 +132,13 @@ impl BranchChange {
 
     fn against(root: &Path, base: &BaseRef, checkout: &Path, branch: &str) -> Self {
         let head = format!("refs/heads/{branch}");
-        let Ok((merge_base, _, true)) = git(root, &["merge-base", &head, base.as_str()]) else {
+        let Ok((merge_base, _, true)) =
+            GitCommand::run(root, &["merge-base", &head, base.as_str()])
+        else {
             return Self::default();
         };
-        let Ok((numstat, _, true)) = git(checkout, &["diff", "--numstat", merge_base.trim()])
+        let Ok((numstat, _, true)) =
+            GitCommand::run(checkout, &["diff", "--numstat", merge_base.trim()])
         else {
             return Self::default();
         };
@@ -172,14 +175,18 @@ impl BaseRef {
     ];
 
     pub fn resolve(root: &Path) -> Option<Self> {
-        if let Ok((stdout, _, true)) = git(root, &["symbolic-ref", "refs/remotes/origin/HEAD"]) {
+        if let Ok((stdout, _, true)) =
+            GitCommand::run(root, &["symbolic-ref", "refs/remotes/origin/HEAD"])
+        {
             let name = stdout.trim();
             if !name.is_empty() {
                 return Some(Self(name.to_string()));
             }
         }
         for candidate in Self::FALLBACKS {
-            if let Ok((_, _, true)) = git(root, &["rev-parse", "--verify", "--quiet", candidate]) {
+            if let Ok((_, _, true)) =
+                GitCommand::run(root, &["rev-parse", "--verify", "--quiet", candidate])
+            {
                 return Some(Self((*candidate).to_string()));
             }
         }
@@ -244,9 +251,10 @@ fn normalize_worktree_path(path: &Path) -> Result<PathBuf, GitError> {
 }
 
 fn rev_parse_path(dir: &Path, flag: &str, label: &str) -> Result<PathBuf, GitError> {
-    let (stdout, stderr, ok) = git(dir, &["rev-parse", "--path-format=absolute", flag])?;
+    let (stdout, stderr, ok) =
+        GitCommand::run(dir, &["rev-parse", "--path-format=absolute", flag])?;
     if !ok {
-        return Err(git_err(&stdout, &stderr));
+        return Err(GitCommand::error(&stdout, &stderr));
     }
     let value = stdout
         .strip_suffix("\r\n")
@@ -259,7 +267,7 @@ fn rev_parse_path(dir: &Path, flag: &str, label: &str) -> Result<PathBuf, GitErr
 }
 
 fn is_bare_repository(dir: &Path) -> bool {
-    git(dir, &["rev-parse", "--is-bare-repository"])
+    GitCommand::run(dir, &["rev-parse", "--is-bare-repository"])
         .ok()
         .is_some_and(|(stdout, _, ok)| ok && stdout.trim() == "true")
 }
@@ -281,19 +289,19 @@ pub fn repository_init(dir: &Path) -> Result<PathBuf, GitError> {
     if !dir.is_dir() {
         return Err(GitError("workspace path is not a directory".to_string()));
     }
-    let (stdout, stderr, ok) = git(&dir, &["init", "--quiet"])?;
+    let (stdout, stderr, ok) = GitCommand::run(&dir, &["init", "--quiet"])?;
     if !ok {
-        return Err(git_err(&stdout, &stderr));
+        return Err(GitCommand::error(&stdout, &stderr));
     }
     CheckoutInfo::try_from(dir.as_path()).map(|info| info.root)
 }
 
 pub fn ensure_initial_commit(root: &Path) -> Result<(), GitError> {
-    let (_, _, has_head) = git(root, &["rev-parse", "--verify", "HEAD"])?;
+    let (_, _, has_head) = GitCommand::run(root, &["rev-parse", "--verify", "HEAD"])?;
     if has_head {
         return Ok(());
     }
-    let (stdout, stderr, ok) = git(
+    let (stdout, stderr, ok) = GitCommand::run(
         root,
         &[
             "commit",
@@ -304,21 +312,21 @@ pub fn ensure_initial_commit(root: &Path) -> Result<(), GitError> {
         ],
     )?;
     if !ok {
-        return Err(git_err(&stdout, &stderr));
+        return Err(GitCommand::error(&stdout, &stderr));
     }
     Ok(())
 }
 
 pub fn ensure_initial_snapshot(root: &Path, message: &str) -> Result<(), GitError> {
-    let (_, _, has_head) = git(root, &["rev-parse", "--verify", "HEAD"])?;
+    let (_, _, has_head) = GitCommand::run(root, &["rev-parse", "--verify", "HEAD"])?;
     if has_head {
         return Ok(());
     }
-    let (stdout, stderr, added) = git(root, &["add", "--all"])?;
+    let (stdout, stderr, added) = GitCommand::run(root, &["add", "--all"])?;
     if !added {
-        return Err(git_err(&stdout, &stderr));
+        return Err(GitCommand::error(&stdout, &stderr));
     }
-    let (stdout, stderr, committed) = git(
+    let (stdout, stderr, committed) = GitCommand::run(
         root,
         &[
             "-c",
@@ -333,21 +341,23 @@ pub fn ensure_initial_snapshot(root: &Path, message: &str) -> Result<(), GitErro
         ],
     )?;
     if !committed {
-        return Err(git_err(&stdout, &stderr));
+        return Err(GitCommand::error(&stdout, &stderr));
     }
     Ok(())
 }
 
 pub fn head_ref(root: &Path) -> Result<String, GitError> {
-    if let Ok((stdout, _, true)) = git(root, &["symbolic-ref", "--quiet", "--short", "HEAD"]) {
+    if let Ok((stdout, _, true)) =
+        GitCommand::run(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+    {
         let name = stdout.trim();
         if !name.is_empty() {
             return Ok(name.to_string());
         }
     }
-    let (stdout, stderr, ok) = git(root, &["rev-parse", "--short", "HEAD"])?;
+    let (stdout, stderr, ok) = GitCommand::run(root, &["rev-parse", "--short", "HEAD"])?;
     if !ok {
-        return Err(git_err(&stdout, &stderr));
+        return Err(GitCommand::error(&stdout, &stderr));
     }
     Ok(stdout.trim().to_string())
 }
@@ -360,12 +370,12 @@ pub fn worktree_add(
 ) -> Result<WorktreeInfo, GitError> {
     let _lock = lock_repository_worktrees(root)?;
     let path_str = path.to_string_lossy();
-    let (stdout, stderr, ok) = git(
+    let (stdout, stderr, ok) = GitCommand::run(
         root,
         &["worktree", "add", path_str.as_ref(), "-b", branch, base],
     )?;
     if !ok {
-        return Err(git_err(&stdout, &stderr));
+        return Err(GitCommand::error(&stdout, &stderr));
     }
     Ok(WorktreeInfo {
         path: path.to_path_buf(),
@@ -412,9 +422,9 @@ pub fn worktree_add_existing(
     if target_registration.is_some() {
         let path_str = normalized_path.to_string_lossy();
         let (stdout, stderr, ok) =
-            git(root, &["worktree", "remove", "--force", path_str.as_ref()])?;
+            GitCommand::run(root, &["worktree", "remove", "--force", path_str.as_ref()])?;
         if !ok {
-            return Err(git_err(&stdout, &stderr));
+            return Err(GitCommand::error(&stdout, &stderr));
         }
         if let Some(registration) = worktree_registrations(root)?.iter().find(|registration| {
             registration.branch.as_deref() == Some(branch) && registration.path != normalized_path
@@ -426,9 +436,10 @@ pub fn worktree_add_existing(
         }
     }
     let path_str = normalized_path.to_string_lossy();
-    let (stdout, stderr, ok) = git(root, &["worktree", "add", path_str.as_ref(), branch])?;
+    let (stdout, stderr, ok) =
+        GitCommand::run(root, &["worktree", "add", path_str.as_ref(), branch])?;
     if !ok {
-        return Err(git_err(&stdout, &stderr));
+        return Err(GitCommand::error(&stdout, &stderr));
     }
     Ok(WorktreeInfo {
         path: normalized_path,
@@ -451,21 +462,21 @@ pub fn worktree_remove(
         args.push("--force");
     }
     args.push(path_str.as_ref());
-    let (stdout, stderr, ok) = git(root, &args)?;
+    let (stdout, stderr, ok) = GitCommand::run(root, &args)?;
     if !ok {
-        return Err(git_err(&stdout, &stderr));
+        return Err(GitCommand::error(&stdout, &stderr));
     }
-    let _ = git(root, &["branch", "-D", branch]);
+    let _ = GitCommand::run(root, &["branch", "-D", branch]);
     Ok(())
 }
 
 pub fn worktree_status(path: &Path) -> Result<WorktreeStatus, GitError> {
-    let (stdout, stderr, ok) = git(path, &["status", "--porcelain"])?;
+    let (stdout, stderr, ok) = GitCommand::run(path, &["status", "--porcelain"])?;
     if !ok {
-        return Err(git_err(&stdout, &stderr));
+        return Err(GitCommand::error(&stdout, &stderr));
     }
     let uncommitted = stdout.lines().filter(|l| !l.trim().is_empty()).count() as u32;
-    let ahead = git(path, &["rev-list", "--count", "@{upstream}..HEAD"])
+    let ahead = GitCommand::run(path, &["rev-list", "--count", "@{upstream}..HEAD"])
         .ok()
         .filter(|(_, _, ok)| *ok)
         .and_then(|(out, _, _)| out.trim().parse::<u32>().ok())
@@ -481,9 +492,9 @@ pub fn worktree_list(root: &Path) -> Result<Vec<PathBuf>, GitError> {
 }
 
 pub fn worktree_registrations(root: &Path) -> Result<Vec<WorktreeRegistration>, GitError> {
-    let (stdout, stderr, ok) = git(root, &["worktree", "list", "--porcelain"])?;
+    let (stdout, stderr, ok) = GitCommand::run(root, &["worktree", "list", "--porcelain"])?;
     if !ok {
-        return Err(git_err(&stdout, &stderr));
+        return Err(GitCommand::error(&stdout, &stderr));
     }
     let mut registrations = Vec::new();
     let mut path = None;
@@ -512,7 +523,7 @@ pub fn worktree_registrations(root: &Path) -> Result<Vec<WorktreeRegistration>, 
 }
 
 pub fn local_branches(root: &Path) -> Result<Vec<String>, GitError> {
-    let (stdout, stderr, ok) = git(
+    let (stdout, stderr, ok) = GitCommand::run(
         root,
         &[
             "branch",
@@ -521,7 +532,7 @@ pub fn local_branches(root: &Path) -> Result<Vec<String>, GitError> {
         ],
     )?;
     if !ok {
-        return Err(git_err(&stdout, &stderr));
+        return Err(GitCommand::error(&stdout, &stderr));
     }
     Ok(stdout
         .lines()
@@ -557,15 +568,15 @@ pub fn validate_branch_name(root: &Path, branch: &str) -> Result<(), GitError> {
             "branch name is empty or has surrounding whitespace".to_string(),
         ));
     }
-    let (stdout, stderr, ok) = git(root, &["check-ref-format", "--branch", branch])?;
+    let (stdout, stderr, ok) = GitCommand::run(root, &["check-ref-format", "--branch", branch])?;
     if !ok {
-        return Err(git_err(&stdout, &stderr));
+        return Err(GitCommand::error(&stdout, &stderr));
     }
     Ok(())
 }
 
 pub fn info_exclude_path(dir: &Path) -> Option<PathBuf> {
-    let (stdout, _, ok) = git(
+    let (stdout, _, ok) = GitCommand::run(
         dir,
         &[
             "rev-parse",
@@ -688,7 +699,7 @@ pub struct LinkedRepoRoot;
 
 impl LinkedRepoRoot {
     pub fn find(dir: &Path) -> Option<PathBuf> {
-        let (dirs, _, ok) = git_read(
+        let (dirs, _, ok) = GitCommand::read(
             dir,
             &[
                 "rev-parse",
@@ -712,7 +723,7 @@ impl LinkedRepoRoot {
 }
 
 pub fn repo_info(dir: &Path) -> Option<RepoInfo> {
-    let (status, _, ok) = git_read(dir, &["status", "--porcelain=v2", "--branch"]).ok()?;
+    let (status, _, ok) = GitCommand::read(dir, &["status", "--porcelain=v2", "--branch"]).ok()?;
     if !ok {
         return None;
     }
@@ -732,7 +743,7 @@ pub fn repo_info(dir: &Path) -> Option<RepoInfo> {
         .lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .count() as u32;
-    let (dirs, _, ok) = git_read(
+    let (dirs, _, ok) = GitCommand::read(
         dir,
         &[
             "rev-parse",
@@ -751,7 +762,7 @@ pub fn repo_info(dir: &Path) -> Option<RepoInfo> {
     let git_dir = dirs.next()?;
     let common_dir = dirs.next()?;
     let mut name = None;
-    if let Ok((remote, _, ok)) = git_read(dir, &["remote", "get-url", "origin"])
+    if let Ok((remote, _, ok)) = GitCommand::read(dir, &["remote", "get-url", "origin"])
         && ok
     {
         name = RepoInfo::name_from_remote(&remote);
@@ -936,7 +947,7 @@ mod tests {
                 .any(|p| p.canonicalize().ok() == wt.canonicalize().ok())
         );
         let (_, _, branch_exists) =
-            git(repo.path(), &["rev-parse", "--verify", "-q", "vmux/feat"]).unwrap();
+            GitCommand::run(repo.path(), &["rev-parse", "--verify", "-q", "vmux/feat"]).unwrap();
         assert!(!branch_exists, "branch deleted");
     }
 
@@ -1055,10 +1066,12 @@ mod tests {
         ensure_initial_snapshot(repository.path(), "Initialize").unwrap();
         ensure_initial_snapshot(repository.path(), "Ignored").unwrap();
 
-        let (count, _, ok) = git(repository.path(), &["rev-list", "--count", "HEAD"]).unwrap();
+        let (count, _, ok) =
+            GitCommand::run(repository.path(), &["rev-list", "--count", "HEAD"]).unwrap();
         assert!(ok);
         assert_eq!(count.trim(), "1");
-        let (tracked, _, ok) = git(repository.path(), &["ls-files", "note.md"]).unwrap();
+        let (tracked, _, ok) =
+            GitCommand::run(repository.path(), &["ls-files", "note.md"]).unwrap();
         assert!(ok);
         assert_eq!(tracked.trim(), "note.md");
     }
@@ -1324,7 +1337,7 @@ mod tests {
         commit_initial(repo.path());
         let outside = tempfile::tempdir().unwrap();
         let outside_path = outside.path().to_string_lossy();
-        let (_, stderr, ok) = git(
+        let (_, stderr, ok) = GitCommand::run(
             repo.path(),
             &["config", "core.worktree", outside_path.as_ref()],
         )
