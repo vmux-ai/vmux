@@ -11,7 +11,7 @@ pub use plugin::{
     AwaitingProcessCreated, CommandLifecycleEvent, OscTitleChanged, PendingServiceCreate,
     ProcessExitedEvent, ReattachedTerminalBundle, RestartPty, TerminalBundle, TerminalPlugin,
     TerminalReinputRequest, TerminalRestartRequest, TerminalStackSpawnRequest,
-    TerminalStackSpawnSet, has_live_terminal, should_confirm_close,
+    TerminalStackSpawnSet,
 };
 pub use process_control::TerminalGridSize;
 pub use request::{RunShellRequest, ShellMode, TerminalRequestPlugin, TerminalSendRequest};
@@ -35,7 +35,6 @@ pub(crate) mod process_monitor;
 mod request;
 mod service;
 mod shell_env;
-pub(crate) mod shell_input;
 pub(crate) mod snapshot;
 mod state;
 pub(crate) mod theme;

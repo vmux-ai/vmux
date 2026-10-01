@@ -1,4 +1,5 @@
 use crate::{
+    placement::{LeafInfo, PageKind, Placement, ReuseHit},
     stack::{ActiveTabParam, LayoutFocus, Stack},
     tab::Tab,
 };
@@ -80,7 +81,7 @@ fn handle_beside_requests(
     let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     let mut spawn_seq_overrides: std::collections::HashMap<Entity, u64> =
         std::collections::HashMap::new();
-    let mut pending_leaf_infos: std::collections::HashMap<Entity, crate::placement::LeafInfo> =
+    let mut pending_leaf_infos: std::collections::HashMap<Entity, LeafInfo> =
         std::collections::HashMap::new();
     let mut pending_leaf_stacks: std::collections::HashMap<Entity, Vec<Entity>> =
         std::collections::HashMap::new();
@@ -234,18 +235,14 @@ fn handle_beside_requests(
         leaves.retain(|leaf| !retired_leaf_panes.contains(&leaf.pane));
         merge_pending_leaf_infos(&mut leaves, &pending_leaf_infos);
 
-        match crate::placement::resolve_placement(&req.url, reuse, &leaves, req.pane) {
-            crate::placement::Placement::Focus { tab, stack } => {
-                focus_reuse_hit(
-                    &mut commands,
-                    &child_of_q,
-                    crate::placement::ReuseHit { tab, stack },
-                );
+        match Placement::resolve(&req.url, reuse, &leaves, req.pane) {
+            Placement::Focus { tab, stack } => {
+                focus_reuse_hit(&mut commands, &child_of_q, ReuseHit { tab, stack });
             }
-            crate::placement::Placement::AddTab { pane } => {
+            Placement::AddTab { pane } => {
                 let refresh_spawn_seq = matches!(
-                    crate::placement::page_kind_for_url(&req.url),
-                    crate::placement::PageKind::File | crate::placement::PageKind::Terminal
+                    PageKind::for_url(&req.url),
+                    PageKind::File | PageKind::Terminal
                 );
                 let stack = spawn_beside_stack(
                     pane,
@@ -262,7 +259,7 @@ fn handle_beside_requests(
                 );
                 pending_open_stacks.push((req.url.clone(), stack));
             }
-            crate::placement::Placement::Spiral { anchor, axis } => {
+            Placement::Spiral { anchor, axis } => {
                 let old_leaf_info = leaves.iter().find(|leaf| leaf.pane == anchor).cloned();
                 let existing_tabs = stack_children_for_split(
                     anchor,
@@ -328,8 +325,8 @@ fn split_or_extend_for_batch(
     existing_tabs: &[Entity],
     activate_new: bool,
     already_split: bool,
-    old_leaf_info: Option<crate::placement::LeafInfo>,
-    pending_leaf_infos: &mut std::collections::HashMap<Entity, crate::placement::LeafInfo>,
+    old_leaf_info: Option<LeafInfo>,
+    pending_leaf_infos: &mut std::collections::HashMap<Entity, LeafInfo>,
     pending_leaf_stacks: &mut std::collections::HashMap<Entity, Vec<Entity>>,
     retired_leaf_panes: &mut std::collections::HashSet<Entity>,
 ) -> BatchSplit {
@@ -378,7 +375,7 @@ fn stamp_split_panes_for_batch(
     spawn_counter: &mut SpawnCounter,
     seq_q: &Query<&SpawnSeq>,
     spawn_seq_overrides: &mut std::collections::HashMap<Entity, u64>,
-    pending_leaf_infos: &mut std::collections::HashMap<Entity, crate::placement::LeafInfo>,
+    pending_leaf_infos: &mut std::collections::HashMap<Entity, LeafInfo>,
     holder: Option<Entity>,
     target: Entity,
 ) {
@@ -397,11 +394,7 @@ fn stamp_split_panes_for_batch(
     }
 }
 
-fn focus_reuse_hit(
-    commands: &mut Commands,
-    child_of_q: &Query<&ChildOf>,
-    hit: crate::placement::ReuseHit,
-) {
+fn focus_reuse_hit(commands: &mut Commands, child_of_q: &Query<&ChildOf>, hit: ReuseHit) {
     if let Ok(co) = child_of_q.get(hit.stack) {
         commands.entity(co.get()).insert(LastActivatedAt::now());
     }
@@ -445,7 +438,7 @@ fn current_pane_spawn_seq(
     pane: Entity,
     seq_q: &Query<&SpawnSeq>,
     spawn_seq_overrides: &std::collections::HashMap<Entity, u64>,
-    pending_leaf_infos: &std::collections::HashMap<Entity, crate::placement::LeafInfo>,
+    pending_leaf_infos: &std::collections::HashMap<Entity, LeafInfo>,
 ) -> u64 {
     pending_leaf_infos
         .get(&pane)
@@ -463,7 +456,7 @@ fn spawn_beside_stack(
     spawn_counter: &mut SpawnCounter,
     seq_q: &Query<&SpawnSeq>,
     spawn_seq_overrides: &mut std::collections::HashMap<Entity, u64>,
-    pending_leaf_infos: &mut std::collections::HashMap<Entity, crate::placement::LeafInfo>,
+    pending_leaf_infos: &mut std::collections::HashMap<Entity, LeafInfo>,
     pending_leaf_stacks: &mut std::collections::HashMap<Entity, Vec<Entity>>,
     pending_size: Vec2,
     refresh_spawn_seq: bool,
@@ -478,7 +471,7 @@ fn spawn_beside_stack(
     record_pending_leaf_info(
         pending_leaf_infos,
         target_pane,
-        crate::placement::page_kind_for_url(&req.url),
+        PageKind::for_url(&req.url),
         spawn_seq,
         pending_size,
     );
@@ -511,7 +504,7 @@ fn spawn_beside_stack(
 fn pending_open_match_index(url: &str, pending_open_stacks: &[(String, Entity)]) -> Option<usize> {
     pending_open_stacks
         .iter()
-        .position(|(pending_url, _)| crate::placement::reusable_page_match(url, pending_url))
+        .position(|(pending_url, _)| PageKind::reuses(url, pending_url))
 }
 
 fn pane_size(pane: Entity, node_q: &Query<&ComputedNode>) -> Vec2 {
@@ -526,20 +519,18 @@ fn split_child_size(size: Vec2, split_dir: PaneSplitDirection) -> Vec2 {
 }
 
 fn record_pending_leaf_info(
-    pending_leaf_infos: &mut std::collections::HashMap<Entity, crate::placement::LeafInfo>,
+    pending_leaf_infos: &mut std::collections::HashMap<Entity, LeafInfo>,
     pane: Entity,
-    kind: crate::placement::PageKind,
+    kind: PageKind,
     spawn_seq: u64,
     size: Vec2,
 ) {
-    let info = pending_leaf_infos
-        .entry(pane)
-        .or_insert_with(|| crate::placement::LeafInfo {
-            pane,
-            kinds: Vec::new(),
-            spawn_seq,
-            size,
-        });
+    let info = pending_leaf_infos.entry(pane).or_insert_with(|| LeafInfo {
+        pane,
+        kinds: Vec::new(),
+        spawn_seq,
+        size,
+    });
     if !info.kinds.contains(&kind) {
         info.kinds.push(kind);
     }
@@ -550,8 +541,8 @@ fn record_pending_leaf_info(
 }
 
 fn merge_pending_leaf_infos(
-    leaves: &mut Vec<crate::placement::LeafInfo>,
-    pending_leaf_infos: &std::collections::HashMap<Entity, crate::placement::LeafInfo>,
+    leaves: &mut Vec<LeafInfo>,
+    pending_leaf_infos: &std::collections::HashMap<Entity, LeafInfo>,
 ) {
     for pending in pending_leaf_infos.values() {
         if let Some(existing) = leaves.iter_mut().find(|leaf| leaf.pane == pending.pane) {
@@ -597,7 +588,7 @@ fn leaf_info_for_pane(
     node_q: &Query<&ComputedNode>,
     page_q: &Query<&PageMetadata, With<Stack>>,
     spawn_seq_overrides: &std::collections::HashMap<Entity, u64>,
-) -> Option<crate::placement::LeafInfo> {
+) -> Option<LeafInfo> {
     let kinds = unique_page_kinds(
         pane_children
             .get(pane)
@@ -606,7 +597,7 @@ fn leaf_info_for_pane(
             .filter_map(|child| page_q.get(child).ok())
             .map(|p| p.url.as_str()),
     );
-    Some(crate::placement::LeafInfo {
+    Some(LeafInfo {
         pane,
         kinds,
         spawn_seq: spawn_seq_overrides
@@ -642,7 +633,7 @@ fn collect_leaf_infos(
     node_q: &Query<&ComputedNode>,
     page_q: &Query<&PageMetadata, With<Stack>>,
     spawn_seq_overrides: &std::collections::HashMap<Entity, u64>,
-) -> Vec<crate::placement::LeafInfo> {
+) -> Vec<LeafInfo> {
     let mut panes = Vec::new();
     let mut pending = vec![tab];
     while let Some(entity) = pending.pop() {
@@ -666,7 +657,7 @@ fn collect_leaf_infos(
                     )
                 })
                 .unwrap_or_default();
-            crate::placement::LeafInfo {
+            LeafInfo {
                 pane,
                 kinds,
                 spawn_seq: spawn_seq_overrides
@@ -680,10 +671,10 @@ fn collect_leaf_infos(
         .collect()
 }
 
-fn unique_page_kinds<'a>(urls: impl Iterator<Item = &'a str>) -> Vec<crate::placement::PageKind> {
+fn unique_page_kinds<'a>(urls: impl Iterator<Item = &'a str>) -> Vec<PageKind> {
     let mut kinds = Vec::new();
     for url in urls {
-        let kind = crate::placement::page_kind_for_url(url);
+        let kind = PageKind::for_url(url);
         if !kinds.contains(&kind) {
             kinds.push(kind);
         }
@@ -699,7 +690,7 @@ fn find_reuse_in_space(
     page_q: &Query<&PageMetadata, With<Stack>>,
     open_task_q: &Query<&PageOpenTask>,
     child_of_q: &Query<&ChildOf>,
-) -> Option<crate::placement::ReuseHit> {
+) -> Option<ReuseHit> {
     let tabs: Vec<Entity> = all_children
         .get(space)
         .map(|c| c.iter().filter(|&e| tab_q.contains(e)).collect())
@@ -708,9 +699,9 @@ fn find_reuse_in_space(
         let mut frontier = vec![tab];
         while let Some(node) = frontier.pop() {
             if let Ok(meta) = page_q.get(node)
-                && crate::placement::reusable_page_match(url, &meta.url)
+                && PageKind::reuses(url, &meta.url)
             {
-                return Some(crate::placement::ReuseHit { tab, stack: node });
+                return Some(ReuseHit { tab, stack: node });
             }
             if let Ok(children) = all_children.get(node) {
                 frontier.extend(children.iter());
@@ -718,11 +709,11 @@ fn find_reuse_in_space(
         }
     }
     for task in open_task_q.iter() {
-        if !crate::placement::reusable_page_match(url, &task.url) {
+        if !PageKind::reuses(url, &task.url) {
             continue;
         }
         if let Some(tab) = tab_for_stack_in_space(task.stack, space, child_of_q, tab_q) {
-            return Some(crate::placement::ReuseHit {
+            return Some(ReuseHit {
                 tab,
                 stack: task.stack,
             });
@@ -787,9 +778,9 @@ impl PanePlacement<'_, '_> {
             &self.page_q,
             &std::collections::HashMap::new(),
         );
-        match crate::placement::resolve_placement(url, None, &leaves, anchor_pane) {
-            crate::placement::Placement::AddTab { pane } => pane,
-            crate::placement::Placement::Spiral { anchor, axis } => {
+        match Placement::resolve(url, None, &leaves, anchor_pane) {
+            Placement::AddTab { pane } => pane,
+            Placement::Spiral { anchor, axis } => {
                 let existing_tabs: Vec<Entity> = self
                     .pane_children
                     .get(anchor)
@@ -804,7 +795,7 @@ impl PanePlacement<'_, '_> {
                     !split_batch.insert(anchor) || self.split_dir_q.contains(anchor);
                 Pane::split_or_extend(commands, anchor, axis, &existing_tabs, focus, already_split)
             }
-            crate::placement::Placement::Focus { .. } => anchor_pane,
+            Placement::Focus { .. } => anchor_pane,
         }
     }
 
@@ -822,7 +813,7 @@ impl PanePlacement<'_, '_> {
             &self.page_q,
             &std::collections::HashMap::new(),
         );
-        crate::placement::resolve_split_anchor(&leaves, anchor_pane)
+        Placement::split_anchor(&leaves, anchor_pane)
     }
 }
 

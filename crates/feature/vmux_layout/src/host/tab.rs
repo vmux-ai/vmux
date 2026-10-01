@@ -378,7 +378,7 @@ fn handle_focus_requests(
         let Some(active) = active_tab.get() else {
             continue;
         };
-        let siblings = active_tab_siblings(active, &child_of, &children, &tabs);
+        let siblings = Tab::siblings(active, &child_of, &children, &tabs);
         if siblings.is_empty() {
             continue;
         }
@@ -478,37 +478,37 @@ fn handle_new_requests(
     }
 }
 
-pub fn active_tab_siblings(
-    active: Entity,
-    child_of_q: &Query<&ChildOf>,
-    all_children: &Query<&Children>,
-    tab_q: &Query<Entity, With<Tab>>,
-) -> Vec<Entity> {
-    let Ok(co) = child_of_q.get(active) else {
-        return vec![active];
-    };
-    let parent = co.get();
-    let Ok(children) = all_children.get(parent) else {
-        return vec![active];
-    };
-    children
-        .iter()
-        .filter(|e| tab_q.contains(*e))
-        .collect::<Vec<_>>()
-}
-
-pub fn pick_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
-    if siblings.len() <= 1 {
-        return None;
+impl Tab {
+    pub fn siblings(
+        active: Entity,
+        child_of_q: &Query<&ChildOf>,
+        all_children: &Query<&Children>,
+        tab_q: &Query<Entity, With<Tab>>,
+    ) -> Vec<Entity> {
+        let Ok(child_of) = child_of_q.get(active) else {
+            return vec![active];
+        };
+        let Ok(children) = all_children.get(child_of.get()) else {
+            return vec![active];
+        };
+        children
+            .iter()
+            .filter(|entity| tab_q.contains(*entity))
+            .collect()
     }
-    let idx = siblings.iter().position(|e| *e == active)?;
-    let next_idx = if idx + 1 < siblings.len() {
-        idx + 1
-    } else {
-        idx - 1
-    };
-    let target = siblings[next_idx];
-    if target == active { None } else { Some(target) }
+
+    pub(crate) fn next_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
+        if siblings.len() <= 1 {
+            return None;
+        }
+        let index = siblings.iter().position(|entity| *entity == active)?;
+        let next = if index + 1 < siblings.len() {
+            siblings[index + 1]
+        } else {
+            siblings[index - 1]
+        };
+        (next != active).then_some(next)
+    }
 }
 
 fn sync_visibility(mut tabs: Query<(&mut Node, &mut Visibility, Has<Active>), With<Tab>>) {
@@ -741,11 +741,11 @@ mod tests {
         let d = Entity::from_bits(4);
         let tabs = [a, b, c, d];
 
-        assert_eq!(pick_after_close(d, &tabs), Some(c));
-        assert_eq!(pick_after_close(b, &tabs), Some(c));
-        assert_eq!(pick_after_close(a, &tabs), Some(b));
-        assert_eq!(pick_after_close(b, &[a, b]), Some(a));
-        assert_eq!(pick_after_close(a, &[a]), None);
+        assert_eq!(Tab::next_after_close(d, &tabs), Some(c));
+        assert_eq!(Tab::next_after_close(b, &tabs), Some(c));
+        assert_eq!(Tab::next_after_close(a, &tabs), Some(b));
+        assert_eq!(Tab::next_after_close(b, &[a, b]), Some(a));
+        assert_eq!(Tab::next_after_close(a, &[a]), None);
     }
 
     #[test]
@@ -772,7 +772,7 @@ mod tests {
                 move |child_of_q: Query<&ChildOf>,
                       all_children: Query<&Children>,
                       tab_q: Query<Entity, With<Tab>>| {
-                    active_tab_siblings(a1, &child_of_q, &all_children, &tab_q)
+                    Tab::siblings(a1, &child_of_q, &all_children, &tab_q)
                 },
             )
             .unwrap();

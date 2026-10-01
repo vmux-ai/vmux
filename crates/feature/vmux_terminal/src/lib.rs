@@ -14,12 +14,10 @@ pub use host::{
     Terminal, TerminalBundle, TerminalContractPlugin, TerminalFontSizeCommand, TerminalGridSize,
     TerminalPlugin, TerminalReinputRequest, TerminalRequestPlugin, TerminalRestartRequest,
     TerminalSendRequest, TerminalStackSpawnRequest, TerminalStackSpawnSet, TerminalThemePlugin,
-    TerminalToolPlugin, TerminalUiStateUpdates, has_live_terminal, should_confirm_close,
+    TerminalToolPlugin, TerminalUiStateUpdates,
 };
 #[cfg(host)]
-pub(crate) use host::{
-    contract, launch, pid, plugin, process_monitor, shell_input, snapshot, theme,
-};
+pub(crate) use host::{contract, launch, pid, plugin, process_monitor, snapshot, theme};
 
 #[cfg(host)]
 pub(crate) struct Feature;
@@ -30,7 +28,7 @@ impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
 }
 
 pub mod event;
-pub mod render_model;
+mod render_model;
 
 pub mod ui;
 

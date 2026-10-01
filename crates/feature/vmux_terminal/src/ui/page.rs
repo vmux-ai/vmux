@@ -2,16 +2,14 @@
 
 use super::state::{TerminalRowState, TerminalState};
 use crate::event::*;
-use crate::render_model::{
-    cursor_cell_style, span_background_overlay, span_classes, span_inline_style,
-    span_looks_like_suggestion,
-};
+use crate::render_model::TermSpanPresentation;
 use dioxus::html::Modifiers;
 use dioxus::html::geometry::{ClientPoint, PixelsVector2D, WheelDelta};
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use std::rc::Rc;
 use unicode_width::UnicodeWidthChar;
+use vmux_api::terminal::CursorStyle;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::Unclaimed;
@@ -522,7 +520,7 @@ fn TerminalRow(
         div {
             class: "relative isolate h-[var(--ch,1.2em)] whitespace-pre",
             for (span_idx, span) in line.spans.iter().enumerate() {
-                if let Some(background) = span_background_overlay(span) {
+                if let Some(background) = TermSpanPresentation::new(span).background {
                     div {
                         key: "bg-{span_idx}",
                         class: "{background.class}",
@@ -535,7 +533,7 @@ fn TerminalRow(
                     span: span.clone(),
                     span_idx,
                     cursor: state.cursor.clone(),
-                    cursor_style: vmux_api::terminal::CursorStyle::Block,
+                    cursor_style: CursorStyle::Block,
                 }
             }
             if let Some((sel_start, sel_end)) = selected_cols {
@@ -626,12 +624,13 @@ fn TermSpanView(
     span: TermSpan,
     span_idx: usize,
     cursor: Option<TermCursor>,
-    cursor_style: vmux_api::terminal::CursorStyle,
+    cursor_style: CursorStyle,
 ) -> Element {
     let span = &span;
     let cursor = cursor.as_ref();
-    let classes = span_classes(span);
-    let style = span_inline_style(span);
+    let presentation = TermSpanPresentation::new(span);
+    let classes = &presentation.classes;
+    let style = &presentation.style;
 
     if let Some(cursor) = cursor
         && cursor.visible
@@ -650,9 +649,7 @@ fn TermSpanView(
         } else {
             cursor.ch.clone()
         };
-        let suggestion = span_looks_like_suggestion(span);
-        let (cursor_classes, cursor_style_attr) =
-            cursor_cell_style(&classes, &style, cursor_style, suggestion);
+        let (cursor_classes, cursor_style_attr) = presentation.cursor(cursor_style);
 
         return rsx! {
             if !before.is_empty() {

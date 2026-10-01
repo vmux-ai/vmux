@@ -28,8 +28,8 @@ use crate::stack::CloseRequest;
 use crate::stack::{
     ActiveTabParam, CloseStackReason, CloseStackRequest, CloseStackSet, Stack, StackCommandSet,
 };
-use crate::tab::{CloseTabRequest, Tab, TabClosed, active_tab_siblings, pick_after_close};
-use crate::window::spawn_tab_scaffold_in_space;
+use crate::tab::{CloseTabRequest, Tab, TabClosed};
+use crate::window::TabScaffold;
 use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
@@ -322,7 +322,7 @@ fn handle_close_tab_requests(
         let Ok(tab) = layout.tabs.get(request.tab) else {
             continue;
         };
-        let siblings = active_tab_siblings(
+        let siblings = Tab::siblings(
             request.tab,
             &layout.archive.child_of,
             &layout.archive.children_q,
@@ -368,7 +368,7 @@ fn handle_close_tab_requests(
                 replacement_spaces.insert(tab_space);
             }
         } else if layout.active_tab.get() == Some(request.tab)
-            && let Some(next) = pick_after_close(
+            && let Some(next) = Tab::next_after_close(
                 request.tab,
                 &siblings
                     .iter()
@@ -917,7 +917,7 @@ fn resolve_reopen_stack(
         }
     }
 
-    let scaffold = spawn_tab_scaffold_in_space(commands, space, primary_window, gap);
+    let scaffold = TabScaffold::spawn(commands, space, primary_window, gap);
     if origin_matches && let Some(idx) = tab_index {
         commands.entity(space).insert_children(idx, &[scaffold.tab]);
     }

@@ -20,7 +20,7 @@ use vmux_layout::LayoutContractPlugin;
 use vmux_layout::OpenBesideRequest;
 use vmux_layout::active_pane::ActivatePane;
 use vmux_layout::pane::Pane;
-use vmux_layout::placement::reusable_page_match;
+use vmux_layout::placement::PageKind;
 use vmux_layout::stack::Stack;
 use vmux_layout::tab::Tab;
 use vmux_layout::worktree::{
@@ -189,7 +189,7 @@ impl AgentFileLayout<'_, '_> {
                 let stack = page_co.get();
                 if !meta.url.starts_with("file:")
                     || self.child_of.get(stack).ok().map(Relationship::get) != Some(*pane)
-                    || !reusable_page_match(url, &meta.url)
+                    || !PageKind::reuses(url, &meta.url)
                 {
                     continue;
                 }
@@ -321,7 +321,7 @@ fn handle_file_touch(
             for preview in previews {
                 if let Some(existing) = deduped
                     .iter_mut()
-                    .find(|existing| reusable_page_match(&preview.url, &existing.url))
+                    .find(|existing| PageKind::reuses(&preview.url, &existing.url))
                 {
                     *existing = preview;
                 } else {

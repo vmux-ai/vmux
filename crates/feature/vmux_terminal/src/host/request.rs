@@ -41,6 +41,14 @@ pub struct RunShellRequest {
     pub mode: ShellMode,
 }
 
+impl RunShellRequest {
+    fn input(&self) -> Vec<u8> {
+        let mut data = self.command.as_bytes().to_vec();
+        data.push(b'\r');
+        data
+    }
+}
+
 fn handle_send_requests(
     mut reader: MessageReader<TerminalSendRequest>,
     focus: vmux_layout::stack::FocusedStack,
@@ -97,8 +105,8 @@ fn handle_run_shell_requests(
     mut terminal_stack_spawns: Option<MessageWriter<TerminalStackSpawnRequest>>,
 ) {
     for request in reader.read() {
-        let RunShellRequest { command, cwd, mode } = request.clone();
-        let input = crate::shell_input::shell_command_input(&command);
+        let input = request.input();
+        let RunShellRequest { cwd, mode, .. } = request.clone();
         if matches!(mode, ShellMode::Active) {
             let mut active_terminal = None;
             if let Some(stack) = focus.stack {
@@ -135,5 +143,21 @@ fn handle_run_shell_requests(
             process_id: None,
             activate: true,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_command_input_appends_carriage_return() {
+        let request = RunShellRequest {
+            command: "echo hi".into(),
+            cwd: String::new(),
+            mode: ShellMode::NewTab,
+        };
+
+        assert_eq!(request.input(), b"echo hi\r".to_vec());
     }
 }

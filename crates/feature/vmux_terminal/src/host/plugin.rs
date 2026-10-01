@@ -302,22 +302,6 @@ impl Plugin for TerminalUpdatePlugin {
 
 const CTRL_V: u8 = 0x16;
 
-pub fn should_confirm_close(settings: &AppSettings) -> bool {
-    settings.terminal.as_ref().is_none_or(|t| t.confirm_close)
-}
-
-pub fn has_live_terminal(
-    tab: Entity,
-    children_q: &Query<&Children>,
-    terminal_q: &Query<(), (With<Terminal>, Without<ProcessExited>)>,
-) -> bool {
-    if let Ok(children) = children_q.get(tab) {
-        children.iter().any(|child| terminal_q.contains(child))
-    } else {
-        false
-    }
-}
-
 #[derive(Clone, Copy)]
 struct CopyModeKeyInput<'a> {
     key: &'a Key,

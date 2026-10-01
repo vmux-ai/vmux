@@ -17,7 +17,7 @@ use vmux_layout::AgentPaneDirection;
 #[cfg(test)]
 use vmux_layout::LayoutContractPlugin;
 use vmux_layout::pane::{Pane, PaneSplit, PaneSplitDirection, SpawnCounter, SpawnSeq};
-use vmux_layout::placement::{PageKind, page_kind_for_url};
+use vmux_layout::placement::PageKind;
 use vmux_layout::stack::Stack;
 use vmux_layout::tab::Tab;
 use vmux_setting::{AppSettings, StartupDir};
@@ -369,7 +369,7 @@ impl RunTerminalBucketPanes {
                     for stack in children.iter().filter(|&child| stack_q.contains(child)) {
                         has_stack = true;
                         let meta = page_q.get(stack).ok()?;
-                        if page_kind_for_url(&meta.url) != PageKind::Terminal {
+                        if PageKind::for_url(&meta.url) != PageKind::Terminal {
                             return None;
                         }
                     }

@@ -11,24 +11,50 @@ pub enum PageKind {
     Browser,
 }
 
-pub fn page_kind_for_url(url: &str) -> PageKind {
-    if let Some(route) = VmuxRoute::parse(url) {
-        if route.is_agent() {
-            return PageKind::Agent;
+impl PageKind {
+    pub fn for_url(url: &str) -> Self {
+        if let Some(route) = VmuxRoute::parse(url) {
+            if route.is_agent() {
+                return Self::Agent;
+            }
+            if route.is_terminal() {
+                return Self::Terminal;
+            }
+            return Self::Browser;
         }
-        if route.is_terminal() {
-            return PageKind::Terminal;
+        match url.starts_with("file:") {
+            true => Self::File,
+            false => Self::Browser,
         }
-        return PageKind::Browser;
     }
-    match url.starts_with("file:") {
-        true => PageKind::File,
-        false => PageKind::Browser,
+
+    pub fn reuses(request_url: &str, existing_url: &str) -> bool {
+        let kind = Self::for_url(request_url);
+        if Self::for_url(existing_url) != kind {
+            return false;
+        }
+        match kind {
+            Self::Agent => {
+                let Some(request) = VmuxRoute::parse(request_url) else {
+                    return false;
+                };
+                let Some(existing) = VmuxRoute::parse(existing_url) else {
+                    return false;
+                };
+                request.same_page(&existing)
+            }
+            Self::File => {
+                let request = request_url.split('#').next().unwrap_or(request_url);
+                let existing = existing_url.split('#').next().unwrap_or(existing_url);
+                request == existing
+            }
+            _ => request_url == existing_url,
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Placement {
+pub(crate) enum Placement {
     Focus {
         tab: Entity,
         stack: Entity,
@@ -43,17 +69,17 @@ pub enum Placement {
 }
 
 #[derive(Debug, Clone)]
-pub struct LeafInfo {
-    pub pane: Entity,
-    pub kinds: Vec<PageKind>,
-    pub spawn_seq: u64,
-    pub size: Vec2,
+pub(crate) struct LeafInfo {
+    pub(crate) pane: Entity,
+    pub(crate) kinds: Vec<PageKind>,
+    pub(crate) spawn_seq: u64,
+    pub(crate) size: Vec2,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ReuseHit {
-    pub tab: Entity,
-    pub stack: Entity,
+pub(crate) struct ReuseHit {
+    pub(crate) tab: Entity,
+    pub(crate) stack: Entity,
 }
 
 fn longer_axis(size: Vec2) -> PaneSplitDirection {
@@ -78,102 +104,87 @@ fn newest_leaf_with_kind(leaves: &[LeafInfo], kind: PageKind) -> Option<&LeafInf
         .max_by_key(|l| l.spawn_seq)
 }
 
-fn file_reuse_key(url: &str) -> &str {
-    url.split('#').next().unwrap_or(url)
-}
-
-pub fn reusable_page_match(request_url: &str, existing_url: &str) -> bool {
-    let kind = page_kind_for_url(request_url);
-    if page_kind_for_url(existing_url) != kind {
-        return false;
-    }
-    match kind {
-        PageKind::Agent => {
-            let Some(request) = VmuxRoute::parse(request_url) else {
-                return false;
+impl Placement {
+    pub(crate) fn resolve(
+        url: &str,
+        reuse: Option<ReuseHit>,
+        leaves: &[LeafInfo],
+        self_pane: Entity,
+    ) -> Self {
+        if let Some(hit) = reuse {
+            return Self::Focus {
+                tab: hit.tab,
+                stack: hit.stack,
             };
-            let Some(existing) = VmuxRoute::parse(existing_url) else {
-                return false;
+        }
+
+        let kind = PageKind::for_url(url);
+
+        if let Some(empty) = leaves.iter().find(|leaf| leaf.kinds.is_empty()) {
+            return Self::AddTab { pane: empty.pane };
+        }
+
+        if kind == PageKind::Agent {
+            if let Some(agent) = newest_leaf_with_kind(leaves, PageKind::Agent) {
+                return Self::AddTab { pane: agent.pane };
+            }
+            if let Some(anchor) = newest_nonagent_leaf(leaves) {
+                return Self::Spiral {
+                    anchor: anchor.pane,
+                    axis: longer_axis(anchor.size),
+                };
+            }
+            return Self::AddTab { pane: self_pane };
+        }
+
+        if let Some(same) = newest_leaf_with_kind(leaves, kind) {
+            return Self::AddTab { pane: same.pane };
+        }
+
+        if kind == PageKind::Terminal
+            && leaves.iter().all(|leaf| {
+                leaf.kinds.contains(&PageKind::Agent)
+                    || (leaf.kinds.len() == 1 && leaf.kinds.contains(&PageKind::Browser))
+            })
+            && let Some(browser) = newest_leaf_with_kind(leaves, PageKind::Browser)
+        {
+            return Self::Spiral {
+                anchor: browser.pane,
+                axis: PaneSplitDirection::Column,
             };
-            request.same_page(&existing)
         }
-        PageKind::File => file_reuse_key(request_url) == file_reuse_key(existing_url),
-        _ => request_url == existing_url,
-    }
-}
 
-pub fn resolve_placement(
-    url: &str,
-    reuse: Option<ReuseHit>,
-    leaves: &[LeafInfo],
-    self_pane: Entity,
-) -> Placement {
-    if let Some(hit) = reuse {
-        return Placement::Focus {
-            tab: hit.tab,
-            stack: hit.stack,
-        };
-    }
-
-    let kind = page_kind_for_url(url);
-
-    if let Some(empty) = leaves.iter().find(|l| l.kinds.is_empty()) {
-        return Placement::AddTab { pane: empty.pane };
-    }
-
-    if kind == PageKind::Agent {
-        if let Some(agent) = newest_leaf_with_kind(leaves, PageKind::Agent) {
-            return Placement::AddTab { pane: agent.pane };
-        }
         if let Some(anchor) = newest_nonagent_leaf(leaves) {
-            return Placement::Spiral {
+            let axis = longer_axis(anchor.size);
+            return Self::Spiral {
                 anchor: anchor.pane,
-                axis: longer_axis(anchor.size),
+                axis,
             };
         }
-        return Placement::AddTab { pane: self_pane };
+
+        if let Some(agent) = leaves
+            .iter()
+            .find(|leaf| leaf.kinds.contains(&PageKind::Agent))
+        {
+            return Self::Spiral {
+                anchor: agent.pane,
+                axis: longer_axis(agent.size),
+            };
+        }
+
+        Self::AddTab { pane: self_pane }
     }
 
-    if let Some(same) = newest_leaf_with_kind(leaves, kind) {
-        return Placement::AddTab { pane: same.pane };
+    pub(crate) fn split_anchor(leaves: &[LeafInfo], self_pane: Entity) -> Entity {
+        newest_nonagent_leaf(leaves)
+            .or_else(|| {
+                leaves
+                    .iter()
+                    .find(|leaf| leaf.kinds.contains(&PageKind::Agent))
+            })
+            .map(|leaf| leaf.pane)
+            .unwrap_or(self_pane)
     }
-
-    if kind == PageKind::Terminal
-        && leaves.iter().all(|leaf| {
-            leaf.kinds.contains(&PageKind::Agent)
-                || (leaf.kinds.len() == 1 && leaf.kinds.contains(&PageKind::Browser))
-        })
-        && let Some(browser) = newest_leaf_with_kind(leaves, PageKind::Browser)
-    {
-        return Placement::Spiral {
-            anchor: browser.pane,
-            axis: PaneSplitDirection::Column,
-        };
-    }
-
-    if let Some(anchor) = newest_nonagent_leaf(leaves) {
-        let axis = longer_axis(anchor.size);
-        return Placement::Spiral {
-            anchor: anchor.pane,
-            axis,
-        };
-    }
-
-    if let Some(agent) = leaves.iter().find(|l| l.kinds.contains(&PageKind::Agent)) {
-        return Placement::Spiral {
-            anchor: agent.pane,
-            axis: longer_axis(agent.size),
-        };
-    }
-
-    Placement::AddTab { pane: self_pane }
-}
-
-pub fn resolve_split_anchor(leaves: &[LeafInfo], self_pane: Entity) -> Entity {
-    newest_nonagent_leaf(leaves)
-        .or_else(|| leaves.iter().find(|l| l.kinds.contains(&PageKind::Agent)))
-        .map(|l| l.pane)
-        .unwrap_or(self_pane)
 }
 
 #[cfg(test)]
@@ -183,14 +194,14 @@ mod tests {
     #[test]
     fn classifies_core_four_kinds() {
         assert_eq!(
-            page_kind_for_url("vmux://sessions/vibe/abc"),
+            PageKind::for_url("vmux://sessions/vibe/abc"),
             PageKind::Agent
         );
-        assert_eq!(page_kind_for_url("vmux://terminal/123"), PageKind::Terminal);
-        assert_eq!(page_kind_for_url("file:///x.rs"), PageKind::File);
-        assert_eq!(page_kind_for_url("https://example.com"), PageKind::Browser);
-        assert_eq!(page_kind_for_url("vmux://services/"), PageKind::Browser);
-        assert_eq!(page_kind_for_url("vmux://spaces/"), PageKind::Browser);
+        assert_eq!(PageKind::for_url("vmux://terminal/123"), PageKind::Terminal);
+        assert_eq!(PageKind::for_url("file:///x.rs"), PageKind::File);
+        assert_eq!(PageKind::for_url("https://example.com"), PageKind::Browser);
+        assert_eq!(PageKind::for_url("vmux://services/"), PageKind::Browser);
+        assert_eq!(PageKind::for_url("vmux://spaces/"), PageKind::Browser);
     }
 
     fn e(n: u64) -> Entity {
@@ -212,7 +223,7 @@ mod tests {
             tab: e(1),
             stack: e(2),
         };
-        let got = resolve_placement(
+        let got = Placement::resolve(
             "https://x.com",
             Some(hit),
             &[leaf(10, &[PageKind::Browser], 5, (800.0, 600.0))],
@@ -229,15 +240,15 @@ mod tests {
 
     #[test]
     fn canonical_and_legacy_agent_urls_reuse_the_same_session() {
-        assert!(reusable_page_match(
+        assert!(PageKind::reuses(
             "vmux://sessions/codex/session-1",
             "vmux://agent/codex/session-1"
         ));
-        assert!(reusable_page_match(
+        assert!(PageKind::reuses(
             "vmux://agent/codex/session-1",
             "vmux://sessions/codex/session-1"
         ));
-        assert!(!reusable_page_match(
+        assert!(!PageKind::reuses(
             "vmux://sessions/codex/session-1",
             "vmux://agent/codex/session-2"
         ));
@@ -245,7 +256,7 @@ mod tests {
 
     #[test]
     fn same_type_adds_tab_no_split() {
-        let got = resolve_placement(
+        let got = Placement::resolve(
             "https://b.com",
             None,
             &[leaf(10, &[PageKind::Browser], 5, (800.0, 600.0))],
@@ -256,7 +267,7 @@ mod tests {
 
     #[test]
     fn same_type_uses_newest_matching_bucket() {
-        let got = resolve_placement(
+        let got = Placement::resolve(
             "vmux://terminal/",
             None,
             &[
@@ -271,7 +282,7 @@ mod tests {
 
     #[test]
     fn same_type_prefers_pure_bucket_over_newer_mixed_bucket() {
-        let got = resolve_placement(
+        let got = Placement::resolve(
             "file:///b.rs",
             None,
             &[
@@ -285,7 +296,7 @@ mod tests {
 
     #[test]
     fn same_type_does_not_add_to_mixed_bucket_when_no_pure_bucket_exists() {
-        let got = resolve_placement(
+        let got = Placement::resolve(
             "https://b.com",
             None,
             &[leaf(
@@ -307,7 +318,7 @@ mod tests {
 
     #[test]
     fn forced_split_uses_newest_nonagent_leaf() {
-        let got = resolve_split_anchor(
+        let got = Placement::split_anchor(
             &[
                 leaf(10, &[PageKind::Terminal], 9, (800.0, 600.0)),
                 leaf(20, &[PageKind::Browser], 12, (800.0, 600.0)),
@@ -321,7 +332,7 @@ mod tests {
 
     #[test]
     fn first_page_fills_empty_leaf() {
-        let got = resolve_placement(
+        let got = Placement::resolve(
             "https://b.com",
             None,
             &[leaf(10, &[], 1, (800.0, 600.0))],
@@ -336,7 +347,7 @@ mod tests {
             leaf(1, &[PageKind::Agent], 1, (800.0, 900.0)),
             leaf(2, &[PageKind::File], 9, (900.0, 400.0)),
         ];
-        let got = resolve_placement("https://b.com", None, &leaves, e(1));
+        let got = Placement::resolve("https://b.com", None, &leaves, e(1));
         assert_eq!(
             got,
             Placement::Spiral {
@@ -353,7 +364,7 @@ mod tests {
             leaf(2, &[PageKind::Browser], 10, (900.0, 400.0)),
             leaf(3, &[PageKind::Terminal], 20, (900.0, 400.0)),
         ];
-        let got = resolve_placement("file:///repo/README.md", None, &leaves, e(1));
+        let got = Placement::resolve("file:///repo/README.md", None, &leaves, e(1));
         assert_eq!(
             got,
             Placement::Spiral {
@@ -369,7 +380,7 @@ mod tests {
             leaf(1, &[PageKind::Agent], 1, (800.0, 900.0)),
             leaf(2, &[PageKind::Browser], 10, (900.0, 400.0)),
         ];
-        let got = resolve_placement("vmux://terminal/", None, &leaves, e(1));
+        let got = Placement::resolve("vmux://terminal/", None, &leaves, e(1));
         assert_eq!(
             got,
             Placement::Spiral {
@@ -382,7 +393,7 @@ mod tests {
     #[test]
     fn new_type_splits_tall_leaf_into_column() {
         let leaves = [leaf(2, &[PageKind::File], 9, (400.0, 900.0))];
-        let got = resolve_placement("https://b.com", None, &leaves, e(2));
+        let got = Placement::resolve("https://b.com", None, &leaves, e(2));
         assert_eq!(
             got,
             Placement::Spiral {
@@ -398,14 +409,14 @@ mod tests {
             leaf(1, &[PageKind::Agent], 1, (800.0, 900.0)),
             leaf(2, &[PageKind::Browser], 9, (900.0, 400.0)),
         ];
-        let got = resolve_placement("vmux://sessions/vibe/x", None, &leaves, e(2));
+        let got = Placement::resolve("vmux://sessions/vibe/x", None, &leaves, e(2));
         assert_eq!(got, Placement::AddTab { pane: e(1) });
     }
 
     #[test]
     fn nonagent_page_bootstraps_by_splitting_agent_when_only_leaf() {
         let leaves = [leaf(1, &[PageKind::Agent], 1, (1600.0, 900.0))];
-        let got = resolve_placement("https://b.com", None, &leaves, e(1));
+        let got = Placement::resolve("https://b.com", None, &leaves, e(1));
         assert_eq!(
             got,
             Placement::Spiral {
@@ -418,7 +429,7 @@ mod tests {
     #[test]
     fn agent_page_bootstraps_by_splitting_newest_nonagent_when_no_agent_pane() {
         let leaves = [leaf(2, &[PageKind::Browser], 9, (400.0, 900.0))];
-        let got = resolve_placement("vmux://sessions/vibe/x", None, &leaves, e(2));
+        let got = Placement::resolve("vmux://sessions/vibe/x", None, &leaves, e(2));
         assert_eq!(
             got,
             Placement::Spiral {

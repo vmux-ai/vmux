@@ -563,61 +563,63 @@ fn request_default(
     });
 }
 
-pub struct TabScaffold {
-    pub tab: Entity,
-    pub pane: Entity,
-    pub stack: Entity,
+pub(crate) struct TabScaffold {
+    pub(crate) tab: Entity,
+    pub(crate) pane: Entity,
+    pub(crate) stack: Entity,
 }
 
-pub fn spawn_tab_scaffold_in_space(
-    commands: &mut Commands,
-    space: Entity,
-    primary_window: Entity,
-    gap_px: f32,
-) -> TabScaffold {
-    let tab = commands
-        .spawn((
-            Tab::bundle(),
-            LastActivatedAt::now(),
-            CreatedAt::now(),
-            ChildOf(space),
-        ))
-        .id();
+impl TabScaffold {
+    pub(crate) fn spawn(
+        commands: &mut Commands,
+        space: Entity,
+        primary_window: Entity,
+        gap_px: f32,
+    ) -> Self {
+        let tab = commands
+            .spawn((
+                Tab::bundle(),
+                LastActivatedAt::now(),
+                CreatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
 
-    let gap = PaneSplitDirection::Row.gaps(gap_px);
-    let split_root = commands
-        .spawn((
-            Pane,
-            PaneSplit {
-                direction: PaneSplitDirection::Row,
-            },
-            HostWindow(primary_window),
-            Transform::default(),
-            Node {
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                column_gap: gap.column_gap,
-                row_gap: gap.row_gap,
-                ..default()
-            },
-            ChildOf(tab),
-        ))
-        .id();
+        let gap = PaneSplitDirection::Row.gaps(gap_px);
+        let split_root = commands
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                HostWindow(primary_window),
+                Transform::default(),
+                Node {
+                    flex_grow: 1.0,
+                    min_height: Val::Px(0.0),
+                    column_gap: gap.column_gap,
+                    row_gap: gap.row_gap,
+                    ..default()
+                },
+                ChildOf(tab),
+            ))
+            .id();
 
-    let pane = commands
-        .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(split_root)))
-        .id();
+        let pane = commands
+            .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(split_root)))
+            .id();
 
-    let stack = commands
-        .spawn((
-            Stack::bundle(),
-            LastActivatedAt::now(),
-            CreatedAt::now(),
-            ChildOf(pane),
-        ))
-        .id();
+        let stack = commands
+            .spawn((
+                Stack::bundle(),
+                LastActivatedAt::now(),
+                CreatedAt::now(),
+                ChildOf(pane),
+            ))
+            .id();
 
-    TabScaffold { tab, pane, stack }
+        Self { tab, pane, stack }
+    }
 }
 
 fn spawn_requested_tab_layouts(
@@ -641,7 +643,7 @@ fn spawn_requested_tab_layouts(
             tab: tab_e,
             pane: leaf,
             stack,
-        } = spawn_tab_scaffold_in_space(
+        } = TabScaffold::spawn(
             &mut commands,
             request.space,
             request.primary_window,
@@ -807,7 +809,7 @@ mod tests {
             let world = app.world_mut();
             let mut state = SystemState::<Commands>::new(world);
             let mut commands = state.get_mut(world).unwrap();
-            let r = spawn_tab_scaffold_in_space(&mut commands, space, window, 8.0);
+            let r = TabScaffold::spawn(&mut commands, space, window, 8.0);
             state.apply(world);
             r
         };

@@ -31,7 +31,7 @@ use vmux_layout::{
     space::{CurrentSpace, Space, SpaceId},
     stack::{ActiveTabParam, FocusedStack, LayoutFocus, Stack},
     state::LayoutUiState,
-    tab::{Tab, active_tab_siblings},
+    tab::Tab,
     window::{FocusedWindow, VmuxWindow, WindowHierarchy},
 };
 
@@ -104,7 +104,7 @@ impl TabProjectionData<'_, '_> {
             .filter_map(|agent| self.tab_of(agent))
             .collect::<std::collections::HashSet<_>>();
         let ordered = match active_tab {
-            Some(anchor) => active_tab_siblings(
+            Some(anchor) => Tab::siblings(
                 anchor,
                 &self.child_of,
                 &self.all_children,
