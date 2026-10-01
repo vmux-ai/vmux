@@ -1,18 +1,14 @@
 pub use bundle::CommandBar;
 pub use command_bar::{
-    ApplyCommandBarRequests, CommandBarDismiss, CommandBarNativeSize, CommandBarOpenRequest,
-    CommandBarPanelActive, CommandBarPlugin, PendingCommandBarReveal, ResumeRows,
-    WriteCommandBarRequests,
+    CommandBarDismiss, CommandBarNativeSize, CommandBarOpenRequest, CommandBarPanelActive,
+    CommandBarPlugin, PendingCommandBarReveal, ResumeRows, WriteCommandBarRequests,
 };
 pub use definition::{
-    AgentAccess, BindCommands, CommandBinding, CommandDefinition, CommandDispatch,
-    CommandInvocation, CommandManifest, CommandMcp, CommandMessage, CommandRegistry,
-    CommandRuntimePlugin, CommandShortcut, DispatchCommandInvocations, ReadCommandRequests,
-    ShortcutDefinition, WriteCommandRequests,
+    BindCommands, CommandBinding, CommandDefinition, CommandDispatch, CommandInvocation,
+    CommandManifest, CommandMcp, CommandRegistry, CommandRuntimePlugin, CommandShortcut,
+    DispatchCommandInvocations, ReadCommandRequests, ShortcutDefinition, WriteCommandRequests,
 };
-pub use payload::{
-    CommandBarEntry, CommandBarOpenProjection, CommandBarPicks, CommandBarProjector,
-};
+pub use payload::{CommandBarOpenProjection, CommandBarProjector};
 pub use plugin::CommandPlugin;
 pub use settings::ResolvedLocale;
 pub use shortcut::{
@@ -23,7 +19,7 @@ pub use snapshot::{
     CommandBarSpacesSnapshot, CommandBarState, CommandBarTerminalPage, CommandBarWorkDirectory,
     CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot, ContributedAgentModels,
     ContributedAgentModes, ContributedCommand, ContributedPage, ContributedPages, RegisteredPage,
-    SpaceSummary, UiStatePlugin, WriteCommandBarSnapshots,
+    SpaceSummary, WriteCommandBarSnapshots,
 };
 pub use tool::AgentInvokeCommand;
 pub use tool::CommandToolPlugin;

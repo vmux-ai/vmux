@@ -2,19 +2,18 @@
 
 #[cfg(host)]
 pub use host::{
-    AgentAccess, AgentInvokeCommand, ApplyCommandBarRequests, BindCommands, Binding, ClaimedUrl,
-    ClaimedUrls, CommandBar, CommandBarDismiss, CommandBarEntry, CommandBarNativeSize,
-    CommandBarOpenProjection, CommandBarOpenRequest, CommandBarPagesSnapshot,
-    CommandBarPanelActive, CommandBarPicks, CommandBarPlugin, CommandBarProjectRoots,
+    AgentInvokeCommand, BindCommands, Binding, ClaimedUrl, ClaimedUrls, CommandBar,
+    CommandBarDismiss, CommandBarNativeSize, CommandBarOpenProjection, CommandBarOpenRequest,
+    CommandBarPagesSnapshot, CommandBarPanelActive, CommandBarPlugin, CommandBarProjectRoots,
     CommandBarProjector, CommandBarSpacesSnapshot, CommandBarState, CommandBarTerminalPage,
     CommandBarWorkDirectory, CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot, CommandBinding,
     CommandDefinition, CommandDispatch, CommandInvocation, CommandManifest, CommandMcp,
-    CommandMessage, CommandPlugin, CommandRegistry, CommandRuntimePlugin, CommandShortcut,
-    CommandToolPlugin, ContributedAgentModels, ContributedAgentModes, ContributedCommand,
-    ContributedPage, ContributedPages, DispatchCommandInvocations, KeyCombo, KeyContext, Keymap,
-    Modifiers, PendingCommandBarReveal, ReadCommandRequests, RegisteredPage, ResolvedKey,
-    ResolvedLocale, ResumeRows, Shortcut, ShortcutDefinition, Source, SpaceSummary, UiStatePlugin,
-    When, WriteCommandBarRequests, WriteCommandBarSnapshots, WriteCommandRequests,
+    CommandPlugin, CommandRegistry, CommandRuntimePlugin, CommandShortcut, CommandToolPlugin,
+    ContributedAgentModels, ContributedAgentModes, ContributedCommand, ContributedPage,
+    ContributedPages, DispatchCommandInvocations, KeyCombo, KeyContext, Keymap, Modifiers,
+    PendingCommandBarReveal, ReadCommandRequests, RegisteredPage, ResolvedKey, ResolvedLocale,
+    ResumeRows, Shortcut, ShortcutDefinition, Source, SpaceSummary, When, WriteCommandBarRequests,
+    WriteCommandBarSnapshots, WriteCommandRequests,
 };
 pub use palette_surface::CommandPaletteSurface;
 #[cfg(ui)]

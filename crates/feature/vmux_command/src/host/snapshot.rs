@@ -7,7 +7,7 @@ use vmux_ecs::page::PageManifest;
 
 pub type CommandBarState = vmux_ecs::host::UiState<vmux_api::command_bar::CommandBarUiState>;
 
-pub struct UiStatePlugin;
+pub(super) struct UiStatePlugin;
 
 impl Plugin for UiStatePlugin {
     fn build(&self, app: &mut App) {

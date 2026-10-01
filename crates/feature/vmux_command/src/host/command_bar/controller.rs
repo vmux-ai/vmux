@@ -174,7 +174,7 @@ impl CommandBarOpenRequest {
 pub struct WriteCommandBarRequests;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct ApplyCommandBarRequests;
+struct ApplyCommandBarRequests;
 
 fn bind(registry: CommandRegistry, mut commands: Commands) {
     registry.message::<CommandBarToggleRequest>(&mut commands);

@@ -51,7 +51,7 @@ pub fn use_command_bar_ui() -> Signal<CommandBarOpenEvent> {
         }
         handled_focus_revision.set(effect.revision);
         if effect.revision != 0 {
-            focus_prompt_input();
+            focus_prompt_end(PROMPT_INPUT_ID);
         }
     });
     state
@@ -714,8 +714,4 @@ pub struct PaletteProps {
     pub surface: CommandPaletteSurface,
     pub on_close: EventHandler<()>,
     pub on_activity: EventHandler<()>,
-}
-
-fn focus_prompt_input() {
-    focus_prompt_end(PROMPT_INPUT_ID);
 }

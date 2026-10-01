@@ -1,7 +1,11 @@
 use bevy::prelude::*;
+use vmux_ecs::overlay::WindowOverlay;
+use vmux_flex::prelude::*;
+
+use crate::host::bundle::CommandBar;
+
 pub use controller::{
-    ApplyCommandBarRequests, CommandBarNativeSize, CommandBarOpenRequest, PendingCommandBarReveal,
-    WriteCommandBarRequests,
+    CommandBarNativeSize, CommandBarOpenRequest, PendingCommandBarReveal, WriteCommandBarRequests,
 };
 pub use model::ResumeRows;
 pub use panel::CommandBarPanelActive;
@@ -39,6 +43,31 @@ impl Plugin for CommandBarPlugin {
             controller::Plugin,
             palette::PalettePlugin,
             panel::PanelPlugin,
-        ));
+        ))
+        .add_systems(Startup, spawn);
     }
+}
+
+impl CommandBar {
+    fn surface() -> impl Bundle {
+        (
+            CommandBar,
+            WindowOverlay,
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                display: Display::None,
+                ..default()
+            },
+            Transform::default(),
+            Visibility::Hidden,
+        )
+    }
+}
+
+fn spawn(mut commands: Commands) {
+    commands.spawn(CommandBar::surface());
 }

@@ -6,11 +6,8 @@ use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
     CommandOrigin,
 };
-use vmux_ecs::overlay::WindowOverlay;
-use vmux_flex::prelude::*;
 
 use super::tool::AgentInvokeCommand;
-use crate::host::bundle::CommandBar;
 use crate::host::definition::{
     CommandDefinition, CommandInvocation, CommandRuntimePlugin, DispatchCommandInvocations,
     WriteCommandRequests,
@@ -29,7 +26,6 @@ impl Plugin for CommandPlugin {
         app.add_agent_request::<AgentInvokeCommand>()
             .add_plugins((UiStatePlugin, crate::CommandToolPlugin))
             .add_observer(resolve)
-            .add_systems(Startup, spawn_surface)
             .add_systems(Update, invoke.after(AgentRequestRouteSet))
             .add_systems(
                 Update,
@@ -38,30 +34,6 @@ impl Plugin for CommandPlugin {
             )
             .add_systems(Last, wake);
     }
-}
-
-impl CommandBar {
-    fn surface() -> impl Bundle {
-        (
-            CommandBar,
-            WindowOverlay,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(0.0),
-                display: Display::None,
-                ..default()
-            },
-            Transform::default(),
-            Visibility::Hidden,
-        )
-    }
-}
-
-fn spawn_surface(mut commands: Commands) {
-    commands.spawn(CommandBar::surface());
 }
 
 fn resolve(

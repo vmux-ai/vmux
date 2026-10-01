@@ -104,7 +104,7 @@ impl CommandManifest {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AgentAccess {
+enum AgentAccess {
     Denied,
     Allowed,
 }
@@ -113,7 +113,7 @@ pub enum AgentAccess {
 pub struct CommandMcp {
     pub description: String,
     pub input_schema: JsonSchema,
-    pub agent_access: AgentAccess,
+    agent_access: AgentAccess,
 }
 
 impl From<manifest::CommandMcp> for CommandMcp {
@@ -196,7 +196,8 @@ impl CommandDefinition {
         self
     }
 
-    pub fn message<T>(self) -> (Self, CommandMessage)
+    #[cfg(test)]
+    fn message<T>(self) -> (Self, CommandMessage)
     where
         T: Message + for<'a> TryFrom<&'a CommandInvocation>,
     {
@@ -508,7 +509,7 @@ pub struct CommandInvocation {
 }
 
 #[derive(Component, Clone, Copy)]
-pub struct CommandMessage(fn(&CommandInvocation, &mut Commands));
+struct CommandMessage(fn(&CommandInvocation, &mut Commands));
 
 pub trait CommandBinding: Bundle + Sized {
     fn for_command(id: &str) -> Option<Self>;

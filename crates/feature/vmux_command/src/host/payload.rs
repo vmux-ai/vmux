@@ -13,7 +13,7 @@ use vmux_api::command_bar::{CommandBarOpenEvent, OpenId};
 use vmux_api::open_target::OpenTarget;
 use vmux_ui::i18n::{Locale, TranslationValue};
 
-pub struct CommandBarEntry {
+struct CommandBarEntry {
     pub id: String,
     pub name: String,
     pub shortcut: String,
@@ -54,7 +54,7 @@ impl CommandBarEntry {
     }
 }
 
-pub struct CommandBarPicks;
+pub(super) struct CommandBarPicks;
 
 impl CommandBarPicks {
     pub fn for_picker(picker: CommandBarPicker, locale: &Locale) -> Vec<CommandBarPickRow> {
