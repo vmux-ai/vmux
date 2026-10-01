@@ -23,11 +23,16 @@ vmux_tool = { path = "../vmux_tool" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
+objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "block2",
     "std",
+    "NSApplication",
     "NSEvent",
+    "NSView",
+    "NSWindow",
 ] }
+raw-window-handle = "0.6"
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy_cef = { workspace = true }

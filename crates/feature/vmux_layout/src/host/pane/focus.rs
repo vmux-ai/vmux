@@ -13,10 +13,6 @@ use crate::{
     stack::{ActiveTabParam, LayoutFocus, active_among},
 };
 
-use bevy::winit::WINIT_WINDOWS;
-use objc2_app_kit::{NSApplication, NSEvent, NSView};
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 const HOVER_COOLDOWN_MS: u64 = 300;
 
@@ -154,7 +150,7 @@ fn poll_cursor(
     let Ok((_, window)) = windows.get(window_entity) else {
         return;
     };
-    let Some(cursor) = pane_hover_cursor_position(window_entity, window) else {
+    let Some(cursor) = vmux_input::NativePointer::position(window_entity, window) else {
         return;
     };
 
@@ -195,58 +191,6 @@ fn poll_cursor(
     }
 }
 
-pub fn pane_hover_cursor_position(window_entity: Entity, window: &Window) -> Option<Vec2> {
-    #[cfg(target_os = "macos")]
-    {
-        native_window_cursor_position(window_entity, window).or_else(|| {
-            window
-                .physical_cursor_position()
-                .map(|position| Vec2::new(position.x, position.y))
-        })
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = window_entity;
-        window
-            .physical_cursor_position()
-            .map(|position| Vec2::new(position.x, position.y))
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn native_window_cursor_position(window_entity: Entity, window: &Window) -> Option<Vec2> {
-    WINIT_WINDOWS.with_borrow(|winit_windows| {
-        let mtm = objc2::MainThreadMarker::new()?;
-        if !NSApplication::sharedApplication(mtm).isActive() {
-            return None;
-        }
-        let winit_window = winit_windows.get_window(window_entity)?;
-        let handle = winit_window.window_handle().ok()?;
-        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
-            return None;
-        };
-        let view: &NSView = unsafe { &*appkit.ns_view.as_ptr().cast::<NSView>() };
-        let ns_window = view.window()?;
-        let screen_point = NSEvent::mouseLocation();
-        let window_point = ns_window.convertPointFromScreen(screen_point);
-        let point = view.convertPoint_fromView(window_point, None);
-        let bounds = view.bounds();
-        let y = if view.isFlipped() {
-            point.y
-        } else {
-            bounds.size.height - point.y
-        };
-        let scale = window.resolution.scale_factor() as f64;
-        let x = point.x * scale;
-        let y = y * scale;
-        if x.is_finite() && y.is_finite() {
-            Some(Vec2::new(x as f32, y as f32))
-        } else {
-            None
-        }
-    })
-}
-
 #[cfg(target_os = "macos")]
 fn apply_pending_hover(
     focused_window: crate::window::FocusedWindow,
@@ -258,7 +202,7 @@ fn apply_pending_hover(
     mut commands: Commands,
     mut last_motion_sequence: Local<u64>,
 ) {
-    let Some(pointer) = vmux_input::pointer::snapshot() else {
+    let Some(pointer) = vmux_input::NativePointer::snapshot() else {
         return;
     };
     if pointer.motion_sequence == 0 || pointer.motion_sequence == *last_motion_sequence {

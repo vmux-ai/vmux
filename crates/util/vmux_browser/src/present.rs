@@ -28,9 +28,7 @@ use vmux_layout::{
 use vmux_ecs::KeyboardOwner;
 use vmux_setting::AppSettings;
 
-use crate::host::{
-    CommandBarRoute, LayoutPointerCapture, NATIVE_COMMAND_BAR_ROUTE, agent_ring_rgb,
-};
+use crate::host::{CommandBarRoute, LayoutPointerCapture, NATIVE_COMMAND_BAR_ROUTE};
 
 #[cfg(target_os = "macos")]
 use crate::native_bridge::CommandBarPointerEvent;
@@ -356,6 +354,35 @@ fn active_tab_is_visible(
     active_candidate(active_tab_in_space(tab, child_of, all_children, tabs), tab)
 }
 
+struct AgentRingColor;
+
+impl AgentRingColor {
+    fn for_key(key: &str) -> [f32; 3] {
+        let mut hue = 1469598103934665603_u64;
+        for byte in key.bytes() {
+            hue ^= byte as u64;
+            hue = hue.wrapping_mul(1099511628211);
+        }
+        Self::from_hsl((hue % 360) as f32, 0.85, 0.62)
+    }
+
+    fn from_hsl(hue: f32, saturation: f32, lightness: f32) -> [f32; 3] {
+        let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+        let section = hue / 60.0;
+        let second = chroma * (1.0 - (section % 2.0 - 1.0).abs());
+        let (red, green, blue) = match section as i32 {
+            0 => (chroma, second, 0.0),
+            1 => (second, chroma, 0.0),
+            2 => (0.0, chroma, second),
+            3 => (0.0, second, chroma),
+            4 => (second, 0.0, chroma),
+            _ => (chroma, 0.0, second),
+        };
+        let offset = lightness - chroma / 2.0;
+        [red + offset, green + offset, blue + offset]
+    }
+}
+
 fn windowed_ring_for(
     stack: Entity,
     focus: &vmux_layout::active_pane::ActiveStack,
@@ -370,7 +397,7 @@ fn windowed_ring_for(
         return (width, [user.r, user.g, user.b]);
     }
     if let Some((profile, _)) = agent {
-        return (width, agent_ring_rgb(profile));
+        return (width, AgentRingColor::for_key(profile));
     }
     (0.0, [user.r, user.g, user.b])
 }
@@ -1346,7 +1373,6 @@ fn should_show_osr_webview(
 mod tests {
     use super::*;
 
-    use crate::host::native_command_bar_route;
     use crate::tests::test_app_settings_with_radius;
 
     use vmux_layout::active_pane::ActiveStack;
@@ -1824,14 +1850,14 @@ mod tests {
             height_px: 100.0,
         };
 
-        let before = native_command_bar_route().generation;
+        let before = CommandBarRoute::current().generation;
         publish_command_bar_route(true, Some(frame), 2.0);
-        let published = native_command_bar_route();
+        let published = CommandBarRoute::current();
         assert_eq!(published.generation, before.wrapping_add(1));
         assert_eq!(published.scale, 2.0);
 
         publish_command_bar_route(false, Some(frame), 1.0);
-        assert!(!native_command_bar_route().owns_input);
+        assert!(!CommandBarRoute::current().owns_input);
     }
 
     #[test]

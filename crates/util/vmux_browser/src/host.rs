@@ -4,22 +4,21 @@ pub(crate) use agent::{
     AgentBrowserPlugin, AgentBrowserScroll, AgentBrowserSnapshot,
 };
 pub use agent_pane::AgentBrowserResolve;
-use bevy::{ecs::relationship::Relationship, input::mouse::MouseButton, prelude::*};
-use bevy_cef::prelude::*;
+#[cfg(not(target_os = "macos"))]
+use bevy::input::mouse::MouseButton;
+use bevy::prelude::*;
+#[cfg(not(target_os = "macos"))]
+use bevy_cef::prelude::Browsers;
 use bevy_cef_core::prelude::CommandLineConfig;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{LazyLock, Mutex};
 use vmux_command::CommandBarPanelActive;
-use vmux_command::PendingCommandBarReveal;
-use vmux_ecs::{PageOpenSet, page::PageReady};
 use vmux_flex::prelude::*;
 use vmux_layout::{
-    Browser, Header, Open, PendingWebviewReveal, UpdateState, bookmark::BookmarkContextMenuActive,
-    overlay::LayoutOverlayActive, side_sheet::SideSheet,
+    Header, Open, UpdateState, bookmark::BookmarkContextMenuActive, overlay::LayoutOverlayActive,
+    side_sheet::SideSheet,
 };
 use vmux_setting::AppSettings;
-use vmux_ui::i18n::Locale;
-use vmux_ui::theme::ThemeEvent;
 
 use vmux_api::protocol::{AgentCommandResult, AgentRequestId, ClientMessage};
 use vmux_ecs::service::ServiceRequest;
@@ -32,90 +31,32 @@ pub struct WebviewLoadCompleted {
     pub webview: Entity,
 }
 
-pub(crate) fn configure_cef_backend_sync(app: &mut App) -> &mut App {
-    app.configure_sets(
-        Update,
-        crate::BrowserSystemSet::SyncCefBackend.before(CefSystems::CreateAndResize),
-    )
-    .add_systems(
-        Update,
-        sync_cef_backend
-            .in_set(crate::BrowserSystemSet::SyncCefBackend)
-            .after(PageOpenSet::Fallback)
-            .after(crate::BrowserSystemSet::SpawnPopupStacks),
-    )
-}
+pub(crate) struct CefStartup;
 
-pub(crate) fn cef_command_line_config() -> CommandLineConfig {
-    CommandLineConfig {
-        switches: vmux_ecs::profile::Profile::current()
-            .cef_keychain_switches()
-            .to_vec(),
-        switch_values: vec![("disable-features", "BackForwardCache")],
-    }
-}
-
-#[cfg(target_os = "macos")]
-pub(crate) fn cef_os_crypt_key_provider() -> Option<bevy_cef::CefOsCryptKeyProvider> {
-    Some(cef_os_crypt_key)
-}
-
-#[cfg(target_os = "macos")]
-fn cef_os_crypt_key() -> Result<bevy_cef::CefOsCryptKey, String> {
-    let key = vmux_ecs::profile::safe_storage::SafeStorage::browser_key()
-        .map_err(|error| error.to_string())?;
-    Ok(bevy_cef::CefOsCryptKey::new(*key.as_bytes()))
-}
-
-pub(crate) fn theme_event(settings: &AppSettings) -> ThemeEvent {
-    let locale = Locale::requested(Some(&settings.appearance.locale));
-    ThemeEvent {
-        radius: settings.layout.radius,
-        catalog: external_locale_catalog(locale.as_str()),
-        locale: locale.into_string(),
-    }
-}
-
-pub(crate) fn browser_accept_language_list(locale: &str) -> String {
-    let locale = locale.trim();
-    let language = locale.split('-').next().unwrap_or(locale);
-    if language.eq_ignore_ascii_case("en") {
-        if locale.eq_ignore_ascii_case(language) {
-            "en,en-US;q=0.9".to_string()
-        } else {
-            format!("{locale},en;q=0.9")
+impl CefStartup {
+    pub(crate) fn command_line() -> CommandLineConfig {
+        CommandLineConfig {
+            switches: vmux_ecs::profile::Profile::current()
+                .cef_keychain_switches()
+                .to_vec(),
+            switch_values: vec![("disable-features", "BackForwardCache")],
         }
-    } else if locale.eq_ignore_ascii_case(language) {
-        format!("{locale},en-US;q=0.9,en;q=0.8")
-    } else {
-        format!("{locale},{language};q=0.9,en-US;q=0.8,en;q=0.7")
     }
-}
 
-fn external_locale_catalog(locale: &str) -> Option<String> {
-    let directory = vmux_ecs::profile::ProfilePaths::current()
-        .config()
-        .join("locales");
-    [locale, locale.split('-').next().unwrap_or(locale)]
-        .into_iter()
-        .find_map(|tag| std::fs::read_to_string(directory.join(format!("{tag}.ftl"))).ok())
-}
+    pub(crate) fn root_cache_path() -> Option<String> {
+        vmux_ecs::profile::ProfilePaths::current().cef_cache()
+    }
 
-#[cfg(test)]
-mod accept_language_tests {
-    use super::browser_accept_language_list;
+    #[cfg(target_os = "macos")]
+    pub(crate) fn os_crypt_key_provider() -> Option<bevy_cef::CefOsCryptKeyProvider> {
+        Some(Self::os_crypt_key)
+    }
 
-    #[test]
-    fn selected_locale_leads_browser_accept_language() {
-        assert_eq!(
-            browser_accept_language_list("ja"),
-            "ja,en-US;q=0.9,en;q=0.8"
-        );
-        assert_eq!(
-            browser_accept_language_list("pt-BR"),
-            "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-        );
-        assert_eq!(browser_accept_language_list("en-US"), "en-US,en;q=0.9");
+    #[cfg(target_os = "macos")]
+    fn os_crypt_key() -> Result<bevy_cef::CefOsCryptKey, String> {
+        let key = vmux_ecs::profile::safe_storage::SafeStorage::browser_key()
+            .map_err(|error| error.to_string())?;
+        Ok(bevy_cef::CefOsCryptKey::new(*key.as_bytes()))
     }
 }
 
@@ -182,108 +123,11 @@ impl CefPointerHitRect {
     }
 }
 
-pub(crate) fn pointer_button_from_mouse_button(button: MouseButton) -> Option<PointerButton> {
-    match button {
-        MouseButton::Left => Some(PointerButton::Primary),
-        MouseButton::Right => Some(PointerButton::Secondary),
-        MouseButton::Middle => Some(PointerButton::Middle),
-        _ => None,
-    }
-}
-
 pub(crate) type LayoutPointerCapture = Or<(
     With<BookmarkContextMenuActive>,
     With<CommandBarPanelActive>,
     With<LayoutOverlayActive>,
 )>;
-
-fn sync_cef_backend(
-    browser_entities: Query<Entity, With<Browser>>,
-    webviews: Query<
-        (Entity, Has<WebviewNativeOverlay>, Has<WebviewWindowed>),
-        (With<Browser>, With<WebviewSource>),
-    >,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
-    mut browsers: NonSendMut<Browsers>,
-    mut commands: Commands,
-) {
-    let mut moved = Vec::new();
-    for entity in &browser_entities {
-        let mut current = entity;
-        let mut inherited = None;
-        while let Ok(parent) = child_of.get(current).map(Relationship::get) {
-            if let Ok(host) = host_windows.get(parent) {
-                inherited = Some(*host);
-                break;
-            }
-            current = parent;
-        }
-        let Some(inherited) = inherited else {
-            continue;
-        };
-        if host_windows.get(entity).ok() != Some(&inherited) {
-            commands.entity(entity).insert(inherited);
-            moved.push(entity);
-        }
-    }
-
-    let mut recreate = Vec::new();
-    for (entity, native_overlay, _) in &webviews {
-        let stale_backend = browsers
-            .is_windowed(&entity)
-            .is_some_and(|windowed| !windowed);
-        let stale_overlay = browsers.has_browser(entity) && native_overlay;
-        if stale_backend || stale_overlay || moved.contains(&entity) {
-            recreate.push(entity);
-        }
-    }
-    for entity in &recreate {
-        browsers.close(entity);
-    }
-    for (entity, native_overlay, windowed) in &webviews {
-        let needs_recreate = recreate.contains(&entity);
-        let settled = windowed && !native_overlay && !needs_recreate;
-        if settled {
-            continue;
-        }
-        let mut entity = commands.entity(entity);
-        entity
-            .insert(WebviewWindowed)
-            .remove::<WebviewNativeOverlay>();
-        if needs_recreate {
-            entity
-                .remove::<PageReady>()
-                .remove::<PendingWebviewReveal>()
-                .remove::<PendingCommandBarReveal>();
-        }
-    }
-}
-
-pub(crate) fn agent_ring_rgb(key: &str) -> [f32; 3] {
-    let mut h: u64 = 1469598103934665603;
-    for b in key.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(1099511628211);
-    }
-    hsl_to_rgb((h % 360) as f32, 0.85, 0.62)
-}
-
-fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
-    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
-    let hp = h / 60.0;
-    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
-    let (r, g, b) = match hp as i32 {
-        0 => (c, x, 0.0),
-        1 => (x, c, 0.0),
-        2 => (0.0, c, x),
-        3 => (0.0, x, c),
-        4 => (x, 0.0, c),
-        _ => (c, 0.0, x),
-    };
-    let m = l - c / 2.0;
-    [r + m, g + m, b + m]
-}
 
 #[cfg(not(target_os = "macos"))]
 #[derive(Default)]
@@ -294,21 +138,23 @@ pub(crate) struct LayoutHoverRefreshState {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn reset_layout_cef_hover(
-    browsers: &Browsers,
-    buttons: &ButtonInput<MouseButton>,
-    layout: Entity,
-    state: &mut LayoutHoverRefreshState,
-) {
-    if state.in_region {
-        browsers.send_mouse_move(
-            &layout,
-            buttons.get_pressed(),
-            state.position.unwrap_or_default(),
-            true,
-        );
+impl LayoutHoverRefreshState {
+    pub(crate) fn reset(
+        &mut self,
+        browsers: &Browsers,
+        buttons: &ButtonInput<MouseButton>,
+        layout: Entity,
+    ) {
+        if self.in_region {
+            browsers.send_mouse_move(
+                &layout,
+                buttons.get_pressed(),
+                self.position.unwrap_or_default(),
+                true,
+            );
+        }
+        *self = Self::default();
     }
-    *state = LayoutHoverRefreshState::default();
 }
 
 #[derive(Default)]
@@ -335,35 +181,37 @@ pub(crate) struct CommandBarRoute {
     pub(crate) scale: f32,
 }
 
+impl CommandBarRoute {
+    #[cfg(any(target_os = "macos", test))]
+    pub(crate) fn current() -> Self {
+        *NATIVE_COMMAND_BAR_ROUTE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn local_position(self, cursor: Vec2) -> Option<Vec2> {
+        if !self.owns_input {
+            return None;
+        }
+        let frame = self.frame?;
+        if cursor.x < frame.left_px
+            || cursor.x > frame.left_px + frame.width_px
+            || cursor.y < frame.top_px
+            || cursor.y > frame.top_px + frame.height_px
+        {
+            return None;
+        }
+        let scale = self.scale.max(1.0e-6);
+        Some(Vec2::new(
+            (cursor.x - frame.left_px) / scale,
+            (cursor.y - frame.top_px) / scale,
+        ))
+    }
+}
+
 pub(crate) static NATIVE_COMMAND_BAR_ROUTE: LazyLock<Mutex<CommandBarRoute>> =
     LazyLock::new(|| Mutex::new(CommandBarRoute::default()));
-static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
-
-#[cfg(any(target_os = "macos", test))]
-pub(crate) fn native_command_bar_route() -> CommandBarRoute {
-    *NATIVE_COMMAND_BAR_ROUTE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-pub fn set_native_left_mouse_down(down: bool) {
-    NATIVE_LEFT_MOUSE_DOWN.store(down, Ordering::Relaxed);
-}
-
-pub fn native_left_mouse_down() -> bool {
-    NATIVE_LEFT_MOUSE_DOWN.load(Ordering::Relaxed)
-}
-
-#[cfg(target_os = "macos")]
-pub(crate) fn command_bar_windowed_frame_contains(
-    frame: CommandBarWindowedFrame,
-    cursor: Vec2,
-) -> bool {
-    cursor.x >= frame.left_px
-        && cursor.x <= frame.left_px + frame.width_px
-        && cursor.y >= frame.top_px
-        && cursor.y <= frame.top_px + frame.height_px
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct LayoutWindowPadding {
@@ -373,28 +221,30 @@ pub(crate) struct LayoutWindowPadding {
     pub(crate) left: f32,
 }
 
-fn val_px(value: Val) -> f32 {
-    match value {
-        Val::Px(px) => px,
-        _ => 0.0,
+impl LayoutWindowPadding {
+    pub(crate) fn from_node(node: &Node) -> Self {
+        Self {
+            top: Self::px(node.padding.top),
+            right: Self::px(node.padding.right),
+            bottom: Self::px(node.padding.bottom),
+            left: Self::px(node.padding.left),
+        }
     }
-}
 
-pub(crate) fn layout_window_padding_from_node(node: &Node) -> LayoutWindowPadding {
-    LayoutWindowPadding {
-        top: val_px(node.padding.top),
-        right: val_px(node.padding.right),
-        bottom: val_px(node.padding.bottom),
-        left: val_px(node.padding.left),
+    pub(crate) fn from_settings(settings: &AppSettings) -> Self {
+        Self {
+            top: settings.layout.window.pad_top(),
+            right: settings.layout.window.pad_right(),
+            bottom: settings.layout.window.pad_bottom(),
+            left: settings.layout.window.pad_left(),
+        }
     }
-}
 
-pub(crate) fn layout_window_padding_from_settings(settings: &AppSettings) -> LayoutWindowPadding {
-    LayoutWindowPadding {
-        top: settings.layout.window.pad_top(),
-        right: settings.layout.window.pad_right(),
-        bottom: settings.layout.window.pad_bottom(),
-        left: settings.layout.window.pad_left(),
+    fn px(value: Val) -> f32 {
+        match value {
+            Val::Px(px) => px,
+            _ => 0.0,
+        }
     }
 }
 
@@ -424,16 +274,16 @@ impl LayoutFixedOffsets {
     }
 }
 
-pub(crate) fn should_emit_cached_payload(body: &str, last: &str, page_ready_changed: bool) -> bool {
-    page_ready_changed || body != last
-}
+pub(crate) struct UpdateProjection;
 
-pub(crate) fn should_emit_update(
-    current: &UpdateState,
-    last: &Option<UpdateState>,
-    page_ready_changed: bool,
-) -> bool {
-    last.as_ref() != Some(current) || (page_ready_changed && *current != UpdateState::Idle)
+impl UpdateProjection {
+    pub(crate) fn should_emit(
+        current: &UpdateState,
+        last: &Option<UpdateState>,
+        page_ready_changed: bool,
+    ) -> bool {
+        last.as_ref() != Some(current) || (page_ready_changed && *current != UpdateState::Idle)
+    }
 }
 
 #[derive(Component, Clone, Debug)]
@@ -444,19 +294,23 @@ pub(crate) struct PageOpenAwaitSnapshot {
     pub(crate) started: std::time::Duration,
 }
 
-pub(crate) fn page_open_response(
-    request_id: Option<[u8; 16]>,
-    result: Result<(), String>,
-) -> Option<vmux_ecs::service::ServiceRequest> {
-    let request_id = request_id?;
-    let result = match result {
-        Ok(()) => AgentCommandResult::Ok,
-        Err(message) => AgentCommandResult::Error(message),
-    };
-    Some(ServiceRequest(ClientMessage::AgentCommandResponse {
-        request_id: AgentRequestId(request_id),
-        result,
-    }))
+pub(crate) struct PageOpenResponse;
+
+impl PageOpenResponse {
+    pub(crate) fn from_result(
+        request_id: Option<[u8; 16]>,
+        result: Result<(), String>,
+    ) -> Option<ServiceRequest> {
+        let request_id = request_id?;
+        let result = match result {
+            Ok(()) => AgentCommandResult::Ok,
+            Err(message) => AgentCommandResult::Error(message),
+        };
+        Some(ServiceRequest(ClientMessage::AgentCommandResponse {
+            request_id: AgentRequestId(request_id),
+            result,
+        }))
+    }
 }
 
 #[derive(Component, Clone)]
@@ -499,8 +353,4 @@ impl PendingNavigationUpdate {
             pending: None,
         }
     }
-}
-
-pub(crate) fn cef_root_cache_path() -> Option<String> {
-    vmux_ecs::profile::ProfilePaths::current().cef_cache()
 }

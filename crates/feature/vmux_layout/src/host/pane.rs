@@ -16,7 +16,7 @@ use bevy::{
 use close::ClosePlugin;
 pub use close::{ForcePaneClose, PendingPaneClose};
 use focus::FocusPlugin;
-pub use focus::{PaneHoverCooldown, PendingCursorWarp, pane_hover_cursor_position};
+pub use focus::{PaneHoverCooldown, PendingCursorWarp};
 use identity::IdentityPlugin;
 pub use identity::{PaneId, SpawnCounter, SpawnSeq};
 use moonshine_save::prelude::*;

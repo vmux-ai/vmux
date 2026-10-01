@@ -45,16 +45,6 @@ vmux_history = { path = "../vmux_history" }
 vmux_input = { path = "../vmux_input" }
 vmux_tool = { path = "../vmux_tool" }
 
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = [
-    "std",
-    "NSApplication",
-    "NSEvent",
-    "NSView",
-    "NSWindow",
-] }
-
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }

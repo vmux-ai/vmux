@@ -42,7 +42,7 @@ fn pending_navigation_updates_keep_only_the_latest_request() {
 #[test]
 fn cef_disables_bfcache_for_extension_ports() {
     assert!(
-        cef_command_line_config()
+        CefStartup::command_line()
             .switch_values
             .contains(&("disable-features", "BackForwardCache"))
     );
@@ -211,7 +211,7 @@ fn appearance_change_updates_cef_color_scheme() {
 fn every_cef_browser_is_windowed_with_no_overlay_markers() {
     let mut app = App::new();
     app.world_mut().insert_non_send(Browsers::default());
-    configure_cef_backend_sync(&mut app);
+    BrowserPlugin::configure_backend(&mut app);
     let page = app
         .world_mut()
         .spawn((Browser, WebviewSource::new("https://example.com")))
@@ -234,13 +234,6 @@ fn every_cef_browser_is_windowed_with_no_overlay_markers() {
 }
 
 #[test]
-fn host_payload_emits_again_when_page_ready_changes() {
-    assert!(should_emit_cached_payload("tabs", "tabs", true));
-    assert!(should_emit_cached_payload("tabs-2", "tabs", false));
-    assert!(!should_emit_cached_payload("tabs", "tabs", false));
-}
-
-#[test]
 fn layout_state_padding_reads_effective_window_node_padding() {
     let node = Node {
         padding: UiRect {
@@ -253,7 +246,7 @@ fn layout_state_padding_reads_effective_window_node_padding() {
     };
 
     assert_eq!(
-        layout_window_padding_from_node(&node),
+        LayoutWindowPadding::from_node(&node),
         LayoutWindowPadding {
             top: 10.0,
             right: 11.0,
@@ -1416,7 +1409,7 @@ mod open_in_place_flow {
 }
 
 mod update_notice_tests {
-    use super::should_emit_update;
+    use super::UpdateProjection;
     use vmux_layout::UpdateState;
 
     fn downloading(v: &str) -> UpdateState {
@@ -1429,14 +1422,14 @@ mod update_notice_tests {
 
     #[test]
     fn emits_on_change() {
-        assert!(should_emit_update(
+        assert!(UpdateProjection::should_emit(
             &UpdateState::Ready {
                 version: "v2".into()
             },
             &None,
             false
         ));
-        assert!(should_emit_update(
+        assert!(UpdateProjection::should_emit(
             &UpdateState::Idle,
             &Some(downloading("v2")),
             false
@@ -1445,7 +1438,7 @@ mod update_notice_tests {
 
     #[test]
     fn no_emit_when_unchanged_and_no_page_ready() {
-        assert!(!should_emit_update(
+        assert!(!UpdateProjection::should_emit(
             &UpdateState::Idle,
             &Some(UpdateState::Idle),
             false
@@ -1453,7 +1446,7 @@ mod update_notice_tests {
         let r = UpdateState::Ready {
             version: "v2".into(),
         };
-        assert!(!should_emit_update(&r, &Some(r.clone()), false));
+        assert!(!UpdateProjection::should_emit(&r, &Some(r.clone()), false));
     }
 
     #[test]
@@ -1461,8 +1454,8 @@ mod update_notice_tests {
         let r = UpdateState::Ready {
             version: "v2".into(),
         };
-        assert!(should_emit_update(&r, &Some(r.clone()), true));
-        assert!(!should_emit_update(
+        assert!(UpdateProjection::should_emit(&r, &Some(r.clone()), true));
+        assert!(!UpdateProjection::should_emit(
             &UpdateState::Idle,
             &Some(UpdateState::Idle),
             true

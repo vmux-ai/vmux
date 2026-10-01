@@ -5,6 +5,7 @@ pub use native_key::{
     ConsumesNativeKey, NativeKey, NativeKeyCapture, NativeKeyClaimSet, NativeKeyInput,
     NativeKeyInputSet, PassesNativeKey,
 };
+pub use pointer::{NativePointer, NativePointerSnapshot};
 
 pub(crate) struct Feature;
 
@@ -16,7 +17,7 @@ mod capture;
 #[cfg(target_os = "macos")]
 mod keyboard;
 mod native_key;
-pub mod pointer;
+mod pointer;
 
 pub struct InputPlugin;
 

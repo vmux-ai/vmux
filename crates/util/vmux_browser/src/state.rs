@@ -38,10 +38,7 @@ use vmux_layout::{
 use vmux_setting::AppSettings;
 use vmux_space::{ExpandedProjectDirs, SpaceProjects};
 
-use crate::host::{
-    LayoutFixedOffsets, layout_window_padding_from_node, layout_window_padding_from_settings,
-    should_emit_cached_payload, should_emit_update,
-};
+use crate::host::{LayoutFixedOffsets, LayoutWindowPadding, UpdateProjection};
 use vmux_flex::prelude::*;
 
 pub(crate) struct PagePresentation;
@@ -300,7 +297,7 @@ impl ProjectionCache {
             .get(&entity)
             .map(String::as_str)
             .unwrap_or_default();
-        if !should_emit_cached_payload(&body, previous, page_ready_changed) {
+        if !page_ready_changed && body == previous {
             return false;
         }
         self.bodies.insert(entity, body);
@@ -550,8 +547,8 @@ fn push_layout_emit(
     let window_padding = window_q
         .iter()
         .find_map(|(host, node)| (host.0 == host_window).then_some(node))
-        .map(layout_window_padding_from_node)
-        .unwrap_or_else(|| layout_window_padding_from_settings(&settings));
+        .map(LayoutWindowPadding::from_node)
+        .unwrap_or_else(|| LayoutWindowPadding::from_settings(&settings));
     let header_open = header_q.iter().any(|(entity, is_open, _)| {
         is_open && projection.layout.hierarchy.get(entity) == Some(host_window)
     });
@@ -1054,7 +1051,7 @@ fn push_update_notice_emit(
         return;
     }
     let previous = last.get(&cef_e).cloned();
-    if !should_emit_update(&state, &previous, page_ready_changed) {
+    if !UpdateProjection::should_emit(&state, &previous, page_ready_changed) {
         return;
     }
     match &*state {

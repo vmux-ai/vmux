@@ -19,7 +19,7 @@ use vmux_layout::{
     stack::Stack,
 };
 
-use crate::host::{PendingNavigationUpdate, page_open_response};
+use crate::host::{PageOpenResponse, PendingNavigationUpdate};
 use crate::input::RecentBrowserInteraction;
 use crate::snapshot::BrowserTarget;
 
@@ -350,7 +350,7 @@ fn navigate(
                     });
                 }
             } else {
-                if let Some(response) = page_open_response(
+                if let Some(response) = PageOpenResponse::from_result(
                     request_id,
                     Err(format!("browser_navigate: invalid pane id '{s}'")),
                 ) {
@@ -374,7 +374,7 @@ fn navigate(
         } else if let Some(webview) = targets.active_webview(focus.stack) {
             if is_vmux_route || url.starts_with("file:") {
                 let Some(pane) = focus.pane.filter(|pane| targets.contains_pane(*pane)) else {
-                    if let Some(response) = page_open_response(
+                    if let Some(response) = PageOpenResponse::from_result(
                         request_id,
                         Err("browser_navigate: no focused pane for vmux URL".to_string()),
                     ) {
@@ -410,7 +410,7 @@ fn navigate(
                 request_id,
             });
         } else {
-            if let Some(response) = page_open_response(
+            if let Some(response) = PageOpenResponse::from_result(
                 request_id,
                 Err("browser_navigate: no focused pane".to_string()),
             ) {

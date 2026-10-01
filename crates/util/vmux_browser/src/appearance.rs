@@ -7,8 +7,65 @@ use vmux_layout::LayoutCef;
 
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
+use vmux_ui::theme::ThemeEvent;
 
-use crate::host::{browser_accept_language_list, theme_event};
+pub(crate) struct BrowserLocale(String);
+
+impl BrowserLocale {
+    pub(crate) fn requested(locale: &str) -> Self {
+        Self(Locale::requested(Some(locale)).into_string())
+    }
+
+    pub(crate) fn value(&self) -> &str {
+        &self.0
+    }
+
+    pub(crate) fn accept_language_list(&self) -> String {
+        let locale = self.0.trim();
+        let language = locale.split('-').next().unwrap_or(locale);
+        if language.eq_ignore_ascii_case("en") {
+            if locale.eq_ignore_ascii_case(language) {
+                return "en,en-US;q=0.9".to_string();
+            }
+            return format!("{locale},en;q=0.9");
+        }
+        if locale.eq_ignore_ascii_case(language) {
+            return format!("{locale},en-US;q=0.9,en;q=0.8");
+        }
+        format!("{locale},{language};q=0.9,en-US;q=0.8,en;q=0.7")
+    }
+
+    fn catalog(&self) -> Option<String> {
+        let directory = vmux_ecs::profile::ProfilePaths::current()
+            .config()
+            .join("locales");
+        [self.0.as_str(), self.0.split('-').next().unwrap_or(&self.0)]
+            .into_iter()
+            .find_map(|tag| std::fs::read_to_string(directory.join(format!("{tag}.ftl"))).ok())
+    }
+}
+
+struct BrowserAppearance<'a>(&'a AppSettings);
+
+impl BrowserAppearance<'_> {
+    fn color_mode(&self) -> CefColorMode {
+        match self.0.appearance.mode {
+            vmux_setting::ColorScheme::Light => CefColorMode::Light,
+            vmux_setting::ColorScheme::Dark => CefColorMode::Dark,
+            vmux_setting::ColorScheme::Device => CefColorMode::System,
+        }
+    }
+
+    fn theme(&self) -> ThemeEvent {
+        let locale = BrowserLocale::requested(&self.0.appearance.locale);
+        ThemeEvent {
+            radius: self.0.layout.radius,
+            catalog: locale.catalog(),
+            locale: locale.0,
+        }
+    }
+}
+
 pub(crate) struct AppearancePlugin;
 
 impl Plugin for AppearancePlugin {
@@ -37,7 +94,7 @@ fn reassert_color_scheme(
         return;
     };
 
-    browsers.set_color_scheme(map_color_scheme(settings.appearance.mode));
+    browsers.set_color_scheme(BrowserAppearance(&settings).color_mode());
 }
 
 fn webview_ready_send_theme(
@@ -52,21 +109,13 @@ fn webview_ready_send_theme(
     let entity = trigger.event().webview;
     commands.trigger(UiStateWrite::<vmux_ui::theme::ThemeEvent>::from_event(
         entity,
-        &theme_event(&settings),
+        &BrowserAppearance(&settings).theme(),
     ));
     if cef_q.get(entity).is_ok() || modal_q.get(entity).is_ok() {
         if let Ok(mut zoom) = zoom_q.get_mut(entity) {
             zoom.0 = 0.0;
         }
         browsers.set_zoom_level(&entity, 0.0);
-    }
-}
-
-fn map_color_scheme(mode: vmux_setting::ColorScheme) -> bevy_cef::prelude::CefColorMode {
-    match mode {
-        vmux_setting::ColorScheme::Light => bevy_cef::prelude::CefColorMode::Light,
-        vmux_setting::ColorScheme::Dark => bevy_cef::prelude::CefColorMode::Dark,
-        vmux_setting::ColorScheme::Device => bevy_cef::prelude::CefColorMode::System,
     }
 }
 
@@ -78,12 +127,13 @@ fn sync_to_cef(
     ready: Query<Entity, With<PageReady>>,
     mut commands: Commands,
 ) {
-    let mode = map_color_scheme(settings.appearance.mode);
+    let appearance = BrowserAppearance(&settings);
+    let mode = appearance.color_mode();
     if scheme.0 != mode {
         scheme.0 = mode;
     }
-    let locale = Locale::requested(Some(&settings.appearance.locale));
-    let next_accept_language_list = browser_accept_language_list(locale.as_str());
+    let locale = BrowserLocale::requested(&settings.appearance.locale);
+    let next_accept_language_list = locale.accept_language_list();
     if accept_language_list
         .as_deref()
         .is_none_or(|current| current.0 != next_accept_language_list)
@@ -95,7 +145,7 @@ fn sync_to_cef(
             browsers.set_accept_language_list(&next_accept_language_list);
         }
     }
-    let payload = theme_event(&settings);
+    let payload = appearance.theme();
     for entity in &ready {
         commands.trigger(UiStateWrite::<vmux_ui::theme::ThemeEvent>::from_event(
             entity, &payload,
@@ -105,14 +155,43 @@ fn sync_to_cef(
 
 #[cfg(test)]
 mod appearance_bridge_tests {
-    use super::map_color_scheme;
+    use super::{BrowserAppearance, BrowserLocale};
     use bevy_cef::prelude::CefColorMode;
-    use vmux_setting::ColorScheme;
+    use vmux_setting::{AppSettings, ColorScheme};
 
     #[test]
     fn maps_color_scheme_to_cef_mode() {
-        assert_eq!(map_color_scheme(ColorScheme::Light), CefColorMode::Light);
-        assert_eq!(map_color_scheme(ColorScheme::Dark), CefColorMode::Dark);
-        assert_eq!(map_color_scheme(ColorScheme::Device), CefColorMode::System);
+        let mut settings = AppSettings::default();
+        settings.appearance.mode = ColorScheme::Light;
+        assert_eq!(
+            BrowserAppearance(&settings).color_mode(),
+            CefColorMode::Light
+        );
+        settings.appearance.mode = ColorScheme::Dark;
+        assert_eq!(
+            BrowserAppearance(&settings).color_mode(),
+            CefColorMode::Dark
+        );
+        settings.appearance.mode = ColorScheme::Device;
+        assert_eq!(
+            BrowserAppearance(&settings).color_mode(),
+            CefColorMode::System
+        );
+    }
+
+    #[test]
+    fn selected_locale_leads_browser_accept_language() {
+        assert_eq!(
+            BrowserLocale("ja".to_string()).accept_language_list(),
+            "ja,en-US;q=0.9,en;q=0.8"
+        );
+        assert_eq!(
+            BrowserLocale("pt-BR".to_string()).accept_language_list(),
+            "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+        );
+        assert_eq!(
+            BrowserLocale("en-US".to_string()).accept_language_list(),
+            "en-US,en;q=0.9"
+        );
     }
 }

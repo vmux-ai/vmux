@@ -93,7 +93,7 @@ fn grab_key_window_on_pane_hover(
     if !app_is_frontmost() {
         return;
     }
-    let Some(pointer) = vmux_input::pointer::snapshot() else {
+    let Some(pointer) = vmux_input::NativePointer::snapshot() else {
         return;
     };
     let mut over_pane = false;
@@ -454,12 +454,12 @@ fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
             _ => false,
         };
         if event_type == NSEventType::LeftMouseDown {
-            vmux_browser::set_native_left_mouse_down(true);
+            vmux_input::NativePointer::set_window_gesture(true);
         } else if event_type == NSEventType::LeftMouseUp {
-            vmux_browser::set_native_left_mouse_down(false);
+            vmux_input::NativePointer::set_window_gesture(false);
         }
         if titlebar_gesture == Some(WindowTitlebarGesture::Drag) {
-            vmux_browser::set_native_left_mouse_down(false);
+            vmux_input::NativePointer::set_window_gesture(false);
         }
         let motion = matches!(
             event_type,
@@ -494,7 +494,7 @@ fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
         }
         let buttons = mouse_buttons();
         if pointer_position_changed && let Some((x, y)) = location {
-            vmux_input::pointer::publish(Vec2::new(x, y), buttons, motion);
+            vmux_input::NativePointer::publish(Vec2::new(x, y), buttons, motion);
         }
         if motion && event_belongs_to_main_window {
             let interval = if event_type == NSEventType::MouseMoved {
@@ -527,16 +527,16 @@ fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     let global_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| {
         let event_type = unsafe { event.as_ref() }.r#type();
         if event_type == NSEventType::LeftMouseDown {
-            vmux_browser::set_native_left_mouse_down(true);
+            vmux_input::NativePointer::set_window_gesture(true);
         } else if event_type == NSEventType::LeftMouseUp {
-            vmux_browser::set_native_left_mouse_down(false);
+            vmux_input::NativePointer::set_window_gesture(false);
             global_resize_drag
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .take();
             IN_LIVE_RESIZE.store(false, Ordering::Relaxed);
         }
-        vmux_input::pointer::publish_buttons(mouse_buttons());
+        vmux_input::NativePointer::publish_buttons(mouse_buttons());
         global_wake(MOUSE_MOVE_WAKE_INTERVAL);
     });
     let mouse_mask = NSEventMask::MouseMoved

@@ -4,7 +4,7 @@ use bevy_cef_core::prelude::NativeMouseButtons;
 use std::sync::{LazyLock, Mutex};
 
 use super::NativeBridge;
-use crate::host::{command_bar_windowed_frame_contains, native_command_bar_route};
+use crate::host::CommandBarRoute;
 use crate::present::WindowedFrameRect;
 
 static BRIDGE: LazyLock<Mutex<NativeBridgeState>> = LazyLock::new(Default::default);
@@ -72,18 +72,7 @@ impl NativeBridge {
     }
 
     fn command_bar_local_position(x_px: f32, y_px: f32) -> Option<Vec2> {
-        let route = native_command_bar_route();
-        if !route.owns_input {
-            return None;
-        }
-        let frame = route
-            .frame
-            .filter(|frame| command_bar_windowed_frame_contains(*frame, Vec2::new(x_px, y_px)))?;
-        let scale = route.scale.max(1.0e-6);
-        Some(Vec2::new(
-            (x_px - frame.left_px) / scale,
-            (y_px - frame.top_px) / scale,
-        ))
+        CommandBarRoute::current().local_position(Vec2::new(x_px, y_px))
     }
 }
 

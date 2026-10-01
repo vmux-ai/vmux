@@ -21,8 +21,8 @@ use vmux_layout::{
 use vmux_ui::i18n::translate;
 
 use crate::host::{
-    PageOpenAwaitSnapshot, PageOpenFallbackDeferred, PendingNavigationSnapshot,
-    PendingNavigationUpdate, page_open_response,
+    PageOpenAwaitSnapshot, PageOpenFallbackDeferred, PageOpenResponse, PendingNavigationSnapshot,
+    PendingNavigationUpdate,
 };
 
 pub(crate) struct PagePlugin;
@@ -108,7 +108,9 @@ fn apply_pending_navigation(
     for update in updates.read() {
         if let Some((entity, displaced)) = pending.remove(&update.webview) {
             commands.entity(entity).despawn();
-            if let Some(response) = page_open_response(Some(displaced.request_id), Ok(())) {
+            if let Some(response) =
+                PageOpenResponse::from_result(Some(displaced.request_id), Ok(()))
+            {
                 service_requests.write(response);
             }
         }
@@ -157,7 +159,9 @@ fn handle_open_requests(
                 .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
                 .id(),
             Err(message) => {
-                if let Some(response) = page_open_response(request.request_id, Err(message)) {
+                if let Some(response) =
+                    PageOpenResponse::from_result(request.request_id, Err(message))
+                {
                     service_requests.write(response);
                 }
                 continue;
@@ -404,7 +408,8 @@ fn respond_open_tasks(
 ) {
     for (entity, task, error, await_snapshot) in &tasks {
         if let Some(error) = error {
-            if let Some(response) = page_open_response(task.request_id, Err(error.message.clone()))
+            if let Some(response) =
+                PageOpenResponse::from_result(task.request_id, Err(error.message.clone()))
             {
                 service_requests.write(response);
             }
@@ -412,7 +417,7 @@ fn respond_open_tasks(
             continue;
         }
         let Some(await_snapshot) = await_snapshot else {
-            if let Some(response) = page_open_response(task.request_id, Ok(())) {
+            if let Some(response) = PageOpenResponse::from_result(task.request_id, Ok(())) {
                 service_requests.write(response);
             }
             commands.entity(entity).despawn();
@@ -440,7 +445,7 @@ fn respond_open_tasks(
             .as_secs_f32()
             > 10.0
         {
-            if let Some(response) = page_open_response(
+            if let Some(response) = PageOpenResponse::from_result(
                 task.request_id,
                 Err("page opened without a snapshot-capable webview".to_string()),
             ) {

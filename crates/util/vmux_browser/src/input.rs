@@ -14,10 +14,7 @@ use vmux_ecs::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
 use vmux_layout::LayoutCef;
 
-use crate::host::{
-    CefPointerRegions, LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE,
-    pointer_button_from_mouse_button,
-};
+use crate::host::{CefPointerRegions, LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE};
 
 pub(crate) struct InputPlugin;
 
@@ -35,6 +32,19 @@ impl Plugin for InputPlugin {
         )
         .add_systems(PreUpdate, log_command_bar_keyboard)
         .add_systems(Update, track_interaction);
+    }
+}
+
+struct CefPointerButton;
+
+impl CefPointerButton {
+    fn from_mouse(button: MouseButton) -> Option<PointerButton> {
+        match button {
+            MouseButton::Left => Some(PointerButton::Primary),
+            MouseButton::Right => Some(PointerButton::Secondary),
+            MouseButton::Middle => Some(PointerButton::Middle),
+            _ => None,
+        }
     }
 }
 
@@ -80,7 +90,7 @@ fn publish_layout_pointer_inside(
                 (scale.is_finite() && scale > 0.0).then_some(scale)
             })
             .and_then(|scale| {
-                vmux_input::pointer::snapshot().map(|pointer| pointer.position_px / scale)
+                vmux_input::NativePointer::snapshot().map(|pointer| pointer.position_px / scale)
             })
             .is_some_and(|position| cef_regions.contains(position));
     #[cfg(not(target_os = "macos"))]
@@ -148,7 +158,7 @@ fn forward_layout_cef_mouse_button(
         return;
     }
     for event in events.read() {
-        let Some(button) = pointer_button_from_mouse_button(event.button) else {
+        let Some(button) = CefPointerButton::from_mouse(event.button) else {
             continue;
         };
         let Ok(window) = windows.get(event.window) else {
@@ -161,7 +171,7 @@ fn forward_layout_cef_mouse_button(
             continue;
         };
         #[cfg(target_os = "macos")]
-        let native_pointer = vmux_input::pointer::snapshot();
+        let native_pointer = vmux_input::NativePointer::snapshot();
         #[cfg(target_os = "macos")]
         let position = native_pointer
             .map(|pointer| pointer.position_px / window.resolution.scale_factor())

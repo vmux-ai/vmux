@@ -18,12 +18,10 @@ use vmux_layout::{Header, LayoutCef, side_sheet::SideSheet, state::LayoutUiState
 
 use crate::NativeLayout;
 #[cfg(not(target_os = "macos"))]
-use crate::host::{
-    CefPointerRegions, LayoutHoverRefreshState, LayoutPointerCapture, reset_layout_cef_hover,
-};
+use crate::host::{CefPointerRegions, LayoutHoverRefreshState, LayoutPointerCapture};
 use crate::host::{
     LAYOUT_INPUT_BURST, LayoutFrameRateState, NATIVE_LAYOUT_POINTER_INSIDE,
-    WindowedHoverRefreshState, native_left_mouse_down,
+    WindowedHoverRefreshState,
 };
 use vmux_ecs::KeyboardOwner;
 use vmux_flex::prelude::*;
@@ -114,24 +112,23 @@ fn refresh_layout_cef_hover(
     };
     if suppress.0 {
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
-        reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
+        state.reset(&browsers, &buttons, layout);
         return;
     }
     let Ok(window) = windows.get(window_entity) else {
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
-        reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
+        state.reset(&browsers, &buttons, layout);
         return;
     };
     let scale = window.resolution.scale_factor();
     if !scale.is_finite() || scale <= 0.0 {
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
-        reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
+        state.reset(&browsers, &buttons, layout);
         return;
     }
     let pointer_capture = !pointer_capture_q.is_empty();
-    let Some(cursor_px) = vmux_layout::pane::pane_hover_cursor_position(window_entity, window)
-    else {
-        reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
+    let Some(cursor_px) = vmux_input::NativePointer::position(window_entity, window) else {
+        state.reset(&browsers, &buttons, layout);
         return;
     };
     let sequence = 0;
@@ -178,7 +175,7 @@ fn refresh_active_windowed_hover(
         *state = WindowedHoverRefreshState::default();
         return;
     }
-    if native_left_mouse_down() {
+    if vmux_input::NativePointer::window_gesture() {
         *state = WindowedHoverRefreshState::default();
         return;
     }
@@ -198,8 +195,7 @@ fn refresh_active_windowed_hover(
         *state = WindowedHoverRefreshState::default();
         return;
     };
-    let Some(cursor_px) = vmux_layout::pane::pane_hover_cursor_position(window_entity, window)
-    else {
+    let Some(cursor_px) = vmux_input::NativePointer::position(window_entity, window) else {
         *state = WindowedHoverRefreshState::default();
         return;
     };
@@ -307,7 +303,7 @@ fn sync_layout_cef(
     focused_window: vmux_layout::window::FocusedWindow,
 ) {
     let inside = NativeLayout::pointer_is_inside();
-    let pointer = vmux_input::pointer::snapshot();
+    let pointer = vmux_input::NativePointer::snapshot();
     let cursor_moved = cursor_events.read().count() > 0;
     let button_changed = button_events.read().count() > 0;
     let wheel_changed = wheel_events.read().count() > 0;

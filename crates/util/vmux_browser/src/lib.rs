@@ -1,12 +1,11 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-use bevy::prelude::*;
+use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::CefEmbeddedHosts;
 pub use command::{NavigationRequest, OpenRequest, ShowDevToolsRequest, ZoomRequest};
 pub use host::AgentBrowserResolve;
 pub use host::WebviewLoadCompleted;
-pub use host::{native_left_mouse_down, set_native_left_mouse_down};
 pub use host_focus::HostFocusIntent;
 pub use infrastructure::{InfrastructureWebview, PopupWebview, RetiredInfrastructureWebview};
 pub use native_bridge::NativeBridge;
@@ -15,8 +14,12 @@ pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_poin
 pub use native_layout::NativeLayout;
 pub use navigation::OpenHistoryRequest;
 pub use tool::BrowserToolPlugin;
-use vmux_command::ReadCommandRequests;
-use vmux_ecs::page::PageManifest;
+use vmux_command::{PendingCommandBarReveal, ReadCommandRequests};
+use vmux_ecs::{
+    PageOpenSet,
+    page::{PageManifest, PageReady},
+};
+use vmux_layout::PendingWebviewReveal;
 use vmux_layout::event::{
     HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
     RemoteCopyEvent, RemotePairingDismissRequest, RemotePairingShowRequest, RemoteRequest,
@@ -25,7 +28,6 @@ use vmux_layout::event::{
     SideSheetStackCreateRequest, WindowDragRegionEvent,
 };
 pub use vmux_layout::{Browser, Loading};
-use vmux_ui::i18n::Locale;
 pub use window_drag::WindowDragRegion;
 
 pub(crate) struct Feature;
@@ -77,11 +79,27 @@ pub struct BrowserOverlaySet;
 
 pub struct BrowserPlugin;
 
+impl BrowserPlugin {
+    fn configure_backend(app: &mut App) -> &mut App {
+        app.configure_sets(
+            Update,
+            BrowserSystemSet::SyncCefBackend.before(CefSystems::CreateAndResize),
+        )
+        .add_systems(
+            Update,
+            sync_cef_backend
+                .in_set(BrowserSystemSet::SyncCefBackend)
+                .after(PageOpenSet::Fallback)
+                .after(BrowserSystemSet::SpawnPopupStacks),
+        )
+    }
+}
+
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
         let startup_appearance = vmux_setting::AppearanceSettings::from_disk();
-        let startup_locale = Locale::requested(Some(&startup_appearance.locale)).into_string();
-        let startup_accept_language_list = host::browser_accept_language_list(&startup_locale);
+        let startup_locale = appearance::BrowserLocale::requested(&startup_appearance.locale);
+        let startup_accept_language_list = startup_locale.accept_language_list();
         app.add_plugins((
             host::AgentBrowserPlugin,
             vmux_command::CommandBarPlugin,
@@ -95,8 +113,7 @@ impl Plugin for BrowserPlugin {
                 .map(PageManifest::embedded_host)
                 .collect(),
         );
-        let cef_command_line = host::cef_command_line_config();
-        host::configure_cef_backend_sync(app)
+        Self::configure_backend(app)
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<WebviewLoadCompleted>()
             .add_plugins(vmux_layout::LayoutContractPlugin)
@@ -106,13 +123,13 @@ impl Plugin for BrowserPlugin {
             )
             .add_plugins((
                 CefPlugin {
-                    command_line_config: cef_command_line,
-                    root_cache_path: host::cef_root_cache_path(),
-                    locale: startup_locale,
+                    command_line_config: host::CefStartup::command_line(),
+                    root_cache_path: host::CefStartup::root_cache_path(),
+                    locale: startup_locale.value().to_string(),
                     accept_language_list: startup_accept_language_list,
                     embedded_hosts,
                     #[cfg(target_os = "macos")]
-                    os_crypt_key_provider: host::cef_os_crypt_key_provider(),
+                    os_crypt_key_provider: host::CefStartup::os_crypt_key_provider(),
                     ..default()
                 },
                 UiEventPlugin::<(
@@ -152,6 +169,69 @@ impl Plugin for BrowserPlugin {
                 scroll::ScrollPlugin,
                 window_drag::WindowDragPlugin,
             ));
+    }
+}
+
+fn sync_cef_backend(
+    browser_entities: Query<Entity, With<Browser>>,
+    webviews: Query<
+        (Entity, Has<WebviewNativeOverlay>, Has<WebviewWindowed>),
+        (With<Browser>, With<WebviewSource>),
+    >,
+    child_of: Query<&ChildOf>,
+    host_windows: Query<&HostWindow>,
+    mut browsers: NonSendMut<Browsers>,
+    mut commands: Commands,
+) {
+    let mut moved = Vec::new();
+    for entity in &browser_entities {
+        let mut current = entity;
+        let mut inherited = None;
+        while let Ok(parent) = child_of.get(current).map(Relationship::get) {
+            if let Ok(host) = host_windows.get(parent) {
+                inherited = Some(*host);
+                break;
+            }
+            current = parent;
+        }
+        let Some(inherited) = inherited else {
+            continue;
+        };
+        if host_windows.get(entity).ok() != Some(&inherited) {
+            commands.entity(entity).insert(inherited);
+            moved.push(entity);
+        }
+    }
+
+    let mut recreate = Vec::new();
+    for (entity, native_overlay, _) in &webviews {
+        let stale_backend = browsers
+            .is_windowed(&entity)
+            .is_some_and(|windowed| !windowed);
+        let stale_overlay = browsers.has_browser(entity) && native_overlay;
+        if stale_backend || stale_overlay || moved.contains(&entity) {
+            recreate.push(entity);
+        }
+    }
+    for entity in &recreate {
+        browsers.close(entity);
+    }
+    for (entity, native_overlay, windowed) in &webviews {
+        let needs_recreate = recreate.contains(&entity);
+        let settled = windowed && !native_overlay && !needs_recreate;
+        if settled {
+            continue;
+        }
+        let mut entity = commands.entity(entity);
+        entity
+            .insert(WebviewWindowed)
+            .remove::<WebviewNativeOverlay>();
+        if needs_recreate {
+            entity
+                .remove::<PageReady>()
+                .remove::<PendingWebviewReveal>()
+                .remove::<PendingCommandBarReveal>();
+        }
     }
 }
 
