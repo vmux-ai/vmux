@@ -29,6 +29,8 @@ impl Plugin for ShortcutPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::ShortcutPage::plugin());
         app.add_plugins((
+            crate::claim::ClaimPlugin,
+            crate::input::InputPlugin,
             HostedUiPlugin::<Shortcuts>::new(Self::MANIFEST),
             UiEventPlugin::<(ShortcutProbePressRequest, ShortcutProbeClearRequest)>::default(),
             vmux_ecs::host::UiStatePlugin::<ShortcutUiState>::default(),
@@ -589,6 +591,7 @@ mod tests {
     use super::*;
     use bevy::input::keyboard::KeyCode;
     use vmux_api::input::KeyModifiers;
+    use vmux_command::CommandManifest;
     use vmux_command::shortcut::{Binding, Modifiers, Source, When};
     use vmux_ecs::{PageMetadata, PageOpenId, PageOpenTask};
     use vmux_layout::native_open::NativeOpenPlugin;
@@ -597,17 +600,14 @@ mod tests {
 
     impl LayoutCommandFixture {
         fn definitions(panes: bool, tabs: bool) -> Vec<CommandDefinition> {
-            let mut app = App::new();
-            app.add_plugins(MinimalPlugins);
-            if panes {
-                app.add_plugins(vmux_layout::pane::PaneCommandPlugin);
-            }
-            if tabs {
-                app.add_plugins(vmux_layout::tab::TabCommandPlugin);
-            }
-            app.update();
-            let mut query = app.world_mut().query::<&CommandDefinition>();
-            query.iter(app.world()).cloned().collect()
+            CommandManifest::from_feature_ron(include_str!("../../vmux_layout/src/feature.ron"))
+                .into_vec()
+                .into_iter()
+                .filter(|definition| {
+                    panes && matches!(definition.id.as_str(), "close_pane" | "rotate_forward")
+                        || tabs && definition.id == "open_in_new_tab"
+                })
+                .collect()
         }
     }
 

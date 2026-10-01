@@ -1,7 +1,7 @@
 [package]
 name = "vmux_shortcut"
 build = "../../build_cfg.rs"
-description = "The vmux://shortcuts/ keyboard shortcut reference page"
+description = "Keyboard shortcut dispatch, context claims, and reference UI"
 version.workspace = true
 edition.workspace = true
 publish = false
@@ -26,6 +26,7 @@ bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_setting = { path = "../vmux_setting" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]

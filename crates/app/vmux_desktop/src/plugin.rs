@@ -1,7 +1,4 @@
-use crate::{
-    os_menu::OsMenuPlugin, permission::PermissionsPlugin, runtime::RuntimePlugin,
-    shortcut::ShortcutPlugin,
-};
+use crate::{os_menu::OsMenuPlugin, permission::PermissionsPlugin, runtime::RuntimePlugin};
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
 
@@ -16,7 +13,6 @@ impl PluginGroup for DesktopPluginGroup {
             .add(RuntimePlugin)
             .add(PermissionsPlugin)
             .add(OsMenuPlugin)
-            .add(ShortcutPlugin)
             .add(crate::relaunch::RelaunchPlugin);
 
         #[cfg(all(target_os = "macos", feature = "native-glass"))]

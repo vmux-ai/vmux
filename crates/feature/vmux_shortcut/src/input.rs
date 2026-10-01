@@ -1,33 +1,32 @@
+use bevy::ecs::system::SystemParam;
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use std::time::Instant;
 use vmux_command::WriteCommandRequests;
 use vmux_command::shortcut::{Binding, Source, When};
-pub(crate) use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
+use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_input::NativeKeyCapture;
 use vmux_setting::{AppSettings, SettingsLoadSet};
 
-pub struct ShortcutPlugin;
+pub(crate) struct InputPlugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
-struct ShortcutInit;
+struct Initialize;
 
-impl Plugin for ShortcutPlugin {
+impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::key_claim::KeyClaimPlugin)
-            .add_systems(
-                Startup,
-                sync_keymap
-                    .in_set(ShortcutInit)
-                    .after(SettingsLoadSet)
-                    .after(vmux_command::BindCommands),
-            )
-            .add_systems(Update, sync_keymap)
-            .add_systems(Update, process_key_input.in_set(WriteCommandRequests));
+        app.add_systems(
+            Startup,
+            sync.in_set(Initialize)
+                .after(SettingsLoadSet)
+                .after(vmux_command::BindCommands),
+        )
+        .add_systems(Update, sync)
+        .add_systems(Update, dispatch.in_set(WriteCommandRequests));
     }
 }
 
-fn sync_keymap(
+fn sync(
     settings: Option<Res<AppSettings>>,
     definitions: Query<Ref<vmux_command::CommandDefinition>>,
     mut keymap: Single<&mut Keymap>,
@@ -73,8 +72,68 @@ fn sync_keymap(
     **keymap = next;
 }
 
-fn process_key_input(
-    keyboard: Res<ButtonInput<KeyCode>>,
+#[derive(SystemParam)]
+struct PressedKeys<'w> {
+    keyboard: Option<Res<'w, ButtonInput<KeyCode>>>,
+}
+
+impl PressedKeys<'_> {
+    fn modifiers(&self) -> Modifiers {
+        let Some(keyboard) = &self.keyboard else {
+            return Modifiers::default();
+        };
+        Modifiers {
+            ctrl: keyboard.pressed(KeyCode::ControlLeft)
+                || keyboard.pressed(KeyCode::ControlRight)
+                || keyboard.just_pressed(KeyCode::ControlLeft)
+                || keyboard.just_pressed(KeyCode::ControlRight),
+            shift: keyboard.pressed(KeyCode::ShiftLeft)
+                || keyboard.pressed(KeyCode::ShiftRight)
+                || keyboard.just_pressed(KeyCode::ShiftLeft)
+                || keyboard.just_pressed(KeyCode::ShiftRight),
+            alt: keyboard.pressed(KeyCode::AltLeft)
+                || keyboard.pressed(KeyCode::AltRight)
+                || keyboard.just_pressed(KeyCode::AltLeft)
+                || keyboard.just_pressed(KeyCode::AltRight),
+            super_key: keyboard.pressed(KeyCode::SuperLeft)
+                || keyboard.pressed(KeyCode::SuperRight)
+                || keyboard.just_pressed(KeyCode::SuperLeft)
+                || keyboard.just_pressed(KeyCode::SuperRight),
+        }
+    }
+
+    fn just_pressed(&self) -> Vec<KeyCombo> {
+        let Some(keyboard) = &self.keyboard else {
+            return Vec::new();
+        };
+        let modifiers = self.modifiers();
+        keyboard
+            .get_just_pressed()
+            .filter(|key| !Self::modifier(**key))
+            .map(|key| KeyCombo {
+                key: *key,
+                modifiers,
+            })
+            .collect()
+    }
+
+    fn modifier(key: KeyCode) -> bool {
+        matches!(
+            key,
+            KeyCode::ControlLeft
+                | KeyCode::ControlRight
+                | KeyCode::ShiftLeft
+                | KeyCode::ShiftRight
+                | KeyCode::AltLeft
+                | KeyCode::AltRight
+                | KeyCode::SuperLeft
+                | KeyCode::SuperRight
+        )
+    }
+}
+
+fn dispatch(
+    input: PressedKeys,
     bindings: Single<&Keymap>,
     mut pending_prefix: Local<Option<(KeyCombo, Instant)>>,
     mut invocations: MessageWriter<vmux_command::CommandInvocation>,
@@ -86,7 +145,6 @@ fn process_key_input(
         return;
     }
     let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
-    let current_modifiers = read_current_modifiers(&keyboard);
 
     if let Some((_, instant)) = pending_prefix.as_ref() {
         let timeout = std::time::Duration::from_millis(bindings.chord_timeout_ms);
@@ -95,14 +153,7 @@ fn process_key_input(
         }
     }
 
-    let just_pressed: Vec<KeyCombo> = keyboard
-        .get_just_pressed()
-        .filter(|key| !is_modifier_key(**key))
-        .map(|key| KeyCombo {
-            key: *key,
-            modifiers: current_modifiers,
-        })
-        .collect();
+    let just_pressed = input.just_pressed();
 
     if let Some((prefix, instant)) = pending_prefix.clone() {
         let timeout = std::time::Duration::from_millis(bindings.chord_timeout_ms);
@@ -143,51 +194,14 @@ fn process_key_input(
     }
 }
 
-fn read_current_modifiers(keyboard: &ButtonInput<KeyCode>) -> Modifiers {
-    Modifiers {
-        ctrl: keyboard.pressed(KeyCode::ControlLeft)
-            || keyboard.pressed(KeyCode::ControlRight)
-            || keyboard.just_pressed(KeyCode::ControlLeft)
-            || keyboard.just_pressed(KeyCode::ControlRight),
-        shift: keyboard.pressed(KeyCode::ShiftLeft)
-            || keyboard.pressed(KeyCode::ShiftRight)
-            || keyboard.just_pressed(KeyCode::ShiftLeft)
-            || keyboard.just_pressed(KeyCode::ShiftRight),
-        alt: keyboard.pressed(KeyCode::AltLeft)
-            || keyboard.pressed(KeyCode::AltRight)
-            || keyboard.just_pressed(KeyCode::AltLeft)
-            || keyboard.just_pressed(KeyCode::AltRight),
-        super_key: keyboard.pressed(KeyCode::SuperLeft)
-            || keyboard.pressed(KeyCode::SuperRight)
-            || keyboard.just_pressed(KeyCode::SuperLeft)
-            || keyboard.just_pressed(KeyCode::SuperRight),
-    }
-}
-
-fn is_modifier_key(key: KeyCode) -> bool {
-    matches!(
-        key,
-        KeyCode::ControlLeft
-            | KeyCode::ControlRight
-            | KeyCode::ShiftLeft
-            | KeyCode::ShiftRight
-            | KeyCode::AltLeft
-            | KeyCode::AltRight
-            | KeyCode::SuperLeft
-            | KeyCode::SuperRight
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
-    use vmux_command::{CommandInvocation, CommandPlugin};
-    use vmux_layout::pane::PaneCommandPlugin;
+    use vmux_command::{CommandInvocation, CommandManifest, CommandPlugin};
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_layout::tab::TabCommandPlugin;
     use vmux_setting::{
         AppSettings, BrowserSettings, KeyComboDef, ShortcutDef, ShortcutEntry, ShortcutSettings,
     };
@@ -197,14 +211,16 @@ mod tests {
     impl ShortcutFixture {
         fn app(settings: Option<AppSettings>) -> App {
             let mut app = App::new();
-            app.add_plugins((
-                MinimalPlugins,
-                CommandPlugin,
-                PaneCommandPlugin,
-                TabCommandPlugin,
-                ShortcutPlugin,
-            ))
-            .insert_resource(ButtonInput::<KeyCode>::default());
+            app.add_plugins((MinimalPlugins, CommandPlugin, InputPlugin))
+                .insert_resource(ButtonInput::<KeyCode>::default());
+            for source in [
+                include_str!("../../vmux_layout/src/feature.ron"),
+                include_str!("../../vmux_space/src/feature.ron"),
+            ] {
+                for definition in CommandManifest::from_feature_ron(source).into_vec() {
+                    app.world_mut().spawn(definition);
+                }
+            }
             if let Some(settings) = settings {
                 app.insert_resource(settings);
             }

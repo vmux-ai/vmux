@@ -5,17 +5,17 @@ use vmux_command::shortcut::{KeyContext, Keymap};
 use vmux_ecs::host::page::HostsPage;
 use vmux_ecs::host::{UiState, UiStatePlugin, UiStateWrite};
 
-pub struct KeyClaimPlugin;
+pub(crate) struct ClaimPlugin;
 
-impl Plugin for KeyClaimPlugin {
+impl Plugin for ClaimPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiStatePlugin::<KeyClaims>::default())
-            .add_observer(receive_page_context)
-            .add_systems(Update, (start_page_context, push_key_claims).chain());
+            .add_observer(receive)
+            .add_systems(Update, (spawn, publish).chain());
     }
 }
 
-fn start_page_context(
+fn spawn(
     pages: Query<
         Entity,
         (
@@ -32,14 +32,14 @@ fn start_page_context(
     }
 }
 
-fn receive_page_context(trigger: On<UiInput<UiKeyContext>>, mut contexts: Query<&mut KeyContext>) {
+fn receive(trigger: On<UiInput<UiKeyContext>>, mut contexts: Query<&mut KeyContext>) {
     let Ok(mut current) = contexts.get_mut(trigger.event_target()) else {
         return;
     };
     current.set_if_neq(trigger.payload.keys.iter().cloned().collect());
 }
 
-fn push_key_claims(
+fn publish(
     keymaps: Query<Ref<Keymap>>,
     contexts: Query<(Entity, Ref<KeyContext>), Or<(With<WebviewSource>, With<HostsPage>)>>,
     mut commands: Commands,
@@ -140,7 +140,7 @@ mod tests {
 
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_plugins(KeyClaimPlugin)
+                .add_plugins(ClaimPlugin)
                 .init_resource::<Pushed>()
                 .init_resource::<Rejected>()
                 .add_observer(Pushed::record);

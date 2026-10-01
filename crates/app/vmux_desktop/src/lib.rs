@@ -15,7 +15,6 @@ mod capture_output;
 mod disabled_features;
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod glass;
-mod key_claim;
 mod log_forward;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -35,7 +34,6 @@ mod screenshot;
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod splash;
 
-pub(crate) mod shortcut;
 #[cfg(feature = "tray")]
 mod tray;
 #[cfg(feature = "updater")]

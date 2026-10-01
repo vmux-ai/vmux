@@ -704,8 +704,9 @@ answer to two pages that want opposite things. Absence of the marker means platf
 editing, which is the default a new page wants.
 
 The AppKit keyboard callback is only a transport adapter. It sends typed values through an
-inbox component; ECS systems translate them into command, simulator, fullscreen, and quit
-messages. AppKit does not retain pending application state.
+inbox component; `vmux_input` normalizes platform input and `vmux_shortcut` owns keymap sync,
+chord state, page key claims, and command dispatch. AppKit does not retain pending application
+state.
 
 ---
 

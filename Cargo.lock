@@ -10453,7 +10453,6 @@ dependencies = [
  "vmux_native",
  "vmux_profile",
  "vmux_setting",
- "vmux_shortcut",
  "vmux_simulator",
  "vmux_space",
  "vmux_start",
@@ -10961,6 +10960,7 @@ dependencies = [
  "vmux_input",
  "vmux_layout",
  "vmux_native",
+ "vmux_setting",
  "vmux_ui",
 ]
 

@@ -189,7 +189,11 @@ impl ShortcutStroke {
 }
 
 #[cfg(host)]
+mod claim;
+#[cfg(host)]
 mod host;
+#[cfg(host)]
+mod input;
 #[cfg(host)]
 pub use host::{ShortcutCaptureSet, ShortcutPlugin};
 
