@@ -29,20 +29,15 @@ impl Plugin for CommandToolPlugin {
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
+            .add_systems(Update, (open, notify, dispatch).in_set(ToolDispatchSet))
             .add_systems(
                 Update,
-                (open_bar, notify, dispatch_unclaimed_tools).in_set(ToolDispatchSet),
-            )
-            .add_systems(
-                Update,
-                answer_queries
-                    .in_set(ToolQueryRouteSet)
-                    .after(ServiceMessageSet),
+                answer.in_set(ToolQueryRouteSet).after(ServiceMessageSet),
             );
     }
 }
 
-fn dispatch_unclaimed_tools(
+fn dispatch(
     mut commands: Commands,
     calls: Query<(Entity, &Name, &JsonArguments), Added<UnclaimedToolInvocation>>,
 ) {
@@ -56,7 +51,7 @@ fn dispatch_unclaimed_tools(
     }
 }
 
-fn answer_queries(
+fn answer(
     mut queries: MessageReader<ToolQueryRequest>,
     commands: Query<&crate::CommandDefinition>,
     mut handled: MessageWriter<ToolQueryHandled>,
@@ -100,15 +95,15 @@ struct NotifyArgs {
     body: Option<String>,
 }
 
-fn open_bar(
+fn open(
     mut commands: Commands,
     requests: Query<(Entity, &OpenCommandBarArgs), AddedTool<OpenCommandBarArgs>>,
 ) {
     for (entity, args) in &requests {
         let result = match args.mode.as_deref().unwrap_or("default") {
-            "default" => Ok("browser_open_command_bar"),
-            "commands" => Ok("browser_open_commands"),
-            "path" => Ok("browser_open_path_bar"),
+            "default" => Ok("command_bar_open"),
+            "commands" => Ok("command_bar_open_commands"),
+            "path" => Ok("command_bar_open_path"),
             other => Err(format!("unknown command bar mode: {other}")),
         };
         let command = result.and_then(|id| {
@@ -187,18 +182,18 @@ mod tests {
 
     #[test]
     fn manifest_registers_command_tools() {
-        assert_eq!(CommandToolFixture::definitions(), ["open_bar", "notify"]);
+        assert_eq!(CommandToolFixture::definitions(), ["open", "notify"]);
     }
 
     #[test]
     fn open_command_bar_dispatches_each_mode() {
         for (mode, id) in [
-            ("default", "browser_open_command_bar"),
-            ("commands", "browser_open_commands"),
-            ("path", "browser_open_path_bar"),
+            ("default", "command_bar_open"),
+            ("commands", "command_bar_open_commands"),
+            ("path", "command_bar_open_path"),
         ] {
             assert_eq!(
-                CommandToolFixture::dispatch("open_bar", serde_json::json!({"mode": mode})),
+                CommandToolFixture::dispatch("open", serde_json::json!({"mode": mode})),
                 AgentRequest::encode(&AgentInvokeCommand {
                     id: id.to_string(),
                     args: JsonValue::Object(Vec::new()),
@@ -206,7 +201,7 @@ mod tests {
             );
         }
         assert!(
-            CommandToolFixture::dispatch("open_bar", serde_json::json!({"mode": "other"})).is_err()
+            CommandToolFixture::dispatch("open", serde_json::json!({"mode": "other"})).is_err()
         );
     }
 

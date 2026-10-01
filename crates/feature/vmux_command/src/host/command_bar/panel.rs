@@ -11,14 +11,14 @@ impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(CommandBarPanelRequest,)>::default())
             .add_observer(active)
-            .add_systems(Update, mark_bar_shown_inline);
+            .add_systems(Update, sync_inline);
     }
 }
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CommandBarPanelActive;
 
-fn mark_bar_shown_inline(
+fn sync_inline(
     panel_active: Query<(), With<CommandBarPanelActive>>,
     bar_q: Query<(Entity, Has<OverlayShownInline>), With<CommandBar>>,
     mut commands: Commands,
@@ -55,7 +55,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_observer(active)
-            .add_systems(Update, mark_bar_shown_inline);
+            .add_systems(Update, sync_inline);
         app
     }
 

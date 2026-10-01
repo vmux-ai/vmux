@@ -645,7 +645,7 @@ fn header_address_focus(
 ) {
     command_invocations.write(CommandInvocation::new(
         trigger.event().webview,
-        "browser_open_page_in_command_bar",
+        "command_bar_edit_page",
     ));
 }
 

@@ -11,15 +11,15 @@ pub struct UiStatePlugin;
 
 impl Plugin for UiStatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (spawn_pages, ApplyDeferred, update_pages).chain())
+        app.add_systems(Startup, (spawn, ApplyDeferred, update).chain())
             .add_plugins(vmux_ecs::host::UiStatePlugin::<
                 vmux_api::command_bar::CommandBarUiState,
             >::default())
-            .add_systems(PreUpdate, attach_bar_ui_state);
+            .add_systems(PreUpdate, attach);
     }
 }
 
-fn spawn_pages(mut commands: Commands) {
+fn spawn(mut commands: Commands) {
     commands.spawn((
         Name::new("Command bar pages"),
         CommandBarPagesSnapshot::default(),
@@ -159,10 +159,7 @@ pub struct CommandBarWorkSnapshot {
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct CommandBarWorkDirectory(pub String);
 
-fn update_pages(
-    manifests: Query<&PageManifest>,
-    mut snapshot: Single<&mut CommandBarPagesSnapshot>,
-) {
+fn update(manifests: Query<&PageManifest>, mut snapshot: Single<&mut CommandBarPagesSnapshot>) {
     if !snapshot.pages.is_empty() {
         return;
     }
@@ -192,7 +189,7 @@ fn update_pages(
     snapshot.pages = pages;
 }
 
-fn attach_bar_ui_state(
+fn attach(
     pages: Query<Entity, (With<RendersLauncherPanel>, Without<CommandBarState>)>,
     mut commands: Commands,
 ) {
@@ -317,7 +314,7 @@ mod tests {
     #[test]
     fn pages_snapshot_collects_only_command_bar_pages() {
         let mut app = App::new();
-        app.add_systems(Update, update_pages);
+        app.add_systems(Update, update);
         app.world_mut().spawn(CommandBarPagesSnapshot::default());
         app.world_mut().spawn(PageManifest {
             url: "vmux://services/",

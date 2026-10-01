@@ -15,7 +15,7 @@ pub(super) struct PaletteResumePlugin;
 
 impl Plugin for PaletteResumePlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(update_draft)
+        app.add_observer(update)
             .add_observer(receive_page)
             .add_systems(PreUpdate, attach)
             .add_systems(PostUpdate, request_more.after(project));
@@ -45,7 +45,7 @@ fn attach(
     }
 }
 
-fn update_draft(
+fn update(
     trigger: On<UiInput<CommandPaletteDraftRequest>>,
     mut palettes: Query<(&mut PaletteResume, &mut PaletteSnapshot)>,
     mut commands: Commands,

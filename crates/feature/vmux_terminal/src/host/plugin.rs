@@ -2521,17 +2521,16 @@ mod tests {
             ..Default::default()
         };
         let mut state = TerminalShortcutState::default();
-        let definitions = [CommandDefinition::new(
-            "browser_open_page_in_command_bar",
-            "Edit Page",
-            "Browser > Bar",
-        )
-        .direct("Super+l")];
+        let definitions =
+            [
+                CommandDefinition::new("command_bar_edit_page", "Edit Page", "Browser > Bar")
+                    .direct("Super+l"),
+            ];
         let keymap = Keymap::defaults_with(&definitions);
 
         assert_eq!(
             resolve_terminal_web_shortcut(&event, &keymap, &mut state),
-            TerminalWebShortcutResolution::Command("browser_open_page_in_command_bar".to_string())
+            TerminalWebShortcutResolution::Command("command_bar_edit_page".to_string())
         );
     }
 

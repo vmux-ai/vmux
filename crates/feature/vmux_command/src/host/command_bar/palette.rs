@@ -71,23 +71,23 @@ impl Plugin for PalettePlugin {
                 media::PaletteMediaPlugin,
                 resume::PaletteResumePlugin,
             ))
-            .add_observer(receive_open)
-            .add_observer(receive_mcp_servers)
-            .add_observer(update_draft)
+            .add_observer(open)
+            .add_observer(receive_mcp)
+            .add_observer(update)
             .add_observer(highlight)
-            .add_observer(move_history)
-            .add_observer(toggle_agent_menu)
-            .add_observer(toggle_model_menu)
-            .add_observer(toggle_permission_menu)
-            .add_observer(toggle_project_menu)
-            .add_observer(toggle_branch_menu)
-            .add_observer(move_menu_request)
+            .add_observer(history)
+            .add_observer(toggle_agent)
+            .add_observer(toggle_model)
+            .add_observer(toggle_permission)
+            .add_observer(toggle_project)
+            .add_observer(toggle_branch)
+            .add_observer(navigate_menu)
             .add_observer(highlight_menu)
             .add_observer(activate_menu)
-            .add_observer(dismiss_menu_request)
-            .add_observer(dispatch_submit)
-            .add_observer(activate_row)
-            .add_observer(apply_decision)
+            .add_observer(dismiss_menu_input)
+            .add_observer(submit_input)
+            .add_observer(activate)
+            .add_observer(apply)
             .add_observer(next)
             .add_observer(previous)
             .add_observer(complete)
@@ -96,10 +96,10 @@ impl Plugin for PalettePlugin {
             .add_observer(move_menu)
             .add_observer(choose_menu)
             .add_observer(dismiss_menu)
-            .add_systems(Startup, bind_commands.in_set(BindCommands))
-            .add_systems(PreUpdate, (attach_snapshot, detach_snapshot))
-            .add_systems(PostUpdate, (project, publish_snapshot).chain())
-            .add_systems(Last, keep_frames_coming);
+            .add_systems(Startup, bind.in_set(BindCommands))
+            .add_systems(PreUpdate, (attach, detach))
+            .add_systems(PostUpdate, (project, publish).chain())
+            .add_systems(Last, wake);
     }
 }
 
@@ -132,7 +132,7 @@ struct PaletteDraftInput {
 }
 
 impl PaletteDraftInput {
-    fn move_history(&mut self, history: &[String], older: bool) -> bool {
+    fn history(&mut self, history: &[String], older: bool) -> bool {
         if history.is_empty() {
             return false;
         }
@@ -292,7 +292,7 @@ struct PaletteDecisionReady {
     decision: PaletteDecision,
 }
 
-fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+fn bind(registry: CommandRegistry, mut commands: Commands) {
     registry.bind::<CommandBarNextBinding>(&mut commands);
     registry.bind::<CommandBarPreviousBinding>(&mut commands);
     registry.bind::<CommandBarCompleteBinding>(&mut commands);
@@ -304,7 +304,7 @@ fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
     registry.bind::<CommandBarMenuDismissBinding>(&mut commands);
 }
 
-fn attach_snapshot(
+fn attach(
     pages: Query<
         Entity,
         (
@@ -326,17 +326,14 @@ fn attach_snapshot(
     }
 }
 
-fn receive_mcp_servers(
-    trigger: On<UiStateWrite<McpServers>>,
-    mut palettes: Query<&mut PaletteMcp>,
-) {
+fn receive_mcp(trigger: On<UiStateWrite<McpServers>>, mut palettes: Query<&mut PaletteMcp>) {
     let Ok(mut mcp) = palettes.get_mut(trigger.event().webview()) else {
         return;
     };
     mcp.0.clone_from(trigger.event().update());
 }
 
-fn receive_open(
+fn open(
     trigger: On<UiStateWrite<CommandBarUiState>>,
     mut palettes: Query<(
         &mut PaletteOpen,
@@ -381,7 +378,7 @@ fn receive_open(
     snapshot.0.projection = Default::default();
 }
 
-fn update_draft(
+fn update(
     trigger: On<UiInput<CommandPaletteDraftRequest>>,
     mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput)>,
     active: Query<(), With<PaletteMcpActive>>,
@@ -445,7 +442,7 @@ fn highlight(
     input.navigating = true;
 }
 
-fn move_history(
+fn history(
     trigger: On<UiInput<CommandPaletteHistoryMoveRequest>>,
     mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput, &PaletteSnapshot)>,
 ) {
@@ -457,10 +454,10 @@ fn move_history(
     if request.open_id != opened.0.open_id {
         return;
     }
-    input.move_history(&snapshot.0.prompt_history, request.older);
+    input.history(&snapshot.0.prompt_history, request.older);
 }
 
-fn toggle_agent_menu(
+fn toggle_agent(
     trigger: On<UiInput<CommandPaletteAgentMenuToggleRequest>>,
     palettes: Query<(&PaletteOpen, &PaletteSnapshot, Has<AgentMenuOpen>)>,
     mut commands: Commands,
@@ -492,7 +489,7 @@ fn toggle_agent_menu(
     }
 }
 
-fn toggle_model_menu(
+fn toggle_model(
     trigger: On<UiInput<CommandPaletteModelMenuToggleRequest>>,
     palettes: Query<(&PaletteOpen, &PaletteSnapshot, Has<ModelMenuOpen>)>,
     mut commands: Commands,
@@ -524,7 +521,7 @@ fn toggle_model_menu(
     }
 }
 
-fn toggle_permission_menu(
+fn toggle_permission(
     trigger: On<UiInput<CommandPalettePermissionMenuToggleRequest>>,
     palettes: Query<(&PaletteOpen, &PaletteSnapshot, Has<PermissionMenuOpen>)>,
     mut commands: Commands,
@@ -556,7 +553,7 @@ fn toggle_permission_menu(
     }
 }
 
-fn toggle_project_menu(
+fn toggle_project(
     trigger: On<UiInput<CommandPaletteProjectMenuToggleRequest>>,
     palettes: Query<(&PaletteOpen, &PaletteSnapshot, Has<ProjectMenuOpen>)>,
     mut commands: Commands,
@@ -591,7 +588,7 @@ fn toggle_project_menu(
     }
 }
 
-fn toggle_branch_menu(
+fn toggle_branch(
     trigger: On<UiInput<CommandPaletteBranchMenuToggleRequest>>,
     palettes: Query<(&PaletteOpen, &PaletteSnapshot, Has<BranchMenuOpen>)>,
     mut commands: Commands,
@@ -624,7 +621,7 @@ fn toggle_branch_menu(
     }
 }
 
-fn move_menu_request(
+fn navigate_menu(
     trigger: On<UiInput<CommandPaletteMenuMoveRequest>>,
     mut palettes: Query<(
         &PaletteOpen,
@@ -827,7 +824,7 @@ fn activate_menu(
     }
 }
 
-fn dismiss_menu_request(
+fn dismiss_menu_input(
     trigger: On<UiInput<CommandPaletteMenuDismissRequest>>,
     palettes: Query<&PaletteOpen>,
     mut commands: Commands,
@@ -849,7 +846,7 @@ fn dismiss_menu_request(
     )>();
 }
 
-fn dispatch_submit(
+fn submit_input(
     trigger: On<UiInput<CommandPaletteSubmitRequest>>,
     palettes: Query<(&PaletteOpen, &PaletteDraftInput, &PaletteSnapshot)>,
     mut commands: Commands,
@@ -898,7 +895,7 @@ fn dispatch_submit(
     commands.trigger(PaletteDecisionReady { target, decision });
 }
 
-fn activate_row(
+fn activate(
     trigger: On<UiInput<CommandPaletteActivateRequest>>,
     palettes: Query<(&PaletteOpen, &PaletteDraftInput, &PaletteSnapshot)>,
     mut commands: Commands,
@@ -945,7 +942,7 @@ fn activate_row(
     });
 }
 
-fn apply_decision(
+fn apply(
     trigger: On<PaletteDecisionReady>,
     mut inputs: Query<&mut PaletteDraftInput>,
     mut commands: Commands,
@@ -1273,7 +1270,7 @@ fn project(
     }
 }
 
-fn publish_snapshot(
+fn publish(
     snapshots: Query<(Entity, &PaletteSnapshot), Changed<PaletteSnapshot>>,
     mut commands: Commands,
 ) {
@@ -1285,7 +1282,7 @@ fn publish_snapshot(
     }
 }
 
-fn detach_snapshot(
+fn detach(
     pages: Query<
         Entity,
         (
@@ -1395,7 +1392,7 @@ impl RequestDelay {
 #[derive(Component)]
 struct PendingPaletteRequest;
 
-fn keep_frames_coming(
+fn wake(
     pending: Query<(), With<PendingPaletteRequest>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
 ) {
@@ -1579,7 +1576,7 @@ mod tests {
     fn palette_history_is_recalled_in_host_state() {
         let open_id = OpenId(11);
         let mut app = App::new();
-        app.add_observer(move_history);
+        app.add_observer(history);
         let page = app
             .world_mut()
             .spawn((

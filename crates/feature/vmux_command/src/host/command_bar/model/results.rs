@@ -917,7 +917,7 @@ mod tests {
     #[test]
     fn spaces_url_includes_normal_commands() {
         let commands = vec![CommandBarCommandEntry {
-            id: "browser_open_command_bar".to_string(),
+            id: "command_bar_open".to_string(),
             name: "Command Bar".to_string(),
             shortcut: "super+k".to_string(),
         }];
@@ -944,7 +944,7 @@ mod tests {
             prompt_hint: false,
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
-            id: "browser_open_command_bar".to_string(),
+            id: "command_bar_open".to_string(),
             name: "Command Bar".to_string(),
             shortcut: "super+k".to_string(),
         }));

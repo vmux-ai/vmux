@@ -21,14 +21,11 @@ pub(super) struct PaletteSearchPlugin;
 
 impl Plugin for PaletteSearchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(update_draft)
-            .add_observer(receive_completion)
+        app.add_observer(update)
+            .add_observer(receive_files)
             .add_observer(receive_history)
             .add_systems(PreUpdate, attach)
-            .add_systems(
-                Update,
-                (dispatch_completion_request, dispatch_history_request),
-            );
+            .add_systems(Update, (request_files, request_history));
     }
 }
 
@@ -56,7 +53,7 @@ fn attach(
     }
 }
 
-fn update_draft(
+fn update(
     trigger: On<UiInput<CommandPaletteDraftRequest>>,
     mut palettes: Query<(&mut PaletteSearch, &mut PaletteSnapshot)>,
     mut commands: Commands,
@@ -84,11 +81,11 @@ fn update_draft(
         return;
     }
     search.query.clone_from(&request.query);
-    request_completion(target, &mut search, &mut snapshot, &mut commands);
-    request_history_suggestions(target, &mut search, &mut snapshot, &mut commands);
+    queue_files(target, &mut search, &mut snapshot, &mut commands);
+    queue_history(target, &mut search, &mut snapshot, &mut commands);
 }
 
-fn receive_completion(
+fn receive_files(
     trigger: On<UiStateWrite<CommandBarUiState>>,
     mut palettes: Query<(&PaletteSearch, &mut PaletteSnapshot)>,
 ) {
@@ -128,7 +125,7 @@ fn receive_history(
     snapshot.0.history.clone_from(&response.entries);
 }
 
-fn request_completion(
+fn queue_files(
     target: Entity,
     search: &mut PaletteSearch,
     snapshot: &mut PaletteSnapshot,
@@ -156,7 +153,7 @@ fn request_completion(
 #[derive(Component)]
 struct CompletionRequestDelay(RequestDelay);
 
-fn request_history_suggestions(
+fn queue_history(
     target: Entity,
     search: &mut PaletteSearch,
     snapshot: &mut PaletteSnapshot,
@@ -182,7 +179,7 @@ fn request_history_suggestions(
     ));
 }
 
-fn dispatch_completion_request(
+fn request_files(
     delays: Query<(Entity, &CompletionRequestDelay)>,
     searches: Query<&PaletteSearch>,
     mut commands: Commands,
@@ -211,7 +208,7 @@ fn dispatch_completion_request(
 #[derive(Component)]
 struct HistoryRequestDelay(RequestDelay);
 
-fn dispatch_history_request(
+fn request_history(
     delays: Query<(Entity, &HistoryRequestDelay)>,
     searches: Query<&PaletteSearch>,
     mut commands: Commands,

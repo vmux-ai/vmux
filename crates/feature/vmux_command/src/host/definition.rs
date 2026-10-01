@@ -33,8 +33,8 @@ impl Plugin for CommandRuntimePlugin {
             .add_systems(
                 Startup,
                 (
-                    spawn_keymap.before(BindCommands),
-                    register_manifests.in_set(CommandStartupSet::Manifest),
+                    spawn.before(BindCommands),
+                    register.in_set(CommandStartupSet::Manifest),
                     ApplyDeferred.in_set(CommandStartupSet::Flush),
                 ),
             )
@@ -50,11 +50,7 @@ impl Plugin for CommandRuntimePlugin {
             )
             .add_systems(
                 Update,
-                (
-                    validate_definitions,
-                    dispatch_invocations,
-                    bevy::ecs::schedule::ApplyDeferred,
-                )
+                (validate, dispatch, bevy::ecs::schedule::ApplyDeferred)
                     .chain()
                     .in_set(DispatchCommandInvocations),
             );
@@ -596,14 +592,14 @@ impl CommandRegistry<'_, '_> {
     }
 }
 
-fn spawn_keymap(mut commands: Commands) {
+fn spawn(mut commands: Commands) {
     commands.spawn((
         Name::new("Command keymap"),
         crate::host::shortcut::Keymap::default(),
     ));
 }
 
-fn register_manifests(manifests: Query<&FeatureManifest>, mut commands: Commands) {
+fn register(manifests: Query<&FeatureManifest>, mut commands: Commands) {
     for manifest in &manifests {
         for definition in manifest
             .commands
@@ -616,7 +612,7 @@ fn register_manifests(manifests: Query<&FeatureManifest>, mut commands: Commands
     }
 }
 
-fn validate_definitions(
+fn validate(
     added: Query<(Entity, &CommandDefinition), Added<CommandDefinition>>,
     definitions: Query<(Entity, &CommandDefinition)>,
     mut commands: Commands,
@@ -658,7 +654,7 @@ impl CommandDispatch {
     }
 }
 
-fn dispatch_invocations(
+fn dispatch(
     mut invocations: MessageReader<CommandInvocation>,
     definitions: Query<(Entity, &CommandDefinition, Option<&CommandMessage>)>,
     mut commands: Commands,

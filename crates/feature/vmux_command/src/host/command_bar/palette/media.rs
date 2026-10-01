@@ -66,20 +66,20 @@ impl Plugin for PaletteMediaPlugin {
             CommandPaletteMediaActivateRequest,
             CommandPaletteMediaDismissRequest,
         )>::default())
-            .add_systems(Startup, bind_commands.in_set(BindCommands))
-            .add_observer(update_draft)
+            .add_systems(Startup, bind.in_set(BindCommands))
+            .add_observer(update)
             .add_observer(remove_attachment)
             .add_observer(receive_attachments)
             .add_observer(receive_entries)
-            .add_observer(move_from)
-            .add_observer(activate_from)
-            .add_observer(dismiss_from)
-            .add_observer(navigate)
+            .add_observer(move_selection)
+            .add_observer(choose)
+            .add_observer(close)
+            .add_observer(move_cursor)
             .add_observer(highlight)
             .add_observer(activate)
             .add_observer(dismiss)
             .add_systems(PreUpdate, attach)
-            .add_systems(Update, dispatch_request);
+            .add_systems(Update, request);
     }
 }
 
@@ -132,7 +132,7 @@ struct CommandBarMediaChooseBinding;
 #[vmux_command::command]
 struct CommandBarMediaDismissBinding;
 
-fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+fn bind(registry: CommandRegistry, mut commands: Commands) {
     registry.bind::<CommandBarMediaNextBinding>(&mut commands);
     registry.bind::<CommandBarMediaPreviousBinding>(&mut commands);
     registry.bind::<CommandBarMediaChooseBinding>(&mut commands);
@@ -154,7 +154,7 @@ fn attach(
     }
 }
 
-fn update_draft(
+fn update(
     trigger: On<UiInput<CommandPaletteDraftRequest>>,
     mut palettes: Query<(&mut PaletteMedia, &mut PaletteSnapshot)>,
     mut commands: Commands,
@@ -189,7 +189,7 @@ fn update_draft(
     media.update_query(target, query, &mut snapshot.0, &mut commands);
 }
 
-fn move_from(
+fn move_selection(
     trigger: On<CommandDispatch>,
     next: Query<(), With<CommandBarMediaNextBinding>>,
     previous: Query<(), With<CommandBarMediaPreviousBinding>>,
@@ -217,7 +217,7 @@ fn move_from(
     });
 }
 
-fn activate_from(
+fn choose(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<CommandBarMediaChooseBinding>>,
     palettes: Query<&PaletteSnapshot>,
@@ -239,7 +239,7 @@ fn activate_from(
     });
 }
 
-fn dismiss_from(
+fn close(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<CommandBarMediaDismissBinding>>,
     palettes: Query<&PaletteSnapshot>,
@@ -260,7 +260,7 @@ fn dismiss_from(
     });
 }
 
-fn navigate(
+fn move_cursor(
     trigger: On<UiInput<CommandPaletteMediaMoveRequest>>,
     mut palettes: Query<(&PaletteMedia, &mut PaletteSnapshot)>,
 ) {
@@ -446,7 +446,7 @@ fn receive_entries(
 #[derive(Component)]
 struct MediaRequestDelay(RequestDelay);
 
-fn dispatch_request(
+fn request(
     delays: Query<(Entity, &MediaRequestDelay)>,
     media: Query<&PaletteMedia>,
     mut commands: Commands,
@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn navigation_and_dismiss_update_host_state() {
         let mut app = App::new();
-        app.add_observer(navigate).add_observer(dismiss);
+        app.add_observer(move_cursor).add_observer(dismiss);
         let open_id = OpenId(7);
         let mut media = PaletteMedia::default();
         assert_eq!(media.open.accept(open_id), Some(true));

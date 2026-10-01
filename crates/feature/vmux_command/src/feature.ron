@@ -24,7 +24,7 @@
     ],
     commands: [
             (
-                id: "browser_open_command_bar",
+                id: "command_bar_open",
                 label: "Command Bar",
                 group: "Browser > Bar",
                 accelerator: Some("super+k"),
@@ -35,7 +35,7 @@
                 mcp: Some((description: "Command Bar")),
             ),
             (
-                id: "browser_open_page_in_command_bar",
+                id: "command_bar_edit_page",
                 label: "Edit Page",
                 group: "Browser > Bar",
                 accelerator: Some("super+l"),
@@ -43,7 +43,7 @@
                 mcp: Some((description: "Edit Page")),
             ),
             (
-                id: "browser_open_path_bar",
+                id: "command_bar_open_path",
                 label: "Path Navigator",
                 group: "Browser > Bar",
                 accelerator: Some("super+/"),
@@ -51,7 +51,7 @@
                 mcp: Some((description: "Path Navigator")),
             ),
             (
-                id: "browser_open_commands",
+                id: "command_bar_open_commands",
                 label: "Commands",
                 group: "Browser > Bar",
                 shortcuts: [(shortcut: Direct(">"), when: None)],

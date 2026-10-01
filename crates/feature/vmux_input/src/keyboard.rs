@@ -562,9 +562,9 @@ mod tests {
         let mut map = Keymap::defaults();
         map.register([
             "select_pane_left",
-            "browser_open_command_bar",
-            "browser_open_page_in_command_bar",
-            "browser_open_path_bar",
+            "command_bar_open",
+            "command_bar_edit_page",
+            "command_bar_open_path",
         ]);
         map.extend(
             Source::Default,
@@ -579,17 +579,17 @@ mod tests {
                 },
                 Binding {
                     shortcut: Shortcut::Direct(super_combo(KeyCode::KeyK)),
-                    command: "browser_open_command_bar".to_string(),
+                    command: "command_bar_open".to_string(),
                     when: None,
                 },
                 Binding {
                     shortcut: Shortcut::Direct(super_combo(KeyCode::KeyL)),
-                    command: "browser_open_page_in_command_bar".to_string(),
+                    command: "command_bar_edit_page".to_string(),
                     when: None,
                 },
                 Binding {
                     shortcut: Shortcut::Direct(super_combo(KeyCode::Slash)),
-                    command: "browser_open_path_bar".to_string(),
+                    command: "command_bar_open_path".to_string(),
                     when: None,
                 },
             ],
@@ -712,12 +712,9 @@ mod tests {
         let mut pending = None;
         let now = Instant::now();
         let shortcuts = [
-            (super_combo(KeyCode::KeyK), "browser_open_command_bar"),
-            (
-                super_combo(KeyCode::KeyL),
-                "browser_open_page_in_command_bar",
-            ),
-            (super_combo(KeyCode::Slash), "browser_open_path_bar"),
+            (super_combo(KeyCode::KeyK), "command_bar_open"),
+            (super_combo(KeyCode::KeyL), "command_bar_edit_page"),
+            (super_combo(KeyCode::Slash), "command_bar_open_path"),
         ];
 
         for (pressed, expected) in shortcuts {

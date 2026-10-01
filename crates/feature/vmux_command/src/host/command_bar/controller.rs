@@ -45,7 +45,7 @@ impl bevy::app::Plugin for Plugin {
                     .chain()
                     .in_set(ReadCommandRequests),
             )
-            .add_systems(Startup, bind_commands.in_set(crate::BindCommands))
+            .add_systems(Startup, bind.in_set(crate::BindCommands))
             .add_message::<LauncherDismissRequest>()
             .add_message::<vmux_ecs::ContributedCommandChosen>()
             .add_message::<RestoreKeyboardToStack>()
@@ -69,19 +69,19 @@ impl bevy::app::Plugin for Plugin {
                     .after(vmux_ecs::workspace::TabCommandSet)
                     .after(vmux_ecs::workspace::StackCommandSet),
             )
-            .add_systems(Update, retry_open.after(open))
+            .add_systems(Update, retry.after(open))
             .add_systems(
                 Update,
-                dismiss_deferred
+                dismiss_requested
                     .after(ReadCommandRequests)
                     .before(vmux_ecs::workspace::ComputeFocusSet),
             )
             .add_systems(PostUpdate, reveal.chain().after(LayoutSystems::Layout))
-            .add_systems(Update, keep_awake.after(ReadCommandRequests));
+            .add_systems(Update, wake.after(ReadCommandRequests));
     }
 }
 
-fn keep_awake(
+fn wake(
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     pending: Query<&PendingCommandBarReveal>,
 ) {
@@ -100,7 +100,7 @@ impl TryFrom<&CommandInvocation> for CommandBarToggleRequest {
     type Error = ();
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-        (invocation.id == "browser_open_command_bar")
+        (invocation.id == "command_bar_open")
             .then_some(Self)
             .ok_or(())
     }
@@ -113,7 +113,7 @@ impl TryFrom<&CommandInvocation> for CommandBarEditPageRequest {
     type Error = ();
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-        (invocation.id == "browser_open_page_in_command_bar")
+        (invocation.id == "command_bar_edit_page")
             .then_some(Self)
             .ok_or(())
     }
@@ -126,7 +126,7 @@ impl TryFrom<&CommandInvocation> for CommandBarPathRequest {
     type Error = ();
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-        (invocation.id == "browser_open_path_bar")
+        (invocation.id == "command_bar_open_path")
             .then_some(Self)
             .ok_or(())
     }
@@ -139,7 +139,7 @@ impl TryFrom<&CommandInvocation> for CommandBarCommandsRequest {
     type Error = ();
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-        (invocation.id == "browser_open_commands")
+        (invocation.id == "command_bar_open_commands")
             .then_some(Self)
             .ok_or(())
     }
@@ -175,7 +175,7 @@ pub struct WriteCommandBarRequests;
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ApplyCommandBarRequests;
 
-fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
+fn bind(registry: CommandRegistry, mut commands: Commands) {
     registry.message::<CommandBarToggleRequest>(&mut commands);
     registry.message::<CommandBarEditPageRequest>(&mut commands);
     registry.message::<CommandBarPathRequest>(&mut commands);
@@ -685,7 +685,7 @@ fn close(
     }
 }
 
-fn dismiss_deferred(
+fn dismiss_requested(
     mut requests: MessageReader<LauncherDismissRequest>,
     mut modal_q: Query<
         (
@@ -767,7 +767,7 @@ fn reveal(
     }
 }
 
-fn retry_open(
+fn retry(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     mut query: Query<
@@ -844,25 +844,25 @@ mod tests {
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
             [
-                "browser_open_command_bar",
-                "browser_open_page_in_command_bar",
-                "browser_open_path_bar",
-                "browser_open_commands",
+                "command_bar_open",
+                "command_bar_edit_page",
+                "command_bar_open_path",
+                "command_bar_open_commands",
             ],
         );
         for tool in tools {
             let invocation = CommandInvocation::new(Entity::PLACEHOLDER, tool.name);
             match invocation.id.as_str() {
-                "browser_open_command_bar" => {
+                "command_bar_open" => {
                     assert!(CommandBarToggleRequest::try_from(&invocation).is_ok());
                 }
-                "browser_open_page_in_command_bar" => {
+                "command_bar_edit_page" => {
                     assert!(CommandBarEditPageRequest::try_from(&invocation).is_ok());
                 }
-                "browser_open_path_bar" => {
+                "command_bar_open_path" => {
                     assert!(CommandBarPathRequest::try_from(&invocation).is_ok());
                 }
-                "browser_open_commands" => {
+                "command_bar_open_commands" => {
                     assert!(CommandBarCommandsRequest::try_from(&invocation).is_ok());
                 }
                 _ => unreachable!(),
@@ -1267,7 +1267,7 @@ mod tests {
     fn the_generic_bar_commands_assert_no_picker() {
         for (id, request) in [
             (
-                "browser_open_command_bar",
+                "command_bar_open",
                 CommandBarOpenState::from_requests(
                     true,
                     false,
@@ -1278,7 +1278,7 @@ mod tests {
                 ),
             ),
             (
-                "browser_open_path_bar",
+                "command_bar_open_path",
                 CommandBarOpenState::from_requests(
                     false,
                     false,
@@ -1289,7 +1289,7 @@ mod tests {
                 ),
             ),
             (
-                "browser_open_commands",
+                "command_bar_open_commands",
                 CommandBarOpenState::from_requests(
                     false,
                     false,
@@ -1425,16 +1425,16 @@ mod tests {
 
     fn send(app: &mut App, id: &str) {
         match id {
-            "browser_open_command_bar" => {
+            "command_bar_open" => {
                 app.world_mut().write_message(CommandBarToggleRequest);
             }
-            "browser_open_page_in_command_bar" => {
+            "command_bar_edit_page" => {
                 app.world_mut().write_message(CommandBarEditPageRequest);
             }
-            "browser_open_path_bar" => {
+            "command_bar_open_path" => {
                 app.world_mut().write_message(CommandBarPathRequest);
             }
-            "browser_open_commands" => {
+            "command_bar_open_commands" => {
                 app.world_mut().write_message(CommandBarCommandsRequest);
             }
             _ => {
@@ -1450,7 +1450,7 @@ mod tests {
         let mut app = panel_app();
         let layout = app.world_mut().spawn(RendersLauncherPanel).id();
 
-        send(&mut app, "browser_open_command_bar");
+        send(&mut app, "command_bar_open");
 
         assert_eq!(emitted_to_page(&app), vec![layout]);
     }
@@ -1475,7 +1475,7 @@ mod tests {
             })
             .unwrap();
 
-        send(&mut app, "browser_open_command_bar");
+        send(&mut app, "command_bar_open");
 
         assert_eq!(emitted_to_page(&app), vec![layout]);
         assert_eq!(open_payload(&app).url, "");
@@ -1489,7 +1489,7 @@ mod tests {
             .spawn((RendersLauncherPanel, CommandBarPanelActive))
             .id();
 
-        send(&mut app, "browser_open_command_bar");
+        send(&mut app, "command_bar_open");
 
         assert_eq!(emitted_to_page(&app), vec![layout]);
         assert!(!open_payload(&app).open_id.is_open());
@@ -1498,7 +1498,7 @@ mod tests {
     #[test]
     fn a_surface_opening_under_the_launcher_closes_the_panel_too() {
         let mut app = panel_app();
-        app.add_systems(Update, dismiss_deferred);
+        app.add_systems(Update, dismiss_requested);
         let layout = app
             .world_mut()
             .spawn((RendersLauncherPanel, CommandBarPanelActive))
@@ -1521,7 +1521,7 @@ mod tests {
         let mut app = panel_app();
         app.world_mut().spawn(RendersLauncherPanel);
 
-        send(&mut app, "browser_open_page_in_command_bar");
+        send(&mut app, "command_bar_edit_page");
 
         assert_eq!(open_payload(&app).target, Some(OpenTarget::InPlace));
     }

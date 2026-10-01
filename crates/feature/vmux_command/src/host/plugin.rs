@@ -32,11 +32,10 @@ impl Plugin for CommandPlugin {
             .add_systems(Update, invoke.after(AgentRequestRouteSet))
             .add_systems(
                 Update,
-                log_invocations
-                    .after(WriteCommandRequests)
+                log.after(WriteCommandRequests)
                     .before(DispatchCommandInvocations),
             )
-            .add_systems(Last, keep_frames_coming);
+            .add_systems(Last, wake);
     }
 }
 
@@ -100,7 +99,7 @@ fn invoke(
 
 const COMMAND_SETTLE_WINDOW: std::time::Duration = std::time::Duration::from_millis(150);
 
-fn keep_frames_coming(
+fn wake(
     mut settle: Local<Option<std::time::Instant>>,
     mut reader: MessageReader<CommandInvocation>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -121,10 +120,7 @@ fn keep_frames_coming(
     let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
 }
 
-fn log_invocations(
-    mut reader: MessageReader<CommandInvocation>,
-    profiles: Query<(&Profile, Has<User>)>,
-) {
+fn log(mut reader: MessageReader<CommandInvocation>, profiles: Query<(&Profile, Has<User>)>) {
     for invocation in reader.read() {
         let who = profiles
             .get(invocation.caller)

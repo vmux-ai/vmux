@@ -19,26 +19,26 @@ pub(super) struct CompletionPlugin;
 
 impl Plugin for CompletionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_project_index)
+        app.add_systems(Startup, spawn)
             .add_plugins(UiEventPlugin::<(PathCompleteRequest,)>::default())
-            .add_observer(path_complete_request)
+            .add_observer(request)
             .add_systems(
                 Update,
                 (
-                    warm_project_index.after(WriteCommandBarSnapshots),
-                    answer_settled_project_index.after(warm_project_index),
-                    start_path_completions.after(answer_settled_project_index),
-                    answer_path_completions.after(start_path_completions),
+                    warm.after(WriteCommandBarSnapshots),
+                    answer_index.after(warm),
+                    start_paths.after(answer_index),
+                    answer_paths.after(start_paths),
                 ),
             );
     }
 }
 
-fn spawn_project_index(mut commands: Commands) {
+fn spawn(mut commands: Commands) {
     commands.spawn((Name::new("Project file index"), ProjectIndex::default()));
 }
 
-fn path_complete_request(
+fn request(
     trigger: On<UiInput<PathCompleteRequest>>,
     workspace: Single<&CommandBarWorkspaceSnapshot>,
     projects: Single<&CommandBarProjectRoots>,
@@ -106,7 +106,7 @@ fn path_complete_request(
     ));
 }
 
-fn warm_project_index(
+fn warm(
     workspace: Single<Ref<CommandBarWorkspaceSnapshot>>,
     projects: Single<Ref<CommandBarProjectRoots>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -126,7 +126,7 @@ fn warm_project_index(
     index.sync(&roots, proxy.as_deref());
 }
 
-fn answer_settled_project_index(
+fn answer_index(
     workspace: Single<&CommandBarWorkspaceSnapshot>,
     projects: Single<&CommandBarProjectRoots>,
     work: Single<&CommandBarWorkSnapshot>,
@@ -192,7 +192,7 @@ fn answer_settled_project_index(
     }
 }
 
-fn start_path_completions(
+fn start_paths(
     requests: Query<(Entity, &PathCompletionRequest), Changed<PathCompletionRequest>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -214,7 +214,7 @@ fn start_path_completions(
     }
 }
 
-fn answer_path_completions(
+fn answer_paths(
     browsers: NonSend<Browsers>,
     mut paths: Query<(Entity, &mut PathCompletionOperation)>,
     mut commands: Commands,

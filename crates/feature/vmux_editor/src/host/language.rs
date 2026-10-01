@@ -587,7 +587,7 @@ fn open_command_palette(
 ) {
     command_invocations.write(vmux_command::CommandInvocation::new(
         trigger.event().webview,
-        "browser_open_command_bar",
+        "command_bar_open",
     ));
 }
 
