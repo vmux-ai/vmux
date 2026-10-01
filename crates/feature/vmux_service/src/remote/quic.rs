@@ -17,6 +17,7 @@ use vmux_transport::quic::{
     ClientCredential, ClientSetup, CloseCode, MessageType, SessionAccepted,
 };
 
+use super::server::RemoteState;
 use crate::RemotePaths;
 
 const AUTHORIZATION_POLL: Duration = Duration::from_secs(1);
@@ -99,46 +100,48 @@ impl From<FrameError> for Rejection {
     }
 }
 
-async fn admit(
-    setup: ClientSetup,
-    state: &super::server::RemoteState,
-    remote_enabled: bool,
-) -> Result<(SessionAccepted, ActiveAuthorization), Rejection> {
-    if !remote_enabled {
-        return Err(Rejection::RemoteDisabled);
-    }
-    let credential = setup.credential.clone();
-    let outcome = state
-        .authorizations
-        .authenticate(setup.client_id.clone(), credential.clone())
-        .await
-        .map_err(|error| {
-            tracing::warn!(%error, "remote quic: authorization store failed");
-            Rejection::Unauthorized
-        })?
-        .ok_or(Rejection::Unauthorized)?;
-    match outcome {
-        AuthorizationOutcome::Accepted => {
-            let ClientCredential::Device(device_token) = credential else {
-                return Err(Rejection::Unauthorized);
-            };
-            Ok((
-                SessionAccepted::default(),
+impl RemoteState {
+    async fn admit(
+        &self,
+        setup: ClientSetup,
+        remote_enabled: bool,
+    ) -> Result<(SessionAccepted, ActiveAuthorization), Rejection> {
+        if !remote_enabled {
+            return Err(Rejection::RemoteDisabled);
+        }
+        let credential = setup.credential.clone();
+        let outcome = self
+            .authorizations
+            .authenticate(setup.client_id.clone(), credential.clone())
+            .await
+            .map_err(|error| {
+                tracing::warn!(%error, "remote quic: authorization store failed");
+                Rejection::Unauthorized
+            })?
+            .ok_or(Rejection::Unauthorized)?;
+        match outcome {
+            AuthorizationOutcome::Accepted => {
+                let ClientCredential::Device(device_token) = credential else {
+                    return Err(Rejection::Unauthorized);
+                };
+                Ok((
+                    SessionAccepted::default(),
+                    ActiveAuthorization {
+                        client_id: setup.client_id,
+                        device_token,
+                    },
+                ))
+            }
+            AuthorizationOutcome::Paired { device_token } => Ok((
+                SessionAccepted {
+                    device_token: Some(device_token.clone()),
+                },
                 ActiveAuthorization {
                     client_id: setup.client_id,
                     device_token,
                 },
-            ))
+            )),
         }
-        AuthorizationOutcome::Paired { device_token } => Ok((
-            SessionAccepted {
-                device_token: Some(device_token.clone()),
-            },
-            ActiveAuthorization {
-                client_id: setup.client_id,
-                device_token,
-            },
-        )),
     }
 }
 
@@ -148,7 +151,7 @@ struct ActiveAuthorization {
 }
 
 impl ActiveAuthorization {
-    async fn is_current(&self, state: &super::server::RemoteState) -> bool {
+    async fn is_current(&self, state: &RemoteState) -> bool {
         match state
             .authorizations
             .authorizes(self.client_id.clone(), self.device_token.clone())
@@ -167,265 +170,303 @@ const SETUP: FrameStream = FrameStream::new(MAX_HELLO_BYTES);
 
 const CONTROL: FrameStream = FrameStream::new(MAX_REQUEST_BYTES);
 
-pub async fn read_setup(stream: &mut quinn::RecvStream) -> Result<ClientSetup, Rejection> {
-    match SETUP.accept(stream).await {
-        Ok(frame) => frame
-            .read_json::<ClientSetup>(MessageType::CLIENT_SETUP)
-            .map_err(Rejection::from),
-        Err(error) => Err(Rejection::from(error)),
-    }
+struct RemoteConnection {
+    connection: quinn::Connection,
+    state: RemoteState,
+    liveness: watch::Receiver<bool>,
 }
 
-async fn serve(
-    connection: quinn::Connection,
-    state: super::server::RemoteState,
-    mut liveness: watch::Receiver<bool>,
-) {
-    let Ok((mut send, mut recv)) = connection.accept_bi().await else {
-        return;
-    };
-    let remote_enabled = *liveness.borrow();
-    let admitted = match read_setup(&mut recv).await {
-        Ok(setup) => admit(setup, &state, remote_enabled).await,
-        Err(rejection) => Err(rejection),
-    };
+impl RemoteConnection {
+    fn new(
+        connection: quinn::Connection,
+        state: RemoteState,
+        liveness: watch::Receiver<bool>,
+    ) -> Self {
+        Self {
+            connection,
+            state,
+            liveness,
+        }
+    }
 
-    let (accepted, authorization) = match admitted {
-        Ok(accepted) => accepted,
-        Err(rejection) => {
-            tracing::info!(?rejection, "remote quic: connection refused");
-            connection.close(rejection.close_code().as_u32().into(), b"refused");
+    async fn serve(mut self) {
+        let Ok((mut send, mut recv)) = self.connection.accept_bi().await else {
+            return;
+        };
+        let remote_enabled = *self.liveness.borrow();
+        let admitted = match Self::read_setup(&mut recv).await {
+            Ok(setup) => self.state.admit(setup, remote_enabled).await,
+            Err(rejection) => Err(rejection),
+        };
+
+        let (accepted, authorization) = match admitted {
+            Ok(accepted) => accepted,
+            Err(rejection) => {
+                tracing::info!(?rejection, "remote quic: connection refused");
+                self.connection
+                    .close(rejection.close_code().as_u32().into(), b"refused");
+                return;
+            }
+        };
+
+        let Ok(frame) = Frame::json(MessageType::SESSION_ACCEPTED, &accepted) else {
+            self.connection
+                .close(CloseCode::ProtocolError.as_u32().into(), b"setup");
+            return;
+        };
+        if SETUP.open(&mut send, &frame).await.is_err() || send.finish().is_err() {
             return;
         }
-    };
+        let mut authorization_poll = tokio::time::interval(AUTHORIZATION_POLL);
+        authorization_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        authorization_poll.tick().await;
 
-    let Ok(frame) = Frame::json(MessageType::SESSION_ACCEPTED, &accepted) else {
-        connection.close(CloseCode::ProtocolError.as_u32().into(), b"setup");
-        return;
-    };
-    if SETUP.open(&mut send, &frame).await.is_err() || send.finish().is_err() {
-        return;
-    }
-    let mut authorization_poll = tokio::time::interval(AUTHORIZATION_POLL);
-    authorization_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    authorization_poll.tick().await;
-
-    loop {
-        tokio::select! {
-            changed = liveness.changed() => {
-                if changed.is_err() || !*liveness.borrow() {
-                    connection.close(CloseCode::RemoteDisabled.as_u32().into(), b"remote off");
-                    return;
-                }
-            }
-            _ = authorization_poll.tick() => {
-                if !authorization.is_current(&state).await {
-                    connection.close(CloseCode::Unauthorized.as_u32().into(), b"revoked");
-                    return;
-                }
-            }
-            accepted = connection.accept_bi() => {
-                match accepted {
-                    Ok((send, recv)) => {
-                        tokio::spawn(dispatch_control(state.clone(), send, recv));
+        loop {
+            tokio::select! {
+                changed = self.liveness.changed() => {
+                    if changed.is_err() || !*self.liveness.borrow() {
+                        self.connection.close(CloseCode::RemoteDisabled.as_u32().into(), b"remote off");
+                        return;
                     }
-                    Err(_) => return,
+                }
+                _ = authorization_poll.tick() => {
+                    if !authorization.is_current(&self.state).await {
+                        self.connection.close(CloseCode::Unauthorized.as_u32().into(), b"revoked");
+                        return;
+                    }
+                }
+                accepted = self.connection.accept_bi() => {
+                    match accepted {
+                        Ok((send, recv)) => {
+                            tokio::spawn(ControlStream::new(send, recv).dispatch(self.state.clone()));
+                        }
+                        Err(_) => return,
+                    }
                 }
             }
+        }
+    }
+
+    async fn read_setup(stream: &mut quinn::RecvStream) -> Result<ClientSetup, Rejection> {
+        match SETUP.accept(stream).await {
+            Ok(frame) => frame
+                .read_json::<ClientSetup>(MessageType::CLIENT_SETUP)
+                .map_err(Rejection::from),
+            Err(error) => Err(Rejection::from(error)),
         }
     }
 }
 
 const MAX_REQUEST_BYTES: usize = (RECEIVE_WINDOW / 8) as usize;
 
-async fn dispatch_control(
-    state: super::server::RemoteState,
-    mut send: quinn::SendStream,
-    mut recv: quinn::RecvStream,
-) {
-    let frame = match CONTROL.accept(&mut recv).await {
-        Ok(frame) => frame,
-        Err(error) => {
-            refuse(&mut send, &mut recv, Rejection::from(error));
-            return;
-        }
-    };
-    match frame.message_type {
-        MessageType::CONTROL_REQUEST | MessageType::SESSION_EVENTS => {}
-        unserved => {
-            tracing::debug!(
-                ?unserved,
-                "remote quic: stream refused, unserved message type"
-            );
-            refuse(&mut send, &mut recv, Rejection::Malformed);
-            return;
-        }
-    }
-
-    let Ok(request) = rkyv::from_bytes::<SharedMessage, rkyv::rancor::Error>(&frame.body) else {
-        refuse(&mut send, &mut recv, Rejection::Malformed);
-        return;
-    };
-
-    if frame.message_type == MessageType::SESSION_EVENTS {
-        stream_session_events(&state, send, request).await;
-        return;
-    }
-
-    let response = dispatch::dispatch(&state, request).await;
-    let Ok(encoded) = rkyv::to_bytes::<rkyv::rancor::Error>(&response) else {
-        refuse(&mut send, &mut recv, Rejection::Malformed);
-        return;
-    };
-    let frame = Frame::new(MessageType::CONTROL_RESPONSE, encoded.to_vec());
-    if CONTROL.open(&mut send, &frame).await.is_ok() {
-        let _ = send.finish();
-    }
+struct ControlStream {
+    send: quinn::SendStream,
+    recv: quinn::RecvStream,
 }
 
-fn refuse(send: &mut quinn::SendStream, recv: &mut quinn::RecvStream, rejection: Rejection) {
-    let code = quinn::VarInt::from(rejection.close_code().as_u32());
-    let _ = send.reset(code);
-    let _ = recv.stop(code);
-}
-
-async fn stream_session_events(
-    state: &super::server::RemoteState,
-    mut send: quinn::SendStream,
-    request: SharedMessage,
-) {
-    let SharedMessage::AgentAttach { sid } = request else {
-        return;
-    };
-    let Some(mut events) = subscribe(state, &sid).await else {
-        let _ = send.finish();
-        return;
-    };
-    let mut opened = false;
-
-    if let Some(snapshot) = session_snapshot(state, &sid).await
-        && write_event(&mut send, &snapshot, &mut opened)
-            .await
-            .is_err()
-    {
-        return;
+impl ControlStream {
+    fn new(send: quinn::SendStream, recv: quinn::RecvStream) -> Self {
+        Self { send, recv }
     }
 
-    loop {
-        match events.recv().await {
-            Ok(message) => {
-                let ServiceMessage::Shared(event) = message else {
-                    continue;
-                };
-                let event = match resolve(state, &sid, event).await {
-                    Some(event) => event,
-                    None => continue,
-                };
-                if write_event(&mut send, &event, &mut opened).await.is_err() {
-                    return;
-                }
+    async fn dispatch(mut self, state: RemoteState) {
+        let frame = match CONTROL.accept(&mut self.recv).await {
+            Ok(frame) => frame,
+            Err(error) => {
+                self.refuse(Rejection::from(error));
+                return;
             }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                let Some(snapshot) = session_snapshot(state, &sid).await else {
-                    return;
-                };
-                if write_event(&mut send, &snapshot, &mut opened)
-                    .await
-                    .is_err()
-                {
-                    return;
-                }
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                let _ = send.finish();
+        };
+        match frame.message_type {
+            MessageType::CONTROL_REQUEST | MessageType::SESSION_EVENTS => {}
+            unserved => {
+                tracing::debug!(
+                    ?unserved,
+                    "remote quic: stream refused, unserved message type"
+                );
+                self.refuse(Rejection::Malformed);
                 return;
             }
         }
-    }
-}
 
-async fn resolve(
-    state: &super::server::RemoteState,
-    sid: &str,
-    event: vmux_api::protocol::SharedEvent,
-) -> Option<vmux_api::protocol::SharedEvent> {
-    use vmux_api::protocol::SharedEvent as Shared;
-    match event {
-        Shared::AcpAgentInfo { .. } | Shared::AcpWorkspaceChanged { .. } => {
-            let session = state.current_session(sid).await?;
-            Some(Shared::Session { session })
+        let Ok(request) = rkyv::from_bytes::<SharedMessage, rkyv::rancor::Error>(&frame.body)
+        else {
+            self.refuse(Rejection::Malformed);
+            return;
+        };
+
+        if frame.message_type == MessageType::SESSION_EVENTS {
+            let Some(events) = SessionEvents::new(state, request) else {
+                return;
+            };
+            events.stream(self.send).await;
+            return;
         }
-        other => Some(other),
+
+        let response = dispatch::dispatch(&state, request).await;
+        let Ok(encoded) = rkyv::to_bytes::<rkyv::rancor::Error>(&response) else {
+            self.refuse(Rejection::Malformed);
+            return;
+        };
+        let frame = Frame::new(MessageType::CONTROL_RESPONSE, encoded.to_vec());
+        if CONTROL.open(&mut self.send, &frame).await.is_ok() {
+            let _ = self.send.finish();
+        }
+    }
+
+    fn refuse(&mut self, rejection: Rejection) {
+        let code = quinn::VarInt::from(rejection.close_code().as_u32());
+        let _ = self.send.reset(code);
+        let _ = self.recv.stop(code);
     }
 }
 
-async fn write_event(
-    send: &mut quinn::SendStream,
-    event: &vmux_api::protocol::SharedEvent,
-    opened: &mut bool,
-) -> Result<(), ()> {
-    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(event).map_err(|_| ())?;
-    let frame = Frame::new(MessageType::SESSION_EVENT, bytes.to_vec());
-    let written = if *opened {
-        CONTROL.send(send, &frame).await
-    } else {
-        *opened = true;
-        CONTROL.open(send, &frame).await
-    };
-    written.map_err(|_| ())
+struct SessionEvents {
+    state: RemoteState,
+    sid: String,
 }
 
-async fn subscribe(
-    state: &super::server::RemoteState,
-    sid: &str,
-) -> Option<tokio::sync::broadcast::Receiver<ServiceMessage>> {
-    state.acp.subscribe(sid.to_string()).await
-}
-
-async fn session_snapshot(
-    state: &super::server::RemoteState,
-    sid: &str,
-) -> Option<vmux_api::protocol::SharedEvent> {
-    let snapshot = state.acp.snapshot(sid.to_string()).await?;
-    match snapshot {
-        ServiceMessage::Shared(event) => Some(event),
-        _ => None,
+impl SessionEvents {
+    fn new(state: RemoteState, request: SharedMessage) -> Option<Self> {
+        let SharedMessage::AgentAttach { sid } = request else {
+            return None;
+        };
+        Some(Self { state, sid })
     }
-}
 
-pub(crate) fn inner_endpoint(
-    socket: std::sync::Arc<vmux_transport::quic::tunnel::TunnelSocket>,
-    identity: &SelfSignedIdentity,
-) -> Result<quinn::Endpoint, String> {
-    let config = identity.server_config()?;
-    quinn::Endpoint::new_with_abstract_socket(
-        quinn::EndpointConfig::default(),
-        Some(config),
-        socket,
-        std::sync::Arc::new(quinn::TokioRuntime),
-    )
-    .map_err(|error| format!("tunnel endpoint failed: {error}"))
-}
+    async fn stream(self, send: quinn::SendStream) {
+        let Some(mut events) = self.state.acp.subscribe(self.sid.clone()).await else {
+            let mut writer = SessionEventWriter::new(send);
+            writer.finish();
+            return;
+        };
+        let mut writer = SessionEventWriter::new(send);
+        if let Some(snapshot) = self.snapshot().await
+            && writer.write(&snapshot).await.is_err()
+        {
+            return;
+        }
 
-pub(crate) async fn accept_loop(
-    endpoint: quinn::Endpoint,
-    state: super::server::RemoteState,
-    liveness: watch::Receiver<bool>,
-    control: quinn::Connection,
-) {
-    loop {
-        tokio::select! {
-            _ = control.closed() => return,
-            incoming = endpoint.accept() => {
-                let Some(incoming) = incoming else { return };
-                let state = state.clone();
-                let liveness = liveness.clone();
-                tokio::spawn(async move {
-                    match incoming.await {
-                        Ok(connection) => serve(connection, state, liveness).await,
-                        Err(error) => tracing::debug!(%error, "remote quic: handshake failed"),
+        loop {
+            match events.recv().await {
+                Ok(message) => {
+                    let ServiceMessage::Shared(event) = message else {
+                        continue;
+                    };
+                    let Some(event) = self.resolve(event).await else {
+                        continue;
+                    };
+                    if writer.write(&event).await.is_err() {
+                        return;
                     }
-                });
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    let Some(snapshot) = self.snapshot().await else {
+                        return;
+                    };
+                    if writer.write(&snapshot).await.is_err() {
+                        return;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    writer.finish();
+                    return;
+                }
+            }
+        }
+    }
+
+    async fn resolve(
+        &self,
+        event: vmux_api::protocol::SharedEvent,
+    ) -> Option<vmux_api::protocol::SharedEvent> {
+        use vmux_api::protocol::SharedEvent as Shared;
+        match event {
+            Shared::AcpAgentInfo { .. } | Shared::AcpWorkspaceChanged { .. } => {
+                let session = self.state.current_session(&self.sid).await?;
+                Some(Shared::Session { session })
+            }
+            other => Some(other),
+        }
+    }
+
+    async fn snapshot(&self) -> Option<vmux_api::protocol::SharedEvent> {
+        let snapshot = self.state.acp.snapshot(self.sid.clone()).await?;
+        match snapshot {
+            ServiceMessage::Shared(event) => Some(event),
+            _ => None,
+        }
+    }
+}
+
+struct SessionEventWriter {
+    send: quinn::SendStream,
+    opened: bool,
+}
+
+impl SessionEventWriter {
+    fn new(send: quinn::SendStream) -> Self {
+        Self {
+            send,
+            opened: false,
+        }
+    }
+
+    async fn write(&mut self, event: &vmux_api::protocol::SharedEvent) -> Result<(), ()> {
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(event).map_err(|_| ())?;
+        let frame = Frame::new(MessageType::SESSION_EVENT, bytes.to_vec());
+        let written = if self.opened {
+            CONTROL.send(&mut self.send, &frame).await
+        } else {
+            self.opened = true;
+            CONTROL.open(&mut self.send, &frame).await
+        };
+        written.map_err(|_| ())
+    }
+
+    fn finish(&mut self) {
+        let _ = self.send.finish();
+    }
+}
+
+pub(crate) struct InnerEndpoint(quinn::Endpoint);
+
+impl InnerEndpoint {
+    pub(crate) fn open(
+        socket: std::sync::Arc<vmux_transport::quic::tunnel::TunnelSocket>,
+        identity: &SelfSignedIdentity,
+    ) -> Result<Self, String> {
+        let config = identity.server_config()?;
+        let endpoint = quinn::Endpoint::new_with_abstract_socket(
+            quinn::EndpointConfig::default(),
+            Some(config),
+            socket,
+            std::sync::Arc::new(quinn::TokioRuntime),
+        )
+        .map_err(|error| format!("tunnel endpoint failed: {error}"))?;
+        Ok(Self(endpoint))
+    }
+
+    pub(crate) async fn accept(
+        &self,
+        state: RemoteState,
+        liveness: watch::Receiver<bool>,
+        control: quinn::Connection,
+    ) {
+        loop {
+            tokio::select! {
+                _ = control.closed() => return,
+                incoming = self.0.accept() => {
+                    let Some(incoming) = incoming else { return };
+                    let state = state.clone();
+                    let liveness = liveness.clone();
+                    tokio::spawn(async move {
+                        match incoming.await {
+                            Ok(connection) => RemoteConnection::new(connection, state, liveness).serve().await,
+                            Err(error) => tracing::debug!(%error, "remote quic: handshake failed"),
+                        }
+                    });
+                }
             }
         }
     }
@@ -433,7 +474,7 @@ pub(crate) async fn accept_loop(
 
 #[cfg(test)]
 fn spawn_with_identity(
-    state: super::server::RemoteState,
+    state: RemoteState,
     address: std::net::SocketAddr,
     identity: SelfSignedIdentity,
     liveness: watch::Receiver<bool>,
@@ -452,7 +493,11 @@ fn spawn_with_identity(
             let liveness = liveness.clone();
             tokio::spawn(async move {
                 match incoming.await {
-                    Ok(connection) => serve(connection, state, liveness).await,
+                    Ok(connection) => {
+                        RemoteConnection::new(connection, state, liveness)
+                            .serve()
+                            .await
+                    }
                     Err(error) => tracing::debug!(%error, "remote quic: handshake failed"),
                 }
             });

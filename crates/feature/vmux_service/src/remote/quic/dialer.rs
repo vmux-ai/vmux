@@ -63,7 +63,7 @@ impl Registration {
             .await
             .map_err(|error| format!("relay connect {} at {address}: {error}", relay.url()))?;
 
-        register(&control, &device_id, token).await?;
+        Self::register(&control, &device_id, token).await?;
         let registered = RegisteredDevice::claim(&device_id)
             .map_err(|error| format!("persist relay registration: {error}"))?;
         tracing::info!(device_id = %device_id.as_str(), relay = %relay.url(), "remote quic: registered with the relay");
@@ -91,12 +91,14 @@ impl Registration {
                 MIN_INNER_MTU + TUNNEL_OVERHEAD
             ));
         }
-        let inner = match super::inner_endpoint(socket, identity) {
+        let inner = match super::InnerEndpoint::open(socket, identity) {
             Ok(inner) => inner,
             Err(error) => return self.ended(error),
         };
 
-        super::accept_loop(inner, state.clone(), liveness.clone(), self.control.clone()).await;
+        inner
+            .accept(state.clone(), liveness.clone(), self.control.clone())
+            .await;
 
         let reason = format!(
             "control connection closed: {:?}",
@@ -110,6 +112,37 @@ impl Registration {
             held: self.since.elapsed(),
             reason: reason.into(),
         }
+    }
+
+    async fn register(
+        control: &quinn::Connection,
+        device_id: &DeviceId,
+        token: &str,
+    ) -> Result<(), String> {
+        let (mut send, mut recv) = control
+            .open_bi()
+            .await
+            .map_err(|error| format!("relay stream: {error}"))?;
+        let setup = RelaySetup {
+            device_id: device_id.clone(),
+            role: PeerRole::Desktop,
+            token: token.to_string(),
+        };
+        let frame = Frame::json(MessageType::RELAY_SETUP, &setup)
+            .map_err(|error| format!("encode setup: {error}"))?;
+        SETUP
+            .open(&mut send, &frame)
+            .await
+            .map_err(|error| format!("write setup: {error}"))?;
+        send.finish().map_err(|error| format!("finish: {error}"))?;
+
+        SETUP
+            .accept(&mut recv)
+            .await
+            .map_err(|error| format!("read acceptance: {error:?}"))?
+            .read_json::<Accepted>(MessageType::RELAY_ACCEPTED)
+            .map_err(|error| format!("decode acceptance: {error:?}"))?;
+        Ok(())
     }
 }
 
@@ -240,37 +273,6 @@ impl RelayDevice {
 }
 
 const SETUP: FrameStream = FrameStream::new(16 * 1024);
-
-async fn register(
-    control: &quinn::Connection,
-    device_id: &DeviceId,
-    token: &str,
-) -> Result<(), String> {
-    let (mut send, mut recv) = control
-        .open_bi()
-        .await
-        .map_err(|error| format!("relay stream: {error}"))?;
-    let setup = RelaySetup {
-        device_id: device_id.clone(),
-        role: PeerRole::Desktop,
-        token: token.to_string(),
-    };
-    let frame = Frame::json(MessageType::RELAY_SETUP, &setup)
-        .map_err(|error| format!("encode setup: {error}"))?;
-    SETUP
-        .open(&mut send, &frame)
-        .await
-        .map_err(|error| format!("write setup: {error}"))?;
-    send.finish().map_err(|error| format!("finish: {error}"))?;
-
-    SETUP
-        .accept(&mut recv)
-        .await
-        .map_err(|error| format!("read acceptance: {error:?}"))?
-        .read_json::<Accepted>(MessageType::RELAY_ACCEPTED)
-        .map_err(|error| format!("decode acceptance: {error:?}"))?;
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {

@@ -2,7 +2,7 @@ use vmux_api::protocol::{
     AgentListAgents, AgentListModels, AgentListTeam, AgentNewChat, AgentRequest, AgentSelectModel,
     AgentSetEffort, SharedFailure, SharedMessage, SharedResponse,
 };
-use vmux_api::room::{ClientOpId, RemoteSession};
+use vmux_api::room::RemoteSession;
 
 use super::super::server::{
     MAX_PROMPT_BYTES, RemoteAttachments, RemoteClientOpId, RemoteMediaQuery, RemoteState,
@@ -11,9 +11,9 @@ use vmux_agent::acp::AcpInput;
 
 pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> SharedResponse {
     match request {
-        SharedMessage::ListSessions => SharedResponse::Sessions(sessions(state).await),
+        SharedMessage::ListSessions => SharedResponse::Sessions(state.sessions().await),
 
-        SharedMessage::AgentAttach { sid } => attach(state, &sid).await,
+        SharedMessage::AgentAttach { sid } => state.attach(&sid).await,
 
         SharedMessage::AgentInput {
             sid,
@@ -21,17 +21,25 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
             context,
             attachments,
             preferred_mode,
-        } => prompt(state, &sid, text, context, attachments, preferred_mode).await,
+        } => {
+            state
+                .prompt(&sid, text, context, attachments, preferred_mode)
+                .await
+        }
 
-        SharedMessage::AgentCancel { sid } => push_input(state, &sid, AcpInput::Cancel).await,
+        SharedMessage::AgentCancel { sid } => state.push_input(&sid, AcpInput::Cancel).await,
 
         SharedMessage::AgentApprove {
             sid,
             call_id,
             decision,
-        } => push_input(state, &sid, AcpInput::Approve { call_id, decision }).await,
+        } => {
+            state
+                .push_input(&sid, AcpInput::Approve { call_id, decision })
+                .await
+        }
 
-        SharedMessage::AgentListMedia { sid, query } => media(state, &sid, query).await,
+        SharedMessage::AgentListMedia { sid, query } => state.media(&sid, query).await,
 
         SharedMessage::AgentNewChat {
             client_op_id,
@@ -41,136 +49,122 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
             if !RemoteClientOpId(&client_op_id).valid() {
                 return SharedResponse::Failed(SharedFailure::Invalid);
             }
-            if !claim_once(state, &client_op_id).await {
+            if !state.client_ops.claim(client_op_id.clone()).await {
                 return SharedResponse::AlreadyApplied;
             }
-            let response = broker(
-                state,
-                AgentNewChat {
+            let response = state
+                .broker(AgentNewChat {
                     client_op_id: client_op_id.clone(),
                     prompt,
                     agent_url,
-                },
-            )
-            .await;
+                })
+                .await;
             if matches!(response, SharedResponse::Failed(_)) {
-                release(state, &client_op_id).await;
+                state.client_ops.release(client_op_id).await;
             }
             response
         }
 
-        SharedMessage::AgentListAgents => broker(state, AgentListAgents).await,
+        SharedMessage::AgentListAgents => state.broker(AgentListAgents).await,
 
-        SharedMessage::AgentListTeam => broker(state, AgentListTeam).await,
+        SharedMessage::AgentListTeam => state.broker(AgentListTeam).await,
 
-        SharedMessage::AgentListModels { sid } => broker(state, AgentListModels { sid }).await,
+        SharedMessage::AgentListModels { sid } => state.broker(AgentListModels { sid }).await,
 
         SharedMessage::AgentSelectModel { sid, model_id } => {
-            broker(state, AgentSelectModel { sid, model_id }).await
+            state.broker(AgentSelectModel { sid, model_id }).await
         }
 
         SharedMessage::AgentSetEffort { sid, level } => {
-            broker(state, AgentSetEffort { sid, level }).await
+            state.broker(AgentSetEffort { sid, level }).await
         }
     }
 }
 
-async fn attach(state: &RemoteState, sid: &str) -> SharedResponse {
-    if session_exists(state, sid).await {
-        SharedResponse::Ok
-    } else {
+impl RemoteState {
+    async fn attach(&self, sid: &str) -> SharedResponse {
+        if self.acp.remote_session(sid.to_string()).await.is_some() {
+            return SharedResponse::Ok;
+        }
         SharedResponse::Failed(SharedFailure::NotFound)
     }
-}
 
-async fn media(state: &RemoteState, sid: &str, query: String) -> SharedResponse {
-    if !session_exists(state, sid).await {
-        return SharedResponse::Failed(SharedFailure::NotFound);
-    }
-    if query.len() > super::super::server::MAX_MEDIA_QUERY_BYTES {
-        return SharedResponse::Failed(SharedFailure::Invalid);
-    }
-    match tokio::task::spawn_blocking(move || RemoteMediaQuery(&query).entries()).await {
-        Ok(entries) => SharedResponse::Media(entries),
-        Err(_) => SharedResponse::Failed(SharedFailure::Internal),
-    }
-}
-
-async fn sessions(state: &RemoteState) -> Vec<RemoteSession> {
-    let mut sessions = state.acp.remote_sessions().await;
-    for session in &mut sessions {
-        if let Some(messages) = state.session_messages(&session.sid).await {
-            session.title =
-                vmux_core::room::ConversationTitle::from_messages(&messages, &session.name);
+    async fn media(&self, sid: &str, query: String) -> SharedResponse {
+        if self.acp.remote_session(sid.to_string()).await.is_none() {
+            return SharedResponse::Failed(SharedFailure::NotFound);
+        }
+        if query.len() > super::super::server::MAX_MEDIA_QUERY_BYTES {
+            return SharedResponse::Failed(SharedFailure::Invalid);
+        }
+        match tokio::task::spawn_blocking(move || RemoteMediaQuery(&query).entries()).await {
+            Ok(entries) => SharedResponse::Media(entries),
+            Err(_) => SharedResponse::Failed(SharedFailure::Internal),
         }
     }
-    sessions.sort_by_key(|session| std::cmp::Reverse(session.created_at_ms));
-    sessions
-}
 
-async fn session_exists(state: &RemoteState, sid: &str) -> bool {
-    state.acp.remote_session(sid.to_string()).await.is_some()
-}
-
-async fn push_input(state: &RemoteState, sid: &str, input: AcpInput) -> SharedResponse {
-    if state.acp.input(sid.to_string(), input).await {
-        return SharedResponse::Ok;
-    }
-    SharedResponse::Failed(SharedFailure::NotFound)
-}
-
-async fn prompt(
-    state: &RemoteState,
-    sid: &str,
-    text: String,
-    context: Option<String>,
-    attachments: Vec<vmux_api::protocol::AgentAttachment>,
-    preferred_mode: Option<String>,
-) -> SharedResponse {
-    if text.trim().is_empty() || text.len() > MAX_PROMPT_BYTES {
-        return SharedResponse::Failed(SharedFailure::Invalid);
-    }
-    let Some(attachments) = RemoteAttachments::validated(attachments) else {
-        return SharedResponse::Failed(SharedFailure::Invalid);
-    };
-    push_input(
-        state,
-        sid,
-        AcpInput::User {
-            text,
-            context,
-            attachments,
-            preferred_mode,
-        },
-    )
-    .await
-}
-
-async fn broker<T>(state: &RemoteState, payload: T) -> SharedResponse
-where
-    T: vmux_api::AgentRequestContract + serde::Serialize,
-{
-    use vmux_api::protocol::AgentCommandResult;
-    let Ok(request) = AgentRequest::encode(&payload) else {
-        return SharedResponse::Failed(SharedFailure::Invalid);
-    };
-    match state.broker_result(request).await {
-        Some(AgentCommandResult::Text(json)) => SharedResponse::BrokerJson(json),
-        Some(AgentCommandResult::Ok) => SharedResponse::Ok,
-        Some(AgentCommandResult::Error(message)) => {
-            tracing::warn!(%message, "remote quic: the GUI refused a brokered command");
-            SharedResponse::Failed(SharedFailure::Invalid)
+    async fn sessions(&self) -> Vec<RemoteSession> {
+        let mut sessions = self.acp.remote_sessions().await;
+        for session in &mut sessions {
+            if let Some(messages) = self.session_messages(&session.sid).await {
+                session.title =
+                    vmux_core::room::ConversationTitle::from_messages(&messages, &session.name);
+            }
         }
-        None => SharedResponse::Failed(SharedFailure::NoDesktop),
+        sessions.sort_by_key(|session| std::cmp::Reverse(session.created_at_ms));
+        sessions
     }
-}
 
-async fn claim_once(state: &RemoteState, client_op_id: &ClientOpId) -> bool {
-    state.client_ops.claim(client_op_id.clone()).await
-}
+    async fn push_input(&self, sid: &str, input: AcpInput) -> SharedResponse {
+        if self.acp.input(sid.to_string(), input).await {
+            return SharedResponse::Ok;
+        }
+        SharedResponse::Failed(SharedFailure::NotFound)
+    }
 
-async fn release(state: &RemoteState, client_op_id: &ClientOpId) {
-    state.client_ops.release(client_op_id.clone()).await;
+    async fn prompt(
+        &self,
+        sid: &str,
+        text: String,
+        context: Option<String>,
+        attachments: Vec<vmux_api::protocol::AgentAttachment>,
+        preferred_mode: Option<String>,
+    ) -> SharedResponse {
+        if text.trim().is_empty() || text.len() > MAX_PROMPT_BYTES {
+            return SharedResponse::Failed(SharedFailure::Invalid);
+        }
+        let Some(attachments) = RemoteAttachments::validated(attachments) else {
+            return SharedResponse::Failed(SharedFailure::Invalid);
+        };
+        self.push_input(
+            sid,
+            AcpInput::User {
+                text,
+                context,
+                attachments,
+                preferred_mode,
+            },
+        )
+        .await
+    }
+
+    async fn broker<T>(&self, payload: T) -> SharedResponse
+    where
+        T: vmux_api::AgentRequestContract + serde::Serialize,
+    {
+        use vmux_api::protocol::AgentCommandResult;
+        let Ok(request) = AgentRequest::encode(&payload) else {
+            return SharedResponse::Failed(SharedFailure::Invalid);
+        };
+        match self.broker_result(request).await {
+            Some(AgentCommandResult::Text(json)) => SharedResponse::BrokerJson(json),
+            Some(AgentCommandResult::Ok) => SharedResponse::Ok,
+            Some(AgentCommandResult::Error(message)) => {
+                tracing::warn!(%message, "remote quic: the GUI refused a brokered command");
+                SharedResponse::Failed(SharedFailure::Invalid)
+            }
+            None => SharedResponse::Failed(SharedFailure::NoDesktop),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -178,6 +172,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use tokio::sync::broadcast;
+    use vmux_api::room::ClientOpId;
 
     fn empty_state() -> RemoteState {
         let (agent_tx, _) = broadcast::channel(8);
