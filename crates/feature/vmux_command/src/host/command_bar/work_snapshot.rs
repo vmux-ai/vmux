@@ -1,4 +1,4 @@
-use crate::snapshot::{CommandBarProjection, CommandBarWorkDirectory};
+use crate::snapshot::{CommandBarWorkDirectory, CommandBarWorkSnapshot};
 use bevy::prelude::*;
 use vmux_api::command_bar::{CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
 use vmux_ecs::{LastVisitedAt, PageMetadata, Url, VisitCount};
@@ -11,11 +11,18 @@ pub struct Plugin;
 
 impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.add_systems(Startup, spawn).add_systems(
             Update,
             (directories, recent).in_set(crate::snapshot::WriteCommandBarSnapshots),
         );
     }
+}
+
+fn spawn(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Command bar work"),
+        CommandBarWorkSnapshot::default(),
+    ));
 }
 
 struct WorkDirectories(Vec<(String, i64)>);
@@ -95,7 +102,7 @@ impl RecentFile {
 fn directories(
     directories: Query<(&CommandBarWorkDirectory, Option<&LastActivatedAt>)>,
     mut last_cwds: Local<Vec<String>>,
-    mut state: Single<&mut CommandBarProjection>,
+    mut state: Single<&mut CommandBarWorkSnapshot>,
 ) {
     let mut current = WorkDirectories(Vec::new());
     for (directory, activated_at) in &directories {
@@ -128,8 +135,8 @@ fn directories(
             break;
         }
     }
-    if entries != state.work.work_dirs {
-        state.work.work_dirs = entries;
+    if entries != state.work_dirs {
+        state.work_dirs = entries;
     }
 }
 
@@ -137,7 +144,7 @@ fn recent(
     changed: Query<(), Or<(Added<Url>, Changed<LastVisitedAt>)>>,
     urls: Query<(&PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
     mut initialized: Local<bool>,
-    mut state: Single<&mut CommandBarProjection>,
+    mut state: Single<&mut CommandBarWorkSnapshot>,
 ) {
     if *initialized && changed.is_empty() {
         return;
@@ -175,11 +182,11 @@ fn recent(
     for (engine, _) in engine_recency {
         search_engines.push(engine);
     }
-    if recent_files != state.work.recent_files {
-        state.work.recent_files = recent_files;
+    if recent_files != state.recent_files {
+        state.recent_files = recent_files;
     }
-    if search_engines != state.work.search_engines {
-        state.work.search_engines = search_engines;
+    if search_engines != state.search_engines {
+        state.search_engines = search_engines;
     }
 }
 
@@ -191,7 +198,7 @@ mod tests {
 
     use super::*;
 
-    impl CommandBarProjection {
+    impl CommandBarWorkSnapshot {
         fn read(app: &mut App) -> Self {
             let world = app.world_mut();
             let mut query = world.query::<&Self>();
@@ -210,11 +217,10 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(Plugin);
-        app.world_mut().spawn(CommandBarProjection::default());
         app.world_mut().spawn(CommandBarWorkDirectory(cwd));
         app.update();
 
-        let snap = CommandBarProjection::read(&mut app).work;
+        let snap = CommandBarWorkSnapshot::read(&mut app);
         assert!(
             snap.work_dirs
                 .iter()
@@ -238,11 +244,10 @@ mod tests {
         std::fs::write(root.join("changed.rs"), "").unwrap();
         let mut app = App::new();
         app.add_plugins(Plugin);
-        app.world_mut().spawn(CommandBarProjection::default());
         app.world_mut()
             .spawn(CommandBarWorkDirectory(root.to_string_lossy().into_owned()));
         app.update();
-        let snap = CommandBarProjection::read(&mut app).work;
+        let snap = CommandBarWorkSnapshot::read(&mut app);
         assert!(
             snap.work_dirs
                 .iter()
@@ -262,11 +267,10 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(Plugin);
-        app.world_mut().spawn(CommandBarProjection::default());
         app.world_mut().spawn(CommandBarWorkDirectory(cwd.clone()));
         app.update();
 
-        let snap = CommandBarProjection::read(&mut app).work;
+        let snap = CommandBarWorkSnapshot::read(&mut app);
         assert!(
             snap.work_dirs
                 .iter()
@@ -280,7 +284,6 @@ mod tests {
     fn recent_files_only_file_urls_ranked() {
         let mut app = App::new();
         app.add_plugins(Plugin);
-        app.world_mut().spawn(CommandBarProjection::default());
         app.world_mut().spawn((
             Url,
             PageMetadata {
@@ -303,7 +306,7 @@ mod tests {
             CreatedAt(0),
         ));
         app.update();
-        let snap = CommandBarProjection::read(&mut app).work;
+        let snap = CommandBarWorkSnapshot::read(&mut app);
         assert_eq!(snap.recent_files.len(), 1);
         assert_eq!(snap.recent_files[0].title, "main.rs");
     }
@@ -312,7 +315,6 @@ mod tests {
     fn search_engines_are_ordered_by_most_recent_visit() {
         let mut app = App::new();
         app.add_plugins(Plugin);
-        app.world_mut().spawn(CommandBarProjection::default());
         for (url, visited) in [
             ("https://www.google.com/search?q=old", 1000),
             ("https://kagi.com/search?q=new", 3000),
@@ -331,8 +333,8 @@ mod tests {
         }
         app.update();
 
-        let snapshot = CommandBarProjection::read(&mut app);
-        let engines = &snapshot.work.search_engines;
+        let snapshot = CommandBarWorkSnapshot::read(&mut app);
+        let engines = &snapshot.search_engines;
         assert_eq!(engines.len(), SearchEngine::ALL.len());
         assert_eq!(
             &engines[..3],

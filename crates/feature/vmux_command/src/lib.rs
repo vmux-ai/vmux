@@ -21,19 +21,19 @@ pub use vmux_api::prompt_media;
 pub use vmux_macro::command;
 
 #[cfg(host)]
-pub mod host;
+mod host;
 #[cfg(host)]
 pub use host::{
     AgentAccess, AgentInvokeCommand, BindCommands, ClaimedUrl, ClaimedUrls, CommandBar,
     CommandBarEntry, CommandBarOpenProjection, CommandBarPagesSnapshot, CommandBarPicks,
-    CommandBarProjectRoots, CommandBarProjection, CommandBarProjector, CommandBarSpacesSnapshot,
-    CommandBarTerminalsSnapshot, CommandBarUiStateUpdates, CommandBarWorkDirectory,
-    CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot, CommandBinding, CommandDefinition,
-    CommandDispatch, CommandInvocation, CommandManifest, CommandMcp, CommandMessage, CommandPlugin,
-    CommandRegistry, CommandRuntimePlugin, CommandShortcut, CommandToolPlugin,
-    ContributedAgentModels, ContributedAgentModes, ContributedCommand, ContributedPage,
-    ContributedPages, DispatchCommandInvocations, JsonSchema, KeyPlugin, ReadCommandRequests,
-    RegisteredPage, ResolvedLocale, ShortcutDefinition, SpaceSummary, UiStatePlugin,
-    WriteCommandBarSnapshots, WriteCommandRequests, bundle, command_bar, definition, page_key,
-    payload, plugin, settings, shortcut, snapshot, surface,
+    CommandBarProjectRoots, CommandBarProjector, CommandBarSpacesSnapshot, CommandBarState,
+    CommandBarTerminalPage, CommandBarWorkDirectory, CommandBarWorkSnapshot,
+    CommandBarWorkspaceSnapshot, CommandBinding, CommandDefinition, CommandDispatch,
+    CommandInvocation, CommandManifest, CommandMcp, CommandMessage, CommandPlugin, CommandRegistry,
+    CommandRuntimePlugin, CommandShortcut, CommandToolPlugin, ContributedAgentModels,
+    ContributedAgentModes, ContributedCommand, ContributedPage, ContributedPages,
+    DispatchCommandInvocations, JsonSchema, KeyPlugin, ReadCommandRequests, RegisteredPage,
+    ResolvedLocale, ShortcutDefinition, SpaceSummary, UiStatePlugin, WriteCommandBarSnapshots,
+    WriteCommandRequests, bundle, command_bar, definition, page_key, payload, plugin, settings,
+    shortcut, snapshot, surface,
 };

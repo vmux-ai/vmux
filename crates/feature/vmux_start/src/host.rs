@@ -7,7 +7,8 @@ use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPromptContext, OpenId
 use vmux_api::space::ProjectBranch;
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    ClaimedUrl, CommandBarProjection, ContributedAgentModels, ContributedAgentModes,
+    ClaimedUrl, CommandBarPagesSnapshot, CommandBarProjectRoots, CommandBarSpacesSnapshot,
+    CommandBarTerminalPage, CommandBarWorkSnapshot, ContributedAgentModels, ContributedAgentModes,
     ContributedCommand, ContributedPage,
 };
 use vmux_command::{CommandBarOpenProjection, CommandBarProjector};
@@ -93,7 +94,11 @@ struct StartPromptContext<'w, 's> {
             Option<Ref<'static, TabWorktree>>,
         ),
     >,
-    command_bar: Single<'w, 's, Ref<'static, CommandBarProjection>>,
+    spaces: Single<'w, 's, Ref<'static, CommandBarSpacesSnapshot>>,
+    pages: Single<'w, 's, Ref<'static, CommandBarPagesSnapshot>>,
+    projects: Single<'w, 's, Ref<'static, CommandBarProjectRoots>>,
+    work: Single<'w, 's, Ref<'static, CommandBarWorkSnapshot>>,
+    terminal_page: Query<'w, 's, Ref<'static, CommandBarTerminalPage>>,
     warmed_branches_for: Local<'s, String>,
 }
 
@@ -119,7 +124,12 @@ impl StartPromptContext<'_, '_> {
     }
 
     fn changed(&self, tab: Option<Entity>) -> bool {
-        if self.command_bar.is_changed() {
+        if self.spaces.is_changed()
+            || self.pages.is_changed()
+            || self.projects.is_changed()
+            || self.work.is_changed()
+            || self.terminal_page.iter().any(|page| page.is_changed())
+        {
             return true;
         }
         let Some(tab) = tab else {
@@ -200,17 +210,23 @@ impl StartPromptContext<'_, '_> {
         locale: &Locale,
     ) -> CommandBarOpenEvent {
         let active_stack_count = tabs.stack_q.iter().count();
-        let space_name = self.command_bar.spaces.active_space_name.clone();
+        let space_name = self.spaces.active_space_name.clone();
         let tab_rows = tabs.tabs(active_tab, &space_name, locale);
         let mut payload = projector.project(CommandBarOpenProjection {
             open_id: OpenId::NONE,
             native_windowed: false,
             space_name,
             url: String::new(),
-            spaces: self.command_bar.spaces.clone(),
-            terminal_page_url: self.command_bar.terminals.terminal_page_url.clone(),
-            pages: self.command_bar.pages.clone(),
-            work: self.command_bar.work.clone(),
+            spaces: (**self.spaces).clone(),
+            terminal_page_url: self
+                .terminal_page
+                .iter()
+                .next()
+                .map(|page| page.0.clone())
+                .unwrap_or_default(),
+            pages: (**self.pages).clone(),
+            projects: (**self.projects).clone(),
+            work: (**self.work).clone(),
             locale: locale.clone(),
             active_stack_count,
             tabs: tab_rows,
@@ -565,8 +581,7 @@ fn sync_pages(
         || removed_claims.read().next().is_some()
         || removed_models.read().next().is_some()
         || removed_modes.read().next().is_some();
-    let changed = prompt_context.command_bar.is_changed()
-        || contributions_changed
+    let changed = contributions_changed
         || focus_changed
         || prompt_context.changed(tab_gather.active_tab.get())
         || git_changed
@@ -659,7 +674,7 @@ fn mark_launcher(
         if meta.url.starts_with(StartPlugin::URL) {
             commands.entity(entity).try_insert((
                 HostsLauncher,
-                vmux_command::snapshot::CommandBarUiStateUpdates::default(),
+                vmux_command::snapshot::CommandBarState::default(),
             ));
         }
     }

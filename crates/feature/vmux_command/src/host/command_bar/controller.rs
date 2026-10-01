@@ -10,7 +10,10 @@ use vmux_ecs::launcher::{LauncherDismissRequest, RendersLauncherPanel, RestoreKe
 
 use crate::command_bar::CommandBarDismiss;
 use crate::command_bar::panel::CommandBarPanelActive;
-use crate::snapshot::{CommandBarProjection, WriteCommandBarSnapshots};
+use crate::snapshot::{
+    CommandBarPagesSnapshot, CommandBarProjectRoots, CommandBarSpacesSnapshot,
+    CommandBarTerminalPage, CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot,
+};
 use crate::{CommandInvocation, CommandRegistry, ReadCommandRequests};
 use bevy::{
     ecs::{message::MessageReader, system::SystemParam},
@@ -67,7 +70,6 @@ impl bevy::app::Plugin for Plugin {
                     .after(vmux_ecs::workspace::StackCommandSet),
             )
             .add_systems(Update, retry_open.after(open))
-            .add_systems(Update, sync_project_roots.in_set(WriteCommandBarSnapshots))
             .add_systems(
                 Update,
                 dismiss_deferred
@@ -523,7 +525,12 @@ fn open(
     windows: Query<&Window>,
     all_children: Query<&Children>,
     browser_meta: Query<&PageMetadata, Or<(With<WebviewSource>, With<HostsPage>)>>,
-    state: Single<&CommandBarProjection>,
+    workspace: Single<&CommandBarWorkspaceSnapshot>,
+    projects: Single<&CommandBarProjectRoots>,
+    spaces: Single<&CommandBarSpacesSnapshot>,
+    pages: Single<&CommandBarPagesSnapshot>,
+    work: Single<&CommandBarWorkSnapshot>,
+    terminal_page: Option<Single<&CommandBarTerminalPage>>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     projector: CommandBarProjector,
     locale: Option<Res<ResolvedLocale>>,
@@ -550,9 +557,9 @@ fn open(
     else {
         return;
     };
-    let focus = &state.workspace;
+    let focus = &*workspace;
     let active_stack_count = focus.stack_count;
-    let spaces_snapshot = &state.spaces;
+    let spaces_snapshot = &*spaces;
     let space_name = spaces_snapshot.active_space_name.clone();
     let locale = locale
         .as_deref()
@@ -606,10 +613,14 @@ fn open(
         native_windowed: false,
         space_name,
         url: current_url,
-        spaces: spaces_snapshot.clone(),
-        terminal_page_url: state.terminals.terminal_page_url.clone(),
-        pages: state.pages.clone(),
-        work: state.work.clone(),
+        spaces: (*spaces_snapshot).clone(),
+        terminal_page_url: terminal_page
+            .as_deref()
+            .map(|page| page.0.clone())
+            .unwrap_or_default(),
+        pages: (*pages).clone(),
+        projects: (*projects).clone(),
+        work: (*work).clone(),
         locale: locale.clone(),
         active_stack_count,
         tabs: bar_tabs,
@@ -645,7 +656,7 @@ fn dismiss(trigger: On<UiInput<DismissRequest>>, mut commands: Commands) {
 
 fn close(
     trigger: On<CommandBarDismiss>,
-    command_bar: Single<&CommandBarProjection>,
+    workspace: Single<&CommandBarWorkspaceSnapshot>,
     mut modal_q: Query<
         (
             Entity,
@@ -668,7 +679,7 @@ fn close(
             .remove::<CommandBarRecreating>();
     }
     if trigger.event().restore_keyboard
-        && let Some(stack) = command_bar.workspace.stack
+        && let Some(stack) = workspace.stack
     {
         restore_keyboard.write(RestoreKeyboardToStack { stack });
     }
@@ -800,13 +811,6 @@ fn retry_open(
     }
 }
 
-fn sync_project_roots(mut state: Single<&mut CommandBarProjection>) {
-    if !state.is_changed() || state.work.projects == state.projects.roots {
-        return;
-    }
-    state.work.projects = state.projects.roots.clone();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -891,6 +895,7 @@ mod tests {
                     spaces: Default::default(),
                     terminal_page_url: String::new(),
                     pages: Default::default(),
+                    projects: Default::default(),
                     work: Default::default(),
                     locale: Locale::from("en-US"),
                     active_stack_count: 0,
@@ -1387,7 +1392,13 @@ mod tests {
             .init_resource::<EmittedToPage>()
             .add_observer(capture_page_emit)
             .add_systems(Update, open);
-        app.world_mut().spawn(CommandBarProjection::default());
+        app.world_mut().spawn((
+            CommandBarWorkspaceSnapshot::default(),
+            CommandBarProjectRoots::default(),
+            CommandBarSpacesSnapshot::default(),
+            CommandBarPagesSnapshot::default(),
+            CommandBarWorkSnapshot::default(),
+        ));
         app
     }
 
@@ -1459,8 +1470,8 @@ mod tests {
             ChildOf(stack),
         ));
         app.world_mut()
-            .run_system_once(move |mut state: Single<&mut CommandBarProjection>| {
-                state.workspace.stack = Some(stack);
+            .run_system_once(move |mut state: Single<&mut CommandBarWorkspaceSnapshot>| {
+                state.stack = Some(stack);
             })
             .unwrap();
 
@@ -1522,7 +1533,8 @@ mod tests {
             .add_plugins(Plugin)
             .add_message::<RestoreKeyboardToStack>()
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>();
-        app.world_mut().spawn(CommandBarProjection::default());
+        app.world_mut()
+            .spawn(CommandBarWorkspaceSnapshot::default());
 
         let modal = app
             .world_mut()

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 #[cfg(test)]
 use bevy_cef::prelude::HostWindow;
-use vmux_command::snapshot::{CommandBarProjection, CommandBarSpacesSnapshot, SpaceSummary};
+use vmux_command::snapshot::{CommandBarSpacesSnapshot, SpaceSummary};
 use vmux_ecs::Order;
 use vmux_layout::space::{Space, SpaceId};
 
@@ -12,11 +12,18 @@ pub struct SnapshotPlugin;
 
 impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.add_systems(Startup, spawn).add_systems(
             Update,
             update_spaces_snapshot.in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
         );
     }
+}
+
+fn spawn(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Command bar spaces"),
+        CommandBarSpacesSnapshot::default(),
+    ));
 }
 
 fn update_spaces_snapshot(
@@ -32,7 +39,7 @@ fn update_spaces_snapshot(
     >,
     focused_window: vmux_layout::window::FocusedWindow,
     hierarchy: vmux_layout::window::WindowHierarchy,
-    mut state: Single<&mut CommandBarProjection>,
+    mut state: Single<&mut CommandBarSpacesSnapshot>,
 ) {
     let profile = SpaceRecord::current_profile_name();
     let mut rows: Vec<(u32, SpaceSummary)> = Vec::new();
@@ -66,8 +73,8 @@ fn update_spaces_snapshot(
         active_space_name,
         spaces_page_url: SpacePlugin::MANIFEST.url.to_string(),
     };
-    if state.spaces != next {
-        state.spaces = next;
+    if **state != next {
+        **state = next;
     }
 }
 
@@ -84,7 +91,7 @@ mod tests {
         fn one() -> Self {
             let mut app = App::new();
             app.add_systems(Update, update_spaces_snapshot);
-            app.world_mut().spawn(CommandBarProjection::default());
+            app.world_mut().spawn(CommandBarSpacesSnapshot::default());
             let window = app
                 .world_mut()
                 .spawn((Window::default(), vmux_ecs::Active))
@@ -117,9 +124,8 @@ mod tests {
                 .app
                 .world()
                 .iter_entities()
-                .find_map(|entity| entity.get::<CommandBarProjection>())
+                .find_map(|entity| entity.get::<CommandBarSpacesSnapshot>())
                 .unwrap()
-                .spaces
         }
 
         fn rename(&mut self, to: &str) {
@@ -170,7 +176,7 @@ mod tests {
     fn publishes_global_spaces_with_the_focused_windows_active_space() {
         let mut app = App::new();
         app.add_systems(Update, update_spaces_snapshot);
-        app.world_mut().spawn(CommandBarProjection::default());
+        app.world_mut().spawn(CommandBarSpacesSnapshot::default());
         let first_window = app
             .world_mut()
             .spawn((Window::default(), vmux_ecs::Active))
@@ -193,8 +199,7 @@ mod tests {
         let snapshot = app
             .world()
             .iter_entities()
-            .find_map(|entity| entity.get::<CommandBarProjection>())
-            .map(|projection| &projection.spaces)
+            .find_map(|entity| entity.get::<CommandBarSpacesSnapshot>())
             .unwrap();
         assert_eq!(snapshot.active_space_id, "first");
         assert_eq!(snapshot.spaces.len(), 2);
@@ -212,8 +217,7 @@ mod tests {
         let snapshot = app
             .world()
             .iter_entities()
-            .find_map(|entity| entity.get::<CommandBarProjection>())
-            .map(|projection| &projection.spaces)
+            .find_map(|entity| entity.get::<CommandBarSpacesSnapshot>())
             .unwrap();
         assert_eq!(snapshot.active_space_id, "second");
         assert_eq!(snapshot.spaces.len(), 2);

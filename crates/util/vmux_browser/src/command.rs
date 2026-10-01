@@ -14,7 +14,7 @@ use vmux_command::CommandDefinition;
 use vmux_command::CommandManifest;
 use vmux_command::command_bar::CommandBarDismiss;
 use vmux_command::snapshot::{
-    ClaimedUrls, CommandBarProjection, ContributedCommand, ContributedPages,
+    ClaimedUrls, CommandBarWorkspaceSnapshot, ContributedCommand, ContributedPages,
 };
 use vmux_command::{CommandInvocation, CommandRegistry, ReadCommandRequests, ResolvedLocale};
 #[cfg(test)]
@@ -178,7 +178,7 @@ fn open_from_bar(
     child_of: Query<&ChildOf>,
     launcher_hosts: Query<(), With<HostsLauncher>>,
     claimed_urls: ClaimedUrls,
-    command_bar: Single<&CommandBarProjection>,
+    workspace: Single<&CommandBarWorkspaceSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
     mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
     mut chosen_writer: MessageWriter<vmux_ecs::ContributedCommandChosen>,
@@ -188,7 +188,7 @@ fn open_from_bar(
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let focus = &command_bar.workspace;
+    let focus = &*workspace;
     let webview = trigger.event().webview;
     let request = &trigger.event().payload;
     let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
@@ -267,7 +267,7 @@ fn invoke_from_bar(
     trigger: On<UiInput<InvokeRequest>>,
     contributed_pages: ContributedPages,
     contributed_commands: Query<&ContributedCommand>,
-    command_bar: Single<&CommandBarProjection>,
+    workspace: Single<&CommandBarWorkspaceSnapshot>,
     users: Query<Entity, With<vmux_ecs::team::User>>,
     mut chosen: MessageWriter<vmux_ecs::ContributedCommandChosen>,
     mut invocations: MessageWriter<CommandInvocation>,
@@ -281,7 +281,7 @@ fn invoke_from_bar(
         .iter()
         .any(|command| command.id == request.id)
     {
-        if let Some(pane) = command_bar.workspace.pane {
+        if let Some(pane) = workspace.pane {
             chosen.write(vmux_ecs::ContributedCommandChosen {
                 id: request.id.clone(),
                 stack: None,

@@ -9,7 +9,10 @@ use vmux_ecs::host::UiStateWrite;
 use crate::command_bar::project_files::{
     MAX_RESULTS, PendingProjectCompletion, ProjectCompletions, ProjectIndex, RankBias,
 };
-use crate::snapshot::{CommandBarProjection, WriteCommandBarSnapshots};
+use crate::snapshot::{
+    CommandBarProjectRoots, CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot,
+    WriteCommandBarSnapshots,
+};
 use vmux_api::command_bar::{CommandBarUiState, PathCompleteRequest, PathEntry};
 
 pub(super) struct CompletionPlugin;
@@ -37,16 +40,15 @@ fn spawn_project_index(mut commands: Commands) {
 
 fn path_complete_request(
     trigger: On<UiInput<PathCompleteRequest>>,
-    state: Single<&CommandBarProjection>,
+    workspace: Single<&CommandBarWorkspaceSnapshot>,
+    projects: Single<&CommandBarProjectRoots>,
+    work: Single<&CommandBarWorkSnapshot>,
     browsers: NonSend<Browsers>,
     pending: Query<&PendingProjectCompletion>,
     mut index: Single<&mut ProjectIndex>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let workspace = &state.workspace;
-    let projects = &state.projects;
-    let work = &state.work;
     let asking = trigger.event().webview;
     if !browsers.can_emit_to(&asking) {
         return;
@@ -105,16 +107,15 @@ fn path_complete_request(
 }
 
 fn warm_project_index(
-    state: Single<Ref<CommandBarProjection>>,
+    workspace: Single<Ref<CommandBarWorkspaceSnapshot>>,
+    projects: Single<Ref<CommandBarProjectRoots>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     pending: Query<&PendingProjectCompletion>,
     mut index: Single<&mut ProjectIndex>,
 ) {
-    if !state.is_changed() {
+    if !workspace.is_changed() && !projects.is_changed() {
         return;
     }
-    let workspace = &state.workspace;
-    let projects = &state.projects;
     let mut roots = ProjectQuery::all(workspace.project_root.as_deref(), &projects.roots);
     for request in &pending {
         ProjectQuery::include(&mut roots, &request.roots);
@@ -126,16 +127,15 @@ fn warm_project_index(
 }
 
 fn answer_settled_project_index(
-    state: Single<&CommandBarProjection>,
+    workspace: Single<&CommandBarWorkspaceSnapshot>,
+    projects: Single<&CommandBarProjectRoots>,
+    work: Single<&CommandBarWorkSnapshot>,
     browsers: NonSend<Browsers>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut index: Single<&mut ProjectIndex>,
     mut pending: Query<(Entity, &mut PendingProjectCompletion)>,
     mut commands: Commands,
 ) {
-    let workspace = &state.workspace;
-    let projects = &state.projects;
-    let work = &state.work;
     if pending.is_empty() {
         return;
     }

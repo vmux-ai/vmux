@@ -20,7 +20,7 @@ use vmux_api::ProcessId;
 use vmux_api::command_bar::PromptRequest;
 use vmux_api::protocol::AgentCommandResult;
 use vmux_command::command_bar::CommandBarDismiss;
-use vmux_command::snapshot::{CommandBarProjection, ContributedPages};
+use vmux_command::snapshot::{CommandBarWorkspaceSnapshot, ContributedPages};
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentContinuationRequest, AgentRequestAppExt, AgentRequestMessage,
     AgentRequestRouteSet, AgentSessionRoot,
@@ -76,7 +76,7 @@ fn submit_from_command_bar(
     launcher_hosts: Query<(), With<HostsLauncher>>,
     child_of: Query<&ChildOf>,
     contributed_pages: ContributedPages,
-    command_bar: Single<&CommandBarProjection>,
+    workspace: Single<&CommandBarWorkspaceSnapshot>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut inline_transition: MessageWriter<InlineTransitionRequested>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -102,7 +102,7 @@ fn submit_from_command_bar(
         .flatten();
     let mut opened = false;
     if (!prompt.is_empty() || !attachments.is_empty())
-        && let Some(stack) = command_bar.workspace.stack
+        && let Some(stack) = workspace.stack
         && let Some(url) = contributed_pages.prompt_url(request.target_url.as_deref())
     {
         if inline_stack == Some(stack)

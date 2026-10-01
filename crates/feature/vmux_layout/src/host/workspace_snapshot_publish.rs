@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use vmux_command::snapshot::{
-    CommandBarProjection, CommandBarWorkspaceSnapshot, WriteCommandBarSnapshots,
+    CommandBarSpacesSnapshot, CommandBarWorkspaceSnapshot, WriteCommandBarSnapshots,
 };
 use vmux_ui::i18n::Locale;
 
@@ -11,18 +11,26 @@ pub(crate) struct SnapshotPlugin;
 
 impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.add_systems(Startup, spawn).add_systems(
             Update,
             publish_workspace_snapshot.in_set(WriteCommandBarSnapshots),
         );
     }
 }
 
+fn spawn(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Command bar workspace"),
+        CommandBarWorkspaceSnapshot::default(),
+    ));
+}
+
 fn publish_workspace_snapshot(
     tab_gather: TabGather,
     locale: Option<Res<ResolvedLocale>>,
     projects: Query<(&crate::tab::Tab, Option<&crate::tab::TabWorkspace>)>,
-    mut state: Single<&mut CommandBarProjection>,
+    spaces: Single<&CommandBarSpacesSnapshot>,
+    mut state: Single<&mut CommandBarWorkspaceSnapshot>,
 ) {
     let active_tab = tab_gather.active_tab.get();
     let project_root = ProjectRoot::resolve(active_tab, &projects);
@@ -31,7 +39,7 @@ fn publish_workspace_snapshot(
         .as_deref()
         .map(|resolved| resolved.0.clone())
         .unwrap_or_else(Locale::preferred);
-    let tabs = tab_gather.tabs(active_tab, &state.spaces.active_space_name, &locale);
+    let tabs = tab_gather.tabs(active_tab, &spaces.active_space_name, &locale);
     let next = CommandBarWorkspaceSnapshot {
         stack,
         pane,
@@ -39,8 +47,8 @@ fn publish_workspace_snapshot(
         stack_count: tab_gather.stack_q.iter().count(),
         project_root,
     };
-    if state.workspace != next {
-        state.workspace = next;
+    if **state != next {
+        **state = next;
     }
 }
 

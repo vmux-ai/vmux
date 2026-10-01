@@ -1,8 +1,8 @@
 use crate::definition::CommandDefinition;
 use crate::open_target::OpenTarget;
 use crate::snapshot::{
-    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, ContributedAgentModels,
-    ContributedAgentModes, ContributedCommand, ContributedPages,
+    CommandBarPagesSnapshot, CommandBarProjectRoots, CommandBarSpacesSnapshot,
+    ContributedAgentModels, ContributedAgentModes, ContributedCommand, ContributedPages,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::Query;
@@ -147,6 +147,7 @@ pub struct CommandBarOpenProjection {
     pub spaces: CommandBarSpacesSnapshot,
     pub terminal_page_url: String,
     pub pages: CommandBarPagesSnapshot,
+    pub projects: CommandBarProjectRoots,
     pub work: crate::snapshot::CommandBarWorkSnapshot,
     pub locale: Locale,
     pub active_stack_count: usize,
@@ -244,7 +245,7 @@ impl CommandBarProjector<'_, '_> {
             terminal_page_url: projection.terminal_page_url,
             work_dirs: projection.work.work_dirs,
             recent_files: projection.work.recent_files,
-            projects: projection.work.projects,
+            projects: projection.projects.roots,
             search_engines: projection.work.search_engines,
             prompt_context: Default::default(),
             agent_models,

@@ -5,45 +5,31 @@ use vmux_api::command_bar::{
 use vmux_ecs::launcher::RendersLauncherPanel;
 use vmux_ecs::page::PageManifest;
 
-pub type CommandBarUiStateUpdates =
-    vmux_ecs::host::UiState<vmux_api::command_bar::CommandBarUiState>;
+pub type CommandBarState = vmux_ecs::host::UiState<vmux_api::command_bar::CommandBarUiState>;
 
 pub struct UiStatePlugin;
 
 impl Plugin for UiStatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Startup,
-            (spawn_bar_projection, ApplyDeferred, update_pages).chain(),
-        )
-        .add_plugins(vmux_ecs::host::UiStatePlugin::<
-            vmux_api::command_bar::CommandBarUiState,
-        >::default())
-        .add_systems(PreUpdate, attach_bar_ui_state);
+        app.add_systems(Startup, (spawn_pages, ApplyDeferred, update_pages).chain())
+            .add_plugins(vmux_ecs::host::UiStatePlugin::<
+                vmux_api::command_bar::CommandBarUiState,
+            >::default())
+            .add_systems(PreUpdate, attach_bar_ui_state);
     }
 }
 
-fn spawn_bar_projection(mut commands: Commands) {
+fn spawn_pages(mut commands: Commands) {
     commands.spawn((
-        Name::new("Command bar projection"),
-        CommandBarProjection::default(),
+        Name::new("Command bar pages"),
+        CommandBarPagesSnapshot::default(),
     ));
 }
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct WriteCommandBarSnapshots;
 
-#[derive(Component, Default, Clone, Debug)]
-pub struct CommandBarProjection {
-    pub workspace: CommandBarWorkspaceSnapshot,
-    pub projects: CommandBarProjectRoots,
-    pub spaces: CommandBarSpacesSnapshot,
-    pub terminals: CommandBarTerminalsSnapshot,
-    pub pages: CommandBarPagesSnapshot,
-    pub work: CommandBarWorkSnapshot,
-}
-
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Component, Default, Clone, Debug, PartialEq)]
 pub struct CommandBarWorkspaceSnapshot {
     pub stack: Option<Entity>,
     pub pane: Option<Entity>,
@@ -52,7 +38,7 @@ pub struct CommandBarWorkspaceSnapshot {
     pub project_root: Option<String>,
 }
 
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Component, Default, Clone, Debug, PartialEq)]
 pub struct CommandBarProjectRoots {
     pub roots: Vec<String>,
     pub active: Option<String>,
@@ -133,7 +119,7 @@ impl ClaimedUrl {
     }
 }
 
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Component, Default, Clone, Debug, PartialEq)]
 pub struct CommandBarSpacesSnapshot {
     pub spaces: Vec<SpaceSummary>,
     pub active_space_id: String,
@@ -148,12 +134,10 @@ pub struct SpaceSummary {
     pub profile: String,
 }
 
-#[derive(Default, Clone, Debug)]
-pub struct CommandBarTerminalsSnapshot {
-    pub terminal_page_url: String,
-}
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct CommandBarTerminalPage(pub String);
 
-#[derive(Default, Clone, Debug)]
+#[derive(Component, Default, Clone, Debug)]
 pub struct CommandBarPagesSnapshot {
     pub pages: Vec<RegisteredPage>,
 }
@@ -165,19 +149,20 @@ pub struct RegisteredPage {
     pub replaces_command: Option<String>,
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Component, Default, Clone, Debug)]
 pub struct CommandBarWorkSnapshot {
     pub work_dirs: Vec<CommandBarWorkDir>,
     pub recent_files: Vec<CommandBarRecentFile>,
     pub search_engines: Vec<SearchEngine>,
-    pub projects: Vec<String>,
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct CommandBarWorkDirectory(pub String);
 
-fn update_pages(manifests: Query<&PageManifest>, mut state: Single<&mut CommandBarProjection>) {
-    let snapshot = &mut state.pages;
+fn update_pages(
+    manifests: Query<&PageManifest>,
+    mut snapshot: Single<&mut CommandBarPagesSnapshot>,
+) {
     if !snapshot.pages.is_empty() {
         return;
     }
@@ -208,19 +193,11 @@ fn update_pages(manifests: Query<&PageManifest>, mut state: Single<&mut CommandB
 }
 
 fn attach_bar_ui_state(
-    pages: Query<
-        Entity,
-        (
-            With<RendersLauncherPanel>,
-            Without<CommandBarUiStateUpdates>,
-        ),
-    >,
+    pages: Query<Entity, (With<RendersLauncherPanel>, Without<CommandBarState>)>,
     mut commands: Commands,
 ) {
     for page in &pages {
-        commands
-            .entity(page)
-            .insert(CommandBarUiStateUpdates::default());
+        commands.entity(page).insert(CommandBarState::default());
     }
 }
 
@@ -341,7 +318,7 @@ mod tests {
     fn pages_snapshot_collects_only_command_bar_pages() {
         let mut app = App::new();
         app.add_systems(Update, update_pages);
-        app.world_mut().spawn(CommandBarProjection::default());
+        app.world_mut().spawn(CommandBarPagesSnapshot::default());
         app.world_mut().spawn(PageManifest {
             url: "vmux://services/",
             asset_host: "services",
@@ -372,18 +349,16 @@ mod tests {
         let snapshot = app
             .world()
             .iter_entities()
-            .find_map(|entity| entity.get::<CommandBarProjection>())
+            .find_map(|entity| entity.get::<CommandBarPagesSnapshot>())
             .unwrap();
-        let snap = &snapshot.pages;
-        assert_eq!(snap.pages.len(), 1);
-        assert_eq!(snap.pages[0].page.url, "vmux://services/");
-        assert_eq!(snap.pages[0].page.url, "vmux://services/");
+        assert_eq!(snapshot.pages.len(), 1);
+        assert_eq!(snapshot.pages[0].page.url, "vmux://services/");
         assert_eq!(
-            snap.pages[0].title_message_id.as_deref(),
+            snapshot.pages[0].title_message_id.as_deref(),
             Some("services-title")
         );
         assert_eq!(
-            snap.pages[0].replaces_command.as_deref(),
+            snapshot.pages[0].replaces_command.as_deref(),
             Some("service_open")
         );
     }

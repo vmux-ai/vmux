@@ -1,18 +1,24 @@
 use crate::Terminal;
 use crate::launch::TerminalLaunch;
 use bevy::prelude::*;
-use vmux_command::snapshot::{CommandBarProjection, CommandBarWorkDirectory};
+use vmux_command::snapshot::{CommandBarTerminalPage, CommandBarWorkDirectory};
 
 pub struct Plugin;
 
 impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.add_systems(Startup, spawn).add_systems(
             Update,
-            (sync_work_directories, project)
-                .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
+            sync_work_directories.in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
         );
     }
+}
+
+fn spawn(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Terminal command bar page"),
+        CommandBarTerminalPage(crate::TerminalPlugin::URL.to_string()),
+    ));
 }
 
 fn sync_work_directories(
@@ -32,31 +38,22 @@ fn sync_work_directories(
     }
 }
 
-fn project(mut state: Single<&mut CommandBarProjection>) {
-    if !state.terminals.terminal_page_url.is_empty() {
-        return;
-    }
-    state.terminals.terminal_page_url = crate::TerminalPlugin::URL.to_string();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn projection(app: &App) -> &CommandBarProjection {
+    fn terminal_page(app: &App) -> &CommandBarTerminalPage {
         app.world()
             .iter_entities()
-            .find_map(|entity| entity.get::<CommandBarProjection>())
+            .find_map(|entity| entity.get::<CommandBarTerminalPage>())
             .unwrap()
     }
 
     #[test]
-    fn writes_url_and_no_running_terminals() {
+    fn contributes_terminal_page() {
         let mut app = App::new();
-        app.add_systems(Update, project);
-        app.world_mut().spawn(CommandBarProjection::default());
-        app.update();
-        let snap = &projection(&app).terminals;
-        assert_eq!(snap.terminal_page_url, crate::TerminalPlugin::URL);
+        app.add_systems(Startup, spawn);
+        app.world_mut().run_schedule(Startup);
+        assert_eq!(terminal_page(&app).0, crate::TerminalPlugin::URL);
     }
 }

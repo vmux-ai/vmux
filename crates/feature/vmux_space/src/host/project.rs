@@ -1,8 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
-use vmux_command::snapshot::{
-    CommandBarProjectRoots, CommandBarProjection, WriteCommandBarSnapshots,
-};
+use vmux_command::snapshot::{CommandBarProjectRoots, WriteCommandBarSnapshots};
 use vmux_ecs::event::{ProjectRow, ProjectRowKind, ProjectTreeToggle};
 use vmux_ecs::host::persistence::PersistenceAppExt;
 use vmux_git::worktree::LinkedRepoRoot;
@@ -36,7 +34,11 @@ impl Plugin for SpaceProjectPlugin {
 }
 
 fn spawn_repository_roots(mut commands: Commands) {
-    commands.spawn((Name::new("Repository roots"), RepoRoots::default()));
+    commands.spawn((
+        Name::new("Repository roots"),
+        RepoRoots::default(),
+        CommandBarProjectRoots::default(),
+    ));
 }
 
 fn tree_toggle(
@@ -58,7 +60,7 @@ fn tree_toggle(
     commands.entity(space).insert(dirs);
 }
 
-fn publish_roots(projects: SpaceProjects, mut state: Single<&mut CommandBarProjection>) {
+fn publish_roots(projects: SpaceProjects, mut roots: Single<&mut CommandBarProjectRoots>) {
     let mut next = Vec::new();
     let mut active = None;
     for project in projects.active_projects() {
@@ -70,12 +72,12 @@ fn publish_roots(projects: SpaceProjects, mut state: Single<&mut CommandBarProje
         }
         next.push(project.path);
     }
-    let roots = CommandBarProjectRoots {
+    let next = CommandBarProjectRoots {
         roots: next,
         active,
     };
-    if state.projects != roots {
-        state.projects = roots;
+    if **roots != next {
+        **roots = next;
     }
 }
 

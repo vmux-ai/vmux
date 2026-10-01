@@ -27,11 +27,11 @@ pub use payload::{
 };
 pub use settings::ResolvedLocale;
 pub use snapshot::{
-    ClaimedUrl, ClaimedUrls, CommandBarPagesSnapshot, CommandBarProjectRoots, CommandBarProjection,
-    CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot, CommandBarUiStateUpdates,
-    CommandBarWorkDirectory, CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot,
-    ContributedAgentModels, ContributedAgentModes, ContributedCommand, ContributedPage,
-    ContributedPages, RegisteredPage, SpaceSummary, UiStatePlugin, WriteCommandBarSnapshots,
+    ClaimedUrl, ClaimedUrls, CommandBarPagesSnapshot, CommandBarProjectRoots,
+    CommandBarSpacesSnapshot, CommandBarState, CommandBarTerminalPage, CommandBarWorkDirectory,
+    CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot, ContributedAgentModels,
+    ContributedAgentModes, ContributedCommand, ContributedPage, ContributedPages, RegisteredPage,
+    SpaceSummary, UiStatePlugin, WriteCommandBarSnapshots,
 };
 pub use tool::AgentInvokeCommand;
 pub use tool::CommandToolPlugin;
