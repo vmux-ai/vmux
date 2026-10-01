@@ -1,31 +1,31 @@
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Startup, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::page::UiStateEmit;
 use vmux_api::team::{TeamEvent, TeamMemberRow};
 
 use crate::projection::TeamStateProjection;
 
-pub struct TeamRosterPlugin;
+pub struct Plugin;
 
-impl Plugin for TeamRosterPlugin {
+impl bevy_app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Members>()
             .add_message::<RepublishTeam>()
             .add_message::<UiStateEmit>()
-            .add_systems(Startup, spawn_team_runtime)
+            .add_systems(Startup, spawn)
             .add_systems(
                 Update,
                 (
-                    receive_members.before(TeamProjection),
-                    project_team.in_set(TeamProjection),
-                    emit_team.after(TeamProjection),
+                    receive.before(Projection),
+                    project.in_set(Projection),
+                    emit.after(Projection),
                 ),
             );
     }
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct TeamProjection;
+struct Projection;
 
 #[derive(Component, Message, Clone, Default, PartialEq)]
 pub struct Members(pub Vec<TeamMemberRow>);
@@ -34,19 +34,16 @@ pub struct Members(pub Vec<TeamMemberRow>);
 pub struct Team(pub TeamEvent);
 
 #[derive(Component)]
-struct TeamRuntime;
+struct Runtime;
 
 #[derive(Message)]
 pub struct RepublishTeam;
 
-fn spawn_team_runtime(mut commands: Commands) {
-    commands.spawn((TeamRuntime, Members::default(), Team::default()));
+fn spawn(mut commands: Commands) {
+    commands.spawn((Runtime, Members::default(), Team::default()));
 }
 
-fn receive_members(
-    mut messages: MessageReader<Members>,
-    mut runtimes: Query<&mut Members, With<TeamRuntime>>,
-) {
+fn receive(mut messages: MessageReader<Members>, mut runtimes: Query<&mut Members, With<Runtime>>) {
     let Ok(mut members) = runtimes.single_mut() else {
         return;
     };
@@ -57,16 +54,16 @@ fn receive_members(
     }
 }
 
-fn project_team(mut runtimes: Query<(&Members, &mut Team), (With<TeamRuntime>, Changed<Members>)>) {
+fn project(mut runtimes: Query<(&Members, &mut Team), (With<Runtime>, Changed<Members>)>) {
     let Ok((members, mut team)) = runtimes.single_mut() else {
         return;
     };
     team.0 = TeamStateProjection::build(members.0.clone(), Vec::new());
 }
 
-fn emit_team(
+fn emit(
     mut refreshes: MessageReader<RepublishTeam>,
-    runtimes: Query<Ref<Team>, With<TeamRuntime>>,
+    runtimes: Query<Ref<Team>, With<Runtime>>,
     mut emits: MessageWriter<UiStateEmit>,
 ) {
     let refresh = refreshes.read().next().is_some();
@@ -91,7 +88,7 @@ mod tests {
     impl Started {
         fn with(members: Vec<TeamMemberRow>) -> Self {
             let mut app = App::new();
-            app.add_plugins(TeamRosterPlugin);
+            app.add_plugins(Plugin);
             app.update();
             let mut started = Self(app);
             started.reroster(members);

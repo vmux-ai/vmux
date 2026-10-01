@@ -34,7 +34,7 @@ impl Plugin for StartPlugin {
             vmux_core::host::page::NativelyHosted::page(START_PAGE_URL, "Start"),
         ))
         .add_message::<InlineTransitionRequested>()
-        .add_systems(Update, (mark_launcher_hosts, begin_inline_transition));
+        .add_systems(Update, (mark_launcher, start_inline_transition));
         app.add_plugins(UiEventPlugin::<(
             StartSelectWorkspace,
             vmux_api::command_bar::StartBranchesRequest,
@@ -44,14 +44,14 @@ impl Plugin for StartPlugin {
             .add_observer(on_branches_request)
             .add_observer(on_go_to_branch)
             .add_observer(apply_chosen_project)
-            .add_observer(publish_command_bar_focus)
+            .add_observer(focus_command_bar)
             .add_systems(
                 Update,
                 (
-                    sync_live_start_pages,
-                    drain_start_workspace_pickers,
-                    begin_branch_reads,
-                    drain_start_branch_reads,
+                    sync_pages,
+                    finish_workspace_pickers,
+                    read_branches,
+                    finish_branch_reads,
                 ),
             );
     }
@@ -300,7 +300,7 @@ fn on_select_workspace(
     commands.spawn(PendingStartWorkspacePicker { tab, task });
 }
 
-fn drain_start_workspace_pickers(
+fn finish_workspace_pickers(
     mut pending: Query<(Entity, &mut PendingStartWorkspacePicker)>,
     mut commands: Commands,
 ) {
@@ -338,7 +338,7 @@ struct StartBranchRead {
     task: Task<Vec<ProjectBranch>>,
 }
 
-fn begin_branch_reads(
+fn read_branches(
     queries: Query<(Entity, &StartBranchQuery), Added<StartBranchQuery>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -389,7 +389,7 @@ fn on_branches_request(
     });
 }
 
-fn drain_start_branch_reads(
+fn finish_branch_reads(
     mut reads: Query<(Entity, &mut StartBranchRead)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -503,7 +503,7 @@ fn apply_chosen_project(
     }
 }
 
-fn sync_live_start_pages(
+fn sync_pages(
     tab_gather: TabGather,
     mut prompt_context: StartPromptContext,
     contributions: (
@@ -624,7 +624,7 @@ fn sync_live_start_pages(
     }
 }
 
-fn publish_command_bar_focus(
+fn focus_command_bar(
     trigger: On<CommandBarFocusRequested>,
     mut revisions: Query<&mut CommandBarFocusRevision>,
     mut commands: Commands,
@@ -644,7 +644,7 @@ fn publish_command_bar_focus(
     >::from_event(webview, &effect));
 }
 
-fn mark_launcher_hosts(
+fn mark_launcher(
     starts: Query<(Entity, &PageMetadata), Without<HostsLauncher>>,
     mut commands: Commands,
 ) {
@@ -658,7 +658,7 @@ fn mark_launcher_hosts(
     }
 }
 
-fn begin_inline_transition(
+fn start_inline_transition(
     mut requests: MessageReader<InlineTransitionRequested>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -708,7 +708,7 @@ mod tests {
     fn start_focus_app() -> App {
         let mut app = App::new();
         app.init_resource::<EmittedIds>()
-            .add_observer(publish_command_bar_focus)
+            .add_observer(focus_command_bar)
             .add_observer(capture_state);
         app
     }
@@ -732,7 +732,7 @@ mod tests {
     fn a_transition_whose_page_already_closed_is_skipped() {
         let mut app = App::new();
         app.add_message::<InlineTransitionRequested>()
-            .add_systems(Update, begin_inline_transition);
+            .add_systems(Update, start_inline_transition);
         let stack = app.world_mut().spawn_empty().id();
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().entity_mut(webview).despawn();

@@ -21,30 +21,27 @@ use crate::runtime::RuntimeHandle;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
-pub(crate) struct PairingPlugin;
+pub struct Plugin;
 
-impl Plugin for PairingPlugin {
+impl bevy_app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<PairLinkChanged>()
             .add_message::<PairRequest>()
             .add_message::<PairingFailure>()
             .add_message::<DisconnectRequest>()
             .insert_non_send(ConnectionSubscribers::default())
-            .add_systems(
-                Startup,
-                (spawn_connection_state, restore_connection).chain(),
-            )
+            .add_systems(Startup, (spawn_state, restore_connection).chain())
             .add_systems(
                 Update,
                 (
-                    change_pair_link,
-                    begin_pairing,
-                    show_pairing_failures,
+                    change_link,
+                    pair,
+                    fail,
                     disconnect,
-                    poll_connection_attempts,
-                    begin_refresh,
-                    poll_refreshes,
-                    publish_connection,
+                    finish_pairing,
+                    refresh,
+                    finish_refresh,
+                    publish,
                 )
                     .chain(),
             );
@@ -61,7 +58,7 @@ struct ConnectionSnapshot {
 #[derive(Default)]
 struct ConnectionSubscribers(Vec<Box<dyn FnMut(ConnectionSnapshot)>>);
 
-fn spawn_connection_state(mut commands: Commands) {
+fn spawn_state(mut commands: Commands) {
     commands.spawn(ConnectionState::default());
 }
 
@@ -196,7 +193,7 @@ impl ConnectionState {
     }
 }
 
-fn publish_connection(
+fn publish(
     state: Single<Ref<ConnectionState>>,
     mut subscribers: NonSendMut<ConnectionSubscribers>,
 ) {
@@ -292,7 +289,7 @@ fn restore_connection(
     );
 }
 
-fn change_pair_link(
+fn change_link(
     mut requests: MessageReader<PairLinkChanged>,
     mut states: Query<&mut ConnectionState>,
 ) {
@@ -305,7 +302,7 @@ fn change_pair_link(
     }
 }
 
-fn begin_pairing(
+fn pair(
     mut requests: MessageReader<PairRequest>,
     mut states: Query<(bevy_ecs::entity::Entity, &mut ConnectionState)>,
     mut leaves: MessageWriter<crate::session::LeaveSession>,
@@ -343,10 +340,7 @@ fn begin_pairing(
     }
 }
 
-fn show_pairing_failures(
-    mut failures: MessageReader<PairingFailure>,
-    mut states: Query<&mut ConnectionState>,
-) {
+fn fail(mut failures: MessageReader<PairingFailure>, mut states: Query<&mut ConnectionState>) {
     let Ok(mut state) = states.single_mut() else {
         return;
     };
@@ -371,7 +365,7 @@ fn disconnect(
     }
 }
 
-fn poll_connection_attempts(
+fn finish_pairing(
     mut attempts: Query<(bevy_ecs::entity::Entity, &mut ConnectionAttempt)>,
     mut states: Query<&mut ConnectionState>,
     mut commands: Commands,
@@ -441,7 +435,7 @@ fn poll_connection_attempts(
     }
 }
 
-fn begin_refresh(
+fn refresh(
     states: Query<(bevy_ecs::entity::Entity, &ConnectionState)>,
     refreshes: Query<&ConnectionRefresh>,
     mut commands: Commands,
@@ -466,7 +460,7 @@ fn begin_refresh(
     });
 }
 
-fn poll_refreshes(
+fn finish_refresh(
     mut refreshes: Query<(bevy_ecs::entity::Entity, &mut ConnectionRefresh)>,
     mut states: Query<&mut ConnectionState>,
     mut leaves: MessageWriter<crate::session::LeaveSession>,

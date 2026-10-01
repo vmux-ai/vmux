@@ -19,27 +19,27 @@ use crate::remote::{Api, ApiError, next_client_op_id, remote_event_from_shared};
 use crate::runtime::RuntimeHandle;
 use crate::transition;
 
-pub(crate) struct SessionPlugin;
+pub struct Plugin;
 
-impl Plugin for SessionPlugin {
+impl bevy_app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<OpenSession>()
             .add_message::<LeaveSession>()
             .add_message::<RestartSession>()
             .add_message::<StartChatRequest>()
             .insert_non_send(SessionSubscribers::default())
-            .add_systems(Startup, spawn_session_state)
+            .add_systems(Startup, spawn_state)
             .add_systems(
                 Update,
                 (
                     start_chats,
-                    poll_started_chats,
-                    open_sessions,
-                    leave_sessions,
-                    restart_session_streams,
-                    poll_session_streams,
-                    synchronize_remote_sessions,
-                    publish_session,
+                    finish_chats,
+                    open,
+                    leave,
+                    restart,
+                    read_streams,
+                    sync_remote,
+                    publish,
                 )
                     .chain(),
             );
@@ -49,7 +49,7 @@ impl Plugin for SessionPlugin {
 #[derive(Default)]
 struct SessionSubscribers(Vec<Box<dyn FnMut(SessionView)>>);
 
-fn spawn_session_state(mut commands: Commands) {
+fn spawn_state(mut commands: Commands) {
     commands.spawn(SessionState::default());
 }
 
@@ -114,10 +114,7 @@ struct SessionState {
     view: SessionView,
 }
 
-fn publish_session(
-    state: Single<Ref<SessionState>>,
-    mut subscribers: NonSendMut<SessionSubscribers>,
-) {
+fn publish(state: Single<Ref<SessionState>>, mut subscribers: NonSendMut<SessionSubscribers>) {
     if !state.is_changed() {
         return;
     }
@@ -251,7 +248,7 @@ fn start_chats(
     }
 }
 
-fn poll_started_chats(
+fn finish_chats(
     mut operations: Query<(Entity, &mut StartChatOperation)>,
     mut connections: Query<&mut ConnectionState>,
     mut openings: MessageWriter<OpenSession>,
@@ -272,7 +269,7 @@ fn poll_started_chats(
     }
 }
 
-fn open_sessions(
+fn open(
     mut requests: MessageReader<OpenSession>,
     mut sessions: Query<(Entity, &mut SessionState)>,
     connections: Query<&ConnectionState>,
@@ -315,7 +312,7 @@ fn open_sessions(
     }
 }
 
-fn leave_sessions(
+fn leave(
     mut requests: MessageReader<LeaveSession>,
     mut sessions: Query<(Entity, &mut SessionState)>,
     mut chats: Query<(&mut Conversation, &mut Log, &mut LiveTurn), With<ChatRuntime>>,
@@ -340,7 +337,7 @@ fn leave_sessions(
     }
 }
 
-fn restart_session_streams(
+fn restart(
     mut requests: MessageReader<RestartSession>,
     mut sessions: Query<(Entity, &mut SessionState)>,
     connections: Query<&ConnectionState>,
@@ -369,7 +366,7 @@ fn restart_session_streams(
         .insert(SessionStream::spawn(api, sid, state.view.generation, true));
 }
 
-fn poll_session_streams(
+fn read_streams(
     mut sessions: Query<(Entity, &mut SessionState, &mut SessionStream)>,
     mut reported: MessageWriter<Reported>,
     mut commands: Commands,
@@ -394,10 +391,7 @@ fn poll_session_streams(
     }
 }
 
-fn synchronize_remote_sessions(
-    mut events: MessageReader<Reported>,
-    mut sessions: Query<&mut SessionState>,
-) {
+fn sync_remote(mut events: MessageReader<Reported>, mut sessions: Query<&mut SessionState>) {
     let Ok(mut state) = sessions.single_mut() else {
         return;
     };

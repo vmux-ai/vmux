@@ -15,10 +15,9 @@ mod transition;
 use crate::logs::Logs;
 use crate::pairing::{
     AuthState, DisconnectRequest, PairCard, PairLinkChanged, PairRequest, PairingFailure,
-    PairingPlugin,
 };
 use crate::runtime::RuntimeHandle;
-use crate::session::{LeaveSession, RestartSession, SessionPlugin, use_session};
+use crate::session::{LeaveSession, RestartSession, use_session};
 use bevy_app::{App as BevyApp, AppExit, Plugin};
 use vmux_chat::host::Agents;
 use vmux_start::roster::Roster;
@@ -65,7 +64,7 @@ struct MobilePlugin;
 
 impl Plugin for MobilePlugin {
     fn build(&self, app: &mut BevyApp) {
-        app.add_plugins((runtime::MobileRuntimePlugin, PairingPlugin, SessionPlugin))
+        app.add_plugins((runtime::Plugin, pairing::Plugin, session::Plugin))
             .set_runner(MobileRunner::run);
     }
 }

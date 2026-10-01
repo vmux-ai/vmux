@@ -27,12 +27,12 @@ struct MobileRuntime {
 #[derive(Default)]
 struct UiStateListeners(pub(crate) HashMap<String, BytesListener>);
 
-pub(super) struct MobileRuntimePlugin;
+pub struct Plugin;
 
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 struct DeliverUiStateEmits;
 
-impl Plugin for MobileRuntimePlugin {
+impl bevy_app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AppLifecycle>()
             .add_message::<UiStateEmit>()
@@ -164,7 +164,7 @@ mod tests {
 
     fn counting_runtime() -> RuntimeHandle {
         let mut app = App::new();
-        app.add_plugins(MobileRuntimePlugin)
+        app.add_plugins(Plugin)
             .init_resource::<Turns>()
             .add_systems(Update, |mut turns: ResMut<Turns>| turns.0 += 1);
         RuntimeHandle::from_app(app)

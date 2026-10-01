@@ -1,3 +1,4 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
@@ -37,32 +38,29 @@ impl Plugin for TeamPlugin {
         app.add_plugins(crate::ui::TeamPage::plugin());
         app.add_plugins((
             HostedUiPlugin::<Team>::new(Self::MANIFEST),
-            TeamProjectionPlugin,
-            TeamIntentPlugin,
+            ProjectionPlugin,
+            IntentPlugin,
             crate::TeamToolPlugin,
         ))
         .add_systems(Startup, (spawn_user_profile, spawn_profile_labels));
     }
 }
 
-struct TeamProjectionPlugin;
+struct ProjectionPlugin;
 
-impl Plugin for TeamProjectionPlugin {
+impl Plugin for ProjectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_agent_request::<AgentListTeam>()
             .add_plugins(UiStatePlugin::<TeamEvent>::default())
-            .add_observer(replay_team)
-            .add_systems(
-                Update,
-                (sync_user_profile_name, project_team, publish_team).chain(),
-            )
-            .add_systems(Update, answer_list_team.after(AgentRequestRouteSet));
+            .add_observer(replay)
+            .add_systems(Update, (sync_user_profile_name, project, publish).chain())
+            .add_systems(Update, list.after(AgentRequestRouteSet));
     }
 }
 
-struct TeamIntentPlugin;
+struct IntentPlugin;
 
-impl Plugin for TeamIntentPlugin {
+impl Plugin for IntentPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ProfileSwitchRequested>()
             .add_plugins(UiEventPlugin::<(
@@ -123,169 +121,142 @@ fn sync_user_profile_name(active_space: FocusedSpace, mut user: Query<&mut Profi
 }
 
 #[allow(clippy::too_many_arguments)]
-fn team_member_row(
-    entity: Entity,
-    profile: &Profile,
-    icon: String,
-    url: String,
-    title: String,
-    sid: String,
-    is_user: bool,
-    is_running: bool,
-    is_done_unseen: bool,
-) -> TeamMemberRow {
-    TeamMemberRow {
-        id: entity.to_bits().to_string(),
-        name: profile.name.clone(),
-        initials: profile.avatar.initials.clone(),
-        color: profile.avatar.color.clone(),
-        icon,
-        url,
-        title,
-        sid,
-        is_user,
-        is_running,
-        is_done_unseen,
-    }
+#[derive(SystemParam)]
+struct TeamProjector<'w, 's> {
+    current_space: Query<'w, 's, Entity, With<CurrentSpace>>,
+    active_spaces: Query<'w, 's, Entity, (With<Space>, With<Active>)>,
+    user: Query<'w, 's, (Entity, &'static Profile), With<User>>,
+    agents: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Profile,
+            &'static Agent,
+            Option<&'static AgentRunState>,
+            Option<&'static AgentDoneUnseen>,
+        ),
+    >,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    window_hierarchy: WindowHierarchy<'w, 's>,
+    space_hierarchy: SpaceHierarchy<'w, 's>,
+    metadata: Query<'w, 's, &'static PageMetadata>,
+    children: Query<'w, 's, &'static Children>,
+    profile_labels:
+        Query<'w, 's, (&'static ProfileId, &'static Name, Has<Active>), With<ProfileLabel>>,
 }
 
-fn agent_page(
-    entity: Entity,
-    meta_q: &Query<&PageMetadata>,
-    children_q: &Query<&Children>,
-    child_of: &Query<&ChildOf>,
-) -> (String, String) {
-    let mut candidates = vec![entity];
-    if let Ok(children) = children_q.get(entity) {
-        candidates.extend(children.iter());
+impl TeamProjector<'_, '_> {
+    fn current(&self) -> Option<Entity> {
+        self.current_space.iter().next()
     }
-    if let Ok(parent) = child_of.get(entity) {
-        let stack = parent.parent();
-        candidates.push(stack);
-        if let Ok(children) = children_q.get(stack) {
+
+    fn target(&self, entity: Entity) -> Option<Entity> {
+        self.space_hierarchy.get(entity).or_else(|| {
+            let window = self.window_hierarchy.get(entity)?;
+            self.active_spaces
+                .iter()
+                .find(|space| self.window_hierarchy.get(*space) == Some(window))
+        })
+    }
+
+    fn page(&self, entity: Entity) -> (String, String) {
+        let mut candidates = vec![entity];
+        if let Ok(children) = self.children.get(entity) {
             candidates.extend(children.iter());
         }
-    }
-    let mut favicon = String::new();
-    let mut title = String::new();
-    for candidate in candidates {
-        if let Ok(meta) = meta_q.get(candidate) {
-            if favicon.is_empty() && !meta.icon.favicon_url().is_empty() {
-                favicon = meta.icon.favicon_url().to_string();
-            }
-            if title.is_empty() && !meta.title.is_empty() {
-                title = meta.title.clone();
+        if let Ok(parent) = self.child_of.get(entity) {
+            let stack = parent.parent();
+            candidates.push(stack);
+            if let Ok(children) = self.children.get(stack) {
+                candidates.extend(children.iter());
             }
         }
-    }
-    (favicon, title)
-}
-
-fn build_team_members(
-    active_space: Option<Entity>,
-    user_q: &Query<(Entity, &Profile), With<User>>,
-    agent_q: &Query<(
-        Entity,
-        &Profile,
-        &Agent,
-        Option<&AgentRunState>,
-        Option<&AgentDoneUnseen>,
-    )>,
-    child_of: &Query<&ChildOf>,
-    space_hierarchy: &SpaceHierarchy,
-    meta_q: &Query<&PageMetadata>,
-    children_q: &Query<&Children>,
-) -> Vec<TeamMemberRow> {
-    let mut members = Vec::new();
-    if let Ok((entity, profile)) = user_q.single() {
-        members.push(team_member_row(
-            entity,
-            profile,
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            true,
-            false,
-            false,
-        ));
-    }
-    if let Some(active) = active_space {
-        for (entity, profile, agent, run, done) in agent_q {
-            if space_hierarchy.get(entity) == Some(active) {
-                let is_running = matches!(run, Some(AgentRunState::Streaming));
-                let is_done_unseen = done.is_some();
-                let (icon, title) = agent_page(entity, meta_q, children_q, child_of);
-                let url = meta_q
-                    .get(entity)
-                    .map(|m| m.url.clone())
-                    .unwrap_or_default();
-                members.push(team_member_row(
-                    entity,
-                    profile,
-                    icon,
-                    url,
-                    title,
-                    agent.sid.clone(),
-                    false,
-                    is_running,
-                    is_done_unseen,
-                ));
+        let mut icon = String::new();
+        let mut title = String::new();
+        for candidate in candidates {
+            if let Ok(metadata) = self.metadata.get(candidate) {
+                if icon.is_empty() && !metadata.icon.favicon_url().is_empty() {
+                    icon = metadata.icon.favicon_url().to_string();
+                }
+                if title.is_empty() && !metadata.title.is_empty() {
+                    title = metadata.title.clone();
+                }
             }
         }
+        (icon, title)
     }
-    members
-}
 
-fn build_profiles(
-    labels: &Query<(&ProfileId, &Name, Has<Active>), With<ProfileLabel>>,
-) -> Vec<ProfileRow> {
-    let mut profiles = Vec::new();
-    for (id, name, is_active) in labels {
-        profiles.push(ProfileRow {
-            id: id.0.clone(),
-            name: name.as_str().to_string(),
-            color: hash_color(&id.0),
-            is_active,
+    fn members(&self, active_space: Option<Entity>) -> Vec<TeamMemberRow> {
+        let mut members = Vec::new();
+        if let Ok((entity, profile)) = self.user.single() {
+            members.push(TeamMemberRow {
+                id: entity.to_bits().to_string(),
+                name: profile.name.clone(),
+                initials: profile.avatar.initials.clone(),
+                color: profile.avatar.color.clone(),
+                is_user: true,
+                ..Default::default()
+            });
+        }
+        let Some(active_space) = active_space else {
+            return members;
+        };
+        for (entity, profile, agent, run, done) in &self.agents {
+            if self.space_hierarchy.get(entity) != Some(active_space) {
+                continue;
+            }
+            let (icon, title) = self.page(entity);
+            let url = self
+                .metadata
+                .get(entity)
+                .map(|metadata| metadata.url.clone())
+                .unwrap_or_default();
+            members.push(TeamMemberRow {
+                id: entity.to_bits().to_string(),
+                name: profile.name.clone(),
+                initials: profile.avatar.initials.clone(),
+                color: profile.avatar.color.clone(),
+                icon,
+                url,
+                title,
+                sid: agent.sid.clone(),
+                is_user: false,
+                is_running: matches!(run, Some(AgentRunState::Streaming)),
+                is_done_unseen: done.is_some(),
+            });
+        }
+        members
+    }
+
+    fn profiles(&self) -> Vec<ProfileRow> {
+        let mut profiles = Vec::new();
+        for (id, name, is_active) in &self.profile_labels {
+            profiles.push(ProfileRow {
+                id: id.0.clone(),
+                name: name.as_str().to_string(),
+                color: hash_color(&id.0),
+                is_active,
+            });
+        }
+        profiles.sort_by(|left, right| {
+            right
+                .is_active
+                .cmp(&left.is_active)
+                .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+                .then_with(|| left.id.cmp(&right.id))
         });
+        profiles
     }
-    profiles.sort_by(|left, right| {
-        right
-            .is_active
-            .cmp(&left.is_active)
-            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    profiles
 }
 
-fn answer_list_team(
+fn list(
     mut reader: MessageReader<AgentRequestMessage<AgentListTeam>>,
-    current_space: Query<Entity, With<CurrentSpace>>,
-    user_q: Query<(Entity, &Profile), With<User>>,
-    agent_q: Query<(
-        Entity,
-        &Profile,
-        &Agent,
-        Option<&AgentRunState>,
-        Option<&AgentDoneUnseen>,
-    )>,
-    child_of: Query<&ChildOf>,
-    space_hierarchy: SpaceHierarchy,
-    meta_q: Query<&PageMetadata>,
-    children_q: Query<&Children>,
+    projector: TeamProjector,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in reader.read() {
-        let members = build_team_members(
-            current_space.iter().next(),
-            &user_q,
-            &agent_q,
-            &child_of,
-            &space_hierarchy,
-            &meta_q,
-            &children_q,
-        );
+        let members = projector.members(projector.current());
         let result = match serde_json::to_string(&members) {
             Ok(json) => AgentCommandResult::Text(json),
             Err(error) => AgentCommandResult::Error(format!("list_team: {error}")),
@@ -294,45 +265,17 @@ fn answer_list_team(
     }
 }
 
-fn project_team(
+fn project(
     views: Query<Entity, Or<(With<LayoutCef>, With<Team>, With<Spaces>)>>,
     presentations: Query<&TeamPresentation>,
-    current_space: Query<Entity, With<CurrentSpace>>,
-    active_spaces: Query<Entity, (With<Space>, With<Active>)>,
-    user_q: Query<(Entity, &Profile), With<User>>,
-    agent_q: Query<(
-        Entity,
-        &Profile,
-        &Agent,
-        Option<&AgentRunState>,
-        Option<&AgentDoneUnseen>,
-    )>,
-    child_of: Query<&ChildOf>,
-    window_hierarchy: WindowHierarchy,
-    space_hierarchy: SpaceHierarchy,
-    meta_q: Query<&PageMetadata>,
-    children_q: Query<&Children>,
-    profile_labels: Query<(&ProfileId, &Name, Has<Active>), With<ProfileLabel>>,
+    projector: TeamProjector,
     mut commands: Commands,
 ) {
     for entity in &views {
-        let target_space = space_hierarchy.get(entity).or_else(|| {
-            let window = window_hierarchy.get(entity)?;
-            active_spaces
-                .iter()
-                .find(|space| window_hierarchy.get(*space) == Some(window))
-        });
+        let target_space = projector.target(entity);
         let presentation = TeamPresentation(TeamStateProjection::build(
-            build_team_members(
-                target_space.or_else(|| current_space.iter().next()),
-                &user_q,
-                &agent_q,
-                &child_of,
-                &space_hierarchy,
-                &meta_q,
-                &children_q,
-            ),
-            build_profiles(&profile_labels),
+            projector.members(target_space.or_else(|| projector.current())),
+            projector.profiles(),
         ));
         if presentations
             .get(entity)
@@ -344,7 +287,7 @@ fn project_team(
     }
 }
 
-fn publish_team(
+fn publish(
     presentations: Query<(Entity, &TeamPresentation), Changed<TeamPresentation>>,
     direct_views: Query<(), Or<(With<Team>, With<Spaces>)>>,
     layout_cefs: Query<(), With<LayoutCef>>,
@@ -365,7 +308,7 @@ fn publish_team(
     }
 }
 
-fn replay_team(
+fn replay(
     trigger: On<UiInput<PageReady>>,
     presentations: Query<&TeamPresentation>,
     direct_views: Query<(), Or<(With<Team>, With<Spaces>)>>,
@@ -531,24 +474,26 @@ mod tests {
 
     #[test]
     fn done_unseen_sets_row_flag() {
-        let row = team_member_row(
-            Entity::PLACEHOLDER,
-            &Profile::registry("Claude", "claude-acp"),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            false,
-            false,
-            true,
-        );
-        assert!(row.is_done_unseen);
+        let mut app = App::new();
+        let space = app.world_mut().spawn((Space, CurrentSpace)).id();
+        app.world_mut().spawn((Profile::user(), User));
+        app.world_mut().spawn((
+            Profile::registry("Claude", "claude-acp"),
+            Agent { sid: String::new() },
+            AgentDoneUnseen,
+            ChildOf(space),
+        ));
+        let rows = app
+            .world_mut()
+            .run_system_once(|projector: TeamProjector| projector.members(projector.current()))
+            .unwrap();
+        assert!(rows.iter().any(|row| !row.is_user && row.is_done_unseen));
     }
 
     #[test]
     fn team_view_owns_active_profile_and_agent_presentation() {
         let mut app = App::new();
-        app.add_plugins(TeamProjectionPlugin);
+        app.add_plugins(ProjectionPlugin);
         let space = app
             .world_mut()
             .spawn((Space, vmux_core::Active, CurrentSpace))
@@ -657,7 +602,7 @@ mod tests {
     fn command_app() -> App {
         let mut app = App::new();
         app.add_message::<vmux_layout::stack::OpenRequest>()
-            .add_plugins(TeamIntentPlugin);
+            .add_plugins(IntentPlugin);
         app
     }
 
@@ -723,31 +668,7 @@ mod tests {
 
         let rows = app
             .world_mut()
-            .run_system_once(
-                |current_space: Query<Entity, With<CurrentSpace>>,
-                 user_q: Query<(Entity, &Profile), With<User>>,
-                 agent_q: Query<(
-                    Entity,
-                    &Profile,
-                    &Agent,
-                    Option<&AgentRunState>,
-                    Option<&vmux_core::notify::AgentDoneUnseen>,
-                )>,
-                 child_of: Query<&ChildOf>,
-                 space_hierarchy: SpaceHierarchy,
-                 meta_q: Query<&PageMetadata>,
-                 children_q: Query<&Children>| {
-                    build_team_members(
-                        current_space.iter().next(),
-                        &user_q,
-                        &agent_q,
-                        &child_of,
-                        &space_hierarchy,
-                        &meta_q,
-                        &children_q,
-                    )
-                },
-            )
+            .run_system_once(|projector: TeamProjector| projector.members(projector.current()))
             .unwrap();
 
         let agent = rows

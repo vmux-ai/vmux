@@ -1,4 +1,4 @@
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Startup, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarPage, CommandBarTab, CommandBarUiState, OpenId,
@@ -8,27 +8,27 @@ use vmux_api::page::UiStateEmit;
 use vmux_api::icon::PageIcon;
 use vmux_api::room::{RemoteAgent, RemoteSession};
 
-pub struct StartRosterPlugin;
+pub struct Plugin;
 
-impl Plugin for StartRosterPlugin {
+impl bevy_app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Roster>()
             .add_message::<RepublishLauncher>()
             .add_message::<UiStateEmit>()
-            .add_systems(Startup, spawn_start_roster)
+            .add_systems(Startup, spawn)
             .add_systems(
                 Update,
                 (
-                    receive_roster.before(LauncherProjection),
-                    project_launcher.in_set(LauncherProjection),
-                    emit_launcher.after(LauncherProjection),
+                    receive.before(Projection),
+                    project.in_set(Projection),
+                    emit.after(Projection),
                 ),
             );
     }
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct LauncherProjection;
+struct Projection;
 
 #[derive(Component, Message, Clone, Default, PartialEq)]
 pub struct Roster {
@@ -43,19 +43,16 @@ pub struct Launcher {
 }
 
 #[derive(Component)]
-struct StartRosterRuntime;
+struct Runtime;
 
 #[derive(Message)]
 pub struct RepublishLauncher;
 
-fn spawn_start_roster(mut commands: Commands) {
-    commands.spawn((StartRosterRuntime, Roster::default(), Launcher::default()));
+fn spawn(mut commands: Commands) {
+    commands.spawn((Runtime, Roster::default(), Launcher::default()));
 }
 
-fn receive_roster(
-    mut messages: MessageReader<Roster>,
-    mut runtimes: Query<&mut Roster, With<StartRosterRuntime>>,
-) {
+fn receive(mut messages: MessageReader<Roster>, mut runtimes: Query<&mut Roster, With<Runtime>>) {
     let Ok(mut roster) = runtimes.single_mut() else {
         return;
     };
@@ -66,18 +63,16 @@ fn receive_roster(
     }
 }
 
-fn project_launcher(
-    mut runtimes: Query<(&Roster, &mut Launcher), (With<StartRosterRuntime>, Changed<Roster>)>,
-) {
+fn project(mut runtimes: Query<(&Roster, &mut Launcher), (With<Runtime>, Changed<Roster>)>) {
     let Ok((roster, mut launcher)) = runtimes.single_mut() else {
         return;
     };
     launcher.snapshot = Launcher::snapshot(roster);
 }
 
-fn emit_launcher(
+fn emit(
     mut refreshes: MessageReader<RepublishLauncher>,
-    mut runtimes: Query<&mut Launcher, With<StartRosterRuntime>>,
+    mut runtimes: Query<&mut Launcher, With<Runtime>>,
     mut emits: MessageWriter<UiStateEmit>,
 ) {
     let refresh = refreshes.read().next().is_some();
@@ -187,7 +182,7 @@ mod tests {
     impl Started {
         fn with(roster: Roster) -> Self {
             let mut app = App::new();
-            app.add_plugins(StartRosterPlugin);
+            app.add_plugins(Plugin);
             app.update();
             let mut started = Self(app);
             started.reroster(roster);
