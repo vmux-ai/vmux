@@ -107,7 +107,7 @@ fn restore_views(layout: PersistedLayout, mut commands: Commands) {
     for space in &layout.spaces {
         commands
             .entity(space)
-            .insert((crate::space::space_view_bundle(), ChildOf(main)));
+            .insert((Space::bundle(), ChildOf(main)));
     }
 
     let mut tabs = layout

@@ -15,11 +15,11 @@ use vmux_history::LastActivatedAt;
 
 use super::input_queue::TerminalProcessIndex;
 use crate::Terminal;
-use crate::plugin::reattach_terminal_bundle;
+use crate::plugin::ReattachedTerminalBundle;
 use vmux_core::{KeyboardOwner, Order};
 use vmux_layout::{
     native_open::HostedUiPlugin,
-    stack::{ActiveTabParam, LayoutFocus, OpenRequest, Stack, stack_bundle},
+    stack::{ActiveTabParam, LayoutFocus, OpenRequest, Stack},
 };
 
 pub struct ProcessMonitorPlugin;
@@ -485,9 +485,9 @@ fn process_navigate(
     let Some(pane) = active_pane else { return };
 
     let tab = commands
-        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+        .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
         .id();
-    commands.spawn((reattach_terminal_bundle(process_id), ChildOf(tab)));
+    commands.spawn((ReattachedTerminalBundle::new(process_id), ChildOf(tab)));
 }
 
 fn process_kill(

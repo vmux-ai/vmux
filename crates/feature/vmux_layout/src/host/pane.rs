@@ -10,7 +10,7 @@ use crate::host::zoom::PaneZoomPlugin;
 pub use crate::host::zoom::Zoomed;
 use crate::stack::Stack;
 #[cfg(test)]
-use crate::{stack::stack_bundle, tab::Tab};
+use crate::tab::Tab;
 use bevy::prelude::*;
 #[cfg(test)]
 use bevy::{
@@ -48,7 +48,7 @@ pub use resize::{PaneDrag, PaneSize, PaneSplitGaps, apply_pane_split_gaps, pane_
 use tree::TreePlugin;
 pub use tree::{
     Pane, PaneSplit, PaneSplitDirection, direction_to_split, first_leaf_descendant,
-    leaf_pane_bundle, split_leaf_into_two, split_or_extend, split_root_bundle,
+    split_leaf_into_two, split_or_extend,
 };
 pub(crate) use tree::{set_split_direction, spawn_split_from_leaf};
 
@@ -416,7 +416,7 @@ mod tests {
             .id();
         let stack = app
             .world_mut()
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: url.to_string(),
@@ -2548,7 +2548,7 @@ mod tests {
             .id();
         let pane = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
@@ -2580,11 +2580,11 @@ mod tests {
             .id();
         let left = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt(10), ChildOf(split)))
+            .spawn((Pane::bundle(), LastActivatedAt(10), ChildOf(split)))
             .id();
         let right = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt(5), ChildOf(split)))
+            .spawn((Pane::bundle(), LastActivatedAt(5), ChildOf(split)))
             .id();
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt(10), ChildOf(left)));
@@ -2601,13 +2601,16 @@ mod tests {
             .add_message::<LauncherDismissRequest>()
             .add_plugins(BesideOpenPlugin);
         app.world_mut().spawn(SpawnCounter::default());
-        let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
+        let tab = app.world_mut().spawn(Tab::bundle()).id();
         let anchor_pane = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
             .id();
-        app.world_mut()
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(anchor_pane)));
+        app.world_mut().spawn((
+            Stack::bundle(),
+            LastActivatedAt::now(),
+            ChildOf(anchor_pane),
+        ));
 
         app.world_mut()
             .resource_mut::<Messages<OpenBesideRequest>>()
@@ -2635,13 +2638,16 @@ mod tests {
             .add_message::<LauncherDismissRequest>()
             .add_plugins(BesideOpenPlugin);
         app.world_mut().spawn(SpawnCounter::default());
-        let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
+        let tab = app.world_mut().spawn(Tab::bundle()).id();
         let anchor_pane = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
             .id();
-        app.world_mut()
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(anchor_pane)));
+        app.world_mut().spawn((
+            Stack::bundle(),
+            LastActivatedAt::now(),
+            ChildOf(anchor_pane),
+        ));
 
         app.world_mut()
             .resource_mut::<Messages<OpenBesideRequest>>()
@@ -2672,13 +2678,16 @@ mod tests {
             .add_message::<LauncherDismissRequest>()
             .add_plugins(BesideOpenPlugin);
         app.world_mut().spawn(SpawnCounter::default());
-        let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
+        let tab = app.world_mut().spawn(Tab::bundle()).id();
         let anchor_pane = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
             .id();
-        app.world_mut()
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(anchor_pane)));
+        app.world_mut().spawn((
+            Stack::bundle(),
+            LastActivatedAt::now(),
+            ChildOf(anchor_pane),
+        ));
 
         for direction in [
             PaneDirection::Right,

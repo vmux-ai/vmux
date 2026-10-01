@@ -13,6 +13,27 @@ pub struct Browser;
 #[require(crate::LayoutUiStateUpdates, ReloadRevision)]
 pub struct LayoutCef;
 
+impl LayoutCef {
+    pub fn bundle(host_window: Entity) -> impl Bundle {
+        (
+            Self,
+            HostsPage,
+            RendersLauncherPanel,
+            HostWindow(host_window),
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                ..default()
+            },
+            Transform::default(),
+            Visibility::Visible,
+        )
+    }
+}
+
 #[derive(Component, Default)]
 pub struct ReloadRevision(u64);
 
@@ -205,25 +226,6 @@ impl Browser {
             Visibility::Visible,
         )
     }
-}
-
-pub fn layout_cef_bundle(host_window: Entity) -> impl Bundle {
-    (
-        LayoutCef,
-        HostsPage,
-        RendersLauncherPanel,
-        HostWindow(host_window),
-        Node {
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            top: Val::Px(0.0),
-            ..default()
-        },
-        Transform::default(),
-        Visibility::Visible,
-    )
 }
 
 #[cfg(test)]

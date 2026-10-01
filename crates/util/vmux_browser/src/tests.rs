@@ -388,7 +388,7 @@ mod browser_navigate_flow {
         let pane = app.world_mut().spawn(Pane).id();
         let stack = app
             .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
+            .spawn(vmux_layout::stack::Stack::bundle())
             .insert(ChildOf(pane))
             .id();
         app.world_mut().spawn(Browser).insert(ChildOf(stack));
@@ -484,7 +484,7 @@ mod browser_navigate_flow {
         let first_stack = app
             .world_mut()
             .spawn((
-                vmux_layout::stack::stack_bundle(),
+                vmux_layout::stack::Stack::bundle(),
                 LastActivatedAt(1),
                 ChildOf(pane),
             ))
@@ -532,7 +532,7 @@ mod browser_navigate_flow {
         let first_stack = app
             .world_mut()
             .spawn((
-                vmux_layout::stack::stack_bundle(),
+                vmux_layout::stack::Stack::bundle(),
                 LastActivatedAt(10),
                 ChildOf(pane),
             ))
@@ -655,7 +655,7 @@ mod browser_navigate_flow {
         let stack = app
             .world_mut()
             .spawn((
-                vmux_layout::stack::stack_bundle(),
+                vmux_layout::stack::Stack::bundle(),
                 LastActivatedAt(1),
                 ChildOf(pane),
             ))
@@ -713,7 +713,7 @@ mod browser_navigate_flow {
         let stack = app
             .world_mut()
             .spawn((
-                vmux_layout::stack::stack_bundle(),
+                vmux_layout::stack::Stack::bundle(),
                 LastActivatedAt(1),
                 ChildOf(pane),
             ))
@@ -759,7 +759,7 @@ mod browser_navigate_flow {
         let stack = app
             .world_mut()
             .spawn((
-                vmux_layout::stack::stack_bundle(),
+                vmux_layout::stack::Stack::bundle(),
                 LastActivatedAt(1),
                 ChildOf(pane),
             ))
@@ -920,7 +920,7 @@ mod browser_navigate_flow {
         let stack = app
             .world_mut()
             .spawn((
-                vmux_layout::stack::stack_bundle(),
+                vmux_layout::stack::Stack::bundle(),
                 vmux_history::LastActivatedAt::now(),
                 ChildOf(pane),
             ))
@@ -1038,7 +1038,7 @@ mod open_in_place_flow {
     use vmux_history::LastActivatedAt;
     use vmux_layout::Browser;
     use vmux_layout::pane::Pane;
-    use vmux_layout::stack::stack_bundle;
+    use vmux_layout::stack::Stack;
     use vmux_layout::tab::Tab;
     use vmux_terminal::Terminal;
 
@@ -1115,7 +1115,7 @@ mod open_in_place_flow {
             .id();
         let stack = app
             .world_mut()
-            .spawn(stack_bundle())
+            .spawn(Stack::bundle())
             .insert((ChildOf(pane), LastActivatedAt(1)))
             .id();
         app.world_mut().spawn(Browser).insert(ChildOf(stack));
@@ -1143,7 +1143,7 @@ mod open_in_place_flow {
             .id();
         let stack = app
             .world_mut()
-            .spawn(stack_bundle())
+            .spawn(Stack::bundle())
             .insert((ChildOf(pane), LastActivatedAt(1)))
             .id();
         app.world_mut()
@@ -1173,7 +1173,7 @@ mod open_in_place_flow {
             .id();
         let stack = app
             .world_mut()
-            .spawn(stack_bundle())
+            .spawn(Stack::bundle())
             .insert((ChildOf(pane), LastActivatedAt(1)))
             .id();
         app.world_mut()

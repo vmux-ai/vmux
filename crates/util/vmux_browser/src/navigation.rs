@@ -292,7 +292,7 @@ fn navigate(
                     });
                     let stack = commands
                         .spawn((
-                            vmux_layout::stack::stack_bundle(),
+                            Stack::bundle(),
                             if activate_new {
                                 LastActivatedAt::now()
                             } else {

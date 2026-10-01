@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::*;
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_command::{
     BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
     WriteCommandRequests,
@@ -7,9 +7,8 @@ use vmux_command::{
 use vmux_core::host::UiState;
 #[cfg(test)]
 use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::{PageIcon, PageMetadata, PageOpenRequest, PageOpenTarget};
+use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_layout::{
-    Browser,
     native_open::HostedUiPlugin,
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
@@ -18,7 +17,6 @@ use vmux_layout::{
 use crate::event::{CheckForUpdatesEvent, CheckForUpdatesRequest, SettingsRequest};
 use crate::state::SettingsUiState;
 use crate::{AppSettings, SettingsWriteRequest};
-use vmux_flex::prelude::*;
 
 use super::projection::SettingsRenderProjection;
 use crate::schema::SettingsSchema;
@@ -74,38 +72,6 @@ fn issue_open_settings(
 ) {
     if registered.contains(trigger.event().command()) {
         requests.write(OpenSettingsRequest);
-    }
-}
-
-impl Settings {
-    pub fn new() -> impl Bundle {
-        (
-            (
-                Self,
-                Browser,
-                WebviewSource::new(crate::SettingsPlugin::URL),
-                ResolvedWebviewUri(crate::SettingsPlugin::URL.to_string()),
-                PageMetadata {
-                    title: "Settings".to_string(),
-                    url: crate::SettingsPlugin::URL.to_string(),
-                    icon: PageIcon::None,
-                    bg_color: None,
-                },
-            ),
-            (
-                WebviewSize(Vec2::new(1280.0, 720.0)),
-                Transform::default(),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
-                    ..default()
-                },
-                Visibility::Visible,
-            ),
-        )
     }
 }
 

@@ -13,6 +13,8 @@ use vmux_core::agent::{
 };
 use vmux_core::profile::ProjectsDirectory;
 use vmux_layout::AgentPaneDirection;
+#[cfg(test)]
+use vmux_layout::LayoutContractPlugin;
 use vmux_layout::pane::{
     Pane, PaneSplit, PaneSplitDirection, SpawnCounter, SpawnSeq, direction_to_split,
     split_or_extend,
@@ -20,8 +22,6 @@ use vmux_layout::pane::{
 use vmux_layout::placement::{PageKind, page_kind_for_url};
 use vmux_layout::stack::Stack;
 use vmux_layout::tab::Tab;
-#[cfg(test)]
-use vmux_layout::{LayoutContractPlugin, stack::stack_bundle};
 use vmux_setting::{AppSettings, StartupDir};
 #[cfg(test)]
 use vmux_setting::{TerminalSettings, TerminalTheme};
@@ -939,7 +939,7 @@ mod tests {
     }
 
     fn spawn_stack_in_pane(app: &mut App, pane: Entity, url: &str) -> Entity {
-        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(pane))).id();
+        let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(pane))).id();
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: url.to_string(),
             ..default()
@@ -1334,7 +1334,7 @@ mod tests {
             .id();
         let stack = app
             .world_mut()
-            .spawn((stack_bundle(), ChildOf(terminal_pane)))
+            .spawn((Stack::bundle(), ChildOf(terminal_pane)))
             .id();
         let desired_cwd = std::env::temp_dir();
         app.world_mut().spawn((
@@ -1386,7 +1386,7 @@ mod tests {
                 .world_mut()
                 .spawn((Pane, SpawnSeq(sequence), ChildOf(tab)))
                 .id();
-            let stack = app.world_mut().spawn((stack_bundle(), ChildOf(pane))).id();
+            let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(pane))).id();
             let terminal = app
                 .world_mut()
                 .spawn((
@@ -1444,7 +1444,7 @@ mod tests {
             .id();
         let current_stack = app
             .world_mut()
-            .spawn((stack_bundle(), ChildOf(current_pane)))
+            .spawn((Stack::bundle(), ChildOf(current_pane)))
             .id();
         let current_pid = ProcessId::new();
         app.world_mut().spawn((
@@ -1465,7 +1465,7 @@ mod tests {
             .id();
         let stale_stack = app
             .world_mut()
-            .spawn((stack_bundle(), ChildOf(stale_pane)))
+            .spawn((Stack::bundle(), ChildOf(stale_pane)))
             .id();
         app.world_mut().spawn((
             Terminal,
@@ -1731,7 +1731,7 @@ mod tests {
         app.world_mut().spawn(SpawnCounter::default());
         let browser_stack = app
             .world_mut()
-            .spawn((stack_bundle(), ChildOf(browser_pane)))
+            .spawn((Stack::bundle(), ChildOf(browser_pane)))
             .id();
         app.world_mut()
             .entity_mut(browser_stack)
@@ -1863,7 +1863,7 @@ mod tests {
             .id();
         let stack = app
             .world_mut()
-            .spawn((stack_bundle(), LastActivatedAt(3), ChildOf(pane)))
+            .spawn((Stack::bundle(), LastActivatedAt(3), ChildOf(pane)))
             .id();
         app.insert_resource(ReusedRunTerminalFocusInput {
             candidate: RunTerminalCandidate {

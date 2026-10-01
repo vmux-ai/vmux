@@ -6,7 +6,7 @@ use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     NavigationState,
     pane::{Pane, PaneSplit},
-    stack::{Stack, stack_bundle},
+    stack::Stack,
 };
 
 use crate::host::WebviewLoadCompleted;
@@ -85,7 +85,7 @@ fn spawn_popup_stacks(
             continue;
         }
         let new_stack = commands
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
         commands.spawn((Browser::new(&ev.target_url), ChildOf(new_stack)));
     }

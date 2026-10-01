@@ -24,13 +24,7 @@ impl Plugin for ProjectionPlugin {
             .add_plugins(vmux_core::host::UiStatePlugin::<SettingsUiState>::default())
             .add_systems(
                 Update,
-                (
-                    localize_metadata,
-                    project_schema,
-                    project_fields,
-                    publish,
-                )
-                    .chain(),
+                (localize_metadata, project_schema, project_fields, publish).chain(),
             );
     }
 }

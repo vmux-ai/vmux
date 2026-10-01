@@ -23,8 +23,6 @@ use vmux_layout::active_pane::ActivatePane;
 use vmux_layout::pane::Pane;
 use vmux_layout::placement::reusable_page_match;
 use vmux_layout::stack::Stack;
-#[cfg(test)]
-use vmux_layout::stack::stack_bundle;
 use vmux_layout::tab::Tab;
 use vmux_layout::worktree::{
     TabDirectoryObservationKind, TabDirectoryObserved, TabDirectoryRebindSet,
@@ -469,14 +467,14 @@ mod tests {
         let agent_pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
         let agent_stack = app
             .world_mut()
-            .spawn((stack_bundle(), ChildOf(agent_pane)))
+            .spawn((Stack::bundle(), ChildOf(agent_pane)))
             .id();
         let anchor = ProcessId::new();
         app.world_mut().spawn((anchor, ChildOf(agent_stack)));
         let file_pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
         let file_stack = app
             .world_mut()
-            .spawn((stack_bundle(), ChildOf(file_pane)))
+            .spawn((Stack::bundle(), ChildOf(file_pane)))
             .id();
         app.world_mut().spawn((
             PageMetadata {
@@ -567,7 +565,7 @@ mod tests {
         let agent_pane = app.world_mut().spawn((Pane, ChildOf(root))).id();
         let agent_stack = app
             .world_mut()
-            .spawn((stack_bundle(), ChildOf(agent_pane)))
+            .spawn((Stack::bundle(), ChildOf(agent_pane)))
             .id();
         let anchor = ProcessId::new();
         app.world_mut().spawn((anchor, ChildOf(agent_stack)));
@@ -585,7 +583,7 @@ mod tests {
         let file_pane = app.world_mut().spawn((Pane, ChildOf(nested))).id();
         let file_stack = app
             .world_mut()
-            .spawn((stack_bundle(), ChildOf(file_pane)))
+            .spawn((Stack::bundle(), ChildOf(file_pane)))
             .id();
         app.world_mut().spawn((
             PageMetadata {
@@ -793,7 +791,7 @@ mod tests {
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
-        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(pane))).id();
+        let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(pane))).id();
         let anchor = ProcessId::new();
         app.world_mut().spawn((anchor, ChildOf(stack)));
 
@@ -839,7 +837,7 @@ mod tests {
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
-        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(pane))).id();
+        let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(pane))).id();
         let anchor = ProcessId::new();
         app.world_mut().spawn((anchor, ChildOf(stack)));
         let path = std::env::temp_dir().join("vmux-observed-file.rs");
@@ -898,7 +896,7 @@ mod tests {
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
-        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(pane))).id();
+        let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(pane))).id();
         let command_anchor = ProcessId::new();
         app.world_mut().spawn((command_anchor, ChildOf(stack)));
         app.world_mut()
@@ -1039,7 +1037,7 @@ mod tests {
             .id();
         app.insert_resource(RunTab(tab));
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
-        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(pane))).id();
+        let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(pane))).id();
         let anchor = ProcessId::new();
         app.world_mut().spawn((anchor, ChildOf(stack)));
         app.world_mut()

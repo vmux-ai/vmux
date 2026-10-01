@@ -31,9 +31,9 @@ pub use component::{
 pub use contract::TerminalContractPlugin;
 pub use plugin::{
     AwaitingProcessCreated, CommandLifecycleEvent, OscTitleChanged, PendingServiceCreate,
-    ProcessExitedEvent, RestartPty, TerminalPlugin, TerminalReinputRequest, TerminalRestartRequest,
-    TerminalStackSpawnRequest, TerminalStackSpawnSet, has_live_terminal, new_terminal_bundle,
-    new_terminal_bundle_with_cwd, reattach_terminal_bundle, should_confirm_close,
+    ProcessExitedEvent, ReattachedTerminalBundle, RestartPty, TerminalBundle, TerminalPlugin,
+    TerminalReinputRequest, TerminalRestartRequest, TerminalStackSpawnRequest,
+    TerminalStackSpawnSet, has_live_terminal, should_confirm_close,
 };
 pub use process_control::TerminalGridSize;
 pub use request::{RunShellRequest, ShellMode, TerminalRequestPlugin, TerminalSendRequest};

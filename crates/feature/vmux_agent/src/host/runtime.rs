@@ -9,10 +9,10 @@ use vmux_core::team::Profile;
 use vmux_core::{LastActivatedAt, PageMetadata};
 use vmux_git::worktree::ValidatedLinkedWorkspace;
 use vmux_layout::pane::PanePlacement;
-use vmux_layout::stack::stack_bundle;
+use vmux_layout::stack::Stack;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::TabWorktreeReady;
-use vmux_terminal::reattach_terminal_bundle;
+use vmux_terminal::ReattachedTerminalBundle;
 
 use super::handoff::PendingHandoff;
 use crate::host::acp::registry::{Registry, RegistryAgent};
@@ -499,10 +499,10 @@ fn apply_terminal(
             &mut split_batch,
         );
         let tab = commands
-            .spawn((stack_bundle(), LastActivatedAt(0), ChildOf(target_pane)))
+            .spawn((Stack::bundle(), LastActivatedAt(0), ChildOf(target_pane)))
             .id();
         commands.spawn((
-            reattach_terminal_bundle(ev.process_id),
+            ReattachedTerminalBundle::new(ev.process_id),
             vmux_terminal::RetainOnProcessExit,
             ChildOf(tab),
         ));
@@ -1158,22 +1158,19 @@ mod tests {
     #[test]
     fn acp_terminal_stack_does_not_take_focus_from_agent() {
         use crate::host::event::UiAgentAcpTerminalCreated;
-        use vmux_layout::pane::leaf_pane_bundle;
+        use vmux_layout::pane::Pane;
         use vmux_layout::stack::Stack;
-        use vmux_layout::tab::tab_bundle;
+        use vmux_layout::tab::Tab;
 
         let mut app = App::new();
         app.add_message::<UiAgentAcpTerminalCreated>()
             .add_systems(Update, apply_terminal);
-        let tab = app.world_mut().spawn(tab_bundle()).id();
-        let pane = app
-            .world_mut()
-            .spawn((leaf_pane_bundle(), ChildOf(tab)))
-            .id();
+        let tab = app.world_mut().spawn(Tab::bundle()).id();
+        let pane = app.world_mut().spawn((Pane::bundle(), ChildOf(tab))).id();
         let agent = app
             .world_mut()
             .spawn((
-                stack_bundle(),
+                Stack::bundle(),
                 LastActivatedAt(10),
                 ChildOf(pane),
                 AcpSession {

@@ -212,6 +212,26 @@ pub struct Tab {
     pub startup_dir: Option<String>,
 }
 
+impl Tab {
+    pub fn bundle() -> impl Bundle {
+        (
+            Self::default(),
+            Transform::default(),
+            Visibility::default(),
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                ..default()
+            },
+        )
+    }
+}
+
 #[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::tab"]
@@ -268,24 +288,6 @@ impl TabHierarchy<'_, '_> {
 
 #[derive(Event, Clone, Copy, Debug)]
 pub struct TabClosed;
-
-pub fn tab_bundle() -> impl Bundle {
-    (
-        Tab::default(),
-        Transform::default(),
-        Visibility::default(),
-        Node {
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            right: Val::Px(0.0),
-            top: Val::Px(0.0),
-            bottom: Val::Px(0.0),
-            ..default()
-        },
-    )
-}
 
 fn handle_open_requests(
     mut requests: MessageReader<OpenRequest>,
@@ -1156,7 +1158,7 @@ mod tests {
         let old_stack = app
             .world_mut()
             .spawn((
-                crate::stack::stack_bundle(),
+                crate::stack::Stack::bundle(),
                 LastActivatedAt(1),
                 ChildOf(old_pane),
             ))
@@ -1307,15 +1309,15 @@ mod tests {
         let space = app.world_mut().spawn(crate::space::Space).id();
         let first = app
             .world_mut()
-            .spawn((tab_bundle(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt(1), ChildOf(space)))
             .id();
         let second = app
             .world_mut()
-            .spawn((tab_bundle(), LastActivatedAt(2), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt(2), ChildOf(space)))
             .id();
         let third = app
             .world_mut()
-            .spawn((tab_bundle(), LastActivatedAt(3), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt(3), ChildOf(space)))
             .id();
 
         app.world_mut().trigger(UiInput::<TabReorderRequest> {
@@ -1360,16 +1362,16 @@ mod tests {
             .id();
         let a = app
             .world_mut()
-            .spawn((tab_bundle(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt(1), ChildOf(space)))
             .id();
         let c = app
             .world_mut()
-            .spawn((tab_bundle(), LastActivatedAt(3), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt(3), ChildOf(space)))
             .id();
         let d = app
             .world_mut()
             .spawn((
-                tab_bundle(),
+                Tab::bundle(),
                 LastActivatedAt(4),
                 vmux_core::Active,
                 ChildOf(space),
@@ -1420,16 +1422,16 @@ mod tests {
             .id();
         let a = app
             .world_mut()
-            .spawn((tab_bundle(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt(1), ChildOf(space)))
             .id();
         let c = app
             .world_mut()
-            .spawn((tab_bundle(), LastActivatedAt(3), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt(3), ChildOf(space)))
             .id();
         let d = app
             .world_mut()
             .spawn((
-                tab_bundle(),
+                Tab::bundle(),
                 LastActivatedAt(4),
                 vmux_core::Active,
                 ChildOf(space),
@@ -1479,7 +1481,7 @@ mod tests {
         let tab_a = app
             .world_mut()
             .spawn((
-                tab_bundle(),
+                Tab::bundle(),
                 LastActivatedAt(2),
                 vmux_core::Active,
                 ChildOf(space),
@@ -1487,7 +1489,7 @@ mod tests {
             .id();
         let tab_b = app
             .world_mut()
-            .spawn((tab_bundle(), LastActivatedAt(1), ChildOf(space)))
+            .spawn((Tab::bundle(), LastActivatedAt(1), ChildOf(space)))
             .id();
 
         app.world_mut()

@@ -16,7 +16,7 @@ use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::{
     pane::{Pane, PaneSplit},
-    stack::{LayoutFocus, Stack, stack_bundle},
+    stack::{LayoutFocus, Stack},
 };
 
 use crate::host::{
@@ -153,7 +153,7 @@ fn handle_open_requests(
         let stack = match target.resolve(&request.target) {
             Ok(PageOpenTargetResolution::Existing(stack)) => stack,
             Ok(PageOpenTargetResolution::CreateIn(pane)) => commands
-                .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
                 .id(),
             Err(message) => {
                 if let Some(response) = page_open_response(request.request_id, Err(message)) {

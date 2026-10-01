@@ -20,20 +20,15 @@ use vmux_core::{
 use vmux_history::LastActivatedAt;
 
 use super::command::LayoutRequestSet;
-use crate::pane::{
-    Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection, leaf_pane_bundle, split_root_bundle,
-};
+use crate::pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection};
 use crate::settings::LayoutSettings;
 use crate::space::{CurrentSpace, Space, SpaceHierarchy, SpaceId};
 #[cfg(test)]
 use crate::stack::CloseRequest;
 use crate::stack::{
     ActiveTabParam, CloseStackReason, CloseStackRequest, CloseStackSet, Stack, StackCommandSet,
-    stack_bundle,
 };
-use crate::tab::{
-    CloseTabRequest, Tab, TabClosed, active_tab_siblings, pick_after_close, tab_bundle,
-};
+use crate::tab::{CloseTabRequest, Tab, TabClosed, active_tab_siblings, pick_after_close};
 use crate::window::spawn_tab_scaffold_in_space;
 use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
@@ -673,7 +668,7 @@ fn restore_archived_tab(
         .unwrap_or(entries[0].entity);
     let tab = commands
         .spawn((
-            tab_bundle(),
+            Tab::bundle(),
             LastActivatedAt::now(),
             CreatedAt::now(),
             ChildOf(space),
@@ -707,7 +702,7 @@ fn restore_archived_tab(
         let root_id = uuid::Uuid::new_v4().to_string();
         let root = commands
             .spawn((
-                split_root_bundle(PaneSplitDirection::Row),
+                Pane::split_bundle(PaneSplitDirection::Row),
                 PaneId(root_id.clone()),
                 LastActivatedAt(0),
                 HostWindow(primary_window),
@@ -718,7 +713,7 @@ fn restore_archived_tab(
         let leaf_id = uuid::Uuid::new_v4().to_string();
         let leaf = commands
             .spawn((
-                leaf_pane_bundle(),
+                Pane::bundle(),
                 PaneId(leaf_id.clone()),
                 LastActivatedAt(0),
                 ChildOf(root),
@@ -751,7 +746,7 @@ fn restore_archived_tab(
         let active = entry.entity == active_entry;
         let stack = commands
             .spawn((
-                stack_bundle(),
+                Stack::bundle(),
                 LastActivatedAt(if active { now_millis() } else { 0 }),
                 CreatedAt::now(),
                 ChildOf(leaf),
@@ -842,7 +837,7 @@ fn spawn_archived_split(
     };
     let entity = commands
         .spawn((
-            split_root_bundle(direction),
+            Pane::split_bundle(direction),
             PaneId(id.to_string()),
             LastActivatedAt(0),
             ChildOf(parent),
@@ -875,7 +870,7 @@ fn spawn_archived_split(
             ArchivedPaneChild::Leaf(child_id) => {
                 let leaf = commands
                     .spawn((
-                        leaf_pane_bundle(),
+                        Pane::bundle(),
                         PaneId(child_id.clone()),
                         LastActivatedAt(0),
                         ChildOf(entity),
@@ -948,7 +943,7 @@ fn spawn_stack_in_leaf(
     commands: &mut Commands,
 ) -> Entity {
     let stack = commands
-        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
+        .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(leaf)))
         .id();
     let stack_count = layout
         .children_q
@@ -1025,7 +1020,7 @@ fn reattach_along_path(
             leaf
         } else {
             commands
-                .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
+                .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(parent)))
                 .id()
         };
         return Some((leaf, anchor));
@@ -1047,7 +1042,7 @@ fn reattach_along_path(
         let new_child = if is_last {
             commands
                 .spawn((
-                    leaf_pane_bundle(),
+                    Pane::bundle(),
                     PaneId(child_id),
                     LastActivatedAt::now(),
                     ChildOf(parent),
@@ -1060,7 +1055,7 @@ fn reattach_along_path(
             };
             commands
                 .spawn((
-                    split_root_bundle(axis),
+                    Pane::split_bundle(axis),
                     PaneId(child_id),
                     LastActivatedAt::now(),
                     ChildOf(parent),
@@ -1115,12 +1110,14 @@ fn promote_leaf_to_split(
         .map(|c| c.iter().filter(|&e| layout.stacks_q.contains(e)).collect())
         .unwrap_or_default();
     let survivor = commands
-        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
+        .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(parent)))
         .id();
     for s in stacks {
         commands.entity(s).insert(ChildOf(survivor));
     }
-    commands.entity(parent).insert(split_root_bundle(direction));
+    commands
+        .entity(parent)
+        .insert(Pane::split_bundle(direction));
 }
 
 #[cfg(test)]

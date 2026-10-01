@@ -1,5 +1,5 @@
 use crate::{
-    stack::{ActiveTabParam, LayoutFocus, Stack, stack_bundle},
+    stack::{ActiveTabParam, LayoutFocus, Stack},
     tab::Tab,
 };
 use bevy::{ecs::relationship::Relationship, prelude::*};
@@ -491,7 +491,7 @@ fn spawn_beside_stack(
         LastActivatedAt(0)
     };
     let new_stack = commands
-        .spawn((stack_bundle(), stack_ts, ChildOf(target_pane)))
+        .spawn((Stack::bundle(), stack_ts, ChildOf(target_pane)))
         .id();
     commands.entity(new_stack).insert(PageMetadata {
         url: req.url.clone(),
@@ -948,7 +948,11 @@ fn handle_in(
 
         if was_split {
             let new_stack = commands
-                .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
+                .spawn((
+                    Stack::bundle(),
+                    LastActivatedAt::now(),
+                    ChildOf(target_pane),
+                ))
                 .id();
             open_stack(new_stack, resolved, None, &mut page_open_requests);
         } else {
@@ -963,7 +967,11 @@ fn handle_in(
                 }
                 PaneOpenMode::NewStack => {
                     let new_stack = commands
-                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
+                        .spawn((
+                            Stack::bundle(),
+                            LastActivatedAt::now(),
+                            ChildOf(target_pane),
+                        ))
                         .id();
                     open_stack(new_stack, resolved, None, &mut page_open_requests);
                 }

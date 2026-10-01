@@ -274,7 +274,7 @@ fn close_last_stack_in_pane(
     let Some(parent) = split_parent else {
         commands.entity(stack).despawn();
         let replacement = commands
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
         closer.page_open_requests.write(PageOpenRequest {
             target: PageOpenTarget::Stack(replacement),
@@ -391,6 +391,24 @@ fn closes_tab(tab: Entity, stack: Entity, closer: &mut StackCloser) -> bool {
 pub struct Stack {
     pub scroll_x: f32,
     pub scroll_y: f32,
+}
+
+impl Stack {
+    pub fn bundle() -> impl Bundle {
+        (
+            Self::default(),
+            vmux_core::PageMetadata::default(),
+            Transform::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                ..default()
+            },
+        )
+    }
 }
 
 pub fn active_among<'a>(
@@ -528,22 +546,6 @@ fn compute_focused(
     commands.spawn(next.local_bundle());
 }
 
-pub fn stack_bundle() -> impl Bundle {
-    (
-        Stack::default(),
-        vmux_core::PageMetadata::default(),
-        Transform::default(),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            right: Val::Px(0.0),
-            top: Val::Px(0.0),
-            bottom: Val::Px(0.0),
-            ..default()
-        },
-    )
-}
-
 fn handle_open_requests(
     mut reader: MessageReader<OpenRequest>,
     active_tab_param: ActiveTabParam,
@@ -563,7 +565,7 @@ fn handle_open_requests(
             .filter(|url| !url.is_empty())
             .unwrap_or_else(|| focused_space.resolved_startup_url());
         let stack = commands
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
         page_open_requests.write(PageOpenRequest {
             target: PageOpenTarget::Stack(stack),
@@ -709,7 +711,7 @@ fn open_startup_url_if_no_stacks(
         return;
     };
     let stack = commands
-        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+        .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
         .id();
     page_open_requests.write(PageOpenRequest {
         target: PageOpenTarget::Stack(stack),
@@ -1053,7 +1055,7 @@ mod tests {
             .id();
         let original_stack = app
             .world_mut()
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
         app.world_mut()
             .resource_mut::<Messages<CloseRequest>>()
@@ -1237,7 +1239,7 @@ mod tests {
         let split = app
             .world_mut()
             .spawn((
-                crate::pane::split_root_bundle(crate::pane::PaneSplitDirection::Row),
+                Pane::split_bundle(crate::pane::PaneSplitDirection::Row),
                 ChildOf(tab),
             ))
             .id();
@@ -1297,7 +1299,7 @@ mod tests {
         let split = app
             .world_mut()
             .spawn((
-                crate::pane::split_root_bundle(crate::pane::PaneSplitDirection::Row),
+                Pane::split_bundle(crate::pane::PaneSplitDirection::Row),
                 ChildOf(tab),
             ))
             .id();

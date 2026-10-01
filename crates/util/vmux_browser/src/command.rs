@@ -869,7 +869,7 @@ mod tests {
     use vmux_flex::prelude::{Node, Val};
     use vmux_layout::pane::Pane;
     use vmux_layout::space::{Space, SpaceId};
-    use vmux_layout::stack::stack_bundle;
+    use vmux_layout::stack::Stack;
     use vmux_layout::tab::Tab;
     use vmux_setting::AppSettings;
 
@@ -949,7 +949,7 @@ mod tests {
                 .id();
             let stack = app
                 .world_mut()
-                .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
                 .id();
             let view = app.world_mut().spawn((Browser, ChildOf(stack), page)).id();
 
@@ -1062,11 +1062,11 @@ mod tests {
         let pane = app.world_mut().spawn(Pane).id();
         let middle = app
             .world_mut()
-            .spawn((stack_bundle(), LastActivatedAt(1), ChildOf(pane)))
+            .spawn((Stack::bundle(), LastActivatedAt(1), ChildOf(pane)))
             .id();
         let active = app
             .world_mut()
-            .spawn((stack_bundle(), LastActivatedAt(2), ChildOf(pane)))
+            .spawn((Stack::bundle(), LastActivatedAt(2), ChildOf(pane)))
             .id();
         let mut cursor = app
             .world()
@@ -1190,7 +1190,7 @@ mod tests {
             let first_tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
             let pane_in_first_tab = app.world_mut().spawn((Pane, ChildOf(first_tab))).id();
             app.world_mut()
-                .spawn((stack_bundle(), ChildOf(pane_in_first_tab)));
+                .spawn((Stack::bundle(), ChildOf(pane_in_first_tab)));
             let second_tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
             let other_space = app
                 .world_mut()

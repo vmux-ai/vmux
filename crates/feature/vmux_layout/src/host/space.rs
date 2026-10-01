@@ -42,6 +42,30 @@ pub struct CurrentSpaceSet;
 )]
 pub struct Space;
 
+impl Space {
+    pub fn bundle() -> impl Bundle {
+        (
+            Self,
+            Self::container_node(),
+            Transform::default(),
+            Visibility::default(),
+        )
+    }
+
+    fn container_node() -> Node {
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            top: Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            ..default()
+        }
+    }
+}
+
 #[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::space"]
@@ -204,27 +228,6 @@ impl SpaceHierarchy<'_, '_> {
     }
 }
 
-pub fn space_container_node() -> Node {
-    Node {
-        position_type: PositionType::Absolute,
-        left: Val::Px(0.0),
-        right: Val::Px(0.0),
-        top: Val::Px(0.0),
-        bottom: Val::Px(0.0),
-        width: Val::Percent(100.0),
-        height: Val::Percent(100.0),
-        ..default()
-    }
-}
-
-pub fn space_view_bundle() -> impl Bundle {
-    (
-        space_container_node(),
-        Transform::default(),
-        Visibility::default(),
-    )
-}
-
 fn sync_container_visibility(
     mut spaces: Query<(&mut Node, &mut Visibility, Has<Active>), With<Space>>,
 ) {
@@ -309,7 +312,10 @@ mod tests {
 
     #[test]
     fn space_container_bundle_is_absolute_fill_node() {
-        assert_eq!(space_container_node().position_type, PositionType::Absolute);
+        assert_eq!(
+            Space::container_node().position_type,
+            PositionType::Absolute
+        );
     }
 
     #[test]
@@ -322,14 +328,11 @@ mod tests {
             .spawn((
                 Space,
                 vmux_core::Active,
-                space_container_node(),
+                Space::container_node(),
                 Visibility::default(),
             ))
             .id();
-        let bg = app
-            .world_mut()
-            .spawn((Space, space_container_node(), Visibility::default()))
-            .id();
+        let bg = app.world_mut().spawn(Space::bundle()).id();
         app.update();
         assert_eq!(
             app.world().get::<Node>(active).unwrap().display,

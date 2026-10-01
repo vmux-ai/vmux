@@ -163,8 +163,8 @@ fn build_stack(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pane::leaf_pane_bundle;
-    use crate::stack::stack_bundle;
+    use crate::pane::Pane;
+    use crate::stack::Stack;
     use bevy::ecs::system::RunSystemOnce;
     use vmux_history::LastActivatedAt;
 
@@ -195,11 +195,11 @@ mod tests {
             .id();
         let leaf = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
+            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(leaf)))
             .id();
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "vmux://terminal/x".into(),
@@ -249,11 +249,11 @@ mod tests {
             .id();
         let leaf = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
+            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(leaf)))
             .id();
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "vmux://terminal/123".into(),
@@ -308,11 +308,11 @@ mod tests {
             .id();
         let leaf = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
+            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(leaf)))
             .id();
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "https://example.com".into(),
@@ -563,11 +563,11 @@ mod tests {
             .id();
         let leaf = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
+            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(leaf)))
             .id();
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "https://example.com".into(),

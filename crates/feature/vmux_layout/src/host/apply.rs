@@ -4,13 +4,10 @@ use std::collections::HashSet as ApplyHashSet;
 use crate::protocol::{LayoutNode, LayoutSnapshot, NodeKind, parse_id};
 use crate::reconcile::*;
 
-use crate::pane::{
-    Pane, PaneSize, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps,
-    split_root_bundle,
-};
+use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps};
 use crate::protocol as proto;
 use crate::protocol::format_id;
-use crate::stack::{Stack, stack_bundle};
+use crate::stack::Stack;
 use crate::tab::Tab as LayoutTab;
 use crate::{TerminalLayoutSpawnRequest, event::PANE_GAP_PX};
 #[cfg(test)]
@@ -294,7 +291,7 @@ fn apply_layout_plan(
             None => {
                 let activated_at = LastActivatedAt::now();
                 let entity = commands
-                    .spawn((crate::tab::tab_bundle(), activated_at, CreatedAt::now()))
+                    .spawn((LayoutTab::bundle(), activated_at, CreatedAt::now()))
                     .id();
                 if let Some(parent) = tab_parent {
                     commands.entity(entity).insert(ChildOf(parent));
@@ -390,7 +387,7 @@ fn materialize_descendants(
                     };
                     let entity = commands
                         .spawn((
-                            split_root_bundle(pane_split_dir),
+                            Pane::split_bundle(pane_split_dir),
                             LastActivatedAt::now(),
                             ChildOf(parent),
                         ))
@@ -407,7 +404,7 @@ fn materialize_descendants(
             },
             None => {
                 let entity = commands
-                    .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
+                    .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(parent)))
                     .id();
                 new_entities.insert(node as *const _, entity);
                 entity
@@ -435,7 +432,11 @@ fn materialize_descendants(
             for t in stacks {
                 if t.id.is_none() {
                     let stack = commands
-                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(node_entity)))
+                        .spawn((
+                            Stack::bundle(),
+                            LastActivatedAt::now(),
+                            ChildOf(node_entity),
+                        ))
                         .id();
                     match t.kind.as_str() {
                         "terminal" => {
@@ -1976,7 +1977,7 @@ mod tests {
             .id();
         let existing_pane = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
@@ -2081,7 +2082,7 @@ mod tests {
             .id();
         let existing_leaf = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), ChildOf(existing_root)))
+            .spawn((Pane::bundle(), ChildOf(existing_root)))
             .id();
         let stack = app
             .world_mut()
@@ -2160,10 +2161,7 @@ mod tests {
                 startup_dir: None,
             })
             .id();
-        let _ = app
-            .world_mut()
-            .spawn((leaf_pane_bundle(), ChildOf(tab)))
-            .id();
+        let _ = app.world_mut().spawn((Pane::bundle(), ChildOf(tab))).id();
 
         app.world_mut()
             .resource_mut::<Messages<LayoutSnapshotRequest>>()
@@ -2195,10 +2193,7 @@ mod tests {
                 startup_dir: None,
             })
             .id();
-        let pane = app
-            .world_mut()
-            .spawn((leaf_pane_bundle(), ChildOf(tab)))
-            .id();
+        let pane = app.world_mut().spawn((Pane::bundle(), ChildOf(tab))).id();
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
@@ -2234,7 +2229,7 @@ mod tests {
             .id();
         let existing_pane = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()

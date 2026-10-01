@@ -36,9 +36,7 @@ use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::event::TERMINAL_CEF_BG_COLOR;
 use vmux_layout::space::FocusedSpace;
-use vmux_layout::stack::{
-    CloseRequest as StackCloseRequest, FocusRequest, FocusedStack, Stack, stack_bundle,
-};
+use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest, FocusedStack, Stack};
 #[cfg(test)]
 use vmux_layout::tab::Tab;
 use vmux_layout::tab::TabHierarchy;
@@ -414,7 +412,7 @@ fn spawn_layout_requested_content(
         };
         let terminal = commands
             .spawn((
-                new_terminal_bundle_with_cwd(&settings, cwd.as_deref()),
+                TerminalBundle::with_cwd(&settings, cwd.as_deref()),
                 ChildOf(request.stack),
             ))
             .id();
@@ -512,7 +510,7 @@ fn handle_page_open(
         });
         let terminal = commands
             .spawn((
-                new_terminal_bundle_with_cwd(&settings, cwd.as_deref()),
+                TerminalBundle::with_cwd(&settings, cwd.as_deref()),
                 ChildOf(task.stack),
             ))
             .id();
@@ -532,7 +530,7 @@ fn respond_spawn(
 ) {
     for req in reader.read() {
         let term_e = commands
-            .spawn(new_terminal_bundle_with_cwd(&settings, req.cwd.as_deref()))
+            .spawn(TerminalBundle::with_cwd(&settings, req.cwd.as_deref()))
             .id();
         commands.entity(term_e).insert(KeyboardOwner);
         let (stack_e, requested_pane) = match req.target {
@@ -540,7 +538,7 @@ fn respond_spawn(
             TerminalSpawnTarget::Stack(stack) => (stack, None),
             TerminalSpawnTarget::NewStackInPane(pane) => (
                 commands
-                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                    .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
                     .id(),
                 Some(pane),
             ),
@@ -563,67 +561,76 @@ fn respond_spawn(
     }
 }
 
-pub fn new_terminal_bundle(settings: &AppSettings) -> impl Bundle {
-    new_terminal_bundle_with_cwd(settings, None)
+#[derive(Bundle)]
+pub struct TerminalBundle {
+    terminal: Terminal,
+    browser: Browser,
+    close_confirmation: CloseRequiresConfirmation,
+    process_id: ProcessId,
+    launch: crate::launch::TerminalLaunch,
+    pending_create: PendingServiceCreate,
+    metadata: PageMetadata,
+    webview: WebviewWindowed,
+    page_host: HostsPage,
+    editing_chords: BindsEditingChords,
+    size: WebviewSize,
+    grid_size: TerminalGridSize,
+    transform: Transform,
+    node: Node,
+    visibility: Visibility,
 }
 
-pub fn new_terminal_bundle_with_cwd(
-    settings: &AppSettings,
-    cwd: Option<&std::path::Path>,
-) -> impl Bundle {
-    new_terminal_bundle_with_cwd_and_shell(settings, cwd, None)
-}
+impl TerminalBundle {
+    pub fn new(settings: &AppSettings) -> Self {
+        Self::with_cwd(settings, None)
+    }
 
-fn new_terminal_bundle_with_cwd_and_shell(
-    settings: &AppSettings,
-    cwd: Option<&std::path::Path>,
-    shell: Option<&str>,
-) -> impl Bundle {
-    let shell = shell.map(str::to_string).unwrap_or_else(|| {
-        settings
-            .terminal
-            .as_ref()
-            .map(|t| t.resolve_theme(&t.default_theme).shell)
-            .unwrap_or_else(default_shell)
-    });
+    pub fn with_cwd(settings: &AppSettings, cwd: Option<&std::path::Path>) -> Self {
+        Self::with_shell(settings, cwd, None)
+    }
 
-    let cwd_str = cwd
-        .filter(|d| !d.to_string_lossy().contains("://"))
-        .map(|d| d.to_string_lossy().to_string())
-        .unwrap_or_default();
-
-    let launch = crate::launch::TerminalLaunch {
-        command: shell,
-        args: vec![],
-        cwd: cwd_str,
-        env: vec![],
-    };
-
-    let process_id = ProcessId::new();
-
-    (
-        (
-            Terminal,
-            Browser,
-            CloseRequiresConfirmation,
+    fn with_shell(
+        settings: &AppSettings,
+        cwd: Option<&std::path::Path>,
+        shell: Option<&str>,
+    ) -> Self {
+        let shell = shell.map(str::to_string).unwrap_or_else(|| {
+            settings
+                .terminal
+                .as_ref()
+                .map(|t| t.resolve_theme(&t.default_theme).shell)
+                .unwrap_or_else(default_shell)
+        });
+        let cwd = cwd
+            .filter(|directory| !directory.to_string_lossy().contains("://"))
+            .map(|directory| directory.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let process_id = ProcessId::new();
+        Self {
+            terminal: Terminal,
+            browser: Browser,
+            close_confirmation: CloseRequiresConfirmation,
             process_id,
-            launch,
-            PendingServiceCreate,
-            PageMetadata {
+            launch: crate::launch::TerminalLaunch {
+                command: shell,
+                args: Vec::new(),
+                cwd,
+                env: Vec::new(),
+            },
+            pending_create: PendingServiceCreate,
+            metadata: PageMetadata {
                 title: format!("Terminal ({})", &process_id.to_string()[..8]),
                 url: TerminalPlugin::URL.to_string(),
                 icon: PageIcon::None,
                 bg_color: None,
             },
-            WebviewWindowed,
-            HostsPage,
-            BindsEditingChords,
-        ),
-        (
-            WebviewSize(Vec2::new(1280.0, 720.0)),
-            TerminalGridSize::default(),
-            Transform::default(),
-            Node {
+            webview: WebviewWindowed,
+            page_host: HostsPage,
+            editing_chords: BindsEditingChords,
+            size: WebviewSize(Vec2::new(1280.0, 720.0)),
+            grid_size: TerminalGridSize::default(),
+            transform: Transform::default(),
+            node: Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
@@ -631,9 +638,9 @@ fn new_terminal_bundle_with_cwd_and_shell(
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            Visibility::Visible,
-        ),
-    )
+            visibility: Visibility::Visible,
+        }
+    }
 }
 
 fn respond_stack_spawn(
@@ -649,7 +656,7 @@ fn respond_stack_spawn(
             LastActivatedAt(0)
         };
         let stack = commands
-            .spawn((stack_bundle(), stack_ts, ChildOf(request.pane)))
+            .spawn((Stack::bundle(), stack_ts, ChildOf(request.pane)))
             .id();
         let title = request
             .cwd
@@ -664,7 +671,7 @@ fn respond_stack_spawn(
         });
         let terminal = commands
             .spawn((
-                new_terminal_bundle_with_cwd_and_shell(
+                TerminalBundle::with_shell(
                     &settings,
                     request.cwd.as_deref(),
                     request.shell.as_deref(),
@@ -685,29 +692,45 @@ fn respond_stack_spawn(
     }
 }
 
-pub fn reattach_terminal_bundle(process_id: ProcessId) -> impl Bundle {
-    (
-        (
-            Terminal,
-            Browser,
-            CloseRequiresConfirmation,
+#[derive(Bundle)]
+pub struct ReattachedTerminalBundle {
+    terminal: Terminal,
+    browser: Browser,
+    close_confirmation: CloseRequiresConfirmation,
+    process_id: ProcessId,
+    pending_attach: PendingServiceAttach,
+    metadata: PageMetadata,
+    webview: WebviewWindowed,
+    page_host: HostsPage,
+    editing_chords: BindsEditingChords,
+    size: WebviewSize,
+    grid_size: TerminalGridSize,
+    transform: Transform,
+    node: Node,
+    visibility: Visibility,
+}
+
+impl ReattachedTerminalBundle {
+    pub fn new(process_id: ProcessId) -> Self {
+        Self {
+            terminal: Terminal,
+            browser: Browser,
+            close_confirmation: CloseRequiresConfirmation,
             process_id,
-            PendingServiceAttach,
-            PageMetadata {
+            pending_attach: PendingServiceAttach,
+            metadata: PageMetadata {
                 title: format!("Terminal ({})", &process_id.to_string()[..8]),
                 url: TerminalPlugin::URL.to_string(),
                 icon: PageIcon::None,
                 bg_color: None,
             },
-            WebviewWindowed,
-            HostsPage,
-            BindsEditingChords,
-        ),
-        (
-            WebviewSize(Vec2::new(1280.0, 720.0)),
-            TerminalGridSize::default(),
-            Transform::default(),
-            Node {
+            webview: WebviewWindowed,
+            page_host: HostsPage,
+            editing_chords: BindsEditingChords,
+            size: WebviewSize(Vec2::new(1280.0, 720.0)),
+            grid_size: TerminalGridSize::default(),
+            transform: Transform::default(),
+            node: Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
@@ -715,9 +738,9 @@ pub fn reattach_terminal_bundle(process_id: ProcessId) -> impl Bundle {
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            Visibility::Visible,
-        ),
-    )
+            visibility: Visibility::Visible,
+        }
+    }
 }
 
 #[derive(Component)]
@@ -2104,7 +2127,7 @@ mod tests {
             .add_systems(Update, handle_page_open);
         spawn_active_space(&mut app, &SpaceRecord::bootstrap());
 
-        let stack = app.world_mut().spawn(stack_bundle()).id();
+        let stack = app.world_mut().spawn(Stack::bundle()).id();
         let task = app
             .world_mut()
             .spawn(PageOpenTask {
@@ -2148,7 +2171,7 @@ mod tests {
             .add_systems(Update, handle_page_open);
         spawn_active_space(&mut app, &record);
 
-        let stack = app.world_mut().spawn(stack_bundle()).id();
+        let stack = app.world_mut().spawn(Stack::bundle()).id();
         app.world_mut().spawn(PageOpenTask {
             id: PageOpenId::new(),
             stack,
@@ -2174,7 +2197,7 @@ mod tests {
             .add_systems(Update, handle_page_open);
         spawn_active_space(&mut app, &record);
 
-        let stack = app.world_mut().spawn(stack_bundle()).id();
+        let stack = app.world_mut().spawn(Stack::bundle()).id();
         app.world_mut().spawn(PageOpenTask {
             id: PageOpenId::new(),
             stack,
@@ -2219,7 +2242,7 @@ mod tests {
                 startup_dir: Some(tab_dir.path().to_string_lossy().into()),
             })
             .id();
-        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(tab))).id();
+        let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(tab))).id();
         app.world_mut().spawn(PageOpenTask {
             id: PageOpenId::new(),
             stack,
@@ -2266,7 +2289,7 @@ mod tests {
                 startup_dir: Some("/no/such/vmux-tab-workspace".into()),
             })
             .id();
-        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(tab))).id();
+        let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(tab))).id();
         let task = app
             .world_mut()
             .spawn(PageOpenTask {
@@ -2317,7 +2340,7 @@ mod tests {
                 startup_dir: Some("/no/such/vmux-tab-workspace".into()),
             })
             .id();
-        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(tab))).id();
+        let stack = app.world_mut().spawn((Stack::bundle(), ChildOf(tab))).id();
         app.world_mut()
             .resource_mut::<Messages<TerminalLayoutSpawnRequest>>()
             .write(TerminalLayoutSpawnRequest { stack });

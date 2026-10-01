@@ -3,7 +3,7 @@ use moonshine_save::prelude::*;
 use vmux_core::host::persistence::PersistenceAppExt;
 use vmux_history::LastActivatedAt;
 
-use super::{Pane, PaneSplit, first_leaf_descendant, leaf_pane_bundle};
+use super::{Pane, PaneSplit, first_leaf_descendant};
 use crate::stack::Stack;
 
 pub(super) struct IdentityPlugin;
@@ -90,7 +90,7 @@ fn repair_stack_parents(
         let mut leaf = first_leaf_descendant(split, &pane_children, &leaf_panes);
         if leaf == split {
             leaf = commands
-                .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(split)))
+                .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(split)))
                 .id();
         }
         warn!(

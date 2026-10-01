@@ -166,7 +166,7 @@ fn respond_process_stack_spawn(
         };
         let stack = commands
             .spawn((
-                vmux_layout::stack::stack_bundle(),
+                vmux_layout::stack::Stack::bundle(),
                 stack_ts,
                 ChildOf(request.pane),
             ))
@@ -190,7 +190,7 @@ fn respond_process_stack_spawn(
         };
         let terminal = commands
             .spawn((
-                super::new_terminal_bundle_with_cwd(&settings, Some(&request.cwd)),
+                super::TerminalBundle::with_cwd(&settings, Some(&request.cwd)),
                 ChildOf(stack),
             ))
             .id();

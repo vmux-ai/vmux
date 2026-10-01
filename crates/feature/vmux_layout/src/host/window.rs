@@ -1,11 +1,11 @@
 use crate::{
     Header, LayoutStartupSet, TabLayoutSpawnContent, TabLayoutSpawnRequest,
-    cef::layout_cef_bundle,
-    pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
+    cef::LayoutCef,
+    pane::{Pane, PaneSplit, PaneSplitDirection, pane_split_gaps},
     settings::LayoutSettings,
     side_sheet::{SideSheet, SideSheetPosition},
-    stack::stack_bundle,
-    tab::{Tab, tab_bundle},
+    stack::Stack,
+    tab::Tab,
     unit::WindowExt,
 };
 use bevy::{
@@ -492,7 +492,7 @@ fn spawn_window_shell(
         ChildOf(root),
     ));
 
-    commands.spawn((layout_cef_bundle(window_entity), ChildOf(root)));
+    commands.spawn((LayoutCef::bundle(window_entity), ChildOf(root)));
     main
 }
 
@@ -507,14 +507,13 @@ fn spawn_new_window_workspace(
 ) {
     let space = commands
         .spawn((
-            crate::space::Space,
             crate::space::SpaceId(id.clone()),
             Name::new(name),
             Order(0),
             Active,
             EffectiveStartupUrl(startup_url.clone().unwrap_or_default()),
             LastActivatedAt::now(),
-            crate::space::space_view_bundle(),
+            crate::space::Space::bundle(),
             ChildOf(main),
         ))
         .id();
@@ -578,7 +577,7 @@ pub fn spawn_tab_scaffold_in_space(
 ) -> TabScaffold {
     let tab = commands
         .spawn((
-            tab_bundle(),
+            Tab::bundle(),
             LastActivatedAt::now(),
             CreatedAt::now(),
             ChildOf(space),
@@ -606,16 +605,12 @@ pub fn spawn_tab_scaffold_in_space(
         .id();
 
     let pane = commands
-        .spawn((
-            leaf_pane_bundle(),
-            LastActivatedAt::now(),
-            ChildOf(split_root),
-        ))
+        .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(split_root)))
         .id();
 
     let stack = commands
         .spawn((
-            stack_bundle(),
+            Stack::bundle(),
             LastActivatedAt::now(),
             CreatedAt::now(),
             ChildOf(pane),

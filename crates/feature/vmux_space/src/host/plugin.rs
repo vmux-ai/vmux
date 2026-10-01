@@ -21,9 +21,8 @@ use vmux_layout::projection::SpacesProjection;
 use vmux_layout::space::CurrentSpace;
 use vmux_layout::space::{
     CurrentSpaceSet, EffectiveStartupDir, EffectiveStartupSet, FocusedSpace, Space, SpaceId,
-    space_view_bundle,
 };
-use vmux_layout::stack::{FocusedStack, Stack, stack_bundle};
+use vmux_layout::stack::{FocusedStack, Stack};
 use vmux_layout::state::LayoutUiState;
 use vmux_layout::tab::Tab;
 use vmux_layout::window::{FocusedWindow, Main, WindowHierarchy};
@@ -538,13 +537,12 @@ impl SpaceViewTemplate {
 
     fn bundle(&self, main: Entity) -> impl Bundle {
         (
-            Space,
             SpaceId(self.id.clone()),
             Name::new(self.name.clone()),
             Order(self.order),
             Active,
             LastActivatedAt::now(),
-            space_view_bundle(),
+            Space::bundle(),
             ChildOf(main),
         )
     }
@@ -648,7 +646,7 @@ fn open_page(
         return;
     };
     let stack = commands
-        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+        .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
         .id();
     spawn_requests.write(PageOpenRequest {
         target: PageOpenTarget::Stack(stack),
@@ -817,13 +815,12 @@ fn create(
     graph.deactivate_in_main(main, &mut commands);
     let space = commands
         .spawn((
-            Space,
             SpaceId(id.clone()),
             Name::new(id.clone()),
             Order(order),
             Active,
             LastActivatedAt::now(),
-            space_view_bundle(),
+            Space::bundle(),
             ChildOf(main),
         ))
         .id();
@@ -881,13 +878,12 @@ fn handle_open_in_new(
         graph.deactivate_in_main(main, &mut commands);
         let space = commands
             .spawn((
-                Space,
                 SpaceId(id.clone()),
                 Name::new(id.clone()),
                 Order(order),
                 Active,
                 LastActivatedAt::now(),
-                space_view_bundle(),
+                Space::bundle(),
                 ChildOf(main),
             ))
             .id();
@@ -1088,23 +1084,21 @@ mod tests {
         let first_main = app.world_mut().spawn((Main, ChildOf(first_column))).id();
         let second_main = app.world_mut().spawn((Main, ChildOf(second_column))).id();
         app.world_mut().spawn((
-            Space,
             SpaceId("shared".to_string()),
             Name::new("shared"),
             Order(0),
             Active,
-            space_view_bundle(),
+            Space::bundle(),
             ChildOf(first_main),
         ));
         let previous = app
             .world_mut()
             .spawn((
-                Space,
                 SpaceId("second".to_string()),
                 Name::new("second"),
                 Order(0),
                 Active,
-                space_view_bundle(),
+                Space::bundle(),
                 ChildOf(second_main),
             ))
             .id();
@@ -1156,21 +1150,19 @@ mod tests {
         let second_main = app.world_mut().spawn((Main, ChildOf(second_root))).id();
         for main in [first_main, second_main] {
             app.world_mut().spawn((
-                Space,
                 SpaceId("shared".to_string()),
                 Name::new("shared"),
                 Order(0),
                 Active,
-                space_view_bundle(),
+                Space::bundle(),
                 ChildOf(main),
             ));
         }
         app.world_mut().spawn((
-            Space,
             SpaceId("fallback".to_string()),
             Name::new("fallback"),
             Order(1),
-            space_view_bundle(),
+            Space::bundle(),
             ChildOf(first_main),
         ));
         let webview = app.world_mut().spawn(HostWindow(second_window)).id();

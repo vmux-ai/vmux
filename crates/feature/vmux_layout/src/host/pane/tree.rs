@@ -23,6 +23,42 @@ impl Plugin for TreePlugin {
 #[require(Save)]
 pub struct Pane;
 
+impl Pane {
+    pub fn bundle() -> impl Bundle {
+        (
+            Self,
+            PaneSize::default(),
+            Transform::default(),
+            Node {
+                flex_grow: 1.0,
+                flex_basis: Val::Px(0.0),
+                align_items: AlignItems::Stretch,
+                justify_content: JustifyContent::Stretch,
+                ..default()
+            },
+        )
+    }
+
+    pub fn split_bundle(direction: PaneSplitDirection) -> impl Bundle {
+        let gaps = pane_split_gaps(direction, crate::event::PANE_GAP_PX);
+        (
+            Self,
+            PaneSplit { direction },
+            PaneSize::default(),
+            Transform::default(),
+            Visibility::default(),
+            Node {
+                flex_grow: 1.0,
+                flex_direction: direction.flex_direction(),
+                column_gap: gaps.column_gap,
+                row_gap: gaps.row_gap,
+                align_items: AlignItems::Stretch,
+                ..default()
+            },
+        )
+    }
+}
+
 #[derive(Component, Reflect)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::pane"]
@@ -60,15 +96,17 @@ pub(crate) fn spawn_split_from_leaf(
         LastActivatedAt(0)
     };
     let existing = commands
-        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
+        .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(active)))
         .id();
     let new = commands
-        .spawn((leaf_pane_bundle(), new_activity, ChildOf(active)))
+        .spawn((Pane::bundle(), new_activity, ChildOf(active)))
         .id();
     for tab in existing_tabs {
         commands.entity(*tab).insert(ChildOf(existing));
     }
-    commands.entity(active).insert(split_root_bundle(direction));
+    commands
+        .entity(active)
+        .insert(Pane::split_bundle(direction));
     (existing, new)
 }
 
@@ -87,40 +125,6 @@ impl PaneSplitDirection {
             Self::Column => FlexDirection::Column,
         }
     }
-}
-
-pub fn leaf_pane_bundle() -> impl Bundle {
-    (
-        Pane,
-        PaneSize::default(),
-        Transform::default(),
-        Node {
-            flex_grow: 1.0,
-            flex_basis: Val::Px(0.0),
-            align_items: AlignItems::Stretch,
-            justify_content: JustifyContent::Stretch,
-            ..default()
-        },
-    )
-}
-
-pub fn split_root_bundle(direction: PaneSplitDirection) -> impl Bundle {
-    let gaps = pane_split_gaps(direction, crate::event::PANE_GAP_PX);
-    (
-        Pane,
-        PaneSplit { direction },
-        PaneSize::default(),
-        Transform::default(),
-        Visibility::default(),
-        Node {
-            flex_grow: 1.0,
-            flex_direction: direction.flex_direction(),
-            column_gap: gaps.column_gap,
-            row_gap: gaps.row_gap,
-            align_items: AlignItems::Stretch,
-            ..default()
-        },
-    )
 }
 
 pub fn first_leaf_descendant(
@@ -177,7 +181,7 @@ pub fn split_or_extend(
             LastActivatedAt(0)
         };
         return commands
-            .spawn((leaf_pane_bundle(), activity, ChildOf(anchor)))
+            .spawn((Pane::bundle(), activity, ChildOf(anchor)))
             .id();
     }
     split_leaf_into_two(commands, anchor, direction, existing_tabs, activate_new)
@@ -186,7 +190,7 @@ pub fn split_or_extend(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{stack::Stack, stack::stack_bundle, tab::Tab};
+    use crate::{stack::Stack, tab::Tab};
     use bevy::{ecs::relationship::Relationship, ecs::system::RunSystemOnce};
 
     #[test]
@@ -195,11 +199,11 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         let active = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now()))
+            .spawn((Pane::bundle(), LastActivatedAt::now()))
             .id();
         let existing = app
             .world_mut()
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(active)))
+            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(active)))
             .id();
 
         let new = app
@@ -243,11 +247,11 @@ mod tests {
             .id();
         let anchor = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(tab)))
             .id();
         let existing_stack = app
             .world_mut()
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(anchor)))
+            .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(anchor)))
             .id();
 
         let (first, second) = app

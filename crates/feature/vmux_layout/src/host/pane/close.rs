@@ -12,12 +12,12 @@ use vmux_history::LastActivatedAt;
 use crate::{
     CloseRequiresConfirmation,
     settings::ConfirmCloseSettings,
-    stack::{ActiveTabParam, CloseConfirmed, LayoutFocus, PendingStackClose, Stack, stack_bundle},
+    stack::{ActiveTabParam, CloseConfirmed, LayoutFocus, PendingStackClose, Stack},
 };
 
 #[cfg(test)]
 use super::PaneSplitDirection;
-use super::{CloseRequest, Pane, PaneSplit, PaneStacks, first_leaf_descendant, leaf_pane_bundle};
+use super::{CloseRequest, Pane, PaneSplit, PaneStacks, first_leaf_descendant};
 use crate::host::command::LayoutRequestSet;
 
 pub(super) struct ClosePlugin;
@@ -128,10 +128,10 @@ fn close(
         if !splits.contains(parent) {
             commands.entity(active).despawn();
             let leaf = commands
-                .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
+                .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(parent)))
                 .id();
             let stack = commands
-                .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
+                .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(leaf)))
                 .id();
             commands.entity(leaf).insert(LastActivatedAt::now());
             page_open_requests.write(PageOpenRequest {
