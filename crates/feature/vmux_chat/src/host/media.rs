@@ -279,7 +279,7 @@ const MEDIA_THUMBNAIL_MAX_EDGE: u32 = 512;
 
 fn attachment_mime(path: &std::path::Path) -> String {
     let path_str = path.to_string_lossy();
-    if let Some(mime) = vmux_ecs::media::media_mime(&path_str) {
+    if let Some(mime) = vmux_api::media::MediaKind::mime(&path_str) {
         return mime.to_string();
     }
     let extension = path
@@ -325,7 +325,7 @@ fn media_thumbnail_data_url(path: &std::path::Path, source_size: u64) -> String 
     if source_size > MEDIA_THUMBNAIL_SOURCE_LIMIT {
         return String::new();
     }
-    let Some(mime) = vmux_ecs::media::image_mime(&path.to_string_lossy()) else {
+    let Some(mime) = vmux_api::media::MediaKind::image_mime(&path.to_string_lossy()) else {
         return String::new();
     };
     if mime == "image/svg+xml" || mime == "image/avif" {

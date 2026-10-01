@@ -159,7 +159,7 @@ impl FileLoadTask {
 enum FileLoad {
     Directory(Vec<FileDirEntry>),
     Media {
-        kind: vmux_ecs::media::MediaKind,
+        kind: vmux_api::media::MediaKind,
         mime: String,
     },
     Text {
@@ -181,8 +181,8 @@ impl FileLoad {
         }
 
         let path_text = path.to_string_lossy();
-        if let Some(kind) = vmux_ecs::media::media_kind(&path_text) {
-            let mime = vmux_ecs::media::media_mime(&path_text)
+        if let Some(kind) = vmux_api::media::MediaKind::from_path(&path_text) {
+            let mime = vmux_api::media::MediaKind::mime(&path_text)
                 .unwrap_or("application/octet-stream")
                 .to_string();
             return Self::Media { kind, mime };
@@ -548,9 +548,9 @@ fn reload_changed_files(
             continue;
         }
 
-        if let Some(kind) = vmux_ecs::media::media_kind(&file.path.to_string_lossy()) {
+        if let Some(kind) = vmux_api::media::MediaKind::from_path(&file.path.to_string_lossy()) {
             if ready {
-                let mime = vmux_ecs::media::media_mime(&file.path.to_string_lossy())
+                let mime = vmux_api::media::MediaKind::mime(&file.path.to_string_lossy())
                     .unwrap_or("application/octet-stream")
                     .to_string();
                 let nonce = std::time::SystemTime::now()

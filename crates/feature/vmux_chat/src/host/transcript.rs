@@ -24,17 +24,17 @@ pub(super) struct Plugin;
 impl bevy::prelude::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(ChatHistoryMoreRequest,)>::default())
-            .add_observer(chat_history_more_request)
-            .add_observer(reset_chat_synced_on_page_ready)
+            .add_observer(request_more)
+            .add_observer(reset_synced)
             .add_systems(
                 Update,
                 (
                     track_turn_duration,
-                    push_chat_to_page,
-                    sync_chat_to_ready_views,
-                    resolve_chat_history_queries,
+                    push_to_page,
+                    sync_ready_views,
+                    resolve_queries,
                     bevy::ecs::schedule::ApplyDeferred,
-                    apply_chat_history_results,
+                    apply_results,
                 )
                     .chain(),
             );
@@ -68,7 +68,7 @@ fn track_turn_duration(
     }
 }
 
-fn push_chat_to_page(
+fn push_to_page(
     sessions: Query<(
         Entity,
         Ref<AgentMessages>,
@@ -321,7 +321,7 @@ impl ChatProjection {
     }
 }
 
-fn sync_chat_to_ready_views(
+fn sync_ready_views(
     mut pending: Query<
         (
             Entity,
@@ -405,7 +405,7 @@ fn sync_chat_to_ready_views(
     }
 }
 
-fn reset_chat_synced_on_page_ready(
+fn reset_synced(
     trigger: On<UiInput<vmux_ecs::page::PageReady>>,
     chat_views: Query<(), With<ChatView>>,
     mut commands: Commands,
@@ -416,7 +416,7 @@ fn reset_chat_synced_on_page_ready(
     }
 }
 
-fn chat_history_more_request(
+fn request_more(
     trigger: On<UiInput<ChatHistoryMoreRequest>>,
     mut views: Query<(&ChildOf, &mut ChatTranscriptProjection), With<ChatView>>,
     mut commands: Commands,
@@ -437,7 +437,7 @@ fn chat_history_more_request(
     );
 }
 
-fn resolve_chat_history_queries(
+fn resolve_queries(
     queries: Query<(Entity, &ChatHistoryQuery)>,
     sessions: Query<(
         &AgentMessages,
@@ -486,7 +486,7 @@ fn resolve_chat_history_queries(
     }
 }
 
-fn apply_chat_history_results(
+fn apply_results(
     results: Query<(Entity, &ChatHistoryResult)>,
     mut views: Query<
         (
@@ -756,7 +756,7 @@ mod tests {
         use vmux_ecs::page::PageReady;
 
         let mut app = App::new();
-        app.add_observer(reset_chat_synced_on_page_ready);
+        app.add_observer(reset_synced);
 
         let chat = app.world_mut().spawn((ChatView, ChatSynced)).id();
         let other = app.world_mut().spawn(ChatSynced).id();

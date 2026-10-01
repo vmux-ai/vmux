@@ -43,7 +43,7 @@ impl Plugin for MediaPlugin {
 
 #[derive(Component, Clone, Debug)]
 pub struct FileMedia {
-    pub kind: vmux_ecs::media::MediaKind,
+    pub kind: vmux_api::media::MediaKind,
     pub mime: String,
 }
 
@@ -100,7 +100,7 @@ fn send_initial(
 }
 
 fn needs_native_video(path: &Path) -> bool {
-    vmux_ecs::media::is_proprietary_video(&path.to_string_lossy())
+    vmux_api::media::MediaKind::requires_native_video(&path.to_string_lossy())
 }
 
 fn attach_video_overlays(
@@ -108,7 +108,7 @@ fn attach_video_overlays(
     browsers: NonSend<Browsers>,
 ) {
     for (entity, file, media) in &media {
-        if media.kind != vmux_ecs::media::MediaKind::Video || !needs_native_video(&file.path) {
+        if media.kind != vmux_api::media::MediaKind::Video || !needs_native_video(&file.path) {
             continue;
         }
         if !browsers.has_browser(entity) {
@@ -128,7 +128,7 @@ fn file_video_rect(
         return;
     }
     let rect = &trigger.event().payload;
-    if !vmux_ecs::media::is_proprietary_video(&rect.path) || rect.w <= 0.0 || rect.h <= 0.0 {
+    if !vmux_api::media::MediaKind::requires_native_video(&rect.path) || rect.w <= 0.0 || rect.h <= 0.0 {
         return;
     }
     browsers.set_media_overlay(&entity, &rect.path, (rect.x, rect.y, rect.w, rect.h));

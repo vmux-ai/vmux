@@ -2,7 +2,6 @@
 pub mod cli;
 pub mod event;
 pub mod icon;
-pub mod media;
 pub mod page_metadata;
 pub mod process_id;
 pub mod scroll;

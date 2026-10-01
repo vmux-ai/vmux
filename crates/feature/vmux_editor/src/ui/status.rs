@@ -163,7 +163,7 @@ impl IndentChoice {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_ecs::media::MediaKind;
+    use vmux_api::media::MediaKind;
 
     fn text(view: FileViewMode, markdown: bool, has_diff: bool) -> FileStatusScope {
         FileStatusScope {

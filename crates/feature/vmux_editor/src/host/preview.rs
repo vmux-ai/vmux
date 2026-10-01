@@ -10,7 +10,7 @@ pub const THUMB_MAX_EDGE: u32 = 64;
 const TEXT_PREVIEW_LINES: usize = 200;
 
 pub fn image_mime(path: &Path) -> Option<&'static str> {
-    vmux_ecs::media::image_mime(&path.to_string_lossy())
+    vmux_api::media::MediaKind::image_mime(&path.to_string_lossy())
 }
 
 pub fn is_image_path(path: &Path) -> bool {
@@ -61,14 +61,14 @@ pub fn build_preview_with_cap(path: &Path, _thumb: bool, cap: u64) -> PreviewKin
             Err(e) => PreviewKind::Error(e.to_string()),
         };
     }
-    if vmux_ecs::media::media_kind(&path.to_string_lossy())
-        == Some(vmux_ecs::media::MediaKind::Video)
+    if vmux_api::media::MediaKind::from_path(&path.to_string_lossy())
+        == Some(vmux_api::media::MediaKind::Video)
     {
         let path_str = path.to_string_lossy();
         return PreviewKind::Video {
             url: raw_preview_url(path),
             path: path_str.clone().into_owned(),
-            native: cfg!(target_os = "macos") && vmux_ecs::media::is_proprietary_video(&path_str),
+            native: cfg!(target_os = "macos") && vmux_api::media::MediaKind::requires_native_video(&path_str),
         };
     }
     match Highlighter::new().load_file(path) {

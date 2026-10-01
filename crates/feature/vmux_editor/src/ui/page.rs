@@ -26,7 +26,7 @@ use dioxus::prelude::*;
 use vmux_api::editor::KeymapKind;
 use vmux_api::editor::{CursorPos, EditMode, SelSpan};
 use vmux_ecs::event::*;
-use vmux_ecs::media::MediaKind;
+use vmux_api::media::MediaKind;
 use vmux_ecs::scroll::{EDGE_TRIGGER_K, needs_refetch};
 use vmux_git::event::{FileGitState, GitLineStatus};
 use vmux_git::ui::{DiffView, GitFooter};

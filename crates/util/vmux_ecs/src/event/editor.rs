@@ -407,7 +407,7 @@ pub struct FileOpenEvent {
 
 #[vmux_api::contract(Eq)]
 pub struct FileMediaEvent {
-    pub kind: crate::media::MediaKind,
+    pub kind: vmux_api::media::MediaKind,
     pub mime: String,
     pub url: String,
     pub abs_path: String,

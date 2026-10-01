@@ -262,7 +262,7 @@ struct RemoteMediaPath<'a>(&'a std::path::Path);
 impl RemoteMediaPath<'_> {
     fn mime(&self) -> String {
         let path = self.0.to_string_lossy();
-        if let Some(mime) = vmux_ecs::media::media_mime(&path) {
+        if let Some(mime) = vmux_api::media::MediaKind::mime(&path) {
             return mime.to_string();
         }
         let extension = self
@@ -293,7 +293,7 @@ impl RemoteMediaPath<'_> {
         if source_size > MEDIA_THUMBNAIL_SOURCE_LIMIT {
             return String::new();
         }
-        let Some(mime) = vmux_ecs::media::image_mime(&self.0.to_string_lossy()) else {
+        let Some(mime) = vmux_api::media::MediaKind::image_mime(&self.0.to_string_lossy()) else {
             return String::new();
         };
         if mime == "image/svg+xml" || mime == "image/avif" {

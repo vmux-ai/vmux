@@ -28,7 +28,7 @@ pub(super) enum Preview {
 }
 
 pub(super) fn image_data_url(bytes: &[u8], path: &str) -> String {
-    let mime = vmux_ecs::media::image_mime(path).unwrap_or("application/octet-stream");
+    let mime = vmux_api::media::MediaKind::image_mime(path).unwrap_or("application/octet-stream");
 
     format!(
         "data:{mime};base64,{}",

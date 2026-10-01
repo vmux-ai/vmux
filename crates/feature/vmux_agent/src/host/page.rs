@@ -535,9 +535,9 @@ fn handle_agent_page_open_task(
             );
             commands.entity(task.stack).insert(request);
             if let Some(webview) = transition_webview {
-                commands.entity(task.stack).insert(vmux_ecs::EntityTarget::<
-                    vmux_chat::host::ChatView,
-                >::new(webview));
+                commands
+                    .entity(task.stack)
+                    .insert(vmux_ecs::EntityTarget::<ChatView>::new(webview));
             }
             insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
             Ok(())
