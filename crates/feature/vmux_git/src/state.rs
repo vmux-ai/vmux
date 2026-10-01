@@ -1,4 +1,6 @@
-use crate::event::{GitBranchLog, GitDiffViewport, GitOperationResult, GitRepositorySnapshot};
+use crate::event::{
+    GitBranchLog, GitDiffRow, GitDiffViewport, GitOperationResult, GitRepositorySnapshot,
+};
 
 #[vmux_api::contract(Copy, Eq, Default)]
 pub enum GitPanel {
@@ -158,17 +160,6 @@ pub struct GitCommandLogEntry {
     pub operation: String,
     pub message: String,
     pub ok: bool,
-}
-
-#[vmux_api::contract(Copy, Eq)]
-pub enum GitDiffRow {
-    Line(u32),
-    Gap {
-        start: u32,
-        end: u32,
-        reveal_start: u32,
-        reveal_end: u32,
-    },
 }
 
 #[vmux_api::contract(Eq)]

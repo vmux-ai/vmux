@@ -1,6 +1,6 @@
 pub use vmux_api::git::{
-    DiffKind, DiffLine, FileGitState, FileStatus, GitDiffViewport, GitFileStatus, GitLineMarker,
-    GitLineStatus, GitOperationError, GitOperationResult, StyledSpan,
+    DiffKind, DiffLine, FileGitState, FileStatus, GitDiffRow, GitDiffViewport, GitFileStatus,
+    GitLineMarker, GitLineStatus, GitOperationError, GitOperationResult, StyledSpan,
 };
 use vmux_api::input::KeyModifiers;
 

@@ -33,16 +33,21 @@ impl Plugin for DiffPlugin {
 fn reveal(
     trigger: On<UiInput<GitDiffRevealRequest>>,
     mut states: Query<&mut super::state::GitState>,
+    mut files: Query<&mut super::status::FileGit>,
 ) {
-    let Ok(mut state) = states.get_mut(trigger.event().webview) else {
-        return;
-    };
     let request = &trigger.event().payload;
-    if state
-        .bypass_change_detection()
-        .reveal_diff(request.start, request.end)
-    {
-        state.set_changed();
+    let entity = trigger.event().webview;
+    if let Ok(mut state) = states.get_mut(entity) {
+        if state
+            .bypass_change_detection()
+            .reveal_diff(request.start, request.end)
+        {
+            state.set_changed();
+        }
+        return;
+    }
+    if let Ok(mut file) = files.get_mut(entity) {
+        file.reveal_diff(request.start, request.end);
     }
 }
 

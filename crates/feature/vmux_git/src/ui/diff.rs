@@ -6,8 +6,8 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
+use crate::event::GitDiffRow;
 use crate::event::{GitDiffViewport, GitRepositorySnapshot};
-use crate::state::GitDiffRow;
 use crate::ui::DiffView;
 
 #[component]

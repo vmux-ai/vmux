@@ -8,8 +8,8 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 
+use crate::event::GitDiffRow;
 use crate::event::*;
-use crate::state::GitDiffRow;
 
 fn span_style(span: &StyledSpan) -> String {
     let [r, g, b] = span.fg;

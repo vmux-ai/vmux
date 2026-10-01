@@ -4,11 +4,12 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::page::PageReady;
 
+use crate::event::GitDiffRow;
 use crate::event::{
     DiffKind, GitBranchLog, GitBranchLogRequest, GitDiffViewport, GitOperationError,
     GitOperationResult, GitRepositoryRequest, GitRepositorySnapshot,
 };
-use crate::state::{GitCommandLogEntry, GitDiffRow, GitPageSnapshot, GitUiState};
+use crate::state::{GitCommandLogEntry, GitPageSnapshot, GitUiState};
 
 use super::controller::GitController;
 use super::directory::GitDirectoryNavigation;

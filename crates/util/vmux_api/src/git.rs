@@ -73,6 +73,17 @@ pub struct GitDiffViewport {
     pub error: String,
 }
 
+#[vmux_api::contract(Copy, Eq)]
+pub enum GitDiffRow {
+    Line(u32),
+    Gap {
+        start: u32,
+        end: u32,
+        reveal_start: u32,
+        reveal_end: u32,
+    },
+}
+
 #[vmux_api::contract(Eq)]
 pub struct GitOperationResult {
     pub operation: String,
@@ -94,6 +105,7 @@ pub struct FileGitState {
     pub result_sequence: u64,
     pub refresh_revision: u64,
     pub diff_viewport: Option<GitDiffViewport>,
+    pub diff_rows: Vec<GitDiffRow>,
     pub diff_loading: bool,
 }
 

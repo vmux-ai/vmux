@@ -105,6 +105,14 @@ pub fn Page() -> Element {
             .then_some(state.diff_viewport)
             .flatten()
     });
+    let git_diff_rows = use_memo(move || {
+        let state = git_state();
+        if state.path == git_path() {
+            state.diff_rows
+        } else {
+            Vec::new()
+        }
+    });
     let git_line_markers = use_memo(move || {
         git_diff_viewport()
             .map(|viewport| {
@@ -1148,6 +1156,7 @@ pub fn Page() -> Element {
                             repo_root: git_repo_root,
                             path: git_path,
                             viewport: git_diff_viewport,
+                            display_rows: git_diff_rows,
                             loading: git_state().diff_loading,
                             visible: file_view_mode() == FileViewMode::Diff,
                         }
