@@ -19,7 +19,7 @@ impl Plugin for WindowPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CloseVmuxWindow>()
             .add_message::<ExitFullscreenRequest>()
-            .add_systems(PreUpdate, ensure_window_state)
+            .add_systems(PreUpdate, ensure_state)
             .add_systems(
                 Update,
                 (open_windows, close_focused_windows)
@@ -33,11 +33,11 @@ impl Plugin for WindowPlugin {
                 (
                     ensure_geometry_singleton,
                     apply_geometry_on_load,
-                    capture_window_geometry,
+                    capture_geometry,
                 )
                     .chain(),
             )
-            .add_systems(Update, relocate_window_to_live_display);
+            .add_systems(Update, relocate_to_live_display);
         #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
         app.add_systems(
             Update,
@@ -75,7 +75,7 @@ fn window_off_all_monitors(window: IRect, monitors: &[IRect]) -> bool {
         .all(|monitor| monitor.intersect(window).is_empty())
 }
 
-fn relocate_window_to_live_display(
+fn relocate_to_live_display(
     monitors_added: Query<(), Added<Monitor>>,
     monitors_removed: RemovedComponents<Monitor>,
     monitors: Query<&Monitor>,
@@ -163,7 +163,7 @@ fn close_windows(
     }
 }
 
-fn ensure_window_state(
+fn ensure_state(
     windows: Query<Entity, (With<Window>, Without<WindowFullscreen>)>,
     mut commands: Commands,
 ) {
@@ -214,7 +214,7 @@ fn apply_geometry_on_load(
     }
 }
 
-fn capture_window_geometry(
+fn capture_geometry(
     window: Query<(&Window, &WindowFullscreen), (With<PrimaryWindow>, With<WindowRestoreComplete>)>,
     mut geometry: Query<&mut WindowGeometry>,
 ) {
@@ -292,7 +292,7 @@ mod tests {
     fn relocate_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, relocate_window_to_live_display);
+            .add_systems(Update, relocate_to_live_display);
         app
     }
 
@@ -537,7 +537,7 @@ mod tests {
             .entity_mut(primary)
             .insert(WindowRestoreComplete);
         app.world_mut().spawn(WindowGeometry::default());
-        app.add_systems(Update, capture_window_geometry);
+        app.add_systems(Update, capture_geometry);
         app.update();
 
         let geom = app
@@ -566,7 +566,7 @@ mod tests {
             position: Some(IVec2::new(7, 8)),
             size: Some(Vec2::new(900.0, 600.0)),
         });
-        app.add_systems(Update, capture_window_geometry);
+        app.add_systems(Update, capture_geometry);
         app.update();
 
         let geom = app

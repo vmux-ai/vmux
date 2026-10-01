@@ -18,20 +18,12 @@ impl Plugin for InputQueuePlugin {
         app.add_message::<ServiceRequest>()
             .add_message::<TerminalReinputRequest>()
             .add_message::<QueueTerminalInput>()
-            .add_systems(
-                Startup,
-                (spawn_terminal_process_index, spawn_terminal_input_sequence),
-            )
-            .add_systems(PreUpdate, sync_terminal_process_index)
-            .add_systems(Update, enqueue_terminal_reinput.after(ServiceMessageSet))
+            .add_systems(Startup, (spawn_process_index, spawn_input_sequence))
+            .add_systems(PreUpdate, sync_process_index)
+            .add_systems(Update, enqueue_reinput.after(ServiceMessageSet))
             .add_systems(
                 PostUpdate,
-                (
-                    queue_terminal_input,
-                    bevy::ecs::schedule::ApplyDeferred,
-                    flush_terminal_input,
-                )
-                    .chain(),
+                (queue_input, bevy::ecs::schedule::ApplyDeferred, flush_input).chain(),
             );
     }
 }
@@ -74,14 +66,14 @@ struct TerminalInput {
     data: Vec<u8>,
 }
 
-fn spawn_terminal_process_index(mut commands: Commands) {
+fn spawn_process_index(mut commands: Commands) {
     commands.spawn((
         Name::new("Terminal process index"),
         TerminalProcessIndex::default(),
     ));
 }
 
-fn sync_terminal_process_index(
+fn sync_process_index(
     mut index: Single<&mut TerminalProcessIndex>,
     changed: Query<
         (Entity, &ProcessId),
@@ -118,14 +110,14 @@ fn sync_terminal_process_index(
     }
 }
 
-fn spawn_terminal_input_sequence(mut commands: Commands) {
+fn spawn_input_sequence(mut commands: Commands) {
     commands.spawn((
         Name::new("Terminal input sequence"),
         NextTerminalInputSequence::default(),
     ));
 }
 
-fn queue_terminal_input(
+fn queue_input(
     mut requests: MessageReader<QueueTerminalInput>,
     mut next: Single<&mut NextTerminalInputSequence>,
     mut commands: Commands,
@@ -157,7 +149,7 @@ pub(crate) fn pending_terminal_input(world: &mut World, terminal: Entity) -> Vec
     pending.into_iter().map(|(_, data)| data).collect()
 }
 
-fn enqueue_terminal_reinput(
+fn enqueue_reinput(
     mut requests: MessageReader<TerminalReinputRequest>,
     process_index: Single<&TerminalProcessIndex>,
     terminals: Query<(), With<Terminal>>,
@@ -177,7 +169,7 @@ fn enqueue_terminal_reinput(
     }
 }
 
-fn flush_terminal_input(
+fn flush_input(
     inputs: Query<(Entity, &TerminalInput, &TerminalInputTarget)>,
     terminals: Query<
         (

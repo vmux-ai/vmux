@@ -40,22 +40,22 @@ impl Plugin for TreePlugin {
         app.add_systems(
             Update,
             (
-                init_explorer_state,
-                start_explorer_dir_loads,
-                drain_explorer_dir_loads,
+                init_state,
+                start_dir_loads,
+                drain_dir_loads,
                 reveal_on_file_change,
-                emit_explorer_tree,
-                prune_idle_explorer_trees,
+                emit,
+                prune_idle_trees,
             )
                 .chain(),
         )
-        .add_observer(mark_explorer_tree_dirty)
+        .add_observer(mark_dirty)
         .add_observer(request_reveal)
         .add_observer(reveal_current)
-        .add_observer(on_collapse_all)
-        .add_observer(on_toggle)
-        .add_observer(on_prefetch)
-        .add_observer(on_refresh);
+        .add_observer(collapse_all)
+        .add_observer(toggle)
+        .add_observer(prefetch)
+        .add_observer(refresh);
     }
 }
 
@@ -116,7 +116,7 @@ fn emit_explorer_focus(
     }
 }
 
-fn init_explorer_state(
+fn init_state(
     mut query: Query<(
         Entity,
         &FileView,
@@ -165,7 +165,7 @@ fn init_explorer_state(
     }
 }
 
-fn start_explorer_dir_loads(
+fn start_dir_loads(
     requests: Query<(Entity, &ExplorerDirLoadRequest), Added<ExplorerDirLoadRequest>>,
     mut commands: Commands,
 ) {
@@ -185,7 +185,7 @@ fn start_explorer_dir_loads(
     }
 }
 
-fn drain_explorer_dir_loads(
+fn drain_dir_loads(
     mut tasks: Query<(Entity, &mut ExplorerDirLoadTask)>,
     mut trees: Query<&mut ExplorerTree>,
     mut commands: Commands,
@@ -226,7 +226,7 @@ fn drain_explorer_dir_loads(
     }
 }
 
-fn mark_explorer_tree_dirty(
+fn mark_dirty(
     trigger: On<ExplorerTreeChanged>,
     trees: Query<&ExplorerTreeUsers>,
     mut commands: Commands,
@@ -239,7 +239,7 @@ fn mark_explorer_tree_dirty(
     }
 }
 
-fn prune_idle_explorer_trees(
+fn prune_idle_trees(
     mut closed: RemovedComponents<ExplorerState>,
     trees: Query<(Entity, &ExplorerTree, Option<&ExplorerTreeUsers>)>,
     mut commands: Commands,
@@ -307,7 +307,7 @@ fn reveal_on_file_change(
     }
 }
 
-fn emit_explorer_tree(
+fn emit(
     mut query: Query<(Entity, &FileView, &mut ExplorerState, &UsesExplorerTree), TreeDirtyReady>,
     trees: Query<&ExplorerTree>,
     browsers: Option<NonSend<Browsers>>,
@@ -366,7 +366,7 @@ impl ExplorerRoot {
     }
 }
 
-fn on_toggle(
+fn toggle(
     trigger: On<UiInput<ExplorerTreeToggle>>,
     query: Query<&UsesExplorerTree>,
     mut trees: Query<&mut ExplorerTree>,
@@ -393,7 +393,7 @@ fn on_toggle(
     commands.trigger(ExplorerTreeChanged(tree_of.0));
 }
 
-fn on_prefetch(
+fn prefetch(
     trigger: On<UiInput<ExplorerTreePrefetch>>,
     query: Query<&UsesExplorerTree>,
     mut trees: Query<&mut ExplorerTree>,
@@ -413,7 +413,7 @@ fn on_prefetch(
     }
 }
 
-fn on_refresh(
+fn refresh(
     trigger: On<UiInput<ExplorerTreeRefresh>>,
     query: Query<&UsesExplorerTree>,
     mut trees: Query<&mut ExplorerTree>,
@@ -474,7 +474,7 @@ fn reveal_current(
     }
 }
 
-fn on_collapse_all(
+fn collapse_all(
     trigger: On<UiInput<ExplorerCollapseAll>>,
     query: Query<&UsesExplorerTree>,
     mut trees: Query<&mut ExplorerTree>,

@@ -27,10 +27,10 @@ impl Plugin for SpaceComposerPlugin {
                 ChatBranchesRequest,
                 ChatGoToBranch,
             )>::default())
-            .add_observer(on_chat_select_workspace)
-            .add_observer(on_chat_branches_request)
-            .add_observer(on_chat_go_to_branch)
-            .add_systems(Update, (push_composer_context_to_page, drain_branch_reads));
+            .add_observer(chat_select_workspace)
+            .add_observer(chat_branches_request)
+            .add_observer(chat_go_to_branch)
+            .add_systems(Update, (push_context_to_page, drain_branch_reads));
     }
 }
 
@@ -84,7 +84,7 @@ impl ComposerProjection<'_, '_> {
     }
 }
 
-fn push_composer_context_to_page(
+fn push_context_to_page(
     mut views: Query<(Entity, &ChildOf, Ref<PageReady>, &mut ChatComposerContext), With<ChatView>>,
     browsers: NonSend<Browsers>,
     mut projection: ComposerProjection,
@@ -200,7 +200,7 @@ struct BranchRead {
     task: bevy::tasks::Task<Vec<ChatBranch>>,
 }
 
-fn on_chat_branches_request(
+fn chat_branches_request(
     trigger: On<UiInput<ChatBranchesRequest>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut projections: Query<(&ChatComposerContext, &mut ChatBranchesProjection), With<ChatView>>,
@@ -281,7 +281,7 @@ fn drain_branch_reads(
     }
 }
 
-fn on_chat_go_to_branch(
+fn chat_go_to_branch(
     trigger: On<UiInput<ChatGoToBranch>>,
     child_of: Query<&ChildOf>,
     sessions: Query<&AcpSession>,
@@ -318,7 +318,7 @@ fn on_chat_go_to_branch(
     });
 }
 
-fn on_chat_select_workspace(
+fn chat_select_workspace(
     trigger: On<UiInput<ChatSelectWorkspace>>,
     child_of: Query<&ChildOf>,
     sessions: Query<&AcpSession>,
@@ -361,7 +361,7 @@ mod tests {
     fn composer_workspace_selection_dispatches_for_current_session() {
         let mut app = App::new();
         app.add_message::<AgentRequestInput>()
-            .add_observer(on_chat_select_workspace);
+            .add_observer(chat_select_workspace);
         let anchor = vmux_core::ProcessId::new();
         let stack = app
             .world_mut()
@@ -400,7 +400,7 @@ mod tests {
     fn an_unheld_branch_names_the_project_it_was_picked_from() {
         let mut app = App::new();
         app.add_message::<AgentRequestInput>()
-            .add_observer(on_chat_go_to_branch);
+            .add_observer(chat_go_to_branch);
         let anchor = vmux_core::ProcessId::new();
         let stack = app
             .world_mut()

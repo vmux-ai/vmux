@@ -1303,7 +1303,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct RunTerminalCandidateOutput(Vec<RunTerminalCandidate>);
 
-    fn collect_run_terminal_candidates(
+    fn collect_run_candidates(
         input: Res<RunTerminalCandidateInput>,
         terminals: RunTerminals,
         child_of_q: Query<&ChildOf>,
@@ -1325,7 +1325,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalCandidateOutput>()
-            .add_systems(Update, collect_run_terminal_candidates);
+            .add_systems(Update, collect_run_candidates);
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let terminal_pane = app
@@ -1371,7 +1371,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalCandidateOutput>()
-            .add_systems(Update, collect_run_terminal_candidates);
+            .add_systems(Update, collect_run_candidates);
         let tab = app.world_mut().spawn(Tab::default()).id();
         let agent_pane = app
             .world_mut()
@@ -1432,7 +1432,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalCandidateOutput>()
-            .add_systems(Update, collect_run_terminal_candidates);
+            .add_systems(Update, collect_run_candidates);
         let tab = app.world_mut().spawn(Tab::default()).id();
         let agent_pane = app
             .world_mut()
@@ -1500,7 +1500,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct RunTerminalBucketPaneOutput(Vec<Entity>);
 
-    fn collect_run_terminal_bucket_panes(
+    fn collect_run_bucket_panes(
         input: Res<RunTerminalBucketPaneInput>,
         child_of_q: Query<&ChildOf>,
         tab_q: Query<Entity, With<Tab>>,
@@ -1532,7 +1532,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalBucketPaneOutput>()
-            .add_systems(Update, collect_run_terminal_bucket_panes);
+            .add_systems(Update, collect_run_bucket_panes);
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let agent_pane = app
@@ -1837,7 +1837,7 @@ mod tests {
         candidate: RunTerminalCandidate,
     }
 
-    fn focus_reused_run_terminal(
+    fn focus_reused_run(
         input: Res<ReusedRunTerminalFocusInput>,
         mut commands: Commands,
         child_of_q: Query<&ChildOf>,
@@ -1852,7 +1852,7 @@ mod tests {
     fn reused_run_terminal_focus_activates_stack_pane_and_tab() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, focus_reused_run_terminal);
+            .add_systems(Update, focus_reused_run);
         let tab = app
             .world_mut()
             .spawn((Tab::default(), LastActivatedAt(1)))

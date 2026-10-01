@@ -18,11 +18,11 @@ impl Plugin for PanelPlugin {
         app.add_plugins(UiEventPlugin::<(FilePanelPick,)>::default())
             .add_observer(receive_completion)
             .add_observer(receive_references)
-            .add_observer(select_next_panel_item)
-            .add_observer(select_previous_panel_item)
-            .add_observer(choose_panel_item)
-            .add_observer(dismiss_panel)
-            .add_observer(receive_panel_pick)
+            .add_observer(select_next_item)
+            .add_observer(select_previous_item)
+            .add_observer(choose_item)
+            .add_observer(dismiss)
+            .add_observer(receive_pick)
             .add_systems(PostUpdate, (clear_navigated_panels, refresh_changed_panels));
     }
 }
@@ -377,14 +377,14 @@ fn clear_navigated_panels(
     }
 }
 
-fn receive_panel_pick(trigger: On<UiInput<FilePanelPick>>, mut commands: Commands) {
+fn receive_pick(trigger: On<UiInput<FilePanelPick>>, mut commands: Commands) {
     commands.trigger(FilePanelChooseRequest {
         entity: trigger.event().webview,
         index: Some(trigger.event().payload.index),
     });
 }
 
-fn select_next_panel_item(
+fn select_next_item(
     trigger: On<FilePanelNextRequest>,
     mut panels: Query<&mut FilePanel>,
     mut commands: Commands,
@@ -402,7 +402,7 @@ fn select_next_panel_item(
     ));
 }
 
-fn select_previous_panel_item(
+fn select_previous_item(
     trigger: On<FilePanelPreviousRequest>,
     mut panels: Query<&mut FilePanel>,
     mut commands: Commands,
@@ -420,7 +420,7 @@ fn select_previous_panel_item(
     ));
 }
 
-fn choose_panel_item(
+fn choose_item(
     trigger: On<FilePanelChooseRequest>,
     mut panels: Query<(&mut FilePanel, &mut Editor)>,
     mut goto: MessageWriter<crate::lsp::manager::LspGoto>,
@@ -471,7 +471,7 @@ fn choose_panel_item(
     }
 }
 
-fn dismiss_panel(
+fn dismiss(
     trigger: On<FilePanelDismissRequest>,
     mut panels: Query<&mut FilePanel>,
     mut commands: Commands,

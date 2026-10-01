@@ -2521,7 +2521,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct InPaneCollectedSpawns(Vec<PageOpenRequest>);
 
-    fn collect_in_pane_spawns(
+    fn collect_in_spawns(
         mut reader: MessageReader<PageOpenRequest>,
         mut collected: ResMut<InPaneCollectedSpawns>,
     ) {
@@ -2539,7 +2539,7 @@ mod tests {
             .init_resource::<InPaneCollectedSpawns>()
             .insert_resource(test_settings())
             .add_plugins(DirectionalOpenPlugin)
-            .add_systems(PostUpdate, collect_in_pane_spawns);
+            .add_systems(PostUpdate, collect_in_spawns);
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         app
     }

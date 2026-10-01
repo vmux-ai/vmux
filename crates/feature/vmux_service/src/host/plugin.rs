@@ -81,32 +81,23 @@ impl Plugin for ServicePlugin {
             .add_message::<ServiceInbound>()
             .add_systems(
                 Startup,
-                (
-                    start_service,
-                    ApplyDeferred,
-                    register_service,
-                    launch_detached_service,
-                )
-                    .chain(),
+                (start, ApplyDeferred, register, launch_detached).chain(),
             )
             .add_systems(
                 Update,
                 (
-                    receive_service_messages,
-                    reconnect_disconnected_service,
-                    finish_service_connection,
-                    start_service_connection,
+                    receive_messages,
+                    reconnect_disconnected,
+                    finish_connection,
+                    start_connection,
                 )
                     .chain(),
             )
-            .add_systems(
-                Last,
-                (queue_service_requests, send_service_requests).chain(),
-            );
+            .add_systems(Last, (queue_requests, send_requests).chain());
     }
 }
 
-fn start_service(mut commands: Commands, proxy: Option<Res<EventLoopProxyWrapper>>) {
+fn start(mut commands: Commands, proxy: Option<Res<EventLoopProxyWrapper>>) {
     let wake = proxy.map(|wrapper| {
         let proxy = (**wrapper).clone();
         Arc::new(move || {
@@ -139,7 +130,7 @@ fn start_service(mut commands: Commands, proxy: Option<Res<EventLoopProxyWrapper
     }
 }
 
-fn register_service(
+fn register(
     registrations: Query<(Entity, &DaemonBinary, &ServiceRegistration)>,
     mut commands: Commands,
 ) {
@@ -230,7 +221,7 @@ fn register_service(
 }
 
 #[cfg(unix)]
-fn launch_detached_service(
+fn launch_detached(
     launches: Query<(Entity, &DaemonBinary), With<DetachedServiceLaunch>>,
     mut commands: Commands,
 ) {
@@ -253,7 +244,7 @@ fn launch_detached_service(
     }
 }
 
-fn start_service_connection(
+fn start_connection(
     mut runtimes: Query<
         (Entity, &mut ServiceConnectRetry, &ServiceWakeCallback),
         (Without<ServiceClient>, Without<ServiceConnectTask>),
@@ -289,7 +280,7 @@ fn start_service_connection(
     }
 }
 
-fn finish_service_connection(
+fn finish_connection(
     mut tasks: Query<(Entity, &mut ServiceConnectRetry, &ServiceConnectTask)>,
     mut commands: Commands,
 ) {
@@ -316,7 +307,7 @@ fn finish_service_connection(
     }
 }
 
-fn queue_service_requests(
+fn queue_requests(
     mut requests: MessageReader<ServiceRequest>,
     mut runtimes: Query<&mut PendingServiceRequests>,
 ) {
@@ -329,7 +320,7 @@ fn queue_service_requests(
     }
 }
 
-fn send_service_requests(
+fn send_requests(
     mut runtimes: Query<
         (Entity, &ServiceClient, &mut PendingServiceRequests),
         Without<ServiceDisconnected>,
@@ -348,7 +339,7 @@ fn send_service_requests(
     }
 }
 
-fn receive_service_messages(
+fn receive_messages(
     clients: Query<(Entity, &ServiceClient, &ServiceWakeCallback), Without<ServiceDisconnected>>,
     mut inbound: MessageWriter<ServiceInbound>,
     mut commands: Commands,
@@ -370,7 +361,7 @@ fn receive_service_messages(
     }
 }
 
-fn reconnect_disconnected_service(
+fn reconnect_disconnected(
     disconnected: Query<Entity, Added<ServiceDisconnected>>,
     mut commands: Commands,
 ) {
@@ -394,14 +385,8 @@ mod tests {
         let mut app = App::new();
         app.add_message::<ServiceRequest>()
             .add_message::<ServiceInbound>()
-            .add_systems(
-                Update,
-                (receive_service_messages, reconnect_disconnected_service).chain(),
-            )
-            .add_systems(
-                Last,
-                (queue_service_requests, send_service_requests).chain(),
-            );
+            .add_systems(Update, (receive_messages, reconnect_disconnected).chain())
+            .add_systems(Last, (queue_requests, send_requests).chain());
         let runtime = app
             .world_mut()
             .spawn((

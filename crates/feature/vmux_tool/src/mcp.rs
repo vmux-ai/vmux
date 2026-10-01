@@ -29,7 +29,7 @@ impl Plugin for McpToolPlugin {
             .add_systems(
                 Update,
                 (
-                    locate_mcp_configs,
+                    locate_configs,
                     discover,
                     import_config,
                     import_defaults,
@@ -268,7 +268,7 @@ pub(super) struct DiscoveredMcpServers {
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 struct McpConfigSources(Vec<PathBuf>);
 
-fn locate_mcp_configs(
+fn locate_configs(
     operations: Query<(Entity, &ToolStoreTarget), Added<DiscoverMcpServers>>,
     stores: Query<&ToolStore>,
     mut commands: Commands,

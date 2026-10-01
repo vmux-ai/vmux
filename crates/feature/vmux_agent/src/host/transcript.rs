@@ -24,7 +24,7 @@ pub(super) struct ChatTranscriptPlugin;
 impl Plugin for ChatTranscriptPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(ChatHistoryMoreRequest,)>::default())
-            .add_observer(on_chat_history_more_request)
+            .add_observer(chat_history_more_request)
             .add_observer(reset_chat_synced_on_page_ready)
             .add_systems(
                 Update,
@@ -416,7 +416,7 @@ fn reset_chat_synced_on_page_ready(
     }
 }
 
-fn on_chat_history_more_request(
+fn chat_history_more_request(
     trigger: On<UiInput<ChatHistoryMoreRequest>>,
     mut views: Query<(&ChildOf, &mut ChatTranscriptProjection), With<ChatView>>,
     mut commands: Commands,

@@ -14,17 +14,12 @@ pub(crate) struct TrayPlugin;
 impl Plugin for TrayPlugin {
     fn build(&self, app: &mut App) {
         app.insert_non_send(TrayRuntime(None))
-            .add_systems(Startup, setup_tray.after(vmux_setting::SettingsLoadSet))
+            .add_systems(Startup, setup.after(vmux_setting::SettingsLoadSet))
             .add_systems(
                 Update,
-                (
-                    toggle_tray_visibility,
-                    quit_from_tray,
-                    control_recording_from_tray,
-                )
-                    .in_set(OsMenuSet::Dispatch),
+                (toggle_visibility, quit_from, control_recording_from).in_set(OsMenuSet::Dispatch),
             )
-            .add_systems(Update, (sync_tray_menu_state, sync_tray_recording));
+            .add_systems(Update, (sync_menu_state, sync_recording));
     }
 }
 
@@ -64,11 +59,7 @@ struct TrayHandle {
 
 struct TrayRuntime(Option<TrayHandle>);
 
-fn setup_tray(
-    settings: Res<AppSettings>,
-    mut runtime: NonSendMut<TrayRuntime>,
-    mut commands: Commands,
-) {
+fn setup(settings: Res<AppSettings>, mut runtime: NonSendMut<TrayRuntime>, mut commands: Commands) {
     let locale = tray_locale(&settings);
     let menu = Menu::new();
     let toggle = MenuItem::new(toggle_label(true, &locale), true, None);
@@ -165,7 +156,7 @@ fn setup_tray(
     ));
 }
 
-fn toggle_tray_visibility(
+fn toggle_visibility(
     mut selections: MessageReader<OsMenuSelection>,
     menu_items: Query<(), With<ToggleTrayVisibility>>,
     windows: Query<&Window>,
@@ -186,7 +177,7 @@ fn toggle_tray_visibility(
     }
 }
 
-fn quit_from_tray(
+fn quit_from(
     mut selections: MessageReader<OsMenuSelection>,
     menu_items: Query<(), With<QuitFromTray>>,
     mut quit: MessageWriter<QuitRequest>,
@@ -200,7 +191,7 @@ fn quit_from_tray(
 }
 
 #[cfg(feature = "recording")]
-fn control_recording_from_tray(
+fn control_recording_from(
     mut selections: MessageReader<OsMenuSelection>,
     pause: Query<(), With<PauseRecordingFromTray>>,
     resume: Query<(), With<ResumeRecordingFromTray>>,
@@ -220,11 +211,11 @@ fn control_recording_from_tray(
 }
 
 #[cfg(not(feature = "recording"))]
-fn control_recording_from_tray(mut selections: MessageReader<OsMenuSelection>) {
+fn control_recording_from(mut selections: MessageReader<OsMenuSelection>) {
     for _ in selections.read() {}
 }
 
-fn sync_tray_menu_state(
+fn sync_menu_state(
     mut runtime: NonSendMut<TrayRuntime>,
     windows: Query<&Window>,
     settings: Res<AppSettings>,
@@ -259,7 +250,7 @@ fn sync_tray_menu_state(
 }
 
 #[cfg(feature = "recording")]
-fn sync_tray_recording(status: Query<&RecordingStatus>, mut runtime: NonSendMut<TrayRuntime>) {
+fn sync_recording(status: Query<&RecordingStatus>, mut runtime: NonSendMut<TrayRuntime>) {
     let Ok(status) = status.single() else {
         return;
     };
@@ -291,7 +282,7 @@ fn sync_tray_recording(status: Query<&RecordingStatus>, mut runtime: NonSendMut<
 }
 
 #[cfg(not(feature = "recording"))]
-fn sync_tray_recording() {}
+fn sync_recording() {}
 
 fn toggle_label(any_visible: bool, locale: &Locale) -> String {
     if any_visible {

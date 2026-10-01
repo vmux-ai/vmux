@@ -126,7 +126,7 @@ impl Plugin for ServiceIngressPlugin {
                     project_command_lifecycle,
                     project_process_list,
                     project_bells,
-                    project_terminal_modes,
+                    project_modes,
                 )
                     .in_set(ServiceMessageSet)
                     .chain(),
@@ -249,7 +249,7 @@ fn project_bells(
     }
 }
 
-fn project_terminal_modes(
+fn project_modes(
     mut inbound: MessageReader<ProcessTerminalMode>,
     process_index: Single<&TerminalProcessIndex>,
     mut terminals: Query<(&mut TerminalMode, &mut TerminalCopyMode), With<Terminal>>,

@@ -18,7 +18,7 @@ impl Plugin for CompletionPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_project_index)
             .add_plugins(UiEventPlugin::<(PathCompleteRequest,)>::default())
-            .add_observer(on_path_complete_request)
+            .add_observer(path_complete_request)
             .add_systems(
                 Update,
                 (
@@ -35,7 +35,7 @@ fn spawn_project_index(mut commands: Commands) {
     commands.spawn((Name::new("Project file index"), ProjectIndex::default()));
 }
 
-fn on_path_complete_request(
+fn path_complete_request(
     trigger: On<UiInput<PathCompleteRequest>>,
     state: Single<&CommandBarProjection>,
     browsers: NonSend<Browsers>,

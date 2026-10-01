@@ -25,12 +25,12 @@ impl Plugin for ExtensionCatalogPlugin {
                 ExtPinRequest,
                 ExtOpenManagerRequest,
             )>::default())
-            .add_observer(on_page_ready)
-            .add_observer(on_toggle_request)
-            .add_observer(on_uninstall_request)
-            .add_observer(on_pin_request)
-            .add_observer(on_open_manager_request)
-            .add_systems(Startup, spawn_extension_catalog)
+            .add_observer(page_ready)
+            .add_observer(toggle_request)
+            .add_observer(uninstall_request)
+            .add_observer(pin_request)
+            .add_observer(open_manager_request)
+            .add_systems(Startup, spawn)
             .add_systems(
                 Update,
                 (start_installs, drain_outbox, emit_extensions_snapshot).chain(),
@@ -194,14 +194,14 @@ struct ExtensionSubscriber {
     revision: u64,
 }
 
-fn spawn_extension_catalog(mut commands: Commands) {
+fn spawn(mut commands: Commands) {
     let outbox = ExtensionOutbox::default();
     let loader = outbox.clone();
     std::thread::spawn(move || loader.queue_snapshot());
     commands.spawn((ExtensionCatalog::default(), outbox));
 }
 
-fn on_page_ready(
+fn page_ready(
     trigger: On<UiInput<vmux_api::PageReady>>,
     pages: Query<(Has<vmux_layout::LayoutCef>, Option<&PageMetadata>)>,
     extension_pages: Query<(&NativelyHosted, &vmux_core::page::PageManifest)>,
@@ -223,7 +223,7 @@ fn on_page_ready(
     }
 }
 
-fn on_toggle_request(trigger: On<UiInput<ExtToggleRequest>>, runtime: Single<&ExtensionOutbox>) {
+fn toggle_request(trigger: On<UiInput<ExtToggleRequest>>, runtime: Single<&ExtensionOutbox>) {
     let request = trigger.event().payload.clone();
     let profile = vmux_core::profile::Profile::current().into_id();
     let _ = store::ExtensionStore::current().update_index(|index| {
@@ -237,17 +237,14 @@ fn on_toggle_request(trigger: On<UiInput<ExtToggleRequest>>, runtime: Single<&Ex
     runtime.queue_snapshot();
 }
 
-fn on_uninstall_request(
-    trigger: On<UiInput<ExtUninstallRequest>>,
-    runtime: Single<&ExtensionOutbox>,
-) {
+fn uninstall_request(trigger: On<UiInput<ExtUninstallRequest>>, runtime: Single<&ExtensionOutbox>) {
     let profile = vmux_core::profile::Profile::current().into_id();
     let _ = store::ExtensionStore::current()
         .uninstall_for_profile(&profile, &trigger.event().payload.id);
     runtime.queue_snapshot();
 }
 
-fn on_pin_request(trigger: On<UiInput<ExtPinRequest>>, runtime: Single<&ExtensionOutbox>) {
+fn pin_request(trigger: On<UiInput<ExtPinRequest>>, runtime: Single<&ExtensionOutbox>) {
     let request = trigger.event().payload.clone();
     let outbox = runtime.clone();
     std::thread::spawn(move || {
@@ -278,7 +275,7 @@ fn on_pin_request(trigger: On<UiInput<ExtPinRequest>>, runtime: Single<&Extensio
     });
 }
 
-fn on_open_manager_request(
+fn open_manager_request(
     _trigger: On<UiInput<ExtOpenManagerRequest>>,
     mut requests: MessageWriter<OpenManagerRequest>,
 ) {
@@ -372,7 +369,7 @@ mod tests {
     #[test]
     fn page_ready_subscribes_only_extension_and_layout_pages() {
         let mut app = App::new();
-        app.add_observer(on_page_ready);
+        app.add_observer(page_ready);
         app.world_mut().spawn((
             crate::ExtensionPlugin::MANIFEST,
             NativelyHosted::page("vmux://extensions/", "Extensions"),

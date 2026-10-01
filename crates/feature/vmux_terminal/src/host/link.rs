@@ -15,11 +15,11 @@ pub(super) struct LinkPlugin;
 impl Plugin for LinkPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(TermLinkOpenRequest,)>::default())
-            .add_observer(on_term_link_open);
+            .add_observer(term_open);
     }
 }
 
-fn on_term_link_open(
+fn term_open(
     trigger: On<UiInput<TermLinkOpenRequest>>,
     mut stack_requests: MessageWriter<OpenRequest>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -176,7 +176,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenRequest>()
             .init_resource::<Captured>()
-            .add_observer(on_term_link_open)
+            .add_observer(term_open)
             .add_systems(Update, capture);
         let webview = app.world_mut().spawn(vmux_core::team::User).id();
 

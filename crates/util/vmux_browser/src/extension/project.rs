@@ -24,13 +24,13 @@ pub(crate) struct ExtensionProjectionSet;
 impl Plugin for ExtensionProjectPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ExtensionModelEvent>()
-            .add_systems(Startup, spawn_extension_model)
+            .add_systems(Startup, spawn_model)
             .add_systems(
                 Update,
                 (
-                    assign_extension_ids,
+                    assign_ids,
                     bevy::ecs::schedule::ApplyDeferred,
-                    rebuild_extension_model,
+                    rebuild_model,
                 )
                     .chain()
                     .in_set(ExtensionProjectionSet)
@@ -87,11 +87,11 @@ struct ProjectedTab {
     tab: ExtensionTabSnapshot,
 }
 
-fn spawn_extension_model(mut commands: Commands) {
+fn spawn_model(mut commands: Commands) {
     commands.spawn((ExtensionModel::default(), ExtensionIdSequence::default()));
 }
 
-fn assign_extension_ids(
+fn assign_ids(
     windows: Query<Entity, (With<Window>, Without<ExtensionWindowId>)>,
     tabs: Query<Entity, (With<Stack>, With<PageMetadata>, Without<ExtensionTabId>)>,
     mut sequence: Single<&mut ExtensionIdSequence>,
@@ -105,7 +105,7 @@ fn assign_extension_ids(
     }
 }
 
-fn rebuild_extension_model(
+fn rebuild_model(
     window_query: Query<(Entity, &Window, &ExtensionWindowId, Has<PrimaryWindow>)>,
     space_query: Query<(Entity, Option<&Order>), With<Space>>,
     hierarchy: Query<HierarchyData>,

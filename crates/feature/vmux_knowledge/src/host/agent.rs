@@ -35,10 +35,7 @@ impl Plugin for KnowledgeAgentPlugin {
         app.add_agent_request::<AgentSearchKnowledge>()
             .add_agent_request::<AgentReadKnowledge>()
             .add_agent_request::<AgentWriteKnowledge>()
-            .add_systems(
-                Update,
-                (search_knowledge, read_knowledge, write_knowledge).after(AgentRequestRouteSet),
-            );
+            .add_systems(Update, (search, read, write).after(AgentRequestRouteSet));
     }
 }
 
@@ -55,7 +52,7 @@ impl AgentPaneQuery<'_, '_> {
     }
 }
 
-fn search_knowledge(
+fn search(
     mut requests: MessageReader<AgentRequestMessage<AgentSearchKnowledge>>,
     agents: AgentPaneQuery,
     indexes: Query<&KnowledgeIndex>,
@@ -108,7 +105,7 @@ fn search_knowledge(
     }
 }
 
-fn read_knowledge(
+fn read(
     mut requests: MessageReader<AgentRequestMessage<AgentReadKnowledge>>,
     agents: AgentPaneQuery,
     indexes: Query<&KnowledgeIndex>,
@@ -169,7 +166,7 @@ fn read_knowledge(
     }
 }
 
-fn write_knowledge(
+fn write(
     mut requests: MessageReader<AgentRequestMessage<AgentWriteKnowledge>>,
     agents: AgentPaneQuery,
     mut open: MessageWriter<vmux_layout::OpenBesideRequest>,

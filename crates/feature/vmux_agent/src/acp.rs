@@ -33,17 +33,17 @@ impl Plugin for AcpSessionPlugin {
         app.add_systems(
             Update,
             (
-                receive_acp_session_requests,
+                receive_session_requests,
                 ApplyDeferred,
-                spawn_acp_sessions,
-                project_acp_sessions,
-                route_acp_session_inputs,
-                subscribe_acp_sessions,
-                read_acp_session_state,
-                list_acp_sessions,
-                rebind_acp_sessions,
-                close_acp_sessions,
-                reap_closed_acp_sessions,
+                spawn_sessions,
+                project_sessions,
+                route_session_inputs,
+                subscribe_sessions,
+                read_session_state,
+                list_sessions,
+                rebind_sessions,
+                close_sessions,
+                reap_closed_sessions,
             )
                 .chain(),
         );
@@ -687,7 +687,7 @@ struct AcpSessionTask(tokio::task::JoinHandle<()>);
 #[derive(Component)]
 struct AcpSessionClosing;
 
-fn receive_acp_session_requests(mut inbox: Single<&mut AcpSessionInbox>, mut commands: Commands) {
+fn receive_session_requests(mut inbox: Single<&mut AcpSessionInbox>, mut commands: Commands) {
     while let Ok(request) = inbox.0.spawns.try_recv() {
         commands.spawn(request);
     }
@@ -723,7 +723,7 @@ fn receive_acp_session_requests(mut inbox: Single<&mut AcpSessionInbox>, mut com
     }
 }
 
-fn spawn_acp_sessions(
+fn spawn_sessions(
     runtime: Single<&AcpSessionRuntime>,
     wake: Single<&AcpSessionWake>,
     sessions: Query<&SessionId>,
@@ -782,7 +782,7 @@ fn spawn_acp_sessions(
     }
 }
 
-fn project_acp_sessions(
+fn project_sessions(
     mut sessions: Query<(
         &SessionId,
         &AcpSessionShared,
@@ -1016,7 +1016,7 @@ fn project_acp_sessions(
     }
 }
 
-fn route_acp_session_inputs(
+fn route_session_inputs(
     sessions: Query<(&SessionId, &AcpSessionInput)>,
     mut requests: Query<(Entity, &mut AcpSessionInputRequest)>,
     mut commands: Commands,
@@ -1039,7 +1039,7 @@ fn route_acp_session_inputs(
     }
 }
 
-fn subscribe_acp_sessions(
+fn subscribe_sessions(
     sessions: Query<(&SessionId, &AcpSessionShared)>,
     mut requests: Query<(Entity, &mut SubscribeAcpSession)>,
     mut commands: Commands,
@@ -1059,7 +1059,7 @@ fn subscribe_acp_sessions(
     }
 }
 
-fn read_acp_session_state(
+fn read_session_state(
     sessions: Query<(
         &SessionId,
         &AcpSessionShared,
@@ -1132,7 +1132,7 @@ fn read_acp_session_state(
     }
 }
 
-fn list_acp_sessions(
+fn list_sessions(
     sessions: Query<(
         &SessionId,
         &AcpSessionShared,
@@ -1213,7 +1213,7 @@ fn list_acp_sessions(
     }
 }
 
-fn rebind_acp_sessions(
+fn rebind_sessions(
     sessions: Query<(&SessionId, &AcpSessionShared)>,
     mut requests: Query<(Entity, &mut RebindAcpSession)>,
     mut commands: Commands,
@@ -1233,7 +1233,7 @@ fn rebind_acp_sessions(
     }
 }
 
-fn close_acp_sessions(
+fn close_sessions(
     sessions: Query<(Entity, &SessionId, &AcpSessionInput)>,
     mut requests: Query<(Entity, &mut CloseAcpSession)>,
     mut commands: Commands,
@@ -1259,7 +1259,7 @@ fn close_acp_sessions(
     }
 }
 
-fn reap_closed_acp_sessions(
+fn reap_closed_sessions(
     sessions: Query<(Entity, &AcpSessionTask), bevy::prelude::With<AcpSessionClosing>>,
     mut commands: Commands,
 ) {

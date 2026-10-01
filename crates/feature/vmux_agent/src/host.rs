@@ -15,7 +15,7 @@ pub mod follow;
 mod handoff;
 mod ingress;
 mod model_selection;
-pub mod page_open;
+mod page;
 pub mod run_state_kind;
 pub mod runtime;
 pub mod snapshot;

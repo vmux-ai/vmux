@@ -10,14 +10,12 @@ pub(crate) struct BootStatusPlugin;
 
 impl Plugin for BootStatusPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_boot_status).add_systems(
-            Update,
-            compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
-        );
+        app.add_systems(Startup, spawn)
+            .add_systems(Update, update.after(vmux_layout::stack::ComputeFocusSet));
     }
 }
 
-fn spawn_boot_status(mut commands: Commands) {
+fn spawn(mut commands: Commands) {
     commands.spawn((Name::new("Boot status"), SplashStatus::default()));
 }
 
@@ -101,7 +99,7 @@ pub fn compute(i: BootInputs) -> (BootPhase, bool) {
     (phase, reveal_ready)
 }
 
-fn compute_boot_status(
+fn update(
     mut status: Single<&mut SplashStatus>,
     restore: Single<&WorkspaceRestore>,
     layout_q: Query<(), (With<LayoutCef>, With<PageReady>)>,
@@ -252,8 +250,7 @@ mod tests {
             store_present: true,
             complete: false,
         });
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, compute_boot_status);
+        app.add_plugins(MinimalPlugins).add_systems(Update, update);
 
         app.world_mut().spawn((LayoutCef, PageReady {}));
         let stack = app.world_mut().spawn(Stack::default()).id();
@@ -274,8 +271,7 @@ mod tests {
             store_present: true,
             complete: false,
         });
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, compute_boot_status);
+        app.add_plugins(MinimalPlugins).add_systems(Update, update);
 
         app.update();
 

@@ -10,8 +10,8 @@ pub(crate) struct SplashPlugin;
 impl Plugin for SplashPlugin {
     fn build(&self, app: &mut App) {
         app.init_non_send::<SplashState>()
-            .add_systems(Startup, show_splash)
-            .add_systems(Last, (update_splash_text, dismiss_splash).chain());
+            .add_systems(Startup, show)
+            .add_systems(Last, (update_text, dismiss).chain());
     }
 }
 
@@ -47,7 +47,7 @@ struct SplashState {
     fade_started: Option<Instant>,
 }
 
-fn show_splash(mut state: NonSendMut<SplashState>) {
+fn show(mut state: NonSendMut<SplashState>) {
     use objc2::{ClassType, MainThreadMarker, MainThreadOnly, runtime::AnyClass};
     use objc2_app_kit::{
         NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSFont, NSGlassEffectView,
@@ -171,7 +171,7 @@ fn show_splash(mut state: NonSendMut<SplashState>) {
     state.created_at = Some(Instant::now());
 }
 
-fn dismiss_splash(
+fn dismiss(
     mut state: NonSendMut<SplashState>,
     window_q: Query<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
@@ -209,10 +209,7 @@ fn dismiss_splash(
     }
 }
 
-fn update_splash_text(
-    state: NonSend<SplashState>,
-    status: Single<&crate::boot_status::SplashStatus>,
-) {
+fn update_text(state: NonSend<SplashState>, status: Single<&crate::boot_status::SplashStatus>) {
     use objc2_foundation::NSString;
     if let Some(label) = &state.status_label {
         label.setStringValue(&NSString::from_str(&status.phase.display()));

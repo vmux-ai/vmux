@@ -13,12 +13,12 @@ pub(super) struct WatchPlugin;
 
 impl Plugin for WatchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, initialize_git_watch)
+        app.add_systems(Startup, initialize)
             .add_systems(Startup, spawn_repo_info_cache)
             .add_systems(
                 Update,
                 (
-                    drain_git_watch,
+                    drain,
                     start_repo_info_loads,
                     poll_repo_info_cache,
                     sync_repo_info_watches,
@@ -29,7 +29,7 @@ impl Plugin for WatchPlugin {
     }
 }
 
-fn initialize_git_watch(world: &mut World) {
+fn initialize(world: &mut World) {
     let (tx, rx) = mpsc::channel();
     let proxy = world
         .get_resource::<EventLoopProxyWrapper>()
@@ -493,7 +493,7 @@ impl GitWatch {
     }
 }
 
-fn drain_git_watch(
+fn drain(
     watch: Option<NonSendMut<GitWatch>>,
     mut repo_info: Single<&mut RepoInfoCache>,
     mut views: Query<&mut super::state::GitState>,

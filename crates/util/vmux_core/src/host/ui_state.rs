@@ -21,9 +21,9 @@ where
         + for<'a> rkyv::Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, rkyv::rancor::Error>>,
 {
     fn build(&self, app: &mut App) {
-        app.add_observer(collect_ui_state::<S>)
-            .add_observer(replay_ui_state::<S>)
-            .add_systems(Last, emit_ui_state::<S>);
+        app.add_observer(collect::<S>)
+            .add_observer(replay::<S>)
+            .add_systems(Last, emit::<S>);
     }
 }
 
@@ -73,7 +73,7 @@ impl<S: UiStateContract> UiState<S> {
     }
 }
 
-fn collect_ui_state<S: UiStateContract>(
+fn collect<S: UiStateContract>(
     trigger: On<UiStateWrite<S>>,
     mut updates: Query<&mut UiState<S>>,
     mut commands: Commands,
@@ -88,7 +88,7 @@ fn collect_ui_state<S: UiStateContract>(
     }
 }
 
-fn replay_ui_state<S: UiStateContract>(
+fn replay<S: UiStateContract>(
     trigger: On<bevy_cef::prelude::UiInput<vmux_api::PageReady>>,
     mut updates: Query<&mut UiState<S>>,
 ) {
@@ -98,7 +98,7 @@ fn replay_ui_state<S: UiStateContract>(
     updates.replay = true;
 }
 
-fn emit_ui_state<S>(
+fn emit<S>(
     mut updates: Query<(Entity, &mut UiState<S>)>,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,

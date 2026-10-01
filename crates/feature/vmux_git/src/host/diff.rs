@@ -17,9 +17,9 @@ pub(super) struct DiffPlugin;
 
 impl Plugin for DiffPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_file_diff_refresh).add_systems(
+        app.add_observer(file_refresh).add_systems(
             Update,
-            (sync_page_diff_targets, start_diff_requests)
+            (sync_page_targets, start_requests)
                 .chain()
                 .in_set(GitUpdateSet::Diff),
         );
@@ -133,7 +133,7 @@ type GitDiffPages<'w, 's> = Query<
     ),
 >;
 
-fn sync_page_diff_targets(pages: GitDiffPages, mut commands: Commands) {
+fn sync_page_targets(pages: GitDiffPages, mut commands: Commands) {
     for (entity, state, controller, pending, current) in &pages {
         if !state.is_changed() && !controller.is_changed() {
             continue;
@@ -158,7 +158,7 @@ fn sync_page_diff_targets(pages: GitDiffPages, mut commands: Commands) {
     }
 }
 
-fn on_file_diff_refresh(
+fn file_refresh(
     trigger: On<FileDiffRefresh>,
     files: Query<&super::status::FileGit>,
     mut commands: Commands,
@@ -177,7 +177,7 @@ fn on_file_diff_refresh(
     });
 }
 
-fn start_diff_requests(
+fn start_requests(
     pending: Query<(
         Entity,
         &PendingGitDiff,
@@ -412,7 +412,7 @@ mod tests {
     #[test]
     fn a_new_target_supersedes_the_previous_diff_generation() {
         let mut app = App::new();
-        app.add_systems(Update, start_diff_requests);
+        app.add_systems(Update, start_requests);
         let entity = app
             .world_mut()
             .spawn((

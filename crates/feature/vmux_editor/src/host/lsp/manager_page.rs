@@ -29,11 +29,11 @@ impl Plugin for ManagerPlugin {
                 LspUninstallRequest,
                 LspUpdateRequest,
             )>::default())
-            .add_observer(on_page_ready)
-            .add_observer(on_catalog_request)
-            .add_observer(on_install_request)
-            .add_observer(on_uninstall_request)
-            .add_observer(on_update_request)
+            .add_observer(page_ready)
+            .add_observer(catalog_request)
+            .add_observer(install_request)
+            .add_observer(uninstall_request)
+            .add_observer(update_request)
             .add_systems(
                 Update,
                 (
@@ -61,7 +61,7 @@ impl Plugin for ManagerPlugin {
     }
 }
 
-fn on_page_ready(
+fn page_ready(
     trigger: On<UiInput<PageReady>>,
     pages: Query<&vmux_core::PageMetadata>,
     mut commands: Commands,
@@ -470,7 +470,7 @@ impl Package {
     }
 }
 
-fn on_catalog_request(
+fn catalog_request(
     trigger: On<UiInput<LspCatalogRequest>>,
     mut states: Query<&mut ManagerState>,
     jobs: Query<(Entity, &CatalogJob)>,
@@ -494,7 +494,7 @@ fn on_catalog_request(
     ));
 }
 
-fn on_install_request(
+fn install_request(
     trigger: On<UiInput<LspInstallRequest>>,
     mut requests: MessageWriter<PackageInstallRequest>,
 ) {
@@ -504,7 +504,7 @@ fn on_install_request(
     });
 }
 
-fn on_update_request(
+fn update_request(
     trigger: On<UiInput<LspUpdateRequest>>,
     mut requests: MessageWriter<PackageInstallRequest>,
 ) {
@@ -526,7 +526,7 @@ fn enqueue_package_installs(
     }
 }
 
-fn on_uninstall_request(trigger: On<UiInput<LspUninstallRequest>>, mut commands: Commands) {
+fn uninstall_request(trigger: On<UiInput<LspUninstallRequest>>, mut commands: Commands) {
     commands.spawn(PendingPackageUninstall {
         target: trigger.event().webview,
         name: trigger.event().payload.name.clone(),
@@ -702,7 +702,7 @@ mod tests {
     #[test]
     fn page_ready_starts_initial_catalog_job() {
         let mut app = App::new();
-        app.add_observer(on_page_ready);
+        app.add_observer(page_ready);
         let webview = app
             .world_mut()
             .spawn(vmux_core::PageMetadata {

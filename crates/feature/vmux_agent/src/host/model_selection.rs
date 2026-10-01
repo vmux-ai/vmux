@@ -12,17 +12,14 @@ impl Plugin for ModelSelectionPlugin {
         app.add_systems(
             Startup,
             (
-                spawn_agent_model_registry,
+                spawn_model_registry,
                 ApplyDeferred,
-                load_agent_model_selections,
-                load_agent_mode_selections,
+                load_model_selections,
+                load_mode_selections,
             )
                 .chain(),
         )
-        .add_systems(
-            PostUpdate,
-            (save_agent_model_selections, save_agent_mode_selections),
-        );
+        .add_systems(PostUpdate, (save_model_selections, save_mode_selections));
     }
 }
 
@@ -84,7 +81,7 @@ fn agent_mode_selections_path() -> std::path::PathBuf {
     ProfilePaths::current().profile().join("agent-modes.json")
 }
 
-fn spawn_agent_model_registry(mut commands: Commands) {
+fn spawn_model_registry(mut commands: Commands) {
     commands.spawn((
         Name::new("Agent model registry"),
         AcpSessionConfigRequestCounter::default(),
@@ -93,7 +90,7 @@ fn spawn_agent_model_registry(mut commands: Commands) {
     ));
 }
 
-fn load_agent_model_selections(mut models: Single<&mut AgentModelSelections>) {
+fn load_model_selections(mut models: Single<&mut AgentModelSelections>) {
     let Ok(bytes) = std::fs::read(agent_model_selections_path()) else {
         return;
     };
@@ -112,7 +109,7 @@ fn load_agent_model_selections(mut models: Single<&mut AgentModelSelections>) {
     models.dirty = false;
 }
 
-fn load_agent_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
+fn load_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
     let Ok(bytes) = std::fs::read(agent_mode_selections_path()) else {
         return;
     };
@@ -128,7 +125,7 @@ fn load_agent_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
     modes.dirty = false;
 }
 
-fn save_agent_model_selections(mut models: Single<&mut AgentModelSelections>) {
+fn save_model_selections(mut models: Single<&mut AgentModelSelections>) {
     if !models.dirty {
         return;
     }
@@ -141,7 +138,7 @@ fn save_agent_model_selections(mut models: Single<&mut AgentModelSelections>) {
     }
 }
 
-fn save_agent_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
+fn save_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
     if !modes.dirty {
         return;
     }

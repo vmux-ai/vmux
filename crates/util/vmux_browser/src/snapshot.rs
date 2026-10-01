@@ -32,7 +32,7 @@ impl Plugin for SnapshotPlugin {
             )
             .add_systems(
                 Update,
-                (start_snapshots, shape_snapshot_results)
+                (start_snapshots, shape_results)
                     .chain()
                     .after(crate::BrowserSystemSet::Scroll)
                     .after(vmux_command::WriteCommandRequests),
@@ -185,7 +185,7 @@ fn drive_pending_nav_snapshots(
     }
 }
 
-fn shape_snapshot_results(
+fn shape_results(
     mut reader: MessageReader<SnapshotResult>,
     navigation_routes: Query<(Entity, &NavigationSnapshotResponseRoute)>,
     scroll_routes: Query<(Entity, &crate::scroll::ScrollSnapshotResponseRoute)>,
@@ -243,7 +243,7 @@ mod tests {
             .add_message::<BrowserSnapshotResponse>()
             .add_message::<BrowserScrollResponse>()
             .add_message::<BrowserNavigationSnapshotResponse>()
-            .add_systems(Update, shape_snapshot_results);
+            .add_systems(Update, shape_results);
 
         let navigation_id = [1; 16];
         let query_id = [2; 16];

@@ -34,7 +34,7 @@ impl Plugin for BesideOpenPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<OpenBesideRequest>().add_systems(
             Update,
-            handle_open_beside_requests.in_set(LayoutRequestSet::Handle),
+            handle_beside_requests.in_set(LayoutRequestSet::Handle),
         );
     }
 }
@@ -44,7 +44,7 @@ pub(super) struct DirectionalOpenPlugin;
 impl Plugin for DirectionalOpenPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<OpenRequest>()
-            .add_systems(Update, handle_open_in_pane.in_set(LayoutRequestSet::Handle));
+            .add_systems(Update, handle_in.in_set(LayoutRequestSet::Handle));
     }
 }
 
@@ -68,7 +68,7 @@ struct PaneOpenResolver<'w, 's> {
     tab_q: Query<'w, 's, Entity, With<Tab>>,
 }
 
-fn handle_open_beside_requests(
+fn handle_beside_requests(
     mut reader: MessageReader<OpenBesideRequest>,
     pane_children: Query<&Children, With<Pane>>,
     split_dir_q: Query<&PaneSplit>,
@@ -874,7 +874,7 @@ fn find_sibling_pane(
     None
 }
 
-fn handle_open_in_pane(
+fn handle_in(
     mut reader: MessageReader<OpenRequest>,
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,

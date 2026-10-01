@@ -9,15 +9,16 @@ use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
 
 use super::super::model::PaletteQuery;
 
-use super::{OpenVersion, PaletteSnapshot, RequestGeneration};
+use super::{OpenVersion, PaletteDraftInput, PaletteSnapshot, RequestGeneration, project};
 
 pub(super) struct PaletteResumePlugin;
 
 impl Plugin for PaletteResumePlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(update_palette_resume_draft)
-            .add_observer(receive_palette_resume_page)
-            .add_systems(PreUpdate, attach_palette_resume);
+        app.add_observer(update_draft)
+            .add_observer(receive_page)
+            .add_systems(PreUpdate, attach)
+            .add_systems(PostUpdate, request_more.after(project));
     }
 }
 
@@ -25,12 +26,11 @@ impl Plugin for PaletteResumePlugin {
 pub(super) struct PaletteResume {
     open: OpenVersion,
     active: bool,
-    selected: u32,
     generation: RequestGeneration,
     inflight: Option<ResumeFlight>,
 }
 
-fn attach_palette_resume(
+fn attach(
     pages: Query<
         Entity,
         (
@@ -45,7 +45,7 @@ fn attach_palette_resume(
     }
 }
 
-fn update_palette_resume_draft(
+fn update_draft(
     trigger: On<UiInput<CommandPaletteDraftRequest>>,
     mut palettes: Query<(&mut PaletteResume, &mut PaletteSnapshot)>,
     mut commands: Commands,
@@ -60,7 +60,6 @@ fn update_palette_resume_draft(
     };
     if opened {
         resume.active = false;
-        resume.selected = 0;
         resume.generation.advance();
         snapshot.0.open_id = request.open_id;
         snapshot.0.sessions.clear();
@@ -68,11 +67,7 @@ fn update_palette_resume_draft(
         snapshot.0.sessions_loading = false;
     }
     let wants_resume = request.start && ResumeQuery::matches(&request.query);
-    resume.selected = request.selected;
     if wants_resume == resume.active {
-        if let Some(request) = resume.maybe_request_page(target, &mut snapshot) {
-            commands.trigger(request);
-        }
         return;
     }
     resume.active = wants_resume;
@@ -89,10 +84,9 @@ fn update_palette_resume_draft(
     }
 }
 
-fn receive_palette_resume_page(
+fn receive_page(
     trigger: On<UiStateWrite<CommandBarUiState>>,
     mut palettes: Query<(&mut PaletteResume, &mut PaletteSnapshot)>,
-    mut commands: Commands,
 ) {
     let Some(response) =
         <CommandBarUiStatePatch as vmux_api::UiStatePatch<ResumableSessions>>::payload(
@@ -105,8 +99,22 @@ fn receive_palette_resume_page(
     let Ok((mut resume, mut snapshot)) = palettes.get_mut(target) else {
         return;
     };
-    if let Some(request) = resume.apply_page(target, response, &mut snapshot) {
-        commands.trigger(request);
+    resume.apply_page(response, &mut snapshot);
+}
+
+fn request_more(
+    mut palettes: Query<(
+        Entity,
+        &PaletteDraftInput,
+        &mut PaletteResume,
+        &mut PaletteSnapshot,
+    )>,
+    mut commands: Commands,
+) {
+    for (target, input, mut resume, mut snapshot) in &mut palettes {
+        if let Some(request) = resume.maybe_request_page(input.selected, target, &mut snapshot) {
+            commands.trigger(request);
+        }
     }
 }
 
@@ -138,13 +146,10 @@ impl PaletteResume {
         })
     }
 
-    fn apply_page(
-        &mut self,
-        target: Entity,
-        response: &ResumableSessions,
-        snapshot: &mut PaletteSnapshot,
-    ) -> Option<UiInput<ResumeListRequest>> {
-        let flight = self.inflight.take()?;
+    fn apply_page(&mut self, response: &ResumableSessions, snapshot: &mut PaletteSnapshot) {
+        let Some(flight) = self.inflight.take() else {
+            return;
+        };
         let accepted = flight.open_generation == self.open.generation()
             && self.generation.matches(flight.generation)
             && self.active
@@ -159,17 +164,12 @@ impl PaletteResume {
             } else {
                 snapshot.0.sessions.extend(response.sessions.clone());
             }
-            return self.maybe_request_page(target, snapshot);
         }
-        if self.active {
-            let offset = snapshot.0.sessions.len() as u32;
-            return self.request_page(target, offset, snapshot);
-        }
-        None
     }
 
     fn maybe_request_page(
         &mut self,
+        selected: usize,
         target: Entity,
         snapshot: &mut PaletteSnapshot,
     ) -> Option<UiInput<ResumeListRequest>> {
@@ -180,7 +180,7 @@ impl PaletteResume {
         if loaded == 0 || loaded >= snapshot.0.sessions_total {
             return None;
         }
-        if self.selected.saturating_add(10) < loaded {
+        if (selected as u32).saturating_add(10) < loaded {
             return None;
         }
         self.request_page(target, loaded, snapshot)

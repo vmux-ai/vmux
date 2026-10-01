@@ -8,7 +8,7 @@ pub(crate) struct SurfacePlugin;
 
 impl Plugin for SurfacePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_command_bar_surface);
+        app.add_systems(Startup, spawn_bar);
     }
 }
 
@@ -32,7 +32,7 @@ impl CommandBar {
     }
 }
 
-fn spawn_command_bar_surface(mut commands: Commands) {
+fn spawn_bar(mut commands: Commands) {
     commands.spawn(CommandBar::surface());
 }
 
@@ -44,7 +44,7 @@ mod tests {
     fn spawned() -> (App, Entity) {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Startup, spawn_command_bar_surface);
+            .add_systems(Startup, spawn_bar);
         app.update();
         let bar = app
             .world_mut()

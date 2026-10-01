@@ -22,14 +22,14 @@ pub(super) struct JobPlugin;
 
 impl Plugin for JobPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(queue_git_job_failure).add_systems(
+        app.add_observer(queue_job_failure).add_systems(
             Update,
             (
                 (
-                    poll_git_jobs::<RepositoryOutput>,
-                    poll_git_jobs::<BranchLogOutput>,
-                    poll_git_jobs::<DiffOutput>,
-                    poll_git_jobs::<OperationOutput>,
+                    poll_jobs::<RepositoryOutput>,
+                    poll_jobs::<BranchLogOutput>,
+                    poll_jobs::<DiffOutput>,
+                    poll_jobs::<OperationOutput>,
                 ),
                 (
                     deliver_repository_outputs,
@@ -142,7 +142,7 @@ struct OperationOutput {
 #[derive(Component)]
 struct FailureOutput(GitOperationError);
 
-fn queue_git_job_failure(trigger: On<GitJobFailure>, mut commands: Commands) {
+fn queue_job_failure(trigger: On<GitJobFailure>, mut commands: Commands) {
     commands.spawn((
         GitJob::new(trigger.event().webview),
         FailureOutput(GitOperationError {
@@ -151,10 +151,7 @@ fn queue_git_job_failure(trigger: On<GitJobFailure>, mut commands: Commands) {
     ));
 }
 
-fn poll_git_jobs<T: Component>(
-    mut jobs: Query<(Entity, &mut GitJobTask<T>)>,
-    mut commands: Commands,
-) {
+fn poll_jobs<T: Component>(mut jobs: Query<(Entity, &mut GitJobTask<T>)>, mut commands: Commands) {
     for (entity, mut task) in &mut jobs {
         if !task.thread.as_ref().is_some_and(JoinHandle::is_finished) {
             continue;
@@ -842,8 +839,8 @@ mod tests {
             .add_systems(
                 Update,
                 capture_outputs
-                    .after(poll_git_jobs::<DiffOutput>)
-                    .after(poll_git_jobs::<OperationOutput>)
+                    .after(poll_jobs::<DiffOutput>)
+                    .after(poll_jobs::<OperationOutput>)
                     .before(deliver_diff_outputs)
                     .before(deliver_operation_outputs),
             );

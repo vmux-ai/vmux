@@ -97,21 +97,21 @@ impl Plugin for VaultPlugin {
         .add_observer(connect_workflow)
         .add_observer(confirm_recovery)
         .add_observer(set_recovery_input)
-        .add_systems(Startup, spawn_vault_runtime)
+        .add_systems(Startup, spawn_runtime)
         .add_systems(
             Update,
             (
-                drain_vault_watch,
-                start_vault_scan,
-                drain_vault_scan,
-                queue_vault_auto_sync,
-                start_vault_operation,
-                emit_vault_state,
+                drain_watch,
+                start_scan,
+                drain_scan,
+                queue_auto_sync,
+                start_operation,
+                emit_state,
             )
                 .chain(),
         )
-        .add_systems(Update, launch_vault_operations)
-        .add_systems(Update, drain_vault_operations);
+        .add_systems(Update, launch_operations)
+        .add_systems(Update, drain_operations);
 
         if let Some(watch) = VaultWatch::new(app) {
             app.insert_non_send(watch);
@@ -1328,7 +1328,7 @@ fn set_recovery_input(
     }
 }
 
-fn spawn_vault_runtime(mut commands: Commands) {
+fn spawn_runtime(mut commands: Commands) {
     commands.spawn((
         Name::new("Vault"),
         VaultRegistry::default(),
@@ -1338,7 +1338,7 @@ fn spawn_vault_runtime(mut commands: Commands) {
     ));
 }
 
-fn start_vault_scan(
+fn start_scan(
     mut registries: Query<&mut VaultRegistry>,
     scans: Query<(), With<VaultScanTask>>,
     tasks: Query<(), With<VaultOperationTask>>,
@@ -1366,7 +1366,7 @@ fn start_vault_scan(
     commands.spawn(VaultScanTask { generation, task });
 }
 
-fn drain_vault_scan(
+fn drain_scan(
     mut scans: Query<(Entity, &mut VaultScanTask)>,
     mut registries: Query<(&mut VaultRegistry, &mut VaultAutoSync)>,
     mut commands: Commands,
@@ -1406,7 +1406,7 @@ fn drain_vault_scan(
     }
 }
 
-fn drain_vault_watch(
+fn drain_watch(
     watcher: Option<NonSendMut<VaultWatch>>,
     mut registry: Query<(&mut VaultRegistry, &mut VaultAutoSync)>,
 ) {
@@ -1438,7 +1438,7 @@ fn drain_vault_watch(
     let _ = watcher.debounce_tx.send(());
 }
 
-fn queue_vault_auto_sync(
+fn queue_auto_sync(
     mut registry: Query<(
         &VaultRegistry,
         &mut VaultAutoSync,
@@ -1510,7 +1510,7 @@ fn vault_event_requests_sync(result: &notify::Result<notify::Event>) -> bool {
     })
 }
 
-fn start_vault_operation(
+fn start_operation(
     pending: Query<(Entity, &VaultOperationContext), With<PendingVaultOperation>>,
     tasks: Query<(), With<VaultOperationTask>>,
     ready: Query<(), With<ReadyVaultOperation>>,
@@ -1557,7 +1557,7 @@ type ReadyVaultOperations<'w, 's> = Query<
     Added<ReadyVaultOperation>,
 >;
 
-fn launch_vault_operations(
+fn launch_operations(
     operations: ReadyVaultOperations,
     mut recoveries: Query<&mut VaultRecoveryState, With<VaultRegistry>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -1764,7 +1764,7 @@ fn launch_vault_operations(
     }
 }
 
-fn drain_vault_operations(
+fn drain_operations(
     mut operations: Query<(Entity, &VaultOperationContext, &mut VaultOperationTask)>,
     mut registry: Query<(&mut VaultRegistry, &mut VaultRecoveryState)>,
     mut subscribers: Query<&mut VaultSubscriber>,
@@ -1829,7 +1829,7 @@ fn drain_vault_operations(
     }
 }
 
-fn emit_vault_state(
+fn emit_state(
     registry: Query<&VaultRegistry>,
     mut subscribers: Query<(Entity, &mut VaultSubscriber, &mut VaultWorkflow)>,
     mut commands: Commands,
@@ -2014,7 +2014,7 @@ mod tests {
     impl VaultAutoSyncScenario {
         fn pending_targets(vault: VaultSnapshot, remote_check: bool) -> Vec<VaultOperationTarget> {
             let mut app = App::new();
-            app.add_systems(Update, queue_vault_auto_sync);
+            app.add_systems(Update, queue_auto_sync);
             let registry = app
                 .world_mut()
                 .spawn((

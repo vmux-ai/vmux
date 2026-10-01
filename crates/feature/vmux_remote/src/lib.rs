@@ -19,31 +19,28 @@ pub struct RemotePlugin;
 impl Plugin for RemotePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<RemoteOperationRequest>()
-            .add_observer(on_request)
-            .add_observer(show_remote_pairing)
-            .add_observer(dismiss_remote_pairing)
-            .add_observer(on_copy)
-            .add_observer(on_revoke)
-            .add_systems(
-                Startup,
-                (spawn_remote_runtime, reconcile_remote_on_startup).chain(),
-            )
+            .add_observer(request)
+            .add_observer(show_pairing)
+            .add_observer(dismiss_pairing)
+            .add_observer(copy)
+            .add_observer(revoke)
+            .add_systems(Startup, (spawn_runtime, reconcile_on_startup).chain())
             .add_systems(
                 Update,
                 (
-                    begin_remote_operations,
-                    poll_remote_operations,
-                    poll_remote_registration,
-                    poll_remote_authorizations,
-                    expire_remote_pairing,
-                    push_remote_state_emit,
+                    begin_operations,
+                    poll_operations,
+                    poll_registration,
+                    poll_authorizations,
+                    expire_pairing,
+                    push_state_emit,
                 )
                     .chain(),
             );
     }
 }
 
-fn spawn_remote_runtime(mut commands: Commands) {
+fn spawn_runtime(mut commands: Commands) {
     let authorizations = RemoteAuthorizationStore::current();
     let devices = authorizations.devices().unwrap_or_default();
     let persisted = std::fs::read_to_string(RemotePaths::current().state()).ok();
@@ -70,10 +67,7 @@ fn spawn_remote_runtime(mut commands: Commands) {
     ));
 }
 
-fn on_copy(
-    _trigger: On<UiInput<RemoteCopyEvent>>,
-    state: Query<(&RemoteState, &RemotePairingInfo)>,
-) {
+fn copy(_trigger: On<UiInput<RemoteCopyEvent>>, state: Query<(&RemoteState, &RemotePairingInfo)>) {
     let Ok((state, pairing)) = state.single() else {
         return;
     };
@@ -82,7 +76,7 @@ fn on_copy(
     }
 }
 
-fn on_revoke(
+fn revoke(
     trigger: On<UiInput<RemoteRevokeRequest>>,
     mut states: Query<(&mut RemoteState, &RemoteAuthorizationStore)>,
 ) {
@@ -152,7 +146,7 @@ struct RemoteState {
     reconcile_on_startup: bool,
 }
 
-fn reconcile_remote_on_startup(
+fn reconcile_on_startup(
     state: Query<(Entity, &RemoteState)>,
     mut operations: MessageWriter<RemoteOperationRequest>,
 ) {
@@ -168,7 +162,7 @@ fn reconcile_remote_on_startup(
     }
 }
 
-fn on_request(
+fn request(
     trigger: On<UiInput<RemoteRequest>>,
     mut states: Query<(Entity, &mut RemoteState, &mut PairingVisibility)>,
     mut operations: MessageWriter<RemoteOperationRequest>,
@@ -201,7 +195,7 @@ fn on_request(
     });
 }
 
-fn show_remote_pairing(
+fn show_pairing(
     _trigger: On<UiInput<RemotePairingShowRequest>>,
     mut states: Query<(
         &RemoteState,
@@ -217,14 +211,14 @@ fn show_remote_pairing(
     }
 }
 
-fn dismiss_remote_pairing(
+fn dismiss_pairing(
     _trigger: On<UiInput<RemotePairingDismissRequest>>,
     mut visibility: Single<&mut PairingVisibility>,
 ) {
     visibility.0 = None;
 }
 
-fn begin_remote_operations(
+fn begin_operations(
     mut requests: MessageReader<RemoteOperationRequest>,
     authorizations: Query<&RemoteAuthorizationStore>,
     mut commands: Commands,
@@ -258,7 +252,7 @@ fn begin_remote_operations(
     }
 }
 
-fn poll_remote_operations(
+fn poll_operations(
     mut operations: Query<(Entity, &mut RemoteOperation)>,
     mut states: Query<(&mut RemoteState, &mut PairingVisibility)>,
     mut commands: Commands,
@@ -309,7 +303,7 @@ fn poll_remote_operations(
     }
 }
 
-fn poll_remote_registration(
+fn poll_registration(
     mut states: Query<(
         Entity,
         &mut RemoteState,
@@ -366,7 +360,7 @@ fn poll_remote_registration(
     }
 }
 
-fn poll_remote_authorizations(
+fn poll_authorizations(
     mut states: Query<(
         Entity,
         &mut RemoteState,
@@ -422,7 +416,7 @@ fn poll_remote_authorizations(
     }
 }
 
-fn expire_remote_pairing(mut visibility: Single<&mut PairingVisibility>) {
+fn expire_pairing(mut visibility: Single<&mut PairingVisibility>) {
     if visibility
         .0
         .is_some_and(|deadline| deadline <= Instant::now())
@@ -431,7 +425,7 @@ fn expire_remote_pairing(mut visibility: Single<&mut PairingVisibility>) {
     }
 }
 
-fn push_remote_state_emit(
+fn push_state_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
@@ -544,7 +538,7 @@ mod tests {
     #[test]
     fn pairing_visibility_expires_in_ecs() {
         let mut app = App::new();
-        app.add_systems(Update, expire_remote_pairing);
+        app.add_systems(Update, expire_pairing);
         let entity = app
             .world_mut()
             .spawn(PairingVisibility(Some(

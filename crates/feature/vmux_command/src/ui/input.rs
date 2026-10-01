@@ -7,27 +7,23 @@ use vmux_ui::focus::FocusClaim;
 pub const COMMAND_BAR_INPUT_ID: &str = "command-bar-input";
 
 #[derive(Clone, Copy, PartialEq)]
-pub struct PaletteSignals {
+pub struct PaletteInput {
     pub query: Signal<String>,
-    pub selected: Signal<usize>,
-    pub nav_mode: Signal<bool>,
     pub last_open_id: Signal<OpenId>,
     pub last_focus_open_id: Signal<OpenId>,
     pub last_input_revision: Signal<u64>,
 }
 
-pub fn use_palette_signals() -> PaletteSignals {
-    PaletteSignals {
+pub fn use_palette_input() -> PaletteInput {
+    PaletteInput {
         query: use_signal(String::new),
-        selected: use_signal(|| 0usize),
-        nav_mode: use_signal(|| false),
         last_open_id: use_signal(|| OpenId(u64::MAX)),
         last_focus_open_id: use_signal(|| OpenId(u64::MAX)),
         last_input_revision: use_signal(|| 0),
     }
 }
 
-impl PaletteSignals {
+impl PaletteInput {
     pub fn reopened(&mut self, open_id: OpenId) -> bool {
         if (self.last_open_id)() == open_id {
             return false;
@@ -38,8 +34,6 @@ impl PaletteSignals {
 
     pub fn restart(&mut self, opened: &CommandBarOpenEvent) {
         self.query.set(opened.url.clone());
-        self.selected.set(0);
-        self.nav_mode.set(false);
     }
 
     pub fn refocus(&mut self, open_id: OpenId) -> bool {
@@ -52,37 +46,15 @@ impl PaletteSignals {
 
     pub fn retype(&mut self, value: String) {
         self.query.set(value);
-        self.selected.set(0);
-        self.nav_mode.set(false);
     }
 
-    pub fn highlight(&mut self, index: usize) {
-        self.selected.set(index);
-        self.nav_mode.set(true);
-    }
-
-    pub fn apply_host_input(
-        &mut self,
-        revision: u64,
-        query: &str,
-        selected: usize,
-        navigating: bool,
-        input_id: &'static str,
-    ) {
+    pub fn apply_host_input(&mut self, revision: u64, query: &str, input_id: &'static str) {
         if revision == 0 || revision <= (self.last_input_revision)() {
             return;
         }
         self.last_input_revision.set(revision);
         self.query.set(query.to_string());
-        self.selected.set(selected);
-        self.nav_mode.set(navigating);
         TextCaret::in_field(input_id).to_end();
-    }
-
-    pub fn watch(&self) {
-        let _ = (self.query)();
-        let _ = (self.selected)();
-        let _ = (self.nav_mode)();
     }
 }
 

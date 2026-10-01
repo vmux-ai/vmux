@@ -12,8 +12,8 @@ impl Plugin for RelaunchPlugin {
         ))
         .add_message::<RelaunchApplication>()
         .add_message::<LaunchProfile>()
-        .add_observer(on_restart_request)
-        .add_observer(on_page_relaunch)
+        .add_observer(restart_request)
+        .add_observer(page)
         .add_systems(
             Update,
             (request_profile_launch, relaunch, launch_profiles).chain(),
@@ -169,17 +169,14 @@ fn launch_profiles(mut requests: MessageReader<LaunchProfile>) {
     bevy::log::info!(profile, "launched profile window");
 }
 
-fn on_restart_request(
+fn restart_request(
     _trigger: On<UiInput<RelaunchRequest>>,
     mut requests: MessageWriter<RelaunchApplication>,
 ) {
     requests.write(RelaunchApplication);
 }
 
-fn on_page_relaunch(
-    trigger: On<Receive<UiRelaunchRequest>>,
-    mut requests: MessageWriter<RelaunchApplication>,
-) {
+fn page(trigger: On<Receive<UiRelaunchRequest>>, mut requests: MessageWriter<RelaunchApplication>) {
     if trigger.payload.channel == "vmux-relaunch" {
         requests.write(RelaunchApplication);
     }

@@ -5,7 +5,7 @@ use vmux_command::snapshot::{CommandBarProjection, CommandBarSpacesSnapshot, Spa
 use vmux_core::Order;
 use vmux_layout::space::{Space, SpaceId};
 
-use crate::event::SPACES_PAGE_URL;
+use crate::host::SpacePlugin;
 use crate::model::SpaceRecord;
 
 pub struct SnapshotPlugin;
@@ -64,7 +64,7 @@ fn update_spaces_snapshot(
         spaces: rows.into_iter().map(|(_, summary)| summary).collect(),
         active_space_id,
         active_space_name,
-        spaces_page_url: SPACES_PAGE_URL.to_string(),
+        spaces_page_url: SpacePlugin::MANIFEST.url.to_string(),
     };
     if state.spaces != next {
         state.spaces = next;
@@ -139,7 +139,7 @@ mod tests {
         spaces.republished();
         let snap = spaces.snapshot();
 
-        assert_eq!(snap.spaces_page_url, SPACES_PAGE_URL);
+        assert_eq!(snap.spaces_page_url, SpacePlugin::MANIFEST.url);
         assert_eq!(snap.active_space_id, "space-1");
         assert_eq!(snap.active_space_name, "Space 1");
         assert_eq!(snap.spaces.len(), 1);

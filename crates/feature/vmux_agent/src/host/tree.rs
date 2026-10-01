@@ -1,42 +1,63 @@
 use bevy::prelude::*;
+use vmux_chat::ChatPlugin;
 use vmux_core::agent::SwapStackSession;
 use vmux_core::host::persistence::WorkspaceStoreValidator;
 use vmux_core::notify::{AgentAttention, BellReceived, OsNotify};
 use vmux_core::{HostSpawnRoute, PageOpenRequest};
+use vmux_editor::ContractPlugin as EditorContractPlugin;
+use vmux_layout::LayoutContractPlugin;
+use vmux_session::room::RoomPlugin;
+use vmux_terminal::TerminalContractPlugin;
 
+use super::acp::AcpSessionConfigPlugin;
+use super::approval::Plugin as ApprovalPlugin;
+use super::attach::AttachPlugin;
+use super::attention::AttentionPlugin;
+use super::command::CommandPlugin;
+use super::continuation::AgentContinuationPlugin;
+use super::follow::FollowPlugin;
+use super::handoff::Plugin as HandoffPlugin;
+use super::ingress::AgentIngressPlugin;
+use super::page::PagePlugin;
+use super::snapshot::SnapshotPlugin;
+use super::tidy::Plugin as TidyPlugin;
+use super::toast::ToastPlugin;
+use crate::command_bar::CommandBarPlugin;
 use crate::event::{AgentRequestInput, AgentToolCallRequest};
+use crate::host::transcript::ChatTranscriptPlugin;
+use crate::runtime::AgentRuntimePlugin;
 
 pub struct AgentPlugin;
 
 impl Plugin for AgentPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            vmux_chat::ChatPlugin,
-            super::acp::AcpSessionConfigPlugin,
-            super::transcript::ChatTranscriptPlugin,
-            crate::runtime::AgentRuntimePlugin,
-            vmux_layout::LayoutContractPlugin,
-            vmux_editor::ContractPlugin,
-            vmux_terminal::TerminalContractPlugin,
-            vmux_session::room::RoomPlugin,
-            crate::command_bar::CommandBarPlugin,
-            super::approval::Plugin,
-            super::attach::AttachPlugin,
-            super::attention::AttentionPlugin,
-            super::command::CommandPlugin,
-            super::continuation::AgentContinuationPlugin,
+            ChatPlugin,
+            AcpSessionConfigPlugin,
+            ChatTranscriptPlugin,
+            AgentRuntimePlugin,
+            LayoutContractPlugin,
+            EditorContractPlugin,
+            TerminalContractPlugin,
+            RoomPlugin,
+            CommandBarPlugin,
+            ApprovalPlugin,
+            AttachPlugin,
+            AttentionPlugin,
+            CommandPlugin,
+            AgentContinuationPlugin,
         ))
         .add_plugins((
-            super::follow::FollowPlugin,
-            super::handoff::Plugin,
-            super::ingress::AgentIngressPlugin,
-            super::page_open::PageOpenPlugin,
-            super::snapshot::SnapshotPlugin,
-            super::tidy::Plugin,
-            super::toast::ToastPlugin,
+            FollowPlugin,
+            HandoffPlugin,
+            AgentIngressPlugin,
+            PagePlugin,
+            SnapshotPlugin,
+            TidyPlugin,
+            ToastPlugin,
         ))
-        .add_systems(PreStartup, spawn_agent_store_validator)
-        .add_systems(Startup, register_agent_session_route)
+        .add_systems(PreStartup, spawn_store_validator)
+        .add_systems(Startup, register_session_route)
         .add_message::<AgentRequestInput>()
         .add_message::<AgentToolCallRequest>()
         .add_message::<SwapStackSession>()
@@ -47,7 +68,7 @@ impl Plugin for AgentPlugin {
     }
 }
 
-fn spawn_agent_store_validator(mut commands: Commands) {
+fn spawn_store_validator(mut commands: Commands) {
     commands.spawn((
         Name::new("Agent workspace-store validator"),
         WorkspaceStoreValidator {
@@ -57,6 +78,6 @@ fn spawn_agent_store_validator(mut commands: Commands) {
     ));
 }
 
-fn register_agent_session_route(mut commands: Commands) {
+fn register_session_route(mut commands: Commands) {
     commands.spawn(HostSpawnRoute::subtree("vmux://sessions/"));
 }

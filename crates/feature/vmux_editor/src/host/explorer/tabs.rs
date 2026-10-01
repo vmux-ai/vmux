@@ -11,7 +11,7 @@ impl Plugin for TabsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<vmux_layout::CloseStackRequest>()
             .add_systems(Update, (sync_open_editors, emit_open_editors))
-            .add_observer(on_close_editor);
+            .add_observer(close);
     }
 }
 
@@ -112,7 +112,7 @@ impl EditorPageClose {
     }
 }
 
-fn on_close_editor(
+fn close(
     trigger: On<UiInput<ExplorerCloseEditor>>,
     mut states: Query<&mut ExplorerState>,
     views: Query<&FileView>,

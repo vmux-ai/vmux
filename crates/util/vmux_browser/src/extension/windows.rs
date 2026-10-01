@@ -20,29 +20,24 @@ pub(crate) struct ExtensionWindowsPlugin;
 
 impl Plugin for ExtensionWindowsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_extension_windows)
+        app.add_systems(Startup, spawn)
             .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_systems(
                 Update,
-                sync_extension_windows
-                    .in_set(super::ExtensionSystemSet::SyncWindows)
+                sync.in_set(super::ExtensionSystemSet::SyncWindows)
                     .after(super::project::ExtensionProjectionSet),
             )
             .add_systems(
                 Update,
-                (
-                    open_extension_windows,
-                    route_close_extension_windows,
-                    apply_host_window_updates,
-                )
+                (open, route_close, apply_host_window_updates)
                     .after(super::ExtensionSystemSet::DrainBridge),
             );
     }
 }
 
-fn spawn_extension_windows(mut commands: Commands) {
+fn spawn(mut commands: Commands) {
     commands.spawn((Name::new("Extension windows"), ExtensionWindows::default()));
 }
 
@@ -115,7 +110,7 @@ pub struct UpdateHostWindowRequest {
     pub update: HostWindowUpdate,
 }
 
-fn open_extension_windows(
+fn open(
     mut requests: MessageReader<OpenExtensionWindowRequest>,
     popups: Query<(Entity, &ExtensionPopup)>,
     mut commands: Commands,
@@ -165,7 +160,7 @@ pub fn dispatch(
     }
 }
 
-fn route_close_extension_windows(
+fn route_close(
     mut requests: MessageReader<CloseExtensionWindowRequest>,
     tab_ids: Query<(Entity, &ExtensionTabId)>,
     stacks: Query<(Entity, &PageMetadata, Option<&LastActivatedAt>), With<Stack>>,
@@ -213,10 +208,7 @@ fn route_close_extension_windows(
     }
 }
 
-fn sync_extension_windows(
-    model: Single<Ref<ExtensionModel>>,
-    mut windows: Single<&mut ExtensionWindows>,
-) {
+fn sync(model: Single<Ref<ExtensionModel>>, mut windows: Single<&mut ExtensionWindows>) {
     if !model.is_changed() {
         return;
     }
@@ -1339,7 +1331,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<CloseExtensionWindowRequest>()
             .add_message::<CloseStackRequest>()
-            .add_systems(Update, route_close_extension_windows);
+            .add_systems(Update, route_close);
         let older = app
             .world_mut()
             .spawn((

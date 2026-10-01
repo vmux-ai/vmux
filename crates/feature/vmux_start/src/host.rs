@@ -40,9 +40,9 @@ impl Plugin for StartPlugin {
             vmux_api::command_bar::StartBranchesRequest,
             vmux_api::command_bar::StartGoToBranch,
         )>::default())
-            .add_observer(on_select_workspace)
-            .add_observer(on_branches_request)
-            .add_observer(on_go_to_branch)
+            .add_observer(select_workspace)
+            .add_observer(branches_request)
+            .add_observer(go_to_branch)
             .add_observer(apply_chosen_project)
             .add_observer(focus_command_bar)
             .add_systems(
@@ -225,7 +225,7 @@ impl StartPromptContext<'_, '_> {
     }
 }
 
-fn on_select_workspace(
+fn select_workspace(
     trigger: On<UiInput<StartSelectWorkspace>>,
     child_of: Query<&ChildOf>,
     tabs: Query<(), With<Tab>>,
@@ -379,7 +379,7 @@ fn read_branches(
     }
 }
 
-fn on_branches_request(
+fn branches_request(
     trigger: On<UiInput<vmux_api::command_bar::StartBranchesRequest>>,
     mut commands: Commands,
 ) {
@@ -414,7 +414,7 @@ fn finish_branch_reads(
     }
 }
 
-fn on_go_to_branch(
+fn go_to_branch(
     trigger: On<UiInput<vmux_api::command_bar::StartGoToBranch>>,
     child_of: Query<&ChildOf>,
     tab_query: Query<(), With<Tab>>,

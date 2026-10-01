@@ -9,11 +9,11 @@ pub struct KeyPlugin;
 
 impl Plugin for KeyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(resolve_page_key);
+        app.add_observer(resolve);
     }
 }
 
-fn resolve_page_key(
+fn resolve(
     trigger: On<UiInput<KeyStroke>>,
     keymaps: Query<&Keymap>,
     contexts: Query<&KeyContext>,

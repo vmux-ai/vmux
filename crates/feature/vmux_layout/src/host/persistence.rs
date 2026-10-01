@@ -22,16 +22,13 @@ pub(crate) struct LayoutPersistencePlugin;
 
 impl Plugin for LayoutPersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreStartup, spawn_layout_store_validator)
-            .add_systems(Startup, restore_layout_views.in_set(LayoutStartupSet::Post))
-            .add_systems(
-                Update,
-                restore_layout_views.in_set(LayoutPersistenceSet::Restore),
-            );
+        app.add_systems(PreStartup, spawn_store_validator)
+            .add_systems(Startup, restore_views.in_set(LayoutStartupSet::Post))
+            .add_systems(Update, restore_views.in_set(LayoutPersistenceSet::Restore));
     }
 }
 
-fn spawn_layout_store_validator(mut commands: Commands) {
+fn spawn_store_validator(mut commands: Commands) {
     commands.spawn((
         Name::new("Layout workspace-store validator"),
         WorkspaceStoreValidator {
@@ -96,7 +93,7 @@ impl PersistedLayout<'_, '_> {
     }
 }
 
-fn restore_layout_views(layout: PersistedLayout, mut commands: Commands) {
+fn restore_views(layout: PersistedLayout, mut commands: Commands) {
     if !layout.has_pending_views() {
         return;
     }

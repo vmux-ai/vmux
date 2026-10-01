@@ -28,10 +28,7 @@ impl Plugin for LayoutApplyPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<LayoutApplyPlan>()
             .add_message::<LayoutApplyResult>()
-            .add_systems(
-                Update,
-                (plan_layout_requests, apply, respond_to_layout_apply).chain(),
-            )
+            .add_systems(Update, (plan_requests, apply, respond_to).chain())
             .add_systems(Update, serve_snapshot_requests);
     }
 }
@@ -150,7 +147,7 @@ fn fill_process_ids(node: &mut LayoutNode, pid_by_stack: &HashMap<u64, String>) 
     }
 }
 
-fn plan_layout_requests(
+fn plan_requests(
     mut reader: MessageReader<LayoutApplyRequest>,
     active_space_q: Query<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>,
     tabs_q: Query<(Entity, Option<&ChildOf>), With<LayoutTab>>,
@@ -225,7 +222,7 @@ fn apply(
     }
 }
 
-fn respond_to_layout_apply(
+fn respond_to(
     mut reader: MessageReader<LayoutApplyResult>,
     tabs_q: Query<(Entity, &LayoutTab, Option<&Children>)>,
     splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,

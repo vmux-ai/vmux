@@ -8,11 +8,10 @@ pub struct PermissionsPlugin;
 
 impl Plugin for PermissionsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_media_permission_store)
-            .add_systems(
-                Update,
-                (drain_media_permission_requests, persist_media_permissions).chain(),
-            );
+        app.add_systems(Startup, spawn_media_store).add_systems(
+            Update,
+            (drain_media_requests, persist_media_permissions).chain(),
+        );
     }
 }
 
@@ -41,7 +40,7 @@ pub struct MediaPermissionStore {
 #[derive(Component)]
 struct MediaPermissionDirty;
 
-fn spawn_media_permission_store(mut commands: Commands) {
+fn spawn_media_store(mut commands: Commands) {
     let store: MediaPermissionStore = std::fs::read_to_string(store_path())
         .ok()
         .and_then(|text| ron::from_str(&text).ok())
@@ -162,7 +161,7 @@ enum Resolution {
     Prompt,
 }
 
-fn drain_media_permission_requests(
+fn drain_media_requests(
     receiver: Res<MediaPermissionReceiver>,
     mut store: Single<(Entity, &mut MediaPermissionStore)>,
     mut commands: Commands,

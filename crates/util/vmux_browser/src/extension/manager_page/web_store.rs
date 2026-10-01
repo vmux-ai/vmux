@@ -13,8 +13,8 @@ impl Plugin for WebStorePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(ExtBrowseStoreRequest,)>::default())
             .add_plugins(JsEmitEventPlugin::<AddExtensionRequest>::default())
-            .add_observer(on_browse_request)
-            .add_observer(on_add_extension)
+            .add_observer(browse_request)
+            .add_observer(add)
             .add_systems(
                 Update,
                 (
@@ -60,7 +60,7 @@ const MANAGE_CHANNEL: &str = "vmux-manage-extension";
 const WEB_STORE_URL: &str = "https://chromewebstore.google.com/category/extensions";
 const INJECTOR_JS: &str = include_str!("../add_to_vmux.js");
 
-fn on_browse_request(
+fn browse_request(
     trigger: On<UiInput<ExtBrowseStoreRequest>>,
     mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
@@ -192,7 +192,7 @@ fn inject_on_load(
     }
 }
 
-fn on_add_extension(
+fn add(
     trigger: On<Receive<AddExtensionRequest>>,
     injectors: Query<&WebStoreInjector>,
     mut installs: MessageWriter<ExtensionInstallRequest>,

@@ -9,7 +9,7 @@ pub(super) struct OutlinePlugin;
 
 impl Plugin for OutlinePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (emit_markdown_outline, clear_on_file_change));
+        app.add_systems(Update, (emit_markdown, clear_on_file_change));
     }
 }
 
@@ -135,7 +135,7 @@ impl SymbolSpan {
 
 type DirtyOutline = (With<OutlineDirty>, With<vmux_core::page::PageReady>);
 
-fn emit_markdown_outline(
+fn emit_markdown(
     query: Query<(Entity, &Editor), DirtyOutline>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,

@@ -14,7 +14,7 @@ impl Plugin for IdentityPlugin {
             .register_type::<SpawnSeq>()
             .add_systems(Update, repair_stack_parents)
             .add_systems(Update, stamp_spawn_seq)
-            .add_systems(Update, assign_pane_ids)
+            .add_systems(Update, assign_ids)
             .add_systems(
                 Startup,
                 (spawn_spawn_counter, reseed_spawn_counter)
@@ -43,7 +43,7 @@ fn spawn_spawn_counter(mut commands: Commands) {
     commands.spawn((Name::new("Pane spawn counter"), SpawnCounter::default()));
 }
 
-fn assign_pane_ids(panes: Query<Entity, (With<Pane>, Without<PaneId>)>, mut commands: Commands) {
+fn assign_ids(panes: Query<Entity, (With<Pane>, Without<PaneId>)>, mut commands: Commands) {
     for entity in &panes {
         commands
             .entity(entity)
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn assign_pane_ids_fills_missing_and_keeps_existing() {
         let mut app = App::new();
-        app.add_systems(Update, assign_pane_ids);
+        app.add_systems(Update, assign_ids);
         let bare = app.world_mut().spawn(Pane).id();
         let kept = app
             .world_mut()

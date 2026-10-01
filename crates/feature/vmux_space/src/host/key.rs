@@ -18,10 +18,10 @@ impl Plugin for SpaceKeyPlugin {
             app.add_plugins(CommandRuntimePlugin);
         }
         app.add_systems(Startup, bind_commands.in_set(BindCommands))
-            .add_observer(select_next_space)
-            .add_observer(select_previous_space)
-            .add_observer(attach_selected_space)
-            .add_observer(delete_selected_space);
+            .add_observer(select_next)
+            .add_observer(select_previous)
+            .add_observer(attach_selected)
+            .add_observer(delete_selected);
     }
 }
 
@@ -48,7 +48,7 @@ fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
     registry.bind::<DeleteSelectedSpace>(&mut commands);
 }
 
-fn select_next_space(
+fn select_next(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<SelectNextSpace>>,
     mut pages: Query<(&mut SpaceSelection, &mut SpacesPageSnapshot), With<Spaces>>,
@@ -69,7 +69,7 @@ fn select_next_space(
     ));
 }
 
-fn select_previous_space(
+fn select_previous(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<SelectPreviousSpace>>,
     mut pages: Query<(&mut SpaceSelection, &mut SpacesPageSnapshot), With<Spaces>>,
@@ -90,7 +90,7 @@ fn select_previous_space(
     ));
 }
 
-fn attach_selected_space(
+fn attach_selected(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<AttachSelectedSpace>>,
     pages: Query<&SpacesPageSnapshot, With<Spaces>>,
@@ -114,7 +114,7 @@ fn attach_selected_space(
     });
 }
 
-fn delete_selected_space(
+fn delete_selected(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<DeleteSelectedSpace>>,
     pages: Query<&SpacesPageSnapshot, With<Spaces>>,

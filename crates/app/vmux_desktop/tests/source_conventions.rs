@@ -108,7 +108,10 @@ fn collect_paths(expression: &Expr, names: &mut BTreeSet<String>) {
 }
 
 fn violation(path: &Path, name: &str) -> Option<String> {
-    let operation = name.strip_prefix("on_").unwrap_or(name);
+    if name.starts_with("on_") {
+        return Some("remove `on_`".to_string());
+    }
+    let operation = name;
     let segments = operation.split('_').collect::<Vec<_>>();
     for redundant in ["feature", "plugin", "system"] {
         if segments.contains(&redundant) {
@@ -117,7 +120,14 @@ fn violation(path: &Path, name: &str) -> Option<String> {
     }
 
     for context in module_context(path) {
-        if operation.starts_with(&format!("{context}_")) {
+        let context = context.split('_').collect::<Vec<_>>();
+        if operation != context.join("_")
+            && context.len() <= segments.len()
+            && segments
+                .windows(context.len())
+                .any(|window| window == context)
+        {
+            let context = context.join("_");
             return Some(format!("remove repeated `{context}` context"));
         }
     }
@@ -178,11 +188,19 @@ fn system_name_policy_detects_framework_and_module_repetition() {
     );
     assert_eq!(
         violation(path, "on_bookmark_pin").as_deref(),
-        Some("remove repeated `bookmark` context")
+        Some("remove `on_`")
     );
     assert_eq!(
         violation(path, "tool_pin").as_deref(),
         Some("remove repeated `tool` context")
+    );
+    assert_eq!(
+        violation(
+            Path::new("crates/feature/vmux_editor/src/host/explorer/search.rs"),
+            "queue_global_search_requests",
+        )
+        .as_deref(),
+        Some("remove repeated `search` context")
     );
     assert_eq!(
         violation(path, "pin_system").as_deref(),

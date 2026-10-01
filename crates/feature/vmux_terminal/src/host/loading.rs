@@ -17,11 +17,11 @@ impl Plugin for LoadingPlugin {
         app.add_systems(
             Update,
             (
-                arm_shell_loading,
-                arm_shell_loading_on_restart,
+                arm_shell,
+                arm_shell_on_restart,
                 announce_slow_shell_boot.after(ServiceMessageSet),
-                clear_shell_loading.after(ServiceMessageSet),
-                set_terminal_shell_icon,
+                clear_shell.after(ServiceMessageSet),
+                set_shell_icon,
             ),
         );
     }
@@ -36,7 +36,7 @@ pub(crate) struct ShellLoading {
     pub(crate) announced: bool,
 }
 
-fn set_terminal_shell_icon(
+fn set_shell_icon(
     mut terminals: Query<
         (&crate::launch::TerminalLaunch, &mut vmux_core::PageMetadata),
         With<Terminal>,
@@ -52,7 +52,7 @@ fn set_terminal_shell_icon(
     }
 }
 
-fn arm_shell_loading(
+fn arm_shell(
     newly_ready: Query<(Entity, Has<ShellOutputSeen>), (With<Terminal>, Added<PageReady>)>,
     mut commands: Commands,
 ) {
@@ -89,7 +89,7 @@ fn announce_slow_shell_boot(
     }
 }
 
-fn arm_shell_loading_on_restart(
+fn arm_shell_on_restart(
     restarted: Query<
         Entity,
         (
@@ -109,7 +109,7 @@ fn arm_shell_loading_on_restart(
     }
 }
 
-fn clear_shell_loading(
+fn clear_shell(
     loading: Query<(Entity, &ShellLoading, Has<ShellOutputSeen>), With<Terminal>>,
     mut commands: Commands,
 ) {

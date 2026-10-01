@@ -19,11 +19,11 @@ impl Plugin for ChatModelPlugin {
                 Update,
                 (
                     receive_models,
-                    project_model_picker.in_set(ModelProjection),
-                    emit_model_picker.after(ModelProjection),
+                    project_picker.in_set(ModelProjection),
+                    emit_picker.after(ModelProjection),
                 ),
             )
-            .add_observer(publish_model_state)
+            .add_observer(publish_state)
             .add_observer(publish_mode_state);
     }
 }
@@ -121,7 +121,7 @@ fn receive_models(
     }
 }
 
-fn project_model_picker(mut runtimes: ChangedModelPicker) {
+fn project_picker(mut runtimes: ChangedModelPicker) {
     let Ok((models, mut picker)) = runtimes.single_mut() else {
         return;
     };
@@ -134,7 +134,7 @@ fn project_model_picker(mut runtimes: ChangedModelPicker) {
     };
 }
 
-fn emit_model_picker(
+fn emit_picker(
     mut refreshes: MessageReader<RepublishChatUiState>,
     mut runtimes: Query<(Ref<Picker>, &mut ChatUiStateProjection), With<ChatRuntime>>,
 ) {
@@ -147,7 +147,7 @@ fn emit_model_picker(
     }
 }
 
-fn publish_model_state(trigger: On<ChatModelStateChanged>, mut commands: Commands) {
+fn publish_state(trigger: On<ChatModelStateChanged>, mut commands: Commands) {
     let event = trigger.event();
     commands
         .entity(event.webview)
@@ -220,7 +220,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Published>()
             .add_observer(Published::record)
-            .add_observer(publish_model_state);
+            .add_observer(publish_state);
         let webview = app.world_mut().spawn_empty().id();
 
         app.world_mut().trigger(ChatModelStateChanged::new(

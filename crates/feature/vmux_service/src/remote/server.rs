@@ -23,11 +23,8 @@ impl Plugin for RemotePlugin {
             super::authorization::RemoteAuthorizationPlugin,
             super::client_operation::ClientOperationPlugin,
         ))
-        .add_systems(Startup, start_remote_runtime)
-        .add_systems(
-            Update,
-            (refresh_remote_exposure, reconcile_remote_dialer).chain(),
-        );
+        .add_systems(Startup, start_runtime)
+        .add_systems(Update, (refresh_exposure, reconcile_dialer).chain());
     }
 }
 
@@ -88,10 +85,7 @@ impl Drop for RemoteDialerTask {
     }
 }
 
-fn start_remote_runtime(
-    mut startups: Query<(Entity, &mut RemoteRuntimeStartup)>,
-    mut commands: Commands,
-) {
+fn start_runtime(mut startups: Query<(Entity, &mut RemoteRuntimeStartup)>, mut commands: Commands) {
     for (entity, mut startup) in &mut startups {
         let Some(start) = startup.0.take() else {
             continue;
@@ -126,7 +120,7 @@ fn start_remote_runtime(
     }
 }
 
-fn refresh_remote_exposure(mut runtimes: Query<(&RemoteRuntime, &mut RemoteExposure)>) {
+fn refresh_exposure(mut runtimes: Query<(&RemoteRuntime, &mut RemoteExposure)>) {
     for (runtime, mut exposure) in &mut runtimes {
         let current = RemoteExposure::current();
         if *exposure == current {
@@ -138,7 +132,7 @@ fn refresh_remote_exposure(mut runtimes: Query<(&RemoteRuntime, &mut RemoteExpos
     }
 }
 
-fn reconcile_remote_dialer(
+fn reconcile_dialer(
     runtimes: Query<(
         Entity,
         &RemoteState,

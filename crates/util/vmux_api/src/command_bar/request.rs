@@ -58,8 +58,12 @@ pub struct CommandPaletteDraftRequest {
     pub open_id: super::OpenId,
     pub query: String,
     pub start: bool,
-    pub selected: u32,
-    pub navigating: bool,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq)]
+pub struct CommandPaletteHighlightRequest {
+    pub open_id: super::OpenId,
+    pub index: u32,
 }
 
 #[vmux_api::ui_event(Copy, Default, Eq)]

@@ -27,10 +27,7 @@ impl Plugin for TerminalToolPlugin {
             .register_tool::<RunArgs>()
             .register_tool::<ReadTerminalArgs>()
             .register_tool::<TerminalSendArgs>()
-            .add_systems(
-                Update,
-                (run, read_terminal, dispatch).in_set(ToolDispatchSet),
-            );
+            .add_systems(Update, (run, read, dispatch).in_set(ToolDispatchSet));
     }
 }
 
@@ -183,14 +180,14 @@ fn run(
     }
 }
 
-fn read_terminal(
+fn read(
     mut commands: Commands,
     requests: Query<(Entity, &ReadTerminalArgs), AddedTool<ReadTerminalArgs>>,
 ) {
     for (entity, args) in &requests {
         let query = match args.terminal.parse() {
             Ok(process_id) => AgentRequest::encode(&AgentReadProcessOutput { process_id }),
-            Err(_) => Err("read_terminal.terminal must be a valid terminal id".to_string()),
+            Err(_) => Err("read.terminal must be a valid terminal id".to_string()),
         };
         commands.entity(entity).insert(ToolQuery(query));
     }
@@ -265,7 +262,7 @@ fn run_result(
     match exit {
         Some(code) => text.push_str(&format!("exit: {code}\n")),
         None if timed_out => text.push_str(&format!(
-            "note: still running after {}s; call read_terminal({process_id}) to read more\n",
+            "note: still running after {}s; call read({process_id}) to read more\n",
             run_block_timeout.as_secs()
         )),
         None => {}

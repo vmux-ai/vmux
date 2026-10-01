@@ -13,7 +13,7 @@ pub(super) struct RepositoryPickerPlugin;
 impl Plugin for RepositoryPickerPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(GitRepositoryPickerRequest,)>::default())
-            .add_observer(on_request)
+            .add_observer(request)
             .add_systems(Update, poll_repository_pickers);
     }
 }
@@ -40,7 +40,7 @@ impl GitRepositoryPicker {
     }
 }
 
-fn on_request(
+fn request(
     trigger: On<UiInput<GitRepositoryPickerRequest>>,
     pending: Query<&PendingGitRepositoryPicker>,
     proxy: Option<Res<EventLoopProxyWrapper>>,

@@ -20,7 +20,7 @@ impl Plugin for SnapshotPlugin {
             .add_systems(
                 Update,
                 (
-                    update_agents_snapshot.in_set(SnapshotSet::AgentSessions),
+                    update_agents.in_set(SnapshotSet::AgentSessions),
                     update_recent_agents,
                     sync_work_directories,
                 )
@@ -48,7 +48,7 @@ fn sync_work_directories(
 }
 
 #[allow(clippy::type_complexity)]
-fn update_agents_snapshot(
+fn update_agents(
     catalog: Option<Single<Ref<crate::runtime::AcpCatalog>>>,
     mut package_changes: MessageReader<crate::acp_tool::AcpPackageChanged>,
     mut state: Single<&mut CommandBarProjection>,

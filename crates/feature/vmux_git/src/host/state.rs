@@ -25,10 +25,10 @@ impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(vmux_core::host::UiStatePlugin::<GitUiState>::default())
             .add_plugins(UiEventPlugin::<(GitRepositoryRequest, GitBranchLogRequest)>::default())
-            .add_observer(on_page_ready)
-            .add_observer(on_repository_request)
-            .add_observer(on_branch_log_request)
-            .add_systems(Update, publish_git_state.after(super::GitUpdateSet::Jobs));
+            .add_observer(page_ready)
+            .add_observer(repository_request)
+            .add_observer(branch_log_request)
+            .add_systems(Update, publish.after(super::GitUpdateSet::Jobs));
     }
 }
 
@@ -162,7 +162,7 @@ impl GitState {
     }
 }
 
-fn on_page_ready(
+fn page_ready(
     trigger: On<UiInput<PageReady>>,
     pages: Query<&vmux_core::PageMetadata>,
     mut commands: Commands,
@@ -177,7 +177,7 @@ fn on_page_ready(
     commands.entity(entity).insert(GitState::default());
 }
 
-fn on_repository_request(
+fn repository_request(
     trigger: On<UiInput<GitRepositoryRequest>>,
     watch: Option<NonSendMut<GitWatch>>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
@@ -221,7 +221,7 @@ fn on_repository_request(
     commands.spawn((GitJob::new(webview), RepositoryJob { path }));
 }
 
-fn on_branch_log_request(trigger: On<UiInput<GitBranchLogRequest>>, mut commands: Commands) {
+fn branch_log_request(trigger: On<UiInput<GitBranchLogRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
@@ -243,7 +243,7 @@ type GitStateQuery<'w, 's> = Query<
     ),
 >;
 
-fn publish_git_state(views: GitStateQuery, mut commands: Commands) {
+fn publish(views: GitStateQuery, mut commands: Commands) {
     for (entity, view, controller, directory) in &views {
         if view.is_changed() {
             commands.trigger(vmux_core::host::UiStateWrite::<GitUiState>::from_event(

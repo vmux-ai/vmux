@@ -47,14 +47,14 @@ impl Plugin for EditorPlugin {
             .add_message::<OpenExRequest>()
             .add_systems(Startup, bind_ex_command.in_set(BindCommands))
             .add_systems(Update, open_ex.in_set(WriteCommandBarRequests))
-            .add_observer(on_file_key)
-            .add_observer(on_file_text_input)
-            .add_observer(on_file_pointer)
+            .add_observer(file_key)
+            .add_observer(file_text_input)
+            .add_observer(file_pointer)
             .add_systems(Update, (reapply_keymap_on_change, run_submitted_ex_lines))
             .add_observer(open_file_find)
             .add_observer(close_file_find)
-            .add_observer(on_file_find_request)
-            .add_observer(on_file_property_edit)
+            .add_observer(file_find_request)
+            .add_observer(file_property_edit)
             .add_observer(submit_ex);
     }
 }
@@ -609,7 +609,7 @@ fn apply_edit_request(
     }
 }
 
-fn on_file_key(
+fn file_key(
     trigger: On<UiInput<KeyStroke>>,
     mut q: Query<(&Editor, &mut EditorKeymap)>,
     app_keymaps: Query<&Keymap>,
@@ -654,7 +654,7 @@ fn on_file_key(
     commands.trigger(request);
 }
 
-fn on_file_text_input(
+fn file_text_input(
     trigger: On<UiInput<FileTextInput>>,
     mut q: Query<(&Editor, &mut EditorKeymap)>,
     mut commands: Commands,
@@ -680,7 +680,7 @@ fn on_file_text_input(
     commands.trigger(WikiCompletionRequest::from(entity));
 }
 
-fn on_file_property_edit(
+fn file_property_edit(
     trigger: On<UiInput<FilePropertyEdit>>,
     q: Query<&Editor>,
     mut commands: Commands,
@@ -741,7 +741,7 @@ fn run_submitted_ex_lines(
     }
 }
 
-fn on_file_find_request(
+fn file_find_request(
     trigger: On<UiInput<FileFindRequest>>,
     mut q: Query<&mut Editor>,
     mut commands: Commands,
@@ -773,7 +773,7 @@ fn on_file_find_request(
     commands.trigger(CursorRenderRequest::new(entity));
 }
 
-fn on_file_pointer(
+fn file_pointer(
     trigger: On<UiInput<FilePointerEvent>>,
     mut q: Query<(&mut Editor, &mut EditorKeymap)>,
     mut commands: Commands,

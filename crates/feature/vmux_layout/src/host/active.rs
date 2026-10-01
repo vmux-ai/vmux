@@ -21,13 +21,13 @@ impl Plugin for ActivePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            ensure_active_space
+            ensure_space
                 .in_set(ActiveSystemSet::Space)
                 .after(crate::window::WindowFocusSet),
         )
         .add_systems(
             Update,
-            (ensure_active_tab, ensure_active_stack, ensure_active_branch)
+            (ensure_tab, ensure_stack, ensure_branch)
                 .in_set(ActiveSystemSet::Descendants)
                 .after(LayoutRequestSet::Handle)
                 .after(crate::window::TabLayoutSpawnSet),
@@ -48,7 +48,7 @@ fn apply_active(entries: &[(Entity, i64, bool)], commands: &mut Commands) {
     }
 }
 
-fn ensure_active_space(
+fn ensure_space(
     mains: Query<&Children, With<crate::window::Main>>,
     spaces: Query<(Entity, Option<&LastActivatedAt>, Has<Active>), With<Space>>,
     mut commands: Commands,
@@ -64,7 +64,7 @@ fn ensure_active_space(
     }
 }
 
-fn ensure_active_tab(
+fn ensure_tab(
     spaces: Query<&Children, With<Space>>,
     tabs: Query<(&LastActivatedAt, Has<Active>), With<Tab>>,
     mut commands: Commands,
@@ -80,7 +80,7 @@ fn ensure_active_tab(
     }
 }
 
-fn ensure_active_stack(
+fn ensure_stack(
     leaves: Query<&Children, (With<Pane>, Without<PaneSplit>)>,
     stacks: Query<(&LastActivatedAt, Has<Active>), With<Stack>>,
     mut commands: Commands,
@@ -96,7 +96,7 @@ fn ensure_active_stack(
     }
 }
 
-fn ensure_active_branch(
+fn ensure_branch(
     splits: Query<&Children, With<PaneSplit>>,
     branches: Query<(Option<&LastActivatedAt>, Has<Active>), With<Pane>>,
     mut commands: Commands,
@@ -120,7 +120,7 @@ mod tests {
     fn ensure_active_tab_marks_max_last_activated_child() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, ensure_active_tab);
+            .add_systems(Update, ensure_tab);
         let space = app.world_mut().spawn(Space).id();
         let older = app
             .world_mut()
@@ -145,7 +145,7 @@ mod tests {
     fn ensure_active_tab_moves_active_off_stale_child() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, ensure_active_tab);
+            .add_systems(Update, ensure_tab);
         let space = app.world_mut().spawn(Space).id();
         let stale = app
             .world_mut()
@@ -164,7 +164,7 @@ mod tests {
     fn ensure_active_space_marks_max_last_activated_space() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, ensure_active_space);
+            .add_systems(Update, ensure_space);
         let main = app.world_mut().spawn(crate::window::Main).id();
         let older = app
             .world_mut()
@@ -183,7 +183,7 @@ mod tests {
     fn ensure_active_space_keeps_one_active_space_per_window() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, ensure_active_space);
+            .add_systems(Update, ensure_space);
         let first_main = app.world_mut().spawn(crate::window::Main).id();
         let second_main = app.world_mut().spawn(crate::window::Main).id();
         let first = app

@@ -34,7 +34,7 @@ impl Plugin for CommandRuntimePlugin {
                 Startup,
                 (
                     spawn_keymap.before(BindCommands),
-                    register_command_manifests.in_set(CommandStartupSet::Manifest),
+                    register_manifests.in_set(CommandStartupSet::Manifest),
                     ApplyDeferred.in_set(CommandStartupSet::Flush),
                 ),
             )
@@ -51,8 +51,8 @@ impl Plugin for CommandRuntimePlugin {
             .add_systems(
                 Update,
                 (
-                    validate_command_definitions,
-                    dispatch_command_invocations,
+                    validate_definitions,
+                    dispatch_invocations,
                     bevy::ecs::schedule::ApplyDeferred,
                 )
                     .chain()
@@ -603,7 +603,7 @@ fn spawn_keymap(mut commands: Commands) {
     ));
 }
 
-fn register_command_manifests(manifests: Query<&FeatureManifest>, mut commands: Commands) {
+fn register_manifests(manifests: Query<&FeatureManifest>, mut commands: Commands) {
     for manifest in &manifests {
         for definition in manifest
             .commands
@@ -616,7 +616,7 @@ fn register_command_manifests(manifests: Query<&FeatureManifest>, mut commands: 
     }
 }
 
-fn validate_command_definitions(
+fn validate_definitions(
     added: Query<(Entity, &CommandDefinition), Added<CommandDefinition>>,
     definitions: Query<(Entity, &CommandDefinition)>,
     mut commands: Commands,
@@ -658,7 +658,7 @@ impl CommandDispatch {
     }
 }
 
-fn dispatch_command_invocations(
+fn dispatch_invocations(
     mut invocations: MessageReader<CommandInvocation>,
     definitions: Query<(Entity, &CommandDefinition, Option<&CommandMessage>)>,
     mut commands: Commands,

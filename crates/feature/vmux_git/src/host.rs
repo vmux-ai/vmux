@@ -49,8 +49,8 @@ impl Plugin for GitPlugin {
         ));
         app.add_message::<GitCheckForUpdatesRequest>()
             .add_plugins(UiEventPlugin::<(GitConfigEditRequest, GitUpdateCheckRequest)>::default())
-            .add_observer(on_config_edit_request)
-            .add_observer(on_update_check_request)
+            .add_observer(config_edit_request)
+            .add_observer(update_check_request)
             .configure_sets(
                 Update,
                 (
@@ -92,7 +92,7 @@ enum GitUpdateSet {
 #[derive(Message, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct GitCheckForUpdatesRequest;
 
-fn on_config_edit_request(
+fn config_edit_request(
     trigger: On<UiInput<GitConfigEditRequest>>,
     child_of: Query<&ChildOf>,
     mut page_open: MessageWriter<PageOpenRequest>,
@@ -117,7 +117,7 @@ fn on_config_edit_request(
     });
 }
 
-fn on_update_check_request(
+fn update_check_request(
     _trigger: On<UiInput<GitUpdateCheckRequest>>,
     mut requests: MessageWriter<GitCheckForUpdatesRequest>,
 ) {

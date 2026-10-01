@@ -11,11 +11,11 @@ pub(super) struct PalettePromptPlugin;
 
 impl Plugin for PalettePromptPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(receive_palette_prompt_history)
-            .add_systems(PreUpdate, attach_palette_prompt)
+        app.add_observer(receive_history)
+            .add_systems(PreUpdate, attach)
             .add_systems(
                 PostUpdate,
-                (update_palette_prompt, request_palette_prompt_history)
+                (update, request_history)
                     .chain()
                     .in_set(PaletteProjectionSet::Context),
             );
@@ -30,7 +30,7 @@ pub(super) struct PalettePrompt {
     inflight: Option<PromptFlight>,
 }
 
-fn attach_palette_prompt(
+fn attach(
     pages: Query<
         Entity,
         (
@@ -45,7 +45,7 @@ fn attach_palette_prompt(
     }
 }
 
-fn update_palette_prompt(
+fn update(
     mut palettes: Query<
         (
             Entity,
@@ -75,7 +75,7 @@ fn update_palette_prompt(
     }
 }
 
-fn receive_palette_prompt_history(
+fn receive_history(
     trigger: On<UiStateWrite<CommandBarUiState>>,
     mut palettes: Query<(&mut PalettePrompt, &mut PaletteSnapshot)>,
 ) {
@@ -98,10 +98,7 @@ fn receive_palette_prompt_history(
     }
 }
 
-fn request_palette_prompt_history(
-    mut palettes: Query<(Entity, &mut PalettePrompt)>,
-    mut commands: Commands,
-) {
+fn request_history(mut palettes: Query<(Entity, &mut PalettePrompt)>, mut commands: Commands) {
     for (target, mut prompt) in &mut palettes {
         if prompt.inflight.is_some() || prompt.desired == prompt.loaded {
             continue;

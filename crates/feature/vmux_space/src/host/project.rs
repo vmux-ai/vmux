@@ -22,14 +22,14 @@ impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_repository_roots)
             .register_persisted::<ExpandedProjectDirs>()
-            .add_observer(on_tree_toggle)
+            .add_observer(tree_toggle)
             .add_systems(
                 Update,
                 (
-                    remember_space_project.before(EffectiveStartupSet),
-                    publish_project_roots
+                    remember.before(EffectiveStartupSet),
+                    publish_roots
                         .in_set(WriteCommandBarSnapshots)
-                        .after(remember_space_project),
+                        .after(remember),
                 ),
             );
     }
@@ -39,7 +39,7 @@ fn spawn_repository_roots(mut commands: Commands) {
     commands.spawn((Name::new("Repository roots"), RepoRoots::default()));
 }
 
-fn on_tree_toggle(
+fn tree_toggle(
     trigger: On<UiInput<ProjectTreeToggle>>,
     space_of_pane: SpaceOfPane,
     mut expanded: Query<&mut ExpandedProjectDirs>,
@@ -58,7 +58,7 @@ fn on_tree_toggle(
     commands.entity(space).insert(dirs);
 }
 
-fn publish_project_roots(projects: SpaceProjects, mut state: Single<&mut CommandBarProjection>) {
+fn publish_roots(projects: SpaceProjects, mut state: Single<&mut CommandBarProjection>) {
     let mut next = Vec::new();
     let mut active = None;
     for project in projects.active_projects() {
@@ -258,7 +258,7 @@ impl RepoRoots {
     }
 }
 
-fn remember_space_project(
+fn remember(
     bound: Query<(
         Entity,
         Ref<TabWorkspace>,
@@ -345,7 +345,7 @@ mod tests {
             app.add_plugins(SpaceProjectPlugin)
                 .add_message::<SettingsSaveRequest>()
                 .init_resource::<SawSettingsChange>()
-                .add_systems(Update, record_settings_change.after(remember_space_project))
+                .add_systems(Update, record_settings_change.after(remember))
                 .insert_resource(AppSettings::embedded());
             let space = app
                 .world_mut()

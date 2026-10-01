@@ -1,6 +1,3 @@
-pub const SPACES_PAGE_URL: &str = "vmux://spaces/";
-pub const PROJECTS_PAGE_URL: &str = "vmux://projects/";
-
 #[vmux_api::contract(Default, Eq)]
 pub struct SpacesListEvent {
     pub spaces: Vec<SpaceRow>,

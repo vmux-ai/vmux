@@ -70,11 +70,11 @@ impl Plugin for IntentPlugin {
                 TeamProfileSwitchRequest,
                 TeamProfileUpdateRequest,
             )>::default())
-            .add_observer(on_open_request)
-            .add_observer(on_member_focus_request)
-            .add_observer(on_profile_create_request)
-            .add_observer(on_profile_switch_request)
-            .add_observer(on_profile_update_request);
+            .add_observer(open_request)
+            .add_observer(member_focus_request)
+            .add_observer(profile_create_request)
+            .add_observer(profile_switch_request)
+            .add_observer(profile_update_request);
     }
 }
 
@@ -347,7 +347,7 @@ fn parse_member_entity(member_id: &str) -> Option<Entity> {
     Entity::try_from_bits(bits)
 }
 
-fn on_open_request(
+fn open_request(
     _trigger: On<UiInput<TeamOpenRequest>>,
     mut stack_requests: MessageWriter<OpenRequest>,
     current_space: Query<Entity, With<CurrentSpace>>,
@@ -367,7 +367,7 @@ fn on_open_request(
     });
 }
 
-fn on_member_focus_request(
+fn member_focus_request(
     trigger: On<UiInput<TeamMemberFocusRequest>>,
     agents: Query<Entity, With<Agent>>,
     mut commands: Commands,
@@ -380,7 +380,7 @@ fn on_member_focus_request(
     }
 }
 
-fn on_profile_create_request(
+fn profile_create_request(
     trigger: On<UiInput<TeamProfileCreateRequest>>,
     mut profile_switches: MessageWriter<ProfileSwitchRequested>,
     mut commands: Commands,
@@ -396,7 +396,7 @@ fn on_profile_create_request(
     }
 }
 
-fn on_profile_switch_request(
+fn profile_switch_request(
     trigger: On<UiInput<TeamProfileSwitchRequest>>,
     profile_labels: Query<&ProfileId, With<ProfileLabel>>,
     mut profile_switches: MessageWriter<ProfileSwitchRequested>,
@@ -411,7 +411,7 @@ fn on_profile_switch_request(
     }
 }
 
-fn on_profile_update_request(
+fn profile_update_request(
     trigger: On<UiInput<TeamProfileUpdateRequest>>,
     user: Query<Entity, With<User>>,
     mut space_profiles: Query<&mut SpaceProfile, With<Space>>,

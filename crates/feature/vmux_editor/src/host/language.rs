@@ -43,7 +43,7 @@ impl Plugin for LanguagePlugin {
             .add_observer(request_implementation)
             .add_observer(request_format_document)
             .add_observer(request_format_selection)
-            .add_observer(request_editor_rename)
+            .add_observer(request_rename_prompt)
             .add_observer(copy_selection)
             .add_observer(cut_selection)
             .add_observer(paste)
@@ -630,7 +630,7 @@ fn request_format_selection(
     commands.trigger(EditorFormatSelectionRequest::from(trigger.event().webview));
 }
 
-fn request_editor_rename(trigger: On<UiInput<FileEditorRenameRequest>>, mut commands: Commands) {
+fn request_rename_prompt(trigger: On<UiInput<FileEditorRenameRequest>>, mut commands: Commands) {
     commands.trigger(EditorRenameRequest::from(trigger.event().webview));
 }
 

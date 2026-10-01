@@ -15,12 +15,12 @@ pub(crate) struct RecordingPlugin;
 impl Plugin for RecordingPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<RecordingControl>()
-            .add_systems(Startup, spawn_recording_runtime)
+            .add_systems(Startup, spawn_runtime)
             .add_systems(
                 Update,
                 (
-                    start_recording,
-                    handle_recording_control,
+                    start,
+                    handle_control,
                     auto_stop_recordings,
                     drain_recordings,
                 )
@@ -30,7 +30,7 @@ impl Plugin for RecordingPlugin {
     }
 }
 
-fn spawn_recording_runtime(mut commands: Commands) {
+fn spawn_runtime(mut commands: Commands) {
     commands.spawn((
         Name::new("Recording capture"),
         RecordingBridge::default(),
@@ -89,7 +89,7 @@ pub(crate) enum RecordingControl {
     Done,
 }
 
-fn handle_recording_control(
+fn handle_control(
     _non_send: NonSendMarker,
     mut reader: MessageReader<RecordingControl>,
     mut runtime: Query<(&mut RecordingBridge, &mut RecordingStatus)>,
@@ -154,7 +154,7 @@ pub(crate) const RECORDING_MAX_EDGE: u32 = 1280;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) const RECORDING_BITRATE_BPS: i32 = 800_000;
 
-fn start_recording(
+fn start(
     _non_send: NonSendMarker,
     mut start_reader: MessageReader<RecordStartRequest>,
     mut stop_reader: MessageReader<RecordStopRequest>,

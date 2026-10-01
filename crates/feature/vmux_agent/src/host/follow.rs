@@ -40,8 +40,8 @@ impl Plugin for FollowPlugin {
         app.add_systems(
             Update,
             (
-                handle_agent_file_touch.before(TabDirectoryRebindSet),
-                handle_agent_file_search,
+                handle_file_touch.before(TabDirectoryRebindSet),
+                handle_file_search,
             )
                 .chain()
                 .in_set(WriteCommandRequests)
@@ -247,7 +247,7 @@ impl AgentFileLayout<'_, '_> {
     }
 }
 
-fn handle_agent_file_touch(
+fn handle_file_touch(
     mut reader: MessageReader<AgentRequestInput>,
     mut resolve: AgentFileResolve,
     settings: Res<AppSettings>,
@@ -377,7 +377,7 @@ fn handle_agent_file_touch(
     }
 }
 
-fn handle_agent_file_search(
+fn handle_file_search(
     mut reader: MessageReader<AgentRequestInput>,
     mut writer: MessageWriter<GlobalSearchRequest>,
 ) {
@@ -456,7 +456,7 @@ mod tests {
             .add_message::<AgentRequestInput>()
             .add_message::<PageOpenRequest>()
             .insert_resource(test_settings())
-            .add_systems(Update, handle_agent_file_touch);
+            .add_systems(Update, handle_file_touch);
         app
     }
 
@@ -617,7 +617,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, EditorContractPlugin))
             .add_message::<AgentRequestInput>()
-            .add_systems(Update, handle_agent_file_search);
+            .add_systems(Update, handle_file_search);
         let anchor = ProcessId::new();
         app.world_mut()
             .resource_mut::<Messages<AgentRequestInput>>()
@@ -789,7 +789,7 @@ mod tests {
             .add_message::<AgentRequestInput>()
             .add_message::<PageOpenRequest>()
             .insert_resource(test_settings())
-            .add_systems(Update, handle_agent_file_touch);
+            .add_systems(Update, handle_file_touch);
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -835,7 +835,7 @@ mod tests {
             .add_message::<AgentRequestInput>()
             .add_message::<PageOpenRequest>()
             .insert_resource(settings)
-            .add_systems(Update, handle_agent_file_touch);
+            .add_systems(Update, handle_file_touch);
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -894,7 +894,7 @@ mod tests {
             .add_message::<AgentRequestInput>()
             .add_message::<PageOpenRequest>()
             .insert_resource(settings)
-            .add_systems(Update, handle_agent_file_touch);
+            .add_systems(Update, handle_file_touch);
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -1026,7 +1026,7 @@ mod tests {
         .add_systems(
             Update,
             (
-                handle_agent_file_touch.before(TabDirectoryRebindSet),
+                handle_file_touch.before(TabDirectoryRebindSet),
                 capture_run_cwd.after(TabDirectoryRebindSet),
             ),
         );

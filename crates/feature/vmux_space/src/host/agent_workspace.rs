@@ -47,7 +47,7 @@ impl Plugin for AgentWorkspaceRequestPlugin {
             .add_message::<ServiceRequest>()
             .add_systems(
                 Update,
-                handle_agent_workspace_requests
+                handle_requests
                     .in_set(AgentWorkspaceRequestSet)
                     .in_set(AgentRequestPrerequisiteSet)
                     .in_set(WriteCommandRequests)
@@ -136,7 +136,7 @@ impl WorkspaceChoice {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn handle_agent_workspace_requests(
+fn handle_requests(
     mut reader: MessageReader<AgentRequestInput>,
     agent_terms: Query<(Entity, &ProcessId, &ChildOf)>,
     ctx: vmux_layout::pane::PanePlacement,

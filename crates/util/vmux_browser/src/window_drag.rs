@@ -13,12 +13,9 @@ use crate::host::LayoutPointerCapture;
 
 impl Plugin for WindowDragPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreUpdate, initialize_window_drag_regions)
-            .add_observer(on_region)
-            .add_systems(
-                PostUpdate,
-                publish_window_drag_region.after(LayoutSystems::Layout),
-            );
+        app.add_systems(PreUpdate, initialize_regions)
+            .add_observer(region)
+            .add_systems(PostUpdate, publish_region.after(LayoutSystems::Layout));
     }
 }
 
@@ -109,7 +106,7 @@ impl ReportedWindowDragRegions {
     }
 }
 
-fn initialize_window_drag_regions(
+fn initialize_regions(
     webviews: Query<
         Entity,
         (
@@ -126,7 +123,7 @@ fn initialize_window_drag_regions(
     }
 }
 
-fn on_region(
+fn region(
     trigger: On<UiInput<WindowDragRegionEvent>>,
     mut reported: Query<&mut ReportedWindowDragRegions>,
 ) {
@@ -136,7 +133,7 @@ fn on_region(
     reported.update(trigger.event().payload.clone());
 }
 
-fn publish_window_drag_region(
+fn publish_region(
     reported: Query<(Entity, &ReportedWindowDragRegions)>,
     window_q: Query<(Entity, &ComputedNode), With<VmuxWindow>>,
     hierarchy: WindowHierarchy,

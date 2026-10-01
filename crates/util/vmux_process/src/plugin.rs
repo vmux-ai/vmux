@@ -34,7 +34,7 @@ pub struct ProcessPlugin;
 
 impl Plugin for ProcessPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (apply_process_operations, poll_processes).chain());
+        app.add_systems(Update, (apply_operations, poll_processes).chain());
     }
 }
 
@@ -498,9 +498,7 @@ enum ProcessOperation {
     },
 }
 
-fn apply_process_operations(
-    mut runtime: Query<(&mut ProcessRegistry, &mut ProcessOperationInbox)>,
-) {
+fn apply_operations(mut runtime: Query<(&mut ProcessRegistry, &mut ProcessOperationInbox)>) {
     let Ok((registry, mut inbox)) = runtime.single_mut() else {
         return;
     };

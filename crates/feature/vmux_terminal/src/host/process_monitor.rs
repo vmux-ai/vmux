@@ -37,10 +37,7 @@ impl Plugin for ProcessMonitorPlugin {
             .add_message::<OpenServicesRequest>()
             .add_systems(
                 Startup,
-                (
-                    spawn_process_monitor,
-                    bind_commands.in_set(vmux_command::BindCommands),
-                ),
+                (spawn, bind_commands.in_set(vmux_command::BindCommands)),
             )
             .add_plugins(UiEventPlugin::<(
                 ProcessNavigateEvent,
@@ -63,9 +60,9 @@ impl Plugin for ProcessMonitorPlugin {
                 Update,
                 open_services.before(vmux_core::workspace::StackCommandSet),
             )
-            .add_observer(on_process_navigate)
-            .add_observer(on_process_kill)
-            .add_observer(on_process_kill_all)
+            .add_observer(process_navigate)
+            .add_observer(process_kill)
+            .add_observer(process_kill_all)
             .add_plugins(HostedUiPlugin::<ProcessMonitorView>::new(
                 crate::ui::monitor::ProcessMonitorPage::MANIFEST,
             ));
@@ -244,7 +241,7 @@ struct ProcSample {
     mem: u64,
 }
 
-fn spawn_process_monitor(mut commands: Commands) {
+fn spawn(mut commands: Commands) {
     commands.spawn((Name::new("Process monitor"), ProcessMonitor::default()));
 }
 
@@ -458,7 +455,7 @@ fn broadcast_to_monitors(
         .remove::<ProcessMonitorDirty>();
 }
 
-fn on_process_navigate(
+fn process_navigate(
     trigger: On<UiInput<ProcessNavigateEvent>>,
     process_index: Single<&TerminalProcessIndex>,
     terminals: Query<&ChildOf, With<Terminal>>,
@@ -493,7 +490,7 @@ fn on_process_navigate(
     commands.spawn((reattach_terminal_bundle(process_id), ChildOf(tab)));
 }
 
-fn on_process_kill(
+fn process_kill(
     trigger: On<UiInput<ProcessKillEvent>>,
     service_processes: Query<(Entity, &ProcessId), With<ServiceProcess>>,
     runtime: Query<Entity, With<ProcessMonitor>>,
@@ -528,7 +525,7 @@ fn on_process_kill(
     }
 }
 
-fn on_process_kill_all(
+fn process_kill_all(
     _trigger: On<UiInput<ProcessKillAllEvent>>,
     service_processes: Query<(Entity, &ProcessId), With<ServiceProcess>>,
     runtime: Query<Entity, With<ProcessMonitor>>,
@@ -588,7 +585,7 @@ mod tests {
         let remove = process_id(2);
         let mut app = App::new();
         app.add_message::<ServiceProcessSnapshot>()
-            .add_systems(Startup, spawn_process_monitor)
+            .add_systems(Startup, spawn)
             .add_systems(Update, reconcile_service_processes);
         app.world_mut().write_message(ServiceProcessSnapshot(vec![
             process_info(keep),

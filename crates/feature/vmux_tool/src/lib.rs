@@ -95,36 +95,36 @@ impl Plugin for ToolRuntimePlugin {
         .add_systems(
             Update,
             (
-                route_external_tool_operation::<ToolInstallRequest>,
-                route_external_tool_operation::<ToolUpdateRequest>,
-                route_external_tool_operation::<ToolUninstallRequest>,
-                route_external_tool_operation::<ToolForgetRequest>,
-                route_external_tool_operation::<ToolAdoptRequest>,
-                route_external_tool_operation::<ToolLinkRequest>,
-                route_external_tool_operation::<ToolUnlinkRequest>,
-                route_external_tool_operation::<ToolApplyRequest>,
-                route_external_tool_operation::<ToolImportRequest>,
+                route_external_operation::<ToolInstallRequest>,
+                route_external_operation::<ToolUpdateRequest>,
+                route_external_operation::<ToolUninstallRequest>,
+                route_external_operation::<ToolForgetRequest>,
+                route_external_operation::<ToolAdoptRequest>,
+                route_external_operation::<ToolLinkRequest>,
+                route_external_operation::<ToolUnlinkRequest>,
+                route_external_operation::<ToolApplyRequest>,
+                route_external_operation::<ToolImportRequest>,
             )
                 .after(ToolOperationRouteFlush),
         )
         .add_systems(
             Update,
             (
-                finish_tool_operation::<mcp::DiscoveredMcpServers>,
-                finish_tool_operation::<mcp::ImportedMcpConfig>,
-                finish_tool_operation::<mcp::ImportedMcpServer>,
-                finish_tool_operation::<mcp::ForgottenMcpServer>,
-                finish_tool_operation::<dotfiles::DiscoveredDotfilePackages>,
-                finish_tool_operation::<dotfiles::DotfilePlan>,
-                finish_tool_operation::<dotfiles::ImportedDotfiles>,
-                finish_tool_operation::<dotfiles::ImportedAvailableDotfiles>,
-                finish_tool_operation::<dotfiles::LinkedDotfilePackage>,
-                finish_tool_operation::<dotfiles::DisabledDotfilePackage>,
-                finish_tool_operation::<dotfiles::UnlinkedDotfilePackage>,
-                finish_tool_operation::<dotfiles::AppliedEnabledDotfiles>,
-                finish_tool_operation::<dotfiles::AdoptedDotfile>,
-                finish_tool_operation::<homebrew::ImportedBrewfile>,
-                finish_tool_operation::<npm::ImportedNpmManifest>,
+                finish_operation::<mcp::DiscoveredMcpServers>,
+                finish_operation::<mcp::ImportedMcpConfig>,
+                finish_operation::<mcp::ImportedMcpServer>,
+                finish_operation::<mcp::ForgottenMcpServer>,
+                finish_operation::<dotfiles::DiscoveredDotfilePackages>,
+                finish_operation::<dotfiles::DotfilePlan>,
+                finish_operation::<dotfiles::ImportedDotfiles>,
+                finish_operation::<dotfiles::ImportedAvailableDotfiles>,
+                finish_operation::<dotfiles::LinkedDotfilePackage>,
+                finish_operation::<dotfiles::DisabledDotfilePackage>,
+                finish_operation::<dotfiles::UnlinkedDotfilePackage>,
+                finish_operation::<dotfiles::AppliedEnabledDotfiles>,
+                finish_operation::<dotfiles::AdoptedDotfile>,
+                finish_operation::<homebrew::ImportedBrewfile>,
+                finish_operation::<npm::ImportedNpmManifest>,
             )
                 .after(ToolOperationRouteFlush),
         );
@@ -160,7 +160,7 @@ pub struct ToolOperationFailed(pub String);
 #[derive(Component)]
 pub(crate) struct ToolOperationTask<T: Component>(Task<Result<T, String>>);
 
-fn finish_tool_operation<T: Component>(
+fn finish_operation<T: Component>(
     mut operations: Query<(Entity, &mut ToolOperationTask<T>)>,
     mut commands: Commands,
 ) {
@@ -181,7 +181,7 @@ fn finish_tool_operation<T: Component>(
     }
 }
 
-fn route_external_tool_operation<R: Clone + Send + Sync + 'static>(
+fn route_external_operation<R: Clone + Send + Sync + 'static>(
     requests: Query<
         Entity,
         (

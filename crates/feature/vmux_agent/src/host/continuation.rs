@@ -15,7 +15,7 @@ impl Plugin for AgentContinuationPlugin {
             .add_message::<ServiceRequest>()
             .add_systems(
                 Update,
-                (queue_agent_continuations, send_continuations)
+                (queue_continuations, send_continuations)
                     .chain()
                     .in_set(WriteCommandRequests)
                     .after(ServiceMessageSet),
@@ -26,7 +26,7 @@ impl Plugin for AgentContinuationPlugin {
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 struct PendingAgentContinuation(String);
 
-fn queue_agent_continuations(
+fn queue_continuations(
     mut requests: MessageReader<AgentContinuationRequest>,
     mut commands: Commands,
 ) {

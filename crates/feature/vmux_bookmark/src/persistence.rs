@@ -22,22 +22,18 @@ impl Plugin for BookmarkPersistencePlugin {
             .add_observer(save_on::<SaveWorld<BookmarkFilter>>)
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
             .add_observer(seed_defaults)
-            .add_observer(seed_bookmark_defaults)
+            .add_observer(insert_defaults)
             .add_systems(
                 Startup,
-                (
-                    spawn_bookmark_persistence,
-                    ApplyDeferred,
-                    load_bookmarks_on_startup,
-                )
+                (spawn, ApplyDeferred, load_bookmarks_on_startup)
                     .chain()
                     .after(LayoutStartupSet::Persistence),
             )
             .add_systems(
                 PostUpdate,
                 (
-                    migrate_legacy_bookmark_order,
-                    migrate_smart_bookmark_folders,
+                    migrate_legacy_order,
+                    migrate_smart_folders,
                     migrate_shortcut_aliases,
                     migrate_tool_page_bookmarks,
                     mark_bookmarks_dirty,
@@ -48,7 +44,7 @@ impl Plugin for BookmarkPersistencePlugin {
     }
 }
 
-fn spawn_bookmark_persistence(mut commands: Commands) {
+fn spawn(mut commands: Commands) {
     commands.spawn((
         Name::new("Bookmark persistence"),
         BookmarkAutoSave::default(),
@@ -223,7 +219,7 @@ struct BookmarkSeed<'w, 's> {
     commands: Commands<'w, 's>,
 }
 
-fn seed_bookmark_defaults(
+fn insert_defaults(
     _trigger: On<SeedBookmarkDefaults>,
     settings: Res<AppSettings>,
     mut seed: BookmarkSeed,
@@ -354,7 +350,7 @@ struct BookmarkAutoSave {
     dirty: bool,
 }
 
-fn migrate_legacy_bookmark_order(
+fn migrate_legacy_order(
     legacy: Query<(Entity, &Order), (BookmarkFilter, Without<BookmarkOrder>)>,
     mut commands: Commands,
 ) {
@@ -367,7 +363,7 @@ fn migrate_legacy_bookmark_order(
     }
 }
 
-fn migrate_smart_bookmark_folders(
+fn migrate_smart_folders(
     folders: Query<(Entity, Option<&Children>), With<SmartBookmarkFolder>>,
     mut offered: ResMut<OfferedBookmarkDefaults>,
     mut auto: Single<&mut BookmarkAutoSave>,
@@ -977,7 +973,7 @@ mod tests {
             .init_resource::<OfferedBookmarkDefaults>()
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
             .add_observer(seed_defaults)
-            .add_observer(seed_bookmark_defaults);
+            .add_observer(insert_defaults);
         load_app
             .world_mut()
             .commands()
@@ -1056,7 +1052,7 @@ mod tests {
                 folder_bookmarks: vec!["projects\nvmux://projects".into()],
                 ..default()
             })
-            .add_systems(Update, migrate_smart_bookmark_folders);
+            .add_systems(Update, migrate_smart_folders);
         let bookmark = app
             .world_mut()
             .spawn((
@@ -1105,7 +1101,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_core::CorePlugin)
-            .add_systems(Update, migrate_legacy_bookmark_order);
+            .add_systems(Update, migrate_legacy_order);
         let entity = app
             .world_mut()
             .spawn((Bookmark, Uuid("b1".into()), Order(3)))

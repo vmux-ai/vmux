@@ -14,13 +14,13 @@ pub struct ServiceCliPlugin;
 impl Plugin for ServiceCliPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .add_systems(Update, route_service_cli)
+            .add_systems(Update, route)
             .add_systems(
                 Update,
                 (
                     status, start, stop, restart, logs, install, uninstall, pair, list, revoke,
                 )
-                    .after(route_service_cli),
+                    .after(route),
             );
     }
 }
@@ -57,7 +57,7 @@ struct RemoteListRequest;
 #[derive(Component)]
 struct RemoteRevokeRequest(String);
 
-fn route_service_cli(
+fn route(
     invocations: Query<(Entity, &CliInvocation), Added<CliInvocation>>,
     mut commands: Commands,
 ) {

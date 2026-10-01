@@ -263,6 +263,7 @@ impl ChatListKind {
 #[vmux_api::contract(Default, Eq)]
 pub struct ChatSelectorState {
     pub active: Option<ChatListKind>,
+    pub key_context: Vec<String>,
     pub commands: Vec<SlashCommandEntry>,
     pub models: Vec<ModelOptionEntry>,
     pub mcp_servers: Vec<vmux_api::mcp::McpServerEntry>,

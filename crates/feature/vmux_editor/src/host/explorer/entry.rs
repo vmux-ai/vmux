@@ -20,17 +20,10 @@ impl Plugin for ExplorerEntryPlugin {
             ExplorerRename,
             ExplorerDelete,
         )>::default())
-            .add_systems(
-                Update,
-                (
-                    drain_explorer_creates,
-                    drain_explorer_renames,
-                    drain_explorer_deletes,
-                ),
-            )
-            .add_observer(on_create)
-            .add_observer(on_rename)
-            .add_observer(on_delete);
+            .add_systems(Update, (drain_creates, drain_renames, drain_deletes))
+            .add_observer(create)
+            .add_observer(rename)
+            .add_observer(delete);
     }
 }
 
@@ -71,7 +64,7 @@ struct ExplorerDeleteTask {
     task: Task<Result<ExplorerDeleteOutcome, String>>,
 }
 
-fn on_create(
+fn create(
     trigger: On<UiInput<ExplorerCreate>>,
     views: Query<&UsesExplorerTree>,
     trees: Query<&ExplorerTree>,
@@ -103,7 +96,7 @@ fn on_create(
     });
 }
 
-fn on_rename(
+fn rename(
     trigger: On<UiInput<ExplorerRename>>,
     views: Query<&UsesExplorerTree>,
     trees: Query<&ExplorerTree>,
@@ -157,7 +150,7 @@ fn on_rename(
     });
 }
 
-fn on_delete(
+fn delete(
     trigger: On<UiInput<ExplorerDelete>>,
     views: Query<&UsesExplorerTree>,
     trees: Query<&ExplorerTree>,
@@ -186,7 +179,7 @@ fn on_delete(
     });
 }
 
-fn drain_explorer_creates(
+fn drain_creates(
     mut tasks: Query<(Entity, &mut ExplorerCreateTask)>,
     views: Query<&UsesExplorerTree>,
     mut trees: Query<&mut ExplorerTree>,
@@ -256,7 +249,7 @@ fn drain_explorer_creates(
     }
 }
 
-fn drain_explorer_renames(
+fn drain_renames(
     mut tasks: Query<(Entity, &mut ExplorerRenameTask)>,
     mut views: Query<(&FileView, &mut ExplorerState, &UsesExplorerTree)>,
     mut trees: Query<&mut ExplorerTree>,
@@ -333,7 +326,7 @@ fn drain_explorer_renames(
     }
 }
 
-fn drain_explorer_deletes(
+fn drain_deletes(
     mut tasks: Query<(Entity, &mut ExplorerDeleteTask)>,
     mut views: Query<(&FileView, &mut ExplorerState, &UsesExplorerTree)>,
     mut trees: Query<&mut ExplorerTree>,

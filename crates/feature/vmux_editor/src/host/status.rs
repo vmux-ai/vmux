@@ -31,8 +31,8 @@ impl Plugin for StatusPlugin {
                     send_file_keymap,
                 ),
             )
-            .add_observer(on_file_view_mode_set)
-            .add_observer(on_file_keymap_set);
+            .add_observer(file_view_mode_set)
+            .add_observer(file_keymap_set);
     }
 }
 
@@ -264,7 +264,7 @@ fn apply_file_view_mode_requests(
     }
 }
 
-fn on_file_view_mode_set(
+fn file_view_mode_set(
     trigger: On<UiInput<FileViewModeSet>>,
     files: Query<(&FileView, Option<&Editor>)>,
     state: Single<(&mut SharedFileViewMode, &mut FileViewModeRevision)>,
@@ -288,7 +288,7 @@ fn on_file_view_mode_set(
     }
 }
 
-fn on_file_keymap_set(
+fn file_keymap_set(
     trigger: On<UiInput<FileKeymapSet>>,
     views: Query<(), With<FileView>>,
     mut settings: ResMut<AppSettings>,
@@ -324,7 +324,7 @@ mod tests {
     fn file_view_mode_is_shared_across_editors() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_observer(on_file_view_mode_set);
+            .add_observer(file_view_mode_set);
         app.world_mut().spawn((
             SharedFileViewMode::default(),
             FileViewModeRevision::default(),
@@ -370,7 +370,7 @@ mod tests {
     fn switching_to_note_reveals_the_current_cursor_line() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_observer(on_file_view_mode_set);
+            .add_observer(file_view_mode_set);
         app.world_mut().spawn((
             SharedFileViewMode(FileViewMode::Editor),
             FileViewModeRevision::default(),
@@ -444,7 +444,7 @@ mod tests {
     fn non_editor_cannot_change_file_view_mode() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_observer(on_file_view_mode_set);
+            .add_observer(file_view_mode_set);
         app.world_mut().spawn((
             SharedFileViewMode::default(),
             FileViewModeRevision::default(),

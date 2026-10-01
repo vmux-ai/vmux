@@ -45,46 +45,39 @@ impl Plugin for WindowLayoutPlugin {
             .register_type::<Option<Vec2>>()
             .add_systems(
                 Startup,
-                setup_window_shells
+                setup_shells
                     .in_set(LayoutStartupSet::Window)
                     .after(PageEmbedSet),
             )
             .add_systems(
                 Startup,
-                request_default_layout.in_set(LayoutStartupSet::DefaultTab),
+                request_default.in_set(LayoutStartupSet::DefaultTab),
             )
             .add_systems(Startup, bind_commands.in_set(BindCommands))
             .add_systems(
                 Startup,
-                fit_window_to_screen
+                fit_to_screen
                     .in_set(LayoutStartupSet::Post)
                     .after(crate::stack::OpenStartupPageSet),
             )
             .add_systems(
                 PostUpdate,
-                (
-                    fit_window_to_screen,
-                    sync_window_layout_to_settings,
-                    sync_main_column_gap,
-                ),
+                (fit_to_screen, sync_to_settings, sync_main_column_gap),
             )
             .add_systems(
                 Update,
-                (sync_focused_window, bevy::ecs::schedule::ApplyDeferred)
+                (sync_focused, bevy::ecs::schedule::ApplyDeferred)
                     .chain()
                     .in_set(WindowFocusSet),
             )
             .add_systems(
                 Update,
-                (setup_window_shells, bevy::ecs::schedule::ApplyDeferred)
+                (setup_shells, bevy::ecs::schedule::ApplyDeferred)
                     .chain()
                     .in_set(WindowShellSet)
                     .after(WindowFocusSet),
             )
-            .add_systems(
-                Update,
-                minimize_focused_window.in_set(LayoutRequestSet::Handle),
-            );
+            .add_systems(Update, minimize_focused.in_set(LayoutRequestSet::Handle));
 
         app.init_resource::<Assets<WindowMaterial>>()
             .init_resource::<WindowBackground>();
@@ -230,7 +223,7 @@ impl Default for WindowBackground {
     }
 }
 
-fn minimize_focused_window(
+fn minimize_focused(
     mut reader: MessageReader<MinimizeWindowRequest>,
     focused_window: FocusedWindow,
 ) {
@@ -278,7 +271,7 @@ pub struct WindowGeometry {
     pub size: Option<Vec2>,
 }
 
-fn sync_focused_window(
+fn sync_focused(
     windows: Query<(Entity, &Window, Has<PrimaryWindow>, Has<Active>)>,
     mut commands: Commands,
 ) {
@@ -328,7 +321,7 @@ impl WindowHierarchy<'_, '_> {
     }
 }
 
-fn setup_window_shells(
+fn setup_shells(
     windows: Query<(Entity, &Window, Has<NewWindowWorkspace>)>,
     roots: Query<&HostWindow, With<VmuxWindow>>,
     spaces: Query<&crate::space::SpaceId, With<crate::space::Space>>,
@@ -543,7 +536,7 @@ fn spawn_new_window_workspace(
     commands.entity(window).remove::<NewWindowWorkspace>();
 }
 
-fn request_default_layout(
+fn request_default(
     tab_q: Query<(), With<Tab>>,
     hierarchy: WindowHierarchy,
     primary_window: Query<Entity, With<PrimaryWindow>>,
@@ -693,7 +686,7 @@ fn spawn_requested_tab_layouts(
     }
 }
 
-fn sync_window_layout_to_settings(
+fn sync_to_settings(
     settings: Res<LayoutSettings>,
     hidden_windows: Query<(), With<crate::toggle::LayoutHidden>>,
     mut window_q: Query<
@@ -779,7 +772,7 @@ fn sync_main_column_gap(
     }
 }
 
-fn fit_window_to_screen(
+fn fit_to_screen(
     windows: Query<&bevy::window::Window>,
     mut last_sizes: Local<std::collections::HashMap<Entity, Vec2>>,
     mut roots: Query<(&HostWindow, &mut Transform), With<VmuxWindow>>,
@@ -892,7 +885,7 @@ mod tests {
             },
             PrimaryWindow,
         ));
-        app.add_systems(Startup, setup_window_shells);
+        app.add_systems(Startup, setup_shells);
         app
     }
 
@@ -941,7 +934,7 @@ mod tests {
             .insert_resource(test_settings(8.0))
             .init_resource::<Assets<WindowMaterial>>()
             .add_message::<TabLayoutSpawnRequest>()
-            .add_systems(Update, setup_window_shells);
+            .add_systems(Update, setup_shells);
         let first = app.world_mut().spawn(Window::default()).id();
         let second = app.world_mut().spawn(Window::default()).id();
 
@@ -967,7 +960,7 @@ mod tests {
             .add_message::<TabLayoutSpawnRequest>()
             .add_systems(
                 Update,
-                (setup_window_shells, bevy::ecs::schedule::ApplyDeferred).chain(),
+                (setup_shells, bevy::ecs::schedule::ApplyDeferred).chain(),
             );
         let window = app
             .world_mut()
@@ -1040,7 +1033,7 @@ mod tests {
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
-            .add_systems(Update, request_default_layout.before(TabLayoutSpawnSet));
+            .add_systems(Update, request_default.before(TabLayoutSpawnSet));
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
@@ -1077,7 +1070,7 @@ mod tests {
             .add_message::<crate::LauncherDismissRequest>()
             .add_message::<PageOpenRequest>()
             .insert_resource(test_settings(0.0))
-            .add_systems(Update, request_default_layout.before(TabLayoutSpawnSet));
+            .add_systems(Update, request_default.before(TabLayoutSpawnSet));
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
@@ -1108,7 +1101,7 @@ mod tests {
             .add_message::<crate::LauncherDismissRequest>()
             .add_message::<PageOpenRequest>()
             .insert_resource(test_settings(0.0))
-            .add_systems(Update, request_default_layout.before(TabLayoutSpawnSet));
+            .add_systems(Update, request_default.before(TabLayoutSpawnSet));
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
@@ -1224,7 +1217,7 @@ mod tests {
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
-            .add_systems(Startup, request_default_layout);
+            .add_systems(Startup, request_default);
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
@@ -1263,7 +1256,7 @@ mod tests {
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
-            .add_systems(Startup, request_default_layout);
+            .add_systems(Startup, request_default);
 
         app.world_mut().spawn(Main);
         app.world_mut().spawn(PrimaryWindow);
@@ -1298,7 +1291,7 @@ mod tests {
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
-            .add_systems(Update, sync_window_layout_to_settings);
+            .add_systems(Update, sync_to_settings);
         let window = app
             .world_mut()
             .spawn((

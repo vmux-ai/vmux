@@ -17,10 +17,7 @@ pub(super) struct PageOpenPlugin;
 impl Plugin for PageOpenPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<vmux_core::event::RecordVisitRequest>()
-            .add_systems(
-                Update,
-                handle_file_page_open.in_set(PageOpenSet::HandleKnownPages),
-            );
+            .add_systems(Update, handle_file.in_set(PageOpenSet::HandleKnownPages));
     }
 }
 
@@ -76,7 +73,7 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
     )
 }
 
-fn handle_file_page_open(
+fn handle_file(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children: Query<&Children>,
     mut views: Query<(&FileView, &mut PageMetadata)>,
@@ -159,7 +156,7 @@ struct FilePageTarget {
 
 impl FilePageTarget {
     fn resolve(url: &str, project_dir: Option<&Path>, knowledge_root: &Path) -> Option<Self> {
-        if url.trim_end_matches('/') == vmux_api::space::PROJECTS_PAGE_URL.trim_end_matches('/') {
+        if url.trim_end_matches('/') == super::ProjectsPage::MANIFEST.url.trim_end_matches('/') {
             return Some(Self {
                 path: Some(
                     project_dir

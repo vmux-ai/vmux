@@ -25,28 +25,28 @@ impl Plugin for HistoryQueryPlugin {
             UiEventPlugin::<(HistorySuggestionsRequest,)>::default(),
         ))
         .add_message::<HistoryOpenIntent>()
-        .add_observer(on_request)
-        .add_observer(on_load_more_request)
-        .add_observer(on_delete_request)
-        .add_observer(on_clear_all_request)
-        .add_observer(on_open_request)
-        .add_observer(on_suggestions_request)
+        .add_observer(request)
+        .add_observer(load_more_request)
+        .add_observer(delete_request)
+        .add_observer(clear_all_request)
+        .add_observer(open_request)
+        .add_observer(suggestions_request)
         .add_systems(
             Update,
-            broadcast_history_changed.after(super::spawn::HistoryWriteSet),
+            broadcast_changed.after(super::spawn::HistoryWriteSet),
         )
-        .add_systems(PostUpdate, publish_history_pages);
+        .add_systems(PostUpdate, publish_pages);
     }
 }
 
-fn on_request(trigger: On<UiInput<HistoryQueryRequest>>, mut pages: Query<&mut HistoryPageState>) {
+fn request(trigger: On<UiInput<HistoryQueryRequest>>, mut pages: Query<&mut HistoryPageState>) {
     let Ok(mut state) = pages.get_mut(trigger.event().webview) else {
         return;
     };
     state.search(&trigger.event().payload.query);
 }
 
-fn on_load_more_request(
+fn load_more_request(
     trigger: On<UiInput<HistoryLoadMoreRequest>>,
     mut pages: Query<&mut HistoryPageState>,
 ) {
@@ -137,7 +137,7 @@ pub fn build_entries(
     }
 }
 
-fn on_delete_request(
+fn delete_request(
     trigger: On<UiInput<HistoryDeleteRequest>>,
     mut commands: Commands,
     visits: Query<(Entity, &VisitedUrl), With<Visit>>,
@@ -157,7 +157,7 @@ fn on_delete_request(
     }
 }
 
-fn on_clear_all_request(
+fn clear_all_request(
     _trigger: On<UiInput<HistoryClearAllRequest>>,
     mut commands: Commands,
     urls: Query<Entity, With<Url>>,
@@ -181,7 +181,7 @@ pub struct HistoryOpenIntent {
     pub in_new_stack: bool,
 }
 
-fn on_open_request(
+fn open_request(
     trigger: On<UiInput<HistoryOpenRequest>>,
     mut messages: MessageWriter<HistoryOpenIntent>,
 ) {
@@ -192,7 +192,7 @@ fn on_open_request(
     });
 }
 
-fn broadcast_history_changed(
+fn broadcast_changed(
     changed: Query<(), (Changed<LastVisitedAt>, With<Url>)>,
     mut pages: Query<&mut HistoryPageState>,
 ) {
@@ -204,7 +204,7 @@ fn broadcast_history_changed(
     }
 }
 
-fn publish_history_pages(
+fn publish_pages(
     mut pages: Query<(Entity, &mut HistoryPageState), Changed<HistoryPageState>>,
     urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
     visits: Query<(&CreatedAt, &VisitedUrl), With<Visit>>,
@@ -221,7 +221,7 @@ fn publish_history_pages(
     }
 }
 
-fn on_suggestions_request(
+fn suggestions_request(
     trigger: On<UiInput<HistorySuggestionsRequest>>,
     urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
     mut commands: Commands,

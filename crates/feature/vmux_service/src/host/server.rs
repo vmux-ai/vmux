@@ -68,11 +68,8 @@ impl Plugin for ServiceDaemonPlugin {
             crate::remote::RemotePlugin,
             vmux_agent::acp::AcpSessionPlugin,
         ))
-        .add_systems(Startup, start_service_daemon)
-        .add_systems(
-            Update,
-            (start_service_clients, reap_service_clients).chain(),
-        );
+        .add_systems(Startup, start_daemon)
+        .add_systems(Update, (start_clients, reap_clients).chain());
     }
 }
 
@@ -132,10 +129,7 @@ impl Drop for ServiceClientTask {
     }
 }
 
-fn start_service_daemon(
-    mut startups: Query<(Entity, &mut ServiceDaemonStartup)>,
-    mut commands: Commands,
-) {
+fn start_daemon(mut startups: Query<(Entity, &mut ServiceDaemonStartup)>, mut commands: Commands) {
     for (entity, mut startup) in &mut startups {
         let Some(start) = startup.0.take() else {
             continue;
@@ -226,7 +220,7 @@ impl ServiceListener {
     }
 }
 
-fn start_service_clients(
+fn start_clients(
     runtime: Single<&ServiceClientRuntime, With<ServiceDaemon>>,
     mut inbox: Single<&mut ServiceConnectionInbox, With<ServiceDaemon>>,
     mut commands: Commands,
@@ -250,7 +244,7 @@ fn start_service_clients(
     }
 }
 
-fn reap_service_clients(
+fn reap_clients(
     clients: Query<(Entity, &ServiceClientTask), With<ServiceClient>>,
     mut commands: Commands,
 ) {

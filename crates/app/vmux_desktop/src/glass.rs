@@ -10,11 +10,11 @@ impl Plugin for GlassPlugin {
     fn build(&self, app: &mut App) {
         app.init_non_send::<GlassState>()
             .add_message::<vmux_input::ExitFullscreenShortcut>()
-            .add_systems(PreUpdate, install_window_glass)
+            .add_systems(PreUpdate, install_window)
             .add_systems(
                 Update,
                 (
-                    sync_window_glass_visibility.in_set(vmux_core::WindowFullscreenSet),
+                    sync_window_visibility.in_set(vmux_core::WindowFullscreenSet),
                     keep_surface_transparent,
                 ),
             )
@@ -83,7 +83,7 @@ impl WindowGlass {
     }
 }
 
-fn install_window_glass(mut state: NonSendMut<GlassState>, windows: Query<(Entity, &Window)>) {
+fn install_window(mut state: NonSendMut<GlassState>, windows: Query<(Entity, &Window)>) {
     use bevy::winit::WINIT_WINDOWS;
     use objc2::{ClassType, MainThreadMarker, MainThreadOnly, rc::Retained, runtime::AnyClass};
     use objc2_app_kit::{
@@ -290,7 +290,7 @@ fn toggle_fullscreen(
     }
 }
 
-fn sync_window_glass_visibility(
+fn sync_window_visibility(
     mut state: NonSendMut<GlassState>,
     mut clear_color: ResMut<vmux_layout::window::WindowBackground>,
     mut window_q: Query<(

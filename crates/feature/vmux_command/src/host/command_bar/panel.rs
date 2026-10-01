@@ -10,15 +10,15 @@ pub struct PanelPlugin;
 impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(CommandBarPanelRequest,)>::default())
-            .add_observer(on_active)
-            .add_systems(Update, mark_command_bar_shown_inline);
+            .add_observer(active)
+            .add_systems(Update, mark_bar_shown_inline);
     }
 }
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CommandBarPanelActive;
 
-fn mark_command_bar_shown_inline(
+fn mark_bar_shown_inline(
     panel_active: Query<(), With<CommandBarPanelActive>>,
     bar_q: Query<(Entity, Has<OverlayShownInline>), With<CommandBar>>,
     mut commands: Commands,
@@ -36,7 +36,7 @@ fn mark_command_bar_shown_inline(
     }
 }
 
-fn on_active(trigger: On<UiInput<CommandBarPanelRequest>>, mut commands: Commands) {
+fn active(trigger: On<UiInput<CommandBarPanelRequest>>, mut commands: Commands) {
     let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
         return;
     };
@@ -54,8 +54,8 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_observer(on_active)
-            .add_systems(Update, mark_command_bar_shown_inline);
+            .add_observer(active)
+            .add_systems(Update, mark_bar_shown_inline);
         app
     }
 

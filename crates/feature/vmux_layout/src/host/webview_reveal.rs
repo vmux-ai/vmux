@@ -6,7 +6,7 @@ use vmux_flex::prelude::*;
 
 impl Plugin for WebviewRevealPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_webview_added)
+        app.add_observer(webview_added)
             .add_systems(PostUpdate, reveal_webviews.after(LayoutSystems::Layout));
     }
 }
@@ -18,7 +18,7 @@ pub struct PendingWebviewReveal(u8);
 
 const REVEAL_FRAMES: u8 = 2;
 
-fn on_webview_added(
+fn webview_added(
     trigger: On<Add, WebviewSource>,
     root: Query<(), With<VmuxWindow>>,
     mut commands: Commands,

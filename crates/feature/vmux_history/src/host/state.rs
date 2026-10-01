@@ -11,7 +11,7 @@ pub(super) struct StatePlugin;
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(vmux_core::host::UiStatePlugin::<HistoryUiState>::default())
-            .add_observer(on_page_ready);
+            .add_observer(page_ready);
     }
 }
 
@@ -54,7 +54,7 @@ impl HistoryPageState {
     }
 }
 
-fn on_page_ready(
+fn page_ready(
     trigger: On<UiInput<PageReady>>,
     pages: Query<&vmux_core::PageMetadata>,
     mut commands: Commands,

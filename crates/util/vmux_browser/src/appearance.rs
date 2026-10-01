@@ -14,10 +14,10 @@ pub(crate) struct AppearancePlugin;
 impl Plugin for AppearancePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiStatePlugin::<vmux_ui::theme::ThemeEvent>::default())
-            .add_observer(on_webview_ready_send_theme)
+            .add_observer(webview_ready_send_theme)
             .add_systems(
                 Update,
-                sync_appearance_to_cef
+                sync_to_cef
                     .before(CefSystems::CreateAndResize)
                     .run_if(resource_changed::<AppSettings>),
             )
@@ -40,7 +40,7 @@ fn reassert_color_scheme(
     browsers.set_color_scheme(map_color_scheme(settings.appearance.mode));
 }
 
-fn on_webview_ready_send_theme(
+fn webview_ready_send_theme(
     trigger: On<UiInput<PageReady>>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
@@ -70,7 +70,7 @@ fn map_color_scheme(mode: vmux_setting::ColorScheme) -> bevy_cef::prelude::CefCo
     }
 }
 
-fn sync_appearance_to_cef(
+fn sync_to_cef(
     settings: Res<AppSettings>,
     mut scheme: ResMut<bevy_cef::prelude::CefColorScheme>,
     mut accept_language_list: Option<ResMut<bevy_cef::prelude::CefAcceptLanguageList>>,

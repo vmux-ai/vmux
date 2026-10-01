@@ -62,20 +62,20 @@ impl Plugin for CommandPlugin {
             .add_message::<ShowDevToolsRequest>()
             .add_plugins(UiEventPlugin::<(CommandBarPageOpenRequest, InvokeRequest)>::default())
             .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands))
-            .add_observer(on_header_back)
-            .add_observer(on_header_forward)
-            .add_observer(on_header_reload)
-            .add_observer(on_header_address_focus)
-            .add_observer(on_side_sheet_stack_activate)
-            .add_observer(on_side_sheet_stack_close)
-            .add_observer(on_side_sheet_stack_create)
-            .add_observer(on_side_sheet_project_open)
-            .add_observer(on_side_sheet_section)
-            .add_observer(on_side_sheet_resize)
-            .add_observer(open_from_command_bar)
-            .add_observer(invoke_from_command_bar)
-            .add_observer(on_reload_notify_header)
-            .add_observer(on_hard_reload_notify_header)
+            .add_observer(header_back)
+            .add_observer(header_forward)
+            .add_observer(header_reload)
+            .add_observer(header_address_focus)
+            .add_observer(side_sheet_stack_activate)
+            .add_observer(side_sheet_stack_close)
+            .add_observer(side_sheet_stack_create)
+            .add_observer(side_sheet_project_open)
+            .add_observer(side_sheet_section)
+            .add_observer(side_sheet_resize)
+            .add_observer(open_from_bar)
+            .add_observer(invoke_from_bar)
+            .add_observer(reload_notify_header)
+            .add_observer(hard_reload_notify_header)
             .add_systems(
                 Update,
                 (
@@ -172,7 +172,7 @@ fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
     }
 }
 
-fn open_from_command_bar(
+fn open_from_bar(
     trigger: On<UiInput<CommandBarPageOpenRequest>>,
     search_engine: Option<Single<&SearchEngineSetting>>,
     child_of: Query<&ChildOf>,
@@ -262,7 +262,7 @@ fn open_from_command_bar(
     commands.trigger(CommandBarDismiss::new(webview, !custom_keyboard_restore));
 }
 
-fn invoke_from_command_bar(
+fn invoke_from_bar(
     trigger: On<UiInput<InvokeRequest>>,
     contributed_pages: ContributedPages,
     contributed_commands: Query<&ContributedCommand>,
@@ -608,7 +608,7 @@ fn show_dev_tools(
     }
 }
 
-fn on_header_back(
+fn header_back(
     trigger: On<UiInput<HeaderBackRequest>>,
     mut command_invocations: MessageWriter<CommandInvocation>,
 ) {
@@ -618,7 +618,7 @@ fn on_header_back(
     ));
 }
 
-fn on_header_forward(
+fn header_forward(
     trigger: On<UiInput<HeaderForwardRequest>>,
     mut command_invocations: MessageWriter<CommandInvocation>,
 ) {
@@ -628,7 +628,7 @@ fn on_header_forward(
     ));
 }
 
-fn on_header_reload(
+fn header_reload(
     trigger: On<UiInput<HeaderReloadRequest>>,
     mut command_invocations: MessageWriter<CommandInvocation>,
 ) {
@@ -638,7 +638,7 @@ fn on_header_reload(
     ));
 }
 
-fn on_header_address_focus(
+fn header_address_focus(
     trigger: On<UiInput<HeaderAddressFocusRequest>>,
     mut command_invocations: MessageWriter<CommandInvocation>,
 ) {
@@ -648,7 +648,7 @@ fn on_header_address_focus(
     ));
 }
 
-fn on_reload_notify_header(
+fn reload_notify_header(
     _trigger: On<RequestReload>,
     mut layouts: Query<
         (Entity, &HostWindow, &mut ReloadRevision),
@@ -668,7 +668,7 @@ fn on_reload_notify_header(
     commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &effect));
 }
 
-fn on_hard_reload_notify_header(
+fn hard_reload_notify_header(
     _trigger: On<RequestReloadIgnoreCache>,
     mut layouts: Query<
         (Entity, &HostWindow, &mut ReloadRevision),
@@ -688,7 +688,7 @@ fn on_hard_reload_notify_header(
     commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &effect));
 }
 
-fn on_side_sheet_resize(
+fn side_sheet_resize(
     trigger: On<UiInput<SideSheetResizeEvent>>,
     mut sheets: Query<(&SideSheetPosition, &mut vmux_flex::prelude::Node), With<SideSheet>>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
@@ -713,7 +713,7 @@ fn on_side_sheet_resize(
     }
 }
 
-fn on_side_sheet_stack_activate(
+fn side_sheet_stack_activate(
     trigger: On<UiInput<SideSheetStackActivateRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
@@ -754,7 +754,7 @@ fn on_side_sheet_stack_activate(
     }
 }
 
-fn on_side_sheet_stack_close(
+fn side_sheet_stack_close(
     trigger: On<UiInput<SideSheetStackCloseRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
@@ -784,7 +784,7 @@ fn on_side_sheet_stack_close(
         .insert(PaneHoverCooldown::start());
 }
 
-fn on_side_sheet_stack_create(
+fn side_sheet_stack_create(
     trigger: On<UiInput<SideSheetStackCreateRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
@@ -800,7 +800,7 @@ fn on_side_sheet_stack_create(
     requests.write(vmux_layout::stack::OpenRequest { url: None });
 }
 
-fn on_side_sheet_project_open(
+fn side_sheet_project_open(
     trigger: On<UiInput<SideSheetProjectOpenRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut requests: MessageWriter<PageOpenRequest>,
@@ -822,7 +822,7 @@ fn on_side_sheet_project_open(
     });
 }
 
-fn on_side_sheet_section(
+fn side_sheet_section(
     trigger: On<UiInput<SideSheetSectionRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     sections_of: vmux_layout::side_sheet::SideSheetSections,
@@ -1056,7 +1056,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<PageOpenRequest>()
-            .add_observer(on_side_sheet_stack_close);
+            .add_observer(side_sheet_stack_close);
 
         let pane = app.world_mut().spawn(Pane).id();
         let middle = app
@@ -1104,7 +1104,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .add_message::<vmux_setting::SettingsSaveRequest>()
-            .add_observer(on_side_sheet_resize);
+            .add_observer(side_sheet_resize);
         let sheet = app
             .world_mut()
             .spawn((SideSheet, SideSheetPosition::Left, Node::default()))
@@ -1180,7 +1180,7 @@ mod tests {
             app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
                 .add_message::<vmux_layout::stack::OpenRequest>()
                 .add_message::<PageOpenRequest>()
-                .add_observer(on_side_sheet_section);
+                .add_observer(side_sheet_section);
 
             let space = app
                 .world_mut()

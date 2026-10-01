@@ -9,10 +9,10 @@ pub struct ActivePanePlugin;
 impl Plugin for ActivePanePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ActivatePane>()
-            .add_systems(Startup, spawn_local_active_pane)
+            .add_systems(Startup, spawn_local)
             .add_systems(
                 Update,
-                (apply_active_pane_requests, prune_active_pane_entities)
+                (apply_requests, prune_entities)
                     .chain()
                     .after(ComputeFocusSet),
             );
@@ -110,11 +110,11 @@ pub struct ActivatePane {
     pub active: ActiveStack,
 }
 
-fn spawn_local_active_pane(mut commands: Commands) {
+fn spawn_local(mut commands: Commands) {
     commands.spawn(ActiveStack::default().local_bundle());
 }
 
-fn apply_active_pane_requests(
+fn apply_requests(
     mut reader: MessageReader<ActivatePane>,
     mut profiles: Query<(&ProfileId, &mut ActiveStack)>,
     mut commands: Commands,
@@ -154,7 +154,7 @@ fn apply_active_pane_requests(
     }
 }
 
-fn prune_active_pane_entities(
+fn prune_entities(
     profiles: Query<(Entity, &ProfileId, &ActiveStack)>,
     panes: Query<(), (With<Pane>, Without<PaneSplit>)>,
     mut commands: Commands,

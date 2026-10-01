@@ -35,8 +35,8 @@ impl Plugin for BookmarkToolPlugin {
                 Update,
                 (list, add, remove, pin, unpin, create_folder).in_set(ToolDispatchSet),
             )
-            .add_systems(Update, route_bookmark_queries.in_set(ToolQueryRouteSet))
-            .add_systems(Update, answer_bookmark_queries.after(ToolQueryRouteSet));
+            .add_systems(Update, route_queries.in_set(ToolQueryRouteSet))
+            .add_systems(Update, answer_queries.after(ToolQueryRouteSet));
     }
 }
 
@@ -198,7 +198,7 @@ fn create_folder(
     }
 }
 
-fn route_bookmark_queries(
+fn route_queries(
     mut queries: MessageReader<ToolQueryRequest>,
     mut handled: MessageWriter<ToolQueryHandled>,
     mut bookmarks: MessageWriter<BookmarkListRequest>,
@@ -225,7 +225,7 @@ fn route_bookmark_queries(
     }
 }
 
-fn answer_bookmark_queries(
+fn answer_queries(
     mut requests: MessageReader<BookmarkListRequest>,
     pins: Query<(&Uuid, &PageMetadata, &BookmarkOrder), With<Pin>>,
     folders: Query<

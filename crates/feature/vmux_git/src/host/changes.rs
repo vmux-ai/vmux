@@ -35,31 +35,31 @@ impl Plugin for ChangesPlugin {
             GitHunkRequest,
         )>::default())
             .add_plugins(UiEventPlugin::<GitOperationRequests>::default())
-            .add_observer(on_stage_request)
-            .add_observer(on_unstage_request)
-            .add_observer(on_discard_request)
-            .add_observer(on_commit_request)
-            .add_observer(on_fetch_request)
-            .add_observer(on_amend_request)
-            .add_observer(on_checkout_commit_request)
-            .add_observer(on_cherry_pick_request)
-            .add_observer(on_create_branch_request)
-            .add_observer(on_delete_branch_request)
-            .add_observer(on_fast_forward_request)
-            .add_observer(on_merge_request)
-            .add_observer(on_rebase_request)
-            .add_observer(on_revert_request)
-            .add_observer(on_stash_drop_request)
-            .add_observer(on_stash_pop_request)
-            .add_observer(on_stash_push_request)
-            .add_observer(on_pull_request)
-            .add_observer(on_push_request)
-            .add_observer(on_stage_all_request)
-            .add_observer(on_hunk_request);
+            .add_observer(stage_request)
+            .add_observer(unstage_request)
+            .add_observer(discard_request)
+            .add_observer(commit_request)
+            .add_observer(fetch_request)
+            .add_observer(amend_request)
+            .add_observer(checkout_commit_request)
+            .add_observer(cherry_pick_request)
+            .add_observer(create_branch_request)
+            .add_observer(delete_branch_request)
+            .add_observer(fast_forward_request)
+            .add_observer(merge_request)
+            .add_observer(rebase_request)
+            .add_observer(revert_request)
+            .add_observer(stash_drop_request)
+            .add_observer(stash_pop_request)
+            .add_observer(stash_push_request)
+            .add_observer(pull_request)
+            .add_observer(push_request)
+            .add_observer(stage_all_request)
+            .add_observer(hunk_request);
     }
 }
 
-fn on_stage_request(trigger: On<UiInput<GitStageRequest>>, mut commands: Commands) {
+fn stage_request(trigger: On<UiInput<GitStageRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
     let path = RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
@@ -70,7 +70,7 @@ fn on_stage_request(trigger: On<UiInput<GitStageRequest>>, mut commands: Command
     ));
 }
 
-fn on_unstage_request(trigger: On<UiInput<GitUnstageRequest>>, mut commands: Commands) {
+fn unstage_request(trigger: On<UiInput<GitUnstageRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
     let path = RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
@@ -81,7 +81,7 @@ fn on_unstage_request(trigger: On<UiInput<GitUnstageRequest>>, mut commands: Com
     ));
 }
 
-fn on_discard_request(trigger: On<UiInput<GitDiscardRequest>>, mut commands: Commands) {
+fn discard_request(trigger: On<UiInput<GitDiscardRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
     let path = RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
@@ -92,7 +92,7 @@ fn on_discard_request(trigger: On<UiInput<GitDiscardRequest>>, mut commands: Com
     ));
 }
 
-fn on_commit_request(trigger: On<UiInput<GitCommitRequest>>, mut commands: Commands) {
+fn commit_request(trigger: On<UiInput<GitCommitRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
@@ -103,7 +103,7 @@ fn on_commit_request(trigger: On<UiInput<GitCommitRequest>>, mut commands: Comma
     ));
 }
 
-fn on_fetch_request(
+fn fetch_request(
     trigger: On<UiInput<GitFetchRequest>>,
     mut views: Query<&mut super::state::GitState>,
     mut commands: Commands,
@@ -119,7 +119,7 @@ fn on_fetch_request(
     ));
 }
 
-fn on_amend_request(trigger: On<UiInput<GitAmendRequest>>, mut commands: Commands) {
+fn amend_request(trigger: On<UiInput<GitAmendRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
@@ -128,10 +128,7 @@ fn on_amend_request(trigger: On<UiInput<GitAmendRequest>>, mut commands: Command
     ));
 }
 
-fn on_checkout_commit_request(
-    trigger: On<UiInput<GitCheckoutCommitRequest>>,
-    mut commands: Commands,
-) {
+fn checkout_commit_request(trigger: On<UiInput<GitCheckoutCommitRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
@@ -142,7 +139,7 @@ fn on_checkout_commit_request(
     ));
 }
 
-fn on_cherry_pick_request(trigger: On<UiInput<GitCherryPickRequest>>, mut commands: Commands) {
+fn cherry_pick_request(trigger: On<UiInput<GitCherryPickRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
@@ -153,7 +150,7 @@ fn on_cherry_pick_request(trigger: On<UiInput<GitCherryPickRequest>>, mut comman
     ));
 }
 
-fn on_create_branch_request(
+fn create_branch_request(
     trigger: On<UiInput<GitCreateBranchRequest>>,
     mut controllers: Query<&mut super::controller::GitController>,
     mut commands: Commands,
@@ -172,7 +169,7 @@ fn on_create_branch_request(
     ));
 }
 
-fn on_delete_branch_request(
+fn delete_branch_request(
     trigger: On<UiInput<GitDeleteBranchRequest>>,
     pages: Query<(&super::state::GitState, &super::controller::GitController)>,
     mut commands: Commands,
@@ -199,7 +196,7 @@ fn on_delete_branch_request(
     ));
 }
 
-fn on_fast_forward_request(trigger: On<UiInput<GitFastForwardRequest>>, mut commands: Commands) {
+fn fast_forward_request(trigger: On<UiInput<GitFastForwardRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
@@ -210,7 +207,7 @@ fn on_fast_forward_request(trigger: On<UiInput<GitFastForwardRequest>>, mut comm
     ));
 }
 
-fn on_merge_request(trigger: On<UiInput<GitMergeRequest>>, mut commands: Commands) {
+fn merge_request(trigger: On<UiInput<GitMergeRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
@@ -221,7 +218,7 @@ fn on_merge_request(trigger: On<UiInput<GitMergeRequest>>, mut commands: Command
     ));
 }
 
-fn on_rebase_request(trigger: On<UiInput<GitRebaseRequest>>, mut commands: Commands) {
+fn rebase_request(trigger: On<UiInput<GitRebaseRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
@@ -232,7 +229,7 @@ fn on_rebase_request(trigger: On<UiInput<GitRebaseRequest>>, mut commands: Comma
     ));
 }
 
-fn on_revert_request(
+fn revert_request(
     trigger: On<UiInput<GitRevertRequest>>,
     pages: Query<(&super::state::GitState, &super::controller::GitController)>,
     mut commands: Commands,
@@ -259,7 +256,7 @@ fn on_revert_request(
     ));
 }
 
-fn on_stash_drop_request(
+fn stash_drop_request(
     trigger: On<UiInput<GitStashDropRequest>>,
     pages: Query<(&super::state::GitState, &super::controller::GitController)>,
     mut commands: Commands,
@@ -286,7 +283,7 @@ fn on_stash_drop_request(
     ));
 }
 
-fn on_stash_pop_request(trigger: On<UiInput<GitStashPopRequest>>, mut commands: Commands) {
+fn stash_pop_request(trigger: On<UiInput<GitStashPopRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
@@ -297,7 +294,7 @@ fn on_stash_pop_request(trigger: On<UiInput<GitStashPopRequest>>, mut commands: 
     ));
 }
 
-fn on_stash_push_request(trigger: On<UiInput<GitStashPushRequest>>, mut commands: Commands) {
+fn stash_push_request(trigger: On<UiInput<GitStashPushRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     commands.spawn((
         GitJob::new(trigger.event().webview),
@@ -306,7 +303,7 @@ fn on_stash_push_request(trigger: On<UiInput<GitStashPushRequest>>, mut commands
     ));
 }
 
-fn on_pull_request(trigger: On<UiInput<GitPullRequest>>, mut commands: Commands) {
+fn pull_request(trigger: On<UiInput<GitPullRequest>>, mut commands: Commands) {
     commands.spawn((
         GitJob::new(trigger.event().webview),
         PullJob {
@@ -315,7 +312,7 @@ fn on_pull_request(trigger: On<UiInput<GitPullRequest>>, mut commands: Commands)
     ));
 }
 
-fn on_push_request(trigger: On<UiInput<GitPushRequest>>, mut commands: Commands) {
+fn push_request(trigger: On<UiInput<GitPushRequest>>, mut commands: Commands) {
     commands.spawn((
         GitJob::new(trigger.event().webview),
         PushJob {
@@ -324,7 +321,7 @@ fn on_push_request(trigger: On<UiInput<GitPushRequest>>, mut commands: Commands)
     ));
 }
 
-fn on_stage_all_request(trigger: On<UiInput<GitStageAllRequest>>, mut commands: Commands) {
+fn stage_all_request(trigger: On<UiInput<GitStageAllRequest>>, mut commands: Commands) {
     commands.spawn((
         GitJob::new(trigger.event().webview),
         StageAllJob {
@@ -333,7 +330,7 @@ fn on_stage_all_request(trigger: On<UiInput<GitStageAllRequest>>, mut commands: 
     ));
 }
 
-fn on_hunk_request(trigger: On<UiInput<GitHunkRequest>>, mut commands: Commands) {
+fn hunk_request(trigger: On<UiInput<GitHunkRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
     let path = RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);

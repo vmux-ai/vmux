@@ -34,15 +34,15 @@ impl Plugin for LayoutToolPlugin {
             .add_message::<LayoutApplyResponse>()
             .add_systems(
                 Update,
-                (open_page, read_layout, update_layout, select_tab).in_set(ToolDispatchSet),
+                (open_page, read, update, select_tab).in_set(ToolDispatchSet),
             )
             .add_systems(
                 Update,
-                route_layout_queries
+                route_queries
                     .in_set(ToolQueryRouteSet)
                     .after(ServiceMessageSet),
             )
-            .add_systems(Update, (forward_layout_apply_responses, forward_snapshots));
+            .add_systems(Update, (forward_apply_responses, forward_snapshots));
     }
 }
 
@@ -96,7 +96,7 @@ fn open_page(
     }
 }
 
-fn route_layout_queries(
+fn route_queries(
     mut queries: MessageReader<ToolQueryRequest>,
     mut snapshots: MessageWriter<LayoutSnapshotRequest>,
     mut handled: MessageWriter<ToolQueryHandled>,
@@ -123,7 +123,7 @@ fn route_layout_queries(
     }
 }
 
-fn forward_layout_apply_responses(
+fn forward_apply_responses(
     mut responses: MessageReader<LayoutApplyResponse>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -171,7 +171,7 @@ struct SelectTabArgs {
 #[serde(transparent)]
 struct UpdateLayoutArgs(layout::LayoutSnapshot);
 
-fn read_layout(
+fn read(
     mut commands: Commands,
     calls: Query<(Entity, Option<&ProcessAnchor>), AddedTool<ReadLayoutArgs>>,
 ) {
@@ -184,7 +184,7 @@ fn read_layout(
     }
 }
 
-fn update_layout(
+fn update(
     mut commands: Commands,
     requests: Query<(Entity, &UpdateLayoutArgs), AddedTool<UpdateLayoutArgs>>,
 ) {

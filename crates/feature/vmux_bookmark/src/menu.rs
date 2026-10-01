@@ -53,7 +53,7 @@ mod macos {
             app.add_plugins(vmux_layout::LayoutContractPlugin)
                 .add_message::<NewFolderInputRequest>()
                 .add_message::<RenameInputRequest>()
-                .add_systems(Startup, spawn_bookmark_menu_input_revision)
+                .add_systems(Startup, spawn_input_revision)
                 .add_systems(
                     Update,
                     (
@@ -71,10 +71,10 @@ mod macos {
                     )
                         .in_set(OsMenuSet::Dispatch),
                 )
-                .add_systems(Update, show_bookmark_menu)
+                .add_systems(Update, show)
                 .add_systems(
                     Update,
-                    begin_bookmark_menu_input.after(vmux_layout::bookmark::BookmarkRequestSet),
+                    begin_input.after(vmux_layout::bookmark::BookmarkRequestSet),
                 );
         }
     }
@@ -130,7 +130,7 @@ mod macos {
         uuid: String,
     }
 
-    fn show_bookmark_menu(
+    fn show(
         _non_send: NonSendMarker,
         mut reader: MessageReader<ShowBookmarkMenuRequest>,
         mut builder: BookmarkMenuBuilder,
@@ -539,11 +539,11 @@ mod macos {
         }
     }
 
-    fn spawn_bookmark_menu_input_revision(mut commands: Commands) {
+    fn spawn_input_revision(mut commands: Commands) {
         commands.spawn(BookmarkMenuInputRevision::default());
     }
 
-    fn begin_bookmark_menu_input(
+    fn begin_input(
         mut new_folders: MessageReader<NewFolderInputRequest>,
         mut renames: MessageReader<RenameInputRequest>,
         mut revision: Single<&mut BookmarkMenuInputRevision>,

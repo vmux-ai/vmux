@@ -13,14 +13,14 @@ impl Plugin for SpaceLayoutPlugin {
                 Update,
                 (
                     bevy::ecs::schedule::ApplyDeferred,
-                    sync_current_space.in_set(CurrentSpaceSet),
+                    sync_current.in_set(CurrentSpaceSet),
                 )
                     .chain()
                     .after(crate::active::ActiveSystemSet::Space),
             )
             .add_systems(
                 PostUpdate,
-                sync_space_container_visibility.before(LayoutSystems::Layout),
+                sync_container_visibility.before(LayoutSystems::Layout),
             );
     }
 }
@@ -135,7 +135,7 @@ impl FocusedSpace<'_, '_> {
     }
 }
 
-fn sync_current_space(
+fn sync_current(
     spaces: Query<(Entity, Has<Active>, Has<CurrentSpace>), With<Space>>,
     focused_window: crate::window::FocusedWindow,
     hierarchy: crate::window::WindowHierarchy,
@@ -227,7 +227,7 @@ pub fn space_view_bundle() -> impl Bundle {
     )
 }
 
-fn sync_space_container_visibility(
+fn sync_container_visibility(
     mut spaces: Query<(&mut Node, &mut Visibility, Has<Active>), With<Space>>,
 ) {
     for (mut node, mut vis, active) in &mut spaces {
@@ -253,7 +253,7 @@ mod tests {
     #[test]
     fn current_space_tracks_active_space() {
         let mut app = App::new();
-        app.add_systems(Update, sync_current_space);
+        app.add_systems(Update, sync_current);
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("default".to_string()), vmux_core::Active))
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn current_space_clears_when_no_space_is_active() {
         let mut app = App::new();
-        app.add_systems(Update, sync_current_space);
+        app.add_systems(Update, sync_current);
         let space = app.world_mut().spawn((Space, CurrentSpace)).id();
         app.update();
         assert!(app.world().get::<CurrentSpace>(space).is_none());
@@ -274,7 +274,7 @@ mod tests {
     #[test]
     fn current_space_retains_its_typed_id() {
         let mut app = App::new();
-        app.add_systems(Update, sync_current_space);
+        app.add_systems(Update, sync_current);
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("work".to_string()), vmux_core::Active))
@@ -318,7 +318,7 @@ mod tests {
     fn inactive_space_container_is_hidden_but_alive() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, sync_space_container_visibility);
+            .add_systems(Update, sync_container_visibility);
         let active = app
             .world_mut()
             .spawn((

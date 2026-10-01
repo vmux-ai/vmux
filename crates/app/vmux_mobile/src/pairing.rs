@@ -38,7 +38,7 @@ impl bevy_app::Plugin for Plugin {
                     pair,
                     fail,
                     disconnect,
-                    finish_pairing,
+                    finish,
                     refresh,
                     finish_refresh,
                     publish,
@@ -365,7 +365,7 @@ fn disconnect(
     }
 }
 
-fn finish_pairing(
+fn finish(
     mut attempts: Query<(bevy_ecs::entity::Entity, &mut ConnectionAttempt)>,
     mut states: Query<&mut ConnectionState>,
     mut commands: Commands,

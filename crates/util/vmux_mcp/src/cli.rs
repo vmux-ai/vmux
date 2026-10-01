@@ -25,11 +25,11 @@ impl Plugin for McpCliPlugin {
                 Update,
                 (write_stdio, finish_stdio).chain().in_set(McpSet::Output),
             )
-            .add_systems(Startup, spawn_mcp_runtime);
+            .add_systems(Startup, spawn_runtime);
     }
 }
 
-fn spawn_mcp_runtime(mut commands: Commands) {
+fn spawn_runtime(mut commands: Commands) {
     commands.spawn((
         Name::new("MCP async runtime"),
         McpRuntime(tokio::runtime::Handle::current()),

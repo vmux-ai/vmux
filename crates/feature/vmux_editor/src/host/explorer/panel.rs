@@ -20,19 +20,19 @@ pub(super) struct PanelPlugin;
 
 impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_explorer_panel_defaults)
+        app.add_systems(Startup, spawn_defaults)
             .register_persisted::<StackExplorerVisibility>()
-            .add_systems(Update, (load_explorer_panel_defaults, emit_explorer_panel))
-            .add_observer(toggle_explorer)
-            .add_observer(reveal_in_explorer)
+            .add_systems(Update, (load_defaults, emit))
+            .add_observer(toggle)
+            .add_observer(reveal_in)
             .add_observer(open_find_in_files)
-            .add_observer(on_set_visible)
-            .add_observer(on_view_set)
-            .add_observer(on_width);
+            .add_observer(set_visible)
+            .add_observer(view_set)
+            .add_observer(width);
     }
 }
 
-fn spawn_explorer_panel_defaults(mut commands: Commands) {
+fn spawn_defaults(mut commands: Commands) {
     commands.spawn((
         Name::new("Explorer panel defaults"),
         ExplorerPanelDefaults {
@@ -94,7 +94,7 @@ impl From<Entity> for ExplorerFindInFilesRequest {
 
 type PanelUnsentReady = (With<FileView>, Without<ExplorerPanelSent>, With<PageReady>);
 
-fn load_explorer_panel_defaults(
+fn load_defaults(
     settings: Option<Res<AppSettings>>,
     mut panel: Single<&mut ExplorerPanelDefaults>,
     views: Query<Entity, With<FileView>>,
@@ -114,7 +114,7 @@ fn load_explorer_panel_defaults(
     }
 }
 
-fn emit_explorer_panel(
+fn emit(
     views: Query<(Entity, Option<&ChildOf>), PanelUnsentReady>,
     visibility: Query<&StackExplorerVisibility>,
     revisions: Query<&StackExplorerRevision>,
@@ -239,7 +239,7 @@ impl ExplorerPanelMutation<'_, '_> {
     }
 }
 
-fn toggle_explorer(
+fn toggle(
     trigger: On<ExplorerToggleRequest>,
     panel: Single<&ExplorerPanelDefaults>,
     mut mutation: ExplorerPanelMutation,
@@ -259,7 +259,7 @@ fn toggle_explorer(
     mutation.mark_unsent();
 }
 
-fn reveal_in_explorer(trigger: On<ExplorerRevealRequest>, mut mutation: ExplorerPanelMutation) {
+fn reveal_in(trigger: On<ExplorerRevealRequest>, mut mutation: ExplorerPanelMutation) {
     let entity = trigger.event_target();
     let scope = mutation.scope(entity);
     let request_id = mutation.next_request_id(scope);
@@ -298,10 +298,7 @@ fn open_find_in_files(
     mutation.mark_unsent();
 }
 
-fn on_set_visible(
-    trigger: On<UiInput<ExplorerPanelSetVisible>>,
-    mut mutation: ExplorerPanelMutation,
-) {
+fn set_visible(trigger: On<UiInput<ExplorerPanelSetVisible>>, mut mutation: ExplorerPanelMutation) {
     let entity = trigger.event().webview;
     let scope = mutation.scope(entity);
     let next_visibility = StackExplorerVisibility {
@@ -321,14 +318,14 @@ fn on_set_visible(
     }
 }
 
-fn on_view_set(trigger: On<UiInput<ExplorerPanelViewSet>>, mut mutation: ExplorerPanelMutation) {
+fn view_set(trigger: On<UiInput<ExplorerPanelViewSet>>, mut mutation: ExplorerPanelMutation) {
     let entity = trigger.event().webview;
     let scope = mutation.scope(entity);
     mutation.set_view(scope, trigger.event().payload.search);
     mutation.mark_unsent();
 }
 
-fn on_width(
+fn width(
     trigger: On<UiInput<ExplorerPanelWidth>>,
     mut panel: Single<&mut ExplorerPanelDefaults>,
     settings: Option<ResMut<AppSettings>>,

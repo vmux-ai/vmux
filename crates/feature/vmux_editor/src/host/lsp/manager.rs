@@ -852,7 +852,7 @@ fn server_overrides(settings: &AppSettings) -> ServerOverrides {
         .collect()
 }
 
-fn finish_lsp_server_starts(
+fn finish_server_starts(
     mut starts: Query<(Entity, &mut LspServerStartTask)>,
     mut manager: Single<&mut LspManager>,
     mut commands: Commands,
@@ -884,7 +884,7 @@ fn finish_lsp_server_starts(
     }
 }
 
-fn change_lsp_documents(
+fn change_documents(
     mut requests: MessageReader<LspDocumentChangeRequest>,
     mut manager: Single<&mut LspManager>,
 ) {
@@ -913,7 +913,7 @@ fn change_lsp_documents(
     }
 }
 
-fn close_lsp_documents(
+fn close_documents(
     mut requests: MessageReader<LspDocumentCloseRequest>,
     mut manager: Single<&mut LspManager>,
 ) {
@@ -1032,7 +1032,7 @@ struct LspResponseWriters<'w> {
     edit: MessageWriter<'w, LspRequestedEdit>,
 }
 
-fn drain_lsp_requests(
+fn drain_requests(
     manager: Single<&LspManager>,
     requests: Query<(Entity, &LspRequestOperation)>,
     browsers: NonSend<Browsers>,
@@ -1263,19 +1263,19 @@ pub fn build(
     .add_message::<LspCodeActionRequest>()
     .add_message::<LspDocumentChangeRequest>()
     .add_message::<LspDocumentCloseRequest>()
-    .add_observer(on_file_code_action_pick)
+    .add_observer(file_code_action_pick)
     .add_systems(
         Update,
         (
-            finish_lsp_server_starts,
-            close_lsp_documents,
-            change_lsp_documents,
+            finish_server_starts,
+            close_documents,
+            change_documents,
             open_documents,
             lint_on_open,
-            drain_lsp_diagnostics,
+            drain_diagnostics,
             drain_lint,
             request_code_actions,
-            drain_lsp_requests,
+            drain_requests,
             apply_semantic_tokens,
             emit_diagnostics,
             publish_status,
@@ -1284,7 +1284,7 @@ pub fn build(
     );
 }
 
-fn on_file_code_action_pick(
+fn file_code_action_pick(
     trigger: On<UiInput<FileCodeActionPick>>,
     views: Query<(&Editor, &OfferedCodeActions)>,
     manager: Single<&LspManager>,
@@ -1380,7 +1380,7 @@ fn emit_diagnostics(
     }
 }
 
-fn drain_lsp_diagnostics(
+fn drain_diagnostics(
     inbox: Single<&LspDiagnosticsInbox>,
     views: Query<(Entity, &FileView, &Editor)>,
     mut commands: Commands,
@@ -1700,7 +1700,7 @@ mod tests {
         let mut app = App::new();
         let (outbox, inbox) = LspDiagnosticsSender::channel();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, drain_lsp_diagnostics);
+            .add_systems(Update, drain_diagnostics);
         app.world_mut().spawn(inbox);
 
         let core = EditCore::new(

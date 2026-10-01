@@ -37,9 +37,9 @@ impl Plugin for AcpToolPlugin {
         app.add_message::<ServiceRequest>()
             .add_message::<AcpPackageChanged>()
             .add_message::<vmux_core::agent::SwapStackSession>()
-            .add_observer(cancel_acp_install_on_remove)
+            .add_observer(cancel_install_on_remove)
             .add_systems(Startup, spawn_tool_provider)
-            .add_systems(Update, (start_acp_installs, poll_acp_installs).chain());
+            .add_systems(Update, (start_installs, poll_installs).chain());
     }
 }
 
@@ -230,7 +230,7 @@ struct AcpInstallProgressSink {
     wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
 }
 
-fn start_acp_installs(
+fn start_installs(
     mut commands: Commands,
     sessions: Query<(Entity, &AcpSession), Without<AcpLaunchStarted>>,
     jobs: Query<(Entity, &AcpInstallKey)>,
@@ -300,7 +300,7 @@ fn start_acp_installs(
     }
 }
 
-fn poll_acp_installs(
+fn poll_installs(
     mut swaps: MessageReader<vmux_core::agent::SwapStackSession>,
     connected: Option<Single<(), With<ServiceConnected>>>,
     settings: Option<Res<AppSettings>>,
@@ -411,7 +411,7 @@ fn poll_acp_installs(
     }
 }
 
-fn cancel_acp_install_on_remove(trigger: On<Remove, AcpSession>, mut commands: Commands) {
+fn cancel_install_on_remove(trigger: On<Remove, AcpSession>, mut commands: Commands) {
     if let Ok(mut entity) = commands.get_entity(trigger.event_target()) {
         entity.remove::<(AcpInstallWaiter, AcpLaunchStarted)>();
     }

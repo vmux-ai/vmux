@@ -21,12 +21,12 @@ pub(crate) struct SearchPlugin;
 impl Plugin for SearchPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(ExplorerSearchRequest,)>::default())
-            .add_observer(start_project_search)
-            .add_systems(Update, finish_project_search);
+            .add_observer(start_project)
+            .add_systems(Update, finish_project);
     }
 }
 
-fn start_project_search(
+fn start_project(
     trigger: On<UiInput<ExplorerSearchRequest>>,
     views: Query<&FileView>,
     mut commands: Commands,
@@ -43,7 +43,7 @@ fn start_project_search(
     commands.entity(entity).insert(RunningSearch(task));
 }
 
-fn finish_project_search(
+fn finish_project(
     mut running: Query<(Entity, &FileView, &mut RunningSearch)>,
     mut writer: MessageWriter<GlobalSearchRequest>,
     mut commands: Commands,

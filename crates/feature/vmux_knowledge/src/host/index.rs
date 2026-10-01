@@ -14,20 +14,12 @@ pub(super) struct KnowledgeIndexPlugin;
 impl Plugin for KnowledgeIndexPlugin {
     fn build(&self, app: &mut App) {
         app.insert_non_send(KnowledgeWatch::default())
-            .add_systems(Startup, initialize_knowledge_index)
-            .add_systems(
-                Update,
-                (
-                    drain_knowledge_watch,
-                    start_knowledge_index,
-                    finish_knowledge_index,
-                )
-                    .chain(),
-            );
+            .add_systems(Startup, initialize)
+            .add_systems(Update, (drain_watch, start, finish).chain());
     }
 }
 
-fn initialize_knowledge_index(
+fn initialize(
     mut commands: Commands,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut watch: NonSendMut<KnowledgeWatch>,
@@ -104,10 +96,7 @@ impl KnowledgeWatcher {
     }
 }
 
-fn drain_knowledge_watch(
-    watch: NonSend<KnowledgeWatch>,
-    mut runtime: Single<&mut KnowledgeIndexRuntime>,
-) {
+fn drain_watch(watch: NonSend<KnowledgeWatch>, mut runtime: Single<&mut KnowledgeIndexRuntime>) {
     let Some(watch) = watch.0.as_ref() else {
         return;
     };
@@ -120,7 +109,7 @@ fn drain_knowledge_watch(
     }
 }
 
-fn start_knowledge_index(
+fn start(
     mut runtime: Single<&mut KnowledgeIndexRuntime>,
     vault: Single<&KnowledgeVault>,
     pending: Query<(), With<KnowledgeIndexTask>>,
@@ -150,7 +139,7 @@ struct KnowledgeIndexTask {
     task: Task<Result<KnowledgeIndex, String>>,
 }
 
-fn finish_knowledge_index(
+fn finish(
     mut tasks: Query<(Entity, &mut KnowledgeIndexTask)>,
     mut runtime: Single<&mut KnowledgeIndexRuntime>,
     mut index: Single<&mut KnowledgeIndex>,

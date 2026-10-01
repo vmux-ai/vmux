@@ -32,13 +32,13 @@ pub(crate) struct FrameRatePlugin;
 impl Plugin for FrameRatePlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(request_layout_frame_burst)
-            .add_systems(Update, cap_uncapped_webview_frame_rate)
+            .add_systems(Update, cap_uncapped_webview)
             .add_systems(
                 Last,
                 (
                     refresh_layout_cef_hover,
                     refresh_active_windowed_hover,
-                    sync_layout_cef_frame_rate,
+                    sync_layout_cef,
                     keep_asset_replies_moving,
                 )
                     .chain(),
@@ -223,7 +223,7 @@ const LAYOUT_IDLE_FRAME_RATE: i32 = 10;
 const LAYOUT_ACTIVE_FRAME_RATE: i32 = 60;
 const PAGE_MAX_FRAME_RATE: i32 = 60;
 
-fn cap_uncapped_webview_frame_rate(
+fn cap_uncapped_webview(
     uncapped: Query<Entity, (With<WebviewSource>, Without<WebviewMaxFrameRate>)>,
     layouts: Query<Entity, (With<LayoutCef>, Without<LayoutFrameRateState>)>,
     mut commands: Commands,
@@ -289,7 +289,7 @@ fn layout_frame_rate(
     }
 }
 
-fn sync_layout_cef_frame_rate(
+fn sync_layout_cef(
     mut cursor_events: MessageReader<CursorMoved>,
     mut button_events: MessageReader<MouseButtonInput>,
     mut wheel_events: MessageReader<MouseWheel>,

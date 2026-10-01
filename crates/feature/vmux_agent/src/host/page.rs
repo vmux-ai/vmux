@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use vmux_api::protocol::AgentAttachment;
 use vmux_chat::host::{ChatView, ImportedConversation};
 use vmux_core::agent::SwapStackSession;
@@ -13,7 +12,7 @@ use vmux_core::{
 };
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
-use vmux_layout::worktree::{ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady};
+use vmux_layout::worktree::{PageOpenWaitForWorktree, TabWorktreePending, TabWorktreeReady};
 use vmux_session::{AcpSession, AgentConversationTitle, PromptQueue};
 use vmux_setting::AppSettings;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
@@ -26,23 +25,16 @@ use vmux_terminal::agent_run::AgentCwd;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
-pub(super) struct PageOpenPlugin;
+pub struct PagePlugin;
 
-impl Plugin for PageOpenPlugin {
+impl Plugin for PagePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, handle_swap_stack_session)
-            .add_systems(
-                Update,
-                (
-                    release_agent_transition_paint,
-                    prepare_agent_tab_worktrees,
-                    start_agent_tab_worktrees,
-                    drain_agent_tab_worktrees,
-                    handle_agent_page_open,
-                )
-                    .chain()
-                    .in_set(PageOpenSet::HandleKnownPages),
-            );
+        app.add_systems(Update, swap).add_systems(
+            Update,
+            (release_transition, prepare, open)
+                .chain()
+                .in_set(PageOpenSet::HandleKnownPages),
+        );
     }
 }
 
@@ -65,24 +57,6 @@ impl AgentPageOpenWorkspace<'_, '_> {
             .or_else(|| self.active_space.id().map(str::to_string))?;
         vmux_setting::StartupDir::resolve(settings, &space_id, None)
     }
-}
-
-#[derive(Component)]
-struct PendingAgentWorktree {
-    tab: Entity,
-    tab_name: String,
-    startup_dir: Option<String>,
-    workspace: TabWorkspace,
-    metadata: TabWorktree,
-    managed_root: PathBuf,
-}
-
-#[derive(Component)]
-struct AgentWorktreeTask(Task<Result<TabWorktreeActivation, String>>);
-
-#[derive(Component, Clone, Copy)]
-struct AwaitingAgentWorktree {
-    pending: Entity,
 }
 
 #[derive(Component)]
@@ -156,9 +130,9 @@ fn ancestor_agent_tab(
     }
 }
 
-fn prepare_agent_tab_worktrees(
+fn prepare(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    pending: Query<(Entity, &PendingAgentWorktree)>,
+    pending: Query<(), With<TabWorktreePending>>,
     transitions: Query<&StartInlineTransition>,
     preparing_views: Query<(Entity, &ChildOf), With<PreparingAgentChatView>>,
     child_of: Query<&ChildOf>,
@@ -173,16 +147,10 @@ fn prepare_agent_tab_worktrees(
     )>,
     settings: Option<Res<AppSettings>>,
     active_space: FocusedSpace,
-    managed_root: Option<Res<ManagedWorktreeRoot>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let managed_root = managed_root.as_deref().cloned().unwrap_or_default().0;
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let mut pending_by_tab: std::collections::HashMap<Entity, Entity> = pending
-        .iter()
-        .map(|(entity, pending)| (pending.tab, entity))
-        .collect();
     let mut preparing_by_stack: std::collections::HashMap<Entity, Entity> = preparing_views
         .iter()
         .map(|(entity, child_of)| (child_of.parent(), entity))
@@ -232,10 +200,11 @@ fn prepare_agent_tab_worktrees(
                 .insert((PageOpenDeferred, AwaitingAgentTransitionPaint));
             continue;
         }
-        if let Some(pending) = pending_by_tab.get(&tab_entity).copied() {
-            commands
-                .entity(task_entity)
-                .insert((PageOpenDeferred, AwaitingAgentWorktree { pending }));
+        if pending.contains(tab_entity) {
+            commands.entity(task_entity).insert((
+                PageOpenDeferred,
+                PageOpenWaitForWorktree { tab: tab_entity },
+            ));
             continue;
         }
         let configured_project_dir = settings.as_deref().and_then(|settings| {
@@ -285,22 +254,24 @@ fn prepare_agent_tab_worktrees(
         if !has_workspace {
             commands.entity(tab_entity).insert(workspace.clone());
         }
-        let pending_worktree = if let Some(metadata) = metadata {
+        if let Some(metadata) = metadata {
             commands
                 .entity(tab_entity)
                 .remove::<vmux_space::RepositoryNeedsWorktree>();
             if ready.is_some_and(|ready| ready.is_current(&tab, &workspace, metadata)) {
-                None
-            } else {
-                Some(PendingAgentWorktree {
-                    tab: tab_entity,
-                    tab_name: tab.name.clone(),
-                    startup_dir: tab.startup_dir.clone(),
-                    workspace: workspace.clone(),
-                    metadata: metadata.clone(),
-                    managed_root: managed_root.clone(),
-                })
+                commands
+                    .entity(tab_entity)
+                    .remove::<TabWorktreeUnavailable>();
+                continue;
             }
+            commands
+                .entity(tab_entity)
+                .remove::<(TabWorktreeReady, TabWorktreeUnavailable)>()
+                .insert(TabWorktreePending);
+            commands.entity(task_entity).insert((
+                PageOpenDeferred,
+                PageOpenWaitForWorktree { tab: tab_entity },
+            ));
         } else {
             let current_dir = tab
                 .startup_dir
@@ -319,53 +290,11 @@ fn prepare_agent_tab_worktrees(
             } else {
                 entity.remove::<vmux_space::RepositoryNeedsWorktree>();
             }
-            None
-        };
-        let Some(pending_worktree) = pending_worktree else {
-            commands
-                .entity(tab_entity)
-                .remove::<TabWorktreeUnavailable>();
-            continue;
-        };
-        let pending = commands.spawn(pending_worktree).id();
-        pending_by_tab.insert(tab_entity, pending);
-        commands
-            .entity(task_entity)
-            .insert((PageOpenDeferred, AwaitingAgentWorktree { pending }));
+        }
     }
 }
 
-fn start_agent_tab_worktrees(
-    pending: Query<(Entity, &PendingAgentWorktree), Without<AgentWorktreeTask>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    for (entity, pending) in &pending {
-        let tab = Tab {
-            name: pending.tab_name.clone(),
-            startup_dir: pending.startup_dir.clone(),
-        };
-        let workspace = pending.workspace.clone();
-        let metadata = pending.metadata.clone();
-        let managed_root = pending.managed_root.clone();
-        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result = vmux_layout::worktree::ensure_tab_worktree_available(
-                &tab,
-                &workspace,
-                &metadata,
-                &managed_root,
-            );
-            if let Some(wake) = wake {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        commands.entity(entity).insert(AgentWorktreeTask(task));
-    }
-}
-
-fn release_agent_transition_paint(
+fn release_transition(
     waiting: Query<Entity, With<AwaitingAgentTransitionPaint>>,
     mut commands: Commands,
 ) {
@@ -376,70 +305,7 @@ fn release_agent_transition_paint(
     }
 }
 
-fn drain_agent_tab_worktrees(
-    mut pending: Query<(Entity, &PendingAgentWorktree, &mut AgentWorktreeTask)>,
-    mut tabs: Query<(&mut Tab, Option<&TabWorkspace>, Option<&TabWorktree>)>,
-    waiting: Query<(Entity, &AwaitingAgentWorktree, &PageOpenTask)>,
-    mut commands: Commands,
-) {
-    for (pending_entity, pending, mut task) in &mut pending {
-        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
-            continue;
-        };
-        let outcome = match tabs.get_mut(pending.tab) {
-            Err(_) => Some(Err("agent tab no longer exists".to_string())),
-            Ok((tab, workspace, metadata))
-                if tab.startup_dir != pending.startup_dir
-                    || workspace != Some(&pending.workspace)
-                    || metadata != Some(&pending.metadata) =>
-            {
-                None
-            }
-            Ok((mut tab, _, metadata)) => match result {
-                Ok(activation) => {
-                    tab.startup_dir = Some(activation.execution_dir.to_string_lossy().into_owned());
-                    let mut entity = commands.entity(pending.tab);
-                    if metadata != Some(&activation.metadata) {
-                        entity.insert(activation.metadata);
-                    }
-                    entity
-                        .insert(activation.ready)
-                        .remove::<TabWorktreeUnavailable>();
-                    Some(Ok(()))
-                }
-                Err(message) => {
-                    commands
-                        .entity(pending.tab)
-                        .insert(TabWorktreeUnavailable {
-                            message: message.clone(),
-                        })
-                        .remove::<TabWorktreeReady>();
-                    Some(Err(message))
-                }
-            },
-        };
-        let mut resumed = std::collections::HashSet::new();
-        for (task_entity, waiting, task) in &waiting {
-            if waiting.pending != pending_entity {
-                continue;
-            }
-            let duplicate = !resumed.insert((task.stack, task.url.clone()));
-            let mut entity = commands.entity(task_entity);
-            entity.remove::<(AwaitingAgentWorktree, PageOpenDeferred)>();
-            if let Some(Err(message)) = outcome.as_ref() {
-                entity.insert(PageOpenError {
-                    message: message.clone(),
-                });
-            }
-            if duplicate {
-                entity.insert(PageOpenHandled);
-            }
-        }
-        commands.entity(pending_entity).despawn();
-    }
-}
-
-fn handle_agent_page_open(
+fn open(
     mut open_q: ParamSet<(
         Query<(Entity, &PageOpenTask, Has<PageRestore>), PendingPageOpen>,
         Query<(&PendingPrompt, Option<&PendingPromptAttachments>)>,
@@ -537,7 +403,7 @@ fn handle_agent_page_open(
     }
 }
 
-fn handle_swap_stack_session(
+fn swap(
     mut reader: MessageReader<SwapStackSession>,
     settings: Res<AppSettings>,
     catalog: Option<Single<&crate::runtime::AcpCatalog>>,

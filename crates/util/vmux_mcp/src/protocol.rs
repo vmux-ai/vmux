@@ -54,7 +54,7 @@ impl Plugin for McpPlugin {
                         start_tool_commands,
                         start_tool_queries,
                         bevy_ecs::schedule::ApplyDeferred,
-                        start_mcp_tasks,
+                        start_tasks,
                         bevy_ecs::schedule::ApplyDeferred,
                         poll_tool_tasks,
                     )
@@ -351,7 +351,7 @@ fn start_tool_queries(
     }
 }
 
-fn start_mcp_tasks(
+fn start_tasks(
     runtimes: Query<&McpRuntime>,
     mut pending: Query<(Entity, &mut McpExecution), Added<McpExecution>>,
     mut commands: Commands,

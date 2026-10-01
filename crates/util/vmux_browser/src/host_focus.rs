@@ -23,11 +23,11 @@ pub(crate) struct HostFocusPlugin;
 
 impl Plugin for HostFocusPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_host_focus)
+        app.add_systems(Startup, spawn)
             .add_systems(Update, sync_keyboard_context.in_set(KeyboardContextSet))
             .add_systems(
                 PostUpdate,
-                (compute_host_focus_intent, apply_windowed_host_focus)
+                (compute_intent, apply_windowed)
                     .chain()
                     .in_set(crate::BrowserSystemSet::HostFocusApplied)
                     .after(crate::BrowserSystemSet::SyncWindowedFrames)
@@ -38,7 +38,7 @@ impl Plugin for HostFocusPlugin {
     }
 }
 
-fn spawn_host_focus(mut commands: Commands) {
+fn spawn(mut commands: Commands) {
     commands.spawn((
         Name::new("Host focus"),
         HostFocusIntent::default(),
@@ -79,7 +79,7 @@ fn host_focus_intent(active_webview: Option<Entity>, is_native: bool) -> HostFoc
     }
 }
 
-fn compute_host_focus_intent(
+fn compute_intent(
     focus: FocusedStack,
     child_of_q: Query<&ChildOf>,
     content_q: Query<Entity, (With<Browser>, Without<Header>, Without<SideSheet>)>,
@@ -169,7 +169,7 @@ fn windowed_focus_target(
     }
 }
 
-fn apply_windowed_host_focus(
+fn apply_windowed(
     intent: Single<&HostFocusIntent>,
     browsers: NonSend<Browsers>,
     mut focused: Local<Option<Entity>>,
@@ -207,7 +207,7 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, (sync_keyboard_context, compute_host_focus_intent));
+            .add_systems(Update, (sync_keyboard_context, compute_intent));
         app.world_mut()
             .spawn((HostFocusIntent::default(), KeyboardContext::default()));
         app.world_mut().spawn(ActiveStack::default().local_bundle());

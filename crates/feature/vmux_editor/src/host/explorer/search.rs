@@ -14,17 +14,9 @@ pub(super) struct SearchPlugin;
 impl Plugin for SearchPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(ExplorerGoto, ExplorerSearchOpen)>::default())
-            .add_systems(
-                Update,
-                (
-                    queue_global_search_requests,
-                    apply_pending_global_search,
-                    emit_global_search,
-                )
-                    .chain(),
-            )
-            .add_observer(on_goto)
-            .add_observer(on_open);
+            .add_systems(Update, (queue, apply, emit).chain())
+            .add_observer(goto)
+            .add_observer(open);
     }
 }
 
@@ -70,7 +62,7 @@ type GlobalSearchDirtyReady = (
     With<GlobalSearchDirty>,
     With<vmux_core::page::PageReady>,
 );
-fn on_goto(
+fn goto(
     trigger: On<UiInput<ExplorerGoto>>,
     views: Query<&FileView>,
     mut writer: MessageWriter<crate::lsp::manager::LspGoto>,
@@ -87,16 +79,13 @@ fn on_goto(
     });
 }
 
-fn queue_global_search_requests(
-    mut reader: MessageReader<GlobalSearchRequest>,
-    mut commands: Commands,
-) {
+fn queue(mut reader: MessageReader<GlobalSearchRequest>, mut commands: Commands) {
     for request in reader.read() {
         commands.spawn(PendingGlobalSearch::new(request.clone()));
     }
 }
 
-fn apply_pending_global_search(
+fn apply(
     mut pending: Query<(Entity, &mut PendingGlobalSearch)>,
     views: Query<(Entity, &FileView, Option<&ChildOf>)>,
     visibility: Query<&StackExplorerVisibility>,
@@ -144,7 +133,7 @@ fn apply_pending_global_search(
     }
 }
 
-fn emit_global_search(
+fn emit(
     query: Query<(Entity, &GlobalSearchState), GlobalSearchDirtyReady>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -160,7 +149,7 @@ fn emit_global_search(
     }
 }
 
-fn on_open(trigger: On<UiInput<ExplorerSearchOpen>>, mut commands: Commands) {
+fn open(trigger: On<UiInput<ExplorerSearchOpen>>, mut commands: Commands) {
     let entity = trigger.event().webview;
     let request = &trigger.event().payload;
     commands.trigger(FileNavigateRequest::new(

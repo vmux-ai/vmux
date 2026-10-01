@@ -31,11 +31,11 @@ impl Plugin for VmuxCliPlugin {
             vmux_terminal::TerminalToolPlugin,
             vmux_simulator::SimulatorToolPlugin,
         ))
-        .add_systems(Update, open_app);
+        .add_systems(Update, launch);
     }
 }
 
-fn open_app(
+fn launch(
     invocations: Query<(Entity, &CliInvocation), Added<CliInvocation>>,
     mut commands: Commands,
 ) {

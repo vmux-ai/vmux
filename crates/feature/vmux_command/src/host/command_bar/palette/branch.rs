@@ -12,11 +12,11 @@ pub(super) struct PaletteBranchPlugin;
 
 impl Plugin for PaletteBranchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(receive_palette_branches)
-            .add_systems(PreUpdate, attach_palette_branch)
+        app.add_observer(receive_branches)
+            .add_systems(PreUpdate, attach)
             .add_systems(
                 PostUpdate,
-                (update_palette_branch, request_palette_branches)
+                (update, request_branches)
                     .chain()
                     .in_set(PaletteProjectionSet::Context),
             );
@@ -31,7 +31,7 @@ pub(super) struct PaletteBranch {
     inflight: Option<BranchFlight>,
 }
 
-fn attach_palette_branch(
+fn attach(
     pages: Query<
         Entity,
         (
@@ -46,7 +46,7 @@ fn attach_palette_branch(
     }
 }
 
-fn update_palette_branch(
+fn update(
     mut palettes: Query<
         (
             Entity,
@@ -77,7 +77,7 @@ fn update_palette_branch(
     }
 }
 
-fn receive_palette_branches(
+fn receive_branches(
     trigger: On<UiStateWrite<CommandBarUiState>>,
     mut palettes: Query<(&mut PaletteBranch, &mut PaletteSnapshot)>,
 ) {
@@ -104,10 +104,7 @@ fn receive_palette_branches(
     }
 }
 
-fn request_palette_branches(
-    mut palettes: Query<(Entity, &mut PaletteBranch)>,
-    mut commands: Commands,
-) {
+fn request_branches(mut palettes: Query<(Entity, &mut PaletteBranch)>, mut commands: Commands) {
     for (target, mut branch) in &mut palettes {
         if branch.inflight.is_some()
             || branch.desired.trim().is_empty()

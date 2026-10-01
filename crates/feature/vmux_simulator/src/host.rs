@@ -112,13 +112,13 @@ impl Plugin for SimulatorPlugin {
             (
                 start_device_attachments,
                 finish_device_attachments,
-                announce_simulator,
+                announce,
             )
                 .chain(),
         )
         .add_systems(
             Update,
-            (sync_active_simulator_view, ApplyDeferred)
+            (sync_active_view, ApplyDeferred)
                 .chain()
                 .in_set(SimulatorFocusSet)
                 .after(ComputeFocusSet),
@@ -416,7 +416,7 @@ struct AttachedDevice {
     server: StreamServer,
 }
 
-fn sync_active_simulator_view(
+fn sync_active_view(
     focus: FocusedStack,
     children: Query<&Children>,
     pages: Query<&PageMetadata, With<PageReady>>,
@@ -577,7 +577,7 @@ fn finish_device_attachments(
     }
 }
 
-fn announce_simulator(
+fn announce(
     views: SimulatorViews,
     attachments: Query<(&StreamServer, &SimulatorDevice)>,
     mut commands: Commands,

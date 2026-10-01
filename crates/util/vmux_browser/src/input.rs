@@ -33,12 +33,12 @@ impl Plugin for InputPlugin {
                 .chain()
                 .after(InputSystems),
         )
-        .add_systems(PreUpdate, log_command_bar_keyboard_input)
-        .add_systems(Update, track_browser_interaction);
+        .add_systems(PreUpdate, log_command_bar_keyboard)
+        .add_systems(Update, track_interaction);
     }
 }
 
-fn log_command_bar_keyboard_input(
+fn log_command_bar_keyboard(
     mut events: MessageReader<KeyboardInput>,
     overlay_q: OverlayStateQuery,
 ) {
@@ -210,7 +210,7 @@ impl RecentBrowserInteraction {
     }
 }
 
-fn track_browser_interaction(
+fn track_interaction(
     mut mouse_buttons: MessageReader<MouseButtonInput>,
     mut mouse_wheels: MessageReader<MouseWheel>,
     mut keyboard: MessageReader<KeyboardInput>,

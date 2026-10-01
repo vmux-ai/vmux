@@ -50,15 +50,15 @@ impl Plugin for AgentIngressPlugin {
             .add_systems(
                 Update,
                 (
-                    subscribe_agent_commands,
-                    (route_agent_requests, route_approval_requests).in_set(ServiceMessageSet),
+                    subscribe_commands,
+                    (route_requests, route_approval_requests).in_set(ServiceMessageSet),
                 ),
             )
-            .add_systems(Last, forward_agent_command_responses);
+            .add_systems(Last, forward_command_responses);
     }
 }
 
-fn subscribe_agent_commands(
+fn subscribe_commands(
     connected: Query<(), Added<ServiceConnected>>,
     mut requests: MessageWriter<ServiceRequest>,
 ) {
@@ -68,7 +68,7 @@ fn subscribe_agent_commands(
     requests.write(ServiceRequest(ClientMessage::SubscribeAgentCommands));
 }
 
-fn forward_agent_command_responses(
+fn forward_command_responses(
     mut responses: MessageReader<AgentCommandResponse>,
     mut requests: MessageWriter<ServiceRequest>,
 ) {
@@ -80,7 +80,7 @@ fn forward_agent_command_responses(
     }
 }
 
-fn route_agent_requests(
+fn route_requests(
     mut inbound: MessageReader<InboundAgentRequest>,
     mut requests: MessageWriter<AgentRequestInput>,
 ) {

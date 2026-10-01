@@ -6,11 +6,9 @@ pub struct PidPlugin;
 
 impl Plugin for PidPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_pid_index).add_systems(
+        app.add_systems(Startup, spawn_index).add_systems(
             Update,
-            (track_pid_inserts, track_pid_removals)
-                .chain()
-                .in_set(PidIndexSet),
+            (track_inserts, track_removals).chain().in_set(PidIndexSet),
         );
     }
 }
@@ -54,14 +52,11 @@ impl FromIterator<(u32, Entity)> for PidToEntity {
     }
 }
 
-fn spawn_pid_index(mut commands: Commands) {
+fn spawn_index(mut commands: Commands) {
     commands.spawn((Name::new("Terminal PID index"), PidToEntity::default()));
 }
 
-fn track_pid_inserts(
-    mut map: Single<&mut PidToEntity>,
-    inserted: Query<(Entity, &Pid), Changed<Pid>>,
-) {
+fn track_inserts(mut map: Single<&mut PidToEntity>, inserted: Query<(Entity, &Pid), Changed<Pid>>) {
     for (entity, Pid(pid)) in &inserted {
         if let Some(previous_pid) = map.by_entity.insert(entity, *pid) {
             map.by_pid.remove(&previous_pid);
@@ -74,7 +69,7 @@ fn track_pid_inserts(
     }
 }
 
-fn track_pid_removals(
+fn track_removals(
     mut map: Single<&mut PidToEntity>,
     mut removed: RemovedComponents<Pid>,
     survivors: Query<&Pid>,

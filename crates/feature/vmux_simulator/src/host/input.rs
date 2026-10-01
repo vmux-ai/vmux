@@ -62,16 +62,16 @@ impl Plugin for SimulatorInputPlugin {
                 SimulatorClipboardPasteRequest,
                 SimulatorClipboardSelectAllRequest,
             )>::default())
-            .add_observer(on_touch)
-            .add_observer(on_text)
-            .add_observer(on_key)
-            .add_observer(on_modified_key)
-            .add_observer(on_hardware_button)
-            .add_observer(on_clipboard_copy)
-            .add_observer(on_clipboard_cut)
-            .add_observer(on_clipboard_paste)
-            .add_observer(on_clipboard_select_all)
-            .add_observer(on_software_keyboard);
+            .add_observer(touch)
+            .add_observer(text)
+            .add_observer(key)
+            .add_observer(modified_key)
+            .add_observer(hardware_button)
+            .add_observer(clipboard_copy)
+            .add_observer(clipboard_cut)
+            .add_observer(clipboard_paste)
+            .add_observer(clipboard_select_all)
+            .add_observer(software_keyboard);
     }
 }
 
@@ -89,7 +89,7 @@ impl Plugin for SimulatorNativeKeyPlugin {
             )
             .add_systems(
                 Update,
-                handle_native_key_input
+                handle_native_key
                     .after(NativeKeyInputSet)
                     .before(SimulatorInputSet),
             );
@@ -232,7 +232,7 @@ fn sync_native_key_bindings(
     }
 }
 
-fn handle_native_key_input(
+fn handle_native_key(
     mut inputs: MessageReader<NativeKeyInput>,
     bindings: SimulatorNativeKeyBindings,
     mut buttons: MessageWriter<HardwareButtonRequest>,
@@ -578,7 +578,7 @@ impl DeviceCoordinates {
     }
 }
 
-fn on_touch(
+fn touch(
     trigger: On<UiInput<SimulatorTouch>>,
     mut attachments: Query<(&DevicePoints, &HidBroker, &mut DeviceTouchSession)>,
 ) {
@@ -655,7 +655,7 @@ fn normalized_point(touch: &SimulatorTouch, points: (f32, f32)) -> Option<(f32, 
     ))
 }
 
-fn on_text(
+fn text(
     trigger: On<UiInput<SimulatorInputTextRequest>>,
     mut requests: MessageWriter<SimulatorInputRequest>,
 ) {
@@ -665,7 +665,7 @@ fn on_text(
     });
 }
 
-fn on_key(
+fn key(
     trigger: On<UiInput<SimulatorInputKeyRequest>>,
     mut requests: MessageWriter<SimulatorInputRequest>,
 ) {
@@ -675,7 +675,7 @@ fn on_key(
     });
 }
 
-fn on_modified_key(
+fn modified_key(
     trigger: On<UiInput<SimulatorInputModifiedKeyRequest>>,
     mut requests: MessageWriter<SimulatorInputRequest>,
 ) {
@@ -688,7 +688,7 @@ fn on_modified_key(
     });
 }
 
-fn on_hardware_button(
+fn hardware_button(
     trigger: On<UiInput<SimulatorInputHardwareButtonRequest>>,
     mut requests: MessageWriter<SimulatorInputRequest>,
 ) {
@@ -698,7 +698,7 @@ fn on_hardware_button(
     });
 }
 
-fn on_clipboard_copy(
+fn clipboard_copy(
     trigger: On<UiInput<SimulatorClipboardCopyRequest>>,
     mut requests: MessageWriter<SimulatorClipboardInputRequest>,
 ) {
@@ -708,7 +708,7 @@ fn on_clipboard_copy(
     });
 }
 
-fn on_clipboard_cut(
+fn clipboard_cut(
     trigger: On<UiInput<SimulatorClipboardCutRequest>>,
     mut requests: MessageWriter<SimulatorClipboardInputRequest>,
 ) {
@@ -718,7 +718,7 @@ fn on_clipboard_cut(
     });
 }
 
-fn on_clipboard_paste(
+fn clipboard_paste(
     trigger: On<UiInput<SimulatorClipboardPasteRequest>>,
     mut requests: MessageWriter<SimulatorClipboardInputRequest>,
 ) {
@@ -728,7 +728,7 @@ fn on_clipboard_paste(
     });
 }
 
-fn on_clipboard_select_all(
+fn clipboard_select_all(
     trigger: On<UiInput<SimulatorClipboardSelectAllRequest>>,
     mut requests: MessageWriter<SimulatorClipboardInputRequest>,
 ) {
@@ -738,7 +738,7 @@ fn on_clipboard_select_all(
     });
 }
 
-fn on_software_keyboard(
+fn software_keyboard(
     trigger: On<UiInput<SimulatorSoftwareKeyboard>>,
     mut requests: MessageWriter<SimulatorSoftwareKeyboardRequest>,
 ) {

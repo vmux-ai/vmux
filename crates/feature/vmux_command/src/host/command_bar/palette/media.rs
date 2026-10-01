@@ -36,19 +36,19 @@ impl Plugin for PaletteMediaPlugin {
             CommandPaletteMediaDismissRequest,
         )>::default())
             .add_systems(Startup, bind_commands.in_set(BindCommands))
-            .add_observer(update_palette_media_draft)
-            .add_observer(remove_palette_attachment)
-            .add_observer(receive_palette_attachments)
-            .add_observer(receive_palette_media_entries)
-            .add_observer(move_from_command)
-            .add_observer(activate_from_command)
-            .add_observer(dismiss_from_command)
-            .add_observer(move_media)
-            .add_observer(highlight_media)
-            .add_observer(activate_media)
-            .add_observer(dismiss_media)
-            .add_systems(PreUpdate, attach_palette_media)
-            .add_systems(Update, dispatch_media_request);
+            .add_observer(update_draft)
+            .add_observer(remove_attachment)
+            .add_observer(receive_attachments)
+            .add_observer(receive_entries)
+            .add_observer(move_from)
+            .add_observer(activate_from)
+            .add_observer(dismiss_from)
+            .add_observer(navigate)
+            .add_observer(highlight)
+            .add_observer(activate)
+            .add_observer(dismiss)
+            .add_systems(PreUpdate, attach)
+            .add_systems(Update, dispatch_request);
     }
 }
 
@@ -111,7 +111,7 @@ fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
     registry.bind::<PaletteMediaDismissBinding>(&mut commands);
 }
 
-fn attach_palette_media(
+fn attach(
     pages: Query<
         Entity,
         (
@@ -126,7 +126,7 @@ fn attach_palette_media(
     }
 }
 
-fn update_palette_media_draft(
+fn update_draft(
     trigger: On<UiInput<CommandPaletteDraftRequest>>,
     mut palettes: Query<(&mut PaletteMedia, &mut PaletteSnapshot)>,
     mut commands: Commands,
@@ -159,7 +159,7 @@ fn update_palette_media_draft(
     media.update_query(target, query, &mut snapshot.0, &mut commands);
 }
 
-fn move_from_command(
+fn move_from(
     trigger: On<CommandDispatch>,
     next: Query<(), With<PaletteMediaNextBinding>>,
     previous: Query<(), With<PaletteMediaPreviousBinding>>,
@@ -187,7 +187,7 @@ fn move_from_command(
     });
 }
 
-fn activate_from_command(
+fn activate_from(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<PaletteMediaActivateBinding>>,
     palettes: Query<&PaletteSnapshot>,
@@ -209,7 +209,7 @@ fn activate_from_command(
     });
 }
 
-fn dismiss_from_command(
+fn dismiss_from(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<PaletteMediaDismissBinding>>,
     palettes: Query<&PaletteSnapshot>,
@@ -230,7 +230,7 @@ fn dismiss_from_command(
     });
 }
 
-fn move_media(
+fn navigate(
     trigger: On<UiInput<CommandPaletteMediaMoveRequest>>,
     mut palettes: Query<(&PaletteMedia, &mut PaletteSnapshot)>,
 ) {
@@ -248,7 +248,7 @@ fn move_media(
     };
 }
 
-fn highlight_media(
+fn highlight(
     trigger: On<UiInput<CommandPaletteMediaHighlightRequest>>,
     mut palettes: Query<(&PaletteMedia, &mut PaletteSnapshot)>,
 ) {
@@ -264,7 +264,7 @@ fn highlight_media(
         .min(snapshot.0.media_entries.len().saturating_sub(1) as u32);
 }
 
-fn activate_media(
+fn activate(
     trigger: On<UiInput<CommandPaletteMediaActivateRequest>>,
     mut palettes: Query<(
         &mut PaletteMedia,
@@ -308,7 +308,7 @@ fn activate_media(
     media.update_query(target, next_query, &mut snapshot.0, &mut commands);
 }
 
-fn dismiss_media(
+fn dismiss(
     trigger: On<UiInput<CommandPaletteMediaDismissRequest>>,
     mut palettes: Query<(
         &mut PaletteMedia,
@@ -335,7 +335,7 @@ fn dismiss_media(
     media.update_query(target, None, &mut snapshot.0, &mut commands);
 }
 
-fn remove_palette_attachment(
+fn remove_attachment(
     trigger: On<UiInput<CommandPaletteRemoveAttachmentRequest>>,
     mut palettes: Query<(&PaletteMedia, &mut PaletteSnapshot)>,
 ) {
@@ -352,7 +352,7 @@ fn remove_palette_attachment(
         .retain(|attachment| attachment.path != request.path);
 }
 
-fn receive_palette_attachments(
+fn receive_attachments(
     trigger: On<UiStateWrite<CommandBarUiState>>,
     mut palettes: Query<(&PaletteMedia, &mut PaletteSnapshot)>,
 ) {
@@ -374,7 +374,7 @@ fn receive_palette_attachments(
     }
 }
 
-fn receive_palette_media_entries(
+fn receive_entries(
     trigger: On<UiStateWrite<CommandBarUiState>>,
     mut palettes: Query<(&PaletteMedia, &mut PaletteSnapshot)>,
     pending: Query<(Entity, &MediaResponsePending)>,
@@ -413,7 +413,7 @@ fn receive_palette_media_entries(
 #[derive(Component)]
 struct MediaRequestDelay(RequestDelay);
 
-fn dispatch_media_request(
+fn dispatch_request(
     delays: Query<(Entity, &MediaRequestDelay)>,
     media: Query<&PaletteMedia>,
     mut commands: Commands,
@@ -474,7 +474,7 @@ mod tests {
     #[test]
     fn navigation_and_dismiss_update_host_state() {
         let mut app = App::new();
-        app.add_observer(move_media).add_observer(dismiss_media);
+        app.add_observer(navigate).add_observer(dismiss);
         let open_id = OpenId(7);
         let mut media = PaletteMedia::default();
         assert_eq!(media.open.accept(open_id), Some(true));

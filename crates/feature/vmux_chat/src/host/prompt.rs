@@ -71,18 +71,18 @@ impl Plugin for ChatPromptInputPlugin {
                 ChatCancelQueuedPrompt,
             )>::default())
             .add_plugins(UiEventPlugin::<(ChatApproval, ChatChoiceSelected)>::default())
-            .add_observer(on_submit)
-            .add_observer(on_cancel)
-            .add_observer(on_stop)
-            .add_observer(on_escape)
-            .add_observer(on_resume)
-            .add_observer(on_clear_queue)
-            .add_observer(on_cancel_queued_prompt);
+            .add_observer(submit)
+            .add_observer(cancel)
+            .add_observer(stop)
+            .add_observer(escape)
+            .add_observer(resume)
+            .add_observer(clear_queue)
+            .add_observer(cancel_queued);
     }
 }
 
 #[cfg(host)]
-fn on_submit(
+fn submit(
     trigger: On<UiInput<ChatSubmit>>,
     mut views: Query<(&ChildOf, &mut ChatAttachmentProjection, &mut ComposerState), With<ChatView>>,
     mut sessions: Query<(
@@ -140,7 +140,7 @@ fn on_submit(
 }
 
 #[cfg(host)]
-fn on_stop(
+fn stop(
     trigger: On<UiInput<ChatStop>>,
     child_of: Query<&ChildOf>,
     mut sessions: Query<(&mut PromptQueue, &mut AgentRunState, &AcpSession)>,
@@ -184,7 +184,7 @@ fn enqueue_prompt(
 }
 
 #[cfg(host)]
-fn on_cancel(
+fn cancel(
     trigger: On<UiInput<ChatCancel>>,
     child_of: Query<&ChildOf>,
     mut sessions: Query<(&mut PromptQueue, &AcpSession)>,
@@ -212,7 +212,7 @@ fn cancel_session(session: &AcpSession, service_requests: &mut MessageWriter<Ser
 }
 
 #[cfg(host)]
-fn on_escape(
+fn escape(
     trigger: On<UiInput<ChatEscape>>,
     child_of: Query<&ChildOf>,
     mut composers: Query<&mut ComposerState, With<ChatView>>,
@@ -260,7 +260,7 @@ fn on_escape(
 }
 
 #[cfg(host)]
-fn on_resume(
+fn resume(
     trigger: On<UiInput<ChatResume>>,
     child_of: Query<&ChildOf>,
     mut queues: Query<&mut PromptQueue>,
@@ -274,7 +274,7 @@ fn on_resume(
 }
 
 #[cfg(host)]
-fn on_clear_queue(
+fn clear_queue(
     trigger: On<UiInput<ChatClearQueue>>,
     child_of: Query<&ChildOf>,
     mut queues: Query<&mut PromptQueue>,
@@ -288,7 +288,7 @@ fn on_clear_queue(
 }
 
 #[cfg(host)]
-fn on_cancel_queued_prompt(
+fn cancel_queued(
     trigger: On<UiInput<ChatCancelQueuedPrompt>>,
     child_of: Query<&ChildOf>,
     mut queues: Query<&mut PromptQueue>,
@@ -612,7 +612,7 @@ mod tests {
     #[test]
     fn first_prompt_updates_conversation_title_immediately() {
         let mut app = input_app();
-        app.add_observer(on_submit);
+        app.add_observer(submit);
         let session = app
             .world_mut()
             .spawn((PromptQueue::default(), AgentRunState::Idle))
@@ -662,7 +662,7 @@ mod tests {
     #[test]
     fn normal_cancel_overrides_pending_flush() {
         let mut app = input_app();
-        app.add_observer(on_cancel);
+        app.add_observer(cancel);
         let mut queue = PromptQueue::default();
         queue.enqueue("queued".into());
         assert!(queue.request_flush());
@@ -687,7 +687,7 @@ mod tests {
     #[test]
     fn stop_with_queued_work_flushes_and_rearms_the_session() {
         let mut app = input_app();
-        app.add_observer(on_stop);
+        app.add_observer(stop);
         let mut queue = PromptQueue::default();
         queue.enqueue("retry".into());
         queue.paused = true;
@@ -720,7 +720,7 @@ mod tests {
     #[test]
     fn idle_escape_clears_the_host_owned_composer_draft() {
         let mut app = input_app();
-        app.add_observer(on_escape);
+        app.add_observer(escape);
         let stack = app
             .world_mut()
             .spawn((
@@ -751,7 +751,7 @@ mod tests {
     #[test]
     fn cancel_queued_prompt_removes_only_target() {
         let mut app = input_app();
-        app.add_observer(on_cancel_queued_prompt);
+        app.add_observer(cancel_queued);
         let mut queue = PromptQueue::default();
         queue.enqueue("first".into());
         queue.enqueue("second".into());

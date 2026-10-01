@@ -50,7 +50,7 @@ impl Plugin for CapturePlugin {
                 Update,
                 (screenshot, record_start, record_stop).in_set(ToolDispatchSet),
             )
-            .add_systems(Update, route_capture_queries.in_set(ToolQueryRouteSet))
+            .add_systems(Update, route_queries.in_set(ToolQueryRouteSet))
             .add_systems(
                 Update,
                 (
@@ -192,7 +192,7 @@ fn record_stop(
     }
 }
 
-fn route_capture_queries(
+fn route_queries(
     mut queries: MessageReader<ToolQueryRequest>,
     mut handled: MessageWriter<ToolQueryHandled>,
     mut writers: CaptureQueryWriters,

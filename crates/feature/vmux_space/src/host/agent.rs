@@ -75,13 +75,7 @@ impl Plugin for SpaceAgentPlugin {
         .add_systems(
             Update,
             (
-                (
-                    create_space,
-                    rename_space,
-                    delete_space,
-                    request_profile_rename,
-                )
-                    .after(AgentRequestRouteSet),
+                (create, rename, delete, request_profile_rename).after(AgentRequestRouteSet),
                 rename_profile,
             )
                 .chain(),
@@ -94,7 +88,7 @@ struct RenameProfileRequest {
     name: String,
 }
 
-fn create_space(
+fn create(
     mut requests: MessageReader<AgentRequestMessage<AgentSpaceCreate>>,
     mut create: MessageWriter<crate::SpaceCreateRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
@@ -107,7 +101,7 @@ fn create_space(
     }
 }
 
-fn rename_space(
+fn rename(
     mut requests: MessageReader<AgentRequestMessage<AgentSpaceRename>>,
     mut rename: MessageWriter<crate::SpaceRenameRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
@@ -121,7 +115,7 @@ fn rename_space(
     }
 }
 
-fn delete_space(
+fn delete(
     mut requests: MessageReader<AgentRequestMessage<AgentSpaceDelete>>,
     mut delete: MessageWriter<crate::SpaceDeleteRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,

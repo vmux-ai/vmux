@@ -22,15 +22,15 @@ impl Plugin for PaneZoomPlugin {
             .add_message::<ToggleZoomRequest>()
             .add_systems(
                 Update,
-                handle_zoom_command
+                handle_command
                     .in_set(LayoutRequestSet::Prepare)
                     .before(ArrangementSet),
             )
             .add_systems(
                 PostUpdate,
                 (
-                    sync_zoom_visibility.before(LayoutSystems::Layout),
-                    clear_zoom_on_pane_removal,
+                    sync_visibility.before(LayoutSystems::Layout),
+                    clear_on_pane_removal,
                 ),
             );
         Zoomed::register_hooks(app);
@@ -61,7 +61,7 @@ impl Zoomed {
     }
 }
 
-fn clear_zoom_on_pane_removal(
+fn clear_on_pane_removal(
     mut removed: RemovedComponents<Pane>,
     zoomed: Query<(Entity, &Zoomed)>,
     mut commands: Commands,
@@ -118,7 +118,7 @@ fn siblings_to_hide(
     hidden
 }
 
-fn handle_zoom_command(
+fn handle_command(
     mut focus_requests: MessageReader<FocusRequest>,
     mut open_requests: MessageReader<OpenRequest>,
     mut toggle_requests: MessageReader<ToggleZoomRequest>,
@@ -166,7 +166,7 @@ fn handle_zoom_command(
     }
 }
 
-fn sync_zoom_visibility(zoomed: Query<&Zoomed, Added<Zoomed>>, mut nodes: Query<&mut Node>) {
+fn sync_visibility(zoomed: Query<&Zoomed, Added<Zoomed>>, mut nodes: Query<&mut Node>) {
     for zoomed in &zoomed {
         for &entity in &zoomed.hidden {
             if let Ok(mut node) = nodes.get_mut(entity) {

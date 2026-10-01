@@ -1,19 +1,20 @@
 use crate::prompt_media::{ChatPasteMedia, ChatPickFiles};
 use crate::ui::composer::{CommandComposerMenus, ComposerChips, ComposerMenuView};
-use crate::ui::media::PromptMedia;
-use crate::ui::signals::{
-    COMMAND_BAR_INPUT_ID, CommandBarField, Readline, TypedDigit, use_palette_signals,
+use crate::ui::input::{
+    COMMAND_BAR_INPUT_ID, CommandBarField, Readline, TypedDigit, use_palette_input,
 };
+use crate::ui::media::PromptMedia;
 use dioxus::prelude::*;
 use vmux_api::command_bar::CommandBarPicker;
 use vmux_api::command_bar::{
     CommandBarFocusEffect, CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch,
-    CommandPaletteActivateRequest, CommandPaletteDraftRequest, CommandPaletteHistoryMoveRequest,
-    CommandPaletteMediaActivateRequest, CommandPaletteMediaDismissRequest,
-    CommandPaletteMediaHighlightRequest, CommandPaletteMediaMoveRequest,
-    CommandPaletteMenuActivateRequest, CommandPaletteMenuDismissRequest,
-    CommandPaletteMenuMoveRequest, CommandPaletteRemoveAttachmentRequest, CommandPaletteState,
-    CommandPaletteSubmitRequest, PaletteGlyph, PaletteMode,
+    CommandPaletteActivateRequest, CommandPaletteDraftRequest, CommandPaletteHighlightRequest,
+    CommandPaletteHistoryMoveRequest, CommandPaletteMediaActivateRequest,
+    CommandPaletteMediaDismissRequest, CommandPaletteMediaHighlightRequest,
+    CommandPaletteMediaMoveRequest, CommandPaletteMenuActivateRequest,
+    CommandPaletteMenuDismissRequest, CommandPaletteMenuMoveRequest,
+    CommandPaletteRemoveAttachmentRequest, CommandPaletteState, CommandPaletteSubmitRequest,
+    PaletteGlyph, PaletteMode,
 };
 use vmux_core::input::{UiKeyContext, Unclaimed};
 use vmux_ui::agent_accent::agent_accent;
@@ -31,11 +32,11 @@ use vmux_ui::prompt_recall::{PromptHistoryDirection, prompt_history_direction};
 use vmux_ui::scroll::ScrollIntoView;
 
 mod composer;
+mod input;
 mod media;
 mod panel;
 mod readline;
 mod row;
-mod signals;
 
 pub use panel::CommandBarPanel;
 pub use row::ResultRow;
@@ -86,7 +87,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let on_close = props.on_close;
     let on_activity = props.on_activity;
 
-    let mut signals = use_palette_signals();
+    let mut input = use_palette_input();
     let host_state = use_ui_state::<CommandPaletteState>();
     let mcp = use_mcp_connections();
     let ime = use_ime_guard();
@@ -98,28 +99,24 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     use_effect(move || {
         let opened = state();
-        if signals.reopened(opened.open_id) {
-            signals.restart(&opened);
+        if input.reopened(opened.open_id) {
+            input.restart(&opened);
         }
     });
 
     use_effect(move || {
         let opened = state();
-        let query = (signals.query)();
-        let selected = (signals.selected)() as u32;
-        let navigating = (signals.nav_mode)();
+        let query = (input.query)();
         let _ = send(&CommandPaletteDraftRequest {
             open_id: opened.open_id,
             query,
             start: is_start,
-            selected,
-            navigating,
         });
     });
 
     use_effect(move || {
         let opened = state();
-        if signals.refocus(opened.open_id) {
+        if input.refocus(opened.open_id) {
             if is_start {
                 focus_prompt_end(PROMPT_INPUT_ID);
             } else {
@@ -129,7 +126,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     use_effect(move || {
-        signals.watch();
+        let _ = (input.query)();
+        let snapshot = host_state.read();
+        let _ = snapshot.projection.selected;
         on_activity.call(());
     });
 
@@ -162,13 +161,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             return;
         }
         let projection = &snapshot.projection;
-        signals.apply_host_input(
-            projection.input_revision,
-            &projection.query,
-            projection.selected as usize,
-            projection.navigating,
-            input_id,
-        );
+        input.apply_host_input(projection.input_revision, &projection.query, input_id);
     });
     use_effect(move || {
         let opened = state();
@@ -205,7 +198,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
     let projection = std::rc::Rc::new(palette_data.projection.clone());
     let attachments = std::rc::Rc::new(palette_data.attachments.clone());
-    let q = (signals.query)();
+    let q = (input.query)();
     let ghost_text = projection.ghost.clone();
     let mcp_open = projection.mcp_open;
     let mcp_entries = std::rc::Rc::new(projection.mcp_entries.clone());
@@ -218,7 +211,14 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let media_options = PromptMedia::options(&media_entries);
 
     use_effect(move || {
-        ScrollIntoView::nearest(&format!("command-bar-item-{}", (signals.selected)()));
+        let snapshot = host_state.read();
+        if snapshot.open_id != state().open_id {
+            return;
+        }
+        ScrollIntoView::nearest(&format!(
+            "command-bar-item-{}",
+            snapshot.projection.selected
+        ));
     });
 
     use_effect(move || {
@@ -265,7 +265,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         let projection = projection.clone();
         let query = q.clone();
         move |e: KeyboardEvent| {
-            if Readline::chord(&e, signals.query, &projection.ghost, PROMPT_INPUT_ID) {
+            if Readline::chord(&e, input.query, &projection.ghost, PROMPT_INPUT_ID) {
                 return;
             }
             if e.key() == Key::Tab {
@@ -281,7 +281,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 && digit < projection.space_count as usize
             {
                 e.prevent_default();
-                signals.highlight(digit);
+                let _ = send(&CommandPaletteHighlightRequest {
+                    open_id: state().open_id,
+                    index: digit as u32,
+                });
                 return;
             }
             let direction = MenuDirection::from_key(&e);
@@ -428,7 +431,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if ime.swallows(&e) {
                 return;
             }
-            if Readline::chord(&e, signals.query, &projection.ghost, COMMAND_BAR_INPUT_ID) {
+            if Readline::chord(&e, input.query, &projection.ghost, COMMAND_BAR_INPUT_ID) {
                 return;
             }
             let ctrl = e.modifiers().contains(Modifiers::CONTROL);
@@ -439,7 +442,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 && digit < projection.space_count as usize
             {
                 e.prevent_default();
-                signals.highlight(digit);
+                let _ = send(&CommandPaletteHighlightRequest {
+                    open_id: state().open_id,
+                    index: digit as u32,
+                });
                 return;
             }
             if e.key() == Key::Enter {
@@ -485,7 +491,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     footer: Some(start_composer_footer),
                     action_title: translate("command-send"),
                     action_enabled: start_submission_enabled,
-                    on_input: move |value| signals.retype(value),
+                    on_input: move |value| input.retype(value),
                     on_keydown: start_keydown,
                     on_paste: move |_| {
                         let _ = send(&ChatPasteMedia);
@@ -543,7 +549,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 placeholder: if projection.row_text.is_some() { String::new() } else { projection.placeholder.clone() },
                                 value: "{q}",
                                 autofocus: true,
-                                oninput: move |event| signals.retype(event.value()),
+                                oninput: move |event| input.retype(event.value()),
                                 oncompositionstart: move |_| ime.start(),
                                 oncompositionend: move |_| ime.commit(),
                                 onkeydown: modal_keydown,
@@ -565,8 +571,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             index: index as u32,
                         });
                     },
-                    on_hover: move |index| signals.selected.set(index),
-                    on_dismiss: move |()| signals.retype(String::new()),
+                    on_hover: move |index| {
+                        let _ = send(&CommandPaletteHighlightRequest {
+                            open_id: state().open_id,
+                            index: index as u32,
+                        });
+                    },
+                    on_dismiss: move |()| input.retype(String::new()),
                 }
             }
             if projection.menu.is_none() && !mcp_open && media_menu_open {
@@ -614,7 +625,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         space_switch: projection.space_switch,
                         on_hover: move |_| {
                             if is_start {
-                                signals.selected.set(i);
+                                let _ = send(&CommandPaletteHighlightRequest {
+                                    open_id: state().open_id,
+                                    index: i as u32,
+                                });
                             }
                         },
                     }

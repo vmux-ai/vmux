@@ -37,24 +37,18 @@ impl Plugin for ShortcutPlugin {
         ))
         .add_message::<NativeKeyInput>()
         .add_observer(send_shortcuts)
-        .add_observer(on_probe_press_request)
-        .add_observer(on_probe_clear_request)
-        .add_observer(on_probe_press)
+        .add_observer(probe_press_request)
+        .add_observer(probe_clear_request)
+        .add_observer(probe_press)
+        .add_systems(Update, normalize_alias.in_set(PageOpenSet::ResolveTarget))
         .add_systems(
             Update,
-            normalize_shortcut_alias.in_set(PageOpenSet::ResolveTarget),
-        )
-        .add_systems(
-            Update,
-            sync_shortcut_capture
+            sync_capture
                 .in_set(ShortcutCaptureSet)
                 .after(ComputeFocusSet),
         )
         .add_systems(Update, capture_native_keys.after(NativeKeyInputSet))
-        .add_systems(
-            Update,
-            (expire_shortcut_probe, publish_shortcut_state).chain(),
-        );
+        .add_systems(Update, (expire_probe, publish_state).chain());
     }
 }
 
@@ -344,7 +338,7 @@ fn send_shortcuts(
     view.catalog = ShortcutCatalog::build(&keymap, context, &locale, &definitions);
 }
 
-fn on_probe_press_request(
+fn probe_press_request(
     trigger: On<UiInput<ShortcutProbePressRequest>>,
     mut views: Query<&mut Shortcuts>,
 ) {
@@ -360,7 +354,7 @@ fn on_probe_press_request(
     );
 }
 
-fn on_probe_clear_request(
+fn probe_clear_request(
     trigger: On<UiInput<ShortcutProbeClearRequest>>,
     mut views: Query<&mut Shortcuts>,
 ) {
@@ -370,7 +364,7 @@ fn on_probe_clear_request(
     view.probe.clear();
 }
 
-fn on_probe_press(trigger: On<ShortcutProbePress>, mut views: Query<&mut Shortcuts>) {
+fn probe_press(trigger: On<ShortcutProbePress>, mut views: Query<&mut Shortcuts>) {
     let Ok(mut view) = views.get_mut(trigger.event_target()) else {
         return;
     };
@@ -382,7 +376,7 @@ fn on_probe_press(trigger: On<ShortcutProbePress>, mut views: Query<&mut Shortcu
     );
 }
 
-fn sync_shortcut_capture(
+fn sync_capture(
     focus: ShortcutCaptureFocus,
     captures: Query<(Entity, Has<NativeKeyCapture>), With<ShortcutCapture>>,
     mut commands: Commands,
@@ -426,7 +420,7 @@ fn capture_native_keys(
     }
 }
 
-fn expire_shortcut_probe(mut views: Query<&mut Shortcuts>) {
+fn expire_probe(mut views: Query<&mut Shortcuts>) {
     let now = vmux_core::now_millis();
     for mut view in &mut views {
         let timeout_ms = view.catalog.chord_timeout_ms;
@@ -436,10 +430,7 @@ fn expire_shortcut_probe(mut views: Query<&mut Shortcuts>) {
     }
 }
 
-fn publish_shortcut_state(
-    views: Query<(Entity, &Shortcuts), Changed<Shortcuts>>,
-    mut commands: Commands,
-) {
+fn publish_state(views: Query<(Entity, &Shortcuts), Changed<Shortcuts>>, mut commands: Commands) {
     for (entity, view) in &views {
         commands.trigger(
             vmux_core::host::UiStateWrite::<ShortcutUiState>::from_event(entity, &view.project()),
@@ -447,7 +438,7 @@ fn publish_shortcut_state(
     }
 }
 
-fn normalize_shortcut_alias(mut tasks: Query<&mut PageOpenTask, Changed<PageOpenTask>>) {
+fn normalize_alias(mut tasks: Query<&mut PageOpenTask, Changed<PageOpenTask>>) {
     for mut task in &mut tasks {
         if let Some(canonical) = ShortcutUrl::canonical(&task.url) {
             task.url = canonical.to_string();

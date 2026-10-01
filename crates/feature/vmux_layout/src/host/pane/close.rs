@@ -29,17 +29,15 @@ impl Plugin for ClosePlugin {
             .add_message::<CloseDialogResult>()
             .add_systems(
                 Update,
-                (request_pane_close, close)
-                    .chain()
-                    .in_set(LayoutRequestSet::Handle),
+                (request, close).chain().in_set(LayoutRequestSet::Handle),
             )
             .add_systems(
                 Update,
                 (
-                    poll_close_dialogs,
-                    process_force_pane_closes,
-                    apply_close_dialog_results,
-                    start_close_dialogs,
+                    poll_dialogs,
+                    process_force_closes,
+                    apply_dialog_results,
+                    start_dialogs,
                 )
                     .chain()
                     .in_set(LayoutRequestSet::Dispatch),
@@ -74,7 +72,7 @@ struct CloseDialogOperation {
     task: Task<bool>,
 }
 
-fn request_pane_close(
+fn request(
     mut reader: MessageReader<CloseRequest>,
     active_tab: ActiveTabParam,
     focus: LayoutFocus,
@@ -250,7 +248,7 @@ fn entity_tree_has_close_confirmation(
         })
 }
 
-fn poll_close_dialogs(
+fn poll_dialogs(
     mut dialogs: Query<(Entity, &mut CloseDialogOperation)>,
     mut results: MessageWriter<CloseDialogResult>,
     mut commands: Commands,
@@ -267,7 +265,7 @@ fn poll_close_dialogs(
     }
 }
 
-fn process_force_pane_closes(
+fn process_force_closes(
     pending: Query<Entity, (With<ForcePaneClose>, With<Pane>)>,
     mut results: MessageWriter<CloseDialogResult>,
     mut commands: Commands,
@@ -281,7 +279,7 @@ fn process_force_pane_closes(
     }
 }
 
-fn apply_close_dialog_results(
+fn apply_dialog_results(
     mut results: MessageReader<CloseDialogResult>,
     child_of: Query<&ChildOf>,
     tabs: Query<(), With<crate::tab::Tab>>,
@@ -344,7 +342,7 @@ fn apply_close_dialog_results(
     }
 }
 
-fn start_close_dialogs(
+fn start_dialogs(
     dialogs: Query<(), With<CloseDialogOperation>>,
     pending_panes: Query<Entity, (With<PendingPaneClose>, With<Pane>)>,
     pending_stacks: Query<Entity, (With<PendingStackClose>, With<Stack>)>,
@@ -425,10 +423,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<CloseRequest>()
             .add_message::<CloseDialogResult>()
-            .add_systems(
-                Update,
-                (process_force_pane_closes, apply_close_dialog_results).chain(),
-            );
+            .add_systems(Update, (process_force_closes, apply_dialog_results).chain());
         let tab = app
             .world_mut()
             .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
@@ -457,7 +452,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<CloseRequest>()
             .add_message::<CloseDialogResult>()
-            .add_systems(Update, apply_close_dialog_results);
+            .add_systems(Update, apply_dialog_results);
         let tab = app
             .world_mut()
             .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))

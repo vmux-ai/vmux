@@ -15,7 +15,7 @@ impl Plugin for ExtensionBridgePagePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (stop_extension_bridge_pages, spawn_extension_bridge_pages)
+            (stop_bridge_pages, spawn_bridge_pages)
                 .chain()
                 .before(bevy_cef::prelude::CefSystems::CreateAndResize),
         );
@@ -53,7 +53,7 @@ impl RetiredExtensionInfrastructureWebview {
 #[derive(Component)]
 struct ExtensionBridgeStopping;
 
-fn stop_extension_bridge_pages(
+fn stop_bridge_pages(
     mut exits: MessageReader<AppExit>,
     pages: Query<Entity, With<ExtensionBridgeWebview>>,
     stopping: Query<(), With<ExtensionBridgeStopping>>,
@@ -71,7 +71,7 @@ fn stop_extension_bridge_pages(
     }
 }
 
-fn spawn_extension_bridge_pages(
+fn spawn_bridge_pages(
     mut commands: Commands,
     runtime: Single<(Ref<PreparedExtensions>, &ExtensionBridgeServer)>,
     primary_window: Query<(), With<PrimaryWindow>>,
@@ -219,10 +219,8 @@ mod tests {
         let endpoint = bridge.endpoint().to_string();
         app.world_mut()
             .spawn((PreparedExtensions(vec![runtime]), bridge));
-        app.add_message::<AppExit>().add_systems(
-            Update,
-            (stop_extension_bridge_pages, spawn_extension_bridge_pages).chain(),
-        );
+        app.add_message::<AppExit>()
+            .add_systems(Update, (stop_bridge_pages, spawn_bridge_pages).chain());
 
         app.update();
         assert!(

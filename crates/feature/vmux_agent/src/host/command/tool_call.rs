@@ -18,17 +18,13 @@ impl Plugin for ToolCallPlugin {
         app.add_message::<ServiceRequest>()
             .add_systems(
                 Update,
-                handle_agent_tool_calls
+                handle_tool_calls
                     .in_set(CommandSet::ToolCalls)
                     .before(ToolResolveSet),
             )
             .add_systems(
                 Update,
-                (
-                    finish_agent_tool_commands,
-                    finish_agent_tool_queries,
-                    fail_agent_tool_calls,
-                )
+                (finish_tool_commands, finish_tool_queries, fail_tool_calls)
                     .after(ToolDispatchFlush)
                     .before(CommandSet::Commands),
             );
@@ -41,7 +37,7 @@ struct PendingAgentToolCall {
     sid: String,
 }
 
-fn handle_agent_tool_calls(
+fn handle_tool_calls(
     mut commands: Commands,
     mut reader: MessageReader<AgentToolCallRequest>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -71,7 +67,7 @@ fn handle_agent_tool_calls(
     }
 }
 
-fn finish_agent_tool_commands(
+fn finish_tool_commands(
     mut commands: Commands,
     calls: Query<(Entity, &PendingAgentToolCall, &ToolCommand), Added<ToolCommand>>,
     mut request_writer: MessageWriter<AgentRequestInput>,
@@ -101,7 +97,7 @@ fn finish_agent_tool_commands(
     }
 }
 
-fn finish_agent_tool_queries(
+fn finish_tool_queries(
     mut commands: Commands,
     calls: Query<(Entity, &PendingAgentToolCall, &ToolQuery), Added<ToolQuery>>,
     mut query_writer: MessageWriter<ToolQueryRequest>,
@@ -127,7 +123,7 @@ fn finish_agent_tool_queries(
     }
 }
 
-fn fail_agent_tool_calls(
+fn fail_tool_calls(
     mut commands: Commands,
     calls: Query<(Entity, &PendingAgentToolCall, &ToolDispatchError), Added<ToolDispatchError>>,
     mut service_requests: MessageWriter<ServiceRequest>,

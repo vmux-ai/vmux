@@ -45,12 +45,12 @@ impl Plugin for PagePlugin {
             )
             .add_systems(
                 Update,
-                handle_page_open_requests.in_set(PageOpenSet::ResolveTarget),
+                handle_open_requests.in_set(PageOpenSet::ResolveTarget),
             )
             .add_systems(
                 Update,
                 (
-                    queue_cef_page_attach_requests,
+                    queue_cef_attach_requests,
                     classify_unclaimed,
                     attach_cef_pages,
                     attach_error_pages,
@@ -58,7 +58,7 @@ impl Plugin for PagePlugin {
                     .chain()
                     .in_set(PageOpenSet::Fallback),
             )
-            .add_systems(Update, respond_page_open_tasks.in_set(PageOpenSet::Respond))
+            .add_systems(Update, respond_open_tasks.in_set(PageOpenSet::Respond))
             .add_systems(
                 Update,
                 apply_pending_navigation
@@ -142,7 +142,7 @@ impl ErrorPageAttachment {
     }
 }
 
-fn handle_page_open_requests(
+fn handle_open_requests(
     mut reader: MessageReader<PageOpenRequest>,
     target: PageOpenTargetResolver,
     time: Res<Time>,
@@ -254,7 +254,7 @@ impl PageOpenTargetResolver<'_, '_> {
     }
 }
 
-fn queue_cef_page_attach_requests(
+fn queue_cef_attach_requests(
     mut reader: MessageReader<CefPageAttachRequest>,
     mut commands: Commands,
 ) {
@@ -378,7 +378,7 @@ fn attach_error_pages(
     }
 }
 
-fn respond_page_open_tasks(
+fn respond_open_tasks(
     tasks: Query<
         (
             Entity,

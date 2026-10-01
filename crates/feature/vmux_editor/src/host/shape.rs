@@ -12,7 +12,7 @@ pub(super) struct ShapePlugin;
 impl Plugin for ShapePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(FileShapeSet,)>::default())
-            .add_observer(on_file_shape_set);
+            .add_observer(file_set);
     }
 }
 
@@ -142,7 +142,7 @@ impl Reindent {
     }
 }
 
-fn on_file_shape_set(
+fn file_set(
     trigger: On<UiInput<FileShapeSet>>,
     mut views: Query<&mut Editor>,
     browsers: NonSend<Browsers>,

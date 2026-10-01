@@ -12,9 +12,9 @@ impl Plugin for TerminalThemePlugin {
         app.add_plugins(crate::contract::TerminalContractPlugin)
             .add_systems(
                 Update,
-                handle_terminal_font_size.after(vmux_command::ReadCommandRequests),
+                handle_font_size.after(vmux_command::ReadCommandRequests),
             )
-            .add_systems(Update, sync_terminal_theme.after(handle_terminal_font_size));
+            .add_systems(Update, sync.after(handle_font_size));
     }
 }
 
@@ -25,7 +25,7 @@ pub enum TerminalFontSizeCommand {
     Reset,
 }
 
-fn handle_terminal_font_size(
+fn handle_font_size(
     mut reader: MessageReader<TerminalFontSizeCommand>,
     mut settings: ResMut<AppSettings>,
     mut saves: MessageWriter<SettingsSaveRequest>,
@@ -90,7 +90,7 @@ fn scheme_for_appearance(name: &str, dark: bool) -> &str {
     }
 }
 
-fn sync_terminal_theme(
+fn sync(
     terminals: Query<Entity, With<Terminal>>,
     new_terminals: Query<Entity, Added<Terminal>>,
     newly_ready: Query<Entity, (With<Terminal>, Changed<PageReady>)>,
@@ -180,7 +180,7 @@ mod tests {
             .insert_resource(settings_with_font(start))
             .add_message::<TerminalFontSizeCommand>()
             .add_message::<SettingsSaveRequest>()
-            .add_systems(Update, handle_terminal_font_size);
+            .add_systems(Update, handle_font_size);
         app.world_mut()
             .resource_mut::<Messages<TerminalFontSizeCommand>>()
             .write(command);
@@ -215,7 +215,7 @@ mod tests {
             .insert_resource(settings)
             .add_message::<TerminalFontSizeCommand>()
             .add_message::<SettingsSaveRequest>()
-            .add_systems(Update, handle_terminal_font_size);
+            .add_systems(Update, handle_font_size);
         app.world_mut()
             .resource_mut::<Messages<TerminalFontSizeCommand>>()
             .write(TerminalFontSizeCommand::Increase);

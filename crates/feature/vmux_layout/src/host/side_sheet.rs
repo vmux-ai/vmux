@@ -13,7 +13,7 @@ impl Plugin for SideSheetLayoutPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    sync_side_sheet_visibility.before(LayoutSystems::Layout),
+                    sync_visibility.before(LayoutSystems::Layout),
                     sync_window_buttons_visibility,
                 ),
             );
@@ -84,7 +84,7 @@ pub enum SideSheetPosition {
     Bottom,
 }
 
-fn sync_side_sheet_visibility(
+fn sync_visibility(
     settings: Res<LayoutSettings>,
     mut side_sheet_q: Query<
         (Entity, &SideSheetPosition, &mut Visibility, &mut Node),
@@ -216,7 +216,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(LayoutSettings::default())
-            .add_systems(Update, sync_side_sheet_visibility);
+            .add_systems(Update, sync_visibility);
         let first = app
             .world_mut()
             .spawn((

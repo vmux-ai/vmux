@@ -48,14 +48,14 @@ impl Plugin for SpaceToolPlugin {
             )
             .add_systems(
                 Update,
-                answer_space_queries
+                answer_queries
                     .in_set(ToolQueryRouteSet)
                     .after(ServiceMessageSet),
             );
     }
 }
 
-fn answer_space_queries(
+fn answer_queries(
     mut queries: MessageReader<ToolQueryRequest>,
     spaces: Query<(Entity, &SpaceId, &Name, Has<Active>, Option<&Order>), With<Space>>,
     focused_window: FocusedWindow,
@@ -277,7 +277,7 @@ mod tests {
         app.add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
-            .add_systems(Update, answer_space_queries);
+            .add_systems(Update, answer_queries);
         let first_window = app.world_mut().spawn(Window::default()).id();
         let second_window = app.world_mut().spawn((Window::default(), Active)).id();
         let first_root = app.world_mut().spawn(HostWindow(first_window)).id();

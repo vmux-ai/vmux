@@ -26,18 +26,18 @@ impl Plugin for MediaPlugin {
             .add_systems(
                 Update,
                 (
-                    sync_media_allowlist.after(EditorFileLoadedSet),
-                    send_initial_media
+                    sync_allowlist.after(EditorFileLoadedSet),
+                    send_initial
                         .after(EditorFileLoadedSet)
-                        .after(sync_media_allowlist),
+                        .after(sync_allowlist),
                     (detach_video_overlays, attach_video_overlays).chain(),
                     drain_thumb_tasks,
                 ),
             )
-            .add_observer(on_file_preview_request)
+            .add_observer(file_preview_request)
             .add_observer(load_file_preview)
-            .add_observer(on_file_open_external)
-            .add_observer(on_file_video_rect);
+            .add_observer(file_open_external)
+            .add_observer(file_video_rect);
     }
 }
 
@@ -66,7 +66,7 @@ type ReadyMedia = (
     With<vmux_core::page::PageReady>,
 );
 
-fn sync_media_allowlist(media: Query<&FileView, With<FileMedia>>, dirs: Query<&FileDir>) {
+fn sync_allowlist(media: Query<&FileView, With<FileMedia>>, dirs: Query<&FileDir>) {
     let mut paths: std::collections::HashSet<PathBuf> =
         media.iter().map(|file| file.path.clone()).collect();
     for dir in &dirs {
@@ -77,7 +77,7 @@ fn sync_media_allowlist(media: Query<&FileView, With<FileMedia>>, dirs: Query<&F
     set_media_allowlist(paths);
 }
 
-fn send_initial_media(
+fn send_initial(
     media: Query<(Entity, &FileView, &FileMedia), ReadyMedia>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -118,7 +118,7 @@ fn attach_video_overlays(
     }
 }
 
-fn on_file_video_rect(
+fn file_video_rect(
     trigger: On<UiInput<FileVideoRect>>,
     file_views: Query<(), With<FileView>>,
     browsers: NonSend<Browsers>,
@@ -144,7 +144,7 @@ fn detach_video_overlays(
     }
 }
 
-fn on_file_preview_request(trigger: On<UiInput<FilePreviewRequest>>, mut commands: Commands) {
+fn file_preview_request(trigger: On<UiInput<FilePreviewRequest>>, mut commands: Commands) {
     commands.trigger(FilePreviewLoad {
         webview: trigger.event().webview,
         request: trigger.event().payload.clone(),
@@ -247,7 +247,7 @@ fn drain_thumb_tasks(
     }
 }
 
-fn on_file_open_external(
+fn file_open_external(
     trigger: On<UiInput<FileOpenExternalRequest>>,
     media: Query<&FileView, With<FileMedia>>,
 ) {

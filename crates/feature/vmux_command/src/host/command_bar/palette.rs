@@ -8,8 +8,8 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch, CommandPaletteActivateRequest,
-    CommandPaletteDraftRequest, CommandPaletteHistoryMoveRequest, CommandPaletteMenu,
-    CommandPaletteMenuActivateRequest, CommandPaletteMenuDismissRequest,
+    CommandPaletteDraftRequest, CommandPaletteHighlightRequest, CommandPaletteHistoryMoveRequest,
+    CommandPaletteMenu, CommandPaletteMenuActivateRequest, CommandPaletteMenuDismissRequest,
     CommandPaletteMenuHighlightRequest, CommandPaletteMenuMoveRequest,
     CommandPaletteMenuToggleRequest, CommandPaletteRemoveAttachmentRequest, CommandPaletteState,
     CommandPaletteSubmitRequest, OpenId, StartGoToBranch, StartSelectMode, StartSelectModel,
@@ -44,6 +44,7 @@ impl Plugin for PalettePlugin {
         app.add_plugins((
             UiEventPlugin::<(
                 CommandPaletteDraftRequest,
+                CommandPaletteHighlightRequest,
                 CommandPaletteHistoryMoveRequest,
                 CommandPaletteMenuToggleRequest,
                 CommandPaletteMenuMoveRequest,
@@ -61,28 +62,26 @@ impl Plugin for PalettePlugin {
             media::PaletteMediaPlugin,
             resume::PaletteResumePlugin,
         ))
-        .add_observer(receive_palette_open)
+        .add_observer(receive_open)
         .add_observer(receive_mcp_servers)
-        .add_observer(update_palette_draft)
-        .add_observer(move_palette_history)
-        .add_observer(toggle_palette_menu)
-        .add_observer(move_palette_menu_request)
-        .add_observer(highlight_palette_menu)
-        .add_observer(activate_palette_menu)
-        .add_observer(dismiss_palette_menu_request)
-        .add_observer(submit_palette)
-        .add_observer(activate_palette_row)
-        .add_observer(apply_palette_decision)
-        .add_observer(apply_palette_key)
-        .add_observer(submit_palette_command)
-        .add_observer(move_palette_menu)
-        .add_observer(choose_palette_menu)
-        .add_observer(dismiss_palette_menu)
+        .add_observer(update_draft)
+        .add_observer(highlight)
+        .add_observer(move_history)
+        .add_observer(toggle_menu)
+        .add_observer(move_menu_request)
+        .add_observer(highlight_menu)
+        .add_observer(activate_menu)
+        .add_observer(dismiss_menu_request)
+        .add_observer(dispatch_submit)
+        .add_observer(activate_row)
+        .add_observer(apply_decision)
+        .add_observer(apply_key)
+        .add_observer(submit)
+        .add_observer(move_menu)
+        .add_observer(choose_menu)
+        .add_observer(dismiss_menu)
         .add_systems(Startup, bind_commands.in_set(BindCommands))
-        .add_systems(
-            PreUpdate,
-            (attach_palette_snapshot, detach_palette_snapshot),
-        )
+        .add_systems(PreUpdate, (attach_snapshot, detach_snapshot))
         .configure_sets(
             PostUpdate,
             (
@@ -92,15 +91,12 @@ impl Plugin for PalettePlugin {
             )
                 .chain(),
         )
+        .add_systems(PostUpdate, project.in_set(PaletteProjectionSet::Project))
         .add_systems(
             PostUpdate,
-            project_palette.in_set(PaletteProjectionSet::Project),
+            publish_snapshot.in_set(PaletteProjectionSet::Publish),
         )
-        .add_systems(
-            PostUpdate,
-            publish_palette_snapshot.in_set(PaletteProjectionSet::Publish),
-        )
-        .add_systems(Last, keep_palette_frames_coming);
+        .add_systems(Last, keep_frames_coming);
     }
 }
 
@@ -341,7 +337,7 @@ fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
     registry.bind::<PaletteMenuDismissBinding>(&mut commands);
 }
 
-fn attach_palette_snapshot(
+fn attach_snapshot(
     pages: Query<
         Entity,
         (
@@ -374,7 +370,7 @@ fn receive_mcp_servers(
     mcp.0.clone_from(trigger.event().update());
 }
 
-fn receive_palette_open(
+fn receive_open(
     trigger: On<UiStateWrite<CommandBarUiState>>,
     mut palettes: Query<(
         &mut PaletteOpen,
@@ -413,7 +409,7 @@ fn receive_palette_open(
     snapshot.0.projection = Default::default();
 }
 
-fn update_palette_draft(
+fn update_draft(
     trigger: On<UiInput<CommandPaletteDraftRequest>>,
     mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput, &mut PaletteMenuState)>,
     active: Query<(), With<PaletteMcpActive>>,
@@ -432,11 +428,11 @@ fn update_palette_draft(
         draft.history_cursor = None;
         draft.history_scratch.clear();
         draft.query.clone_from(&request.query);
+        draft.selected = 0;
+        draft.navigating = false;
         menu.dismiss();
     }
     draft.start = request.start;
-    draft.selected = request.selected as usize;
-    draft.navigating = request.navigating;
     let wants_mcp = PaletteQuery::new(&request.query).mcp_filter().is_some();
     match (wants_mcp, active.contains(target)) {
         (true, false) => {
@@ -450,7 +446,27 @@ fn update_palette_draft(
     }
 }
 
-fn move_palette_history(
+fn highlight(
+    trigger: On<UiInput<CommandPaletteHighlightRequest>>,
+    mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput, &PaletteSnapshot)>,
+) {
+    let target = trigger.event().webview;
+    let Ok((opened, mut input, snapshot)) = palettes.get_mut(target) else {
+        return;
+    };
+    let request = &trigger.event().payload;
+    if request.open_id != opened.0.open_id {
+        return;
+    }
+    let rows = match snapshot.0.projection.mcp_open {
+        true => snapshot.0.projection.mcp_entries.len(),
+        false => snapshot.0.projection.rows.len(),
+    };
+    input.selected = (request.index as usize).min(rows.saturating_sub(1));
+    input.navigating = true;
+}
+
+fn move_history(
     trigger: On<UiInput<CommandPaletteHistoryMoveRequest>>,
     mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput, &PaletteSnapshot)>,
 ) {
@@ -465,7 +481,7 @@ fn move_palette_history(
     input.move_history(&snapshot.0.prompt_history, request.older);
 }
 
-fn toggle_palette_menu(
+fn toggle_menu(
     trigger: On<UiInput<CommandPaletteMenuToggleRequest>>,
     mut palettes: Query<(&PaletteOpen, &PaletteSnapshot, &mut PaletteMenuState)>,
 ) {
@@ -479,7 +495,7 @@ fn toggle_palette_menu(
     menu.toggle(request.menu, &snapshot.0);
 }
 
-fn move_palette_menu_request(
+fn move_menu_request(
     trigger: On<UiInput<CommandPaletteMenuMoveRequest>>,
     mut palettes: Query<(&PaletteOpen, &PaletteSnapshot, &mut PaletteMenuState)>,
 ) {
@@ -493,7 +509,7 @@ fn move_palette_menu_request(
     menu.step(request.next, &snapshot.0);
 }
 
-fn highlight_palette_menu(
+fn highlight_menu(
     trigger: On<UiInput<CommandPaletteMenuHighlightRequest>>,
     mut palettes: Query<(&PaletteOpen, &PaletteSnapshot, &mut PaletteMenuState)>,
 ) {
@@ -507,7 +523,7 @@ fn highlight_palette_menu(
     menu.highlight(request.index as usize, &snapshot.0);
 }
 
-fn activate_palette_menu(
+fn activate_menu(
     trigger: On<UiInput<CommandPaletteMenuActivateRequest>>,
     mut palettes: Query<(
         &PaletteOpen,
@@ -616,7 +632,7 @@ fn activate_palette_menu(
     }
 }
 
-fn dismiss_palette_menu_request(
+fn dismiss_menu_request(
     trigger: On<UiInput<CommandPaletteMenuDismissRequest>>,
     mut palettes: Query<(&PaletteOpen, &mut PaletteMenuState)>,
 ) {
@@ -629,7 +645,7 @@ fn dismiss_palette_menu_request(
     menu.dismiss();
 }
 
-fn submit_palette(
+fn dispatch_submit(
     trigger: On<UiInput<CommandPaletteSubmitRequest>>,
     palettes: Query<(&PaletteOpen, &PaletteDraftInput, &PaletteSnapshot)>,
     mut commands: Commands,
@@ -678,7 +694,7 @@ fn submit_palette(
     commands.trigger(PaletteDecisionReady { target, decision });
 }
 
-fn activate_palette_row(
+fn activate_row(
     trigger: On<UiInput<CommandPaletteActivateRequest>>,
     palettes: Query<(&PaletteOpen, &PaletteDraftInput, &PaletteSnapshot)>,
     mut commands: Commands,
@@ -725,7 +741,7 @@ fn activate_palette_row(
     });
 }
 
-fn apply_palette_decision(
+fn apply_decision(
     trigger: On<PaletteDecisionReady>,
     mut inputs: Query<&mut PaletteDraftInput>,
     mut commands: Commands,
@@ -802,7 +818,7 @@ fn apply_palette_decision(
     }
 }
 
-fn apply_palette_key(
+fn apply_key(
     trigger: On<CommandDispatch>,
     keys: Query<&PaletteKeyBinding>,
     mut palettes: Query<(&mut PaletteDraftInput, &PaletteSnapshot)>,
@@ -863,7 +879,7 @@ fn apply_palette_key(
     input.input_revision = input.input_revision.wrapping_add(1).max(1);
 }
 
-fn submit_palette_command(
+fn submit(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<PaletteSubmitBinding>>,
     palettes: Query<&PaletteOpen>,
@@ -884,7 +900,7 @@ fn submit_palette_command(
     });
 }
 
-fn move_palette_menu(
+fn move_menu(
     trigger: On<CommandDispatch>,
     next: Query<(), With<PaletteMenuNextBinding>>,
     previous: Query<(), With<PaletteMenuPreviousBinding>>,
@@ -912,7 +928,7 @@ fn move_palette_menu(
     });
 }
 
-fn choose_palette_menu(
+fn choose_menu(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<PaletteMenuChooseBinding>>,
     palettes: Query<(&PaletteOpen, &PaletteMenuState)>,
@@ -934,7 +950,7 @@ fn choose_palette_menu(
     });
 }
 
-fn dismiss_palette_menu(
+fn dismiss_menu(
     trigger: On<CommandDispatch>,
     bindings: Query<(), With<PaletteMenuDismissBinding>>,
     palettes: Query<&PaletteOpen>,
@@ -955,7 +971,7 @@ fn dismiss_palette_menu(
     });
 }
 
-fn project_palette(
+fn project(
     mut palettes: Query<(
         &PaletteOpen,
         &PaletteDraftInput,
@@ -1029,7 +1045,7 @@ fn project_palette(
     }
 }
 
-fn publish_palette_snapshot(
+fn publish_snapshot(
     snapshots: Query<(Entity, &PaletteSnapshot), Changed<PaletteSnapshot>>,
     mut commands: Commands,
 ) {
@@ -1041,7 +1057,7 @@ fn publish_palette_snapshot(
     }
 }
 
-fn detach_palette_snapshot(
+fn detach_snapshot(
     pages: Query<
         Entity,
         (
@@ -1142,7 +1158,7 @@ impl RequestDelay {
 #[derive(Component)]
 struct PendingPaletteRequest;
 
-fn keep_palette_frames_coming(
+fn keep_frames_coming(
     pending: Query<(), With<PendingPaletteRequest>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
 ) {
@@ -1328,7 +1344,7 @@ mod tests {
     fn palette_history_is_recalled_in_host_state() {
         let open_id = OpenId(11);
         let mut app = App::new();
-        app.add_observer(move_palette_history);
+        app.add_observer(move_history);
         let page = app
             .world_mut()
             .spawn((

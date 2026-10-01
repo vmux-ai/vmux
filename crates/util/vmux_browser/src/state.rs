@@ -179,17 +179,17 @@ pub(crate) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_state_revision)
+        app.add_systems(Startup, spawn_revision)
             .add_systems(
                 Update,
-                mark_page_state_dirty
+                mark_page_dirty
                     .after(vmux_layout::LayoutCefStateSet::Apply)
                     .after(vmux_layout::stack::ComputeFocusSet),
             )
             .add_systems(
                 Update,
                 (
-                    push_layout_state_emit,
+                    push_layout_emit,
                     push_stacks_host_emit,
                     push_pane_tree_emit,
                     push_tabs_host_emit,
@@ -197,12 +197,12 @@ impl Plugin for StatePlugin {
                     push_update_notice_emit,
                     push_projects_host_emit,
                 )
-                    .after(mark_page_state_dirty),
+                    .after(mark_page_dirty),
             );
     }
 }
 
-fn spawn_state_revision(mut commands: Commands) {
+fn spawn_revision(mut commands: Commands) {
     commands.spawn((Name::new("Page state revision"), StateRevision::default()));
 }
 
@@ -514,7 +514,7 @@ impl PageStateRemovals<'_, '_> {
     }
 }
 
-fn mark_page_state_dirty(
+fn mark_page_dirty(
     changes: StateChanges,
     mut removals: PageStateRemovals,
     focused_window: FocusedWindow,
@@ -532,7 +532,7 @@ fn mark_page_state_dirty(
     }
 }
 
-fn push_layout_state_emit(
+fn push_layout_emit(
     mut projection: LayoutProjection,
     header_q: Query<(Entity, Has<Open>, Option<&ComputedNode>), With<Header>>,
     side_sheet_q: Query<(Entity, &SideSheetPosition, Has<Open>, &Node), With<SideSheet>>,

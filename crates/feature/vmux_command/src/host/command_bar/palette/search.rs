@@ -21,10 +21,10 @@ pub(super) struct PaletteSearchPlugin;
 
 impl Plugin for PaletteSearchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(update_palette_search_draft)
-            .add_observer(receive_palette_completion)
-            .add_observer(receive_palette_history)
-            .add_systems(PreUpdate, attach_palette_search)
+        app.add_observer(update_draft)
+            .add_observer(receive_completion)
+            .add_observer(receive_history)
+            .add_systems(PreUpdate, attach)
             .add_systems(
                 Update,
                 (dispatch_completion_request, dispatch_history_request),
@@ -41,7 +41,7 @@ pub(super) struct PaletteSearch {
     history_generation: RequestGeneration,
 }
 
-fn attach_palette_search(
+fn attach(
     pages: Query<
         Entity,
         (
@@ -56,7 +56,7 @@ fn attach_palette_search(
     }
 }
 
-fn update_palette_search_draft(
+fn update_draft(
     trigger: On<UiInput<CommandPaletteDraftRequest>>,
     mut palettes: Query<(&mut PaletteSearch, &mut PaletteSnapshot)>,
     mut commands: Commands,
@@ -88,7 +88,7 @@ fn update_palette_search_draft(
     request_history_suggestions(target, &mut search, &mut snapshot, &mut commands);
 }
 
-fn receive_palette_completion(
+fn receive_completion(
     trigger: On<UiStateWrite<CommandBarUiState>>,
     mut palettes: Query<(&PaletteSearch, &mut PaletteSnapshot)>,
 ) {
@@ -110,7 +110,7 @@ fn receive_palette_completion(
     snapshot.0.completions_total = response.total;
 }
 
-fn receive_palette_history(
+fn receive_history(
     trigger: On<UiStateWrite<CommandBarUiState>>,
     mut palettes: Query<(&PaletteSearch, &mut PaletteSnapshot)>,
 ) {

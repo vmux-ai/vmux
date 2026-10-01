@@ -39,16 +39,16 @@ impl Plugin for ControllerPlugin {
             GitStashSelectRequest,
             GitDiscardFileRequest,
         )>::default())
-            .add_observer(on_ui_state_write)
-            .add_observer(on_key_request)
-            .add_observer(on_panel_select_request)
-            .add_observer(on_shortcut_help_request)
-            .add_observer(on_file_select_request)
+            .add_observer(ui_state_write)
+            .add_observer(key_request)
+            .add_observer(panel_select_request)
+            .add_observer(shortcut_help_request)
+            .add_observer(file_select_request)
             .add_observer(select_branch_collection)
-            .add_observer(on_branch_select_request)
-            .add_observer(on_commit_select_request)
-            .add_observer(on_stash_select_request)
-            .add_observer(on_discard_file_request);
+            .add_observer(branch_select_request)
+            .add_observer(commit_select_request)
+            .add_observer(stash_select_request)
+            .add_observer(discard_file_request);
     }
 }
 
@@ -705,7 +705,7 @@ impl SelectionDirection {
     }
 }
 
-fn on_ui_state_write(
+fn ui_state_write(
     trigger: On<UiStateWrite<GitUiState>>,
     mut pages: Query<(
         &mut GitState,
@@ -768,7 +768,7 @@ fn on_ui_state_write(
     });
 }
 
-fn on_key_request(
+fn key_request(
     trigger: On<UiInput<GitKeyRequest>>,
     mut pages: Query<(&GitState, &mut GitController)>,
     mut commands: Commands,
@@ -790,7 +790,7 @@ fn on_key_request(
     }
 }
 
-fn on_panel_select_request(
+fn panel_select_request(
     trigger: On<UiInput<GitPanelSelectRequest>>,
     mut pages: Query<(&GitState, &mut GitController)>,
     mut commands: Commands,
@@ -803,7 +803,7 @@ fn on_panel_select_request(
     request_branch_log(&controller, webview, state, &mut commands);
 }
 
-fn on_shortcut_help_request(
+fn shortcut_help_request(
     trigger: On<UiInput<GitShortcutHelpRequest>>,
     mut pages: Query<&mut GitController>,
 ) {
@@ -813,7 +813,7 @@ fn on_shortcut_help_request(
     controller.state.shortcut_help_visible = trigger.event().payload.visible;
 }
 
-fn on_file_select_request(
+fn file_select_request(
     trigger: On<UiInput<GitFileSelectRequest>>,
     mut pages: Query<(&GitState, &mut GitController)>,
 ) {
@@ -842,7 +842,7 @@ fn select_branch_collection(
     request_branch_log(&controller, webview, state, &mut commands);
 }
 
-fn on_branch_select_request(
+fn branch_select_request(
     trigger: On<UiInput<GitBranchSelectRequest>>,
     mut pages: Query<(&GitState, &mut GitController)>,
     mut commands: Commands,
@@ -859,7 +859,7 @@ fn on_branch_select_request(
     }
 }
 
-fn on_commit_select_request(
+fn commit_select_request(
     trigger: On<UiInput<GitCommitSelectRequest>>,
     mut pages: Query<(&GitState, &mut GitController)>,
 ) {
@@ -872,7 +872,7 @@ fn on_commit_select_request(
     controller.select_commit(&trigger.event().payload.commit, repository);
 }
 
-fn on_stash_select_request(
+fn stash_select_request(
     trigger: On<UiInput<GitStashSelectRequest>>,
     mut pages: Query<(&GitState, &mut GitController)>,
 ) {
@@ -885,7 +885,7 @@ fn on_stash_select_request(
     controller.select_stash(&trigger.event().payload.reference, repository);
 }
 
-fn on_discard_file_request(
+fn discard_file_request(
     trigger: On<UiInput<GitDiscardFileRequest>>,
     mut pages: Query<(&GitState, &mut GitController)>,
     mut commands: Commands,

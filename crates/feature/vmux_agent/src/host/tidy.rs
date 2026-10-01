@@ -28,7 +28,7 @@ impl bevy::app::Plugin for Plugin {
             .add_message::<CloseStackRequest>()
             .add_message::<SettingsSaveRequest>()
             .add_plugins(UiEventPlugin::<(FileTidyRequest,)>::default())
-            .add_observer(on_request)
+            .add_observer(request)
             .add_systems(
                 Update,
                 attention
@@ -45,7 +45,7 @@ struct PendingTidy {
     closable: Vec<Entity>,
 }
 
-fn on_request(
+fn request(
     trigger: On<UiInput<FileTidyRequest>>,
     child_of: Query<&ChildOf>,
     pending: Query<&PendingTidy>,

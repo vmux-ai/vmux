@@ -24,7 +24,7 @@ impl Plugin for VaultToolPlugin {
             .add_message::<ServiceRequest>()
             .register_tool::<VaultStatusArgs>()
             .register_tool::<OpenVaultArgs>()
-            .add_systems(Update, (status, open_vault).in_set(ToolDispatchSet));
+            .add_systems(Update, (status, open).in_set(ToolDispatchSet));
     }
 }
 
@@ -34,8 +34,8 @@ impl Plugin for VaultAgentPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(VaultToolPlugin)
             .add_message::<VaultStatusRequest>()
-            .add_systems(Update, route_vault_queries.in_set(ToolQueryRouteSet))
-            .add_systems(Update, answer_vault_queries.after(ToolQueryRouteSet));
+            .add_systems(Update, route_queries.in_set(ToolQueryRouteSet))
+            .add_systems(Update, answer_queries.after(ToolQueryRouteSet));
     }
 }
 
@@ -72,7 +72,7 @@ fn status(mut commands: Commands, calls: Query<Entity, AddedTool<VaultStatusArgs
     }
 }
 
-fn open_vault(
+fn open(
     mut commands: Commands,
     requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &OpenVaultArgs), Added<OpenVaultArgs>>,
 ) {
@@ -102,7 +102,7 @@ fn open_vault(
     }
 }
 
-fn route_vault_queries(
+fn route_queries(
     mut queries: MessageReader<ToolQueryRequest>,
     mut handled: MessageWriter<ToolQueryHandled>,
     mut vault: MessageWriter<VaultStatusRequest>,
@@ -129,7 +129,7 @@ fn route_vault_queries(
     }
 }
 
-fn answer_vault_queries(
+fn answer_queries(
     mut requests: MessageReader<VaultStatusRequest>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {

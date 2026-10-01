@@ -48,7 +48,7 @@ impl Plugin for AgentTerminalPlugin {
             .add_message::<ProcessStackSpawnRequest>()
             .add_systems(
                 Update,
-                (open_terminal_tab, run_shell, send_to_terminal)
+                (open_tab, run_shell, send_to)
                     .after(AgentRequestRouteSet)
                     .before(respond_process_stack_spawn),
             );
@@ -65,7 +65,7 @@ struct ProcessStackSpawnRequest {
     activate: bool,
 }
 
-fn open_terminal_tab(
+fn open_tab(
     mut requests: MessageReader<AgentRequestMessage<AgentNewTerminalTab>>,
     focus: FocusedStack,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -139,7 +139,7 @@ fn run_shell(
     }
 }
 
-fn send_to_terminal(
+fn send_to(
     mut requests: MessageReader<AgentRequestMessage<AgentTerminalSend>>,
     mut send: MessageWriter<super::TerminalSendRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,

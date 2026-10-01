@@ -21,9 +21,9 @@ pub(crate) struct NavigationPlugin;
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<crate::lsp::manager::LspGoto>()
-            .add_observer(on_file_open)
-            .add_observer(on_knowledge_link_open)
-            .add_observer(apply_file_navigation)
+            .add_observer(file_open)
+            .add_observer(knowledge_link_open)
+            .add_observer(apply_file)
             .add_systems(Update, (apply_goto, apply_pending_goto));
     }
 }
@@ -68,13 +68,13 @@ impl PendingGoto {
     }
 }
 
-fn on_file_open(trigger: On<UiInput<FileOpenEvent>>, mut commands: Commands) {
+fn file_open(trigger: On<UiInput<FileOpenEvent>>, mut commands: Commands) {
     let entity = trigger.event().webview;
     let path = PathBuf::from(&trigger.event().payload.path);
     commands.trigger(FileNavigateRequest::new(entity, path, 0));
 }
 
-fn apply_file_navigation(
+fn apply_file(
     trigger: On<FileNavigateRequest>,
     mut views: Query<(
         &mut FileView,
@@ -145,7 +145,7 @@ fn apply_file_navigation(
         .remove::<crate::lsp::manager::LintRan>();
 }
 
-fn on_knowledge_link_open(
+fn knowledge_link_open(
     trigger: On<UiInput<KnowledgeLinkOpen>>,
     mut goto: MessageWriter<crate::lsp::manager::LspGoto>,
     browsers: NonSend<Browsers>,

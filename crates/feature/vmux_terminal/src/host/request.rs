@@ -17,7 +17,7 @@ impl Plugin for TerminalRequestPlugin {
         }
         app.add_systems(
             Update,
-            (handle_terminal_send_requests, handle_run_shell_requests).after(ServiceMessageSet),
+            (handle_send_requests, handle_run_shell_requests).after(ServiceMessageSet),
         );
     }
 }
@@ -41,7 +41,7 @@ pub struct RunShellRequest {
     pub mode: ShellMode,
 }
 
-fn handle_terminal_send_requests(
+fn handle_send_requests(
     mut reader: MessageReader<TerminalSendRequest>,
     focus: vmux_layout::stack::FocusedStack,
     process_index: Single<&TerminalProcessIndex>,

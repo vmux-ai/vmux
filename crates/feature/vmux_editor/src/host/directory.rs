@@ -34,20 +34,20 @@ impl Plugin for DirectoryPlugin {
             .add_systems(
                 Update,
                 (
-                    initialize_directory.after(EditorFileLoadedSet),
-                    publish_directory.after(initialize_directory),
+                    initialize.after(EditorFileLoadedSet),
+                    publish.after(initialize),
                 ),
             )
-            .add_observer(on_select)
-            .add_observer(on_next)
-            .add_observer(on_previous)
-            .add_observer(on_ascend)
-            .add_observer(on_descend)
-            .add_observer(on_activate)
-            .add_observer(on_parent)
-            .add_observer(on_open)
-            .add_observer(on_back)
-            .add_observer(on_toggle_hidden);
+            .add_observer(select)
+            .add_observer(next)
+            .add_observer(previous)
+            .add_observer(ascend)
+            .add_observer(descend)
+            .add_observer(activate)
+            .add_observer(parent)
+            .add_observer(open)
+            .add_observer(back)
+            .add_observer(toggle_hidden);
     }
 }
 
@@ -138,7 +138,7 @@ type DirectoryProjection<'w, 's> = Query<
     With<vmux_core::page::PageReady>,
 >;
 
-fn initialize_directory(
+fn initialize(
     mut directories: Query<
         (
             Entity,
@@ -169,11 +169,7 @@ fn initialize_directory(
     }
 }
 
-fn publish_directory(
-    directories: DirectoryProjection,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
+fn publish(directories: DirectoryProjection, browsers: NonSend<Browsers>, mut commands: Commands) {
     for (entity, file, directory, navigation) in &directories {
         if !directory.is_changed() && !navigation.is_changed() {
             continue;
@@ -212,7 +208,7 @@ fn publish_directory(
     }
 }
 
-fn on_select(
+fn select(
     trigger: On<UiInput<FileDirectorySelectRequest>>,
     directories: Query<&FileDir>,
     mut navigation: Query<&mut FileDirectoryNavigation>,
@@ -231,7 +227,7 @@ fn on_select(
     navigation.selected = index.min(visible.len().saturating_sub(1));
 }
 
-fn on_next(
+fn next(
     trigger: On<UiInput<FileDirectoryNextRequest>>,
     directories: Query<&FileDir>,
     mut navigation: Query<&mut FileDirectoryNavigation>,
@@ -247,7 +243,7 @@ fn on_next(
     navigation.selected = (navigation.selected + 1).min(len.saturating_sub(1));
 }
 
-fn on_previous(
+fn previous(
     trigger: On<UiInput<FileDirectoryPreviousRequest>>,
     mut navigation: Query<&mut FileDirectoryNavigation>,
 ) {
@@ -257,7 +253,7 @@ fn on_previous(
     navigation.selected = navigation.selected.saturating_sub(1);
 }
 
-fn on_ascend(
+fn ascend(
     trigger: On<UiInput<FileDirectoryAscendRequest>>,
     navigation: Query<&FileDirectoryNavigation>,
     mut commands: Commands,
@@ -279,7 +275,7 @@ fn on_ascend(
     ));
 }
 
-fn on_descend(
+fn descend(
     trigger: On<UiInput<FileDirectoryDescendRequest>>,
     directories: Query<&FileDir>,
     navigation: Query<&FileDirectoryNavigation>,
@@ -305,7 +301,7 @@ fn on_descend(
     commands.trigger(FileNavigateRequest::new(entity, path, 0));
 }
 
-fn on_activate(
+fn activate(
     trigger: On<UiInput<FileDirectoryActivateRequest>>,
     directories: Query<&FileDir>,
     views: Query<&FileView>,
@@ -337,7 +333,7 @@ fn on_activate(
     commands.trigger(FileNavigateRequest::new(entity, path, 0));
 }
 
-fn on_parent(
+fn parent(
     trigger: On<UiInput<FileDirectoryParentRequest>>,
     views: Query<&FileView>,
     navigation: Query<&FileDirectoryNavigation>,
@@ -363,7 +359,7 @@ fn on_parent(
     ));
 }
 
-fn on_open(
+fn open(
     trigger: On<UiInput<FileDirectoryOpenRequest>>,
     views: Query<&FileView>,
     mut commands: Commands,
@@ -388,7 +384,7 @@ fn on_open(
     commands.trigger(FileNavigateRequest::new(entity, path, 0));
 }
 
-fn on_back(
+fn back(
     trigger: On<UiInput<FileDirectoryBackRequest>>,
     back: Query<&FileBackDirectory>,
     mut commands: Commands,
@@ -403,7 +399,7 @@ fn on_back(
     commands.trigger(FileNavigateRequest::new(entity, back.path.clone(), 0));
 }
 
-fn on_toggle_hidden(
+fn toggle_hidden(
     trigger: On<UiInput<FileDirectoryToggleHiddenRequest>>,
     directories: Query<&FileDir>,
     mut navigation: Query<&mut FileDirectoryNavigation>,

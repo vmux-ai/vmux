@@ -114,10 +114,7 @@ impl AgentRequestAppExt for App {
                 )
                     .chain(),
             )
-            .add_systems(
-                Update,
-                route_agent_requests::<T>.in_set(AgentRequestRouteSet),
-            )
+            .add_systems(Update, route_requests::<T>.in_set(AgentRequestRouteSet))
     }
 
     fn add_agent_message<T>(&mut self) -> &mut Self
@@ -131,14 +128,11 @@ impl AgentRequestAppExt for App {
     {
         self.add_agent_request::<T>()
             .add_message::<T>()
-            .add_systems(
-                Update,
-                forward_agent_messages::<T>.in_set(AgentRequestApplySet),
-            )
+            .add_systems(Update, forward_messages::<T>.in_set(AgentRequestApplySet))
     }
 }
 
-fn route_agent_requests<T>(
+fn route_requests<T>(
     mut requests: MessageReader<AgentRequestInput>,
     mut routed: MessageWriter<AgentRequestMessage<T>>,
     mut responses: MessageWriter<AgentCommandResponse>,
@@ -165,7 +159,7 @@ fn route_agent_requests<T>(
     }
 }
 
-fn forward_agent_messages<T>(
+fn forward_messages<T>(
     mut requests: MessageReader<AgentRequestMessage<T>>,
     mut messages: MessageWriter<T>,
     mut responses: MessageWriter<AgentCommandResponse>,

@@ -38,27 +38,23 @@ impl Plugin for WorkspacePersistencePlugin {
             .add_observer(load_on_default_event)
             .add_systems(
                 Startup,
-                (
-                    spawn_space_persistence,
-                    ApplyDeferred,
-                    load_space_on_startup,
-                )
+                (spawn, ApplyDeferred, load_on_startup)
                     .chain()
                     .in_set(LayoutStartupSet::Persistence),
             )
             .add_observer(mark_restore_pending)
-            .add_observer(mark_persistence_dirty)
+            .add_observer(mark_dirty)
             .add_systems(
                 Update,
                 complete_restore
                     .after(LayoutPersistenceSet::Restore)
                     .run_if(any_with_component::<RestorePending>),
             )
-            .add_systems(Update, (auto_save, handle_save_space_requests));
+            .add_systems(Update, (auto_save, handle_save_requests));
     }
 }
 
-fn spawn_space_persistence(registry: Res<AppTypeRegistry>, mut commands: Commands) {
+fn spawn(registry: Res<AppTypeRegistry>, mut commands: Commands) {
     let components = persisted_components(&registry.read())
         .allow::<Save>()
         .allow::<ChildOf>()
@@ -76,7 +72,7 @@ fn spawn_space_persistence(registry: Res<AppTypeRegistry>, mut commands: Command
     ));
 }
 
-fn handle_save_space_requests(
+fn handle_save_requests(
     mut requests: MessageReader<WorkspaceSaveRequest>,
     save_entities: SpaceSaveEntities,
     persistence: Single<&AutoSave>,
@@ -179,7 +175,7 @@ impl WorkspaceStorePath {
     }
 }
 
-fn mark_persistence_dirty(_trigger: On<PersistenceDirty>, mut auto_save: Single<&mut AutoSave>) {
+fn mark_dirty(_trigger: On<PersistenceDirty>, mut auto_save: Single<&mut AutoSave>) {
     auto_save.dirty = true;
     auto_save.debounce.reset();
 }
@@ -250,7 +246,7 @@ fn save_space_to_path_excluding(
     commands.trigger_save(save);
 }
 
-fn load_space_on_startup(
+fn load_on_startup(
     registry: Res<AppTypeRegistry>,
     validators: WorkspaceStoreValidators,
     mut restore: Single<&mut WorkspaceRestore>,
@@ -402,7 +398,7 @@ mod tests {
             })
             .id();
         app.register_persisted::<ArchivedPage>()
-            .add_observer(mark_persistence_dirty);
+            .add_observer(mark_dirty);
         app.update();
         app.world_mut()
             .get_mut::<AutoSave>(auto_save)
@@ -426,7 +422,7 @@ mod tests {
             })
             .id();
         app.register_persisted::<vmux_history::Visit>()
-            .add_observer(mark_persistence_dirty);
+            .add_observer(mark_dirty);
         app.update();
         app.world_mut()
             .get_mut::<AutoSave>(auto_save)
@@ -449,8 +445,7 @@ mod tests {
                 components: WorldFilter::allow_all(),
             })
             .id();
-        app.register_persisted::<Tab>()
-            .add_observer(mark_persistence_dirty);
+        app.register_persisted::<Tab>().add_observer(mark_dirty);
         let tab = app.world_mut().spawn(Tab::default()).id();
         app.update();
         app.world_mut()
@@ -481,7 +476,7 @@ mod tests {
             })
             .id();
         app.register_persisted::<TabWorkspace>()
-            .add_observer(mark_persistence_dirty);
+            .add_observer(mark_dirty);
         let tab = app.world_mut().spawn(Tab::default()).id();
         app.update();
         app.world_mut()
@@ -511,7 +506,7 @@ mod tests {
             .id();
         app.register_persisted::<Tab>()
             .register_persisted::<TabWorktree>()
-            .add_observer(mark_persistence_dirty);
+            .add_observer(mark_dirty);
         let tab = app
             .world_mut()
             .spawn((

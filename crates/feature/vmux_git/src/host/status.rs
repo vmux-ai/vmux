@@ -21,15 +21,15 @@ pub(super) struct StatusPlugin;
 
 impl Plugin for StatusPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_file_git_added).add_systems(
+        app.add_observer(file_added).add_systems(
             Update,
             (
                 refresh_changed_sources,
-                start_status_refreshes,
-                poll_status_refreshes,
-                poll_status_tasks,
-                dispatch_status_requests,
-                publish_file_git_state,
+                start_refreshes,
+                poll_refreshes,
+                poll_tasks,
+                dispatch_requests,
+                publish_file_state,
             )
                 .chain()
                 .in_set(GitUpdateSet::Status),
@@ -211,7 +211,7 @@ struct GitStatusResult {
 
 struct GitStatusResults(Vec<GitStatusResult>);
 
-fn on_file_git_added(
+fn file_added(
     trigger: On<Add, FileGit>,
     mut files: Query<&mut FileGit>,
     wake: Option<Res<EventLoopProxyWrapper>>,
@@ -241,7 +241,7 @@ fn refresh_changed_sources(
     }
 }
 
-fn start_status_refreshes(
+fn start_refreshes(
     refreshes: Query<(Entity, &GitStatusRefresh), Added<GitStatusRefresh>>,
     mut commands: Commands,
 ) {
@@ -264,7 +264,7 @@ fn start_status_refreshes(
     }
 }
 
-fn poll_status_refreshes(
+fn poll_refreshes(
     mut refreshes: Query<(
         Entity,
         &mut GitStatusRefreshTask,
@@ -313,7 +313,7 @@ fn poll_status_refreshes(
     }
 }
 
-fn poll_status_tasks(
+fn poll_tasks(
     mut tasks: Query<(Entity, &mut GitStatusTask)>,
     mut files: Query<&mut FileGit>,
     mut commands: Commands,
@@ -351,7 +351,7 @@ fn poll_status_tasks(
     }
 }
 
-fn dispatch_status_requests(
+fn dispatch_requests(
     pending: Query<(Entity, &PendingGitStatus)>,
     tasks: Query<&GitStatusTask>,
     wake: Option<Res<EventLoopProxyWrapper>>,
@@ -439,7 +439,7 @@ fn dispatch_status_requests(
     }
 }
 
-fn publish_file_git_state(
+fn publish_file_state(
     files: Query<(Entity, &FileGit), Changed<FileGit>>,
     pages: Query<(), With<FileUiStateUpdates>>,
     mut commands: Commands,

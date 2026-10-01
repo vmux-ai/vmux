@@ -33,7 +33,7 @@ impl Plugin for WorkspaceAgentPlugin {
             .add_observer(initialize_git_agent_choice)
             .add_systems(
                 Update,
-                drain_workspace_picker_tasks
+                drain_picker_tasks
                     .after(AgentWorkspaceRequestSet)
                     .in_set(WriteCommandRequests)
                     .after(ServiceMessageSet),
@@ -437,7 +437,7 @@ impl ExistingWorktreeCandidates {
     }
 }
 
-fn drain_workspace_picker_tasks(
+fn drain_picker_tasks(
     mut pickers: Query<(Entity, &mut PendingWorkspacePicker)>,
     chat_views: Query<(), With<ChatView>>,
     mut workspace: AgentWorkspaceState,

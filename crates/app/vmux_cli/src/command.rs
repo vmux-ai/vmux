@@ -20,8 +20,8 @@ pub struct CliRuntimePlugin;
 impl Plugin for CliRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.set_runner(CliRunner::run)
-            .add_systems(First, collect_cli_catalog)
-            .add_systems(PreUpdate, parse_cli_arguments)
+            .add_systems(First, collect_catalog)
+            .add_systems(PreUpdate, parse_arguments)
             .add_systems(Last, exit_with_result);
     }
 }
@@ -47,7 +47,7 @@ impl CliRunner {
 #[derive(Component)]
 struct CliArguments(Vec<OsString>);
 
-fn collect_cli_catalog(
+fn collect_catalog(
     processes: Query<Entity, (With<CliArguments>, Without<CliCatalog>)>,
     manifests: Query<&FeatureManifest>,
     mut commands: Commands,
@@ -85,7 +85,7 @@ fn collect_cli_catalog(
     }
 }
 
-fn parse_cli_arguments(
+fn parse_arguments(
     processes: Query<(Entity, &CliArguments, &CliCatalog), Without<CliInvocation>>,
     mut exits: MessageWriter<AppExit>,
     mut commands: Commands,

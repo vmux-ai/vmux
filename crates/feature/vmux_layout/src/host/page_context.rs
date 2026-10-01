@@ -17,8 +17,8 @@ pub struct PageContextPlugin;
 impl Plugin for PageContextPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(ProjectActivateRequest,)>::default())
-            .add_observer(on_git_page_ready)
-            .add_observer(on_project_activate);
+            .add_observer(git_page_ready)
+            .add_observer(project_activate);
     }
 }
 
@@ -145,7 +145,7 @@ fn apply_tab_workspace_selection(
     selection.startup_dir
 }
 
-fn on_git_page_ready(
+fn git_page_ready(
     trigger: On<UiInput<PageReady>>,
     tabs: TabHierarchy,
     pages: Query<&vmux_core::PageMetadata>,
@@ -177,7 +177,7 @@ fn on_git_page_ready(
     );
 }
 
-fn on_project_activate(
+fn project_activate(
     trigger: On<UiInput<ProjectActivateRequest>>,
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<Tab>>,
@@ -276,7 +276,7 @@ mod tests {
     fn git_page_ready_publishes_page_context() {
         let mut app = App::new();
         app.init_resource::<ContextWrites>()
-            .add_observer(on_git_page_ready)
+            .add_observer(git_page_ready)
             .add_observer(capture_context);
         let webview = app
             .world_mut()
@@ -304,7 +304,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
-            .add_observer(on_project_activate);
+            .add_observer(project_activate);
         let tab = app.world_mut().spawn(Tab::default()).id();
         let webview = app.world_mut().spawn(ChildOf(tab)).id();
 

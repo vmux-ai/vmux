@@ -8,9 +8,11 @@ use std::{
 use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
 
 use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use sha2::{Digest, Sha256};
 
 use crate::tab::{Tab, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
+use vmux_core::{PageOpenDeferred, PageOpenError};
 use vmux_git::worktree::{self, CheckoutInfo};
 
 impl Plugin for WorktreePlugin {
@@ -22,7 +24,9 @@ impl Plugin for WorktreePlugin {
                 (
                     ensure_tab_workspaces,
                     queue_added_tab_worktrees,
-                    reconcile_next_tab_worktree,
+                    start_reconcile,
+                    finish_reconcile,
+                    resume_page_open,
                 )
                     .chain(),
             )
@@ -30,7 +34,7 @@ impl Plugin for WorktreePlugin {
                 Update,
                 rebind_tab_directories
                     .in_set(TabDirectoryRebindSet)
-                    .after(reconcile_next_tab_worktree),
+                    .after(finish_reconcile),
             );
     }
 }
@@ -68,7 +72,20 @@ pub struct TabWorktreeReady {
 }
 
 #[derive(Component)]
-struct WorktreeReconcilePending;
+pub struct TabWorktreePending;
+
+#[derive(Component)]
+struct TabWorktreeTask {
+    startup_dir: Option<String>,
+    workspace: TabWorkspace,
+    metadata: TabWorktree,
+    task: Task<Result<TabWorktreeActivation, String>>,
+}
+
+#[derive(Component, Clone, Copy)]
+pub struct PageOpenWaitForWorktree {
+    pub tab: Entity,
+}
 
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TabDirectoryRebindSet;
@@ -510,30 +527,86 @@ fn queue_added_tab_worktrees(
 ) {
     for (entity, ready) in &worktrees {
         if ready.is_none() {
-            commands.entity(entity).insert(WorktreeReconcilePending);
+            commands.entity(entity).insert(TabWorktreePending);
         }
     }
 }
 
-fn reconcile_next_tab_worktree(
-    pending: Query<Entity, With<WorktreeReconcilePending>>,
-    mut q: Query<(&mut Tab, &TabWorkspace, &TabWorktree), Without<TabWorktreeReady>>,
+fn start_reconcile(
+    pending: Query<Entity, (With<TabWorktreePending>, Without<TabWorktreeTask>)>,
+    tabs: Query<(&Tab, &TabWorkspace, &TabWorktree), Without<TabWorktreeReady>>,
     managed_root: Res<ManagedWorktreeRoot>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     for entity in &pending {
-        commands.entity(entity).remove::<WorktreeReconcilePending>();
-        let Ok((mut tab, workspace, metadata)) = q.get_mut(entity) else {
+        let Ok((tab, workspace, metadata)) = tabs.get(entity) else {
+            commands.entity(entity).remove::<TabWorktreePending>();
             continue;
         };
-        match ensure_tab_worktree_available(&tab, workspace, metadata, &managed_root.0) {
+        let startup_dir = tab.startup_dir.clone();
+        let tab = Tab {
+            name: tab.name.clone(),
+            startup_dir: tab.startup_dir.clone(),
+        };
+        let workspace = workspace.clone();
+        let metadata = metadata.clone();
+        let task_workspace = workspace.clone();
+        let task_metadata = metadata.clone();
+        let root = managed_root.0.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result =
+                ensure_tab_worktree_available(&tab, &task_workspace, &task_metadata, &root);
+            if let Some(wake) = wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands.entity(entity).insert(TabWorktreeTask {
+            startup_dir,
+            workspace,
+            metadata,
+            task,
+        });
+        break;
+    }
+}
+
+fn finish_reconcile(
+    mut pending: Query<(Entity, &mut TabWorktreeTask)>,
+    mut tabs: Query<(&mut Tab, Option<&TabWorkspace>, Option<&TabWorktree>)>,
+    mut commands: Commands,
+) {
+    for (entity, mut pending) in &mut pending {
+        let Some(result) = future::block_on(future::poll_once(&mut pending.task)) else {
+            continue;
+        };
+        let Ok((mut tab, workspace, metadata)) = tabs.get_mut(entity) else {
+            commands
+                .entity(entity)
+                .remove::<(TabWorktreeTask, TabWorktreePending)>();
+            continue;
+        };
+        if tab.startup_dir != pending.startup_dir
+            || workspace != Some(&pending.workspace)
+            || metadata != Some(&pending.metadata)
+        {
+            commands
+                .entity(entity)
+                .remove::<TabWorktreeTask>()
+                .insert(TabWorktreePending);
+            continue;
+        }
+        let mut entity_commands = commands.entity(entity);
+        entity_commands.remove::<(TabWorktreeTask, TabWorktreePending)>();
+        match result {
             Ok(activation) => {
                 let startup_dir = activation.execution_dir.to_string_lossy().into_owned();
                 if tab.startup_dir.as_deref() != Some(&startup_dir) {
                     tab.startup_dir = Some(startup_dir);
                 }
-                let mut entity_commands = commands.entity(entity);
-                if metadata != &activation.metadata {
+                if metadata != Some(&activation.metadata) {
                     entity_commands.insert(activation.metadata);
                 }
                 entity_commands
@@ -541,12 +614,50 @@ fn reconcile_next_tab_worktree(
                     .remove::<TabWorktreeUnavailable>();
             }
             Err(message) => {
-                commands
-                    .entity(entity)
-                    .insert(TabWorktreeUnavailable { message });
+                entity_commands.insert(TabWorktreeUnavailable { message });
             }
         }
-        break;
+    }
+}
+
+fn resume_page_open(
+    waiting: Query<(Entity, &PageOpenWaitForWorktree)>,
+    tabs: Query<(
+        Has<TabWorktreePending>,
+        Has<TabWorktreeTask>,
+        Option<&TabWorktreeReady>,
+        Option<&TabWorktreeUnavailable>,
+    )>,
+    mut commands: Commands,
+) {
+    for (entity, waiting) in &waiting {
+        let Ok((pending, running, ready, unavailable)) = tabs.get(waiting.tab) else {
+            commands
+                .entity(entity)
+                .remove::<(PageOpenWaitForWorktree, PageOpenDeferred)>()
+                .insert(PageOpenError {
+                    message: "tab closed while preparing its worktree".to_string(),
+                });
+            continue;
+        };
+        if pending || running {
+            continue;
+        }
+        if let Some(unavailable) = unavailable {
+            commands
+                .entity(entity)
+                .remove::<(PageOpenWaitForWorktree, PageOpenDeferred)>()
+                .insert(PageOpenError {
+                    message: unavailable.message.clone(),
+                });
+            continue;
+        }
+        if ready.is_none() {
+            continue;
+        }
+        commands
+            .entity(entity)
+            .remove::<(PageOpenWaitForWorktree, PageOpenDeferred)>();
     }
 }
 

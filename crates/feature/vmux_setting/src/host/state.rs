@@ -41,8 +41,8 @@ impl Plugin for StatePlugin {
                 HostedUiPlugin::<Settings>::new(super::SettingsPlugin::MANIFEST),
                 UiEventPlugin::<(SettingsRequest, CheckForUpdatesEvent)>::default(),
             ))
-            .add_observer(on_settings_request)
-            .add_observer(on_check_for_updates)
+            .add_observer(settings_request)
+            .add_observer(check_for_updates)
             .add_systems(
                 Update,
                 handle_open_settings_command
@@ -115,7 +115,7 @@ impl Settings {
     }
 }
 
-fn on_settings_request(
+fn settings_request(
     trigger: On<UiInput<SettingsRequest>>,
     mut settings: ResMut<AppSettings>,
     mut writes: MessageWriter<SettingsWriteRequest>,
@@ -136,7 +136,7 @@ fn on_settings_request(
     }
 }
 
-fn on_check_for_updates(
+fn check_for_updates(
     _trigger: On<UiInput<CheckForUpdatesEvent>>,
     mut requests: MessageWriter<CheckForUpdatesRequest>,
 ) {

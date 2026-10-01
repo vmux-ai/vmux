@@ -16,13 +16,13 @@ impl Plugin for RoomPlugin {
         app.add_message::<RoomOpReceived>()
             .add_message::<RoomOpCommitted>()
             .add_message::<CrdtChangeReceived>()
-            .add_systems(Startup, spawn_room_registry)
+            .add_systems(Startup, spawn_registry)
             .add_systems(
                 PostUpdate,
                 (
                     ensure_implicit_rooms,
-                    sync_room_messages,
-                    sync_room_titles,
+                    sync_messages,
+                    sync_titles,
                     cleanup_orphaned_rooms,
                 )
                     .chain(),
@@ -65,7 +65,7 @@ impl RoomEvents {
     }
 }
 
-fn spawn_room_registry(mut commands: Commands) {
+fn spawn_registry(mut commands: Commands) {
     commands.spawn((Name::new("Chat room registry"), RoomRegistry::default()));
 }
 
@@ -291,7 +291,7 @@ fn materialize_events(
     }
 }
 
-fn sync_room_messages(
+fn sync_messages(
     mut commands: Commands,
     sessions: Query<(&AgentMessages, &RoomAgentBinding, &AcpSession), Changed<AgentMessages>>,
     mut registry: Single<&mut RoomRegistry>,
@@ -354,7 +354,7 @@ fn sync_room_messages(
     }
 }
 
-fn sync_room_titles(
+fn sync_titles(
     sessions: Query<(&AgentConversationTitle, &RoomAgentBinding), Changed<AgentConversationTitle>>,
     registry: Single<&RoomRegistry>,
     mut metadata: Query<&mut RoomMetadata>,

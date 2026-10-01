@@ -27,22 +27,19 @@ impl Plugin for KeyboardPlugin {
         app.add_message::<NativeKeyInput>()
             .add_message::<ExitFullscreenShortcut>()
             .add_message::<HideWindowsShortcut>()
-            .add_systems(
-                Startup,
-                (spawn_keyboard_bridge, spawn_application_key_bindings),
-            )
+            .add_systems(Startup, (spawn_bridge, spawn_application_key_bindings))
             .add_systems(Update, install_monitor)
             .add_systems(
                 Update,
-                sync_keyboard_context
+                sync_context
                     .after(KeyboardContextSet)
                     .after(NativeKeyClaimSet)
                     .before(NativeKeyInputSet),
             )
             .add_systems(
                 Update,
-                dispatch_keyboard_input
-                    .after(sync_keyboard_context)
+                dispatch
+                    .after(sync_context)
                     .in_set(NativeKeyInputSet)
                     .in_set(WriteCommandRequests),
             )
@@ -94,7 +91,7 @@ struct KeyboardInbox {
 #[derive(Component)]
 struct KeyboardMonitorPending;
 
-fn spawn_keyboard_bridge(mut commands: Commands) {
+fn spawn_bridge(mut commands: Commands) {
     let (bridge, inbox) = KeyboardBridge::channel();
     commands.spawn((Name::new("Keyboard"), bridge, inbox, KeyboardMonitorPending));
 }
@@ -455,7 +452,7 @@ type ActiveNativeKeyClaims<'w, 's> = Query<
     With<Active>,
 >;
 
-fn sync_keyboard_context(
+fn sync_context(
     keyboard: Single<&KeyboardBridge>,
     keymap: Single<Ref<Keymap>>,
     contexts: Query<&KeyboardContext>,
@@ -492,7 +489,7 @@ fn sync_keyboard_context(
         .is_some_and(|context| context.text_entry_owns_keys);
 }
 
-fn dispatch_keyboard_input(
+fn dispatch(
     inbox: Single<&KeyboardInbox>,
     mut invocations: MessageWriter<CommandInvocation>,
     mut inputs: MessageWriter<NativeKeyInput>,

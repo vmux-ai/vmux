@@ -73,13 +73,13 @@ impl PersistenceAppExt for App {
     where
         T: Component,
     {
-        self.add_systems(Update, detect_persistence_change::<T>)
+        self.add_systems(Update, detect_change::<T>)
     }
 }
 
 type PersistedChanged<T> = Or<(Added<T>, Changed<T>)>;
 
-fn detect_persistence_change<T: Component>(
+fn detect_change<T: Component>(
     changed: Query<(), PersistedChanged<T>>,
     mut removed: RemovedComponents<T>,
     mut commands: Commands,

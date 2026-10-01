@@ -72,12 +72,7 @@ impl Plugin for RemoteAuthorizationPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (
-                receive_authorization_requests,
-                ApplyDeferred,
-                process_authorization_requests,
-            )
-                .chain(),
+            (receive_requests, ApplyDeferred, process_requests).chain(),
         );
     }
 }
@@ -193,10 +188,7 @@ struct RevalidateAuthorization {
     response: Option<oneshot::Sender<std::io::Result<bool>>>,
 }
 
-fn receive_authorization_requests(
-    mut inbox: Single<&mut AuthorizationInbox>,
-    mut commands: Commands,
-) {
+fn receive_requests(mut inbox: Single<&mut AuthorizationInbox>, mut commands: Commands) {
     while let Ok(request) = inbox.0.authenticate.try_recv() {
         commands.spawn(request);
     }
@@ -205,7 +197,7 @@ fn receive_authorization_requests(
     }
 }
 
-fn process_authorization_requests(
+fn process_requests(
     store: Single<&RemoteAuthorizationStore>,
     mut authentications: Query<(Entity, &mut AuthenticateAuthorization)>,
     mut revalidations: Query<(Entity, &mut RevalidateAuthorization)>,

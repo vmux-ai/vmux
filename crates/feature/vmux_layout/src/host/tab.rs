@@ -45,10 +45,10 @@ impl Plugin for TabPlugin {
                 TabActivateRequest,
                 TabReorderRequest,
             )>::default())
-            .add_observer(on_create_request)
-            .add_observer(on_close_request)
-            .add_observer(on_activate_request)
-            .add_observer(on_reorder_request)
+            .add_observer(create_request)
+            .add_observer(close_request)
+            .add_observer(activate_request)
+            .add_observer(reorder_request)
             .add_systems(
                 Update,
                 (
@@ -57,18 +57,15 @@ impl Plugin for TabPlugin {
                     handle_close_requests,
                     handle_focus_requests,
                     handle_move_requests,
-                    handle_new_tab_requests,
+                    handle_new_requests,
                 )
                     .chain()
                     .in_set(LayoutRequestSet::Handle)
                     .in_set(TabCommandSet)
                     .after(crate::space::EffectiveStartupSet),
             )
-            .add_systems(
-                PostUpdate,
-                sync_tab_visibility.before(LayoutSystems::Layout),
-            )
-            .add_systems(PostUpdate, sync_tab_order)
+            .add_systems(PostUpdate, sync_visibility.before(LayoutSystems::Layout))
+            .add_systems(PostUpdate, sync_order)
             .add_systems(Update, dismiss_launcher);
     }
 }
@@ -449,7 +446,7 @@ fn handle_move_requests(
     }
 }
 
-fn handle_new_tab_requests(
+fn handle_new_requests(
     mut requests: MessageReader<crate::NewTabRequest>,
     tabs: Query<Entity, With<Tab>>,
     focused_window: crate::window::FocusedWindow,
@@ -512,7 +509,7 @@ pub fn pick_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
     if target == active { None } else { Some(target) }
 }
 
-fn sync_tab_visibility(mut tabs: Query<(&mut Node, &mut Visibility, Has<Active>), With<Tab>>) {
+fn sync_visibility(mut tabs: Query<(&mut Node, &mut Visibility, Has<Active>), With<Tab>>) {
     for (mut node, mut vis, active) in &mut tabs {
         let target_display = if active { Display::Flex } else { Display::None };
         if node.display != target_display {
@@ -529,7 +526,7 @@ fn sync_tab_visibility(mut tabs: Query<(&mut Node, &mut Visibility, Has<Active>)
     }
 }
 
-fn sync_tab_order(
+fn sync_order(
     spaces: Query<&Children, (With<crate::space::Space>, Changed<Children>)>,
     tab_q: Query<(), With<Tab>>,
     mut order_q: Query<&mut Order>,
@@ -556,14 +553,14 @@ fn sync_tab_order(
     }
 }
 
-fn on_create_request(
+fn create_request(
     _trigger: On<UiInput<TabCreateRequest>>,
     mut requests: MessageWriter<OpenRequest>,
 ) {
     requests.write(OpenRequest { url: None });
 }
 
-fn on_close_request(
+fn close_request(
     trigger: On<UiInput<TabCloseRequest>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab_param: crate::stack::ActiveTabParam,
@@ -579,7 +576,7 @@ fn on_close_request(
     close_requests.write(CloseTabRequest { tab: target });
 }
 
-fn on_activate_request(
+fn activate_request(
     trigger: On<UiInput<TabActivateRequest>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     mut commands: Commands,
@@ -593,7 +590,7 @@ fn on_activate_request(
     commands.entity(target).insert(LastActivatedAt::now());
 }
 
-fn on_reorder_request(
+fn reorder_request(
     trigger: On<UiInput<TabReorderRequest>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of: Query<&ChildOf>,
@@ -785,7 +782,7 @@ mod tests {
     fn order_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, sync_tab_order);
+            .add_systems(Update, sync_order);
         app
     }
 
@@ -898,7 +895,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct ClosedTabs(usize);
 
-    fn record_closed_tab(_trigger: On<TabClosed>, mut closed: ResMut<ClosedTabs>) {
+    fn record_closed(_trigger: On<TabClosed>, mut closed: ResMut<ClosedTabs>) {
         closed.0 += 1;
     }
 
@@ -934,7 +931,7 @@ mod tests {
                     handle_close_requests,
                     handle_focus_requests,
                     handle_move_requests,
-                    handle_new_tab_requests,
+                    handle_new_requests,
                 )
                     .chain()
                     .before(crate::window::TabLayoutSpawnSet),
@@ -1239,7 +1236,7 @@ mod tests {
         .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
         .add_message::<crate::TabLayoutSpawnRequest>()
         .init_resource::<ClosedTabs>()
-        .add_observer(record_closed_tab);
+        .add_observer(record_closed);
 
         let webview = app.world_mut().spawn_empty().id();
         let main = app.world_mut().spawn(MainNode).id();
@@ -1287,7 +1284,7 @@ mod tests {
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .init_resource::<ClosedTabs>()
-            .add_observer(record_closed_tab);
+            .add_observer(record_closed);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().spawn(PrimaryWindow);
 
@@ -1411,7 +1408,7 @@ mod tests {
         ))
         .add_message::<crate::TabLayoutSpawnRequest>()
         .add_message::<CloseTabRequest>()
-        .add_observer(on_close_request);
+        .add_observer(close_request);
 
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut()

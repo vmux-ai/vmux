@@ -38,25 +38,25 @@ impl Plugin for AcpSessionConfigPlugin {
                 PageReady,
             )>::default())
             .add_plugins(UiEventPlugin::<(StartSelectModel, StartSelectMode)>::default())
-            .add_observer(on_select_model)
-            .add_observer(on_select_mode)
-            .add_observer(on_set_agent_effort)
-            .add_observer(on_start_select_model)
-            .add_observer(on_start_select_mode)
+            .add_observer(select_model)
+            .add_observer(select_mode)
+            .add_observer(set_effort)
+            .add_observer(start_select_model)
+            .add_observer(start_select_mode)
             .add_observer(sync_page_model_state)
             .add_systems(
                 Update,
                 (
                     answer_remote_model_commands.after(ServiceMessageSet),
-                    apply_session_config_selection,
-                    push_acp_config_state_to_page,
-                    remove_acp_config_state,
-                    apply_last_used_acp_model.after(crate::runtime::AcpSessionConfigSet),
-                    send_acp_session_config_requests,
-                    remember_acp_model_lists,
-                    remember_acp_mode_lists,
-                    publish_agent_models.after(remember_acp_model_lists),
-                    publish_agent_modes.after(remember_acp_mode_lists),
+                    apply_session_selection,
+                    push_state_to_page,
+                    remove_state,
+                    apply_last_used_model.after(crate::runtime::AcpSessionConfigSet),
+                    send_session_requests,
+                    remember_model_lists,
+                    remember_mode_lists,
+                    publish_models.after(remember_model_lists),
+                    publish_modes.after(remember_mode_lists),
                 ),
             );
     }
@@ -155,7 +155,7 @@ fn remote_model_state(
     })
 }
 
-fn apply_session_config_selection(
+fn apply_session_selection(
     mut reader: MessageReader<SessionConfigSelectRequest>,
     mut sessions: Query<(&AcpSession, &mut AcpSessionConfigState)>,
     mut counter: Single<&mut AcpSessionConfigRequestCounter>,
@@ -278,7 +278,7 @@ impl AcpConfigProjection<'_> {
     }
 }
 
-fn on_start_select_model(
+fn start_select_model(
     trigger: On<UiInput<StartSelectModel>>,
     mut last_used: Single<&mut AgentModelSelections>,
 ) {
@@ -289,7 +289,7 @@ fn on_start_select_model(
     last_used.select(&request.agent_key, &request.model_id);
 }
 
-fn on_start_select_mode(
+fn start_select_mode(
     trigger: On<UiInput<StartSelectMode>>,
     mut last_used: Single<&mut AgentModeSelections>,
 ) {
@@ -300,7 +300,7 @@ fn on_start_select_mode(
     last_used.select(&request.agent_key, &request.mode_id);
 }
 
-fn remember_acp_model_lists(
+fn remember_model_lists(
     sessions: Query<(&AcpSession, &AcpSessionConfigState), Changed<AcpSessionConfigState>>,
     mut last_used: Single<&mut AgentModelSelections>,
 ) {
@@ -323,7 +323,7 @@ fn remember_acp_model_lists(
     }
 }
 
-fn remember_acp_mode_lists(
+fn remember_mode_lists(
     sessions: Query<(&AcpSession, &AcpSessionConfigState), Changed<AcpSessionConfigState>>,
     mut last_used: Single<&mut AgentModeSelections>,
 ) {
@@ -345,7 +345,7 @@ fn remember_acp_mode_lists(
     }
 }
 
-fn publish_agent_models(
+fn publish_models(
     last_used: Single<Ref<AgentModelSelections>>,
     mut state: Single<&mut CommandBarProjection>,
 ) {
@@ -369,7 +369,7 @@ fn publish_agent_models(
     }
 }
 
-fn publish_agent_modes(
+fn publish_modes(
     last_used: Single<Ref<AgentModeSelections>>,
     mut state: Single<&mut CommandBarProjection>,
 ) {
@@ -393,7 +393,7 @@ fn publish_agent_modes(
     }
 }
 
-fn push_acp_config_state_to_page(
+fn push_state_to_page(
     sessions: Query<(Entity, &AcpSession, &AcpSessionConfigState), Changed<AcpSessionConfigState>>,
     children: Query<&Children>,
     chat_views: Query<(), With<ChatView>>,
@@ -418,7 +418,7 @@ fn push_acp_config_state_to_page(
     }
 }
 
-fn remove_acp_config_state(
+fn remove_state(
     mut removed: RemovedComponents<AcpSessionConfigState>,
     sessions: Query<&AcpSession>,
     children: Query<&Children>,
@@ -468,7 +468,7 @@ fn sync_page_model_state(
     commands.trigger(ChatModeStateChanged::new(webview, projection.mode_state()));
 }
 
-fn on_select_model(
+fn select_model(
     trigger: On<UiInput<SelectModel>>,
     child_of: Query<&ChildOf>,
     sessions: Query<&AcpSession>,
@@ -487,7 +487,7 @@ fn on_select_model(
     });
 }
 
-fn on_select_mode(
+fn select_mode(
     trigger: On<UiInput<SelectMode>>,
     child_of: Query<&ChildOf>,
     sessions: Query<&AcpSession>,
@@ -506,7 +506,7 @@ fn on_select_mode(
     });
 }
 
-fn on_set_agent_effort(
+fn set_effort(
     trigger: On<UiInput<SetAgentEffort>>,
     child_of: Query<&ChildOf>,
     sessions: Query<&AcpSession>,
@@ -525,7 +525,7 @@ fn on_set_agent_effort(
     });
 }
 
-fn apply_last_used_acp_model(
+fn apply_last_used_model(
     mut sessions: Query<(&AcpSession, &mut AcpSessionConfigState), Added<AcpSessionConfigState>>,
     last_used: Single<&AgentModelSelections>,
     mut counter: Single<&mut AcpSessionConfigRequestCounter>,
@@ -562,7 +562,7 @@ fn apply_last_used_acp_model(
     }
 }
 
-fn send_acp_session_config_requests(
+fn send_session_requests(
     mut requests: MessageReader<AcpSetSessionConfigRequest>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -593,8 +593,8 @@ mod tests {
             .id();
         app.add_message::<AcpSetSessionConfigRequest>()
             .add_message::<SessionConfigSelectRequest>()
-            .add_observer(on_select_model)
-            .add_systems(Update, apply_session_config_selection);
+            .add_observer(select_model)
+            .add_systems(Update, apply_session_selection);
         let stack = app
             .world_mut()
             .spawn((
@@ -701,8 +701,8 @@ mod tests {
         ));
         app.add_message::<AcpSetSessionConfigRequest>()
             .add_message::<SessionConfigSelectRequest>()
-            .add_observer(on_select_mode)
-            .add_systems(Update, apply_session_config_selection);
+            .add_observer(select_mode)
+            .add_systems(Update, apply_session_selection);
         let stack = app
             .world_mut()
             .spawn((
@@ -792,8 +792,8 @@ mod tests {
         app.add_systems(
             Update,
             (
-                remember_acp_mode_lists,
-                publish_agent_modes.after(remember_acp_mode_lists),
+                remember_mode_lists,
+                publish_modes.after(remember_mode_lists),
             ),
         );
         app.world_mut().spawn((
@@ -856,7 +856,7 @@ mod tests {
             ))
             .id();
         app.add_message::<AcpSetSessionConfigRequest>()
-            .add_systems(Update, apply_last_used_acp_model);
+            .add_systems(Update, apply_last_used_model);
         app.world_mut()
             .get_mut::<AgentModelSelections>(registry)
             .unwrap()

@@ -118,14 +118,14 @@ pub struct ChatComposerPlugin;
 impl Plugin for ChatComposerPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(ChatDraftChanged, ChatSlashCommandRequest)>::default())
-            .add_observer(on_draft_changed)
-            .add_observer(on_slash_command)
+            .add_observer(draft_changed)
+            .add_observer(slash_command)
             .add_observer(project_queries);
     }
 }
 
 #[cfg(host)]
-fn on_draft_changed(
+fn draft_changed(
     trigger: On<UiInput<ChatDraftChanged>>,
     mut composers: Query<&mut ComposerState, With<ChatView>>,
     mut commands: Commands,
@@ -139,7 +139,7 @@ fn on_draft_changed(
 }
 
 #[cfg(host)]
-fn on_slash_command(
+fn slash_command(
     trigger: On<UiInput<ChatSlashCommandRequest>>,
     mut composers: Query<&mut ComposerState, With<ChatView>>,
     mut commands: Commands,

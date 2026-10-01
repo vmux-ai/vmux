@@ -22,7 +22,7 @@ impl Plugin for AttentionPlugin {
             Update,
             (
                 bell,
-                handle_agent_turn_ended
+                handle_turn_ended
                     .in_set(TurnEndedSet)
                     .after(ServiceMessageSet),
             )
@@ -31,7 +31,7 @@ impl Plugin for AttentionPlugin {
         )
         .add_systems(
             Update,
-            (mark_agent_done, clear_agent_done)
+            (mark_done, clear_done)
                 .chain()
                 .after(ComputeFocusSet)
                 .after(super::tidy::TidySet),
@@ -87,7 +87,7 @@ fn agent_stack(
         .or_else(|| child_of.get(entity).ok().map(|child| child.parent()))
 }
 
-fn mark_agent_done(
+fn mark_done(
     mut reader: MessageReader<AgentAttention>,
     mut notify: MessageWriter<OsNotify>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
@@ -150,7 +150,7 @@ fn mark_agent_done(
     }
 }
 
-fn clear_agent_done(
+fn clear_done(
     done: Query<Entity, With<AgentDoneUnseen>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     focused: FocusedStack,
@@ -175,7 +175,7 @@ fn clear_agent_done(
     }
 }
 
-fn handle_agent_turn_ended(
+fn handle_turn_ended(
     mut reader: MessageReader<AgentRequestInput>,
     agents: Query<(Entity, &ProcessId), With<Agent>>,
     mut attention: MessageWriter<AgentAttention>,
@@ -233,7 +233,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<AgentRequestInput>()
             .add_message::<AgentAttention>()
-            .add_systems(Update, handle_agent_turn_ended);
+            .add_systems(Update, handle_turn_ended);
         app
     }
 
@@ -301,7 +301,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_message::<AgentAttention>()
             .add_message::<OsNotify>()
-            .add_systems(Update, (mark_agent_done, clear_agent_done));
+            .add_systems(Update, (mark_done, clear_done));
         app.world_mut().spawn(ActiveStack::default().local_bundle());
         app
     }

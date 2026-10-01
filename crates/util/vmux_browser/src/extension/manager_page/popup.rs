@@ -19,10 +19,10 @@ impl Plugin for PopupPlugin {
             ExtensionPopupCloseRequest,
         )>::default())
             .add_plugins(JsEmitEventPlugin::<ExtensionPopupSizeRequest>::default())
-            .add_observer(on_open_request)
-            .add_observer(on_bounds_request)
-            .add_observer(on_close_request)
-            .add_observer(on_size)
+            .add_observer(open_request)
+            .add_observer(bounds_request)
+            .add_observer(close_request)
+            .add_observer(size)
             .add_systems(
                 Update,
                 inject_sizing.after(crate::BrowserSystemSet::DrainLoadingState),
@@ -99,7 +99,7 @@ struct ExtensionPopupSizeRequest {
 
 const POPUP_SIZE_CHANNEL: &str = "vmux-extension-popup-size";
 
-fn on_open_request(
+fn open_request(
     trigger: On<UiInput<ExtensionPopupOpenRequest>>,
     layouts: Query<(Entity, Option<&HostWindow>), With<LayoutCef>>,
     host_windows: Query<&HostWindow>,
@@ -153,7 +153,7 @@ fn on_open_request(
     ));
 }
 
-fn on_bounds_request(
+fn bounds_request(
     trigger: On<UiInput<ExtensionPopupBoundsRequest>>,
     popups: Query<(Entity, &ExtensionPopup)>,
     mut commands: Commands,
@@ -170,7 +170,7 @@ fn on_bounds_request(
     }
 }
 
-fn on_close_request(
+fn close_request(
     trigger: On<UiInput<ExtensionPopupCloseRequest>>,
     popups: Query<(Entity, &ExtensionPopup)>,
     browsers: NonSend<Browsers>,
@@ -256,7 +256,7 @@ fn inject_sizing(
     }
 }
 
-fn on_size(
+fn size(
     trigger: On<Receive<ExtensionPopupSizeRequest>>,
     popups: Query<&ExtensionPopup>,
     mut commands: Commands,

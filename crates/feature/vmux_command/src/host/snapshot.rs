@@ -15,21 +15,16 @@ impl Plugin for UiStatePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Startup,
-            (
-                spawn_command_bar_projection,
-                ApplyDeferred,
-                update_pages_snapshot,
-            )
-                .chain(),
+            (spawn_bar_projection, ApplyDeferred, update_pages).chain(),
         )
         .add_plugins(vmux_core::host::UiStatePlugin::<
             vmux_api::command_bar::CommandBarUiState,
         >::default())
-        .add_systems(PreUpdate, attach_command_bar_ui_state);
+        .add_systems(PreUpdate, attach_bar_ui_state);
     }
 }
 
-fn spawn_command_bar_projection(mut commands: Commands) {
+fn spawn_bar_projection(mut commands: Commands) {
     commands.spawn((
         Name::new("Command bar projection"),
         CommandBarProjection::default(),
@@ -217,10 +212,7 @@ pub struct CommandBarWorkSnapshot {
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct CommandBarWorkDirectory(pub String);
 
-fn update_pages_snapshot(
-    manifests: Query<&PageManifest>,
-    mut state: Single<&mut CommandBarProjection>,
-) {
+fn update_pages(manifests: Query<&PageManifest>, mut state: Single<&mut CommandBarProjection>) {
     let snapshot = &mut state.pages;
     if !snapshot.pages.is_empty() {
         return;
@@ -250,7 +242,7 @@ fn update_pages_snapshot(
     snapshot.pages = pages;
 }
 
-fn attach_command_bar_ui_state(
+fn attach_bar_ui_state(
     pages: Query<
         Entity,
         (
@@ -390,7 +382,7 @@ mod tests {
     #[test]
     fn pages_snapshot_collects_only_command_bar_pages() {
         let mut app = App::new();
-        app.add_systems(Update, update_pages_snapshot);
+        app.add_systems(Update, update_pages);
         app.world_mut().spawn(CommandBarProjection::default());
         app.world_mut().spawn(PageManifest {
             url: "vmux://services/",

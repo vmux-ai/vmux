@@ -38,9 +38,9 @@ use vmux_setting::{AppSettings, SettingsLoadSet, SettingsSaveRequest};
 use super::SpacesUiStateUpdates;
 use super::agent::SpaceAgentPlugin;
 use crate::event::{
-    ProjectActivateRequest, ProjectForgetRequest, SPACES_PAGE_URL, SpaceAttachRequest,
-    SpaceCreateRequest, SpaceDeleteRequest, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow,
-    SpacesListEvent, SpacesUiState,
+    ProjectActivateRequest, ProjectForgetRequest, SpaceAttachRequest, SpaceCreateRequest,
+    SpaceDeleteRequest, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow, SpacesListEvent,
+    SpacesUiState,
 };
 use crate::model::SpaceRecord;
 use crate::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
@@ -72,19 +72,16 @@ impl Plugin for SpacePlugin {
         .add_message::<SpaceRenameRequest>()
         .add_message::<OpenRequest>()
         .add_message::<CommandBarSpaceOpenRequest>()
-        .add_systems(
-            Update,
-            open_command_bar_space.in_set(WriteCommandBarRequests),
-        )
+        .add_systems(Update, open_command_bar.in_set(WriteCommandBarRequests))
         .add_systems(Startup, bind_command.in_set(BindCommands))
         .add_systems(
             Update,
             (
-                relay_space_requests::<SpaceAttachRequest>,
-                relay_space_requests::<SpaceCreateRequest>,
-                relay_space_requests::<SpaceDeleteRequest>,
-                relay_space_requests::<SpaceOpenPageRequest>,
-                relay_space_requests::<SpaceRenameRequest>,
+                relay_requests::<SpaceAttachRequest>,
+                relay_requests::<SpaceCreateRequest>,
+                relay_requests::<SpaceDeleteRequest>,
+                relay_requests::<SpaceOpenPageRequest>,
+                relay_requests::<SpaceRenameRequest>,
             ),
         )
         .add_systems(
@@ -94,14 +91,10 @@ impl Plugin for SpacePlugin {
                 .after(CurrentSpaceSet)
                 .before(ReadCommandRequests),
         )
-        .add_systems(Update, sync_space_name_to_id)
+        .add_systems(Update, sync_name_to_id)
         .add_systems(
             Startup,
-            (
-                ensure_bootstrap_space,
-                ApplyDeferred,
-                update_effective_startup,
-            )
+            (ensure_bootstrap, ApplyDeferred, update_effective_startup)
                 .chain()
                 .after(SettingsLoadSet)
                 .after(LayoutStartupSet::Persistence)
@@ -126,21 +119,21 @@ impl Plugin for SpacePlugin {
                 vmux_core::event::ProjectTreeToggle,
             )>::default(),
         ))
-        .add_observer(on_attach)
-        .add_observer(on_create)
-        .add_observer(on_delete)
-        .add_observer(on_open_page)
-        .add_observer(on_rename)
-        .add_observer(on_project_activate)
-        .add_observer(on_project_forget)
-        .add_observer(switch_space)
+        .add_observer(attach)
+        .add_observer(create)
+        .add_observer(delete)
+        .add_observer(open_page)
+        .add_observer(rename)
+        .add_observer(project_activate)
+        .add_observer(project_forget)
+        .add_observer(switch)
         .add_observer(reset_sent)
-        .add_systems(Update, handle_open_in_new_space.in_set(ReadCommandRequests))
+        .add_systems(Update, handle_open_in_new.in_set(ReadCommandRequests))
         .add_systems(Update, broadcast_spaces_to_views);
     }
 }
 
-fn ensure_bootstrap_space(
+fn ensure_bootstrap(
     spaces: Query<(), With<Space>>,
     restore: Query<&WorkspaceRestore>,
     mut commands: Commands,
@@ -184,7 +177,7 @@ fn bind_command(registry: CommandRegistry, mut commands: Commands) {
     registry.message::<CommandBarSpaceOpenRequest>(&mut commands);
 }
 
-fn open_command_bar_space(
+fn open_command_bar(
     mut requests: MessageReader<CommandBarSpaceOpenRequest>,
     mut open: MessageWriter<CommandBarOpenRequest>,
 ) {
@@ -377,7 +370,7 @@ fn broadcast_spaces_to_views(
     }
 }
 
-fn on_project_activate(
+fn project_activate(
     trigger: On<UiInput<ProjectActivateRequest>>,
     active: FocusedSpace,
     settings: Option<ResMut<AppSettings>>,
@@ -395,7 +388,7 @@ fn on_project_activate(
     }
 }
 
-fn on_project_forget(
+fn project_forget(
     trigger: On<UiInput<ProjectForgetRequest>>,
     active: FocusedSpace,
     settings: Option<ResMut<AppSettings>>,
@@ -413,7 +406,7 @@ fn on_project_forget(
     }
 }
 
-fn relay_space_requests<T: Message + Clone>(mut reader: MessageReader<T>, mut commands: Commands) {
+fn relay_requests<T: Message + Clone>(mut reader: MessageReader<T>, mut commands: Commands) {
     for request in reader.read() {
         commands.trigger(UiInput {
             webview: Entity::PLACEHOLDER,
@@ -582,9 +575,7 @@ impl SpaceViewTemplate {
     }
 }
 
-fn sync_space_name_to_id(
-    mut spaces: Query<(&SpaceId, &mut Name), (With<Space>, Changed<SpaceId>)>,
-) {
+fn sync_name_to_id(mut spaces: Query<(&SpaceId, &mut Name), (With<Space>, Changed<SpaceId>)>) {
     for (id, mut name) in &mut spaces {
         if name.as_str() != id.0 {
             *name = Name::new(id.0.clone());
@@ -592,7 +583,7 @@ fn sync_space_name_to_id(
     }
 }
 
-fn on_rename(trigger: On<UiInput<SpaceRenameRequest>>, graph: SpaceGraph, mut commands: Commands) {
+fn rename(trigger: On<UiInput<SpaceRenameRequest>>, graph: SpaceGraph, mut commands: Commands) {
     let request = &trigger.event().payload;
     let name = request.name.trim();
     if name.is_empty() {
@@ -630,7 +621,7 @@ fn on_rename(trigger: On<UiInput<SpaceRenameRequest>>, graph: SpaceGraph, mut co
     }
 }
 
-fn on_open_page(
+fn open_page(
     trigger: On<UiInput<SpaceOpenPageRequest>>,
     space_window: SpaceWindow,
     focus: FocusedStack,
@@ -642,7 +633,7 @@ fn on_open_page(
         return;
     };
     if let Some((existing, _)) = stacks.iter().find(|(stack, metadata)| {
-        metadata.url == SPACES_PAGE_URL && space_window.window_of(*stack) == Some(window)
+        metadata.url == SpacePlugin::MANIFEST.url && space_window.window_of(*stack) == Some(window)
     }) {
         commands.trigger(ActivateRequest { entity: existing });
         return;
@@ -658,12 +649,12 @@ fn on_open_page(
         .id();
     spawn_requests.write(PageOpenRequest {
         target: PageOpenTarget::Stack(stack),
-        url: SPACES_PAGE_URL.to_string(),
+        url: SpacePlugin::MANIFEST.url.to_string(),
         request_id: None,
     });
 }
 
-fn on_delete(
+fn delete(
     trigger: On<UiInput<SpaceDeleteRequest>>,
     graph: SpaceGraph,
     space_window: SpaceWindow,
@@ -723,7 +714,7 @@ fn on_delete(
     }
 }
 
-fn on_attach(
+fn attach(
     trigger: On<UiInput<SpaceAttachRequest>>,
     graph: SpaceGraph,
     space_window: SpaceWindow,
@@ -758,7 +749,7 @@ fn on_attach(
     graph.bump_tab(entity, &mut commands);
 }
 
-fn switch_space(trigger: On<UiInput<SwitchSpaceRequest>>, mut commands: Commands) {
+fn switch(trigger: On<UiInput<SwitchSpaceRequest>>, mut commands: Commands) {
     let webview = trigger.event().webview;
     let id = &trigger.event().payload.id;
     if !id.is_empty() {
@@ -772,7 +763,7 @@ fn switch_space(trigger: On<UiInput<SwitchSpaceRequest>>, mut commands: Commands
     commands.trigger(CommandBarDismiss::new(webview, false));
 }
 
-fn on_create(
+fn create(
     trigger: On<UiInput<SpaceCreateRequest>>,
     graph: SpaceGraph,
     space_window: SpaceWindow,
@@ -830,7 +821,7 @@ fn on_create(
         name: None,
         startup_dir,
         content: TabLayoutSpawnContent::Url {
-            url: SPACES_PAGE_URL.to_string(),
+            url: SpacePlugin::MANIFEST.url.to_string(),
             pending_prompt: None,
         },
         clear_pending_stack: true,
@@ -838,7 +829,7 @@ fn on_create(
     });
 }
 
-fn handle_open_in_new_space(
+fn handle_open_in_new(
     mut reader: MessageReader<OpenRequest>,
     graph: SpaceGraph,
     space_window: SpaceWindow,
@@ -929,7 +920,7 @@ fn respond_spaces_spawn(
     for req in reader.read() {
         page_open.write(PageOpenRequest {
             target: PageOpenTarget::Stack(req.target_stack),
-            url: SPACES_PAGE_URL.to_string(),
+            url: SpacePlugin::MANIFEST.url.to_string(),
             request_id: None,
         });
     }
@@ -1070,7 +1061,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(on_attach);
+            .add_observer(attach);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
         app.world_mut().entity_mut(second_window).insert(Active);
@@ -1139,7 +1130,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(on_delete);
+            .add_observer(delete);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
         app.world_mut().entity_mut(second_window).insert(Active);
@@ -1304,8 +1295,8 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SettingsSaveRequest>()
             .insert_resource(settings)
-            .add_observer(on_project_activate)
-            .add_observer(on_project_forget);
+            .add_observer(project_activate)
+            .add_observer(project_forget);
         app.world_mut().spawn((
             SpaceRecord {
                 id: "work".into(),
@@ -1577,7 +1568,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(on_rename);
+            .add_observer(rename);
         app.world_mut().spawn(bevy::window::PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
         let space = app

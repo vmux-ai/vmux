@@ -14,9 +14,9 @@ impl Plugin for ChatUiStatePlugin {
         app.add_message::<UiStateEmit>()
             .add_message::<PublishComposerEffect>()
             .add_message::<RepublishChatUiState>()
-            .add_systems(Startup, spawn_chat_runtime)
+            .add_systems(Startup, spawn_runtime)
             .add_systems(Update, publish_composer_effects)
-            .add_systems(Last, emit_ui_state);
+            .add_systems(Last, emit_ui);
     }
 }
 
@@ -44,7 +44,7 @@ impl ChatUiStateProjection {
     }
 }
 
-fn spawn_chat_runtime(mut commands: Commands) {
+fn spawn_runtime(mut commands: Commands) {
     commands.spawn((
         ChatRuntime,
         ChatUiStateProjection::default(),
@@ -76,7 +76,7 @@ fn publish_composer_effects(
     }
 }
 
-fn emit_ui_state(
+fn emit_ui(
     mut runtimes: Query<&mut ChatUiStateProjection, With<ChatRuntime>>,
     mut emits: MessageWriter<UiStateEmit>,
 ) {

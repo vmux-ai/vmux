@@ -14,9 +14,9 @@ impl Plugin for ProcessControlPlugin {
         app.add_message::<ServiceRequest>()
             .add_plugins(UiEventPlugin::<(TermResizeEvent, TermScrollEvent)>::default())
             .add_systems(Update, request_snapshot.after(ServiceMessageSet))
-            .add_observer(on_term_ready)
-            .add_observer(on_term_resize)
-            .add_observer(on_term_scroll);
+            .add_observer(term_ready)
+            .add_observer(term_resize)
+            .add_observer(term_scroll);
     }
 }
 
@@ -35,7 +35,7 @@ impl Default for TerminalGridSize {
 #[derive(Component)]
 pub(super) struct PendingTerminalSnapshot;
 
-fn on_term_ready(
+fn term_ready(
     trigger: On<UiInput<PageReady>>,
     terminals: Query<&ProcessId, With<Terminal>>,
     connected: Option<Single<(), With<ServiceConnected>>>,
@@ -76,7 +76,7 @@ fn request_snapshot(
     }
 }
 
-fn on_term_resize(
+fn term_resize(
     trigger: On<UiInput<TermResizeEvent>>,
     webviews: Query<&WebviewSize, With<Terminal>>,
     terminals: Query<&ProcessId, With<Terminal>>,
@@ -120,7 +120,7 @@ fn on_term_resize(
     }));
 }
 
-fn on_term_scroll(
+fn term_scroll(
     trigger: On<UiInput<TermScrollEvent>>,
     terminals: Query<&ProcessId, With<Terminal>>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -146,7 +146,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<ServiceRequest>()
-            .add_observer(on_term_ready);
+            .add_observer(term_ready);
         let webview = app.world_mut().spawn((Terminal, ProcessId::new())).id();
 
         app.world_mut().trigger(UiInput::<PageReady> {

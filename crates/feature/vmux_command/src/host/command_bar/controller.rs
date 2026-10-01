@@ -936,7 +936,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct CapturedCommandBarOpen(bool);
 
-    fn capture_command_bar_open(
+    fn capture_bar_open(
         modal_q: Query<
             (
                 &Node,
@@ -956,7 +956,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<CapturedCommandBarOpen>()
-            .add_systems(Update, capture_command_bar_open);
+            .add_systems(Update, capture_bar_open);
         app.world_mut().spawn((
             CommandBar,
             Node {

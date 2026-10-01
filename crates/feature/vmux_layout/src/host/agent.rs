@@ -59,7 +59,7 @@ impl Plugin for LayoutAgentPlugin {
             .add_message::<FocusPaneRequest>()
             .add_systems(
                 Update,
-                (request_focus, focus_pane, update_layout)
+                (request_focus, focus_pane, update)
                     .chain()
                     .after(AgentRequestRouteSet),
             )
@@ -176,7 +176,7 @@ fn focus_pane(mut requests: MessageReader<FocusPaneRequest>, mut commands: Comma
     }
 }
 
-fn update_layout(
+fn update(
     mut requests: MessageReader<AgentRequestMessage<AgentUpdateLayout>>,
     focus: FocusedStack,
     mut apply: MessageWriter<crate::apply::LayoutApplyRequest>,

@@ -47,28 +47,24 @@ impl Plugin for AgentRuntimePlugin {
         .add_message::<UiAgentSessionConfigSelectionResult>()
         .add_message::<UiAgentSessionCreated>()
         .add_message::<UiAgentAcpTerminalCreated>()
-        .add_systems(Startup, (spawn_acp_catalog, start_catalog_fetch))
+        .add_systems(Startup, (spawn_catalog, fetch_catalog))
         .add_systems(
             Update,
             (
-                send_acp_input,
+                send_input,
                 receive_catalog,
                 (
-                    apply_acp_agent_info,
-                    apply_acp_workspace_changed,
-                    (
-                        apply_acp_session_config_state.in_set(AcpSessionConfigSet),
-                        apply_acp_session_config_selection,
-                    )
-                        .chain(),
-                    apply_acp_session_created,
-                    apply_acp_terminal_created,
+                    apply_info,
+                    apply_workspace,
+                    (apply_config.in_set(AcpSessionConfigSet), apply_selection).chain(),
+                    apply_session,
+                    apply_terminal,
                 )
                     .after(ServiceMessageSet),
             ),
         )
-        .add_observer(close_acp_session_on_remove)
-        .add_observer(auto_allow_acp_approval);
+        .add_observer(close_on_remove)
+        .add_observer(auto_allow);
     }
 }
 
@@ -195,11 +191,11 @@ struct AcpCatalogFetch {
     rx: Receiver<Vec<RegistryAgent>>,
 }
 
-fn spawn_acp_catalog(mut commands: Commands) {
+fn spawn_catalog(mut commands: Commands) {
     commands.spawn((Name::new("ACP catalog"), AcpCatalog::default()));
 }
 
-fn start_catalog_fetch(mut commands: Commands) {
+fn fetch_catalog(mut commands: Commands) {
     let (tx, rx) = crossbeam_channel::unbounded();
     std::thread::spawn(move || {
         let agents = Registry::fetch_blocking()
@@ -226,7 +222,7 @@ fn receive_catalog(
     }
 }
 
-fn apply_acp_agent_info(
+fn apply_info(
     mut reader: MessageReader<UiAgentInfo>,
     mut sessions: Query<(&AcpSession, &mut Profile)>,
 ) {
@@ -267,7 +263,7 @@ fn ancestor_tab(
     }
 }
 
-fn apply_acp_workspace_changed(
+fn apply_workspace(
     mut reader: MessageReader<UiAgentWorkspaceChanged>,
     mut sessions: Query<(Entity, &mut AcpSession)>,
     child_of: Query<&ChildOf>,
@@ -332,7 +328,7 @@ fn apply_acp_workspace_changed(
     }
 }
 
-fn apply_acp_session_config_state(
+fn apply_config(
     mut reader: MessageReader<UiAgentSessionConfigState>,
     mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpSessionConfigState>)>,
     mut commands: Commands,
@@ -390,7 +386,7 @@ fn apply_acp_session_config_state(
     }
 }
 
-fn apply_acp_session_config_selection(
+fn apply_selection(
     mut reader: MessageReader<UiAgentSessionConfigSelectionResult>,
     mut sessions: Query<(&AcpSession, &mut AcpSessionConfigState)>,
 ) {
@@ -433,7 +429,7 @@ fn acp_auto_approval_message(
     })
 }
 
-fn auto_allow_acp_approval(
+fn auto_allow(
     trigger: On<AgentApprovalRequest>,
     sessions: Query<(&AcpSession, &AgentApprovalPolicy)>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -449,7 +445,7 @@ fn auto_allow_acp_approval(
 }
 
 #[allow(clippy::type_complexity)]
-fn apply_acp_session_created(
+fn apply_session(
     mut reader: MessageReader<UiAgentSessionCreated>,
     mut sessions: Query<(Entity, &mut AcpSession, &mut PageMetadata), Without<ChatView>>,
     children: Query<&Children>,
@@ -478,7 +474,7 @@ fn apply_acp_session_created(
     }
 }
 
-fn apply_acp_terminal_created(
+fn apply_terminal(
     mut reader: MessageReader<UiAgentAcpTerminalCreated>,
     sessions: Query<(Entity, &AcpSession)>,
     ctx: PanePlacement,
@@ -514,7 +510,7 @@ fn apply_acp_terminal_created(
     }
 }
 
-fn send_acp_input(
+fn send_input(
     mut q: Query<(
         Entity,
         &AcpSession,
@@ -591,7 +587,7 @@ fn acp_prompt_dispatch_ready(
     install_started && queue.ready(matches!(state, AgentRunState::Idle))
 }
 
-fn close_acp_session_on_remove(
+fn close_on_remove(
     trigger: On<Remove, AcpSession>,
     sessions: Query<&AcpSession>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -851,7 +847,7 @@ mod tests {
         let worktree_dir = worktree.canonicalize().unwrap();
         let mut app = App::new();
         app.add_message::<crate::event::UiAgentWorkspaceChanged>()
-            .add_systems(Update, apply_acp_workspace_changed);
+            .add_systems(Update, apply_workspace);
         let tab = app
             .world_mut()
             .spawn((
@@ -1050,14 +1046,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<UiAgentSessionConfigState>()
             .add_message::<UiAgentSessionConfigSelectionResult>()
-            .add_systems(
-                Update,
-                (
-                    apply_acp_session_config_state,
-                    apply_acp_session_config_selection,
-                )
-                    .chain(),
-            );
+            .add_systems(Update, (apply_config, apply_selection).chain());
         let entity = app
             .world_mut()
             .spawn((
@@ -1176,7 +1165,7 @@ mod tests {
 
         let mut app = App::new();
         app.add_message::<UiAgentAcpTerminalCreated>()
-            .add_systems(Update, apply_acp_terminal_created);
+            .add_systems(Update, apply_terminal);
         let tab = app.world_mut().spawn(tab_bundle()).id();
         let pane = app
             .world_mut()

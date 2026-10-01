@@ -49,7 +49,7 @@ impl Plugin for LayoutCefPlugin {
         )
         .add_systems(
             Update,
-            apply_cef_state_from_webview.in_set(LayoutCefStateSet::Apply),
+            apply_state_from_webview.in_set(LayoutCefStateSet::Apply),
         )
         .add_systems(
             Update,
@@ -83,7 +83,7 @@ fn mirror_metadata_to_url(
     }
 }
 
-fn apply_cef_state_from_webview(
+fn apply_state_from_webview(
     cef_rx: Res<WebviewCefStateReceiver>,
     mut browser_meta: Query<&mut PageMetadata>,
 ) {

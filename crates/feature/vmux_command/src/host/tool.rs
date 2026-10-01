@@ -31,11 +31,11 @@ impl Plugin for CommandToolPlugin {
             .add_message::<ServiceRequest>()
             .add_systems(
                 Update,
-                (open_command_bar, notify, dispatch_unclaimed_tools).in_set(ToolDispatchSet),
+                (open_bar, notify, dispatch_unclaimed_tools).in_set(ToolDispatchSet),
             )
             .add_systems(
                 Update,
-                answer_command_queries
+                answer_queries
                     .in_set(ToolQueryRouteSet)
                     .after(ServiceMessageSet),
             );
@@ -56,7 +56,7 @@ fn dispatch_unclaimed_tools(
     }
 }
 
-fn answer_command_queries(
+fn answer_queries(
     mut queries: MessageReader<ToolQueryRequest>,
     commands: Query<&crate::CommandDefinition>,
     mut handled: MessageWriter<ToolQueryHandled>,
@@ -100,7 +100,7 @@ struct NotifyArgs {
     body: Option<String>,
 }
 
-fn open_command_bar(
+fn open_bar(
     mut commands: Commands,
     requests: Query<(Entity, &OpenCommandBarArgs), AddedTool<OpenCommandBarArgs>>,
 ) {
@@ -187,10 +187,7 @@ mod tests {
 
     #[test]
     fn manifest_registers_command_tools() {
-        assert_eq!(
-            CommandToolFixture::definitions(),
-            ["open_command_bar", "notify"]
-        );
+        assert_eq!(CommandToolFixture::definitions(), ["open_bar", "notify"]);
     }
 
     #[test]
@@ -201,7 +198,7 @@ mod tests {
             ("path", "browser_open_path_bar"),
         ] {
             assert_eq!(
-                CommandToolFixture::dispatch("open_command_bar", serde_json::json!({"mode": mode})),
+                CommandToolFixture::dispatch("open_bar", serde_json::json!({"mode": mode})),
                 AgentRequest::encode(&AgentInvokeCommand {
                     id: id.to_string(),
                     args: JsonValue::Object(Vec::new()),
@@ -209,8 +206,7 @@ mod tests {
             );
         }
         assert!(
-            CommandToolFixture::dispatch("open_command_bar", serde_json::json!({"mode": "other"}))
-                .is_err()
+            CommandToolFixture::dispatch("open_bar", serde_json::json!({"mode": "other"})).is_err()
         );
     }
 

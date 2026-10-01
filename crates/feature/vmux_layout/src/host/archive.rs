@@ -73,11 +73,11 @@ impl Plugin for ArchivePlugin {
             .add_message::<CloseTabRequest>()
             .add_systems(Startup, bind_command.in_set(BindCommands))
             .add_observer(issue_reopen_closed_page)
-            .add_systems(Update, (capture_archived_pages, maintain_archive))
+            .add_systems(Update, (capture_archived_pages, maintain))
             .add_systems(
                 Update,
                 (
-                    on_stack_close.after(StackCommandSet).before(CloseStackSet),
+                    stack_close.after(StackCommandSet).before(CloseStackSet),
                     handle_reopen_closed_page,
                     handle_close_tab_requests
                         .after(TabCommandSet)
@@ -91,7 +91,7 @@ impl Plugin for ArchivePlugin {
 const MAX_ARCHIVE_ENTRIES: usize = 25;
 const ARCHIVE_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
-fn on_stack_close(
+fn stack_close(
     mut reader: MessageReader<CloseStackRequest>,
     layout: TabArchiveLayout,
     mut writer: MessageWriter<PageArchiveRequest>,
@@ -159,7 +159,7 @@ fn spawn_archived_page(
     }
 }
 
-fn maintain_archive(
+fn maintain(
     archived: Query<(Entity, &ArchivedPage, Option<&ArchivedTabPage>)>,
     mut commands: Commands,
 ) {
@@ -1224,7 +1224,7 @@ mod tests {
     #[test]
     fn maintain_enforces_cap_dropping_oldest() {
         let mut app = App::new();
-        app.add_systems(Update, maintain_archive);
+        app.add_systems(Update, maintain);
         let now = now_millis();
         for i in 0..(MAX_ARCHIVE_ENTRIES as i64 + 1) {
             app.world_mut().spawn(page(&format!("u{i}"), now - i));
@@ -1240,7 +1240,7 @@ mod tests {
     #[test]
     fn maintain_purges_expired() {
         let mut app = App::new();
-        app.add_systems(Update, maintain_archive);
+        app.add_systems(Update, maintain);
         let now = now_millis();
         app.world_mut().spawn(page("fresh", now));
         app.world_mut()

@@ -6,11 +6,11 @@ pub(crate) struct HostFocusPlatformPlugin;
 
 impl Plugin for HostFocusPlatformPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Last, apply_winit_host_focus);
+        app.add_systems(Last, apply_winit);
     }
 }
 
-fn apply_winit_host_focus(
+fn apply_winit(
     _non_send: NonSendMarker,
     intent: Single<&HostFocusIntent>,
     focused_window: vmux_layout::window::FocusedWindow,

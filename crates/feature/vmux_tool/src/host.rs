@@ -42,30 +42,30 @@ impl Plugin for ToolHostPlugin {
             ToolOpenRequest,
             ToolsNavigateRequest,
         )>::default())
-        .add_observer(on_page_ready)
-        .add_observer(on_refresh_request)
-        .add_observer(on_operation_request::<ToolInstallRequest>)
-        .add_observer(on_operation_request::<ToolUpdateRequest>)
-        .add_observer(on_operation_request::<ToolUninstallRequest>)
-        .add_observer(on_operation_request::<ToolForgetRequest>)
-        .add_observer(on_operation_request::<ToolAdoptRequest>)
-        .add_observer(on_operation_request::<ToolLinkRequest>)
-        .add_observer(on_operation_request::<ToolUnlinkRequest>)
-        .add_observer(on_operation_request::<ToolApplyRequest>)
-        .add_observer(on_operation_request::<ToolImportRequest>)
-        .add_observer(on_open_request)
-        .add_observer(on_navigate_request)
-        .add_systems(Startup, spawn_tool_registry)
+        .add_observer(page_ready)
+        .add_observer(refresh_request)
+        .add_observer(operation_request::<ToolInstallRequest>)
+        .add_observer(operation_request::<ToolUpdateRequest>)
+        .add_observer(operation_request::<ToolUninstallRequest>)
+        .add_observer(operation_request::<ToolForgetRequest>)
+        .add_observer(operation_request::<ToolAdoptRequest>)
+        .add_observer(operation_request::<ToolLinkRequest>)
+        .add_observer(operation_request::<ToolUnlinkRequest>)
+        .add_observer(operation_request::<ToolApplyRequest>)
+        .add_observer(operation_request::<ToolImportRequest>)
+        .add_observer(open_request)
+        .add_observer(navigate_request)
+        .add_systems(Startup, spawn_registry)
         .add_systems(
             Update,
             (
-                request_tool_scan,
-                finish_tool_scans,
-                start_tool_operation,
-                start_external_tool_operations,
-                finish_external_tool_operations,
-                drain_succeeded_tool_operations,
-                drain_failed_tool_operations,
+                request_scan,
+                finish_scans,
+                start_operation,
+                start_external_operations,
+                finish_external_operations,
+                drain_succeeded_operations,
+                drain_failed_operations,
                 emit_tools_state,
             )
                 .chain(),
@@ -73,7 +73,7 @@ impl Plugin for ToolHostPlugin {
     }
 }
 
-fn on_page_ready(
+fn page_ready(
     trigger: On<UiInput<PageReady>>,
     pages: Query<&PageMetadata>,
     subscribers: Query<(), With<ToolSubscriber>>,
@@ -91,7 +91,7 @@ fn on_page_ready(
     }
 }
 
-fn on_open_request(
+fn open_request(
     trigger: On<UiInput<ToolOpenRequest>>,
     stores: Query<&ToolStore>,
     mut requests: MessageWriter<PageOpenRequest>,
@@ -116,7 +116,7 @@ fn on_open_request(
     });
 }
 
-fn on_navigate_request(
+fn navigate_request(
     trigger: On<UiInput<ToolsNavigateRequest>>,
     mut requests: MessageWriter<PageOpenRequest>,
 ) {
@@ -130,7 +130,7 @@ fn on_navigate_request(
     });
 }
 
-fn spawn_tool_registry(mut commands: Commands) {
+fn spawn_registry(mut commands: Commands) {
     commands.spawn((
         Name::new("Tool registry"),
         ToolRegistry::default(),
@@ -251,7 +251,7 @@ struct ToolOperationContext {
 #[derive(Component, Default)]
 struct PendingToolOperation;
 
-fn on_refresh_request(
+fn refresh_request(
     trigger: On<UiInput<ToolsRefreshRequest>>,
     mut registry: Query<&mut ToolRegistry>,
     subscribers: Query<(), With<ToolSubscriber>>,
@@ -307,7 +307,7 @@ fn queue_tool_operation<R: Clone + Send + Sync + 'static>(
     ));
 }
 
-fn on_operation_request<R>(
+fn operation_request<R>(
     trigger: On<UiInput<R>>,
     registries: Query<&mut OperationRequestSequence, With<ToolRegistry>>,
     subscribers: Query<&mut ToolSubscriber>,
@@ -328,7 +328,7 @@ fn on_operation_request<R>(
     );
 }
 
-fn start_tool_operation(
+fn start_operation(
     pending: Query<(Entity, &ToolOperationContext), With<PendingToolOperation>>,
     active: Query<(), With<ToolStoreTarget>>,
     scans: Query<(), With<ToolScanTask>>,
@@ -357,7 +357,7 @@ fn start_tool_operation(
         .insert(ToolStoreTarget::new(store));
 }
 
-fn request_tool_scan(
+fn request_scan(
     mut registry: Query<(&mut ToolRegistry, &ToolStore)>,
     providers: Query<(&ToolProviderId, &ToolScanner)>,
     scans: Query<(), With<ToolScanTask>>,
@@ -393,7 +393,7 @@ fn request_tool_scan(
     state.refresh_catalogs = false;
 }
 
-fn finish_tool_scans(
+fn finish_scans(
     mut scans: Query<(Entity, &mut ToolScanTask)>,
     mut registry: Query<(&mut ToolRegistry, &mut ToolsManifest)>,
     mut commands: Commands,
@@ -416,7 +416,7 @@ fn finish_tool_scans(
     }
 }
 
-fn start_external_tool_operations(
+fn start_external_operations(
     operations: Query<
         (
             Entity,
@@ -538,7 +538,7 @@ fn apply_tools(
     ))
 }
 
-fn finish_external_tool_operations(
+fn finish_external_operations(
     mut operations: Query<(Entity, &mut ToolProviderOperationTask)>,
     mut commands: Commands,
 ) {
@@ -616,7 +616,7 @@ fn scan_tools(
     }
 }
 
-fn drain_succeeded_tool_operations(
+fn drain_succeeded_operations(
     operations: Query<
         (Entity, &ToolOperationContext, &ToolOperationSucceeded),
         With<ToolOperationFinished>,
@@ -643,7 +643,7 @@ fn drain_succeeded_tool_operations(
     }
 }
 
-fn drain_failed_tool_operations(
+fn drain_failed_operations(
     operations: Query<
         (Entity, &ToolOperationContext, &ToolOperationFailed),
         With<ToolOperationFinished>,
@@ -693,7 +693,7 @@ mod tests {
     #[test]
     fn tools_page_ready_registers_state_subscriber() {
         let mut app = App::new();
-        app.add_observer(on_page_ready);
+        app.add_observer(page_ready);
         let webview = app
             .world_mut()
             .spawn(PageMetadata {
@@ -715,7 +715,7 @@ mod tests {
     fn tools_navigation_targets_the_emitting_page_stack() {
         let mut app = App::new();
         app.add_message::<PageOpenRequest>()
-            .add_observer(on_navigate_request);
+            .add_observer(navigate_request);
         let webview = app.world_mut().spawn_empty().id();
 
         app.world_mut().trigger(UiInput {

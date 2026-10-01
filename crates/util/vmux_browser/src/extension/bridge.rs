@@ -162,7 +162,7 @@ impl bevy::prelude::Plugin for ExtensionBridgePlugin {
                 registrations: self.registrations.clone(),
             },
         ));
-        app.add_systems(bevy::prelude::Startup, start_extension_bridge);
+        app.add_systems(bevy::prelude::Startup, start);
     }
 }
 
@@ -172,7 +172,7 @@ struct ExtensionBridgeStartup {
     registrations: Vec<BridgeRegistration>,
 }
 
-fn start_extension_bridge(
+fn start(
     mut commands: bevy::prelude::Commands,
     startup: bevy::prelude::Single<(bevy::prelude::Entity, &ExtensionBridgeStartup)>,
 ) {

@@ -16,7 +16,7 @@ impl Plugin for ToolCliPlugin {
             .add_systems(
                 Update,
                 (
-                    route_tool_cli,
+                    route,
                     execute_status,
                     execute_apply,
                     execute_homebrew_import,
@@ -58,7 +58,7 @@ struct DotfileAdoptRequest {
 #[derive(Component)]
 struct DotfileUnlinkRequest(String);
 
-fn route_tool_cli(
+fn route(
     invocations: Query<(Entity, &CliInvocation), Added<CliInvocation>>,
     mut commands: Commands,
 ) {

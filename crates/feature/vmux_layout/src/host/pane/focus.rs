@@ -21,18 +21,15 @@ pub(super) struct FocusPlugin;
 impl Plugin for FocusPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<FocusRequest>()
-            .add_systems(Update, on_select.in_set(LayoutRequestSet::Handle))
-            .add_systems(PostUpdate, warp_cursor_to_active_pane);
+            .add_systems(Update, select.in_set(LayoutRequestSet::Handle))
+            .add_systems(PostUpdate, warp_cursor_to_active);
         #[cfg(target_os = "macos")]
         app.add_systems(
             Update,
             apply_pending_hover.before(crate::stack::ComputeFocusSet),
         );
         #[cfg(not(target_os = "macos"))]
-        app.add_systems(
-            Update,
-            poll_cursor_pane_focus.before(crate::stack::ComputeFocusSet),
-        );
+        app.add_systems(Update, poll_cursor.before(crate::stack::ComputeFocusSet));
     }
 }
 
@@ -52,7 +49,7 @@ impl PaneHoverCooldown {
 #[derive(Component)]
 pub struct PendingCursorWarp;
 
-fn on_select(
+fn select(
     mut reader: MessageReader<FocusRequest>,
     active_tab_param: ActiveTabParam,
     focus_query: LayoutFocus,
@@ -129,7 +126,7 @@ fn on_select(
 }
 
 #[cfg_attr(target_os = "macos", allow(dead_code))]
-fn poll_cursor_pane_focus(
+fn poll_cursor(
     windows: Query<(Entity, &Window)>,
     focused_window: crate::window::FocusedWindow,
     hierarchy: crate::window::WindowHierarchy,
@@ -306,7 +303,7 @@ fn apply_pending_hover(
     }
 }
 
-fn warp_cursor_to_active_pane(
+fn warp_cursor_to_active(
     pane_layout: Query<
         (Entity, &ComputedNode),
         (With<Pane>, Without<PaneSplit>, With<PendingCursorWarp>),
@@ -346,7 +343,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_message::<FocusRequest>()
-                .add_systems(Update, on_select);
+                .add_systems(Update, select);
             app.world_mut().spawn(PrimaryWindow);
             Self { app }
         }
@@ -355,7 +352,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .insert_resource(ButtonInput::<KeyCode>::default())
-                .add_systems(Update, poll_cursor_pane_focus);
+                .add_systems(Update, poll_cursor);
             Self { app }
         }
 

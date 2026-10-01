@@ -23,14 +23,8 @@ impl Plugin for ToolRegistryPlugin {
             )
                 .chain(),
         )
-        .add_systems(
-            Startup,
-            spawn_tool_registry.in_set(ToolStartupSet::Registry),
-        )
-        .add_systems(
-            Startup,
-            register_tool_manifests.in_set(ToolStartupSet::Manifest),
-        )
+        .add_systems(Startup, spawn.in_set(ToolStartupSet::Registry))
+        .add_systems(Startup, register_manifests.in_set(ToolStartupSet::Manifest))
         .configure_sets(
             Update,
             (
@@ -44,7 +38,7 @@ impl Plugin for ToolRegistryPlugin {
         )
         .add_systems(
             Update,
-            (resolve_tool_catalogs, resolve_tool_invocations).in_set(ToolResolveSet),
+            (resolve_catalogs, resolve_invocations).in_set(ToolResolveSet),
         )
         .add_systems(
             Update,
@@ -75,8 +69,8 @@ impl ToolAppExt for App {
             })
             .in_set(ToolStartupSet::Registry),
         )
-        .add_systems(Startup, bind_tool::<T>.in_set(ToolStartupSet::Binding))
-        .add_systems(Update, parse_tool::<T>.in_set(ToolRequestSet))
+        .add_systems(Startup, bind::<T>.in_set(ToolStartupSet::Binding))
+        .add_systems(Update, parse::<T>.in_set(ToolRequestSet))
     }
 }
 
@@ -84,11 +78,11 @@ pub trait ToolInput: Component + serde::de::DeserializeOwned {
     const NAME: &'static str;
 }
 
-fn spawn_tool_registry(mut commands: Commands) {
+fn spawn(mut commands: Commands) {
     commands.spawn((Name::new("Tool registry"), NextToolOrder::default()));
 }
 
-fn register_tool_manifests(
+fn register_manifests(
     features: Query<&FeatureManifest>,
     mut commands: Commands,
     mut next_order: Single<&mut NextToolOrder>,
@@ -108,7 +102,7 @@ struct ToolBindingSource<T> {
 #[derive(Component)]
 struct ToolBinding<T>(PhantomData<fn() -> T>);
 
-fn bind_tool<T>(
+fn bind<T>(
     bindings: Query<(Entity, &ToolBindingSource<T>)>,
     tools: Query<(Entity, &Name), With<RegisteredTool>>,
     mut commands: Commands,
@@ -126,7 +120,7 @@ fn bind_tool<T>(
     }
 }
 
-fn parse_tool<T>(
+fn parse<T>(
     calls: Query<(Entity, &Name, &JsonArguments, &ToolTarget), Added<ToolCall>>,
     tools: Query<(), With<ToolBinding<T>>>,
     mut commands: Commands,
@@ -212,7 +206,7 @@ pub struct AcpSessionContext;
 #[derive(Component, Clone, Copy)]
 pub struct AcpTerminalContext;
 
-fn resolve_tool_catalogs(
+fn resolve_catalogs(
     requests: Query<
         (
             Entity,
@@ -257,7 +251,7 @@ fn resolve_tool_catalogs(
     }
 }
 
-fn resolve_tool_invocations(
+fn resolve_invocations(
     invocations: Query<
         (
             Entity,

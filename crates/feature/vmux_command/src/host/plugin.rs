@@ -29,10 +29,10 @@ impl Plugin for CommandPlugin {
                 SurfacePlugin,
                 crate::CommandToolPlugin,
             ))
-            .add_systems(Update, invoke_command.after(AgentRequestRouteSet))
+            .add_systems(Update, invoke.after(AgentRequestRouteSet))
             .add_systems(
                 Update,
-                log_command_invocations
+                log_invocations
                     .after(WriteCommandRequests)
                     .before(DispatchCommandInvocations),
             )
@@ -40,7 +40,7 @@ impl Plugin for CommandPlugin {
     }
 }
 
-fn invoke_command(
+fn invoke(
     mut requests: MessageReader<AgentRequestMessage<AgentInvokeCommand>>,
     definitions: Query<&CommandDefinition>,
     mut invocations: MessageWriter<CommandInvocation>,
@@ -121,7 +121,7 @@ fn keep_frames_coming(
     let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
 }
 
-fn log_command_invocations(
+fn log_invocations(
     mut reader: MessageReader<CommandInvocation>,
     profiles: Query<(&Profile, Has<User>)>,
 ) {

@@ -15,7 +15,7 @@ pub(super) struct MousePlugin;
 impl Plugin for MousePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(TermMouseEvent,)>::default())
-            .add_observer(on_term_mouse);
+            .add_observer(term);
     }
 }
 
@@ -226,7 +226,7 @@ fn sgr_mouse_sequence(button: u8, col: u16, row: u16, modifiers: u8, pressed: bo
     format!("\x1b[<{};{};{}{}", button, col + 1, row + 1, suffix).into_bytes()
 }
 
-fn on_term_mouse(
+fn term(
     trigger: On<UiInput<TermMouseEvent>>,
     mut terminals: Query<
         (

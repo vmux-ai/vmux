@@ -45,7 +45,7 @@ impl Plugin for NavigationPlugin {
             .add_systems(
                 Update,
                 (
-                    drain_committed_navigation,
+                    drain_committed,
                     navigate.in_set(crate::BrowserSystemSet::Navigate),
                     go_back,
                     go_forward,
@@ -83,7 +83,7 @@ fn issue_open_history(
     }
 }
 
-fn drain_committed_navigation(
+fn drain_committed(
     receiver: Res<WebviewCommittedNavigationReceiver>,
     infrastructure: Query<(), With<crate::extension::bridge_page::ExtensionInfrastructureWebview>>,
     retired_infrastructure: Query<
@@ -459,7 +459,7 @@ mod committed_navigation_tests {
         app.insert_resource(WebviewCommittedNavigationReceiver(receiver))
             .init_resource::<Collected>()
             .add_message::<WebviewCommittedNavigationEvent>()
-            .add_systems(Update, (drain_committed_navigation, collect).chain());
+            .add_systems(Update, (drain_committed, collect).chain());
         app.world_mut().despawn(infrastructure);
         app.world_mut().spawn(
             crate::extension::bridge_page::RetiredExtensionInfrastructureWebview::new(

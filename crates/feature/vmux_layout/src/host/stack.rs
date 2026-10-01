@@ -64,13 +64,13 @@ impl Plugin for StackPlugin {
             )
             .add_systems(
                 Update,
-                handle_close_stack_requests
+                apply_closures
                     .in_set(CloseStackSet)
                     .in_set(LayoutRequestSet::Handle),
             )
             .add_systems(
                 Update,
-                compute_focused_stack
+                compute_focused
                     .in_set(ComputeFocusSet)
                     .after(LayoutRequestSet::Handle)
                     .after(crate::active::ActiveSystemSet::Descendants),
@@ -191,7 +191,7 @@ pub enum CloseStackReason {
     Tidying,
 }
 
-fn handle_close_stack_requests(
+fn apply_closures(
     mut reader: MessageReader<CloseStackRequest>,
     mut closer: StackCloser,
     mut commands: Commands,
@@ -508,7 +508,7 @@ impl LayoutFocus<'_, '_> {
     }
 }
 
-fn compute_focused_stack(
+fn compute_focused(
     mut profiles: Query<(&ProfileId, &mut ActiveStack)>,
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
@@ -781,7 +781,7 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
-            .add_systems(Update, handle_close_stack_requests);
+            .add_systems(Update, apply_closures);
         app
     }
 
@@ -959,7 +959,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<ChangeLog>()
-            .add_systems(Update, (compute_focused_stack, probe).chain());
+            .add_systems(Update, (compute_focused, probe).chain());
         app.world_mut().spawn(ActiveStack::default().local_bundle());
 
         let tab = app
@@ -1228,10 +1228,7 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
             .insert_resource(test_settings())
-            .add_systems(
-                Update,
-                (handle_close_requests, handle_close_stack_requests).chain(),
-            );
+            .add_systems(Update, (handle_close_requests, apply_closures).chain());
 
         let tab = app
             .world_mut()
@@ -1291,10 +1288,7 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
             .insert_resource(test_settings())
-            .add_systems(
-                Update,
-                (handle_close_requests, handle_close_stack_requests).chain(),
-            );
+            .add_systems(Update, (handle_close_requests, apply_closures).chain());
 
         let tab = app
             .world_mut()
@@ -1516,7 +1510,7 @@ mod tests {
                 (
                     handle_open_requests,
                     handle_close_requests,
-                    handle_close_stack_requests,
+                    apply_closures,
                     collect_spawn_requests,
                 )
                     .chain(),

@@ -56,10 +56,7 @@ impl ServiceMessageAppExt for App {
         self.add_message::<ServiceInbound>()
             .add_message::<M>()
             .configure_sets(Update, (ServiceMessageDecodeSet, ServiceMessageSet).chain())
-            .add_systems(
-                Update,
-                route_service_message::<M>.in_set(ServiceMessageDecodeSet),
-            )
+            .add_systems(Update, route_message::<M>.in_set(ServiceMessageDecodeSet))
     }
 }
 
@@ -72,7 +69,7 @@ pub struct ServiceMessageSet;
 struct ServiceMessageDecodeSet;
 
 #[cfg(host)]
-fn route_service_message<M: ServiceMessageVariant>(
+fn route_message<M: ServiceMessageVariant>(
     mut inbound: MessageReader<ServiceInbound>,
     mut messages: MessageWriter<M>,
 ) {

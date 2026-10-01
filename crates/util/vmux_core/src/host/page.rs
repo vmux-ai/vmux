@@ -15,9 +15,9 @@ pub struct PagePlugin;
 impl Plugin for PagePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(PageReady,)>::default())
-            .add_observer(mark_webview_page_ready)
+            .add_observer(mark_webview_ready)
             .configure_sets(Startup, PageEmbedSet)
-            .add_systems(Startup, embed_page_static_assets.in_set(PageEmbedSet));
+            .add_systems(Startup, embed_static_assets.in_set(PageEmbedSet));
     }
 }
 
@@ -333,7 +333,7 @@ impl PageManifest {
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PageEmbedSet;
 
-fn mark_webview_page_ready(trigger: On<UiInput<PageReady>>, mut commands: Commands) {
+fn mark_webview_ready(trigger: On<UiInput<PageReady>>, mut commands: Commands) {
     commands
         .entity(trigger.event().webview)
         .insert(trigger.event().payload);
@@ -379,10 +379,7 @@ fn packaged_page_root(resources_dir: Option<&Path>, host: &str) -> Option<PathBu
     shared_root.is_dir().then_some(shared_root)
 }
 
-fn embed_page_static_assets(
-    manifests: Query<&PageManifest>,
-    mut reg: ResMut<EmbeddedAssetRegistry>,
-) {
+fn embed_static_assets(manifests: Query<&PageManifest>, mut reg: ResMut<EmbeddedAssetRegistry>) {
     let resources_dir = current_app_resources_dir();
     for manifest in &manifests {
         let bundle_root = manifest.bundle_root(resources_dir.as_deref());

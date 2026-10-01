@@ -21,16 +21,16 @@ impl Plugin for ViewportPlugin {
             .add_systems(
                 Update,
                 (
-                    sync_editor_wrap_settings.after(EditorFileLoadedSet),
+                    sync_wrap_settings.after(EditorFileLoadedSet),
                     rehighlight_on_color_scheme,
                     apply_lsp_folds,
                     persist_folds,
                 ),
             )
-            .add_observer(on_file_resize)
-            .add_observer(on_file_scroll)
-            .add_observer(on_file_fold_toggle)
-            .add_observer(render_viewport)
+            .add_observer(file_resize)
+            .add_observer(file_scroll)
+            .add_observer(file_fold_toggle)
+            .add_observer(render)
             .add_observer(render_cursor);
     }
 }
@@ -168,7 +168,7 @@ impl ViewportRenderRequest {
     }
 }
 
-fn render_viewport(
+fn render(
     trigger: On<ViewportRenderRequest>,
     mut views: Query<(&mut Editor, &FileViewport)>,
     browsers: NonSend<Browsers>,
@@ -376,7 +376,7 @@ fn rehighlight_on_color_scheme(
     }
 }
 
-fn sync_editor_wrap_settings(
+fn sync_wrap_settings(
     settings: Res<vmux_setting::AppSettings>,
     mut views: Query<(
         Entity,
@@ -419,7 +419,7 @@ fn sync_editor_wrap_settings(
     }
 }
 
-fn on_file_resize(
+fn file_resize(
     trigger: On<UiInput<FileResizeEvent>>,
     mut views: Query<(&mut FileViewport, Option<&mut Editor>, Has<EditorKeymap>)>,
     mut commands: Commands,
@@ -445,7 +445,7 @@ fn on_file_resize(
     }
 }
 
-fn on_file_scroll(
+fn file_scroll(
     trigger: On<UiInput<FileScrollEvent>>,
     mut views: Query<(&mut Editor, &mut FileViewport), With<EditorKeymap>>,
     mut commands: Commands,
@@ -465,7 +465,7 @@ fn on_file_scroll(
     commands.trigger(CursorRenderRequest::new(entity));
 }
 
-fn on_file_fold_toggle(
+fn file_fold_toggle(
     trigger: On<UiInput<FileFoldToggle>>,
     mut views: Query<&mut Editor, (With<EditorKeymap>, With<FileViewport>)>,
     mut commands: Commands,
@@ -584,7 +584,7 @@ mod tests {
                 crate::host::fold::FoldState::default(),
             );
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins).add_observer(on_file_scroll);
+            app.add_plugins(MinimalPlugins).add_observer(file_scroll);
             app.world_mut().insert_non_send(Browsers::default());
             let entity = app
                 .world_mut()

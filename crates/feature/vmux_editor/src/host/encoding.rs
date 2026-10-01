@@ -20,12 +20,12 @@ impl Plugin for EncodingPlugin {
             FileEncodingReopenRequest,
             FileEncodingSaveRequest,
         )>::default())
-            .add_observer(reopen_with_encoding)
-            .add_observer(save_with_encoding);
+            .add_observer(reopen_with)
+            .add_observer(save_with);
     }
 }
 
-fn reopen_with_encoding(
+fn reopen_with(
     trigger: On<UiInput<FileEncodingReopenRequest>>,
     views: Query<&FileView>,
     mut lsp_changes: Option<MessageWriter<crate::lsp::manager::LspDocumentChangeRequest>>,
@@ -56,7 +56,7 @@ fn reopen_with_encoding(
     }
 }
 
-fn save_with_encoding(
+fn save_with(
     trigger: On<UiInput<FileEncodingSaveRequest>>,
     mut editors: Query<&mut Editor>,
     browsers: NonSend<Browsers>,

@@ -13,7 +13,7 @@ impl Plugin for NotePlugin {
             Update,
             (
                 mark_notes_on_knowledge_change,
-                send_note.after(mark_notes_on_knowledge_change),
+                send.after(mark_notes_on_knowledge_change),
             ),
         );
     }
@@ -40,7 +40,7 @@ fn active_note_block(blocks: &[NoteBlock], line: u32) -> Option<u32> {
         .map(|index| index as u32)
 }
 
-fn send_note(
+fn send(
     mode: Single<&SharedFileViewMode>,
     indexes: Query<&vmux_core::knowledge::KnowledgeIndex>,
     notes: Query<(Entity, &FileView, &Editor, Option<&NoteRevealLine>), ReadyNote>,

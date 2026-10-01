@@ -203,9 +203,12 @@ struct ChatLists<'w, 's> {
 impl ChatLists<'_, '_> {
     fn selector(&self, webview: Entity, draft: &str) -> ChatSelectorState {
         let Some(active) = self.active(webview, draft) else {
-            return ChatSelectorState::default();
+            return ChatSelectorState {
+                key_context: vec!["chat".to_string()],
+                ..Default::default()
+            };
         };
-        match active.kind {
+        let mut state = match active.kind {
             ChatListKind::Approval
             | ChatListKind::Choice
             | ChatListKind::Composer
@@ -252,7 +255,16 @@ impl ChatLists<'_, '_> {
                     ..Default::default()
                 }
             }
+        };
+        state.key_context.push("chat".to_string());
+        state.key_context.push("chat.list".to_string());
+        if matches!(active.kind, ChatListKind::Approval | ChatListKind::Choice) {
+            state.key_context.push("chat.choice".to_string());
         }
+        if active.kind.is_selector() {
+            state.key_context.push("chat.selector".to_string());
+        }
+        state
     }
 
     fn active(&self, webview: Entity, draft: &str) -> Option<ActiveChatList> {

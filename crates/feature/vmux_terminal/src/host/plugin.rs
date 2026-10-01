@@ -198,18 +198,18 @@ impl Plugin for TerminalServicePlugin {
         app.add_plugins(TerminalUpdatePlugin)
             .add_systems(
                 Update,
-                respond_terminal_stack_spawn
+                respond_stack_spawn
                     .in_set(TerminalStackSpawnSet)
                     .after(ServiceMessageSet),
             )
-            .add_systems(Update, respond_terminal_spawn.in_set(ReadCommandRequests))
+            .add_systems(Update, respond_spawn.in_set(ReadCommandRequests))
             .add_systems(
                 Update,
                 prewarm_login_shell_env.run_if(resource_added::<AppSettings>),
             )
-            .add_observer(on_restart)
-            .add_observer(on_restart_pty)
-            .add_observer(on_removed);
+            .add_observer(restart)
+            .add_observer(restart_pty)
+            .add_observer(removed);
     }
 }
 
@@ -217,14 +217,14 @@ struct TerminalInputPlugin;
 
 impl Plugin for TerminalInputPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreUpdate, initialize_terminal_state)
-            .add_systems(Update, format_terminal_url.after(pid::PidIndexSet))
+        app.add_systems(PreUpdate, initialize_state)
+            .add_systems(Update, format_url.after(pid::PidIndexSet))
             .add_plugins((
                 super::mouse::MousePlugin,
                 super::link::LinkPlugin,
                 ProcessControlPlugin,
             ))
-            .add_observer(on_term_key);
+            .add_observer(term_key);
     }
 }
 
@@ -232,7 +232,7 @@ fn prewarm_login_shell_env(settings: Res<AppSettings>) {
     crate::shell_env::prewarm_login_shell_env(terminal_shell(&settings));
 }
 
-fn initialize_terminal_state(terminals: Query<Entity, Added<Terminal>>, mut commands: Commands) {
+fn initialize_state(terminals: Query<Entity, Added<Terminal>>, mut commands: Commands) {
     for entity in &terminals {
         commands.entity(entity).insert((
             TerminalMode::default(),
@@ -274,7 +274,7 @@ impl Plugin for TerminalUpdatePlugin {
         .add_systems(Update, clear_osc_title_on_exit.after(ServiceMessageSet))
         .add_systems(
             Update,
-            handle_terminal_page_open.in_set(PageOpenSet::HandleKnownPages),
+            handle_page_open.in_set(PageOpenSet::HandleKnownPages),
         )
         .add_systems(
             Update,
@@ -284,7 +284,7 @@ impl Plugin for TerminalUpdatePlugin {
             Update,
             (
                 publish_service_status,
-                resolve_pending_terminal_cwd,
+                resolve_pending_cwd,
                 (
                     send_service_requests,
                     apply_process_start,
@@ -368,7 +368,7 @@ pub struct TerminalStackSpawnRequest {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TerminalStackSpawnSet;
 
-fn format_terminal_url(
+fn format_url(
     mut q: Query<
         (Option<&Pid>, &mut PageMetadata),
         (With<Terminal>, Or<(Changed<Pid>, Added<PageMetadata>)>),
@@ -385,7 +385,7 @@ fn format_terminal_url(
     }
 }
 
-fn on_removed(
+fn removed(
     trigger: On<Remove, ProcessId>,
     pids: Query<&ProcessId>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -424,7 +424,7 @@ fn spawn_layout_requested_content(
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
-fn handle_terminal_page_open(
+fn handle_page_open(
     tasks: Query<(Entity, &PageOpenTask, Has<PageRestore>), PendingPageOpen>,
     pid_indexes: Query<&pid::PidToEntity>,
     tabs: TabHierarchy,
@@ -524,7 +524,7 @@ fn handle_terminal_page_open(
     }
 }
 
-fn respond_terminal_spawn(
+fn respond_spawn(
     mut reader: MessageReader<TerminalSpawnRequest>,
     mut commands: Commands,
     settings: Res<AppSettings>,
@@ -636,7 +636,7 @@ fn new_terminal_bundle_with_cwd_and_shell(
     )
 }
 
-fn respond_terminal_stack_spawn(
+fn respond_stack_spawn(
     mut reader: MessageReader<TerminalStackSpawnRequest>,
     settings: Res<AppSettings>,
     mut terminal_inputs: MessageWriter<QueueTerminalInput>,
@@ -742,7 +742,7 @@ pub struct TerminalRestartRequest {
     pub terminal: Entity,
 }
 
-fn on_restart(trigger: On<TerminalRestartRequest>, mut commands: Commands) {
+fn restart(trigger: On<TerminalRestartRequest>, mut commands: Commands) {
     commands
         .entity(trigger.event_target())
         .remove::<ShellOutputSeen>()
@@ -825,7 +825,7 @@ fn line_has_content(line: &vmux_core::event::TermLine) -> bool {
     line.spans.iter().any(|s| !s.text.trim().is_empty())
 }
 
-fn resolve_pending_terminal_cwd(
+fn resolve_pending_cwd(
     mut pending: Query<
         (Entity, &mut crate::launch::TerminalLaunch),
         (With<Terminal>, With<PendingServiceCreate>),
@@ -1599,7 +1599,7 @@ fn key_code_from_web_code(code: &str) -> KeyCode {
     }
 }
 
-fn on_term_key(
+fn term_key(
     trigger: On<UiInput<KeyStroke>>,
     mut terminals: Query<
         (
@@ -1691,7 +1691,7 @@ fn on_term_key(
     }
 }
 
-fn on_restart_pty(
+fn restart_pty(
     trigger: On<RestartPty>,
     mut q: Query<(
         &mut ProcessId,
@@ -2068,7 +2068,7 @@ mod tests {
             .add_plugins(InputQueuePlugin)
             .add_message::<TerminalStackSpawnRequest>()
             .insert_resource(test_settings())
-            .add_systems(Update, respond_terminal_stack_spawn);
+            .add_systems(Update, respond_stack_spawn);
 
         let pane = app.world_mut().spawn_empty().id();
         app.world_mut()
@@ -2101,7 +2101,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .add_systems(Update, handle_terminal_page_open);
+            .add_systems(Update, handle_page_open);
         spawn_active_space(&mut app, &SpaceRecord::bootstrap());
 
         let stack = app.world_mut().spawn(stack_bundle()).id();
@@ -2145,7 +2145,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
-            .add_systems(Update, handle_terminal_page_open);
+            .add_systems(Update, handle_page_open);
         spawn_active_space(&mut app, &record);
 
         let stack = app.world_mut().spawn(stack_bundle()).id();
@@ -2171,7 +2171,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .add_systems(Update, handle_terminal_page_open);
+            .add_systems(Update, handle_page_open);
         spawn_active_space(&mut app, &record);
 
         let stack = app.world_mut().spawn(stack_bundle()).id();
@@ -2209,7 +2209,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
-            .add_systems(Update, handle_terminal_page_open);
+            .add_systems(Update, handle_page_open);
         spawn_active_space(&mut app, &record);
 
         let tab = app
@@ -2256,7 +2256,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
-            .add_systems(Update, handle_terminal_page_open);
+            .add_systems(Update, handle_page_open);
         spawn_active_space(&mut app, &record);
 
         let tab = app
@@ -2738,7 +2738,7 @@ mod tests {
     fn restart_state_clears_shell_output_seen_and_preserves_pending_input() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, InputQueuePlugin))
-            .add_observer(on_restart);
+            .add_observer(restart);
         let entity = app.world_mut().spawn((Terminal, ShellOutputSeen)).id();
         app.world_mut().write_message(QueueTerminalInput {
             terminal: entity,

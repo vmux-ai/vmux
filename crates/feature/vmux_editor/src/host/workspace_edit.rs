@@ -14,13 +14,12 @@ impl Plugin for WorkspaceEditPlugin {
         app.add_message::<crate::lsp::manager::LspRequestedEdit>()
             .add_systems(
                 Update,
-                apply_lsp_workspace_edit
-                    .in_set(crate::lsp::server_request::ServerRequestSet::Answer),
+                apply_lsp.in_set(crate::lsp::server_request::ServerRequestSet::Answer),
             );
     }
 }
 
-fn apply_lsp_workspace_edit(
+fn apply_lsp(
     requests: Query<(Entity, &crate::lsp::server_request::AwaitingApplyEdit)>,
     browsers: NonSend<Browsers>,
     mut replies: MessageWriter<crate::lsp::server_request::ServerReply>,

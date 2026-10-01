@@ -25,7 +25,7 @@ impl Plugin for ExtensionBrokerPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
         app.add_plugins(FeaturePlugin::<crate::Feature>::default());
-        app.add_systems(Startup, spawn_extension_broker)
+        app.add_systems(Startup, spawn)
             .add_systems(
                 Update,
                 drain_bridge_requests
@@ -34,17 +34,14 @@ impl Plugin for ExtensionBrokerPlugin {
             )
             .add_systems(
                 Update,
-                forward_extension_model_events.after(super::project::ExtensionProjectionSet),
+                forward_model_events.after(super::project::ExtensionProjectionSet),
             )
             .add_systems(Update, fire_conformance_wake_timer)
             .add_systems(Update, arm_bridge_wake);
     }
 }
 
-fn spawn_extension_broker(
-    manifests: Query<&vmux_core::host::manifest::FeatureManifest>,
-    mut commands: Commands,
-) {
+fn spawn(manifests: Query<&vmux_core::host::manifest::FeatureManifest>, mut commands: Commands) {
     let matrix = CapabilityMatrix::from_features(&manifests)
         .expect("browser feature manifest contains a valid extension policy");
     let mut entity = commands.spawn((
@@ -707,7 +704,7 @@ fn collect_request_targets(
     }
 }
 
-fn forward_extension_model_events(
+fn forward_model_events(
     mut events: MessageReader<ExtensionModelEvent>,
     subscriptions: Single<&BridgeSubscriptions>,
     server: Single<&ExtensionBridgeServer>,
@@ -1619,7 +1616,7 @@ mod tests {
                 Update,
                 (
                     drain_bridge_requests,
-                    forward_extension_model_events.after(drain_bridge_requests),
+                    forward_model_events.after(drain_bridge_requests),
                 ),
             );
         app.world_mut().spawn(ExtensionModel::default());

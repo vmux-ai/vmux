@@ -79,11 +79,11 @@ impl ToolQueryAppExt for App {
             self.add_plugins(ToolQueryPlugin);
         }
         self.add_message::<ToolQueryMessage<T>>()
-            .add_systems(Update, route_tool_queries::<T>.in_set(ToolQueryRouteSet))
+            .add_systems(Update, route_queries::<T>.in_set(ToolQueryRouteSet))
     }
 }
 
-fn route_tool_queries<T>(
+fn route_queries<T>(
     mut queries: MessageReader<ToolQueryRequest>,
     mut handled: MessageWriter<ToolQueryHandled>,
     mut routed: MessageWriter<ToolQueryMessage<T>>,
