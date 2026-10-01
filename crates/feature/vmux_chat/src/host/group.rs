@@ -6,83 +6,111 @@ use vmux_api::room::{AssistantBlock, Message, PlanStep, SubagentBlock};
 #[cfg(test)]
 use vmux_api::protocol::compose_agent_prompt;
 
-#[cfg(test)]
-pub fn group_turns(messages: &[Message], durations: &[u32], running: bool) -> Vec<ChatItem> {
-    group_turns_page(&[], messages, &[], durations, running, 0, usize::MAX).items
-}
-
-pub struct ChatItemPage {
+pub(super) struct ChatItemPage {
     pub items: Vec<ChatItem>,
     pub start: usize,
     pub end: usize,
     pub total: usize,
 }
 
-pub fn grouped_item_count(imported: &[Message], live: &[Message]) -> usize {
-    let mut count = 0usize;
-    let mut current_turn = false;
-    for message in imported.iter().chain(live) {
-        match message {
-            Message::User { text, attachments } => {
-                if current_turn {
-                    count += 1;
-                }
-                let text = extract_display_prompt(text).unwrap_or(text);
-                if !text.trim().is_empty() || !attachments.is_empty() {
-                    count += 1;
-                }
-                current_turn = true;
-            }
-            Message::Assistant { .. } | Message::ToolResult { .. } => current_turn = true,
+pub(super) struct ChatMessages<'a> {
+    imported: &'a [Message],
+    live: &'a [Message],
+    message_times: &'a [u64],
+    durations: &'a [u32],
+    running: bool,
+}
+
+impl<'a> ChatMessages<'a> {
+    pub(super) fn new(
+        imported: &'a [Message],
+        live: &'a [Message],
+        message_times: &'a [u64],
+        durations: &'a [u32],
+        running: bool,
+    ) -> Self {
+        Self {
+            imported,
+            live,
+            message_times,
+            durations,
+            running,
         }
     }
-    if current_turn {
-        count += 1;
+
+    pub(super) fn item_count(&self) -> usize {
+        let mut count = 0usize;
+        let mut current_turn = false;
+        for message in self.imported.iter().chain(self.live) {
+            match message {
+                Message::User { text, attachments } => {
+                    if current_turn {
+                        count += 1;
+                    }
+                    let text = extract_display_prompt(text).unwrap_or(text);
+                    if !text.trim().is_empty() || !attachments.is_empty() {
+                        count += 1;
+                    }
+                    current_turn = true;
+                }
+                Message::Assistant { .. } | Message::ToolResult { .. } => current_turn = true,
+            }
+        }
+        if current_turn {
+            count += 1;
+        }
+        count
     }
-    count
-}
 
-pub fn group_turns_tail(
-    imported: &[Message],
-    live: &[Message],
-    message_times: &[u64],
-    durations: &[u32],
-    running: bool,
-    limit: usize,
-) -> ChatItemPage {
-    let total = grouped_item_count(imported, live);
-    let range = PageRange::new(total.saturating_sub(limit), total, total);
-    group_turns_page_with_total(imported, live, message_times, durations, running, range)
-}
+    pub(super) fn tail(&self, limit: usize) -> ChatItemPage {
+        let total = self.item_count();
+        self.page(PageRange::new(total.saturating_sub(limit), total, total))
+    }
 
-pub fn group_turns_before(
-    imported: &[Message],
-    live: &[Message],
-    message_times: &[u64],
-    durations: &[u32],
-    running: bool,
-    before: usize,
-    limit: usize,
-) -> ChatItemPage {
-    let total = grouped_item_count(imported, live);
-    let end = before.min(total);
-    let range = PageRange::new(end.saturating_sub(limit), end, total);
-    group_turns_page_with_total(imported, live, message_times, durations, running, range)
-}
+    pub(super) fn before(&self, before: usize, limit: usize) -> ChatItemPage {
+        let total = self.item_count();
+        let end = before.min(total);
+        self.page(PageRange::new(end.saturating_sub(limit), end, total))
+    }
 
-#[cfg(test)]
-fn group_turns_page(
-    imported: &[Message],
-    live: &[Message],
-    message_times: &[u64],
-    durations: &[u32],
-    running: bool,
-    start: usize,
-    end: usize,
-) -> ChatItemPage {
-    let total = grouped_item_count(imported, live);
-    let range = PageRange::new(start, end, total);
-    group_turns_page_with_total(imported, live, message_times, durations, running, range)
+    #[cfg(test)]
+    fn all(&self) -> Vec<ChatItem> {
+        self.page(PageRange::new(0, usize::MAX, self.item_count()))
+            .items
+    }
+
+    #[cfg(test)]
+    fn between(&self, start: usize, end: usize) -> ChatItemPage {
+        self.page(PageRange::new(start, end, self.item_count()))
+    }
+
+    fn page(&self, range: PageRange) -> ChatItemPage {
+        let mut builder = PageBuilder::new(range.start, range.end, self.durations);
+
+        for (index, message) in self.imported.iter().chain(self.live).enumerate() {
+            let created_at_ms = index
+                .checked_sub(self.imported.len())
+                .and_then(|index| self.message_times.get(index))
+                .copied()
+                .unwrap_or_default();
+            builder.push(message, created_at_ms);
+        }
+        builder.flush_turn();
+        if self.running
+            && range.end == range.total
+            && let Some(ChatItem::Turn(last)) = builder.items.last_mut()
+        {
+            last.running = true;
+            last.duration_secs = None;
+            super::projection::ChatTurnProjection::apply(last);
+        }
+        ChatItemPage {
+            items: builder.items,
+            start: range.start,
+            end: range.end,
+            total: range.total,
+        }
+    }
 }
 
 struct PageRange {
@@ -99,37 +127,23 @@ impl PageRange {
     }
 }
 
-fn group_turns_page_with_total(
-    imported: &[Message],
-    live: &[Message],
-    message_times: &[u64],
-    durations: &[u32],
-    running: bool,
-    range: PageRange,
-) -> ChatItemPage {
-    let mut builder = PageBuilder::new(range.start, range.end, durations);
-
-    for (index, message) in imported.iter().chain(live).enumerate() {
-        let created_at_ms = index
-            .checked_sub(imported.len())
-            .and_then(|index| message_times.get(index))
-            .copied()
-            .unwrap_or_default();
+impl PageBuilder<'_> {
+    fn push(&mut self, message: &Message, created_at_ms: u64) {
         match message {
             Message::User { text, attachments } => {
-                builder.flush_turn();
+                self.flush_turn();
                 let (context, text) = split_private_context_prompt(text)
                     .map(|(context, display)| (Some(context), display))
                     .unwrap_or((None, text));
                 if !text.trim().is_empty() || !attachments.is_empty() {
-                    builder.push_user(text, context, attachments, created_at_ms);
+                    self.push_user(text, context, attachments, created_at_ms);
                 }
-                builder.start_turn(created_at_ms);
+                self.start_turn(created_at_ms);
             }
             Message::Assistant { blocks } => {
-                builder.start_agent_turn(created_at_ms);
-                if let Some(turn) = builder.current.as_mut() {
-                    push_assistant_blocks(turn, blocks);
+                self.start_agent_turn(created_at_ms);
+                if let Some(turn) = self.current.as_mut() {
+                    Self::push_assistant_blocks(turn, blocks);
                 }
             }
             Message::ToolResult {
@@ -137,8 +151,8 @@ fn group_turns_page_with_total(
                 content,
                 is_error,
             } => {
-                builder.start_agent_turn(created_at_ms);
-                if let Some(turn) = builder.current.as_mut() {
+                self.start_agent_turn(created_at_ms);
+                if let Some(turn) = self.current.as_mut() {
                     turn.blocks.push(ChatBlock::ToolResult {
                         call_id: call_id.clone(),
                         content: content.clone(),
@@ -147,21 +161,6 @@ fn group_turns_page_with_total(
                 }
             }
         }
-    }
-    builder.flush_turn();
-    if running
-        && range.end == range.total
-        && let Some(ChatItem::Turn(last)) = builder.items.last_mut()
-    {
-        last.running = true;
-        last.duration_secs = None;
-        crate::projection::project_turn(last);
-    }
-    ChatItemPage {
-        items: builder.items,
-        start: range.start,
-        end: range.end,
-        total: range.total,
     }
 }
 
@@ -258,11 +257,12 @@ impl<'a> PageBuilder<'a> {
                 .enumerate()
                 .filter(|(index, block)| {
                     !matches!(block, ChatBlock::Text(_))
-                        && crate::projection::parent_tool_index(&turn, *index).is_none()
+                        && super::projection::ChatTurnProjection::parent_tool_index(&turn, *index)
+                            .is_none()
                 })
                 .count() as u32;
             turn.duration_secs = self.durations.get(self.turn_ordinal).copied();
-            crate::projection::project_turn(&mut turn);
+            super::projection::ChatTurnProjection::apply(&mut turn);
             self.items.push(ChatItem::Turn(turn));
         }
         self.current_exists = false;
@@ -272,110 +272,115 @@ impl<'a> PageBuilder<'a> {
     }
 }
 
-fn push_assistant_blocks(turn: &mut ChatTurn, blocks: &[AssistantBlock]) {
-    for block in blocks {
-        match block {
-            AssistantBlock::Text(text) => push_assistant_text(turn, text),
-            AssistantBlock::Thinking(text) => turn.blocks.push(ChatBlock::Thinking(text.clone())),
-            AssistantBlock::ToolUse {
-                call_id,
-                name,
-                args,
-                parent_call_id,
-            } => turn.blocks.push(ChatBlock::ToolUse {
-                call_id: call_id.clone(),
-                name: name.clone(),
-                args: args.clone(),
-                parent_call_id: parent_call_id.clone(),
-            }),
-            AssistantBlock::Subagent(subagent) => turn
-                .blocks
-                .push(ChatBlock::Subagent(Box::new(map_subagent(subagent)))),
-            AssistantBlock::Diff {
-                call_id,
-                path,
-                old_text,
-                new_text,
-            } => turn.blocks.push(ChatBlock::Diff {
-                call_id: call_id.clone(),
-                path: path.clone(),
-                old_text: old_text.clone(),
-                new_text: new_text.clone(),
-            }),
-            AssistantBlock::Plan { steps } => turn.blocks.push(ChatBlock::Plan {
-                steps: steps.iter().map(map_plan_step).collect(),
-            }),
+impl PageBuilder<'_> {
+    fn push_assistant_blocks(turn: &mut ChatTurn, blocks: &[AssistantBlock]) {
+        for block in blocks {
+            match block {
+                AssistantBlock::Text(text) => Self::push_assistant_text(turn, text),
+                AssistantBlock::Thinking(text) => {
+                    turn.blocks.push(ChatBlock::Thinking(text.clone()))
+                }
+                AssistantBlock::ToolUse {
+                    call_id,
+                    name,
+                    args,
+                    parent_call_id,
+                } => turn.blocks.push(ChatBlock::ToolUse {
+                    call_id: call_id.clone(),
+                    name: name.clone(),
+                    args: args.clone(),
+                    parent_call_id: parent_call_id.clone(),
+                }),
+                AssistantBlock::Subagent(subagent) => turn
+                    .blocks
+                    .push(ChatBlock::Subagent(Box::new(Self::map_subagent(subagent)))),
+                AssistantBlock::Diff {
+                    call_id,
+                    path,
+                    old_text,
+                    new_text,
+                } => turn.blocks.push(ChatBlock::Diff {
+                    call_id: call_id.clone(),
+                    path: path.clone(),
+                    old_text: old_text.clone(),
+                    new_text: new_text.clone(),
+                }),
+                AssistantBlock::Plan { steps } => turn.blocks.push(ChatBlock::Plan {
+                    steps: steps.iter().map(Self::map_plan_step).collect(),
+                }),
+            }
         }
     }
-}
 
-fn push_assistant_text(turn: &mut ChatTurn, text: &str) {
-    let mut prose = String::new();
-    for line in text.split_inclusive('\n') {
-        if let Some((attempt, total)) = reconnect_progress(line.trim()) {
-            push_prose(turn, &mut prose);
-            push_reconnect(turn, attempt, total);
+    fn push_assistant_text(turn: &mut ChatTurn, text: &str) {
+        let mut prose = String::new();
+        for line in text.split_inclusive('\n') {
+            if let Some((attempt, total)) = Self::reconnect_progress(line.trim()) {
+                Self::push_prose(turn, &mut prose);
+                Self::push_reconnect(turn, attempt, total);
+            } else {
+                prose.push_str(line);
+            }
+        }
+        Self::push_prose(turn, &mut prose);
+    }
+
+    fn push_prose(turn: &mut ChatTurn, prose: &mut String) {
+        if prose.trim().is_empty() {
+            prose.clear();
+            return;
+        }
+        turn.blocks
+            .push(ChatBlock::Text(std::mem::take(prose).trim().to_string()));
+    }
+
+    fn push_reconnect(turn: &mut ChatTurn, attempt: u32, total: u32) {
+        let block = ChatBlock::Reconnect { attempt, total };
+        if matches!(turn.blocks.last(), Some(ChatBlock::Reconnect { .. })) {
+            *turn.blocks.last_mut().expect("reconnect tail") = block;
         } else {
-            prose.push_str(line);
+            turn.blocks.push(block);
         }
     }
-    push_prose(turn, &mut prose);
-}
 
-fn push_prose(turn: &mut ChatTurn, prose: &mut String) {
-    if prose.trim().is_empty() {
-        prose.clear();
-        return;
+    fn reconnect_progress(text: &str) -> Option<(u32, u32)> {
+        let rest = text.strip_prefix("Reconnecting")?;
+        let rest = rest.trim_start_matches('.').trim_start_matches('…').trim();
+        let (attempt, total) = rest.split_once('/')?;
+        Some((attempt.trim().parse().ok()?, total.trim().parse().ok()?))
     }
-    turn.blocks
-        .push(ChatBlock::Text(std::mem::take(prose).trim().to_string()));
-}
 
-fn push_reconnect(turn: &mut ChatTurn, attempt: u32, total: u32) {
-    let block = ChatBlock::Reconnect { attempt, total };
-    if matches!(turn.blocks.last(), Some(ChatBlock::Reconnect { .. })) {
-        *turn.blocks.last_mut().expect("reconnect tail") = block;
-    } else {
-        turn.blocks.push(block);
+    fn map_plan_step(step: &PlanStep) -> ChatPlanStep {
+        ChatPlanStep {
+            content: step.content.clone(),
+            status: step.status.clone(),
+        }
     }
-}
 
-fn reconnect_progress(text: &str) -> Option<(u32, u32)> {
-    let rest = text.strip_prefix("Reconnecting")?;
-    let rest = rest.trim_start_matches('.').trim_start_matches('…').trim();
-    let (attempt, total) = rest.split_once('/')?;
-    Some((attempt.trim().parse().ok()?, total.trim().parse().ok()?))
-}
-
-fn map_plan_step(step: &PlanStep) -> ChatPlanStep {
-    ChatPlanStep {
-        content: step.content.clone(),
-        status: step.status.clone(),
-    }
-}
-
-fn map_subagent(subagent: &SubagentBlock) -> ChatSubagent {
-    ChatSubagent {
-        call_id: subagent.call_id.clone(),
-        provider: subagent.provider.clone(),
-        title: subagent.title.clone(),
-        status: subagent.status.clone(),
-        activity: subagent.activity.clone(),
-        agent_name: subagent.agent_name.clone(),
-        thread_id: subagent.thread_id.clone(),
-        parent_thread_id: subagent.parent_thread_id.clone(),
-        child_thread_ids: subagent.child_thread_ids.clone(),
-        parent_call_id: subagent.parent_call_id.clone(),
-        prompt: subagent.prompt.clone(),
-        model: subagent.model.clone(),
-        reasoning_effort: subagent.reasoning_effort.clone(),
-        raw_input: subagent.raw_input.clone(),
+    fn map_subagent(subagent: &SubagentBlock) -> ChatSubagent {
+        ChatSubagent {
+            call_id: subagent.call_id.clone(),
+            provider: subagent.provider.clone(),
+            title: subagent.title.clone(),
+            status: subagent.status.clone(),
+            activity: subagent.activity.clone(),
+            agent_name: subagent.agent_name.clone(),
+            thread_id: subagent.thread_id.clone(),
+            parent_thread_id: subagent.parent_thread_id.clone(),
+            child_thread_ids: subagent.child_thread_ids.clone(),
+            parent_call_id: subagent.parent_call_id.clone(),
+            prompt: subagent.prompt.clone(),
+            model: subagent.model.clone(),
+            reasoning_effort: subagent.reasoning_effort.clone(),
+            raw_input: subagent.raw_input.clone(),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::projection::ChatTurnProjection;
 
     fn assistant(blocks: Vec<AssistantBlock>) -> Message {
         Message::Assistant { blocks }
@@ -421,7 +426,7 @@ mod tests {
             },
             assistant(vec![AssistantBlock::Text("done".into())]),
         ];
-        let items = group_turns(&msgs, &[], false);
+        let items = ChatMessages::new(&[], &msgs, &[], &[], false).all();
         assert_eq!(items.len(), 2);
         assert!(matches!(&items[0], ChatItem::User { text, .. } if text == "hi"));
         let ChatItem::Turn(t) = &items[1] else {
@@ -446,7 +451,7 @@ mod tests {
             }],
         )];
 
-        let items = group_turns(&messages, &[], false);
+        let items = ChatMessages::new(&[], &messages, &[], &[], false).all();
 
         assert!(matches!(
             &items[0],
@@ -467,7 +472,7 @@ mod tests {
             Message::user("b"),
             assistant(vec![AssistantBlock::Text("2".into())]),
         ];
-        let items = group_turns(&msgs, &[5, 9], false);
+        let items = ChatMessages::new(&[], &msgs, &[], &[5, 9], false).all();
         assert_eq!(items.len(), 4);
         let ChatItem::Turn(t0) = &items[1] else {
             panic!()
@@ -490,7 +495,7 @@ mod tests {
             assistant(vec![AssistantBlock::Text("three".into())]),
         ];
 
-        let page = group_turns_tail(&[], &messages, &[], &[1, 2, 3], false, 3);
+        let page = ChatMessages::new(&[], &messages, &[], &[1, 2, 3], false).tail(3);
 
         assert_eq!((page.start, page.end, page.total), (3, 6, 6));
         assert_eq!(page.items.len(), 3);
@@ -505,7 +510,9 @@ mod tests {
             assistant(vec![AssistantBlock::Text("answer".into())]),
         ];
 
-        let items = group_turns_page(&[], &messages, &[10, 20], &[], false, 0, usize::MAX).items;
+        let items = ChatMessages::new(&[], &messages, &[10, 20], &[], false)
+            .between(0, usize::MAX)
+            .items;
 
         assert!(matches!(
             &items[0],
@@ -536,8 +543,9 @@ mod tests {
             assistant(vec![AssistantBlock::Text("answer".into())]),
         ];
 
-        let items =
-            group_turns_page(&[], &messages, &[10, 20, 30, 40], &[], false, 0, usize::MAX).items;
+        let items = ChatMessages::new(&[], &messages, &[10, 20, 30, 40], &[], false)
+            .between(0, usize::MAX)
+            .items;
 
         assert!(matches!(
             &items[1],
@@ -557,7 +565,7 @@ mod tests {
             assistant(vec![AssistantBlock::Text("two".into())]),
         ];
 
-        let page = group_turns_before(&[], &messages, &[], &[1, 2], false, 3, 2);
+        let page = ChatMessages::new(&[], &messages, &[], &[1, 2], false).before(3, 2);
 
         assert_eq!((page.start, page.end, page.total), (1, 3, 4));
         assert!(matches!(&page.items[0], ChatItem::Turn(turn) if turn.duration_secs == Some(1)));
@@ -575,7 +583,7 @@ mod tests {
             assistant(vec![AssistantBlock::Text("Which branch?".into())]),
         ];
 
-        let items = group_turns(&messages, &[], false);
+        let items = ChatMessages::new(&[], &messages, &[], &[], false).all();
 
         assert_eq!(items.len(), 3);
         assert!(matches!(&items[0], ChatItem::User { text, .. } if text == "fix it"));
@@ -596,7 +604,7 @@ mod tests {
         let private = compose_agent_prompt("show me something fun", Some("project policy"));
         let messages = vec![Message::user(format!("show me something fun{private}"))];
 
-        let items = group_turns(&messages, &[], false);
+        let items = ChatMessages::new(&[], &messages, &[], &[], false).all();
 
         assert!(matches!(
             &items[0],
@@ -614,7 +622,7 @@ mod tests {
             Message::user("b"),
             assistant(vec![AssistantBlock::Text("2".into())]),
         ];
-        let items = group_turns(&msgs, &[5], false);
+        let items = ChatMessages::new(&[], &msgs, &[], &[5], false).all();
         let ChatItem::Turn(t1) = &items[3] else {
             panic!()
         };
@@ -627,7 +635,7 @@ mod tests {
             Message::user("a"),
             assistant(vec![AssistantBlock::Text("1".into())]),
         ];
-        let items = group_turns(&msgs, &[5], true);
+        let items = ChatMessages::new(&[], &msgs, &[], &[5], true).all();
         let ChatItem::Turn(t) = &items[1] else {
             panic!()
         };
@@ -638,7 +646,7 @@ mod tests {
     #[test]
     fn running_emits_empty_tail_turn_after_user() {
         let msgs = vec![Message::user("a")];
-        let items = group_turns(&msgs, &[], true);
+        let items = ChatMessages::new(&[], &msgs, &[], &[], true).all();
         assert_eq!(items.len(), 2);
         let ChatItem::Turn(t) = &items[1] else {
             panic!()
@@ -658,7 +666,7 @@ mod tests {
                 AssistantBlock::Text("after".into()),
             ]),
         ];
-        let items = group_turns(&msgs, &[], false);
+        let items = ChatMessages::new(&[], &msgs, &[], &[], false).all();
         let ChatItem::Turn(turn) = &items[1] else {
             panic!()
         };
@@ -677,7 +685,7 @@ mod tests {
                 is_error: false,
             },
         ];
-        let items = group_turns(&msgs, &[], false);
+        let items = ChatMessages::new(&[], &msgs, &[], &[], false).all();
         let ChatItem::Turn(turn) = &items[1] else {
             panic!()
         };
@@ -708,7 +716,7 @@ mod tests {
                 is_error: false,
             },
         ];
-        let items = group_turns(&msgs, &[], false);
+        let items = ChatMessages::new(&[], &msgs, &[], &[], false).all();
         let ChatItem::Turn(turn) = &items[1] else {
             panic!()
         };
@@ -740,15 +748,24 @@ mod tests {
             },
         ];
 
-        let items = group_turns(&msgs, &[], false);
+        let items = ChatMessages::new(&[], &msgs, &[], &[], false).all();
         let ChatItem::Turn(turn) = &items[1] else {
             panic!()
         };
         assert_eq!(turn.step_count, 1);
         assert!(matches!(&turn.blocks[0], ChatBlock::Subagent(_)));
-        assert_eq!(crate::projection::parent_tool_index(turn, 1), Some(0));
-        assert_eq!(crate::projection::parent_tool_index(turn, 2), Some(0));
-        assert_eq!(crate::projection::parent_tool_index(turn, 3), Some(0));
+        assert_eq!(
+            ChatTurnProjection::parent_tool_index(turn, 1),
+            Some(0)
+        );
+        assert_eq!(
+            ChatTurnProjection::parent_tool_index(turn, 2),
+            Some(0)
+        );
+        assert_eq!(
+            ChatTurnProjection::parent_tool_index(turn, 3),
+            Some(0)
+        );
     }
 
     #[test]
@@ -759,7 +776,7 @@ mod tests {
                 "Reconnecting... 1/5\n\nReconnecting… 2/5\nReconnecting 3/5".into(),
             )]),
         ];
-        let items = group_turns(&msgs, &[], true);
+        let items = ChatMessages::new(&[], &msgs, &[], &[], true).all();
         let ChatItem::Turn(turn) = &items[1] else {
             panic!()
         };
@@ -782,7 +799,7 @@ mod tests {
                 "before\nReconnecting... 2/5\nafter".into(),
             )]),
         ];
-        let items = group_turns(&msgs, &[], false);
+        let items = ChatMessages::new(&[], &msgs, &[], &[], false).all();
         let ChatItem::Turn(turn) = &items[1] else {
             panic!()
         };

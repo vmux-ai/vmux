@@ -1,4 +1,4 @@
-use crate::group::group_turns_tail;
+use super::group::ChatMessages;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::chat::ChatItem;
@@ -239,7 +239,8 @@ fn project_snapshot(mut runtimes: ChangedChatProjection) {
         transcript.state.generation.wrapping_add(1).max(1)
     };
     transcript.room_id = Some(session.room_id.clone());
-    let (active_subagents, active_tasks) = crate::projection::activity_counts(&items);
+    let (active_subagents, active_tasks) =
+        super::projection::ChatTurnProjection::activity_counts(&items);
     transcript.state = ChatTranscriptState {
         generation,
         items,
@@ -295,7 +296,9 @@ impl Log {
             });
             timestamps.push(0);
         }
-        group_turns_tail(&[], &messages, &timestamps, &[], running, usize::MAX).items
+        ChatMessages::new(&[], &messages, &timestamps, &[], running)
+            .tail(usize::MAX)
+            .items
     }
 }
 

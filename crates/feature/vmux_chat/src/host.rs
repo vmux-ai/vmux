@@ -4,6 +4,7 @@ use vmux_ecs::host::manifest::FeaturePlugin;
 
 #[cfg(host)]
 mod composer;
+mod group;
 #[cfg(host)]
 mod handoff;
 #[cfg(host)]
@@ -11,6 +12,7 @@ mod key;
 #[cfg(host)]
 mod media;
 mod model;
+mod projection;
 mod prompt;
 mod room;
 #[cfg(host)]

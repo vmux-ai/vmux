@@ -6,15 +6,15 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
 use super::composer::{ComposerSelectors, ComposerState};
+use super::group::ChatMessages;
 use super::key::{ChatListSelection, ChatSelectorProjection};
+use super::projection::ChatTurnProjection;
 use crate::activity::ActivityIcon;
 use crate::event::{
     CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_HISTORY_PAGE_SIZE, ChatAttachment, ChatBranch,
     ChatBranchesState, ChatItem, ChatMediaState, ChatOpenPage, ChatResumeState, ChatSnapshot,
     ChatTranscriptState, ComposerContext, ResumableSessions,
 };
-use crate::group::group_turns_tail;
-use crate::projection::{activity_counts, current_activity};
 use crate::state::ChatUiState;
 use vmux_api::ProcessId;
 use vmux_api::command_bar::PromptRequest;
@@ -334,8 +334,8 @@ fn tab_activity_icon(
     session: &AcpSession,
 ) -> Option<PageIcon> {
     let running = matches!(state, AgentRunState::Streaming);
-    let page = group_turns_tail(&[], &messages.0, &[], &[], running, TAB_ACTIVITY_TAIL_ITEMS);
-    let activity = current_activity(&page.items, state.status())?;
+    let page = ChatMessages::new(&[], &messages.0, &[], &[], running).tail(TAB_ACTIVITY_TAIL_ITEMS);
+    let activity = ChatTurnProjection::current_activity(&page.items, state.status())?;
     let accent = crate::tab::Accent::for_agent(
         profile
             .map(|profile| profile.avatar.color.as_str())
@@ -515,7 +515,7 @@ impl ChatTranscriptProjection {
     }
 
     fn refresh_activity(&mut self) {
-        let (subagents, tasks) = activity_counts(&self.state.items);
+        let (subagents, tasks) = ChatTurnProjection::activity_counts(&self.state.items);
         self.state.active_subagents = subagents;
         self.state.active_tasks = tasks;
     }
@@ -705,8 +705,8 @@ mod tests {
             blocks: vec![ChatBlock::Thinking(String::new())],
             ..Default::default()
         };
-        crate::projection::project_turn(&mut thinking_turn);
-        let thinking = crate::projection::current_activity(
+        ChatTurnProjection::apply(&mut thinking_turn);
+        let thinking = ChatTurnProjection::current_activity(
             &[vmux_api::chat::ChatItem::Turn(thinking_turn)],
             "streaming",
         )
@@ -719,8 +719,8 @@ mod tests {
             ],
             ..Default::default()
         };
-        crate::projection::project_turn(&mut writing_turn);
-        let writing = crate::projection::current_activity(
+        ChatTurnProjection::apply(&mut writing_turn);
+        let writing = ChatTurnProjection::current_activity(
             &[vmux_api::chat::ChatItem::Turn(writing_turn)],
             "streaming",
         )

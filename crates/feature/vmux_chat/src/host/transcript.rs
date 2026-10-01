@@ -1,13 +1,13 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
+use super::group::ChatMessages;
 #[cfg(test)]
 use crate::event::ChatItem;
 use crate::event::{
     CHAT_INITIAL_ITEM_LIMIT, ChatHistoryMoreRequest, ChatSnapshot, PendingApproval,
     QueuedPromptSnapshot,
 };
-use crate::group::{group_turns_before, group_turns_tail, grouped_item_count};
 use crate::host::{ChatAttachmentHydrationRequest, ImportedConversation};
 use crate::host::{
     ChatAttachmentProjection, ChatHistoryQuery, ChatHistoryResult, ChatSnapshotProjection,
@@ -216,14 +216,14 @@ impl ChatProjection {
         let imported_messages = imported
             .map(|conversation| conversation.messages.as_slice())
             .unwrap_or_default();
-        let page = group_turns_tail(
+        let page = ChatMessages::new(
             imported_messages,
             &messages.0,
             &message_times.0,
             durations,
             running,
-            CHAT_INITIAL_ITEM_LIMIT as usize,
-        );
+        )
+        .tail(CHAT_INITIAL_ITEM_LIMIT as usize);
         let error = match state {
             AgentRunState::Installing { pct, message } => match pct {
                 Some(pct) => format!("{message} ({pct}%)"),
@@ -281,8 +281,11 @@ impl ChatProjection {
                 handoff_truncated: imported.is_some_and(|imported| imported.truncated),
                 handoff_message_count: imported
                     .map(|imported| {
-                        u32::try_from(grouped_item_count(&imported.messages, &[]))
-                            .unwrap_or(u32::MAX)
+                        u32::try_from(
+                            ChatMessages::new(&imported.messages, &[], &[], &[], false)
+                                .item_count(),
+                        )
+                        .unwrap_or(u32::MAX)
                     })
                     .unwrap_or_default(),
                 choice_question: choice
@@ -457,15 +460,14 @@ fn resolve_queries(
                 let durations = turn_meta
                     .map(|meta| meta.durations.as_slice())
                     .unwrap_or(&[]);
-                let page = group_turns_before(
+                let page = ChatMessages::new(
                     imported_messages,
                     &messages.0,
                     &message_times.0,
                     durations,
                     matches!(state, AgentRunState::Streaming),
-                    query.before as usize,
-                    query.limit as usize,
-                );
+                )
+                .before(query.before as usize, query.limit as usize);
                 TranscriptPage {
                     items: page.items,
                     start: u32::try_from(page.start).unwrap_or(u32::MAX),
