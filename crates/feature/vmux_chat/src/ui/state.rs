@@ -2,15 +2,14 @@ use super::format::{ChatPageTitle, ImportedMessages, ResumeMenuState};
 use super::scroll;
 use crate::event::ChatResumeState;
 use crate::event::{
-    ApprovalDecision, ChatApproval, ChatAttachment, ChatAttachments, ChatBranch,
-    ChatBranchesRequest, ChatBranchesState, ChatComposerEffect, ChatComposerMenuChanged,
-    ChatComposerMenuKind, ChatComposerMenuState, ChatDraftChanged, ChatHistoryMoreRequest,
-    ChatItem, ChatListChooseRequest, ChatListKind, ChatListSelectionChanged,
-    ChatListSelectionState, ChatMediaEntry, ChatMediaState, ChatRemoveAttachment,
+    ApprovalDecision, ChatApproval, ChatAttachments, ChatBranchesRequest, ChatBranchesState,
+    ChatComposerEffect, ChatComposerMenuChanged, ChatComposerMenuKind, ChatComposerMenuState,
+    ChatDraftChanged, ChatHistoryMoreRequest, ChatListChooseRequest, ChatListKind,
+    ChatListSelectionChanged, ChatListSelectionState, ChatMediaState, ChatRemoveAttachment,
     ChatSelectorState, ChatSnapshot, ChatStop, ChatSubmit, ChatTranscriptState, ComposerContext,
-    ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry, SelectMode, SlashCommandEntry,
+    ModelOptionEntry, QueuedPromptSnapshot, SelectMode, SlashCommandEntry,
 };
-use crate::state::{ChatUiState, ChatUiStatePatch};
+use crate::state::ChatUiState;
 use crate::tab::Accent;
 use dioxus::prelude::*;
 use vmux_api::prompt_media::{inline_media_query, replace_inline_media_query};
@@ -25,7 +24,7 @@ use vmux_ui::components::composer_bar::{
 use vmux_ui::components::mcp_menu::{McpConnections, use_mcp_connections};
 use vmux_ui::components::prompt_media_options::PromptMediaOption;
 use vmux_ui::file_icon::FilePath;
-use vmux_ui::hooks::{send, use_selector, use_theme, use_ui_state_patches};
+use vmux_ui::hooks::{UiStateRoot, UiStateValue, send, use_selector, use_theme, use_ui_state_root};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -46,116 +45,112 @@ pub struct Chat {
     pub projects: ProjectPicker,
     pub slash: SlashCommands,
     pub resume: Resume,
-    pub selector: Signal<ChatSelectorState>,
+    pub selector: UiStateValue<ChatSelectorState>,
     pub menu: ComposerMenu,
 }
 
 pub fn use_chat() -> Chat {
     use_theme();
-    let transcript = use_transcript();
+    let ui = use_ui_state_root::<ChatUiState>();
+    let snapshot = ui.use_value::<ChatSnapshot>();
+    let composer_context = ui.use_value::<ComposerContext>();
+    let mode = ui.use_value::<crate::event::ModeState>();
+    let model = ui.use_value::<crate::event::ModelState>();
+    let attachments = ui.use_value::<ChatAttachments>();
+    let media = ui.use_value::<ChatMediaState>();
+    let branches = ui.use_value::<ChatBranchesState>();
+    let resume = ui.use_value::<ChatResumeState>();
+    let selector = ui.use_value::<ChatSelectorState>();
     let chat = Chat {
         agent: use_signal(CurrentAgent::read),
-        transcript,
-        run: use_run_state(),
-        identity: use_agent_identity(),
-        user: use_user_identity(),
-        handoff: use_handoff(),
-        composer: use_composer_draft(),
-        queue: use_prompt_queue(),
-        media: use_media_picker(),
+        transcript: use_transcript(ui),
+        run: use_run_state(snapshot),
+        identity: AgentIdentity { snapshot },
+        user: use_user_identity(snapshot),
+        handoff: Handoff { snapshot },
+        composer: use_composer_draft(attachments),
+        queue: PromptQueue { snapshot },
+        media: MediaPicker { state: media },
         mcp: use_mcp_connections(),
-        models: use_model_picker(),
-        effort: use_effort_picker(),
-        permissions: use_permission_picker(),
-        projects: use_project_picker(),
-        slash: use_slash_commands(),
-        resume: use_resume(),
-        selector: use_signal(ChatSelectorState::default),
+        models: ModelPicker { state: model },
+        effort: EffortPicker { state: model },
+        permissions: PermissionPicker { state: mode },
+        projects: ProjectPicker {
+            context: composer_context,
+            branches,
+        },
+        slash: use_slash_commands(composer_context),
+        resume: Resume { state: resume },
+        selector,
         menu: use_composer_menu(),
     };
-    chat.listen();
+    chat.listen(ui);
     chat.watch();
     chat
 }
 
 impl Chat {
-    fn listen(&self) {
+    fn listen(&self, ui: UiStateRoot<ChatUiState>) {
         let chat = *self;
-        let _error = use_ui_state_patches::<ChatUiState>(move |patch| {
-            chat.apply_ui_state(patch);
+        let mut previous_snapshot = use_signal(ChatSnapshot::default);
+        ui.use_updates::<ChatSnapshot>(move |snapshot| {
+            let previous = previous_snapshot.peek();
+            let choices_changed = previous.choice_options != snapshot.choice_options;
+            let approval_changed = {
+                let previous_approval = if previous.status == "awaiting" {
+                    previous.approval.as_ref()
+                } else {
+                    None
+                };
+                let next_approval = if snapshot.status == "awaiting" {
+                    snapshot.approval.as_ref()
+                } else {
+                    None
+                };
+                previous_approval != next_approval
+            };
+            drop(previous);
+            if choices_changed {
+                set_if_changed(chat.slash.menu_sel, 0);
+            }
+            if approval_changed {
+                set_if_changed(chat.run.approval_sel, 0);
+            }
+            previous_snapshot.set(snapshot);
         });
-    }
-
-    fn apply_ui_state(&self, patch: &ChatUiStatePatch) {
-        if let Some(snapshot) = &patch.snapshot {
-            self.apply_snapshot(*snapshot.clone());
-        }
-        if let Some(context) = &patch.composer {
-            let mut composer_context = self.slash.composer_context;
-            let mut loaded = self.projects.loaded;
-            composer_context.set(context.clone());
-            loaded.set(true);
-        }
-        if let Some(state) = &patch.mode {
-            let mut modes = self.permissions.modes;
-            let mut current_mode_id = self.permissions.current_mode_id;
-            modes.set(state.modes.clone());
-            current_mode_id.set(state.current_mode_id.clone());
-        }
-        if let Some(state) = &patch.model {
-            let mut current_model_id = self.models.current_model_id;
-            let mut default_model_id = self.models.default_model_id;
-            let mut current_model = self.models.current_model;
-            let mut loaded = self.models.loaded;
-            let mut levels = self.effort.levels;
-            let mut current = self.effort.current;
-            let mut default_level = self.effort.default_level;
-            let mut agent_key = self.effort.agent_key;
-            let mut menu_sel = self.slash.menu_sel;
-            current_model_id.set(state.current_model_id.clone());
-            default_model_id.set(state.default_model_id.clone());
-            current_model.set(state.current_model_name.clone());
-            levels.set(state.effort_levels.clone());
-            current.set(state.effort_current.clone());
-            default_level.set(state.effort_default.clone());
-            agent_key.set(state.agent_key.clone());
-            menu_sel.set(0);
-            loaded.set(true);
-        }
-        if let Some(state) = &patch.transcript {
-            self.apply_transcript(state);
-        }
-        if let Some(selected) = &patch.attachments {
-            self.apply_attachments(selected);
-        }
-        if let Some(state) = &patch.media {
-            self.apply_media(state);
-        }
-        if let Some(incoming) = &patch.branches {
-            self.apply_branches(incoming);
-        }
-        if let Some(state) = &patch.resume {
-            self.apply_sessions(state);
-        }
-        if let Some(effect) = &patch.composer_effect {
-            self.apply_composer_effect(effect);
-        }
-        if let Some(effect) = patch.prompt_focus
-            && effect.revision > *self.composer.focus_revision.peek()
-        {
-            let mut focus_revision = self.composer.focus_revision;
+        let chat = *self;
+        ui.use_updates::<crate::event::ModelState>(move |_| {
+            set_if_changed(chat.slash.menu_sel, 0);
+        });
+        let chat = *self;
+        ui.use_updates::<ChatMediaState>(move |_| {
+            set_if_changed(chat.slash.menu_sel, 0);
+        });
+        let chat = *self;
+        ui.use_updates::<ChatResumeState>(move |_| {
+            set_if_changed(chat.slash.menu_sel, 0);
+        });
+        let chat = *self;
+        ui.use_updates::<ChatComposerEffect>(move |effect| {
+            chat.apply_composer_effect(&effect);
+        });
+        let chat = *self;
+        ui.use_updates::<crate::event::ChatPromptFocusEffect>(move |effect| {
+            if effect.revision <= *chat.composer.focus_revision.peek() {
+                return;
+            }
+            let mut focus_revision = chat.composer.focus_revision;
             focus_revision.set(effect.revision);
             focus_prompt_end(PROMPT_INPUT_ID);
-        }
-        if let Some(selection) = patch.list_selection {
-            self.apply_list_selection(selection);
-        }
-        if let Some(menu) = &patch.composer_menu {
-            self.apply_composer_menu(menu);
-        }
-        if let Some(selector) = &patch.selector {
-            set_if_changed(self.selector, selector.clone());
-        }
+        });
+        let chat = *self;
+        ui.use_updates::<ChatListSelectionState>(move |selection| {
+            chat.apply_list_selection(selection);
+        });
+        let chat = *self;
+        ui.use_updates::<ChatComposerMenuState>(move |menu| {
+            chat.apply_composer_menu(&menu);
+        });
     }
 
     fn apply_list_selection(&self, selection: ChatListSelectionState) {
@@ -204,33 +199,6 @@ impl Chat {
         }
     }
 
-    fn apply_attachments(&self, selected: &ChatAttachments) {
-        set_if_changed(self.composer.attachments, selected.attachments.clone());
-    }
-
-    fn apply_media(&self, state: &ChatMediaState) {
-        set_if_changed(self.media.query, state.query.clone());
-        set_if_changed(self.media.entries, state.entries.clone());
-        set_if_changed(self.media.loading, state.loading);
-        set_if_changed(self.slash.menu_sel, 0);
-    }
-
-    fn apply_sessions(&self, state: &ChatResumeState) {
-        set_if_changed(self.resume.query, state.query.clone());
-        set_if_changed(self.resume.sessions, state.sessions.clone());
-        set_if_changed(self.resume.rows, state.rows.clone());
-        set_if_changed(self.resume.total, state.total);
-        set_if_changed(self.resume.loading, state.loading);
-        set_if_changed(self.resume.active, state.active);
-        set_if_changed(self.slash.menu_sel, 0);
-    }
-
-    fn apply_branches(&self, incoming: &ChatBranchesState) {
-        set_if_changed(self.projects.branches_for, incoming.project.clone());
-        set_if_changed(self.projects.branches, incoming.branches.clone());
-        set_if_changed(self.projects.branches_loading, incoming.loading);
-    }
-
     fn watch(&self) {
         let chat = *self;
         use_effect(move || focus_prompt_end(PROMPT_INPUT_ID));
@@ -248,18 +216,18 @@ impl Chat {
             });
         });
         use_effect(move || {
-            let _ = chat.transcript.items.read().len();
-            let _ = chat.run.status.read();
+            let _ = chat.transcript.state.read().items.len();
+            let _ = chat.run.status();
             if !*chat.transcript.at_bottom.peek() {
                 return;
             }
             scroll::to_bottom(chat.transcript.scroll_container);
         });
         use_selector(chat.slash.menu_sel, move |selected| {
-            let selector = chat.selector.read().active;
-            let _ = chat.resume.sessions.read().len();
-            let _ = chat.media.entries.read().len();
-            if !chat.run.choice_options.read().is_empty() {
+            let selector = chat.selector.value.read().active;
+            let _ = chat.resume.state.value.read().sessions.len();
+            let _ = chat.media.state.value.read().entries.len();
+            if !chat.run.choice_options().is_empty() {
                 format!("agent-choice-item-{selected}")
             } else if selector == Some(ChatListKind::Media) {
                 format!("prompt-media-item-{selected}")
@@ -267,72 +235,6 @@ impl Chat {
                 format!("agent-selector-item-{selected}")
             }
         });
-    }
-
-    fn apply_snapshot(&self, snapshot: ChatSnapshot) {
-        set_if_changed(self.run.status, snapshot.status.clone());
-        set_if_changed(self.run.error, snapshot.error.clone());
-        set_if_changed(self.queue.queued, snapshot.queued.clone());
-        set_if_changed(self.composer.transition_preview, String::new());
-        set_if_changed(self.composer.transition_attachments, Vec::new());
-        set_if_changed(self.queue.paused, snapshot.paused);
-        set_if_changed(self.identity.agent_name, snapshot.agent_name.clone());
-        set_if_changed(
-            self.identity.conversation_title,
-            snapshot.conversation_title.clone(),
-        );
-        set_if_changed(self.identity.agent_icon, snapshot.agent_icon.clone());
-        set_if_changed(self.identity.accent, snapshot.accent_color.clone());
-        if !snapshot.user_name.is_empty() {
-            set_if_changed(self.user.name, snapshot.user_name.clone());
-        }
-        if !snapshot.user_initials.is_empty() {
-            set_if_changed(self.user.initials, snapshot.user_initials.clone());
-        }
-        if !snapshot.user_color.is_empty() {
-            set_if_changed(self.user.color, snapshot.user_color.clone());
-        }
-        set_if_changed(self.handoff.source, snapshot.handoff_source.clone());
-        set_if_changed(self.handoff.truncated, snapshot.handoff_truncated);
-        set_if_changed(self.handoff.message_count, snapshot.handoff_message_count);
-        set_if_changed(self.run.choice_question, snapshot.choice_question.clone());
-        let mut choice_options = self.run.choice_options;
-        if choice_options.peek().as_slice() != snapshot.choice_options.as_slice() {
-            set_if_changed(self.slash.menu_sel, 0);
-            choice_options.set(snapshot.choice_options.clone());
-        }
-        let next_approval = if snapshot.status == "awaiting" {
-            snapshot.approval.clone()
-        } else {
-            None
-        };
-        let mut approval = self.run.approval;
-        if approval.peek().ne(&next_approval) {
-            approval.set(next_approval);
-            set_if_changed(self.run.approval_sel, 0);
-        }
-    }
-
-    fn apply_transcript(&self, state: &ChatTranscriptState) {
-        let transcript = self.transcript;
-        let preserve_scroll = (transcript.generation)() == state.generation
-            && (transcript.prepend_revision)() != state.prepend_revision;
-        let metrics = if preserve_scroll {
-            scroll::metrics(transcript.scroll_container)
-        } else {
-            None
-        };
-        set_if_changed(transcript.items, state.items.clone());
-        set_if_changed(transcript.loaded_start, state.loaded_start);
-        set_if_changed(transcript.messages_total, state.total);
-        set_if_changed(transcript.history_loading, state.loading);
-        set_if_changed(transcript.generation, state.generation);
-        set_if_changed(transcript.prepend_revision, state.prepend_revision);
-        set_if_changed(transcript.active_subagents, state.active_subagents);
-        set_if_changed(transcript.active_tasks, state.active_tasks);
-        if let Some((height, top)) = metrics {
-            scroll::restore(transcript.scroll_container, height, top);
-        }
     }
 
     pub fn request_history(&self) {
@@ -346,23 +248,23 @@ impl Chat {
     }
 
     pub fn header_name(&self) -> String {
-        let name = (self.identity.agent_name)();
+        let name = self.identity.name();
         if name.is_empty() { self.agent() } else { name }
     }
 
     pub fn title(&self) -> String {
-        ChatPageTitle::resolve(&(self.identity.conversation_title)(), &self.header_name())
+        ChatPageTitle::resolve(&self.identity.title(), &self.header_name())
     }
 
     pub fn accent(&self) -> Accent {
         Accent::resolve(
-            &(self.identity.accent)(),
+            &self.identity.accent(),
             agent_accent(&self.agent()).rain_rgb,
         )
     }
 
     pub fn status(&self) -> String {
-        (self.run.status)()
+        self.run.status()
     }
 
     pub fn installing(&self) -> bool {
@@ -370,11 +272,11 @@ impl Chat {
     }
 
     pub fn installing_splash(&self) -> bool {
-        self.installing() && self.transcript.items.read().is_empty()
+        self.installing() && self.transcript.state.read().items.is_empty()
     }
 
     pub fn install_detail(&self) -> String {
-        let detail = (self.run.error)();
+        let detail = self.run.error();
         if detail.is_empty() {
             translate("agent-preparing")
         } else {
@@ -387,39 +289,36 @@ impl Chat {
     }
 
     pub fn filtered_commands(&self) -> Vec<SlashCommandEntry> {
-        self.selector.read().commands.clone()
+        self.selector.value.read().commands.clone()
     }
 
     pub fn filtered_models(&self) -> Vec<ModelOptionEntry> {
-        self.selector.read().models.clone()
+        self.selector.value.read().models.clone()
     }
 
     pub fn filtered_mcp_servers(&self) -> Vec<vmux_api::mcp::McpServerEntry> {
-        self.selector.read().mcp_servers.clone()
+        self.selector.value.read().mcp_servers.clone()
     }
 
     pub fn command_menu_open(&self) -> bool {
-        self.selector.read().active == Some(ChatListKind::Command)
-    }
-
-    pub(crate) fn active_list(&self) -> Option<ChatListKind> {
-        self.selector.read().active
+        self.selector.value.read().active == Some(ChatListKind::Command)
     }
 
     pub fn resume_menu_open(&self) -> bool {
-        self.selector.read().active == Some(ChatListKind::Session)
+        self.selector.value.read().active == Some(ChatListKind::Session)
     }
 
     pub fn model_menu_open(&self) -> bool {
-        self.selector.read().active == Some(ChatListKind::Model)
+        self.selector.value.read().active == Some(ChatListKind::Model)
     }
 
     pub fn mcp_menu_open(&self) -> bool {
-        self.selector.read().active == Some(ChatListKind::Mcp)
+        self.selector.value.read().active == Some(ChatListKind::Mcp)
     }
 
     pub fn selector_open(&self) -> bool {
         self.selector
+            .value
             .read()
             .active
             .is_some_and(ChatListKind::is_selector)
@@ -429,21 +328,22 @@ impl Chat {
         if !self.resume_menu_open() {
             return None;
         }
+        let state = self.resume.state.value.read();
         Some(ResumeMenuState::resolve(
-            (self.resume.active)(),
-            (self.resume.loading)(),
-            &(self.resume.query)(),
-            self.resume.rows.read().len(),
+            state.active,
+            state.loading,
+            &state.query,
+            state.rows.len(),
         ))
     }
 
     pub fn media_menu_open(&self) -> bool {
-        self.selector.read().active == Some(ChatListKind::Media)
+        self.selector.value.read().active == Some(ChatListKind::Media)
     }
 
     pub fn media_options(&self) -> Vec<PromptMediaOption> {
         let mut options = Vec::new();
-        for entry in self.media.entries.read().iter() {
+        for entry in &self.media.state.value.read().entries {
             options.push(PromptMediaOption {
                 key: format!("media-{}", entry.path),
                 name: entry.name.clone(),
@@ -457,12 +357,7 @@ impl Chat {
     }
 
     pub fn composer_attachments(&self) -> Vec<PromptComposerAttachment> {
-        let mut pills =
-            PromptComposerAttachment::pinned(&self.composer.transition_attachments.read());
-        pills.extend(PromptComposerAttachment::removable(
-            &self.composer.attachments.read(),
-        ));
-        pills
+        PromptComposerAttachment::removable(&self.composer.attachments.value.read().attachments)
     }
 
     pub fn streaming(&self) -> bool {
@@ -470,7 +365,7 @@ impl Chat {
     }
 
     pub fn prompt_mode(&self) -> PromptComposerMode {
-        if self.streaming() && self.queue.queued.read().is_empty() {
+        if self.streaming() && self.queue.snapshot.value.read().queued.is_empty() {
             PromptComposerMode::Stop
         } else {
             PromptComposerMode::Send
@@ -478,7 +373,7 @@ impl Chat {
     }
 
     pub fn prompt_action_title(&self) -> String {
-        if self.streaming() && !self.queue.queued.read().is_empty() {
+        if self.streaming() && !self.queue.snapshot.value.read().queued.is_empty() {
             translate("agent-send-all-queued")
         } else if self.streaming() {
             translate("common-stop")
@@ -491,24 +386,31 @@ impl Chat {
         !self.choice_pending()
             && (self.streaming()
                 || !self.draft().trim().is_empty()
-                || !self.composer.attachments.read().is_empty())
+                || !self
+                    .composer
+                    .attachments
+                    .value
+                    .read()
+                    .attachments
+                    .is_empty())
     }
 
     pub fn choice_pending(&self) -> bool {
-        !self.run.choice_options.read().is_empty() || self.run.approval.read().is_some()
+        !self.run.choice_options().is_empty() || self.run.approval().is_some()
     }
 }
 
 impl Chat {
     pub fn model_chip(&self) -> Option<ComposerChip> {
-        if !(self.models.loaded)() {
+        if !(self.models.state.ready)() {
             return Some(ComposerChip::loading());
         }
-        let name = (self.models.current_model)();
+        let model = self.models.state.value.read();
+        let name = model.current_model_name.clone();
         if name.is_empty() {
             return None;
         }
-        let label = match (self.models.current_model_id)() == (self.models.default_model_id)() {
+        let label = match model.current_model_id == model.default_model_id {
             true => translate_with(
                 "agent-option-default",
                 &[("value", TranslationValue::String(&name))],
@@ -527,21 +429,19 @@ impl Chat {
     }
 
     pub fn effort_chip(&self) -> Option<ComposerChip> {
-        if !(self.models.loaded)() {
+        if !(self.models.state.ready)() {
             return Some(ComposerChip::loading());
         }
-        if self.effort.levels.read().is_empty() {
+        let effort = self.effort.state.value.read();
+        if effort.effort_levels.is_empty() {
             return None;
         }
-        let selected = (self.effort.current)();
+        let selected = effort.effort_current.clone();
         let label = match selected.is_empty() {
             false => selected,
             true => translate_with(
                 "agent-option-default",
-                &[(
-                    "value",
-                    TranslationValue::String(&(self.effort.default_level)()),
-                )],
+                &[("value", TranslationValue::String(&effort.effort_default))],
             ),
         };
         let chat = *self;
@@ -553,22 +453,25 @@ impl Chat {
     }
 
     pub fn permission_chip(&self) -> Option<ComposerChip> {
-        let modes = self.permissions.modes.read();
-        if modes.is_empty() {
+        let state = self.permissions.state.value.read();
+        if state.modes.is_empty() {
             return None;
         }
-        let current_mode_id = (self.permissions.current_mode_id)();
-        let current = modes.iter().find(|mode| mode.id == current_mode_id);
+        let current = state
+            .modes
+            .iter()
+            .find(|mode| mode.id == state.current_mode_id);
         let label = current
             .map(|mode| mode.name.clone())
-            .unwrap_or_else(|| current_mode_id.clone());
+            .unwrap_or_else(|| state.current_mode_id.clone());
         let title = current
             .and_then(|mode| mode.description.clone())
             .filter(|description| !description.is_empty())
             .unwrap_or_else(|| translate("composer-permission-change"));
-        let selected = modes
+        let selected = state
+            .modes
             .iter()
-            .position(|mode| mode.id == current_mode_id)
+            .position(|mode| mode.id == state.current_mode_id)
             .unwrap_or(0);
         let chat = *self;
         let open = EventHandler::new(move |()| {
@@ -579,10 +482,10 @@ impl Chat {
     }
 
     pub fn project_chip(&self) -> Option<ComposerChip> {
-        if !(self.projects.loaded)() {
+        if !(self.projects.context.ready)() {
             return Some(ComposerChip::loading());
         }
-        let context = (self.slash.composer_context)();
+        let context = self.slash.context();
         let active_project = context.projects.iter().find(|project| project.is_active);
         let label = if let Some(project) = active_project {
             project.label.clone()
@@ -619,10 +522,10 @@ impl Chat {
     }
 
     pub fn branch_chip(&self) -> Option<ComposerChip> {
-        if !(self.projects.loaded)() {
+        if !(self.projects.context.ready)() {
             return Some(ComposerChip::loading());
         }
-        let context = (self.slash.composer_context)();
+        let context = self.slash.context();
         if !context.is_git_repo {
             return None;
         }
@@ -654,7 +557,7 @@ impl Chat {
     pub fn submit(&self) {
         let mut at_bottom = self.transcript.at_bottom;
         let text = self.composer.draft.peek().trim().to_string();
-        let selected = self.composer.attachments.peek().clone();
+        let selected = self.composer.attachments.value.peek().attachments.clone();
         if text.is_empty() && selected.is_empty() {
             return;
         }
@@ -746,8 +649,8 @@ impl Chat {
     }
 
     pub fn remove_attachment(&self, index: usize) {
-        let attachments = self.composer.attachments.read();
-        let Some(attachment) = attachments.get(index) else {
+        let attachments = self.composer.attachments.value.read();
+        let Some(attachment) = attachments.attachments.get(index) else {
             return;
         };
         let _ = send(&ChatRemoveAttachment {
@@ -758,112 +661,158 @@ impl Chat {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Transcript {
-    pub items: Signal<Vec<ChatItem>>,
-    pub loaded_start: Signal<u32>,
-    pub messages_total: Signal<u32>,
-    pub history_loading: Signal<bool>,
-    pub generation: Signal<u64>,
-    pub prepend_revision: Signal<u64>,
-    pub active_subagents: Signal<u32>,
-    pub active_tasks: Signal<u32>,
+    pub state: Signal<ChatTranscriptState>,
     pub at_bottom: Signal<bool>,
     pub last_top: Signal<i32>,
     pub scroll_container: scroll::Container,
 }
 
-pub fn use_transcript() -> Transcript {
-    Transcript {
-        items: use_signal(Vec::new),
-        loaded_start: use_signal(|| 0),
-        messages_total: use_signal(|| 0),
-        history_loading: use_signal(|| false),
-        generation: use_signal(|| 0),
-        prepend_revision: use_signal(|| 0),
-        active_subagents: use_signal(|| 0),
-        active_tasks: use_signal(|| 0),
+pub fn use_transcript(ui: UiStateRoot<ChatUiState>) -> Transcript {
+    let transcript = Transcript {
+        state: use_signal(ChatTranscriptState::default),
         at_bottom: use_signal(|| true),
         last_top: use_signal(|| 0),
         scroll_container: use_signal(|| None),
+    };
+    let current = transcript;
+    ui.use_updates::<ChatTranscriptState>(move |state| current.apply(state));
+    transcript
+}
+
+impl Transcript {
+    fn apply(self, state: ChatTranscriptState) {
+        let previous = self.state.peek();
+        let preserve_scroll = previous.generation == state.generation
+            && previous.prepend_revision != state.prepend_revision;
+        let metrics = if preserve_scroll {
+            scroll::metrics(self.scroll_container)
+        } else {
+            None
+        };
+        drop(previous);
+        let mut current = self.state;
+        current.set(state);
+        if let Some((height, top)) = metrics {
+            scroll::restore(self.scroll_container, height, top);
+        }
+    }
+
+    pub fn current(self) -> ChatTranscriptState {
+        self.state.read().clone()
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct RunState {
-    pub status: Signal<String>,
-    pub error: Signal<String>,
-    pub approval: Signal<Option<crate::event::PendingApproval>>,
+    snapshot: UiStateValue<ChatSnapshot>,
     pub approval_sel: Signal<usize>,
-    pub choice_question: Signal<String>,
-    pub choice_options: Signal<Vec<String>>,
 }
 
-pub fn use_run_state() -> RunState {
+pub fn use_run_state(snapshot: UiStateValue<ChatSnapshot>) -> RunState {
     RunState {
-        status: use_signal(|| "installing".to_string()),
-        error: use_signal(String::new),
-        approval: use_signal(|| None),
+        snapshot,
         approval_sel: use_signal(|| 0),
-        choice_question: use_signal(String::new),
-        choice_options: use_signal(Vec::new),
+    }
+}
+
+impl RunState {
+    pub fn status(self) -> String {
+        if !(self.snapshot.ready)() {
+            return "installing".to_string();
+        }
+        self.snapshot.value.read().status.clone()
+    }
+
+    pub fn error(self) -> String {
+        self.snapshot.value.read().error.clone()
+    }
+
+    pub fn approval(self) -> Option<crate::event::PendingApproval> {
+        let snapshot = self.snapshot.value.read();
+        if snapshot.status != "awaiting" {
+            return None;
+        }
+        snapshot.approval.clone()
+    }
+
+    pub fn choice_question(self) -> String {
+        self.snapshot.value.read().choice_question.clone()
+    }
+
+    pub fn choice_options(self) -> Vec<String> {
+        self.snapshot.value.read().choice_options.clone()
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct AgentIdentity {
-    pub agent_name: Signal<String>,
-    pub conversation_title: Signal<String>,
-    pub agent_icon: Signal<String>,
-    pub accent: Signal<String>,
+    snapshot: UiStateValue<ChatSnapshot>,
 }
 
-pub fn use_agent_identity() -> AgentIdentity {
-    AgentIdentity {
-        agent_name: use_signal(String::new),
-        conversation_title: use_signal(String::new),
-        agent_icon: use_signal(String::new),
-        accent: use_signal(String::new),
+impl AgentIdentity {
+    pub fn name(self) -> String {
+        self.snapshot.value.read().agent_name.clone()
+    }
+
+    pub fn title(self) -> String {
+        self.snapshot.value.read().conversation_title.clone()
+    }
+
+    pub fn icon(self) -> String {
+        self.snapshot.value.read().agent_icon.clone()
+    }
+
+    pub fn accent(self) -> String {
+        self.snapshot.value.read().accent_color.clone()
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct UserIdentity {
-    pub name: Signal<String>,
-    pub initials: Signal<String>,
-    pub color: Signal<String>,
+    snapshot: UiStateValue<ChatSnapshot>,
 }
 
-pub fn use_user_identity() -> UserIdentity {
-    let name = translate("team-you");
-    let initials = name
-        .chars()
-        .next()
-        .map(|character| character.to_uppercase().collect())
-        .unwrap_or_default();
-    UserIdentity {
-        name: use_signal(move || name),
-        initials: use_signal(move || initials),
-        color: use_signal(|| "#3b82f6".to_string()),
+pub fn use_user_identity(snapshot: UiStateValue<ChatSnapshot>) -> UserIdentity {
+    UserIdentity { snapshot }
+}
+
+impl UserIdentity {
+    pub fn name(self) -> String {
+        let name = self.snapshot.value.read().user_name.clone();
+        if name.is_empty() {
+            translate("team-you")
+        } else {
+            name
+        }
+    }
+
+    pub fn color(self) -> String {
+        let color = self.snapshot.value.read().user_color.clone();
+        if color.is_empty() {
+            "#3b82f6".to_string()
+        } else {
+            color
+        }
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Handoff {
-    pub source: Signal<String>,
-    pub truncated: Signal<bool>,
-    pub message_count: Signal<u32>,
+    snapshot: UiStateValue<ChatSnapshot>,
 }
 
 impl Handoff {
     pub fn boundary(&self, message_index: usize) -> bool {
-        ImportedMessages::new((self.message_count)()).boundary(message_index)
+        ImportedMessages::new(self.snapshot.value.read().handoff_message_count)
+            .boundary(message_index)
     }
-}
 
-pub fn use_handoff() -> Handoff {
-    Handoff {
-        source: use_signal(String::new),
-        truncated: use_signal(|| false),
-        message_count: use_signal(|| 0),
+    pub fn source(self) -> String {
+        self.snapshot.value.read().handoff_source.clone()
+    }
+
+    pub fn truncated(self) -> bool {
+        self.snapshot.value.read().handoff_truncated
     }
 }
 
@@ -872,145 +821,120 @@ pub struct ComposerDraft {
     pub draft: Signal<String>,
     pub effect_revision: Signal<u64>,
     pub focus_revision: Signal<u64>,
-    pub attachments: Signal<Vec<ChatAttachment>>,
-    pub transition_preview: Signal<String>,
-    pub transition_attachments: Signal<Vec<ChatAttachment>>,
+    pub attachments: UiStateValue<ChatAttachments>,
 }
 
-pub fn use_composer_draft() -> ComposerDraft {
+pub fn use_composer_draft(attachments: UiStateValue<ChatAttachments>) -> ComposerDraft {
     ComposerDraft {
         draft: use_signal(String::new),
         effect_revision: use_signal(|| 0),
         focus_revision: use_signal(|| 0),
-        attachments: use_signal(Vec::new),
-        transition_preview: use_signal(String::new),
-        transition_attachments: use_signal(Vec::new),
+        attachments,
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct PromptQueue {
-    pub queued: Signal<Vec<QueuedPromptSnapshot>>,
-    pub paused: Signal<bool>,
+    snapshot: UiStateValue<ChatSnapshot>,
 }
 
-pub fn use_prompt_queue() -> PromptQueue {
-    PromptQueue {
-        queued: use_signal(Vec::new),
-        paused: use_signal(|| false),
+impl PromptQueue {
+    pub fn queued(self) -> Vec<QueuedPromptSnapshot> {
+        self.snapshot.value.read().queued.clone()
+    }
+
+    pub fn paused(self) -> bool {
+        self.snapshot.value.read().paused
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct MediaPicker {
-    pub entries: Signal<Vec<ChatMediaEntry>>,
-    pub query: Signal<String>,
-    pub loading: Signal<bool>,
+    state: UiStateValue<ChatMediaState>,
 }
 
-pub fn use_media_picker() -> MediaPicker {
-    MediaPicker {
-        entries: use_signal(Vec::new),
-        query: use_signal(String::new),
-        loading: use_signal(|| false),
+impl MediaPicker {
+    pub fn current(self) -> ChatMediaState {
+        self.state.value.read().clone()
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct ModelPicker {
-    pub current_model_id: Signal<String>,
-    pub default_model_id: Signal<String>,
-    pub current_model: Signal<String>,
-    pub loaded: Signal<bool>,
+    state: UiStateValue<crate::event::ModelState>,
 }
 
-pub fn use_model_picker() -> ModelPicker {
-    ModelPicker {
-        current_model_id: use_signal(String::new),
-        default_model_id: use_signal(String::new),
-        current_model: use_signal(String::new),
-        loaded: use_signal(|| false),
+impl ModelPicker {
+    pub fn current(self) -> crate::event::ModelState {
+        self.state.value.read().clone()
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct ProjectPicker {
-    pub loaded: Signal<bool>,
-    pub branches: Signal<Vec<ChatBranch>>,
-    pub branches_for: Signal<String>,
-    pub branches_loading: Signal<bool>,
+    context: UiStateValue<ComposerContext>,
+    branches: UiStateValue<ChatBranchesState>,
 }
 
-pub fn use_project_picker() -> ProjectPicker {
-    ProjectPicker {
-        loaded: use_signal(|| false),
-        branches: use_signal(Vec::new),
-        branches_for: use_signal(String::new),
-        branches_loading: use_signal(|| false),
+impl ProjectPicker {
+    pub fn context_ready(self) -> bool {
+        (self.context.ready)()
+    }
+
+    pub fn branches(self) -> ChatBranchesState {
+        self.branches.value.read().clone()
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct EffortPicker {
-    pub levels: Signal<Vec<String>>,
-    pub current: Signal<String>,
-    pub default_level: Signal<String>,
-    pub agent_key: Signal<String>,
+    state: UiStateValue<crate::event::ModelState>,
 }
 
-pub fn use_effort_picker() -> EffortPicker {
-    EffortPicker {
-        levels: use_signal(Vec::new),
-        current: use_signal(String::new),
-        default_level: use_signal(String::new),
-        agent_key: use_signal(String::new),
+impl EffortPicker {
+    pub fn current(self) -> crate::event::ModelState {
+        self.state.value.read().clone()
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct PermissionPicker {
-    pub modes: Signal<Vec<vmux_api::protocol::AcpModeOption>>,
-    pub current_mode_id: Signal<String>,
+    state: UiStateValue<crate::event::ModeState>,
 }
 
-pub fn use_permission_picker() -> PermissionPicker {
-    PermissionPicker {
-        modes: use_signal(Vec::new),
-        current_mode_id: use_signal(String::new),
+impl PermissionPicker {
+    pub fn current(self) -> crate::event::ModeState {
+        self.state.value.read().clone()
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct SlashCommands {
     pub menu_sel: Signal<usize>,
-    pub composer_context: Signal<ComposerContext>,
+    context: UiStateValue<ComposerContext>,
 }
 
-pub fn use_slash_commands() -> SlashCommands {
+pub fn use_slash_commands(context: UiStateValue<ComposerContext>) -> SlashCommands {
     SlashCommands {
         menu_sel: use_signal(|| 0),
-        composer_context: use_signal(ComposerContext::default),
+        context,
+    }
+}
+
+impl SlashCommands {
+    pub fn context(self) -> ComposerContext {
+        self.context.value.read().clone()
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Resume {
-    pub sessions: Signal<Vec<ResumableSessionEntry>>,
-    pub rows: Signal<Vec<vmux_api::command_bar::CommandBarResultItem>>,
-    pub query: Signal<String>,
-    pub total: Signal<u32>,
-    pub loading: Signal<bool>,
-    pub active: Signal<bool>,
+    state: UiStateValue<ChatResumeState>,
 }
 
-pub fn use_resume() -> Resume {
-    Resume {
-        sessions: use_signal(Vec::new),
-        rows: use_signal(Vec::new),
-        query: use_signal(String::new),
-        total: use_signal(|| 0),
-        loading: use_signal(|| false),
-        active: use_signal(|| false),
+impl Resume {
+    pub fn current(self) -> ChatResumeState {
+        self.state.value.read().clone()
     }
 }
 

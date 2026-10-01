@@ -41,6 +41,11 @@ pub struct UiStateRoot<T> {
     pub error: Signal<Option<String>>,
 }
 
+pub struct UiStateValue<T> {
+    pub value: Signal<T>,
+    pub ready: Signal<bool>,
+}
+
 fn use_ui_state_listener<T, F>(on_state: F) -> UiStateListener
 where
     T: UiState + rkyv::Archive + 'static,
@@ -97,6 +102,20 @@ impl<T> Clone for UiStateRoot<T> {
 
 impl<T> Copy for UiStateRoot<T> {}
 
+impl<T> Clone for UiStateValue<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for UiStateValue<T> {}
+
+impl<T: 'static> PartialEq for UiStateValue<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value && self.ready == other.ready
+    }
+}
+
 impl<S, T> Clone for UiStatePatchBatch<S, T> {
     fn clone(&self) -> Self {
         *self
@@ -134,6 +153,53 @@ where
         for payload in self.take() {
             callback(payload);
         }
+    }
+}
+
+impl<S> UiStateRoot<S>
+where
+    S: BatchedUiState,
+{
+    fn patch<T>(self) -> UiStatePatchBatch<S, T>
+    where
+        S::Patch: UiStatePatch<T>,
+        T: Clone + 'static,
+    {
+        UiStatePatchBatch {
+            state: self.state,
+            handled_sequence: use_signal(|| 0),
+            payload: PhantomData,
+        }
+    }
+
+    pub fn use_value<T>(self) -> UiStateValue<T>
+    where
+        S::Patch: UiStatePatch<T>,
+        T: Clone + Default + PartialEq + 'static,
+    {
+        let patches = self.patch::<T>();
+        let mut value = use_signal(T::default);
+        let mut ready = use_signal(|| false);
+        use_effect(move || {
+            for next in patches.take() {
+                if value.peek().ne(&next) {
+                    value.set(next);
+                }
+                if !*ready.peek() {
+                    ready.set(true);
+                }
+            }
+        });
+        UiStateValue { value, ready }
+    }
+
+    pub fn use_updates<T>(self, mut apply: impl FnMut(T) + 'static)
+    where
+        S::Patch: UiStatePatch<T>,
+        T: Clone + 'static,
+    {
+        let patches = self.patch::<T>();
+        use_effect(move || patches.for_each(&mut apply));
     }
 }
 

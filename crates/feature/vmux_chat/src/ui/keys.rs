@@ -1,6 +1,5 @@
 use super::format::{PromptEdit, PromptHistoryDirection, prompt_history_direction};
 use super::state::Chat;
-use crate::event::ChatListKind;
 use dioxus::prelude::*;
 use vmux_core::input::{KeyStroke, UiKeyContext, Unclaimed};
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
@@ -17,7 +16,9 @@ pub fn use_chat_keys(chat: Chat) -> ChatKeys {
     let handler = ChatKeyHandler(chat);
     let keys = ChatKeys {
         handler,
-        claim: use_key_claim(Unclaimed::Types, move || chat.key_context()),
+        claim: use_key_claim(Unclaimed::Types, move || {
+            chat.selector.value.read().key_context.clone()
+        }),
     };
     use_drop(move || {
         let _ = send(&UiKeyContext { keys: Vec::new() });
@@ -60,7 +61,7 @@ impl ChatKeyHandler {
         if !Self::moves_the_caret(stroke) {
             return false;
         }
-        if self.0.active_list().is_some() {
+        if self.0.selector.value.read().active.is_some() {
             return false;
         }
         self.history_direction(&stroke.key, stroke.mods.ctrl)
@@ -114,22 +115,5 @@ impl ChatKeyHandler {
         let (value, _caret) = edit.apply(&current, end, end);
         self.0.edit_draft(value);
         focus_prompt_end(PROMPT_INPUT_ID);
-    }
-}
-
-impl Chat {
-    fn key_context(&self) -> Vec<String> {
-        let mut keys = vec!["chat".to_string()];
-        let Some(list) = self.active_list() else {
-            return keys;
-        };
-        keys.push("chat.list".to_string());
-        if matches!(list, ChatListKind::Approval | ChatListKind::Choice) {
-            keys.push("chat.choice".to_string());
-        }
-        if list.is_selector() {
-            keys.push("chat.selector".to_string());
-        }
-        keys
     }
 }

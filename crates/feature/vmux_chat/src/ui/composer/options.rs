@@ -38,14 +38,13 @@ pub(crate) struct ChatMenuSet {
 
 impl From<Chat> for ChatMenuSet {
     fn from(chat: Chat) -> Self {
-        let context = (chat.slash.composer_context)();
-        let agent_key = (chat.effort.agent_key)();
-        let mut current = chat.effort.current;
+        let context = chat.slash.context();
+        let effort_state = chat.effort.current();
+        let agent_key = effort_state.agent_key.clone();
         let effort = EffortMenuData {
-            levels: (chat.effort.levels)(),
-            selected: current(),
+            levels: effort_state.effort_levels,
+            selected: effort_state.effort_current,
             on_select: EventHandler::new(move |level: String| {
-                current.set(level.clone());
                 let _ = send(&SetAgentEffort {
                     agent_key: agent_key.clone(),
                     level,
@@ -53,27 +52,28 @@ impl From<Chat> for ChatMenuSet {
                 focus_prompt_end(PROMPT_INPUT_ID);
             }),
         };
+        let permission_state = chat.permissions.current();
         let permission = PermissionMenuData {
-            modes: (chat.permissions.modes)(),
-            current_mode_id: (chat.permissions.current_mode_id)(),
+            modes: permission_state.modes,
+            current_mode_id: permission_state.current_mode_id,
             on_select: EventHandler::new(move |mode: vmux_api::protocol::AcpModeOption| {
                 chat.select_mode(mode.id)
             }),
         };
         let project = ProjectMenuData {
             projects: context.projects.clone(),
-            loaded: (chat.projects.loaded)(),
+            loaded: chat.projects.context_ready(),
             on_pick: EventHandler::new(Self::go_to),
             on_choose_another: EventHandler::new(move |()| {
                 let _ = send(&ChatSelectWorkspace);
                 focus_prompt_end(PROMPT_INPUT_ID);
             }),
         };
+        let branches = chat.projects.branches();
         let branch = BranchMenuData {
             project: context.cwd.clone(),
-            branches: (chat.projects.branches)(),
-            loaded: (chat.projects.branches_for)() == context.cwd
-                && !(chat.projects.branches_loading)(),
+            branches: branches.branches,
+            loaded: branches.project == context.cwd && !branches.loading,
             on_pick: EventHandler::new(Self::go_to),
         };
 
@@ -103,7 +103,7 @@ pub(super) fn ChatModelMenu(chat: Chat) -> Element {
     rsx! {
         ModelMenu {
             models: chat.filtered_models(),
-            current_model_id: (chat.models.current_model_id)(),
+            current_model_id: chat.models.current().current_model_id,
             selected: menu_sel(),
             on_hover: move |index| chat.point_at_list(index),
             on_select: move |(index, _model): (usize, ModelOptionEntry)| chat.choose_list(index),

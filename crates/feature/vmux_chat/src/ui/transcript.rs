@@ -53,20 +53,19 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let mut scroll_container = chat.transcript.scroll_container;
     let mut at_bottom = chat.transcript.at_bottom;
     let mut last_top = chat.transcript.last_top;
-    let loaded_start = chat.transcript.loaded_start;
-    let history_loading = chat.transcript.history_loading;
-    let items = chat.transcript.items;
-    let handoff_source = (chat.handoff.source)();
-    let handoff_truncated = (chat.handoff.truncated)();
+    let transcript = chat.transcript.current();
+    let loaded_start = transcript.loaded_start;
+    let history_loading = transcript.loading;
+    let items = transcript.items;
+    let handoff_source = chat.handoff.source();
+    let handoff_truncated = chat.handoff.truncated();
     let agent = chat.agent();
     let agent_name = chat.header_name();
-    let agent_avatar = favicon_src_for_url(
-        &(chat.identity.agent_icon)(),
-        &format!("vmux://sessions/{agent}"),
-    );
+    let agent_avatar =
+        favicon_src_for_url(&chat.identity.icon(), &format!("vmux://sessions/{agent}"));
     let agent_color = chat.accent().css;
-    let user_name = (chat.user.name)();
-    let user_color = (chat.user.color)();
+    let user_name = chat.user.name();
+    let user_color = chat.user.color();
     rsx! {
         div {
             id: "chat-scroll",
@@ -86,24 +85,24 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                 }
             },
             div { class: "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5",
-                if loaded_start() > 0 {
+                if loaded_start > 0 {
                     button {
                         id: "chat-load-older",
                         class: "mx-auto mb-3 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50",
-                        disabled: history_loading(),
+                        disabled: history_loading,
                         onclick: move |_| chat.request_history(),
-                        {if history_loading() { translate("agent-loading-older") } else { translate("agent-load-older") }}
+                        {if history_loading { translate("agent-loading-older") } else { translate("agent-load-older") }}
                     }
                 }
                 if chat.installing_splash() {
                     InstallIntro { chat, detail: chat.install_detail() }
-                } else if items.read().is_empty() && chat.status() == "idle" {
+                } else if items.is_empty() && chat.status() == "idle" {
                     ReadyIntro { chat }
                 }
-                for (i , item) in items.read().iter().cloned().enumerate() {
+                for (i , item) in items.iter().cloned().enumerate() {
                     ChatItemRow {
-                        key: "{loaded_start() as usize + i}",
-                        absolute_index: loaded_start() as usize + i,
+                        key: "{loaded_start as usize + i}",
+                        absolute_index: loaded_start as usize + i,
                         item,
                         agent_name: agent_name.clone(),
                         agent_avatar: agent_avatar.clone(),
@@ -111,14 +110,14 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                         user_name: user_name.clone(),
                         user_color: user_color.clone(),
                     }
-                    if !handoff_source.is_empty() && chat.handoff.boundary(loaded_start() as usize + i) {
+                    if !handoff_source.is_empty() && chat.handoff.boundary(loaded_start as usize + i) {
                         HandoffDivider { source: handoff_source.clone(), truncated: handoff_truncated }
                     }
                 }
                 if chat.status() == "errored" {
-                    ChatErrorCard { message: (chat.run.error)() }
+                    ChatErrorCard { message: chat.run.error() }
                 }
-                if (chat.queue.paused)() {
+                if chat.queue.paused() {
                     div { class: "flex items-center gap-3 py-1 text-xs text-muted-foreground",
                         span { class: "h-px flex-1 bg-foreground/10" }
                         span { class: "shrink-0", {translate("agent-interrupted")} }
@@ -175,11 +174,11 @@ fn HandoffDivider(source: String, truncated: bool) -> Element {
 
 #[component]
 pub(super) fn QueuedPrompts(chat: Chat) -> Element {
-    let queued = (chat.queue.queued)();
-    if !chat.composer.transition_preview.read().is_empty() || queued.is_empty() {
+    let queued = chat.queue.queued();
+    if queued.is_empty() {
         return rsx! {};
     }
-    let paused = (chat.queue.paused)();
+    let paused = chat.queue.paused();
     let count = queued.len();
     rsx! {
         div { class: "flex flex-col items-end gap-1.5",

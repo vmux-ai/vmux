@@ -14,8 +14,8 @@ pub(super) fn ChatHeader(chat: Chat) -> Element {
         "agent-chat-subtitle",
         &[("agent", TranslationValue::String(&name))],
     );
-    let user_name = (chat.user.name)();
-    let user_color = (chat.user.color)();
+    let user_name = chat.user.name();
+    let user_color = chat.user.color();
     rsx! {
         header { class: "session-chat-header relative z-10 flex min-w-0 items-center gap-3 bg-transparent px-3 pb-2 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-5",
             BackButton {}
@@ -47,11 +47,8 @@ pub(super) fn ChatHeader(chat: Chat) -> Element {
 #[component]
 fn AgentAvatar(chat: Chat, size_class: String) -> Element {
     let agent = chat.agent();
-    let accent = (chat.identity.accent)();
-    let src = favicon_src_for_url(
-        &(chat.identity.agent_icon)(),
-        &format!("vmux://sessions/{agent}"),
-    );
+    let accent = chat.identity.accent();
+    let src = favicon_src_for_url(&chat.identity.icon(), &format!("vmux://sessions/{agent}"));
     let fallback = if accent.is_empty() {
         "#6366f1"
     } else {
@@ -71,8 +68,8 @@ fn AgentAvatar(chat: Chat, size_class: String) -> Element {
 #[component]
 pub(super) fn AgentBanner(chat: Chat) -> Element {
     let name = chat.header_name();
-    let user_name = (chat.user.name)();
-    let user_color = (chat.user.color)();
+    let user_name = chat.user.name();
+    let user_color = chat.user.color();
     rsx! {
         div { class: "flex items-center -space-x-2",
             Avatar {

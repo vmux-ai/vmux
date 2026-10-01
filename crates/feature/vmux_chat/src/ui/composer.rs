@@ -59,7 +59,7 @@ fn ChatComposer(chat: Chat) -> Element {
             shared_transition: true,
             show_send_button: false,
             value: drafted,
-            preview: (chat.composer.transition_preview)(),
+            preview: String::new(),
             attachments: chat.composer_attachments(),
             placeholder: if chat.choice_pending() { translate("agent-choose-option") } else { translate("command-composer-placeholder") },
             accent_color: chat.accent().css,
@@ -94,7 +94,9 @@ fn ChatComposer(chat: Chat) -> Element {
 
 #[component]
 fn ComposerFooter(chat: Chat) -> Element {
-    let context = (chat.slash.composer_context)();
+    let context = chat.slash.context();
+    let transcript = chat.transcript.current();
+    let queued = chat.queue.queued();
     rsx! {
         ComposerBar {
             opened: chat.menu.opened(),
@@ -108,9 +110,9 @@ fn ComposerFooter(chat: Chat) -> Element {
             uncommitted: context.uncommitted,
             ahead: context.ahead,
             status: chat.status(),
-            active_subagents: (chat.transcript.active_subagents)() as usize,
-            active_tasks: (chat.transcript.active_tasks)() as usize,
-            queued_count: chat.queue.queued.read().len(),
+            active_subagents: transcript.active_subagents as usize,
+            active_tasks: transcript.active_tasks as usize,
+            queued_count: queued.len(),
         }
     }
 }

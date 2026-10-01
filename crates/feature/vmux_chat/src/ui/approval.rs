@@ -14,7 +14,7 @@ pub(super) fn ChatApprovalDock(chat: Chat) -> Element {
     if chat.installing() {
         return rsx! {};
     }
-    let Some(approval) = (chat.run.approval)() else {
+    let Some(approval) = chat.run.approval() else {
         return rsx! {};
     };
     rsx! {
@@ -116,11 +116,11 @@ mod tests {
 
 #[component]
 pub(super) fn ChoiceList(chat: Chat) -> Element {
-    let options = (chat.run.choice_options)();
+    let options = chat.run.choice_options();
     if options.is_empty() {
         return rsx! {};
     }
-    let question = (chat.run.choice_question)();
+    let question = chat.run.choice_question();
     rsx! {
         div { class: "border-l-2 border-foreground/15 py-2 pl-3.5",
             div { class: "mb-3 text-sm font-medium text-foreground", "{question}" }
