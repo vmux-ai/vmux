@@ -1,7 +1,6 @@
 (
     pages: [
         (
-            name: "default",
             url: "vmux://start/",
             title: "Start",
             bookmark: Some(10),

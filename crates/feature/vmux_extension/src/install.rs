@@ -46,8 +46,8 @@ fn install_crx(
 
     let manifest_json =
         std::fs::read_to_string(unpack_dir.join("manifest.json")).map_err(|e| e.to_string())?;
-    let m = manifest::parse(&manifest_json)?;
-    let name = manifest::resolve_name(&unpack_dir, &m);
+    let m = manifest::ExtensionManifest::parse(&manifest_json)?;
+    let name = m.resolve_name(&unpack_dir);
     let icon = m
         .icon
         .as_ref()

@@ -1,7 +1,6 @@
 (
     pages: [
         (
-            name: "default",
             url: "vmux://simulator/",
             title: "Simulator",
             bookmark: Some(80),

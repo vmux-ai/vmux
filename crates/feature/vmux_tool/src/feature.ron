@@ -1,7 +1,6 @@
 (
     pages: [
         (
-            name: "default",
             url: "vmux://tools/",
             title: "Tools",
             bookmark: Some(50),

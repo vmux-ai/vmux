@@ -176,9 +176,10 @@ flowchart LR
 Close the window and the shell keeps reading, the build keeps building, the agent keeps
 streaming. Reopen and the app reconnects, re-subscribes, and replays a snapshot.
 
-The daemon executable and its composition root live in `vmux_service`. Shared wire values,
-connection state, framing, and paths live below it in `vmux_api`, `vmux_ecs`, and
-`vmux_transport`; feature crates do not depend on the daemon package.
+The daemon executable and its composition root live in `vmux_service`. Shared wire values live in
+`vmux_api`, connection state in `vmux_ecs`, framing and client connections in `vmux_transport`, and
+profile-scoped filesystem paths in `vmux_profile`; feature crates do not depend on the daemon
+package.
 
 launchd relaunches the daemon **on crash, not on exit**, and `RunAtLoad` is false — it is
 not a login item. The app starts it on demand.
@@ -415,7 +416,8 @@ crate declares one `FeatureManifestSource` marker. Feature entry paths install t
 typed metadata. Repeated composition reuses that entity. Tool, command, CLI, and MCP catalog consumers
 read only the metadata they own from it. Page attributes read the same file at compile time. Feature
 plugins bind typed behavior without reparsing a named subsection or teaching an application crate
-which features exist.
+which features exist. The first page is the feature's default page; only additional pages need a
+`name` for an explicit `page = "..."` selection.
 
 `vmux_app` exposes reusable feature-plugin composition without owning executable policy. Page
 manifests, hosted-page plugins, command-bar contributions, and typed MCP tools remain in their

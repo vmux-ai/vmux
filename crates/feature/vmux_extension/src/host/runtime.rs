@@ -99,7 +99,7 @@ pub(crate) fn prepare_runtime_in(
     }
     copy_tree(&source, &temp_dir).map_err(PrepareRuntimeError::Infrastructure)?;
     if let Some(key) = entry.public_key_b64.as_deref() {
-        manifest::prepare_unpacked(&temp_dir, key, entry.popup.as_deref())
+        manifest::ExtensionManifest::prepare_unpacked(&temp_dir, key, entry.popup.as_deref())
             .map_err(PrepareRuntimeError::Infrastructure)?;
     }
     std::fs::write(temp_dir.join("vmux_runtime.js"), worker_source)

@@ -62,7 +62,6 @@
     )),
     pages: [
         (
-            name: "default",
             url: "file://",
             title: "Files",
             manifest_url: "vmux://files/",

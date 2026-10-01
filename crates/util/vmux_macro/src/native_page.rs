@@ -83,9 +83,15 @@ impl PageManifestFile {
                 ),
             )
         })?;
-        let key = page
-            .map(LitStr::value)
-            .unwrap_or_else(|| "default".to_string());
+        if page.is_none() {
+            return feature.pages.into_iter().next().ok_or_else(|| {
+                syn::Error::new(
+                    file.span(),
+                    format!("feature manifest {} has no pages", path.display()),
+                )
+            });
+        }
+        let key = page.expect("page checked above").value();
         let mut selected = None;
         for manifest in feature.pages {
             if manifest.name != key {
@@ -726,7 +732,7 @@ mod tests {
         let manifest = ron::from_str::<FeatureManifestFile>(
             r#"(
                 pages: [
-                    (name: "default", url: "vmux://tools/", title: "Tools"),
+                    (url: "vmux://tools/", title: "Tools"),
                     (name: "detail", url: "vmux://tools/detail", title: "Detail"),
                 ],
             )"#,

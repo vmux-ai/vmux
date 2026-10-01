@@ -112,8 +112,8 @@ impl<'de> Deserialize<'de> for FeatureManifest {
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Page {
-    #[serde(default)]
-    pub name: String,
+    #[serde(default, rename = "name")]
+    _name: String,
     pub url: String,
     pub title: String,
     #[serde(default)]
@@ -277,7 +277,6 @@ mod tests {
 
     const SOURCE: &str = r#"(
         pages: [(
-            name: "default",
             url: "vmux://example/",
             title: "Example",
             permissions: ["PageReady"],

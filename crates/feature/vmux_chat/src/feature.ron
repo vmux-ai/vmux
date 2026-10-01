@@ -1,7 +1,6 @@
 (
     pages: [
         (
-            name: "default",
             url: "vmux://sessions/",
             title: "Sessions",
             owns_subtree: true,

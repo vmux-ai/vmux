@@ -97,7 +97,7 @@ fn migrate_index_permissions(
         };
         let text = std::fs::read_to_string(source.join("manifest.json"))
             .map_err(|error| error.to_string())?;
-        let parsed = manifest::parse(&text)?;
+        let parsed = manifest::ExtensionManifest::parse(&text)?;
         entry.permissions = parsed.permissions;
         entry.optional_permissions = parsed.optional_permissions;
         entry.host_permissions = parsed.host_permissions;

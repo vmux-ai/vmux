@@ -38,7 +38,6 @@
     )),
     pages: [
         (
-            name: "default",
             url: "vmux://shortcuts/",
             title: "Keyboard Shortcuts",
             title_message_id: "shortcuts-title",

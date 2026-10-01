@@ -69,7 +69,6 @@
     )),
     pages: [
         (
-            name: "default",
             url: "vmux://settings/",
             title: "Settings",
             title_message_id: "settings-title",

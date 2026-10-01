@@ -19,7 +19,6 @@
     )),
     pages: [
         (
-            name: "default",
             url: "vmux://spaces/",
             title: "Spaces",
             bookmark: Some(90),

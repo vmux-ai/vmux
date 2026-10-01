@@ -540,7 +540,7 @@ fn install_vmux_fixture(home: &Path, extension: &Path, extension_id: &str) -> Re
     let store = store::ExtensionStore::at(&root);
     let manifest_text = std::fs::read_to_string(extension.join("manifest.json"))
         .map_err(|error| error.to_string())?;
-    let parsed = manifest::parse(&manifest_text)?;
+    let parsed = manifest::ExtensionManifest::parse(&manifest_text)?;
     let source = store.source_dir(extension_id, &parsed.version);
     copy_tree(extension, &source)?;
     let source_hash = store.source_hash(&source)?;
@@ -557,7 +557,7 @@ fn install_vmux_fixture(home: &Path, extension: &Path, extension_id: &str) -> Re
     );
     index.upsert(store::ExtEntry {
         id: extension_id.into(),
-        name: manifest::resolve_name(extension, &parsed),
+        name: parsed.resolve_name(extension),
         version: parsed.version,
         popup: parsed.popup,
         icon: parsed.icon,

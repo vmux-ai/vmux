@@ -1,7 +1,6 @@
 (
     pages: [
         (
-            name: "default",
             url: "git://",
             title: "Git",
             manifest_url: "vmux://git/",

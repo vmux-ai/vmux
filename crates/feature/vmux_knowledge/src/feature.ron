@@ -1,7 +1,6 @@
 (
     pages: [
         (
-            name: "default",
             url: "vmux://knowledge/",
             title: "Knowledge",
             bookmark: Some(40),
