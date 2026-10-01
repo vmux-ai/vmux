@@ -7,6 +7,7 @@ use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::{GitDiffViewport, GitRepositorySnapshot};
+use crate::state::GitDiffRow;
 use crate::ui::DiffView;
 
 #[component]
@@ -15,6 +16,7 @@ pub(super) fn CommitDiffCard(
     repo_root: ReadSignal<String>,
     selected_commit: ReadSignal<String>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
+    diff_rows: ReadSignal<Vec<GitDiffRow>>,
     loading: bool,
 ) -> Element {
     let empty_path = use_signal(String::new);
@@ -45,6 +47,7 @@ pub(super) fn CommitDiffCard(
                     repo_root,
                     path: empty_path,
                     viewport: diff_viewport,
+                    display_rows: diff_rows,
                     loading,
                     visible: true,
                 }
@@ -60,6 +63,7 @@ pub(super) fn DiffCard(
     selected_path_bytes: ReadSignal<Vec<u8>>,
     selected_abs_path: ReadSignal<String>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
+    diff_rows: ReadSignal<Vec<GitDiffRow>>,
     loading: bool,
 ) -> Element {
     rsx! {
@@ -78,7 +82,7 @@ pub(super) fn DiffCard(
                     {translate("git-select-file")}
                 }
             } else {
-                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), viewport: diff_viewport, loading, visible: true }
+                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), viewport: diff_viewport, display_rows: diff_rows, loading, visible: true }
             }
         }
     }

@@ -30,6 +30,7 @@ pub(super) fn GitDashboard() -> Element {
     };
     let repo_root = use_memo(move || snapshot().workspace);
     let diff_viewport = use_memo(move || snapshot().diff_viewport);
+    let diff_rows = use_memo(move || snapshot().diff_rows);
     let selected_path = use_memo(move || controller().selected_path);
     let selected_path_bytes = use_memo(move || controller().selected_path_bytes);
     let selected_abs_path = use_memo(move || controller().selected_abs_path);
@@ -90,6 +91,7 @@ pub(super) fn GitDashboard() -> Element {
                         repo_root,
                         selected_commit,
                         diff_viewport,
+                        diff_rows,
                         loading: ui.diff_loading,
                     }
                 } else {
@@ -99,6 +101,7 @@ pub(super) fn GitDashboard() -> Element {
                         selected_path_bytes,
                         selected_abs_path,
                         diff_viewport,
+                        diff_rows,
                         loading: ui.diff_loading,
                     }
                 }

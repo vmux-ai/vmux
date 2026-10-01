@@ -3,7 +3,6 @@ mod changes;
 mod command_log;
 mod dashboard;
 mod diff;
-mod diff_projection;
 mod empty;
 mod history;
 mod model;
@@ -14,7 +13,6 @@ mod shortcuts;
 mod state;
 mod status;
 
-pub use diff_projection::DiffViewRow;
 pub use root::Page;
 pub use shared::{DiffView, GitFooter};
 

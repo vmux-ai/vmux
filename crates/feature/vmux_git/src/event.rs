@@ -78,6 +78,12 @@ pub struct GitFileSelectRequest {
     pub path_bytes: Vec<u8>,
 }
 
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct GitDiffRevealRequest {
+    pub start: u32,
+    pub end: u32,
+}
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitBranchCollectionSelectRequest {
     pub collection: GitBranchCollection,

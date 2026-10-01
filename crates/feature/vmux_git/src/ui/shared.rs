@@ -8,8 +8,8 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 
-use super::diff_projection::{DiffViewRow, diff_view_rows};
 use crate::event::*;
+use crate::state::GitDiffRow;
 
 fn span_style(span: &StyledSpan) -> String {
     let [r, g, b] = span.fg;
@@ -174,22 +174,10 @@ pub fn DiffView(
     path: ReadSignal<String>,
     #[props(default)] path_bytes: Vec<u8>,
     viewport: ReadSignal<Option<GitDiffViewport>>,
+    display_rows: ReadSignal<Vec<GitDiffRow>>,
     loading: bool,
     visible: bool,
 ) -> Element {
-    let mut expanded = use_signal(Vec::<(usize, usize)>::new);
-    let viewport_generation = use_memo(move || {
-        viewport()
-            .as_ref()
-            .map(|viewport| viewport.generation)
-            .unwrap_or_default()
-    });
-
-    use_effect(move || {
-        let _ = viewport_generation();
-        expanded.set(Vec::new());
-    });
-
     let viewport = viewport();
     let rows = viewport
         .as_ref()
@@ -199,7 +187,6 @@ pub fn DiffView(
         .as_ref()
         .map(|viewport| viewport.error.as_str())
         .unwrap_or_default();
-    let display_rows = diff_view_rows(rows, &expanded());
     let maxno = rows
         .iter()
         .flat_map(|l| [l.old_no, l.new_no])
@@ -232,12 +219,13 @@ pub fn DiffView(
                 div { class: "p-3 text-xs text-muted-foreground", {translate("git-no-changes")} }
             }
 
-            for display_row in display_rows {
+            for display_row in display_rows() {
                 match display_row {
-                    DiffViewRow::Line(i) => {
-                        let line = &rows[i];
+                    GitDiffRow::Line(index) => {
+                        let index = index as usize;
+                        let line = &rows[index];
                         rsx! {
-                            div { key: "line-{i}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
+                            div { key: "line-{index}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
                                 div { class: "group flex min-w-max whitespace-pre transition-colors {row_class(line.kind)}",
                                     span { class: "sticky left-0 z-[1] flex shrink-0 select-none border-r border-foreground/[0.08] bg-background/95 shadow-[4px_0_10px_-8px_rgba(0,0,0,0.8)] backdrop-blur-sm",
                                         span {
@@ -261,7 +249,7 @@ pub fn DiffView(
                                         }
                                     }
                                 }
-                                if let Some(h) = ends[i] {
+                                if let Some(h) = ends[index] {
                                     {
                                         let accept_path_bytes = path_bytes.clone();
                                         let reject_path_bytes = path_bytes.clone();
@@ -305,16 +293,8 @@ pub fn DiffView(
                             }
                         }
                     },
-                    DiffViewRow::Gap { start, end } => {
+                    GitDiffRow::Gap { start, end, reveal_start, reveal_end } => {
                         let hidden = end - start;
-                        let upward = start == 0;
-                        let reveal = if hidden <= super::diff_projection::GAP_REVEAL_CHUNK {
-                            (start, end)
-                        } else if upward {
-                            (end - super::diff_projection::GAP_REVEAL_CHUNK, end)
-                        } else {
-                            (start, start + super::diff_projection::GAP_REVEAL_CHUNK)
-                        };
                         rsx! {
                             div {
                                 key: "gap-{start}-{end}",
@@ -328,7 +308,10 @@ pub fn DiffView(
                                         &[("count", TranslationValue::Number(hidden as i64))],
                                     ),
                                     onclick: move |_| {
-                                        expanded.write().push(reveal);
+                                        let _ = send(&GitDiffRevealRequest {
+                                            start: reveal_start,
+                                            end: reveal_end,
+                                        });
                                     },
                                     span { "⋯" }
                                     span { {translate_with(

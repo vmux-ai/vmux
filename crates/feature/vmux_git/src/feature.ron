@@ -16,6 +16,7 @@
                 "GitPanelSelectRequest",
                 "GitShortcutHelpRequest",
                 "GitFileSelectRequest",
+                "GitDiffRevealRequest",
                 "GitBranchCollectionSelectRequest",
                 "GitBranchSelectRequest",
                 "GitCommitSelectRequest",
@@ -61,8 +62,7 @@
                 "KeyStroke",
                 "KeyClaims",
             ],
-        )
-        ,
+        ),
         (
             name: "document",
             url: "vmux://git/",
@@ -75,6 +75,7 @@
                 "GitPanelSelectRequest",
                 "GitShortcutHelpRequest",
                 "GitFileSelectRequest",
+                "GitDiffRevealRequest",
                 "GitBranchCollectionSelectRequest",
                 "GitBranchSelectRequest",
                 "GitCommitSelectRequest",

@@ -5,10 +5,10 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::page::PageReady;
 
 use crate::event::{
-    GitBranchLog, GitBranchLogRequest, GitDiffViewport, GitOperationError, GitOperationResult,
-    GitRepositoryRequest, GitRepositorySnapshot,
+    DiffKind, GitBranchLog, GitBranchLogRequest, GitDiffViewport, GitOperationError,
+    GitOperationResult, GitRepositoryRequest, GitRepositorySnapshot,
 };
-use crate::state::{GitCommandLogEntry, GitPageSnapshot, GitUiState};
+use crate::state::{GitCommandLogEntry, GitDiffRow, GitPageSnapshot, GitUiState};
 
 use super::controller::GitController;
 use super::directory::GitDirectoryNavigation;
@@ -18,6 +18,9 @@ use super::repository::GitRepository;
 use super::watch::GitWatch;
 
 type GitUiStateUpdates = vmux_ecs::host::UiState<GitUiState>;
+
+const DIFF_CONTEXT_LINES: usize = 3;
+const DIFF_REVEAL_LINES: usize = 20;
 
 pub(super) struct StatePlugin;
 
@@ -36,6 +39,7 @@ impl Plugin for StatePlugin {
 #[require(GitUiStateUpdates, GitController, GitDirectoryNavigation)]
 pub(super) struct GitState {
     snapshot: GitPageSnapshot,
+    revealed_diff: Vec<(usize, usize)>,
 }
 
 impl GitState {
@@ -45,6 +49,7 @@ impl GitState {
             loading: true,
             ..Default::default()
         };
+        self.revealed_diff.clear();
     }
 
     fn start_repository(&mut self, path: &Path) {
@@ -80,12 +85,26 @@ impl GitState {
         self.snapshot.diff_loading = target_changed || self.snapshot.diff_viewport.is_none();
         if target_changed {
             self.snapshot.diff_viewport = None;
+            self.snapshot.diff_rows.clear();
+            self.revealed_diff.clear();
         }
     }
 
     pub(super) fn set_diff_viewport(&mut self, event: GitDiffViewport) {
         self.snapshot.diff_loading = false;
         self.snapshot.diff_viewport = Some(event);
+        self.revealed_diff.clear();
+        self.project_diff();
+    }
+
+    pub(super) fn reveal_diff(&mut self, start: u32, end: u32) -> bool {
+        let range = (start as usize, end as usize);
+        if range.0 >= range.1 || self.revealed_diff.contains(&range) {
+            return false;
+        }
+        self.revealed_diff.push(range);
+        self.project_diff();
+        true
     }
 
     pub(super) fn start_fetch(&mut self) {
@@ -159,6 +178,59 @@ impl GitState {
             self.snapshot.command_log.remove(0);
         }
         self.snapshot.command_log.push(entry);
+    }
+
+    fn project_diff(&mut self) {
+        let Some(viewport) = self.snapshot.diff_viewport.as_ref() else {
+            self.snapshot.diff_rows.clear();
+            return;
+        };
+        let lines = &viewport.lines;
+        let mut visible = vec![false; lines.len()];
+        for (index, line) in lines.iter().enumerate() {
+            if matches!(line.kind, DiffKind::Context) {
+                continue;
+            }
+            let start = index.saturating_sub(DIFF_CONTEXT_LINES);
+            let end = (index + DIFF_CONTEXT_LINES + 1).min(lines.len());
+            visible[start..end].fill(true);
+        }
+        for (start, end) in &self.revealed_diff {
+            let start = (*start).min(lines.len());
+            let end = (*end).min(lines.len());
+            if start < end {
+                visible[start..end].fill(true);
+            }
+        }
+
+        let mut rows = Vec::new();
+        let mut index = 0;
+        while index < lines.len() {
+            if visible[index] {
+                rows.push(GitDiffRow::Line(index as u32));
+                index += 1;
+                continue;
+            }
+            let start = index;
+            while index < lines.len() && !visible[index] {
+                index += 1;
+            }
+            let hidden = index - start;
+            let (reveal_start, reveal_end) = if hidden <= DIFF_REVEAL_LINES {
+                (start, index)
+            } else if start == 0 {
+                (index - DIFF_REVEAL_LINES, index)
+            } else {
+                (start, start + DIFF_REVEAL_LINES)
+            };
+            rows.push(GitDiffRow::Gap {
+                start: start as u32,
+                end: index as u32,
+                reveal_start: reveal_start as u32,
+                reveal_end: reveal_end as u32,
+            });
+        }
+        self.snapshot.diff_rows = rows;
     }
 }
 
@@ -263,5 +335,69 @@ fn publish(views: GitStateQuery, mut commands: Commands) {
                 &directory.state(),
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::DiffLine;
+
+    fn line(kind: DiffKind, number: u32) -> DiffLine {
+        DiffLine {
+            kind,
+            old_no: Some(number),
+            new_no: Some(number),
+            hunk: None,
+            spans: Vec::new(),
+        }
+    }
+
+    fn state_with_change(line_count: u32, changed: usize) -> GitState {
+        let mut lines = (1..=line_count)
+            .map(|number| line(DiffKind::Context, number))
+            .collect::<Vec<_>>();
+        lines[changed].kind = DiffKind::Add;
+        let mut state = GitState::default();
+        state.set_diff_viewport(GitDiffViewport {
+            generation: 1,
+            first_line: 0,
+            total_lines: line_count,
+            lines,
+            markers: Vec::new(),
+            error: String::new(),
+        });
+        state
+    }
+
+    #[test]
+    fn diff_projection_collapses_context_outside_changed_hunks() {
+        let state = state_with_change(20, 9);
+
+        assert_eq!(
+            state.snapshot.diff_rows.first(),
+            Some(&GitDiffRow::Gap {
+                start: 0,
+                end: 6,
+                reveal_start: 0,
+                reveal_end: 6,
+            })
+        );
+        assert!(state.snapshot.diff_rows.contains(&GitDiffRow::Line(9)));
+    }
+
+    #[test]
+    fn diff_projection_reveals_only_the_requested_chunk() {
+        let mut state = state_with_change(60, 49);
+
+        assert!(state.reveal_diff(0, DIFF_REVEAL_LINES as u32));
+
+        assert!(state.snapshot.diff_rows.contains(&GitDiffRow::Line(0)));
+        assert!(state.snapshot.diff_rows.contains(&GitDiffRow::Gap {
+            start: DIFF_REVEAL_LINES as u32,
+            end: 46,
+            reveal_start: DIFF_REVEAL_LINES as u32,
+            reveal_end: (DIFF_REVEAL_LINES * 2) as u32,
+        }));
     }
 }

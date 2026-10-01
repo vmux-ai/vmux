@@ -160,6 +160,17 @@ pub struct GitCommandLogEntry {
     pub ok: bool,
 }
 
+#[vmux_api::contract(Copy, Eq)]
+pub enum GitDiffRow {
+    Line(u32),
+    Gap {
+        start: u32,
+        end: u32,
+        reveal_start: u32,
+        reveal_end: u32,
+    },
+}
+
 #[vmux_api::contract(Eq)]
 pub struct GitDirectoryState {
     pub path: String,
@@ -189,6 +200,7 @@ pub struct GitPageSnapshot {
     pub repository: Option<GitRepositorySnapshot>,
     pub branch_log: Option<GitBranchLog>,
     pub diff_viewport: Option<GitDiffViewport>,
+    pub diff_rows: Vec<GitDiffRow>,
     pub diff_loading: bool,
     pub command_log: Vec<GitCommandLogEntry>,
     pub result: Option<GitOperationResult>,
@@ -206,6 +218,7 @@ impl Default for GitPageSnapshot {
             repository: None,
             branch_log: None,
             diff_viewport: None,
+            diff_rows: Vec::new(),
             diff_loading: false,
             command_log: Vec::new(),
             result: None,

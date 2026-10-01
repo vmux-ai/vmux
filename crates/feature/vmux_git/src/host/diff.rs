@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use bevy::prelude::*;
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use crate::event::{DiffKind, DiffLine, GitLineMarker, GitLineStatus};
+use crate::event::{DiffKind, DiffLine, GitDiffRevealRequest, GitLineMarker, GitLineStatus};
 use crate::state::GitPanel;
 
 use super::GitUpdateSet;
@@ -17,12 +18,31 @@ pub(super) struct DiffPlugin;
 
 impl Plugin for DiffPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(file_refresh).add_systems(
-            Update,
-            (sync_page_targets, start_requests)
-                .chain()
-                .in_set(GitUpdateSet::Diff),
-        );
+        app.add_plugins(UiEventPlugin::<(GitDiffRevealRequest,)>::default())
+            .add_observer(file_refresh)
+            .add_observer(reveal)
+            .add_systems(
+                Update,
+                (sync_page_targets, start_requests)
+                    .chain()
+                    .in_set(GitUpdateSet::Diff),
+            );
+    }
+}
+
+fn reveal(
+    trigger: On<UiInput<GitDiffRevealRequest>>,
+    mut states: Query<&mut super::state::GitState>,
+) {
+    let Ok(mut state) = states.get_mut(trigger.event().webview) else {
+        return;
+    };
+    let request = &trigger.event().payload;
+    if state
+        .bypass_change_detection()
+        .reveal_diff(request.start, request.end)
+    {
+        state.set_changed();
     }
 }
 
