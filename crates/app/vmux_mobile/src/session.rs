@@ -21,7 +21,7 @@ use crate::transition;
 
 pub struct Plugin;
 
-impl bevy_app::Plugin for Plugin {
+impl Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<OpenSession>()
             .add_message::<LeaveSession>()

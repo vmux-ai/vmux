@@ -23,7 +23,7 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
 pub struct Plugin;
 
-impl bevy_app::Plugin for Plugin {
+impl Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<PairLinkChanged>()
             .add_message::<PairRequest>()

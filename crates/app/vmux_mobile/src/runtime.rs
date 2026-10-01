@@ -32,7 +32,7 @@ pub struct Plugin;
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 struct DeliverUiStateEmits;
 
-impl bevy_app::Plugin for Plugin {
+impl Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AppLifecycle>()
             .add_message::<UiStateEmit>()

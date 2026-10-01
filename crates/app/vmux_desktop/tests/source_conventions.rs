@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use syn::visit::{self, Visit};
-use syn::{Expr, ExprMethodCall, Item, ItemFn, UseTree};
+use syn::{Expr, ExprMethodCall, Item, ItemFn, UseTree, Visibility};
 
 const GENERIC_MODULES: &[&str] = &[
     "bin", "host", "lib", "main", "plugin", "runtime", "src", "test", "tests", "ui",
@@ -37,6 +37,118 @@ fn registered_systems_and_observers_use_short_names_from_their_module_context() 
         "registered systems and observers must use short operation names within their owning module:\n{}",
         violations.join("\n")
     );
+}
+
+#[test]
+fn registered_systems_and_observers_are_private_to_their_plugin_module() {
+    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("crates dir");
+    let mut violations = Vec::new();
+
+    walk(crates_dir, &mut |path, source| {
+        let Ok(file) = syn::parse_file(source) else {
+            return;
+        };
+        audit_private_systems(path, &file.items, "crate", &mut violations);
+    });
+
+    assert!(
+        violations.is_empty(),
+        "registered systems and observers must be private to the module whose plugin schedules them:\n{}",
+        violations.join("\n")
+    );
+}
+
+fn audit_private_systems(path: &Path, items: &[Item], scope: &str, violations: &mut Vec<String>) {
+    let public = items
+        .iter()
+        .filter_map(|item| {
+            let Item::Fn(function) = item else {
+                return None;
+            };
+            (!matches!(function.vis, Visibility::Inherited)).then(|| function.sig.ident.to_string())
+        })
+        .collect::<BTreeSet<_>>();
+    let mut systems = RegisteredSystems::default();
+    for item in items {
+        if !matches!(item, Item::Mod(_)) {
+            systems.visit_item(item);
+        }
+    }
+    for name in public.intersection(&systems.0) {
+        violations.push(format!("{} ({scope}): {name}", path.display()));
+    }
+
+    for item in items {
+        let Item::Mod(module) = item else {
+            continue;
+        };
+        let Some((_, items)) = &module.content else {
+            continue;
+        };
+        let nested = format!("{scope}::{}", module.ident);
+        audit_private_systems(path, items, &nested, violations);
+    }
+}
+
+#[test]
+fn modules_follow_the_workspace_physical_layout() {
+    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("crates dir");
+    let mut violations = Vec::new();
+    audit_module_layout(crates_dir, &mut violations);
+
+    assert!(
+        violations.is_empty(),
+        "modules must avoid mod.rs, generic collection names, and one-child directory splits:\n{}",
+        violations.join("\n")
+    );
+}
+
+fn audit_module_layout(dir: &Path, violations: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if path.file_name().and_then(|name| name.to_str()) == Some("target") {
+                continue;
+            }
+            let sibling = path.with_extension("rs");
+            if sibling.is_file() {
+                let children = std::fs::read_dir(&path)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .filter(|entry| {
+                        entry.path().extension().and_then(|value| value.to_str()) == Some("rs")
+                    })
+                    .count();
+                if children == 1 {
+                    violations.push(format!("{}: one-child module directory", path.display()));
+                }
+            }
+            if path.file_name().and_then(|name| name.to_str()) == Some("systems") {
+                violations.push(format!("{}: generic systems directory", path.display()));
+            }
+            audit_module_layout(&path, violations);
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if name == "mod.rs" || matches!(name, "tools.rs" | "page_state.rs" | "view.rs") {
+            violations.push(path.display().to_string());
+        }
+        if name == "native_page.rs" && !path.ends_with("vmux_macro/src/native_page.rs") {
+            violations.push(path.display().to_string());
+        }
+    }
 }
 
 #[derive(Default)]

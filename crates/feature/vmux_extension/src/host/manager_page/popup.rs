@@ -137,7 +137,7 @@ fn open_request(
         .spawn(Browser::new_with_title(&url, &entry.name))
         .insert((
             Name::new(format!("Extension popup: {}", entry.name)),
-            vmux_core::overlay::WindowOverlay,
+            WindowOverlay,
             ExtensionPopup {
                 owner,
                 extension_id: id.clone(),

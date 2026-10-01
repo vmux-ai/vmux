@@ -99,7 +99,7 @@ impl Plugin for BrowserPlugin {
         let cef_command_line = host::cef_command_line_config();
         host::configure_cef_backend_sync(app)
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
-            .add_message::<host::WebviewLoadCompleted>()
+            .add_message::<WebviewLoadCompleted>()
             .add_plugins(vmux_layout::LayoutContractPlugin)
             .configure_sets(
                 Update,

@@ -229,7 +229,7 @@ fn pair(
                 let _ = std::fs::remove_file(remote.relay_url());
                 let _ = std::fs::remove_file(remote.relay_registration());
             }
-            agent.ensure_running(super::DaemonBinary::current()?.path())?;
+            agent.ensure_running(DaemonBinary::current()?.path())?;
             let relay_token = crate::RelayToken::wait(Duration::from_secs(5))?;
             let pairing_token = crate::RemoteAuthorizationStore::current().pairing_token()?;
             std::fs::write(super::RemotePaths::current().state(), b"enabled\n")?;
