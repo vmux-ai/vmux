@@ -1,4 +1,92 @@
 (
+    settings: Some((
+        sections: [(
+            id: "terminal",
+            title: "schema-terminal",
+            root_path: "terminal",
+            order: 50,
+        )],
+        fields: [
+            (
+                path: "terminal",
+                order: [
+                    "shell",
+                    "font_family",
+                    "startup_dir",
+                    "confirm_close",
+                    "default_theme",
+                    "themes",
+                    "custom_themes",
+                ],
+            ),
+            (path: "terminal.shell", label: Some("schema-shell")),
+            (path: "terminal.font_family", label: Some("schema-font-family")),
+            (path: "terminal.startup_dir", label: Some("schema-startup-directory")),
+            (
+                path: "terminal.confirm_close",
+                label: Some("schema-confirm-close"),
+                hint: Some("schema-confirm-close-detail"),
+            ),
+            (
+                path: "terminal.default_theme",
+                label: Some("schema-default-theme"),
+                hint: Some("schema-default-theme-detail"),
+                placeholder: Some("default"),
+            ),
+            (path: "terminal.themes", label: Some("schema-themes")),
+            (path: "terminal.themes[].name", label: Some("schema-name")),
+            (
+                path: "terminal.themes[].color_scheme",
+                label: Some("schema-color-scheme"),
+            ),
+            (
+                path: "terminal.themes[].font_family",
+                label: Some("schema-font-family"),
+            ),
+            (
+                path: "terminal.themes[].font_size",
+                label: Some("schema-font-size"),
+            ),
+            (
+                path: "terminal.themes[].line_height",
+                label: Some("schema-line-height"),
+            ),
+            (path: "terminal.themes[].padding", label: Some("schema-padding")),
+            (
+                path: "terminal.themes[].cursor_style",
+                label: Some("schema-cursor-style"),
+            ),
+            (
+                path: "terminal.themes[].cursor_blink",
+                label: Some("schema-cursor-blink"),
+            ),
+            (path: "terminal.themes[].shell", label: Some("schema-shell")),
+            (
+                path: "terminal.custom_themes",
+                label: Some("schema-custom-themes"),
+            ),
+            (
+                path: "terminal.custom_themes[].name",
+                label: Some("schema-name"),
+            ),
+            (
+                path: "terminal.custom_themes[].foreground",
+                label: Some("schema-foreground"),
+            ),
+            (
+                path: "terminal.custom_themes[].background",
+                label: Some("schema-background"),
+            ),
+            (
+                path: "terminal.custom_themes[].cursor",
+                label: Some("schema-cursor"),
+            ),
+            (
+                path: "terminal.custom_themes[].ansi",
+                label: Some("schema-ansi-colors"),
+            ),
+        ],
+    )),
     pages: [
         (
             name: "default",

@@ -2,7 +2,6 @@ mod agent;
 mod appearance;
 mod projection;
 mod runtime;
-mod schema;
 mod state;
 mod tool;
 

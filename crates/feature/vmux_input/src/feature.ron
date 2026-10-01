@@ -1,4 +1,19 @@
 (
+    settings: Some((
+        sections: [(
+            id: "recording",
+            title: "schema-recording",
+            root_path: "recording",
+            order: 80,
+        )],
+        fields: [(
+            path: "recording",
+            order: ["output_dir"],
+        ), (
+            path: "recording.output_dir",
+            label: Some("schema-output-directory"),
+        )],
+    )),
     tools: [
         (
             name: "screenshot",

@@ -1,4 +1,37 @@
 (
+    settings: Some((
+        sections: [(
+            id: "browser",
+            title: "schema-browser",
+            root_path: "browser",
+            order: 60,
+        )],
+        fields: [
+            (
+                path: "browser",
+                order: ["startup_url", "search_engine"],
+            ),
+            (
+                path: "browser.startup_url",
+                label: Some("schema-startup-url"),
+                hint: Some("schema-startup-url-detail"),
+                placeholder: Some("https://example.com"),
+            ),
+            (
+                path: "browser.search_engine",
+                label: Some("schema-search-engine"),
+                hint: Some("schema-search-engine-detail"),
+                widget: Some(Select),
+                options: [
+                    (value: "google", label: "Google"),
+                    (value: "bing", label: "Bing"),
+                    (value: "duckduckgo", label: "DuckDuckGo"),
+                    (value: "brave", label: "Brave Search"),
+                    (value: "kagi", label: "Kagi"),
+                ],
+            ),
+        ],
+    )),
     commands: [
             (
                 id: "browser_prev_page",

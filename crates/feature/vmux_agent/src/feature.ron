@@ -1,4 +1,42 @@
 (
+    settings: Some((
+        sections: [(
+            id: "agent",
+            title: "schema-agent",
+            description: Some("schema-agent-detail"),
+            root_path: "agent",
+            order: 30,
+        )],
+        fields: [
+            (
+                path: "agent",
+                order: [
+                    "allow_run_placement_override",
+                    "follow_files",
+                    "tidy_files",
+                    "tidy_files_max",
+                    "tidy_files_auto",
+                    "acp",
+                ],
+            ),
+            (
+                path: "agent.allow_run_placement_override",
+                label: Some("schema-run-placement"),
+                hint: Some("schema-run-placement-detail"),
+            ),
+            (path: "agent.follow_files", label: Some("schema-follow-files")),
+            (path: "agent.tidy_files", label: Some("schema-tidy-files")),
+            (path: "agent.tidy_files_max", label: Some("schema-tidy-files-max")),
+            (path: "agent.tidy_files_auto", label: Some("schema-tidy-files-auto")),
+            (path: "agent.acp", label: Some("schema-acp")),
+            (path: "agent.acp[].id", label: Some("schema-id")),
+            (path: "agent.acp[].name", label: Some("schema-name")),
+            (path: "agent.acp[].command", label: Some("schema-command")),
+            (path: "agent.acp[].args", label: Some("schema-arguments")),
+            (path: "agent.acp[].env", label: Some("schema-environment")),
+            (path: "agent.acp[].cwd", label: Some("schema-working-directory")),
+        ],
+    )),
     policies: Some({
         "acp_workspace":
         (

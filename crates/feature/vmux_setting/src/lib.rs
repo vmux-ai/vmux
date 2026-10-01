@@ -13,9 +13,11 @@ impl vmux_core::host::manifest::FeatureManifestSource for Feature {
 }
 
 pub mod event;
-pub mod schema;
 pub mod state;
 pub mod themes;
+
+#[cfg(host)]
+mod schema;
 
 #[cfg(ui)]
 pub mod ui;

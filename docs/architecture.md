@@ -406,8 +406,10 @@ Page manifests are static plugin registration data. Their registration entities 
 plugin construction so the browser can build the complete embedded-host allowlist before CEF
 initializes. Runtime page state and behavior still initialize through ECS schedules.
 
-Each feature keeps one `src/feature.ron`. `pages`, `tools`, and application `commands` are flat
-lists; `cli` is the optional command tree. String-keyed pseudo-sections are not namespaces. A
+Each feature keeps one `src/feature.ron`. `pages`, `tools`, application `commands`, and settings
+schema contributions are owned beside the feature that implements them; `cli` is the optional
+command tree. The settings feature aggregates those contributions into the `SettingsSchema`
+component on each settings page entity. String-keyed pseudo-sections are not namespaces. A
 crate declares one `FeatureManifestSource` marker. Feature entry paths install the generic
 `FeaturePlugin`, which parses the runtime sections once and registers one ECS entity containing their
 typed metadata. Repeated composition reuses that entity. Tool, command, CLI, and MCP catalog consumers
@@ -415,8 +417,9 @@ read only the metadata they own from it. Page attributes read the same file at c
 plugins bind typed behavior without reparsing a named subsection or teaching an application crate
 which features exist.
 
-`vmux_app::extension` exposes the stable integration pieces: page manifests and hosted-page
-plugins, command-bar contributions and their chosen message, and typed MCP tool plugins. A custom
+`vmux_app` exposes reusable feature-plugin composition without owning executable policy. Page
+manifests, hosted-page plugins, command-bar contributions, and typed MCP tools remain in their
+owning feature crates. A custom
 MCP binary builds a Bevy `App` with `McpPlugin` and its tool plugins, then gives that app to the
 stdio transport adapter. The runtime entity carries the `McpServer` component; tool handlers own
 their typed manifest variant and return a typed command or query dispatch target.
@@ -749,9 +752,10 @@ full Bevy Remote Protocol is locked to the `debug` page alone.
 ### Browser extensions
 
 `vmux_extension` owns package metadata, installation, permissions, enabled state, catalog ECS,
-and the manager page. `vmux_browser` owns only Chromium runtime adapters: bridge transport,
-service workers, extension popups, and web-store injection. The adapters publish typed
-`vmux_extension` requests and do not register routes or mutate the extension catalog directly.
+runtime preparation, bridge transport, service workers, browser API projection, extension
+popups, web-store injection, conformance tooling, and the manager page. `vmux_browser` exposes
+only generic CEF primitives and lifecycle boundaries used by browser-backed features; it neither
+depends on nor installs extension behavior.
 
 An installed extension is never handed to CEF as it shipped. Vmux copies the package into a
 generated runtime directory and patches the manifest so the service worker becomes a stable

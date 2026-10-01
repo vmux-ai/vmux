@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 use vmux_core::PageMetadata;
+use vmux_core::host::manifest::FeatureManifest;
 use vmux_core::page::PageReady;
 use vmux_ui::i18n::{Locale, TranslationValue};
 
@@ -19,22 +20,22 @@ pub(super) struct ProjectionPlugin;
 
 impl Plugin for ProjectionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_update_check_status)
+        app.add_systems(Startup, spawn_status)
             .add_plugins(vmux_core::host::UiStatePlugin::<SettingsUiState>::default())
             .add_systems(
                 Update,
                 (
-                    localize_settings_metadata,
-                    project_settings_schema,
-                    project_settings_render_fields,
-                    publish_settings_ui_state,
+                    localize_metadata,
+                    project_schema,
+                    project_fields,
+                    publish,
                 )
                     .chain(),
             );
     }
 }
 
-fn spawn_update_check_status(mut commands: Commands) {
+fn spawn_status(mut commands: Commands) {
     commands.spawn((
         Name::new("Update check status"),
         CurrentUpdateCheckStatus::default(),
@@ -42,12 +43,9 @@ fn spawn_update_check_status(mut commands: Commands) {
 }
 
 #[derive(Component, Default)]
-pub(super) struct SettingsSchemaProjection(SettingsSchema);
-
-#[derive(Component, Default)]
 pub(super) struct SettingsRenderProjection(SettingsUiState);
 
-fn localize_settings_metadata(
+fn localize_metadata(
     settings: Res<AppSettings>,
     mut views: Query<&mut PageMetadata, With<Settings>>,
 ) {
@@ -60,31 +58,35 @@ fn localize_settings_metadata(
     }
 }
 
-fn project_settings_schema(
+fn project_schema(
     settings: Res<AppSettings>,
-    mut views: Query<&mut SettingsSchemaProjection, With<Settings>>,
+    manifests: Query<&FeatureManifest>,
+    changed_manifests: Query<(), Changed<FeatureManifest>>,
+    mut views: Query<&mut SettingsSchema, With<Settings>>,
 ) {
-    let mut next = None;
-    for mut projection in &mut views {
-        if !settings.is_changed() && !projection.0.sections.is_empty() {
-            continue;
+    let added = views.iter_mut().any(|schema| schema.is_added());
+    if !settings.is_changed() && changed_manifests.is_empty() && !added {
+        return;
+    }
+    let locale = Locale::requested(Some(&settings.appearance.locale));
+    let schema = match SettingsSchema::from_manifests(manifests.iter(), &locale) {
+        Ok(schema) => schema,
+        Err(error) => {
+            bevy::log::error!("settings: feature manifest schema is invalid: {error}");
+            return;
         }
-        let schema = next.get_or_insert_with(|| {
-            SettingsSchema::localized(&Locale::requested(Some(&settings.appearance.locale)))
-        });
-        if projection.0 != *schema {
-            projection.0.clone_from(schema);
+    };
+    for mut current in &mut views {
+        if *current != schema {
+            current.clone_from(&schema);
         }
     }
 }
 
-fn project_settings_render_fields(
+fn project_fields(
     settings: Res<AppSettings>,
     status: Single<Ref<CurrentUpdateCheckStatus>>,
-    mut views: Query<
-        (Ref<SettingsSchemaProjection>, &mut SettingsRenderProjection),
-        With<Settings>,
-    >,
+    mut views: Query<(Ref<SettingsSchema>, &mut SettingsRenderProjection), With<Settings>>,
 ) {
     let locale = Locale::requested(Some(&settings.appearance.locale));
     for (schema, mut projection) in &mut views {
@@ -95,14 +97,14 @@ fn project_settings_render_fields(
         {
             continue;
         }
-        let next = SettingsUiState::projected(&settings, &schema.0, &status.0, &locale);
+        let next = SettingsUiState::projected(&settings, &schema, &status.0, &locale);
         if projection.0 != next {
             projection.0 = next;
         }
     }
 }
 
-fn publish_settings_ui_state(
+fn publish(
     views: Query<(Entity, Ref<PageReady>, Ref<SettingsRenderProjection>), With<Settings>>,
     mut commands: Commands,
 ) {
@@ -208,6 +210,7 @@ impl SettingsSection {
                     description: None,
                     synthetic_keys: Vec::new(),
                     root_path: key.clone(),
+                    order: 0,
                 };
                 sections.push(Self {
                     id: spec.id.clone(),
@@ -229,6 +232,7 @@ impl SettingsSection {
                 description: None,
                 synthetic_keys: Vec::new(),
                 root_path: String::new(),
+                order: 0,
             };
             let section = Self {
                 id: spec.id.clone(),
@@ -685,10 +689,14 @@ mod projection_tests {
     #[test]
     fn initial_settings_state_projects_typed_fields() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, ProjectionPlugin))
-            .insert_resource(AppSettings::embedded())
-            .init_resource::<Emitted>()
-            .add_observer(record_settings_state);
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default(),
+            ProjectionPlugin,
+        ))
+        .insert_resource(AppSettings::embedded())
+        .init_resource::<Emitted>()
+        .add_observer(record_settings_state);
         let entity = app.world_mut().spawn((Settings, PageReady)).id();
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(entity);
@@ -732,14 +740,13 @@ mod projection_tests {
                 description: Some("Agent behavior".into()),
                 synthetic_keys: Vec::new(),
                 root_path: "agent".into(),
+                order: 0,
             }],
-            fields: vec![(
-                "agent.acp[].command".into(),
-                FieldSpec {
-                    label: Some("Command".into()),
-                    ..Default::default()
-                },
-            )],
+            fields: vec![FieldSpec {
+                path: "agent.acp[].command".into(),
+                label: Some("Command".into()),
+                ..Default::default()
+            }],
         };
         let settings = serde_json::json!({
             "agent": {

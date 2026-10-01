@@ -1,4 +1,22 @@
 (
+    settings: Some((
+        sections: [(
+            id: "spaces",
+            title: "spaces-title",
+            root_path: "spaces",
+            order: 90,
+        )],
+        fields: [
+            (
+                path: "spaces.*.startup_url",
+                label: Some("schema-startup-url"),
+            ),
+            (
+                path: "spaces.*.startup_dir",
+                label: Some("schema-startup-directory"),
+            ),
+        ],
+    )),
     pages: [
         (
             name: "default",

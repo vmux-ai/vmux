@@ -1,4 +1,52 @@
 (
+    settings: Some((
+        sections: [(
+            id: "layout",
+            title: "schema-layout",
+            description: Some("schema-layout-detail"),
+            root_path: "layout",
+            order: 20,
+        )],
+        fields: [
+            (
+                path: "layout",
+                order: ["radius", "window", "pane", "side_sheet", "focus_ring"],
+            ),
+            (path: "layout.radius", label: Some("schema-radius")),
+            (
+                path: "layout.window",
+                label: Some("schema-window"),
+                order: ["padding"],
+            ),
+            (path: "layout.window.padding", label: Some("schema-padding")),
+            (
+                path: "layout.pane",
+                label: Some("schema-pane"),
+                order: ["gap"],
+            ),
+            (path: "layout.pane.gap", label: Some("schema-gap")),
+            (
+                path: "layout.side_sheet",
+                label: Some("schema-side-sheet"),
+                order: ["width"],
+            ),
+            (path: "layout.side_sheet.width", label: Some("schema-width")),
+            (
+                path: "layout.focus_ring",
+                label: Some("schema-focus-ring"),
+                order: ["width", "color"],
+            ),
+            (path: "layout.focus_ring.width", label: Some("schema-width")),
+            (
+                path: "layout.focus_ring.color",
+                label: Some("schema-color"),
+                order: ["r", "g", "b"],
+            ),
+            (path: "layout.focus_ring.color.r", label: Some("schema-red")),
+            (path: "layout.focus_ring.color.g", label: Some("schema-green")),
+            (path: "layout.focus_ring.color.b", label: Some("schema-blue")),
+        ],
+    )),
     pages: [
         (
             name: "default",

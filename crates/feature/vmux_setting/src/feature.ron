@@ -1,4 +1,64 @@
 (
+    settings: Some((
+        sections: [
+            (
+                id: "general",
+                title: "schema-general",
+                synthetic_keys: ["update_channel", "auto_update"],
+                root_path: "",
+                order: 0,
+            ),
+            (
+                id: "appearance",
+                title: "schema-appearance",
+                root_path: "appearance",
+                order: 10,
+            ),
+        ],
+        fields: [
+            (
+                path: "",
+                order: ["update_channel", "auto_update"],
+            ),
+            (
+                path: "update_channel",
+                label: Some("schema-update-channel"),
+                hint: Some("schema-update-channel-detail"),
+                widget: Some(Select),
+                options: [
+                    (value: "stable", label: "schema-update-channel-stable"),
+                    (value: "preview", label: "schema-update-channel-preview"),
+                ],
+            ),
+            (
+                path: "auto_update",
+                label: Some("schema-auto-update"),
+                hint: Some("schema-auto-update-detail"),
+            ),
+            (
+                path: "appearance",
+                order: ["mode", "locale"],
+            ),
+            (
+                path: "appearance.mode",
+                label: Some("schema-mode"),
+                hint: Some("schema-mode-detail"),
+                widget: Some(Select),
+                options: [
+                    (value: "device", label: "schema-device"),
+                    (value: "light", label: "schema-light"),
+                    (value: "dark", label: "schema-dark"),
+                ],
+            ),
+            (
+                path: "appearance.locale",
+                label: Some("schema-language"),
+                hint: Some("schema-language-detail"),
+                widget: Some(Select),
+                options_source: Some(Locale),
+            ),
+        ],
+    )),
     pages: [
         (
             name: "default",

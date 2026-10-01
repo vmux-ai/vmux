@@ -20,7 +20,8 @@ use crate::state::SettingsUiState;
 use crate::{AppSettings, SettingsWriteRequest};
 use vmux_flex::prelude::*;
 
-use super::projection::{SettingsRenderProjection, SettingsSchemaProjection};
+use super::projection::SettingsRenderProjection;
+use crate::schema::SettingsSchema;
 
 pub(super) struct StatePlugin;
 
@@ -51,11 +52,7 @@ impl Plugin for StatePlugin {
 }
 
 #[derive(Component, Default)]
-#[require(
-    SettingsUiStateUpdates,
-    SettingsSchemaProjection,
-    SettingsRenderProjection
-)]
+#[require(SettingsUiStateUpdates, SettingsSchema, SettingsRenderProjection)]
 pub struct Settings;
 
 type SettingsUiStateUpdates = UiState<SettingsUiState>;

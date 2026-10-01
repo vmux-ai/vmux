@@ -1,4 +1,65 @@
 (
+    settings: Some((
+        sections: [(
+            id: "editor",
+            title: "schema-editor",
+            root_path: "editor",
+            order: 70,
+        )],
+        fields: [
+            (
+                path: "editor",
+                order: ["keymap", "explorer", "lsp"],
+            ),
+            (
+                path: "editor.keymap",
+                label: Some("schema-keymap"),
+                widget: Some(Select),
+                options: [
+                    (value: "standard", label: "editor-keymap-standard"),
+                    (value: "vim", label: "editor-keymap-vim"),
+                ],
+            ),
+            (
+                path: "editor.explorer",
+                label: Some("schema-explorer"),
+                order: ["visible", "width"],
+            ),
+            (
+                path: "editor.explorer.visible",
+                label: Some("schema-visible"),
+            ),
+            (
+                path: "editor.explorer.width",
+                label: Some("schema-width"),
+            ),
+            (
+                path: "editor.lsp",
+                label: Some("schema-language-servers"),
+                order: ["servers"],
+            ),
+            (
+                path: "editor.lsp.servers",
+                label: Some("schema-servers"),
+            ),
+            (
+                path: "editor.lsp.servers.*.command",
+                label: Some("schema-command"),
+            ),
+            (
+                path: "editor.lsp.servers.*.args",
+                label: Some("schema-arguments"),
+            ),
+            (
+                path: "editor.lsp.servers.*.language_id",
+                label: Some("schema-language-id"),
+            ),
+            (
+                path: "editor.lsp.servers.*.root_markers",
+                label: Some("schema-root-markers"),
+            ),
+        ],
+    )),
     pages: [
         (
             name: "default",

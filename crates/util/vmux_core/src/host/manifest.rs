@@ -15,6 +15,7 @@ pub struct FeatureManifest {
     pub tools: Vec<Tool>,
     pub cli: Option<CliManifest>,
     pub mcp_servers: Vec<McpServer>,
+    settings: Option<Box<RawValue>>,
     policy: Option<Box<RawValue>>,
     policies: Option<Box<RawValue>>,
 }
@@ -37,6 +38,10 @@ impl FeatureManifest {
 
     pub fn policies<T: DeserializeOwned>(&self) -> Result<Option<T>, String> {
         Self::decode(&self.policies)
+    }
+
+    pub fn settings<T: DeserializeOwned>(&self) -> Result<Option<T>, String> {
+        Self::decode(&self.settings)
     }
 
     fn decode<T: DeserializeOwned>(value: &Option<Box<RawValue>>) -> Result<Option<T>, String> {
@@ -83,6 +88,8 @@ impl<'de> Deserialize<'de> for FeatureManifest {
             #[serde(default)]
             mcp_servers: Vec<McpServer>,
             #[serde(default)]
+            settings: Option<Box<RawValue>>,
+            #[serde(default)]
             policy: Option<Box<RawValue>>,
             #[serde(default)]
             policies: Option<Box<RawValue>>,
@@ -95,6 +102,7 @@ impl<'de> Deserialize<'de> for FeatureManifest {
             tools: manifest.tools,
             cli: manifest.cli,
             mcp_servers: manifest.mcp_servers,
+            settings: manifest.settings,
             policy: manifest.policy,
             policies: manifest.policies,
         })
@@ -283,6 +291,7 @@ mod tests {
             providers: Some({"example": (enabled: true)}),
         )),
         policy: Some((enabled: true)),
+        settings: Some((enabled: true)),
     )"#;
 
     #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -338,6 +347,10 @@ mod tests {
         );
         assert_eq!(
             manifests[0].policy::<Policy>().unwrap(),
+            Some(Policy { enabled: true })
+        );
+        assert_eq!(
+            manifests[0].settings::<Policy>().unwrap(),
             Some(Policy { enabled: true })
         );
     }

@@ -1,4 +1,35 @@
 (
+    settings: Some((
+        sections: [(
+            id: "shortcuts",
+            title: "schema-shortcuts",
+            description: Some("schema-shortcuts-detail"),
+            root_path: "shortcuts",
+            order: 40,
+        )],
+        fields: [
+            (
+                path: "shortcuts",
+                order: ["chord_timeout_ms", "leader", "bindings"],
+            ),
+            (
+                path: "shortcuts.leader",
+                label: Some("schema-leader"),
+                hint: Some("schema-leader-detail"),
+                widget: Some(LeaderKbd),
+            ),
+            (
+                path: "shortcuts.chord_timeout_ms",
+                label: Some("schema-chord-timeout"),
+                hint: Some("schema-chord-timeout-detail"),
+            ),
+            (
+                path: "shortcuts.bindings",
+                label: Some("schema-bindings"),
+                widget: Some(BindingsList),
+            ),
+        ],
+    )),
     pages: [
         (
             name: "default",
