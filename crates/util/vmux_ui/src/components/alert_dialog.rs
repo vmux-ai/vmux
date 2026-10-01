@@ -7,7 +7,7 @@ use dioxus_primitives::alert_dialog::{
 use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
 
-use crate::util::cn;
+use crate::class::ClassList;
 
 #[component]
 pub fn AlertDialogRoot(props: AlertDialogRootProps) -> Element {
@@ -26,7 +26,7 @@ pub fn AlertDialogRoot(props: AlertDialogRootProps) -> Element {
 
 #[component]
 pub fn AlertDialogContent(props: AlertDialogContentProps) -> Element {
-    let merged = cn([
+    let merged = ClassList::join([
         "fixed left-1/2 top-1/2 z-[1001] flex w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-lg border border-border bg-background px-6 pb-6 pt-8 text-center font-sans text-muted-foreground shadow-[0_2px_10px_rgb(0_0_0_/_18%)] sm:max-w-lg sm:text-left",
         props.class.as_deref().unwrap_or_default(),
     ]);

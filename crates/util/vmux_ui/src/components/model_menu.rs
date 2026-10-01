@@ -1,11 +1,11 @@
 use dioxus::prelude::*;
 use vmux_api::room::ModelOptionEntry;
 
+use crate::class::ClassList;
 use crate::components::prompt_box::{
     PROMPT_MENU_ROW, PromptMenuRow, PromptPopup, PromptPopupPlacement,
 };
 use crate::i18n::translate;
-use crate::util::cn;
 
 #[component]
 pub fn ModelMenu(
@@ -17,7 +17,7 @@ pub fn ModelMenu(
     on_select: EventHandler<(usize, ModelOptionEntry)>,
     #[props(default)] on_dismiss: Option<EventHandler<()>>,
 ) -> Element {
-    let empty_class = cn([PROMPT_MENU_ROW, "text-muted-foreground"]);
+    let empty_class = ClassList::join([PROMPT_MENU_ROW, "text-muted-foreground"]);
     rsx! {
         PromptPopup { placement, heading: translate("composer-model"), on_dismiss,
             if models.is_empty() {
@@ -27,7 +27,7 @@ pub fn ModelMenu(
                     div {
                         key: "model{i}",
                         id: "agent-selector-item-{i}",
-                        class: cn([
+                        class: ClassList::join([
                             PromptMenuRow::class(i == selected).as_str(),
                             "cursor-pointer flex-col items-stretch gap-0.5",
                         ]),

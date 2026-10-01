@@ -548,8 +548,8 @@ fn insert_initial_prompt_queue(
     if prompt.trim().is_empty() && initial_attachments.is_empty() {
         return;
     }
-    if let Some(title) = vmux_session::provisional_conversation_title(&prompt) {
-        commands.entity(stack).insert(AgentConversationTitle(title));
+    if let Some(title) = AgentConversationTitle::from_prompt(&prompt) {
+        commands.entity(stack).insert(title);
     }
     let mut queue = PromptQueue::default();
     queue.enqueue_with_attachments(prompt, initial_attachments);

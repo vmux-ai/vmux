@@ -52,19 +52,21 @@ impl AgentMessageTimes {
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentConversationTitle(pub String);
 
-pub fn provisional_conversation_title(text: &str) -> Option<String> {
-    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.is_empty() {
-        return None;
+impl AgentConversationTitle {
+    pub fn from_prompt(text: &str) -> Option<Self> {
+        let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if normalized.is_empty() {
+            return None;
+        }
+        if normalized.chars().count() <= 120 {
+            return Some(Self(normalized));
+        }
+        let mut title = normalized.chars().take(119).collect::<String>();
+        let trimmed_len = title.trim_end().len();
+        title.truncate(trimmed_len);
+        title.push('…');
+        Some(Self(title))
     }
-    if normalized.chars().count() <= 120 {
-        return Some(normalized);
-    }
-    let mut title = normalized.chars().take(119).collect::<String>();
-    let trimmed_len = title.trim_end().len();
-    title.truncate(trimmed_len);
-    title.push('…');
-    Some(title)
 }
 
 #[derive(Component, Clone, Debug, Default, Serialize, Deserialize, Reflect)]
@@ -75,23 +77,23 @@ pub struct AgentApprovalPolicy {
 
 impl AgentApprovalPolicy {
     pub fn allow(&mut self, tool: &str) {
-        self.auto.insert(approval_tool_key(tool));
+        self.auto.insert(Self::tool_key(tool));
     }
 
     pub fn allows(&self, tool: &str) -> bool {
-        self.auto.contains(&approval_tool_key(tool))
+        self.auto.contains(&Self::tool_key(tool))
     }
-}
 
-pub fn approval_tool_key(tool: &str) -> String {
-    tool.trim()
-        .to_ascii_lowercase()
-        .split(|character: char| {
-            character.is_ascii_whitespace() || matches!(character, '-' | '.' | ':' | '_')
-        })
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("_")
+    pub fn tool_key(tool: &str) -> String {
+        tool.trim()
+            .to_ascii_lowercase()
+            .split(|character: char| {
+                character.is_ascii_whitespace() || matches!(character, '-' | '.' | ':' | '_')
+            })
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("_")
+    }
 }
 
 #[derive(Component, Clone, Debug, Default)]

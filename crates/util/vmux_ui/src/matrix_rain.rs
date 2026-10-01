@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::util::cn;
+use crate::class::ClassList;
 
 const DEFAULT_COLUMNS: usize = 120;
 const COLUMN_GLYPHS: usize = 96;
@@ -70,7 +70,7 @@ pub fn MatrixLoader(
 
     rsx! {
         div {
-            class: cn(["overflow-hidden", class.as_str()]),
+            class: ClassList::join(["overflow-hidden", class.as_str()]),
             role: "status",
             "aria-busy": "true",
             div { class: "relative h-full w-full overflow-hidden bg-background",

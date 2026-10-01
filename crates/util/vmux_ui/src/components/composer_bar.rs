@@ -3,6 +3,7 @@ use vmux_api::protocol::AcpModeOption;
 use vmux_api::room::ModelOptionEntry;
 use vmux_api::space::{ProjectBranch, ProjectRow};
 
+use crate::class::ClassList;
 use crate::components::agent_menu::AgentMenu;
 use crate::components::effort_menu::EffortMenu;
 use crate::components::model_menu::ModelMenu;
@@ -12,7 +13,6 @@ use crate::components::prompt_box::PromptPopupPlacement;
 use crate::components::skeleton::Skeleton;
 use crate::i18n::{TranslationValue, translate, translate_with};
 use crate::list_nav::MenuDirection;
-use crate::util::cn;
 
 const COMPOSER_CHIP: &str = "flex h-7 max-w-44 shrink-0 items-center gap-1 rounded-lg px-1.5 text-[11px] text-muted-foreground";
 const COMPOSER_CHIP_LABEL_TIGHT: &str = "@max-[34rem]:hidden";
@@ -64,7 +64,7 @@ pub fn StatusDot(status: String, size_class: String) -> Element {
         _ => "bg-success shadow-[0_0_8px_rgba(16,185,129,0.65)]",
     };
     rsx! {
-        span { class: cn([size_class.as_str(), "rounded-full", tone]) }
+        span { class: ClassList::join([size_class.as_str(), "rounded-full", tone]) }
     }
 }
 
@@ -401,11 +401,11 @@ fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> E
     if chip.loading {
         let width = kind.skeleton_width();
         return rsx! {
-            Skeleton { class: cn([COMPOSER_CHIP_SKELETON, width]) }
+            Skeleton { class: ClassList::join([COMPOSER_CHIP_SKELETON, width]) }
         };
     }
     let label_class = kind.label_class();
-    let label_class = cn([label_class, COMPOSER_CHIP_LABEL_TIGHT]);
+    let label_class = ClassList::join([label_class, COMPOSER_CHIP_LABEL_TIGHT]);
     let Some(on_open) = chip.on_open else {
         return rsx! {
             span { class: COMPOSER_CHIP, title: "{chip.title}",
@@ -418,7 +418,7 @@ fn ComposerChipSlot(kind: ComposerMenuKind, chip: ComposerChip, open: bool) -> E
         true => COMPOSER_CHIP_OPEN,
         false => COMPOSER_CHIP_INTERACTIVE,
     };
-    let chip_class = cn([COMPOSER_CHIP, state]);
+    let chip_class = ClassList::join([COMPOSER_CHIP, state]);
     rsx! {
         button {
             class: chip_class,

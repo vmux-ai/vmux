@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 use vmux_api::command_bar::CommandPaletteAgent;
 
+use crate::class::ClassList;
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::favicon::Favicon;
 use crate::i18n::translate;
-use crate::util::cn;
 
 #[component]
 pub fn AgentMenu(
@@ -58,7 +58,7 @@ fn AgentMenuRow(
     let row_class = PromptMenuRow::class(at_cursor);
     rsx! {
         button {
-            class: cn([row_class.as_str(), text]),
+            class: ClassList::join([row_class.as_str(), text]),
             onmousedown: move |event| event.prevent_default(),
             onmouseenter: move |_| on_hover.call(()),
             onclick: move |_| on_pick.call(url.clone()),

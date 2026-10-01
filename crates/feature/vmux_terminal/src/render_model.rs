@@ -1,6 +1,6 @@
 use crate::event::{FLAG_BOLD, FLAG_DIM, FLAG_INVERSE, FLAG_ITALIC, FLAG_STRIKETHROUGH};
 use crate::event::{FLAG_UNDERLINE, TermColor, TermSpan};
-use vmux_ui::util::cn;
+use vmux_ui::class::ClassList;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SpanBackgroundOverlay {
@@ -112,7 +112,7 @@ pub fn cursor_cell_style(
             vmux_api::terminal::CursorStyle::Bar => "border-l-2 border-term-cursor",
             vmux_api::terminal::CursorStyle::Block => "bg-term-cursor",
         };
-        let classes = cn([span_classes, cursor_class]);
+        let classes = ClassList::join([span_classes, cursor_class]);
         return (classes, span_style.to_string());
     }
 

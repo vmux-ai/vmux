@@ -1,8 +1,8 @@
+use crate::class::ClassList;
 use crate::components::badge::Badge;
 use crate::components::skeleton::Skeleton;
 use crate::hooks::use_selector;
 use crate::list_nav::{MenuDirection, move_selection};
-use crate::util::cn;
 use dioxus::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -208,7 +208,7 @@ pub fn ManagerThumbnail(src: Option<String>, fallback: String) -> Element {
 #[component]
 pub fn ManagerBadge(#[props(default)] tone: ManagerTone, children: Element) -> Element {
     rsx! {
-        Badge { class: cn(["rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ring-1 ring-inset", tone.classes()]),
+        Badge { class: ClassList::join(["rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ring-1 ring-inset", tone.classes()]),
             {children}
         }
     }

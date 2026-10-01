@@ -9,8 +9,8 @@ use vmux_api::protocol::{ClientMessage, SharedMessage};
 use vmux_chat::event::ChatApproval;
 use vmux_core::service::ServiceRequest;
 use vmux_session::AcpSession;
+use vmux_session::AgentApprovalPolicy;
 use vmux_session::AgentRunState;
-use vmux_session::{AgentApprovalPolicy, approval_tool_key};
 
 pub struct Plugin;
 
@@ -102,7 +102,7 @@ impl AgentApprovalStore {
             .or_default()
             .entry(scope)
             .or_default()
-            .insert(approval_tool_key(tool));
+            .insert(AgentApprovalPolicy::tool_key(tool));
         if inserted && let Err(error) = self.save() {
             warn!("failed to save agent approvals: {error}");
         }

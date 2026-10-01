@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
 use vmux_api::protocol::AcpModeOption;
 
+use crate::class::ClassList;
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;
-use crate::util::cn;
 
 #[component]
 pub fn PermissionMenu(
@@ -21,7 +21,7 @@ pub fn PermissionMenu(
                 button {
                     key: "permission-{mode.id}",
                     id: "agent-selector-item-{index}",
-                    class: cn([
+                    class: ClassList::join([
                         PromptMenuRow::class(index == selected).as_str(),
                         "flex-col items-stretch gap-0.5 text-left",
                     ]),

@@ -507,7 +507,7 @@ impl Process {
         wake_tx: mpsc::UnboundedSender<()>,
         reader_send_delay: Duration,
     ) -> Result<Self, String> {
-        crate::shell_integration::inject(
+        crate::shell_integration::ShellIntegration::inject(
             &command,
             &mut args,
             &mut env,

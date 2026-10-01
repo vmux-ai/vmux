@@ -2,10 +2,10 @@ use dioxus::html::geometry::ClientPoint;
 use dioxus::prelude::*;
 use vmux_core::editor::SelSpan;
 use vmux_core::event::{MdBlock, MdInline, MdListItem, MdTableAlign};
+use vmux_ui::class::ClassList;
 use vmux_ui::components::checkbox::Checkbox;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
-use vmux_ui::util::cn;
 
 use super::text_style::StyledSpanStyle;
 
@@ -132,7 +132,7 @@ pub fn NoteSourceLine(chunks: Vec<NoteLineChunk>, caret_width_class: String) -> 
 }
 
 fn hidden_class(class: &'static str, hidden: bool) -> String {
-    cn([class, if hidden { "invisible" } else { "" }])
+    ClassList::join([class, if hidden { "invisible" } else { "" }])
 }
 
 #[component]

@@ -2,6 +2,8 @@ pub mod agent_accent;
 
 pub mod caret;
 
+pub mod class;
+
 pub mod clipboard;
 
 #[cfg(ui)]
@@ -56,8 +58,6 @@ pub mod script;
 
 #[cfg(ui)]
 pub mod text_run;
-
-pub mod util;
 
 pub mod dioxus_ext {
     pub use dioxus_primitives::dioxus_attributes::attributes;

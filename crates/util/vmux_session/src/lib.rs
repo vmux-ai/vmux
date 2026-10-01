@@ -11,7 +11,7 @@ pub use acp::AcpSession;
 pub use run_state::{AgentRunState, AgentTurnMeta};
 pub use session::{
     AgentApprovalPolicy, AgentConversationTitle, AgentMessageTimes, AgentMessages, PromptQueue,
-    QueuedPrompt, approval_tool_key, provisional_conversation_title,
+    QueuedPrompt,
 };
 
 pub struct SessionPlugin;

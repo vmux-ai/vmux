@@ -11,9 +11,7 @@ use vmux_core::prompt_media::AttachmentSelection;
 #[cfg(host)]
 use vmux_core::service::ServiceRequest;
 #[cfg(host)]
-use vmux_session::{
-    AcpSession, AgentConversationTitle, AgentRunState, PromptQueue, provisional_conversation_title,
-};
+use vmux_session::{AcpSession, AgentConversationTitle, AgentRunState, PromptQueue};
 
 #[cfg(host)]
 use super::composer::{ComposerChanged, ComposerState};
@@ -114,11 +112,9 @@ fn submit(
         return;
     };
     if title.is_none()
-        && let Some(title) = provisional_conversation_title(&text)
+        && let Some(title) = AgentConversationTitle::from_prompt(&text)
     {
-        commands
-            .entity(session)
-            .insert(AgentConversationTitle(title));
+        commands.entity(session).insert(title);
     }
     enqueue_prompt(&mut queue, &mut state, text, attachments);
     let effect = composer.effect(String::new(), true);

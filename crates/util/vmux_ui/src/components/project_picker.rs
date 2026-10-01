@@ -1,12 +1,12 @@
 use dioxus::prelude::*;
 use vmux_api::space::{ProjectBranch, ProjectRow};
 
+use crate::class::ClassList;
 use crate::components::prompt_box::{
     PROMPT_MENU_INDENT, PROMPT_MENU_ROW, PromptMenuRow, PromptPopup, PromptPopupPlacement,
 };
 use crate::components::skeleton::Skeleton;
 use crate::i18n::translate;
-use crate::util::cn;
 
 #[derive(Clone, PartialEq, Props)]
 pub struct ProjectPickerProps {
@@ -49,9 +49,9 @@ pub fn ProjectPicker(props: ProjectPickerProps) -> Element {
             roots.push(project.clone());
         }
     }
-    let empty_class = cn([PROMPT_MENU_ROW, "text-muted-foreground"]);
+    let empty_class = ClassList::join([PROMPT_MENU_ROW, "text-muted-foreground"]);
     let choose_another_row = PromptMenuRow::class(cursor == roots.len());
-    let choose_another_class = cn([
+    let choose_another_class = ClassList::join([
         choose_another_row.as_str(),
         "border-t border-foreground/10 text-muted-foreground hover:text-foreground",
     ]);
@@ -106,7 +106,7 @@ pub fn BranchPicker(
     on_pick: EventHandler<ProjectPick>,
     on_dismiss: EventHandler<()>,
 ) -> Element {
-    let empty_class = cn([PROMPT_MENU_ROW, "text-muted-foreground"]);
+    let empty_class = ClassList::join([PROMPT_MENU_ROW, "text-muted-foreground"]);
     rsx! {
         PromptPopup {
             placement,
@@ -146,7 +146,7 @@ fn PromptMenuSkeleton(rows: usize) -> Element {
             for (row, width) in WIDTHS.iter().take(rows).enumerate() {
                 Skeleton {
                     key: "skeleton-{row}",
-                    class: cn(["h-5 bg-foreground/[0.06]", width]),
+                    class: ClassList::join(["h-5 bg-foreground/[0.06]", width]),
                 }
             }
         }
@@ -216,7 +216,7 @@ fn ProjectBranchRow(
     let row_class = PromptMenuRow::class(at_cursor);
     rsx! {
         button {
-            class: cn([
+            class: ClassList::join([
                 row_class.as_str(),
                 if indent { PROMPT_MENU_INDENT } else { "" },
             ]),
