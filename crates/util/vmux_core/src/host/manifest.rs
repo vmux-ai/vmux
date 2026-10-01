@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use ron::value::RawValue;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use vmux_api::InputSchema;
+use vmux_api::JsonSchema;
 
 use crate::cli::CliManifest;
 
@@ -149,7 +149,7 @@ pub struct Shortcut {
 pub struct CommandMcp {
     pub description: String,
     #[serde(default)]
-    pub input_schema: Option<InputSchema>,
+    pub input_schema: Option<JsonSchema>,
     #[serde(default)]
     pub allow_agent: bool,
 }
@@ -206,7 +206,7 @@ pub struct Tool {
     #[serde(default)]
     pub aliases: Vec<String>,
     pub description: String,
-    pub input_schema: InputSchema,
+    pub input_schema: JsonSchema,
     #[serde(default)]
     pub availability: ToolAvailability,
     #[serde(default)]

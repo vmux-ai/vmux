@@ -11,8 +11,8 @@ pub mod extension;
 pub mod git;
 pub mod history;
 pub mod icon;
-pub mod input_schema;
 pub mod json;
+pub mod json_schema;
 pub mod layout;
 pub mod mcp;
 pub mod open_target;
@@ -33,7 +33,7 @@ pub mod vault;
 
 pub use bin_event::{AgentRequestContract, BinEvent, HostEvent, PageReady, UiEvent};
 pub use icon::{BuiltinIcon, PageIcon};
-pub use input_schema::{InputSchema, InputSchemaType};
+pub use json_schema::{JsonSchema, JsonSchemaType};
 #[cfg(feature = "bevy")]
 pub use page::UiEventPermissions;
 pub use page_metadata::{PageIdentity, PageMetadata};

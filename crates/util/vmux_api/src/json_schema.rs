@@ -5,23 +5,23 @@ use serde_json::{Map, Value};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct InputSchema {
+pub struct JsonSchema {
     #[serde(
         rename = "type",
         default,
-        deserialize_with = "InputSchema::deserialize_type"
+        deserialize_with = "JsonSchema::deserialize_type"
     )]
-    schema_type: Option<InputSchemaType>,
+    schema_type: Option<JsonSchemaType>,
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
     required: Vec<String>,
     #[serde(default)]
-    properties: BTreeMap<String, InputSchema>,
+    properties: BTreeMap<String, JsonSchema>,
     #[serde(default)]
     additional_properties: bool,
     #[serde(default)]
-    definitions: BTreeMap<String, InputSchema>,
+    definitions: BTreeMap<String, JsonSchema>,
     #[serde(default)]
     values: Vec<String>,
     #[serde(default)]
@@ -32,21 +32,21 @@ pub struct InputSchema {
     minimum: Option<i64>,
     #[serde(default)]
     maximum: Option<i64>,
-    #[serde(default, deserialize_with = "InputSchema::deserialize_items")]
-    items: Option<Box<InputSchema>>,
+    #[serde(default, deserialize_with = "JsonSchema::deserialize_items")]
+    items: Option<Box<JsonSchema>>,
     #[serde(default)]
     min_items: Option<u64>,
     #[serde(default)]
     max_items: Option<u64>,
     #[serde(default)]
-    one_of: Vec<InputSchema>,
+    one_of: Vec<JsonSchema>,
     #[serde(default)]
     reference: Option<String>,
     #[serde(default)]
     constant: Option<String>,
 }
 
-impl Serialize for InputSchema {
+impl Serialize for JsonSchema {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -56,7 +56,7 @@ impl Serialize for InputSchema {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-pub enum InputSchemaType {
+pub enum JsonSchemaType {
     Object,
     String,
     Integer,
@@ -65,7 +65,7 @@ pub enum InputSchemaType {
     Array,
 }
 
-impl InputSchemaType {
+impl JsonSchemaType {
     fn json_name(self) -> &'static str {
         match self {
             Self::Object => "object",
@@ -89,13 +89,13 @@ impl InputSchemaType {
     }
 }
 
-impl InputSchema {
+impl JsonSchema {
     pub fn object() -> Self {
-        Self::new(Some(InputSchemaType::Object))
+        Self::new(Some(JsonSchemaType::Object))
     }
 
     pub fn string() -> Self {
-        Self::new(Some(InputSchemaType::String))
+        Self::new(Some(JsonSchemaType::String))
     }
 
     pub fn description(mut self, description: impl Into<String>) -> Self {
@@ -129,7 +129,7 @@ impl InputSchema {
                 Value::String(description.clone()),
             );
         }
-        if self.schema_type == Some(InputSchemaType::Object) {
+        if self.schema_type == Some(JsonSchemaType::Object) {
             if !self.required.is_empty() {
                 object.insert("required".to_string(), serde_json::json!(self.required));
             }
@@ -192,7 +192,7 @@ impl InputSchema {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.schema_type == Some(InputSchemaType::Array) && self.items.is_none() {
+        if self.schema_type == Some(JsonSchemaType::Array) && self.items.is_none() {
             return Err("array input schema must define items".to_string());
         }
         if self.schema_type.is_none()
@@ -334,11 +334,11 @@ impl InputSchema {
         Ok(())
     }
 
-    fn deserialize_type<'de, D>(deserializer: D) -> Result<Option<InputSchemaType>, D::Error>
+    fn deserialize_type<'de, D>(deserializer: D) -> Result<Option<JsonSchemaType>, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        InputSchemaType::deserialize(deserializer).map(Some)
+        JsonSchemaType::deserialize(deserializer).map(Some)
     }
 
     fn deserialize_items<'de, D>(deserializer: D) -> Result<Option<Box<Self>>, D::Error>
@@ -348,7 +348,7 @@ impl InputSchema {
         Self::deserialize(deserializer).map(|schema| Some(Box::new(schema)))
     }
 
-    fn new(schema_type: Option<InputSchemaType>) -> Self {
+    fn new(schema_type: Option<JsonSchemaType>) -> Self {
         Self {
             schema_type,
             description: None,
@@ -371,29 +371,29 @@ impl InputSchema {
     }
 }
 
-impl TryFrom<Value> for InputSchema {
+impl TryFrom<Value> for JsonSchema {
     type Error = String;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        InputSchemaParser::parse(value)
+        JsonSchemaParser::parse(value)
     }
 }
 
-struct InputSchemaParser {
+struct JsonSchemaParser {
     fields: Map<String, Value>,
 }
 
-impl InputSchemaParser {
-    fn parse(value: Value) -> Result<InputSchema, String> {
+impl JsonSchemaParser {
+    fn parse(value: Value) -> Result<JsonSchema, String> {
         let Value::Object(fields) = value else {
             return Err("input schema must be an object".to_string());
         };
         Self { fields }.finish()
     }
 
-    fn finish(mut self) -> Result<InputSchema, String> {
+    fn finish(mut self) -> Result<JsonSchema, String> {
         let schema_type = self.schema_type()?;
-        let mut schema = InputSchema::new(schema_type);
+        let mut schema = JsonSchema::new(schema_type);
         schema.description = self.string("description")?;
         schema.required = self.strings("required")?;
         schema.properties = self.schemas("properties")?;
@@ -417,7 +417,7 @@ impl InputSchemaParser {
         Ok(schema)
     }
 
-    fn schema_type(&mut self) -> Result<Option<InputSchemaType>, String> {
+    fn schema_type(&mut self) -> Result<Option<JsonSchemaType>, String> {
         let Some(value) = self.fields.remove("type") else {
             return Ok(None);
         };
@@ -425,12 +425,12 @@ impl InputSchemaParser {
             return Err("input schema type must be a string".to_string());
         };
         let schema_type = match value {
-            "object" => InputSchemaType::Object,
-            "string" => InputSchemaType::String,
-            "integer" => InputSchemaType::Integer,
-            "number" => InputSchemaType::Number,
-            "boolean" => InputSchemaType::Boolean,
-            "array" => InputSchemaType::Array,
+            "object" => JsonSchemaType::Object,
+            "string" => JsonSchemaType::String,
+            "integer" => JsonSchemaType::Integer,
+            "number" => JsonSchemaType::Number,
+            "boolean" => JsonSchemaType::Boolean,
+            "array" => JsonSchemaType::Array,
             _ => return Err(format!("unsupported input schema type: {value}")),
         };
         Ok(Some(schema_type))
@@ -476,7 +476,7 @@ impl InputSchemaParser {
         Ok(strings)
     }
 
-    fn schemas(&mut self, name: &str) -> Result<BTreeMap<String, InputSchema>, String> {
+    fn schemas(&mut self, name: &str) -> Result<BTreeMap<String, JsonSchema>, String> {
         let Some(value) = self.fields.remove(name) else {
             return Ok(BTreeMap::new());
         };
@@ -485,19 +485,19 @@ impl InputSchemaParser {
         };
         let mut schemas = BTreeMap::new();
         for (name, value) in values {
-            schemas.insert(name, InputSchema::try_from(value)?);
+            schemas.insert(name, JsonSchema::try_from(value)?);
         }
         Ok(schemas)
     }
 
-    fn schema(&mut self, name: &str) -> Result<Option<InputSchema>, String> {
+    fn schema(&mut self, name: &str) -> Result<Option<JsonSchema>, String> {
         let Some(value) = self.fields.remove(name) else {
             return Ok(None);
         };
-        Ok(Some(InputSchema::try_from(value)?))
+        Ok(Some(JsonSchema::try_from(value)?))
     }
 
-    fn alternatives(&mut self) -> Result<Vec<InputSchema>, String> {
+    fn alternatives(&mut self) -> Result<Vec<JsonSchema>, String> {
         let value = match self.fields.remove("oneOf") {
             Some(value) => Some(value),
             None => self.fields.remove("anyOf"),
@@ -510,7 +510,7 @@ impl InputSchemaParser {
         };
         let mut schemas = Vec::with_capacity(values.len());
         for value in values {
-            schemas.push(InputSchema::try_from(value)?);
+            schemas.push(JsonSchema::try_from(value)?);
         }
         Ok(schemas)
     }
@@ -549,7 +549,7 @@ mod tests {
 
     #[test]
     fn typed_object_schema_rejects_unknown_and_invalid_fields() {
-        let schema = InputSchema::object().optional("url", InputSchema::string());
+        let schema = JsonSchema::object().optional("url", JsonSchema::string());
 
         assert!(schema.validate_value(&serde_json::json!({})).is_ok());
         assert!(
@@ -572,7 +572,7 @@ mod tests {
 
     #[test]
     fn typed_schema_serializes_as_json_schema() {
-        let schema = InputSchema::object().required("url", InputSchema::string());
+        let schema = JsonSchema::object().required("url", JsonSchema::string());
 
         assert_eq!(
             serde_json::to_value(schema).unwrap(),

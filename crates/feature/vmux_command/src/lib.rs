@@ -30,7 +30,7 @@ pub use host::{
     CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot, CommandBinding, CommandDefinition,
     CommandDispatch, CommandInvocation, CommandManifest, CommandMcp, CommandMessage, CommandPlugin,
     CommandRegistry, CommandRuntimePlugin, CommandShortcut, CommandToolPlugin, ContributedCommand,
-    ContributedPage, ContributedPages, DispatchCommandInvocations, InputSchema, KeyPlugin,
+    ContributedPage, ContributedPages, DispatchCommandInvocations, JsonSchema, KeyPlugin,
     ReadCommandRequests, RegisteredPage, ResolvedLocale, ShortcutDefinition, SpaceSummary,
     UiStatePlugin, WriteCommandBarSnapshots, WriteCommandRequests, bundle, command_bar, definition,
     page_key, payload, plugin, settings, shortcut, snapshot, surface,

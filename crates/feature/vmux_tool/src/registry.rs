@@ -8,7 +8,7 @@ use vmux_api::protocol::{AgentCommandTool, AgentRequest};
 use vmux_core::host::manifest::{FeatureManifest, Tool as ToolEntry, ToolAvailability};
 use vmux_core::{HostShell, JsonArguments, RegistrationOrder};
 
-use vmux_api::InputSchema;
+use vmux_api::JsonSchema;
 
 pub struct ToolRegistryPlugin;
 
@@ -171,7 +171,7 @@ pub struct ToolDispatchFlush;
 pub struct ToolDefinition {
     pub name: String,
     pub description: String,
-    pub input_schema: InputSchema,
+    pub input_schema: JsonSchema,
 }
 
 type ToolEntity<'w> = (
@@ -319,7 +319,7 @@ impl ToolDefinition {
         for command in commands {
             let input_schema = Value::try_from(&command.input_schema)
                 .map_err(|error| format!("invalid command input schema: {error}"))?;
-            let input_schema = InputSchema::try_from(input_schema)
+            let input_schema = JsonSchema::try_from(input_schema)
                 .map_err(|error| format!("invalid command input schema: {error}"))?;
             definitions.push(Self {
                 name: command.name,
@@ -353,7 +353,7 @@ struct ToolAliases(pub(crate) Vec<String>);
 struct ToolDescription(pub(crate) String);
 
 #[derive(Component)]
-struct ToolInputSchema(pub(crate) InputSchema);
+struct ToolInputSchema(pub(crate) JsonSchema);
 
 #[derive(Component)]
 struct ToolAccess(pub(crate) ToolAvailability);
@@ -388,7 +388,7 @@ struct ToolSeed {
     name: String,
     aliases: Vec<String>,
     description: String,
-    input_schema: InputSchema,
+    input_schema: JsonSchema,
     availability: ToolAvailability,
     shell_aware: bool,
 }

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use bevy::{ecs::system::SystemParam, prelude::*};
-use vmux_api::InputSchema;
+use vmux_api::JsonSchema;
 use vmux_api::json::JsonValue;
 use vmux_api::protocol::AgentCommandTool;
 use vmux_core::JsonArguments;
@@ -116,7 +116,7 @@ pub enum AgentAccess {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandMcp {
     pub description: String,
-    pub input_schema: InputSchema,
+    pub input_schema: JsonSchema,
     pub agent_access: AgentAccess,
 }
 
@@ -124,7 +124,7 @@ impl From<manifest::CommandMcp> for CommandMcp {
     fn from(mcp: manifest::CommandMcp) -> Self {
         let definition = Self::new(
             mcp.description,
-            mcp.input_schema.unwrap_or_else(InputSchema::object),
+            mcp.input_schema.unwrap_or_else(JsonSchema::object),
         );
         if mcp.allow_agent {
             return definition.allow_agent();
@@ -134,7 +134,7 @@ impl From<manifest::CommandMcp> for CommandMcp {
 }
 
 impl CommandMcp {
-    pub fn new(description: impl Into<String>, input_schema: InputSchema) -> Self {
+    pub fn new(description: impl Into<String>, input_schema: JsonSchema) -> Self {
         Self {
             description: description.into(),
             input_schema,
@@ -258,7 +258,7 @@ impl CommandDefinition {
     }
 
     pub fn expose_to_mcp(mut self) -> Self {
-        self.mcp = Some(CommandMcp::new(self.label.clone(), InputSchema::object()));
+        self.mcp = Some(CommandMcp::new(self.label.clone(), JsonSchema::object()));
         self
     }
 
@@ -842,14 +842,12 @@ mod tests {
             Self::register::<AgentVisibleRequest>(
                 &mut app,
                 CommandDefinition::new("agent_visible", "Visible", "Agent")
-                    .mcp(CommandMcp::new("Visible", vmux_api::InputSchema::object()).allow_agent()),
+                    .mcp(CommandMcp::new("Visible", vmux_api::JsonSchema::object()).allow_agent()),
             );
             Self::register::<UserOnlyRequest>(
                 &mut app,
-                CommandDefinition::new("user_only", "Only", "User").mcp(CommandMcp::new(
-                    "User only",
-                    vmux_api::InputSchema::object(),
-                )),
+                CommandDefinition::new("user_only", "Only", "User")
+                    .mcp(CommandMcp::new("User only", vmux_api::JsonSchema::object())),
             );
             app
         }

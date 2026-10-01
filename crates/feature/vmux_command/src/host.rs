@@ -12,7 +12,7 @@ pub mod snapshot;
 pub mod surface;
 mod tool;
 
-pub use vmux_api::InputSchema;
+pub use vmux_api::JsonSchema;
 
 pub use bundle::CommandBar;
 pub use definition::{
