@@ -87,10 +87,14 @@ pub struct CommandBarOpenEvent {
     pub space_name: String,
     #[serde(default)]
     pub spaces: Vec<CommandBarSpace>,
+    #[serde(default)]
+    pub spaces_page_url: String,
     pub tabs: Vec<CommandBarTab>,
     pub commands: Vec<CommandBarCommandEntry>,
     #[serde(default)]
     pub pages: Vec<CommandBarPage>,
+    #[serde(default)]
+    pub terminal_page_url: String,
     #[serde(default)]
     pub work_dirs: Vec<CommandBarWorkDir>,
     #[serde(default)]

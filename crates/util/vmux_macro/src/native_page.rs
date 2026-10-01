@@ -570,10 +570,7 @@ fn expand_native(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStre
     let component = args.component;
     let document_url = match args.document_url {
         Some(url) => quote! { ::core::option::Option::Some(#url) },
-        None if matches!(placement, Placement::Layout) => {
-            quote! { ::core::option::Option::Some(#url) }
-        }
-        None => quote! { ::core::option::Option::Some("vmux://start/") },
+        None => quote! { ::core::option::Option::None },
     };
     let dom_group = match args.dom_group {
         Some(group) => quote! { ::core::option::Option::Some(#group) },

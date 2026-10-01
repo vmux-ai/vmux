@@ -82,7 +82,7 @@ impl AgentPromptTarget {
     pub fn recency_ranks(targets: &[Self]) -> HashMap<String, usize> {
         let mut ranks = HashMap::new();
         for (rank, target) in targets.iter().enumerate() {
-            ranks.entry(target.url()).or_insert(rank);
+            ranks.entry(target.url.clone()).or_insert(rank);
         }
         ranks
     }
@@ -160,15 +160,20 @@ impl ClaimedUrl {
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct AgentPromptTarget {
     pub id: String,
+    url: String,
 }
 
 impl AgentPromptTarget {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self { id: id.into() }
+    pub fn under(root: &str, id: impl Into<String>) -> Self {
+        let id = id.into();
+        Self {
+            url: format!("{root}{id}"),
+            id,
+        }
     }
 
-    pub fn url(&self) -> String {
-        format!("vmux://sessions/{}", self.id)
+    pub fn url(&self) -> &str {
+        &self.url
     }
 }
 

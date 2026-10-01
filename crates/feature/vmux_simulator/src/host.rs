@@ -22,6 +22,7 @@ use vmux_core::service::ServiceRequest;
 use vmux_layout::stack::{ComputeFocusSet, FocusedStack};
 use vmux_tool::{ToolQueryAppExt, ToolQueryMessage, ToolQueryRouteSet};
 
+use crate::SimulatorPlugin;
 pub use device::{Axe, SimulatorDevice};
 pub use tool::SimulatorToolPlugin;
 
@@ -64,9 +65,6 @@ struct AgentSimulatorButtonPress {
 
 #[vmux_api::agent(Copy, Eq)]
 struct AgentSimulatorScreenshot;
-
-#[vmux_native::page]
-pub struct SimulatorPlugin;
 
 impl Plugin for SimulatorPlugin {
     fn build(&self, app: &mut App) {

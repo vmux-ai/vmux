@@ -961,7 +961,7 @@ impl CurrentAgent {
         if let Some(meta) = try_consume_context::<vmux_core::PageMetadata>()
             && let Some(rest) = meta
                 .url
-                .strip_prefix("vmux://sessions/")
+                .strip_prefix(crate::ChatPlugin::URL)
                 .or_else(|| meta.url.strip_prefix("vmux://agent/"))
             && let Some(agent) = Self::provider(rest)
         {

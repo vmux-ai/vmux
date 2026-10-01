@@ -12,10 +12,9 @@ pub struct ShortcutUrl;
 #[cfg(host)]
 impl ShortcutUrl {
     pub fn canonical(url: &str) -> Option<&'static str> {
-        matches!(
-            url.trim().trim_end_matches('/'),
-            "vmux://shortcuts" | "vmux://cheatsheet" | "vmux://cheetsheet"
-        )
+        let url = url.trim().trim_end_matches('/');
+        (url == ShortcutPlugin::URL.trim_end_matches('/')
+            || matches!(url, "vmux://cheatsheet" | "vmux://cheetsheet"))
         .then_some(ShortcutPlugin::URL)
     }
 }

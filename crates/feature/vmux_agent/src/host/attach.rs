@@ -71,8 +71,8 @@ fn attach(
         } = request;
         let agent_id = agent_id.as_str();
         let url = match resume.as_deref() {
-            Some(acp_sid) => format!("vmux://sessions/{agent_id}/{acp_sid}"),
-            None => format!("vmux://sessions/{agent_id}"),
+            Some(acp_sid) => format!("{}{agent_id}/{acp_sid}", vmux_chat::ChatPlugin::URL),
+            None => format!("{}{agent_id}", vmux_chat::ChatPlugin::URL),
         };
         let favicon = vmux_core::PageIcon::favicon(icon.as_deref().unwrap_or(""));
         commands.entity(entity).insert(PageMetadata {

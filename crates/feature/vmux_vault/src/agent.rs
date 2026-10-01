@@ -87,14 +87,18 @@ fn open(
             })
             .and_then(|anchor| {
                 let url = match args.provider.as_ref().unwrap_or(&VaultProvider::Overview) {
-                    VaultProvider::Overview => "vmux://vault/",
-                    VaultProvider::Github => "vmux://vault/?provider=github",
-                    VaultProvider::CloudFolder => "vmux://vault/?provider=cloud_folder",
+                    VaultProvider::Overview => crate::VaultPlugin::URL.to_string(),
+                    VaultProvider::Github => {
+                        format!("{}?provider=github", crate::VaultPlugin::URL)
+                    }
+                    VaultProvider::CloudFolder => {
+                        format!("{}?provider=cloud_folder", crate::VaultPlugin::URL)
+                    }
                 };
                 AgentRequest::encode(&AgentOpenBeside {
                     anchor,
                     direction: None,
-                    url: url.to_string(),
+                    url,
                     focus: true,
                 })
             });

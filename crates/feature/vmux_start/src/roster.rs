@@ -100,7 +100,7 @@ impl Launcher {
             let cwd = vmux_ui::file_icon::FilePath(&session.cwd).name();
             tabs.push(CommandBarTab {
                 title: session.name.clone(),
-                url: format!("vmux://sessions/{sid}", sid = session.sid),
+                url: session.url.clone(),
                 pane_id: 0,
                 tab_index: index as u32,
                 is_active: false,
@@ -165,6 +165,7 @@ mod tests {
         fn session(name: &str) -> RemoteSession {
             RemoteSession {
                 sid: format!("sid-{name}"),
+                url: format!("vmux://sessions/sid-{name}"),
                 room_id: RoomId::for_session(name),
                 title: String::new(),
                 name: name.into(),

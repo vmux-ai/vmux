@@ -67,7 +67,7 @@ impl NativePage {
             transparent: false,
             owns_subtree: false,
             permissions: &[],
-            document_url: Some("vmux://start/"),
+            document_url: None,
         }
     }
 
@@ -126,14 +126,16 @@ mod shell_tests {
     use super::*;
 
     fn page() -> NativePage {
-        NativePage::pane("file://", || unreachable!()).titled("Files")
+        NativePage::pane("file://", || unreachable!())
+            .served_from("vmux://files/")
+            .titled("Files")
     }
 
     #[test]
     fn the_interpreter_talks_to_the_origin_the_document_came_from() {
         let html = String::from_utf8(page().shell().into_body()).unwrap();
 
-        assert!(html.contains(r#"new NativeInterpreter("vmux://start", false)"#));
+        assert!(html.contains(r#"new NativeInterpreter("vmux://files", false)"#));
         assert!(
             !html.contains(r#"NativeInterpreter("file:"#),
             "no protocol handler answers `file://`, so nothing would reply to a fetch there"

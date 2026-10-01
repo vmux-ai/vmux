@@ -102,7 +102,9 @@ fn load_model_selections(mut models: Single<&mut AgentModelSelections>) {
     for (agent, entry) in saved {
         let mut memory = entry.memory();
         if !memory.url.is_empty() {
-            memory.url = AgentPromptTarget::new(&agent).url();
+            memory.url = AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, &agent)
+                .url()
+                .to_string();
         }
         models.by_agent.insert(agent, memory);
     }
@@ -119,7 +121,9 @@ fn load_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
         return;
     };
     for (agent, mut memory) in saved {
-        memory.url = AgentPromptTarget::new(&agent).url();
+        memory.url = AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, &agent)
+            .url()
+            .to_string();
         modes.by_agent.insert(agent, memory);
     }
     modes.dirty = false;

@@ -120,12 +120,12 @@ fn navigate_request(
     trigger: On<UiInput<ToolsNavigateRequest>>,
     mut requests: MessageWriter<PageOpenRequest>,
 ) {
-    let Some(url) = trigger.event().payload.canonical_url() else {
+    let Some(route) = crate::route::ToolRoute::parse(&trigger.event().payload.url) else {
         return;
     };
     requests.write(PageOpenRequest {
         target: PageOpenTarget::ContainingStack(trigger.event().webview),
-        url: url.to_string(),
+        url: route.url(),
         request_id: None,
     });
 }

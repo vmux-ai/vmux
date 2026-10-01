@@ -113,8 +113,8 @@ mod tests {
                 },
             ],
             recent: vec![
-                AgentPromptTarget::new("codex"),
-                AgentPromptTarget::new("claude"),
+                AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, "codex"),
+                AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, "claude"),
             ],
             ..Default::default()
         };

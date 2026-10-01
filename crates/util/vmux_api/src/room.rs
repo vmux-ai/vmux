@@ -194,6 +194,8 @@ pub struct RemoteMediaEntry {
 #[vmux_api::contract]
 pub struct RemoteSession {
     pub sid: String,
+    #[serde(default)]
+    pub url: String,
     pub room_id: RoomId,
     #[serde(default)]
     pub title: String,

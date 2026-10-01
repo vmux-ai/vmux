@@ -9,6 +9,9 @@ impl vmux_core::host::manifest::FeatureManifestSource for Feature {
 pub mod event;
 pub mod url;
 
+#[vmux_native::page]
+pub struct SimulatorPlugin;
+
 #[cfg(ui)]
 pub mod ui;
 
@@ -18,7 +21,7 @@ mod host;
 pub use host::{
     Axe, HardwareButtonRequest, SimulatorButtonPressRequest, SimulatorClipboardRequest,
     SimulatorControlResponse, SimulatorDevice, SimulatorFocusSet, SimulatorInputSet,
-    SimulatorKeyPressRequest, SimulatorPlugin, SimulatorScreenshot, SimulatorScreenshotRequest,
+    SimulatorKeyPressRequest, SimulatorScreenshot, SimulatorScreenshotRequest,
     SimulatorScreenshotResponse, SimulatorSoftwareKeyboardRequest, SimulatorSwipeRequest,
     SimulatorTapRequest, SimulatorToolPlugin, SimulatorTypeTextRequest,
 };

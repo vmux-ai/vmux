@@ -148,20 +148,6 @@ pub struct ToolsNavigateRequest {
     pub url: String,
 }
 
-impl ToolsNavigateRequest {
-    pub fn canonical_url(&self) -> Option<&'static str> {
-        match self.url.trim().trim_end_matches('/') {
-            "vmux://tools/acp" => Some("vmux://tools/acp"),
-            "vmux://tools/lsp" => Some("vmux://tools/lsp"),
-            "vmux://tools/homebrew" => Some("vmux://tools/homebrew"),
-            "vmux://tools/npm" => Some("vmux://tools/npm"),
-            "vmux://tools/mcp" => Some("vmux://tools/mcp"),
-            "vmux://tools/dotfiles" => Some("vmux://tools/dotfiles"),
-            _ => None,
-        }
-    }
-}
-
 #[vmux_api::ui_event(Eq)]
 pub struct ToolInstallRequest {
     pub provider: ToolProvider,

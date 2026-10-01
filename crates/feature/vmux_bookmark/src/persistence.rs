@@ -497,10 +497,10 @@ impl From<&str> for ToolBookmarkUrl {
             .unwrap_or_default()
             .trim_end_matches('/')
             .to_ascii_lowercase();
-        if url == "vmux://tools" {
+        if url == vmux_tool::ToolPlugin::URL.trim_end_matches('/') {
             return Self::Root;
         }
-        if url.starts_with("vmux://tools/")
+        if url.starts_with(vmux_tool::ToolPlugin::URL)
             || matches!(
                 url.as_str(),
                 "vmux://agents" | "vmux://lsp" | "vmux://extensions"

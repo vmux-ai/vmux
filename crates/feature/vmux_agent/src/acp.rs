@@ -1156,6 +1156,7 @@ fn list_sessions(
             let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
             result.push(RemoteSession {
                 sid: sid.0.clone(),
+                url: format!("{}{}", vmux_chat::ChatPlugin::URL, sid.0),
                 room_id: vmux_api::room::RoomId::for_session(&sid.0),
                 title: vmux_core::room::ConversationTitle::from_messages(
                     projector.messages(),
@@ -1187,6 +1188,7 @@ fn list_sessions(
                 let name = name.0.clone().unwrap_or_else(|| agent.0.clone());
                 result = Some(RemoteSession {
                     sid: sid.0.clone(),
+                    url: format!("{}{}", vmux_chat::ChatPlugin::URL, sid.0),
                     room_id: vmux_api::room::RoomId::for_session(&sid.0),
                     title: vmux_core::room::ConversationTitle::from_messages(
                         projector.messages(),

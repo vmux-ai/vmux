@@ -48,7 +48,10 @@ pub(super) fn ChatHeader(chat: Chat) -> Element {
 fn AgentAvatar(chat: Chat, size_class: String) -> Element {
     let agent = chat.agent();
     let accent = chat.identity.accent();
-    let src = favicon_src_for_url(&chat.identity.icon(), &format!("vmux://sessions/{agent}"));
+    let src = favicon_src_for_url(
+        &chat.identity.icon(),
+        &format!("{}{agent}", crate::ChatPlugin::URL),
+    );
     let fallback = if accent.is_empty() {
         "#6366f1"
     } else {

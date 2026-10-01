@@ -24,6 +24,7 @@ mod provider;
 #[cfg(host)]
 mod query;
 mod registry;
+mod route;
 #[cfg(ui)]
 mod ui;
 

@@ -252,7 +252,12 @@ impl PaletteRows {
         let is_start = surface.is_start();
         if let Some(picker) = Self::picker(mode) {
             if Self::is_space(mode) {
-                return PaletteRows::space_switch(&state.spaces, &state.pages, query);
+                return PaletteRows::space_switch(
+                    &state.spaces,
+                    &state.pages,
+                    &state.spaces_page_url,
+                    query,
+                );
             }
             return PickerRows::filtered(picker, &state.picks, query);
         }
@@ -279,6 +284,7 @@ impl PaletteRows {
                 &state.work_dirs,
                 &state.recent_files,
                 &state.search_engines,
+                &state.terminal_page_url,
                 query,
             );
             return Self::with_completions(query, draft, matched);
@@ -294,6 +300,7 @@ impl PaletteRows {
             &draft.history,
             &state.work_dirs,
             &state.recent_files,
+            &state.spaces_page_url,
         );
         let matched = Self::with_completions(query, draft, matched);
         if !is_start {
@@ -1419,6 +1426,8 @@ mod tests {
                         startup: false,
                     },
                 ],
+                spaces_page_url: "vmux://spaces/".into(),
+                terminal_page_url: "vmux://terminal/".into(),
                 commands: vec![CommandBarCommandEntry {
                     id: "close_tab".into(),
                     name: "Close Tab".into(),

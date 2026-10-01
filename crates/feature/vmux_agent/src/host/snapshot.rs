@@ -87,7 +87,7 @@ fn acp_agent_summaries(
         .map(|agent| AgentSummary {
             id: agent.id.clone(),
             name: agent.name.clone(),
-            url: format!("vmux://sessions/{}", agent.id),
+            url: format!("{}{}", vmux_chat::ChatPlugin::URL, agent.id),
             icon: agent.icon.clone().unwrap_or_default(),
         })
         .collect();
@@ -113,12 +113,14 @@ fn update_recent_agents(
     for (session, timestamp) in &acp_sessions {
         consider(
             timestamp.map(|timestamp| timestamp.0).unwrap_or(i64::MIN),
-            AgentPromptTarget::new(&session.agent_id),
+            AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, &session.agent_id),
         );
     }
     for page in &archived_pages {
         let target = match crate::host::url::AgentUrl::parse(&page.url) {
-            Some(crate::host::url::AgentUrl::Acp { id, .. }) => AgentPromptTarget::new(&id),
+            Some(crate::host::url::AgentUrl::Acp { id, .. }) => {
+                AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, id)
+            }
             _ => continue,
         };
         consider(page.closed_at, target);
@@ -235,8 +237,8 @@ mod tests {
         assert_eq!(
             projection(&app).agents.recent,
             vec![
-                AgentPromptTarget::new("claude"),
-                AgentPromptTarget::new("claude-acp")
+                AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, "claude"),
+                AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, "claude-acp")
             ]
         );
 
@@ -252,8 +254,8 @@ mod tests {
         assert_eq!(
             projection(&app).agents.recent,
             vec![
-                AgentPromptTarget::new("claude"),
-                AgentPromptTarget::new("claude-acp")
+                AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, "claude"),
+                AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, "claude-acp")
             ]
         );
     }
@@ -271,7 +273,10 @@ mod tests {
 
         assert_eq!(
             projection(&app).agents.recent,
-            vec![AgentPromptTarget::new("codex-acp")]
+            vec![AgentPromptTarget::under(
+                vmux_chat::ChatPlugin::URL,
+                "codex-acp"
+            )]
         );
     }
 
@@ -304,8 +309,8 @@ mod tests {
         assert_eq!(
             projection(&app).agents.recent,
             vec![
-                AgentPromptTarget::new("claude-acp"),
-                AgentPromptTarget::new("codex-acp"),
+                AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, "claude-acp"),
+                AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, "codex-acp"),
             ]
         );
     }

@@ -400,6 +400,7 @@ mod tests {
             Self {
                 session: Some(RemoteSession {
                     sid: "s".to_string(),
+                    url: "vmux://sessions/s".to_string(),
                     room_id: RoomId::from("r"),
                     title: String::new(),
                     name: name.to_string(),

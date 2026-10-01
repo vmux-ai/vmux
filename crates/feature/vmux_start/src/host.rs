@@ -209,6 +209,7 @@ impl StartPromptContext<'_, '_> {
             space_name,
             url: String::new(),
             spaces: self.command_bar.spaces.clone(),
+            terminal_page_url: self.command_bar.terminals.terminal_page_url.clone(),
             pages: self.command_bar.pages.clone(),
             work: self.command_bar.work.clone(),
             locale: locale.clone(),

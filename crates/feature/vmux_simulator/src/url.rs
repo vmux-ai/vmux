@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
 
 use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
+use vmux_api::VmuxRoute;
 
-pub const PAGE_HOST: &str = "simulator";
 pub const PLATFORM: &str = "ios";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,13 +93,13 @@ impl SimulatorRoute {
     }
 
     fn parse_url(url: &str) -> Option<Self> {
-        let rest = url.strip_prefix("vmux://")?;
-        let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
-        if host != PAGE_HOST {
+        let root = VmuxRoute::parse(crate::SimulatorPlugin::URL)?;
+        let route = VmuxRoute::parse(url)?;
+        if route.host() != root.host() {
             return None;
         }
-        let path = path.split(['?', '#']).next().unwrap_or(path);
-        if path.is_empty() {
+        let path = route.path();
+        if path.trim_matches('/').is_empty() {
             return Some(Self::Unpinned);
         }
         Self::parse(path)
@@ -129,7 +129,11 @@ impl SimulatorRoute {
     }
 
     pub fn url(version: &IosVersion, device_name: Option<&str>) -> String {
-        format!("vmux://{PAGE_HOST}{}", Self::path(version, device_name))
+        format!(
+            "{}{}",
+            crate::SimulatorPlugin::URL.trim_end_matches('/'),
+            Self::path(version, device_name)
+        )
     }
 }
 
