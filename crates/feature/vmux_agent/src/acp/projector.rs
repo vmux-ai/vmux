@@ -9,6 +9,8 @@ use vmux_api::protocol::AgentAttachment;
 use vmux_api::room::{AssistantBlock, Message, PlanStep};
 use vmux_ecs::host::workspace::WorkspaceLocation;
 
+use vmux_api::protocol::FileTouchKind;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intent {
     Delta(String),
@@ -115,7 +117,6 @@ impl FileTouchState {
     }
 
     fn kind(kind: ToolKind) -> Option<vmux_api::protocol::FileTouchKind> {
-        use vmux_api::protocol::FileTouchKind;
         match kind {
             ToolKind::Read => Some(FileTouchKind::Read),
             ToolKind::Edit | ToolKind::Delete | ToolKind::Move => Some(FileTouchKind::Edit),
@@ -752,8 +753,9 @@ impl AcpProjector {
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{
-        ContentChunk, Diff, SessionInfoUpdate, SessionUpdate, Terminal, TextContent, ToolCall,
-        ToolCallContent, ToolCallUpdateFields,
+        Content, ContentChunk, Diff, Plan, PlanEntry, PlanEntryPriority, SessionInfoUpdate,
+        SessionUpdate, Terminal, TextContent, ToolCall, ToolCallContent, ToolCallUpdate,
+        ToolCallUpdateFields,
     };
 
     fn chunk(text: &str) -> SessionUpdate {
@@ -895,8 +897,6 @@ mod tests {
 
     #[test]
     fn edit_diff_without_locations_emits_and_retries_file_touch() {
-        use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
-
         let mut p = AcpProjector::default();
         let started = p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Editing files")
@@ -999,8 +999,6 @@ mod tests {
 
     #[test]
     fn completed_edit_retries_file_touch_from_initial_tool_call() {
-        use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
-
         let mut p = AcpProjector::default();
         let tc = ToolCall::new("c1", "Write file")
             .kind(ToolKind::Edit)
@@ -1021,8 +1019,6 @@ mod tests {
 
     #[test]
     fn failed_edit_clears_pending_and_suppresses_future_touches() {
-        use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
-
         let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Write file")
@@ -1054,8 +1050,6 @@ mod tests {
 
     #[test]
     fn locations_only_update_uses_initial_edit_kind() {
-        use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
-
         let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Write file").kind(ToolKind::Edit),
@@ -1077,8 +1071,6 @@ mod tests {
 
     #[test]
     fn kind_only_update_uses_initial_locations() {
-        use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
-
         let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Write file")
@@ -1101,8 +1093,6 @@ mod tests {
 
     #[test]
     fn completion_with_explicit_locations_uses_replacement() {
-        use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
-
         let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Write files")
@@ -1133,8 +1123,6 @@ mod tests {
 
     #[test]
     fn completion_reclassification_does_not_replay_initial_edit() {
-        use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
-
         let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Write file")
@@ -1165,8 +1153,6 @@ mod tests {
 
     #[test]
     fn repeated_completion_emits_no_duplicate_file_touch() {
-        use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
-
         let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Write file")
@@ -1196,8 +1182,6 @@ mod tests {
 
     #[test]
     fn read_completion_with_unchanged_identity_emits_no_duplicate_touch() {
-        use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
-
         let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(
             ToolCall::new("c1", "Read file")
@@ -1287,7 +1271,6 @@ mod tests {
 
     #[test]
     fn plan_update_replaces_the_single_plan_block() {
-        use agent_client_protocol::schema::v1::{Plan, PlanEntry, PlanEntryPriority};
         let mut p = AcpProjector::default();
         p.apply(SessionUpdate::Plan(Plan::new(vec![PlanEntry::new(
             "step one",
@@ -1316,7 +1299,6 @@ mod tests {
 
     #[test]
     fn tool_call_update_content_becomes_a_tool_result() {
-        use agent_client_protocol::schema::v1::{Content, ToolCallUpdate, ToolCallUpdateFields};
         let mut p = AcpProjector::default();
         p.apply(SessionUpdate::ToolCall(ToolCall::new("c1", "run")));
         let fields = ToolCallUpdateFields::new()
@@ -1349,7 +1331,6 @@ mod tests {
 
     #[test]
     fn tool_call_with_terminal_and_text_prefers_text_output() {
-        use agent_client_protocol::schema::v1::Content;
         let mut p = AcpProjector::default();
         let tc = ToolCall::new("c1", "Run").content(vec![
             ToolCallContent::Terminal(Terminal::new("t1")),

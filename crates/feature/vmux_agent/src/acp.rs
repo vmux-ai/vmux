@@ -1,30 +1,34 @@
-mod driver;
-mod projector;
-
-pub use driver::AcpInput;
-use driver::AcpShared;
-use projector::{AcpProjector, ApprovalDetailsQuery, Intent};
-
-use std::collections::HashSet;
-use std::path::PathBuf;
-use std::sync::Arc;
-
 use bevy::prelude::{
     App, ApplyDeferred, Bundle, Commands, Component, Entity, IntoScheduleConfigs, Name, Plugin,
     Query, Single, Update,
 };
+pub use driver::AcpInput;
+use driver::AcpShared;
+use projector::{AcpProjector, ApprovalDetailsQuery, Intent};
+use std::collections::HashSet;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
-use vmux_ecs::agent::SessionId;
-use vmux_ecs::{CreatedAt, ProcessId};
-
 use vmux_api::protocol::{
     AcpSessionConfig, AcpSessionConfigValue, AgentAttachment, AgentFileTouched, AgentRequest,
     AgentRequestId, AgentRunStatus, ManagedMcpServer, ManagedMcpTransport, ServiceMessage,
     SharedEvent,
 };
 use vmux_api::room::{Message, RemoteApproval, RemoteSession, RemoteStatus};
+use vmux_ecs::agent::SessionId;
+use vmux_ecs::{CreatedAt, ProcessId};
 use vmux_process::ProcessRuntime;
+
+use agent_client_protocol::schema::v1::SessionConfigKind;
+use agent_client_protocol::schema::v1::SessionConfigOptionCategory;
+use agent_client_protocol::schema::v1::SessionConfigSelectOptions;
+use agent_client_protocol::schema::v1::{
+    EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
+};
+
+mod driver;
+mod projector;
 
 pub struct AcpSessionPlugin;
 
@@ -86,8 +90,6 @@ impl AcpSessionConfigs {
     fn category_name(
         category: &agent_client_protocol::schema::v1::SessionConfigOptionCategory,
     ) -> String {
-        use agent_client_protocol::schema::v1::SessionConfigOptionCategory;
-
         match category {
             SessionConfigOptionCategory::Mode => "mode".to_string(),
             SessionConfigOptionCategory::Model => "model".to_string(),
@@ -101,8 +103,6 @@ impl AcpSessionConfigs {
     fn options(
         options: &agent_client_protocol::schema::v1::SessionConfigSelectOptions,
     ) -> Vec<AcpSessionConfigValue> {
-        use agent_client_protocol::schema::v1::SessionConfigSelectOptions;
-
         let mut values = Vec::new();
         match options {
             SessionConfigSelectOptions::Ungrouped(options) => {
@@ -136,8 +136,6 @@ impl AcpSessionConfigs {
         config_options: &[agent_client_protocol::schema::v1::SessionConfigOption],
         legacy: Option<&agent_client_protocol::schema::v1::SessionModeState>,
     ) -> Self {
-        use agent_client_protocol::schema::v1::SessionConfigKind;
-
         let mut configs = Vec::new();
         for config in config_options {
             let SessionConfigKind::Select(select) = &config.kind else {
@@ -257,8 +255,6 @@ impl AcpMcpServers {
         mcp_args: Vec<String>,
         managed: Vec<ManagedMcpServer>,
     ) -> Self {
-        use agent_client_protocol::schema::v1::{McpServer, McpServerStdio};
-
         let mut servers = Vec::new();
         if let Some(command) = mcp_command {
             servers.push(McpServer::Stdio(
@@ -276,10 +272,6 @@ impl AcpMcpServers {
     fn from_managed(
         server: ManagedMcpServer,
     ) -> Option<agent_client_protocol::schema::v1::McpServer> {
-        use agent_client_protocol::schema::v1::{
-            EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
-        };
-
         if server.transport == ManagedMcpTransport::Stdio && server.cwd.is_some() {
             tracing::warn!(
                 "managed MCP server {} skipped for ACP because ACP v1 does not support stdio cwd",

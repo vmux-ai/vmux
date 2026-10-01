@@ -355,10 +355,10 @@ fn tray_icon_rgba() -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use vmux_ui::i18n::Locale;
+
     #[test]
     fn toggle_label_reflects_visibility() {
-        use vmux_ui::i18n::Locale;
-
         assert_eq!(
             super::toggle_label(true, &Locale::from("en-US")),
             "Close Window"

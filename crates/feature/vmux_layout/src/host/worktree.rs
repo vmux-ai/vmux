@@ -927,6 +927,12 @@ mod tests {
     use std::collections::HashMap;
     use std::process::Command;
 
+    #[cfg(all(unix, not(target_os = "macos")))]
+    use std::ffi::OsString;
+    #[cfg(all(unix, not(target_os = "macos")))]
+    use std::os::unix::ffi::OsStringExt;
+    use std::os::unix::fs::symlink;
+
     #[derive(Resource)]
     struct ObservationInput {
         tab: Entity,
@@ -1303,8 +1309,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn managed_project_directory_cannot_escape_through_symlink() {
-        use std::os::unix::fs::symlink;
-
         let repo = init_repo();
         let nested = repo.path().join("crates/app");
         std::fs::create_dir_all(&nested).unwrap();
@@ -1696,9 +1700,6 @@ mod tests {
     #[cfg(all(unix, not(target_os = "macos")))]
     #[test]
     fn observation_ignores_non_utf8_checkout_root() {
-        use std::ffi::OsString;
-        use std::os::unix::ffi::OsStringExt;
-
         let current = init_repo();
         let observed_parent = tempfile::tempdir().unwrap();
         let observed = observed_parent

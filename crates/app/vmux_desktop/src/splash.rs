@@ -2,8 +2,15 @@ use std::time::Duration;
 use std::time::Instant;
 
 use bevy::prelude::*;
-use objc2::rc::Retained;
-use objc2_app_kit::NSPanel;
+use objc2::{ClassType, MainThreadMarker, MainThreadOnly, rc::Retained, runtime::AnyClass};
+use objc2_app_kit::{
+    NSAnimatablePropertyContainer, NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSFont,
+    NSGlassEffectView, NSGlassEffectViewStyle, NSPanel, NSProgressIndicator,
+    NSProgressIndicatorStyle, NSScreen, NSTextAlignment, NSTextField, NSView,
+    NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView,
+    NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+};
+use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
 pub(crate) struct SplashPlugin;
 
@@ -48,16 +55,6 @@ struct SplashState {
 }
 
 fn show(mut state: NonSendMut<SplashState>) {
-    use objc2::{ClassType, MainThreadMarker, MainThreadOnly, runtime::AnyClass};
-    use objc2_app_kit::{
-        NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSFont, NSGlassEffectView,
-        NSGlassEffectViewStyle, NSProgressIndicator, NSProgressIndicatorStyle, NSScreen,
-        NSTextAlignment, NSTextField, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
-        NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowCollectionBehavior,
-        NSWindowStyleMask,
-    };
-    use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
-
     if state.shown {
         return;
     }
@@ -175,9 +172,6 @@ fn dismiss(
     mut state: NonSendMut<SplashState>,
     window_q: Query<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
-    use objc2::ClassType;
-    use objc2_app_kit::{NSAnimatablePropertyContainer, NSWindow};
-
     if state.window.is_none() {
         return;
     }
@@ -210,7 +204,6 @@ fn dismiss(
 }
 
 fn update_text(state: NonSend<SplashState>, status: Single<&crate::boot_status::SplashStatus>) {
-    use objc2_foundation::NSString;
     if let Some(label) = &state.status_label {
         label.setStringValue(&NSString::from_str(&status.phase.display()));
     }

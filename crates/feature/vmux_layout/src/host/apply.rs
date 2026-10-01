@@ -10,8 +10,6 @@ use crate::protocol::format_id;
 use crate::stack::Stack;
 use crate::tab::Tab as LayoutTab;
 use crate::{TerminalLayoutSpawnRequest, event::PANE_GAP_PX};
-#[cfg(test)]
-use bevy::ecs::message::Messages;
 use bevy::ecs::message::{MessageReader, MessageWriter};
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
@@ -724,6 +722,11 @@ mod tests {
     use crate::protocol::{Focus, SplitDirection, Stack as StackDto, Tab as TabDto};
     use std::collections::HashSet;
 
+    use crate::pane::{Pane, PaneSplitDirection};
+    use crate::tab::Tab as LayoutTab;
+
+    use bevy::ecs::message::Messages;
+
     struct ApplyHarness;
 
     impl ApplyHarness {
@@ -1078,9 +1081,6 @@ mod tests {
             Err(ValidationError::MissingReferencedEntity(_))
         ));
     }
-
-    use crate::pane::{Pane, PaneSplitDirection};
-    use crate::tab::Tab as LayoutTab;
 
     #[test]
     fn updating_split_direction_changes_component() {
@@ -2148,8 +2148,6 @@ mod tests {
 
     #[test]
     fn serve_snapshot_requests_emits_response() {
-        use bevy::ecs::message::Messages;
-
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         ApplyHarness::install(&mut app);

@@ -1,6 +1,8 @@
 use crate::edit::command::{EditCommand, EditMode, Motion, Operator, Target, VerticalDirection};
 use crate::keymap::{KeyInput, Keymap};
 
+use EditCommand::*;
+
 #[derive(Default)]
 pub struct VscodeKeymap;
 
@@ -31,7 +33,6 @@ impl Keymap for VscodeKeymap {
     }
 
     fn handle(&mut self, k: &KeyInput) -> Vec<EditCommand> {
-        use EditCommand::*;
         let m = &k.mods;
         let sel = m.shift;
         let mv = |motion: Motion| {

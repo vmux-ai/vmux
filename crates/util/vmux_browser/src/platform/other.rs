@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 pub(super) struct FallbackBrowserPlugin;
 
 impl Plugin for FallbackBrowserPlugin {
@@ -9,8 +11,6 @@ impl Plugin for FallbackBrowserPlugin {
 }
 
 fn report_missing_renderer() {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
     static REPORTED: AtomicBool = AtomicBool::new(false);
     if !REPORTED.swap(true, Ordering::Relaxed) {
         warn!("browser_platform: no renderer on this platform, native pages will be missing");

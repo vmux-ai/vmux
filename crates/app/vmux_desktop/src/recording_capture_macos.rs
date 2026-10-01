@@ -33,6 +33,11 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use vmux_input::RecordStartResponse;
 
+use bevy::winit::WINIT_WINDOWS;
+use objc2_app_kit::NSView;
+use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
 const PIXEL_FORMAT_BGRA: u32 = 0x4247_5241;
 
 unsafe extern "C" {
@@ -239,7 +244,6 @@ fn gif_worker(path: PathBuf, rx: crossbeam_channel::Receiver<GifMsg>) {
 }
 
 fn os_at_least_14() -> bool {
-    use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
     let version = NSOperatingSystemVersion {
         majorVersion: 14,
         minorVersion: 0,
@@ -249,10 +253,6 @@ fn os_at_least_14() -> bool {
 }
 
 fn window_number(window_entity: Entity) -> Option<u32> {
-    use bevy::winit::WINIT_WINDOWS;
-    use objc2_app_kit::NSView;
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
     WINIT_WINDOWS.with_borrow(|winit_windows| {
         let win = winit_windows.get_window(window_entity)?;
         let handle = win.window_handle().ok()?;

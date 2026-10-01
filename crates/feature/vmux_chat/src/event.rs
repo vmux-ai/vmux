@@ -1,6 +1,6 @@
-pub const CHAT_INITIAL_ITEM_LIMIT: u32 = 48;
-pub const CHAT_HISTORY_PAGE_SIZE: u32 = 40;
-pub const CHAT_HISTORY_MAX_PAGE_SIZE: u32 = 80;
+pub use vmux_api::chat::{
+    ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, WORKING_VERB_IDS,
+};
 pub use vmux_api::chat::{
     ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession, SlashCommand,
     SlashCommandEntry, SlashCommands,
@@ -12,6 +12,11 @@ pub use vmux_api::prompt_media::{
 };
 pub use vmux_api::protocol::ApprovalDecision;
 pub use vmux_api::room::ModelOptionEntry;
+pub use vmux_ecs::event::ProjectBranch as ChatBranch;
+
+pub const CHAT_INITIAL_ITEM_LIMIT: u32 = 48;
+pub const CHAT_HISTORY_PAGE_SIZE: u32 = 40;
+pub const CHAT_HISTORY_MAX_PAGE_SIZE: u32 = 80;
 
 #[vmux_api::contract(Default, Eq)]
 pub struct QueuedPromptSnapshot {
@@ -351,8 +356,6 @@ pub struct ChatResumeQueryRequest {
     pub query: String,
 }
 
-pub use vmux_ecs::event::ProjectBranch as ChatBranch;
-
 #[vmux_api::ui_event(Default)]
 pub struct ChatGoToBranch {
     pub project: String,
@@ -388,10 +391,6 @@ pub struct SetAgentEffort {
 pub struct ChatOpenPage {
     pub url: String,
 }
-
-pub use vmux_api::chat::{
-    ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, WORKING_VERB_IDS,
-};
 
 #[cfg(test)]
 mod tests {

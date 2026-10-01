@@ -1,14 +1,17 @@
+use std::{
+    fs,
+    os::unix::{
+        fs::{PermissionsExt, symlink},
+        process::CommandExt,
+    },
+    process::Command,
+    thread,
+    time::{Duration, Instant},
+};
+
 #[cfg(unix)]
 #[test]
 fn cargo_cache_wrapper_allows_nested_package_builds() {
-    use std::{
-        fs,
-        os::unix::{fs::PermissionsExt, process::CommandExt},
-        process::Command,
-        thread,
-        time::{Duration, Instant},
-    };
-
     let temp = tempfile::tempdir().expect("tempdir");
     let target = temp.path().join("target");
     let locks = temp.path().join("locks");
@@ -89,9 +92,6 @@ fi
 
 #[test]
 fn target_seed_key_resolves_a_symlinked_repo_root() {
-    use std::os::unix::fs::symlink;
-    use std::process::Command;
-
     let temp = tempfile::tempdir().expect("tempdir");
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -130,8 +130,6 @@ fn target_seed_key_resolves_a_symlinked_repo_root() {
 
 #[test]
 fn cef_target_relocator_rewrites_only_cef_build_state() {
-    use std::{fs, process::Command};
-
     let temp = tempfile::tempdir().expect("tempdir");
     let staging = temp.path().join("target");
     let source = temp.path().join("source-target");

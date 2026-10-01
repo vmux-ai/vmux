@@ -448,6 +448,8 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use vmux_ecs::LastActivatedAt;
 
+    use vmux_ecs::page_open::{PageOpenId, PageOpenTask};
+
     fn spawn_team_stack(world: &mut World, space: Entity) -> Entity {
         world
             .spawn((
@@ -574,7 +576,6 @@ mod tests {
 
     #[test]
     fn team_page_open_titles_webview_profiles() {
-        use vmux_ecs::page_open::{PageOpenId, PageOpenTask};
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_layout::native_open::NativeOpenPlugin)

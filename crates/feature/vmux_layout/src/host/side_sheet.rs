@@ -6,6 +6,9 @@ use bevy::{ecs::system::NonSendMarker, winit::WINIT_WINDOWS};
 use vmux_ecs::host::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
 
+use objc_ffi::sel;
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
 impl Plugin for SideSheetLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.register_persisted::<SideSheetSectionsExpanded>()
@@ -137,7 +140,6 @@ fn sync_window_buttons_visibility(
                 return false;
             };
 
-            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
             let Ok(handle) = winit_win.window_handle() else {
                 return false;
             };
@@ -147,8 +149,6 @@ fn sync_window_buttons_visibility(
 
             let ns_view = appkit.ns_view.as_ptr();
             unsafe {
-                use objc_ffi::sel;
-
                 type MsgSendNoArgs = unsafe extern "C" fn(
                     *mut libc::c_void,
                     *const libc::c_void,

@@ -1,14 +1,13 @@
+use bevy::prelude::*;
+pub use query::HistoryOpenIntent;
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::host::page::NativelyHosted;
+
 pub mod prune;
 pub mod query;
 pub mod spawn;
 mod state;
 pub mod transition;
-
-use bevy::prelude::*;
-use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_ecs::host::page::NativelyHosted;
-
-pub use query::HistoryOpenIntent;
 
 #[vmux_native::page]
 pub struct HistoryPlugin;

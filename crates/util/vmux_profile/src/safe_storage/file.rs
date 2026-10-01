@@ -4,6 +4,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::SafeStorageError;
 
+use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::PermissionsExt;
+
 static FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) struct ProtectedFile {
@@ -80,7 +83,6 @@ impl ProtectedFile {
         options.create_new(true).write(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
         let mut file = options.open(path)?;
@@ -90,8 +92,6 @@ impl ProtectedFile {
 
     #[cfg(unix)]
     fn restrict_directory(path: &Path) -> Result<(), SafeStorageError> {
-        use std::os::unix::fs::PermissionsExt;
-
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
             .map_err(SafeStorageError::from)
     }

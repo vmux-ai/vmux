@@ -14,6 +14,8 @@ use crate::remote::client_operation::ClientOperations;
 use vmux_agent::acp::AcpSessions;
 use vmux_agent::broker::AgentBroker;
 
+use vmux_api::protocol::AgentCommandResult;
+
 pub struct ServiceDaemonPlugin;
 
 impl ServiceDaemonPlugin {
@@ -263,7 +265,6 @@ struct AgentContent {
 
 impl From<vmux_api::protocol::AgentCommandResult> for AgentContent {
     fn from(result: vmux_api::protocol::AgentCommandResult) -> Self {
-        use vmux_api::protocol::AgentCommandResult;
         match result {
             AgentCommandResult::Ok => Self {
                 content: "ok".to_string(),
@@ -937,6 +938,8 @@ impl ServiceConnection {
 mod tests {
     use super::*;
 
+    use vmux_api::protocol::ClientMessage;
+
     struct ProcessAppThread {
         stop: Option<std::sync::mpsc::Sender<()>>,
         handle: Option<std::thread::JoinHandle<()>>,
@@ -1024,8 +1027,6 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_message_breaks_run_server() {
-        use vmux_api::protocol::ClientMessage;
-
         let dir = std::env::temp_dir().join(format!("vmux-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let sock = dir.join("test.sock");
@@ -1122,8 +1123,6 @@ mod tests {
 
     #[tokio::test]
     async fn client_disconnect_reaps_created_processes() {
-        use vmux_api::protocol::ClientMessage;
-
         let dir = std::env::temp_dir().join(format!("vmux-reap-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let sock = dir.join("reap.sock");
@@ -1189,8 +1188,6 @@ mod tests {
 
     #[tokio::test]
     async fn a_client_that_dies_mid_frame_still_has_its_processes_reaped() {
-        use vmux_api::protocol::ClientMessage;
-
         let dir = std::env::temp_dir().join(format!("vmux-torn-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let sock = dir.join("torn.sock");

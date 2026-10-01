@@ -7,6 +7,9 @@ use crate::page::NativePage;
 use crate::webview::embed::{Outbox, Wake};
 use crate::webview::measurement::{Measured, PendingReads};
 
+use base64::Engine;
+use vmux_ui::transport::bin_ipc_envelope::BinIpcEnvelope;
+
 enum PageReport<'a> {
     Console {
         level: &'a str,
@@ -113,9 +116,6 @@ impl PageMessage {
     }
 
     fn emit(&self, payload: &str) {
-        use base64::Engine;
-        use vmux_ui::transport::bin_ipc_envelope::BinIpcEnvelope;
-
         let bytes = match base64::engine::general_purpose::STANDARD.decode(payload) {
             Ok(bytes) => bytes,
             Err(error) => {

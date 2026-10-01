@@ -1,28 +1,5 @@
 #![cfg_attr(ui, allow(non_snake_case))]
 
-extern crate self as vmux_command;
-
-#[cfg(host)]
-pub(crate) struct Feature;
-
-#[cfg(host)]
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
-    const SOURCE: &'static str = include_str!("feature.ron");
-}
-
-#[cfg(ui)]
-mod ui;
-#[cfg(ui)]
-pub use ui::{CommandBarPanel, CommandPalette, PaletteProps, ResultRow, use_command_bar_ui};
-
-mod palette_surface;
-pub use palette_surface::CommandPaletteSurface;
-pub use vmux_api::open_target;
-pub use vmux_api::prompt_media;
-pub use vmux_macro::command;
-
-#[cfg(host)]
-mod host;
 #[cfg(host)]
 pub use host::{
     AgentAccess, AgentInvokeCommand, ApplyCommandBarRequests, BindCommands, Binding, ClaimedUrl,
@@ -40,3 +17,27 @@ pub use host::{
     SpaceSummary, UiStatePlugin, When, WriteCommandBarRequests, WriteCommandBarSnapshots,
     WriteCommandRequests,
 };
+pub use palette_surface::CommandPaletteSurface;
+#[cfg(ui)]
+pub use ui::{CommandBarPanel, CommandPalette, PaletteProps, ResultRow, use_command_bar_ui};
+pub use vmux_api::open_target;
+pub use vmux_api::prompt_media;
+pub use vmux_macro::command;
+
+extern crate self as vmux_command;
+
+#[cfg(host)]
+pub(crate) struct Feature;
+
+#[cfg(host)]
+impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+    const SOURCE: &'static str = include_str!("feature.ron");
+}
+
+#[cfg(ui)]
+mod ui;
+
+mod palette_surface;
+
+#[cfg(host)]
+mod host;

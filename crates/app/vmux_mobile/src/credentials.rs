@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use crate::pairing::Credentials;
 
+use std::os::unix::fs::PermissionsExt;
+
 pub struct StoredCredentials;
 
 impl StoredCredentials {
@@ -24,7 +26,6 @@ impl StoredCredentials {
         }
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
         }
     }

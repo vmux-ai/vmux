@@ -11,6 +11,9 @@ use crate::event::{
     RemotePhase, RemoteRequest, RemoteRevokeRequest, RemoteUiState,
 };
 
+use qrcode::QrCode;
+use qrcode::render::svg;
+
 #[component]
 pub(crate) fn RemoteControl(remote: RemoteUiState) -> Element {
     let mut open = use_signal(|| false);
@@ -260,9 +263,6 @@ struct PairingCode;
 
 impl PairingCode {
     fn svg(value: &str) -> Option<String> {
-        use qrcode::QrCode;
-        use qrcode::render::svg;
-
         let code = QrCode::new(value).ok()?;
         Some(
             code.render::<svg::Color>()

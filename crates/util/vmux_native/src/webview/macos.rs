@@ -2,8 +2,9 @@ use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
-    NSView, NSWindowOrderingMode,
+    NSColor, NSView, NSWindowOrderingMode,
 };
+use objc2_quartz_core::CACornerMask;
 use objc2_web_kit::WKWebViewConfiguration;
 use tracing::{error, warn};
 use wry::WebViewExtMacOS;
@@ -49,7 +50,6 @@ impl WebView {
     }
 
     pub fn set_corner_radius(&self, radius: f64, all_corners: bool) {
-        use objc2_quartz_core::CACornerMask;
         let wk = self.webview.webview();
         let view: &NSView = &wk;
         view.setWantsLayer(true);
@@ -71,7 +71,6 @@ impl WebView {
         layer.setMaskedCorners(if all_corners { all } else { bottom });
     }
     pub fn set_focus_ring(&self, width: f64, color_rgb: [f32; 3]) {
-        use objc2_app_kit::NSColor;
         let wk = self.webview.webview();
         let view: &NSView = &wk;
         view.setWantsLayer(true);
@@ -143,8 +142,6 @@ pub struct LinkPreviewPolicy;
 
 impl LinkPreviewPolicy {
     pub fn forbid(webview: &wry::WebView) {
-        use wry::WebViewExtMacOS;
-
         unsafe { webview.webview().setAllowsLinkPreview(false) };
     }
 }

@@ -1,3 +1,24 @@
+use crate::event::{GitConfigEditRequest, GitUpdateCheckRequest};
+use crate::host::changes::ChangesPlugin;
+use crate::host::controller::ControllerPlugin;
+use crate::host::diff::DiffPlugin;
+use crate::host::directory::DirectoryPlugin;
+use crate::host::job_runner::JobPlugin;
+use crate::host::repository_picker::RepositoryPickerPlugin;
+use crate::host::status::StatusPlugin;
+use crate::host::watch::WatchPlugin;
+#[cfg(ui)]
+use crate::ui::{GitPage, LegacyGitPage};
+use bevy::prelude::*;
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
+pub use diff::GitDiffSource;
+pub use repository::{GitError, GitRepository};
+pub use status::FileGit;
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::host::page::NativelyHosted;
+use vmux_ecs::{PageOpenRequest, PageOpenTarget};
+pub use watch::RepoInfoCache;
+
 mod changes;
 mod controller;
 mod diff;
@@ -13,30 +34,6 @@ mod highlight;
 mod parse;
 mod repository;
 pub mod worktree;
-
-use bevy::prelude::*;
-use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_ecs::host::page::NativelyHosted;
-use vmux_ecs::{PageOpenRequest, PageOpenTarget};
-
-use crate::event::{GitConfigEditRequest, GitUpdateCheckRequest};
-#[cfg(ui)]
-use crate::ui::{GitPage, LegacyGitPage};
-
-pub use diff::GitDiffSource;
-pub use repository::{GitError, GitRepository};
-pub use status::FileGit;
-pub use watch::RepoInfoCache;
-
-use crate::host::changes::ChangesPlugin;
-use crate::host::controller::ControllerPlugin;
-use crate::host::diff::DiffPlugin;
-use crate::host::directory::DirectoryPlugin;
-use crate::host::job_runner::JobPlugin;
-use crate::host::repository_picker::RepositoryPickerPlugin;
-use crate::host::status::StatusPlugin;
-use crate::host::watch::WatchPlugin;
 
 #[vmux_native::page]
 pub struct GitPlugin;

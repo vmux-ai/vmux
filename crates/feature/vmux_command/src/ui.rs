@@ -32,14 +32,14 @@ use vmux_ui::scroll::ScrollIntoView;
 
 use crate::CommandPaletteSurface;
 
+pub use panel::CommandBarPanel;
+pub use row::ResultRow;
+
 mod composer;
 mod input;
 mod panel;
 mod readline;
 mod row;
-
-pub use panel::CommandBarPanel;
-pub use row::ResultRow;
 
 pub fn use_command_bar_ui() -> Signal<CommandBarOpenEvent> {
     let ui = use_ui_state::<CommandBarUiState>();

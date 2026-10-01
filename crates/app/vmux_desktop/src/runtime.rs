@@ -1,8 +1,17 @@
 #[cfg(target_os = "macos")]
 use crate::macos::{live_resize_active, pointer_inside_windowed_page};
 
-#[cfg(target_os = "macos")]
-pub(crate) use crate::macos::ensure_key_window;
+use bevy::prelude::*;
+#[cfg(feature = "tray")]
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy::window::{Monitor, Window};
+use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent};
+use bevy_cef_core::prelude::{
+    Browsers, MessageLoopWakePolicy, windowless_frame_interval_from_refresh_millihertz,
+};
+use std::time::Duration;
+#[cfg(feature = "tray")]
+use vmux_terminal::{PtyExited, Terminal};
 
 #[cfg(not(target_os = "macos"))]
 fn live_resize_active() -> bool {
@@ -13,19 +22,6 @@ fn live_resize_active() -> bool {
 fn pointer_inside_windowed_page() -> bool {
     false
 }
-
-use bevy::prelude::*;
-#[cfg(feature = "tray")]
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy::window::{Monitor, Window};
-use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent};
-use bevy_cef_core::prelude::{
-    Browsers, MessageLoopWakePolicy, windowless_frame_interval_from_refresh_millihertz,
-};
-use std::time::Duration;
-
-#[cfg(feature = "tray")]
-use vmux_terminal::{PtyExited, Terminal};
 
 pub struct RuntimePlugin;
 
@@ -285,6 +281,9 @@ fn resolve_quit_confirmation(
 mod tests {
     use super::*;
 
+    use bevy::ecs::schedule::{NodeId, Schedules};
+    use std::path::Path;
+
     #[cfg(feature = "tray")]
     #[test]
     fn quit_without_live_terminal_exits_immediately() {
@@ -308,7 +307,6 @@ mod tests {
 
     #[test]
     fn no_continuous_update_mode_anywhere_in_workspace() {
-        use std::path::Path;
         let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .and_then(Path::parent)
@@ -415,8 +413,6 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     fn platform_systems(label: impl bevy::ecs::schedule::ScheduleLabel) -> Vec<String> {
-        use bevy::ecs::schedule::{NodeId, Schedules};
-
         let mut app = App::new();
         app.add_plugins(crate::macos::RuntimePlatformPlugin);
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();

@@ -1,9 +1,11 @@
 use tracing::warn;
 
+use std::io::Write;
+use std::process::Command;
+use std::process::{Command, Stdio};
+
 impl super::Clipboard {
     pub(super) fn write_blocking(text: &str) {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
         let candidates: &[(&str, &[&str])] = &[
             ("/usr/bin/wl-copy", &[]),
             ("/usr/bin/xclip", &["-selection", "clipboard"]),
@@ -26,7 +28,6 @@ impl super::Clipboard {
     }
 
     pub fn read_text() -> Option<String> {
-        use std::process::Command;
         let candidates: &[(&str, &[&str])] = &[
             ("/usr/bin/wl-paste", &[]),
             ("/usr/bin/xclip", &["-selection", "clipboard", "-o"]),

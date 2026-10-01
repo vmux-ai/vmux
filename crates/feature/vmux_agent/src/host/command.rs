@@ -1,13 +1,12 @@
-mod operation;
-mod tool_call;
-
+use crate::host::event::CommandOrigin;
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, AgentNotify};
 use vmux_command::WriteCommandRequests;
 use vmux_ecs::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
 use vmux_ecs::service::ServiceMessageSet;
 
-use crate::host::event::CommandOrigin;
+mod operation;
+mod tool_call;
 
 pub(crate) struct CommandPlugin;
 

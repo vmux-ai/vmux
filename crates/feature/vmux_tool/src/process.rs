@@ -2,6 +2,8 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use std::os::unix::fs::PermissionsExt;
+
 pub(crate) struct ToolProcess(PathBuf);
 
 impl ToolProcess {
@@ -58,8 +60,6 @@ fn executable_path() -> OsString {
 
 #[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-
     path.is_file()
         && path
             .metadata()

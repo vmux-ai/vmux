@@ -1,5 +1,11 @@
 use bevy::prelude::*;
 
+pub use capture::*;
+pub use native_key::{
+    ConsumesNativeKey, NativeKey, NativeKeyCapture, NativeKeyClaimSet, NativeKeyInput,
+    NativeKeyInputSet, PassesNativeKey,
+};
+
 pub(crate) struct Feature;
 
 impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
@@ -11,12 +17,6 @@ mod capture;
 mod keyboard;
 mod native_key;
 pub mod pointer;
-
-pub use capture::*;
-pub use native_key::{
-    ConsumesNativeKey, NativeKey, NativeKeyCapture, NativeKeyClaimSet, NativeKeyInput,
-    NativeKeyInputSet, PassesNativeKey,
-};
 
 pub struct InputPlugin;
 

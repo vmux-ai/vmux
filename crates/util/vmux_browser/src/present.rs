@@ -1346,10 +1346,13 @@ fn should_show_osr_webview(
 mod tests {
     use super::*;
 
+    use crate::host::native_command_bar_route;
+    use crate::tests::test_app_settings_with_radius;
+
+    use vmux_layout::active_pane::ActiveStack;
+
     #[test]
     fn the_user_ring_outranks_an_agent_ring_on_the_same_pane() {
-        use vmux_layout::active_pane::ActiveStack;
-
         let mut world = World::new();
         let stack = world.spawn_empty().id();
         let settings = test_app_settings_with_radius(0.0);
@@ -1384,9 +1387,6 @@ mod tests {
         let (width, _) = windowed_ring_for(stack, &focused, 1, None, &settings, 1.0);
         assert_eq!(width, 0.0);
     }
-
-    use crate::host::native_command_bar_route;
-    use crate::tests::test_app_settings_with_radius;
 
     #[test]
     fn osr_webview_hides_when_window_is_hidden() {

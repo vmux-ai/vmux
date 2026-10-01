@@ -1,3 +1,15 @@
+#[cfg(target_os = "macos")]
+use cipher::SafeStorageCipher;
+#[cfg(target_os = "macos")]
+pub(crate) use file::ProtectedFile;
+use std::fmt::{Display, Formatter};
+#[cfg(any(target_os = "macos", test))]
+use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "macos", test))]
+use zeroize::Zeroizing;
+
+use std::fmt::Write;
+
 #[cfg(any(target_os = "macos", test))]
 mod cipher;
 #[cfg(target_os = "macos")]
@@ -6,18 +18,6 @@ mod file;
 mod macos;
 #[cfg(target_os = "macos")]
 mod root;
-
-use std::fmt::{Display, Formatter};
-#[cfg(any(target_os = "macos", test))]
-use std::path::{Path, PathBuf};
-
-#[cfg(any(target_os = "macos", test))]
-use zeroize::Zeroizing;
-
-#[cfg(target_os = "macos")]
-use cipher::SafeStorageCipher;
-#[cfg(target_os = "macos")]
-pub(crate) use file::ProtectedFile;
 
 #[cfg(any(target_os = "macos", test))]
 const ROOT_KEY_LENGTH: usize = 32;
@@ -292,8 +292,6 @@ impl SafeStorage {
 }
 
 pub(crate) fn encoded_file_name(value: &str) -> String {
-    use std::fmt::Write;
-
     let mut encoded = String::with_capacity(value.len() * 2);
     for byte in value.as_bytes() {
         write!(&mut encoded, "{byte:02x}").unwrap();

@@ -1,7 +1,7 @@
+use bevy::prelude::*;
+
 mod popup;
 mod web_store;
-
-use bevy::prelude::*;
 
 pub(super) struct ManagerPagePlugin;
 

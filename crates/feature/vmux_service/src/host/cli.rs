@@ -10,6 +10,9 @@ use vmux_transport::service::ServiceCodec;
 #[cfg(target_os = "macos")]
 use super::{DaemonBinary, LaunchAgent};
 
+use std::os::unix::process::CommandExt;
+use vmux_api::protocol::{ClientMessage, ServiceMessage};
+
 pub struct ServiceCliPlugin;
 
 impl Plugin for ServiceCliPlugin {
@@ -165,7 +168,6 @@ fn logs(
     mut commands: Commands,
 ) {
     for (entity, request) in &requests {
-        use std::os::unix::process::CommandExt;
         let mut command = std::process::Command::new("tail");
         if request.0 {
             command.arg("-f");
@@ -390,7 +392,6 @@ impl StatusInfo {
     }
 
     fn live() -> Option<(u64, u32)> {
-        use vmux_api::protocol::{ClientMessage, ServiceMessage};
         let result = (|| {
             let stream = std::os::unix::net::UnixStream::connect(ServicePaths::current().socket())?;
             stream.set_read_timeout(Some(Duration::from_secs(2)))?;

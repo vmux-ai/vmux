@@ -18,17 +18,16 @@ use vmux_tool::{
     ToolScanner, ToolStore, ToolsManifest,
 };
 
+use self::environment::AcpEnvironment;
+use self::install::AgentInstaller;
+use self::registry::Registry;
+pub(super) use config::AcpSessionConfigPlugin;
+use vmux_session::AgentRunState;
+
 mod config;
 mod environment;
 mod install;
 pub mod registry;
-
-pub(super) use config::AcpSessionConfigPlugin;
-
-use self::environment::AcpEnvironment;
-use self::install::AgentInstaller;
-use self::registry::Registry;
-use vmux_session::AgentRunState;
 
 pub(crate) struct AcpToolPlugin;
 

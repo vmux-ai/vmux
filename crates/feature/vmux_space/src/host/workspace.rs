@@ -533,6 +533,8 @@ mod tests {
     use super::*;
     use vmux_ecs::ProcessId;
 
+    use bevy::ecs::system::RunSystemOnce;
+
     struct TestRepository(tempfile::TempDir);
 
     impl TestRepository {
@@ -637,8 +639,6 @@ mod tests {
 
     #[test]
     fn worktree_activation_rebinds_existing_acp_session_without_replacing_view() {
-        use bevy::ecs::system::RunSystemOnce;
-
         let repo = TestRepository::new();
         let project_dir = repo.path().canonicalize().unwrap();
         let managed_root = tempfile::tempdir().unwrap();
@@ -736,8 +736,6 @@ mod tests {
 
     #[test]
     fn selected_workspace_binds_repository_without_eager_worktree_creation() {
-        use bevy::ecs::system::RunSystemOnce;
-
         let repo = TestRepository::new();
         let project_dir = repo.path().canonicalize().unwrap();
         let external_root = tempfile::tempdir().unwrap();
@@ -832,8 +830,6 @@ mod tests {
 
     #[test]
     fn selected_workspace_binds_non_git_directory_without_worktree() {
-        use bevy::ecs::system::RunSystemOnce;
-
         let directory = tempfile::tempdir().unwrap();
         let selected = directory.path().canonicalize().unwrap();
         let mut app = App::new();

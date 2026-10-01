@@ -16,6 +16,8 @@ use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery};
 use super::{AgentRun, AgentRunWithPlacementOverride, AgentTerminalSend, PlacementMode};
 use vmux_layout::AgentPaneDirection;
 
+use std::fmt::Write;
+
 const RUN_PROCESS_MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
 const RUN_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -245,7 +247,6 @@ fn output_since(baseline: &str, final_text: &str) -> String {
 fn run_done_token(request_id: AgentRequestId) -> String {
     let mut token = String::with_capacity(32);
     for byte in request_id.0 {
-        use std::fmt::Write;
         let _ = write!(&mut token, "{byte:02x}");
     }
     token

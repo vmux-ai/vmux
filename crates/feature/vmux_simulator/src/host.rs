@@ -1,18 +1,13 @@
-#[cfg(target_os = "macos")]
-mod core_simulator;
-mod device;
-mod hid;
-mod input;
-mod stream;
-mod tool;
-
+use crate::SimulatorPlugin;
 use crate::event::{HardwareButton, SimulatorClipboardOperation, SimulatorReady};
 use crate::url::SimulatorRoute;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+pub use device::{Axe, SimulatorDevice};
 use hid::HidBroker;
 use stream::StreamServer;
+pub use tool::SimulatorToolPlugin;
 use vmux_api::protocol::{AgentImage, AgentQueryResult, AgentRequestId, ClientMessage};
 use vmux_ecs::PageMetadata;
 use vmux_ecs::host::page::{NativelyHosted, PageReady};
@@ -22,9 +17,13 @@ use vmux_input::{NativeKeyClaimSet, NativeKeyInputSet};
 use vmux_layout::stack::{ComputeFocusSet, FocusedStack};
 use vmux_tool::{ToolQueryAppExt, ToolQueryMessage, ToolQueryRouteSet};
 
-use crate::SimulatorPlugin;
-pub use device::{Axe, SimulatorDevice};
-pub use tool::SimulatorToolPlugin;
+#[cfg(target_os = "macos")]
+mod core_simulator;
+mod device;
+mod hid;
+mod input;
+mod stream;
+mod tool;
 
 #[vmux_api::contract(Copy, Eq)]
 pub enum SimulatorButton {

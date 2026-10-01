@@ -1,3 +1,5 @@
+use std::{fs, os::unix::fs::PermissionsExt, process::Command};
+
 #[test]
 fn packager_binaries_avoid_case_insensitive_collision() {
     let toml = include_str!("../Cargo.toml");
@@ -43,8 +45,6 @@ fn before_packaging_command_prepares_named_binaries() {
 #[cfg(unix)]
 #[test]
 fn package_binary_paths_honor_target_dir_and_triple() {
-    use std::{fs, os::unix::fs::PermissionsExt, process::Command};
-
     let temp = tempfile::tempdir().expect("tempdir");
     let cargo = temp.path().join("cargo");
     let target = temp.path().join("custom target");

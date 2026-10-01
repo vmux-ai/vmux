@@ -46,6 +46,9 @@ mod macos {
     };
     use vmux_ui::i18n::{Locale, TranslationValue};
 
+    use bevy::winit::WINIT_WINDOWS;
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
     pub(super) struct BookmarkMenuPlugin;
 
     impl Plugin for BookmarkMenuPlugin {
@@ -135,9 +138,6 @@ mod macos {
         mut reader: MessageReader<ShowBookmarkMenuRequest>,
         mut builder: BookmarkMenuBuilder,
     ) {
-        use bevy::winit::WINIT_WINDOWS;
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
         let Some(request) = reader.read().last().cloned() else {
             return;
         };

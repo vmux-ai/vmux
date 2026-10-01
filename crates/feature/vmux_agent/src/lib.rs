@@ -1,6 +1,9 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 #[cfg(all(host, feature = "app"))]
+pub use host::AgentPlugin;
+
+#[cfg(all(host, feature = "app"))]
 pub(crate) struct Feature;
 
 #[cfg(all(host, feature = "app"))]
@@ -23,5 +26,3 @@ mod mcp;
 mod policy;
 #[cfg(host)]
 pub(crate) mod route;
-#[cfg(all(host, feature = "app"))]
-pub use host::AgentPlugin;

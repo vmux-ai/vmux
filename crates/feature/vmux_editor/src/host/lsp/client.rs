@@ -2,10 +2,11 @@ use std::path::PathBuf;
 
 use crate::lsp::{LspDiagnosticsSender, PendingMap};
 
-pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
-    url::Url::parse(uri).ok()?.to_file_path().ok()
-}
-
+use crate::lsp::framing::LspFrame;
+use crate::lsp::reader::Reader;
+use crate::lsp::registry::ServerSpec;
+use crate::lsp::server_request::ServerInputSender;
+use std::collections::HashMap;
 use std::io::BufReader;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -14,12 +15,11 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use std::collections::HashMap;
+use std::io::BufRead;
 
-use crate::lsp::framing::LspFrame;
-use crate::lsp::reader::Reader;
-use crate::lsp::registry::ServerSpec;
-use crate::lsp::server_request::ServerInputSender;
+pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
+    url::Url::parse(uri).ok()?.to_file_path().ok()
+}
 
 pub struct ServerClient {
     child: Child,
@@ -147,7 +147,6 @@ impl ServerClient {
 
         let cmd_name = spec.command.clone();
         let stderr_thread = std::thread::spawn(move || {
-            use std::io::BufRead;
             let r = BufReader::new(stderr);
             for line in r.lines().map_while(Result::ok) {
                 tracing::debug!(server = %cmd_name, "lsp stderr: {line}");

@@ -1,5 +1,6 @@
-mod tree;
 pub use tree::AgentPlugin;
+
+mod tree;
 
 mod acp;
 mod approval;

@@ -15,6 +15,8 @@ use vmux_tool::{
 };
 use vmux_transport::service::ServiceConnection;
 
+use std::io::{BufRead, Read};
+
 pub struct FileToolPlugin;
 
 impl Plugin for FileToolPlugin {
@@ -275,7 +277,6 @@ async fn grep_result(
     let requested = requested.as_deref().unwrap_or(".");
     let search_path = scoped_existing_path(anchor, Path::new(requested), "grep").await?;
 
-    use std::io::{BufRead, Read};
     let mut child = std::process::Command::new("rg")
         .args(["--json", "--", &query])
         .arg(&search_path)
@@ -444,7 +445,6 @@ fn read_lines_bounded(
     offset: Option<u32>,
     limit: Option<usize>,
 ) -> std::io::Result<String> {
-    use std::io::BufRead;
     let reader = std::io::BufReader::new(std::fs::File::open(path)?);
     let start = offset
         .map(|offset| offset.saturating_sub(1) as usize)

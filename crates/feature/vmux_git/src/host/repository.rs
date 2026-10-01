@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 use std::ffi::OsString;
+use std::io::Write;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
 use bevy::prelude::Component;
@@ -499,8 +501,6 @@ impl GitRepository {
     fn index_text(&self, target: &Path) -> Result<String, GitError> {
         #[cfg(unix)]
         let spec = {
-            use std::os::unix::ffi::{OsStrExt, OsStringExt};
-
             let mut bytes = vec![b':'];
             bytes.extend_from_slice(target.as_os_str().as_bytes());
             OsString::from_vec(bytes)
@@ -520,9 +520,6 @@ impl GitRepository {
     }
 
     fn apply_patch(&self, patch: &str, reverse: bool) -> Result<(), GitError> {
-        use std::io::Write;
-        use std::process::Stdio;
-
         let mut args = vec!["apply"];
         if reverse {
             args.push("-R");
@@ -670,8 +667,6 @@ impl GitCommand {
 
 #[cfg(unix)]
 fn path_bytes(path: &Path) -> Vec<u8> {
-    use std::os::unix::ffi::OsStrExt;
-
     path.as_os_str().as_bytes().to_vec()
 }
 
@@ -682,8 +677,6 @@ fn path_bytes(path: &Path) -> Vec<u8> {
 
 #[cfg(unix)]
 fn path_from_bytes(bytes: &[u8]) -> PathBuf {
-    use std::os::unix::ffi::OsStringExt;
-
     PathBuf::from(OsString::from_vec(bytes.to_vec()))
 }
 
@@ -1043,9 +1036,12 @@ pub(crate) mod test_repo {
 mod tests {
     use super::*;
 
+    use std::ffi::OsStr;
+    use std::fs::{FileTimes, OpenOptions};
+    use std::time::{Duration, SystemTime};
+
     #[test]
     fn git_command_scrubs_all_local_env_vars() {
-        use std::ffi::OsStr;
         let cmd = GitCommand::new(Path::new("."));
         let removed: HashSet<&OsStr> = cmd
             .get_envs()
@@ -1436,8 +1432,6 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn non_utf8_path_round_trips_through_repository_actions() {
-        use std::os::unix::ffi::OsStringExt;
-
         let repo = test_repo::init();
         let git = GitRepository::at(repo.path());
         let raw_path = b"invalid-\x80-name.txt".to_vec();
@@ -1473,9 +1467,6 @@ mod tests {
 
     #[test]
     fn background_status_does_not_refresh_index() {
-        use std::fs::{FileTimes, OpenOptions};
-        use std::time::{Duration, SystemTime};
-
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);

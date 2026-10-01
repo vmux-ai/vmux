@@ -1,6 +1,13 @@
 #![allow(clippy::type_complexity)]
 
 #[cfg(host)]
+pub use catalog::OpenManagerRequest;
+#[cfg(host)]
+pub use host::ExtensionPlugin;
+#[cfg(host)]
+pub use install::{ExtensionInstallCompleted, ExtensionInstallRequest};
+
+#[cfg(host)]
 pub(crate) struct Feature;
 
 #[cfg(host)]
@@ -30,10 +37,3 @@ pub mod store;
 mod ui;
 #[cfg(host)]
 pub mod webstore;
-
-#[cfg(host)]
-pub use catalog::OpenManagerRequest;
-#[cfg(host)]
-pub use host::ExtensionPlugin;
-#[cfg(host)]
-pub use install::{ExtensionInstallCompleted, ExtensionInstallRequest};

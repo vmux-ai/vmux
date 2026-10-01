@@ -6,6 +6,8 @@ use vmux_api::knowledge::KnowledgePropertyKind;
 
 use crate::MarkdownMetadata;
 
+use std::os::unix::fs::PermissionsExt;
+
 const MAX_SKILLS: usize = 64;
 const MAX_EMBEDDED_BYTES: usize = 24 * 1024;
 const SKILLS_PROMPT_MARKER: &str = "vmux Knowledge skill instructions are already loaded";
@@ -275,8 +277,6 @@ enum Privacy {
 impl Privacy {
     #[cfg(unix)]
     fn apply(self, path: &Path) -> io::Result<()> {
-        use std::os::unix::fs::PermissionsExt;
-
         let mode = match self {
             Self::Directory => 0o700,
             Self::File => 0o600,

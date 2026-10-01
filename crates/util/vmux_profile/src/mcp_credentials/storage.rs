@@ -3,6 +3,11 @@ use super::McpOauthCredentials;
 #[cfg(target_os = "macos")]
 use crate::safe_storage::{ProtectedFile, SafeStorage, SafeStorageContext, encoded_file_name};
 
+#[cfg(not(target_os = "macos"))]
+use std::io::Write;
+#[cfg(all(not(target_os = "macos"), unix))]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
 pub struct McpCredentialStorage;
 
 #[cfg(target_os = "macos")]
@@ -98,8 +103,6 @@ impl McpCredentialStorage {
     }
 
     fn store_account(account: &str, bytes: &[u8]) -> Result<(), String> {
-        use std::io::Write;
-
         let path = Self::path(account);
         let Some(parent) = path.parent() else {
             return Err("MCP credential path has no parent".to_string());
@@ -109,13 +112,11 @@ impl McpCredentialStorage {
         options.create(true).truncate(true).write(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
         let mut file = options.open(path).map_err(|error| error.to_string())?;
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             file.set_permissions(std::fs::Permissions::from_mode(0o600))
                 .map_err(|error| error.to_string())?;
         }

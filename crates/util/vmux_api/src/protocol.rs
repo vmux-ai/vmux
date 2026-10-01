@@ -1,25 +1,24 @@
-pub mod layout;
-pub mod shared;
+pub use crate::ProcessId;
+pub use crate::json::JsonValue;
+pub use agent::*;
 pub use layout::{
     Focus, LayoutIdParseError, LayoutNode, LayoutSnapshot, NodeKind, SplitDirection, Stack, Tab,
     format_id, parse_id,
 };
+pub use process::*;
+pub use query::*;
+pub use remote::*;
 pub use shared::{SharedEvent, SharedFailure, SharedMessage, SharedResponse};
+pub use terminal::*;
 
-pub use crate::ProcessId;
-pub use crate::json::JsonValue;
+pub mod layout;
+pub mod shared;
 
 mod agent;
 mod process;
 mod query;
 mod remote;
 mod terminal;
-
-pub use agent::*;
-pub use process::*;
-pub use query::*;
-pub use remote::*;
-pub use terminal::*;
 
 #[cfg(test)]
 mod tests {

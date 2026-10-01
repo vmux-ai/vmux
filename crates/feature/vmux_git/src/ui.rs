@@ -1,3 +1,6 @@
+pub use root::Page;
+pub use shared::{DiffView, GitFooter};
+
 mod branches;
 mod changes;
 mod command_log;
@@ -12,9 +15,6 @@ mod shared;
 mod shortcuts;
 mod state;
 mod status;
-
-pub use root::Page;
-pub use shared::{DiffView, GitFooter};
 
 #[vmux_native::page(
     component = Page,

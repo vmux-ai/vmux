@@ -1,4 +1,15 @@
 #[cfg(host)]
+pub use graph::{KnowledgeIndex, KnowledgeRenamePlan, KnowledgeResolvedLink, KnowledgeSearchHit};
+#[cfg(host)]
+pub use host::{ExpandedKnowledgeDirs, KnowledgePlugin};
+pub use model::{MarkdownMetadata, WikiLink};
+#[cfg(host)]
+pub use tool::KnowledgeToolPlugin;
+#[cfg(host)]
+pub use vault::{AgentPrompt, Frontmatter, KnowledgeVault, MemoriesDir, SkillsDir};
+pub use vmux_api::knowledge::{KnowledgeProperty, KnowledgePropertyKind, KnowledgeReference};
+
+#[cfg(host)]
 pub(crate) struct Feature;
 
 #[cfg(host)]
@@ -17,13 +28,3 @@ mod model;
 mod tool;
 #[cfg(host)]
 mod vault;
-#[cfg(host)]
-pub use graph::{KnowledgeIndex, KnowledgeRenamePlan, KnowledgeResolvedLink, KnowledgeSearchHit};
-#[cfg(host)]
-pub use host::{ExpandedKnowledgeDirs, KnowledgePlugin};
-pub use model::{MarkdownMetadata, WikiLink};
-#[cfg(host)]
-pub use tool::KnowledgeToolPlugin;
-#[cfg(host)]
-pub use vault::{AgentPrompt, Frontmatter, KnowledgeVault, MemoriesDir, SkillsDir};
-pub use vmux_api::knowledge::{KnowledgeProperty, KnowledgePropertyKind, KnowledgeReference};

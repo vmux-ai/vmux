@@ -1,5 +1,14 @@
 #![allow(non_snake_case)]
 
+use self::extension::ExtensionPopupModal;
+use self::header::HeaderView;
+use self::side_sheet::SideSheetView;
+use self::state::LayoutUi;
+use dioxus::prelude::*;
+pub(crate) use error::ErrorPage;
+use vmux_command::CommandBarPanel;
+use vmux_ui::hooks::use_theme;
+
 mod active_session;
 mod bookmark;
 mod error;
@@ -12,16 +21,6 @@ mod state;
 mod tab_drag;
 mod update;
 mod window_drag;
-
-use self::extension::ExtensionPopupModal;
-use self::header::HeaderView;
-use self::side_sheet::SideSheetView;
-use self::state::LayoutUi;
-use dioxus::prelude::*;
-use vmux_command::CommandBarPanel;
-use vmux_ui::hooks::use_theme;
-
-pub(crate) use error::ErrorPage;
 
 #[vmux_native::page(
     component = Page,

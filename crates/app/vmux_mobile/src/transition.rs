@@ -1,3 +1,5 @@
+pub use platform::{NativeSheet, install};
+
 #[cfg(target_os = "ios")]
 mod platform {
     use std::cell::RefCell;
@@ -156,5 +158,3 @@ mod platform {
         pub fn finish(self) {}
     }
 }
-
-pub use platform::{NativeSheet, install};

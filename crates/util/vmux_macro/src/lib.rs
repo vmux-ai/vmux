@@ -1,3 +1,7 @@
+use proc_macro::TokenStream;
+use quote::quote;
+use syn::{DeriveInput, parse_macro_input};
+
 mod app_plugin;
 mod bin_event;
 mod command;
@@ -9,10 +13,6 @@ mod tool_input;
 mod ui_event_variants;
 mod ui_state;
 mod variant_names;
-
-use proc_macro::TokenStream;
-use quote::quote;
-use syn::{DeriveInput, parse_macro_input};
 
 #[proc_macro_attribute]
 pub fn app_plugin(_args: TokenStream, input: TokenStream) -> TokenStream {

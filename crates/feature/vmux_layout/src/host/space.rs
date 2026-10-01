@@ -251,6 +251,8 @@ fn sync_container_visibility(
 mod tests {
     use super::*;
 
+    use bevy::ecs::system::RunSystemOnce;
+
     #[test]
     fn current_space_tracks_active_space() {
         let mut app = App::new();
@@ -292,7 +294,6 @@ mod tests {
 
     #[test]
     fn space_of_walks_up_to_nearest_space() {
-        use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
         let space = app
             .world_mut()

@@ -44,6 +44,9 @@ use vmux_api::room::{Message, RemoteApproval};
 use vmux_process::{Process, ProcessManager};
 use vmux_process::{ProcessCreated, ProcessLaunch, ProcessRuntime, ProcessUpdate};
 
+use agent_client_protocol::schema::v1::PermissionOptionKind as Kind;
+use tokio::io::{AsyncBufReadExt, BufReader};
+
 pub(super) const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
 const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
 const PROMPT_MEDIA_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
@@ -269,7 +272,6 @@ struct AcpPermissionOptions<'a>(&'a [PermissionOption]);
 
 impl AcpPermissionOptions<'_> {
     fn select(&self, decision: ApprovalDecision) -> Option<PermissionOptionId> {
-        use agent_client_protocol::schema::v1::PermissionOptionKind as Kind;
         let preferred: &[Kind] = match decision {
             ApprovalDecision::Allow => &[Kind::AllowOnce, Kind::AllowAlways],
             ApprovalDecision::Deny => &[Kind::RejectOnce, Kind::RejectAlways],
@@ -1286,7 +1288,6 @@ where
 }
 
 async fn drain_stderr(stderr: tokio::process::ChildStderr, shared: Arc<AcpShared>) {
-    use tokio::io::{AsyncBufReadExt, BufReader};
     let mut lines = BufReader::new(stderr).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         tracing::warn!(target: "acp", "{line}");

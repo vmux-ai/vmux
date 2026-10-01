@@ -1,4 +1,13 @@
 #[cfg(host)]
+pub use host::{
+    Axe, HardwareButtonRequest, SimulatorButtonPressRequest, SimulatorClipboardRequest,
+    SimulatorControlResponse, SimulatorDevice, SimulatorFocusSet, SimulatorInputSet,
+    SimulatorKeyPressRequest, SimulatorScreenshot, SimulatorScreenshotRequest,
+    SimulatorScreenshotResponse, SimulatorSoftwareKeyboardRequest, SimulatorSwipeRequest,
+    SimulatorTapRequest, SimulatorToolPlugin, SimulatorTypeTextRequest,
+};
+
+#[cfg(host)]
 pub(crate) struct Feature;
 
 #[cfg(host)]
@@ -17,11 +26,3 @@ pub mod ui;
 
 #[cfg(host)]
 mod host;
-#[cfg(host)]
-pub use host::{
-    Axe, HardwareButtonRequest, SimulatorButtonPressRequest, SimulatorClipboardRequest,
-    SimulatorControlResponse, SimulatorDevice, SimulatorFocusSet, SimulatorInputSet,
-    SimulatorKeyPressRequest, SimulatorScreenshot, SimulatorScreenshotRequest,
-    SimulatorScreenshotResponse, SimulatorSoftwareKeyboardRequest, SimulatorSwipeRequest,
-    SimulatorTapRequest, SimulatorToolPlugin, SimulatorTypeTextRequest,
-};

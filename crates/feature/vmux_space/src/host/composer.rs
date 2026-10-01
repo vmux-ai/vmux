@@ -17,6 +17,8 @@ use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
 use vmux_session::AcpSession;
 use vmux_session::AgentApprovalPolicy;
 
+use bevy::tasks::futures_lite::future;
+
 pub(super) struct SpaceComposerPlugin;
 
 impl Plugin for SpaceComposerPlugin {
@@ -256,8 +258,6 @@ fn drain_branch_reads(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    use bevy::tasks::futures_lite::future;
-
     for (entity, mut read) in &mut reads {
         let Some(branches) = future::block_on(future::poll_once(&mut read.task)) else {
             continue;

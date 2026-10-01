@@ -1,5 +1,28 @@
 #![allow(clippy::type_complexity)]
 
+use crate::state::{
+    ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
+    ToolLinkRequest, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
+};
+use bevy_app::{App, Plugin, Update};
+use bevy_ecs::prelude::*;
+use bevy_tasks::{Task, futures_lite::future};
+#[cfg(host)]
+pub use cli::ToolCliPlugin;
+#[cfg(not(target_os = "ios"))]
+pub use connection::{McpConnectionPlugin, McpSnapshotRequest};
+pub use dotfiles::*;
+pub use homebrew::*;
+pub use manifest::*;
+pub use mcp::*;
+pub use npm::*;
+pub use provider::*;
+#[cfg(host)]
+pub use query::*;
+pub use registry::*;
+use vmux_ecs::host::manifest::FeaturePlugin;
+pub use vmux_macro::input;
+
 extern crate self as vmux_tool;
 
 pub(crate) struct Feature;
@@ -28,30 +51,6 @@ mod route;
 pub mod state;
 #[cfg(ui)]
 mod ui;
-
-use crate::state::{
-    ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
-    ToolLinkRequest, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
-};
-use bevy_app::{App, Plugin, Update};
-use bevy_ecs::prelude::*;
-use bevy_tasks::{Task, futures_lite::future};
-use vmux_ecs::host::manifest::FeaturePlugin;
-
-#[cfg(host)]
-pub use cli::ToolCliPlugin;
-#[cfg(not(target_os = "ios"))]
-pub use connection::{McpConnectionPlugin, McpSnapshotRequest};
-pub use dotfiles::*;
-pub use homebrew::*;
-pub use manifest::*;
-pub use mcp::*;
-pub use npm::*;
-pub use provider::*;
-#[cfg(host)]
-pub use query::*;
-pub use registry::*;
-pub use vmux_macro::input;
 
 #[vmux_native::page]
 pub struct ToolPlugin;

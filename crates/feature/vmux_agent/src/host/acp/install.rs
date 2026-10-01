@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use vmux_ecs::event::InstallPhase;
@@ -386,7 +388,6 @@ impl UvRuntime {
 
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             for executable in ["uv", "uvx"] {
                 let path = staged_package.join(&dirname).join(executable);
                 if let Ok(metadata) = std::fs::metadata(&path) {
@@ -538,7 +539,6 @@ impl BinaryTarget {
 
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             if let Ok(metadata) = std::fs::metadata(&staged_command) {
                 let mut permissions = metadata.permissions();
                 permissions.set_mode(0o755);

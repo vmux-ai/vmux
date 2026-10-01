@@ -2,6 +2,9 @@ use crate::edit::command::{EditCommand, EditMode, Motion, Operator, ScrollPlacem
 use crate::edit::text_object::{TextObject, TextObjectKind};
 use crate::keymap::{KeyInput, Keymap};
 
+use crate::keymap::mapping::MatchResult;
+use EditCommand::*;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ObjectScope {
     Inner,
@@ -217,7 +220,6 @@ impl VimKeymap {
     }
 
     fn route_through_mappings(&mut self, k: &KeyInput) -> Option<Vec<EditCommand>> {
-        use crate::keymap::mapping::MatchResult;
         let mut pending = std::mem::take(&mut self.map_pending);
         pending.push(k.clone());
         match self.mappings.match_keys(self.mode, &pending) {
@@ -396,7 +398,6 @@ impl VimKeymap {
     }
 
     fn normal(&mut self, k: &KeyInput) -> Vec<EditCommand> {
-        use EditCommand::*;
         let key = k.key.as_str();
 
         if let Some((forward, till)) = self.pending_find.take() {
@@ -727,7 +728,6 @@ impl VimKeymap {
     }
 
     fn visual(&mut self, k: &KeyInput) -> Vec<EditCommand> {
-        use EditCommand::*;
         let key = k.key.as_str();
 
         if let Some((forward, till)) = self.pending_find.take() {
@@ -924,8 +924,6 @@ impl VimKeymap {
     }
 
     fn insert(&mut self, k: &KeyInput) -> Vec<EditCommand> {
-        use EditCommand::*;
-
         if self.register_pending {
             self.register_pending = false;
             let Some(reg) = single_char(&k.key) else {

@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use objc2::MainThreadMarker;
+use objc2_app_kit::{NSAlert, NSAlertFirstButtonReturn, NSAlertStyle, NSImage};
+use objc2_foundation::NSString;
+
 pub struct PermissionsPlugin;
 
 impl Plugin for PermissionsPlugin {
@@ -222,10 +226,6 @@ fn permission_host(origin: &str) -> &str {
 
 #[cfg(target_os = "macos")]
 fn prompt_native(origin: &str, categories: RequestCategories) -> Option<bool> {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSAlert, NSAlertFirstButtonReturn, NSAlertStyle, NSImage};
-    use objc2_foundation::NSString;
-
     let mtm = MainThreadMarker::new()?;
     let alert = NSAlert::new(mtm);
     alert.setAlertStyle(NSAlertStyle::Informational);

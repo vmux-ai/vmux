@@ -4,7 +4,16 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
-use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use bevy::winit::{EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
+use objc2_app_kit::{
+    NSAnimatablePropertyContainer, NSAnimationContext, NSApp, NSEvent, NSEventMask, NSEventType,
+    NSView, NSWindowDidEndLiveResizeNotification, NSWindowStyleMask,
+    NSWindowWillStartLiveResizeNotification,
+};
+use objc2_foundation::{
+    NSNotification, NSNotificationCenter, NSPoint, NSRect, NSSize, NSString, NSUserDefaults,
+};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use vmux_flex::prelude::*;
 use vmux_setting::{ResolvedScheme, SystemAppearance};
 
@@ -110,8 +119,6 @@ fn grab_key_window_on_pane_hover(
 }
 
 fn app_is_frontmost() -> bool {
-    use objc2_app_kit::NSApp;
-
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return false;
     };
@@ -119,10 +126,6 @@ fn app_is_frontmost() -> bool {
 }
 
 fn activate_window(window_entity: Entity) {
-    use bevy::winit::WINIT_WINDOWS;
-    use objc2_app_kit::{NSApp, NSView};
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return;
     };
@@ -148,10 +151,6 @@ fn activate_window(window_entity: Entity) {
 }
 
 pub(crate) fn ensure_key_window(window_entity: Entity) -> bool {
-    use bevy::winit::WINIT_WINDOWS;
-    use objc2_app_kit::{NSApp, NSView};
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return false;
     };
@@ -183,8 +182,6 @@ pub(crate) fn ensure_key_window(window_entity: Entity) -> bool {
 const APP_ACTIVATION_BUDGET: Duration = Duration::from_secs(10);
 
 fn activate_app() -> bool {
-    use objc2_app_kit::NSApp;
-
     if app_is_frontmost() {
         return true;
     }
@@ -274,8 +271,6 @@ impl From<objc2_foundation::NSRect> for WindowFrame {
 
 impl From<WindowFrame> for objc2_foundation::NSRect {
     fn from(frame: WindowFrame) -> Self {
-        use objc2_foundation::{NSPoint, NSRect, NSSize};
-
         NSRect::new(
             NSPoint::new(frame.x, frame.y),
             NSSize::new(frame.width, frame.height),
@@ -284,8 +279,6 @@ impl From<WindowFrame> for objc2_foundation::NSRect {
 }
 
 fn begin_window_resize(event: &objc2_app_kit::NSEvent) -> Option<WindowResizeDrag> {
-    use objc2_app_kit::{NSEvent, NSWindowStyleMask};
-
     let mtm = objc2::MainThreadMarker::new()?;
     let window = event.window(mtm)?;
     let style = window.styleMask();
@@ -313,8 +306,6 @@ fn begin_window_resize(event: &objc2_app_kit::NSEvent) -> Option<WindowResizeDra
 }
 
 fn update_window_resize(event: &objc2_app_kit::NSEvent, drag: WindowResizeDrag) {
-    use objc2_app_kit::NSEvent;
-
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return;
     };
@@ -364,8 +355,6 @@ impl WindowTitlebarGesture {
     }
 
     fn double_click_action() -> Option<String> {
-        use objc2_foundation::{NSString, NSUserDefaults};
-
         let defaults = NSUserDefaults::standardUserDefaults();
         let behavior = defaults.stringForKey(&NSString::from_str("AppleActionOnDoubleClick"))?;
         Some(behavior.to_string())
@@ -374,8 +363,6 @@ impl WindowTitlebarGesture {
 
 impl WindowZoom {
     fn animate(&mut self, window: objc2::rc::Retained<objc2_app_kit::NSWindow>) {
-        use objc2_app_kit::{NSAnimatablePropertyContainer, NSAnimationContext};
-
         let Some(screen) = window.screen() else {
             return;
         };
@@ -394,8 +381,6 @@ impl WindowZoom {
 }
 
 fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
-    use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
-
     let Some(proxy) = proxy else {
         return;
     };
@@ -587,11 +572,6 @@ fn install_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
 }
 
 fn install_live_resize_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
-    use objc2_app_kit::{
-        NSWindowDidEndLiveResizeNotification, NSWindowWillStartLiveResizeNotification,
-    };
-    use objc2_foundation::{NSNotification, NSNotificationCenter};
-
     if LIVE_RESIZE_MONITOR_INSTALLED.load(Ordering::Relaxed) {
         return;
     }

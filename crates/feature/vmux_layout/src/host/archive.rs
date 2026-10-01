@@ -1125,6 +1125,8 @@ mod tests {
     use super::*;
     use bevy::ecs::relationship::Relationship;
 
+    use crate::pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection};
+
     fn page(url: &str, closed_at: i64) -> ArchivedPage {
         ArchivedPage {
             url: url.to_string(),
@@ -1361,7 +1363,6 @@ mod tests {
 
     #[test]
     fn close_records_pane_path_and_leaf() {
-        use crate::pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection};
         let mut app = archive_app();
         let space = app
             .world_mut()
@@ -2193,7 +2194,6 @@ mod tests {
 
     #[test]
     fn reopen_into_surviving_leaf_pane_at_index() {
-        use crate::pane::{Pane, PaneId};
         let mut app = reopen_app();
         let space = app
             .world_mut()
@@ -2251,7 +2251,6 @@ mod tests {
 
     #[test]
     fn reopen_readds_leaf_under_surviving_split() {
-        use crate::pane::{Pane, PaneId, PaneSplit, PaneSplitDirection};
         let mut app = reopen_app();
         let space = app
             .world_mut()
@@ -2314,7 +2313,6 @@ mod tests {
 
     #[test]
     fn reopen_reconstructs_collapsed_split_level() {
-        use crate::pane::{Pane, PaneId, PaneSplit, PaneSplitDirection};
         let mut app = reopen_app();
         let space = app
             .world_mut()
@@ -2372,7 +2370,6 @@ mod tests {
 
     #[test]
     fn reopen_focuses_restored_stack_and_ancestors() {
-        use crate::pane::{Pane, PaneId};
         let mut app = reopen_app();
         let space = app
             .world_mut()
@@ -2403,7 +2400,6 @@ mod tests {
 
     #[test]
     fn reopen_focus_propagates_through_reattached_splits() {
-        use crate::pane::{Pane, PaneId, PaneSplit, PaneSplitDirection};
         let mut app = reopen_app();
         let space = app
             .world_mut()
@@ -2540,7 +2536,6 @@ mod tests {
 
     #[test]
     fn reopen_resplits_collapsed_two_pane() {
-        use crate::pane::{Pane, PaneId, PaneSplit};
         let mut app = reopen_app();
         let space = app
             .world_mut()

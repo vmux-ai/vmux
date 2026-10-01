@@ -6,14 +6,6 @@ pub use vmux_api::{
     TermSelectionRange, TermSpan, command_bar::CommandBarPicker,
 };
 
-mod editor;
-mod explorer;
-mod file_ui_state;
-mod lsp;
-#[cfg(host)]
-mod page;
-mod terminal;
-
 pub use editor::*;
 pub use explorer::*;
 pub use file_ui_state::*;
@@ -21,6 +13,14 @@ pub use lsp::*;
 #[cfg(host)]
 pub use page::*;
 pub use terminal::*;
+
+mod editor;
+mod explorer;
+mod file_ui_state;
+mod lsp;
+#[cfg(host)]
+mod page;
+mod terminal;
 
 #[cfg(test)]
 mod file_event_tests {
@@ -250,9 +250,10 @@ mod file_event_tests {
 mod tests {
     use super::*;
 
+    use vmux_api::editor::{CursorPos, EditMode, SelSpan};
+
     #[test]
     fn file_cursor_event_roundtrips() {
-        use vmux_api::editor::{CursorPos, EditMode, SelSpan};
         let e = FileCursorEvent {
             search_total: 4,
             search_index: 2,

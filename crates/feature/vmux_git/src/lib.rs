@@ -1,4 +1,10 @@
 #[cfg(host)]
+pub use host::{
+    FileGit, GitCheckForUpdatesRequest, GitDiffSource, GitError, GitPlugin, GitRepository,
+    RepoInfoCache, worktree,
+};
+
+#[cfg(host)]
 pub(crate) struct Feature;
 
 #[cfg(host)]
@@ -53,11 +59,6 @@ pub mod ui;
 
 #[cfg(host)]
 mod host;
-#[cfg(host)]
-pub use host::{
-    FileGit, GitCheckForUpdatesRequest, GitDiffSource, GitError, GitPlugin, GitRepository,
-    RepoInfoCache, worktree,
-};
 
 #[cfg(test)]
 mod tests {

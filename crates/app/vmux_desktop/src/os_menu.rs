@@ -3,7 +3,7 @@ use bevy::window::WindowCloseRequested;
 use crossbeam_channel::Receiver;
 #[cfg(target_os = "macos")]
 use muda::ContextMenu;
-use muda::{Menu, MenuEvent, MenuItem, MenuItemKind};
+use muda::{AboutMetadata, Menu, MenuEvent, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu};
 #[cfg(target_os = "macos")]
 use objc2::rc::Retained;
 #[cfg(target_os = "macos")]
@@ -331,8 +331,6 @@ fn submenu_message_id(title: &str, locale: &Locale) -> Option<&'static str> {
 }
 
 fn append_standard_edit_menu(menu: &Menu) {
-    use muda::{PredefinedMenuItem, Submenu};
-
     let undo = PredefinedMenuItem::undo(None);
     let redo = PredefinedMenuItem::redo(None);
     let sep = PredefinedMenuItem::separator();
@@ -351,8 +349,6 @@ fn append_standard_edit_menu(menu: &Menu) {
 }
 
 fn append_application_menu(menu: &Menu) -> Result<(), muda::Error> {
-    use muda::{AboutMetadata, PredefinedMenuItem, Submenu};
-
     let app_name = match env!("VMUX_BUILD_PROFILE") {
         "release" => "Vmux".to_string(),
         "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),

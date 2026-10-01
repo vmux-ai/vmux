@@ -5,6 +5,8 @@ use bevy::prelude::Component;
 
 use vmux_profile::ServicePaths;
 
+use std::os::unix::process::CommandExt;
+
 #[derive(Component, Clone, Debug, Eq, PartialEq)]
 pub struct DaemonBinary(PathBuf);
 
@@ -51,8 +53,6 @@ impl DaemonBinary {
 
     #[cfg(unix)]
     pub(crate) fn spawn_detached(&self) -> std::io::Result<()> {
-        use std::os::unix::process::CommandExt;
-
         let log_dir = ServicePaths::log_dir();
         let _ = std::fs::create_dir_all(&log_dir);
         let stderr = match std::fs::File::create(ServicePaths::current().log()) {

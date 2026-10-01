@@ -1,3 +1,5 @@
+pub use components::{Favicon, GlobeIcon};
+
 pub fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
     let s = page_url.trim();
     let rest = s
@@ -54,8 +56,6 @@ pub fn favicon_src_for_url(favicon_url: &str, url: &str) -> Option<String> {
     host_for_favicon_fallback(url)
         .map(|h| format!("https://www.google.com/s2/favicons?domain={h}&sz=64"))
 }
-
-pub use components::{Favicon, GlobeIcon};
 
 mod components {
     use super::favicon_src_for_url;

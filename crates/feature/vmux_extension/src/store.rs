@@ -6,6 +6,8 @@ use std::sync::Mutex;
 use crate::webstore;
 use vmux_api::extension::{ExtRow, ExtStatus, ExtensionsEvent};
 
+use sha2::{Digest, Sha256};
+
 static INDEX_LOCK: Mutex<()> = Mutex::new(());
 const INDEX_VERSION: u32 = 3;
 const LEGACY_PROFILE: &str = "personal";
@@ -171,8 +173,6 @@ impl ExtensionStore {
 }
 
 fn tree_sha256(root: &Path) -> Result<String, String> {
-    use sha2::{Digest, Sha256};
-
     let mut files = Vec::new();
     collect_files(root, root, &mut files)?;
     files.sort_by(|a, b| a.0.cmp(&b.0));

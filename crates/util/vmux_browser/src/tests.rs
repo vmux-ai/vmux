@@ -6,6 +6,8 @@ use vmux_flex::prelude::{ComputedNode, Node, UiRect, Val};
 use vmux_layout::stack::Stack;
 use vmux_setting::AppSettings;
 
+use vmux_ecs::PageIdentity;
+
 #[test]
 fn pending_navigation_updates_keep_only_the_latest_request() {
     let mut app = App::new();
@@ -48,7 +50,6 @@ fn cef_disables_bfcache_for_extension_ports() {
 
 #[test]
 fn reported_title_wins_unless_it_is_absent_or_blank() {
-    use vmux_ecs::PageIdentity;
     let meta = PageMetadata {
         title: "host".to_string(),
         ..Default::default()
@@ -283,6 +284,8 @@ mod browser_navigate_flow {
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
     use vmux_terminal::Terminal;
 
+    use bevy_cef::prelude::RequestNavigate;
+
     fn test_settings() -> AppSettings {
         AppSettings {
             browser: BrowserSettings {
@@ -376,9 +379,6 @@ mod browser_navigate_flow {
 
     #[test]
     fn browser_navigate_triggers_request_navigate_with_url() {
-        use bevy_cef::prelude::RequestNavigate;
-        use vmux_layout::Browser;
-
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings())
@@ -421,8 +421,6 @@ mod browser_navigate_flow {
 
     #[test]
     fn browser_navigate_auto_spawns_tab_when_pane_is_empty() {
-        use vmux_layout::Browser;
-
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings());
@@ -838,8 +836,6 @@ mod browser_navigate_flow {
 
     #[test]
     fn browser_navigate_with_unknown_vmux_url_errors() {
-        use vmux_layout::Browser;
-
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings());
@@ -909,8 +905,6 @@ mod browser_navigate_flow {
 
     #[test]
     fn page_open_error_renders_error_page() {
-        use vmux_layout::Browser;
-
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings());
@@ -955,8 +949,6 @@ mod browser_navigate_flow {
 
     #[test]
     fn browser_navigate_with_claude_url_does_not_spawn_standalone_browser() {
-        use vmux_layout::Browser;
-
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings());
@@ -992,8 +984,6 @@ mod browser_navigate_flow {
 
     #[test]
     fn browser_navigate_with_codex_url_does_not_spawn_standalone_browser() {
-        use vmux_layout::Browser;
-
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
         app.insert_resource(test_settings());
@@ -1351,8 +1341,6 @@ mod open_in_place_flow {
 
     #[test]
     fn zoom_in_on_terminal_emits_font_size_increase() {
-        use bevy::ecs::message::Messages;
-
         let mut app = build_app();
         build_focused_terminal_stack(&mut app);
 
@@ -1372,8 +1360,6 @@ mod open_in_place_flow {
 
     #[test]
     fn zoom_reset_on_terminal_emits_font_size_reset() {
-        use bevy::ecs::message::Messages;
-
         let mut app = build_app();
         build_focused_terminal_stack(&mut app);
 

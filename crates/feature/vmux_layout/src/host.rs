@@ -1,5 +1,19 @@
 use bevy::prelude::*;
 
+pub use agent::{AgentOpenBeside, AgentPaneDirection};
+pub use cef::{
+    Browser, LayoutCef, LayoutCefPlugin, LayoutCefStateSet, Loading, NavigationState,
+    ReloadRevision,
+};
+pub use contract::LayoutContractPlugin;
+pub use pane::OpenBesideRequest;
+pub use persistence::LayoutPersistenceSet;
+pub use plugin::{ErrorPage, LayoutPlugin};
+pub use stack::{CloseStackReason, CloseStackRequest};
+pub use vmux_ecs::ContributedCommandChosen;
+pub use vmux_ecs::launcher::LauncherDismissRequest;
+pub use webview_reveal::PendingWebviewReveal;
+
 pub mod active;
 pub mod active_pane;
 mod agent;
@@ -38,20 +52,6 @@ pub mod worktree;
 mod swap;
 mod webview_reveal;
 mod zoom;
-
-pub use agent::{AgentOpenBeside, AgentPaneDirection};
-pub use cef::{
-    Browser, LayoutCef, LayoutCefPlugin, LayoutCefStateSet, Loading, NavigationState,
-    ReloadRevision,
-};
-pub use contract::LayoutContractPlugin;
-pub use pane::OpenBesideRequest;
-pub use persistence::LayoutPersistenceSet;
-pub use plugin::{ErrorPage, LayoutPlugin};
-pub use stack::{CloseStackReason, CloseStackRequest};
-pub use vmux_ecs::ContributedCommandChosen;
-pub use vmux_ecs::launcher::LauncherDismissRequest;
-pub use webview_reveal::PendingWebviewReveal;
 
 pub type LayoutUiStateUpdates = vmux_ecs::host::UiState<crate::state::LayoutUiState>;
 

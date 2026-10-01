@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 
+pub use host::ChatPlugin;
+
 #[cfg(host)]
 pub(crate) struct Feature;
 
@@ -15,8 +17,6 @@ pub mod state;
 pub mod tab;
 
 pub mod selector;
-
-pub use host::ChatPlugin;
 
 #[cfg(ui)]
 pub mod ui;

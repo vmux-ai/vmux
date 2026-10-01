@@ -796,9 +796,10 @@ mod tests {
     use bevy::ecs::relationship::Relationship;
     use bevy::window::Monitor;
 
+    use bevy::ecs::system::SystemState;
+
     #[test]
     fn scaffold_builds_tab_pane_stack_under_space() {
-        use bevy::ecs::system::SystemState;
         let mut app = App::new();
         let space = app.world_mut().spawn(crate::space::Space).id();
         let window = app.world_mut().spawn_empty().id();
@@ -1237,7 +1238,6 @@ mod tests {
 
     #[test]
     fn default_tab_adopts_existing_space_when_none_active() {
-        use bevy::ecs::relationship::Relationship;
         let _home = HomeEnvGuard::use_temp_home("default-tab-adopts-space");
         let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();

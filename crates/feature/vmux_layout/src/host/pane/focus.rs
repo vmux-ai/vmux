@@ -13,6 +13,10 @@ use crate::{
     stack::{ActiveTabParam, LayoutFocus, active_among},
 };
 
+use bevy::winit::WINIT_WINDOWS;
+use objc2_app_kit::{NSApplication, NSEvent, NSView};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 const HOVER_COOLDOWN_MS: u64 = 300;
 
@@ -211,10 +215,6 @@ pub fn pane_hover_cursor_position(window_entity: Entity, window: &Window) -> Opt
 
 #[cfg(target_os = "macos")]
 fn native_window_cursor_position(window_entity: Entity, window: &Window) -> Option<Vec2> {
-    use bevy::winit::WINIT_WINDOWS;
-    use objc2_app_kit::{NSApplication, NSEvent, NSView};
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
     WINIT_WINDOWS.with_borrow(|winit_windows| {
         let mtm = objc2::MainThreadMarker::new()?;
         if !NSApplication::sharedApplication(mtm).isActive() {

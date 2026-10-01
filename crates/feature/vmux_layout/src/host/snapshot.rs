@@ -168,6 +168,8 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use vmux_history::LastActivatedAt;
 
+    use bevy::ecs::system::SystemState;
+
     fn make_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
@@ -184,7 +186,6 @@ mod tests {
 
     #[test]
     fn self_stack_is_marked_is_self() {
-        use bevy::ecs::system::SystemState;
         let mut app = make_app();
         let tab = app
             .world_mut()

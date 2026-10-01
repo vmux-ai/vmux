@@ -1,12 +1,11 @@
 use bevy::prelude::Component;
 
+use crate::edit::command::{EditCommand, EditMode};
+pub use vmux_api::editor::KeymapKind;
+
 pub mod mapping;
 pub mod vim;
 pub mod vscode;
-
-pub use vmux_api::editor::KeymapKind;
-
-use crate::edit::command::{EditCommand, EditMode};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Mods {

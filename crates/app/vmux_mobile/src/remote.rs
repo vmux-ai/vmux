@@ -8,6 +8,10 @@ use vmux_api::room::{
 };
 use vmux_ui::i18n::translate;
 
+use crate::quic::QuicError;
+use vmux_api::protocol::SharedEvent as Shared;
+use vmux_api::protocol::SharedFailure;
+
 static NEXT_CLIENT_OP_ID: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn next_client_op_id() -> ClientOpId {
@@ -204,7 +208,6 @@ impl Api {
 pub(crate) fn remote_event_from_shared(
     event: vmux_api::protocol::SharedEvent,
 ) -> Option<RemoteEvent> {
-    use vmux_api::protocol::SharedEvent as Shared;
     match event {
         Shared::AgentDelta { sid, text } => Some(RemoteEvent::Delta {
             room_id: vmux_api::room::RoomId::for_session(&sid),
@@ -257,8 +260,6 @@ async fn broker_json<T: serde::de::DeserializeOwned>(
 
 impl From<crate::quic::QuicError> for ApiError {
     fn from(error: crate::quic::QuicError) -> Self {
-        use crate::quic::QuicError;
-        use vmux_api::protocol::SharedFailure;
         match error {
             QuicError::Unauthorized => Self::Unauthorized,
             QuicError::Refused(SharedFailure::NotFound) => Self::NotFound,

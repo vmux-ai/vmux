@@ -459,6 +459,10 @@ fn search(
 mod tests {
     use super::*;
 
+    use sha2::Digest;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
     const SAMPLE: &str = r#"[
       {
         "name": "rust-analyzer",
@@ -573,9 +577,6 @@ mod tests {
 
     #[test]
     fn fetch_catalog_downloads_unzips_parses() {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-
         let mut zbuf = Vec::new();
         {
             let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut zbuf));
@@ -584,7 +585,6 @@ mod tests {
             w.write_all(SAMPLE.as_bytes()).unwrap();
             w.finish().unwrap();
         }
-        use sha2::Digest;
         let digest = Sha256Digest::parse(&format!("{:x}", sha2::Sha256::digest(&zbuf))).unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();

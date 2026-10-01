@@ -1,5 +1,7 @@
 #![allow(clippy::type_complexity)]
 
+pub use cli::McpCliPlugin;
+
 pub(crate) struct Feature;
 
 impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
@@ -9,5 +11,3 @@ impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
 mod cli;
 pub mod host_quote;
 pub mod protocol;
-
-pub use cli::McpCliPlugin;

@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 use vmux_ecs::host::persistence::PersistenceAppExt;
 
+pub(crate) use agent::{AgentReadKnowledge, AgentSearchKnowledge, AgentWriteKnowledge};
+
 mod agent;
 mod index;
-
-pub(crate) use agent::{AgentReadKnowledge, AgentSearchKnowledge, AgentWriteKnowledge};
 
 #[vmux_native::page]
 pub struct KnowledgePlugin;

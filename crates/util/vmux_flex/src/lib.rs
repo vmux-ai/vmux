@@ -1,17 +1,20 @@
 #![allow(clippy::too_many_arguments)]
 
-pub mod computed;
-pub mod node;
-pub mod tree;
-pub mod visibility;
-mod write;
-
+use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 pub use computed::{ComputedNode, Insets};
 pub use node::{
     AlignItems, Display, FlexDirection, JustifyContent, Node, PositionType, UiRect, Val,
 };
 pub use tree::{FlexTree, LayoutContext};
 pub use visibility::Visibility;
+use write::GeometryWalk;
+
+pub mod computed;
+pub mod node;
+pub mod tree;
+pub mod visibility;
+mod write;
 
 pub mod prelude {
     pub use crate::computed::{ComputedNode, Insets};
@@ -21,11 +24,6 @@ pub mod prelude {
     pub use crate::visibility::Visibility;
     pub use crate::{FlexPlugin, FlexViewport, LayoutSystems};
 }
-
-use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
-
-use write::GeometryWalk;
 
 pub struct FlexPlugin;
 

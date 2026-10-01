@@ -6,6 +6,8 @@ use super::{
     VaultWrappingKey,
 };
 
+use ring::rand::SecureRandom;
+
 const NONCE_LENGTH: usize = 12;
 const ENVELOPE_HEADER: &[u8] = b"vmux-safe-storage-envelope-v1\0";
 const HKDF_SALT: &[u8] = b"vmux-safe-storage-hkdf-v1";
@@ -101,8 +103,6 @@ impl SafeStorageCipher {
         aad: &[u8],
         plaintext: &[u8],
     ) -> Result<Vec<u8>, SafeStorageError> {
-        use ring::rand::SecureRandom;
-
         let key = aead::UnboundKey::new(&aead::AES_256_GCM, key).map_err(|_| {
             SafeStorageError::Crypto("failed to initialize Vmux Safe Storage encryption")
         })?;

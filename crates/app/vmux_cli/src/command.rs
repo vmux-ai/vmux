@@ -9,11 +9,11 @@ use clap::error::ErrorKind;
 use vmux_ecs::cli::{CliInvocation, CliResult};
 use vmux_ecs::host::manifest::FeatureManifest;
 
-mod catalog;
-mod parser;
-
 use catalog::CliCatalog;
 use parser::CliParser;
+
+mod catalog;
+mod parser;
 
 pub struct CliRuntimePlugin;
 

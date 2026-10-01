@@ -1,3 +1,5 @@
+pub use platform::*;
+
 #[cfg(target_os = "ios")]
 mod platform {
     use objc2::rc::Retained;
@@ -89,5 +91,3 @@ mod platform {
         runtime.report_lifecycle(AppLifecycle::Running);
     }
 }
-
-pub use platform::*;

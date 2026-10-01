@@ -1,18 +1,4 @@
 #[cfg(host)]
-pub mod cli;
-pub mod event;
-pub mod icon;
-pub mod page_metadata;
-pub mod process_id;
-pub mod scroll;
-pub mod service;
-pub use icon::{BuiltinIcon, PageIcon};
-pub use page_metadata::{PageIdentity, PageMetadata};
-pub use process_id::ProcessId;
-
-#[cfg(host)]
-pub mod host;
-#[cfg(host)]
 pub use host::{
     ActivateRequest, Active, AgentAttention, AgentDoneUnseen, AgentWorkingDir, ArchivedPage,
     ArchivedPagePosition, ArchivedTabPage, Bookmark, BookmarkOrder, CefPageAttachRequest,
@@ -30,3 +16,18 @@ pub use host::{
     now_millis, overlay, page, page_open, persistence, plugin, profile, team, terminal, ui_state,
     wake, workspace,
 };
+pub use icon::{BuiltinIcon, PageIcon};
+pub use page_metadata::{PageIdentity, PageMetadata};
+pub use process_id::ProcessId;
+
+#[cfg(host)]
+pub mod cli;
+pub mod event;
+pub mod icon;
+pub mod page_metadata;
+pub mod process_id;
+pub mod scroll;
+pub mod service;
+
+#[cfg(host)]
+pub mod host;

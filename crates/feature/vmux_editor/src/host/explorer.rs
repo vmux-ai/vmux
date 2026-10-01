@@ -9,6 +9,16 @@ use vmux_ecs::event::{
     ExplorerTreeToggle, FileDirEntry, TreeRow,
 };
 
+use entry::ExplorerEntryPlugin;
+use outline::OutlinePlugin;
+pub(crate) use outline::OutlineRows;
+use panel::PanelPlugin;
+pub use panel::StackExplorerVisibility;
+pub(crate) use panel::{ExplorerFindInFilesRequest, ExplorerRevealRequest, ExplorerToggleRequest};
+pub use search::GlobalSearchRequest;
+use search::SearchPlugin;
+use tree::{ExplorerDirLoadRequest, TreePlugin};
+
 mod entry;
 mod fs;
 mod outline;
@@ -19,16 +29,6 @@ mod tree;
 
 #[cfg(test)]
 mod tests;
-
-use entry::ExplorerEntryPlugin;
-use outline::OutlinePlugin;
-pub(crate) use outline::OutlineRows;
-use panel::PanelPlugin;
-pub use panel::StackExplorerVisibility;
-pub(crate) use panel::{ExplorerFindInFilesRequest, ExplorerRevealRequest, ExplorerToggleRequest};
-pub use search::GlobalSearchRequest;
-use search::SearchPlugin;
-use tree::{ExplorerDirLoadRequest, TreePlugin};
 
 #[derive(EntityEvent)]
 struct RevealCurrent {

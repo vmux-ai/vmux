@@ -4,6 +4,11 @@ pub use vmux_api::room::{
 };
 
 #[cfg(host)]
+pub(crate) use server::RemotePlugin;
+
+use std::os::unix::fs::PermissionsExt;
+
+#[cfg(host)]
 pub mod authorization;
 #[cfg(host)]
 pub mod client_operation;
@@ -13,9 +18,6 @@ pub mod pairing;
 pub mod quic;
 #[cfg(host)]
 pub mod server;
-
-#[cfg(host)]
-pub(crate) use server::RemotePlugin;
 
 #[cfg(host)]
 pub(crate) struct PrivateFile(std::path::PathBuf);
@@ -30,7 +32,6 @@ impl PrivateFile {
         vmux_path::AtomicFile::write(&self.0, contents.as_ref())?;
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600))?;
         }
         Ok(())

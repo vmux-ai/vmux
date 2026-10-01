@@ -15,6 +15,8 @@ use crate::activity::{ActivityIcon, ToolPresentation};
 use vmux_ui::clipboard::Clipboard;
 use vmux_ui::platform::{random_index, sleep_ms};
 
+use pulldown_cmark::{Event, Options, Parser, html};
+
 #[component]
 pub fn UserBubble(
     avatar_name: String,
@@ -920,7 +922,6 @@ const CHAT_MD_CLASS: &str = "chat-md px-0.5 text-sm text-foreground/95 leading-[
     [&_:is(th,td)]:[padding:0.3em_0.6em] [&_:is(th,td)]:text-left";
 
 fn md_to_html(src: &str) -> String {
-    use pulldown_cmark::{Event, Options, Parser, html};
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TABLES);

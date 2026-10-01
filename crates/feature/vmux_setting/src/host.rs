@@ -1,15 +1,5 @@
-mod agent;
-mod appearance;
-mod projection;
-mod runtime;
-mod state;
-mod tool;
-
-use bevy::{ecs::message::MessageReader, prelude::*};
-use vmux_command::ReadCommandRequests;
-use vmux_ecs::{PageOpenRequest, PageOpenTarget};
-
 pub use appearance::{ColorSchemeChanged, ResolvedColorScheme, ResolvedScheme, SystemAppearance};
+use bevy::{ecs::message::MessageReader, prelude::*};
 pub use runtime::{
     AcpAgentConfig, AgentSettings, AppSettings, AppearanceSettings, BookmarkFolderSettings,
     BrowserSettings, ColorScheme, DirSource, EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH,
@@ -20,6 +10,15 @@ pub use runtime::{
 pub use state::Settings;
 pub use tool::SettingToolPlugin;
 pub use vmux_api::command_bar::SearchEngine;
+use vmux_command::ReadCommandRequests;
+use vmux_ecs::{PageOpenRequest, PageOpenTarget};
+
+mod agent;
+mod appearance;
+mod projection;
+mod runtime;
+mod state;
+mod tool;
 
 #[derive(bevy::prelude::Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SearchEngineSetting(pub SearchEngine);

@@ -1,5 +1,12 @@
 use bevy::prelude::*;
 
+pub use contract::ContractPlugin;
+pub use editor::FileView;
+pub use explorer::{GlobalSearchRequest, StackExplorerVisibility};
+pub use lsp::LspPlugin;
+pub use status::FileViewModeRequest;
+pub use tool::FileToolPlugin;
+
 #[vmux_native::page]
 pub struct EditorPlugin;
 
@@ -82,10 +89,3 @@ pub(crate) mod status;
 pub(crate) mod viewport;
 pub(crate) mod workspace_edit;
 pub(crate) mod wrap;
-
-pub use contract::ContractPlugin;
-pub use editor::FileView;
-pub use explorer::{GlobalSearchRequest, StackExplorerVisibility};
-pub use lsp::LspPlugin;
-pub use status::FileViewModeRequest;
-pub use tool::FileToolPlugin;

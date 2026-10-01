@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use vmux_ecs::event::InstallPhase;
@@ -184,7 +186,6 @@ impl Package {
 
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             let path = package_dir.join(asset_bin.as_path());
             if let Ok(metadata) = std::fs::metadata(&path) {
                 let mut permissions = metadata.permissions();
@@ -279,7 +280,6 @@ impl Package {
         for file in links.values() {
             #[cfg(unix)]
             {
-                use std::os::unix::fs::PermissionsExt;
                 let binary = staged_package.join(file.as_path());
                 if let Ok(metadata) = std::fs::metadata(&binary) {
                     let mut permissions = metadata.permissions();
@@ -355,6 +355,8 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
+    use sha2::Digest;
+
     fn serve_gz_once(payload: &'static [u8]) -> (String, PackagePath, Sha256Digest) {
         let mut gz = Vec::new();
         {
@@ -362,7 +364,6 @@ mod tests {
             enc.write_all(payload).unwrap();
             enc.finish().unwrap();
         }
-        use sha2::Digest;
         let digest = Sha256Digest::parse(&format!("{:x}", sha2::Sha256::digest(&gz))).unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();

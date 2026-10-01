@@ -2,7 +2,7 @@ use alacritty_terminal::{
     event::{Event as TermEvent, EventListener as TermEventListener},
     grid::{Dimensions, Scroll},
     index::{Column, Line},
-    term::{Config as TermConfig, Term},
+    term::{Config as TermConfig, Term, TermMode},
     vte::ansi::Processor,
 };
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
@@ -24,6 +24,9 @@ use vmux_profile::ServicePaths;
 
 use crate::render::{build_line, hash_grid_row};
 
+use vmux_api::protocol::CopyModeKey as K;
+use vmux_api::protocol::{CommandLifecycleKind, ServiceMessage};
+
 const MAX_PTY_CHUNKS_PER_POLL: usize = 64;
 const _: () = assert!(MAX_PTY_CHUNKS_PER_POLL <= 256);
 const HEAVY_OUTPUT_FRAME_INTERVAL: Duration = Duration::from_millis(100);
@@ -40,8 +43,6 @@ pub enum ProcessUpdate {
 
 impl ProcessUpdate {
     pub fn into_service_message(self, process_id: ProcessId) -> vmux_api::protocol::ServiceMessage {
-        use vmux_api::protocol::{CommandLifecycleKind, ServiceMessage};
-
         match self {
             Self::Viewport(patch) => ServiceMessage::ViewportPatch {
                 process_id,
@@ -912,7 +913,6 @@ impl Process {
     }
 
     fn maybe_broadcast_mode(&mut self) {
-        use alacritty_terminal::term::TermMode;
         let mouse_capture = self.term.mode().intersects(TermMode::MOUSE_MODE);
         let copy_mode = self.copy_mode.is_some();
         let alt_screen = self.term.mode().contains(TermMode::ALT_SCREEN);
@@ -966,7 +966,6 @@ impl Process {
     }
 
     pub fn copy_mode_key(&mut self, key: vmux_api::protocol::CopyModeKey) -> Option<String> {
-        use vmux_api::protocol::CopyModeKey as K;
         let cols = self.cols;
         let rows = self.rows;
         let (cur_col, cur_row, last_find) = {
@@ -1199,7 +1198,6 @@ impl Process {
     }
 
     pub fn handle_mouse_wheel(&mut self, up: bool, col: u16, row: u16, modifiers: u8) {
-        use alacritty_terminal::term::TermMode;
         let delta = if up { 1 } else { -1 };
         if self.copy_mode.is_some() {
             if self.scroll_copy_mode_viewport(delta) != 0 {
@@ -1947,6 +1945,8 @@ mod tests {
     use crate::ProcessManager;
     use std::time::{Duration, Instant};
 
+    use std::io;
+
     #[test]
     fn heavy_output_waits_for_frame_interval_but_sparse_and_final_output_do_not() {
         let start = Instant::now();
@@ -2544,8 +2544,6 @@ mod tests {
 
     #[test]
     fn proxy_broadcasts_process_title_on_term_title_event() {
-        use std::io;
-
         let (tx, mut rx) = broadcast::channel::<ProcessUpdate>(8);
         let writer = PtyInputWriter::new(Box::new(io::sink()));
         let proxy = ServiceEventProxy {
@@ -2564,8 +2562,6 @@ mod tests {
 
     #[test]
     fn proxy_broadcasts_bell_on_term_bell_event() {
-        use std::io;
-
         let (tx, mut rx) = broadcast::channel::<ProcessUpdate>(8);
         let writer = PtyInputWriter::new(Box::new(io::sink()));
         let proxy = ServiceEventProxy {

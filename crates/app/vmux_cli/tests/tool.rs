@@ -1,9 +1,9 @@
+use assert_cmd::Command;
+use predicates::prelude::*;
+
 #[cfg(unix)]
 #[test]
 fn tools_adopt_and_apply_manage_home_links() {
-    use assert_cmd::Command;
-    use predicates::prelude::*;
-
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
     let config = home.join(".config/nushell/config.nu");
@@ -43,9 +43,6 @@ fn tools_adopt_and_apply_manage_home_links() {
 
 #[test]
 fn tools_import_adopts_existing_manifests() {
-    use assert_cmd::Command;
-    use predicates::prelude::*;
-
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
     let brewfile = temp.path().join("Brewfile");

@@ -65,6 +65,7 @@ use super::state::{
 use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::{ProcessExited, RetainOnProcessExit, Terminal};
+use CopyModeKey as K;
 use vmux_ecs::service::ServiceMessageSet;
 use vmux_flex::prelude::*;
 use vmux_ui::i18n::Locale;
@@ -1125,7 +1126,6 @@ fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<CopyModeKey> {
 }
 
 fn map_copy_mode_key_from_input(input: CopyModeKeyInput<'_>) -> Option<CopyModeKey> {
-    use CopyModeKey as K;
     match (input.key, input.ctrl) {
         (Key::ArrowLeft, _) => Some(K::Left),
         (Key::ArrowRight, _) => Some(K::Right),
@@ -1197,8 +1197,6 @@ fn map_copy_mode_keys_with_state(
     copy_mode: &mut TerminalCopyMode,
     input: CopyModeKeyInput<'_>,
 ) -> Vec<CopyModeKey> {
-    use CopyModeKey as K;
-
     let state = &mut copy_mode.input;
     if let Some(pending) = state.pending_key.take() {
         let key = match pending {
@@ -1273,7 +1271,6 @@ fn repeat_copy_mode_key(state: &mut CopyModeInputState, key: CopyModeKey) -> Vec
 }
 
 fn copy_mode_key_uses_count(key: CopyModeKey) -> bool {
-    use CopyModeKey as K;
     !matches!(
         key,
         K::StartSelection | K::StartLineSelection | K::Copy | K::Exit
@@ -1869,7 +1866,6 @@ fn is_copy_mode_active(mode: &TerminalMode, copy_mode: &TerminalCopyMode) -> boo
 }
 
 fn copy_mode_key_exits(key: CopyModeKey) -> bool {
-    use CopyModeKey as K;
     matches!(key, K::Copy | K::Exit)
 }
 
@@ -1958,6 +1954,10 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_setting::{BrowserSettings, ShortcutSettings};
+
+    use crate::launch::TerminalLaunch;
+    use CopyModeKey as K;
+    use bevy::ecs::message::Messages;
 
     fn spawn_active_space(app: &mut App, record: &SpaceRecord) {
         app.world_mut()
@@ -2580,8 +2580,6 @@ mod tests {
 
     #[test]
     fn vim_visual_keys_map_to_copy_mode_actions() {
-        use CopyModeKey as K;
-
         assert_eq!(
             map_copy_mode_key(&Key::Character("v".into()), false),
             Some(K::StartSelection)
@@ -2610,8 +2608,6 @@ mod tests {
 
     #[test]
     fn vim_g_ends_visual_selection_at_last_non_blank() {
-        use CopyModeKey as K;
-
         let mut copy_mode = TerminalCopyMode::default();
 
         assert_eq!(
@@ -2626,8 +2622,6 @@ mod tests {
 
     #[test]
     fn vim_visual_motion_keys_map_to_copy_mode_actions() {
-        use CopyModeKey as K;
-
         let mut copy_mode = TerminalCopyMode::default();
 
         assert_eq!(
@@ -2692,8 +2686,6 @@ mod tests {
 
     #[test]
     fn shifted_minus_resolves_g_() {
-        use CopyModeKey as K;
-
         let mut copy_mode = TerminalCopyMode::default();
 
         assert_eq!(
@@ -2737,8 +2729,6 @@ mod tests {
 
     #[test]
     fn exiting_copy_mode_clears_local_latch() {
-        use CopyModeKey as K;
-
         let mut copy_mode = TerminalCopyMode::default();
         copy_mode.set(true);
 
@@ -2780,8 +2770,6 @@ mod tests {
 
     #[test]
     fn process_created_matches_by_id_not_by_position() {
-        use crate::launch::TerminalLaunch;
-
         let mut app = bevy::prelude::App::new();
         let id1 = ProcessId::new();
         let id2 = ProcessId::new();
@@ -2905,7 +2893,6 @@ mod tests {
 
     #[test]
     fn apply_osc_title_sets_and_clears() {
-        use bevy::ecs::message::Messages;
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, InputQueuePlugin))
             .add_message::<OscTitleChanged>()
@@ -2939,7 +2926,6 @@ mod tests {
 
     #[test]
     fn clear_osc_title_on_exit_removes_override() {
-        use bevy::ecs::message::Messages;
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, InputQueuePlugin))
             .add_message::<ProcessExitedEvent>()

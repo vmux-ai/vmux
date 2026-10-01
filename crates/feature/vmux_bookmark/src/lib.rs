@@ -1,5 +1,8 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+pub use menu::BookmarkPlugin;
+pub use tool::BookmarkToolPlugin;
+
 pub(crate) struct Feature;
 
 impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
@@ -9,6 +12,3 @@ impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
 mod menu;
 mod persistence;
 mod tool;
-
-pub use menu::BookmarkPlugin;
-pub use tool::BookmarkToolPlugin;

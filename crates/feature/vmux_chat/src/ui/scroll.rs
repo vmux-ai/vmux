@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use std::rc::Rc;
 
+pub use imp::{metrics, restore, to_bottom};
+
 pub type Container = Signal<Option<Rc<MountedData>>>;
 
 mod imp {
@@ -31,5 +33,3 @@ mod imp {
 
     pub fn restore(_container: Container, _previous_height: i32, _previous_top: i32) {}
 }
-
-pub use imp::{metrics, restore, to_bottom};

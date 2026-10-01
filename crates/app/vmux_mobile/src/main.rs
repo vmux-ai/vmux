@@ -1,5 +1,22 @@
 #![allow(non_snake_case)]
 
+use crate::logs::Logs;
+use crate::pairing::{
+    AuthState, DisconnectRequest, PairCard, PairLinkChanged, PairRequest, PairingFailure,
+};
+use crate::runtime::RuntimeHandle;
+use crate::session::{LeaveSession, RestartSession, use_session};
+use bevy_app::{App as BevyApp, AppExit, Plugin};
+use dioxus::prelude::*;
+use vmux_chat::host::Agents;
+use vmux_start::roster::Roster;
+use vmux_ui::back::PageBack;
+use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, StartHero};
+use vmux_ui::i18n::translate;
+
+use dioxus::mobile::tao::event::Event;
+use objc2_ui_kit::{UITraitCollection, UIUserInterfaceStyle};
+
 mod credentials;
 mod host;
 mod lifecycle;
@@ -12,21 +29,6 @@ mod runtime;
 mod session;
 mod transition;
 
-use crate::logs::Logs;
-use crate::pairing::{
-    AuthState, DisconnectRequest, PairCard, PairLinkChanged, PairRequest, PairingFailure,
-};
-use crate::runtime::RuntimeHandle;
-use crate::session::{LeaveSession, RestartSession, use_session};
-use bevy_app::{App as BevyApp, AppExit, Plugin};
-use vmux_chat::host::Agents;
-use vmux_start::roster::Roster;
-
-use dioxus::prelude::*;
-use vmux_ui::back::PageBack;
-use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, StartHero};
-use vmux_ui::i18n::translate;
-
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
 
 const LIGHT_BACKGROUND: (u8, u8, u8, u8) = (215, 215, 215, 255);
@@ -35,8 +37,6 @@ const DARK_BACKGROUND: (u8, u8, u8, u8) = (10, 10, 10, 255);
 
 #[cfg(target_os = "ios")]
 fn webview_background() -> (u8, u8, u8, u8) {
-    use objc2_ui_kit::{UITraitCollection, UIUserInterfaceStyle};
-
     let style = unsafe { UITraitCollection::currentTraitCollection().userInterfaceStyle() };
     if style == UIUserInterfaceStyle::Dark {
         DARK_BACKGROUND
@@ -79,22 +79,19 @@ impl MobileRunner {
         let event_runtime = runtime.clone();
         let config = dioxus::mobile::Config::new()
             .with_background_color(webview_background())
-            .with_custom_event_handler(move |event, _| {
-                use dioxus::mobile::tao::event::Event;
-                match event {
-                    Event::Opened { urls } => {
-                        for url in urls {
-                            if url.scheme() == "vmux" && url.host_str() == Some("pair") {
-                                event_runtime.send(PairRequest(url.to_string()));
-                            }
+            .with_custom_event_handler(move |event, _| match event {
+                Event::Opened { urls } => {
+                    for url in urls {
+                        if url.scheme() == "vmux" && url.host_str() == Some("pair") {
+                            event_runtime.send(PairRequest(url.to_string()));
                         }
                     }
-                    Event::Resumed => {
-                        event_runtime.send(RestartSession);
-                    }
-                    Event::MainEventsCleared => event_runtime.update(),
-                    _ => {}
                 }
+                Event::Resumed => {
+                    event_runtime.send(RestartSession);
+                }
+                Event::MainEventsCleared => event_runtime.update(),
+                _ => {}
             });
         dioxus::LaunchBuilder::mobile()
             .with_cfg(config)

@@ -1,3 +1,5 @@
+pub use language_icon::LanguageIconPath;
+
 pub mod agent_accent;
 
 pub mod caret;
@@ -43,8 +45,6 @@ pub mod language_icon;
 pub mod list_nav;
 
 pub mod hooks;
-
-pub use language_icon::LanguageIconPath;
 
 pub mod back;
 

@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use std::os::unix::fs::PermissionsExt;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Executable(PathBuf);
 
@@ -50,7 +52,6 @@ impl Executable {
 
     #[cfg(unix)]
     fn is_executable(path: &Path) -> bool {
-        use std::os::unix::fs::PermissionsExt;
         path.is_file()
             && path
                 .metadata()
@@ -68,6 +69,8 @@ impl Executable {
 mod tests {
     use super::*;
 
+    use std::os::unix::fs::PermissionsExt;
+
     #[test]
     fn finds_an_executable_on_path() {
         let temp = std::env::temp_dir().join(format!("vmux-executable-{}", std::process::id()));
@@ -76,7 +79,6 @@ mod tests {
         std::fs::write(&path, b"").unwrap();
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 

@@ -1,7 +1,9 @@
-mod agent;
-mod agent_pane;
-
 use crate::present::CommandBarWindowedFrame;
+pub(crate) use agent::{
+    AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch, AgentBrowserNavigate,
+    AgentBrowserPlugin, AgentBrowserScroll, AgentBrowserSnapshot,
+};
+pub use agent_pane::AgentBrowserResolve;
 use bevy::{ecs::relationship::Relationship, input::mouse::MouseButton, prelude::*};
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::CommandLineConfig;
@@ -19,11 +21,11 @@ use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
 use vmux_ui::theme::ThemeEvent;
 
-pub(crate) use agent::{
-    AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch, AgentBrowserNavigate,
-    AgentBrowserPlugin, AgentBrowserScroll, AgentBrowserSnapshot,
-};
-pub use agent_pane::AgentBrowserResolve;
+use vmux_api::protocol::{AgentCommandResult, AgentRequestId, ClientMessage};
+use vmux_ecs::service::ServiceRequest;
+
+mod agent;
+mod agent_pane;
 
 #[derive(Clone, Copy, Debug, Message)]
 pub struct WebviewLoadCompleted {
@@ -446,8 +448,6 @@ pub(crate) fn page_open_response(
     request_id: Option<[u8; 16]>,
     result: Result<(), String>,
 ) -> Option<vmux_ecs::service::ServiceRequest> {
-    use vmux_api::protocol::{AgentCommandResult, AgentRequestId, ClientMessage};
-    use vmux_ecs::service::ServiceRequest;
     let request_id = request_id?;
     let result = match result {
         Ok(()) => AgentCommandResult::Ok,

@@ -7,6 +7,9 @@ use dioxus_interpreter_js::MutationState;
 use crate::event_request::EventOutcome;
 use crate::page_dom_converter::{LiveElements, MountedBacking};
 
+use std::future::Future;
+use std::task::{Context, Poll, Waker};
+
 pub type PageComponent = fn() -> Element;
 
 pub struct PageDom {
@@ -55,9 +58,6 @@ impl PageDom {
     }
 
     fn has_work(&mut self) -> bool {
-        use std::future::Future;
-        use std::task::{Context, Poll, Waker};
-
         let mut context = Context::from_waker(Waker::noop());
 
         matches!(
@@ -113,6 +113,9 @@ mod tests {
     use dioxus_html::{EventData, HtmlEvent, SerializedMouseData};
 
     use super::*;
+
+    use std::cell::Cell;
+    use std::rc::Rc;
 
     #[component]
     fn Static() -> Element {
@@ -233,9 +236,6 @@ mod tests {
 
     #[test]
     fn a_mounted_element_reaches_the_page_able_to_answer_for_itself() {
-        use std::cell::Cell;
-        use std::rc::Rc;
-
         #[derive(Clone, Default)]
         struct Focusable(Rc<Cell<bool>>);
 

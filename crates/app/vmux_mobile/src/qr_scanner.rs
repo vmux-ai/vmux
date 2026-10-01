@@ -1,3 +1,5 @@
+pub use platform::*;
+
 #[cfg(target_os = "ios")]
 mod platform {
     use std::cell::{Cell, RefCell};
@@ -425,5 +427,3 @@ mod platform {
         Err(translate("mobile-qr-unsupported-platform"))
     }
 }
-
-pub use platform::*;

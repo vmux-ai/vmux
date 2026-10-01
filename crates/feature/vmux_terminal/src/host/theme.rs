@@ -5,6 +5,8 @@ use vmux_setting::{AppSettings, SettingsSaveRequest};
 
 use crate::{Terminal, event::TermThemeEvent};
 
+use std::hash::{Hash, Hasher};
+
 pub struct TerminalThemePlugin;
 
 impl Plugin for TerminalThemePlugin {
@@ -63,7 +65,6 @@ fn theme_signature(
     theme: &vmux_setting::TerminalTheme,
     colors: &vmux_setting::themes::TerminalColorScheme,
 ) -> u64 {
-    use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     colors.foreground.hash(&mut hasher);
     colors.background.hash(&mut hasher);
@@ -149,6 +150,8 @@ fn sync(
 mod tests {
     use super::*;
 
+    use bevy::ecs::message::Messages;
+
     fn terminal_theme(font_size: f32) -> vmux_setting::TerminalTheme {
         vmux_setting::TerminalTheme {
             name: "default".to_string(),
@@ -174,7 +177,6 @@ mod tests {
     }
 
     fn run_font_size_command(start: f32, command: TerminalFontSizeCommand) -> (f32, usize) {
-        use bevy::ecs::message::Messages;
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings_with_font(start))
@@ -203,7 +205,6 @@ mod tests {
 
     #[test]
     fn font_size_materializes_missing_default_theme() {
-        use bevy::ecs::message::Messages;
         let mut settings = AppSettings::default();
         settings.terminal = Some(vmux_setting::TerminalSettings {
             default_theme: "default".to_string(),

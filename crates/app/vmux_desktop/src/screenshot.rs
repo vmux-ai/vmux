@@ -162,6 +162,14 @@ mod capture {
     use std::path::PathBuf;
     use vmux_input::{ScreenshotImage, ScreenshotResponse};
 
+    use bevy::winit::WINIT_WINDOWS;
+    use objc2_app_kit::NSView;
+    use objc2_core_graphics::{
+        CGColorSpaceCreateDeviceRGB, CGContextDrawImage, CGImageGetHeight, CGImageGetWidth,
+    };
+    use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
     unsafe extern "C" {
         fn CGPreflightScreenCaptureAccess() -> bool;
         fn CGRequestScreenCaptureAccess() -> bool;
@@ -179,10 +187,6 @@ mod capture {
     }
 
     fn window_number(window_entity: Entity) -> Option<u32> {
-        use bevy::winit::WINIT_WINDOWS;
-        use objc2_app_kit::NSView;
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
         WINIT_WINDOWS.with_borrow(|winit_windows| {
             let win = winit_windows.get_window(window_entity)?;
             let handle = win.window_handle().ok()?;
@@ -197,9 +201,6 @@ mod capture {
 
     #[allow(deprecated)]
     fn cgimage_to_rgba(image: &CGImage) -> Result<image::RgbaImage, String> {
-        use objc2_core_graphics::{
-            CGColorSpaceCreateDeviceRGB, CGContextDrawImage, CGImageGetHeight, CGImageGetWidth,
-        };
         let width = CGImageGetWidth(Some(image)) as u32;
         let height = CGImageGetHeight(Some(image)) as u32;
         if width == 0 || height == 0 {
@@ -264,7 +265,6 @@ mod capture {
     }
 
     fn os_at_least_14() -> bool {
-        use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
         let version = NSOperatingSystemVersion {
             majorVersion: 14,
             minorVersion: 0,

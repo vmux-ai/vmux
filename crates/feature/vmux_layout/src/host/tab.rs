@@ -670,6 +670,8 @@ mod tests {
     use vmux_command::CommandPlugin;
     use vmux_ecs::PageOpenRequest;
 
+    use bevy::ecs::system::RunSystemOnce;
+
     #[test]
     fn tab_mcp_definition_dispatches_to_the_typed_request() {
         let definitions = CommandManifest::for_feature::<crate::Feature>().into_vec();
@@ -748,7 +750,6 @@ mod tests {
 
     #[test]
     fn active_tab_siblings_are_parent_space_tabs() {
-        use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         let space_a = app.world_mut().spawn(crate::space::Space).id();

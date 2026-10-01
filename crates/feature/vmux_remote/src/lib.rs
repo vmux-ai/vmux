@@ -13,6 +13,8 @@ use vmux_layout::event::{
 use vmux_layout::{LayoutCef, state::LayoutUiState};
 use vmux_service::{RelayToken, RemoteAuthorizationStore, RemotePaths};
 
+use std::os::unix::fs::PermissionsExt;
+
 pub struct RemotePlugin;
 
 impl Plugin for RemotePlugin {
@@ -508,7 +510,6 @@ fn ensure_relay_device_id() -> std::io::Result<String> {
     std::fs::write(&path, &device_id)?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     }
     Ok(device_id)

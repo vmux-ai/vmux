@@ -24,6 +24,9 @@ use super::workspace::{
 };
 use vmux_ecs::profile::ProjectsDirectory;
 
+use bevy::ecs::relationship::Relationship;
+use vmux_api::protocol::{AgentCommandResult, ClientMessage};
+
 struct WorkspaceDirectory;
 
 impl WorkspaceDirectory {
@@ -62,7 +65,6 @@ fn resolve_self_pane(
     agent_terms: &Query<(Entity, &ProcessId, &ChildOf)>,
     child_of_q: &Query<&ChildOf>,
 ) -> Option<(Entity, Entity)> {
-    use bevy::ecs::relationship::Relationship;
     let (term, _, term_co) = agent_terms.iter().find(|(_, pid, _)| **pid == anchor)?;
     let stack = term_co.get();
     let pane = child_of_q.get(stack).ok()?.get();
@@ -148,7 +150,6 @@ fn handle_requests(
     mut workspace: AgentWorkspaceState,
     workspace_picker: AgentWorkspacePicker,
 ) {
-    use vmux_api::protocol::{AgentCommandResult, ClientMessage};
     let managed_root = workspace
         .managed_root
         .as_deref()

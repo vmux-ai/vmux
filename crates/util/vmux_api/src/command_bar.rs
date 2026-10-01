@@ -1,13 +1,5 @@
 pub use crate::history::{HistoryEntry, HistorySuggestionsRequest, HistorySuggestionsResponse};
 
-mod input;
-mod open;
-mod palette;
-mod path;
-mod picker;
-mod request;
-mod state;
-
 pub use input::*;
 pub use open::*;
 pub use palette::*;
@@ -15,6 +7,14 @@ pub use path::*;
 pub use picker::*;
 pub use request::*;
 pub use state::*;
+
+mod input;
+mod open;
+mod palette;
+mod path;
+mod picker;
+mod request;
+mod state;
 
 #[cfg(test)]
 mod tests {

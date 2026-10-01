@@ -1,9 +1,14 @@
 use tracing::warn;
 
+use objc2_app_kit::{
+    NSPasteboard, NSPasteboardTypeFileURL, NSPasteboardTypePNG, NSPasteboardTypeTIFF,
+};
+use objc2_foundation::{NSArray, NSURL};
+use std::io::Write;
+use std::process::{Command, Stdio};
+
 impl super::Clipboard {
     pub(super) fn write_blocking(text: &str) {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
         match Command::new("/usr/bin/pbcopy")
             .stdin(Stdio::piped())
             .spawn()
@@ -19,7 +24,6 @@ impl super::Clipboard {
     }
 
     pub fn read_text() -> Option<String> {
-        use std::process::Command;
         let output = Command::new("/usr/bin/pbpaste").output().ok()?;
         if !output.status.success() {
             return None;
@@ -28,8 +32,6 @@ impl super::Clipboard {
     }
 
     pub fn has_image() -> bool {
-        use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG};
-        use objc2_foundation::NSArray;
         let png_type = unsafe { NSArray::from_slice(&[NSPasteboardTypePNG]) };
         NSPasteboard::generalPasteboard()
             .availableTypeFromArray(&png_type)
@@ -37,22 +39,18 @@ impl super::Clipboard {
     }
 
     pub fn read_image_png() -> Option<Vec<u8>> {
-        use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG};
         let png_type = unsafe { NSPasteboardTypePNG };
         let data = NSPasteboard::generalPasteboard().dataForType(png_type)?;
         Some(data.to_vec())
     }
 
     pub fn read_image_tiff() -> Option<Vec<u8>> {
-        use objc2_app_kit::{NSPasteboard, NSPasteboardTypeTIFF};
         let tiff_type = unsafe { NSPasteboardTypeTIFF };
         let data = NSPasteboard::generalPasteboard().dataForType(tiff_type)?;
         Some(data.to_vec())
     }
 
     pub fn image_file_path() -> Option<String> {
-        use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL};
-        use objc2_foundation::NSURL;
         let url_type = unsafe { NSPasteboardTypeFileURL };
         let pasteboard = NSPasteboard::generalPasteboard();
         let mut candidates = Vec::new();

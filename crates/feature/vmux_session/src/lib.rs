@@ -2,12 +2,6 @@
 
 use bevy_app::{App, Plugin};
 
-pub mod acp;
-pub mod room;
-pub mod run_state;
-pub mod session;
-mod title;
-
 pub use acp::AcpSession;
 pub use run_state::{AgentRunState, AgentTurnMeta};
 pub use session::{
@@ -15,6 +9,12 @@ pub use session::{
     QueuedPrompt,
 };
 pub use title::ConversationTitle;
+
+pub mod acp;
+pub mod room;
+pub mod run_state;
+pub mod session;
+mod title;
 
 pub struct SessionPlugin;
 

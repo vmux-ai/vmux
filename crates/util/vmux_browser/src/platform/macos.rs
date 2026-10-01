@@ -30,6 +30,8 @@ use vmux_ui::hooks::EventListenerError;
 use crate::host::LayoutPointerCapture;
 use crate::present::{AllCorners, FocusRing, PaneFrame};
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 pub(super) struct MacosBrowserPlugin;
 
 impl Plugin for MacosBrowserPlugin {
@@ -855,8 +857,6 @@ impl SimulatorFrame {
 }
 
 fn report_waiting(reason: &str) {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
     static REPORTED: AtomicBool = AtomicBool::new(false);
     if !REPORTED.swap(true, Ordering::Relaxed) {
         info!("browser_platform: waiting, {reason}");

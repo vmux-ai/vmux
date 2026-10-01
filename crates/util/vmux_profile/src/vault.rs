@@ -1,3 +1,12 @@
+pub use connect::{
+    RepositoryVisibility, VaultRepository, connect_folder, connect_github_with_progress,
+    connect_remote, create_remote,
+};
+pub use recovery::{GeneratedRecoveryKey, RecoveryKeyCreation, VaultRecovery};
+pub use status::VaultStatus;
+use std::path::{Path, PathBuf};
+pub use sync::{initialize, sync};
+
 mod connect;
 mod files;
 mod keys;
@@ -8,16 +17,6 @@ mod status;
 mod sync;
 #[cfg(test)]
 mod tests;
-
-use std::path::{Path, PathBuf};
-
-pub use connect::{
-    RepositoryVisibility, VaultRepository, connect_folder, connect_github_with_progress,
-    connect_remote, create_remote,
-};
-pub use recovery::{GeneratedRecoveryKey, RecoveryKeyCreation, VaultRecovery};
-pub use status::VaultStatus;
-pub use sync::{initialize, sync};
 
 pub fn root_dir() -> PathBuf {
     super::ProfilePaths::current().config()

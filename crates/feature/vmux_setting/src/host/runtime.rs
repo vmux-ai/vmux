@@ -14,6 +14,10 @@ pub use vmux_layout::settings::{
     FocusRingSettings, PaneSettings, SideSheetSettings, WindowSettings,
 };
 
+use std::hash::{Hash, Hasher};
+use std::str::FromStr;
+use vmux_ecs::event::ProjectRow;
+
 pub struct SettingsRuntimePlugin;
 
 impl Plugin for SettingsRuntimePlugin {
@@ -511,8 +515,6 @@ impl SpaceOverrides {
     }
 
     pub fn project_rows(&self) -> Vec<vmux_ecs::event::ProjectRow> {
-        use vmux_ecs::event::ProjectRow;
-
         let active = self.active_dir();
         let mut rows = Vec::with_capacity(self.projects.len());
         for project in &self.projects {
@@ -988,8 +990,6 @@ fn deserialize_cursor_style<'de, D>(
 where
     D: serde::Deserializer<'de>,
 {
-    use std::str::FromStr;
-
     let value = String::deserialize(deserializer)?;
     vmux_api::terminal::CursorStyle::from_str(&value).map_err(serde::de::Error::custom)
 }
@@ -1677,7 +1677,6 @@ struct SettingsWriteRequest {
 }
 
 fn settings_content_hash(bytes: &[u8]) -> u64 {
-    use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     bytes.hash(&mut hasher);
     hasher.finish()
@@ -1748,6 +1747,8 @@ fn persist_settings_to_disk(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use bevy::ecs::message::Messages;
 
     const MANIFESTS: [&str; 9] = [
         include_str!("../feature.ron"),
@@ -2645,7 +2646,6 @@ mod tests {
 
     #[test]
     fn request_settings_save_sets_due() {
-        use bevy::ecs::message::Messages;
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<SettingsSaveRequest>()
@@ -2666,7 +2666,6 @@ mod tests {
 
     #[test]
     fn flush_writes_after_due_elapses() {
-        use bevy::ecs::message::Messages;
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(base_settings())
@@ -2693,7 +2692,6 @@ mod tests {
 
     #[test]
     fn flush_skips_before_due() {
-        use bevy::ecs::message::Messages;
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(base_settings())

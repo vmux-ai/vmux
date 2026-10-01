@@ -9,6 +9,8 @@ use rustls::{DigitallySignedStruct, SignatureScheme};
 
 use super::{ALPN, PROBE_ALPN};
 
+use std::fmt::Write;
+
 pub const MAX_IDLE_TIMEOUT_MS: u32 = 30_000;
 
 pub const KEEP_ALIVE_MS: u64 = 10_000;
@@ -58,7 +60,6 @@ impl SelfSignedIdentity {
         let digest = ring::digest::digest(&ring::digest::SHA256, certificate.as_ref());
         let mut hex = String::with_capacity(digest.as_ref().len() * 2);
         for byte in digest.as_ref() {
-            use std::fmt::Write;
             let _ = write!(hex, "{byte:02x}");
         }
         hex

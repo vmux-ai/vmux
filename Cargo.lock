@@ -10423,6 +10423,7 @@ dependencies = [
  "objc2-quartz-core 0.3.2",
  "objc2-screen-capture-kit",
  "objc2-user-notifications 0.3.2",
+ "proc-macro2",
  "raw-window-handle 0.6.2",
  "rfd 0.15.4",
  "rkyv",

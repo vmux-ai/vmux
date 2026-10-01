@@ -1,4 +1,7 @@
 #[cfg(host)]
+pub use host::{ShortcutCaptureSet, ShortcutPlugin};
+
+#[cfg(host)]
 pub(crate) struct Feature;
 
 #[cfg(host)]
@@ -194,8 +197,6 @@ mod claim;
 mod host;
 #[cfg(host)]
 mod input;
-#[cfg(host)]
-pub use host::{ShortcutCaptureSet, ShortcutPlugin};
 
 #[cfg(ui)]
 pub mod ui;

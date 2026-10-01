@@ -2,6 +2,10 @@ use crate::host_focus::HostFocusIntent;
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 
+use bevy::winit::WINIT_WINDOWS;
+use objc2_app_kit::{NSResponder, NSView};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
 pub(crate) struct HostFocusPlatformPlugin;
 
 impl Plugin for HostFocusPlatformPlugin {
@@ -59,10 +63,6 @@ fn should_release_keys(outcome: ReclaimOutcome, pending_key_window: &mut bool) -
 }
 
 fn reclaim_first_responder(window_entity: Entity) -> ReclaimOutcome {
-    use bevy::winit::WINIT_WINDOWS;
-    use objc2_app_kit::{NSResponder, NSView};
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
     let view_ptr = WINIT_WINDOWS.with_borrow(|windows| {
         let id = windows.entity_to_winit.get(&window_entity)?;
         let wrapper = windows.windows.get(id)?;

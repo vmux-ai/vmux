@@ -177,6 +177,8 @@ mod tests {
     use serde_json::json;
     use vmux_api::protocol::ProcessId;
 
+    use vmux_session::AcpSession;
+
     fn session() -> AcpSession {
         AcpSession {
             agent_id: "anthropic".into(),
@@ -233,7 +235,6 @@ mod tests {
 
     #[test]
     fn acp_session_reply_sets_streaming() {
-        use vmux_session::AcpSession;
         let mut app = make_app();
         let entity = app
             .world_mut()

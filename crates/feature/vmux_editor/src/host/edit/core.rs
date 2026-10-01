@@ -10,6 +10,8 @@ use crate::edit::register::{RegisterKind, RegisterValue, Registers};
 use crate::edit::text_object::char_class;
 use crate::text::DisplayCells;
 
+use crate::edit::ex::ExRange;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Group {
     Insert,
@@ -969,7 +971,6 @@ impl EditCore {
     }
 
     fn ex_range(&self, range: crate::edit::ex::ExRange) -> std::ops::Range<usize> {
-        use crate::edit::ex::ExRange;
         match range {
             ExRange::CurrentLine => self.line_span(self.primary().head, 1),
             ExRange::WholeFile => 0..self.buffer.len_chars(),
@@ -1853,6 +1854,9 @@ impl EditCore {
 mod tests {
     use super::*;
 
+    use crate::host::keymap::vim::VimKeymap;
+    use crate::keymap::{KeyInput, Keymap, Mods};
+
     fn core(text: &str) -> EditCore {
         EditCore::new(
             PathBuf::from("a.txt"),
@@ -1867,9 +1871,6 @@ mod tests {
     }
 
     fn typed_after_vim_keys(text: &str, caret: usize, keys: &[&str], typed: &str) -> String {
-        use crate::host::keymap::vim::VimKeymap;
-        use crate::keymap::{KeyInput, Keymap, Mods};
-
         let mut c = core(text);
         c.mode = EditMode::Normal;
         c.set_caret(caret);

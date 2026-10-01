@@ -2,13 +2,13 @@ use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 
-mod executable;
-mod file_url;
-mod navigation;
-
 pub use executable::Executable;
 pub use file_url::FileUrl;
 pub use navigation::NavigationText;
+
+mod executable;
+mod file_url;
+mod navigation;
 
 pub struct AtomicFile;
 
@@ -196,6 +196,8 @@ impl From<PathBuf> for PathIdentity {
 mod tests {
     use super::*;
 
+    use std::os::unix::fs::PermissionsExt;
+
     #[test]
     fn atomic_file_creates_parent_and_replaces_existing_contents() {
         let directory = tempfile::tempdir().unwrap();
@@ -210,8 +212,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn atomic_file_preserves_existing_permissions() {
-        use std::os::unix::fs::PermissionsExt;
-
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("executable");
         std::fs::write(&path, b"first").unwrap();

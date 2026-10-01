@@ -1,14 +1,12 @@
+use super::snapshot::validate_key;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use zeroize::Zeroizing;
+
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(not(target_os = "macos"))]
 mod other;
-
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-
-use zeroize::Zeroizing;
-
-use super::snapshot::validate_key;
 
 const LOCKED: &str = "This Vault is locked on this device. Unlock it with a passkey.";
 

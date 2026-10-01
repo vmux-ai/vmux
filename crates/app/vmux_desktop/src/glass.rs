@@ -1,7 +1,18 @@
 use std::collections::HashMap;
+use std::ptr::NonNull;
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
+use bevy::winit::WINIT_WINDOWS;
+use objc2::{ClassType, MainThreadMarker, MainThreadOnly, rc::Retained, runtime::AnyClass};
+use objc2_app_kit::{
+    NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSGlassEffectView,
+    NSGlassEffectViewStyle, NSPanel, NSView, NSWindowCollectionBehavior,
+    NSWindowDidMoveNotification, NSWindowDidResizeNotification, NSWindowOrderingMode,
+    NSWindowStyleMask,
+};
+use objc2_foundation::{NSNotification, NSNotificationCenter, NSPoint, NSRect, NSSize};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use vmux_layout::window::ToggleFullscreenRequest;
 
 pub(crate) struct GlassPlugin;
@@ -53,11 +64,6 @@ struct WindowGlass {
 
 impl WindowGlass {
     fn track_parent_frame(&self) {
-        use objc2::ClassType;
-        use objc2_app_kit::{NSWindowDidMoveNotification, NSWindowDidResizeNotification};
-        use objc2_foundation::{NSNotification, NSNotificationCenter};
-        use std::ptr::NonNull;
-
         let (Some(backdrop), Some(parent)) = (&self._backdrop_window, &self._parent_window) else {
             return;
         };
@@ -84,16 +90,6 @@ impl WindowGlass {
 }
 
 fn install_window(mut state: NonSendMut<GlassState>, windows: Query<(Entity, &Window)>) {
-    use bevy::winit::WINIT_WINDOWS;
-    use objc2::{ClassType, MainThreadMarker, MainThreadOnly, rc::Retained, runtime::AnyClass};
-    use objc2_app_kit::{
-        NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSGlassEffectView,
-        NSGlassEffectViewStyle, NSPanel, NSView, NSWindowCollectionBehavior, NSWindowOrderingMode,
-        NSWindowStyleMask,
-    };
-    use objc2_foundation::{NSPoint, NSRect, NSSize};
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
@@ -214,8 +210,6 @@ fn restore_fullscreen_after_reveal(
     >,
     mut commands: Commands,
 ) {
-    use objc2_app_kit::NSWindowStyleMask;
-
     let Ok((window, pending)) = primary_window.single() else {
         return;
     };
@@ -266,7 +260,7 @@ fn activate_revealed_window(
         if !should_attempt_activation(glass.revealed, glass.active_confirmed, elapsed) {
             continue;
         }
-        if crate::runtime::ensure_key_window(entity) {
+        if crate::macos::ensure_key_window(entity) {
             glass.active_confirmed = true;
         } else if let Some(proxy) = proxy.as_ref() {
             let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
@@ -302,9 +296,6 @@ fn sync_window_visibility(
     mut exit_fullscreen: MessageReader<crate::window::ExitFullscreenRequest>,
     mut shortcut: MessageReader<vmux_input::ExitFullscreenShortcut>,
 ) {
-    use objc2::ClassType;
-    use objc2_app_kit::NSWindowStyleMask;
-
     let mut focused_fullscreen = false;
     let exit_fullscreen =
         exit_fullscreen.read().next().is_some() || shortcut.read().next().is_some();
@@ -382,8 +373,6 @@ fn focus_shadow_visible(focused: bool, visible: bool, fullscreen: bool) -> bool 
 }
 
 fn content_view_ptr(entity: Entity) -> Option<*mut core::ffi::c_void> {
-    use bevy::winit::WINIT_WINDOWS;
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     WINIT_WINDOWS.with_borrow(|windows| {
         let id = windows.entity_to_winit.get(&entity)?;
         let wrapper = windows.windows.get(id)?;
@@ -396,9 +385,6 @@ fn content_view_ptr(entity: Entity) -> Option<*mut core::ffi::c_void> {
 }
 
 fn keep_surface_transparent(windows: Query<Entity, With<Window>>) {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSColor, NSView};
-
     if MainThreadMarker::new().is_none() {
         return;
     }

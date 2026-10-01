@@ -229,6 +229,8 @@ mod tests {
     use std::task::{Context, Poll};
     use tokio::io::{AsyncRead, ReadBuf};
 
+    use crate::quic::{PeerRole, RelaySetup};
+
     const CODEC: LengthPrefixed = LengthPrefixed::new(64 * 1024);
 
     struct FailsWith(Option<ErrorKind>);
@@ -353,8 +355,6 @@ mod tests {
 
     #[tokio::test]
     async fn one_legs_setup_is_refused_by_the_other_legs_reader() {
-        use crate::quic::{PeerRole, RelaySetup};
-
         let stream = FrameStream::new(64 * 1024);
         let relay_setup = RelaySetup {
             device_id: crate::DeviceId::new("alpha"),

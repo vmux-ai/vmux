@@ -2,6 +2,8 @@ use std::time::{Duration, Instant};
 
 use crate::RemotePaths;
 
+use std::os::unix::fs::PermissionsExt;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Relay {
     url: String,
@@ -75,7 +77,6 @@ impl Relay {
         std::fs::write(&path, PersistedRelay::from(self).contents())?;
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         }
         Ok(())

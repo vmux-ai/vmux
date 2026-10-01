@@ -47,6 +47,8 @@ use vmux_setting::SearchEngineSetting;
 use vmux_terminal::{RestartPty, Terminal};
 use vmux_ui::i18n::{Locale, TranslationValue};
 
+use vmux_api::open_target::{OpenTarget, PaneDirection};
+
 pub(crate) struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
@@ -98,8 +100,6 @@ impl PageOpenCommand {
         target: Option<vmux_api::open_target::OpenTarget>,
         url: String,
     ) -> CommandInvocation {
-        use vmux_api::open_target::{OpenTarget, PaneDirection};
-
         let (id, arguments) = match target {
             Some(OpenTarget::InPlace) | None => {
                 ("open_in_place", serde_json::json!({ "url": url }))

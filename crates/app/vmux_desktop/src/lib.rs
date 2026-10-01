@@ -4,6 +4,14 @@
     clippy::new_ret_no_self
 )]
 
+use bevy::prelude::*;
+use bevy::window::{
+    CompositeAlphaMode, ExitCondition, MonitorSelection, Window as NativeWindow, WindowPlugin,
+    WindowPosition, WindowResolution,
+};
+
+use crate::plugin::DesktopPluginGroup;
+
 mod boot_status;
 #[cfg(any(feature = "recording", feature = "screenshots"))]
 mod capture_output;
@@ -30,6 +38,8 @@ mod relaunch;
 mod runtime;
 #[cfg(feature = "screenshots")]
 mod screenshot;
+#[cfg(test)]
+mod source_policy;
 
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod splash;
@@ -41,13 +51,6 @@ pub mod updater;
 mod window;
 #[cfg(any(target_os = "macos", test))]
 mod window_interaction;
-use bevy::prelude::*;
-use bevy::window::{
-    CompositeAlphaMode, ExitCondition, MonitorSelection, Window as NativeWindow, WindowPlugin,
-    WindowPosition, WindowResolution,
-};
-
-use crate::plugin::DesktopPluginGroup;
 
 pub struct VmuxPlugin;
 

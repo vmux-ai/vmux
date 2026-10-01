@@ -1,44 +1,25 @@
-mod arrangement;
-mod close;
-mod focus;
-mod identity;
-mod open;
-mod resize;
-mod tree;
-
+#[cfg(test)]
+use super::command::LayoutRequestPlugin;
+use super::target::SiblingDirection;
 use crate::host::zoom::PaneZoomPlugin;
 pub use crate::host::zoom::Zoomed;
 use crate::stack::Stack;
 #[cfg(test)]
 use crate::tab::Tab;
+use arrangement::ArrangementPlugin;
 use bevy::prelude::*;
 #[cfg(test)]
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
     window::PrimaryWindow,
 };
-use moonshine_save::prelude::*;
-use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
-use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
-#[cfg(test)]
-use vmux_ecs::host::manifest::FeaturePlugin;
-#[cfg(test)]
-use vmux_ecs::{Active, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget, PageOpenTask};
-#[cfg(test)]
-use vmux_flex::prelude::*;
-#[cfg(test)]
-use vmux_history::LastActivatedAt;
-
-#[cfg(test)]
-use super::command::LayoutRequestPlugin;
-use super::target::SiblingDirection;
-use arrangement::ArrangementPlugin;
 use close::ClosePlugin;
 pub use close::{ForcePaneClose, PendingPaneClose};
 use focus::FocusPlugin;
 pub use focus::{PaneHoverCooldown, PendingCursorWarp, pane_hover_cursor_position};
 use identity::IdentityPlugin;
 pub use identity::{PaneId, SpawnCounter, SpawnSeq};
+use moonshine_save::prelude::*;
 use open::OpenPlugin;
 #[cfg(test)]
 use open::{BesideOpenPlugin, DirectionalOpenPlugin};
@@ -51,6 +32,24 @@ pub use tree::{
     split_leaf_into_two, split_or_extend,
 };
 pub(crate) use tree::{set_split_direction, spawn_split_from_leaf};
+use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
+use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
+#[cfg(test)]
+use vmux_ecs::host::manifest::FeaturePlugin;
+#[cfg(test)]
+use vmux_ecs::{Active, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget, PageOpenTask};
+#[cfg(test)]
+use vmux_flex::prelude::*;
+#[cfg(test)]
+use vmux_history::LastActivatedAt;
+
+mod arrangement;
+mod close;
+mod focus;
+mod identity;
+mod open;
+mod resize;
+mod tree;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct ArrangementSet;

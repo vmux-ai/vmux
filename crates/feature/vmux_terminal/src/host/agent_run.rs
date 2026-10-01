@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, ProcessId};
 use vmux_api::service::RUN_OSC;
@@ -33,6 +34,8 @@ use crate::{
     AgentRunTerminal, ProcessExited, Terminal, TerminalReinputRequest, TerminalStackSpawnRequest,
 };
 use vmux_space::valid_cwd;
+
+use AgentPaneDirection as D;
 
 #[vmux_api::contract(Copy, Eq)]
 pub enum PlacementMode {
@@ -179,7 +182,6 @@ impl RunTerminals<'_, '_> {
         seq_q: &Query<&SpawnSeq>,
         desired_cwd: &Path,
     ) -> Vec<RunTerminalCandidate> {
-        use bevy::ecs::relationship::Relationship;
         let Some(agent_tab) = AgentPane::new(agent_pane).tab(child_of_q, tab_q) else {
             return Vec::new();
         };
@@ -215,7 +217,6 @@ impl RunTerminals<'_, '_> {
     }
 
     fn pane(&self, process_id: ProcessId, child_of_q: &Query<&ChildOf>) -> Option<Entity> {
-        use bevy::ecs::relationship::Relationship;
         let (terminal, _) = self
             .terminals
             .iter()
@@ -259,7 +260,6 @@ impl AgentPane {
         child_of_q: &Query<&ChildOf>,
         tab_q: &Query<Entity, With<Tab>>,
     ) -> Option<Entity> {
-        use bevy::ecs::relationship::Relationship;
         let mut cur = self.0;
         for _ in 0..32 {
             if tab_q.contains(cur) {
@@ -296,7 +296,6 @@ impl AgentPane {
     }
 
     fn direction(d: &AgentPaneDirection) -> PaneDirection {
-        use AgentPaneDirection as D;
         match d {
             D::Top => PaneDirection::Top,
             D::Right => PaneDirection::Right,
@@ -654,7 +653,6 @@ pub(super) struct AgentRunContext<'w, 's> {
 
 impl AgentRunContext<'_, '_> {
     fn resolve_pane(&self, anchor: ProcessId) -> Option<(Entity, Entity, AgentTerminalRegion)> {
-        use bevy::ecs::relationship::Relationship;
         let (terminal, _, terminal_parent, region) = self
             .agent_terminals
             .iter()
@@ -911,6 +909,8 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_setting::{BrowserSettings, ShortcutSettings};
+
+    use bevy::ecs::system::RunSystemOnce;
 
     fn test_settings() -> AppSettings {
         AppSettings {
@@ -1214,8 +1214,6 @@ mod tests {
 
     #[test]
     fn explicit_run_terminal_errors_distinguish_missing_page_and_launch() {
-        use bevy::ecs::system::RunSystemOnce;
-
         let mut app = App::new();
         let terminal_pid = ProcessId::new();
         let missing_pid = ProcessId::new();

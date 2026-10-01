@@ -4,6 +4,8 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
@@ -437,7 +439,6 @@ fn copy_diagnostic_file(source: &Path, destination: &Path) -> Result<(), String>
 
 #[cfg(unix)]
 fn secure_directory(path: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
         .map_err(|error| error.to_string())
 }
@@ -449,7 +450,6 @@ fn secure_directory(_path: &Path) -> Result<(), String> {
 
 #[cfg(unix)]
 fn secure_file(path: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
         .map_err(|error| error.to_string())
 }

@@ -5,21 +5,6 @@
 )]
 
 #[cfg(host)]
-pub(crate) struct Feature;
-
-#[cfg(host)]
-impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
-    const SOURCE: &'static str = include_str!("feature.ron");
-}
-
-pub mod event;
-pub mod render_model;
-
-pub mod ui;
-
-#[cfg(host)]
-mod host;
-#[cfg(host)]
 pub use host::{
     AgentCwd, AgentNewTerminalTab, AgentRun, AgentRunShell, AgentRunTerminal,
     AgentRunWithPlacementOverride, AgentShellMode, AgentTerminalSend, AgentTerminalShell,
@@ -35,3 +20,19 @@ pub use host::{
 pub(crate) use host::{
     contract, launch, pid, plugin, process_monitor, shell_input, snapshot, theme,
 };
+
+#[cfg(host)]
+pub(crate) struct Feature;
+
+#[cfg(host)]
+impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
+    const SOURCE: &'static str = include_str!("feature.ron");
+}
+
+pub mod event;
+pub mod render_model;
+
+pub mod ui;
+
+#[cfg(host)]
+mod host;

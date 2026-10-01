@@ -6,6 +6,8 @@ use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 use vmux_ecs::event::{FileLine, StyledSpan};
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 pub const FILE_VIEW_MAX_BYTES: u64 = 50 * 1024 * 1024;
 
 pub const HIGHLIGHT_MAX_BYTES: u64 = 5 * 1024 * 1024;
@@ -26,8 +28,6 @@ pub fn select_syntax(path: &Path) -> &'static syntect::parsing::SyntaxReference 
         .and_then(|ext| ss.find_syntax_by_extension(ext))
         .unwrap_or_else(|| ss.find_syntax_plain_text())
 }
-
-use std::sync::atomic::{AtomicBool, Ordering};
 
 static DARK_THEME: AtomicBool = AtomicBool::new(true);
 

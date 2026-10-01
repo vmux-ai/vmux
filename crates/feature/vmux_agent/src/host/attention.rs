@@ -200,6 +200,8 @@ mod tests {
     use super::*;
     use crate::host::event::CommandOrigin;
 
+    use ProcessId;
+
     pub(crate) fn bell_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -271,7 +273,6 @@ mod tests {
 
     #[test]
     fn bell_resolves_to_agent_attention() {
-        use ProcessId;
         let mut app = bell_test_app();
         let pid = ProcessId::new();
         let agent = spawn_agent_with_pid(&mut app, pid);
@@ -284,7 +285,6 @@ mod tests {
 
     #[test]
     fn bell_unknown_process_id_emits_nothing() {
-        use ProcessId;
         let mut app = bell_test_app();
         let _agent = spawn_agent_with_pid(&mut app, ProcessId::new());
         app.world_mut()

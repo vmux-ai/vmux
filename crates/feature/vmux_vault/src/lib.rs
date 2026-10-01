@@ -1,6 +1,11 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 #[cfg(host)]
+pub use agent::VaultToolPlugin;
+#[cfg(host)]
+pub use host::VaultPlugin;
+
+#[cfg(host)]
 pub(crate) struct Feature;
 
 #[cfg(host)]
@@ -15,8 +20,3 @@ mod host;
 mod state;
 #[cfg(ui)]
 mod ui;
-
-#[cfg(host)]
-pub use agent::VaultToolPlugin;
-#[cfg(host)]
-pub use host::VaultPlugin;

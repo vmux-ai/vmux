@@ -9,6 +9,8 @@ use super::super::server::{
 };
 use vmux_agent::acp::AcpInput;
 
+use vmux_api::protocol::AgentCommandResult;
+
 pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> SharedResponse {
     match request {
         SharedMessage::ListSessions => SharedResponse::Sessions(state.sessions().await),
@@ -151,7 +153,6 @@ impl RemoteState {
     where
         T: vmux_api::AgentRequestContract + serde::Serialize,
     {
-        use vmux_api::protocol::AgentCommandResult;
         let Ok(request) = AgentRequest::encode(&payload) else {
             return SharedResponse::Failed(SharedFailure::Invalid);
         };

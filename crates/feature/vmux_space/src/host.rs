@@ -1,18 +1,3 @@
-mod agent;
-mod agent_workspace;
-mod composer;
-mod cwd;
-mod key;
-mod persistence;
-mod plugin;
-mod project;
-mod snapshot_updater;
-mod spaces;
-mod tool;
-mod workspace;
-
-type SpacesUiStateUpdates = vmux_ecs::host::UiState<vmux_api::space::SpacesUiState>;
-
 pub use agent::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktree,
     AgentCreateWorktreeOnBranch, AgentListSpaces, AgentPrepareWorktree, AgentRenameProfile,
@@ -28,3 +13,18 @@ pub use vmux_api::space::{
     SpaceRenameRequest,
 };
 pub use workspace::{PendingProject, RepositoryNeedsWorktree};
+
+mod agent;
+mod agent_workspace;
+mod composer;
+mod cwd;
+mod key;
+mod persistence;
+mod plugin;
+mod project;
+mod snapshot_updater;
+mod spaces;
+mod tool;
+mod workspace;
+
+type SpacesUiStateUpdates = vmux_ecs::host::UiState<vmux_api::space::SpacesUiState>;

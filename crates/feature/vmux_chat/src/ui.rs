@@ -1,7 +1,5 @@
 #![allow(non_snake_case)]
 
-mod activity;
-mod format;
 use self::agent::ChatHeader;
 use self::approval::ChatApprovalDock;
 use self::composer::ChatDock;
@@ -10,6 +8,9 @@ use self::keys::use_chat_keys;
 use self::state::use_chat;
 use self::transcript::ChatTranscript;
 use dioxus::prelude::*;
+
+mod activity;
+mod format;
 
 #[vmux_native::page(
     component = Page,

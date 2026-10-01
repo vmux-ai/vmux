@@ -5,6 +5,17 @@
 )]
 
 #[cfg(host)]
+pub use host::{
+    AcpAgentConfig, AgentSettings, AppSettings, AppearanceSettings, BookmarkFolderSettings,
+    BrowserSettings, ColorScheme, ColorSchemeChanged, DirSource, EXPLORER_DEFAULT_WIDTH,
+    EXPLORER_MAX_WIDTH, EXPLORER_MIN_WIDTH, KeyComboDef, ResolvedColorScheme, ResolvedScheme,
+    SearchEngine, SearchEngineSetting, SettingToolPlugin, Settings, SettingsLoadSet,
+    SettingsPlugin, SettingsRuntimePlugin, SettingsSaveRequest, ShortcutDef, ShortcutEntry,
+    ShortcutSettings, SpaceOverrides, SpaceProject, StartupDir, SystemAppearance, TerminalSettings,
+    TerminalTheme, UpdateChannel,
+};
+
+#[cfg(host)]
 pub(crate) struct Feature;
 
 #[cfg(host)]
@@ -24,13 +35,3 @@ pub mod ui;
 
 #[cfg(host)]
 mod host;
-#[cfg(host)]
-pub use host::{
-    AcpAgentConfig, AgentSettings, AppSettings, AppearanceSettings, BookmarkFolderSettings,
-    BrowserSettings, ColorScheme, ColorSchemeChanged, DirSource, EXPLORER_DEFAULT_WIDTH,
-    EXPLORER_MAX_WIDTH, EXPLORER_MIN_WIDTH, KeyComboDef, ResolvedColorScheme, ResolvedScheme,
-    SearchEngine, SearchEngineSetting, SettingToolPlugin, Settings, SettingsLoadSet,
-    SettingsPlugin, SettingsRuntimePlugin, SettingsSaveRequest, ShortcutDef, ShortcutEntry,
-    ShortcutSettings, SpaceOverrides, SpaceProject, StartupDir, SystemAppearance, TerminalSettings,
-    TerminalTheme, UpdateChannel,
-};

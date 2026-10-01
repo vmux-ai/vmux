@@ -23,6 +23,10 @@ use crate::lsp::{
     OpenDoc, ServerKey, store,
 };
 
+use bevy::tasks::futures_lite::future;
+use lsp_types::GotoDefinitionResponse::*;
+use lsp_types::{HoverContents, MarkedString};
+
 pub fn line_text(line: &FileLine) -> String {
     line.spans.iter().map(|s| s.text.as_str()).collect()
 }
@@ -668,7 +672,6 @@ impl LspManager {
 }
 
 fn hover_contents_to_string(c: lsp_types::HoverContents) -> String {
-    use lsp_types::{HoverContents, MarkedString};
     let marked = |m: MarkedString| match m {
         MarkedString::String(s) => s,
         MarkedString::LanguageString(ls) => {
@@ -758,7 +761,6 @@ fn parse_definition(value: &serde_json::Value) -> Option<(PathBuf, u32, u32)> {
         return None;
     }
 
-    use lsp_types::GotoDefinitionResponse::*;
     match serde_json::from_value::<lsp_types::GotoDefinitionResponse>(result.clone()).ok()? {
         Scalar(l) => loc_tuple(&l.uri, l.range.start),
         Array(ls) => ls
@@ -857,8 +859,6 @@ fn finish_server_starts(
     mut manager: Single<&mut LspManager>,
     mut commands: Commands,
 ) {
-    use bevy::tasks::futures_lite::future;
-
     for (entity, mut start) in &mut starts {
         let Some(result) = future::block_on(future::poll_once(&mut start.task)) else {
             continue;
@@ -1549,6 +1549,12 @@ mod tests {
     use super::*;
     use vmux_ecs::event::StyledSpan;
 
+    use crate::edit::highlight_cache::HighlightCache;
+    use crate::edit::{EditCore, EditMode};
+    use crate::host::editor::{Editor, FileView};
+    use crate::lsp::{LspDiagnosticsInbox, LspDiagnosticsSender};
+    use std::path::PathBuf;
+
     #[test]
     fn a_language_string_hover_survives_as_a_highlighted_code_block() {
         let contents = lsp_types::HoverContents::Scalar(lsp_types::MarkedString::LanguageString(
@@ -1662,9 +1668,6 @@ mod tests {
 
     #[test]
     fn drain_empties_outbox() {
-        use crate::lsp::{LspDiagnosticsInbox, LspDiagnosticsSender};
-        use std::path::PathBuf;
-
         let mut app = App::new();
         let (outbox, inbox) = LspDiagnosticsSender::channel();
         let probe = inbox.0.clone();
@@ -1690,12 +1693,6 @@ mod tests {
 
     #[test]
     fn diagnostics_map_through_editor() {
-        use crate::edit::highlight_cache::HighlightCache;
-        use crate::edit::{EditCore, EditMode};
-        use crate::host::editor::{Editor, FileView};
-        use crate::lsp::LspDiagnosticsSender;
-        use std::path::PathBuf;
-
         let path = PathBuf::from("/tmp/vmux_lsp_editor.rs");
         let mut app = App::new();
         let (outbox, inbox) = LspDiagnosticsSender::channel();

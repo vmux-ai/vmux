@@ -1,10 +1,9 @@
+use crate::DeviceId;
+use serde::{Deserialize, Serialize};
+
 pub mod endpoint;
 
 pub mod tunnel;
-
-use serde::{Deserialize, Serialize};
-
-use crate::DeviceId;
 
 pub const ALPN: &[u8] = b"vmux/9";
 

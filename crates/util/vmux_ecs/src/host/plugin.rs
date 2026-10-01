@@ -12,6 +12,8 @@ use crate::component::{
 use crate::icon::{BuiltinIcon, PageIcon};
 use vmux_api::bookmark::SmartBookmarkFolder;
 
+use bevy::ecs::relationship::Relationship;
+
 pub struct EcsPlugin;
 
 impl Plugin for EcsPlugin {
@@ -54,8 +56,6 @@ impl Plugin for EcsPlugin {
 }
 
 fn activate(trigger: On<ActivateRequest>, child_of: Query<&ChildOf>, mut commands: Commands) {
-    use bevy::ecs::relationship::Relationship;
-
     let activated_at = LastActivatedAt::now();
     let mut current = trigger.event_target();
     commands.entity(current).insert(activated_at);

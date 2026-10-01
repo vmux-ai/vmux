@@ -4,6 +4,11 @@ use bevy::math::Vec2;
 #[cfg(any(target_os = "macos", test))]
 use crate::present::WindowedFrameRect;
 
+#[cfg(target_os = "macos")]
+pub(crate) use platform::CommandBarPointerEvent;
+#[cfg(target_os = "macos")]
+pub use platform::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
+
 pub struct NativeBridge;
 
 impl NativeBridge {
@@ -43,8 +48,3 @@ mod platform;
 #[cfg(not(target_os = "macos"))]
 #[path = "native_bridge/other.rs"]
 mod platform;
-
-#[cfg(target_os = "macos")]
-pub(crate) use platform::CommandBarPointerEvent;
-#[cfg(target_os = "macos")]
-pub use platform::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};

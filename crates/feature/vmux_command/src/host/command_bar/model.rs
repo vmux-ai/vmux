@@ -19,10 +19,10 @@ use self::results::{
     StartRows,
 };
 
+pub(super) use query::PaletteQuery;
+
 mod query;
 mod results;
-
-pub(super) use query::PaletteQuery;
 
 #[derive(Clone, Debug, Default)]
 pub struct PaletteDraft {

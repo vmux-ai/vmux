@@ -558,6 +558,8 @@ fn apply_results(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_ecs::page::PageReady;
+
     #[test]
     fn streaming_snapshots_wait_for_frame_interval() {
         assert!(!chat_snapshot_due(
@@ -816,8 +818,6 @@ mod tests {
 
     #[test]
     fn page_ready_clears_chat_synced_only_for_chat_views() {
-        use vmux_ecs::page::PageReady;
-
         let mut app = App::new();
         app.add_observer(reset_synced);
 

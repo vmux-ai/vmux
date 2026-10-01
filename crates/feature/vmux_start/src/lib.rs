@@ -1,6 +1,9 @@
 #![allow(non_snake_case, clippy::too_many_arguments, clippy::type_complexity)]
 
 #[cfg(host)]
+pub use host::StartPlugin;
+
+#[cfg(host)]
 pub(crate) struct Feature;
 
 #[cfg(host)]
@@ -15,8 +18,6 @@ pub mod ui;
 
 #[cfg(host)]
 mod host;
-#[cfg(host)]
-pub use host::StartPlugin;
 
 pub mod roster;
 

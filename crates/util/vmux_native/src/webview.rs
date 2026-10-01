@@ -1,3 +1,15 @@
+use crate::page::NativePage;
+use crate::webview::dom::Dom;
+use crate::webview::report::PageMessage;
+use crate::webview::route::PageRoutes;
+use crate::webview::shim::WRY_HOST_SHIM;
+pub use embed::{AssetReply, Assets, Embedding, Outbox, Wake};
+use std::cell::Cell;
+use std::rc::Rc;
+use tracing::error;
+
+use wry::WebViewBuilderExtMacos;
+
 mod dom;
 mod dom_request;
 mod element;
@@ -12,18 +24,6 @@ mod measurement;
 mod report;
 mod route;
 mod shim;
-
-pub use embed::{AssetReply, Assets, Embedding, Outbox, Wake};
-
-use std::cell::Cell;
-use std::rc::Rc;
-use tracing::error;
-
-use crate::page::NativePage;
-use crate::webview::dom::Dom;
-use crate::webview::report::PageMessage;
-use crate::webview::route::PageRoutes;
-use crate::webview::shim::WRY_HOST_SHIM;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Appearance {
@@ -68,10 +68,7 @@ impl WebView {
         let builder = wry::WebViewBuilder::new();
         #[cfg(target_os = "macos")]
         let builder = match macos::SharedWebProcess::configuration() {
-            Some(config) => {
-                use wry::WebViewBuilderExtMacos;
-                builder.with_webview_configuration(config)
-            }
+            Some(config) => builder.with_webview_configuration(config),
             None => builder,
         };
         let webview = builder

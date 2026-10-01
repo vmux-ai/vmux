@@ -6,6 +6,8 @@ use vmux_ecs::profile::mcp_credentials::McpCredentialAccess;
 use vmux_ecs::profile::mcp_credentials::McpCredentialStorage;
 use vmux_tool::{McpServerManifest, McpTransport};
 
+use std::fmt::Write;
+
 pub(crate) struct ManagedMcpServers(BTreeMap<String, McpServerManifest>);
 
 impl ManagedMcpServers {
@@ -107,8 +109,6 @@ impl McpAuthorization {
     }
 
     fn environment_name(name: &str) -> String {
-        use std::fmt::Write;
-
         let mut encoded = String::from("VMUX_MCP_OAUTH_");
         for byte in name.as_bytes() {
             write!(&mut encoded, "{byte:02X}").unwrap();

@@ -1,4 +1,11 @@
 use bevy::prelude::*;
+pub use controller::{
+    ApplyCommandBarRequests, CommandBarNativeSize, CommandBarOpenRequest, PendingCommandBarReveal,
+    WriteCommandBarRequests,
+};
+pub use model::ResumeRows;
+pub use panel::CommandBarPanelActive;
+
 mod completion;
 mod controller;
 mod model;
@@ -6,14 +13,6 @@ mod palette;
 mod panel;
 mod project_files;
 mod work_snapshot;
-
-pub use model::ResumeRows;
-pub use panel::CommandBarPanelActive;
-
-pub use controller::{
-    ApplyCommandBarRequests, CommandBarNativeSize, CommandBarOpenRequest, PendingCommandBarReveal,
-    WriteCommandBarRequests,
-};
 
 #[derive(EntityEvent)]
 pub struct CommandBarDismiss {

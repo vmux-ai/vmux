@@ -1,5 +1,6 @@
-pub mod component;
-pub mod plugin;
+pub use archive::{
+    ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
+};
 pub use component::{
     ActivateRequest, Active, AgentWorkingDir, Bookmark, BookmarkOrder, Collapsed, CreatedAt,
     EffectiveStartupUrl, EntityTarget, Folder, HostShell, JsonArguments, KeyboardOwner,
@@ -7,7 +8,25 @@ pub use component::{
     TransitionType, Url, Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen,
     WindowFullscreenSet, now_millis,
 };
+pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
+pub use host_spawn::HostSpawnRoute;
+pub use launcher::{
+    ContributedCommandChosen, HostsLauncher, InlineTransitionRequested, LauncherDismissRequest,
+    RendersLauncherPanel, RestoreKeyboardToStack, StackInPaneChosen,
+};
+pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
+pub use overlay::{OverlayShownInline, OverlayState, OverlayStateQuery, WindowOverlay};
+pub use page_open::{
+    CefPageAttachRequest, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenId,
+    PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask, PendingPrompt,
+    PendingPromptAttachments,
+};
 pub use plugin::EcsPlugin;
+pub use ui_state::{UiState, UiStatePlugin, UiStateWrite};
+pub use workspace::{ComputeFocusSet, StackCommandSet, TabCommandSet};
+
+pub mod component;
+pub mod plugin;
 
 pub mod agent;
 pub mod archive;
@@ -27,22 +46,3 @@ pub mod terminal;
 pub mod ui_state;
 pub mod wake;
 pub mod workspace;
-
-pub use archive::{
-    ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
-};
-pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
-pub use host_spawn::HostSpawnRoute;
-pub use launcher::{
-    ContributedCommandChosen, HostsLauncher, InlineTransitionRequested, LauncherDismissRequest,
-    RendersLauncherPanel, RestoreKeyboardToStack, StackInPaneChosen,
-};
-pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
-pub use overlay::{OverlayShownInline, OverlayState, OverlayStateQuery, WindowOverlay};
-pub use page_open::{
-    CefPageAttachRequest, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenId,
-    PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask, PendingPrompt,
-    PendingPromptAttachments,
-};
-pub use ui_state::{UiState, UiStatePlugin, UiStateWrite};
-pub use workspace::{ComputeFocusSet, StackCommandSet, TabCommandSet};

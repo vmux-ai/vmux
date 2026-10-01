@@ -742,6 +742,8 @@ mod tests {
     };
     use bevy::ecs::relationship::Relationship;
 
+    use bevy::ecs::system::RunSystemOnce;
+
     #[test]
     fn stack_mcp_definitions_are_the_dispatchable_command_set() {
         let definitions = CommandManifest::for_feature::<crate::Feature>().into_vec();
@@ -1655,7 +1657,6 @@ mod tests {
 
     #[test]
     fn active_tab_param_picks_active_space_tab_not_global_max() {
-        use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
         let main = app.world_mut().spawn(crate::window::Main).id();
         let space_a = app
@@ -1698,7 +1699,6 @@ mod tests {
 
     #[test]
     fn active_tab_param_falls_back_to_global_when_no_scoped_active_tab() {
-        use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
         let main = app.world_mut().spawn(crate::window::Main).id();
         app.world_mut()

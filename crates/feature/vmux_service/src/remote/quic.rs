@@ -1,24 +1,21 @@
-pub mod dispatch;
-
-pub(crate) mod dialer;
-
-use std::time::Duration;
-
-use tokio::sync::watch;
-
-use vmux_transport::quic::endpoint::{RECEIVE_WINDOW, SelfSignedIdentity};
-
-use vmux_api::protocol::{ServiceMessage, SharedMessage};
-
+use super::server::RemoteState;
 use crate::AuthorizationOutcome;
+use crate::RemotePaths;
+use std::time::Duration;
+use tokio::sync::watch;
+use vmux_api::protocol::{ServiceMessage, SharedMessage};
 use vmux_transport::DeviceId;
 use vmux_transport::framing::{Frame, FrameError, FrameStream};
+use vmux_transport::quic::endpoint::{RECEIVE_WINDOW, SelfSignedIdentity};
 use vmux_transport::quic::{
     ClientCredential, ClientSetup, CloseCode, MessageType, SessionAccepted,
 };
 
-use super::server::RemoteState;
-use crate::RemotePaths;
+use vmux_api::protocol::SharedEvent as Shared;
+
+pub mod dispatch;
+
+pub(crate) mod dialer;
 
 const AUTHORIZATION_POLL: Duration = Duration::from_secs(1);
 
@@ -380,7 +377,6 @@ impl SessionEvents {
         &self,
         event: vmux_api::protocol::SharedEvent,
     ) -> Option<vmux_api::protocol::SharedEvent> {
-        use vmux_api::protocol::SharedEvent as Shared;
         match event {
             Shared::AcpAgentInfo { .. } | Shared::AcpWorkspaceChanged { .. } => {
                 let session = self.state.current_session(&self.sid).await?;

@@ -19,6 +19,8 @@ use vmux_tool::{
 };
 use vmux_transport::service::ServiceConnection;
 
+use base64::Engine;
+
 pub struct McpPlugin;
 
 impl Plugin for McpPlugin {
@@ -540,7 +542,6 @@ pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
             }
             let mut content = vec![json!({"type": "text", "text": result.content})];
             if let Some(image) = result.image {
-                use base64::Engine;
                 let data = base64::engine::general_purpose::STANDARD.encode(&image.png);
                 content.push(json!({
                     "type": "image",

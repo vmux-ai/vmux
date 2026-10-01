@@ -170,6 +170,8 @@ mod tests {
     use crate::contract::ContractPlugin;
     use bevy::ecs::message::Messages;
 
+    use crate::lsp::manager::LspGoto;
+
     #[test]
     fn global_search_opens_only_the_target_stack_explorer() {
         let mut app = App::new();
@@ -295,8 +297,6 @@ mod tests {
 
     #[test]
     fn explorer_goto_writes_lsp_goto_message() {
-        use crate::lsp::manager::LspGoto;
-
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, SearchPlugin))
             .add_message::<LspGoto>();

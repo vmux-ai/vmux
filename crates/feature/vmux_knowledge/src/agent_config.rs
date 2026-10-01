@@ -5,6 +5,8 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 #[cfg(unix)]
 use std::collections::HashSet;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 
 use crate::{KnowledgeVault, SkillsDir};
 
@@ -150,8 +152,6 @@ fn keep_first_error(first: &mut Option<io::Error>, result: io::Result<()>) {
 
 #[cfg(unix)]
 fn link_instructions(path: &Path, canonical: &Path) -> io::Result<()> {
-    use std::os::unix::fs::symlink;
-
     match std::fs::symlink_metadata(path) {
         Ok(metadata) => {
             if metadata.file_type().is_symlink() {
@@ -315,8 +315,6 @@ fn sync_claude_skills(
     skills_root: &Path,
     skills: &[PathBuf],
 ) -> io::Result<()> {
-    use std::os::unix::fs::symlink;
-
     std::fs::create_dir_all(destination)?;
     let desired = skills.iter().cloned().collect::<HashSet<_>>();
     for entry in std::fs::read_dir(destination)?.flatten() {
@@ -354,8 +352,6 @@ fn sync_claude_skills(
 
 #[cfg(unix)]
 fn redirect_empty_directory(path: &Path, target: &Path) -> io::Result<()> {
-    use std::os::unix::fs::symlink;
-
     std::fs::create_dir_all(target)?;
     match std::fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -619,6 +615,8 @@ fn write_changed(path: &Path, existing: &str, updated: &str) -> io::Result<()> {
 mod tests {
     use super::*;
 
+    use std::os::unix::fs::symlink;
+
     fn paths(root: &Path) -> AgentConfigPaths {
         AgentConfigPaths {
             claude_instructions: root.join("claude/CLAUDE.md"),
@@ -860,7 +858,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn link_instructions_leaves_foreign_symlink_untouched() {
-        use std::os::unix::fs::symlink;
         let temp = tempfile::tempdir().unwrap();
         let canonical = temp.path().join("knowledge/AGENTS.md");
         let dotfiles = temp.path().join("dotfiles/CLAUDE.md");

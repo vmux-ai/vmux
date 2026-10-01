@@ -7,6 +7,9 @@ use super::repository::VaultRepositoryPath;
 use super::sync::local_change_count;
 use super::{repository_dir, root_dir};
 
+use vmux_api::vault::VaultProvider;
+use vmux_api::vault::VaultStatusSnapshot;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VaultStatus {
     pub root: PathBuf,
@@ -96,8 +99,6 @@ impl VaultStatus {
     }
 
     pub fn snapshot(&self) -> vmux_api::vault::VaultStatusSnapshot {
-        use vmux_api::vault::VaultStatusSnapshot;
-
         let remote = self.sanitized_remote();
         let connected = self.initialized && remote.is_some();
         let provider = if !connected {
@@ -142,8 +143,6 @@ impl VaultStatus {
     }
 
     fn provider(remote: &str) -> vmux_api::vault::VaultProvider {
-        use vmux_api::vault::VaultProvider;
-
         if Path::new(remote).is_absolute() {
             return VaultProvider::CloudFolder;
         }

@@ -3,6 +3,24 @@ use bevy_app::{App, Plugin};
 use vmux_ecs::host::manifest::FeaturePlugin;
 
 #[cfg(host)]
+pub use handoff::ImportedConversation;
+#[cfg(host)]
+pub use media::ChatAttachmentHydrationRequest;
+pub use model::{ChatModeStateChanged, ChatModelStateChanged, Models};
+pub use prompt::{Attach, Attachments, Browsed, RemoveAttachment};
+pub use room::{Agents, Conversation, LiveTurn, Log, Reported, Submitted};
+#[cfg(host)]
+pub use session::{
+    ChatAttachmentProjection, ChatBranchesProjection, ChatComposerContext, ChatHistoryQuery,
+    ChatHistoryResult, ChatMediaProjection, ChatResumeProjection, ChatSnapshotProjection,
+    ChatSynced, ChatTranscriptProjection, ChatView, PendingAgentChoice, TranscriptPage,
+    TranscriptTail, USER_CHOICE_REQUESTED,
+};
+pub use state::{ChatRuntime, PublishComposerEffect, RepublishChatUiState};
+#[cfg(host)]
+pub use tool::ChatToolPlugin;
+
+#[cfg(host)]
 mod composer;
 mod group;
 #[cfg(host)]
@@ -22,24 +40,6 @@ mod state;
 mod tool;
 #[cfg(host)]
 mod transcript;
-
-#[cfg(host)]
-pub use handoff::ImportedConversation;
-#[cfg(host)]
-pub use media::ChatAttachmentHydrationRequest;
-pub use model::{ChatModeStateChanged, ChatModelStateChanged, Models};
-pub use prompt::{Attach, Attachments, Browsed, RemoveAttachment};
-pub use room::{Agents, Conversation, LiveTurn, Log, Reported, Submitted};
-#[cfg(host)]
-pub use session::{
-    ChatAttachmentProjection, ChatBranchesProjection, ChatComposerContext, ChatHistoryQuery,
-    ChatHistoryResult, ChatMediaProjection, ChatResumeProjection, ChatSnapshotProjection,
-    ChatSynced, ChatTranscriptProjection, ChatView, PendingAgentChoice, TranscriptPage,
-    TranscriptTail, USER_CHOICE_REQUESTED,
-};
-pub use state::{ChatRuntime, PublishComposerEffect, RepublishChatUiState};
-#[cfg(host)]
-pub use tool::ChatToolPlugin;
 
 #[vmux_native::page]
 pub struct ChatPlugin;

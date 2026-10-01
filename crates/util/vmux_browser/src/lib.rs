@@ -1,5 +1,33 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+use bevy::prelude::*;
+use bevy_cef::prelude::*;
+use bevy_cef_core::prelude::CefEmbeddedHosts;
+pub use command::{NavigationRequest, OpenRequest, ShowDevToolsRequest, ZoomRequest};
+pub use host::AgentBrowserResolve;
+pub use host::WebviewLoadCompleted;
+pub use host::{native_left_mouse_down, set_native_left_mouse_down};
+pub use host_focus::HostFocusIntent;
+pub use infrastructure::{InfrastructureWebview, PopupWebview, RetiredInfrastructureWebview};
+pub use native_bridge::NativeBridge;
+#[cfg(target_os = "macos")]
+pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
+pub use native_layout::NativeLayout;
+pub use navigation::OpenHistoryRequest;
+pub use tool::BrowserToolPlugin;
+use vmux_command::ReadCommandRequests;
+use vmux_ecs::page::PageManifest;
+use vmux_layout::event::{
+    HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
+    RemoteCopyEvent, RemotePairingDismissRequest, RemotePairingShowRequest, RemoteRequest,
+    RemoteRevokeRequest, SideSheetProjectOpenRequest, SideSheetResizeEvent,
+    SideSheetSectionRequest, SideSheetStackActivateRequest, SideSheetStackCloseRequest,
+    SideSheetStackCreateRequest, WindowDragRegionEvent,
+};
+pub use vmux_layout::{Browser, Loading};
+use vmux_ui::i18n::Locale;
+pub use window_drag::WindowDragRegion;
+
 pub(crate) struct Feature;
 
 impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
@@ -26,35 +54,6 @@ mod snapshot;
 mod state;
 mod tool;
 mod window_drag;
-pub use command::{NavigationRequest, OpenRequest, ShowDevToolsRequest, ZoomRequest};
-pub use host::AgentBrowserResolve;
-pub use host::WebviewLoadCompleted;
-pub use host_focus::HostFocusIntent;
-pub use infrastructure::{InfrastructureWebview, PopupWebview, RetiredInfrastructureWebview};
-pub use navigation::OpenHistoryRequest;
-pub use tool::BrowserToolPlugin;
-pub use window_drag::WindowDragRegion;
-
-pub use native_bridge::NativeBridge;
-#[cfg(target_os = "macos")]
-pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
-pub use native_layout::NativeLayout;
-
-use bevy::prelude::*;
-use bevy_cef::prelude::*;
-use bevy_cef_core::prelude::CefEmbeddedHosts;
-use vmux_command::ReadCommandRequests;
-use vmux_ecs::page::PageManifest;
-use vmux_layout::event::{
-    HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
-    RemoteCopyEvent, RemotePairingDismissRequest, RemotePairingShowRequest, RemoteRequest,
-    RemoteRevokeRequest, SideSheetProjectOpenRequest, SideSheetResizeEvent,
-    SideSheetSectionRequest, SideSheetStackActivateRequest, SideSheetStackCloseRequest,
-    SideSheetStackCreateRequest, WindowDragRegionEvent,
-};
-pub use vmux_layout::{Browser, Loading};
-
-use vmux_ui::i18n::Locale;
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub(crate) enum BrowserSystemSet {
@@ -155,8 +154,6 @@ impl Plugin for BrowserPlugin {
             ));
     }
 }
-
-pub use host::{native_left_mouse_down, set_native_left_mouse_down};
 
 #[cfg(test)]
 mod tests;

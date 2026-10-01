@@ -1,3 +1,4 @@
+use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use vmux_ecs::agent::CommandOrigin;
 use vmux_layout::pane::Pane;
@@ -26,7 +27,6 @@ pub struct AgentBrowserPaneResolution {
 
 impl AgentBrowserResolve<'_, '_> {
     fn browser_pane_for(&self, agent_pane: Entity) -> Option<Entity> {
-        use bevy::ecs::relationship::Relationship;
         let agent_parent = self.child_of.get(agent_pane).ok()?.get();
         for stack_co in self.browser_stacks.iter() {
             let pane = stack_co.get();
@@ -57,7 +57,6 @@ impl AgentBrowserResolve<'_, '_> {
     }
 
     pub fn agent_pane(&self, anchor: vmux_ecs::ProcessId) -> Option<Entity> {
-        use bevy::ecs::relationship::Relationship;
         let (_, _, term_co) = self
             .agent_terms
             .iter()

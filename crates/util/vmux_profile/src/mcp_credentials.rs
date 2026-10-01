@@ -1,12 +1,10 @@
+pub use access::McpCredentialAccess;
+use serde::{Deserialize, Serialize};
+use std::fmt::{Debug, Formatter};
+pub use storage::McpCredentialStorage;
+
 mod access;
 mod storage;
-
-use std::fmt::{Debug, Formatter};
-
-use serde::{Deserialize, Serialize};
-
-pub use access::McpCredentialAccess;
-pub use storage::McpCredentialStorage;
 
 const DEFAULT_TOKEN_LIFETIME_SECS: u64 = 3600;
 

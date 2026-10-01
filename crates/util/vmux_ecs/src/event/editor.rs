@@ -1,5 +1,7 @@
 use super::CommandBarPicker;
 
+pub use vmux_api::space::{ProjectBranch, ProjectRow, ProjectRowKind, ProjectTreeToggle};
+
 #[vmux_api::contract]
 pub struct StyledSpan {
     pub text: String,
@@ -301,8 +303,6 @@ pub struct FileScrollByEvent {
 pub struct FileFoldToggle {
     pub line: u32,
 }
-
-pub use vmux_api::space::{ProjectBranch, ProjectRow, ProjectRowKind, ProjectTreeToggle};
 
 #[vmux_api::contract(Eq)]
 pub struct FileDirEntry {
