@@ -29,9 +29,9 @@ use crate::ResolvedLocale;
 use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 
-pub(super) struct CommandBarControllerPlugin;
+pub struct Plugin;
 
-impl Plugin for CommandBarControllerPlugin {
+impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CommandBarToggleRequest>()
             .add_plugins(WorkSnapshotPlugin)
@@ -55,41 +55,29 @@ impl Plugin for CommandBarControllerPlugin {
                 CommandBarRenderedEvent,
                 CommandBarSizeEvent,
             )>::default())
-            .add_observer(on_dismiss_request)
-            .add_observer(close_command_bar)
-            .add_observer(on_ready)
-            .add_observer(on_rendered)
-            .add_observer(on_size)
+            .add_observer(dismiss)
+            .add_observer(close)
+            .add_observer(close_panel)
+            .add_observer(ready)
+            .add_observer(rendered)
+            .add_observer(resize)
+            .add_systems(Update, prewarm.before(CefSystems::CreateAndResize))
             .add_systems(
                 Update,
-                prewarm_command_bar_modal.before(CefSystems::CreateAndResize),
-            )
-            .add_systems(
-                Update,
-                handle_open_command_bar
-                    .in_set(ApplyCommandBarRequests)
-                    .after(prewarm_command_bar_modal)
+                open.in_set(ApplyCommandBarRequests)
+                    .after(prewarm)
                     .after(vmux_core::workspace::TabCommandSet)
                     .after(vmux_core::workspace::StackCommandSet),
             )
+            .add_systems(Update, retry_open.after(open))
+            .add_systems(Update, sync_project_roots.in_set(WriteCommandBarSnapshots))
             .add_systems(
                 Update,
-                retry_pending_command_bar_open.after(handle_open_command_bar),
-            )
-            .add_systems(
-                Update,
-                mirror_project_roots.in_set(WriteCommandBarSnapshots),
-            )
-            .add_systems(
-                Update,
-                deferred_dismiss_modal
+                dismiss_deferred
                     .after(ReadCommandRequests)
                     .before(vmux_core::workspace::ComputeFocusSet),
             )
-            .add_systems(
-                PostUpdate,
-                reveal_command_bar.chain().after(LayoutSystems::Layout),
-            )
+            .add_systems(PostUpdate, reveal.chain().after(LayoutSystems::Layout))
             .add_systems(Update, keep_awake.after(ReadCommandRequests));
     }
 }
@@ -229,6 +217,74 @@ impl PendingCommandBarReveal {
     pub fn is_active(&self) -> bool {
         self.open_id.is_open()
     }
+
+    fn next_frame(
+        &self,
+        rendered_open_id: Option<OpenId>,
+        native_windowed: bool,
+        native_overlay: bool,
+        has_native_size: bool,
+    ) -> Option<u8> {
+        if (native_windowed || native_overlay)
+            && self.open_id.is_open()
+            && (rendered_open_id != Some(self.open_id) || (native_windowed && !has_native_size))
+        {
+            return Some(self.frames.saturating_add(1));
+        }
+        if !self.open_id.is_open() {
+            return Some(self.frames);
+        }
+        if rendered_open_id != Some(self.open_id) {
+            if self.frames >= COMMAND_BAR_REVEAL_FALLBACK_FRAMES {
+                return None;
+            }
+            return Some(self.frames + 1);
+        }
+        if self.frames >= COMMAND_BAR_REVEAL_FRAMES {
+            None
+        } else {
+            Some(self.frames + 1)
+        }
+    }
+
+    fn timed_out(
+        &self,
+        now: Instant,
+        rendered_open_id: Option<OpenId>,
+        native_windowed: bool,
+        native_overlay: bool,
+        has_native_size: bool,
+    ) -> bool {
+        let elapsed = self
+            .started_at
+            .map(|started_at| now.duration_since(started_at))
+            .unwrap_or_default();
+        (native_windowed || native_overlay)
+            && self.open_id.is_open()
+            && elapsed >= COMMAND_BAR_NATIVE_REVEAL_TIMEOUT
+            && (rendered_open_id != Some(self.open_id) || (native_windowed && !has_native_size))
+    }
+
+    fn should_retry(&self, rendered_open_id: Option<OpenId>) -> bool {
+        self.open_id.is_open() && self.payload.is_some() && rendered_open_id != Some(self.open_id)
+    }
+
+    fn accepts_size(&self) -> bool {
+        self.open_id.is_open() && self.payload.is_some()
+    }
+
+    #[cfg(test)]
+    fn waiting(frames: u8, open_id: OpenId) -> Self {
+        Self {
+            frames,
+            open_id,
+            payload: Some(CommandBarOpenEvent {
+                open_id,
+                ..Default::default()
+            }),
+            started_at: Some(Instant::now()),
+        }
+    }
 }
 
 const COMMAND_BAR_REVEAL_FRAMES: u8 = 2;
@@ -236,33 +292,27 @@ const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
 const COMMAND_BAR_NATIVE_REVEAL_TIMEOUT: Duration = Duration::from_secs(2);
 const COMMAND_BAR_OPEN_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
-fn prepare_command_bar_surface(
-    modal_node: &mut Node,
-    modal_vis: &mut Visibility,
-    native_overlay: bool,
-) {
-    modal_node.display = Display::Flex;
-    *modal_vis = if native_overlay {
-        Visibility::Visible
-    } else {
-        Visibility::Hidden
-    };
-}
+impl CommandBar {
+    fn prepare(node: &mut Node, visibility: &mut Visibility, native_overlay: bool) {
+        node.display = Display::Flex;
+        *visibility = if native_overlay {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
 
-fn close_command_bar_surface(
-    modal_node: &mut Node,
-    modal_vis: &mut Visibility,
-    native_overlay: bool,
-) {
-    if native_overlay {
-        prepare_command_bar_surface(modal_node, modal_vis, true);
-    } else {
-        modal_node.display = Display::None;
-        *modal_vis = Visibility::Hidden;
+    fn close(node: &mut Node, visibility: &mut Visibility, native_overlay: bool) {
+        if native_overlay {
+            Self::prepare(node, visibility, true);
+        } else {
+            node.display = Display::None;
+            *visibility = Visibility::Hidden;
+        }
     }
 }
 
-fn prewarm_command_bar_modal(
+fn prewarm(
     mut commands: Commands,
     mut modal_q: Query<
         (
@@ -290,7 +340,7 @@ fn prewarm_command_bar_modal(
     if has_keyboard_target || pending_reveal {
         return;
     }
-    prepare_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
+    CommandBar::prepare(&mut modal_node, &mut modal_vis, native_overlay);
     commands.entity(modal_e).insert(PendingCommandBarReveal {
         frames: 0,
         open_id: OpenId::NONE,
@@ -299,67 +349,7 @@ fn prewarm_command_bar_modal(
     });
 }
 
-fn next_command_bar_reveal_frames(
-    frames: u8,
-    open_id: OpenId,
-    rendered_open_id: Option<OpenId>,
-) -> Option<u8> {
-    if !open_id.is_open() {
-        return Some(frames);
-    }
-    if rendered_open_id != Some(open_id) {
-        if frames >= COMMAND_BAR_REVEAL_FALLBACK_FRAMES {
-            return None;
-        }
-        return Some(frames + 1);
-    }
-    if frames >= COMMAND_BAR_REVEAL_FRAMES {
-        None
-    } else {
-        Some(frames + 1)
-    }
-}
-
-fn next_reveal(
-    native_windowed: bool,
-    native_overlay: bool,
-    frames: u8,
-    open_id: OpenId,
-    rendered_open_id: Option<OpenId>,
-    has_native_size: bool,
-) -> Option<u8> {
-    if (native_windowed || native_overlay)
-        && open_id.is_open()
-        && (rendered_open_id != Some(open_id) || (native_windowed && !has_native_size))
-    {
-        return Some(frames.saturating_add(1));
-    }
-    next_command_bar_reveal_frames(frames, open_id, rendered_open_id)
-}
-
-fn native_command_bar_reveal_timed_out(
-    native_windowed: bool,
-    native_overlay: bool,
-    elapsed: Duration,
-    open_id: OpenId,
-    rendered_open_id: Option<OpenId>,
-    has_native_size: bool,
-) -> bool {
-    (native_windowed || native_overlay)
-        && open_id.is_open()
-        && elapsed >= COMMAND_BAR_NATIVE_REVEAL_TIMEOUT
-        && (rendered_open_id != Some(open_id) || (native_windowed && !has_native_size))
-}
-
-fn should_retry_command_bar_open_payload(
-    open_id: OpenId,
-    payload: Option<&CommandBarOpenEvent>,
-    rendered_open_id: Option<OpenId>,
-) -> bool {
-    open_id.is_open() && payload.is_some() && rendered_open_id != Some(open_id)
-}
-
-fn on_ready(
+fn ready(
     trigger: On<UiInput<CommandBarReadyEvent>>,
     mut pending_q: Query<&mut PendingCommandBarReveal>,
     mut commands: Commands,
@@ -377,7 +367,7 @@ fn on_ready(
         .remove::<CommandBarRecreating>();
 }
 
-fn on_rendered(
+fn rendered(
     trigger: On<UiInput<CommandBarRenderedEvent>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -394,7 +384,7 @@ fn on_rendered(
     ));
 }
 
-fn on_size(
+fn resize(
     trigger: On<UiInput<CommandBarSizeEvent>>,
     browsers: NonSend<Browsers>,
     state: Query<(
@@ -409,7 +399,9 @@ fn on_size(
     let Ok((visibility, pending_reveal, current_size, native_windowed)) = state.get(webview) else {
         return;
     };
-    if !command_bar_size_should_apply(*visibility, pending_reveal) {
+    if *visibility == Visibility::Hidden
+        && !pending_reveal.is_some_and(PendingCommandBarReveal::accepts_size)
+    {
         return;
     }
     let payload = trigger.event().payload;
@@ -445,15 +437,6 @@ fn on_size(
         shell_width: payload.shell_width.max(1) as f32,
         shell_height: payload.shell_height.max(1) as f32,
     });
-}
-
-fn command_bar_size_should_apply(
-    visibility: Visibility,
-    pending_reveal: Option<&PendingCommandBarReveal>,
-) -> bool {
-    visibility != Visibility::Hidden
-        || pending_reveal
-            .is_some_and(|pending| pending.open_id.is_open() && pending.payload.is_some())
 }
 
 #[derive(Default)]
@@ -518,10 +501,10 @@ impl CommandBarOpenState {
         }
         request
     }
-}
 
-fn command_bar_toggle_should_open(is_open: bool, picker: Option<CommandBarPicker>) -> bool {
-    !is_open || picker.is_some()
+    fn closes_visible_bar(&self, is_open: bool) -> bool {
+        self.should_toggle && is_open && self.picker.is_none()
+    }
 }
 
 #[derive(SystemParam)]
@@ -533,7 +516,7 @@ struct CommandBarOpenRequests<'w, 's> {
     open: MessageReader<'w, 's, CommandBarOpenRequest>,
 }
 
-fn handle_open_command_bar(
+fn open(
     mut reader: MessageReader<CommandInvocation>,
     mut open_requests: CommandBarOpenRequests,
     layout_q: Query<
@@ -582,6 +565,7 @@ fn handle_open_command_bar(
         .unwrap_or_else(Locale::preferred);
     let definitions = definitions.iter().cloned().collect::<Vec<_>>();
 
+    let toggle_closes = request.closes_visible_bar(is_open);
     let should_toggle = request.should_toggle;
     let should_dismiss = request.should_dismiss;
     let should_dismiss_nav = request.should_dismiss_nav;
@@ -589,10 +573,8 @@ fn handle_open_command_bar(
     let url_override = request.url_override;
     let picker = request.picker;
 
-    let toggle_closes = should_toggle && !command_bar_toggle_should_open(is_open, picker);
-
     if (should_dismiss || toggle_closes) && is_open {
-        close_command_bar_panel(layout_e, &mut commands);
+        commands.trigger(CommandBarPanelClose { layout: layout_e });
         if let Some(stack) = focus.stack {
             restore_keyboard.write(RestoreKeyboardToStack { stack });
         }
@@ -600,7 +582,7 @@ fn handle_open_command_bar(
     }
 
     if should_dismiss_nav && is_open {
-        close_command_bar_panel(layout_e, &mut commands);
+        commands.trigger(CommandBarPanelClose { layout: layout_e });
         return;
     }
 
@@ -652,17 +634,25 @@ fn handle_open_command_bar(
     >::from_event(layout_e, &payload));
 }
 
-fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
-    commands.trigger(vmux_core::host::UiStateWrite::<
-        vmux_api::command_bar::CommandBarUiState,
-    >::from_event(layout, &CommandBarOpenEvent::default()));
+#[derive(EntityEvent)]
+struct CommandBarPanelClose {
+    #[event_target]
+    layout: Entity,
 }
 
-fn on_dismiss_request(trigger: On<UiInput<DismissRequest>>, mut commands: Commands) {
+fn close_panel(trigger: On<CommandBarPanelClose>, mut commands: Commands) {
+    commands.trigger(vmux_core::host::UiStateWrite::<
+        vmux_api::command_bar::CommandBarUiState,
+    >::from_event(
+        trigger.event().layout, &CommandBarOpenEvent::default()
+    ));
+}
+
+fn dismiss(trigger: On<UiInput<DismissRequest>>, mut commands: Commands) {
     commands.trigger(CommandBarDismiss::new(trigger.event().webview, true));
 }
 
-fn close_command_bar(
+fn close(
     trigger: On<CommandBarDismiss>,
     command_bar: Single<&CommandBarProjection>,
     mut modal_q: Query<
@@ -678,7 +668,7 @@ fn close_command_bar(
     mut commands: Commands,
 ) {
     if let Ok((modal_e, mut modal_node, mut modal_vis, native_overlay)) = modal_q.single_mut() {
-        close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
+        CommandBar::close(&mut modal_node, &mut modal_vis, native_overlay);
         commands
             .entity(modal_e)
             .remove::<KeyboardOwner>()
@@ -693,7 +683,7 @@ fn close_command_bar(
     }
 }
 
-fn deferred_dismiss_modal(
+fn dismiss_deferred(
     mut requests: MessageReader<LauncherDismissRequest>,
     mut modal_q: Query<
         (
@@ -711,12 +701,12 @@ fn deferred_dismiss_modal(
         return;
     }
     for layout_e in &panel_q {
-        close_command_bar_panel(layout_e, &mut commands);
+        commands.trigger(CommandBarPanelClose { layout: layout_e });
     }
     if let Ok((modal_e, mut modal_node, mut modal_vis, native_overlay)) = modal_q.single_mut()
         && modal_node.display != Display::None
     {
-        close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
+        CommandBar::close(&mut modal_node, &mut modal_vis, native_overlay);
         commands
             .entity(modal_e)
             .remove::<KeyboardOwner>()
@@ -726,7 +716,7 @@ fn deferred_dismiss_modal(
     }
 }
 
-fn reveal_command_bar(
+fn reveal(
     mut commands: Commands,
     mut query: Query<
         (
@@ -744,17 +734,13 @@ fn reveal_command_bar(
     for (entity, mut vis, mut pending, rendered, native_size, native_windowed, native_overlay) in
         &mut query
     {
+        let now = Instant::now();
         let rendered_open_id = rendered.map(|rendered| rendered.0);
-        let elapsed = pending
-            .started_at
-            .map(|started_at| started_at.elapsed())
-            .unwrap_or_default();
-        if native_command_bar_reveal_timed_out(
+        if pending.timed_out(
+            now,
+            rendered_open_id,
             native_windowed,
             native_overlay,
-            elapsed,
-            pending.open_id,
-            rendered_open_id,
             native_size.is_some(),
         ) {
             commands.entity(entity).remove::<PendingCommandBarReveal>();
@@ -764,12 +750,10 @@ fn reveal_command_bar(
             });
             continue;
         }
-        match next_reveal(
+        match pending.next_frame(
+            rendered_open_id,
             native_windowed,
             native_overlay,
-            pending.frames,
-            pending.open_id,
-            rendered_open_id,
             native_size.is_some(),
         ) {
             Some(frames) => pending.frames = frames,
@@ -781,7 +765,7 @@ fn reveal_command_bar(
     }
 }
 
-fn retry_pending_command_bar_open(
+fn retry_open(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     mut query: Query<
@@ -804,8 +788,7 @@ fn retry_pending_command_bar_open(
         let Some(payload) = pending.payload.as_ref() else {
             continue;
         };
-        if !should_retry_command_bar_open_payload(pending.open_id, Some(payload), rendered_open_id)
-        {
+        if !pending.should_retry(rendered_open_id) {
             last_emit.remove(&entity);
             continue;
         }
@@ -826,7 +809,7 @@ fn retry_pending_command_bar_open(
     }
 }
 
-fn mirror_project_roots(mut state: Single<&mut CommandBarProjection>) {
+fn sync_project_roots(mut state: Single<&mut CommandBarProjection>) {
     if !state.is_changed() || state.work.projects == state.projects.roots {
         return;
     }
@@ -952,35 +935,19 @@ mod tests {
 
     #[test]
     fn command_bar_open_payload_retries_until_rendered_ack() {
-        let payload = CommandBarOpenEvent {
-            open_id: OpenId(7),
-            ..Default::default()
+        let pending = PendingCommandBarReveal::waiting(0, OpenId(7));
+        assert!(pending.should_retry(None));
+        assert!(pending.should_retry(Some(OpenId(6))));
+        assert!(!pending.should_retry(Some(OpenId(7))));
+
+        let closed = PendingCommandBarReveal::waiting(0, OpenId::NONE);
+        assert!(!closed.should_retry(None));
+
+        let empty = PendingCommandBarReveal {
+            payload: None,
+            ..PendingCommandBarReveal::waiting(0, OpenId(7))
         };
-        assert!(should_retry_command_bar_open_payload(
-            OpenId(7),
-            Some(&payload),
-            None
-        ));
-        assert!(should_retry_command_bar_open_payload(
-            OpenId(7),
-            Some(&payload),
-            Some(OpenId(6))
-        ));
-        assert!(!should_retry_command_bar_open_payload(
-            OpenId(7),
-            Some(&payload),
-            Some(OpenId(7))
-        ));
-        assert!(!should_retry_command_bar_open_payload(
-            OpenId::NONE,
-            Some(&payload),
-            None
-        ));
-        assert!(!should_retry_command_bar_open_payload(
-            OpenId(7),
-            None,
-            None
-        ));
+        assert!(!empty.should_retry(None));
     }
 
     #[derive(Resource, Default)]
@@ -1026,7 +993,7 @@ mod tests {
         let mut node = Node::default();
         let mut visibility = Visibility::Hidden;
 
-        close_command_bar_surface(&mut node, &mut visibility, true);
+        CommandBar::close(&mut node, &mut visibility, true);
 
         assert_eq!(node.display, Display::Flex);
         assert_eq!(visibility, Visibility::Visible);
@@ -1036,8 +1003,7 @@ mod tests {
     #[test]
     fn command_bar_modal_prewarms_hidden_and_renderable() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, prewarm_command_bar_modal);
+        app.add_plugins(MinimalPlugins).add_systems(Update, prewarm);
         let modal = app
             .world_mut()
             .spawn((
@@ -1065,8 +1031,7 @@ mod tests {
     #[test]
     fn ready_command_bar_modal_still_prewarms_hidden_and_renderable() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, prewarm_command_bar_modal);
+        app.add_plugins(MinimalPlugins).add_systems(Update, prewarm);
         let modal = app
             .world_mut()
             .spawn((
@@ -1093,27 +1058,56 @@ mod tests {
 
     #[test]
     fn command_bar_reveal_waits_for_matching_open_id() {
-        assert_eq!(next_command_bar_reveal_frames(1, OpenId(7), None), Some(2));
         assert_eq!(
-            next_command_bar_reveal_frames(1, OpenId(7), Some(OpenId(6))),
+            PendingCommandBarReveal::waiting(1, OpenId(7)).next_frame(None, false, false, false),
             Some(2)
         );
         assert_eq!(
-            next_command_bar_reveal_frames(0, OpenId(7), Some(OpenId(7))),
+            PendingCommandBarReveal::waiting(1, OpenId(7)).next_frame(
+                Some(OpenId(6)),
+                false,
+                false,
+                false,
+            ),
+            Some(2)
+        );
+        assert_eq!(
+            PendingCommandBarReveal::waiting(0, OpenId(7)).next_frame(
+                Some(OpenId(7)),
+                false,
+                false,
+                false,
+            ),
             Some(1)
         );
         assert_eq!(
-            next_command_bar_reveal_frames(2, OpenId(7), Some(OpenId(7))),
+            PendingCommandBarReveal::waiting(2, OpenId(7)).next_frame(
+                Some(OpenId(7)),
+                false,
+                false,
+                false,
+            ),
             None
         );
     }
 
     #[test]
     fn command_bar_reveal_falls_back_when_rendered_event_is_missing() {
-        assert_eq!(next_command_bar_reveal_frames(0, OpenId(7), None), Some(1));
-        assert_eq!(next_command_bar_reveal_frames(10, OpenId(7), None), None);
         assert_eq!(
-            next_command_bar_reveal_frames(10, OpenId(7), Some(OpenId(6))),
+            PendingCommandBarReveal::waiting(0, OpenId(7)).next_frame(None, false, false, false),
+            Some(1)
+        );
+        assert_eq!(
+            PendingCommandBarReveal::waiting(10, OpenId(7)).next_frame(None, false, false, false),
+            None
+        );
+        assert_eq!(
+            PendingCommandBarReveal::waiting(10, OpenId(7)).next_frame(
+                Some(OpenId(6)),
+                false,
+                false,
+                false,
+            ),
             None
         );
     }
@@ -1121,11 +1115,12 @@ mod tests {
     #[test]
     fn command_bar_reveal_does_not_require_texture_after_rendered_event() {
         assert_eq!(
-            next_command_bar_reveal_frames(2, OpenId(7), Some(OpenId(7))),
-            None
-        );
-        assert_eq!(
-            next_command_bar_reveal_frames(2, OpenId(7), Some(OpenId(7))),
+            PendingCommandBarReveal::waiting(2, OpenId(7)).next_frame(
+                Some(OpenId(7)),
+                false,
+                false,
+                false,
+            ),
             None
         );
     }
@@ -1133,71 +1128,58 @@ mod tests {
     #[test]
     fn native_command_bar_waits_for_size_and_rendered_ack() {
         assert_eq!(
-            next_reveal(true, false, 10, OpenId(7), None, true),
+            PendingCommandBarReveal::waiting(10, OpenId(7)).next_frame(None, true, false, true),
             Some(11)
         );
         assert_eq!(
-            next_reveal(true, false, 10, OpenId(7), Some(OpenId(7)), false),
+            PendingCommandBarReveal::waiting(10, OpenId(7)).next_frame(
+                Some(OpenId(7)),
+                true,
+                false,
+                false,
+            ),
             Some(11)
         );
         assert_eq!(
-            next_reveal(true, false, 2, OpenId(7), Some(OpenId(7)), true),
+            PendingCommandBarReveal::waiting(2, OpenId(7)).next_frame(
+                Some(OpenId(7)),
+                true,
+                false,
+                true,
+            ),
             None
         );
     }
 
     #[test]
     fn native_command_bar_aborts_stalled_reveal() {
-        assert!(!native_command_bar_reveal_timed_out(
-            true,
-            false,
-            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT - Duration::from_millis(1),
-            OpenId(7),
-            None,
-            false,
-        ));
-        assert!(native_command_bar_reveal_timed_out(
-            true,
-            false,
-            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
-            OpenId(7),
-            None,
-            false,
-        ));
-        assert!(native_command_bar_reveal_timed_out(
-            true,
-            false,
-            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
-            OpenId(7),
-            Some(OpenId(7)),
-            false,
-        ));
-        assert!(!native_command_bar_reveal_timed_out(
-            true,
-            false,
-            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
-            OpenId(7),
-            Some(OpenId(7)),
-            true,
-        ));
-        assert!(!native_command_bar_reveal_timed_out(
-            false,
-            false,
-            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
-            OpenId(7),
-            None,
-            false,
-        ));
+        let now = Instant::now();
+        let mut pending = PendingCommandBarReveal::waiting(0, OpenId(7));
+        pending.started_at = Some(now - COMMAND_BAR_NATIVE_REVEAL_TIMEOUT);
+
+        assert!(pending.timed_out(now, None, true, false, false));
+        assert!(pending.timed_out(now, Some(OpenId(7)), true, false, false));
+        assert!(!pending.timed_out(now, Some(OpenId(7)), true, false, true));
+        assert!(!pending.timed_out(now, None, false, false, false));
+
+        pending.started_at =
+            Some(now - (COMMAND_BAR_NATIVE_REVEAL_TIMEOUT - Duration::from_millis(1)));
+        assert!(!pending.timed_out(now, None, true, false, false));
     }
 
     #[test]
     fn native_overlay_waits_for_rendered_ack() {
         assert_eq!(
-            next_reveal(false, true, 10, OpenId(7), None, false),
+            PendingCommandBarReveal::waiting(10, OpenId(7)).next_frame(None, false, true, false),
             Some(11)
         );
         assert_eq!(
-            next_reveal(false, true, 2, OpenId(7), Some(OpenId(7)), false),
+            PendingCommandBarReveal::waiting(2, OpenId(7)).next_frame(
+                Some(OpenId(7)),
+                false,
+                true,
+                false,
+            ),
             None
         );
     }
@@ -1205,8 +1187,7 @@ mod tests {
     #[test]
     fn native_command_bar_stalled_reveal_stays_hidden() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, reveal_command_bar);
+        app.add_plugins(MinimalPlugins).add_systems(Update, reveal);
         let modal = app
             .world_mut()
             .spawn((
@@ -1237,8 +1218,7 @@ mod tests {
     #[test]
     fn native_command_bar_does_not_timeout_from_rapid_updates() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, reveal_command_bar);
+        app.add_plugins(MinimalPlugins).add_systems(Update, reveal);
         let modal = app
             .world_mut()
             .spawn((
@@ -1269,9 +1249,12 @@ mod tests {
     }
 
     #[test]
-    fn native_command_bar_ignores_hidden_prewarm_size() {
-        assert!(!command_bar_size_should_apply(Visibility::Hidden, None));
-        assert!(command_bar_size_should_apply(Visibility::Visible, None));
+    fn command_bar_reveal_without_payload_rejects_size() {
+        let pending = PendingCommandBarReveal {
+            payload: None,
+            ..PendingCommandBarReveal::waiting(0, OpenId(7))
+        };
+        assert!(!pending.accepts_size());
     }
 
     #[test]
@@ -1286,11 +1269,8 @@ mod tests {
             started_at: Some(Instant::now()),
         };
 
-        assert!(command_bar_size_should_apply(
-            Visibility::Hidden,
-            Some(&pending)
-        ));
-        assert_eq!(next_reveal(true, false, 0, OpenId(7), None, true), Some(1));
+        assert!(pending.accepts_size());
+        assert_eq!(pending.next_frame(None, true, false, true), Some(1));
     }
 
     #[test]
@@ -1389,16 +1369,20 @@ mod tests {
 
     #[test]
     fn duplicate_open_is_ignored_while_command_bar_is_visible() {
-        assert!(command_bar_toggle_should_open(false, None));
-        assert!(!command_bar_toggle_should_open(true, None));
-        assert!(command_bar_toggle_should_open(
-            true,
-            Some(CommandBarPicker::Space)
-        ));
-        assert!(command_bar_toggle_should_open(
-            false,
-            Some(CommandBarPicker::Space)
-        ));
+        let toggle = CommandBarOpenState {
+            should_toggle: true,
+            ..Default::default()
+        };
+        assert!(!toggle.closes_visible_bar(false));
+        assert!(toggle.closes_visible_bar(true));
+
+        let picker = CommandBarOpenState {
+            should_toggle: true,
+            picker: Some(CommandBarPicker::Space),
+            ..Default::default()
+        };
+        assert!(!picker.closes_visible_bar(true));
+        assert!(!picker.closes_visible_bar(false));
     }
 
     #[test]
@@ -1469,7 +1453,7 @@ mod tests {
             .add_message::<LauncherDismissRequest>()
             .init_resource::<EmittedToPage>()
             .add_observer(capture_page_emit)
-            .add_systems(Update, handle_open_command_bar);
+            .add_systems(Update, open);
         app.world_mut().spawn(CommandBarProjection::default());
         app
     }
@@ -1570,7 +1554,7 @@ mod tests {
     #[test]
     fn a_surface_opening_under_the_launcher_closes_the_panel_too() {
         let mut app = panel_app();
-        app.add_systems(Update, deferred_dismiss_modal);
+        app.add_systems(Update, dismiss_deferred);
         let layout = app
             .world_mut()
             .spawn((RendersLauncherPanel, CommandBarPanelActive))
@@ -1604,7 +1588,7 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(CommandBarControllerPlugin)
+            .add_plugins(Plugin)
             .add_message::<RestoreKeyboardToStack>()
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>();
         app.world_mut().spawn(CommandBarProjection::default());
@@ -1658,9 +1642,7 @@ mod tests {
             "PendingCommandBarReveal should be cleared after dismiss"
         );
 
-        app.world_mut()
-            .run_system_once(prewarm_command_bar_modal)
-            .unwrap();
+        app.world_mut().run_system_once(prewarm).unwrap();
 
         let vis_after_prewarm = *app.world().get::<Visibility>(modal).unwrap();
         let display_after_prewarm = app.world().get::<Node>(modal).unwrap().display;
@@ -1693,7 +1675,7 @@ mod tests {
             assert_eq!(
                 open_id,
                 OpenId::NONE,
-                "prewarm should re-arm reveal at OpenId::NONE (which never fires until handle_open_command_bar bumps it)"
+                "prewarm should re-arm reveal at OpenId::NONE until open bumps it"
             );
         }
     }
@@ -1702,7 +1684,7 @@ mod tests {
     fn command_bar_open_runs_after_tab_commands() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(CommandBarControllerPlugin);
+            .add_plugins(Plugin);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
         let mut update = schedules.remove(Update).unwrap();

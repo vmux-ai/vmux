@@ -36,7 +36,7 @@ impl Plugin for CommandBarPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             completion::CompletionPlugin,
-            controller::CommandBarControllerPlugin,
+            controller::Plugin,
             palette::PalettePlugin,
             panel::PanelPlugin,
         ));
