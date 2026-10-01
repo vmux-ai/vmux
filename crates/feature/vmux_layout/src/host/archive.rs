@@ -35,16 +35,16 @@ use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct ReopenClosedPage;
 
-#[vmux_command::command(id = "stack_reopen")]
-struct ReopenClosedPageBinding;
+#[vmux_command::command]
+struct StackReopenBinding;
 
 fn bind_command(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<ReopenClosedPageBinding>(&mut commands);
+    registry.bind::<StackReopenBinding>(&mut commands);
 }
 
 fn issue_reopen_closed_page(
     trigger: On<CommandDispatch>,
-    registered: Query<(), With<ReopenClosedPageBinding>>,
+    registered: Query<(), With<StackReopenBinding>>,
     mut requests: MessageWriter<ReopenClosedPage>,
 ) {
     if registered.contains(trigger.event().command()) {

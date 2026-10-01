@@ -114,14 +114,14 @@ pub(super) struct ActiveComposerMenu {
     index: usize,
 }
 
-#[vmux_command::command(id = "chat_list_next")]
-struct ListNextBinding;
+#[vmux_command::command]
+struct ChatListNextBinding;
 
-#[vmux_command::command(id = "chat_list_previous")]
-struct ListPreviousBinding;
+#[vmux_command::command]
+struct ChatListPreviousBinding;
 
-#[vmux_command::command(id = "chat_list_choose")]
-struct ListChooseBinding;
+#[vmux_command::command]
+struct ChatListChooseBinding;
 
 #[derive(EntityEvent)]
 struct ChooseList {
@@ -144,35 +144,35 @@ impl CommandBinding for ChoiceNumberBinding {
     }
 }
 
-#[vmux_command::command(id = "chat_history_older")]
-struct HistoryOlderBinding;
+#[vmux_command::command]
+struct ChatHistoryOlderBinding;
 
-#[vmux_command::command(id = "chat_history_newer")]
-struct HistoryNewerBinding;
+#[vmux_command::command]
+struct ChatHistoryNewerBinding;
 
-#[vmux_command::command(id = "chat_submit")]
-struct SubmitBinding;
+#[vmux_command::command]
+struct ChatSubmitBinding;
 
-#[vmux_command::command(id = "chat_dismiss_selector")]
-struct DismissSelectorBinding;
+#[vmux_command::command]
+struct ChatDismissSelectorBinding;
 
-#[vmux_command::command(id = "chat_interrupt")]
-struct InterruptBinding;
+#[vmux_command::command]
+struct ChatInterruptBinding;
 
-#[vmux_command::command(id = "chat_cancel")]
-struct CancelBinding;
+#[vmux_command::command]
+struct ChatCancelBinding;
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<ListNextBinding>(&mut commands);
-    registry.bind::<ListPreviousBinding>(&mut commands);
-    registry.bind::<ListChooseBinding>(&mut commands);
+    registry.bind::<ChatListNextBinding>(&mut commands);
+    registry.bind::<ChatListPreviousBinding>(&mut commands);
+    registry.bind::<ChatListChooseBinding>(&mut commands);
     registry.bind::<ChoiceNumberBinding>(&mut commands);
-    registry.bind::<HistoryOlderBinding>(&mut commands);
-    registry.bind::<HistoryNewerBinding>(&mut commands);
-    registry.bind::<SubmitBinding>(&mut commands);
-    registry.bind::<DismissSelectorBinding>(&mut commands);
-    registry.bind::<InterruptBinding>(&mut commands);
-    registry.bind::<CancelBinding>(&mut commands);
+    registry.bind::<ChatHistoryOlderBinding>(&mut commands);
+    registry.bind::<ChatHistoryNewerBinding>(&mut commands);
+    registry.bind::<ChatSubmitBinding>(&mut commands);
+    registry.bind::<ChatDismissSelectorBinding>(&mut commands);
+    registry.bind::<ChatInterruptBinding>(&mut commands);
+    registry.bind::<ChatCancelBinding>(&mut commands);
 }
 
 #[derive(SystemParam)]
@@ -433,8 +433,8 @@ fn project_selector(
 
 fn move_list(
     trigger: On<CommandDispatch>,
-    next: Query<(), With<ListNextBinding>>,
-    previous: Query<(), With<ListPreviousBinding>>,
+    next: Query<(), With<ChatListNextBinding>>,
+    previous: Query<(), With<ChatListPreviousBinding>>,
     lists: ChatLists,
     composers: Query<&ComposerState>,
     mut selections: Query<&mut ChatListSelection>,
@@ -479,7 +479,7 @@ fn move_list(
 
 fn choose_shortcut(
     trigger: On<CommandDispatch>,
-    bindings: Query<(), With<ListChooseBinding>>,
+    bindings: Query<(), With<ChatListChooseBinding>>,
     mut commands: Commands,
 ) {
     if !bindings.contains(trigger.event().command()) {
@@ -883,8 +883,8 @@ fn choose_number(
 
 fn move_history(
     trigger: On<CommandDispatch>,
-    older: Query<(), With<HistoryOlderBinding>>,
-    newer: Query<(), With<HistoryNewerBinding>>,
+    older: Query<(), With<ChatHistoryOlderBinding>>,
+    newer: Query<(), With<ChatHistoryNewerBinding>>,
     mut views: Query<
         (
             &mut ComposerState,
@@ -917,7 +917,7 @@ fn move_history(
 
 fn submit(
     trigger: On<CommandDispatch>,
-    bindings: Query<(), With<SubmitBinding>>,
+    bindings: Query<(), With<ChatSubmitBinding>>,
     composers: Query<&ComposerState, With<ChatView>>,
     mut commands: Commands,
 ) {
@@ -938,7 +938,7 @@ fn submit(
 
 fn dismiss_selector(
     trigger: On<CommandDispatch>,
-    bindings: Query<(), With<DismissSelectorBinding>>,
+    bindings: Query<(), With<ChatDismissSelectorBinding>>,
     menus: Query<&ActiveComposerMenu>,
     mut composers: Query<&mut ComposerState, With<ChatView>>,
     mut selections: Query<&mut ChatListSelection>,
@@ -989,7 +989,7 @@ fn dismiss_selector(
 
 fn interrupt(
     trigger: On<CommandDispatch>,
-    bindings: Query<(), With<InterruptBinding>>,
+    bindings: Query<(), With<ChatInterruptBinding>>,
     views: Query<(), With<ChatView>>,
     mut commands: Commands,
 ) {
@@ -1005,7 +1005,7 @@ fn interrupt(
 
 fn cancel(
     trigger: On<CommandDispatch>,
-    bindings: Query<(), With<CancelBinding>>,
+    bindings: Query<(), With<ChatCancelBinding>>,
     views: Query<(), With<ChatView>>,
     mut commands: Commands,
 ) {

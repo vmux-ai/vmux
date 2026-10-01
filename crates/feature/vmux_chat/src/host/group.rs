@@ -754,18 +754,9 @@ mod tests {
         };
         assert_eq!(turn.step_count, 1);
         assert!(matches!(&turn.blocks[0], ChatBlock::Subagent(_)));
-        assert_eq!(
-            ChatTurnProjection::parent_tool_index(turn, 1),
-            Some(0)
-        );
-        assert_eq!(
-            ChatTurnProjection::parent_tool_index(turn, 2),
-            Some(0)
-        );
-        assert_eq!(
-            ChatTurnProjection::parent_tool_index(turn, 3),
-            Some(0)
-        );
+        assert_eq!(ChatTurnProjection::parent_tool_index(turn, 1), Some(0));
+        assert_eq!(ChatTurnProjection::parent_tool_index(turn, 2), Some(0));
+        assert_eq!(ChatTurnProjection::parent_tool_index(turn, 3), Some(0));
     }
 
     #[test]

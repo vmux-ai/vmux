@@ -56,29 +56,29 @@ impl Plugin for KeyPlugin {
     }
 }
 
-#[vmux_command::command(id = "file_toggle_explorer")]
-struct FileToggleExplorerKeyBinding;
+#[vmux_command::command]
+struct FileToggleExplorerBinding;
 
-#[vmux_command::command(id = "file_reveal_in_explorer")]
-struct FileRevealExplorerKeyBinding;
+#[vmux_command::command]
+struct FileRevealInExplorerBinding;
 
-#[vmux_command::command(id = "file_find")]
-struct FileFindKeyBinding;
+#[vmux_command::command]
+struct FileFindBinding;
 
-#[vmux_command::command(id = "file_find_in_files")]
-struct FileFindInFilesKeyBinding;
+#[vmux_command::command]
+struct FileFindInFilesBinding;
 
-#[vmux_command::command(id = "file_panel_next")]
-struct FilePanelNextKeyBinding;
+#[vmux_command::command]
+struct FilePanelNextBinding;
 
-#[vmux_command::command(id = "file_panel_previous")]
-struct FilePanelPreviousKeyBinding;
+#[vmux_command::command]
+struct FilePanelPreviousBinding;
 
-#[vmux_command::command(id = "file_panel_choose")]
-struct FilePanelChooseKeyBinding;
+#[vmux_command::command]
+struct FilePanelChooseBinding;
 
-#[vmux_command::command(id = "file_panel_dismiss")]
-struct FilePanelDismissKeyBinding;
+#[vmux_command::command]
+struct FilePanelDismissBinding;
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct OpenStatusPickerRequest(CommandBarPicker);
@@ -106,14 +106,14 @@ struct FileStatusPicked {
 }
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<FileToggleExplorerKeyBinding>(&mut commands);
-    registry.bind::<FileRevealExplorerKeyBinding>(&mut commands);
-    registry.bind::<FileFindKeyBinding>(&mut commands);
-    registry.bind::<FileFindInFilesKeyBinding>(&mut commands);
-    registry.bind::<FilePanelNextKeyBinding>(&mut commands);
-    registry.bind::<FilePanelPreviousKeyBinding>(&mut commands);
-    registry.bind::<FilePanelChooseKeyBinding>(&mut commands);
-    registry.bind::<FilePanelDismissKeyBinding>(&mut commands);
+    registry.bind::<FileToggleExplorerBinding>(&mut commands);
+    registry.bind::<FileRevealInExplorerBinding>(&mut commands);
+    registry.bind::<FileFindBinding>(&mut commands);
+    registry.bind::<FileFindInFilesBinding>(&mut commands);
+    registry.bind::<FilePanelNextBinding>(&mut commands);
+    registry.bind::<FilePanelPreviousBinding>(&mut commands);
+    registry.bind::<FilePanelChooseBinding>(&mut commands);
+    registry.bind::<FilePanelDismissBinding>(&mut commands);
     registry.message::<OpenStatusPickerRequest>(&mut commands);
 }
 
@@ -128,7 +128,7 @@ fn open_bound_status_picker(
 
 fn toggle_explorer(
     trigger: On<CommandDispatch>,
-    keys: Query<(), With<FileToggleExplorerKeyBinding>>,
+    keys: Query<(), With<FileToggleExplorerBinding>>,
     mut commands: Commands,
 ) {
     if !keys.contains(trigger.event().command()) {
@@ -141,7 +141,7 @@ fn toggle_explorer(
 
 fn reveal_in_explorer(
     trigger: On<CommandDispatch>,
-    keys: Query<(), With<FileRevealExplorerKeyBinding>>,
+    keys: Query<(), With<FileRevealInExplorerBinding>>,
     mut commands: Commands,
 ) {
     if !keys.contains(trigger.event().command()) {
@@ -154,7 +154,7 @@ fn reveal_in_explorer(
 
 fn open_find(
     trigger: On<CommandDispatch>,
-    keys: Query<(), With<FileFindKeyBinding>>,
+    keys: Query<(), With<FileFindBinding>>,
     mut commands: Commands,
 ) {
     if !keys.contains(trigger.event().command()) {
@@ -168,7 +168,7 @@ fn open_find(
 
 fn open_find_in_files(
     trigger: On<CommandDispatch>,
-    keys: Query<(), With<FileFindInFilesKeyBinding>>,
+    keys: Query<(), With<FileFindInFilesBinding>>,
     mut commands: Commands,
 ) {
     if !keys.contains(trigger.event().command()) {
@@ -181,7 +181,7 @@ fn open_find_in_files(
 
 fn dispatch_panel_next_command(
     trigger: On<CommandDispatch>,
-    keys: Query<(), With<FilePanelNextKeyBinding>>,
+    keys: Query<(), With<FilePanelNextBinding>>,
     mut commands: Commands,
 ) {
     if !keys.contains(trigger.event().command()) {
@@ -194,7 +194,7 @@ fn dispatch_panel_next_command(
 
 fn dispatch_panel_previous_command(
     trigger: On<CommandDispatch>,
-    keys: Query<(), With<FilePanelPreviousKeyBinding>>,
+    keys: Query<(), With<FilePanelPreviousBinding>>,
     mut commands: Commands,
 ) {
     if !keys.contains(trigger.event().command()) {
@@ -207,7 +207,7 @@ fn dispatch_panel_previous_command(
 
 fn dispatch_panel_choose_command(
     trigger: On<CommandDispatch>,
-    keys: Query<(), With<FilePanelChooseKeyBinding>>,
+    keys: Query<(), With<FilePanelChooseBinding>>,
     mut commands: Commands,
 ) {
     if !keys.contains(trigger.event().command()) {
@@ -221,7 +221,7 @@ fn dispatch_panel_choose_command(
 
 fn dispatch_panel_dismiss_command(
     trigger: On<CommandDispatch>,
-    keys: Query<(), With<FilePanelDismissKeyBinding>>,
+    keys: Query<(), With<FilePanelDismissBinding>>,
     mut commands: Commands,
 ) {
     if !keys.contains(trigger.event().command()) {

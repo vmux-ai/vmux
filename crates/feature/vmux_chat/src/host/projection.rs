@@ -531,9 +531,9 @@ impl ChatTurnProjection {
                     })
                     || ChatTurnProjection::contains_skill_path(value)
             }),
-            serde_json::Value::Array(values) => values
-                .iter()
-                .any(ChatTurnProjection::contains_skill_path),
+            serde_json::Value::Array(values) => {
+                values.iter().any(ChatTurnProjection::contains_skill_path)
+            }
             _ => false,
         }
     }

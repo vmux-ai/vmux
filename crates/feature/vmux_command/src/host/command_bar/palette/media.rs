@@ -120,23 +120,23 @@ impl PaletteMedia {
     }
 }
 
-#[vmux_command::command(id = "command_bar_media_next")]
-struct PaletteMediaNextBinding;
+#[vmux_command::command]
+struct CommandBarMediaNextBinding;
 
-#[vmux_command::command(id = "command_bar_media_previous")]
-struct PaletteMediaPreviousBinding;
+#[vmux_command::command]
+struct CommandBarMediaPreviousBinding;
 
-#[vmux_command::command(id = "command_bar_media_choose")]
-struct PaletteMediaActivateBinding;
+#[vmux_command::command]
+struct CommandBarMediaChooseBinding;
 
-#[vmux_command::command(id = "command_bar_media_dismiss")]
-struct PaletteMediaDismissBinding;
+#[vmux_command::command]
+struct CommandBarMediaDismissBinding;
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<PaletteMediaNextBinding>(&mut commands);
-    registry.bind::<PaletteMediaPreviousBinding>(&mut commands);
-    registry.bind::<PaletteMediaActivateBinding>(&mut commands);
-    registry.bind::<PaletteMediaDismissBinding>(&mut commands);
+    registry.bind::<CommandBarMediaNextBinding>(&mut commands);
+    registry.bind::<CommandBarMediaPreviousBinding>(&mut commands);
+    registry.bind::<CommandBarMediaChooseBinding>(&mut commands);
+    registry.bind::<CommandBarMediaDismissBinding>(&mut commands);
 }
 
 fn attach(
@@ -191,8 +191,8 @@ fn update_draft(
 
 fn move_from(
     trigger: On<CommandDispatch>,
-    next: Query<(), With<PaletteMediaNextBinding>>,
-    previous: Query<(), With<PaletteMediaPreviousBinding>>,
+    next: Query<(), With<CommandBarMediaNextBinding>>,
+    previous: Query<(), With<CommandBarMediaPreviousBinding>>,
     palettes: Query<&PaletteSnapshot>,
     mut commands: Commands,
 ) {
@@ -219,7 +219,7 @@ fn move_from(
 
 fn activate_from(
     trigger: On<CommandDispatch>,
-    bindings: Query<(), With<PaletteMediaActivateBinding>>,
+    bindings: Query<(), With<CommandBarMediaChooseBinding>>,
     palettes: Query<&PaletteSnapshot>,
     mut commands: Commands,
 ) {
@@ -241,7 +241,7 @@ fn activate_from(
 
 fn dismiss_from(
     trigger: On<CommandDispatch>,
-    bindings: Query<(), With<PaletteMediaDismissBinding>>,
+    bindings: Query<(), With<CommandBarMediaDismissBinding>>,
     palettes: Query<&PaletteSnapshot>,
     mut commands: Commands,
 ) {

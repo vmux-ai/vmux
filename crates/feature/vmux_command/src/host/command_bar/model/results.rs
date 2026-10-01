@@ -9,7 +9,7 @@ use vmux_ui::i18n::translate;
 
 pub use vmux_api::command_bar::CommandBarResultItem;
 
-use super::{PaletteRows, query::PaletteQuery};
+use super::query::PaletteQuery;
 
 pub struct ResumeRows;
 
@@ -199,7 +199,9 @@ impl PickerRows {
     }
 }
 
-impl PaletteRows {
+pub(super) struct SpaceRows;
+
+impl SpaceRows {
     fn space_result(space: &CommandBarSpace) -> CommandBarResultItem {
         CommandBarResultItem::Space {
             id: space.id.clone(),
@@ -216,7 +218,11 @@ impl PaletteRows {
             || space.id.to_lowercase().contains(search_lower)
             || space.profile.to_lowercase().contains(search_lower)
     }
+}
 
+pub(super) struct PageRows;
+
+impl PageRows {
     fn urls_match(a: &str, b: &str) -> bool {
         a == b || a.trim_end_matches('/') == b.trim_end_matches('/')
     }
@@ -309,7 +315,11 @@ impl PaletteRows {
             && (title.to_lowercase().contains(&search_lower)
                 || url.to_lowercase().contains(&search_lower))
     }
+}
 
+pub(super) struct StartRows;
+
+impl StartRows {
     pub(super) fn terminal_matches(query: &str) -> bool {
         let query = query.trim().to_lowercase();
         !query.is_empty() && "terminal".starts_with(&query)
@@ -324,18 +334,18 @@ impl PaletteRows {
         if !PaletteQuery::new(query).is_start_prompt()
             || results
                 .iter()
-                .any(|item| PaletteRows::prompt_target_url(item).is_some())
+                .any(|item| PageRows::prompt_target_url(item).is_some())
         {
             return;
         }
         let mut suggestions = Vec::new();
         for target in selected_target.into_iter().chain(recent_targets) {
-            let Some(url) = PaletteRows::prompt_target_url(target) else {
+            let Some(url) = PageRows::prompt_target_url(target) else {
                 continue;
             };
             if suggestions
                 .iter()
-                .any(|existing| PaletteRows::prompt_target_url(existing) == Some(url))
+                .any(|existing| PageRows::prompt_target_url(existing) == Some(url))
             {
                 continue;
             }
@@ -367,7 +377,9 @@ impl PaletteRows {
         results.extend(rest);
         results.extend(tail);
     }
+}
 
+impl PageRows {
     pub(super) fn open_sessions(
         tabs: &[CommandBarTab],
         pages: &[CommandBarPage],
@@ -384,7 +396,9 @@ impl PaletteRows {
             })
             .collect()
     }
+}
 
+impl StartRows {
     pub(super) fn start(
         pages: &[CommandBarPage],
         work_dirs: &[CommandBarWorkDir],
@@ -395,15 +409,15 @@ impl PaletteRows {
     ) -> Vec<CommandBarResultItem> {
         let search_lower = query.trim().to_lowercase();
         let mut results = Vec::new();
-        if PaletteRows::terminal_matches(query) {
+        if Self::terminal_matches(query) {
             results.push(CommandBarResultItem::Terminal {
                 path: String::new(),
             });
         }
         results.extend(
-            PaletteRows::prompt_targets(pages, query)
+            PageRows::prompt_targets(pages, query)
                 .into_iter()
-                .filter(|item| PaletteRows::prompt_target_matches(item, query)),
+                .filter(|item| PageRows::prompt_target_matches(item, query)),
         );
         let trimmed = query.trim();
         if PaletteQuery::new(trimmed).is_start_prompt() {
@@ -424,9 +438,9 @@ impl PaletteRows {
             .filter(|page| {
                 !page.prompt_target
                     && !page.startup
-                    && !Self::urls_match(&page.url, terminal_page_url)
+                    && !PageRows::urls_match(&page.url, terminal_page_url)
             })
-            .filter(|page| Self::page_matches(page, &search_lower))
+            .filter(|page| PageRows::page_matches(page, &search_lower))
             .collect();
         app_pages.sort_by_cached_key(|page| page.url.to_lowercase());
         results.extend(
@@ -482,7 +496,9 @@ impl PaletteRows {
             })
             .collect()
     }
+}
 
+impl SpaceRows {
     fn space_list_items(
         spaces: &[CommandBarSpace],
         search_lower: &str,
@@ -504,7 +520,7 @@ impl PaletteRows {
         let mut items = Self::space_list_items(spaces, &search_lower);
         if let Some(page) = pages
             .iter()
-            .find(|page| Self::urls_match(&page.url, spaces_page_url))
+            .find(|page| PageRows::urls_match(&page.url, spaces_page_url))
         {
             items.push(CommandBarResultItem::Page {
                 url: page.url.clone(),
@@ -526,7 +542,11 @@ impl PaletteRows {
             || q == spaces_page_url.trim_end_matches('/')
             || q.starts_with(spaces_page_url)
     }
+}
 
+pub(super) struct SearchRows;
+
+impl SearchRows {
     fn command_results(
         commands: &[CommandBarCommandEntry],
     ) -> impl Iterator<Item = CommandBarResultItem> + '_ {
@@ -552,9 +572,9 @@ impl PaletteRows {
     ) -> Vec<CommandBarResultItem> {
         let q = query.trim();
 
-        if Self::query_targets_spaces_page(q, spaces_page_url) {
-            let mut items = Self::page_results(pages, &q.to_lowercase());
-            items.extend(Self::space_list_items(spaces, ""));
+        if SpaceRows::query_targets_spaces_page(q, spaces_page_url) {
+            let mut items = PageRows::page_results(pages, &q.to_lowercase());
+            items.extend(SpaceRows::space_list_items(spaces, ""));
             items.extend(Self::command_results(commands));
             return items;
         }
@@ -574,15 +594,15 @@ impl PaletteRows {
                 CommandBarResultItem::Stack {
                     title: t.title.clone(),
                     url: t.url.clone(),
-                    icon: Self::stack_icon_for(pages, &t.url),
+                    icon: PageRows::stack_icon_for(pages, &t.url),
                     pane_id: t.pane_id,
                     tab_index: t.tab_index as usize,
                     location: t.location.clone(),
                 }
             }));
-            items.extend(Self::page_results(pages, ""));
-            items.extend(Self::work_dir_results(work_dirs, ""));
-            items.extend(Self::recent_file_results(recent_files, ""));
+            items.extend(PageRows::page_results(pages, ""));
+            items.extend(StartRows::work_dir_results(work_dirs, ""));
+            items.extend(StartRows::recent_file_results(recent_files, ""));
             items.extend(Self::command_results(commands));
             return items;
         }
@@ -636,10 +656,10 @@ impl PaletteRows {
         }
 
         if !starts_with_cmd && !is_path {
-            items.extend(Self::page_results(pages, &search_lower));
-            items.extend(Self::space_list_items(spaces, &search_lower));
-            items.extend(Self::work_dir_results(work_dirs, &search_lower));
-            items.extend(Self::recent_file_results(recent_files, &search_lower));
+            items.extend(PageRows::page_results(pages, &search_lower));
+            items.extend(SpaceRows::space_list_items(spaces, &search_lower));
+            items.extend(StartRows::work_dir_results(work_dirs, &search_lower));
+            items.extend(StartRows::recent_file_results(recent_files, &search_lower));
         }
 
         if !starts_with_cmd || !search.is_empty() {
@@ -654,7 +674,7 @@ impl PaletteRows {
                     items.push(CommandBarResultItem::Stack {
                         title: t.title.clone(),
                         url: t.url.clone(),
-                        icon: Self::stack_icon_for(pages, &t.url),
+                        icon: PageRows::stack_icon_for(pages, &t.url),
                         pane_id: t.pane_id,
                         tab_index: t.tab_index as usize,
                         location: t.location.clone(),
@@ -828,7 +848,7 @@ mod tests {
             space("space-1", "Space 1", false),
             space("work", "Work", true),
         ];
-        let results = PaletteRows::space_switch(&spaces, &sample_pages(), SPACES_PAGE_URL, "");
+        let results = SpaceRows::space_switch(&spaces, &sample_pages(), SPACES_PAGE_URL, "");
         assert!(matches!(&results[0], CommandBarResultItem::Space { id, .. } if id == "space-1"));
         assert!(matches!(&results[1], CommandBarResultItem::Space { id, .. } if id == "work"));
         assert!(matches!(
@@ -843,7 +863,7 @@ mod tests {
             space("space-1", "Space 1", false),
             space("work", "Work", true),
         ];
-        let results = PaletteRows::space_switch(&spaces, &sample_pages(), SPACES_PAGE_URL, "wor");
+        let results = SpaceRows::space_switch(&spaces, &sample_pages(), SPACES_PAGE_URL, "wor");
         let ids: Vec<_> = results
             .iter()
             .filter_map(|r| match r {
@@ -865,7 +885,7 @@ mod tests {
             space("work", "Work", true),
         ];
 
-        let results = PaletteRows::filter(
+        let results = SearchRows::filter(
             "vmux://spaces/",
             &[],
             &[] as &[CommandBarCommandEntry],
@@ -902,7 +922,7 @@ mod tests {
             shortcut: "super+k".to_string(),
         }];
 
-        let results = PaletteRows::filter(
+        let results = SearchRows::filter(
             "vmux://spaces/",
             &[],
             &commands,
@@ -938,7 +958,7 @@ mod tests {
             shortcut: "<leader> s".to_string(),
         }];
 
-        let results = PaletteRows::filter(
+        let results = SearchRows::filter(
             "spaces",
             &[],
             &commands,
@@ -974,7 +994,7 @@ mod tests {
         ];
         let tabs: Vec<CommandBarTab> = Vec::new();
 
-        let results = PaletteRows::filter(
+        let results = SearchRows::filter(
             "client",
             &tabs,
             &[],
@@ -994,7 +1014,7 @@ mod tests {
 
     #[test]
     fn page_matched_by_keyword() {
-        let results = PaletteRows::filter(
+        let results = SearchRows::filter(
             "preferences",
             &[],
             &[],
@@ -1018,7 +1038,7 @@ mod tests {
 
     #[test]
     fn agent_page_matched_by_vmux_prefix_carries_favicon() {
-        let results = PaletteRows::filter(
+        let results = SearchRows::filter(
             "vmux://",
             &[],
             &[],
@@ -1039,7 +1059,7 @@ mod tests {
 
     #[test]
     fn agent_page_matched_by_name() {
-        let results = PaletteRows::filter(
+        let results = SearchRows::filter(
             "vibe",
             &[],
             &[],
@@ -1071,7 +1091,7 @@ mod tests {
             startup: false,
         });
 
-        let results = PaletteRows::prompt_targets(&pages, "");
+        let results = PageRows::prompt_targets(&pages, "");
         let urls: Vec<_> = results
             .iter()
             .filter_map(|result| match result {
@@ -1099,7 +1119,7 @@ mod tests {
             startup: false,
         });
 
-        let results = PaletteRows::prompt_targets(&pages, "vibe");
+        let results = PageRows::prompt_targets(&pages, "vibe");
 
         assert_eq!(results.len(), 1);
         assert!(matches!(
@@ -1120,12 +1140,12 @@ mod tests {
             prompt_target: true,
             startup: false,
         });
-        let codex = PaletteRows::prompt_targets(&pages, "cod").remove(0);
+        let codex = PageRows::prompt_targets(&pages, "cod").remove(0);
 
-        assert!(PaletteRows::prompt_target_matches(&codex, "cod"));
-        assert!(PaletteRows::prompt_target_matches(&codex, "codex"));
-        assert!(PaletteRows::prompt_target_matches(&codex, "codex-acp"));
-        assert!(!PaletteRows::prompt_target_matches(
+        assert!(PageRows::prompt_target_matches(&codex, "cod"));
+        assert!(PageRows::prompt_target_matches(&codex, "codex"));
+        assert!(PageRows::prompt_target_matches(&codex, "codex-acp"));
+        assert!(!PageRows::prompt_target_matches(
             &codex,
             "fix the failing test"
         ));
@@ -1144,10 +1164,10 @@ mod tests {
             startup: false,
         });
 
-        let results = PaletteRows::prompt_targets(&pages, "show me something fun in terminal");
+        let results = PageRows::prompt_targets(&pages, "show me something fun in terminal");
         let urls: Vec<_> = results
             .iter()
-            .filter_map(PaletteRows::prompt_target_url)
+            .filter_map(PageRows::prompt_target_url)
             .collect();
 
         assert_eq!(
@@ -1158,7 +1178,7 @@ mod tests {
 
     #[test]
     fn start_page_does_not_show_unmatched_agents() {
-        let results = PaletteRows::start(
+        let results = StartRows::start(
             &sample_pages(),
             &[],
             &[],
@@ -1185,7 +1205,7 @@ mod tests {
             SearchEngine::Bing,
             SearchEngine::DuckDuckGo,
         ];
-        let results = PaletteRows::start(
+        let results = StartRows::start(
             &sample_pages(),
             &[],
             &[],
@@ -1214,7 +1234,7 @@ mod tests {
             url: "file:///work/failing%20test.txt".into(),
             title: "failing test.txt".into(),
         }];
-        let results = PaletteRows::start(
+        let results = StartRows::start(
             &sample_pages(),
             &work_dirs,
             &recent_files,
@@ -1262,9 +1282,9 @@ mod tests {
                 startup: false,
             },
         ]);
-        let agents = PaletteRows::prompt_targets(&pages, "");
+        let agents = PageRows::prompt_targets(&pages, "");
         let selected = agents[1].clone();
-        let mut results = PaletteRows::start(
+        let mut results = StartRows::start(
             &pages,
             &[],
             &[],
@@ -1273,7 +1293,7 @@ mod tests {
             "show me something fun",
         );
 
-        PaletteRows::prepend_targets(
+        StartRows::prepend_targets(
             &mut results,
             Some(&selected),
             &agents,
@@ -1281,15 +1301,15 @@ mod tests {
         );
 
         assert_eq!(
-            PaletteRows::prompt_target_url(&results[0]),
+            PageRows::prompt_target_url(&results[0]),
             Some("vmux://sessions/codex/cli")
         );
         assert_eq!(
-            PaletteRows::prompt_target_url(&results[1]),
+            PageRows::prompt_target_url(&results[1]),
             Some("vmux://sessions/vibe/")
         );
         assert_eq!(
-            PaletteRows::prompt_target_url(&results[2]),
+            PageRows::prompt_target_url(&results[2]),
             Some("vmux://sessions/claude")
         );
         assert!(matches!(results[3], CommandBarResultItem::Search { .. }));
@@ -1297,8 +1317,8 @@ mod tests {
 
     #[test]
     fn terminal_leads_but_agents_and_search_stay_available() {
-        let agent = PaletteRows::prompt_targets(&sample_pages(), "").remove(0);
-        let mut results = PaletteRows::start(
+        let agent = PageRows::prompt_targets(&sample_pages(), "").remove(0);
+        let mut results = StartRows::start(
             &sample_pages(),
             &[],
             &[],
@@ -1307,7 +1327,7 @@ mod tests {
             "terminal",
         );
 
-        PaletteRows::prepend_targets(&mut results, Some(&agent), &[], "terminal");
+        StartRows::prepend_targets(&mut results, Some(&agent), &[], "terminal");
 
         assert!(
             matches!(results.first(), Some(CommandBarResultItem::Terminal { .. })),
@@ -1316,7 +1336,7 @@ mod tests {
         assert!(
             results
                 .iter()
-                .any(|item| PaletteRows::prompt_target_url(item).is_some()),
+                .any(|item| PageRows::prompt_target_url(item).is_some()),
             "asking an agent stays reachable: {results:?}"
         );
         assert!(
@@ -1329,7 +1349,7 @@ mod tests {
 
     #[test]
     fn a_terminal_prefix_offers_terminal_alongside_the_other_options() {
-        let results = PaletteRows::start(&sample_pages(), &[], &[], &[], TERMINAL_PAGE_URL, "ter");
+        let results = StartRows::start(&sample_pages(), &[], &[], &[], TERMINAL_PAGE_URL, "ter");
         assert!(matches!(
             results.first(),
             Some(CommandBarResultItem::Terminal { .. })
@@ -1339,14 +1359,14 @@ mod tests {
 
     #[test]
     fn terminal_query_predicate_matches_display_and_activation() {
-        assert!(PaletteRows::terminal_matches("t"));
-        assert!(PaletteRows::terminal_matches("ter"));
-        assert!(PaletteRows::terminal_matches("Terminal"));
-        assert!(PaletteRows::terminal_matches("  term  "));
-        assert!(!PaletteRows::terminal_matches(""));
-        assert!(!PaletteRows::terminal_matches("   "));
-        assert!(!PaletteRows::terminal_matches("terminals"));
-        assert!(!PaletteRows::terminal_matches("xterm"));
+        assert!(StartRows::terminal_matches("t"));
+        assert!(StartRows::terminal_matches("ter"));
+        assert!(StartRows::terminal_matches("Terminal"));
+        assert!(StartRows::terminal_matches("  term  "));
+        assert!(!StartRows::terminal_matches(""));
+        assert!(!StartRows::terminal_matches("   "));
+        assert!(!StartRows::terminal_matches("terminals"));
+        assert!(!StartRows::terminal_matches("xterm"));
     }
 
     #[test]
@@ -1361,7 +1381,7 @@ mod tests {
             prompt_target: false,
             startup: false,
         });
-        let results = PaletteRows::start(&pages, &[], &[], &[], TERMINAL_PAGE_URL, "terminal");
+        let results = StartRows::start(&pages, &[], &[], &[], TERMINAL_PAGE_URL, "terminal");
         assert!(matches!(
             results.first(),
             Some(CommandBarResultItem::Terminal { .. })
@@ -1393,7 +1413,7 @@ mod tests {
             url: "file:///work/vmux/README.md".into(),
             title: "README.md".into(),
         }];
-        let dir_results = PaletteRows::start(
+        let dir_results = StartRows::start(
             &sample_pages(),
             &work_dirs,
             &recent_files,
@@ -1405,7 +1425,7 @@ mod tests {
             result,
             CommandBarResultItem::WorkDir { path, .. } if path == "/work/vmux"
         )));
-        let file_results = PaletteRows::start(
+        let file_results = StartRows::start(
             &sample_pages(),
             &work_dirs,
             &recent_files,
@@ -1422,7 +1442,7 @@ mod tests {
 
     #[test]
     fn prompt_agent_url_only_accepts_agent_page_rows() {
-        let agent = PaletteRows::prompt_targets(&sample_pages(), "").remove(0);
+        let agent = PageRows::prompt_targets(&sample_pages(), "").remove(0);
         let settings = CommandBarResultItem::Page {
             url: "vmux://settings/".into(),
             title: "Settings".into(),
@@ -1433,15 +1453,15 @@ mod tests {
         };
 
         assert_eq!(
-            PaletteRows::prompt_target_url(&agent),
+            PageRows::prompt_target_url(&agent),
             Some("vmux://sessions/vibe/")
         );
-        assert_eq!(PaletteRows::prompt_target_url(&settings), None);
+        assert_eq!(PageRows::prompt_target_url(&settings), None);
     }
 
     #[test]
     fn settings_page_reachable_by_name() {
-        let results = PaletteRows::filter(
+        let results = SearchRows::filter(
             "setti",
             &[],
             &[],
@@ -1467,7 +1487,7 @@ mod tests {
             shortcut: String::new(),
         }];
 
-        let results = PaletteRows::filter(
+        let results = SearchRows::filter(
             "",
             &[],
             &commands,
@@ -1499,7 +1519,7 @@ mod tests {
 
     #[test]
     fn pages_listed_alphabetically_by_url() {
-        let results = PaletteRows::filter(
+        let results = SearchRows::filter(
             "",
             &[],
             &[],
@@ -1531,7 +1551,7 @@ mod tests {
 
     #[test]
     fn page_carries_shortcut() {
-        let results = PaletteRows::filter(
+        let results = SearchRows::filter(
             "history",
             &[],
             &[],
@@ -1552,7 +1572,7 @@ mod tests {
 
     #[test]
     fn command_prefix_excludes_pages() {
-        let results = PaletteRows::filter(
+        let results = SearchRows::filter(
             "> set",
             &[],
             &[],
@@ -1587,7 +1607,7 @@ mod tests {
 
     #[test]
     fn empty_query_puts_work_after_pages() {
-        let results = PaletteRows::filter(
+        let results = SearchRows::filter(
             "",
             &[],
             &[],
@@ -1616,7 +1636,7 @@ mod tests {
     }
 
     fn path_results(query: &str) -> Vec<CommandBarResultItem> {
-        PaletteRows::filter(
+        SearchRows::filter(
             query,
             &[],
             &[],
@@ -1676,7 +1696,7 @@ mod tests {
 
     #[test]
     fn work_dir_matched_by_query() {
-        let results = PaletteRows::filter(
+        let results = SearchRows::filter(
             "proj",
             &[],
             &[],
@@ -1717,7 +1737,7 @@ mod tests {
             },
         ];
 
-        let items = PaletteRows::open_sessions(&tabs, &[]);
+        let items = PageRows::open_sessions(&tabs, &[]);
 
         assert_eq!(items.len(), 1, "the stack already on screen is not offered");
         assert!(matches!(
@@ -1725,6 +1745,6 @@ mod tests {
             CommandBarResultItem::Stack { title, pane_id, .. }
                 if title == "Docs" && *pane_id == 8
         ));
-        assert!(PaletteRows::open_sessions(&[], &[]).is_empty());
+        assert!(PageRows::open_sessions(&[], &[]).is_empty());
     }
 }

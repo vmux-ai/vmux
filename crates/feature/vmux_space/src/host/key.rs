@@ -25,28 +25,28 @@ impl Plugin for SpaceKeyPlugin {
     }
 }
 
-#[vmux_command::command(id = "space_next")]
-struct SelectNextSpace;
+#[vmux_command::command]
+struct SpaceNextBinding;
 
-#[vmux_command::command(id = "space_previous")]
-struct SelectPreviousSpace;
+#[vmux_command::command]
+struct SpacePreviousBinding;
 
-#[vmux_command::command(id = "space_attach")]
-struct AttachSelectedSpace;
+#[vmux_command::command]
+struct SpaceAttachBinding;
 
-#[vmux_command::command(id = "space_delete")]
-struct DeleteSelectedSpace;
+#[vmux_command::command]
+struct SpaceDeleteBinding;
 
 fn bind_commands(registry: CommandRegistry, mut commands: Commands) {
-    registry.bind::<SelectNextSpace>(&mut commands);
-    registry.bind::<SelectPreviousSpace>(&mut commands);
-    registry.bind::<AttachSelectedSpace>(&mut commands);
-    registry.bind::<DeleteSelectedSpace>(&mut commands);
+    registry.bind::<SpaceNextBinding>(&mut commands);
+    registry.bind::<SpacePreviousBinding>(&mut commands);
+    registry.bind::<SpaceAttachBinding>(&mut commands);
+    registry.bind::<SpaceDeleteBinding>(&mut commands);
 }
 
 fn select_next(
     trigger: On<CommandDispatch>,
-    bindings: Query<(), With<SelectNextSpace>>,
+    bindings: Query<(), With<SpaceNextBinding>>,
     mut pages: Query<(&mut SpaceSelection, &mut SpacesPageSnapshot), With<Spaces>>,
     mut commands: Commands,
 ) {
@@ -67,7 +67,7 @@ fn select_next(
 
 fn select_previous(
     trigger: On<CommandDispatch>,
-    bindings: Query<(), With<SelectPreviousSpace>>,
+    bindings: Query<(), With<SpacePreviousBinding>>,
     mut pages: Query<(&mut SpaceSelection, &mut SpacesPageSnapshot), With<Spaces>>,
     mut commands: Commands,
 ) {
@@ -88,7 +88,7 @@ fn select_previous(
 
 fn attach_selected(
     trigger: On<CommandDispatch>,
-    bindings: Query<(), With<AttachSelectedSpace>>,
+    bindings: Query<(), With<SpaceAttachBinding>>,
     pages: Query<&SpacesPageSnapshot, With<Spaces>>,
     mut commands: Commands,
 ) {
@@ -112,7 +112,7 @@ fn attach_selected(
 
 fn delete_selected(
     trigger: On<CommandDispatch>,
-    bindings: Query<(), With<DeleteSelectedSpace>>,
+    bindings: Query<(), With<SpaceDeleteBinding>>,
     pages: Query<&SpacesPageSnapshot, With<Spaces>>,
     mut commands: Commands,
 ) {
