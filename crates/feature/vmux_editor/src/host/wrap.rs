@@ -1,6 +1,6 @@
 use ropey::Rope;
-use vmux_core::editor::{SelSpan, WordWrap};
-use vmux_core::event::FileLineLayout;
+use vmux_api::editor::{SelSpan, WordWrap};
+use vmux_ecs::event::FileLineLayout;
 
 use crate::fold::FoldView;
 use crate::text::DisplayCells;

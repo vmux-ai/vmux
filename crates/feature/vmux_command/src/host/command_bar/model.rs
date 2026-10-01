@@ -11,6 +11,7 @@ use vmux_ui::i18n::translate;
 #[cfg(test)]
 use vmux_ui::list_nav::MenuDirection;
 
+pub use self::results::ResumeRows;
 use self::results::{CommandBarResultItem, PickerRows, SlashRows};
 
 mod query;

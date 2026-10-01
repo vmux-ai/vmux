@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use vmux_core::event::InstallPhase;
+use vmux_ecs::event::InstallPhase;
 use vmux_editor::lsp::archive::ArchiveKind;
 use vmux_editor::lsp::download::{self, RemoteArtifact};
 use vmux_editor::lsp::package_path::{PackageName, PackagePath, Sha256Digest};
@@ -27,7 +27,7 @@ pub(super) struct AgentInstaller {
 impl AgentInstaller {
     pub(super) fn current() -> Self {
         Self::at(PackageStore::at(
-            vmux_core::profile::ProfilePaths::current().agents(),
+            vmux_ecs::profile::ProfilePaths::current().agents(),
         ))
     }
 

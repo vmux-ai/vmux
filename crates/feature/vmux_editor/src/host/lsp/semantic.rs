@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use syntect::highlighting::Highlighter;
 use syntect::parsing::ScopeStack;
-use vmux_core::event::StyledSpan;
+use vmux_ecs::event::StyledSpan;
 
 pub const SEMANTIC_TOKEN_TYPES: &[&str] = &[
     "namespace",

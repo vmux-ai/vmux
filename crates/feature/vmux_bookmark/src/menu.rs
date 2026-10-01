@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_core::agent::AgentRequestAppExt;
+use vmux_ecs::agent::AgentRequestAppExt;
 use vmux_layout::bookmark::{
     AddRequest, CreateFolderRequest, PinRequest, PinUrlRequest, RemoveRequest, UnpinRequest,
 };
@@ -33,7 +33,7 @@ mod macos {
     use vmux_api::bookmark::{
         BookmarkFolderCreateEffect, BookmarkMenuEffect, BookmarkRenameEffect,
     };
-    use vmux_core::{Bookmark, Collapsed, Folder, PageMetadata, Pin, Uuid, host::UiStateWrite};
+    use vmux_ecs::{Bookmark, Collapsed, Folder, PageMetadata, Pin, Uuid, host::UiStateWrite};
     use vmux_layout::bookmark::{
         AddRequest, BookmarkMenuTarget, MoveFolderRequest, MoveRequest, PinRequest,
         RemoveFolderRequest, RemoveRequest, ShowBookmarkMenuRequest, ToggleFolderRequest,

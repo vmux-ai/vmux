@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use vmux_api::protocol::ProcessId;
-use vmux_core::agent::{
+use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
 
@@ -156,7 +156,7 @@ fn rename_profile(
         if name.is_empty() {
             continue;
         }
-        match vmux_core::profile::Profile::current().set_display_name(name) {
+        match vmux_ecs::profile::Profile::current().set_display_name(name) {
             Ok(()) => {
                 if let Ok(mut profile) = profiles.single_mut() {
                     profile.name = name.to_string();

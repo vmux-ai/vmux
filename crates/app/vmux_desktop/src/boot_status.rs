@@ -1,7 +1,7 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use vmux_core::host::persistence::WorkspaceRestore;
-use vmux_core::page::PageReady;
+use vmux_ecs::host::persistence::WorkspaceRestore;
+use vmux_ecs::page::PageReady;
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::space::Space;
 use vmux_layout::stack::Stack;
@@ -22,7 +22,7 @@ fn spawn(mut commands: Commands) {
 fn stack_in_active_space(
     stack: Entity,
     child_of_q: &Query<&ChildOf>,
-    space_active_q: &Query<Has<vmux_core::Active>, With<Space>>,
+    space_active_q: &Query<Has<vmux_ecs::Active>, With<Space>>,
 ) -> bool {
     let mut entity = stack;
     loop {
@@ -106,7 +106,7 @@ fn update(
     stacks_q: Query<(Entity, Option<&Children>), With<Stack>>,
     ready_q: Query<(), With<PageReady>>,
     child_of_q: Query<&ChildOf>,
-    space_active_q: Query<Has<vmux_core::Active>, With<Space>>,
+    space_active_q: Query<Has<vmux_ecs::Active>, With<Space>>,
 ) {
     let layout_ready = !layout_q.is_empty();
 

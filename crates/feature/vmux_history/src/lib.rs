@@ -2,7 +2,7 @@
 pub(crate) struct Feature;
 
 #[cfg(host)]
-impl vmux_core::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
@@ -13,7 +13,7 @@ pub mod state;
 pub mod ui;
 
 #[cfg(host)]
-pub use vmux_core::{CreatedAt, LastActivatedAt, Visit, now_millis};
+pub use vmux_ecs::{CreatedAt, LastActivatedAt, Visit, now_millis};
 
 #[cfg(host)]
 mod host;

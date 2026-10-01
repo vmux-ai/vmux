@@ -17,7 +17,8 @@ percent-encoding = "2"
 rkyv = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true }
-vmux_core = { path = "../../util/vmux_core" }
+vmux_ecs = { path = "../../util/vmux_ecs" }
+vmux_input = { path = "../vmux_input" }
 vmux_native = { path = "../../util/vmux_native" }
 vmux_api = { path = "../../util/vmux_api" }
 

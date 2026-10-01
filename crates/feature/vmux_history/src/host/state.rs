@@ -1,16 +1,16 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
-use vmux_core::page::PageReady;
+use vmux_ecs::page::PageReady;
 
 use crate::state::HistoryUiState;
 
-type HistoryUiStateUpdates = vmux_core::host::UiState<HistoryUiState>;
+type HistoryUiStateUpdates = vmux_ecs::host::UiState<HistoryUiState>;
 
 pub(super) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::UiStatePlugin::<HistoryUiState>::default())
+        app.add_plugins(vmux_ecs::host::UiStatePlugin::<HistoryUiState>::default())
             .add_observer(page_ready);
     }
 }
@@ -56,7 +56,7 @@ impl HistoryPageState {
 
 fn page_ready(
     trigger: On<UiInput<PageReady>>,
-    pages: Query<&vmux_core::PageMetadata>,
+    pages: Query<&vmux_ecs::PageMetadata>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;

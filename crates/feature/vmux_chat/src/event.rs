@@ -147,7 +147,7 @@ pub struct ComposerContext {
     pub ahead: u32,
     pub can_manage_workspace: bool,
     pub auto_allow_count: u32,
-    pub projects: Vec<vmux_core::event::ProjectRow>,
+    pub projects: Vec<vmux_ecs::event::ProjectRow>,
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -349,7 +349,7 @@ pub struct ChatResumeQueryRequest {
     pub query: String,
 }
 
-pub use vmux_core::event::ProjectBranch as ChatBranch;
+pub use vmux_ecs::event::ProjectBranch as ChatBranch;
 
 #[vmux_api::ui_event(Default)]
 pub struct ChatGoToBranch {

@@ -18,7 +18,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 vmux_api = { path = "../../util/vmux_api" }
-vmux_core = { path = "../../util/vmux_core" }
+vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_native = { path = "../../util/vmux_native" }
 vmux_setting = { path = "../vmux_setting" }

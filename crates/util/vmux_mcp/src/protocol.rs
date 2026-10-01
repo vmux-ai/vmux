@@ -11,8 +11,8 @@ use vmux_api::protocol::{
     AgentCommandResult, AgentListCommands, AgentRequest, AgentRequestId, ClientMessage, ProcessId,
     ServiceMessage,
 };
-use vmux_core::service::ServiceConnection;
-use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
+use vmux_ecs::service::ServiceConnection;
+use vmux_ecs::{HostShell, JsonArguments, ProcessAnchor};
 use vmux_tool::{
     AcpSessionContext, AcpTerminalContext, ToolCall, ToolCatalog, ToolCatalogRequest, ToolCommand,
     ToolCommandFallback, ToolDefinition, ToolDispatchError, ToolDispatchFlush, ToolDispatchSet,

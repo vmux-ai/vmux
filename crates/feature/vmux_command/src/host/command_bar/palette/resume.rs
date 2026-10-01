@@ -4,8 +4,8 @@ use vmux_api::chat::{ResumableSessions, ResumeListRequest};
 use vmux_api::command_bar::{
     CommandBarUiState, CommandBarUiStatePatch, CommandPaletteDraftRequest,
 };
-use vmux_core::host::UiStateWrite;
-use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
+use vmux_ecs::host::UiStateWrite;
+use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
 
 use super::super::model::PaletteQuery;
 

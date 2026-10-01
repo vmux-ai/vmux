@@ -1,5 +1,10 @@
 pub const RUN_OSC: &str = "6973";
 
+#[cfg(feature = "bevy")]
+pub trait ServiceMessageVariant: bevy_ecs::message::Message + Sized {
+    fn from_service_message(message: &crate::protocol::ServiceMessage) -> Option<Self>;
+}
+
 #[vmux_api::ui_state(Default)]
 pub struct ProcessesUiState {
     pub connected: bool,

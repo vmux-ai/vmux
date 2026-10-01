@@ -4,6 +4,7 @@
             name: "default",
             url: "vmux://start/",
             title: "Start",
+            bookmark: Some(10),
             title_message_id: "start-title",
             keywords: ["start", "home", "new tab", "launcher"],
             icon: "Sparkles",

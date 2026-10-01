@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
-use vmux_core::agent::{
+use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
-use vmux_core::host::manifest::FeaturePlugin;
+use vmux_ecs::host::manifest::FeaturePlugin;
 use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet};
 
 mod bridge;
@@ -36,7 +36,7 @@ impl Plugin for ExtensionPlugin {
             unsafe { std::env::remove_var("VMUX_LOAD_EXTENSIONS") };
             Vec::new()
         });
-        let profile = vmux_core::profile::Profile::current().into_id();
+        let profile = vmux_ecs::profile::Profile::current().into_id();
         let conformance_extension = std::env::var("VMUX_EXTENSION_CONFORMANCE_ID").ok();
         let registrations = prepared
             .iter()
@@ -65,7 +65,7 @@ impl Plugin for ExtensionPlugin {
             .bind_tool::<BrowserInstallExtensionArgs>()
             .add_plugins((
                 crate::catalog::ExtensionCatalogPlugin,
-                vmux_core::host::UiStatePlugin::<vmux_api::extension::ExtensionsEvent>::default(),
+                vmux_ecs::host::UiStatePlugin::<vmux_api::extension::ExtensionsEvent>::default(),
                 bridge::ExtensionBridgePlugin::new(profile, registrations),
                 bridge_page::ExtensionBridgePagePlugin,
                 broker::ExtensionBrokerPlugin,

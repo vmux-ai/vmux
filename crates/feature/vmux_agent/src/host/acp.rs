@@ -6,13 +6,13 @@ use std::thread::JoinHandle;
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
 use vmux_api::protocol::{ClientMessage, ManagedMcpServer};
-use vmux_core::event::InstallPhase;
-use vmux_core::service::ServiceConnected;
-use vmux_core::service::ServiceRequest;
-use vmux_core::tool::{ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus};
+use vmux_ecs::event::InstallPhase;
+use vmux_ecs::service::ServiceConnected;
+use vmux_ecs::service::ServiceRequest;
 use vmux_editor::lsp::store::PackageStore;
 use vmux_session::AcpSession;
 use vmux_setting::{AcpAgentConfig, AppSettings};
+use vmux_tool::state::{ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus};
 use vmux_tool::{
     ToolInventory, ToolInventoryItem, ToolOperator, ToolProviderId, ToolProviderSnapshot,
     ToolScanner, ToolStore, ToolsManifest,
@@ -36,7 +36,7 @@ impl Plugin for AcpToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
             .add_message::<AcpPackageChanged>()
-            .add_message::<vmux_core::agent::SwapStackSession>()
+            .add_message::<vmux_ecs::agent::SwapStackSession>()
             .add_observer(cancel_install_on_remove)
             .add_systems(Startup, spawn_tool_provider)
             .add_systems(Update, (start_installs, poll_installs).chain());
@@ -71,7 +71,7 @@ fn scan_tools(
                 .collect::<BTreeMap<_, _>>()
         })
         .unwrap_or_default();
-    let package_store = PackageStore::at(vmux_core::profile::ProfilePaths::current().agents());
+    let package_store = PackageStore::at(vmux_ecs::profile::ProfilePaths::current().agents());
     let receipts = package_store.installed();
     let inventory = receipts
         .into_values()
@@ -301,7 +301,7 @@ fn start_installs(
 }
 
 fn poll_installs(
-    mut swaps: MessageReader<vmux_core::agent::SwapStackSession>,
+    mut swaps: MessageReader<vmux_ecs::agent::SwapStackSession>,
     connected: Option<Single<(), With<ServiceConnected>>>,
     settings: Option<Res<AppSettings>>,
     mut jobs: Query<(
@@ -380,7 +380,7 @@ fn poll_installs(
             match &outcome.launch {
                 Ok(launch) => {
                     let message = launch.message_for(session, settings.as_deref());
-                    match vmux_core::profile::mcp_credentials::McpCredentialAccess::with_revision(
+                    match vmux_ecs::profile::mcp_credentials::McpCredentialAccess::with_revision(
                         launch.mcp_revision,
                         || (),
                     ) {
@@ -675,7 +675,7 @@ mod tests {
             agent_id: agent_id.to_string(),
             sid: sid.to_string(),
             cwd: PathBuf::from("/workspace"),
-            anchor: vmux_core::ProcessId::new(),
+            anchor: vmux_ecs::ProcessId::new(),
             resume: None,
         }
     }

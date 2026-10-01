@@ -11,7 +11,7 @@ pub struct PreparedExtensions(pub Vec<PreparedRuntime>);
 pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
     let store = store::ExtensionStore::current();
     let runtime_store = store::ExtensionStore::at(runtime_store_root());
-    let profile = vmux_core::profile::Profile::current().into_id();
+    let profile = vmux_ecs::profile::Profile::current().into_id();
     let mut idx = store.load_index()?;
     let migrating = idx.requires_save();
     let mut index_changed = migrating;
@@ -26,7 +26,7 @@ pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
     if index_changed {
         store.save_index(&idx)?;
     }
-    let profile_dir = vmux_core::profile::ProfilePaths::current().profile();
+    let profile_dir = vmux_ecs::profile::ProfilePaths::current().profile();
     ServiceWorkerCache::from(profile_dir.as_path()).reconcile(&prepared)?;
     let dirs = prepared
         .iter()
@@ -79,7 +79,7 @@ fn prepare_enabled_entries(
 }
 
 fn runtime_store_root() -> std::path::PathBuf {
-    vmux_core::profile::ProfilePaths::current()
+    vmux_ecs::profile::ProfilePaths::current()
         .shared_data()
         .join("extensions")
 }

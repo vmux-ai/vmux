@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_core::page::PageReady;
+use vmux_ecs::page::PageReady;
 
 use crate::event::{
     GitBranchLog, GitBranchLogRequest, GitDiffViewport, GitOperationError, GitOperationResult,
@@ -17,13 +17,13 @@ use super::job_runner::{GitJob, GitJobFailure};
 use super::repository::GitRepository;
 use super::watch::GitWatch;
 
-type GitUiStateUpdates = vmux_core::host::UiState<GitUiState>;
+type GitUiStateUpdates = vmux_ecs::host::UiState<GitUiState>;
 
 pub(super) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_core::host::UiStatePlugin::<GitUiState>::default())
+        app.add_plugins(vmux_ecs::host::UiStatePlugin::<GitUiState>::default())
             .add_plugins(UiEventPlugin::<(GitRepositoryRequest, GitBranchLogRequest)>::default())
             .add_observer(page_ready)
             .add_observer(repository_request)
@@ -164,7 +164,7 @@ impl GitState {
 
 fn page_ready(
     trigger: On<UiInput<PageReady>>,
-    pages: Query<&vmux_core::PageMetadata>,
+    pages: Query<&vmux_ecs::PageMetadata>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -180,7 +180,7 @@ fn page_ready(
 fn repository_request(
     trigger: On<UiInput<GitRepositoryRequest>>,
     watch: Option<NonSendMut<GitWatch>>,
-    mut pages: Query<&mut vmux_core::PageMetadata>,
+    mut pages: Query<&mut vmux_ecs::PageMetadata>,
     mut views: Query<&mut GitState>,
     mut commands: Commands,
 ) {
@@ -246,19 +246,19 @@ type GitStateQuery<'w, 's> = Query<
 fn publish(views: GitStateQuery, mut commands: Commands) {
     for (entity, view, controller, directory) in &views {
         if view.is_changed() {
-            commands.trigger(vmux_core::host::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::host::UiStateWrite::<GitUiState>::from_event(
                 entity,
                 &view.snapshot,
             ));
         }
         if controller.is_changed() {
-            commands.trigger(vmux_core::host::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::host::UiStateWrite::<GitUiState>::from_event(
                 entity,
                 controller.state(),
             ));
         }
         if directory.is_changed() {
-            commands.trigger(vmux_core::host::UiStateWrite::<GitUiState>::from_event(
+            commands.trigger(vmux_ecs::host::UiStateWrite::<GitUiState>::from_event(
                 entity,
                 &directory.state(),
             ));

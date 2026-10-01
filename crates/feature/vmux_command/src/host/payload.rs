@@ -96,8 +96,8 @@ impl CommandBarPicks {
     }
 
     fn encodings(save: bool) -> Vec<CommandBarPickRow> {
-        let mut rows = Vec::with_capacity(vmux_core::event::FileEncoding::ALL.len());
-        for encoding in vmux_core::event::FileEncoding::ALL {
+        let mut rows = Vec::with_capacity(vmux_ecs::event::FileEncoding::ALL.len());
+        for encoding in vmux_ecs::event::FileEncoding::ALL {
             rows.push(Self::row(
                 encoding.label(),
                 CommandBarPick::Encoding {

@@ -8,10 +8,9 @@ use vmux_api::protocol::{
     AgentFileSearch, AgentFileTouched, FileSearchMatch, FileTouchKind, ProcessId,
 };
 use vmux_command::WriteCommandRequests;
-use vmux_core::event::{ExplorerSearchFile, ExplorerSearchMatch, FileViewMode};
-use vmux_core::file_url::FileUrl;
-use vmux_core::service::ServiceMessageSet;
-use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
+use vmux_ecs::event::{ExplorerSearchFile, ExplorerSearchMatch, FileViewMode};
+use vmux_ecs::service::ServiceMessageSet;
+use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
 #[cfg(test)]
 use vmux_editor::ContractPlugin as EditorContractPlugin;
 use vmux_editor::{FileViewModeRequest, GlobalSearchRequest};
@@ -27,6 +26,7 @@ use vmux_layout::tab::Tab;
 use vmux_layout::worktree::{
     TabDirectoryObservationKind, TabDirectoryObserved, TabDirectoryRebindSet,
 };
+use vmux_path::FileUrl;
 use vmux_setting::AppSettings;
 
 use crate::host::event::{AgentRequestInput, CommandOrigin};

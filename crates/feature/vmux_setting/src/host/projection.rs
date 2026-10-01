@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
-use vmux_core::PageMetadata;
-use vmux_core::host::manifest::FeatureManifest;
-use vmux_core::page::PageReady;
+use vmux_ecs::PageMetadata;
+use vmux_ecs::page::PageReady;
 use vmux_ui::i18n::{Locale, TranslationValue};
 
+use super::runtime::SettingsManifest;
 use crate::AppSettings;
 use crate::event::{CurrentUpdateCheckStatus, UpdateCheckStatus};
 use crate::schema::{FieldSpec, SectionSpec, SettingsSchema, WidgetKind};
@@ -21,7 +21,7 @@ pub(super) struct ProjectionPlugin;
 impl Plugin for ProjectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_status)
-            .add_plugins(vmux_core::host::UiStatePlugin::<SettingsUiState>::default())
+            .add_plugins(vmux_ecs::host::UiStatePlugin::<SettingsUiState>::default())
             .add_systems(
                 Update,
                 (localize_metadata, project_schema, project_fields, publish).chain(),
@@ -54,8 +54,8 @@ fn localize_metadata(
 
 fn project_schema(
     settings: Res<AppSettings>,
-    manifests: Query<&FeatureManifest>,
-    changed_manifests: Query<(), Changed<FeatureManifest>>,
+    manifests: Query<&SettingsManifest, Without<Settings>>,
+    changed_manifests: Query<(), Changed<SettingsManifest>>,
     mut views: Query<&mut SettingsSchema, With<Settings>>,
 ) {
     let added = views.iter_mut().any(|schema| schema.is_added());
@@ -63,13 +63,13 @@ fn project_schema(
         return;
     }
     let locale = Locale::requested(Some(&settings.appearance.locale));
-    let schema = match SettingsSchema::from_manifests(manifests.iter(), &locale) {
-        Ok(schema) => schema,
-        Err(error) => {
-            bevy::log::error!("settings: feature manifest schema is invalid: {error}");
-            return;
-        }
-    };
+    let mut schema = SettingsSchema::default();
+    for manifest in &manifests {
+        schema.sections.extend(manifest.sections.iter().cloned());
+        schema.fields.extend(manifest.fields.iter().cloned());
+    }
+    schema.sections.sort_by_key(|section| section.order);
+    schema.localize(&locale);
     for mut current in &mut views {
         if *current != schema {
             current.clone_from(&schema);
@@ -106,9 +106,10 @@ fn publish(
         if !ready.is_changed() && !projection.is_changed() {
             continue;
         }
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<SettingsUiState>::from_event(entity, &projection.0),
-        );
+        commands.trigger(vmux_ecs::host::UiStateWrite::<SettingsUiState>::from_event(
+            entity,
+            &projection.0,
+        ));
     }
 }
 
@@ -667,6 +668,18 @@ mod projection_tests {
     use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
     use vmux_api::BinEvent;
 
+    const MANIFESTS: [&str; 9] = [
+        include_str!("../feature.ron"),
+        include_str!("../../../vmux_agent/src/feature.ron"),
+        include_str!("../../../vmux_editor/src/feature.ron"),
+        include_str!("../../../vmux_input/src/feature.ron"),
+        include_str!("../../../vmux_layout/src/feature.ron"),
+        include_str!("../../../vmux_shortcut/src/feature.ron"),
+        include_str!("../../../vmux_space/src/feature.ron"),
+        include_str!("../../../vmux_terminal/src/feature.ron"),
+        include_str!("../../../../util/vmux_browser/src/feature.ron"),
+    ];
+
     #[derive(Resource, Default)]
     struct Emitted(Vec<SettingsUiState>);
 
@@ -685,10 +698,10 @@ mod projection_tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_core::host::manifest::FeaturePlugin::<crate::Feature>::default(),
+            vmux_ecs::host::manifest::FeaturePlugin::<crate::Feature>::default(),
             ProjectionPlugin,
         ))
-        .insert_resource(AppSettings::embedded())
+        .insert_resource(AppSettings::default())
         .init_resource::<Emitted>()
         .add_observer(record_settings_state);
         let entity = app.world_mut().spawn((Settings, PageReady)).id();
@@ -723,6 +736,71 @@ mod projection_tests {
                 .map(|field| &field.kind),
             Some(SettingsRenderFieldKind::UpdateCheck { .. })
         ));
+    }
+
+    #[test]
+    fn feature_manifests_spawn_settings_components_and_compose_the_page_schema() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(AppSettings::default())
+            .add_systems(Update, project_schema);
+        let page = app.world_mut().spawn(Settings).id();
+        for source in MANIFESTS {
+            let feature = vmux_ecs::host::manifest::FeatureManifest::parse(source);
+            let settings = feature
+                .settings::<SettingsManifest>()
+                .unwrap()
+                .expect("settings manifest");
+            app.world_mut().spawn((feature, settings));
+        }
+
+        app.update();
+
+        let mut manifests = app.world_mut().query::<&SettingsManifest>();
+        assert_eq!(manifests.iter(app.world()).count(), MANIFESTS.len());
+        let schema = app
+            .world()
+            .get::<SettingsSchema>(page)
+            .expect("settings page schema");
+        let sections = schema
+            .sections
+            .iter()
+            .map(|section| section.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            sections,
+            [
+                "general",
+                "appearance",
+                "layout",
+                "agent",
+                "shortcuts",
+                "terminal",
+                "browser",
+                "editor",
+                "recording",
+                "spaces",
+            ]
+        );
+        let language = schema.field("appearance.locale").expect("language field");
+        assert_eq!(language.widget, Some(WidgetKind::Select));
+        assert_eq!(language.options.first().unwrap().value, "system");
+        assert_eq!(
+            schema
+                .field("agent.acp[0].command")
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("Command")
+        );
+        assert_eq!(
+            schema
+                .field("spaces.personal.startup_dir")
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("Startup directory")
+        );
     }
 
     #[test]

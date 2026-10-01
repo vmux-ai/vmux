@@ -6,7 +6,9 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+percent-encoding = "2"
 tempfile = "3"
+url = { workspace = true }
 
 [lints]
 workspace = true

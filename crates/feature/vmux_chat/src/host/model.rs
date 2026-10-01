@@ -150,7 +150,7 @@ fn publish_state(trigger: On<ChatModelStateChanged>, mut commands: Commands) {
         .entity(event.webview)
         .insert(ModelPickerProjection(event.state.clone()));
     commands.trigger(
-        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+        vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
             event.webview,
             &event.state,
         ),
@@ -188,7 +188,7 @@ fn publish_mode_state(trigger: On<ChatModeStateChanged>, mut commands: Commands)
         .entity(event.webview)
         .insert(ModeProjection(event.state.clone()));
     commands.trigger(
-        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+        vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
             event.webview,
             &event.state,
         ),
@@ -198,7 +198,7 @@ fn publish_mode_state(trigger: On<ChatModeStateChanged>, mut commands: Commands)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::host::UiStateWrite;
+    use vmux_ecs::host::UiStateWrite;
 
     #[derive(Resource, Default)]
     struct Published(Vec<crate::state::ChatUiStatePatch>);

@@ -3,24 +3,25 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::{
+    ConsumesNativeKey, NativeKey, NativeKeyCapture, NativeKeyClaimSet, NativeKeyInput,
+    NativeKeyInputSet, PassesNativeKey,
+};
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::{Receiver, Sender};
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
 use parking_lot::Mutex;
+use vmux_api::input::KeyModifiers;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_command::{CommandInvocation, WriteCommandRequests};
-use vmux_core::input::{
-    ConsumesNativeKey, NativeKey, NativeKeyCapture, NativeKeyClaimSet, NativeKeyInput,
-    NativeKeyInputSet, PassesNativeKey,
-};
-use vmux_core::team::User;
-use vmux_core::{Active, KeyModifiers, WindowFullscreen, WindowFullscreenSet, now_millis};
+use vmux_ecs::team::User;
+use vmux_ecs::{Active, WindowFullscreen, WindowFullscreenSet, now_millis};
 
 use crate::{ExitFullscreenShortcut, HideWindowsShortcut, KeyboardContext, KeyboardContextSet};
 
-pub struct KeyboardPlugin;
+pub(crate) struct KeyboardPlugin;
 
 impl Plugin for KeyboardPlugin {
     fn build(&self, app: &mut App) {
@@ -760,13 +761,13 @@ mod tests {
             );
         app.world_mut().spawn((
             Window::default(),
-            vmux_core::WindowFullscreen(true),
-            vmux_core::Active,
+            vmux_ecs::WindowFullscreen(true),
+            vmux_ecs::Active,
         ));
         app.update();
         let mut claims = app.world_mut().query_filtered::<
             (Entity, &NativeKey),
-            (With<ExitFullscreenKey>, With<vmux_core::Active>),
+            (With<ExitFullscreenKey>, With<vmux_ecs::Active>),
         >();
         let claim = claims
             .iter(app.world())
@@ -801,7 +802,7 @@ mod tests {
 
         assert!(
             app.world_mut()
-                .query_filtered::<Entity, (With<ExitFullscreenKey>, With<vmux_core::Active>)>()
+                .query_filtered::<Entity, (With<ExitFullscreenKey>, With<vmux_ecs::Active>)>()
                 .iter(app.world())
                 .next()
                 .is_none()

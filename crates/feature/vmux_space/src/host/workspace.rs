@@ -7,9 +7,9 @@ use vmux_api::protocol::ClientMessage;
 use vmux_chat::event::ChatChoiceSelected;
 use vmux_chat::host::{ChatSynced, ChatView, PendingAgentChoice};
 use vmux_command::WriteCommandRequests;
-use vmux_core::AgentWorkingDir;
-use vmux_core::agent::{AgentContinuationRequest, AgentSessionRoot};
-use vmux_core::service::{ServiceMessageSet, ServiceRequest};
+use vmux_ecs::AgentWorkingDir;
+use vmux_ecs::agent::{AgentContinuationRequest, AgentSessionRoot};
+use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_git::worktree::{
     CheckoutInfo, is_linked_worktree, repository_init, worktree_registrations,
 };
@@ -22,7 +22,7 @@ use vmux_layout::worktree::{
 use vmux_session::AcpSession;
 
 use super::agent_workspace::AgentWorkspaceRequestSet;
-use vmux_core::profile::ProjectsDirectory;
+use vmux_ecs::profile::ProjectsDirectory;
 
 pub(super) struct WorkspaceAgentPlugin;
 
@@ -316,8 +316,10 @@ impl AgentWorkspaceState<'_, '_> {
             return None;
         };
         session.cwd = cwd.to_path_buf();
+        commands
+            .entity(stack)
+            .insert(AgentWorkingDir(cwd.to_path_buf()));
         let cwd = cwd.to_string_lossy().into_owned();
-        commands.entity(stack).insert(AgentWorkingDir(cwd.clone()));
         Some(ClientMessage::RebindAcpWorkspace {
             sid: session.sid.clone(),
             cwd,
@@ -529,7 +531,7 @@ fn drain_picker_tasks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::ProcessId;
+    use vmux_ecs::ProcessId;
 
     struct TestRepository(tempfile::TempDir);
 
@@ -672,7 +674,7 @@ mod tests {
                     anchor,
                     resume: None,
                 },
-                AgentWorkingDir(projects.to_string_lossy().into_owned()),
+                AgentWorkingDir(projects.clone()),
                 ChildOf(pane),
             ))
             .id();
@@ -721,7 +723,7 @@ mod tests {
         assert_eq!(session.cwd, execution_dir);
         assert_eq!(
             app.world().get::<AgentWorkingDir>(stack).unwrap().0,
-            execution_dir.to_string_lossy()
+            execution_dir
         );
         assert_eq!(app.world().get::<ChildOf>(view).unwrap().parent(), stack);
         assert!(app.world().get::<ChatView>(view).is_some());

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::event::*;
+use vmux_ecs::event::*;
 
 use crate::edit::EditCommand;
 use crate::event::*;
@@ -241,7 +241,7 @@ struct WikiCompletion {
 }
 
 impl WikiCompletion {
-    fn for_edit(edit: &Editor, index: &vmux_core::knowledge::KnowledgeIndex) -> Option<Self> {
+    fn for_edit(edit: &Editor, index: &vmux_knowledge::KnowledgeIndex) -> Option<Self> {
         if !index.loaded()
             || !edit.core.buffer.path.starts_with(index.root())
             || !crate::markdown::is_markdown_path(&edit.core.buffer.path)
@@ -269,7 +269,7 @@ impl WikiCompletion {
     fn result(
         self,
         entity: Entity,
-        index: &vmux_core::knowledge::KnowledgeIndex,
+        index: &vmux_knowledge::KnowledgeIndex,
     ) -> crate::host::panel::CompletionResult {
         let items = index
             .completions(&self.prefix, 32)
@@ -367,7 +367,7 @@ fn rename(
     if current.is_empty() || !browsers.can_emit_to(&entity) {
         return;
     }
-    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
         entity,
         &FileRenamePrompt {
             line: position.line,
@@ -518,7 +518,7 @@ fn code_action(
 fn wiki_completion(
     trigger: On<WikiCompletionRequest>,
     views: Query<&Editor>,
-    indexes: Query<&vmux_core::knowledge::KnowledgeIndex>,
+    indexes: Query<&vmux_knowledge::KnowledgeIndex>,
     mut commands: Commands,
 ) {
     let Ok(index) = indexes.single() else {
@@ -726,7 +726,7 @@ fn request_references(
 fn request_completion(
     trigger: On<UiInput<FileCompletionRequest>>,
     views: Query<&Editor>,
-    indexes: Query<&vmux_core::knowledge::KnowledgeIndex>,
+    indexes: Query<&vmux_knowledge::KnowledgeIndex>,
     mut commands: Commands,
     mut manager: Single<&mut crate::lsp::manager::LspManager>,
 ) {

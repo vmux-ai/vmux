@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::event::{ExplorerCloseEditor, OpenEditorItem, OpenEditorsEvent};
+use vmux_ecs::event::{ExplorerCloseEditor, OpenEditorItem, OpenEditorsEvent};
 
 use super::{ExplorerState, OpenEditorsDirty, TabsPlugin};
 use crate::host::editor::{Editor, FileNavigateRequest, FileView, ParkedEdits};
@@ -15,7 +15,7 @@ impl Plugin for TabsPlugin {
     }
 }
 
-type OpenEditorsDirtyReady = (With<OpenEditorsDirty>, With<vmux_core::page::PageReady>);
+type OpenEditorsDirtyReady = (With<OpenEditorsDirty>, With<vmux_ecs::page::PageReady>);
 
 fn sync_open_editors(
     mut query: Query<(Entity, &FileView, &mut ExplorerState), Changed<FileView>>,
@@ -72,7 +72,7 @@ fn emit_open_editors(
                 is_dir: path.is_dir(),
             });
         }
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
             entity,
             &OpenEditorsEvent { items },
         ));

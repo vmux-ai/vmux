@@ -375,7 +375,7 @@ impl CaptureRuntime {
         let (out_w, out_h) = crop.map_or((img_w, img_h), |c| (c.w, c.h));
         let ts = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
         let rid: String = request_id[..4].iter().map(|b| format!("{b:02x}")).collect();
-        let tmp_dir = vmux_core::profile::ProfilePaths::current().recording();
+        let tmp_dir = vmux_ecs::profile::ProfilePaths::current().recording();
         if let Err(e) = std::fs::create_dir_all(&tmp_dir) {
             return err(format!("cannot create {}: {e}", tmp_dir.display()));
         }

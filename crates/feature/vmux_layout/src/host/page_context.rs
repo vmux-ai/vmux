@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_core::event::space::ProjectActivateRequest;
-use vmux_core::page::PageReady;
+use vmux_ecs::event::space::ProjectActivateRequest;
+use vmux_ecs::page::PageReady;
 use vmux_git::state::{GitPageContext, GitWorkspaceChanged};
 
 use crate::space::FocusedSpace;
@@ -148,7 +148,7 @@ fn apply_tab_workspace_selection(
 fn git_page_ready(
     trigger: On<UiInput<PageReady>>,
     tabs: TabHierarchy,
-    pages: Query<&vmux_core::PageMetadata>,
+    pages: Query<&vmux_ecs::PageMetadata>,
     focused_space: FocusedSpace,
     mut commands: Commands,
 ) {
@@ -169,7 +169,7 @@ fn git_page_ready(
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
     commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
+        vmux_ecs::host::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
             webview,
             &GitPageContext {
                 working_directory: path,
@@ -184,7 +184,7 @@ fn project_activate(
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<Tab>>,
     pane_entities: Query<Entity, With<crate::pane::Pane>>,
-    pages: Query<Entity, With<vmux_core::PageMetadata>>,
+    pages: Query<Entity, With<vmux_ecs::PageMetadata>>,
     mut tabs: Query<&mut Tab>,
     managed_root: Res<ManagedWorktreeRoot>,
     mut commands: Commands,
@@ -233,7 +233,7 @@ fn project_activate(
     };
     let Some(tab_entity) = tab_entity else {
         commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
+            vmux_ecs::host::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
                 webview, &event,
             ),
         );
@@ -244,7 +244,7 @@ fn project_activate(
         loop {
             if current == tab_entity {
                 commands.trigger(
-                    vmux_core::host::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
+                    vmux_ecs::host::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
                         page, &event,
                     ),
                 );
@@ -266,7 +266,7 @@ mod tests {
     struct ContextWrites(Vec<GitPageContext>);
 
     fn capture_context(
-        trigger: On<vmux_core::host::UiStateWrite<vmux_git::state::GitUiState>>,
+        trigger: On<vmux_ecs::host::UiStateWrite<vmux_git::state::GitUiState>>,
         mut writes: ResMut<ContextWrites>,
     ) {
         if let Some(context) = &trigger.event().update().context {
@@ -282,7 +282,7 @@ mod tests {
             .add_observer(capture_context);
         let webview = app
             .world_mut()
-            .spawn(vmux_core::PageMetadata {
+            .spawn(vmux_ecs::PageMetadata {
                 url: "git://tmp/repo".to_string(),
                 ..Default::default()
             })

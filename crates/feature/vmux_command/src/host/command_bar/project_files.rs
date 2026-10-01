@@ -144,11 +144,11 @@ impl RootIndex {
             built_at: None,
             walking: None,
         };
-        started.rewalk(vmux_core::host::wake::Wake::beside(proxy));
+        started.rewalk(vmux_ecs::host::wake::Wake::beside(proxy));
         started
     }
 
-    fn rewalk(&mut self, wake: vmux_core::host::wake::Wake) {
+    fn rewalk(&mut self, wake: vmux_ecs::host::wake::Wake) {
         let walked = self.root.clone();
         self.walking = Some(IoTaskPool::get().spawn(async move {
             let _wake = wake;
@@ -175,7 +175,7 @@ impl RootIndex {
             return true;
         }
         if self.built_at.is_some_and(|at| at.elapsed() > INDEX_TTL) {
-            self.rewalk(vmux_core::host::wake::Wake::beside(proxy));
+            self.rewalk(vmux_ecs::host::wake::Wake::beside(proxy));
         }
         false
     }
@@ -750,13 +750,13 @@ mod tests {
 
     #[test]
     fn a_basename_hit_outranks_a_scattered_path_hit() {
-        let paths = files(&["crates/util/vmux_core/src/handler.rs", "docs/h/a/n/dler.md"]);
+        let paths = files(&["crates/util/vmux_ecs/src/handler.rs", "docs/h/a/n/dler.md"]);
         let ranked = FuzzyRank::listed(
             &[(Path::new("/root"), &paths)],
             &RankBias::default(),
             "handler",
         );
-        assert_eq!(ranked[0].name, "crates/util/vmux_core/src/handler.rs");
+        assert_eq!(ranked[0].name, "crates/util/vmux_ecs/src/handler.rs");
     }
 
     #[test]

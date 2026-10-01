@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use vmux_core::KeyboardOwner;
-use vmux_core::launcher::{RestoreKeyboardToStack, StackInPaneChosen};
+use vmux_ecs::KeyboardOwner;
+use vmux_ecs::launcher::{RestoreKeyboardToStack, StackInPaneChosen};
 
 use crate::cef::Browser;
 use crate::stack::Stack;
@@ -61,7 +61,7 @@ fn focus_chosen_stack_in_pane(
                 .filter(|&e| stack_q.contains(e))
                 .nth(event.index)
         });
-        commands.trigger(vmux_core::ActivateRequest {
+        commands.trigger(vmux_ecs::ActivateRequest {
             entity: stack.unwrap_or(pane),
         });
     }

@@ -1,12 +1,12 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use crate::state::{
+    ToolImportRequest, ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus,
+};
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
 use bevy_tasks::IoTaskPool;
-use vmux_core::tool::{
-    ToolImportRequest, ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus,
-};
 
 use crate::manifest::{ToolStore, ToolsManifest};
 use crate::process::ToolProcess;

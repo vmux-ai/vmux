@@ -23,4 +23,4 @@ pub mod supervisor;
 mod daemon;
 pub use daemon::{DaemonBinary, DaemonIdentity};
 pub use launch_agent::LaunchAgent;
-pub use vmux_core::service::{RemotePaths, ServicePaths};
+pub use vmux_ecs::service::{RemotePaths, ServicePaths};

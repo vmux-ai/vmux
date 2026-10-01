@@ -1,12 +1,12 @@
+use crate::dom_snapshot::{RawSnapshot, shape_snapshot};
 use crate::host::PendingNavigationSnapshot;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, SnapshotResult};
-use vmux_core::browser::{
+use vmux_ecs::browser::{
     BrowserNavigationSnapshotResponse, BrowserScrollResponse, BrowserSnapshotRequest,
     BrowserSnapshotResponse,
 };
-use vmux_core::dom_snapshot::{RawSnapshot, shape_snapshot};
 use vmux_layout::active_pane::ActivePaneQuery;
 use vmux_layout::{Browser, Loading};
 
@@ -150,7 +150,7 @@ fn drive_pending_nav_snapshots(
     mut pending: Query<(Entity, &mut PendingNavigationSnapshot)>,
     loading_q: Query<(), With<Loading>>,
     alive_q: Query<(), With<Browser>>,
-    ready_q: Query<(), With<vmux_core::page::PageReady>>,
+    ready_q: Query<(), With<vmux_ecs::page::PageReady>>,
     mut snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
     mut commands: Commands,
 ) {

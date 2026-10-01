@@ -2,12 +2,12 @@ use std::time::Duration;
 
 use bevy::app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_core::cli::{CliInvocation, CliResult};
-use vmux_core::host::manifest::FeaturePlugin;
+use vmux_ecs::cli::{CliInvocation, CliResult};
+use vmux_ecs::host::manifest::FeaturePlugin;
 
 #[cfg(target_os = "macos")]
 use super::{DaemonBinary, LaunchAgent};
-use vmux_core::service::ServicePaths;
+use vmux_ecs::service::ServicePaths;
 
 pub struct ServiceCliPlugin;
 
@@ -395,9 +395,9 @@ impl StatusInfo {
             stream.set_read_timeout(Some(Duration::from_secs(2)))?;
             stream.set_write_timeout(Some(Duration::from_secs(2)))?;
             let mut stream = stream;
-            vmux_core::service::write_client_message_blocking(&mut stream, &ClientMessage::Status)?;
+            vmux_ecs::service::write_client_message_blocking(&mut stream, &ClientMessage::Status)?;
             let mut reader = std::io::BufReader::new(&mut stream);
-            vmux_core::service::read_service_message_blocking(&mut reader)
+            vmux_ecs::service::read_service_message_blocking(&mut reader)
         })();
         match result {
             Ok(Some(ServiceMessage::StatusResponse {

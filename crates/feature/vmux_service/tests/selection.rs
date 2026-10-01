@@ -1,5 +1,5 @@
 use vmux_api::protocol::{CopyModeKey, ProcessId};
-use vmux_core::event::TermSelectionRange;
+use vmux_ecs::event::TermSelectionRange;
 use vmux_process::{Process, ProcessUpdate};
 
 static PTY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -333,7 +333,7 @@ fn buffer_mutation_clears_selection() {
 }
 
 struct ViewportPatchProbe {
-    cursor: vmux_core::event::TermCursor,
+    cursor: vmux_ecs::event::TermCursor,
     copy_mode: bool,
 }
 

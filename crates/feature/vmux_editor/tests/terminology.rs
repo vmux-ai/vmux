@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 const ALLOWED_PREFIXES: &[&str] = &[
     "crates/util/vmux_browser/src/extension/",
-    "crates/util/vmux_core/src/host/extension/",
+    "crates/util/vmux_ecs/src/host/extension/",
 ];
 const ALLOWED_FILES: &[&str] = &[
     "crates/util/vmux_mcp/src/tools/param.rs",

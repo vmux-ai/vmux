@@ -4,7 +4,7 @@ use vmux_api::command_bar::{
     CommandPaletteComposer, CommandPaletteMenuActivateRequest, CommandPaletteMenuDismissRequest,
     CommandPaletteMenuHighlightRequest, CommandPaletteMenus, CommandPaletteModelMenuToggleRequest,
     CommandPalettePermissionMenuToggleRequest, CommandPaletteProjectMenuToggleRequest,
-    CommandPaletteState, OpenId,
+    CommandPaletteUiState, OpenId,
 };
 use vmux_ui::components::agent_menu::AgentMenu;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
@@ -188,7 +188,7 @@ impl ComposerMenuView {
 #[component]
 pub fn CommandComposerMenus(
     composer: CommandPaletteComposer,
-    palette: CommandPaletteState,
+    palette: CommandPaletteUiState,
     open_id: OpenId,
     menus: CommandPaletteMenus,
     cursor: usize,

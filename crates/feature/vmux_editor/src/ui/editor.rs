@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
-use vmux_core::event::{
+use vmux_ecs::event::{
     DiagSeverity, FileDefinitionRequest, FileDiagnostic, FileFoldToggle, FileHover,
     FileHoverRequest, FileLine, FileLineLayout, FilePointerEvent, FoldGutter,
 };

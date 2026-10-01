@@ -177,7 +177,7 @@ Close the window and the shell keeps reading, the build keeps building, the agen
 streaming. Reopen and the app reconnects, re-subscribes, and replays a snapshot.
 
 The daemon executable and its composition root live in `vmux_service`. Shared wire values,
-connection state, framing, and paths live below it in `vmux_api`, `vmux_core`, and
+connection state, framing, and paths live below it in `vmux_api`, `vmux_ecs`, and
 `vmux_transport`; feature crates do not depend on the daemon package.
 
 launchd relaunches the daemon **on crash, not on exit**, and `RunAtLoad` is false — it is
@@ -1004,7 +1004,7 @@ crates/
     ├── vmux_app            platform-neutral application plugin facade
     ├── vmux_browser        browser runtime and native-page renderer
     ├── vmux_clipboard
-    ├── vmux_core
+    ├── vmux_ecs
     ├── vmux_flex
     ├── vmux_macro
     ├── vmux_mcp
@@ -1030,14 +1030,14 @@ And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated co
 staying flat.
 
 `vmux_agent` owns session, runtime, and orchestration ECS. `vmux_chat` owns reusable chat state
-and Dioxus UI. Shared transcript grouping and projection live in `vmux_core`; neither feature
+and Dioxus UI. Shared transcript grouping and projection live in `vmux_ecs`; neither feature
 reaches through the other's internals or through `vmux_service` for reusable chat behavior.
 The service carries serialized agent protocol messages and runs persistent daemon sessions;
 `vmux_agent` owns the client-host Bevy messages produced when those wire messages enter ECS.
 
 `vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
 capability in `vmux_tool`; consumers depend on it directly instead of reaching through a
-`vmux_core` re-export. `vmux_tool` also owns the tool page, manifest, inventory lifecycle,
+`vmux_ecs` re-export. `vmux_tool` also owns the tool page, manifest, inventory lifecycle,
 operation sequencing, and built-in Homebrew, NPM, MCP, and dotfile providers. Feature crates
 register their own provider entities, such as ACP in `vmux_agent` and LSP in `vmux_editor`;
 application crates only compose plugins. `vmux_path` gives filesystem boundaries one shared

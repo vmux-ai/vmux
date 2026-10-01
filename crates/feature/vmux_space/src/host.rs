@@ -11,7 +11,7 @@ mod spaces;
 mod tool;
 mod workspace;
 
-type SpacesUiStateUpdates = vmux_core::host::UiState<vmux_api::space::SpacesUiState>;
+type SpacesUiStateUpdates = vmux_ecs::host::UiState<vmux_api::space::SpacesUiState>;
 
 pub use agent::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktree,

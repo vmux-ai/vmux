@@ -58,13 +58,13 @@ mobile = ["chat", "dep:vmux_start", "dep:vmux_team"]
 tool = ["dep:vmux_tool"]
 capture = ["tool", "dep:vmux_input"]
 bookmark = ["layout", "dep:vmux_bookmark"]
-core = [
-    "dep:vmux_core",
+ecs = [
+    "dep:vmux_ecs",
     "dep:vmux_flex",
 ]
 chat = ["dep:vmux_chat"]
-command = ["core", "dep:vmux_command"]
-setting = ["core", "dep:vmux_setting"]
+command = ["ecs", "dep:vmux_command"]
+setting = ["ecs", "dep:vmux_setting"]
 session = ["dep:vmux_session"]
 layout = ["command", "setting", "dep:vmux_layout"]
 browser = ["command", "layout", "dep:vmux_browser"]
@@ -84,15 +84,15 @@ agent = [
     "terminal",
     "dep:vmux_agent",
 ]
-knowledge = ["core", "dep:vmux_knowledge"]
-history = ["core", "dep:vmux_history"]
+knowledge = ["ecs", "dep:vmux_knowledge"]
+history = ["ecs", "dep:vmux_history"]
 simulator = ["layout", "dep:vmux_simulator"]
-shortcut = ["core", "dep:vmux_shortcut"]
-team = ["core", "dep:vmux_team"]
+shortcut = ["ecs", "dep:vmux_shortcut"]
+team = ["ecs", "dep:vmux_team"]
 space = ["layout", "dep:vmux_space"]
-service = ["core", "dep:vmux_service"]
+service = ["ecs", "dep:vmux_service"]
 remote = ["layout", "service", "dep:vmux_remote"]
-start = ["core", "dep:vmux_start"]
+start = ["ecs", "dep:vmux_start"]
 vault = ["layout", "dep:vmux_vault"]
 
 [dependencies]
@@ -103,7 +103,7 @@ vmux_bookmark = { path = "../../feature/vmux_bookmark", optional = true }
 vmux_browser = { path = "../vmux_browser", optional = true }
 vmux_chat = { path = "../../feature/vmux_chat", optional = true }
 vmux_command = { path = "../../feature/vmux_command", optional = true }
-vmux_core = { path = "../vmux_core", optional = true }
+vmux_ecs = { path = "../vmux_ecs", optional = true }
 vmux_editor = { path = "../../feature/vmux_editor", optional = true }
 vmux_extension = { path = "../../feature/vmux_extension", optional = true }
 vmux_flex = { path = "../vmux_flex", optional = true }
@@ -116,7 +116,7 @@ vmux_mcp = { path = "../vmux_mcp", optional = true }
 vmux_macro = { path = "../vmux_macro" }
 vmux_remote = { path = "../../feature/vmux_remote", optional = true }
 vmux_service = { path = "../../feature/vmux_service", optional = true }
-vmux_session = { path = "../vmux_session", optional = true }
+vmux_session = { path = "../../feature/vmux_session", optional = true }
 vmux_setting = { path = "../../feature/vmux_setting", optional = true }
 vmux_shortcut = { path = "../../feature/vmux_shortcut", optional = true }
 vmux_simulator = { path = "../../feature/vmux_simulator", optional = true }

@@ -16,9 +16,9 @@ pub mod worktree;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::host::page::NativelyHosted;
-use vmux_core::{PageOpenRequest, PageOpenTarget};
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::host::page::NativelyHosted;
+use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 
 use crate::event::{GitConfigEditRequest, GitUpdateCheckRequest};
 

@@ -22,13 +22,13 @@ vmux_native = { path = "../../util/vmux_native" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 serde_json = { workspace = true }
-vmux_core = { path = "../../util/vmux_core" }
+vmux_ecs = { path = "../../util/vmux_ecs" }
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 ron = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_layout = { path = "../vmux_layout" }
-vmux_session = { path = "../../util/vmux_session" }
+vmux_session = { path = "../vmux_session" }
 vmux_tool = { path = "../vmux_tool" }
 vmux_space = { path = "../vmux_space" }
 

@@ -105,7 +105,7 @@ impl Default for Index {
 
 impl ExtensionStore {
     pub fn current() -> Self {
-        Self::at(vmux_core::profile::ProfilePaths::current().extensions())
+        Self::at(vmux_ecs::profile::ProfilePaths::current().extensions())
     }
 
     pub fn at(root: impl Into<PathBuf>) -> Self {

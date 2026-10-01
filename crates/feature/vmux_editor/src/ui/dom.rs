@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use vmux_core::event::{FileDocumentKind, FileResizeEvent, FileViewMode};
+use vmux_ecs::event::{FileDocumentKind, FileResizeEvent, FileViewMode};
 use vmux_ui::hooks::send;
 use vmux_ui::scroll::ScrollIntoView;
 

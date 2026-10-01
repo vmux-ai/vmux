@@ -26,8 +26,9 @@ pulldown-cmark = { version = "0.12", default-features = false, features = [
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+similar = "2"
 unicode-segmentation = "1"
-vmux_core = { path = "../../util/vmux_core" }
+vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_command = { path = "../vmux_command" }
 vmux_native = { path = "../../util/vmux_native" }
 vmux_ui = { path = "../../util/vmux_ui" }
@@ -43,7 +44,7 @@ rfd = { workspace = true }
 uuid = { workspace = true }
 vmux_clipboard = { path = "../../util/vmux_clipboard" }
 vmux_layout = { path = "../vmux_layout" }
-vmux_session = { path = "../../util/vmux_session" }
+vmux_session = { path = "../vmux_session" }
 vmux_tool = { path = "../vmux_tool" }
 
 [lints]

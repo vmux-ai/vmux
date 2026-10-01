@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
 use vmux_api::command_bar::{CommandBarUiState, CommandBarUiStatePatch};
-use vmux_core::host::UiStateWrite;
-use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
+use vmux_ecs::host::UiStateWrite;
+use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
 
 use super::{OpenVersion, PaletteContext, PaletteSnapshot};
 

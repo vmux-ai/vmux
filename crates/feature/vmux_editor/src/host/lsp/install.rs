@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use vmux_core::event::InstallPhase;
+use vmux_ecs::event::InstallPhase;
 
 use crate::lsp::download::RemoteArtifact;
 #[cfg(test)]

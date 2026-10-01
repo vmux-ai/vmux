@@ -6,19 +6,19 @@ use crate::host::event::{
 };
 use bevy::prelude::*;
 use vmux_api::protocol::ClientMessage;
-use vmux_core::agent::AgentCommandResponse;
-use vmux_core::service::{
+use vmux_ecs::agent::AgentCommandResponse;
+use vmux_ecs::service::{
     ServiceConnected, ServiceMessageAppExt, ServiceMessageSet, ServiceRequest,
 };
 
-#[vmux_core::service_message(AgentRequest)]
+#[vmux_api::service_message(AgentRequest)]
 struct InboundAgentRequest {
     request_id: vmux_api::protocol::AgentRequestId,
     anchor: Option<vmux_api::ProcessId>,
     request: vmux_api::protocol::AgentRequest,
 }
 
-#[vmux_core::service_message(SharedEvent::AgentAwaitingApproval)]
+#[vmux_api::service_message(SharedEvent::AgentAwaitingApproval)]
 struct InboundAgentAwaitingApproval {
     sid: String,
     call_id: String,
@@ -116,7 +116,7 @@ fn route_approval_requests(
 mod tests {
     use super::*;
     use vmux_api::protocol::{AgentRequest, AgentRequestId, ServiceMessage, SharedEvent};
-    use vmux_core::service::ServiceInbound;
+    use vmux_ecs::service::ServiceInbound;
     use vmux_space::AgentRenameProfile;
 
     #[test]

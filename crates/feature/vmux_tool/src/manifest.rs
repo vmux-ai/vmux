@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use crate::state::ToolProvider;
 use bevy_ecs::prelude::Component;
 use serde::{Deserialize, Serialize};
-use vmux_core::tool::ToolProvider;
 
 use crate::dotfiles::DotfilesManifest;
 use crate::mcp::McpManifest;

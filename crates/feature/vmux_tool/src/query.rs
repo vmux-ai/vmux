@@ -5,9 +5,8 @@ use bevy_ecs::prelude::*;
 use vmux_api::protocol::{
     AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage, ServiceMessage,
 };
-use vmux_core::service::{
-    ServiceMessageAppExt, ServiceMessageSet, ServiceMessageVariant, ServiceRequest,
-};
+use vmux_api::service::ServiceMessageVariant;
+use vmux_ecs::service::{ServiceMessageAppExt, ServiceMessageSet, ServiceRequest};
 
 #[vmux_api::agent(Copy, Eq)]
 pub struct AgentWorkingDirectory {
@@ -138,7 +137,7 @@ mod tests {
     use super::*;
     use vmux_api::ProcessId;
     use vmux_api::protocol::ServiceMessage;
-    use vmux_core::service::ServiceInbound;
+    use vmux_ecs::service::ServiceInbound;
 
     fn handle_known(
         mut queries: MessageReader<ToolQueryRequest>,

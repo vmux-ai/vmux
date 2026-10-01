@@ -39,9 +39,12 @@ pub mod transport;
 #[cfg(ui)]
 pub mod key_stroke;
 
+pub mod language_icon;
 pub mod list_nav;
 
 pub mod hooks;
+
+pub use language_icon::LanguageIconPath;
 
 pub mod back;
 

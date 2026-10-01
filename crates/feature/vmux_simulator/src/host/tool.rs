@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
-use vmux_core::host::manifest::FeaturePlugin;
+use vmux_ecs::host::manifest::FeaturePlugin;
 
 use super::{
     AgentSimulatorButtonPress, AgentSimulatorKeyPress, AgentSimulatorScreenshot,
@@ -180,7 +180,7 @@ fn button(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::JsonArguments;
+    use vmux_ecs::JsonArguments;
     use vmux_tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
 
     struct SimulatorToolFixture;

@@ -1,5 +1,5 @@
 use bevy_cef_core::prelude::{CefTransitionCore, CefTransitionQualifiers};
-use vmux_core::TransitionType;
+use vmux_ecs::TransitionType;
 
 pub fn map(core: CefTransitionCore, qual: CefTransitionQualifiers) -> TransitionType {
     if qual.forward_back {

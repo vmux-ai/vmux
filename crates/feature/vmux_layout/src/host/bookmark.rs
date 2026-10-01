@@ -20,9 +20,9 @@ use vmux_api::bookmark::{
 };
 use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::host::page::PageManifest;
-use vmux_core::{Bookmark, BookmarkOrder, Collapsed, Folder, PageIcon, PageMetadata, Pin, Uuid};
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::host::page::PageManifest;
+use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageIcon, PageMetadata, Pin, Uuid};
 
 use super::{command::LayoutRequestSet, stack::OpenRequest};
 
@@ -1111,7 +1111,7 @@ fn handle_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::PageIcon;
+    use vmux_ecs::PageIcon;
 
     #[test]
     fn command_id_dispatches_the_typed_bookmark_request() {
@@ -1477,7 +1477,7 @@ mod tests {
         let expected = PageMetadata {
             title: "Start".into(),
             url: "vmux://start/".into(),
-            icon: PageIcon::Builtin(vmux_core::BuiltinIcon::Sparkles),
+            icon: PageIcon::Builtin(vmux_ecs::BuiltinIcon::Sparkles),
             bg_color: Some("#111111".into()),
         };
         TestRequest::send(
@@ -1588,7 +1588,7 @@ mod tests {
             title_message_id: None,
             replaces_command: None,
             keywords: &[],
-            icon: Some(vmux_core::BuiltinIcon::Smartphone),
+            icon: Some(vmux_ecs::BuiltinIcon::Smartphone),
             command_bar: true,
             startup: false,
         });
@@ -1599,7 +1599,7 @@ mod tests {
         assert_eq!(metadata.title, "Simulator");
         assert_eq!(
             metadata.icon,
-            PageIcon::Builtin(vmux_core::BuiltinIcon::Smartphone)
+            PageIcon::Builtin(vmux_ecs::BuiltinIcon::Smartphone)
         );
     }
 

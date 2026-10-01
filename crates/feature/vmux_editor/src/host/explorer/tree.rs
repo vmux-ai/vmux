@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
-use vmux_core::event::*;
+use vmux_ecs::event::*;
 
 use super::panel::StackExplorerVisibility;
 use super::{
@@ -31,7 +31,7 @@ struct ExplorerDirLoadTask {
     task: Task<(PathBuf, Vec<FileDirEntry>)>,
 }
 
-type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_core::page::PageReady>);
+type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_ecs::page::PageReady>);
 
 pub(super) struct TreePlugin;
 
@@ -110,7 +110,7 @@ fn emit_explorer_focus(
 ) {
     if browsers.can_emit_to(&entity) {
         let effect = state.focus_effect(current, reveal);
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
             entity, &effect,
         ));
     }
@@ -332,7 +332,7 @@ fn emit(
         } else {
             None
         };
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
             entity,
             &ExplorerTreeEvent {
                 root_name: ExplorerRoot::name(&tree.root),

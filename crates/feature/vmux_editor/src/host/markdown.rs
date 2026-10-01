@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-use vmux_core::event::{MdBlock, MdInline, MdListItem, MdTableAlign, NoteBlock};
-use vmux_core::knowledge::markdown_metadata;
+use vmux_ecs::event::{MdBlock, MdInline, MdListItem, MdTableAlign, NoteBlock};
+use vmux_knowledge::{KnowledgeProperty, MarkdownMetadata, WikiLink};
 
 use crate::highlight::highlight_snippet;
 
@@ -43,7 +43,7 @@ enum Frame {
 #[derive(Clone)]
 pub struct ParsedNote {
     pub title: String,
-    pub properties: Vec<vmux_core::knowledge::KnowledgeProperty>,
+    pub properties: Vec<KnowledgeProperty>,
     pub blocks: Vec<NoteBlock>,
 }
 
@@ -126,7 +126,7 @@ fn inline_text(inlines: &[MdInline], output: &mut String) {
 }
 
 fn push_text_with_wiki_links(stack: &mut [Frame], text: &str) {
-    let links = vmux_core::knowledge::wiki_links(text);
+    let links = WikiLink::parse_all(text);
     if links.is_empty() {
         push_inline(stack, MdInline::Text(text.to_string()));
         return;
@@ -228,7 +228,7 @@ pub fn note_vertical_target(blocks: &[NoteBlock], line: u32, direction: i8) -> O
 }
 
 pub fn parse_note_document(text: &str) -> ParsedNote {
-    let metadata = markdown_metadata(text);
+    let metadata = MarkdownMetadata::parse(text);
     let body = &text[metadata.body_offset..];
     let line_starts = line_start_offsets(text);
     let mut options = Options::empty();

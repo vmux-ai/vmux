@@ -5,7 +5,7 @@ use bevy_cef::prelude::RequestNavigate;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
-use vmux_core::PageMetadata;
+use vmux_ecs::PageMetadata;
 use vmux_history::LastActivatedAt;
 use vmux_layout::stack::{CloseStackRequest, Stack};
 

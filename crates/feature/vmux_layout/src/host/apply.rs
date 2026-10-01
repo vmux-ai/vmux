@@ -15,7 +15,7 @@ use bevy::ecs::message::Messages;
 use bevy::ecs::message::{MessageReader, MessageWriter};
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
 use vmux_history::{CreatedAt, LastActivatedAt};
 
@@ -45,7 +45,7 @@ pub struct LayoutApplyResponse {
 #[derive(Message, Clone)]
 pub struct LayoutSnapshotRequest {
     pub request_id: [u8; 16],
-    pub anchor: Option<vmux_core::ProcessId>,
+    pub anchor: Option<vmux_ecs::ProcessId>,
 }
 
 #[derive(Message, Clone)]
@@ -76,9 +76,9 @@ fn serve_snapshot_requests(
     pane_sizes_q: Query<&PaneSize>,
     zoomed_q: Query<&crate::pane::Zoomed>,
     focused: crate::stack::FocusedStack,
-    process_ids: Query<(&vmux_core::ProcessId, &ChildOf)>,
+    process_ids: Query<(&vmux_ecs::ProcessId, &ChildOf)>,
     space_hierarchy: crate::space::SpaceHierarchy,
-    active_space_q: Query<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>,
+    active_space_q: Query<Entity, (With<crate::space::Space>, With<vmux_ecs::Active>)>,
     mut writer: MessageWriter<LayoutSnapshotResponse>,
 ) {
     let pid_by_stack: HashMap<u64, String> = process_ids
@@ -146,7 +146,7 @@ fn fill_process_ids(node: &mut LayoutNode, pid_by_stack: &HashMap<u64, String>) 
 
 fn plan_requests(
     mut reader: MessageReader<LayoutApplyRequest>,
-    active_space_q: Query<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>,
+    active_space_q: Query<Entity, (With<crate::space::Space>, With<vmux_ecs::Active>)>,
     tabs_q: Query<(Entity, Option<&ChildOf>), With<LayoutTab>>,
     nodes_q: Query<(
         Option<&Children>,
@@ -529,7 +529,7 @@ fn collect_ids_recursive(
 }
 
 fn collect_existing_ids(
-    active_space_q: &Query<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>,
+    active_space_q: &Query<Entity, (With<crate::space::Space>, With<vmux_ecs::Active>)>,
     tabs_q: &Query<(Entity, Option<&ChildOf>), With<LayoutTab>>,
     nodes_q: &Query<(
         Option<&Children>,
@@ -768,7 +768,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         let space_a = app
             .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active))
+            .spawn((crate::space::Space, vmux_ecs::Active))
             .id();
         let space_b = app.world_mut().spawn(crate::space::Space).id();
         let tab_a = app

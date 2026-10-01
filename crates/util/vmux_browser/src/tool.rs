@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
-use vmux_core::ProcessAnchor;
-use vmux_core::host::manifest::FeaturePlugin;
+use vmux_ecs::ProcessAnchor;
+use vmux_ecs::host::manifest::FeaturePlugin;
 
 use crate::host::{
     AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch, AgentBrowserNavigate,
@@ -47,11 +47,11 @@ fn register_agent_policy(mut commands: Commands) {
         .unwrap_or_else(|| home.join(".codex"));
     commands.spawn((
         Name::new("Browser agent policy"),
-        vmux_core::agent::AgentPromptContribution(
+        vmux_ecs::agent::AgentPromptContribution(
             "Use the available vmux browser tools for web access and follow their descriptions. Do not look for a built-in web search or connector discovery. For website visuals, use code-native design or available project assets when no image tool is available."
                 .to_string(),
         ),
-        vmux_core::agent::AgentDisabledSkillRoot(
+        vmux_ecs::agent::AgentDisabledSkillRoot(
             codex_home.join("plugins/cache/openai-bundled/browser"),
         ),
     ));
@@ -258,8 +258,8 @@ mod tests {
         app.update();
 
         let mut policies = app.world_mut().query::<(
-            &vmux_core::agent::AgentPromptContribution,
-            &vmux_core::agent::AgentDisabledSkillRoot,
+            &vmux_ecs::agent::AgentPromptContribution,
+            &vmux_ecs::agent::AgentDisabledSkillRoot,
         )>();
         let policies = policies.iter(app.world()).collect::<Vec<_>>();
         assert_eq!(policies.len(), 1);

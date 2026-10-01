@@ -1,7 +1,7 @@
 use dioxus::html::geometry::ClientPoint;
 use dioxus::prelude::*;
-use vmux_core::editor::SelSpan;
-use vmux_core::event::{MdBlock, MdInline, MdListItem, MdTableAlign};
+use vmux_api::editor::SelSpan;
+use vmux_ecs::event::{MdBlock, MdInline, MdListItem, MdTableAlign};
 use vmux_ui::class::ClassList;
 use vmux_ui::components::checkbox::Checkbox;
 use vmux_ui::hooks::send;
@@ -446,7 +446,7 @@ fn MdInlineView(inline: MdInline, inline_key: usize) -> Element {
                     },
                     onclick: move |event: Event<MouseData>| {
                         event.stop_propagation();
-                        let _ = send(&vmux_core::event::KnowledgeLinkOpen {
+                        let _ = send(&vmux_ecs::event::KnowledgeLinkOpen {
                             path: open_path.clone(),
                             title: open_title.clone(),
                             line: open_line,

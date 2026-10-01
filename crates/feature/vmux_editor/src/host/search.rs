@@ -5,7 +5,7 @@ use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use ignore::WalkBuilder;
 use regex::{Regex, RegexBuilder};
-use vmux_core::event::{ExplorerSearchFile, ExplorerSearchMatch, ExplorerSearchRequest};
+use vmux_ecs::event::{ExplorerSearchFile, ExplorerSearchMatch, ExplorerSearchRequest};
 
 use super::directory::project_root;
 use crate::{FileView, GlobalSearchRequest};

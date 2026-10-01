@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, JsonValue};
-use vmux_core::agent::{
+use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
 
-use super::{AppSettings, SettingsWriteRequest};
+use super::{AppSettings, SettingsSaveRequest};
 
 #[vmux_api::agent]
 pub(super) struct AgentUpdateSettings {
@@ -27,7 +27,7 @@ impl Plugin for AgentSettingsPlugin {
 fn update_settings(
     mut requests: MessageReader<AgentRequestMessage<AgentUpdateSettings>>,
     mut settings: ResMut<AppSettings>,
-    mut write: MessageWriter<SettingsWriteRequest>,
+    mut save: MessageWriter<SettingsSaveRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
@@ -41,7 +41,7 @@ fn update_settings(
             Ok(value) => {
                 let mut updated = (*settings).clone();
                 match updated.apply_update(&request.payload.path, value) {
-                    Ok(ron_bytes) => {
+                    Ok(()) => {
                         if request.origin.is_agent()
                             && updated.agent.allow_run_placement_override
                                 != settings.agent.allow_run_placement_override
@@ -52,7 +52,7 @@ fn update_settings(
                             )
                         } else {
                             *settings = updated;
-                            write.write(SettingsWriteRequest { ron_bytes });
+                            save.write(SettingsSaveRequest);
                             AgentCommandResult::Ok
                         }
                     }

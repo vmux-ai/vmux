@@ -2,7 +2,6 @@ use base64::Engine;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_core::prompt_media::AttachmentSelection;
 
 use super::prompt::ChatPromptFocusRevision;
 use super::session::{
@@ -124,7 +123,7 @@ impl ChatAttachmentProjection {
             self.previews
                 .insert(attachment.path.clone(), attachment.clone());
         }
-        let merged = AttachmentSelection::new(&mut self.selected).merge(incoming);
+        let merged = incoming.merge_into(&mut self.selected);
         self.hydrate_selected() || merged
     }
 
@@ -280,7 +279,7 @@ const MEDIA_THUMBNAIL_MAX_EDGE: u32 = 512;
 
 fn attachment_mime(path: &std::path::Path) -> String {
     let path_str = path.to_string_lossy();
-    if let Some(mime) = vmux_core::media::media_mime(&path_str) {
+    if let Some(mime) = vmux_ecs::media::media_mime(&path_str) {
         return mime.to_string();
     }
     let extension = path
@@ -326,7 +325,7 @@ fn media_thumbnail_data_url(path: &std::path::Path, source_size: u64) -> String 
     if source_size > MEDIA_THUMBNAIL_SOURCE_LIMIT {
         return String::new();
     }
-    let Some(mime) = vmux_core::media::image_mime(&path.to_string_lossy()) else {
+    let Some(mime) = vmux_ecs::media::image_mime(&path.to_string_lossy()) else {
         return String::new();
     };
     if mime == "image/svg+xml" || mime == "image/avif" {
@@ -366,7 +365,7 @@ fn spawn_chat_attachment_task(
     webview: Entity,
     delivery: ChatAttachmentDelivery,
     paths: Vec<std::path::PathBuf>,
-    wake: vmux_core::host::wake::Wake,
+    wake: vmux_ecs::host::wake::Wake,
     commands: &mut Commands,
 ) {
     if paths.is_empty() {
@@ -397,7 +396,7 @@ fn spawn_chat_attachment_task(
 fn spawn_selected_attachment_tasks(
     webview: Entity,
     paths: Vec<std::path::PathBuf>,
-    wake: vmux_core::host::wake::Wake,
+    wake: vmux_ecs::host::wake::Wake,
     commands: &mut Commands,
 ) {
     spawn_chat_attachment_task(
@@ -605,7 +604,7 @@ fn query(
         return;
     };
     commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+        vmux_ecs::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
             webview,
             &projection.0,
         ),
@@ -633,7 +632,7 @@ fn attach_paths(
     spawn_selected_attachment_tasks(
         trigger.event().webview,
         paths,
-        vmux_core::host::wake::Wake::from_resource(proxy),
+        vmux_ecs::host::wake::Wake::from_resource(proxy),
         &mut commands,
     );
 }
@@ -653,7 +652,7 @@ fn hydrate_attachments(
         request.webview,
         ChatAttachmentDelivery::Hydrated,
         paths,
-        vmux_core::host::wake::Wake::from_resource(proxy),
+        vmux_ecs::host::wake::Wake::from_resource(proxy),
         &mut commands,
     );
 }
@@ -674,13 +673,13 @@ fn remove_attachment(
         return;
     }
     commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+        vmux_ecs::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
             webview,
             &projection.state(),
         ),
     );
     commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+        vmux_ecs::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
             webview,
             &focus.next(),
         ),
@@ -702,7 +701,7 @@ fn pick_files(
     spawn_selected_attachment_tasks(
         trigger.event().webview,
         paths,
-        vmux_core::host::wake::Wake::from_resource(proxy),
+        vmux_ecs::host::wake::Wake::from_resource(proxy),
         &mut commands,
     );
 }
@@ -739,7 +738,7 @@ fn paste(
     spawn_selected_attachment_tasks(
         trigger.event().webview,
         vec![path],
-        vmux_core::host::wake::Wake::from_resource(proxy),
+        vmux_ecs::host::wake::Wake::from_resource(proxy),
         &mut commands,
     );
 }
@@ -769,10 +768,10 @@ fn drain_attachment_tasks(
                 ChatAttachmentDelivery::Selected => {
                     let incoming = ChatAttachments { attachments };
                     if projection.merge_selected(&incoming) {
-                        commands.trigger(vmux_core::host::UiStateWrite::<
+                        commands.trigger(vmux_ecs::host::UiStateWrite::<
                             vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &projection.state()));
-                        commands.trigger(vmux_core::host::UiStateWrite::<
+                        commands.trigger(vmux_ecs::host::UiStateWrite::<
                             vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &focus.next()));
                     }
@@ -783,17 +782,17 @@ fn drain_attachment_tasks(
                     let transcript_changed = projection.hydrate_transcript(&mut transcript.state);
                     let snapshot_changed = projection.hydrate_snapshot(&mut snapshot.0);
                     if selected_changed {
-                        commands.trigger(vmux_core::host::UiStateWrite::<
+                        commands.trigger(vmux_ecs::host::UiStateWrite::<
                             vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &projection.state()));
                     }
                     if transcript_changed {
-                        commands.trigger(vmux_core::host::UiStateWrite::<
+                        commands.trigger(vmux_ecs::host::UiStateWrite::<
                             vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &transcript.state));
                     }
                     if snapshot_changed {
-                        commands.trigger(vmux_core::host::UiStateWrite::<
+                        commands.trigger(vmux_ecs::host::UiStateWrite::<
                             vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &snapshot.0));
                     }
@@ -810,7 +809,7 @@ fn drain_attachment_tasks(
             let response = ChatAttachments {
                 attachments: attachments.clone(),
             };
-            commands.trigger(vmux_core::host::UiStateWrite::<
+            commands.trigger(vmux_ecs::host::UiStateWrite::<
                 vmux_api::command_bar::CommandBarUiState,
             >::from_event(pending.webview, &response));
             if matches!(pending.delivery, ChatAttachmentDelivery::Selected) {
@@ -823,7 +822,7 @@ fn drain_attachment_tasks(
                     pending.webview,
                     ChatAttachmentDelivery::Hydrated,
                     paths,
-                    vmux_core::host::wake::Wake::beside(proxy.as_deref()),
+                    vmux_ecs::host::wake::Wake::beside(proxy.as_deref()),
                     &mut commands,
                 );
             }
@@ -848,13 +847,13 @@ fn drain_list_tasks(
                 continue;
             }
             commands.trigger(
-                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                vmux_ecs::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                     pending.webview,
                     &projection.0,
                 ),
             );
         } else {
-            commands.trigger(vmux_core::host::UiStateWrite::<
+            commands.trigger(vmux_ecs::host::UiStateWrite::<
                 vmux_api::command_bar::CommandBarUiState,
             >::from_event(pending.webview, &entries));
         }
@@ -863,7 +862,7 @@ fn drain_list_tasks(
             .iter()
             .any(|entry| !entry.is_dir && entry.mime_type.starts_with("image/"))
         {
-            let wake = vmux_core::host::wake::Wake::beside(proxy.as_deref());
+            let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
             let task = IoTaskPool::get().spawn(async move {
                 let _wake = wake;
                 chat_media_previews(entries)
@@ -889,14 +888,14 @@ fn drain_preview_tasks(
         if let Ok(mut projection) = projections.get_mut(pending.webview) {
             if projection.finish(&entries) {
                 commands.trigger(
-                    vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                    vmux_ecs::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                         pending.webview,
                         &projection.0,
                     ),
                 );
             }
         } else {
-            commands.trigger(vmux_core::host::UiStateWrite::<
+            commands.trigger(vmux_ecs::host::UiStateWrite::<
                 vmux_api::command_bar::CommandBarUiState,
             >::from_event(pending.webview, &entries));
         }

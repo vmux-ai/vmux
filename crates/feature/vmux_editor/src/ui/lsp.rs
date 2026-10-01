@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_core::LanguageIconPath;
-use vmux_core::event::*;
+use vmux_ecs::event::*;
+use vmux_ui::LanguageIconPath;
 use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
     ManagerPage, ManagerRow, ManagerSpinner, ManagerTone,

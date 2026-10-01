@@ -18,9 +18,9 @@ use vmux_command::snapshot::{
 };
 use vmux_command::{CommandInvocation, CommandRegistry, ReadCommandRequests, ResolvedLocale};
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::launcher::{HostsLauncher, InlineTransitionRequested};
-use vmux_core::{
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
+use vmux_ecs::{
     HostSpawnRoute, PageMetadata, PageOpenRequest, PageOpenTarget,
     host::{UiStateWrite, page::NativelyHosted},
     page::{HostHistory, HostHistoryDelta, HostHistoryStep, PageReady},
@@ -42,7 +42,7 @@ use vmux_layout::{
     state::LayoutUiState,
 };
 
-use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
+use vmux_ecs::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_setting::SearchEngineSetting;
 use vmux_terminal::{RestartPty, Terminal};
 use vmux_ui::i18n::{Locale, TranslationValue};
@@ -162,7 +162,7 @@ impl Home {
 
 fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
     let value = value.trim();
-    let query = vmux_core::input::NavigationText::new(value);
+    let query = vmux_path::NavigationText::new(value);
     if query.is_data_uri() || (value.contains("://") && query.looks_like_url()) {
         value.to_string()
     } else if query.looks_like_url() {
@@ -181,10 +181,10 @@ fn open_from_bar(
     command_bar: Single<&CommandBarProjection>,
     locale: Option<Res<ResolvedLocale>>,
     mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
-    mut chosen_writer: MessageWriter<vmux_core::ContributedCommandChosen>,
+    mut chosen_writer: MessageWriter<vmux_ecs::ContributedCommandChosen>,
     mut inline_transition: MessageWriter<InlineTransitionRequested>,
     mut command_invocations: MessageWriter<CommandInvocation>,
-    users: Query<Entity, With<vmux_core::team::User>>,
+    users: Query<Entity, With<vmux_ecs::team::User>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -249,7 +249,7 @@ fn open_from_bar(
         };
         if !inline_transitioned && claimed_urls.contains(&url) {
             if let Some(pane) = focus.pane {
-                chosen_writer.write(vmux_core::ContributedCommandChosen {
+                chosen_writer.write(vmux_ecs::ContributedCommandChosen {
                     id: url,
                     stack: None,
                     pane: Some(pane),
@@ -268,8 +268,8 @@ fn invoke_from_bar(
     contributed_pages: ContributedPages,
     contributed_commands: Query<&ContributedCommand>,
     command_bar: Single<&CommandBarProjection>,
-    users: Query<Entity, With<vmux_core::team::User>>,
-    mut chosen: MessageWriter<vmux_core::ContributedCommandChosen>,
+    users: Query<Entity, With<vmux_ecs::team::User>>,
+    mut chosen: MessageWriter<vmux_ecs::ContributedCommandChosen>,
     mut invocations: MessageWriter<CommandInvocation>,
     mut commands: Commands,
 ) {
@@ -282,7 +282,7 @@ fn invoke_from_bar(
         .any(|command| command.id == request.id)
     {
         if let Some(pane) = command_bar.workspace.pane {
-            chosen.write(vmux_core::ContributedCommandChosen {
+            chosen.write(vmux_ecs::ContributedCommandChosen {
                 id: request.id.clone(),
                 stack: None,
                 pane: Some(pane),
@@ -529,7 +529,7 @@ fn handle_open_requests(
         if let Ok(mut metadata) = browser.metadata.get_mut(webview) {
             metadata.url = resolved.clone();
             metadata.title = resolved.clone();
-            metadata.icon = vmux_core::PageIcon::None;
+            metadata.icon = vmux_ecs::PageIcon::None;
         }
         commands
             .entity(webview)
@@ -865,7 +865,7 @@ fn side_sheet_section(
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_core::page::HostHistory;
+    use vmux_ecs::page::HostHistory;
     use vmux_flex::prelude::{Node, Val};
     use vmux_layout::pane::Pane;
     use vmux_layout::space::{Space, SpaceId};
@@ -933,7 +933,7 @@ mod tests {
     impl NavArrow {
         fn over(page: impl Bundle) -> Self {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_core::CorePlugin, CommandPlugin))
+            app.add_plugins((MinimalPlugins, vmux_ecs::EcsPlugin, CommandPlugin))
                 .add_message::<PageOpenRequest>()
                 .add_message::<vmux_terminal::TerminalFontSizeCommand>()
                 .init_resource::<CefNavigations>()
@@ -1099,7 +1099,7 @@ mod tests {
 
     #[test]
     fn side_sheet_resize_is_live_but_saved_only_when_settled() {
-        let mut settings = AppSettings::embedded();
+        let mut settings = AppSettings::default();
         settings.layout.side_sheet.width = 220.0;
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)

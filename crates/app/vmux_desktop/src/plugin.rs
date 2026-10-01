@@ -19,11 +19,6 @@ impl PluginGroup for DesktopPluginGroup {
             .add(ShortcutPlugin)
             .add(crate::relaunch::RelaunchPlugin);
 
-        #[cfg(target_os = "macos")]
-        {
-            builder = builder.add(vmux_input::KeyboardPlugin);
-        }
-
         #[cfg(all(target_os = "macos", feature = "native-glass"))]
         {
             builder = builder

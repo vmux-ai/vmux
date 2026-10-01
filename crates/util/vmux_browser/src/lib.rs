@@ -2,12 +2,13 @@
 
 pub(crate) struct Feature;
 
-impl vmux_core::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
 mod appearance;
 mod command;
+mod dom_snapshot;
 mod frame_rate;
 mod host;
 mod host_focus;
@@ -43,7 +44,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::CefEmbeddedHosts;
 use vmux_command::ReadCommandRequests;
-use vmux_core::page::PageManifest;
+use vmux_ecs::page::PageManifest;
 use vmux_layout::event::{
     HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
     RemoteCopyEvent, RemotePairingDismissRequest, RemotePairingShowRequest, RemoteRequest,
@@ -79,9 +80,8 @@ pub struct BrowserPlugin;
 
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
-        let startup_settings = vmux_setting::AppSettings::from_disk();
-        let startup_locale =
-            Locale::requested(Some(&startup_settings.appearance.locale)).into_string();
+        let startup_appearance = vmux_setting::AppearanceSettings::from_disk();
+        let startup_locale = Locale::requested(Some(&startup_appearance.locale)).into_string();
         let startup_accept_language_list = host::browser_accept_language_list(&startup_locale);
         app.add_plugins((
             host::AgentBrowserPlugin,

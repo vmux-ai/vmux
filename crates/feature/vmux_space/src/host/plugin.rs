@@ -8,9 +8,9 @@ use vmux_command::command_bar::{
 use vmux_command::{
     BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
 };
-use vmux_core::host::{UiStateWrite, persistence::WorkspaceRestore};
-use vmux_core::page::{PageReady, SpacesPageSpawnRequest, StartupPageUrl};
-use vmux_core::{
+use vmux_ecs::host::{UiStateWrite, persistence::WorkspaceRestore};
+use vmux_ecs::page::{PageReady, SpacesPageSpawnRequest, StartupPageUrl};
+use vmux_ecs::{
     ActivateRequest, Active, EffectiveStartupUrl, Order, PageMetadata, PageOpenRequest,
     PageOpenTarget,
 };
@@ -62,7 +62,7 @@ impl Plugin for SpacePlugin {
         ))
         .add_plugins(super::SpaceToolPlugin)
         .add_plugins(LayoutContractPlugin)
-        .add_plugins(vmux_core::host::UiStatePlugin::<SpacesUiState>::default())
+        .add_plugins(vmux_ecs::host::UiStatePlugin::<SpacesUiState>::default())
         .add_message::<CommandBarOpenRequest>()
         .add_message::<SpaceAttachRequest>()
         .add_message::<SpaceCreateRequest>()
@@ -115,7 +115,7 @@ impl Plugin for SpacePlugin {
                 ProjectActivateRequest,
                 ProjectForgetRequest,
                 SwitchSpaceRequest,
-                vmux_core::event::ProjectTreeToggle,
+                vmux_ecs::event::ProjectTreeToggle,
             )>::default(),
         ))
         .add_observer(attach)
@@ -1010,11 +1010,11 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, SpacePlugin));
         app.world_mut().run_schedule(PreStartup);
-        let mut query = app.world_mut().query::<&vmux_core::page::PageManifest>();
+        let mut query = app.world_mut().query::<&vmux_ecs::page::PageManifest>();
         let hosts = bevy_cef_core::prelude::CefEmbeddedHosts(
             query
                 .iter(app.world())
-                .map(vmux_core::page::PageManifest::embedded_host)
+                .map(vmux_ecs::page::PageManifest::embedded_host)
                 .collect(),
         );
 

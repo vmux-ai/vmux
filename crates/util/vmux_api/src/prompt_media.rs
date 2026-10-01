@@ -32,6 +32,33 @@ pub struct ChatAttachments {
     pub attachments: Vec<ChatAttachment>,
 }
 
+impl ChatAttachments {
+    pub fn merge_into(&self, current: &mut Vec<ChatAttachment>) -> bool {
+        let previous = current.clone();
+        for attachment in &self.attachments {
+            if let Some(existing) = current
+                .iter_mut()
+                .find(|existing| existing.path == attachment.path)
+            {
+                let mut replacement = attachment.clone();
+                if replacement.preview_data_url.is_empty()
+                    && replacement.name == existing.name
+                    && replacement.mime_type == existing.mime_type
+                    && replacement.size == existing.size
+                {
+                    replacement
+                        .preview_data_url
+                        .clone_from(&existing.preview_data_url);
+                }
+                *existing = replacement;
+            } else {
+                current.push(attachment.clone());
+            }
+        }
+        *current != previous
+    }
+}
+
 #[vmux_api::contract(Default, Eq)]
 pub struct ChatMediaEntry {
     pub path: String,
@@ -40,6 +67,27 @@ pub struct ChatMediaEntry {
     pub mime_type: String,
     pub is_dir: bool,
     pub preview_data_url: String,
+}
+
+impl ChatMediaEntry {
+    pub fn reference(&self) -> String {
+        let encode = |value: &str| value.replace('%', "%25").replace(' ', "%20");
+        if self.parent == "~" {
+            return format!("~/{name}", name = encode(&self.name));
+        }
+        format!(
+            "{parent}/{name}",
+            parent = encode(&self.parent),
+            name = encode(&self.name)
+        )
+    }
+
+    pub fn display_path(&self) -> String {
+        if self.parent == "~" {
+            return format!("~/{}", self.name);
+        }
+        format!("{}/{}", self.parent.trim_end_matches('/'), self.name)
+    }
 }
 
 #[vmux_api::contract(Default)]
@@ -165,5 +213,59 @@ mod tests {
         assert_eq!(submitted.name, first.name);
         assert_eq!(submitted.mime_type, first.mime_type);
         assert_eq!(submitted.size, first.size);
+    }
+
+    #[test]
+    fn media_entry_paths_include_the_name() {
+        let entry = ChatMediaEntry {
+            name: "Accessibility".into(),
+            parent: "~/Library".into(),
+            ..Default::default()
+        };
+        assert_eq!(entry.display_path(), "~/Library/Accessibility");
+
+        let root = ChatMediaEntry {
+            name: "Pictures".into(),
+            parent: "~".into(),
+            ..Default::default()
+        };
+        assert_eq!(root.display_path(), "~/Pictures");
+    }
+
+    #[test]
+    fn attachment_batches_preserve_loaded_previews() {
+        let first = ChatAttachment {
+            path: "/tmp/one.png".into(),
+            name: "one.png".into(),
+            mime_type: "image/png".into(),
+            size: 1,
+            preview_data_url: "data:image/png;base64,preview".into(),
+        };
+        let refreshed = ChatAttachment {
+            preview_data_url: String::new(),
+            ..first.clone()
+        };
+        let mut current = vec![first.clone()];
+
+        assert!(
+            !ChatAttachments {
+                attachments: vec![refreshed],
+            }
+            .merge_into(&mut current)
+        );
+        assert_eq!(current[0].preview_data_url, first.preview_data_url);
+
+        assert!(
+            ChatAttachments {
+                attachments: vec![ChatAttachment {
+                    size: 3,
+                    preview_data_url: String::new(),
+                    ..first
+                }],
+            }
+            .merge_into(&mut current)
+        );
+        assert_eq!(current[0].size, 3);
+        assert!(current[0].preview_data_url.is_empty());
     }
 }

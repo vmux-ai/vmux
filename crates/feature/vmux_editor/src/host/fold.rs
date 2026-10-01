@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use ropey::Rope;
-use vmux_core::event::FoldGutter;
+use vmux_ecs::event::FoldGutter;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FoldRegion {

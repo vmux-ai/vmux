@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use vmux_api::protocol::AgentAttachment;
 use vmux_chat::host::{ChatView, ImportedConversation};
-use vmux_core::agent::SwapStackSession;
-use vmux_core::host::persistence::PageRestore;
-use vmux_core::terminal::TerminalLaunch;
-use vmux_core::{
+use vmux_ecs::agent::SwapStackSession;
+use vmux_ecs::host::persistence::PageRestore;
+use vmux_ecs::terminal::TerminalLaunch;
+use vmux_ecs::{
     PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
     PendingPrompt, PendingPromptAttachments,
 };
@@ -72,12 +72,12 @@ struct AgentChatTarget {
 
 impl AgentChatTarget {
     fn parse(url: &str) -> Option<Self> {
-        match crate::host::url::AgentUrl::parse(url)? {
-            crate::host::url::AgentUrl::AcpDefault => Some(Self {
+        match crate::acp::route::AcpRoute::parse(url)? {
+            crate::acp::route::AcpRoute::AcpDefault => Some(Self {
                 url: vmux_chat::ChatPlugin::URL.to_string(),
                 title: "Agent".to_string(),
             }),
-            crate::host::url::AgentUrl::Acp { id, sid } => {
+            crate::acp::route::AcpRoute::Acp { id, sid } => {
                 let url = match sid {
                     Some(sid) => format!("{}{id}/{sid}", vmux_chat::ChatPlugin::URL),
                     None => format!("{}{id}", vmux_chat::ChatPlugin::URL),
@@ -92,7 +92,7 @@ impl AgentChatTarget {
 }
 
 fn agent_url_uses_local_workspace(url: &str) -> bool {
-    crate::host::url::AgentUrl::parse(url).is_some()
+    crate::acp::route::AcpRoute::parse(url).is_some()
 }
 
 fn ancestor_tab_entity(
@@ -182,8 +182,8 @@ fn prepare(
                 ))
                 .remove::<(
                     StartInlineTransitionView,
-                    vmux_core::launcher::HostsLauncher,
-                    vmux_core::page::PageReady,
+                    vmux_ecs::launcher::HostsLauncher,
+                    vmux_ecs::page::PageReady,
                 )>();
             commands
                 .entity(task.stack)
@@ -414,14 +414,14 @@ fn swap(
 ) {
     let catalog = catalog.as_ref().map(|catalog| **catalog);
     for ev in reader.read() {
-        let target = match crate::host::url::AgentUrl::parse(&ev.target_url) {
-            Some(target @ crate::host::url::AgentUrl::Acp { .. }) => target,
+        let target = match crate::acp::route::AcpRoute::parse(&ev.target_url) {
+            Some(target @ crate::acp::route::AcpRoute::Acp { .. }) => target,
             other => {
                 bevy::log::warn!("swap: unsupported target url {other:?} ({})", ev.target_url);
                 continue;
             }
         };
-        if let crate::host::url::AgentUrl::Acp { id, .. } = &target
+        if let crate::acp::route::AcpRoute::Acp { id, .. } = &target
             && !settings.agent.acp.iter().any(|cfg| cfg.id == *id)
             && acp_registry_agent_for_id(catalog, id).is_none()
         {
@@ -453,20 +453,19 @@ fn swap(
             .remove::<vmux_session::AgentRunState>()
             .remove::<ImportedConversation>()
             .remove::<super::handoff::PendingHandoff>()
-            .remove::<vmux_core::AgentWorkingDir>()
-            .remove::<vmux_core::team::Agent>()
-            .remove::<vmux_core::team::Profile>();
+            .remove::<vmux_ecs::AgentWorkingDir>()
+            .remove::<vmux_ecs::team::Agent>()
+            .remove::<vmux_ecs::team::Profile>();
         commands.entity(ev.stack).despawn_children();
 
         match target {
-            crate::host::url::AgentUrl::Acp { id, sid } => {
+            crate::acp::route::AcpRoute::Acp { id, sid } => {
                 let cfg = settings.agent.acp.iter().find(|cfg| cfg.id == id);
                 let routing_sid = uuid::Uuid::new_v4().to_string();
                 let icon = acp_icon_for_id(catalog, &id);
                 let name = acp_profile_name_for_id(&id, cfg, catalog);
-                let request = AcpAgentAttachment::new(id, name, routing_sid, ev.cwd.clone())
-                    .icon(icon)
-                    .resume(sid);
+                let request =
+                    AcpAgentAttachment::new(id, name, routing_sid, ev.cwd.clone(), icon, sid);
                 commands.entity(ev.stack).insert(request);
                 if let Some((imported, pending)) = imported {
                     commands.entity(ev.stack).insert((imported, pending));
@@ -488,8 +487,8 @@ fn handle_agent_page_open_task(
     acp_configs: &[vmux_setting::AcpAgentConfig],
     catalog: Option<&crate::host::runtime::AcpCatalog>,
 ) -> Result<(), String> {
-    let target = match crate::host::url::AgentUrl::parse(&task.url) {
-        Some(crate::host::url::AgentUrl::AcpDefault) => {
+    let target = match crate::acp::route::AcpRoute::parse(&task.url) {
+        Some(crate::acp::route::AcpRoute::AcpDefault) => {
             let id = acp_configs
                 .first()
                 .map(|config| config.id.clone())
@@ -503,13 +502,13 @@ fn handle_agent_page_open_task(
                     })
                 })
                 .ok_or_else(|| "no ACP agent is configured or installed".to_string())?;
-            crate::host::url::AgentUrl::Acp { id, sid: None }
+            crate::acp::route::AcpRoute::Acp { id, sid: None }
         }
         Some(target) => target,
         None => return Err(format!("malformed agent URL '{}'", task.url)),
     };
     match target {
-        crate::host::url::AgentUrl::Acp { id, sid } => {
+        crate::acp::route::AcpRoute::Acp { id, sid } => {
             let cfg = acp_configs.iter().find(|config| config.id == id);
             if cfg.is_none() && acp_registry_agent_for_id(catalog, &id).is_none() {
                 return Err(format!("ACP agent unavailable for '{id}'"));
@@ -526,15 +525,24 @@ fn handle_agent_page_open_task(
             let routing_sid = uuid::Uuid::new_v4().to_string();
             let icon = acp_icon_for_id(catalog, &id);
             let name = acp_profile_name_for_id(&id, cfg, catalog);
-            let request = AcpAgentAttachment::new(id, name, routing_sid, default_cwd.to_path_buf())
-                .icon(icon)
-                .resume(sid)
-                .webview(transition_webview);
+            let request = AcpAgentAttachment::new(
+                id,
+                name,
+                routing_sid,
+                default_cwd.to_path_buf(),
+                icon,
+                sid,
+            );
             commands.entity(task.stack).insert(request);
+            if let Some(webview) = transition_webview {
+                commands.entity(task.stack).insert(vmux_ecs::EntityTarget::<
+                    vmux_chat::host::ChatView,
+                >::new(webview));
+            }
             insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
             Ok(())
         }
-        crate::host::url::AgentUrl::AcpDefault => unreachable!(),
+        crate::acp::route::AcpRoute::AcpDefault => unreachable!(),
     }
 }
 

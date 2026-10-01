@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use vmux_api::protocol::AgentCommandResult;
-use vmux_core::agent::{
+use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
     CommandOrigin,
 };
@@ -13,7 +13,7 @@ use crate::definition::{
 use crate::page_key::KeyPlugin;
 use crate::snapshot::UiStatePlugin;
 use crate::surface::SurfacePlugin;
-use vmux_core::team::{Agent, Profile, User};
+use vmux_ecs::team::{Agent, Profile, User};
 
 pub struct CommandPlugin;
 
@@ -44,12 +44,12 @@ fn invoke(
     mut requests: MessageReader<AgentRequestMessage<AgentInvokeCommand>>,
     definitions: Query<&CommandDefinition>,
     mut invocations: MessageWriter<CommandInvocation>,
-    agents: Query<(Entity, &Agent, Option<&vmux_core::ProcessId>)>,
+    agents: Query<(Entity, &Agent, Option<&vmux_ecs::ProcessId>)>,
     user: Query<Entity, With<User>>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        let args = match vmux_core::JsonArguments::try_from(&request.payload.args) {
+        let args = match vmux_ecs::JsonArguments::try_from(&request.payload.args) {
             Ok(args) => args.0,
             Err(message) => {
                 responses.write(request.reply.response(AgentCommandResult::Error(message)));

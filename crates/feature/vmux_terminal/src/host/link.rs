@@ -4,9 +4,9 @@ use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use unicode_width::UnicodeWidthChar;
-use vmux_core::event::{LinkRange, TermLine};
-use vmux_core::input::NavigationText;
+use vmux_ecs::event::{LinkRange, TermLine};
 use vmux_layout::stack::OpenRequest;
+use vmux_path::NavigationText;
 
 use crate::event::TermLinkOpenRequest;
 
@@ -159,7 +159,7 @@ fn resolve_path(token: &str, cwd: Option<&Path>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::event::TermSpan;
+    use vmux_ecs::event::TermSpan;
 
     #[test]
     fn link_open_emits_stack_open_request() {
@@ -178,7 +178,7 @@ mod tests {
             .init_resource::<Captured>()
             .add_observer(term_open)
             .add_systems(Update, capture);
-        let webview = app.world_mut().spawn(vmux_core::team::User).id();
+        let webview = app.world_mut().spawn(vmux_ecs::team::User).id();
 
         app.world_mut().trigger(UiInput::<TermLinkOpenRequest> {
             webview,

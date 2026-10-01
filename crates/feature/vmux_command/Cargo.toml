@@ -18,10 +18,11 @@ rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
-vmux_core = { path = "../../util/vmux_core" }
+vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_history = { path = "../vmux_history", default-features = false }
 vmux_api = { path = "../../util/vmux_api" }
 vmux_macro = { path = "../../util/vmux_macro" }
+vmux_path = { path = "../../util/vmux_path" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }

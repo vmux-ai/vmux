@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_core::overlay::WindowOverlay;
+use vmux_ecs::overlay::WindowOverlay;
 
 use crate::bundle::CommandBar;
 use vmux_flex::prelude::*;

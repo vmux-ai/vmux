@@ -1,9 +1,10 @@
 use super::format::{PromptEdit, PromptHistoryDirection, prompt_history_direction};
 use super::state::Chat;
 use dioxus::prelude::*;
-use vmux_core::input::{KeyStroke, UiKeyContext, Unclaimed};
+use vmux_api::input::{KeyStroke, UiKeyContext};
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
+use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{KeyClaim, send, use_key_claim};
 
 #[derive(Clone, Copy)]

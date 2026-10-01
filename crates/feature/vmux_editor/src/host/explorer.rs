@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::event::{
+use vmux_ecs::event::{
     ExplorerCloseEditor, ExplorerCollapseAll, ExplorerPanelSetVisible, ExplorerPanelViewSet,
     ExplorerPanelWidth, ExplorerRevealCurrent, ExplorerTreePrefetch, ExplorerTreeRefresh,
     ExplorerTreeToggle, FileDirEntry, TreeRow,
@@ -34,7 +34,7 @@ use tree::{ExplorerDirLoadRequest, TreePlugin};
 struct RevealCurrent {
     #[event_target]
     entity: Entity,
-    reveal: vmux_core::event::ExplorerReveal,
+    reveal: vmux_ecs::event::ExplorerReveal,
 }
 
 #[derive(Component)]
@@ -222,10 +222,10 @@ impl ExplorerState {
     pub(super) fn focus_effect(
         &mut self,
         path: &Path,
-        reveal: vmux_core::event::ExplorerReveal,
-    ) -> vmux_core::event::ExplorerFocusEvent {
+        reveal: vmux_ecs::event::ExplorerReveal,
+    ) -> vmux_ecs::event::ExplorerFocusEvent {
         self.focus_revision = self.focus_revision.wrapping_add(1).max(1);
-        vmux_core::event::ExplorerFocusEvent {
+        vmux_ecs::event::ExplorerFocusEvent {
             revision: self.focus_revision,
             path: path.to_string_lossy().into_owned(),
             reveal,

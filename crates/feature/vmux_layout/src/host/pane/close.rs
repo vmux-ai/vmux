@@ -5,7 +5,7 @@ use bevy::{
     prelude::*,
     tasks::{IoTaskPool, Task, futures_lite::future},
 };
-use vmux_core::{PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 

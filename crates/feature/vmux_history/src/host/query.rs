@@ -6,7 +6,7 @@ use crate::event::{
     HistoryOpenRequest, HistoryQueryRequest, HistorySuggestionsRequest, HistorySuggestionsResponse,
 };
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_core::{CreatedAt, LastVisitedAt, PageMetadata, Url, Visit, VisitCount, VisitedUrl};
+use vmux_ecs::{CreatedAt, LastVisitedAt, PageMetadata, Url, Visit, VisitCount, VisitedUrl};
 
 use super::state::HistoryPageState;
 
@@ -69,12 +69,7 @@ fn history_ui_state(
         .iter()
         .map(|(created, visited)| (*created, *visited))
         .collect();
-    let entries = build_entries(
-        &state.query,
-        &url_rows,
-        &visit_rows,
-        vmux_core::now_millis(),
-    );
+    let entries = build_entries(&state.query, &url_rows, &visit_rows, vmux_ecs::now_millis());
     let limit = state.limit as usize;
     crate::state::HistoryUiState {
         has_more: entries.len() > limit,
@@ -214,7 +209,7 @@ fn publish_pages(
         let snapshot = history_ui_state(&state, &urls, &visits);
         state.bypass_change_detection().has_more = snapshot.has_more;
         commands.trigger(
-            vmux_core::host::UiStateWrite::<crate::state::HistoryUiState>::from_event(
+            vmux_ecs::host::UiStateWrite::<crate::state::HistoryUiState>::from_event(
                 entity, &snapshot,
             ),
         );
@@ -227,7 +222,7 @@ fn suggestions_request(
     mut commands: Commands,
 ) {
     let req = &trigger.event().payload;
-    let now = vmux_core::now_millis();
+    let now = vmux_ecs::now_millis();
 
     let mut scored: Vec<(f32, HistoryEntry)> = urls
         .iter()
@@ -257,7 +252,7 @@ fn suggestions_request(
         .map(|(_, e)| e)
         .collect();
 
-    commands.trigger(vmux_core::host::UiStateWrite::<
+    commands.trigger(vmux_ecs::host::UiStateWrite::<
         vmux_api::command_bar::CommandBarUiState,
     >::from_event(
         trigger.event().webview,
@@ -271,14 +266,14 @@ fn suggestions_request(
 #[cfg(test)]
 mod handler_tests {
     use super::*;
-    use vmux_core::{
-        CorePlugin, CreatedAt, LastVisitedAt, PageMetadata, Url, VisitCount, VisitedUrl,
+    use vmux_ecs::{
+        CreatedAt, EcsPlugin, LastVisitedAt, PageMetadata, Url, VisitCount, VisitedUrl,
     };
 
     #[test]
     fn build_entries_no_query_orders_by_visit_created_at_desc() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_plugins(CorePlugin);
+        app.add_plugins(MinimalPlugins).add_plugins(EcsPlugin);
 
         let url_e = app
             .world_mut()
@@ -317,7 +312,7 @@ mod handler_tests {
     #[test]
     fn build_entries_with_query_filters_and_ranks() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_plugins(CorePlugin);
+        app.add_plugins(MinimalPlugins).add_plugins(EcsPlugin);
 
         let e1 = app
             .world_mut()
@@ -381,7 +376,7 @@ mod handler_tests {
     #[test]
     fn build_entries_pagination() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_plugins(CorePlugin);
+        app.add_plugins(MinimalPlugins).add_plugins(EcsPlugin);
 
         let url_e = app
             .world_mut()

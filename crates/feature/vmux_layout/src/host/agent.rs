@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, ProcessId};
-use vmux_core::agent::{
+use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestApplySet, AgentRequestBlocked,
     AgentRequestMessage, AgentRequestRouteSet,
 };
@@ -170,7 +170,7 @@ fn focus_pane(mut requests: MessageReader<FocusPaneRequest>, mut commands: Comma
         let Ok((_, bits)) = crate::protocol::parse_id(&request.pane) else {
             continue;
         };
-        commands.trigger(vmux_core::ActivateRequest {
+        commands.trigger(vmux_ecs::ActivateRequest {
             entity: Entity::from_bits(bits),
         });
     }
@@ -196,7 +196,7 @@ fn update(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::agent::{AgentReply, CommandOrigin};
+    use vmux_ecs::agent::{AgentReply, CommandOrigin};
 
     struct OpenBesideFixture {
         app: App,

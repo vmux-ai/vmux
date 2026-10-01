@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use vmux_api::bookmark::{BookmarkFolderChoice, BookmarkRow};
-use vmux_core::{PageIcon, PageMetadata};
+use vmux_ecs::{PageIcon, PageMetadata};
 
 #[vmux_api::contract(Default, Eq)]
 pub struct ReloadEffect {
@@ -505,7 +505,7 @@ pub struct StackRevealTarget {
 
 #[vmux_api::contract(Default)]
 pub struct SideSheetState {
-    pub active_space: Option<vmux_core::event::space::SpaceRow>,
+    pub active_space: Option<vmux_ecs::event::space::SpaceRow>,
     pub active_pane: Option<SideSheetPane>,
     pub active_page: Option<StackNode>,
     pub reveal: Option<StackRevealTarget>,
@@ -705,7 +705,7 @@ pub struct TabBoundary {
 #[vmux_api::contract(Default)]
 pub struct TabBoundaryState {
     pub boundary: Option<TabBoundary>,
-    pub projects: Vec<vmux_core::event::ProjectRow>,
+    pub projects: Vec<vmux_ecs::event::ProjectRow>,
 }
 
 #[vmux_api::contract(Default)]
@@ -716,7 +716,7 @@ pub struct ActiveSessionState {
 #[vmux_api::contract]
 pub struct ActiveSession {
     pub page: StackNode,
-    pub agent: Option<vmux_core::event::team::TeamMemberRow>,
+    pub agent: Option<vmux_ecs::event::team::TeamMemberRow>,
     pub project: Option<ActiveWorkspaceProject>,
     pub boundary: Option<TabBoundary>,
     pub pane_id: u64,
@@ -724,9 +724,9 @@ pub struct ActiveSession {
 
 #[vmux_api::contract]
 pub struct ActiveWorkspaceProject {
-    pub root: vmux_core::event::ProjectRow,
-    pub children: Vec<vmux_core::event::ProjectRow>,
-    pub choices: Vec<vmux_core::event::ProjectRow>,
+    pub root: vmux_ecs::event::ProjectRow,
+    pub children: Vec<vmux_ecs::event::ProjectRow>,
+    pub choices: Vec<vmux_ecs::event::ProjectRow>,
 }
 
 #[vmux_api::contract(Default)]
@@ -735,8 +735,8 @@ pub struct HeaderState {
     pub metadata: Option<PageMetadata>,
     pub bookmarked: bool,
     pub pinned_uuid: Option<String>,
-    pub user: Option<vmux_core::event::team::TeamMemberRow>,
-    pub agents: Vec<vmux_core::event::team::TeamMemberRow>,
+    pub user: Option<vmux_ecs::event::team::TeamMemberRow>,
+    pub agents: Vec<vmux_ecs::event::team::TeamMemberRow>,
 }
 
 #[vmux_api::contract(Copy, Eq)]

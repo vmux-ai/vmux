@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use vmux_core::event::*;
+use vmux_ecs::event::*;
 
 use super::directory::list_dir;
 use super::editor::{Editor, FileView, ParkedEdits};
@@ -159,7 +159,7 @@ impl FileLoadTask {
 enum FileLoad {
     Directory(Vec<FileDirEntry>),
     Media {
-        kind: vmux_core::media::MediaKind,
+        kind: vmux_ecs::media::MediaKind,
         mime: String,
     },
     Text {
@@ -181,8 +181,8 @@ impl FileLoad {
         }
 
         let path_text = path.to_string_lossy();
-        if let Some(kind) = vmux_core::media::media_kind(&path_text) {
-            let mime = vmux_core::media::media_mime(&path_text)
+        if let Some(kind) = vmux_ecs::media::media_kind(&path_text) {
+            let mime = vmux_ecs::media::media_mime(&path_text)
                 .unwrap_or("application/octet-stream")
                 .to_string();
             return Self::Media { kind, mime };
@@ -408,7 +408,7 @@ fn apply_loaded_file_buffers(
 }
 
 fn reset_sent(
-    trigger: On<UiInput<vmux_core::page::PageReady>>,
+    trigger: On<UiInput<vmux_ecs::page::PageReady>>,
     file_views: Query<&FileView>,
     mut commands: Commands,
 ) {
@@ -548,9 +548,9 @@ fn reload_changed_files(
             continue;
         }
 
-        if let Some(kind) = vmux_core::media::media_kind(&file.path.to_string_lossy()) {
+        if let Some(kind) = vmux_ecs::media::media_kind(&file.path.to_string_lossy()) {
             if ready {
-                let mime = vmux_core::media::media_mime(&file.path.to_string_lossy())
+                let mime = vmux_ecs::media::media_mime(&file.path.to_string_lossy())
                     .unwrap_or("application/octet-stream")
                     .to_string();
                 let nonce = std::time::SystemTime::now()
@@ -558,7 +558,7 @@ fn reload_changed_files(
                     .map(|duration| duration.as_millis())
                     .unwrap_or(0);
                 let url = format!("{}&v={nonce}", file.raw_media_url());
-                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                     entity,
                     &FileMediaEvent {
                         kind,
@@ -617,7 +617,7 @@ mod tests {
                 top_row: 0,
                 rows: 0,
                 wrap_columns: 0,
-                word_wrap: vmux_core::editor::WordWrap::default(),
+                word_wrap: vmux_api::editor::WordWrap::default(),
                 word_wrap_column: 80,
                 scroll_revision: 0,
             },

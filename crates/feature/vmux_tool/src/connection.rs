@@ -18,12 +18,12 @@ use vmux_api::mcp::{
     McpServerEntry, McpServerOperation, McpServerPending, McpServerRequest, McpServerResult,
     McpServerStatus, McpServers, McpServersRequest,
 };
-use vmux_core::host::manifest::FeatureManifest;
-use vmux_core::host::{UiStatePlugin, UiStateWrite};
-use vmux_core::profile::mcp_credentials::{
+use vmux_ecs::host::manifest::FeatureManifest;
+use vmux_ecs::host::{UiStatePlugin, UiStateWrite};
+use vmux_ecs::profile::mcp_credentials::{
     McpCredentialAccess, McpCredentialStorage, McpOauthCredentials,
 };
-use vmux_core::{PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 
 pub struct McpConnectionPlugin;
 

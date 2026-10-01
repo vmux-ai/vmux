@@ -1,13 +1,13 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_api::command_bar::ExRequest;
+use vmux_api::input::KeyStroke;
 use vmux_command::command_bar::{
     CommandBarDismiss, CommandBarOpenRequest, WriteCommandBarRequests,
 };
 use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap};
 use vmux_command::{BindCommands, CommandInvocation, CommandRegistry};
-use vmux_core::event::*;
-use vmux_core::input::KeyStroke;
+use vmux_ecs::event::*;
 
 #[cfg(test)]
 use crate::edit::EditCore;
@@ -24,7 +24,7 @@ use crate::host::note::NoteSent;
 use crate::host::status::SharedFileViewMode;
 use crate::host::viewport::{CursorRenderRequest, FileViewport, FoldsDirty, ViewportRenderRequest};
 use crate::keymap::{KeyInput, Mods};
-use vmux_core::scroll::clamp_top_line;
+use vmux_ecs::scroll::clamp_top_line;
 
 pub(super) struct EditorPlugin;
 
@@ -159,7 +159,7 @@ fn open_file_find(
     state.open = true;
     state.forward = trigger.event().forward;
     state.revision = state.revision.wrapping_add(1).max(1);
-    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
         entity,
         &FileFindEvent {
             open: state.open,
@@ -180,7 +180,7 @@ fn close_file_find(
     };
     state.open = false;
     state.revision = state.revision.wrapping_add(1).max(1);
-    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
         entity,
         &FileFindEvent {
             open: state.open,
@@ -363,7 +363,7 @@ fn apply_edit_request(
             if let Some(scroll) = vp.set_top(target)
                 && browsers.can_emit_to(&entity)
             {
-                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                     entity, &scroll,
                 ));
             }
@@ -387,7 +387,7 @@ fn apply_edit_request(
             if let Some(scroll) = vp.set_top(target)
                 && browsers.can_emit_to(&entity)
             {
-                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                     entity, &scroll,
                 ));
             }
@@ -466,7 +466,7 @@ fn apply_edit_request(
                 Err(unmappable) => {
                     tracing::warn!(path = %path.display(), "editor save refused: {unmappable}");
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                             entity,
                             &FileErrorEvent {
                                 message: format!("save failed: {unmappable}"),
@@ -496,7 +496,7 @@ fn apply_edit_request(
                 Err(e) => {
                     tracing::warn!(path = %path.display(), "editor save failed: {e}");
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                             entity,
                             &FileErrorEvent {
                                 message: format!("save failed: {e}"),
@@ -567,7 +567,7 @@ fn apply_edit_request(
         if let Some(scroll) = vp.set_top(top)
             && browsers.can_emit_to(&entity)
         {
-            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                 entity, &scroll,
             ));
         }
@@ -589,7 +589,7 @@ fn apply_edit_request(
     if text_changed || dirty_changed {
         diff_source.content = edit.core.buffer.text();
         diff_source.dirty = edit.core.dirty;
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
             entity,
             &FileDirtyEvent {
                 dirty: edit.core.dirty,
@@ -671,7 +671,7 @@ fn file_text_input(
         return;
     }
     keymap.0.record_text(&text);
-    let command = if keymap.0.mode() == vmux_core::EditMode::Replace {
+    let command = if keymap.0.mode() == vmux_api::editor::EditMode::Replace {
         EditCommand::OvertypeText(text)
     } else {
         EditCommand::InsertText(text)
@@ -693,21 +693,20 @@ fn file_property_edit(
         return;
     }
     let text = edit.core.buffer.text();
-    let updated = match vmux_core::knowledge::Frontmatter::from(text.as_str())
-        .apply(&trigger.event().payload)
-    {
-        Ok(updated) => updated,
-        Err(message) => {
-            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-                entity,
-                &FileErrorEvent {
-                    message,
-                    undecodable: false,
-                },
-            ));
-            return;
-        }
-    };
+    let updated =
+        match vmux_knowledge::Frontmatter::from(text.as_str()).apply(&trigger.event().payload) {
+            Ok(updated) => updated,
+            Err(message) => {
+                commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+                    entity,
+                    &FileErrorEvent {
+                        message,
+                        undecodable: false,
+                    },
+                ));
+                return;
+            }
+        };
     if updated == text {
         return;
     }
@@ -843,7 +842,7 @@ mod edit_flow_tests {
 
     #[test]
     fn vim_dd_deletes_line_via_keymap_and_core() {
-        let mut km = vmux_core::KeymapKind::Vim.make(&[], " ");
+        let mut km = vmux_api::editor::KeymapKind::Vim.make(&[], " ");
         let mut core = EditCore::new(
             std::path::PathBuf::from("a.txt"),
             "Plain Text".into(),

@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::host::{UiStatePlugin, UiStateWrite};
-use vmux_core::overlay::WindowOverlay;
-use vmux_core::page::PageReady;
+use vmux_ecs::host::{UiStatePlugin, UiStateWrite};
+use vmux_ecs::overlay::WindowOverlay;
+use vmux_ecs::page::PageReady;
 use vmux_layout::LayoutCef;
 
 use vmux_setting::AppSettings;

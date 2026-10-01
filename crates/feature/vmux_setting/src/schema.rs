@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_core::host::manifest::FeatureManifest;
 use vmux_ui::i18n::Locale;
 
 use crate::state::SettingsSelectOption;
@@ -15,23 +14,6 @@ pub(super) struct SettingsSchema {
 }
 
 impl SettingsSchema {
-    pub fn from_manifests<'a>(
-        manifests: impl IntoIterator<Item = &'a FeatureManifest>,
-        locale: &Locale,
-    ) -> Result<Self, String> {
-        let mut schema = Self::default();
-        for manifest in manifests {
-            let Some(mut contribution) = manifest.settings::<Self>()? else {
-                continue;
-            };
-            schema.sections.append(&mut contribution.sections);
-            schema.fields.append(&mut contribution.fields);
-        }
-        schema.sections.sort_by_key(|section| section.order);
-        schema.localize(locale);
-        Ok(schema)
-    }
-
     pub fn field(&self, path: &str) -> Option<&FieldSpec> {
         if let Some(field) = self.fields.iter().find(|field| field.path == path) {
             return Some(field);
@@ -42,8 +24,8 @@ impl SettingsSchema {
             .find(|field| SettingsPath::from(field.path.as_str()).matches(&path))
     }
 
-    fn localize(&mut self, locale: &Locale) {
-        let directory = vmux_core::profile::ProfilePaths::current()
+    pub(crate) fn localize(&mut self, locale: &Locale) {
+        let directory = vmux_ecs::profile::ProfilePaths::current()
             .config()
             .join("locales");
         let tag = locale.as_str();
@@ -182,67 +164,6 @@ impl From<&str> for SettingsPath {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const MANIFESTS: [&str; 9] = [
-        include_str!("feature.ron"),
-        include_str!("../../vmux_agent/src/feature.ron"),
-        include_str!("../../vmux_editor/src/feature.ron"),
-        include_str!("../../vmux_input/src/feature.ron"),
-        include_str!("../../vmux_layout/src/feature.ron"),
-        include_str!("../../vmux_shortcut/src/feature.ron"),
-        include_str!("../../vmux_space/src/feature.ron"),
-        include_str!("../../vmux_terminal/src/feature.ron"),
-        include_str!("../../../util/vmux_browser/src/feature.ron"),
-    ];
-
-    #[test]
-    fn feature_manifests_compose_the_settings_schema() {
-        let manifests = MANIFESTS
-            .into_iter()
-            .map(FeatureManifest::parse)
-            .collect::<Vec<_>>();
-        let schema = SettingsSchema::from_manifests(manifests.iter(), &Locale::from("en-US"))
-            .expect("settings schema");
-        let sections = schema
-            .sections
-            .iter()
-            .map(|section| section.id.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            sections,
-            [
-                "general",
-                "appearance",
-                "layout",
-                "agent",
-                "shortcuts",
-                "terminal",
-                "browser",
-                "editor",
-                "recording",
-                "spaces",
-            ]
-        );
-        let language = schema.field("appearance.locale").expect("language field");
-        assert_eq!(language.widget, Some(WidgetKind::Select));
-        assert_eq!(language.options.first().unwrap().value, "system");
-        assert_eq!(
-            schema
-                .field("agent.acp[0].command")
-                .unwrap()
-                .label
-                .as_deref(),
-            Some("Command")
-        );
-        assert_eq!(
-            schema
-                .field("spaces.personal.startup_dir")
-                .unwrap()
-                .label
-                .as_deref(),
-            Some("Startup directory")
-        );
-    }
 
     #[test]
     fn field_lookup_matches_array_indexes_and_dynamic_map_keys() {

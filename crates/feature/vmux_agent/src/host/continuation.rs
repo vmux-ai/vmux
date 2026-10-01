@@ -3,8 +3,8 @@ use bevy::prelude::*;
 use vmux_api::protocol::ClientMessage;
 use vmux_api::protocol::SharedMessage;
 use vmux_command::WriteCommandRequests;
-use vmux_core::agent::AgentContinuationRequest;
-use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
+use vmux_ecs::agent::AgentContinuationRequest;
+use vmux_ecs::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
 use vmux_session::{AcpSession, AgentRunState};
 
 pub(super) struct AgentContinuationPlugin;

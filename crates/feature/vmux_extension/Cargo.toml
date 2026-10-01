@@ -17,7 +17,7 @@ base64 = "0.22"
 serde = { workspace = true }
 serde_json = { workspace = true }
 vmux_api = { path = "../../util/vmux_api" }
-vmux_core = { path = "../../util/vmux_core" }
+vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_native = { path = "../../util/vmux_native" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }

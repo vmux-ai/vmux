@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_core::Active;
+use vmux_ecs::Active;
 use vmux_history::LastActivatedAt;
 
 use crate::pane::{Pane, PaneSplit};

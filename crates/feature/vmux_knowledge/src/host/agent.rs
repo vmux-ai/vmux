@@ -1,9 +1,9 @@
+use crate::{KnowledgeIndex, KnowledgeVault};
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, ProcessId};
-use vmux_core::agent::{
+use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
-use vmux_core::knowledge::{KnowledgeIndex, KnowledgeVault};
 
 #[vmux_api::agent]
 pub(crate) struct AgentWriteKnowledge {
@@ -185,7 +185,7 @@ fn write(
                     open.write(vmux_layout::OpenBesideRequest {
                         pane,
                         direction: None,
-                        url: vmux_core::file_url::FileUrl::from_path(&path, None, None, None),
+                        url: vmux_path::FileUrl::from_path(&path, None, None, None),
                         request_id: request.reply.request_id.0,
                         focus: false,
                     });

@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_core::event::{ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPanelWidth};
+use vmux_ecs::event::{ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPanelWidth};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::platform::{now_millis, random_index, sleep_ms};

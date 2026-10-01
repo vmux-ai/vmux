@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_api::VmuxRoute;
-use vmux_core::host::page::HostsPage;
-use vmux_core::launcher::RendersLauncherPanel;
-use vmux_core::{PageIcon, PageMetadata, Url};
+use vmux_ecs::host::page::HostsPage;
+use vmux_ecs::launcher::RendersLauncherPanel;
+use vmux_ecs::{PageIcon, PageMetadata, Url};
 use vmux_flex::prelude::*;
 
 #[derive(Component)]
@@ -232,13 +232,13 @@ impl Browser {
 mod apply_cef_state_tests {
     use super::*;
     use bevy_cef_core::prelude::WebviewCefStateEvent;
-    use vmux_core::PageMetadata;
+    use vmux_ecs::PageMetadata;
 
     fn vmux_meta() -> PageMetadata {
         PageMetadata {
             url: "vmux://history/".into(),
             title: "History".into(),
-            icon: vmux_core::PageIcon::None,
+            icon: vmux_ecs::PageIcon::None,
             bg_color: None,
         }
     }
@@ -247,7 +247,7 @@ mod apply_cef_state_tests {
         PageMetadata {
             url: "https://example.com".into(),
             title: "old".into(),
-            icon: vmux_core::PageIcon::None,
+            icon: vmux_ecs::PageIcon::None,
             bg_color: None,
         }
     }
@@ -274,7 +274,7 @@ mod apply_cef_state_tests {
             let mut meta = PageMetadata {
                 url: url.into(),
                 title: "Codex".into(),
-                icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Sparkles),
+                icon: vmux_ecs::PageIcon::Builtin(vmux_ecs::BuiltinIcon::Sparkles),
                 bg_color: None,
             };
             apply_cef_state_to_meta(
@@ -289,7 +289,7 @@ mod apply_cef_state_tests {
             assert_eq!(meta.url, url);
             assert_eq!(
                 meta.icon,
-                vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Sparkles),
+                vmux_ecs::PageIcon::Builtin(vmux_ecs::BuiltinIcon::Sparkles),
                 "{url}"
             );
         }
@@ -299,7 +299,7 @@ mod apply_cef_state_tests {
     fn vmux_url_preserves_favicon_against_cef_update() {
         let mut meta = vmux_meta();
         apply_cef_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None));
-        assert_eq!(meta.icon, vmux_core::PageIcon::None);
+        assert_eq!(meta.icon, vmux_ecs::PageIcon::None);
     }
 
     #[test]
@@ -338,7 +338,7 @@ mod apply_cef_state_tests {
         apply_cef_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None));
         assert_eq!(
             meta.icon,
-            vmux_core::PageIcon::Favicon("https://x/fav.ico".into())
+            vmux_ecs::PageIcon::Favicon("https://x/fav.ico".into())
         );
     }
 
@@ -347,12 +347,12 @@ mod apply_cef_state_tests {
         let mut meta = PageMetadata {
             url: "https://example.com".into(),
             title: "Old".into(),
-            icon: vmux_core::PageIcon::Favicon("https://example.com/fav.ico".into()),
+            icon: vmux_ecs::PageIcon::Favicon("https://example.com/fav.ico".into()),
             bg_color: None,
         };
         apply_cef_state_to_meta(&mut meta, ev(None, None, Some("https://other.com")));
         assert_eq!(meta.url, "https://other.com");
-        assert_eq!(meta.icon, vmux_core::PageIcon::None);
+        assert_eq!(meta.icon, vmux_ecs::PageIcon::None);
     }
 }
 
@@ -409,13 +409,13 @@ mod tests {
 #[cfg(test)]
 mod url_mirror_tests {
     use super::*;
-    use vmux_core::{CorePlugin, CreatedAt, LastVisitedAt, PageMetadata, Url, VisitCount};
+    use vmux_ecs::{CreatedAt, EcsPlugin, LastVisitedAt, PageMetadata, Url, VisitCount};
 
     #[test]
     fn updates_matching_url_meta() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(CorePlugin)
+            .add_plugins(EcsPlugin)
             .add_systems(Update, mirror_metadata_to_url);
 
         app.world_mut().spawn((
@@ -432,7 +432,7 @@ mod url_mirror_tests {
         app.world_mut().spawn(PageMetadata {
             url: "https://example.com".into(),
             title: "Example".into(),
-            icon: vmux_core::PageIcon::Favicon("https://example.com/fav.ico".into()),
+            icon: vmux_ecs::PageIcon::Favicon("https://example.com/fav.ico".into()),
             bg_color: None,
         });
 
@@ -447,7 +447,7 @@ mod url_mirror_tests {
         assert_eq!(url_meta.title, "Example");
         assert_eq!(
             url_meta.icon,
-            vmux_core::PageIcon::Favicon("https://example.com/fav.ico".into())
+            vmux_ecs::PageIcon::Favicon("https://example.com/fav.ico".into())
         );
     }
 
@@ -455,7 +455,7 @@ mod url_mirror_tests {
     fn skips_empty_tab_url() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(CorePlugin)
+            .add_plugins(EcsPlugin)
             .add_systems(Update, mirror_metadata_to_url);
 
         app.world_mut().spawn((

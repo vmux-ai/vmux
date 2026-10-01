@@ -10,7 +10,7 @@ use crate::host::viewport::FileViewport;
 
 #[derive(Component, Clone, Debug)]
 #[require(
-    vmux_core::host::FileUiStateUpdates,
+    vmux_ecs::host::FileUiStateUpdates,
     FileDocumentRevision,
     crate::host::panel::FilePanel,
     crate::host::directory::FileDirectoryNavigation,
@@ -91,10 +91,10 @@ impl FileView {
         url
     }
 
-    pub(crate) fn document_kind(&self) -> vmux_core::event::FileDocumentKind {
+    pub(crate) fn document_kind(&self) -> vmux_ecs::event::FileDocumentKind {
         match crate::markdown::is_markdown_path(&self.path) {
-            true => vmux_core::event::FileDocumentKind::Markdown,
-            false => vmux_core::event::FileDocumentKind::Text,
+            true => vmux_ecs::event::FileDocumentKind::Markdown,
+            false => vmux_ecs::event::FileDocumentKind::Text,
         }
     }
 
@@ -147,7 +147,7 @@ impl Editor {
         self.parsed_note.is_some()
     }
 
-    pub(super) fn note_blocks(&self) -> Option<&[vmux_core::event::NoteBlock]> {
+    pub(super) fn note_blocks(&self) -> Option<&[vmux_ecs::event::NoteBlock]> {
         self.parsed_note.as_ref().map(|note| note.blocks.as_slice())
     }
 
@@ -249,7 +249,7 @@ impl ParkedEdits {
 
 struct CachedWrapView {
     generation: u64,
-    mode: vmux_core::editor::WordWrap,
+    mode: vmux_api::editor::WordWrap,
     viewport_columns: u16,
     word_wrap_column: u16,
     view: WrapView,
@@ -259,8 +259,8 @@ struct CachedWrapView {
 mod tests {
     use super::*;
     use bevy_cef::prelude::{BinIpcEventRawBuffer, Browsers, UiInput};
-    use vmux_core::PageMetadata;
-    use vmux_core::event::{
+    use vmux_ecs::PageMetadata;
+    use vmux_ecs::event::{
         FileEncoding, FileEncodingReopenRequest, FileEncodingSaveRequest, FileOpenEvent,
     };
 
@@ -294,11 +294,11 @@ mod tests {
 
         assert_eq!(
             markdown.document_kind(),
-            vmux_core::event::FileDocumentKind::Markdown
+            vmux_ecs::event::FileDocumentKind::Markdown
         );
         assert_eq!(
             source.document_kind(),
-            vmux_core::event::FileDocumentKind::Text
+            vmux_ecs::event::FileDocumentKind::Text
         );
     }
 
@@ -333,7 +333,7 @@ mod tests {
                         top_row: 0,
                         rows: 0,
                         wrap_columns: 0,
-                        word_wrap: vmux_core::editor::WordWrap::default(),
+                        word_wrap: vmux_api::editor::WordWrap::default(),
                         word_wrap_column: 80,
                         scroll_revision: 0,
                     },

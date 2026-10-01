@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_core::event::{CommandBarPicker, FileStatusPickerOpen, FileViewMode};
+use vmux_ecs::event::{CommandBarPicker, FileStatusPickerOpen, FileViewMode};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
@@ -10,9 +10,9 @@ pub(super) fn FileStatusInfo(
     scope: FileStatusScope,
     line: u32,
     col: u32,
-    indent: vmux_core::event::FileIndent,
-    line_ending: vmux_core::event::FileLineEnding,
-    encoding: vmux_core::event::FileEncoding,
+    indent: vmux_ecs::event::FileIndent,
+    line_ending: vmux_ecs::event::FileLineEnding,
+    encoding: vmux_ecs::event::FileEncoding,
     language: String,
 ) -> Element {
     let position = translate_with(
@@ -23,8 +23,8 @@ pub(super) fn FileStatusInfo(
         ],
     );
     let eol = match line_ending {
-        vmux_core::event::FileLineEnding::Crlf => "CRLF",
-        vmux_core::event::FileLineEnding::Lf => "LF",
+        vmux_ecs::event::FileLineEnding::Crlf => "CRLF",
+        vmux_ecs::event::FileLineEnding::Lf => "LF",
     };
     rsx! {
         if scope.shows_caret() {
@@ -138,8 +138,8 @@ struct IndentChoice {
     width: u16,
 }
 
-impl From<vmux_core::event::FileIndent> for IndentChoice {
-    fn from(indent: vmux_core::event::FileIndent) -> Self {
+impl From<vmux_ecs::event::FileIndent> for IndentChoice {
+    fn from(indent: vmux_ecs::event::FileIndent) -> Self {
         Self {
             spaces: indent.spaces,
             width: indent.width,
@@ -163,7 +163,7 @@ impl IndentChoice {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::media::MediaKind;
+    use vmux_ecs::media::MediaKind;
 
     fn text(view: FileViewMode, markdown: bool, has_diff: bool) -> FileStatusScope {
         FileStatusScope {

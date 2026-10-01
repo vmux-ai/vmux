@@ -1,7 +1,7 @@
 use super::*;
 use crate::host::*;
-use vmux_core::PageMetadata;
-use vmux_core::overlay::WindowOverlay;
+use vmux_ecs::PageMetadata;
+use vmux_ecs::overlay::WindowOverlay;
 use vmux_flex::prelude::{ComputedNode, Node, UiRect, Val};
 use vmux_layout::stack::Stack;
 use vmux_setting::AppSettings;
@@ -48,7 +48,7 @@ fn cef_disables_bfcache_for_extension_ports() {
 
 #[test]
 fn reported_title_wins_unless_it_is_absent_or_blank() {
-    use vmux_core::PageIdentity;
+    use vmux_ecs::PageIdentity;
     let meta = PageMetadata {
         title: "host".to_string(),
         ..Default::default()
@@ -270,8 +270,8 @@ mod browser_navigate_flow {
     use bevy::ecs::relationship::Relationship;
     use bevy::prelude::*;
     use vmux_api::protocol::{AgentRequest, AgentRequestId};
-    use vmux_core::agent::{AgentRequestInput, CommandOrigin};
-    use vmux_core::{
+    use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
+    use vmux_ecs::{
         LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
         PageOpenId, PageOpenSet, PageOpenTask,
     };
@@ -338,14 +338,13 @@ mod browser_navigate_flow {
             .insert_resource(bevy_cef::prelude::WebviewCommittedNavigationReceiver(
                 async_channel::unbounded().1,
             ))
-            .add_message::<vmux_setting::SettingsWriteRequest>()
             .add_message::<vmux_space::SpaceAttachRequest>()
             .add_message::<vmux_space::SpaceCreateRequest>()
             .add_message::<vmux_space::SpaceDeleteRequest>()
             .add_message::<vmux_space::SpaceOpenPageRequest>()
             .add_message::<vmux_space::SpaceRenameRequest>()
             .add_message::<vmux_history::HistoryOpenIntent>()
-            .add_message::<vmux_core::page::HostHistoryStep>()
+            .add_message::<vmux_ecs::page::HostHistoryStep>()
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_systems(
                 Update,
@@ -1034,7 +1033,7 @@ mod open_in_place_flow {
     use bevy::ecs::message::Messages;
     use bevy::prelude::*;
     use bevy_cef::prelude::RequestNavigate;
-    use vmux_core::{PageOpenRequest, PageOpenTarget};
+    use vmux_ecs::{PageOpenRequest, PageOpenTarget};
     use vmux_history::LastActivatedAt;
     use vmux_layout::Browser;
     use vmux_layout::pane::Pane;
@@ -1052,7 +1051,7 @@ mod open_in_place_flow {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_core::CorePlugin,
+            vmux_ecs::EcsPlugin,
             vmux_command::CommandPlugin,
             vmux_terminal::TerminalContractPlugin,
             crate::command::CommandPlugin,
@@ -1070,9 +1069,9 @@ mod open_in_place_flow {
             },
         );
         app.world_mut()
-            .spawn(vmux_core::HostSpawnRoute::page("vmux://terminal/"));
+            .spawn(vmux_ecs::HostSpawnRoute::page("vmux://terminal/"));
         app.world_mut()
-            .spawn(vmux_core::HostSpawnRoute::subtree("vmux://sessions/"));
+            .spawn(vmux_ecs::HostSpawnRoute::subtree("vmux://sessions/"));
         for (url, title) in [
             ("vmux://services/", "Services"),
             ("vmux://settings/", "Settings"),
@@ -1080,10 +1079,10 @@ mod open_in_place_flow {
             ("vmux://spaces/", "Spaces"),
         ] {
             app.world_mut()
-                .spawn(vmux_core::host::page::NativelyHosted::subtree(url, title));
+                .spawn(vmux_ecs::host::page::NativelyHosted::subtree(url, title));
         }
         app.world_mut()
-            .spawn(vmux_core::HostSpawnRoute::scheme("file"));
+            .spawn(vmux_ecs::HostSpawnRoute::scheme("file"));
         app
     }
 
@@ -1102,7 +1101,7 @@ mod open_in_place_flow {
                 vmux_layout::space::CurrentSpace,
                 vmux_layout::space::SpaceId("test".to_string()),
                 vmux_layout::profile::Profile::default(),
-                vmux_core::Active,
+                vmux_ecs::Active,
             ))
             .id();
         let tab = app
@@ -1130,7 +1129,7 @@ mod open_in_place_flow {
                 vmux_layout::space::CurrentSpace,
                 vmux_layout::space::SpaceId("test".to_string()),
                 vmux_layout::profile::Profile::default(),
-                vmux_core::Active,
+                vmux_ecs::Active,
             ))
             .id();
         let tab = app
@@ -1160,7 +1159,7 @@ mod open_in_place_flow {
                 vmux_layout::space::CurrentSpace,
                 vmux_layout::space::SpaceId("test".to_string()),
                 vmux_layout::profile::Profile::default(),
-                vmux_core::Active,
+                vmux_ecs::Active,
             ))
             .id();
         let tab = app
@@ -1179,10 +1178,10 @@ mod open_in_place_flow {
         app.world_mut()
             .spawn((
                 Browser,
-                vmux_core::PageMetadata {
+                vmux_ecs::PageMetadata {
                     url: native_url.to_string(),
                     title: native_url.to_string(),
-                    icon: vmux_core::PageIcon::None,
+                    icon: vmux_ecs::PageIcon::None,
                     bg_color: None,
                 },
             ))
@@ -1398,7 +1397,7 @@ mod open_in_place_flow {
         let space = build_focused_stack(&mut app);
         app.world_mut()
             .entity_mut(space)
-            .insert(vmux_core::EffectiveStartupUrl(
+            .insert(vmux_ecs::EffectiveStartupUrl(
                 "https://startup.example".into(),
             ));
 

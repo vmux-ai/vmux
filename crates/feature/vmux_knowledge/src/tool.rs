@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
-use vmux_core::ProcessAnchor;
-use vmux_core::host::manifest::FeaturePlugin;
+use vmux_ecs::ProcessAnchor;
+use vmux_ecs::host::manifest::FeaturePlugin;
 use vmux_tool::{ToolAppExt, ToolCommand, ToolDispatchSet};
 
 use crate::host::{AgentReadKnowledge, AgentSearchKnowledge, AgentWriteKnowledge};

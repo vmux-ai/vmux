@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
-use vmux_core::event::FilePanelState;
-use vmux_core::input::{UiKeyContext, Unclaimed};
+use vmux_api::input::UiKeyContext;
+use vmux_ecs::event::FilePanelState;
+use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{KeyClaim, send, use_key_claim};
 
 pub(crate) fn use_file_keys(panel: Signal<FilePanelState>) -> FileKeys {

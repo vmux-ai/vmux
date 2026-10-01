@@ -10,13 +10,13 @@ use vmux_command::snapshot::{
     ClaimedUrl, CommandBarProjection, ContributedCommand, ContributedPage,
 };
 use vmux_command::{CommandBarOpenProjection, CommandBarProjector};
-use vmux_core::KeyboardOwner;
-use vmux_core::PageMetadata;
-use vmux_core::host::manifest::FeaturePlugin;
+use vmux_ecs::KeyboardOwner;
+use vmux_ecs::PageMetadata;
+use vmux_ecs::host::manifest::FeaturePlugin;
 use vmux_ui::i18n::Locale;
 
 use crate::event::StartSelectWorkspace;
-use vmux_core::launcher::{HostsLauncher, InlineTransitionRequested};
+use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_layout::settings::ResolvedLocale;
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
 use vmux_layout::workspace_snapshot::TabGather;
@@ -30,7 +30,7 @@ impl Plugin for StartPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::StartPage::plugin());
         app.add_plugins(Self::MANIFEST.plugin().hosted(
-            vmux_core::host::page::NativelyHosted::page(Self::URL, "Start"),
+            vmux_ecs::host::page::NativelyHosted::page(Self::URL, "Start"),
         ))
         .add_message::<InlineTransitionRequested>()
         .add_systems(Update, (mark_launcher, begin_inline));
@@ -250,7 +250,7 @@ fn select_workspace(
         return;
     }
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let projects_dir = vmux_core::profile::ProfilePaths::current().projects();
+    let projects_dir = vmux_ecs::profile::ProfilePaths::current().projects();
     let initial_dir = std::fs::create_dir_all(&projects_dir)
         .ok()
         .map(|_| projects_dir)
@@ -350,7 +350,7 @@ fn read_branches(
             continue;
         }
         let root = std::path::PathBuf::from(&project);
-        let wake = vmux_core::host::wake::Wake::beside(proxy.as_deref());
+        let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
         let task = IoTaskPool::get().spawn(async move {
             let _wake = wake;
             let mut branches = Vec::new();
@@ -402,7 +402,7 @@ fn finish_branch_reads(
         if !browsers.can_emit_to(&read.webview) {
             continue;
         }
-        commands.trigger(vmux_core::host::UiStateWrite::<
+        commands.trigger(vmux_ecs::host::UiStateWrite::<
             vmux_api::command_bar::CommandBarUiState,
         >::from_event(
             read.webview,
@@ -614,7 +614,7 @@ fn sync_pages(
                 project: project.clone(),
             });
         }
-        commands.trigger(vmux_core::host::UiStateWrite::<
+        commands.trigger(vmux_ecs::host::UiStateWrite::<
             vmux_api::command_bar::CommandBarUiState,
         >::from_event(e, &payload));
         if focus_requested {
@@ -639,7 +639,7 @@ fn focus_command_bar(
             effect
         }
     };
-    commands.trigger(vmux_core::host::UiStateWrite::<
+    commands.trigger(vmux_ecs::host::UiStateWrite::<
         vmux_api::command_bar::CommandBarUiState,
     >::from_event(webview, &effect));
 }
@@ -684,8 +684,8 @@ fn begin_inline(
 mod tests {
     use super::*;
     use vmux_api::command_bar::CommandBarUiState;
-    use vmux_core::host::UiStateWrite;
-    use vmux_core::page::PageManifest;
+    use vmux_ecs::host::UiStateWrite;
+    use vmux_ecs::page::PageManifest;
 
     #[derive(Resource, Default)]
     struct EmittedIds(Vec<(&'static str, u64)>);

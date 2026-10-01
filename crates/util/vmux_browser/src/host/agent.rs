@@ -1,15 +1,15 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, AgentQueryResult, AgentRequestId, ClientMessage};
-use vmux_core::agent::{
+use vmux_ecs::agent::{
     AgentCommandResponse, AgentReply, AgentRequestAppExt, AgentRequestMessage,
     AgentRequestRouteSet, CommandOrigin,
 };
-use vmux_core::browser::{
+use vmux_ecs::browser::{
     BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
     BrowserSnapshotRequest, BrowserSnapshotResponse,
 };
-use vmux_core::profile::ProjectsDirectory;
-use vmux_core::service::ServiceRequest;
+use vmux_ecs::profile::ProjectsDirectory;
+use vmux_ecs::service::ServiceRequest;
 use vmux_history::HistoryOpenIntent;
 use vmux_layout::active_pane::ActivatePane;
 use vmux_layout::{
@@ -46,7 +46,7 @@ pub(crate) struct AgentBrowserHistorySearch {
 #[vmux_api::agent(Eq)]
 pub(crate) struct AgentBrowserSnapshot {
     pub pane: Option<String>,
-    pub anchor: Option<vmux_core::ProcessId>,
+    pub anchor: Option<vmux_ecs::ProcessId>,
 }
 
 #[vmux_api::agent(Eq)]
@@ -54,7 +54,7 @@ pub(crate) struct AgentBrowserScroll {
     pub pane: Option<String>,
     pub to: Option<String>,
     pub delta: Option<i32>,
-    pub anchor: Option<vmux_core::ProcessId>,
+    pub anchor: Option<vmux_ecs::ProcessId>,
 }
 
 #[vmux_api::agent]

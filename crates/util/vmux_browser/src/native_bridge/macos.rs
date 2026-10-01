@@ -7,11 +7,13 @@ use super::NativeBridge;
 use crate::host::{command_bar_windowed_frame_contains, native_command_bar_route};
 use crate::present::WindowedFrameRect;
 
-static WINDOWED_PAGE_FRAMES: LazyLock<Mutex<Vec<WindowedFrameRect>>> =
-    LazyLock::new(|| Mutex::new(Vec::new()));
+static BRIDGE: LazyLock<Mutex<NativeBridgeState>> = LazyLock::new(Default::default);
 
-static COMMAND_BAR_POINTER_EVENTS: LazyLock<Mutex<Vec<CommandBarPointerEvent>>> =
-    LazyLock::new(|| Mutex::new(Vec::new()));
+#[derive(Default)]
+struct NativeBridgeState {
+    frames: Vec<WindowedFrameRect>,
+    pointer_events: Vec<CommandBarPointerEvent>,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum CommandBarPointerEvent {
@@ -29,9 +31,10 @@ pub(crate) enum CommandBarPointerEvent {
 impl NativeBridge {
     pub fn windowed_page_contains_point(x_px: f32, y_px: f32) -> bool {
         let point = Vec2::new(x_px, y_px);
-        WINDOWED_PAGE_FRAMES
+        BRIDGE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .frames
             .iter()
             .copied()
             .any(|frame| Self::frame_contains(frame, point))
@@ -44,26 +47,27 @@ impl NativeBridge {
     pub(crate) fn set_windowed_page_frames(
         mut frames: Vec<WindowedFrameRect>,
     ) -> Vec<WindowedFrameRect> {
-        let mut published = WINDOWED_PAGE_FRAMES
+        let mut bridge = BRIDGE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        std::mem::swap(&mut *published, &mut frames);
+        std::mem::swap(&mut bridge.frames, &mut frames);
         frames.clear();
         frames
     }
 
     pub(crate) fn windowed_page_bounds() -> Option<WindowedFrameRect> {
-        let frames = WINDOWED_PAGE_FRAMES
+        let bridge = BRIDGE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        Self::frames_union(&frames)
+        Self::frames_union(&bridge.frames)
     }
 
     pub(crate) fn drain_command_bar_pointer_events() -> Vec<CommandBarPointerEvent> {
         std::mem::take(
-            &mut *COMMAND_BAR_POINTER_EVENTS
+            &mut BRIDGE
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .pointer_events,
         )
     }
 
@@ -87,9 +91,10 @@ pub fn queue_command_bar_pointer_move(x_px: f32, y_px: f32, buttons: NativeMouse
     let Some(position) = NativeBridge::command_bar_local_position(x_px, y_px) else {
         return false;
     };
-    COMMAND_BAR_POINTER_EVENTS
+    BRIDGE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .pointer_events
         .push(CommandBarPointerEvent::Move { position, buttons });
     true
 }
@@ -103,9 +108,10 @@ pub fn queue_command_bar_pointer_button(x_px: f32, y_px: f32, button: u8, releas
         2 => PointerButton::Middle,
         _ => PointerButton::Primary,
     };
-    COMMAND_BAR_POINTER_EVENTS
+    BRIDGE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .pointer_events
         .push(CommandBarPointerEvent::Button {
             position,
             button,

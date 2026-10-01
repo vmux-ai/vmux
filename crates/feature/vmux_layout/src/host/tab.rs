@@ -16,11 +16,11 @@ use vmux_command::CommandDefinition;
 use vmux_command::CommandManifest;
 use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::host::persistence::PersistenceAppExt;
-use vmux_core::launcher::LauncherDismissRequest;
-pub use vmux_core::workspace::TabCommandSet;
-use vmux_core::{Active, Order};
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::host::persistence::PersistenceAppExt;
+use vmux_ecs::launcher::LauncherDismissRequest;
+pub use vmux_ecs::workspace::TabCommandSet;
+use vmux_ecs::{Active, Order};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -668,7 +668,7 @@ mod tests {
     use bevy::reflect::{FromReflect, TypeRegistry, serde::TypedReflectDeserializer};
     use serde::de::DeserializeSeed;
     use vmux_command::CommandPlugin;
-    use vmux_core::PageOpenRequest;
+    use vmux_ecs::PageOpenRequest;
 
     #[test]
     fn tab_mcp_definition_dispatches_to_the_typed_request() {
@@ -947,15 +947,15 @@ mod tests {
 
     fn build_main_and_tab(app: &mut App, startup_url: &str) -> Entity {
         app.world_mut()
-            .spawn((Window::default(), PrimaryWindow, vmux_core::Active));
+            .spawn((Window::default(), PrimaryWindow, vmux_ecs::Active));
         let main = app.world_mut().spawn(MainNode).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)))
             .id();
         app.world_mut().entity_mut(space).insert((
             crate::space::EffectiveStartupDir(Some(std::env::current_dir().unwrap())),
-            vmux_core::EffectiveStartupUrl(startup_url.to_string()),
+            vmux_ecs::EffectiveStartupUrl(startup_url.to_string()),
         ));
         app.world_mut().spawn((
             Tab {
@@ -1008,7 +1008,7 @@ mod tests {
         assert_eq!(collected.0[0].url, "vmux://sessions/codex/cli");
         let prompts = app
             .world_mut()
-            .query::<&vmux_core::PendingPrompt>()
+            .query::<&vmux_ecs::PendingPrompt>()
             .iter(app.world())
             .map(|prompt| prompt.0.clone())
             .collect::<Vec<_>>();
@@ -1148,9 +1148,7 @@ mod tests {
             .query_filtered::<Entity, With<Tab>>()
             .single(app.world())
             .expect("initial tab");
-        app.world_mut()
-            .entity_mut(old_tab)
-            .insert(vmux_core::Active);
+        app.world_mut().entity_mut(old_tab).insert(vmux_ecs::Active);
         let old_pane = app
             .world_mut()
             .spawn((crate::pane::Pane, LastActivatedAt(1), ChildOf(old_tab)))
@@ -1172,7 +1170,7 @@ mod tests {
 
         let new_tab = app
             .world_mut()
-            .query_filtered::<Entity, (With<Tab>, With<vmux_core::Active>)>()
+            .query_filtered::<Entity, (With<Tab>, With<vmux_ecs::Active>)>()
             .single(app.world())
             .expect("one active tab");
         assert_ne!(new_tab, old_tab);
@@ -1196,7 +1194,7 @@ mod tests {
         let main = app.world_mut().spawn(MainNode).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)))
             .id();
 
         app.world_mut()
@@ -1354,11 +1352,11 @@ mod tests {
         .add_systems(Update, handle_close_requests.in_set(TabCommandSet));
 
         app.world_mut()
-            .spawn((Window::default(), PrimaryWindow, vmux_core::Active));
+            .spawn((Window::default(), PrimaryWindow, vmux_ecs::Active));
         let main = app.world_mut().spawn(MainNode).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)))
             .id();
         let a = app
             .world_mut()
@@ -1373,7 +1371,7 @@ mod tests {
             .spawn((
                 Tab::bundle(),
                 LastActivatedAt(4),
-                vmux_core::Active,
+                vmux_ecs::Active,
                 ChildOf(space),
             ))
             .id();
@@ -1390,11 +1388,11 @@ mod tests {
             "the active rightmost tab must be closed"
         );
         assert!(
-            app.world().entity(c).contains::<vmux_core::Active>(),
+            app.world().entity(c).contains::<vmux_ecs::Active>(),
             "left neighbor must become active after closing the rightmost active tab"
         );
         assert!(
-            !app.world().entity(a).contains::<vmux_core::Active>(),
+            !app.world().entity(a).contains::<vmux_ecs::Active>(),
             "closing the rightmost tab must not jump to the first tab"
         );
     }
@@ -1414,11 +1412,11 @@ mod tests {
 
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut()
-            .spawn((Window::default(), PrimaryWindow, vmux_core::Active));
+            .spawn((Window::default(), PrimaryWindow, vmux_ecs::Active));
         let main = app.world_mut().spawn(MainNode).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)))
             .id();
         let a = app
             .world_mut()
@@ -1433,7 +1431,7 @@ mod tests {
             .spawn((
                 Tab::bundle(),
                 LastActivatedAt(4),
-                vmux_core::Active,
+                vmux_ecs::Active,
                 ChildOf(space),
             ))
             .id();
@@ -1448,11 +1446,11 @@ mod tests {
 
         assert!(app.world().get_entity(d).is_err(), "active tab closed");
         assert!(
-            app.world().entity(c).contains::<vmux_core::Active>(),
+            app.world().entity(c).contains::<vmux_ecs::Active>(),
             "left neighbor must be active via the page close observer"
         );
         assert!(
-            !app.world().entity(a).contains::<vmux_core::Active>(),
+            !app.world().entity(a).contains::<vmux_ecs::Active>(),
             "must not jump to first tab"
         );
     }
@@ -1472,18 +1470,18 @@ mod tests {
         .add_message::<PageOpenRequest>();
 
         app.world_mut()
-            .spawn((Window::default(), PrimaryWindow, vmux_core::Active));
+            .spawn((Window::default(), PrimaryWindow, vmux_ecs::Active));
         let main = app.world_mut().spawn(MainNode).id();
         let space = app
             .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)))
             .id();
         let tab_a = app
             .world_mut()
             .spawn((
                 Tab::bundle(),
                 LastActivatedAt(2),
-                vmux_core::Active,
+                vmux_ecs::Active,
                 ChildOf(space),
             ))
             .id();
@@ -1499,7 +1497,7 @@ mod tests {
         app.update();
 
         assert!(
-            app.world().entity(tab_b).contains::<vmux_core::Active>(),
+            app.world().entity(tab_b).contains::<vmux_ecs::Active>(),
             "target tab must become Active in the same update as the switch command"
         );
         assert_eq!(

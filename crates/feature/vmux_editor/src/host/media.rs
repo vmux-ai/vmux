@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
-use vmux_core::event::{
+use vmux_ecs::event::{
     FileMediaEvent, FileOpenExternalRequest, FilePreviewEvent, FilePreviewRequest, FileVideoRect,
     PreviewKind,
 };
@@ -43,7 +43,7 @@ impl Plugin for MediaPlugin {
 
 #[derive(Component, Clone, Debug)]
 pub struct FileMedia {
-    pub kind: vmux_core::media::MediaKind,
+    pub kind: vmux_ecs::media::MediaKind,
     pub mime: String,
 }
 
@@ -63,7 +63,7 @@ pub(crate) struct FilePreviewLoad {
 
 type ReadyMedia = (
     Without<FileInitialMetaSent>,
-    With<vmux_core::page::PageReady>,
+    With<vmux_ecs::page::PageReady>,
 );
 
 fn sync_allowlist(media: Query<&FileView, With<FileMedia>>, dirs: Query<&FileDir>) {
@@ -86,7 +86,7 @@ fn send_initial(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
             entity,
             &FileMediaEvent {
                 kind: media.kind,
@@ -100,7 +100,7 @@ fn send_initial(
 }
 
 fn needs_native_video(path: &Path) -> bool {
-    vmux_core::media::is_proprietary_video(&path.to_string_lossy())
+    vmux_ecs::media::is_proprietary_video(&path.to_string_lossy())
 }
 
 fn attach_video_overlays(
@@ -108,7 +108,7 @@ fn attach_video_overlays(
     browsers: NonSend<Browsers>,
 ) {
     for (entity, file, media) in &media {
-        if media.kind != vmux_core::media::MediaKind::Video || !needs_native_video(&file.path) {
+        if media.kind != vmux_ecs::media::MediaKind::Video || !needs_native_video(&file.path) {
             continue;
         }
         if !browsers.has_browser(entity) {
@@ -128,7 +128,7 @@ fn file_video_rect(
         return;
     }
     let rect = &trigger.event().payload;
-    if !vmux_core::media::is_proprietary_video(&rect.path) || rect.w <= 0.0 || rect.h <= 0.0 {
+    if !vmux_ecs::media::is_proprietary_video(&rect.path) || rect.w <= 0.0 || rect.h <= 0.0 {
         return;
     }
     browsers.set_media_overlay(&entity, &rect.path, (rect.x, rect.y, rect.w, rect.h));
@@ -208,7 +208,7 @@ fn load_file_preview(
     {
         *entries = FileDirectoryNavigation::visible(entries, navigation.show_hidden);
     }
-    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
         entity,
         &FilePreviewEvent {
             path: request.path,
@@ -232,7 +232,7 @@ fn drain_thumb_tasks(
         if let Ok(bytes) = result
             && browsers.can_emit_to(&webview)
         {
-            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                 webview,
                 &FilePreviewEvent {
                     path,

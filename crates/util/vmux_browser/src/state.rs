@@ -3,11 +3,11 @@ use bevy_cef::prelude::*;
 use vmux_api::VmuxRoute;
 use vmux_api::bookmark::{
     BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
+    SmartBookmarkFolder,
 };
-use vmux_core::{
+use vmux_ecs::{
     Active, Bookmark, BookmarkOrder, Collapsed, Folder, PageIcon, PageIdentity, PageMetadata, Pin,
-    SmartBookmarkFolder, Uuid,
-    file_url::FileUrl,
+    Uuid,
     host::UiStateWrite,
     notify::AgentDoneUnseen,
     page::{HostHistory, PageReady},
@@ -617,7 +617,7 @@ struct AddressRoots<'a> {
 
 impl AddressRoots<'_> {
     fn resolve(&mut self, url: &str, title: &str) -> AddressParts {
-        let Some(path) = FileUrl::parse(url).and_then(|url| url.path()) else {
+        let Some(path) = vmux_path::FileUrl::parse(url).and_then(|url| url.path()) else {
             return match VmuxRoute::parse(url).is_some() {
                 true => AddressParts::internal(url),
                 false => AddressParts::web(url, title),
@@ -744,7 +744,7 @@ fn push_pane_tree_emit(
             Has<Loading>,
             Option<&PageIdentity>,
             Option<&GitDiffSource>,
-            Has<vmux_core::team::Agent>,
+            Has<vmux_ecs::team::Agent>,
         ),
         With<Browser>,
     >,

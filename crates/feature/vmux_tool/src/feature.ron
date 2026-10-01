@@ -4,6 +4,7 @@
             name: "default",
             url: "vmux://tools/",
             title: "Tools",
+            bookmark: Some(50),
             title_message_id: "tools-title",
             keywords: [
                 "packages",

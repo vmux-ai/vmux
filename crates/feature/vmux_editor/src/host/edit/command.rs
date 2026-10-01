@@ -1,4 +1,4 @@
-pub use vmux_core::{CursorPos, EditMode, SelSpan};
+pub use vmux_api::editor::{CursorPos, EditMode, SelSpan};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MotionKind {

@@ -9,6 +9,8 @@ pub mod panel;
 pub mod project_files;
 pub mod work_snapshot;
 
+pub use model::ResumeRows;
+
 pub use controller::{
     ApplyCommandBarRequests, CommandBarNativeSize, CommandBarOpenRequest, PendingCommandBarReveal,
     WriteCommandBarRequests,

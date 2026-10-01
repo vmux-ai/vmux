@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::host::event::{AgentApprovalReply, ApprovalDecision};
 use vmux_api::protocol::{ClientMessage, SharedMessage};
 use vmux_chat::event::ChatApproval;
-use vmux_core::service::ServiceRequest;
+use vmux_ecs::service::ServiceRequest;
 use vmux_session::AcpSession;
 use vmux_session::AgentApprovalPolicy;
 use vmux_session::AgentRunState;
@@ -61,7 +61,7 @@ struct AgentApprovalStore {
 impl AgentApprovalStore {
     fn load() -> Self {
         Self::load_from(
-            vmux_core::profile::ProfilePaths::current()
+            vmux_ecs::profile::ProfilePaths::current()
                 .profile()
                 .join("agent-approvals.json"),
         )
@@ -242,7 +242,7 @@ mod tests {
                     agent_id: "vibe-acp".into(),
                     sid: "s".into(),
                     cwd: std::path::PathBuf::from("/tmp"),
-                    anchor: vmux_core::ProcessId::new(),
+                    anchor: vmux_ecs::ProcessId::new(),
                     resume: None,
                 },
                 AgentApprovalPolicy::default(),

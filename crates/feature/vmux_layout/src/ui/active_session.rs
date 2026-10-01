@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_core::event::{ProjectRow, ProjectTreeToggle};
+use vmux_ecs::event::{ProjectRow, ProjectTreeToggle};
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::composer_bar::StatusDot;
@@ -195,7 +195,7 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
                     if root.is_worktree {
                         LineIconView { icon: LineIcon::GitFork, class: "size-3.5 shrink-0".to_string() }
                     } else {
-                        BuiltinIconView { icon: vmux_core::BuiltinIcon::Project, class: "size-3.5 shrink-0".to_string() }
+                        BuiltinIconView { icon: vmux_ecs::BuiltinIcon::Project, class: "size-3.5 shrink-0".to_string() }
                     }
                     div { class: "min-w-0 flex-1",
                         div { class: "truncate text-[10px] font-medium text-foreground", "{root.label}" }
@@ -257,7 +257,7 @@ fn ActiveWorkspaceChoice(project: ProjectRow, pane_id: u64, on_pick: EventHandle
             title: "{project.display_path}",
             onclick: move |_| {
                 on_pick.call(());
-                let _ = send(&vmux_core::event::space::ProjectActivateRequest {
+                let _ = send(&vmux_ecs::event::space::ProjectActivateRequest {
                     path: path.clone(),
                     branch: String::new(),
                     checkout: String::new(),
@@ -265,7 +265,7 @@ fn ActiveWorkspaceChoice(project: ProjectRow, pane_id: u64, on_pick: EventHandle
                 });
             },
             BuiltinIconView {
-                icon: vmux_core::BuiltinIcon::Project,
+                icon: vmux_ecs::BuiltinIcon::Project,
                 class: "size-3.5 shrink-0".to_string(),
             }
             div { class: "min-w-0 flex-1",

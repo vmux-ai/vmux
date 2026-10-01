@@ -34,6 +34,8 @@ struct PageManifestFile {
     command_bar: bool,
     #[serde(default)]
     startup: bool,
+    #[serde(default, rename = "bookmark")]
+    _bookmark: Option<i32>,
     #[serde(default)]
     manifest: bool,
     #[serde(default)]
@@ -122,7 +124,7 @@ impl PageManifestFile {
                 format!("page manifest icon must be a BuiltinIcon variant: {error}"),
             )
         })?;
-        Ok(Some(parse_quote!(::vmux_core::BuiltinIcon::#icon)))
+        Ok(Some(parse_quote!(::vmux_ecs::BuiltinIcon::#icon)))
     }
 
     fn manifest(&self, file: &LitStr) -> syn::Result<TokenStream> {
@@ -173,7 +175,7 @@ impl PageManifestFile {
         let command_bar = self.command_bar;
         let startup = self.startup;
         Ok(quote! {
-            ::vmux_core::page::PageManifest {
+            ::vmux_ecs::page::PageManifest {
                 url: #url,
                 asset_host: #asset_host,
                 owns_subtree: #owns_subtree,
@@ -231,7 +233,7 @@ fn expand_manifest(args: TokenStream, input: DeriveInput) -> syn::Result<TokenSt
 
         impl #ident {
             pub const URL: &'static str = #url;
-            pub const MANIFEST: ::vmux_core::page::PageManifest = #manifest;
+            pub const MANIFEST: ::vmux_ecs::page::PageManifest = #manifest;
         }
     })
 }
@@ -619,8 +621,8 @@ fn expand_native(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStre
         let command_bar = args.command_bar;
         quote! {
             #[cfg(host)]
-            pub const MANIFEST: ::vmux_core::page::PageManifest =
-                ::vmux_core::page::PageManifest {
+            pub const MANIFEST: ::vmux_ecs::page::PageManifest =
+                ::vmux_ecs::page::PageManifest {
                     url: #url,
                     asset_host: #host,
                     owns_subtree: #owns_subtree,

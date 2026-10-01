@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
-use vmux_core::input::KeyStroke;
+use vmux_api::input::KeyStroke;
 
 use crate::definition::CommandInvocation;
 use crate::shortcut::{KeyCombo, KeyContext, Keymap};
@@ -40,7 +40,7 @@ mod tests {
     use crate::shortcut::{Binding, Modifiers, Shortcut, Source, When};
     use bevy::ecs::message::Messages;
     use bevy::input::keyboard::KeyCode;
-    use vmux_core::input::KeyModifiers;
+    use vmux_api::input::KeyModifiers;
 
     const CTRL: Modifiers = Modifiers {
         ctrl: true,

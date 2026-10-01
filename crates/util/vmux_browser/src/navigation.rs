@@ -7,9 +7,9 @@ use vmux_command::{
     BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
 };
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
-use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
+use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_layout::Browser;
 use vmux_layout::{
@@ -29,7 +29,7 @@ impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
         app.add_plugins(FeaturePlugin::<crate::Feature>::default());
-        app.add_message::<vmux_core::service::ServiceRequest>();
+        app.add_message::<vmux_ecs::service::ServiceRequest>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -37,8 +37,8 @@ impl Plugin for NavigationPlugin {
             .configure_sets(
                 Update,
                 crate::BrowserSystemSet::Navigate
-                    .after(vmux_core::service::ServiceMessageSet)
-                    .before(vmux_core::PageOpenSet::ResolveTarget),
+                    .after(vmux_ecs::service::ServiceMessageSet)
+                    .before(vmux_ecs::PageOpenSet::ResolveTarget),
             )
             .add_systems(Startup, bind_command.in_set(BindCommands))
             .add_observer(issue_open_history)
@@ -125,10 +125,10 @@ fn record_visits(
 
 fn sync_tab_metadata(
     browser_q: Query<
-        (&PageMetadata, Option<&vmux_core::PageIdentity>, &ChildOf),
+        (&PageMetadata, Option<&vmux_ecs::PageIdentity>, &ChildOf),
         (
             With<Browser>,
-            Or<(Changed<PageMetadata>, Changed<vmux_core::PageIdentity>)>,
+            Or<(Changed<PageMetadata>, Changed<vmux_ecs::PageIdentity>)>,
         ),
     >,
     tab_q: Query<Option<&PageMetadata>, With<Stack>>,
@@ -163,7 +163,7 @@ fn sync_tab_metadata(
             ecmds.insert(meta.clone());
             match identity {
                 Some(identity) => ecmds.insert(identity.clone()),
-                None => ecmds.remove::<vmux_core::PageIdentity>(),
+                None => ecmds.remove::<vmux_ecs::PageIdentity>(),
             };
         }
     }
@@ -259,7 +259,7 @@ fn navigate(
     stack_metadata: Query<&PageMetadata, With<Stack>>,
     recent_interactions: Query<&RecentBrowserInteraction>,
     mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
-    mut service_requests: MessageWriter<vmux_core::service::ServiceRequest>,
+    mut service_requests: MessageWriter<vmux_ecs::service::ServiceRequest>,
 ) {
     for request in reader.read() {
         let vmux_layout::BrowserNavigateRequest {

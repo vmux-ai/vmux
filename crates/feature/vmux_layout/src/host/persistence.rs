@@ -2,8 +2,8 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
-use vmux_core::host::persistence::{PageRestore, WorkspaceStoreValidator};
-use vmux_core::{CreatedAt, Order, PageMetadata, PageOpenId, PageOpenTask};
+use vmux_ecs::host::persistence::{PageRestore, WorkspaceStoreValidator};
+use vmux_ecs::{CreatedAt, Order, PageMetadata, PageOpenId, PageOpenTask};
 use vmux_flex::prelude::*;
 
 use crate::LayoutStartupSet;

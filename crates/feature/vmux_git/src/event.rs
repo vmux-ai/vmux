@@ -2,7 +2,7 @@ pub use vmux_api::git::{
     DiffKind, DiffLine, FileGitState, FileStatus, GitDiffViewport, GitFileStatus, GitLineMarker,
     GitLineStatus, GitOperationError, GitOperationResult, StyledSpan,
 };
-use vmux_core::input::KeyModifiers;
+use vmux_api::input::KeyModifiers;
 
 use crate::state::{GitBranchCollection, GitPanel};
 

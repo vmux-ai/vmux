@@ -1,5 +1,11 @@
 (
     settings: Some((
+        defaults: (
+            shortcuts: Some((
+                leader: (key: "b", ctrl: true),
+                chord_timeout_ms: 1000,
+            )),
+        ),
         sections: [(
             id: "shortcuts",
             title: "schema-shortcuts",
@@ -39,6 +45,7 @@
             keywords: ["keyboard", "shortcut", "keymap", "cheatsheet"],
             icon: "Keyboard",
             command_bar: true,
+            bookmark: Some(120),
             permissions: [
                 "PageReady",
                 "ThemeEvent",

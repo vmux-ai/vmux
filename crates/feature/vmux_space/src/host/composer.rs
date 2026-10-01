@@ -8,9 +8,9 @@ use vmux_chat::event::{
     ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
 };
 use vmux_chat::host::{ChatBranchesProjection, ChatComposerContext, ChatView};
-use vmux_core::agent::{AgentRequestInput, CommandOrigin};
-use vmux_core::event::ProjectRow;
-use vmux_core::page::PageReady;
+use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
+use vmux_ecs::event::ProjectRow;
+use vmux_ecs::page::PageReady;
 use vmux_git::RepoInfoCache;
 use vmux_git::worktree::RepoInfo;
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
@@ -104,7 +104,7 @@ fn push_context_to_page(
         }
         if changed || ready.is_changed() {
             commands.trigger(
-                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                vmux_ecs::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                     webview, &context,
                 ),
             );
@@ -216,13 +216,13 @@ fn chat_branches_request(
     }
     let request_id = projection.start(project.clone());
     commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+        vmux_ecs::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
             webview,
             &projection.0,
         ),
     );
     let root = std::path::PathBuf::from(&project);
-    let wake = vmux_core::host::wake::Wake::from_resource(proxy);
+    let wake = vmux_ecs::host::wake::Wake::from_resource(proxy);
     let task = bevy::tasks::IoTaskPool::get().spawn(async move {
         let _wake = wake;
         let Ok(holders) = vmux_git::worktree::branch_holders(&root) else {
@@ -273,7 +273,7 @@ fn drain_branch_reads(
             continue;
         }
         commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            vmux_ecs::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                 read.webview,
                 &projection.0,
             ),
@@ -362,7 +362,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<AgentRequestInput>()
             .add_observer(chat_select_workspace);
-        let anchor = vmux_core::ProcessId::new();
+        let anchor = vmux_ecs::ProcessId::new();
         let stack = app
             .world_mut()
             .spawn(AcpSession {
@@ -401,7 +401,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<AgentRequestInput>()
             .add_observer(chat_go_to_branch);
-        let anchor = vmux_core::ProcessId::new();
+        let anchor = vmux_ecs::ProcessId::new();
         let stack = app
             .world_mut()
             .spawn(AcpSession {

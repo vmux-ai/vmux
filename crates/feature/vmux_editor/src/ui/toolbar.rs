@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
-use vmux_core::event::{ExplorerCloseEditor, FileFindRequest, FileOpenEvent, OpenEditorItem};
+use vmux_ecs::event::{ExplorerCloseEditor, FileFindRequest, FileOpenEvent, OpenEditorItem};
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;

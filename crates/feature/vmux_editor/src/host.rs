@@ -36,12 +36,12 @@ impl Plugin for EditorPlugin {
             navigation::NavigationPlugin,
             history::HistoryPlugin,
             explorer::ExplorerPlugin,
-            vmux_core::host::UiStatePlugin::<vmux_core::event::FileUiState>::default(),
+            vmux_ecs::host::UiStatePlugin::<vmux_ecs::event::FileUiState>::default(),
         ))
         .add_plugins((
             Self::MANIFEST
                 .plugin()
-                .route(vmux_core::HostSpawnRoute::scheme("file")),
+                .route(vmux_ecs::HostSpawnRoute::scheme("file")),
             ProjectsPage::MANIFEST.plugin(),
         ));
     }

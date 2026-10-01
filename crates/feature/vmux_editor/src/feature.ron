@@ -149,6 +149,7 @@
             name: "projects",
             url: "vmux://projects/",
             title: "Projects",
+            bookmark: Some(30),
             owns_subtree: true,
             title_message_id: "layout-projects",
             keywords: ["project", "files", "folder", "open"],

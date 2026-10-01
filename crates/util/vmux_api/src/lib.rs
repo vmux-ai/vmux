@@ -5,13 +5,16 @@ pub mod bin_event;
 pub mod bookmark;
 pub mod chat;
 pub mod command_bar;
+pub mod editor;
 pub mod error;
 pub mod extension;
 pub mod git;
 pub mod history;
 pub mod icon;
+pub mod input;
 pub mod json;
 pub mod json_schema;
+pub mod knowledge;
 pub mod layout;
 pub mod mcp;
 pub mod open_target;
@@ -45,6 +48,6 @@ pub use terminal::{
 };
 pub use ui_state::{BatchedUiState, UiState, UiStatePatch};
 pub use vmux_macro::{
-    agent, bidirectional_event, contract, host_event, ui_event, ui_event_variants, ui_state,
-    ui_state_patch,
+    agent, bidirectional_event, contract, host_event, service_message, ui_event, ui_event_variants,
+    ui_state, ui_state_patch,
 };

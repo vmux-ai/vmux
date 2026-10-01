@@ -11,8 +11,8 @@ use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
 use vmux_api::BinEvent;
 use vmux_api::command_bar::CommandBarUiState;
-use vmux_core::overlay::WindowOverlay;
-use vmux_core::overlay::{OverlayState, OverlayStateQuery};
+use vmux_ecs::overlay::WindowOverlay;
+use vmux_ecs::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
 use vmux_layout::{Header, LayoutCef, side_sheet::SideSheet, state::LayoutUiState};
 
@@ -25,7 +25,7 @@ use crate::host::{
     LAYOUT_INPUT_BURST, LayoutFrameRateState, NATIVE_LAYOUT_POINTER_INSIDE,
     WindowedHoverRefreshState, native_left_mouse_down,
 };
-use vmux_core::KeyboardOwner;
+use vmux_ecs::KeyboardOwner;
 use vmux_flex::prelude::*;
 pub(crate) struct FrameRatePlugin;
 

@@ -21,9 +21,9 @@ use moonshine_save::prelude::*;
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
 use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
+use vmux_ecs::host::manifest::FeaturePlugin;
 #[cfg(test)]
-use vmux_core::{Active, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget, PageOpenTask};
+use vmux_ecs::{Active, PageMetadata, PageOpenId, PageOpenRequest, PageOpenTarget, PageOpenTask};
 #[cfg(test)]
 use vmux_flex::prelude::*;
 #[cfg(test)]

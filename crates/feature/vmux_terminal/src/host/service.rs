@@ -1,21 +1,21 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{CommandLifecycleKind, ProcessId, ProcessInfo};
 use vmux_api::{TermCursor, TermLine, TermSelectionRange};
-use vmux_core::event::TermViewportPatch;
-use vmux_core::service::{ServiceMessageAppExt, ServiceMessageSet};
+use vmux_ecs::event::TermViewportPatch;
+use vmux_ecs::service::{ServiceMessageAppExt, ServiceMessageSet};
 
 use super::input_queue::TerminalProcessIndex;
 use super::plugin::{CommandLifecycleEvent, OscTitleChanged, ProcessExitedEvent};
 use super::state::{TerminalCopyMode, TerminalMode};
 use crate::Terminal;
 
-#[vmux_core::service_message(ProcessCreated)]
+#[vmux_api::service_message(ProcessCreated)]
 pub(crate) struct TerminalProcessCreated {
     pub process_id: ProcessId,
     pub pid: u32,
 }
 
-#[vmux_core::service_message(ProcessCreateFailed)]
+#[vmux_api::service_message(ProcessCreateFailed)]
 pub(crate) struct TerminalProcessCreateFailed {
     pub process_id: ProcessId,
     pub reason: String,
@@ -28,18 +28,18 @@ pub(crate) struct TerminalViewportUpdate {
     pub request_snapshot_if_hidden: bool,
 }
 
-#[vmux_core::service_message(Error)]
+#[vmux_api::service_message(Error)]
 pub(crate) struct TerminalServiceError {
     pub message: String,
 }
 
-#[vmux_core::service_message(SelectionText)]
+#[vmux_api::service_message(SelectionText)]
 pub(crate) struct TerminalSelectionText {
     pub process_id: ProcessId,
     pub text: String,
 }
 
-#[vmux_core::service_message(ViewportPatch)]
+#[vmux_api::service_message(ViewportPatch)]
 struct ProcessViewportPatch {
     process_id: ProcessId,
     changed_lines: Vec<(u32, TermLine)>,
@@ -56,7 +56,7 @@ struct ProcessViewportPatch {
     evicted_total: u64,
 }
 
-#[vmux_core::service_message(Snapshot)]
+#[vmux_api::service_message(Snapshot)]
 struct ProcessSnapshot {
     process_id: ProcessId,
     lines: Vec<TermLine>,
@@ -65,34 +65,34 @@ struct ProcessSnapshot {
     rows: u16,
 }
 
-#[vmux_core::service_message(ProcessExited)]
+#[vmux_api::service_message(ProcessExited)]
 struct ProcessExitedInput {
     process_id: ProcessId,
 }
 
-#[vmux_core::service_message(ProcessTitle)]
+#[vmux_api::service_message(ProcessTitle)]
 struct ProcessTitleInput {
     process_id: ProcessId,
     title: String,
 }
 
-#[vmux_core::service_message(CommandLifecycle)]
+#[vmux_api::service_message(CommandLifecycle)]
 struct ProcessCommandLifecycle {
     process_id: ProcessId,
     kind: CommandLifecycleKind,
 }
 
-#[vmux_core::service_message(ProcessList)]
+#[vmux_api::service_message(ProcessList)]
 struct ProcessListInput {
     processes: Vec<ProcessInfo>,
 }
 
-#[vmux_core::service_message(Bell)]
+#[vmux_api::service_message(Bell)]
 struct ProcessBell {
     process_id: ProcessId,
 }
 
-#[vmux_core::service_message(TerminalMode)]
+#[vmux_api::service_message(TerminalMode)]
 struct ProcessTerminalMode {
     process_id: ProcessId,
     mouse_capture: bool,
@@ -240,10 +240,10 @@ fn project_process_list(
 
 fn project_bells(
     mut inbound: MessageReader<ProcessBell>,
-    mut bells: MessageWriter<vmux_core::notify::BellReceived>,
+    mut bells: MessageWriter<vmux_ecs::notify::BellReceived>,
 ) {
     for message in inbound.read() {
-        bells.write(vmux_core::notify::BellReceived {
+        bells.write(vmux_ecs::notify::BellReceived {
             process_id: message.process_id,
         });
     }
@@ -274,7 +274,7 @@ mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
     use vmux_api::protocol::ServiceMessage;
-    use vmux_core::service::ServiceInbound;
+    use vmux_ecs::service::ServiceInbound;
 
     #[test]
     fn transport_envelopes_become_terminal_messages() {
@@ -289,7 +289,7 @@ mod tests {
         .add_message::<crate::process_monitor::ServiceProcessSnapshot>()
         .add_message::<CommandLifecycleEvent>()
         .add_message::<OscTitleChanged>()
-        .add_message::<vmux_core::notify::BellReceived>();
+        .add_message::<vmux_ecs::notify::BellReceived>();
         let process_id = ProcessId([7; 16]);
         let terminal = app
             .world_mut()

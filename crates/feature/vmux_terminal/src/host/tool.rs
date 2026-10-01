@@ -5,9 +5,9 @@ use std::time::{Duration, Instant};
 use vmux_api::protocol::{
     AgentRequest, AgentRequestId, AgentRunCompletion, ClientMessage, ProcessId, ServiceMessage,
 };
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::service::ServiceConnection;
-use vmux_core::{HostShell, ProcessAnchor};
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::service::ServiceConnection;
+use vmux_ecs::{HostShell, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 
 use vmux_process::{AgentProcessRunCompletion, AgentReadProcessOutput, AgentReadProcessTranscript};

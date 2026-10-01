@@ -9,6 +9,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use vmux_api::command_bar::TerminalRequest as CommandBarTerminalRequest;
+use vmux_api::input::KeyStroke;
 use vmux_api::protocol::{ClientMessage, CopyModeKey, ProcessId};
 use vmux_clipboard::Clipboard;
 #[cfg(test)]
@@ -20,15 +21,14 @@ use vmux_command::{
     WriteCommandRequests,
 };
 #[cfg(test)]
-use vmux_core::PageOpenId;
-use vmux_core::event::TerminalUiState;
-use vmux_core::host::UiStateWrite;
-use vmux_core::host::page::{BindsEditingChords, HostsPage};
-use vmux_core::host::persistence::{PageRestore, PersistenceAppExt};
-use vmux_core::input::KeyStroke;
-use vmux_core::service::{ServiceConnected, ServiceRequest, ServiceUnavailable};
-use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
-use vmux_core::{
+use vmux_ecs::PageOpenId;
+use vmux_ecs::event::TerminalUiState;
+use vmux_ecs::host::UiStateWrite;
+use vmux_ecs::host::page::{BindsEditingChords, HostsPage};
+use vmux_ecs::host::persistence::{PageRestore, PersistenceAppExt};
+use vmux_ecs::service::{ServiceConnected, ServiceRequest, ServiceUnavailable};
+use vmux_ecs::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
+use vmux_ecs::{
     KeyboardOwner, PageIcon, PageIdentity, PageMetadata, PageOpenError, PageOpenHandled,
     PageOpenSet, PageOpenTask,
 };
@@ -65,7 +65,7 @@ use super::state::{
 use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::{ProcessExited, RetainOnProcessExit, Terminal};
-use vmux_core::service::ServiceMessageSet;
+use vmux_ecs::service::ServiceMessageSet;
 use vmux_flex::prelude::*;
 use vmux_ui::i18n::Locale;
 
@@ -82,7 +82,7 @@ impl Plugin for TerminalPlugin {
         app.add_plugins(
             Self::MANIFEST
                 .plugin()
-                .route(vmux_core::HostSpawnRoute::page("vmux://terminal/")),
+                .route(vmux_ecs::HostSpawnRoute::page("vmux://terminal/")),
         )
         .add_message::<ServiceRequest>()
         .add_message::<super::command::TerminalCloseRequest>()
@@ -92,7 +92,7 @@ impl Plugin for TerminalPlugin {
         .add_message::<super::command::CopyModeRequest>()
         .add_systems(Startup, bind_commands.in_set(vmux_command::BindCommands))
         .add_plugins((
-            vmux_core::host::UiStatePlugin::<TerminalUiState>::default(),
+            vmux_ecs::host::UiStatePlugin::<TerminalUiState>::default(),
             super::agent::AgentTerminalPlugin,
             crate::TerminalToolPlugin,
         ))
@@ -121,7 +121,7 @@ fn open_from_command_bar(
     focus: FocusedStack,
     pid_indexes: Query<&pid::PidToEntity>,
     locale: Option<Res<vmux_command::ResolvedLocale>>,
-    users: Query<Entity, With<vmux_core::team::User>>,
+    users: Query<Entity, With<vmux_ecs::team::User>>,
     mut spawn: MessageWriter<TerminalSpawnRequest>,
     mut invocations: MessageWriter<CommandInvocation>,
     mut commands: Commands,
@@ -134,7 +134,7 @@ fn open_from_command_bar(
             .find_map(|(pid, entity)| (Pid(pid).page_url() == *value).then_some(entity))
     });
     if let Some(entity) = running {
-        commands.trigger(vmux_core::ActivateRequest { entity });
+        commands.trigger(vmux_ecs::ActivateRequest { entity });
         commands.trigger(CommandBarDismiss::new(webview, false));
         return;
     }
@@ -264,7 +264,7 @@ impl Plugin for TerminalUpdatePlugin {
         .add_message::<ProcessExitedEvent>()
         .add_message::<CommandLifecycleEvent>()
         .add_message::<OscTitleChanged>()
-        .add_message::<vmux_core::notify::BellReceived>()
+        .add_message::<vmux_ecs::notify::BellReceived>()
         .add_systems(Update, apply_osc_title.after(ServiceMessageSet))
         .add_systems(Update, clear_osc_title_on_exit.after(ServiceMessageSet))
         .add_systems(
@@ -460,7 +460,7 @@ fn handle_page_open(
                 }
             }
             if let Some(terminal) = existing {
-                commands.trigger(vmux_core::ActivateRequest { entity: terminal });
+                commands.trigger(vmux_ecs::ActivateRequest { entity: terminal });
                 commands.entity(entity).insert(PageOpenHandled);
                 continue;
             }
@@ -841,7 +841,7 @@ fn publish_service_status(
     }
 }
 
-fn line_has_content(line: &vmux_core::event::TermLine) -> bool {
+fn line_has_content(line: &vmux_ecs::event::TermLine) -> bool {
     line.spans.iter().any(|s| !s.text.trim().is_empty())
 }
 
@@ -1628,7 +1628,7 @@ fn term_key(
     >,
     keymap: Single<&Keymap>,
     mut command_invocations: MessageWriter<CommandInvocation>,
-    user_q: Query<Entity, With<vmux_core::team::User>>,
+    user_q: Query<Entity, With<vmux_ecs::team::User>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -1953,7 +1953,7 @@ fn clear_osc_title_on_exit(
 mod tests {
     use super::*;
     use bevy::ecs::schedule::Schedules;
-    use vmux_core::input::KeyModifiers;
+    use vmux_api::input::KeyModifiers;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };

@@ -6,12 +6,12 @@ use vmux_api::service::RUN_OSC;
 #[cfg(test)]
 use vmux_api::terminal::CursorStyle;
 use vmux_command::open_target::PaneDirection;
-use vmux_core::LastActivatedAt;
-use vmux_core::PageMetadata;
-use vmux_core::agent::{
+use vmux_ecs::LastActivatedAt;
+use vmux_ecs::PageMetadata;
+use vmux_ecs::agent::{
     AgentCommandResponse, AgentReply, AgentRequestApplySet, AgentRequestBlocked, AgentRequestInput,
 };
-use vmux_core::profile::ProjectsDirectory;
+use vmux_ecs::profile::ProjectsDirectory;
 use vmux_layout::AgentPaneDirection;
 #[cfg(test)]
 use vmux_layout::LayoutContractPlugin;
@@ -547,7 +547,7 @@ impl AgentTerminalShell {
 
     fn validate(&self) -> Result<(), String> {
         let shell = &self.0;
-        if vmux_core::Executable::find(shell).is_some() {
+        if vmux_path::Executable::find(shell).is_some() {
             Ok(())
         } else {
             Err(format!(
@@ -973,7 +973,7 @@ mod tests {
         let request_id = vmux_api::protocol::AgentRequestId::new();
         app.world_mut().write_message(AgentRequestInput {
             request_id,
-            origin: vmux_core::agent::CommandOrigin::User,
+            origin: vmux_ecs::agent::CommandOrigin::User,
             request: vmux_api::protocol::AgentRequest::encode(&AgentRun {
                 anchor: ProcessId::new(),
                 command: "pwd".to_string(),

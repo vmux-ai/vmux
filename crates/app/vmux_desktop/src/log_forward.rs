@@ -3,13 +3,13 @@ use bevy::log::BoxedLayer;
 use tracing_subscriber::Layer;
 
 pub fn file_log_layer(_app: &mut App) -> Option<BoxedLayer> {
-    let dir = vmux_core::service::ServicePaths::log_dir();
+    let dir = vmux_ecs::service::ServicePaths::log_dir();
     std::fs::create_dir_all(&dir).ok()?;
     let appender = tracing_appender::rolling::Builder::new()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
         .filename_prefix(format!(
             "vmux-{}",
-            vmux_core::service::ServicePaths::build_profile()
+            vmux_ecs::service::ServicePaths::build_profile()
         ))
         .filename_suffix("log")
         .max_log_files(7)

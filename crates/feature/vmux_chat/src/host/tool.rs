@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::AgentRequest;
-use vmux_core::ProcessAnchor;
+use vmux_ecs::ProcessAnchor;
 use vmux_tool::{ToolAppExt, ToolCommand, ToolDispatchSet};
 
 use super::session::{AgentRequestUserChoice, AgentSetConversationTitle};

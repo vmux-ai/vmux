@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use serde_json::Value;
-use vmux_core::event::{DiagSeverity, FileDiagnostic};
+use vmux_ecs::event::{DiagSeverity, FileDiagnostic};
 
 use crate::lsp::registry::{LintFormat, LinterSpec};
 

@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowPosition};
 use bevy_cef::prelude::HostWindow;
 use std::collections::HashMap;
-use vmux_core::{Order, PageMetadata};
+use vmux_ecs::{Order, PageMetadata};
 use vmux_history::LastActivatedAt;
 use vmux_layout::Loading;
 use vmux_layout::space::Space;
@@ -55,7 +55,7 @@ type PageData = (
     &'static PageMetadata,
     &'static ExtensionTabId,
     Option<&'static LastActivatedAt>,
-    Option<&'static vmux_core::PageIdentity>,
+    Option<&'static vmux_ecs::PageIdentity>,
     Has<ExtensionBridgeWebview>,
     Has<Loading>,
 );
@@ -344,7 +344,7 @@ impl PageCandidate {
         None
     }
 
-    fn title(metadata: &PageMetadata, identity: Option<&vmux_core::PageIdentity>) -> String {
+    fn title(metadata: &PageMetadata, identity: Option<&vmux_ecs::PageIdentity>) -> String {
         match identity.and_then(|identity| identity.title.as_deref()) {
             Some(title) if !title.is_empty() => title.to_string(),
             _ => metadata.title.clone(),

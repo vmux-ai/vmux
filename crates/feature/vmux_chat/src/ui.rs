@@ -16,7 +16,7 @@ use dioxus::prelude::*;
     subtree,
     preserve_title,
     no_favicon,
-    takes = vmux_core::PageMetadata
+    takes = vmux_ecs::PageMetadata
 )]
 pub(crate) struct ChatPage;
 

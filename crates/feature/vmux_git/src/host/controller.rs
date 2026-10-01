@@ -2,8 +2,8 @@ use std::path::Path;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_core::event::space::ProjectActivateRequest;
-use vmux_core::host::UiStateWrite;
+use vmux_ecs::event::space::ProjectActivateRequest;
+use vmux_ecs::host::UiStateWrite;
 
 use crate::event::{
     GitAmendRequest, GitBranchCollectionSelectRequest, GitBranchLogRequest, GitBranchSelectRequest,

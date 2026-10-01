@@ -21,7 +21,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
 vmux_command = { path = "../../feature/vmux_command" }
-vmux_core = { path = "../vmux_core" }
+vmux_ecs = { path = "../vmux_ecs" }
 vmux_editor = { path = "../../feature/vmux_editor" }
 vmux_flex = { path = "../vmux_flex" }
 vmux_git = { path = "../../feature/vmux_git" }
@@ -30,6 +30,7 @@ vmux_input = { path = "../../feature/vmux_input" }
 vmux_layout = { path = "../../feature/vmux_layout" }
 vmux_tool = { path = "../../feature/vmux_tool" }
 vmux_native = { path = "../vmux_native" }
+vmux_path = { path = "../vmux_path" }
 vmux_setting = { path = "../../feature/vmux_setting" }
 vmux_space = { path = "../../feature/vmux_space" }
 vmux_start = { path = "../../feature/vmux_start" }

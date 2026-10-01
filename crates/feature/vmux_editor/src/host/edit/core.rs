@@ -2706,11 +2706,11 @@ mod tests {
         c.mode = EditMode::Normal;
 
         c.apply(EditCommand::Reshape(crate::shape::BufferShape {
-            indent: vmux_core::event::FileIndent {
+            indent: vmux_ecs::event::FileIndent {
                 spaces: true,
                 width: 2,
             },
-            line_ending: vmux_core::event::FileLineEnding::Lf,
+            line_ending: vmux_ecs::event::FileLineEnding::Lf,
         }));
 
         assert_eq!(text_of(&c), "fn a() {\n  b();\n    c();\n}\n");
@@ -2725,11 +2725,11 @@ mod tests {
         c.mode = EditMode::Normal;
 
         c.apply(EditCommand::Reshape(crate::shape::BufferShape {
-            indent: vmux_core::event::FileIndent {
+            indent: vmux_ecs::event::FileIndent {
                 spaces: true,
                 width: 2,
             },
-            line_ending: vmux_core::event::FileLineEnding::Lf,
+            line_ending: vmux_ecs::event::FileLineEnding::Lf,
         }));
 
         assert_eq!(text_of(&c), "a\n  b\n");

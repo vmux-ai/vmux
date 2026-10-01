@@ -14,14 +14,14 @@ use vmux_api::command_bar::{
     CommandPaletteMenuHighlightRequest, CommandPaletteMenuMoveRequest,
     CommandPaletteModelMenuToggleRequest, CommandPalettePermissionMenuToggleRequest,
     CommandPaletteProjectMenuToggleRequest, CommandPaletteRemoveAttachmentRequest,
-    CommandPaletteState, CommandPaletteSubmitRequest, OpenId, StartGoToBranch, StartSelectMode,
+    CommandPaletteSubmitRequest, CommandPaletteUiState, OpenId, StartGoToBranch, StartSelectMode,
     StartSelectModel, StartSelectWorkspace,
 };
 use vmux_api::mcp::{McpServerRequest, McpServers};
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::host::{UiState, UiStateWrite};
-use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::host::{UiState, UiStateWrite};
+use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
 use vmux_tool::McpSnapshotRequest;
 
 use crate::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
@@ -63,7 +63,7 @@ impl Plugin for PalettePlugin {
                 CommandPaletteRemoveAttachmentRequest,
             )>::default())
             .add_plugins((
-                vmux_core::host::UiStatePlugin::<CommandPaletteState>::default(),
+                vmux_ecs::host::UiStatePlugin::<CommandPaletteUiState>::default(),
                 search::PaletteSearchPlugin,
                 prompt::PalettePromptPlugin,
                 branch::PaletteBranchPlugin,
@@ -103,7 +103,7 @@ impl Plugin for PalettePlugin {
 }
 
 #[derive(Component, Default)]
-struct PaletteSnapshot(CommandPaletteState);
+struct PaletteSnapshot(CommandPaletteUiState);
 
 #[derive(Component, Default)]
 struct PaletteOpen(CommandBarOpenEvent);
@@ -169,7 +169,7 @@ impl PaletteDraftInput {
         true
     }
 
-    fn next(&mut self, snapshot: &CommandPaletteState) {
+    fn next(&mut self, snapshot: &CommandPaletteUiState) {
         let rows = if snapshot.projection.mcp_open {
             snapshot.projection.mcp_entries.len()
         } else {
@@ -186,7 +186,7 @@ impl PaletteDraftInput {
         self.changed();
     }
 
-    fn complete(&mut self, snapshot: &CommandPaletteState) {
+    fn complete(&mut self, snapshot: &CommandPaletteUiState) {
         if snapshot.projection.mcp_open || snapshot.projection.ghost.is_empty() {
             return;
         }
@@ -196,7 +196,7 @@ impl PaletteDraftInput {
         self.changed();
     }
 
-    fn dismiss(&mut self, snapshot: &CommandPaletteState) -> bool {
+    fn dismiss(&mut self, snapshot: &CommandPaletteUiState) -> bool {
         if snapshot.projection.mcp_open {
             self.query.clear();
             self.selected = 0;
@@ -320,7 +320,7 @@ fn attach_snapshot(
             PaletteContext::default(),
             PaletteDraftInput::default(),
             PaletteMcp::default(),
-            UiState::<CommandPaletteState>::default(),
+            UiState::<CommandPaletteUiState>::default(),
         ));
     }
 }
@@ -1277,7 +1277,7 @@ fn publish_snapshot(
     mut commands: Commands,
 ) {
     for (target, snapshot) in &snapshots {
-        commands.trigger(UiStateWrite::<CommandPaletteState>::from_event(
+        commands.trigger(UiStateWrite::<CommandPaletteUiState>::from_event(
             target,
             &snapshot.0,
         ));
@@ -1311,7 +1311,7 @@ fn detach_snapshot(
         page.remove::<(
             BranchMenuOpen,
             PaletteMenuCursor,
-            UiState<CommandPaletteState>,
+            UiState<CommandPaletteUiState>,
             search::PaletteSearch,
             prompt::PalettePrompt,
             branch::PaletteBranch,
@@ -1484,7 +1484,7 @@ mod tests {
                 query: ">close".to_string(),
                 ..Default::default()
             },
-            PaletteSnapshot(CommandPaletteState {
+            PaletteSnapshot(CommandPaletteUiState {
                 open_id,
                 ..Default::default()
             }),
@@ -1530,7 +1530,7 @@ mod tests {
                 query: ">close".to_string(),
                 ..Default::default()
             },
-            PaletteSnapshot(CommandPaletteState {
+            PaletteSnapshot(CommandPaletteUiState {
                 open_id,
                 ..Default::default()
             }),
@@ -1591,7 +1591,7 @@ mod tests {
                     query: "unfinished".to_string(),
                     ..Default::default()
                 },
-                PaletteSnapshot(CommandPaletteState {
+                PaletteSnapshot(CommandPaletteUiState {
                     open_id,
                     prompt_history: vec!["first".to_string(), "second".to_string()],
                     ..Default::default()
@@ -1647,7 +1647,7 @@ mod tests {
                 query: "/mcp lin".to_string(),
                 ..Default::default()
             },
-            PaletteSnapshot(CommandPaletteState {
+            PaletteSnapshot(CommandPaletteUiState {
                 open_id,
                 ..Default::default()
             }),
@@ -1762,7 +1762,7 @@ mod tests {
                 ..Default::default()
             },
             PaletteMcp::default(),
-            PaletteSnapshot(CommandPaletteState {
+            PaletteSnapshot(CommandPaletteUiState {
                 open_id,
                 ..Default::default()
             }),

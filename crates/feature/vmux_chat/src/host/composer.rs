@@ -151,7 +151,7 @@ fn slash_command(
     };
     let effect = composer.slash_effect(command);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
+        vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
     );
     commands.trigger(ComposerChanged::new(webview));
     match command {

@@ -1,5 +1,5 @@
 #[cfg_attr(bevy_linked, derive(bevy_reflect::Reflect))]
-#[cfg_attr(bevy_linked, type_path = "vmux_core::icon")]
+#[cfg_attr(bevy_linked, type_path = "vmux_ecs::icon")]
 #[vmux_api::contract(Copy, Eq)]
 pub enum BuiltinIcon {
     Terminal,
@@ -41,7 +41,7 @@ impl BuiltinIcon {
 }
 
 #[cfg_attr(bevy_linked, derive(bevy_reflect::Reflect))]
-#[cfg_attr(bevy_linked, type_path = "vmux_core::icon")]
+#[cfg_attr(bevy_linked, type_path = "vmux_ecs::icon")]
 #[vmux_api::contract(Default, Eq)]
 pub enum PageIcon {
     #[default]

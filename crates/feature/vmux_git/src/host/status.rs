@@ -6,7 +6,7 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
-use vmux_core::host::{FileUiStateUpdates, FileUiStateWrite};
+use vmux_ecs::host::{FileUiStateUpdates, FileUiStateWrite};
 
 use crate::event::{FileGitState, FileStatus, GitDiffViewport, GitFileStatus, GitOperationResult};
 
@@ -457,7 +457,7 @@ mod tests {
     use crate::host::repository::test_repo;
     use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
     use vmux_api::BinEvent;
-    use vmux_core::event::FileUiState;
+    use vmux_ecs::event::FileUiState;
 
     #[derive(Resource, Default)]
     struct Emitted(Vec<FileUiState>);
@@ -536,7 +536,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_core::host::UiStatePlugin::<FileUiState>::default(),
+            vmux_ecs::host::UiStatePlugin::<FileUiState>::default(),
             StatusPlugin,
         ))
         .init_resource::<Emitted>()

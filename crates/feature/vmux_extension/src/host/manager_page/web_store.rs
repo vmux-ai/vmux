@@ -115,7 +115,7 @@ fn inject_page(
         return;
     };
     let injector = WebStoreInjector::resolve(current, extension_id);
-    let profile = vmux_core::profile::Profile::current().into_id();
+    let profile = vmux_ecs::profile::Profile::current().into_id();
     let index = store::ExtensionStore::current()
         .load_index()
         .unwrap_or_default();
@@ -174,7 +174,7 @@ fn inject_on_navigation(
 fn inject_on_load(
     mut events: MessageReader<vmux_browser::WebviewLoadCompleted>,
     browsers: NonSend<Browsers>,
-    browser_meta: Query<&vmux_core::PageMetadata, With<vmux_layout::Browser>>,
+    browser_meta: Query<&vmux_ecs::PageMetadata, With<vmux_layout::Browser>>,
     injectors: Query<&WebStoreInjector>,
     mut commands: Commands,
 ) {

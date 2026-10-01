@@ -1,1 +1,1 @@
-pub use vmux_core::event::*;
+pub use vmux_ecs::event::*;

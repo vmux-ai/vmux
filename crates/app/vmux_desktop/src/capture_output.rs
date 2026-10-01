@@ -20,7 +20,7 @@ impl CaptureOutput {
             .map(str::trim)
             .filter(|path| !path.is_empty())
             .map(PathBuf::from)
-            .unwrap_or_else(|| vmux_core::profile::ProfilePaths::current().recording())
+            .unwrap_or_else(|| vmux_ecs::profile::ProfilePaths::current().recording())
     }
 
     #[cfg(feature = "recording")]

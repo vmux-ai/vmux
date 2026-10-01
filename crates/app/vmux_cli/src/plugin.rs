@@ -2,8 +2,8 @@ use std::io;
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_core::cli::{CliInvocation, CliResult};
-use vmux_core::host::manifest::{FeatureManifestSource, FeaturePlugin};
+use vmux_ecs::cli::{CliInvocation, CliResult};
+use vmux_ecs::host::manifest::{FeatureManifestSource, FeaturePlugin};
 
 use crate::command::CliRuntimePlugin;
 

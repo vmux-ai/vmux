@@ -6,8 +6,8 @@ use std::time::Duration;
 use bevy_app::{App, AppExit, First, Last, Plugin, PreUpdate};
 use bevy_ecs::prelude::*;
 use clap::error::ErrorKind;
-use vmux_core::cli::{CliInvocation, CliResult};
-use vmux_core::host::manifest::FeatureManifest;
+use vmux_ecs::cli::{CliInvocation, CliResult};
+use vmux_ecs::host::manifest::FeatureManifest;
 
 mod catalog;
 mod parser;

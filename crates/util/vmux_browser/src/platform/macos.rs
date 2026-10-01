@@ -15,9 +15,9 @@ use bevy_cef_core::prelude::{
     asset_load_path_from_request_url,
 };
 use vmux_api::UiEventPermissions;
-use vmux_core::host::page::HostsPage;
-use vmux_core::page::PageReady;
-use vmux_core::{PageIcon, PageMetadata, PageOpenSet};
+use vmux_ecs::host::page::HostsPage;
+use vmux_ecs::page::PageReady;
+use vmux_ecs::{PageIcon, PageMetadata, PageOpenSet};
 use vmux_layout::LayoutCef;
 use vmux_layout::window::FocusedWindow;
 use vmux_native::{
@@ -48,26 +48,26 @@ impl Plugin for MacosBrowserPlugin {
                 NativePageMetadataReceiver(receiver),
             ));
         })
-        .add_systems(First, accept_page_wakes)
+        .add_systems(First, accept_wakes)
         .add_systems(
             Update,
             (
-                apply_native_page_metadata,
-                open_native_pages.after(PageOpenSet::HandleKnownPages),
-                sync_native_appearance.run_if(resource_changed::<AppSettings>),
-                sync_native_page_scale,
+                apply_metadata,
+                open.after(PageOpenSet::HandleKnownPages),
+                sync_appearance.run_if(resource_changed::<AppSettings>),
+                sync_scale,
             )
                 .chain(),
         )
         .add_systems(
             PostUpdate,
-            (place_native_pages, render_native_pages)
+            (place, render)
                 .chain()
                 .after(crate::BrowserSystemSet::SyncWindowedFrames),
         )
         .add_systems(
             PostUpdate,
-            focus_native_page.after(crate::BrowserSystemSet::HostFocusApplied),
+            focus.after(crate::BrowserSystemSet::HostFocusApplied),
         )
         .add_observer(forward_host_emit);
     }
@@ -96,7 +96,7 @@ struct NativePageMetadataSender(async_channel::Sender<NativePageMetadata>);
 #[derive(Component)]
 struct NativePageMetadataReceiver(async_channel::Receiver<NativePageMetadata>);
 
-fn apply_native_page_metadata(
+fn apply_metadata(
     receiver: Single<&NativePageMetadataReceiver>,
     mut pages: Query<&mut PageMetadata>,
 ) {
@@ -138,7 +138,7 @@ impl HostedPages {
     }
 }
 
-fn open_native_pages(world: &mut World) {
+fn open(world: &mut World) {
     let registered = world
         .query::<&NativePageRegistration>()
         .iter(world)
@@ -260,7 +260,7 @@ fn open_native_pages(world: &mut World) {
     }
 }
 
-fn place_native_pages(
+fn place(
     hosted: Option<NonSendMut<HostedPages>>,
     frames: Query<&PaneFrame>,
     rings: Query<&FocusRing>,
@@ -301,7 +301,7 @@ fn place_native_pages(
     }
 }
 
-fn render_native_pages(hosted: Option<NonSend<HostedPages>>) {
+fn render(hosted: Option<NonSend<HostedPages>>) {
     let Some(hosted) = hosted else {
         return;
     };
@@ -310,7 +310,7 @@ fn render_native_pages(hosted: Option<NonSend<HostedPages>>) {
     }
 }
 
-fn focus_native_page(
+fn focus(
     hosted: Option<NonSend<HostedPages>>,
     intent: Single<&crate::host_focus::HostFocusIntent>,
     focused_window: FocusedWindow,
@@ -361,7 +361,7 @@ fn forward_host_emit(
     page.surface.deliver(host_emit.id(), host_emit.payload());
 }
 
-fn sync_native_appearance(hosted: Option<NonSend<HostedPages>>, settings: Res<AppSettings>) {
+fn sync_appearance(hosted: Option<NonSend<HostedPages>>, settings: Res<AppSettings>) {
     let Some(hosted) = hosted else {
         return;
     };
@@ -372,7 +372,7 @@ fn sync_native_appearance(hosted: Option<NonSend<HostedPages>>, settings: Res<Ap
     }
 }
 
-fn sync_native_page_scale(
+fn sync_scale(
     hosted: Option<NonSend<HostedPages>>,
     zoom: Query<(Entity, &ZoomLevel), Changed<ZoomLevel>>,
 ) {
@@ -553,7 +553,7 @@ impl NativeWake for PageWaker {
     }
 }
 
-fn accept_page_wakes(_: bevy::ecs::system::NonSendMarker) {
+fn accept_wakes(_: bevy::ecs::system::NonSendMarker) {
     PAGE_WAKE_PENDING.store(false, std::sync::atomic::Ordering::Release);
 }
 
@@ -913,16 +913,16 @@ mod tests {
     fn document_metadata_updates_the_hosted_page() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_systems(Update, super::apply_native_page_metadata);
+            .add_systems(Update, super::apply_metadata);
         let (metadata_tx, metadata_rx) = async_channel::unbounded();
         app.world_mut()
             .spawn(NativePageMetadataReceiver(metadata_rx));
         let page = app
             .world_mut()
-            .spawn(vmux_core::PageMetadata {
+            .spawn(vmux_ecs::PageMetadata {
                 title: "vmux://history/".to_string(),
                 url: "vmux://history/".to_string(),
-                icon: vmux_core::PageIcon::None,
+                icon: vmux_ecs::PageIcon::None,
                 bg_color: None,
             })
             .id();
@@ -938,11 +938,11 @@ mod tests {
         vmux_native::Outbox::set_favicon(&outbox, "vmux://history/assets/favicons/history.svg");
         app.update();
 
-        let metadata = app.world().get::<vmux_core::PageMetadata>(page).unwrap();
+        let metadata = app.world().get::<vmux_ecs::PageMetadata>(page).unwrap();
         assert_eq!(metadata.title, "History");
         assert_eq!(
             metadata.icon,
-            vmux_core::PageIcon::favicon("vmux://history/assets/favicons/history.svg")
+            vmux_ecs::PageIcon::favicon("vmux://history/assets/favicons/history.svg")
         );
     }
 

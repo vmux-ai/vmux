@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_core::cli::{CliInvocation, CliResult};
-use vmux_core::host::manifest::FeaturePlugin;
+use vmux_ecs::cli::{CliInvocation, CliResult};
+use vmux_ecs::host::manifest::FeaturePlugin;
 
 use crate::DotfileLinkState;
 

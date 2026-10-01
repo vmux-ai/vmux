@@ -1,5 +1,10 @@
 (
     settings: Some((
+        defaults: (
+            layout: Some((
+                window: (padding: 8.0),
+            )),
+        ),
         sections: [(
             id: "layout",
             title: "schema-layout",

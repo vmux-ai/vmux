@@ -163,9 +163,9 @@ pub struct GitCommandLogEntry {
 #[vmux_api::contract(Eq)]
 pub struct GitDirectoryState {
     pub path: String,
-    pub parent_entries: Vec<vmux_core::event::FileDirEntry>,
-    pub entries: Vec<vmux_core::event::FileDirEntry>,
-    pub children: Option<Vec<vmux_core::event::FileDirEntry>>,
+    pub parent_entries: Vec<vmux_ecs::event::FileDirEntry>,
+    pub entries: Vec<vmux_ecs::event::FileDirEntry>,
+    pub children: Option<Vec<vmux_ecs::event::FileDirEntry>>,
     pub selected: u32,
     pub show_hidden: bool,
 }

@@ -7,8 +7,8 @@ use vmux_api::extension::{
     ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent,
     ExtensionPopupOpenRequest, ExtensionPopupSizeEvent,
 };
-use vmux_core::overlay::WindowOverlay;
-use vmux_core::{KeyboardOwner, host::UiStateWrite};
+use vmux_ecs::overlay::WindowOverlay;
+use vmux_ecs::{KeyboardOwner, host::UiStateWrite};
 use vmux_flex::prelude::{LayoutSystems, Visibility};
 use vmux_layout::{Browser, LayoutCef, state::LayoutUiState};
 
@@ -116,7 +116,7 @@ fn open_request(
     let Some(entry) = index.entries.into_iter().find(|entry| entry.id == id) else {
         return;
     };
-    if !entry.enabled_for(vmux_core::profile::Profile::current().id()) {
+    if !entry.enabled_for(vmux_ecs::profile::Profile::current().id()) {
         return;
     }
     let Some(popup) = entry.popup else {

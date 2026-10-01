@@ -6,9 +6,9 @@ use vmux_api::protocol::{
     AgentFileSearch, AgentFileTouched, AgentRequest, AgentRequestId, ClientMessage, FileTouchKind,
     ProcessId, ServiceMessage,
 };
-use vmux_core::ProcessAnchor;
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::service::ServiceConnection;
+use vmux_ecs::ProcessAnchor;
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::service::ServiceConnection;
 use vmux_layout::{AgentOpenBeside, AgentPaneDirection};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 use vmux_tool::{

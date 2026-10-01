@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use vmux_api::VmuxRoute;
-use vmux_core::{
+use vmux_ecs::{
     CreatedAt, LastVisitedAt, PageMetadata, TransitionType, Url, Visit, VisitCount, VisitedUrl,
     now_millis, page::PageReady,
 };
@@ -12,7 +12,7 @@ pub(crate) struct HistoryWriteSet;
 
 impl Plugin for HistorySpawnPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<vmux_core::event::RecordVisitRequest>()
+        app.add_message::<vmux_ecs::event::RecordVisitRequest>()
             .add_systems(
                 Update,
                 (spawn, record_requested_visits, record_vmux_pages)
@@ -83,7 +83,7 @@ fn record_visit(
 }
 
 fn record_requested_visits(
-    mut reader: bevy::ecs::message::MessageReader<vmux_core::event::RecordVisitRequest>,
+    mut reader: bevy::ecs::message::MessageReader<vmux_ecs::event::RecordVisitRequest>,
     mut commands: Commands,
     mut urls: Query<(Entity, &PageMetadata, &mut VisitCount, &mut LastVisitedAt), With<Url>>,
 ) {
@@ -138,12 +138,12 @@ mod system_tests {
     use bevy_cef_core::prelude::{
         CefTransitionCore, CefTransitionQualifiers, WebviewCommittedNavigationEvent,
     };
-    use vmux_core::CorePlugin;
+    use vmux_ecs::EcsPlugin;
 
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(CorePlugin)
+            .add_plugins(EcsPlugin)
             .add_message::<WebviewCommittedNavigationEvent>()
             .add_systems(Update, spawn);
         app
@@ -273,7 +273,7 @@ mod system_tests {
     fn ready_vmux_page_is_recorded_but_history_shell_is_not() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(CorePlugin)
+            .add_plugins(EcsPlugin)
             .add_systems(Update, record_vmux_pages);
         app.world_mut().spawn((
             PageMetadata {
@@ -311,12 +311,12 @@ mod system_tests {
     fn record_request_spawns_url_with_title() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(CorePlugin)
-            .add_message::<vmux_core::event::RecordVisitRequest>()
+            .add_plugins(EcsPlugin)
+            .add_message::<vmux_ecs::event::RecordVisitRequest>()
             .add_systems(Update, record_requested_visits);
         app.world_mut()
-            .resource_mut::<Messages<vmux_core::event::RecordVisitRequest>>()
-            .write(vmux_core::event::RecordVisitRequest {
+            .resource_mut::<Messages<vmux_ecs::event::RecordVisitRequest>>()
+            .write(vmux_ecs::event::RecordVisitRequest {
                 url: "file:///Users/me/main.rs".into(),
                 title: "main.rs".into(),
             });

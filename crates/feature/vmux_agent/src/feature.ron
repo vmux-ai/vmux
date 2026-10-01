@@ -1,5 +1,18 @@
 (
     settings: Some((
+        defaults: (
+            agent: Some((
+                allow_run_placement_override: false,
+                follow_files: true,
+                tidy_files: true,
+                tidy_files_max: 5,
+                acp: [
+                    (id: "claude", name: "Claude Code", command: "npx", args: ["-y", "@zed-industries/claude-code-acp@latest"]),
+                    (id: "codex", name: "Codex", command: "npx", args: ["-y", "@zed-industries/codex-acp@latest"]),
+                    (id: "gemini", name: "Gemini CLI", command: "npx", args: ["-y", "--", "@google/gemini-cli@latest", "--experimental-acp"]),
+                ],
+            )),
+        ),
         sections: [(
             id: "agent",
             title: "schema-agent",

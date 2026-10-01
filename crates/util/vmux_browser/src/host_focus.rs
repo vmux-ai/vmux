@@ -1,8 +1,8 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, HostWindow, WebviewWindowed};
-use vmux_core::KeyboardOwner;
-use vmux_core::overlay::{OverlayState, OverlayStateQuery, WindowOverlay};
+use vmux_ecs::KeyboardOwner;
+use vmux_ecs::overlay::{OverlayState, OverlayStateQuery, WindowOverlay};
 use vmux_input::{KeyboardContext, KeyboardContextSet};
 use vmux_layout::Header;
 use vmux_layout::side_sheet::SideSheet;
@@ -90,13 +90,13 @@ fn compute_intent(
             Option<&Visibility>,
             Has<KeyboardOwner>,
             Has<WebviewWindowed>,
-            Has<vmux_core::overlay::OverlayShownInline>,
+            Has<vmux_ecs::overlay::OverlayShownInline>,
         ),
         With<WindowOverlay>,
     >,
     layout_keyboard_q: Query<(Entity, Option<&HostWindow>), crate::present::LayoutKeyboardHost>,
     focused_window: vmux_layout::window::FocusedWindow,
-    native_q: Query<(), With<vmux_core::host::page::HostsPage>>,
+    native_q: Query<(), With<vmux_ecs::host::page::HostsPage>>,
     mut intent: Single<&mut HostFocusIntent>,
 ) {
     let next = if let Some((modal, windowed, shown_inline)) = modal_q.iter().find_map(
@@ -253,7 +253,7 @@ mod tests {
             .spawn((
                 Browser,
                 Terminal,
-                vmux_core::host::page::HostsPage,
+                vmux_ecs::host::page::HostsPage,
                 ChildOf(stack),
             ))
             .id();
@@ -430,7 +430,7 @@ mod tests {
             Node::default(),
             Visibility::Hidden,
             WebviewWindowed,
-            vmux_core::overlay::OverlayShownInline,
+            vmux_ecs::overlay::OverlayShownInline,
         ));
         set_focus(&mut app, stack);
         app.update();

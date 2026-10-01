@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentRequestId, ClientMessage};
-use vmux_core::JsonArguments;
-use vmux_core::service::ServiceRequest;
+use vmux_ecs::JsonArguments;
+use vmux_ecs::service::ServiceRequest;
 use vmux_tool::{
     ToolCommand, ToolCommandFallback, ToolDispatchError, ToolDispatchFlush, ToolInvocation,
     ToolQuery, ToolQueryRequest, ToolResolveSet,
@@ -143,7 +143,7 @@ mod tests {
     use super::*;
     use serde::Deserialize;
     use vmux_api::protocol::AgentRequest;
-    use vmux_core::host::manifest::FeaturePlugin;
+    use vmux_ecs::host::manifest::FeaturePlugin;
     use vmux_tool::{AddedTool, ToolAppExt, ToolDispatchSet, ToolQuery};
 
     #[vmux_tool::input]
@@ -152,7 +152,7 @@ mod tests {
 
     struct TestFeature;
 
-    impl vmux_core::host::manifest::FeatureManifestSource for TestFeature {
+    impl vmux_ecs::host::manifest::FeatureManifestSource for TestFeature {
         const SOURCE: &'static str =
             r#"(tools: [(name: "test_query", description: "test", input_schema: (type: Object))])"#;
     }

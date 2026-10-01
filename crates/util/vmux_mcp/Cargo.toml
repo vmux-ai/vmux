@@ -16,7 +16,7 @@ bevy_ecs = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 vmux_api = { path = "../vmux_api" }
-vmux_core = { path = "../vmux_core" }
+vmux_ecs = { path = "../vmux_ecs" }
 vmux_tool = { path = "../../feature/vmux_tool" }
 
 [dev-dependencies]

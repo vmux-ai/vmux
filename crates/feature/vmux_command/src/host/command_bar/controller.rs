@@ -6,7 +6,7 @@ use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarPicker, CommandBarReadyEvent, CommandBarRenderedEvent,
     CommandBarSizeEvent, DismissRequest, OpenId,
 };
-use vmux_core::launcher::{LauncherDismissRequest, RendersLauncherPanel, RestoreKeyboardToStack};
+use vmux_ecs::launcher::{LauncherDismissRequest, RendersLauncherPanel, RestoreKeyboardToStack};
 
 use crate::command_bar::CommandBarDismiss;
 use crate::command_bar::panel::CommandBarPanelActive;
@@ -17,13 +17,13 @@ use bevy::{
     prelude::*,
 };
 use bevy_cef::prelude::*;
-use vmux_core::PageMetadata;
-use vmux_core::host::page::HostsPage;
+use vmux_ecs::PageMetadata;
+use vmux_ecs::host::page::HostsPage;
 use vmux_history::now_millis;
 use vmux_ui::i18n::Locale;
 
 use crate::ResolvedLocale;
-use vmux_core::KeyboardOwner;
+use vmux_ecs::KeyboardOwner;
 use vmux_flex::prelude::*;
 
 pub struct Plugin;
@@ -44,7 +44,7 @@ impl bevy::app::Plugin for Plugin {
             )
             .add_systems(Startup, bind_commands.in_set(crate::BindCommands))
             .add_message::<LauncherDismissRequest>()
-            .add_message::<vmux_core::ContributedCommandChosen>()
+            .add_message::<vmux_ecs::ContributedCommandChosen>()
             .add_message::<RestoreKeyboardToStack>()
             .add_plugins(UiEventPlugin::<(
                 DismissRequest,
@@ -63,8 +63,8 @@ impl bevy::app::Plugin for Plugin {
                 Update,
                 open.in_set(ApplyCommandBarRequests)
                     .after(prewarm)
-                    .after(vmux_core::workspace::TabCommandSet)
-                    .after(vmux_core::workspace::StackCommandSet),
+                    .after(vmux_ecs::workspace::TabCommandSet)
+                    .after(vmux_ecs::workspace::StackCommandSet),
             )
             .add_systems(Update, retry_open.after(open))
             .add_systems(Update, sync_project_roots.in_set(WriteCommandBarSnapshots))
@@ -72,7 +72,7 @@ impl bevy::app::Plugin for Plugin {
                 Update,
                 dismiss_deferred
                     .after(ReadCommandRequests)
-                    .before(vmux_core::workspace::ComputeFocusSet),
+                    .before(vmux_ecs::workspace::ComputeFocusSet),
             )
             .add_systems(PostUpdate, reveal.chain().after(LayoutSystems::Layout))
             .add_systems(Update, keep_awake.after(ReadCommandRequests));
@@ -620,7 +620,7 @@ fn open(
     if let Some(picker) = picker {
         payload.picks = CommandBarPicks::for_picker(picker, &locale);
     }
-    commands.trigger(vmux_core::host::UiStateWrite::<
+    commands.trigger(vmux_ecs::host::UiStateWrite::<
         vmux_api::command_bar::CommandBarUiState,
     >::from_event(layout_e, &payload));
 }
@@ -632,7 +632,7 @@ struct CommandBarPanelClose {
 }
 
 fn close_panel(trigger: On<CommandBarPanelClose>, mut commands: Commands) {
-    commands.trigger(vmux_core::host::UiStateWrite::<
+    commands.trigger(vmux_ecs::host::UiStateWrite::<
         vmux_api::command_bar::CommandBarUiState,
     >::from_event(
         trigger.event().layout, &CommandBarOpenEvent::default()
@@ -792,7 +792,7 @@ fn retry_open(
         {
             continue;
         }
-        commands.trigger(vmux_core::host::UiStateWrite::<
+        commands.trigger(vmux_ecs::host::UiStateWrite::<
             vmux_api::command_bar::CommandBarUiState,
         >::from_event(entity, payload));
         pending.started_at.get_or_insert(now);
@@ -816,9 +816,9 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch};
     use vmux_api::open_target::OpenTarget;
-    use vmux_core::host::UiStateWrite;
-    use vmux_core::launcher::HostsLauncher;
-    use vmux_core::overlay::OverlayState;
+    use vmux_ecs::host::UiStateWrite;
+    use vmux_ecs::launcher::HostsLauncher;
+    use vmux_ecs::overlay::OverlayState;
 
     #[test]
     fn command_bar_mcp_definitions_are_the_dispatchable_command_set() {
@@ -944,7 +944,7 @@ mod tests {
                 &Node,
                 &Visibility,
                 Has<KeyboardOwner>,
-                Has<vmux_core::overlay::OverlayShownInline>,
+                Has<vmux_ecs::overlay::OverlayShownInline>,
             ),
             With<CommandBar>,
         >,
@@ -1625,11 +1625,11 @@ mod tests {
         let graph = update.graph();
         let tab_command_set = graph
             .system_sets
-            .get_key(vmux_core::workspace::StackCommandSet.intern())
+            .get_key(vmux_ecs::workspace::StackCommandSet.intern())
             .unwrap();
         let read_command_systems = graph.systems_in_set(ReadCommandRequests.intern()).unwrap();
         let tab_command_systems = graph
-            .systems_in_set(vmux_core::workspace::StackCommandSet.intern())
+            .systems_in_set(vmux_ecs::workspace::StackCommandSet.intern())
             .unwrap();
         let command_bar_open_system = read_command_systems
             .iter()

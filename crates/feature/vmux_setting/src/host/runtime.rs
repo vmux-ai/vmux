@@ -1,10 +1,12 @@
+use crate::schema::{FieldSpec, SectionSpec};
 use crate::{SearchEngine, SearchEngineSetting};
 use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use std::sync::{Mutex, OnceLock, mpsc};
+use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
+use vmux_ecs::host::manifest::FeatureManifest;
 pub use vmux_layout::settings::LayoutSettings;
 use vmux_layout::settings::{ConfirmCloseSettings, ResolvedLocale};
 #[cfg(test)]
@@ -18,10 +20,13 @@ impl Plugin for SettingsRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SettingsWriteRequest>()
             .add_message::<SettingsSaveRequest>()
+            .init_resource::<SettingsDefaults>()
             .configure_sets(
                 Startup,
                 SettingsLoadSet.before(vmux_layout::LayoutStartupSet::Window),
             )
+            .add_systems(PreStartup, register_manifests)
+            .add_systems(Startup, compose_defaults.before(SettingsLoadSet))
             .add_systems(Startup, spawn_settings_runtime.before(SettingsLoadSet))
             .add_systems(Startup, load_settings.in_set(SettingsLoadSet))
             .add_systems(
@@ -78,6 +83,34 @@ pub struct AppSettings {
     pub appearance: AppearanceSettings,
 }
 
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            browser: BrowserSettings::default(),
+            layout: LayoutSettings::default(),
+            shortcuts: ShortcutSettings::default(),
+            terminal: None,
+            auto_update: default_auto_update(),
+            update_channel: UpdateChannel::default(),
+            agent: AgentSettings::default(),
+            spaces: std::collections::BTreeMap::new(),
+            projects: Vec::new(),
+            recording: RecordingSettings::default(),
+            editor: EditorSettings::default(),
+            appearance: AppearanceSettings::default(),
+        }
+    }
+}
+
+#[derive(Resource, Clone)]
+struct SettingsDefaults(AppSettings);
+
+impl Default for SettingsDefaults {
+    fn default() -> Self {
+        Self(AppSettings::default())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UpdateChannel {
@@ -87,14 +120,6 @@ pub enum UpdateChannel {
 }
 
 impl AppSettings {
-    pub fn embedded() -> Self {
-        load_embedded_settings()
-    }
-
-    pub fn from_disk() -> Self {
-        read_settings_and_path().0
-    }
-
     pub fn space(&self, space_id: &str) -> Option<&SpaceOverrides> {
         space_override(self, space_id)
     }
@@ -135,15 +160,14 @@ impl AppSettings {
         }
     }
 
-    pub fn apply_update(&mut self, path: &str, value: serde_json::Value) -> Result<String, String> {
+    pub fn apply_update(&mut self, path: &str, value: serde_json::Value) -> Result<(), String> {
         let mut value_json =
             serde_json::to_value(&*self).map_err(|e| format!("settings to JSON failed: {e}"))?;
         set_at_path(&mut value_json, path, value)?;
         let new_settings: AppSettings = serde_json::from_value(value_json)
             .map_err(|e| format!("invalid value for path '{path}': {e}"))?;
-        let ron_bytes = sparse_settings_ron(&new_settings)?;
         *self = new_settings;
-        Ok(ron_bytes)
+        Ok(())
     }
 
     pub fn to_json(&self) -> String {
@@ -278,6 +302,21 @@ impl Default for AppearanceSettings {
     }
 }
 
+impl AppearanceSettings {
+    pub fn from_disk() -> Self {
+        let path = vmux_ecs::profile::ProfilePaths::current().settings();
+        let Ok(source) = std::fs::read_to_string(path) else {
+            return Self::default();
+        };
+        ron::Options::default()
+            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+            .from_str::<PartialAppSettings>(&source)
+            .ok()
+            .and_then(|settings| settings.appearance)
+            .unwrap_or_default()
+    }
+}
+
 fn default_locale_setting() -> String {
     "system".to_string()
 }
@@ -285,9 +324,9 @@ fn default_locale_setting() -> String {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EditorSettings {
     #[serde(default)]
-    pub keymap: vmux_core::KeymapKind,
+    pub keymap: vmux_api::editor::KeymapKind,
     #[serde(default)]
-    pub word_wrap: vmux_core::editor::WordWrap,
+    pub word_wrap: vmux_api::editor::WordWrap,
     #[serde(default = "default_word_wrap_column")]
     pub word_wrap_column: u16,
     #[serde(default)]
@@ -297,7 +336,7 @@ pub struct EditorSettings {
     #[serde(default = "default_editor_leader")]
     pub leader: String,
     #[serde(default)]
-    pub mappings: Vec<vmux_core::editor::KeyMapping>,
+    pub mappings: Vec<vmux_api::editor::KeyMapping>,
 }
 
 fn default_editor_leader() -> String {
@@ -307,8 +346,8 @@ fn default_editor_leader() -> String {
 impl Default for EditorSettings {
     fn default() -> Self {
         Self {
-            keymap: vmux_core::KeymapKind::default(),
-            word_wrap: vmux_core::editor::WordWrap::default(),
+            keymap: vmux_api::editor::KeymapKind::default(),
+            word_wrap: vmux_api::editor::WordWrap::default(),
             word_wrap_column: default_word_wrap_column(),
             lsp: LspSettings::default(),
             explorer: ExplorerSettings::default(),
@@ -471,8 +510,8 @@ impl SpaceOverrides {
         self.projects = roots;
     }
 
-    pub fn project_rows(&self) -> Vec<vmux_core::event::ProjectRow> {
-        use vmux_core::event::ProjectRow;
+    pub fn project_rows(&self) -> Vec<vmux_ecs::event::ProjectRow> {
+        use vmux_ecs::event::ProjectRow;
 
         let active = self.active_dir();
         let mut rows = Vec::with_capacity(self.projects.len());
@@ -487,7 +526,7 @@ impl SpaceOverrides {
                 is_worktree: project.checkout.is_some(),
                 missing: !std::path::Path::new(in_use).is_dir(),
                 branch: String::new(),
-                kind: vmux_core::event::ProjectRowKind::Project,
+                kind: vmux_ecs::event::ProjectRowKind::Project,
                 expanded: false,
             });
         }
@@ -840,7 +879,7 @@ pub struct BrowserSettings {
 pub struct BookmarkFolderSettings {
     pub name: String,
     #[serde(default)]
-    pub smart: Option<vmux_core::SmartBookmarkFolder>,
+    pub smart: Option<vmux_api::bookmark::SmartBookmarkFolder>,
 }
 
 fn default_browser_settings() -> BrowserSettings {
@@ -999,9 +1038,15 @@ impl TerminalSettings {
     }
 }
 
-#[derive(Deserialize)]
-struct SettingsFeaturePolicy {
-    defaults: AppSettings,
+#[derive(Component, Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SettingsManifest {
+    #[serde(default)]
+    pub sections: Vec<SectionSpec>,
+    #[serde(default)]
+    pub fields: Vec<FieldSpec>,
+    #[serde(default)]
+    defaults: PartialAppSettings,
 }
 
 #[derive(Component)]
@@ -1011,7 +1056,7 @@ struct SettingsWatcher {
     _watcher: RecommendedWatcher,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize, Default)]
 struct PartialAppSettings {
     #[serde(default)]
     browser: Option<BrowserSettings>,
@@ -1039,84 +1084,140 @@ struct PartialAppSettings {
     appearance: Option<AppearanceSettings>,
 }
 
-fn merge_over_embedded(partial: PartialAppSettings) -> AppSettings {
-    let mut settings = load_embedded_settings();
-    if let Some(browser) = partial.browser {
-        settings.browser = browser;
+impl PartialAppSettings {
+    fn apply_to(&self, settings: &mut AppSettings) {
+        if let Some(browser) = &self.browser {
+            settings.browser.clone_from(browser);
+        }
+        if let Some(layout) = &self.layout {
+            settings.layout.clone_from(layout);
+        }
+        if let Some(shortcuts) = &self.shortcuts {
+            settings.shortcuts.clone_from(shortcuts);
+        }
+        if let Some(terminal) = &self.terminal {
+            settings.terminal = Some(terminal.clone());
+        }
+        if let Some(auto_update) = self.auto_update {
+            settings.auto_update = auto_update;
+        }
+        if let Some(update_channel) = self.update_channel {
+            settings.update_channel = update_channel;
+        }
+        if let Some(agent) = &self.agent {
+            settings.agent.clone_from(agent);
+        }
+        if let Some(spaces) = &self.spaces {
+            settings.spaces.clone_from(spaces);
+        }
+        for overrides in settings.spaces.values_mut() {
+            overrides.normalize();
+        }
+        if let Some(projects) = &self.projects {
+            settings.projects.clone_from(projects);
+        }
+        if let Some(recording) = &self.recording {
+            settings.recording.clone_from(recording);
+        }
+        if let Some(editor) = &self.editor {
+            settings.editor.clone_from(editor);
+        }
+        if let Some(appearance) = &self.appearance {
+            settings.appearance.clone_from(appearance);
+        }
     }
-    if let Some(layout) = partial.layout {
-        settings.layout = layout;
-    }
-    if let Some(shortcuts) = partial.shortcuts {
-        settings.shortcuts = shortcuts;
-    }
-    if let Some(terminal) = partial.terminal {
-        settings.terminal = Some(terminal);
-    }
-    if let Some(auto_update) = partial.auto_update {
-        settings.auto_update = auto_update;
-    }
-    if let Some(update_channel) = partial.update_channel {
-        settings.update_channel = update_channel;
-    }
-    if let Some(agent) = partial.agent {
-        settings.agent = agent;
-    }
-    if let Some(spaces) = partial.spaces {
-        settings.spaces = spaces;
-    }
-    for overrides in settings.spaces.values_mut() {
-        overrides.normalize();
-    }
-    if let Some(projects) = partial.projects {
-        settings.projects = projects;
-    }
-    if let Some(recording) = partial.recording {
-        settings.recording = recording;
-    }
-    if let Some(editor) = partial.editor {
-        settings.editor = editor;
-    }
-    if let Some(appearance) = partial.appearance {
-        settings.appearance = appearance;
-    }
-    settings
 }
 
-fn parse_settings(text: &str) -> Result<AppSettings, ron::error::SpannedError> {
+fn register_manifests(
+    manifests: Query<(Entity, &FeatureManifest), Added<FeatureManifest>>,
+    mut commands: Commands,
+) {
+    for (entity, manifest) in &manifests {
+        match manifest.settings::<SettingsManifest>() {
+            Ok(Some(settings)) => {
+                commands.entity(entity).insert(settings);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                bevy::log::error!("settings: feature manifest is invalid: {error}");
+            }
+        }
+    }
+}
+
+fn compose_defaults(
+    manifests: Query<(Option<&Name>, &FeatureManifest, Option<&SettingsManifest>)>,
+    mut defaults: ResMut<SettingsDefaults>,
+) {
+    let mut manifests = manifests.iter().collect::<Vec<_>>();
+    manifests.sort_by(|left, right| {
+        left.0
+            .map(Name::as_str)
+            .unwrap_or_default()
+            .cmp(right.0.map(Name::as_str).unwrap_or_default())
+    });
+    let mut settings = AppSettings::default();
+    let mut bookmarks = Vec::new();
+    for (_, feature, manifest) in manifests {
+        if let Some(manifest) = manifest {
+            manifest.defaults.apply_to(&mut settings);
+        }
+        for page in &feature.pages {
+            if let Some(order) = page.bookmark {
+                bookmarks.push((order, page.url.clone()));
+            }
+        }
+    }
+    bookmarks.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+    settings.browser.bookmarks = bookmarks.into_iter().map(|(_, url)| url).collect();
+    defaults.0 = settings;
+}
+
+fn parse_with_defaults(
+    text: &str,
+    defaults: &AppSettings,
+) -> Result<AppSettings, ron::error::SpannedError> {
     ron::Options::default()
         .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
         .from_str::<PartialAppSettings>(text)
-        .map(merge_over_embedded)
+        .map(|partial| {
+            let mut settings = defaults.clone();
+            partial.apply_to(&mut settings);
+            settings
+        })
 }
 
-fn read_settings_and_path() -> (AppSettings, Option<std::path::PathBuf>) {
-    let path = vmux_core::profile::ProfilePaths::current().settings();
+fn read_settings_and_path(defaults: &AppSettings) -> (AppSettings, Option<std::path::PathBuf>) {
+    let path = vmux_ecs::profile::ProfilePaths::current().settings();
     let parent_ready = path
         .parent()
         .is_some_and(|parent| std::fs::create_dir_all(parent).is_ok());
     if parent_ready {
-        let s = match std::fs::read_to_string(&path) {
-            Ok(text) => match parse_settings(&text) {
-                Ok(s) => s,
-                Err(e) => {
+        let settings = match std::fs::read_to_string(&path) {
+            Ok(text) => match parse_with_defaults(&text, defaults) {
+                Ok(settings) => settings,
+                Err(error) => {
                     bevy::log::warn!(
-                        "Ignoring invalid config {}: {e}; using embedded defaults",
+                        "Ignoring invalid config {}: {error}; using feature defaults",
                         path.display()
                     );
-                    load_embedded_settings()
+                    defaults.clone()
                 }
             },
-            Err(_) => load_embedded_settings(),
+            Err(_) => defaults.clone(),
         };
-        (s, Some(path))
+        (settings, Some(path))
     } else {
-        (load_embedded_settings(), None)
+        (defaults.clone(), None)
     }
 }
 
-fn load_settings(mut commands: Commands, runtime: Single<Entity, With<LastSelfWriteHash>>) {
-    let (settings, config_path) = read_settings_and_path();
+fn load_settings(
+    defaults: Res<SettingsDefaults>,
+    mut commands: Commands,
+    runtime: Single<Entity, With<LastSelfWriteHash>>,
+) {
+    let (settings, config_path) = read_settings_and_path(&defaults.0);
     vmux_ui::i18n::Locale::requested(Some(&settings.appearance.locale)).make_current();
 
     commands.insert_resource(settings.layout.clone());
@@ -1164,6 +1265,7 @@ fn load_settings(mut commands: Commands, runtime: Single<Entity, With<LastSelfWr
 
 fn reload_settings_on_change(
     watcher: Option<Single<&SettingsWatcher>>,
+    defaults: Res<SettingsDefaults>,
     mut settings: ResMut<AppSettings>,
     mut layout_settings: ResMut<LayoutSettings>,
     mut confirm_close: ResMut<ConfirmCloseSettings>,
@@ -1189,7 +1291,7 @@ fn reload_settings_on_change(
                 bevy::log::debug!("settings: skipping reload (matches last self-write)");
                 return;
             }
-            match parse_settings(&text) {
+            match parse_with_defaults(&text, &defaults.0) {
                 Ok(new_settings) => {
                     bevy::log::info!("Settings reloaded from {}", watcher.path.display());
                     let locale =
@@ -1214,19 +1316,6 @@ fn reload_settings_on_change(
     }
 }
 
-fn load_embedded_settings() -> AppSettings {
-    static DEFAULTS: OnceLock<AppSettings> = OnceLock::new();
-    DEFAULTS
-        .get_or_init(|| {
-            vmux_core::host::manifest::FeatureManifest::of::<crate::Feature>()
-                .policy::<SettingsFeaturePolicy>()
-                .expect("embedded feature settings policy must parse")
-                .expect("settings feature manifest defines policy")
-                .defaults
-        })
-        .clone()
-}
-
 fn sync_search_engine(
     settings: Option<Res<AppSettings>>,
     mut search_engine: Single<&mut SearchEngineSetting>,
@@ -1244,12 +1333,11 @@ fn section_ron<T: Serialize>(value: &T) -> Result<String, String> {
         .map_err(|e| format!("RON serialize failed: {e}"))
 }
 
-fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
-    let default = load_embedded_settings();
+fn sparse_with_defaults(settings: &AppSettings, defaults: &AppSettings) -> Result<String, String> {
     let cur =
         serde_json::to_value(settings).map_err(|e| format!("settings to JSON failed: {e}"))?;
     let def =
-        serde_json::to_value(&default).map_err(|e| format!("settings to JSON failed: {e}"))?;
+        serde_json::to_value(defaults).map_err(|e| format!("settings to JSON failed: {e}"))?;
     let differs = |key: &str| cur.get(key) != def.get(key);
     let mut parts: Vec<String> = Vec::new();
     if differs("browser") {
@@ -1266,7 +1354,7 @@ fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
     }
     if differs("terminal") {
         let terminal_ron = match &settings.terminal {
-            Some(terminal) => sparse_terminal_ron(terminal, default.terminal.as_ref())?,
+            Some(terminal) => sparse_terminal_ron(terminal, defaults.terminal.as_ref())?,
             None => section_ron(&settings.terminal)?,
         };
         parts.push(format!("    terminal: {terminal_ron},"));
@@ -1304,7 +1392,7 @@ fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
     if differs("editor") {
         parts.push(format!(
             "    editor: {},",
-            sparse_editor_ron(&settings.editor, &default.editor)?
+            sparse_editor_ron(&settings.editor, &defaults.editor)?
         ));
     }
     if differs("appearance") {
@@ -1584,7 +1672,7 @@ fn set_leaf(
 pub struct LastSelfWriteHash(pub Option<u64>);
 
 #[derive(Message, Debug, Clone)]
-pub struct SettingsWriteRequest {
+struct SettingsWriteRequest {
     pub ron_bytes: String,
 }
 
@@ -1617,6 +1705,7 @@ fn request_settings_save(
 fn flush_settings_save(
     mut debounce: Single<&mut SettingsSaveDebounce>,
     settings: Res<AppSettings>,
+    defaults: Res<SettingsDefaults>,
     mut writes: MessageWriter<SettingsWriteRequest>,
 ) {
     let Some(due) = debounce.due else {
@@ -1626,7 +1715,7 @@ fn flush_settings_save(
         return;
     }
     debounce.due = None;
-    match sparse_settings_ron(&settings) {
+    match sparse_with_defaults(&settings, &defaults.0) {
         Ok(ron_bytes) => {
             writes.write(SettingsWriteRequest { ron_bytes });
         }
@@ -1659,6 +1748,45 @@ fn persist_settings_to_disk(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const MANIFESTS: [&str; 9] = [
+        include_str!("../feature.ron"),
+        include_str!("../../../vmux_agent/src/feature.ron"),
+        include_str!("../../../vmux_editor/src/feature.ron"),
+        include_str!("../../../vmux_input/src/feature.ron"),
+        include_str!("../../../vmux_layout/src/feature.ron"),
+        include_str!("../../../vmux_shortcut/src/feature.ron"),
+        include_str!("../../../vmux_space/src/feature.ron"),
+        include_str!("../../../vmux_terminal/src/feature.ron"),
+        include_str!("../../../../util/vmux_browser/src/feature.ron"),
+    ];
+
+    fn load_embedded_settings() -> AppSettings {
+        let mut settings = AppSettings::default();
+        let mut bookmarks = Vec::new();
+        for source in MANIFESTS {
+            let feature = FeatureManifest::parse(source);
+            if let Some(manifest) = feature.settings::<SettingsManifest>().unwrap() {
+                manifest.defaults.apply_to(&mut settings);
+            }
+            for page in feature.pages {
+                if let Some(order) = page.bookmark {
+                    bookmarks.push((order, page.url));
+                }
+            }
+        }
+        bookmarks.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+        settings.browser.bookmarks = bookmarks.into_iter().map(|(_, url)| url).collect();
+        settings
+    }
+
+    fn parse_settings(text: &str) -> Result<AppSettings, ron::error::SpannedError> {
+        parse_with_defaults(text, &load_embedded_settings())
+    }
+
+    fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
+        sparse_with_defaults(settings, &load_embedded_settings())
+    }
 
     #[test]
     fn acp_agent_config_parses() {
@@ -1705,14 +1833,15 @@ mod tests {
     #[test]
     fn apply_update_enables_run_placement_override() {
         let mut settings = base_settings();
-        let ron = settings
+        settings
             .apply_update(
                 "agent.allow_run_placement_override",
                 serde_json::json!(true),
             )
             .expect("update ok");
         assert!(settings.agent.allow_run_placement_override);
-        let reparsed: AppSettings = ron::de::from_str(&ron).expect("RON parses");
+        let ron = sparse_settings_ron(&settings).expect("serialize");
+        let reparsed = parse_settings(&ron).expect("RON parses");
         assert!(reparsed.agent.allow_run_placement_override);
     }
 
@@ -1720,11 +1849,11 @@ mod tests {
     fn apply_update_sets_tidy_auto_without_clobbering_siblings() {
         let mut s = base_settings();
         assert!(s.agent.follow_files);
-        let ron = s
-            .apply_update("agent.tidy_files_auto", serde_json::json!(true))
+        s.apply_update("agent.tidy_files_auto", serde_json::json!(true))
             .expect("update ok");
         assert!(s.agent.tidy_files_auto);
         assert!(s.agent.follow_files, "sibling preserved");
+        let ron = sparse_settings_ron(&s).expect("serialize");
         assert!(ron.contains("tidy_files_auto"));
     }
 
@@ -1767,7 +1896,7 @@ mod tests {
     fn editor_wrap_defaults_match_enabled_vscode_settings() {
         let settings = EditorSettings::default();
 
-        assert_eq!(settings.word_wrap, vmux_core::editor::WordWrap::On);
+        assert_eq!(settings.word_wrap, vmux_api::editor::WordWrap::On);
         assert_eq!(settings.word_wrap_column, 80);
     }
 
@@ -1778,7 +1907,7 @@ mod tests {
 
         assert_eq!(
             settings.editor.word_wrap,
-            vmux_core::editor::WordWrap::WordWrapColumn
+            vmux_api::editor::WordWrap::WordWrapColumn
         );
         assert_eq!(settings.editor.word_wrap_column, 100);
     }
@@ -2020,15 +2149,16 @@ mod tests {
     }
 
     #[test]
-    fn apply_settings_update_changes_pane_gap_and_returns_ron() {
+    fn apply_settings_update_changes_pane_gap() {
         let mut settings = base_settings();
-        let ron_bytes = settings
+        settings
             .apply_update("layout.pane.gap", serde_json::json!(16.0))
             .expect("apply ok");
         assert_eq!(settings.layout.pane.gap, 16.0);
+        let ron_bytes = sparse_settings_ron(&settings).expect("serialize");
         assert!(ron_bytes.contains("gap"));
         assert!(ron_bytes.contains("16"));
-        let reparsed: AppSettings = ron::de::from_str(&ron_bytes).expect("RON parses");
+        let reparsed = parse_settings(&ron_bytes).expect("RON parses");
         assert_eq!(reparsed.layout.pane.gap, 16.0);
     }
 
@@ -2044,12 +2174,13 @@ mod tests {
     #[test]
     fn apply_settings_update_changes_release_channel() {
         let mut settings = base_settings();
-        let ron = settings
+        settings
             .apply_update("update_channel", serde_json::json!("preview"))
             .expect("apply ok");
 
         assert_eq!(settings.update_channel, UpdateChannel::Preview);
-        let reparsed: AppSettings = ron::de::from_str(&ron).expect("RON parses");
+        let ron = sparse_settings_ron(&settings).expect("serialize");
+        let reparsed = parse_settings(&ron).expect("RON parses");
         assert_eq!(reparsed.update_channel, UpdateChannel::Preview);
     }
 
@@ -2493,12 +2624,13 @@ mod tests {
     #[test]
     fn apply_settings_update_writes_only_changed_section() {
         let mut settings = parse_settings("()").unwrap();
-        let ron = settings
+        settings
             .apply_update(
                 "browser.startup_url",
                 serde_json::json!("https://x.example"),
             )
             .unwrap();
+        let ron = sparse_settings_ron(&settings).unwrap();
         let sparse: PartialAppSettings = ron::Options::default()
             .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
             .from_str(&ron)
@@ -2599,14 +2731,14 @@ mod tests {
     #[test]
     fn sparse_save_persists_vim_keymap() {
         let mut settings = load_embedded_settings();
-        settings.editor.keymap = vmux_core::KeymapKind::Vim;
+        settings.editor.keymap = vmux_api::editor::KeymapKind::Vim;
 
         let ron = sparse_settings_ron(&settings).unwrap();
         assert!(ron.contains("editor: (keymap: vim)"), "{ron}");
         assert!(!ron.contains("word_wrap"), "{ron}");
         assert_eq!(
             parse_settings(&ron).unwrap().editor.keymap,
-            vmux_core::KeymapKind::Vim
+            vmux_api::editor::KeymapKind::Vim
         );
     }
 

@@ -3,7 +3,7 @@ use vmux_command::snapshot::{
     AgentPromptTarget, AgentSummary, CommandBarProjection, CommandBarWorkDirectory,
 };
 
-use vmux_core::{ArchivedPage, LastActivatedAt};
+use vmux_ecs::{ArchivedPage, LastActivatedAt};
 
 use crate::host::acp::registry::RegistryAgent;
 
@@ -31,14 +31,14 @@ impl Plugin for SnapshotPlugin {
 }
 
 fn sync_work_directories(
-    changed: Query<(Entity, &vmux_core::AgentWorkingDir), Changed<vmux_core::AgentWorkingDir>>,
-    mut removed: RemovedComponents<vmux_core::AgentWorkingDir>,
+    changed: Query<(Entity, &vmux_ecs::AgentWorkingDir), Changed<vmux_ecs::AgentWorkingDir>>,
+    mut removed: RemovedComponents<vmux_ecs::AgentWorkingDir>,
     mut commands: Commands,
 ) {
     for (entity, directory) in &changed {
-        commands
-            .entity(entity)
-            .insert(CommandBarWorkDirectory(directory.0.clone()));
+        commands.entity(entity).insert(CommandBarWorkDirectory(
+            directory.0.to_string_lossy().into_owned(),
+        ));
     }
     for entity in removed.read() {
         if let Ok(mut entity) = commands.get_entity(entity) {
@@ -117,8 +117,8 @@ fn update_recent_agents(
         );
     }
     for page in &archived_pages {
-        let target = match crate::host::url::AgentUrl::parse(&page.url) {
-            Some(crate::host::url::AgentUrl::Acp { id, .. }) => {
+        let target = match crate::acp::route::AcpRoute::parse(&page.url) {
+            Some(crate::acp::route::AcpRoute::Acp { id, .. }) => {
                 AgentPromptTarget::under(vmux_chat::ChatPlugin::URL, id)
             }
             _ => continue,
@@ -216,7 +216,7 @@ mod tests {
                 agent_id: "claude".to_string(),
                 sid: "acp-session".to_string(),
                 cwd: std::path::PathBuf::new(),
-                anchor: vmux_core::ProcessId::new(),
+                anchor: vmux_ecs::ProcessId::new(),
                 resume: None,
             },
             LastActivatedAt(30),
@@ -226,7 +226,7 @@ mod tests {
                 agent_id: "claude-acp".to_string(),
                 sid: "older-acp-session".to_string(),
                 cwd: std::path::PathBuf::new(),
-                anchor: vmux_core::ProcessId::new(),
+                anchor: vmux_ecs::ProcessId::new(),
                 resume: None,
             },
             LastActivatedAt(10),
@@ -288,7 +288,7 @@ mod tests {
                 agent_id: "claude-acp".to_string(),
                 sid: "acp-session".to_string(),
                 cwd: std::path::PathBuf::new(),
-                anchor: vmux_core::ProcessId::new(),
+                anchor: vmux_ecs::ProcessId::new(),
                 resume: None,
             },
             LastActivatedAt(10),
@@ -298,7 +298,7 @@ mod tests {
                 agent_id: "codex-acp".to_string(),
                 sid: "other-session".to_string(),
                 cwd: std::path::PathBuf::new(),
-                anchor: vmux_core::ProcessId::new(),
+                anchor: vmux_ecs::ProcessId::new(),
                 resume: None,
             },
             LastActivatedAt(10),

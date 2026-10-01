@@ -3,13 +3,13 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiInput};
-use vmux_core::event::{
+use vmux_ecs::event::{
     CompletionItem, DiagSeverity, EditorCapability, FileCodeActionPick, FileCodeActions,
     FileDiagnostic, FileDiagnostics, FileEditFailure, FileHover, FileLine, FileLspStatus,
     HoverBlock, LspServerState, OutlineEvent, RefItem,
 };
-use vmux_core::host::FileUiStateWrite;
-use vmux_core::page::PageReady;
+use vmux_ecs::host::FileUiStateWrite;
+use vmux_ecs::page::PageReady;
 use vmux_path::PathIdentity;
 use vmux_setting::AppSettings;
 
@@ -1547,7 +1547,7 @@ fn publish_status(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::event::StyledSpan;
+    use vmux_ecs::event::StyledSpan;
 
     #[test]
     fn a_language_string_hover_survives_as_a_highlighted_code_block() {
@@ -1577,7 +1577,7 @@ mod tests {
     fn fline(no: u32, text: &str) -> FileLine {
         FileLine {
             line_no: no,
-            fold: vmux_core::event::FoldGutter::None,
+            fold: vmux_ecs::event::FoldGutter::None,
             spans: vec![StyledSpan {
                 text: text.into(),
                 fg: [0, 0, 0],

@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_core::event::*;
+use vmux_ecs::event::*;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;

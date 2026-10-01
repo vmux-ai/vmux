@@ -17,7 +17,7 @@ regex.workspace = true
 serde = { workspace = true }
 rkyv = { workspace = true }
 unicode-width = "0.2"
-vmux_core = { path = "../../util/vmux_core" }
+vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_native = { path = "../../util/vmux_native" }
 vmux_git = { path = "../vmux_git" }
 vmux_knowledge = { path = "../vmux_knowledge" }

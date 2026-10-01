@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_core::host::persistence::PersistenceAppExt;
-use vmux_core::{Active, EffectiveStartupUrl};
+use vmux_ecs::host::persistence::PersistenceAppExt;
+use vmux_ecs::{Active, EffectiveStartupUrl};
 use vmux_flex::prelude::*;
 
 impl Plugin for SpaceLayoutPlugin {
@@ -257,7 +257,7 @@ mod tests {
         app.add_systems(Update, sync_current);
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("default".to_string()), vmux_core::Active))
+            .spawn((Space, SpaceId("default".to_string()), vmux_ecs::Active))
             .id();
         app.update();
         assert!(app.world().get::<CurrentSpace>(space).is_some());
@@ -278,7 +278,7 @@ mod tests {
         app.add_systems(Update, sync_current);
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("work".to_string()), vmux_core::Active))
+            .spawn((Space, SpaceId("work".to_string()), vmux_ecs::Active))
             .id();
         app.update();
         assert_eq!(
@@ -327,7 +327,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Space,
-                vmux_core::Active,
+                vmux_ecs::Active,
                 Space::container_node(),
                 Visibility::default(),
             ))

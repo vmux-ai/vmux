@@ -7,13 +7,13 @@ mod tool;
 
 use bevy::{ecs::message::MessageReader, prelude::*};
 use vmux_command::ReadCommandRequests;
-use vmux_core::{PageOpenRequest, PageOpenTarget};
+use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 
 pub use appearance::{ColorSchemeChanged, ResolvedColorScheme, ResolvedScheme, SystemAppearance};
 pub use runtime::{
-    AcpAgentConfig, AgentSettings, AppSettings, BookmarkFolderSettings, BrowserSettings,
-    ColorScheme, DirSource, EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH, EXPLORER_MIN_WIDTH,
-    KeyComboDef, SettingsLoadSet, SettingsRuntimePlugin, SettingsSaveRequest, SettingsWriteRequest,
+    AcpAgentConfig, AgentSettings, AppSettings, AppearanceSettings, BookmarkFolderSettings,
+    BrowserSettings, ColorScheme, DirSource, EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH,
+    EXPLORER_MIN_WIDTH, KeyComboDef, SettingsLoadSet, SettingsRuntimePlugin, SettingsSaveRequest,
     ShortcutDef, ShortcutEntry, ShortcutSettings, SpaceOverrides, SpaceProject, StartupDir,
     TerminalSettings, TerminalTheme, UpdateChannel,
 };
@@ -40,13 +40,13 @@ impl Plugin for SettingsPlugin {
             appearance::AppearancePlugin,
             vmux_layout::LayoutContractPlugin,
         ))
-        .add_message::<vmux_core::page::SettingsPageSpawnRequest>()
+        .add_message::<vmux_ecs::page::SettingsPageSpawnRequest>()
         .add_systems(Update, respond_settings_spawn.in_set(ReadCommandRequests));
     }
 }
 
 fn respond_settings_spawn(
-    mut reader: MessageReader<vmux_core::page::SettingsPageSpawnRequest>,
+    mut reader: MessageReader<vmux_ecs::page::SettingsPageSpawnRequest>,
     mut page_open: MessageWriter<PageOpenRequest>,
 ) {
     for req in reader.read() {

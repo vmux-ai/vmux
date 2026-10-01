@@ -4,19 +4,19 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use vmux_api::avatar::hash_color;
 use vmux_api::protocol::{AgentCommandResult, AgentListTeam};
-use vmux_core::agent::{
+use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
-use vmux_core::event::team::{
+use vmux_ecs::event::team::{
     ProfileRow, TeamEvent, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest,
     TeamProfileCreateRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest,
 };
-use vmux_core::host::{UiStatePlugin, UiStateWrite};
-use vmux_core::notify::AgentDoneUnseen;
-use vmux_core::page::PageReady;
-use vmux_core::profile::{Profile as StoredProfile, ProfileId, ProfileLabel, is_test_session};
-use vmux_core::team::{Agent, Profile, Tester, User};
-use vmux_core::{ActivateRequest, Active, PageMetadata};
+use vmux_ecs::host::{UiStatePlugin, UiStateWrite};
+use vmux_ecs::notify::AgentDoneUnseen;
+use vmux_ecs::page::PageReady;
+use vmux_ecs::profile::{Profile as StoredProfile, ProfileId, ProfileLabel, is_test_session};
+use vmux_ecs::team::{Agent, Profile, Tester, User};
+use vmux_ecs::{ActivateRequest, Active, PageMetadata};
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::native_open::HostedUiPlugin;
 use vmux_layout::profile::Profile as SpaceProfile;
@@ -446,7 +446,7 @@ fn profile_update_request(
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_core::LastActivatedAt;
+    use vmux_ecs::LastActivatedAt;
 
     fn spawn_team_stack(world: &mut World, space: Entity) -> Entity {
         world
@@ -496,7 +496,7 @@ mod tests {
         app.add_plugins(ProjectionPlugin);
         let space = app
             .world_mut()
-            .spawn((Space, vmux_core::Active, CurrentSpace))
+            .spawn((Space, vmux_ecs::Active, CurrentSpace))
             .id();
         app.world_mut().spawn((Profile::user(), User));
         app.world_mut().spawn((
@@ -508,7 +508,7 @@ mod tests {
             ProfileLabel,
             ProfileId("work".to_string()),
             Name::new("Work"),
-            vmux_core::Active,
+            vmux_ecs::Active,
         ));
         let view = app.world_mut().spawn(Team).id();
 
@@ -574,7 +574,7 @@ mod tests {
 
     #[test]
     fn team_page_open_titles_webview_profiles() {
-        use vmux_core::page_open::{PageOpenId, PageOpenTask};
+        use vmux_ecs::page_open::{PageOpenId, PageOpenTask};
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_layout::native_open::NativeOpenPlugin)
@@ -660,7 +660,7 @@ mod tests {
             },
             PageMetadata {
                 url: "vmux://sessions/mistral-vibe".to_string(),
-                icon: vmux_core::PageIcon::favicon("https://cdn.example/vibe.svg"),
+                icon: vmux_ecs::PageIcon::favicon("https://cdn.example/vibe.svg"),
                 ..default()
             },
             ChildOf(space),

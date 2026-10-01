@@ -10,7 +10,7 @@ impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn)
             .add_systems(Update, load)
-            .add_systems(Update, persist.after(vmux_core::service::ServiceMessageSet));
+            .add_systems(Update, persist.after(vmux_ecs::service::ServiceMessageSet));
     }
 }
 
@@ -76,7 +76,7 @@ fn spawn(mut commands: Commands) {
     commands.spawn((
         Name::new("Agent handoff directory"),
         HandoffDirectory(
-            vmux_core::profile::ProfilePaths::current()
+            vmux_ecs::profile::ProfilePaths::current()
                 .profile()
                 .join("handoffs"),
         ),

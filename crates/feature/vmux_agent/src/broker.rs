@@ -3,7 +3,7 @@ use vmux_api::protocol::{
     AGENT_QUERY_TIMEOUT, AGENT_REQUEST_TIMEOUT, AGENT_TOOL_TIMEOUT, AgentCommandResult,
     AgentRequest, AgentRequestId, JsonValue, ProcessId, ServiceMessage,
 };
-use vmux_core::service::PendingRequests;
+use vmux_ecs::service::PendingRequests;
 
 pub type AgentCommandResponses = PendingRequests<AgentRequestId, AgentCommandResult>;
 pub type AgentQueryResponses = PendingRequests<AgentRequestId, ServiceMessage>;

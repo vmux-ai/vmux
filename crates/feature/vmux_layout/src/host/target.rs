@@ -1,7 +1,7 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use vmux_core::terminal::{ProcessExited, Terminal};
+use vmux_ecs::terminal::{ProcessExited, Terminal};
 
 use crate::pane::{Pane, PaneSplit};
 use crate::stack::{LayoutFocus, Stack};
@@ -23,7 +23,7 @@ pub struct BrowserTargets<'w, 's, B: Component> {
     panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
     stacks: Query<'w, 's, Entity, With<Stack>>,
     focus: LayoutFocus<'w, 's>,
-    stack_activity: Query<'w, 's, (Entity, &'static vmux_core::LastActivatedAt), With<Stack>>,
+    stack_activity: Query<'w, 's, (Entity, &'static vmux_ecs::LastActivatedAt), With<Stack>>,
     browsers: Query<'w, 's, (Entity, &'static ChildOf), With<B>>,
     terminals: Query<'w, 's, (Entity, &'static ChildOf), (With<Terminal>, Without<ProcessExited>)>,
 }

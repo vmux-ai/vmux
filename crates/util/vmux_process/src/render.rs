@@ -5,7 +5,7 @@ use alacritty_terminal::{
     term::{Term, cell::Flags as CellFlags},
     vte::ansi::{Color, NamedColor},
 };
-use vmux_core::event::{
+use vmux_ecs::event::{
     FLAG_BOLD, FLAG_DIM, FLAG_INVERSE, FLAG_ITALIC, FLAG_STRIKETHROUGH, FLAG_UNDERLINE, TermColor,
     TermLine, TermSpan,
 };

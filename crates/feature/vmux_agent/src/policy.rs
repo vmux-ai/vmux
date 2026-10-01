@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_core::host::manifest::FeatureManifest;
+use vmux_ecs::host::manifest::FeatureManifest;
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
+use vmux_ecs::host::manifest::FeaturePlugin;
 
 pub(crate) struct AgentPolicyPlugin;
 

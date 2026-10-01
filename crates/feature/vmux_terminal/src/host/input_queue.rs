@@ -4,7 +4,7 @@ use bevy::ecs::entity::EntityHashMap;
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use vmux_api::protocol::{ClientMessage, ProcessId};
-use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
+use vmux_ecs::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
 
 use super::plugin::{
     AwaitingProcessCreated, PendingServiceCreate, ShellOutputSeen, TerminalReinputRequest,
@@ -173,7 +173,7 @@ fn flush_input(
     inputs: Query<(Entity, &TerminalInput, &TerminalInputTarget)>,
     terminals: Query<
         (
-            &vmux_core::ProcessId,
+            &vmux_ecs::ProcessId,
             Has<ShellOutputSeen>,
             Has<PendingServiceCreate>,
             Has<AwaitingProcessCreated>,

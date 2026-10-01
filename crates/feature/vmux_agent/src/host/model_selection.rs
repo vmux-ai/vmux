@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use vmux_api::protocol::AcpModeOption;
 use vmux_chat::event::ModelOptionEntry;
 use vmux_command::snapshot::AgentPromptTarget;
-use vmux_core::profile::ProfilePaths;
+use vmux_ecs::profile::ProfilePaths;
 use vmux_path::AtomicFile;
 
 pub(super) struct ModelSelectionPlugin;

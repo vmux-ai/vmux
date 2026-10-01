@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::event::{ExplorerGoto, ExplorerSearchEvent, ExplorerSearchFile, ExplorerSearchOpen};
+use vmux_ecs::event::{ExplorerGoto, ExplorerSearchEvent, ExplorerSearchFile, ExplorerSearchOpen};
 
 use super::panel::StackExplorerVisibility;
 use super::{ExplorerPanelDefaults, ExplorerPanelSent};
@@ -60,7 +60,7 @@ const GLOBAL_SEARCH_RETRY_LIMIT: u8 = 120;
 type GlobalSearchDirtyReady = (
     With<GlobalSearchState>,
     With<GlobalSearchDirty>,
-    With<vmux_core::page::PageReady>,
+    With<vmux_ecs::page::PageReady>,
 );
 fn goto(
     trigger: On<UiInput<ExplorerGoto>>,
@@ -142,7 +142,7 @@ fn emit(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
             entity, &search.0,
         ));
         commands.entity(entity).remove::<GlobalSearchDirty>();

@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use vmux_api::bookmark::{
     BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
 };
-use vmux_core::event::team::{TeamEvent, TeamMemberRow};
+use vmux_ecs::event::team::{TeamEvent, TeamMemberRow};
 
 use crate::cef::LayoutCef;
 use crate::event::{
@@ -58,7 +58,7 @@ pub struct StackProjection(pub StackNavigationState);
 pub struct BookmarkProjection(pub BookmarkStateEvent);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
-pub struct SpacesProjection(pub vmux_core::event::space::SpacesListEvent);
+pub struct SpacesProjection(pub vmux_ecs::event::space::SpacesListEvent);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 struct TabListProjection(TabListState);
@@ -95,7 +95,7 @@ impl TabStripProjection {
             } else {
                 tab.name.clone()
             };
-            let metadata = vmux_core::PageMetadata {
+            let metadata = vmux_ecs::PageMetadata {
                 title: display_title.clone(),
                 url: tab.url.clone(),
                 icon: tab.icon.clone(),
@@ -164,7 +164,7 @@ impl BookmarkUiBuilder {
             pins,
             rows: builder.rows,
             folders: bookmarks.folders.clone(),
-            active_page: active_page.map(|page| vmux_core::PageMetadata {
+            active_page: active_page.map(|page| vmux_ecs::PageMetadata {
                 title: page.title.clone(),
                 url: page.url.clone(),
                 icon: page.icon.clone(),
@@ -241,7 +241,7 @@ impl BookmarkUiBuilder {
 }
 
 impl ActiveWorkspaceProject {
-    fn active(projects: &[vmux_core::event::ProjectRow]) -> Option<Self> {
+    fn active(projects: &[vmux_ecs::event::ProjectRow]) -> Option<Self> {
         let index = projects
             .iter()
             .position(|project| project.depth == 0 && project.is_active)?;
@@ -325,7 +325,7 @@ impl HeaderState {
             .filter(|url| !url.is_empty())
         else {
             return Self {
-                metadata: active.as_ref().map(|row| vmux_core::PageMetadata {
+                metadata: active.as_ref().map(|row| vmux_ecs::PageMetadata {
                     title: row.title.clone(),
                     url: row.url.clone(),
                     icon: row.icon.clone(),
@@ -353,7 +353,7 @@ impl HeaderState {
             .find(|pin| pin.metadata.url == url)
             .map(|pin| pin.uuid.clone());
         Self {
-            metadata: active.as_ref().map(|row| vmux_core::PageMetadata {
+            metadata: active.as_ref().map(|row| vmux_ecs::PageMetadata {
                 title: row.title.clone(),
                 url: row.url.clone(),
                 icon: row.icon.clone(),
@@ -371,7 +371,7 @@ impl HeaderState {
 impl SideSheetProjection {
     fn from_sources(
         panes: &PaneTreeState,
-        spaces: &vmux_core::event::space::SpacesListEvent,
+        spaces: &vmux_ecs::event::space::SpacesListEvent,
         current: Option<&Self>,
     ) -> Self {
         let active_space = spaces.spaces.iter().find(|space| space.is_active).cloned();
@@ -486,7 +486,7 @@ fn publish_active_session(
         if last.get(&entity) == Some(&event) {
             continue;
         }
-        commands.trigger(vmux_core::host::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::host::UiStateWrite::<LayoutUiState>::from_event(
             entity, &event,
         ));
         last.insert(entity, event);
@@ -494,7 +494,7 @@ fn publish_active_session(
 }
 
 fn capture_tab_list(
-    trigger: On<vmux_core::host::UiStateWrite<LayoutUiState>>,
+    trigger: On<vmux_ecs::host::UiStateWrite<LayoutUiState>>,
     mut commands: Commands,
 ) {
     let Some(tabs) = &trigger.event().patch().tabs else {
@@ -563,7 +563,7 @@ fn publish_header(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_core::host::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::host::UiStateWrite::<LayoutUiState>::from_event(
             entity,
             &projection.0,
         ));
@@ -575,7 +575,7 @@ fn publish_tab_strip(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_core::host::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::host::UiStateWrite::<LayoutUiState>::from_event(
             entity,
             &projection.0,
         ));
@@ -632,7 +632,7 @@ fn publish_side_sheet(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_core::host::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::host::UiStateWrite::<LayoutUiState>::from_event(
             entity,
             &projection.state,
         ));
@@ -644,7 +644,7 @@ fn publish_bookmark_ui(
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {
-        commands.trigger(vmux_core::host::UiStateWrite::<LayoutUiState>::from_event(
+        commands.trigger(vmux_ecs::host::UiStateWrite::<LayoutUiState>::from_event(
             entity,
             &projection.0,
         ));
@@ -807,13 +807,13 @@ mod tests {
                 },
             ],
         };
-        let spaces = vmux_core::event::space::SpacesListEvent {
+        let spaces = vmux_ecs::event::space::SpacesListEvent {
             spaces: vec![
-                vmux_core::event::space::SpaceRow {
+                vmux_ecs::event::space::SpaceRow {
                     id: "inactive".into(),
                     ..Default::default()
                 },
-                vmux_core::event::space::SpaceRow {
+                vmux_ecs::event::space::SpaceRow {
                     id: "active".into(),
                     is_active: true,
                     ..Default::default()

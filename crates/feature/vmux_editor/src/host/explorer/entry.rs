@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
-use vmux_core::event::{ExplorerCreate, ExplorerDelete, ExplorerFsResult, ExplorerRename};
+use vmux_ecs::event::{ExplorerCreate, ExplorerDelete, ExplorerFsResult, ExplorerRename};
 
 use super::{
     ExplorerState, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty, OpenEditorsDirty,
@@ -119,16 +119,16 @@ fn rename(
             .ok_or_else(|| "Explorer root cannot be changed".to_string())?
             .to_path_buf();
         let next_path = old_path.with_file_name(&name);
-        let knowledge_root = vmux_core::knowledge::KnowledgeVault::user().into_root();
+        let knowledge_root = vmux_knowledge::KnowledgeVault::user().into_root();
         let rename_plan = (root
             .canonicalize()
             .ok()
             .zip(knowledge_root.canonicalize().ok())
             .is_some_and(|(root, knowledge_root)| root == knowledge_root))
         .then(|| {
-            vmux_core::knowledge::KnowledgeIndex::build(&root)
+            vmux_knowledge::KnowledgeIndex::build(&root)
                 .map(|index| {
-                    vmux_core::knowledge::KnowledgeRenamePlan::build(&index, &old_path, &next_path)
+                    vmux_knowledge::KnowledgeRenamePlan::build(&index, &old_path, &next_path)
                 })
                 .map_err(|error| error.to_string())
         })
@@ -199,7 +199,7 @@ fn drain_creates(
             Ok(outcome) => outcome,
             Err(error) => {
                 if browsers.can_emit_to(&webview) {
-                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                         webview,
                         &ExplorerFsResult {
                             ok: false,
@@ -230,7 +230,7 @@ fn drain_creates(
             } else {
                 outcome.path.to_string_lossy().into_owned()
             };
-            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                 webview,
                 &ExplorerFsResult {
                     ok: true,
@@ -269,7 +269,7 @@ fn drain_renames(
             Ok(outcome) => outcome,
             Err(error) => {
                 if browsers.can_emit_to(&webview) {
-                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                         webview,
                         &ExplorerFsResult {
                             ok: false,
@@ -307,7 +307,7 @@ fn drain_renames(
             .entity(webview)
             .insert((ExplorerTreeDirty, OpenEditorsDirty));
         if browsers.can_emit_to(&webview) {
-            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                 webview,
                 &ExplorerFsResult {
                     ok: true,
@@ -346,7 +346,7 @@ fn drain_deletes(
             Ok(outcome) => outcome,
             Err(error) => {
                 if browsers.can_emit_to(&webview) {
-                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                         webview,
                         &ExplorerFsResult {
                             ok: false,
@@ -382,7 +382,7 @@ fn drain_deletes(
             .entity(webview)
             .insert((ExplorerTreeDirty, OpenEditorsDirty));
         if browsers.can_emit_to(&webview) {
-            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                 webview,
                 &ExplorerFsResult {
                     ok: true,

@@ -35,9 +35,9 @@ impl AgentContribution {
                     title: agent.name.clone(),
                     keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
                     icon: if agent.icon.is_empty() {
-                        vmux_core::PageIcon::None
+                        vmux_ecs::PageIcon::None
                     } else {
-                        vmux_core::PageIcon::Favicon(agent.icon.clone())
+                        vmux_ecs::PageIcon::Favicon(agent.icon.clone())
                     },
                     shortcut: String::new(),
                     prompt_target: true,
@@ -46,17 +46,17 @@ impl AgentContribution {
             });
         }
         let recency = AgentPromptTarget::recency_ranks(&agents.recent);
-        pages.sort_by(|a, b| {
+        pages.sort_by(|left, right| {
             recency
-                .get(&a.page.url)
+                .get(&left.page.url)
                 .copied()
                 .unwrap_or(usize::MAX)
-                .cmp(&recency.get(&b.page.url).copied().unwrap_or(usize::MAX))
+                .cmp(&recency.get(&right.page.url).copied().unwrap_or(usize::MAX))
                 .then_with(|| {
-                    a.page
+                    left.page
                         .title
                         .to_lowercase()
-                        .cmp(&b.page.title.to_lowercase())
+                        .cmp(&right.page.title.to_lowercase())
                 })
         });
         for (rank, page) in pages.iter_mut().enumerate() {
@@ -130,7 +130,7 @@ mod tests {
         assert_eq!(pages[1].page.title, "Claude Agent");
         assert!(matches!(
             pages[1].page.icon,
-            vmux_core::PageIcon::Favicon(ref u) if u == "https://cdn.example/claude-acp.svg"
+            vmux_ecs::PageIcon::Favicon(ref u) if u == "https://cdn.example/claude-acp.svg"
         ));
     }
 

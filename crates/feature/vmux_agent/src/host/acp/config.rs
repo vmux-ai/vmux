@@ -19,8 +19,8 @@ use vmux_chat::event::{
 };
 use vmux_chat::host::{ChatModeStateChanged, ChatModelStateChanged, ChatView};
 use vmux_command::snapshot::{AgentPromptTarget, CommandBarProjection};
-use vmux_core::page::PageReady;
-use vmux_core::service::{ServiceMessageSet, ServiceRequest};
+use vmux_ecs::page::PageReady;
+use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_session::AcpSession;
 
 pub struct AcpSessionConfigPlugin;
@@ -606,7 +606,7 @@ mod tests {
                     agent_id: "claude".into(),
                     sid: "s1".into(),
                     cwd: "/tmp".into(),
-                    anchor: vmux_core::ProcessId::new(),
+                    anchor: vmux_ecs::ProcessId::new(),
                     resume: None,
                 },
                 AcpSessionConfigState {
@@ -714,7 +714,7 @@ mod tests {
                     agent_id: "claude".into(),
                     sid: "s1".into(),
                     cwd: "/tmp".into(),
-                    anchor: vmux_core::ProcessId::new(),
+                    anchor: vmux_ecs::ProcessId::new(),
                     resume: None,
                 },
                 AcpSessionConfigState {
@@ -805,7 +805,7 @@ mod tests {
                 agent_id: "codex-acp".into(),
                 sid: "s1".into(),
                 cwd: "/tmp".into(),
-                anchor: vmux_core::ProcessId::new(),
+                anchor: vmux_ecs::ProcessId::new(),
                 resume: None,
             },
             AcpSessionConfigState {
@@ -881,7 +881,7 @@ mod tests {
                     agent_id: "claude".into(),
                     sid: "s2".into(),
                     cwd: "/tmp".into(),
-                    anchor: vmux_core::ProcessId::new(),
+                    anchor: vmux_ecs::ProcessId::new(),
                     resume: None,
                 },
                 AcpSessionConfigState {

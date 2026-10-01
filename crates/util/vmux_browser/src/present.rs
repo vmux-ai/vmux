@@ -8,8 +8,8 @@ use bevy_cef::prelude::*;
 use vmux_command::CommandBar;
 use vmux_command::command_bar::panel::CommandBarPanelActive;
 use vmux_command::command_bar::{CommandBarNativeSize, PendingCommandBarReveal};
-use vmux_core::overlay::{OverlayState, WindowOverlay};
-use vmux_core::page::PageReady;
+use vmux_ecs::overlay::{OverlayState, WindowOverlay};
+use vmux_ecs::page::PageReady;
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::{
@@ -25,7 +25,7 @@ use vmux_layout::{
     },
 };
 
-use vmux_core::KeyboardOwner;
+use vmux_ecs::KeyboardOwner;
 use vmux_setting::AppSettings;
 
 use crate::host::{
@@ -852,7 +852,7 @@ fn sync_windowed_command_bar(
             &Visibility,
             Has<KeyboardOwner>,
             Has<WebviewWindowed>,
-            Has<vmux_core::overlay::OverlayShownInline>,
+            Has<vmux_ecs::overlay::OverlayShownInline>,
             Option<&HostWindow>,
             Option<&CommandBarNativeSize>,
         ),

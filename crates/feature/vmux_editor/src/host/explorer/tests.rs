@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_api::BinEvent;
-use vmux_core::event::*;
+use vmux_ecs::event::*;
 
 use super::*;
 use crate::host::editor::FileView;
@@ -528,9 +528,7 @@ impl SentReveals {
     fn watch(app: &mut App, webview: Entity) {
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(webview);
-        app.add_plugins(vmux_core::host::UiStatePlugin::<
-            vmux_core::event::FileUiState,
-        >::default())
+        app.add_plugins(vmux_ecs::host::UiStatePlugin::<vmux_ecs::event::FileUiState>::default())
             .insert_non_send(browsers)
             .init_resource::<Self>()
             .add_observer(Self::record);

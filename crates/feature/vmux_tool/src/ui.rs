@@ -2,13 +2,13 @@
 
 use std::collections::BTreeSet;
 
-use dioxus::prelude::*;
-use vmux_core::tool::{
+use crate::state::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolItem, ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind,
     ToolOperationNotice, ToolProvider, ToolStatus, ToolUninstallRequest, ToolUnlinkRequest,
     ToolUpdateRequest, ToolsNavigateRequest, ToolsRefreshRequest, ToolsUiState,
 };
+use dioxus::prelude::*;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList, ManagerPage,
     ManagerRow, ManagerSpinner, ManagerTab, ManagerTabs, ManagerThumbnail,
@@ -21,13 +21,13 @@ use crate::route::ToolRoute;
 #[vmux_native::page(
     component = Page,
     subtree,
-    takes = vmux_core::PageMetadata
+    takes = vmux_ecs::PageMetadata
 )]
 pub struct ToolsPage;
 
 #[component]
 pub fn Page() -> Element {
-    let initial_route = try_consume_context::<vmux_core::PageMetadata>()
+    let initial_route = try_consume_context::<vmux_ecs::PageMetadata>()
         .map(|metadata| ToolRoute::from(metadata.url.as_str()))
         .unwrap_or_default();
     let active_route = use_signal(|| initial_route);

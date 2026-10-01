@@ -13,22 +13,22 @@ use crate::event::{
     ChatBranchesState, ChatItem, ChatMediaState, ChatOpenPage, ChatResumeState, ChatSnapshot,
     ChatTranscriptState, ComposerContext, ResumableSessions,
 };
+use crate::group::group_turns_tail;
+use crate::projection::{activity_counts, current_activity};
 use crate::state::ChatUiState;
 use vmux_api::ProcessId;
 use vmux_api::command_bar::PromptRequest;
 use vmux_api::protocol::AgentCommandResult;
 use vmux_command::command_bar::CommandBarDismiss;
 use vmux_command::snapshot::{CommandBarProjection, ContributedPages};
-use vmux_core::agent::{
+use vmux_ecs::agent::{
     AgentCommandResponse, AgentContinuationRequest, AgentRequestAppExt, AgentRequestMessage,
     AgentRequestRouteSet, AgentSessionRoot,
 };
-use vmux_core::chat::group_turns_tail;
-use vmux_core::chat_projection::{activity_counts, current_activity};
-use vmux_core::host::UiState;
-use vmux_core::launcher::{HostsLauncher, InlineTransitionRequested};
-use vmux_core::team::Profile;
-use vmux_core::{
+use vmux_ecs::host::UiState;
+use vmux_ecs::launcher::{HostsLauncher, InlineTransitionRequested};
+use vmux_ecs::team::Profile;
+use vmux_ecs::{
     PageIcon, PageIdentity, PageOpenRequest, PageOpenTarget, PendingPrompt,
     PendingPromptAttachments,
 };
@@ -547,7 +547,7 @@ impl ChatResumeProjection {
             return false;
         }
         self.0.sessions.clone_from(&sessions.sessions);
-        self.0.rows = vmux_core::chat_projection::ResumeRows::all(&sessions.sessions);
+        self.0.rows = vmux_command::command_bar::ResumeRows::all(&sessions.sessions);
         self.0.total = sessions.total;
         self.0.loading = false;
         true
@@ -584,8 +584,8 @@ mod tests {
     use super::*;
     use vmux_api::chat::{ChatBlock, ChatTurn};
     use vmux_api::protocol::{AgentRequest, AgentRequestId};
-    use vmux_core::ProcessId;
-    use vmux_core::agent::{AgentRequestInput, CommandOrigin};
+    use vmux_ecs::ProcessId;
+    use vmux_ecs::agent::{AgentRequestInput, CommandOrigin};
 
     struct Conversation {
         view: Entity,
@@ -625,9 +625,9 @@ mod tests {
             app.update();
         }
 
-        fn reported(&self, app: &App) -> vmux_core::PageIdentity {
+        fn reported(&self, app: &App) -> vmux_ecs::PageIdentity {
             app.world()
-                .get::<vmux_core::PageIdentity>(self.view)
+                .get::<vmux_ecs::PageIdentity>(self.view)
                 .cloned()
                 .unwrap_or_default()
         }
@@ -645,7 +645,7 @@ mod tests {
         );
         assert!(
             app.world()
-                .get::<vmux_core::PageIdentity>(conversation.session)
+                .get::<vmux_ecs::PageIdentity>(conversation.session)
                 .is_none()
         );
     }
@@ -705,8 +705,8 @@ mod tests {
             blocks: vec![ChatBlock::Thinking(String::new())],
             ..Default::default()
         };
-        vmux_core::chat_projection::project_turn(&mut thinking_turn);
-        let thinking = vmux_core::chat_projection::current_activity(
+        crate::projection::project_turn(&mut thinking_turn);
+        let thinking = crate::projection::current_activity(
             &[vmux_api::chat::ChatItem::Turn(thinking_turn)],
             "streaming",
         )
@@ -719,8 +719,8 @@ mod tests {
             ],
             ..Default::default()
         };
-        vmux_core::chat_projection::project_turn(&mut writing_turn);
-        let writing = vmux_core::chat_projection::current_activity(
+        crate::projection::project_turn(&mut writing_turn);
+        let writing = crate::projection::current_activity(
             &[vmux_api::chat::ChatItem::Turn(writing_turn)],
             "streaming",
         )

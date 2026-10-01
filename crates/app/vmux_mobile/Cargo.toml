@@ -41,9 +41,9 @@ vmux_transport = { path = "../../util/vmux_transport" }
 vmux_app = { path = "../../util/vmux_app", features = ["mobile"] }
 vmux_path = { path = "../../util/vmux_path" }
 vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
-vmux_core = { path = "../../util/vmux_core" }
+vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_chat = { path = "../../feature/vmux_chat" }
-vmux_session = { path = "../../util/vmux_session" }
+vmux_session = { path = "../../feature/vmux_session" }
 vmux_start = { path = "../../feature/vmux_start" }
 vmux_team = { path = "../../feature/vmux_team" }
 vmux_ui = { path = "../../util/vmux_ui" }

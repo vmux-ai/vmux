@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_api::error::{ErrorPageData, FAILED_TO_LOAD, NOT_FOUND};
+use vmux_api::error::ErrorPageData;
 use vmux_ui::hooks::use_theme;
 use vmux_ui::i18n::translate;
 
@@ -17,11 +17,10 @@ pub fn Page() -> Element {
     use_theme();
     let failure = use_hook(|| try_consume_context::<ErrorPageData>().unwrap_or_default());
 
-    let title = match failure.title.as_str() {
-        FAILED_TO_LOAD => translate("error-page-failed-load"),
-        NOT_FOUND => translate("error-page-not-found"),
-        "" => translate("error-title"),
-        _ => failure.title.clone(),
+    let title = if failure.title_message_id.is_empty() {
+        translate("error-title")
+    } else {
+        translate(&failure.title_message_id)
     };
 
     rsx! {

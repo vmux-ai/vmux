@@ -21,8 +21,8 @@ use vmux_command::{
     BindCommands, CommandDefinition, CommandInvocation, DispatchCommandInvocations,
     WriteCommandRequests,
 };
-use vmux_core::host::page::BindsEditingChords;
-use vmux_core::team::User;
+use vmux_ecs::host::page::BindsEditingChords;
+use vmux_ecs::team::User;
 use vmux_layout::stack::CloseRequest;
 use vmux_layout::tab::TabClosed;
 use vmux_native::menu::{

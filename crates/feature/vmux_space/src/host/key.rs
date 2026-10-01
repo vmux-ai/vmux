@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_command::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
-use vmux_core::host::UiStateWrite;
+use vmux_ecs::host::UiStateWrite;
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
+use vmux_ecs::host::manifest::FeaturePlugin;
 
 use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
 use crate::event::{SpaceAttachRequest, SpaceDeleteRequest, SpacesUiState};

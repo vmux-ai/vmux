@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use ropey::Rope;
-use vmux_core::event::{FileIndent, FileLineEnding, FileShapeEvent, FileShapeSet};
+use vmux_ecs::event::{FileIndent, FileLineEnding, FileShapeEvent, FileShapeSet};
 
 use crate::edit::EditCommand;
 use crate::host::editing::EditRequest;
@@ -162,7 +162,7 @@ fn file_set(
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
         entity,
         &FileShapeEvent {
             indent: shape.indent,

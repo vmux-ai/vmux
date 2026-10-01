@@ -294,7 +294,7 @@ fn toggle_label(any_visible: bool, locale: &Locale) -> String {
 
 fn tray_locale(settings: &AppSettings) -> Locale {
     let locale = Locale::requested(Some(&settings.appearance.locale));
-    let directory = vmux_core::profile::ProfilePaths::current()
+    let directory = vmux_ecs::profile::ProfilePaths::current()
         .config()
         .join("locales");
     let tag = locale.as_str();

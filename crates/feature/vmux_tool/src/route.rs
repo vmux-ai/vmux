@@ -1,5 +1,5 @@
+use crate::state::ToolProvider;
 use vmux_api::VmuxRoute;
-use vmux_core::tool::ToolProvider;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum ToolRoute {

@@ -3,13 +3,13 @@ use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use crossbeam_channel::{Receiver, Sender};
 use std::collections::HashSet;
-use vmux_core::event::{
+use vmux_ecs::event::{
     InstallPhase, LspCatalog, LspCatalogRequest, LspInstallProgress, LspInstallRequest,
     LspManagerUiState, LspPackage, LspPackageStatus, LspPkgStatus, LspUninstallRequest,
     LspUpdateRequest,
 };
-use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
-use vmux_core::page::PageReady;
+use vmux_ecs::host::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_ecs::page::PageReady;
 use vmux_layout::native_open::HostedUiPlugin;
 
 use crate::lsp::catalog::{CatalogOutput, CatalogReady, CatalogSearch, Package};
@@ -59,7 +59,7 @@ impl Plugin for ManagerPlugin {
 
 fn page_ready(
     trigger: On<UiInput<PageReady>>,
-    pages: Query<&vmux_core::PageMetadata>,
+    pages: Query<&vmux_ecs::PageMetadata>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
@@ -521,7 +521,7 @@ fn deliver_progress_outputs(
         }
         for target in targets.matching(output.target, &output.progress.name) {
             if targets.contains(target) {
-                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                     target,
                     &output.progress,
                 ));
@@ -554,7 +554,7 @@ fn deliver_status_outputs(
         }
         for target in matching {
             if targets.contains(target) {
-                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                     target,
                     &output.status,
                 ));
@@ -590,7 +590,7 @@ mod tests {
         app.add_observer(page_ready);
         let webview = app
             .world_mut()
-            .spawn(vmux_core::PageMetadata {
+            .spawn(vmux_ecs::PageMetadata {
                 url: "vmux://tools/lsp".to_string(),
                 ..Default::default()
             })

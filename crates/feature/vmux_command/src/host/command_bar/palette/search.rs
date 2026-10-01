@@ -8,8 +8,8 @@ use vmux_api::command_bar::{
     HistorySuggestionsRequest, HistorySuggestionsResponse, PathCompleteRequest,
     PathCompleteResponse,
 };
-use vmux_core::host::UiStateWrite;
-use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
+use vmux_ecs::host::UiStateWrite;
+use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
 
 use super::{OpenVersion, PaletteSnapshot, PendingPaletteRequest, RequestDelay, RequestGeneration};
 

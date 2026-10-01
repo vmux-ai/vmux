@@ -4,6 +4,7 @@
             name: "default",
             url: "vmux://team/",
             title: "Team",
+            bookmark: Some(100),
             title_message_id: "team-title",
             keywords: ["team", "agents", "profile"],
             icon: "Users",

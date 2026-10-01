@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use vmux_api::protocol::{ManagedMcpServer, ManagedMcpTransport};
-use vmux_core::profile::mcp_credentials::McpCredentialAccess;
+use vmux_ecs::profile::mcp_credentials::McpCredentialAccess;
 #[cfg(not(test))]
-use vmux_core::profile::mcp_credentials::McpCredentialStorage;
+use vmux_ecs::profile::mcp_credentials::McpCredentialStorage;
 use vmux_tool::{McpServerManifest, McpTransport};
 
 pub(crate) struct ManagedMcpServers(BTreeMap<String, McpServerManifest>);
@@ -184,7 +184,7 @@ impl McpAuthorization {
     fn credentials(
         name: &str,
         server: &McpServerManifest,
-    ) -> Result<Option<vmux_core::profile::mcp_credentials::McpOauthCredentials>, String> {
+    ) -> Result<Option<vmux_ecs::profile::mcp_credentials::McpOauthCredentials>, String> {
         let Some(credentials) = McpCredentialStorage::load(name)? else {
             return Ok(None);
         };
@@ -200,7 +200,7 @@ impl McpAuthorization {
 
     #[cfg(not(test))]
     fn token(
-        credentials: vmux_core::profile::mcp_credentials::McpOauthCredentials,
+        credentials: vmux_ecs::profile::mcp_credentials::McpOauthCredentials,
     ) -> Result<String, String> {
         if credentials.access_token.is_empty() {
             return Err("stored access token is empty".to_string());
@@ -215,7 +215,7 @@ impl McpAuthorization {
 
     #[cfg(not(test))]
     fn refresh(
-        credentials: &mut vmux_core::profile::mcp_credentials::McpOauthCredentials,
+        credentials: &mut vmux_ecs::profile::mcp_credentials::McpOauthCredentials,
     ) -> Result<(), String> {
         let refresh_token = credentials
             .refresh_token
@@ -261,7 +261,7 @@ impl McpAuthorization {
             credentials.refresh_token = token.refresh_token;
         }
         credentials.expires_at =
-            vmux_core::profile::mcp_credentials::McpOauthCredentials::expires_at(token.expires_in);
+            vmux_ecs::profile::mcp_credentials::McpOauthCredentials::expires_at(token.expires_in);
         if let Some(scope) = token.scope {
             credentials.scope = scope;
         }

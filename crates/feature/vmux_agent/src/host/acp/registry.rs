@@ -39,7 +39,7 @@ impl Registry {
             .and_then(|response| response.text())
             .map_err(|error| format!("acp registry: fetch failed: {error}"))?;
         let registry = text.parse()?;
-        let dir = vmux_core::profile::ProfilePaths::current().agents();
+        let dir = vmux_ecs::profile::ProfilePaths::current().agents();
         if std::fs::create_dir_all(&dir).is_ok() {
             let _ = vmux_path::AtomicFile::write(Self::cache_path(), text.as_bytes());
         }
@@ -47,7 +47,7 @@ impl Registry {
     }
 
     fn cache_path() -> PathBuf {
-        vmux_core::profile::ProfilePaths::current()
+        vmux_ecs::profile::ProfilePaths::current()
             .agents()
             .join("registry.json")
     }

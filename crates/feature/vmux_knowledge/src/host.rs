@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_core::host::persistence::PersistenceAppExt;
+use vmux_ecs::host::persistence::PersistenceAppExt;
 
 mod agent;
 mod index;

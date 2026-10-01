@@ -1,5 +1,21 @@
 (
     settings: Some((
+        defaults: (
+            terminal: Some((
+                default_theme: "default",
+                confirm_close: true,
+                themes: [(
+                    name: "default",
+                    color_scheme: "catppuccin-mocha",
+                    font_family: "",
+                    font_size: 14.0,
+                    line_height: 1.2,
+                    padding: 4.0,
+                    cursor_style: "block",
+                    cursor_blink: true,
+                )],
+            )),
+        ),
         sections: [(
             id: "terminal",
             title: "schema-terminal",
@@ -96,6 +112,7 @@
             keywords: ["shell", "console"],
             icon: "Terminal",
             command_bar: true,
+            bookmark: Some(20),
             permissions: [
                 "PageReady",
                 "ThemeEvent",
@@ -119,6 +136,7 @@
             keywords: ["processes", "monitor"],
             icon: "Activity",
             command_bar: true,
+            bookmark: Some(70),
             manifest: true,
             permissions: [
                 "PageReady",

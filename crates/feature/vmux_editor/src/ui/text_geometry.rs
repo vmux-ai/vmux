@@ -1,5 +1,5 @@
 use dioxus::html::geometry::ElementPoint;
-use vmux_core::event::{FileLine, FileLineLayout};
+use vmux_ecs::event::{FileLine, FileLineLayout};
 
 use crate::text::DisplayCells;
 

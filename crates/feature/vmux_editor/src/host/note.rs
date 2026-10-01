@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::event::{FileNoteEvent, FileViewMode, NoteBlock};
+use vmux_ecs::event::{FileNoteEvent, FileViewMode, NoteBlock};
 
 use crate::host::editor::{Editor, FileView};
 use crate::host::status::{FileInitialMetaSent, SharedFileViewMode};
@@ -27,7 +27,7 @@ pub(crate) struct NoteRevealLine(pub(crate) u32);
 
 type ReadyNote = (
     Without<NoteSent>,
-    With<vmux_core::page::PageReady>,
+    With<vmux_ecs::page::PageReady>,
     With<FileInitialMetaSent>,
 );
 
@@ -42,7 +42,7 @@ fn active_note_block(blocks: &[NoteBlock], line: u32) -> Option<u32> {
 
 fn send(
     mode: Single<&SharedFileViewMode>,
-    indexes: Query<&vmux_core::knowledge::KnowledgeIndex>,
+    indexes: Query<&vmux_knowledge::KnowledgeIndex>,
     notes: Query<(Entity, &FileView, &Editor, Option<&NoteRevealLine>), ReadyNote>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -71,7 +71,7 @@ fn send(
                 references.extend(index.unlinked_mentions(&file.path, 32));
                 references
                     .into_iter()
-                    .map(|reference| vmux_core::knowledge::KnowledgeReference {
+                    .map(|reference| vmux_knowledge::KnowledgeReference {
                         title: reference.title,
                         path: reference.path.to_string_lossy().into_owned(),
                         line: reference.line,
@@ -82,7 +82,7 @@ fn send(
             })
             .unwrap_or_default();
         let active = active_note_block(&note.blocks, edit.cursor_line());
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
             entity,
             &FileNoteEvent {
                 title: note.title,
@@ -101,7 +101,7 @@ fn send(
 }
 
 fn mark_notes_on_knowledge_change(
-    indexes: Query<Ref<vmux_core::knowledge::KnowledgeIndex>>,
+    indexes: Query<Ref<vmux_knowledge::KnowledgeIndex>>,
     files: Query<Entity, With<FileView>>,
     mut commands: Commands,
 ) {

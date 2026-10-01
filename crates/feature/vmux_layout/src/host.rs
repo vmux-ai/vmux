@@ -49,11 +49,11 @@ pub use pane::OpenBesideRequest;
 pub use persistence::LayoutPersistenceSet;
 pub use plugin::{ErrorPage, LayoutPlugin};
 pub use stack::{CloseStackReason, CloseStackRequest};
-pub use vmux_core::ContributedCommandChosen;
-pub use vmux_core::launcher::LauncherDismissRequest;
+pub use vmux_ecs::ContributedCommandChosen;
+pub use vmux_ecs::launcher::LauncherDismissRequest;
 pub use webview_reveal::PendingWebviewReveal;
 
-pub type LayoutUiStateUpdates = vmux_core::host::UiState<crate::state::LayoutUiState>;
+pub type LayoutUiStateUpdates = vmux_ecs::host::UiState<crate::state::LayoutUiState>;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LayoutStartupSet {

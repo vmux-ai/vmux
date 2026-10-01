@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use vmux_api::command_bar::{
     CommandBarPage, CommandBarRecentFile, CommandBarWorkDir, SearchEngine,
 };
-use vmux_core::launcher::RendersLauncherPanel;
-use vmux_core::page::PageManifest;
+use vmux_ecs::launcher::RendersLauncherPanel;
+use vmux_ecs::page::PageManifest;
 
 pub type CommandBarUiStateUpdates =
-    vmux_core::host::UiState<vmux_api::command_bar::CommandBarUiState>;
+    vmux_ecs::host::UiState<vmux_api::command_bar::CommandBarUiState>;
 
 pub struct UiStatePlugin;
 
@@ -17,7 +17,7 @@ impl Plugin for UiStatePlugin {
             Startup,
             (spawn_bar_projection, ApplyDeferred, update_pages).chain(),
         )
-        .add_plugins(vmux_core::host::UiStatePlugin::<
+        .add_plugins(vmux_ecs::host::UiStatePlugin::<
             vmux_api::command_bar::CommandBarUiState,
         >::default())
         .add_systems(PreUpdate, attach_bar_ui_state);
@@ -185,6 +185,28 @@ pub struct AgentSummary {
     pub icon: String,
 }
 
+impl From<&AgentSummary> for ContributedPage {
+    fn from(agent: &AgentSummary) -> Self {
+        Self {
+            id: agent.id.clone(),
+            rank: 0,
+            page: CommandBarPage {
+                url: agent.url.clone(),
+                title: agent.name.clone(),
+                keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
+                icon: if agent.icon.is_empty() {
+                    vmux_ecs::PageIcon::None
+                } else {
+                    vmux_ecs::PageIcon::Favicon(agent.icon.clone())
+                },
+                shortcut: String::new(),
+                prompt_target: true,
+                startup: false,
+            },
+        }
+    }
+}
+
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct CommandBarSpacesSnapshot {
     pub spaces: Vec<SpaceSummary>,
@@ -246,7 +268,7 @@ fn update_pages(manifests: Query<&PageManifest>, mut state: Single<&mut CommandB
                 keywords: manifest.keywords.iter().map(|k| k.to_string()).collect(),
                 icon: manifest
                     .icon
-                    .map(vmux_core::PageIcon::Builtin)
+                    .map(vmux_ecs::PageIcon::Builtin)
                     .unwrap_or_default(),
                 shortcut: String::new(),
                 prompt_target: false,
@@ -410,7 +432,7 @@ mod tests {
             title_message_id: Some("services-title"),
             replaces_command: Some("service_open"),
             keywords: &["daemon"],
-            icon: Some(vmux_core::BuiltinIcon::Settings),
+            icon: Some(vmux_ecs::BuiltinIcon::Settings),
             command_bar: true,
             startup: false,
         });

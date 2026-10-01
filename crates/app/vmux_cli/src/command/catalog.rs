@@ -1,5 +1,5 @@
 use bevy_ecs::prelude::*;
-use vmux_core::cli::CliCommandManifest;
+use vmux_ecs::cli::CliCommandManifest;
 
 #[derive(Component)]
 pub(super) struct CliCatalog {

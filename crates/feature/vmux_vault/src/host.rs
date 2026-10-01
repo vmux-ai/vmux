@@ -7,16 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use bevy::ecs::system::SystemParam;
-use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use parking_lot::Mutex;
-use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
-use vmux_core::page::PageReady;
-use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
-use vmux_core::vault::{
+use crate::state::{
     VaultAuthorization, VaultChooseCloudFolderRequest, VaultCompletion, VaultConnectCloudRequest,
     VaultConnectFolderRequest, VaultConnectGithubRequest, VaultConnectRequest,
     VaultConnectionProvider, VaultCreateCloudFolderRequest, VaultCreateRecoveryKeyRequest,
@@ -29,6 +20,15 @@ use vmux_core::vault::{
     VaultUnlockRecoveryKeyRequest, VaultWorkflowConnectRequest, VaultWorkflowCreateRequest,
     VaultWorkflowState,
 };
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use parking_lot::Mutex;
+use vmux_ecs::host::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_ecs::page::PageReady;
+use vmux_ecs::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 
 #[vmux_native::page]
 pub struct VaultPlugin;
@@ -39,7 +39,7 @@ impl Plugin for VaultPlugin {
         app.add_plugins(crate::ui::VaultPage::plugin()).add_plugins(
             Self::MANIFEST
                 .plugin()
-                .hosted(vmux_core::host::page::NativelyHosted::page(
+                .hosted(vmux_ecs::host::page::NativelyHosted::page(
                     Self::URL,
                     crate::ui::VaultPage::NATIVE.title,
                 )),
@@ -122,7 +122,7 @@ impl Plugin for VaultPlugin {
 
 fn page_ready(
     trigger: On<UiInput<PageReady>>,
-    pages: Query<&vmux_core::PageMetadata>,
+    pages: Query<&vmux_ecs::PageMetadata>,
     mut registry: Query<&mut VaultRegistry>,
     mut subscribers: Query<&mut VaultWorkflow, With<VaultSubscriber>>,
     mut commands: Commands,
@@ -552,7 +552,7 @@ struct VaultWatch {
 
 impl VaultWatch {
     fn new(app: &App) -> Option<Self> {
-        let vault_root = vmux_core::profile::vault::root_dir();
+        let vault_root = vmux_ecs::profile::vault::root_dir();
         let _ = std::fs::create_dir_all(&vault_root);
         let (watch_tx, watch_rx) = mpsc::channel();
         let watch_wake = app
@@ -693,11 +693,11 @@ fn create_vault(
 ) -> VaultOperationFuture {
     Box::pin(async move {
         let visibility = if request.private {
-            vmux_core::profile::vault::RepositoryVisibility::Private
+            vmux_ecs::profile::vault::RepositoryVisibility::Private
         } else {
-            vmux_core::profile::vault::RepositoryVisibility::Public
+            vmux_ecs::profile::vault::RepositoryVisibility::Public
         };
-        let message = vmux_core::profile::vault::create_remote(&request.repository, visibility)?;
+        let message = vmux_ecs::profile::vault::create_remote(&request.repository, visibility)?;
         Ok(VaultOperationOutput::message(message))
     })
 }
@@ -710,7 +710,7 @@ fn connect_vault(
     _canceled: VaultCancellation,
 ) -> VaultOperationFuture {
     Box::pin(async move {
-        let message = vmux_core::profile::vault::connect_remote(&request.repository)?;
+        let message = vmux_ecs::profile::vault::connect_remote(&request.repository)?;
         Ok(VaultOperationOutput::message(message))
     })
 }
@@ -723,7 +723,7 @@ fn sync_vault(
     _canceled: VaultCancellation,
 ) -> VaultOperationFuture {
     Box::pin(async move {
-        let message = vmux_core::profile::vault::sync()?;
+        let message = vmux_ecs::profile::vault::sync()?;
         Ok(VaultOperationOutput::message(message))
     })
 }
@@ -736,7 +736,7 @@ fn connect_vault_github(
     canceled: VaultCancellation,
 ) -> VaultOperationFuture {
     Box::pin(async move {
-        let message = vmux_core::profile::vault::connect_github_with_progress(
+        let message = vmux_ecs::profile::vault::connect_github_with_progress(
             |code| {
                 progress(VaultAuthorization {
                     code,
@@ -769,7 +769,7 @@ fn connect_vault_folder(
         let Some(folder) = dialog.pick_folder().await else {
             return Err(String::new());
         };
-        let message = vmux_core::profile::vault::connect_folder(folder.path())?;
+        let message = vmux_ecs::profile::vault::connect_folder(folder.path())?;
         Ok(VaultOperationOutput::message(message))
     })
 }
@@ -845,7 +845,7 @@ fn create_vault_cloud_folder(
 ) -> VaultOperationFuture {
     Box::pin(async move {
         let folder = Path::new(&request.root).join(&request.folder_name);
-        let message = vmux_core::profile::vault::connect_folder(&folder)?;
+        let message = vmux_ecs::profile::vault::connect_folder(&folder)?;
         Ok(VaultOperationOutput::message(message))
     })
 }
@@ -878,7 +878,7 @@ fn choose_vault_cloud_folder(
         if !remote.exists() {
             return Err("selected folder does not contain a Vault".to_string());
         }
-        let message = vmux_core::profile::vault::connect_folder(folder.path())?;
+        let message = vmux_ecs::profile::vault::connect_folder(folder.path())?;
         Ok(VaultOperationOutput::message(message))
     })
 }
@@ -1063,7 +1063,7 @@ fn choose_cloud_folder(
 fn refresh(
     trigger: On<UiInput<VaultRefreshRequest>>,
     mut registry: Query<&mut VaultRegistry>,
-    pages: Query<&vmux_core::PageMetadata>,
+    pages: Query<&vmux_ecs::PageMetadata>,
     mut subscribers: Query<&mut VaultWorkflow, With<VaultSubscriber>>,
     mut commands: Commands,
 ) {
@@ -1102,7 +1102,7 @@ fn select_provider(
         return;
     };
     workflow.state.provider = Some(provider);
-    workflow.state.destination = vmux_core::vault::VaultDestination::Create;
+    workflow.state.destination = crate::state::VaultDestination::Create;
     workflow.state.selected_repository.clear();
     if provider.is_github() {
         if subscriber.state.vault.github_owner.is_empty() {
@@ -1507,7 +1507,7 @@ fn vault_event_requests_sync(result: &notify::Result<notify::Event>) -> bool {
             && event
                 .paths
                 .iter()
-                .any(|path| vmux_core::profile::vault::is_managed_local_path(path))
+                .any(|path| vmux_ecs::profile::vault::is_managed_local_path(path))
     })
 }
 
@@ -1861,9 +1861,9 @@ fn emit_state(
 
 fn scan_vault(load_repositories: bool, previous: VaultSnapshot) -> VaultSnapshot {
     let status = if load_repositories {
-        vmux_core::profile::vault::VaultStatus::current_with_repositories()
+        vmux_ecs::profile::vault::VaultStatus::current_with_repositories()
     } else {
-        vmux_core::profile::vault::VaultStatus::current()
+        vmux_ecs::profile::vault::VaultStatus::current()
     };
     let mut snapshot = VaultSnapshot {
         root: status.root.to_string_lossy().into_owned(),
@@ -1987,7 +1987,7 @@ mod tests {
         app.world_mut().spawn(VaultRegistry::default());
         let webview = app
             .world_mut()
-            .spawn(vmux_core::PageMetadata {
+            .spawn(vmux_ecs::PageMetadata {
                 url: "vmux://vault/?provider=dropbox".to_string(),
                 ..Default::default()
             })
@@ -2173,7 +2173,7 @@ mod tests {
 
     #[test]
     fn vault_backup_watcher_ignores_runtime_and_access_events() {
-        let root = vmux_core::profile::vault::root_dir();
+        let root = vmux_ecs::profile::vault::root_dir();
         let knowledge =
             notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Any))
                 .add_path(root.join("knowledge/note.md"));

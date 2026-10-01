@@ -33,7 +33,7 @@ sha2 = { version = "0.10" }
 path = "src/lib.rs"
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
-vmux_core = { path = "../vmux_core" }
+vmux_ecs = { path = "../vmux_ecs" }
 
 [lints]
 workspace = true

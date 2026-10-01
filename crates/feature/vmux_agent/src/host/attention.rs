@@ -2,14 +2,14 @@ use bevy::prelude::*;
 #[cfg(test)]
 use vmux_api::protocol::AgentRequest;
 use vmux_api::protocol::{AgentTurnEnded, ProcessId};
-use vmux_core::notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
-use vmux_core::service::ServiceMessageSet;
-use vmux_core::team::{Agent, Profile};
+use vmux_ecs::notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
+use vmux_ecs::service::ServiceMessageSet;
+use vmux_ecs::team::{Agent, Profile};
 use vmux_layout::active_pane::ActiveStack;
 use vmux_layout::stack::{ComputeFocusSet, FocusedStack, Stack};
 
 use crate::host::event::AgentRequestInput;
-use vmux_core::agent::SessionId;
+use vmux_ecs::agent::SessionId;
 
 pub(super) struct AttentionPlugin;
 

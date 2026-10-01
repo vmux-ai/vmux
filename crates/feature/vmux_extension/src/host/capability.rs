@@ -1,7 +1,7 @@
 use bevy::prelude::{Component, Query};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use vmux_core::host::manifest::FeatureManifest;
+use vmux_ecs::host::manifest::FeatureManifest;
 
 #[derive(Deserialize)]
 struct BrowserFeaturePolicy {

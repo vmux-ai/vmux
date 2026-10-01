@@ -1,6 +1,6 @@
 use bevy::ecs::component::Component;
 use bevy::input::keyboard::KeyCode;
-use vmux_core::input::{ClaimedKey, KeyClaims, KeyModifiers};
+use vmux_api::input::{ClaimedKey, KeyClaims, KeyModifiers};
 
 #[derive(Component, Debug, Clone, Default)]
 pub struct Keymap {
@@ -325,7 +325,7 @@ impl KeyCombo {
         Self::label(self.key)
     }
 
-    pub fn from_stroke(stroke: &vmux_core::input::KeyStroke) -> Option<Self> {
+    pub fn from_stroke(stroke: &vmux_api::input::KeyStroke) -> Option<Self> {
         if stroke.is_modifier_key() {
             return None;
         }
@@ -976,7 +976,7 @@ mod tests {
         let claims = KeyClaims {
             keys: vec![modified(KeyCode::KeyX, CTRL).claimed("test").unwrap()],
         };
-        let stroke = |mods: KeyModifiers| vmux_core::input::KeyStroke {
+        let stroke = |mods: KeyModifiers| vmux_api::input::KeyStroke {
             key: "x".to_string(),
             code: "KeyX".to_string(),
             mods,

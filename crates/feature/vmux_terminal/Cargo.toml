@@ -18,7 +18,7 @@ serde = { workspace = true }
 rkyv = { workspace = true }
 serde_json = { workspace = true }
 unicode-width = "0.2"
-vmux_core = { path = "../../util/vmux_core" }
+vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_native = { path = "../../util/vmux_native" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 
@@ -38,10 +38,11 @@ vmux_flex = { path = "../../util/vmux_flex" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_mcp = { path = "../../util/vmux_mcp" }
+vmux_path = { path = "../../util/vmux_path" }
 vmux_process = { path = "../../util/vmux_process" }
 vmux_tool = { path = "../vmux_tool" }
 vmux_setting = { path = "../vmux_setting" }
-vmux_session = { path = "../../util/vmux_session" }
+vmux_session = { path = "../vmux_session" }
 vmux_space = { path = "../vmux_space" }
 
 [target.'cfg(not(target_os = "ios"))'.dev-dependencies]

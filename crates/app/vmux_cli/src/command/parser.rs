@@ -3,7 +3,7 @@ use std::ffi::OsString;
 
 use clap::builder::{OsStringValueParser, PossibleValuesParser};
 use clap::{Arg, ArgAction, ArgMatches, Command};
-use vmux_core::cli::{CliArgumentManifest, CliCommandManifest, CliInvocation};
+use vmux_ecs::cli::{CliArgumentManifest, CliCommandManifest, CliInvocation};
 
 use super::catalog::CliCatalog;
 

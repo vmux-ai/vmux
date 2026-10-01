@@ -15,7 +15,6 @@ use dioxus::prelude::*;
 use vmux_api::prompt_media::{
     PromptComposerAttachment, PromptMediaOption, inline_media_query, replace_inline_media_query,
 };
-use vmux_core::prompt_media::MediaPath;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, focus_prompt_end};
 use vmux_ui::components::composer_bar::{
@@ -346,7 +345,7 @@ impl Chat {
             options.push(PromptMediaOption {
                 key: format!("media-{}", entry.path),
                 name: entry.name.clone(),
-                display_path: MediaPath::new(entry).display(),
+                display_path: entry.display_path(),
                 preview_data_url: entry.preview_data_url.clone(),
                 label: FilePath(&entry.name).extension_label(),
                 is_dir: entry.is_dir,
@@ -958,7 +957,7 @@ struct CurrentAgent;
 
 impl CurrentAgent {
     fn read() -> String {
-        if let Some(meta) = try_consume_context::<vmux_core::PageMetadata>()
+        if let Some(meta) = try_consume_context::<vmux_ecs::PageMetadata>()
             && let Some(rest) = meta
                 .url
                 .strip_prefix(crate::ChatPlugin::URL)

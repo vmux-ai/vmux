@@ -4,7 +4,7 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Style};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
-use vmux_core::event::{FileLine, StyledSpan};
+use vmux_ecs::event::{FileLine, StyledSpan};
 
 pub const FILE_VIEW_MAX_BYTES: u64 = 50 * 1024 * 1024;
 
@@ -69,7 +69,7 @@ pub fn highlight_snippet(code: &str, lang_token: &str) -> Vec<FileLine> {
             let ranges = h.highlight_line(line, ss).unwrap_or_default();
             FileLine {
                 line_no: idx as u32,
-                fold: vmux_core::event::FoldGutter::None,
+                fold: vmux_ecs::event::FoldGutter::None,
                 indent_levels: 0,
                 spans: ranges
                     .into_iter()
@@ -85,7 +85,7 @@ pub fn highlight_snippet(code: &str, lang_token: &str) -> Vec<FileLine> {
 pub struct HighlightedFile {
     pub language: String,
     pub lines: Vec<FileLine>,
-    pub encoding: vmux_core::event::FileEncoding,
+    pub encoding: vmux_ecs::event::FileEncoding,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,7 +136,7 @@ impl Highlighter {
                 .collect();
             lines.push(FileLine {
                 line_no: idx as u32,
-                fold: vmux_core::event::FoldGutter::None,
+                fold: vmux_ecs::event::FoldGutter::None,
                 indent_levels: 0,
                 spans,
             });
@@ -144,7 +144,7 @@ impl Highlighter {
         HighlightedFile {
             language: syntax.name.clone(),
             lines,
-            encoding: vmux_core::event::FileEncoding::Utf8,
+            encoding: vmux_ecs::event::FileEncoding::Utf8,
         }
     }
 
@@ -184,7 +184,7 @@ impl Highlighter {
             .enumerate()
             .map(|(idx, line)| FileLine {
                 line_no: idx as u32,
-                fold: vmux_core::event::FoldGutter::None,
+                fold: vmux_ecs::event::FoldGutter::None,
                 indent_levels: 0,
                 spans: vec![StyledSpan {
                     text: line.trim_end_matches(['\n', '\r']).to_string(),
@@ -197,7 +197,7 @@ impl Highlighter {
         HighlightedFile {
             language: select_syntax(path).name.clone(),
             lines,
-            encoding: vmux_core::event::FileEncoding::Utf8,
+            encoding: vmux_ecs::event::FileEncoding::Utf8,
         }
     }
 }

@@ -11,10 +11,10 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use std::collections::{BTreeMap, HashMap};
 use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap, Shortcut};
 use vmux_command::{CommandDefinition, ResolvedLocale};
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::input::{NativeKeyCapture, NativeKeyInput, NativeKeyInputSet};
-use vmux_core::page::PageReady;
-use vmux_core::{PageOpenSet, PageOpenTask, workspace::ComputeFocusSet};
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::page::PageReady;
+use vmux_ecs::{PageOpenSet, PageOpenTask, workspace::ComputeFocusSet};
+use vmux_input::{NativeKeyCapture, NativeKeyInput, NativeKeyInputSet};
 use vmux_layout::native_open::HostedUiPlugin;
 use vmux_layout::stack::FocusedStack;
 use vmux_layout::window::WindowHierarchy;
@@ -31,7 +31,7 @@ impl Plugin for ShortcutPlugin {
         app.add_plugins((
             HostedUiPlugin::<Shortcuts>::new(Self::MANIFEST),
             UiEventPlugin::<(ShortcutProbePressRequest, ShortcutProbeClearRequest)>::default(),
-            vmux_core::host::UiStatePlugin::<ShortcutUiState>::default(),
+            vmux_ecs::host::UiStatePlugin::<ShortcutUiState>::default(),
         ))
         .add_message::<NativeKeyInput>()
         .add_observer(send_shortcuts)
@@ -348,7 +348,7 @@ fn probe_press_request(
     view.probe.capture(
         trigger.event().payload.stroke.clone(),
         &catalog,
-        vmux_core::now_millis(),
+        vmux_ecs::now_millis(),
     );
 }
 
@@ -419,7 +419,7 @@ fn capture_native_keys(
 }
 
 fn expire_probe(mut views: Query<&mut Shortcuts>) {
-    let now = vmux_core::now_millis();
+    let now = vmux_ecs::now_millis();
     for mut view in &mut views {
         let timeout_ms = view.catalog.chord_timeout_ms;
         if view.bypass_change_detection().probe.expire(now, timeout_ms) {
@@ -430,9 +430,10 @@ fn expire_probe(mut views: Query<&mut Shortcuts>) {
 
 fn publish_state(views: Query<(Entity, &Shortcuts), Changed<Shortcuts>>, mut commands: Commands) {
     for (entity, view) in &views {
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<ShortcutUiState>::from_event(entity, &view.project()),
-        );
+        commands.trigger(vmux_ecs::host::UiStateWrite::<ShortcutUiState>::from_event(
+            entity,
+            &view.project(),
+        ));
     }
 }
 
@@ -587,8 +588,9 @@ impl ShortcutStroke {
 mod tests {
     use super::*;
     use bevy::input::keyboard::KeyCode;
+    use vmux_api::input::KeyModifiers;
     use vmux_command::shortcut::{Binding, Modifiers, Source, When};
-    use vmux_core::{KeyModifiers, PageMetadata, PageOpenId, PageOpenTask};
+    use vmux_ecs::{PageMetadata, PageOpenId, PageOpenTask};
     use vmux_layout::native_open::NativeOpenPlugin;
 
     struct LayoutCommandFixture;

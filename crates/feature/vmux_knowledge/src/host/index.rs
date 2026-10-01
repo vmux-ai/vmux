@@ -1,13 +1,11 @@
 use std::path::Path;
 use std::sync::mpsc;
 
+use crate::{KnowledgeIndex, KnowledgeVault};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use vmux_core::knowledge::{KnowledgeIndex, KnowledgeVault};
-
-use crate::store::{ensure_vault, ensure_vault_repository};
 
 pub(super) struct KnowledgeIndexPlugin;
 
@@ -31,14 +29,14 @@ fn initialize(
         KnowledgeIndex::default(),
         vault.clone(),
     ));
-    if let Err(error) = ensure_vault(vault.root()) {
+    if let Err(error) = vault.ensure() {
         warn!("knowledge vault initialization failed: {error}");
         return;
     }
-    if let Err(error) = ensure_vault_repository(vault.root()) {
+    if let Err(error) = vault.ensure_repository() {
         warn!("knowledge Git initialization failed: {error}");
     }
-    if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
+    if let Err(error) = vault.sync_agent_configs() {
         warn!("external agent Knowledge sync failed: {error}");
     }
     let wake = wake.map(|wrapper| (**wrapper).clone());

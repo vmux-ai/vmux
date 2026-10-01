@@ -32,7 +32,7 @@ pub struct CommandBarUiState {
 }
 
 #[vmux_api::ui_state(Default)]
-pub struct CommandPaletteState {
+pub struct CommandPaletteUiState {
     pub open_id: super::OpenId,
     pub projection: super::CommandPaletteProjection,
     pub completions: Vec<super::PathEntry>,
@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn palette_projection_round_trips() {
-        let state = CommandPaletteState {
+        let state = CommandPaletteUiState {
             open_id: OpenId(8),
             projection: CommandPaletteProjection {
                 rows: vec![CommandBarResultItem::Navigate {
@@ -93,7 +93,8 @@ mod tests {
             ..Default::default()
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
-        let decoded = rkyv::from_bytes::<CommandPaletteState, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded =
+            rkyv::from_bytes::<CommandPaletteUiState, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(decoded.open_id, OpenId(8));
         assert_eq!(decoded.projection.mode, PaletteMode::Url);

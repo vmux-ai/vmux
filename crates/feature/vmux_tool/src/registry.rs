@@ -5,8 +5,8 @@ use serde::Serialize;
 use serde_json::Value;
 use std::marker::PhantomData;
 use vmux_api::protocol::{AgentCommandTool, AgentRequest};
-use vmux_core::host::manifest::{FeatureManifest, Tool as ToolEntry, ToolAvailability};
-use vmux_core::{HostShell, JsonArguments, RegistrationOrder};
+use vmux_ecs::host::manifest::{FeatureManifest, Tool as ToolEntry, ToolAvailability};
+use vmux_ecs::{HostShell, JsonArguments, RegistrationOrder};
 
 use vmux_api::JsonSchema;
 
@@ -382,7 +382,7 @@ pub struct ToolCall;
 
 pub type AddedTool<T> = (With<ToolCall>, Added<T>);
 
-type ToolTarget = vmux_core::EntityTarget<RegisteredTool>;
+type ToolTarget = vmux_ecs::EntityTarget<RegisteredTool>;
 
 struct ToolSeed {
     name: String,

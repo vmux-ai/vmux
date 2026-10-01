@@ -3,7 +3,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::CommandBar;
 use vmux_api::command_bar::CommandBarPanelRequest;
-use vmux_core::overlay::OverlayShownInline;
+use vmux_ecs::overlay::OverlayShownInline;
 
 pub struct PanelPlugin;
 

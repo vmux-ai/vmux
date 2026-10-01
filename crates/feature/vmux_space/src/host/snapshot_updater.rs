@@ -2,7 +2,7 @@ use bevy::prelude::*;
 #[cfg(test)]
 use bevy_cef::prelude::HostWindow;
 use vmux_command::snapshot::{CommandBarProjection, CommandBarSpacesSnapshot, SpaceSummary};
-use vmux_core::Order;
+use vmux_ecs::Order;
 use vmux_layout::space::{Space, SpaceId};
 
 use crate::host::SpacePlugin;
@@ -25,7 +25,7 @@ fn update_spaces_snapshot(
             Entity,
             &SpaceId,
             &Name,
-            Has<vmux_core::Active>,
+            Has<vmux_ecs::Active>,
             Option<&Order>,
         ),
         With<Space>,
@@ -87,7 +87,7 @@ mod tests {
             app.world_mut().spawn(CommandBarProjection::default());
             let window = app
                 .world_mut()
-                .spawn((Window::default(), vmux_core::Active))
+                .spawn((Window::default(), vmux_ecs::Active))
                 .id();
             let root = app.world_mut().spawn(HostWindow(window)).id();
             let main = app.world_mut().spawn(ChildOf(root)).id();
@@ -95,7 +95,7 @@ mod tests {
                 Space,
                 SpaceId("space-1".to_string()),
                 Name::new("Space 1"),
-                vmux_core::Active,
+                vmux_ecs::Active,
                 ChildOf(main),
             ));
             Self {
@@ -173,7 +173,7 @@ mod tests {
         app.world_mut().spawn(CommandBarProjection::default());
         let first_window = app
             .world_mut()
-            .spawn((Window::default(), vmux_core::Active))
+            .spawn((Window::default(), vmux_ecs::Active))
             .id();
         let second_window = app.world_mut().spawn(Window::default()).id();
         for (window, id) in [(first_window, "first"), (second_window, "second")] {
@@ -183,7 +183,7 @@ mod tests {
                 Space,
                 SpaceId(id.to_string()),
                 Name::new(id.to_string()),
-                vmux_core::Active,
+                vmux_ecs::Active,
                 ChildOf(main),
             ));
         }
@@ -203,10 +203,10 @@ mod tests {
 
         app.world_mut()
             .entity_mut(first_window)
-            .remove::<vmux_core::Active>();
+            .remove::<vmux_ecs::Active>();
         app.world_mut()
             .entity_mut(second_window)
-            .insert(vmux_core::Active);
+            .insert(vmux_ecs::Active);
         app.update();
 
         let snapshot = app

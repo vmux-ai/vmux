@@ -1,3 +1,4 @@
+use crate::group::group_turns_tail;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::chat::ChatItem;
@@ -5,7 +6,6 @@ use vmux_api::room::{
     AssistantBlock, Message as RoomMessage, RemoteAgent, RemoteApproval, RemoteEvent,
     RemoteSession, RemoteStatus, RoomEvent, RoomId,
 };
-use vmux_core::chat::group_turns_tail;
 
 use super::prompt::AttachmentPreviews;
 use super::state::{ChatRuntime, ChatUiStateProjection, RepublishChatUiState};
@@ -239,7 +239,7 @@ fn project_snapshot(mut runtimes: ChangedChatProjection) {
         transcript.state.generation.wrapping_add(1).max(1)
     };
     transcript.room_id = Some(session.room_id.clone());
-    let (active_subagents, active_tasks) = vmux_core::chat_projection::activity_counts(&items);
+    let (active_subagents, active_tasks) = crate::projection::activity_counts(&items);
     transcript.state = ChatTranscriptState {
         generation,
         items,

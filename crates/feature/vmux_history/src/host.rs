@@ -5,8 +5,8 @@ mod state;
 pub mod transition;
 
 use bevy::prelude::*;
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::host::page::NativelyHosted;
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::host::page::NativelyHosted;
 
 pub use query::HistoryOpenIntent;
 

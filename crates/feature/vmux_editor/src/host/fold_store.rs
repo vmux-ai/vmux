@@ -9,7 +9,7 @@ pub struct FoldStore {
 }
 
 fn store_path() -> PathBuf {
-    vmux_core::profile::ProfilePaths::current()
+    vmux_ecs::profile::ProfilePaths::current()
         .profile()
         .join("folds.ron")
 }

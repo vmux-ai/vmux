@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_core::event::FileTextInput;
+use vmux_ecs::event::FileTextInput;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send};
 use vmux_ui::ime::ImeGuard;
@@ -30,7 +30,7 @@ pub(super) fn send_committed_text(mut field: Signal<String>, text: String) {
 
 pub(super) fn forward_file_key(
     event: &Event<KeyboardData>,
-    mode: vmux_core::editor::EditMode,
+    mode: vmux_api::editor::EditMode,
 ) -> bool {
     let Some(stroke) = PressedKey::new(&event.data()).stroke() else {
         return false;

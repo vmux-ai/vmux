@@ -4,6 +4,7 @@
             name: "default",
             url: "vmux://vault/",
             title: "Vault",
+            bookmark: Some(60),
             title_message_id: "vault-title",
             keywords: ["vault", "sync", "git", "backup", "dotfiles", "knowledge"],
             icon: "Vault",

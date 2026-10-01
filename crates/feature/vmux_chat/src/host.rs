@@ -1,6 +1,6 @@
 use bevy_app::{App, Plugin};
 #[cfg(host)]
-use vmux_core::host::manifest::FeaturePlugin;
+use vmux_ecs::host::manifest::FeaturePlugin;
 
 #[cfg(host)]
 mod composer;
@@ -18,6 +18,8 @@ mod session;
 mod state;
 #[cfg(host)]
 mod tool;
+#[cfg(host)]
+mod transcript;
 
 #[cfg(host)]
 pub use handoff::ImportedConversation;
@@ -52,6 +54,7 @@ impl Plugin for ChatPlugin {
         app.add_plugins((
             FeaturePlugin::<crate::Feature>::default(),
             session::ChatHostPlugin,
+            transcript::Plugin,
         ));
     }
 }

@@ -21,7 +21,7 @@ use vmux_ui::script::PageScript;
 #[vmux_native::page(
     component = Page,
     subtree,
-    takes = vmux_core::PageMetadata
+    takes = vmux_ecs::PageMetadata
 )]
 pub(crate) struct SimulatorPage;
 
@@ -29,7 +29,7 @@ pub(crate) struct SimulatorPage;
 pub fn Page() -> Element {
     use_theme();
     let ready = use_ui_state::<SimulatorReady>().state;
-    let route = try_consume_context::<vmux_core::PageMetadata>()
+    let route = try_consume_context::<vmux_ecs::PageMetadata>()
         .and_then(|metadata| SimulatorRoute::try_from(metadata.url.as_str()).ok());
 
     let announced = ready();

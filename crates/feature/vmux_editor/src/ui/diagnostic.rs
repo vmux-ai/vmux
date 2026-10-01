@@ -1,4 +1,4 @@
-use vmux_core::event::{DiagSeverity, FileDiagnostic};
+use vmux_ecs::event::{DiagSeverity, FileDiagnostic};
 
 pub(super) struct DiagnosticPresentation;
 

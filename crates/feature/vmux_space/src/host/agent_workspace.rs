@@ -8,9 +8,9 @@ use vmux_api::protocol::{AgentRequest, AgentRequestId};
 use vmux_chat::host::USER_CHOICE_REQUESTED;
 use vmux_command::WriteCommandRequests;
 #[cfg(test)]
-use vmux_core::agent::CommandOrigin;
-use vmux_core::agent::{AgentRequestBlocked, AgentRequestInput, AgentRequestPrerequisiteSet};
-use vmux_core::service::{ServiceMessageSet, ServiceRequest};
+use vmux_ecs::agent::CommandOrigin;
+use vmux_ecs::agent::{AgentRequestBlocked, AgentRequestInput, AgentRequestPrerequisiteSet};
+use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_setting::{AppSettings, StartupDir};
 
 use super::agent::{
@@ -22,7 +22,7 @@ use super::workspace::{
     WORKSPACE_SELECTION_PENDING, WORKSPACE_SELECTION_REQUESTED, workspace_path_task,
     workspace_picker_task,
 };
-use vmux_core::profile::ProjectsDirectory;
+use vmux_ecs::profile::ProjectsDirectory;
 
 struct WorkspaceDirectory;
 
@@ -85,7 +85,7 @@ fn ancestor_self_tab(
 
 fn ancestor_agent_session(
     entity: Entity,
-    session_roots: &Query<(), With<vmux_core::agent::AgentSessionRoot>>,
+    session_roots: &Query<(), With<vmux_ecs::agent::AgentSessionRoot>>,
     child_of: &Query<&ChildOf>,
 ) -> Option<Entity> {
     let mut current = entity;

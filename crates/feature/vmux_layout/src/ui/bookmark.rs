@@ -9,7 +9,7 @@ use vmux_api::bookmark::{
     BookmarkPinRequest, BookmarkRemoveRequest, BookmarkRenameRequest, BookmarkRow,
     BookmarkTextInputRequest, BookmarkUnpinRequest,
 };
-use vmux_core::PageMetadata;
+use vmux_ecs::PageMetadata;
 #[cfg(not(target_os = "macos"))]
 use vmux_ui::components::context_menu::ContextMenuTrigger;
 use vmux_ui::components::context_menu::{ContextMenu, ContextMenuContent, ContextMenuItem};

@@ -113,11 +113,11 @@ impl TerminalState {
             cols.set(patch.cols);
         }
 
-        let overscan = vmux_core::scroll::overscan_for(
+        let overscan = vmux_ecs::scroll::overscan_for(
             patch.rows,
-            vmux_core::scroll::TERMINAL_OVERSCAN_K,
-            vmux_core::scroll::OVERSCAN_FLOOR,
-            vmux_core::scroll::OVERSCAN_CAP,
+            vmux_ecs::scroll::TERMINAL_OVERSCAN_K,
+            vmux_ecs::scroll::OVERSCAN_FLOOR,
+            vmux_ecs::scroll::OVERSCAN_CAP,
         );
         let keep_hi =
             (first + patch.rows as u32 + overscan * 2 + 2).min(patch.total_rows.saturating_sub(1));

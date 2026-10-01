@@ -4,10 +4,10 @@ use vmux_command::{
     BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin, ReadCommandRequests,
     WriteCommandRequests,
 };
-use vmux_core::host::UiState;
+use vmux_ecs::host::UiState;
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::{PageOpenRequest, PageOpenTarget};
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 use vmux_layout::{
     native_open::HostedUiPlugin,
     pane::{Pane, PaneSplit},
@@ -16,7 +16,7 @@ use vmux_layout::{
 
 use crate::event::{CheckForUpdatesEvent, CheckForUpdatesRequest, SettingsRequest};
 use crate::state::SettingsUiState;
-use crate::{AppSettings, SettingsWriteRequest};
+use crate::{AppSettings, SettingsSaveRequest};
 
 use super::projection::SettingsRenderProjection;
 use crate::schema::SettingsSchema;
@@ -78,7 +78,7 @@ fn issue_open_settings(
 fn settings_request(
     trigger: On<UiInput<SettingsRequest>>,
     mut settings: ResMut<AppSettings>,
-    mut writes: MessageWriter<SettingsWriteRequest>,
+    mut saves: MessageWriter<SettingsSaveRequest>,
 ) {
     let evt = &trigger.event().payload;
     let value = match serde_json::Value::try_from(&evt.value) {
@@ -89,8 +89,8 @@ fn settings_request(
         }
     };
     match settings.apply_update(&evt.path, value) {
-        Ok(ron_bytes) => {
-            writes.write(SettingsWriteRequest { ron_bytes });
+        Ok(()) => {
+            saves.write(SettingsSaveRequest);
         }
         Err(e) => bevy::log::warn!("settings: update {} rejected: {}", evt.path, e),
     }
@@ -127,7 +127,7 @@ fn handle_open_settings_command(
 #[cfg(test)]
 mod page_open_tests {
     use super::*;
-    use vmux_core::{PageOpenHandled, PageOpenId, PageOpenTask};
+    use vmux_ecs::{PageOpenHandled, PageOpenId, PageOpenTask};
     use vmux_layout::native_open::{HostedUiPlugin, NativeOpenPlugin};
 
     #[test]

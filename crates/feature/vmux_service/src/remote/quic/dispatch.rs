@@ -107,7 +107,7 @@ impl RemoteState {
         for session in &mut sessions {
             if let Some(messages) = self.session_messages(&session.sid).await {
                 session.title =
-                    vmux_core::room::ConversationTitle::from_messages(&messages, &session.name);
+                    vmux_session::ConversationTitle::from_messages(&messages, &session.name);
             }
         }
         sessions.sort_by_key(|session| std::cmp::Reverse(session.created_at_ms));

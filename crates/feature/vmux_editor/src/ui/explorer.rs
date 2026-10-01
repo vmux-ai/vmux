@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use super::state::use_file_ui;
 use dioxus::prelude::*;
-use vmux_core::event::*;
+use vmux_ecs::event::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogDescription, DialogRoot, DialogTitle};
 use vmux_ui::components::tree_row::{

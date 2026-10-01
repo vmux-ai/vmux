@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_core::event::{
+use vmux_ecs::event::{
     EditorCapability, FileCodeActionPick, FileDefinitionRequest, FilePanelPick,
     FileReferencesRequest, FileRenameRequest, RefItem,
 };

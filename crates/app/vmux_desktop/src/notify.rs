@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_core::notify::OsNotify;
+use vmux_ecs::notify::OsNotify;
 
 pub(crate) struct NotificationPlugin;
 

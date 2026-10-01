@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_core::host::persistence::PersistenceAppExt;
+use vmux_ecs::host::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
 
 use super::agent::LayoutAgentPlugin;
@@ -49,7 +49,7 @@ impl Plugin for LayoutPlugin {
             .init_resource::<settings::ConfirmCloseSettings>()
             .init_resource::<settings::ResolvedLocale>()
             .add_message::<TerminalLayoutSpawnRequest>()
-            .add_message::<vmux_core::PageOpenRequest>()
+            .add_message::<vmux_ecs::PageOpenRequest>()
             .configure_sets(
                 Startup,
                 (
@@ -85,7 +85,7 @@ impl Plugin for LayoutPlugin {
                 PrewarmPagesPlugin,
                 NativeOpenPlugin,
                 BookmarkPlugin,
-                vmux_core::host::UiStatePlugin::<crate::state::LayoutUiState>::default(),
+                vmux_ecs::host::UiStatePlugin::<crate::state::LayoutUiState>::default(),
                 crate::workspace_snapshot_publish::SnapshotPlugin,
                 crate::pending_stack::PendingStackPlugin,
             ));

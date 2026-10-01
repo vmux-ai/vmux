@@ -7,12 +7,12 @@ use vmux_command::command_bar::{
 use vmux_command::{
     BindCommands, CommandDispatch, CommandInvocation, CommandRegistry, CommandRuntimePlugin,
 };
-use vmux_core::event::{
+use vmux_ecs::event::{
     ExplorerGoto, FileEncoding, FileEncodingReopenRequest, FileEncodingSaveRequest, FileIndent,
     FileLineEnding, FileShapeSet, FileStatusPickerOpen,
 };
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
+use vmux_ecs::host::manifest::FeaturePlugin;
 
 use crate::host::editing::FileFindOpenRequest;
 use crate::host::editor::{Editor, FileView};

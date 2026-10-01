@@ -1,18 +1,18 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
-use vmux_core::page::PageReady;
-use vmux_core::tool::{
+use crate::state::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind, ToolOperationNotice,
     ToolProvider, ToolStatus, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
     ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot, ToolsUiState,
 };
-use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
+use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_ecs::host::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_ecs::page::PageReady;
+use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget};
 
 use crate::{
     ExternalToolOperation, ToolApplier, ToolOperationFailed, ToolOperationFinished,
@@ -688,7 +688,7 @@ fn emit_tools_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::tool::{ToolOperationKind, ToolProvider};
+    use crate::state::{ToolOperationKind, ToolProvider};
 
     #[test]
     fn tools_page_ready_registers_state_subscriber() {

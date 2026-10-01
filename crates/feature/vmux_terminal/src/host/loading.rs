@@ -1,9 +1,9 @@
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
-use vmux_core::ProcessId;
-use vmux_core::page::PageReady;
-use vmux_core::service::ServiceMessageSet;
+use vmux_ecs::ProcessId;
+use vmux_ecs::page::PageReady;
+use vmux_ecs::service::ServiceMessageSet;
 
 use crate::Terminal;
 use crate::event::TermLoadingEvent;
@@ -38,7 +38,7 @@ pub(crate) struct ShellLoading {
 
 fn set_shell_icon(
     mut terminals: Query<
-        (&crate::launch::TerminalLaunch, &mut vmux_core::PageMetadata),
+        (&crate::launch::TerminalLaunch, &mut vmux_ecs::PageMetadata),
         With<Terminal>,
     >,
 ) {
@@ -46,8 +46,8 @@ fn set_shell_icon(
         if !metadata.icon.is_none() {
             continue;
         }
-        if let Some(icon) = vmux_core::BuiltinIcon::for_shell(&launch.command) {
-            metadata.icon = vmux_core::PageIcon::Builtin(icon);
+        if let Some(icon) = vmux_ecs::BuiltinIcon::for_shell(&launch.command) {
+            metadata.icon = vmux_ecs::PageIcon::Builtin(icon);
         }
     }
 }
@@ -76,8 +76,8 @@ fn announce_slow_shell_boot(
             continue;
         }
         loading.announced = true;
-        commands.trigger(vmux_core::host::UiStateWrite::<
-            vmux_core::event::TerminalUiState,
+        commands.trigger(vmux_ecs::host::UiStateWrite::<
+            vmux_ecs::event::TerminalUiState,
         >::from_event(
             entity,
             &TermLoadingEvent {
@@ -121,8 +121,8 @@ fn clear_shell(
         if !state.announced {
             continue;
         }
-        commands.trigger(vmux_core::host::UiStateWrite::<
-            vmux_core::event::TerminalUiState,
+        commands.trigger(vmux_ecs::host::UiStateWrite::<
+            vmux_ecs::event::TerminalUiState,
         >::from_event(
             entity,
             &TermLoadingEvent {

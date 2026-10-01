@@ -4,7 +4,7 @@ extern crate self as vmux_tool;
 
 pub(crate) struct Feature;
 
-impl vmux_core::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
@@ -25,17 +25,18 @@ mod provider;
 mod query;
 mod registry;
 mod route;
+pub mod state;
 #[cfg(ui)]
 mod ui;
 
-use bevy_app::{App, Plugin, Update};
-use bevy_ecs::prelude::*;
-use bevy_tasks::{Task, futures_lite::future};
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::tool::{
+use crate::state::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolLinkRequest, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
 };
+use bevy_app::{App, Plugin, Update};
+use bevy_ecs::prelude::*;
+use bevy_tasks::{Task, futures_lite::future};
+use vmux_ecs::host::manifest::FeaturePlugin;
 
 #[cfg(host)]
 pub use cli::ToolCliPlugin;
@@ -63,7 +64,7 @@ impl Plugin for ToolPlugin {
 
         #[cfg(all(host, ui))]
         app.add_plugins(Self::MANIFEST.plugin().hosted(
-            vmux_core::host::page::NativelyHosted::subtree(Self::URL, ui::ToolsPage::NATIVE.title),
+            vmux_ecs::host::page::NativelyHosted::subtree(Self::URL, ui::ToolsPage::NATIVE.title),
         ));
 
         app.add_plugins((
@@ -151,7 +152,7 @@ pub struct ToolOperationFinished;
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ToolOperationSucceeded(pub String);
 
-pub type ToolStoreTarget = vmux_core::EntityTarget<ToolStore>;
+pub type ToolStoreTarget = vmux_ecs::EntityTarget<ToolStore>;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ToolOperationFailed(pub String);
@@ -346,7 +347,7 @@ brew "ripgrep"
             .world_mut()
             .spawn((
                 ToolOperationRequest(ToolImportRequest {
-                    provider: vmux_core::tool::ToolProvider::Npm,
+                    provider: state::ToolProvider::Npm,
                     value: package_json.to_string_lossy().into_owned(),
                 }),
                 ToolStoreTarget::new(store_entity),
@@ -404,7 +405,7 @@ brew "ripgrep"
             .world_mut()
             .spawn((
                 ToolOperationRequest(ToolImportRequest {
-                    provider: vmux_core::tool::ToolProvider::Mcp,
+                    provider: state::ToolProvider::Mcp,
                     value: String::new(),
                 }),
                 ToolStoreTarget::new(store_entity),

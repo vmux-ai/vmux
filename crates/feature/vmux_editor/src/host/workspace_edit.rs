@@ -56,9 +56,9 @@ fn apply_lsp(
         if browsers.can_emit_to(&rename.entity) {
             edits
                 .commands
-                .trigger(vmux_core::host::FileUiStateWrite::from_event(
+                .trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                     rename.entity,
-                    &vmux_core::event::FileEditFailure { reason },
+                    &vmux_ecs::event::FileEditFailure { reason },
                 ));
         }
     }
@@ -284,12 +284,12 @@ mod tests {
                                 HighlightCache::new(path),
                                 crate::fold::FoldState::default(),
                             ),
-                            EditorKeymap(vmux_core::editor::KeymapKind::Vscode.make(&[], "\\")),
+                            EditorKeymap(vmux_api::editor::KeymapKind::Vscode.make(&[], "\\")),
                             FileViewport {
                                 top_row: 0,
                                 rows: 0,
                                 wrap_columns: 0,
-                                word_wrap: vmux_core::editor::WordWrap::default(),
+                                word_wrap: vmux_api::editor::WordWrap::default(),
                                 word_wrap_column: 80,
                                 scroll_revision: 0,
                             },

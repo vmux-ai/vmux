@@ -19,11 +19,12 @@ use std::io;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use vmux_core::input::{
+use vmux_api::input::KeyModifiers;
+use vmux_ecs::Active;
+use vmux_input::{
     ConsumesNativeKey, NativeKey, NativeKeyClaimSet, NativeKeyInput, NativeKeyInputSet,
     PassesNativeKey,
 };
-use vmux_core::{Active, KeyModifiers};
 
 pub(super) struct SimulatorInputPlugin;
 

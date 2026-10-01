@@ -1,1 +1,1 @@
-pub use vmux_core::terminal::TerminalLaunch;
+pub use vmux_ecs::terminal::TerminalLaunch;

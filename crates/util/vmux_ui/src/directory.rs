@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dioxus::html::geometry::ClientPoint;
 use dioxus::prelude::*;
-use vmux_core::event::FileDirEntry;
+use vmux_ecs::event::FileDirEntry;
 
 use crate::class::ClassList;
 use crate::file_icon::TypeIcon;

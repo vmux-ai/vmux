@@ -5,7 +5,7 @@ use crate::event::{
 };
 use vmux_api::bookmark::{BookmarkMenuEffect, BookmarkStateEvent};
 use vmux_api::extension::{ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent};
-use vmux_core::event::space::SpacesListEvent;
+use vmux_ecs::event::space::SpacesListEvent;
 
 #[vmux_api::ui_state_patch(Default)]
 pub struct LayoutUiStatePatch {

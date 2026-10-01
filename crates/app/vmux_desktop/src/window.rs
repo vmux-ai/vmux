@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 use bevy::window::{Monitor, MonitorSelection, PrimaryWindow, WindowPosition};
 use bevy_cef::prelude::HostWindow;
-use vmux_core::WindowFullscreen;
+use vmux_ecs::WindowFullscreen;
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
-use vmux_core::WindowFullscreenSet;
-use vmux_core::host::persistence::WorkspaceRestore;
+use vmux_ecs::WindowFullscreenSet;
+use vmux_ecs::host::persistence::WorkspaceRestore;
 use vmux_layout::window::{
     CloseFocusedWindowRequest, FocusedWindow, NewWindowRequest, NewWindowWorkspace, VmuxWindow,
     WindowGeometry,
@@ -107,12 +107,12 @@ fn open_windows(
 ) {
     for _ in reader.read() {
         if let Some(window) = focused.entity() {
-            commands.entity(window).remove::<vmux_core::Active>();
+            commands.entity(window).remove::<vmux_ecs::Active>();
         }
         commands.spawn((
             crate::window_config(true),
             NewWindowWorkspace,
-            vmux_core::Active,
+            vmux_ecs::Active,
         ));
     }
 }
@@ -398,7 +398,7 @@ mod tests {
         assert!(
             app.world()
                 .entity(windows[0])
-                .contains::<vmux_core::Active>()
+                .contains::<vmux_ecs::Active>()
         );
     }
 

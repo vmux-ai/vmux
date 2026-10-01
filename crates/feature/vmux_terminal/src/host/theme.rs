@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::page::PageReady;
+use vmux_ecs::page::PageReady;
 use vmux_setting::{AppSettings, SettingsSaveRequest};
 
 use crate::{Terminal, event::TermThemeEvent};
@@ -138,8 +138,8 @@ fn sync(
 
     for entity in targets {
         if browsers.can_emit_to(&entity) {
-            commands.trigger(vmux_core::host::UiStateWrite::<
-                vmux_core::event::TerminalUiState,
+            commands.trigger(vmux_ecs::host::UiStateWrite::<
+                vmux_ecs::event::TerminalUiState,
             >::from_event(entity, &event));
         }
     }
@@ -164,7 +164,7 @@ mod tests {
     }
 
     fn settings_with_font(font_size: f32) -> AppSettings {
-        let mut settings = AppSettings::embedded();
+        let mut settings = AppSettings::default();
         settings.terminal = Some(vmux_setting::TerminalSettings {
             default_theme: "default".to_string(),
             themes: vec![terminal_theme(font_size)],
@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn font_size_materializes_missing_default_theme() {
         use bevy::ecs::message::Messages;
-        let mut settings = AppSettings::embedded();
+        let mut settings = AppSettings::default();
         settings.terminal = Some(vmux_setting::TerminalSettings {
             default_theme: "default".to_string(),
             themes: Vec::new(),

@@ -2,18 +2,37 @@ use bevy::prelude::*;
 
 pub(crate) struct Feature;
 
-impl vmux_core::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
 mod capture;
 #[cfg(target_os = "macos")]
 mod keyboard;
+mod native_key;
 pub mod pointer;
 
 pub use capture::*;
-#[cfg(target_os = "macos")]
-pub use keyboard::KeyboardPlugin;
+pub use native_key::{
+    ConsumesNativeKey, NativeKey, NativeKeyCapture, NativeKeyClaimSet, NativeKeyInput,
+    NativeKeyInputSet, PassesNativeKey,
+};
+
+pub struct InputPlugin;
+
+impl Plugin for InputPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            capture::CapturePlugin,
+            bevy_cef::prelude::UiEventPlugin::<(
+                vmux_api::input::KeyStroke,
+                vmux_api::input::UiKeyContext,
+            )>::default(),
+        ));
+        #[cfg(target_os = "macos")]
+        app.add_plugins(keyboard::KeyboardPlugin);
+    }
+}
 
 #[derive(Message, Clone, Copy, Debug)]
 pub struct ExitFullscreenShortcut;

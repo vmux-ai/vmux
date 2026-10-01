@@ -15,7 +15,7 @@ bevy_ecs = { workspace = true }
 clap = { version = "4", features = ["string"] }
 tokio = { workspace = true }
 vmux_app = { path = "../../util/vmux_app", features = ["cli"] }
-vmux_core = { path = "../../util/vmux_core" }
+vmux_ecs = { path = "../../util/vmux_ecs" }
 
 [dev-dependencies]
 assert_cmd = "2"

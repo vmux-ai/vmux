@@ -133,7 +133,7 @@ mod tests {
                 agent_id: "mistral-vibe".into(),
                 sid: "acp1".into(),
                 cwd: std::path::PathBuf::from("/tmp"),
-                anchor: vmux_core::ProcessId::new(),
+                anchor: vmux_ecs::ProcessId::new(),
                 resume: None,
             },
             LastRunStateKind::default(),

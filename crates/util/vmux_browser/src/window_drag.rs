@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{HostWindow, UiInput};
 use std::sync::{LazyLock, Mutex};
-use vmux_core::overlay::{OverlayState, OverlayStateQuery};
+use vmux_ecs::overlay::{OverlayState, OverlayStateQuery};
 use vmux_flex::prelude::{ComputedNode, LayoutSystems};
 use vmux_layout::event::WindowDragRegionEvent;
 use vmux_layout::{

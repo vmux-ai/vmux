@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::event::*;
-use vmux_core::host::FileUiStateWrite;
-use vmux_core::page::PageReady;
-use vmux_setting::{AppSettings, SettingsWriteRequest};
+use vmux_ecs::event::*;
+use vmux_ecs::host::FileUiStateWrite;
+use vmux_ecs::page::PageReady;
+use vmux_setting::{AppSettings, SettingsSaveRequest};
 
 use crate::host::editor::{Editor, FileDocumentRevision, FileView};
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileBuffer};
@@ -16,7 +16,7 @@ pub(crate) struct StatusPlugin;
 impl Plugin for StatusPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_shared_file_view_mode)
-            .add_message::<SettingsWriteRequest>()
+            .add_message::<SettingsSaveRequest>()
             .add_plugins(UiEventPlugin::<(FileViewModeSet, FileKeymapSet)>::default())
             .add_systems(
                 Update,
@@ -292,7 +292,7 @@ fn file_keymap_set(
     trigger: On<UiInput<FileKeymapSet>>,
     views: Query<(), With<FileView>>,
     mut settings: ResMut<AppSettings>,
-    mut writes: MessageWriter<SettingsWriteRequest>,
+    mut saves: MessageWriter<SettingsSaveRequest>,
 ) {
     if !views.contains(trigger.event().webview) {
         return;
@@ -305,8 +305,8 @@ fn file_keymap_set(
         "editor.keymap",
         serde_json::to_value(keymap).unwrap_or_default(),
     ) {
-        Ok(ron_bytes) => {
-            writes.write(SettingsWriteRequest { ron_bytes });
+        Ok(()) => {
+            saves.write(SettingsSaveRequest);
         }
         Err(error) => bevy::log::warn!("editor: keymap update rejected: {error}"),
     }

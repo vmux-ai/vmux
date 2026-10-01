@@ -9,7 +9,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
+use vmux_ecs::host::manifest::FeaturePlugin;
 
 use super::bridge::{BridgeAuthorization, BridgeInbound, ExtensionBridgeServer};
 use super::capability::{CapabilityKind, CapabilityMatrix, CapabilityStatus};
@@ -41,7 +41,7 @@ impl Plugin for ExtensionBrokerPlugin {
     }
 }
 
-fn spawn(manifests: Query<&vmux_core::host::manifest::FeatureManifest>, mut commands: Commands) {
+fn spawn(manifests: Query<&vmux_ecs::host::manifest::FeatureManifest>, mut commands: Commands) {
     let matrix = CapabilityMatrix::from_features(&manifests)
         .expect("browser feature manifest contains a valid extension policy");
     let mut entity = commands.spawn((

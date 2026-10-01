@@ -5,7 +5,7 @@ use crate::{
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use vmux_api::VmuxRoute;
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
-use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget, PageOpenTask};
+use vmux_ecs::{PageMetadata, PageOpenRequest, PageOpenTarget, PageOpenTask};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 

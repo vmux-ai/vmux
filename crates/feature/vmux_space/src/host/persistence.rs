@@ -8,16 +8,16 @@ use moonshine_save::prelude::*;
 use moonshine_save::save::EntityFilter;
 use std::path::{Path, PathBuf};
 
-use vmux_core::BuiltinIcon;
+use vmux_ecs::BuiltinIcon;
 #[cfg(test)]
-use vmux_core::host::persistence::PersistenceAppExt;
-use vmux_core::host::persistence::{
+use vmux_ecs::host::persistence::PersistenceAppExt;
+use vmux_ecs::host::persistence::{
     PersistenceDirty, WorkspaceRestore, WorkspaceSaveRequest, WorkspaceStoreValidators,
     persisted_components,
 };
-use vmux_core::profile::{ProfilePaths, is_test_session};
+use vmux_ecs::profile::{ProfilePaths, is_test_session};
 #[cfg(test)]
-use vmux_core::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
+use vmux_ecs::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
 use vmux_layout::space::Space;
 #[cfg(test)]
 use vmux_layout::space::SpaceId;
@@ -608,32 +608,32 @@ mod tests {
 
         let mut app_save = App::new();
         app_save.add_plugins(MinimalPlugins);
-        app_save.add_plugins(vmux_core::CorePlugin);
+        app_save.add_plugins(vmux_ecs::EcsPlugin);
         app_save.add_observer(save_on_default_event);
 
         let url_e = app_save
             .world_mut()
             .spawn((
                 Save,
-                vmux_core::Url,
+                vmux_ecs::Url,
                 PageMetadata {
                     url: "https://example.com".into(),
                     title: "Example".into(),
-                    icon: vmux_core::PageIcon::None,
+                    icon: vmux_ecs::PageIcon::None,
                     bg_color: None,
                 },
-                vmux_core::VisitCount(3),
-                vmux_core::LastVisitedAt(1000),
-                vmux_core::CreatedAt(500),
+                vmux_ecs::VisitCount(3),
+                vmux_ecs::LastVisitedAt(1000),
+                vmux_ecs::CreatedAt(500),
             ))
             .id();
 
         app_save.world_mut().spawn((
             Save,
-            vmux_core::Visit,
-            vmux_core::VisitedUrl(url_e),
-            vmux_core::CreatedAt(900),
-            vmux_core::TransitionType::Typed,
+            vmux_ecs::Visit,
+            vmux_ecs::VisitedUrl(url_e),
+            vmux_ecs::CreatedAt(900),
+            vmux_ecs::TransitionType::Typed,
         ));
 
         save_space_to_path(app_save.world_mut(), path.clone());
@@ -644,7 +644,7 @@ mod tests {
         let mut app_load = App::new();
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_core::CorePlugin)
+            .add_plugins(vmux_ecs::EcsPlugin)
             .add_observer(load_on_default_event);
         app_load.update();
 
@@ -656,12 +656,12 @@ mod tests {
 
         let url_count = app_load
             .world_mut()
-            .query::<&vmux_core::Url>()
+            .query::<&vmux_ecs::Url>()
             .iter(app_load.world())
             .count();
         let visit_count = app_load
             .world_mut()
-            .query::<&vmux_core::Visit>()
+            .query::<&vmux_ecs::Visit>()
             .iter(app_load.world())
             .count();
         assert_eq!(url_count, 1, "Url not round-tripped");
@@ -670,9 +670,9 @@ mod tests {
         let (vc, lva, ca) = app_load
             .world_mut()
             .query::<(
-                &vmux_core::VisitCount,
-                &vmux_core::LastVisitedAt,
-                &vmux_core::CreatedAt,
+                &vmux_ecs::VisitCount,
+                &vmux_ecs::LastVisitedAt,
+                &vmux_ecs::CreatedAt,
             )>()
             .iter(app_load.world())
             .find(|(vc, _, _)| vc.0 == 3)
@@ -683,11 +683,11 @@ mod tests {
 
         let tt = app_load
             .world_mut()
-            .query::<&vmux_core::TransitionType>()
+            .query::<&vmux_ecs::TransitionType>()
             .iter(app_load.world())
             .next()
             .expect("TransitionType not round-tripped");
-        assert_eq!(*tt, vmux_core::TransitionType::Typed);
+        assert_eq!(*tt, vmux_ecs::TransitionType::Typed);
     }
 
     #[test]
@@ -698,14 +698,14 @@ mod tests {
         let mut app_save = App::new();
         app_save
             .add_plugins(MinimalPlugins)
-            .add_plugins(vmux_core::CorePlugin)
+            .add_plugins(vmux_ecs::EcsPlugin)
             .add_observer(save_on_default_event);
         app_save.world_mut().spawn((
             Save,
             PageMetadata {
                 title: "Git".into(),
                 url: "vmux://git/".into(),
-                icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Project),
+                icon: vmux_ecs::PageIcon::Builtin(vmux_ecs::BuiltinIcon::Project),
                 bg_color: None,
             },
         ));
@@ -720,7 +720,7 @@ mod tests {
         let mut app_load = App::new();
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_core::CorePlugin)
+            .add_plugins(vmux_ecs::EcsPlugin)
             .add_observer(load_on_default_event);
         app_load.update();
         app_load
@@ -736,7 +736,7 @@ mod tests {
             .expect("legacy page metadata loaded");
         assert_eq!(
             metadata.icon,
-            vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::GitBranch)
+            vmux_ecs::PageIcon::Builtin(vmux_ecs::BuiltinIcon::GitBranch)
         );
     }
 
@@ -767,7 +767,7 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_core::CorePlugin)
+            .add_plugins(vmux_ecs::EcsPlugin)
             .register_type::<vmux_layout::side_sheet::SideSheetSectionsExpanded>()
             .add_observer(load_on_default_event);
         app.update();
@@ -791,7 +791,7 @@ mod tests {
 
         let mut app_save = App::new();
         app_save.add_plugins(MinimalPlugins);
-        app_save.add_plugins(vmux_core::CorePlugin);
+        app_save.add_plugins(vmux_ecs::EcsPlugin);
         app_save
             .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
@@ -813,7 +813,7 @@ mod tests {
         let mut app_load = App::new();
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_core::CorePlugin);
+            .add_plugins(vmux_ecs::EcsPlugin);
         app_load
             .register_type::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
@@ -877,7 +877,7 @@ mod tests {
         let mut app_save = App::new();
         app_save
             .add_plugins(MinimalPlugins)
-            .add_plugins(vmux_core::CorePlugin)
+            .add_plugins(vmux_ecs::EcsPlugin)
             .register_persisted::<Space>()
             .register_persisted::<SpaceId>()
             .register_persisted::<WindowGeometry>()
@@ -914,7 +914,7 @@ mod tests {
 
         let mut app_save = App::new();
         app_save.add_plugins(MinimalPlugins);
-        app_save.add_plugins(vmux_core::CorePlugin);
+        app_save.add_plugins(vmux_ecs::EcsPlugin);
         app_save.register_persisted::<PaneId>();
         app_save.add_observer(save_on_default_event);
         app_save
@@ -929,9 +929,9 @@ mod tests {
             ArchivedPagePosition {
                 leaf_pane_id: "p-1".into(),
                 stack_index: 1,
-                pane_path: vec![vmux_core::PaneStep {
+                pane_path: vec![vmux_ecs::PaneStep {
                     split_id: "root".into(),
-                    axis: vmux_core::SplitAxis::Column,
+                    axis: vmux_ecs::SplitAxis::Column,
                     child_index: 2,
                     flex_weights: vec![1.0, 4.0],
                 }],
@@ -950,7 +950,7 @@ mod tests {
         let mut app_load = App::new();
         app_load
             .add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_core::CorePlugin)
+            .add_plugins(vmux_ecs::EcsPlugin)
             .register_type::<PaneId>()
             .add_observer(load_on_default_event);
         app_load.update();
@@ -973,10 +973,7 @@ mod tests {
             .expect("position round-tripped");
         assert_eq!(pos.leaf_pane_id, "p-1");
         assert_eq!(pos.pane_path[0].child_index, 2);
-        assert!(matches!(
-            pos.pane_path[0].axis,
-            vmux_core::SplitAxis::Column
-        ));
+        assert!(matches!(pos.pane_path[0].axis, vmux_ecs::SplitAxis::Column));
         let tab = app_load
             .world_mut()
             .query::<&ArchivedTabPage>()
@@ -991,7 +988,7 @@ mod tests {
     fn registry_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(vmux_core::CorePlugin);
+            .add_plugins(vmux_ecs::EcsPlugin);
         app
     }
 
@@ -1013,7 +1010,7 @@ mod tests {
     fn store_with_registered_component_types_is_compatible() {
         let app = registry_app();
         let registry = app.world().resource::<AppTypeRegistry>().read();
-        let key = <vmux_core::PageMetadata as bevy::reflect::TypePath>::type_path();
+        let key = <vmux_ecs::PageMetadata as bevy::reflect::TypePath>::type_path();
         let body = store_body_with_key(key);
         assert!(!space_has_unregistered_types(&body, &registry));
     }
@@ -1065,7 +1062,7 @@ mod tests {
         let (normalized, _) = normalized_store_icons(body).expect("unknown icon");
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .add_plugins(vmux_core::CorePlugin)
+            .add_plugins(vmux_ecs::EcsPlugin)
             .add_observer(load_on_default_event);
         app.update();
         app.world_mut()
@@ -1080,7 +1077,7 @@ mod tests {
             .query::<&PageMetadata>()
             .single(app.world())
             .expect("page metadata loaded");
-        assert_eq!(metadata.icon, vmux_core::PageIcon::None);
+        assert_eq!(metadata.icon, vmux_ecs::PageIcon::None);
         assert_eq!(metadata.url, "vmux://projects/");
     }
 
@@ -1108,7 +1105,7 @@ mod tests {
         let path = dir.path().join("store.ron");
         let app = registry_app();
         let registry = app.world().resource::<AppTypeRegistry>().read();
-        let key = <vmux_core::PageMetadata as bevy::reflect::TypePath>::type_path();
+        let key = <vmux_ecs::PageMetadata as bevy::reflect::TypePath>::type_path();
         std::fs::write(&path, store_body_with_key(key)).expect("write store");
 
         assert!(!remove_incompatible_store_if_needed(&path, &registry));
@@ -1157,7 +1154,7 @@ mod tests {
             components: WorldFilter::allow_all(),
         });
         app.add_plugins(MinimalPlugins)
-            .add_plugins(vmux_core::CorePlugin)
+            .add_plugins(vmux_ecs::EcsPlugin)
             .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
@@ -1190,7 +1187,7 @@ mod tests {
             components: WorldFilter::allow_all(),
         });
         app.add_plugins(MinimalPlugins)
-            .add_plugins(vmux_core::CorePlugin)
+            .add_plugins(vmux_ecs::EcsPlugin)
             .register_persisted::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()

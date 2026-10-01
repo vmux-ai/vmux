@@ -3,7 +3,7 @@ use vmux_api::protocol::{
     AgentCommandResult, AgentFileSearch, AgentFileTouched, AgentListAgents, AgentNewChat,
     AgentTurnEnded,
 };
-use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
+use vmux_ecs::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
 
 use super::CommandSet;
 

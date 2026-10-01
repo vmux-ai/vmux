@@ -4,8 +4,8 @@ use vmux_api::BinEvent;
 use vmux_api::protocol::{
     AgentImage, AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage,
 };
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::service::ServiceRequest;
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::service::ServiceRequest;
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolDispatchSet, ToolQuery, ToolQueryHandled, ToolQueryRequest,
     ToolQueryRouteSet,
@@ -333,7 +333,7 @@ impl OptionalText {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::JsonArguments;
+    use vmux_ecs::JsonArguments;
     use vmux_tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
 
     struct CaptureFixture;

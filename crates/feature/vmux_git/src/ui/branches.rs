@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_core::event::space::ProjectActivateRequest;
+use vmux_ecs::event::space::ProjectActivateRequest;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::card::{Card, CardVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};

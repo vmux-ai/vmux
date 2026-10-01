@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use bevy_cef::prelude::CefSystems;
 use bevy_cef::prelude::HostWindow;
-use vmux_core::KeyboardOwner;
-use vmux_core::page::{PageReady, PrewarmPage};
-use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
+use vmux_ecs::KeyboardOwner;
+use vmux_ecs::page::{PageReady, PrewarmPage};
+use vmux_ecs::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 
 use crate::cef::LayoutCef;
 use crate::window::VmuxWindow;
@@ -154,7 +154,7 @@ fn pool_node_for(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::{PageOpenId, PageOpenTask};
+    use vmux_ecs::{PageOpenId, PageOpenTask};
 
     use crate::cef::Browser;
 

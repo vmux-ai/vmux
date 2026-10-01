@@ -6,7 +6,7 @@ use crate::window::VmuxWindow;
 use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
+use vmux_ecs::host::manifest::FeaturePlugin;
 use vmux_flex::prelude::*;
 
 use super::command::LayoutRequestSet;
@@ -244,7 +244,7 @@ mod tests {
         let second_window = app.world_mut().spawn(Window::default()).id();
         app.world_mut()
             .entity_mut(first_window)
-            .insert(vmux_core::Active);
+            .insert(vmux_ecs::Active);
         let first_root = app.world_mut().spawn(HostWindow(first_window)).id();
         let second_root = app.world_mut().spawn(HostWindow(second_window)).id();
         let first_header = app

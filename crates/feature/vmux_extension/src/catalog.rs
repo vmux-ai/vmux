@@ -5,9 +5,9 @@ use vmux_api::extension::{
     ExtInstallPhase, ExtInstallProgress, ExtOpenManagerRequest, ExtPinRequest, ExtToggleRequest,
     ExtUninstallRequest, ExtensionsEvent,
 };
-use vmux_core::PageMetadata;
-use vmux_core::host::UiStateWrite;
-use vmux_core::host::page::NativelyHosted;
+use vmux_ecs::PageMetadata;
+use vmux_ecs::host::UiStateWrite;
+use vmux_ecs::host::page::NativelyHosted;
 use vmux_layout::LayoutUiStateUpdates;
 
 use crate::{install, store};
@@ -154,7 +154,7 @@ struct ExtensionCatalog {
 impl ExtensionCatalog {
     fn load() -> ExtensionsEvent {
         let store = store::ExtensionStore::current();
-        let profile = vmux_core::profile::Profile::current().into_id();
+        let profile = vmux_ecs::profile::Profile::current().into_id();
         let index = store.load_index().unwrap_or_default();
         let loaded = store.loaded_ids(&profile);
         index.snapshot(&profile, &loaded)
@@ -204,7 +204,7 @@ fn spawn(mut commands: Commands) {
 fn page_ready(
     trigger: On<UiInput<vmux_api::PageReady>>,
     pages: Query<(Has<vmux_layout::LayoutCef>, Option<&PageMetadata>)>,
-    extension_pages: Query<(&NativelyHosted, &vmux_core::page::PageManifest)>,
+    extension_pages: Query<(&NativelyHosted, &vmux_ecs::page::PageManifest)>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -225,7 +225,7 @@ fn page_ready(
 
 fn toggle_request(trigger: On<UiInput<ExtToggleRequest>>, runtime: Single<&ExtensionOutbox>) {
     let request = trigger.event().payload.clone();
-    let profile = vmux_core::profile::Profile::current().into_id();
+    let profile = vmux_ecs::profile::Profile::current().into_id();
     let _ = store::ExtensionStore::current().update_index(|index| {
         index.set_enabled_for(
             &profile,
@@ -238,7 +238,7 @@ fn toggle_request(trigger: On<UiInput<ExtToggleRequest>>, runtime: Single<&Exten
 }
 
 fn uninstall_request(trigger: On<UiInput<ExtUninstallRequest>>, runtime: Single<&ExtensionOutbox>) {
-    let profile = vmux_core::profile::Profile::current().into_id();
+    let profile = vmux_ecs::profile::Profile::current().into_id();
     let _ = store::ExtensionStore::current()
         .uninstall_for_profile(&profile, &trigger.event().payload.id);
     runtime.queue_snapshot();
@@ -249,7 +249,7 @@ fn pin_request(trigger: On<UiInput<ExtPinRequest>>, runtime: Single<&ExtensionOu
     let outbox = runtime.clone();
     std::thread::spawn(move || {
         let store = store::ExtensionStore::current();
-        let profile = vmux_core::profile::Profile::current().into_id();
+        let profile = vmux_ecs::profile::Profile::current().into_id();
         let loaded = store.loaded_ids(&profile);
         let result = store.update_index_if_changed(|index| {
             index

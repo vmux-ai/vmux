@@ -1,7 +1,7 @@
 use crate::snapshot::{CommandBarProjection, CommandBarWorkDirectory};
 use bevy::prelude::*;
 use vmux_api::command_bar::{CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
-use vmux_core::{LastVisitedAt, PageMetadata, Url, VisitCount};
+use vmux_ecs::{LastVisitedAt, PageMetadata, Url, VisitCount};
 use vmux_history::LastActivatedAt;
 
 const WORK_DIR_ENTRIES_CAP: usize = 40;
@@ -143,7 +143,7 @@ fn recent(
         return;
     }
     *initialized = true;
-    let now = vmux_core::now_millis();
+    let now = vmux_ecs::now_millis();
     let mut scored = Vec::new();
     for (metadata, visit_count, last_visited_at) in &urls {
         if let Some(file) = RecentFile::from_page(metadata, *visit_count, *last_visited_at, now) {
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn recent_files_only_file_urls_ranked() {
-        use vmux_core::CreatedAt;
+        use vmux_ecs::CreatedAt;
         let mut app = App::new();
         app.add_plugins(Plugin);
         app.world_mut().spawn(CommandBarProjection::default());
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn search_engines_are_ordered_by_most_recent_visit() {
-        use vmux_core::CreatedAt;
+        use vmux_ecs::CreatedAt;
         let mut app = App::new();
         app.add_plugins(Plugin);
         app.world_mut().spawn(CommandBarProjection::default());

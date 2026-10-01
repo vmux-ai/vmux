@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::PageMetadata;
-use vmux_core::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen};
+use vmux_ecs::PageMetadata;
+use vmux_ecs::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen};
 
 use super::media::FileMedia;
 use crate::edit::Selection;
@@ -105,7 +105,7 @@ fn apply_file(
     if let Some(page_url) = &request.page_url {
         metadata.title.clone_from(page_url);
         metadata.url.clone_from(page_url);
-        metadata.icon = vmux_core::PageIcon::None;
+        metadata.icon = vmux_ecs::PageIcon::None;
     }
     viewport.top_row = request.top_line;
     let entity = request.entity;
@@ -153,7 +153,7 @@ fn knowledge_link_open(
 ) {
     let entity = trigger.event().webview;
     let request = &trigger.event().payload;
-    let root = vmux_core::knowledge::KnowledgeVault::user().into_root();
+    let root = vmux_knowledge::KnowledgeVault::user().into_root();
     let requested = PathBuf::from(&request.path);
     let path = if request.create {
         let Ok(relative) = requested.strip_prefix(&root) else {
@@ -178,7 +178,7 @@ fn knowledge_link_open(
             path
         } else {
             let relative = relative.to_string_lossy();
-            match vmux_core::knowledge::KnowledgeVault::user().write_note(
+            match vmux_knowledge::KnowledgeVault::user().write_note(
                 Some(&relative),
                 &request.title,
                 &format!("# {}", request.title),
@@ -186,7 +186,7 @@ fn knowledge_link_open(
                 Ok(path) => path,
                 Err(error) => {
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                             entity,
                             &FileErrorEvent {
                                 message: error,
@@ -254,7 +254,7 @@ fn goto_caret(
         if let Some(scroll) = viewport.set_top(top)
             && browsers.can_emit_to(&entity)
         {
-            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                 entity, &scroll,
             ));
         }
@@ -384,7 +384,7 @@ mod tests {
     use crate::keymap::EditorKeymap;
     use crate::keymap::KeymapKindExt;
     use vmux_api::BinEvent;
-    use vmux_core::event::{FileUiState, FileUiStatePatch};
+    use vmux_ecs::event::{FileUiState, FileUiStatePatch};
 
     #[derive(Resource, Default)]
     struct Emitted(Vec<FileUiStatePatch>);
@@ -415,7 +415,7 @@ mod tests {
                 .add_message::<crate::lsp::manager::LspGoto>()
                 .add_plugins((
                     NavigationPlugin,
-                    vmux_core::host::UiStatePlugin::<FileUiState>::default(),
+                    vmux_ecs::host::UiStatePlugin::<FileUiState>::default(),
                 ))
                 .init_resource::<Emitted>()
                 .add_observer(
@@ -445,15 +445,15 @@ mod tests {
                         top_row: 0,
                         rows: 40,
                         wrap_columns: 0,
-                        word_wrap: vmux_core::editor::WordWrap::Off,
+                        word_wrap: vmux_api::editor::WordWrap::Off,
                         word_wrap_column: 80,
                         scroll_revision: 0,
                     },
-                    EditorKeymap(vmux_core::editor::KeymapKind::Vscode.make(&[], "\\")),
+                    EditorKeymap(vmux_api::editor::KeymapKind::Vscode.make(&[], "\\")),
                     PageMetadata {
                         title: String::new(),
                         url: String::new(),
-                        icon: vmux_core::PageIcon::None,
+                        icon: vmux_ecs::PageIcon::None,
                         bg_color: None,
                     },
                 ))

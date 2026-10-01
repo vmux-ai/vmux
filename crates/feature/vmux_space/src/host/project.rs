@@ -3,8 +3,8 @@ use bevy_cef::prelude::UiInput;
 use vmux_command::snapshot::{
     CommandBarProjectRoots, CommandBarProjection, WriteCommandBarSnapshots,
 };
-use vmux_core::event::{ProjectRow, ProjectRowKind, ProjectTreeToggle};
-use vmux_core::host::persistence::PersistenceAppExt;
+use vmux_ecs::event::{ProjectRow, ProjectRowKind, ProjectTreeToggle};
+use vmux_ecs::host::persistence::PersistenceAppExt;
 use vmux_git::worktree::LinkedRepoRoot;
 #[cfg(test)]
 use vmux_layout::pane::Pane;
@@ -346,7 +346,7 @@ mod tests {
                 .add_message::<SettingsSaveRequest>()
                 .init_resource::<SawSettingsChange>()
                 .add_systems(Update, record_settings_change.after(remember))
-                .insert_resource(AppSettings::embedded());
+                .insert_resource(AppSettings::default());
             let space = app
                 .world_mut()
                 .spawn((Space, SpaceId(space_id.to_string())))
@@ -518,7 +518,7 @@ mod tests {
         let project = root.path().join("project");
         std::fs::create_dir_all(project.join("src")).unwrap();
         let path = project.to_string_lossy().into_owned();
-        let mut settings = AppSettings::embedded();
+        let mut settings = AppSettings::default();
         settings.spaces.insert(
             "work".to_string(),
             SpaceOverrides {

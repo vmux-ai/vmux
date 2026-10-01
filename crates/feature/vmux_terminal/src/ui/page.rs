@@ -12,9 +12,9 @@ use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use std::rc::Rc;
 use unicode_width::UnicodeWidthChar;
-use vmux_core::input::Unclaimed;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::favicon::Favicon;
+use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{send, use_key_claim, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::matrix_rain::MatrixRain;
@@ -218,7 +218,7 @@ pub fn Page() -> Element {
     let client_h = viewport().client.1;
     let content_h = total_rows() as f64 * ch;
     let bottom_pad = if ch > 0.0 && content_h + 2.0 * padding > client_h {
-        vmux_core::scroll::follow_bottom_pad(client_h as f32, padding as f32, ch as f32) as f64
+        vmux_ecs::scroll::follow_bottom_pad(client_h as f32, padding as f32, ch as f32) as f64
     } else {
         0.0
     };
@@ -331,10 +331,10 @@ pub fn Page() -> Element {
                 if follow {
                     return;
                 }
-                let trigger = (vis_rows as f32 * vmux_core::scroll::EDGE_TRIGGER_K).ceil() as u32;
+                let trigger = (vis_rows as f32 * vmux_ecs::scroll::EDGE_TRIGGER_K).ceil() as u32;
                 let loaded_first = first_row();
                 let loaded_len = rows.read().len() as u32;
-                if vmux_core::scroll::needs_refetch(vis_first, vis_rows, loaded_first, loaded_len, trigger)
+                if vmux_ecs::scroll::needs_refetch(vis_first, vis_rows, loaded_first, loaded_len, trigger)
                     && last_scroll_req() != vis_first
                 {
                     last_scroll_req.set(vis_first);

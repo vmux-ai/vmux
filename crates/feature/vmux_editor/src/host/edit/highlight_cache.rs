@@ -1,7 +1,7 @@
 use ropey::Rope;
 use syntect::highlighting::{HighlightIterator, HighlightState, Highlighter, Theme};
 use syntect::parsing::{ParseState, ScopeStack, SyntaxReference};
-use vmux_core::event::{FileLine, StyledSpan};
+use vmux_ecs::event::{FileLine, StyledSpan};
 
 use crate::highlight::{default_theme, is_dark_theme, select_syntax, styled_span, syntax_set};
 
@@ -112,7 +112,7 @@ impl HighlightCache {
             let spans = self.semantic.apply(i as u32, spans, self.dark);
             out.push(FileLine {
                 line_no: i as u32,
-                fold: vmux_core::event::FoldGutter::None,
+                fold: vmux_ecs::event::FoldGutter::None,
                 indent_levels: 0,
                 spans,
             });
@@ -140,7 +140,7 @@ impl HighlightCache {
             };
             out.push(FileLine {
                 line_no: i as u32,
-                fold: vmux_core::event::FoldGutter::None,
+                fold: vmux_ecs::event::FoldGutter::None,
                 indent_levels: 0,
                 spans: self.semantic.apply(i as u32, spans, self.dark),
             });

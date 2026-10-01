@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
-use vmux_core::tool::{ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus};
+use vmux_tool::state::{ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus};
 use vmux_tool::{
     ToolInventory, ToolInventoryItem, ToolOperator, ToolProviderId, ToolProviderSnapshot,
     ToolScanner, ToolStore, ToolsManifest,
@@ -225,7 +225,7 @@ impl LspDiagnosticsInbox {
     }
 }
 
-pub type PathLintDiagnostics = (PathBuf, Vec<vmux_core::event::FileDiagnostic>);
+pub type PathLintDiagnostics = (PathBuf, Vec<vmux_ecs::event::FileDiagnostic>);
 
 #[derive(Component, Clone)]
 pub struct LintDiagnosticsSender(crossbeam_channel::Sender<PathLintDiagnostics>);

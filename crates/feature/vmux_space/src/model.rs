@@ -26,7 +26,7 @@ impl SpaceRecord {
     pub fn current_profile_name() -> String {
         #[cfg(host)]
         {
-            vmux_core::profile::Profile::current().display_name()
+            vmux_ecs::profile::Profile::current().display_name()
         }
         #[cfg(not(host))]
         {

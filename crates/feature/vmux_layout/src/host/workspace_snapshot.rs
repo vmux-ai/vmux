@@ -2,7 +2,7 @@ use bevy::ecs::relationship::Relationship;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use vmux_api::command_bar::CommandBarTab;
-use vmux_core::PageMetadata;
+use vmux_ecs::PageMetadata;
 use vmux_ui::i18n::{Locale, TranslationValue};
 
 use crate::cef::Browser;

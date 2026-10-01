@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use ropey::Rope;
 use unicode_segmentation::UnicodeSegmentation;
-use vmux_core::event::FileEncoding;
+use vmux_ecs::event::FileEncoding;
 
 pub struct TextBuffer {
     pub rope: Rope,

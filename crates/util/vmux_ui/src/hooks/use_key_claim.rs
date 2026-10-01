@@ -2,7 +2,39 @@ use crate::hooks::use_ui_state::use_ui_state;
 use crate::key_stroke::PressedKey;
 use crate::transport::event_listener::send;
 use dioxus::prelude::*;
-use vmux_core::input::{KeyClaims, KeyStroke, KeyVerdict, UiKeyContext, Unclaimed};
+use vmux_api::input::{KeyClaims, KeyStroke, UiKeyContext};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unclaimed {
+    Types,
+    Forwards,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeyVerdict {
+    Browser,
+    Send,
+}
+
+impl KeyVerdict {
+    fn decide(
+        claims: &KeyClaims,
+        unclaimed: Unclaimed,
+        stroke: &KeyStroke,
+        wanted_locally: bool,
+    ) -> Self {
+        if wanted_locally {
+            return Self::Browser;
+        }
+        if claims.contains(stroke) {
+            return Self::Send;
+        }
+        match unclaimed {
+            Unclaimed::Types => Self::Browser,
+            Unclaimed::Forwards => Self::Send,
+        }
+    }
+}
 
 pub fn use_key_claim(
     unclaimed: Unclaimed,

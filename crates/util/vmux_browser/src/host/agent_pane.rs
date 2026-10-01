@@ -1,10 +1,10 @@
 use bevy::prelude::*;
-use vmux_core::agent::CommandOrigin;
+use vmux_ecs::agent::CommandOrigin;
 use vmux_layout::pane::Pane;
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct AgentBrowserResolve<'w, 's> {
-    agent_terms: Query<'w, 's, (Entity, &'static vmux_core::ProcessId, &'static ChildOf)>,
+    agent_terms: Query<'w, 's, (Entity, &'static vmux_ecs::ProcessId, &'static ChildOf)>,
     child_of: Query<'w, 's, &'static ChildOf>,
     pane_children: Query<'w, 's, &'static Children, With<Pane>>,
     stack_q: Query<'w, 's, Entity, With<vmux_layout::stack::Stack>>,
@@ -56,7 +56,7 @@ impl AgentBrowserResolve<'_, '_> {
             .unwrap_or(false)
     }
 
-    pub fn agent_pane(&self, anchor: vmux_core::ProcessId) -> Option<Entity> {
+    pub fn agent_pane(&self, anchor: vmux_ecs::ProcessId) -> Option<Entity> {
         use bevy::ecs::relationship::Relationship;
         let (_, _, term_co) = self
             .agent_terms
@@ -65,7 +65,7 @@ impl AgentBrowserResolve<'_, '_> {
         self.child_of.get(term_co.get()).ok().map(|co| co.get())
     }
 
-    pub fn working_directory(&self, anchor: vmux_core::ProcessId) -> Option<std::path::PathBuf> {
+    pub fn working_directory(&self, anchor: vmux_ecs::ProcessId) -> Option<std::path::PathBuf> {
         let pane = self.agent_pane(anchor)?;
         let path = self.tabs.startup_dir(pane)?;
         vmux_setting::StartupDir::from_tab(&path)
@@ -75,7 +75,7 @@ impl AgentBrowserResolve<'_, '_> {
 
     pub(super) fn claim_browser_pane(
         &self,
-        anchor: vmux_core::ProcessId,
+        anchor: vmux_ecs::ProcessId,
     ) -> Option<AgentBrowserPaneClaim> {
         let pane = self.browser_pane_for(self.agent_pane(anchor)?)?;
         let profile = vmux_layout::active_pane::ProfileId::Agent(format!("{anchor:?}"));
@@ -101,7 +101,7 @@ impl AgentBrowserResolve<'_, '_> {
     pub fn resolve_pane(
         &self,
         pane: &Option<String>,
-        anchor: &Option<vmux_core::ProcessId>,
+        anchor: &Option<vmux_ecs::ProcessId>,
     ) -> AgentBrowserPaneResolution {
         if let Some(pane) = pane {
             return AgentBrowserPaneResolution {

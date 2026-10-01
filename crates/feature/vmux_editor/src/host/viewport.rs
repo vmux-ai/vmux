@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::event::{
+use vmux_ecs::event::{
     FileCursorEvent, FileFoldToggle, FileResizeEvent, FileScrollByEvent, FileScrollEvent,
     FileViewportPatch,
 };
-use vmux_core::scroll::{clamp_top_line, rows_from_viewport, window_range};
+use vmux_ecs::scroll::{clamp_top_line, rows_from_viewport, window_range};
 
 use crate::host::edit::Selection;
 use crate::host::editor::{Editor, FileView};
@@ -40,7 +40,7 @@ pub(crate) struct FileViewport {
     pub(crate) top_row: u32,
     pub(crate) rows: u16,
     pub(crate) wrap_columns: u16,
-    pub(crate) word_wrap: vmux_core::editor::WordWrap,
+    pub(crate) word_wrap: vmux_api::editor::WordWrap,
     pub(crate) word_wrap_column: u16,
     pub(crate) scroll_revision: u64,
 }
@@ -91,11 +91,11 @@ impl FileViewport {
         let wrap = edit.wrapped_view(self);
         let (visible, wrap_columns) = (wrap.total_rows(), wrap.columns());
         let (visible_first, visible_end) = window_range(visible, self.top_row, self.rows);
-        let overscan = vmux_core::scroll::overscan_for(
+        let overscan = vmux_ecs::scroll::overscan_for(
             self.rows,
-            vmux_core::scroll::EDITOR_OVERSCAN_K,
-            vmux_core::scroll::OVERSCAN_FLOOR,
-            vmux_core::scroll::OVERSCAN_CAP,
+            vmux_ecs::scroll::EDITOR_OVERSCAN_K,
+            vmux_ecs::scroll::OVERSCAN_FLOOR,
+            vmux_ecs::scroll::OVERSCAN_CAP,
         );
         let first_row = visible_first.saturating_sub(overscan);
         let end_row = (visible_end + overscan).min(visible);
@@ -181,7 +181,7 @@ fn render(
     let Ok((mut edit, viewport)) = views.get_mut(entity) else {
         return;
     };
-    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
         entity,
         &viewport.patch(&mut edit),
     ));
@@ -259,7 +259,7 @@ fn render_cursor(
     let selections = wrap.selections(raw_selections.iter().copied());
     let search = wrap.selections(raw_search.iter().copied());
     let word_highlights = wrap.selections(raw_word_highlights.iter().copied());
-    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
         entity,
         &FileCursorEvent {
             search_total,
@@ -284,11 +284,11 @@ impl HighlightedLines {
         let wrap = edit.wrapped_view(viewport);
         let visible = wrap.total_rows();
         let (first_row, end_row) = window_range(visible, viewport.top_row, viewport.rows);
-        let overscan = vmux_core::scroll::overscan_for(
+        let overscan = vmux_ecs::scroll::overscan_for(
             viewport.rows,
-            vmux_core::scroll::EDITOR_OVERSCAN_K,
-            vmux_core::scroll::OVERSCAN_FLOOR,
-            vmux_core::scroll::OVERSCAN_CAP,
+            vmux_ecs::scroll::EDITOR_OVERSCAN_K,
+            vmux_ecs::scroll::OVERSCAN_FLOOR,
+            vmux_ecs::scroll::OVERSCAN_CAP,
         );
         let from = first_row.saturating_sub(overscan);
         let to = end_row.saturating_add(overscan).min(visible);
@@ -308,11 +308,11 @@ impl DriftedWindow {
     fn between(previous_top: u32, viewport: &FileViewport) -> Self {
         Self {
             rows: viewport.top_row.abs_diff(previous_top),
-            overscan: vmux_core::scroll::overscan_for(
+            overscan: vmux_ecs::scroll::overscan_for(
                 viewport.rows,
-                vmux_core::scroll::EDITOR_OVERSCAN_K,
-                vmux_core::scroll::OVERSCAN_FLOOR,
-                vmux_core::scroll::OVERSCAN_CAP,
+                vmux_ecs::scroll::EDITOR_OVERSCAN_K,
+                vmux_ecs::scroll::OVERSCAN_FLOOR,
+                vmux_ecs::scroll::OVERSCAN_CAP,
             ),
         }
     }
@@ -405,7 +405,7 @@ fn sync_wrap_settings(
                 if let Some(scroll) = viewport.set_top(wanted.unwrap_or(0))
                     && browsers.can_emit_to(&entity)
                 {
-                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                         entity, &scroll,
                     ));
                 }
@@ -556,7 +556,7 @@ mod tests {
                 top_row,
                 rows,
                 wrap_columns: 0,
-                word_wrap: vmux_core::editor::WordWrap::Off,
+                word_wrap: vmux_api::editor::WordWrap::Off,
                 word_wrap_column: 80,
                 scroll_revision: 0,
             };
@@ -594,11 +594,11 @@ mod tests {
                         top_row,
                         rows,
                         wrap_columns: 0,
-                        word_wrap: vmux_core::editor::WordWrap::Off,
+                        word_wrap: vmux_api::editor::WordWrap::Off,
                         word_wrap_column: 80,
                         scroll_revision: 0,
                     },
-                    EditorKeymap(vmux_core::editor::KeymapKind::Vscode.make(&[], "\\")),
+                    EditorKeymap(vmux_api::editor::KeymapKind::Vscode.make(&[], "\\")),
                 ))
                 .id();
             (app, entity)
@@ -636,7 +636,7 @@ mod tests {
                 top_row,
                 rows: 40,
                 wrap_columns,
-                word_wrap: vmux_core::editor::WordWrap::On,
+                word_wrap: vmux_api::editor::WordWrap::On,
                 word_wrap_column: 80,
                 scroll_revision: 0,
             }

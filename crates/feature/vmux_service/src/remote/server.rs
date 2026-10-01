@@ -200,7 +200,7 @@ impl RemoteState {
         let mut session = self.acp.remote_session(sid.to_string()).await?;
         if let Some(messages) = self.session_messages(sid).await {
             session.title =
-                vmux_core::room::ConversationTitle::from_messages(&messages, &session.name);
+                vmux_session::ConversationTitle::from_messages(&messages, &session.name);
         }
         Some(session)
     }
@@ -262,7 +262,7 @@ struct RemoteMediaPath<'a>(&'a std::path::Path);
 impl RemoteMediaPath<'_> {
     fn mime(&self) -> String {
         let path = self.0.to_string_lossy();
-        if let Some(mime) = vmux_core::media::media_mime(&path) {
+        if let Some(mime) = vmux_ecs::media::media_mime(&path) {
             return mime.to_string();
         }
         let extension = self
@@ -293,7 +293,7 @@ impl RemoteMediaPath<'_> {
         if source_size > MEDIA_THUMBNAIL_SOURCE_LIMIT {
             return String::new();
         }
-        let Some(mime) = vmux_core::media::image_mime(&self.0.to_string_lossy()) else {
+        let Some(mime) = vmux_ecs::media::image_mime(&self.0.to_string_lossy()) else {
             return String::new();
         };
         if mime == "image/svg+xml" || mime == "image/avif" {

@@ -2,11 +2,11 @@ use bevy::prelude::*;
 use crossbeam_channel::Receiver;
 use vmux_api::protocol::{AcpSessionConfig, ApprovalDecision, ClientMessage, SharedMessage};
 #[cfg(test)]
-use vmux_core::ProcessId;
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::service::{ServiceMessageSet, ServiceRequest};
-use vmux_core::team::Profile;
-use vmux_core::{LastActivatedAt, PageMetadata};
+use vmux_ecs::ProcessId;
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
+use vmux_ecs::team::Profile;
+use vmux_ecs::{LastActivatedAt, PageMetadata};
 use vmux_git::worktree::ValidatedLinkedWorkspace;
 use vmux_layout::pane::PanePlacement;
 use vmux_layout::stack::Stack;

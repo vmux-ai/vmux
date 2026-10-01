@@ -1,5 +1,12 @@
 (
     settings: Some((
+        defaults: (
+            browser: Some((
+                startup_url: "",
+                search_engine: google,
+                bookmark_folders: [],
+            )),
+        ),
         sections: [(
             id: "browser",
             title: "schema-browser",

@@ -131,7 +131,7 @@ pub struct Mappings {
 }
 
 impl Mappings {
-    pub fn new(specs: &[vmux_core::editor::KeyMapping], leader: &str) -> Self {
+    pub fn new(specs: &[vmux_api::editor::KeyMapping], leader: &str) -> Self {
         let entries = specs
             .iter()
             .filter_map(|spec| {
@@ -181,8 +181,8 @@ impl Mappings {
 mod tests {
     use super::*;
 
-    fn spec(mode: &str, lhs: &str, rhs: &str) -> vmux_core::editor::KeyMapping {
-        vmux_core::editor::KeyMapping {
+    fn spec(mode: &str, lhs: &str, rhs: &str) -> vmux_api::editor::KeyMapping {
+        vmux_api::editor::KeyMapping {
             mode: mode.into(),
             lhs: lhs.into(),
             rhs: rhs.into(),

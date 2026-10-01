@@ -138,7 +138,7 @@ mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
     use bevy::window::{PrimaryWindow, WindowPosition};
-    use vmux_core::{Order, PageMetadata};
+    use vmux_ecs::{Order, PageMetadata};
     use vmux_history::LastActivatedAt;
     use vmux_layout::active_pane::ActiveStack;
     use vmux_layout::pane::Pane;

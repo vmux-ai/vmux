@@ -14,7 +14,7 @@ impl Plugin for GlassPlugin {
             .add_systems(
                 Update,
                 (
-                    sync_window_visibility.in_set(vmux_core::WindowFullscreenSet),
+                    sync_window_visibility.in_set(vmux_ecs::WindowFullscreenSet),
                     keep_surface_transparent,
                 ),
             )
@@ -296,7 +296,7 @@ fn sync_window_visibility(
     mut window_q: Query<(
         Entity,
         &mut bevy::window::Window,
-        &mut vmux_core::WindowFullscreen,
+        &mut vmux_ecs::WindowFullscreen,
     )>,
     focused_window: vmux_layout::window::FocusedWindow,
     mut exit_fullscreen: MessageReader<crate::window::ExitFullscreenRequest>,

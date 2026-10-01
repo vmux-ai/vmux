@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_core::{CreatedAt, LastVisitedAt, Url, Visit, VisitedUrl, now_millis};
+use vmux_ecs::{CreatedAt, LastVisitedAt, Url, Visit, VisitedUrl, now_millis};
 
 pub struct HistoryPrunePlugin;
 
@@ -46,12 +46,12 @@ fn prune(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_core::{CorePlugin, PageMetadata, VisitCount};
+    use vmux_ecs::{EcsPlugin, PageMetadata, VisitCount};
 
     fn app() -> App {
         let mut a = App::new();
         a.add_plugins(MinimalPlugins);
-        a.add_plugins(CorePlugin);
+        a.add_plugins(EcsPlugin);
         a.add_systems(Update, prune);
         a
     }

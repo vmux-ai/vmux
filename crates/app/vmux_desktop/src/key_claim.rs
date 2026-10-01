@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiInput, WebviewSource};
+use vmux_api::input::{KeyClaims, UiKeyContext};
 use vmux_command::shortcut::{KeyContext, Keymap};
-use vmux_core::host::page::HostsPage;
-use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
-use vmux_core::input::{KeyClaims, UiKeyContext};
+use vmux_ecs::host::page::HostsPage;
+use vmux_ecs::host::{UiState, UiStatePlugin, UiStateWrite};
 
 pub struct KeyClaimPlugin;
 
@@ -224,7 +224,7 @@ mod tests {
 
         app.world_mut().trigger(UiInput {
             webview: page,
-            payload: vmux_core::host::page::PageReady {},
+            payload: vmux_ecs::host::page::PageReady {},
         });
         app.update();
 

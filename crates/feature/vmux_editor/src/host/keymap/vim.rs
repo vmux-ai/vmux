@@ -155,7 +155,7 @@ fn single_char(key: &str) -> Option<char> {
 }
 
 impl VimKeymap {
-    pub fn with_mappings(specs: &[vmux_core::editor::KeyMapping], leader: &str) -> Self {
+    pub fn with_mappings(specs: &[vmux_api::editor::KeyMapping], leader: &str) -> Self {
         Self {
             mappings: crate::keymap::mapping::Mappings::new(specs, leader),
             ..Self::default()
@@ -1606,7 +1606,7 @@ mod tests {
     fn mapped(specs: &[(&str, &str, &str)]) -> VimKeymap {
         let specs: Vec<_> = specs
             .iter()
-            .map(|(mode, lhs, rhs)| vmux_core::editor::KeyMapping {
+            .map(|(mode, lhs, rhs)| vmux_api::editor::KeyMapping {
                 mode: (*mode).into(),
                 lhs: (*lhs).into(),
                 rhs: (*rhs).into(),

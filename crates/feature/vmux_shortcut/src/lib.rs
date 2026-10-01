@@ -2,7 +2,7 @@
 pub(crate) struct Feature;
 
 #[cfg(host)]
-impl vmux_core::host::manifest::FeatureManifestSource for Feature {
+impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
     const SOURCE: &'static str = include_str!("feature.ron");
 }
 
@@ -102,7 +102,7 @@ pub struct ShortcutUiState {
 }
 
 #[cfg(host)]
-pub type ShortcutUiStateUpdates = vmux_core::host::UiState<ShortcutUiState>;
+pub type ShortcutUiStateUpdates = vmux_ecs::host::UiState<ShortcutUiState>;
 
 #[vmux_api::contract(Default, Eq)]
 pub struct ShortcutGroup {

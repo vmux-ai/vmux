@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 
-use dioxus::prelude::*;
-use vmux_core::vault::{
+use crate::state::{
     VaultConnectionProvider, VaultDestination, VaultDestinationSelectRequest,
     VaultGenerateRecoveryKeyRequest, VaultOperationKind, VaultOwnerKind, VaultOwnerSelectRequest,
     VaultPrivacyRequest, VaultProviderSelectRequest, VaultRecoveryConfirmationRequest,
@@ -9,6 +8,7 @@ use vmux_core::vault::{
     VaultRepositorySelectRequest, VaultSnapshot, VaultSyncRequest, VaultSyncStatus, VaultUiState,
     VaultWorkflowConnectRequest, VaultWorkflowCreateRequest, VaultWorkflowState,
 };
+use dioxus::prelude::*;
 use vmux_ui::components::checkbox::Checkbox;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSelect,
@@ -20,7 +20,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 #[vmux_native::page(
     component = Page,
     subtree,
-    takes = vmux_core::PageMetadata
+    takes = vmux_ecs::PageMetadata
 )]
 pub struct VaultPage;
 

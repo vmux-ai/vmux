@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, ClientMessage, JsonValue};
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::service::{ServiceMessageSet, ServiceRequest};
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled,
     ToolQueryRequest, ToolQueryRouteSet,

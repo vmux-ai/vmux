@@ -2,9 +2,9 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentRequestId, ClientMessage};
-use vmux_core::ProcessAnchor;
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::service::ServiceRequest;
+use vmux_ecs::ProcessAnchor;
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::service::ServiceRequest;
 use vmux_layout::AgentOpenBeside;
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolQuery, ToolQueryHandled,
@@ -138,7 +138,7 @@ fn answer_queries(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in requests.read() {
-        let snapshot = vmux_core::profile::vault::VaultStatus::current().snapshot();
+        let snapshot = vmux_ecs::profile::vault::VaultStatus::current().snapshot();
         let result = serde_json::to_string_pretty(&snapshot).map_err(|error| error.to_string());
         service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
             AgentQueryResult::text(request.request_id, result),

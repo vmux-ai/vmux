@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
-use vmux_core::host::UiStateWrite;
+use vmux_ecs::host::UiStateWrite;
 
 use crate::command_bar::project_files::{
     MAX_RESULTS, PendingProjectCompletion, ProjectCompletions, ProjectIndex, RankBias,
@@ -199,7 +199,7 @@ fn start_path_completions(
 ) {
     for (webview, request) in &requests {
         let query = PathQuery(request.query.clone());
-        let wake = vmux_core::host::wake::Wake::beside(proxy.as_deref());
+        let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
         let task = IoTaskPool::get().spawn(async move {
             let _wake = wake;
             query.complete()

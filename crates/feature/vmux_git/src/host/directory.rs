@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_core::event::FileDirEntry;
-use vmux_core::event::space::ProjectActivateRequest;
+use vmux_ecs::event::FileDirEntry;
+use vmux_ecs::event::space::ProjectActivateRequest;
 
 use crate::event::{
     GitDirectoryActivateRequest, GitDirectoryAscendRequest, GitDirectoryDescendRequest,
@@ -345,7 +345,7 @@ fn toggle_hidden(
 
 fn load(
     trigger: On<DirectoryLoad>,
-    mut pages: Query<&mut vmux_core::PageMetadata>,
+    mut pages: Query<&mut vmux_ecs::PageMetadata>,
     mut views: Query<(&mut super::state::GitState, &mut GitDirectoryNavigation)>,
     mut commands: Commands,
 ) {

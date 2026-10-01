@@ -566,7 +566,7 @@ mod tests {
             .app
             .world_mut()
             .entity_mut(window)
-            .insert(vmux_core::Active);
+            .insert(vmux_ecs::Active);
         let root = fixture.app.world_mut().spawn(HostWindow(window)).id();
         fixture
             .app

@@ -1,5 +1,5 @@
 use vmux_api::open_target::OpenTarget;
-use vmux_core::input::NavigationText;
+use vmux_path::NavigationText;
 
 #[derive(Clone, Copy, Debug)]
 pub struct PaletteQuery<'a>(&'a str);

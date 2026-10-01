@@ -2,6 +2,14 @@ use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 
+mod executable;
+mod file_url;
+mod navigation;
+
+pub use executable::Executable;
+pub use file_url::FileUrl;
+pub use navigation::NavigationText;
+
 pub struct AtomicFile;
 
 impl AtomicFile {

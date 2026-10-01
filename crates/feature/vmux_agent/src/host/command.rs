@@ -4,8 +4,8 @@ mod tool_call;
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommandResult, AgentNotify};
 use vmux_command::WriteCommandRequests;
-use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
-use vmux_core::service::ServiceMessageSet;
+use vmux_ecs::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
+use vmux_ecs::service::ServiceMessageSet;
 
 use crate::host::event::CommandOrigin;
 
@@ -34,13 +34,9 @@ impl Plugin for CommandPlugin {
 
 fn notify(
     mut requests: MessageReader<AgentRequestInput>,
-    agents: Query<(
-        Entity,
-        &vmux_core::team::Agent,
-        Option<&vmux_core::ProcessId>,
-    )>,
-    user: Query<Entity, With<vmux_core::team::User>>,
-    mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
+    agents: Query<(Entity, &vmux_ecs::team::Agent, Option<&vmux_ecs::ProcessId>)>,
+    user: Query<Entity, With<vmux_ecs::team::User>>,
+    mut attention: MessageWriter<vmux_ecs::notify::AgentAttention>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
@@ -63,7 +59,7 @@ fn notify(
         };
         let result = match caller {
             Some(caller) => {
-                attention.write(vmux_core::notify::AgentAttention {
+                attention.write(vmux_ecs::notify::AgentAttention {
                     entity: caller,
                     title: payload.title.clone(),
                     body: payload.body.clone(),

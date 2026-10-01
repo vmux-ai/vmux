@@ -30,7 +30,7 @@ pub enum Resolution {
 
 impl PackageStore {
     pub fn lsp() -> Self {
-        Self::at(vmux_core::profile::ProfilePaths::current().lsp())
+        Self::at(vmux_ecs::profile::ProfilePaths::current().lsp())
     }
 
     pub fn at(root: impl Into<PathBuf>) -> Self {

@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput, WebviewSize};
 use vmux_api::protocol::{ClientMessage, ProcessId};
-use vmux_core::page::PageReady;
-use vmux_core::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
+use vmux_ecs::page::PageReady;
+use vmux_ecs::service::{ServiceConnected, ServiceMessageSet, ServiceRequest};
 
 use crate::Terminal;
 use crate::event::{TermResizeEvent, TermScrollEvent};

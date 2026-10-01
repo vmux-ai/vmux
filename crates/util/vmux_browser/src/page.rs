@@ -8,7 +8,7 @@ use vmux_api::{
 };
 
 use vmux_command::ReadCommandRequests;
-use vmux_core::{
+use vmux_ecs::{
     CefPageAttachRequest, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
     PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask,
 };
@@ -18,6 +18,7 @@ use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::{LayoutFocus, Stack},
 };
+use vmux_ui::i18n::translate;
 
 use crate::host::{
     PageOpenAwaitSnapshot, PageOpenFallbackDeferred, PendingNavigationSnapshot,
@@ -28,7 +29,7 @@ pub(crate) struct PagePlugin;
 
 impl Plugin for PagePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<vmux_core::service::ServiceRequest>()
+        app.add_message::<vmux_ecs::service::ServiceRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<CefPageAttachRequest>()
             .add_message::<PendingNavigationUpdate>()
@@ -98,7 +99,7 @@ fn apply_pending_navigation(
     mut updates: MessageReader<PendingNavigationUpdate>,
     existing: Query<(Entity, &PendingNavigationSnapshot)>,
     mut commands: Commands,
-    mut service_requests: MessageWriter<vmux_core::service::ServiceRequest>,
+    mut service_requests: MessageWriter<vmux_ecs::service::ServiceRequest>,
 ) {
     let mut pending = existing
         .iter()
@@ -123,7 +124,7 @@ impl ErrorPageAttachment {
         Self {
             stack,
             failure: ErrorPageData {
-                title: FAILED_TO_LOAD.to_string(),
+                title_message_id: FAILED_TO_LOAD.to_string(),
                 message: message.to_string(),
                 url: url.to_string(),
             },
@@ -134,7 +135,7 @@ impl ErrorPageAttachment {
         Self {
             stack,
             failure: ErrorPageData {
-                title: NOT_FOUND.to_string(),
+                title_message_id: NOT_FOUND.to_string(),
                 message: String::new(),
                 url: url.to_string(),
             },
@@ -146,7 +147,7 @@ fn handle_open_requests(
     mut reader: MessageReader<PageOpenRequest>,
     target: PageOpenTargetResolver,
     time: Res<Time>,
-    mut service_requests: MessageWriter<vmux_core::service::ServiceRequest>,
+    mut service_requests: MessageWriter<vmux_ecs::service::ServiceRequest>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -339,7 +340,7 @@ fn attach_cef_pages(
             .id();
         commands
             .entity(browser)
-            .insert((vmux_core::KeyboardOwner, metadata));
+            .insert((vmux_ecs::KeyboardOwner, metadata));
         if task.is_some() {
             commands
                 .entity(entity)
@@ -356,14 +357,19 @@ fn attach_error_pages(
     mut commands: Commands,
 ) {
     for (entity, attachment, task) in &attachments {
+        let title = if attachment.failure.title_message_id.is_empty() {
+            translate("error-title")
+        } else {
+            translate(&attachment.failure.title_message_id)
+        };
         commands.entity(attachment.stack).despawn_children();
         commands.entity(attachment.stack).insert(PageMetadata {
             url: attachment.failure.url.clone(),
-            title: attachment.failure.title.clone(),
+            title: title.clone(),
             ..default()
         });
         commands.spawn((
-            Browser::native_page(vmux_layout::ErrorPage::URL, &attachment.failure.title),
+            Browser::native_page(vmux_layout::ErrorPage::URL, &title),
             attachment.failure.clone(),
             ChildOf(attachment.stack),
         ));
@@ -394,7 +400,7 @@ fn respond_open_tasks(
     child_of: Query<&ChildOf>,
     mut pending_navigation: MessageWriter<PendingNavigationUpdate>,
     mut commands: Commands,
-    mut service_requests: MessageWriter<vmux_core::service::ServiceRequest>,
+    mut service_requests: MessageWriter<vmux_ecs::service::ServiceRequest>,
 ) {
     for (entity, task, error, await_snapshot) in &tasks {
         if let Some(error) = error {

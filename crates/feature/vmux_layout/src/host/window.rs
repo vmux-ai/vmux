@@ -15,10 +15,10 @@ use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::host::persistence::PersistenceAppExt;
-use vmux_core::page::PageEmbedSet;
-use vmux_core::{
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::host::persistence::PersistenceAppExt;
+use vmux_ecs::page::PageEmbedSet;
+use vmux_ecs::{
     Active, EffectiveStartupUrl, Order, PageOpenRequest, PageOpenSet, PageOpenTarget, PendingPrompt,
 };
 use vmux_flex::prelude::*;
@@ -1158,7 +1158,7 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let requested_space = app
             .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)))
             .id();
         let later_space = app
             .world_mut()
@@ -1177,10 +1177,10 @@ mod tests {
             });
         app.world_mut()
             .entity_mut(requested_space)
-            .remove::<vmux_core::Active>();
+            .remove::<vmux_ecs::Active>();
         app.world_mut()
             .entity_mut(later_space)
-            .insert(vmux_core::Active);
+            .insert(vmux_ecs::Active);
 
         app.update();
 
@@ -1222,7 +1222,7 @@ mod tests {
             .id();
         app.world_mut().entity_mut(space).insert((
             crate::space::EffectiveStartupDir(Some(startup_dir.path().to_path_buf())),
-            vmux_core::EffectiveStartupUrl("vmux://sessions/vibe/".to_string()),
+            vmux_ecs::EffectiveStartupUrl("vmux://sessions/vibe/".to_string()),
         ));
 
         app.update();
@@ -1258,7 +1258,7 @@ mod tests {
         let space = app.world_mut().spawn(crate::space::Space).id();
         app.world_mut().entity_mut(space).insert((
             crate::space::EffectiveStartupDir(Some(startup_dir.path().to_path_buf())),
-            vmux_core::EffectiveStartupUrl("vmux://sessions/vibe/".to_string()),
+            vmux_ecs::EffectiveStartupUrl("vmux://sessions/vibe/".to_string()),
         ));
 
         app.update();

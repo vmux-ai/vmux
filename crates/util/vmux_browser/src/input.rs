@@ -10,7 +10,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
-use vmux_core::overlay::{OverlayState, OverlayStateQuery};
+use vmux_ecs::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
 use vmux_layout::LayoutCef;
 

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use base64::Engine;
 use dioxus::prelude::*;
-use vmux_core::event::{FileDirEntry, FileLine};
+use vmux_ecs::event::{FileDirEntry, FileLine};
 use vmux_ui::i18n::translate;
 use vmux_ui::media::MediaElement;
 
@@ -28,7 +28,7 @@ pub(super) enum Preview {
 }
 
 pub(super) fn image_data_url(bytes: &[u8], path: &str) -> String {
-    let mime = vmux_core::media::image_mime(path).unwrap_or("application/octet-stream");
+    let mime = vmux_ecs::media::image_mime(path).unwrap_or("application/octet-stream");
 
     format!(
         "data:{mime};base64,{}",

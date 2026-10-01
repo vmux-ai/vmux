@@ -2,11 +2,11 @@ use std::collections::HashMap;
 
 use dioxus::html::geometry::{ClientPoint, ElementPoint};
 use dioxus::prelude::*;
-use vmux_core::event::{
+use vmux_ecs::event::{
     CompletionItem, FilePanelPick, FilePointerEvent, FilePropertyEdit, MdBlock, NoteBlock,
 };
-use vmux_core::knowledge::{KnowledgeProperty, KnowledgePropertyKind};
 use vmux_git::event::GitLineStatus;
+use vmux_knowledge::{KnowledgeProperty, KnowledgePropertyKind};
 use vmux_ui::caret::EventSelection;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::send;
@@ -188,10 +188,10 @@ impl NoteBlocks for [NoteBlock] {
 }
 
 #[component]
-pub(super) fn NoteBlankLine(line: u32, col: u32, keymap: vmux_core::KeymapKind) -> Element {
+pub(super) fn NoteBlankLine(line: u32, col: u32, keymap: vmux_api::editor::KeymapKind) -> Element {
     let text = " ".repeat(col as usize);
     let chunks = NoteLineChunk::split(&text, Some(col), None);
-    let caret_width_class = if keymap == vmux_core::KeymapKind::Vscode {
+    let caret_width_class = if keymap == vmux_api::editor::KeymapKind::Vscode {
         "w-px"
     } else {
         "w-[2px]"
@@ -417,7 +417,7 @@ fn NoteInlineNodes(
 fn note_selection_ranges(
     source: &str,
     start_line: u32,
-    selections: &[vmux_core::editor::SelSpan],
+    selections: &[vmux_api::editor::SelSpan],
 ) -> Vec<(u32, u32)> {
     let text = NoteText::new(source);
     selections
@@ -572,10 +572,10 @@ pub(super) fn NoteBlockView(
     diff_markers: ReadSignal<HashMap<u32, GitLineStatus>>,
     index: usize,
     editing: bool,
-    source_cursor: Signal<vmux_core::editor::CursorPos>,
-    source_selections: Signal<Vec<vmux_core::editor::SelSpan>>,
+    source_cursor: Signal<vmux_api::editor::CursorPos>,
+    source_selections: Signal<Vec<vmux_api::editor::SelSpan>>,
     note_diff_marker: Option<GitLineStatus>,
-    keymap: vmux_core::KeymapKind,
+    keymap: vmux_api::editor::KeymapKind,
     note_cursor: NoteCursor,
     mut note_dragging: Signal<bool>,
     comp_open: bool,
@@ -588,7 +588,7 @@ pub(super) fn NoteBlockView(
     let current = if editing {
         *source_cursor.read()
     } else {
-        vmux_core::editor::CursorPos::default()
+        vmux_api::editor::CursorPos::default()
     };
     let selections = if editing {
         source_selections.read().clone()
@@ -654,7 +654,7 @@ pub(super) fn NoteBlockView(
     } else {
         (Vec::new(), Vec::new(), 0, Vec::new())
     };
-    let caret_width_class = if keymap == vmux_core::KeymapKind::Vscode {
+    let caret_width_class = if keymap == vmux_api::editor::KeymapKind::Vscode {
         "w-px"
     } else {
         "w-[2px]"
@@ -663,7 +663,7 @@ pub(super) fn NoteBlockView(
         let selection = selections
             .iter()
             .find(|selection| selection.line == line)
-            .map(|selection| vmux_core::editor::SelSpan {
+            .map(|selection| vmux_api::editor::SelSpan {
                 line: selection.line,
                 row: selection.row,
                 start: selection.start.saturating_sub(prefix),

@@ -349,7 +349,7 @@ impl ServiceConnection {
 
         loop {
             let msg: Option<ClientMessage> =
-                match vmux_core::service::read_client_message(&mut reader).await {
+                match vmux_ecs::service::read_client_message(&mut reader).await {
                     Ok(msg) => msg,
                     Err(error) => {
                         tracing::warn!(%error, "client stream ended mid-frame");
@@ -391,13 +391,13 @@ impl ServiceConnection {
                             };
                             let w = writer.clone();
                             let mut w = w.lock().await;
-                            vmux_core::service::write_service_message(&mut *w, &resp).await?;
+                            vmux_ecs::service::write_service_message(&mut *w, &resp).await?;
                         }
                         Err(reason) => {
                             let resp = ServiceMessage::ProcessCreateFailed { process_id, reason };
                             let w = writer.clone();
                             let mut w = w.lock().await;
-                            vmux_core::service::write_service_message(&mut *w, &resp).await?;
+                            vmux_ecs::service::write_service_message(&mut *w, &resp).await?;
                         }
                     }
                 }
@@ -416,7 +416,7 @@ impl ServiceConnection {
                                                 Err(_) => break,
                                             };
                                         let mut w = w.lock().await;
-                                        if vmux_core::service::write_raw_frame(&mut *w, &bytes)
+                                        if vmux_ecs::service::write_raw_frame(&mut *w, &bytes)
                                             .await
                                             .is_err()
                                         {
@@ -440,7 +440,7 @@ impl ServiceConnection {
                             message: format!("process not found: {process_id}"),
                         };
                         let mut w = writer.lock().await;
-                        vmux_core::service::write_service_message(&mut *w, &resp).await?;
+                        vmux_ecs::service::write_service_message(&mut *w, &resp).await?;
                     }
                 }
 
@@ -488,7 +488,7 @@ impl ServiceConnection {
                         processes: process_list,
                     };
                     let mut w = writer.lock().await;
-                    vmux_core::service::write_service_message(&mut *w, &resp).await?;
+                    vmux_ecs::service::write_service_message(&mut *w, &resp).await?;
                 }
 
                 ClientMessage::KillProcess { process_id } => {
@@ -502,13 +502,13 @@ impl ServiceConnection {
                     if let Ok(snapshot) = processes.snapshot(process_id).await {
                         let snap = snapshot.into_service_message(process_id);
                         let mut w = writer.lock().await;
-                        vmux_core::service::write_service_message(&mut *w, &snap).await?;
+                        vmux_ecs::service::write_service_message(&mut *w, &snap).await?;
                     } else {
                         let resp = ServiceMessage::Error {
                             message: format!("process not found: {process_id}"),
                         };
                         let mut w = writer.lock().await;
-                        vmux_core::service::write_service_message(&mut *w, &resp).await?;
+                        vmux_ecs::service::write_service_message(&mut *w, &resp).await?;
                     }
                 }
 
@@ -543,7 +543,7 @@ impl ServiceConnection {
                         .unwrap_or_default();
                     let resp = ServiceMessage::SelectionText { process_id, text };
                     let mut w = writer.lock().await;
-                    vmux_core::service::write_service_message(&mut *w, &resp).await?;
+                    vmux_ecs::service::write_service_message(&mut *w, &resp).await?;
                 }
 
                 ClientMessage::EnterCopyMode { process_id } => {
@@ -558,7 +558,7 @@ impl ServiceConnection {
                     if let Ok(Some(text)) = processes.copy_mode_key(process_id, key).await {
                         let resp = ServiceMessage::SelectionText { process_id, text };
                         let mut w = writer.lock().await;
-                        vmux_core::service::write_service_message(&mut *w, &resp).await?;
+                        vmux_ecs::service::write_service_message(&mut *w, &resp).await?;
                     }
                 }
 
@@ -577,7 +577,7 @@ impl ServiceConnection {
                                         Err(_) => break,
                                     };
                                     let mut w = w.lock().await;
-                                    if vmux_core::service::write_raw_frame(&mut *w, &bytes)
+                                    if vmux_ecs::service::write_raw_frame(&mut *w, &bytes)
                                         .await
                                         .is_err()
                                     {
@@ -614,7 +614,7 @@ impl ServiceConnection {
                             Err(_) => return,
                         };
                         let mut w = writer.lock().await;
-                        let _ = vmux_core::service::write_raw_frame(&mut *w, &bytes).await;
+                        let _ = vmux_ecs::service::write_raw_frame(&mut *w, &bytes).await;
                     });
                 }
 
@@ -625,7 +625,7 @@ impl ServiceConnection {
                         processes: Vec::new(),
                     };
                     let mut w = writer.lock().await;
-                    vmux_core::service::write_service_message(&mut *w, &resp).await?;
+                    vmux_ecs::service::write_service_message(&mut *w, &resp).await?;
                     shutdown_tx.send(()).await.ok();
                     break;
                 }
@@ -638,7 +638,7 @@ impl ServiceConnection {
                         process_count,
                     };
                     let mut w = writer.lock().await;
-                    vmux_core::service::write_service_message(&mut *w, &resp).await?;
+                    vmux_ecs::service::write_service_message(&mut *w, &resp).await?;
                 }
 
                 ClientMessage::AgentQuery { request_id, query } => {
@@ -658,14 +658,14 @@ impl ServiceConnection {
                                 };
                                 let mut writer = writer.lock().await;
                                 let _ =
-                                    vmux_core::service::write_raw_frame(&mut *writer, &bytes).await;
+                                    vmux_ecs::service::write_raw_frame(&mut *writer, &bytes).await;
                             });
                             continue;
                         }
                         Err(message) => ServiceMessage::Error { message },
                     };
                     let mut writer = writer.lock().await;
-                    vmux_core::service::write_service_message(&mut *writer, &response).await?;
+                    vmux_ecs::service::write_service_message(&mut *writer, &response).await?;
                 }
 
                 ClientMessage::AgentQueryResult(result) => {
@@ -704,15 +704,15 @@ impl ServiceConnection {
                     if let Some(mut rx) = rx {
                         if let Some(snapshot) = acp_sessions.snapshot(sid.clone()).await {
                             let mut w = writer.lock().await;
-                            vmux_core::service::write_service_message(&mut *w, &snapshot).await?;
+                            vmux_ecs::service::write_service_message(&mut *w, &snapshot).await?;
                         }
                         if let Some(agent_info) = acp_sessions.agent_info(sid.clone()).await {
                             let mut w = writer.lock().await;
-                            vmux_core::service::write_service_message(&mut *w, &agent_info).await?;
+                            vmux_ecs::service::write_service_message(&mut *w, &agent_info).await?;
                         }
                         if let Some(config_state) = acp_sessions.config_state(sid.clone()).await {
                             let mut w = writer.lock().await;
-                            vmux_core::service::write_service_message(&mut *w, &config_state)
+                            vmux_ecs::service::write_service_message(&mut *w, &config_state)
                                 .await?;
                         }
                         if let Some(old) = agent_forwarders.remove(&sid) {
@@ -729,7 +729,7 @@ impl ServiceConnection {
                                                 Err(_) => break,
                                             };
                                         let mut w = w.lock().await;
-                                        if vmux_core::service::write_raw_frame(&mut *w, &bytes)
+                                        if vmux_ecs::service::write_raw_frame(&mut *w, &bytes)
                                             .await
                                             .is_err()
                                         {
@@ -784,7 +784,7 @@ impl ServiceConnection {
                     {
                         let resp = ServiceMessage::Error { message };
                         let mut w = writer.lock().await;
-                        vmux_core::service::write_service_message(&mut *w, &resp).await?;
+                        vmux_ecs::service::write_service_message(&mut *w, &resp).await?;
                     }
                 }
 
@@ -872,22 +872,22 @@ impl ServiceConnection {
                     {
                         let response = ServiceMessage::Error { message };
                         let mut writer = writer.lock().await;
-                        vmux_core::service::write_service_message(&mut *writer, &response).await?;
+                        vmux_ecs::service::write_service_message(&mut *writer, &response).await?;
                         continue;
                     }
                     let rx = acp_sessions.subscribe(sid.clone()).await;
                     if let Some(mut rx) = rx {
                         if let Some(snapshot) = acp_sessions.snapshot(sid.clone()).await {
                             let mut w = writer.lock().await;
-                            vmux_core::service::write_service_message(&mut *w, &snapshot).await?;
+                            vmux_ecs::service::write_service_message(&mut *w, &snapshot).await?;
                         }
                         if let Some(agent_info) = acp_sessions.agent_info(sid.clone()).await {
                             let mut w = writer.lock().await;
-                            vmux_core::service::write_service_message(&mut *w, &agent_info).await?;
+                            vmux_ecs::service::write_service_message(&mut *w, &agent_info).await?;
                         }
                         if let Some(config_state) = acp_sessions.config_state(sid.clone()).await {
                             let mut w = writer.lock().await;
-                            vmux_core::service::write_service_message(&mut *w, &config_state)
+                            vmux_ecs::service::write_service_message(&mut *w, &config_state)
                                 .await?;
                         }
                         if let Some(old) = agent_forwarders.remove(&sid) {
@@ -904,7 +904,7 @@ impl ServiceConnection {
                                                 Err(_) => break,
                                             };
                                         let mut w = w.lock().await;
-                                        if vmux_core::service::write_raw_frame(&mut *w, &bytes)
+                                        if vmux_ecs::service::write_raw_frame(&mut *w, &bytes)
                                             .await
                                             .is_err()
                                         {
@@ -1054,7 +1054,7 @@ mod tests {
         let (_r, mut w) = stream.into_split();
         let bytes =
             rkyv::to_bytes::<rkyv::rancor::Error>(&ClientMessage::Shutdown).expect("serialize");
-        vmux_core::service::write_raw_frame(&mut w, &bytes)
+        vmux_ecs::service::write_raw_frame(&mut w, &bytes)
             .await
             .expect("write shutdown");
 
@@ -1166,7 +1166,7 @@ mod tests {
             rows: 24,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&create).expect("serialize");
-        vmux_core::service::write_raw_frame(&mut w, &bytes)
+        vmux_ecs::service::write_raw_frame(&mut w, &bytes)
             .await
             .expect("write create");
 
@@ -1233,7 +1233,7 @@ mod tests {
             rows: 24,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&create).expect("serialize");
-        vmux_core::service::write_raw_frame(&mut w, &bytes)
+        vmux_ecs::service::write_raw_frame(&mut w, &bytes)
             .await
             .expect("write create");
 

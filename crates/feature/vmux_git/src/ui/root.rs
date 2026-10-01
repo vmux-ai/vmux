@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_core::input::KeyModifiers;
+use vmux_api::input::KeyModifiers;
 use vmux_ui::hooks::{send, use_theme};
 use vmux_ui::i18n::translate;
 

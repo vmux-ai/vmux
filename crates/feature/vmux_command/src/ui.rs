@@ -11,10 +11,10 @@ use vmux_api::command_bar::{
     CommandPaletteMediaActivateRequest, CommandPaletteMediaDismissRequest,
     CommandPaletteMediaHighlightRequest, CommandPaletteMediaMoveRequest,
     CommandPaletteMenuActivateRequest, CommandPaletteMenuDismissRequest,
-    CommandPaletteMenuMoveRequest, CommandPaletteRemoveAttachmentRequest, CommandPaletteState,
-    CommandPaletteSubmitRequest, PaletteGlyph, PaletteMode,
+    CommandPaletteMenuMoveRequest, CommandPaletteRemoveAttachmentRequest,
+    CommandPaletteSubmitRequest, CommandPaletteUiState, PaletteGlyph, PaletteMode,
 };
-use vmux_core::input::{UiKeyContext, Unclaimed};
+use vmux_api::input::UiKeyContext;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposer, focus_prompt_end};
@@ -23,6 +23,7 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::components::mcp_menu::{McpMenu, use_mcp_connections};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
+use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_ui_state};
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
@@ -75,7 +76,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let on_activity = props.on_activity;
 
     let mut input = use_palette_input();
-    let host_state = use_ui_state::<CommandPaletteState>().state;
+    let host_state = use_ui_state::<CommandPaletteUiState>().state;
     let mcp = use_mcp_connections();
     let ime = use_ime_guard();
     let mut handled_close = use_signal(|| None);
@@ -181,7 +182,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let palette_data = if host_snapshot.open_id == state_val.open_id {
         host_snapshot
     } else {
-        CommandPaletteState::default()
+        CommandPaletteUiState::default()
     };
     let projection = std::rc::Rc::new(palette_data.projection.clone());
     let attachments = std::rc::Rc::new(palette_data.attachments.clone());

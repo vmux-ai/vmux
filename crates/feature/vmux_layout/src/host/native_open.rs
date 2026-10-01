@@ -1,8 +1,8 @@
 use bevy::prelude::*;
-use vmux_core::host::page::PageManifest;
-use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
+use vmux_ecs::host::page::PageManifest;
+use vmux_ecs::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 
-use vmux_core::host::page::NativelyHosted;
+use vmux_ecs::host::page::NativelyHosted;
 
 use crate::cef::Browser;
 
@@ -52,7 +52,7 @@ impl<M> HostedUiManifest<M> {
 
 fn mark_hosted_view<M: Component + Default>(
     manifest: Res<HostedUiManifest<M>>,
-    views: Query<(Entity, &PageMetadata), (With<vmux_core::host::page::HostsPage>, Without<M>)>,
+    views: Query<(Entity, &PageMetadata), (With<vmux_ecs::host::page::HostsPage>, Without<M>)>,
     mut commands: Commands,
 ) {
     for (entity, page) in &views {
@@ -109,10 +109,10 @@ fn handle_native_page_open(
 
 #[cfg(test)]
 mod tests {
-    use vmux_core::{BuiltinIcon, PageIcon, PageOpenId};
+    use vmux_ecs::{BuiltinIcon, PageIcon, PageOpenId};
 
     use super::*;
-    use vmux_core::host::page::NativelyHosted;
+    use vmux_ecs::host::page::NativelyHosted;
 
     #[test]
     fn a_trailing_slash_does_not_decide_which_page_was_asked_for() {

@@ -79,7 +79,7 @@ pub(super) fn EmptyRepository() -> Element {
                 on_descend: move |target| {
                     let _ = send(&GitDirectoryDescendRequest { target });
                 },
-                        on_open: move |entry: vmux_core::event::FileDirEntry| {
+                        on_open: move |entry: vmux_ecs::event::FileDirEntry| {
                             if entry.is_dir {
                                 let _ = send(&GitDirectoryOpenRequest { path: entry.path });
                             }

@@ -5,7 +5,7 @@ use crate::event::LayoutOverlayEvent;
 use crate::window::VmuxWindow;
 use bevy::prelude::*;
 use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
-use vmux_core::overlay::WindowOverlay;
+use vmux_ecs::overlay::WindowOverlay;
 
 pub(crate) struct LayoutOverlayPlugin;
 
@@ -89,7 +89,7 @@ mod tests {
         let mut app = app();
         let window = app
             .world_mut()
-            .spawn((Window::default(), vmux_core::Active))
+            .spawn((Window::default(), vmux_ecs::Active))
             .id();
         let root = app.world_mut().spawn((VmuxWindow, HostWindow(window))).id();
         let overlay = app.world_mut().spawn(WindowOverlay).id();
@@ -110,7 +110,7 @@ mod tests {
         let old_window = app.world_mut().spawn(Window::default()).id();
         let focused_window = app
             .world_mut()
-            .spawn((Window::default(), vmux_core::Active))
+            .spawn((Window::default(), vmux_ecs::Active))
             .id();
         let elsewhere = app.world_mut().spawn_empty().id();
         let root = app

@@ -7,9 +7,8 @@ use vmux_api::prompt_media::{ChatAttachment, ChatAttachments, ChatMediaEntry};
 #[cfg(host)]
 use vmux_api::protocol::{AgentAttachment, ClientMessage, SharedMessage};
 use vmux_api::room::RemoteMediaEntry;
-use vmux_core::prompt_media::AttachmentSelection;
 #[cfg(host)]
-use vmux_core::service::ServiceRequest;
+use vmux_ecs::service::ServiceRequest;
 #[cfg(host)]
 use vmux_session::{AcpSession, AgentConversationTitle, AgentRunState, PromptQueue};
 
@@ -119,12 +118,12 @@ fn submit(
     enqueue_prompt(&mut queue, &mut state, text, attachments);
     let effect = composer.effect(String::new(), true);
     commands.trigger(
-        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
+        vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
     );
     commands.trigger(ComposerChanged::new(webview));
     if selected.clear_selected() {
         commands.trigger(
-            vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+            vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
                 webview,
                 &selected.state(),
             ),
@@ -244,9 +243,7 @@ fn escape(
     if !running && queue.items.is_empty() && !composer.draft().is_empty() {
         let effect = composer.effect(String::new(), true);
         commands.trigger(
-            vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
-                webview, &effect,
-            ),
+            vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(webview, &effect),
         );
         commands.trigger(ComposerChanged::new(webview));
     }
@@ -451,9 +448,10 @@ fn fold_attachments(
                 .0
                 .insert(attachment.path.clone(), attachment.clone());
         }
-        changed |= AttachmentSelection::new(&mut attachments.0).merge(&ChatAttachments {
+        changed |= ChatAttachments {
             attachments: added.clone(),
-        });
+        }
+        .merge_into(&mut attachments.0);
     }
     if changed {
         focus.next();
@@ -488,7 +486,7 @@ mod tests {
                 agent_id: "mock".into(),
                 sid: "session".into(),
                 cwd: std::path::PathBuf::from("/tmp"),
-                anchor: vmux_core::ProcessId::new(),
+                anchor: vmux_ecs::ProcessId::new(),
                 resume: None,
             }
         }

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::Browsers;
-use vmux_core::browser::{BrowserScrollRequest, BrowserSnapshotRequest};
+use vmux_ecs::browser::{BrowserScrollRequest, BrowserSnapshotRequest};
 
 use crate::snapshot::BrowserTarget;
 

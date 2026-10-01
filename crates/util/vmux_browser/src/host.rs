@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use vmux_command::command_bar::PendingCommandBarReveal;
 use vmux_command::command_bar::panel::CommandBarPanelActive;
-use vmux_core::{PageOpenSet, page::PageReady};
+use vmux_ecs::{PageOpenSet, page::PageReady};
 use vmux_flex::prelude::*;
 use vmux_layout::{
     Browser, Header, Open, PendingWebviewReveal, UpdateState, bookmark::BookmarkContextMenuActive,
@@ -46,7 +46,7 @@ pub(crate) fn configure_cef_backend_sync(app: &mut App) -> &mut App {
 
 pub(crate) fn cef_command_line_config() -> CommandLineConfig {
     CommandLineConfig {
-        switches: vmux_core::profile::Profile::current()
+        switches: vmux_ecs::profile::Profile::current()
             .cef_keychain_switches()
             .to_vec(),
         switch_values: vec![("disable-features", "BackForwardCache")],
@@ -60,7 +60,7 @@ pub(crate) fn cef_os_crypt_key_provider() -> Option<bevy_cef::CefOsCryptKeyProvi
 
 #[cfg(target_os = "macos")]
 fn cef_os_crypt_key() -> Result<bevy_cef::CefOsCryptKey, String> {
-    let key = vmux_core::profile::safe_storage::SafeStorage::browser_key()
+    let key = vmux_ecs::profile::safe_storage::SafeStorage::browser_key()
         .map_err(|error| error.to_string())?;
     Ok(bevy_cef::CefOsCryptKey::new(*key.as_bytes()))
 }
@@ -91,7 +91,7 @@ pub(crate) fn browser_accept_language_list(locale: &str) -> String {
 }
 
 fn external_locale_catalog(locale: &str) -> Option<String> {
-    let directory = vmux_core::profile::ProfilePaths::current()
+    let directory = vmux_ecs::profile::ProfilePaths::current()
         .config()
         .join("locales");
     [locale, locale.split('-').next().unwrap_or(locale)]
@@ -445,9 +445,9 @@ pub(crate) struct PageOpenAwaitSnapshot {
 pub(crate) fn page_open_response(
     request_id: Option<[u8; 16]>,
     result: Result<(), String>,
-) -> Option<vmux_core::service::ServiceRequest> {
+) -> Option<vmux_ecs::service::ServiceRequest> {
     use vmux_api::protocol::{AgentCommandResult, AgentRequestId, ClientMessage};
-    use vmux_core::service::ServiceRequest;
+    use vmux_ecs::service::ServiceRequest;
     let request_id = request_id?;
     let result = match result {
         Ok(()) => AgentCommandResult::Ok,
@@ -502,5 +502,5 @@ impl PendingNavigationUpdate {
 }
 
 pub(crate) fn cef_root_cache_path() -> Option<String> {
-    vmux_core::profile::ProfilePaths::current().cef_cache()
+    vmux_ecs::profile::ProfilePaths::current().cef_cache()
 }

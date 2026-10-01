@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_core::PageMetadata;
+use vmux_ecs::PageMetadata;
 
 use crate::active_pane::ActiveStack;
 use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, Zoomed};
@@ -204,7 +204,7 @@ mod tests {
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "vmux://terminal/x".into(),
             title: String::new(),
-            icon: vmux_core::PageIcon::None,
+            icon: vmux_ecs::PageIcon::None,
             bg_color: None,
         });
 
@@ -258,7 +258,7 @@ mod tests {
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "vmux://terminal/123".into(),
             title: String::new(),
-            icon: vmux_core::PageIcon::None,
+            icon: vmux_ecs::PageIcon::None,
             bg_color: None,
         });
 
@@ -317,7 +317,7 @@ mod tests {
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "https://example.com".into(),
             title: "Example".into(),
-            icon: vmux_core::PageIcon::None,
+            icon: vmux_ecs::PageIcon::None,
             bg_color: None,
         });
 
@@ -572,7 +572,7 @@ mod tests {
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "https://example.com".into(),
             title: "Ex".into(),
-            icon: vmux_core::PageIcon::Favicon("https://example.com/icon.png".into()),
+            icon: vmux_ecs::PageIcon::Favicon("https://example.com/icon.png".into()),
             bg_color: None,
         });
 
@@ -608,7 +608,7 @@ mod tests {
         };
         assert_eq!(
             stacks[0].icon,
-            vmux_core::PageIcon::Favicon("https://example.com/icon.png".into())
+            vmux_ecs::PageIcon::Favicon("https://example.com/icon.png".into())
         );
     }
 }

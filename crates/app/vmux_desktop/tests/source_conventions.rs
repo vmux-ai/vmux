@@ -142,7 +142,18 @@ fn audit_module_layout(dir: &Path, violations: &mut Vec<String>) {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if name == "mod.rs" || matches!(name, "tools.rs" | "page_state.rs" | "view.rs") {
+        if name == "mod.rs"
+            || matches!(
+                name,
+                "helper.rs"
+                    | "helpers.rs"
+                    | "page_state.rs"
+                    | "tools.rs"
+                    | "util.rs"
+                    | "utils.rs"
+                    | "view.rs"
+            )
+        {
             violations.push(path.display().to_string());
         }
         if name == "native_page.rs" && !path.ends_with("vmux_macro/src/native_page.rs") {

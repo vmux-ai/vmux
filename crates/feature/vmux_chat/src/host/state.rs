@@ -8,7 +8,7 @@ use bevy_ecs::prelude::*;
 #[cfg(not(host))]
 use vmux_api::page::UiStateEmit;
 #[cfg(host)]
-use vmux_core::host::{UiStatePlugin, UiStateWrite};
+use vmux_ecs::host::{UiStatePlugin, UiStateWrite};
 
 pub struct ChatUiStatePlugin;
 

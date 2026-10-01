@@ -4,6 +4,7 @@
             name: "default",
             url: "vmux://simulator/",
             title: "Simulator",
+            bookmark: Some(80),
             owns_subtree: true,
             title_message_id: "simulator-title",
             keywords: ["simulator", "ios", "iphone", "device"],

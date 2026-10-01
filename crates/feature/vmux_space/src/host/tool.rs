@@ -4,9 +4,9 @@ use bevy_cef::prelude::HostWindow;
 use serde::Deserialize;
 use vmux_api::BinEvent;
 use vmux_api::protocol::{AgentQueryResult, AgentRequest, AgentSpace, ClientMessage};
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::service::{ServiceMessageSet, ServiceRequest};
-use vmux_core::{Active, Order, ProcessAnchor};
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
+use vmux_ecs::{Active, Order, ProcessAnchor};
 use vmux_layout::space::{Space, SpaceId};
 use vmux_layout::window::{FocusedWindow, WindowHierarchy};
 use vmux_tool::{

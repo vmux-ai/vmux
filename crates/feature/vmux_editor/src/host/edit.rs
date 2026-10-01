@@ -13,4 +13,4 @@ pub use command::{EditCommand, Motion, Operator, Selection, Target};
 pub use core::{EditCore, EditOutcome};
 pub use register::{RegisterKind, RegisterValue, Registers};
 pub use text_object::{TextObject, TextObjectKind};
-pub use vmux_core::{CursorPos, EditMode, SelSpan};
+pub use vmux_api::editor::{CursorPos, EditMode, SelSpan};

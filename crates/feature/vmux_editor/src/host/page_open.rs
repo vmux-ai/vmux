@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::PageMetadata;
-use vmux_core::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
+use vmux_ecs::PageMetadata;
+use vmux_ecs::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_flex::prelude::*;
 use vmux_layout::Browser;
 
@@ -16,7 +16,7 @@ pub(super) struct PageOpenPlugin;
 
 impl Plugin for PageOpenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<vmux_core::event::RecordVisitRequest>()
+        app.add_message::<vmux_ecs::event::RecordVisitRequest>()
             .add_systems(Update, handle_file.in_set(PageOpenSet::HandleKnownPages));
     }
 }
@@ -38,7 +38,7 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
                 top_row: 0,
                 rows: 0,
                 wrap_columns: 0,
-                word_wrap: vmux_core::editor::WordWrap::default(),
+                word_wrap: vmux_api::editor::WordWrap::default(),
                 word_wrap_column: 80,
                 scroll_revision: 0,
             },
@@ -50,12 +50,12 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
             PageMetadata {
                 title,
                 url: url.to_string(),
-                icon: vmux_core::PageIcon::None,
+                icon: vmux_ecs::PageIcon::None,
                 bg_color: None,
             },
-            vmux_core::host::page::HostsPage,
-            vmux_core::host::page::BindsEditingChords,
-            vmux_core::host::page::HostHistory::default(),
+            vmux_ecs::host::page::HostsPage,
+            vmux_ecs::host::page::BindsEditingChords,
+            vmux_ecs::host::page::HostHistory::default(),
         ),
         (
             WebviewSize(Vec2::new(1280.0, 720.0)),
@@ -79,11 +79,11 @@ fn handle_file(
     mut views: Query<(&FileView, &mut PageMetadata)>,
     focused_space: vmux_layout::space::FocusedSpace,
     mut commands: Commands,
-    mut record_writer: MessageWriter<vmux_core::event::RecordVisitRequest>,
+    mut record_writer: MessageWriter<vmux_ecs::event::RecordVisitRequest>,
 ) {
     for (entity, task) in &tasks {
         let project_dir = focused_space.startup_dir();
-        let knowledge_root = vmux_core::knowledge::KnowledgeVault::user().into_root();
+        let knowledge_root = vmux_knowledge::KnowledgeVault::user().into_root();
         let Some(target) = FilePageTarget::resolve(&task.url, project_dir, &knowledge_root) else {
             continue;
         };
@@ -106,7 +106,7 @@ fn handle_file(
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| path.to_string_lossy().to_string());
-            record_writer.write(vmux_core::event::RecordVisitRequest {
+            record_writer.write(vmux_ecs::event::RecordVisitRequest {
                 url: clean_url.clone(),
                 title,
             });
@@ -130,7 +130,7 @@ fn handle_file(
                     } else if page_url.starts_with("vmux://") {
                         metadata.title.clone_from(&page_url);
                         metadata.url = page_url.clone();
-                        metadata.icon = vmux_core::PageIcon::None;
+                        metadata.icon = vmux_ecs::PageIcon::None;
                     }
                 }
                 view
@@ -161,7 +161,7 @@ impl FilePageTarget {
                 path: Some(
                     project_dir
                         .map(Path::to_path_buf)
-                        .unwrap_or_else(|| vmux_core::profile::ProfilePaths::current().projects()),
+                        .unwrap_or_else(|| vmux_ecs::profile::ProfilePaths::current().projects()),
                 ),
                 error: String::new(),
             });
@@ -176,7 +176,7 @@ impl FilePageTarget {
             return None;
         }
         Some(Self {
-            path: vmux_core::file_url::FileUrl::parse(url).and_then(|file| file.path()),
+            path: vmux_path::FileUrl::parse(url).and_then(|file| file.path()),
             error: format!("malformed file URL '{url}'"),
         })
     }
@@ -186,8 +186,8 @@ impl FilePageTarget {
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
-    use vmux_core::PageOpenId;
-    use vmux_core::event::FileOpenEvent;
+    use vmux_ecs::PageOpenId;
+    use vmux_ecs::event::FileOpenEvent;
 
     use super::super::explorer::{ExplorerState, TabsPlugin};
     use super::super::file_lifecycle::FileDir;
@@ -303,7 +303,7 @@ mod tests {
         app.update();
         let messages = app
             .world()
-            .resource::<Messages<vmux_core::event::RecordVisitRequest>>();
+            .resource::<Messages<vmux_ecs::event::RecordVisitRequest>>();
         let mut cursor = messages.get_cursor();
         let recorded: Vec<_> = cursor.read(messages).collect();
         assert_eq!(recorded.len(), 1);
@@ -372,8 +372,8 @@ mod tests {
         let page = stack.page();
 
         assert_eq!(
-            vmux_core::file_url::FileUrl::parse(&stack.url(page)).and_then(|url| url.path()),
-            Some(vmux_core::knowledge::KnowledgeVault::user().into_root())
+            vmux_path::FileUrl::parse(&stack.url(page)).and_then(|url| url.path()),
+            Some(vmux_knowledge::KnowledgeVault::user().into_root())
         );
     }
 

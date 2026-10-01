@@ -1,4 +1,4 @@
-use vmux_core::event::{FileUiState, FileUiStatePatch};
+use vmux_ecs::event::{FileUiState, FileUiStatePatch};
 use vmux_ui::hooks::{UiStateBinding, UiStatePatch, UiStatePatchBatch};
 
 pub(crate) fn use_file_ui<T>() -> UiStatePatchBatch<FileUiState, T>

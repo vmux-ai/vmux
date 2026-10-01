@@ -12,7 +12,7 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use sha2::{Digest, Sha256};
 
 use crate::tab::{Tab, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
-use vmux_core::{PageOpenDeferred, PageOpenError};
+use vmux_ecs::{PageOpenDeferred, PageOpenError};
 use vmux_git::worktree::{self, CheckoutInfo};
 
 impl Plugin for WorktreePlugin {

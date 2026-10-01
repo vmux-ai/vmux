@@ -4,7 +4,7 @@ pub mod mapping;
 pub mod vim;
 pub mod vscode;
 
-pub use vmux_core::KeymapKind;
+pub use vmux_api::editor::KeymapKind;
 
 use crate::edit::command::{EditCommand, EditMode};
 
@@ -59,12 +59,12 @@ pub trait Keymap: Send + Sync {
 }
 
 pub trait KeymapKindExt {
-    fn make(self, mappings: &[vmux_core::editor::KeyMapping], leader: &str) -> Box<dyn Keymap>;
+    fn make(self, mappings: &[vmux_api::editor::KeyMapping], leader: &str) -> Box<dyn Keymap>;
     fn initial_mode(self) -> EditMode;
 }
 
 impl KeymapKindExt for KeymapKind {
-    fn make(self, mappings: &[vmux_core::editor::KeyMapping], leader: &str) -> Box<dyn Keymap> {
+    fn make(self, mappings: &[vmux_api::editor::KeyMapping], leader: &str) -> Box<dyn Keymap> {
         match self {
             KeymapKind::Vscode => Box::new(vscode::VscodeKeymap),
             KeymapKind::Vim => Box::new(vim::VimKeymap::with_mappings(mappings, leader)),
@@ -85,7 +85,7 @@ pub struct EditorKeymap(pub Box<dyn Keymap>);
 #[derive(PartialEq, Eq)]
 pub(super) struct KeymapConfig {
     kind: KeymapKind,
-    maps: Vec<vmux_core::editor::KeyMapping>,
+    maps: Vec<vmux_api::editor::KeyMapping>,
     leader: String,
 }
 
@@ -109,7 +109,7 @@ impl KeymapConfig {
         EditorKeymap(self.kind.make(&self.maps, &self.leader))
     }
 
-    pub(super) fn initial_mode(&self) -> vmux_core::EditMode {
+    pub(super) fn initial_mode(&self) -> vmux_api::editor::EditMode {
         self.kind.initial_mode()
     }
 

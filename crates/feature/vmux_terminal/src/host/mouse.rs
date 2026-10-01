@@ -3,7 +3,7 @@ use std::time::Instant;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::protocol::{ClientMessage, ProcessId};
-use vmux_core::service::ServiceRequest;
+use vmux_ecs::service::ServiceRequest;
 
 use crate::Terminal;
 use crate::event::{MOD_ALT, MOD_CTRL, MOD_SHIFT, TermMouseEvent, TermSelectionRange};

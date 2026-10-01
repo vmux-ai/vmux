@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
-use vmux_core::event::{
+use vmux_ecs::event::{
     FileDirEntry, FileDirectoryActivateRequest, FileDirectoryAscendRequest,
     FileDirectoryBackRequest, FileDirectoryDescendRequest, FileDirectoryNextRequest,
     FileDirectoryOpenRequest, FileDirectoryParentRequest, FileDirectoryPreviousRequest,
@@ -123,7 +123,7 @@ struct DirectorySelectionTarget(String);
 
 type ReadyDirectory = (
     Without<FileInitialMetaSent>,
-    With<vmux_core::page::PageReady>,
+    With<vmux_ecs::page::PageReady>,
 );
 
 type DirectoryProjection<'w, 's> = Query<
@@ -135,7 +135,7 @@ type DirectoryProjection<'w, 's> = Query<
         Ref<'static, FileDir>,
         Ref<'static, FileDirectoryNavigation>,
     ),
-    With<vmux_core::page::PageReady>,
+    With<vmux_ecs::page::PageReady>,
 >;
 
 fn initialize(
@@ -178,9 +178,7 @@ fn publish(directories: DirectoryProjection, browsers: NonSend<Browsers>, mut co
             continue;
         }
         let state = navigation.state(file, &directory);
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-            entity, &state,
-        ));
+        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(entity, &state));
         commands.entity(entity).insert(FileInitialMetaSent);
         if let Some(entry) = state.entries.get(state.selected as usize) {
             commands.trigger(FilePreviewLoad {
@@ -457,10 +455,7 @@ pub fn parent_listing(path: &Path) -> (String, Vec<FileDirEntry>) {
 }
 
 pub fn project_root(start: &Path) -> PathBuf {
-    project_root_with_knowledge(
-        start,
-        &vmux_core::knowledge::KnowledgeVault::user().into_root(),
-    )
+    project_root_with_knowledge(start, &vmux_knowledge::KnowledgeVault::user().into_root())
 }
 
 fn project_root_with_knowledge(start: &Path, knowledge: &Path) -> PathBuf {

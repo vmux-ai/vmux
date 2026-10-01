@@ -173,7 +173,7 @@ fn poll_jobs<T: Component>(mut jobs: Query<(Entity, &mut GitJobTask<T>)>, mut co
 
 fn deliver_repository_outputs(
     outputs: Query<(Entity, &GitJob, &RepositoryOutput)>,
-    mut pages: Query<&mut vmux_core::PageMetadata>,
+    mut pages: Query<&mut vmux_ecs::PageMetadata>,
     mut views: Query<(
         &mut super::state::GitState,
         &mut super::controller::GitController,
@@ -279,7 +279,7 @@ fn deliver_operation_outputs(
             if let Some(branch) = branch {
                 commands.trigger(bevy_cef::prelude::UiInput {
                     webview,
-                    payload: vmux_core::event::space::ProjectActivateRequest {
+                    payload: vmux_ecs::event::space::ProjectActivateRequest {
                         path: view.workspace().to_string(),
                         branch,
                         checkout: String::new(),

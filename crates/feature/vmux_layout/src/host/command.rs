@@ -3,7 +3,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::SwitchTabRequest;
 use vmux_command::ReadCommandRequests;
 use vmux_command::command_bar::CommandBarDismiss;
-use vmux_core::launcher::StackInPaneChosen;
+use vmux_ecs::launcher::StackInPaneChosen;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum LayoutRequestSet {

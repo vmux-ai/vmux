@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_core::PageMetadata;
+use vmux_ecs::PageMetadata;
 
 use crate::host::editor::{FileNavigateRequest, FileView};
 use crate::host::viewport::FileViewport;
@@ -11,20 +11,19 @@ impl Plugin for HistoryPlugin {
         app.add_systems(
             Update,
             (
-                show_traversed_file_view.in_set(vmux_core::host::page::HostHistorySet::Apply),
-                record_file_view_visit.in_set(vmux_core::host::page::HostHistorySet::Record),
+                show_traversed_file_view.in_set(vmux_ecs::host::page::HostHistorySet::Apply),
+                record_file_view_visit.in_set(vmux_ecs::host::page::HostHistorySet::Record),
             ),
         );
     }
 }
 
 fn show_traversed_file_view(
-    mut traversed: MessageReader<vmux_core::host::page::HostHistoryTraversed>,
+    mut traversed: MessageReader<vmux_ecs::host::page::HostHistoryTraversed>,
     mut commands: Commands,
 ) {
     for event in traversed.read() {
-        let Some(path) =
-            vmux_core::file_url::FileUrl::parse(&event.entry.url).and_then(|url| url.path())
+        let Some(path) = vmux_path::FileUrl::parse(&event.entry.url).and_then(|url| url.path())
         else {
             continue;
         };
@@ -41,7 +40,7 @@ fn record_file_view_visit(
         (
             &PageMetadata,
             &FileViewport,
-            &mut vmux_core::host::page::HostHistory,
+            &mut vmux_ecs::host::page::HostHistory,
         ),
         With<FileView>,
     >,
@@ -58,10 +57,10 @@ fn record_file_view_visit(
 mod tests {
     use super::*;
     use bevy_cef::prelude::UiInput;
-    use vmux_core::PageOpenId;
-    use vmux_core::event::FileOpenEvent;
-    use vmux_core::host::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
-    use vmux_core::page_open::PageOpenTask;
+    use vmux_ecs::PageOpenId;
+    use vmux_ecs::event::FileOpenEvent;
+    use vmux_ecs::host::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
+    use vmux_ecs::page_open::PageOpenTask;
 
     use crate::host::navigation::NavigationPlugin;
     use crate::host::page_open::PageOpenPlugin;
@@ -77,7 +76,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_plugins(vmux_core::CorePlugin)
+                .add_plugins(vmux_ecs::EcsPlugin)
                 .add_plugins(NavigationPlugin)
                 .add_plugins(HistoryPlugin)
                 .add_plugins(PageOpenPlugin);

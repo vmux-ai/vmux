@@ -4,6 +4,7 @@
             name: "default",
             url: "vmux://knowledge/",
             title: "Knowledge",
+            bookmark: Some(40),
             owns_subtree: true,
             title_message_id: "layout-knowledge",
             keywords: ["knowledge", "notes", "markdown"],

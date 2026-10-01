@@ -5,13 +5,14 @@ use crate::event::{
     SpacesListEvent, SpacesUiState,
 };
 use dioxus::prelude::*;
-use vmux_core::event::team::{TeamEvent, TeamProfileSwitchRequest};
-use vmux_core::input::{UiKeyContext, Unclaimed};
+use vmux_api::input::UiKeyContext;
+use vmux_ecs::event::team::{TeamEvent, TeamProfileSwitchRequest};
 use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
 use vmux_ui::components::inline_edit::{EditableText, InlineEdit};
 use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem, ManagerSelectItemKind};
+use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{send, use_key_claim, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::sleep_ms;

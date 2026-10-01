@@ -4,6 +4,7 @@
             name: "default",
             url: "vmux://history/",
             title: "History",
+            bookmark: Some(110),
             title_message_id: "history-title",
             replaces_command: "browser_open_history",
             keywords: ["recent", "visited"],

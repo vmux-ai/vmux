@@ -6,15 +6,14 @@ use vmux_api::command_bar::{
     CommandBarUiState, CommandBarUiStatePatch, CommandPaletteDraftRequest,
     CommandPaletteMediaActivateRequest, CommandPaletteMediaDismissRequest,
     CommandPaletteMediaHighlightRequest, CommandPaletteMediaMoveRequest,
-    CommandPaletteRemoveAttachmentRequest, CommandPaletteState,
+    CommandPaletteRemoveAttachmentRequest, CommandPaletteUiState,
 };
 use vmux_api::prompt_media::{
     ChatAttachPaths, ChatAttachments, ChatMediaEntries, ChatMediaListRequest,
     PromptComposerAttachment, PromptMediaOption, inline_media_query, replace_inline_media_query,
 };
-use vmux_core::host::UiStateWrite;
-use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
-use vmux_core::prompt_media::{AttachmentSelection, MediaPath};
+use vmux_ecs::host::UiStateWrite;
+use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
 use vmux_ui::file_icon::FilePath;
 
 use crate::{BindCommands, CommandDispatch, CommandRegistry};
@@ -33,7 +32,7 @@ impl PaletteSnapshot {
             options.push(PromptMediaOption {
                 key: format!("media-{}", entry.path),
                 name: entry.name.clone(),
-                display_path: MediaPath::new(entry).display(),
+                display_path: entry.display_path(),
                 preview_data_url: entry.preview_data_url.clone(),
                 label: FilePath(&entry.name).extension_label(),
                 is_dir: entry.is_dir,
@@ -97,7 +96,7 @@ impl PaletteMedia {
         &mut self,
         target: Entity,
         query: Option<String>,
-        snapshot: &mut CommandPaletteState,
+        snapshot: &mut CommandPaletteUiState,
         commands: &mut Commands,
     ) {
         if self.query == query {
@@ -319,7 +318,7 @@ fn activate(
     let Some(query) = inline_media_query(&draft.query) else {
         return;
     };
-    let reference = MediaPath::new(&entry).reference();
+    let reference = entry.reference();
     let replacement = if entry.is_dir {
         format!("@{reference}/")
     } else {
@@ -401,7 +400,7 @@ fn receive_attachments(
     if !media.start {
         return;
     }
-    if AttachmentSelection::new(&mut snapshot.0.attachments).merge(response) {
+    if response.merge_into(&mut snapshot.0.attachments) {
         snapshot.0.attachment_sequence = snapshot.0.attachment_sequence.wrapping_add(1).max(1);
         snapshot.project_attachments();
     }
@@ -523,7 +522,7 @@ mod tests {
                     query: "show @pic".to_string(),
                     ..Default::default()
                 },
-                PaletteSnapshot(CommandPaletteState {
+                PaletteSnapshot(CommandPaletteUiState {
                     open_id,
                     media_query: Some("pic".to_string()),
                     media_entries: vec![

@@ -6,17 +6,17 @@ use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_api::service::*;
 use vmux_command::{CommandInvocation, CommandRegistry};
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
-use vmux_core::page::PageReady;
-use vmux_core::service::ServiceConnected;
-use vmux_core::service::ServiceRequest;
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::host::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_ecs::page::PageReady;
+use vmux_ecs::service::ServiceConnected;
+use vmux_ecs::service::ServiceRequest;
 use vmux_history::LastActivatedAt;
 
 use super::input_queue::TerminalProcessIndex;
 use crate::Terminal;
 use crate::plugin::ReattachedTerminalBundle;
-use vmux_core::{KeyboardOwner, Order};
+use vmux_ecs::{KeyboardOwner, Order};
 use vmux_layout::{
     native_open::HostedUiPlugin,
     stack::{ActiveTabParam, LayoutFocus, OpenRequest, Stack},
@@ -54,11 +54,11 @@ impl Plugin for ProcessMonitorPlugin {
                     broadcast_to_monitors,
                 )
                     .chain()
-                    .after(vmux_core::service::ServiceMessageSet),
+                    .after(vmux_ecs::service::ServiceMessageSet),
             )
             .add_systems(
                 Update,
-                open_services.before(vmux_core::workspace::StackCommandSet),
+                open_services.before(vmux_ecs::workspace::StackCommandSet),
             )
             .add_observer(process_navigate)
             .add_observer(process_kill)

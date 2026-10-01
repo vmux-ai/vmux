@@ -14,11 +14,11 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use hid::HidBroker;
 use stream::StreamServer;
 use vmux_api::protocol::{AgentImage, AgentQueryResult, AgentRequestId, ClientMessage};
-use vmux_core::PageMetadata;
-use vmux_core::host::page::{NativelyHosted, PageReady};
-use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
-use vmux_core::input::{NativeKeyClaimSet, NativeKeyInputSet};
-use vmux_core::service::ServiceRequest;
+use vmux_ecs::PageMetadata;
+use vmux_ecs::host::page::{NativelyHosted, PageReady};
+use vmux_ecs::host::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_ecs::service::ServiceRequest;
+use vmux_input::{NativeKeyClaimSet, NativeKeyInputSet};
 use vmux_layout::stack::{ComputeFocusSet, FocusedStack};
 use vmux_tool::{ToolQueryAppExt, ToolQueryMessage, ToolQueryRouteSet};
 

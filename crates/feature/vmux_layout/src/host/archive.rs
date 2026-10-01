@@ -9,11 +9,11 @@ use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
 use vmux_command::{BindCommands, CommandDispatch, CommandRegistry, CommandRuntimePlugin};
 #[cfg(test)]
-use vmux_core::Active;
+use vmux_ecs::Active;
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::terminal::{TerminalLaunch, TerminalSpawnRequest, TerminalSpawnTarget};
-use vmux_core::{
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::terminal::{TerminalLaunch, TerminalSpawnRequest, TerminalSpawnTarget};
+use vmux_ecs::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
     PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, TabCommandSet, now_millis,
 };

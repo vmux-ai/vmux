@@ -18,7 +18,7 @@ service = [
     "dep:tokio-util",
     "dep:tracing",
     "dep:url",
-    "dep:vmux_core",
+    "dep:vmux_ecs",
     "dep:vmux_path",
     "dep:vmux_process",
 ]
@@ -44,7 +44,7 @@ app = [
     "dep:uuid",
     "dep:vmux_chat",
     "dep:vmux_command",
-    "dep:vmux_core",
+    "dep:vmux_ecs",
     "dep:vmux_editor",
     "dep:vmux_git",
     "dep:vmux_layout",
@@ -92,7 +92,7 @@ toml = { workspace = true, optional = true }
 tempfile = { version = "3", optional = true }
 uuid = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
-vmux_core = { path = "../../util/vmux_core", optional = true }
+vmux_ecs = { path = "../../util/vmux_ecs", optional = true }
 vmux_editor = { path = "../vmux_editor", optional = true }
 vmux_git = { path = "../vmux_git", optional = true }
 vmux_layout = { path = "../vmux_layout", optional = true }
@@ -100,7 +100,7 @@ vmux_start = { path = "../vmux_start", optional = true }
 vmux_mcp = { path = "../../util/vmux_mcp", optional = true }
 vmux_path = { path = "../../util/vmux_path", optional = true }
 vmux_process = { path = "../../util/vmux_process", optional = true }
-vmux_session = { path = "../../util/vmux_session", optional = true }
+vmux_session = { path = "../vmux_session", optional = true }
 vmux_setting = { path = "../vmux_setting", optional = true }
 vmux_space = { path = "../vmux_space", optional = true }
 vmux_terminal = { path = "../vmux_terminal", optional = true }

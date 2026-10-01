@@ -4,8 +4,8 @@ use bevy::{ecs::system::SystemParam, prelude::*};
 use vmux_api::JsonSchema;
 use vmux_api::json::JsonValue;
 use vmux_api::protocol::AgentCommandTool;
-use vmux_core::JsonArguments;
-use vmux_core::host::manifest::{self, FeatureManifest};
+use vmux_ecs::JsonArguments;
+use vmux_ecs::host::manifest::{self, FeatureManifest};
 use vmux_ui::i18n::Locale;
 
 use crate::shortcut::{Binding, KeyCombo, Modifiers, ResolvedKey, Shortcut, Source, When};

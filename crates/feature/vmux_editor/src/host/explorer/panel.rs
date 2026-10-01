@@ -1,13 +1,13 @@
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::event::{
+use vmux_ecs::event::{
     ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPanelViewSet, ExplorerPanelWidth,
     ExplorerReveal,
 };
-use vmux_core::host::FileUiStateWrite;
-use vmux_core::host::persistence::PersistenceAppExt;
-use vmux_core::page::PageReady;
+use vmux_ecs::host::FileUiStateWrite;
+use vmux_ecs::host::persistence::PersistenceAppExt;
+use vmux_ecs::page::PageReady;
 use vmux_setting::{
     AppSettings, EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH, EXPLORER_MIN_WIDTH,
     SettingsSaveRequest,

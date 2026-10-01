@@ -16,10 +16,10 @@ use vmux_command::CommandDefinition;
 use vmux_command::CommandManifest;
 use vmux_command::{CommandInvocation, CommandRegistry};
 #[cfg(test)]
-use vmux_core::host::manifest::FeaturePlugin;
-use vmux_core::host::persistence::PersistenceAppExt;
-pub use vmux_core::workspace::{ComputeFocusSet, StackCommandSet};
-use vmux_core::{PageOpenRequest, PageOpenTarget};
+use vmux_ecs::host::manifest::FeaturePlugin;
+use vmux_ecs::host::persistence::PersistenceAppExt;
+pub use vmux_ecs::workspace::{ComputeFocusSet, StackCommandSet};
+use vmux_ecs::{PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -80,7 +80,7 @@ impl Plugin for StackPlugin {
                 open_startup_url_if_no_stacks
                     .in_set(OpenStartupPageSet)
                     .after(crate::window::WindowShellSet)
-                    .before(vmux_core::PageOpenSet::ResolveTarget),
+                    .before(vmux_ecs::PageOpenSet::ResolveTarget),
             );
     }
 }
@@ -397,7 +397,7 @@ impl Stack {
     pub fn bundle() -> impl Bundle {
         (
             Self::default(),
-            vmux_core::PageMetadata::default(),
+            vmux_ecs::PageMetadata::default(),
             Transform::default(),
             Node {
                 position_type: PositionType::Absolute,
@@ -458,7 +458,7 @@ fn active_stack_in_pane(
 #[derive(SystemParam)]
 pub struct ActiveTabParam<'w, 's> {
     tabs: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Tab>>,
-    active_tabs: Query<'w, 's, Entity, (With<Tab>, With<vmux_core::Active>)>,
+    active_tabs: Query<'w, 's, Entity, (With<Tab>, With<vmux_ecs::Active>)>,
     current_space: Query<'w, 's, Entity, With<crate::space::CurrentSpace>>,
     child_of: Query<'w, 's, &'static ChildOf>,
 }
@@ -1015,7 +1015,7 @@ mod tests {
             .spawn((
                 crate::space::Space,
                 crate::space::SpaceId("s1".to_string()),
-                vmux_core::Active,
+                vmux_ecs::Active,
             ))
             .id();
         let worktree = tempfile::tempdir().unwrap();
@@ -1044,7 +1044,7 @@ mod tests {
                 crate::tab::TabWorktreeUnavailable {
                     message: "stale".to_string(),
                 },
-                vmux_core::Active,
+                vmux_ecs::Active,
                 LastActivatedAt::now(),
                 ChildOf(space),
             ))
@@ -1526,8 +1526,8 @@ mod tests {
             .spawn((
                 crate::space::Space,
                 crate::space::CurrentSpace,
-                vmux_core::Active,
-                vmux_core::EffectiveStartupUrl(startup_url.to_string()),
+                vmux_ecs::Active,
+                vmux_ecs::EffectiveStartupUrl(startup_url.to_string()),
             ))
             .id();
         let tab = app
@@ -1666,20 +1666,20 @@ mod tests {
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                vmux_ecs::Active,
                 LastActivatedAt(100),
                 ChildOf(space_a),
             ))
             .id();
         let space_b = app
             .world_mut()
-            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)))
             .id();
         let tab_b = app
             .world_mut()
             .spawn((
                 Tab::default(),
-                vmux_core::Active,
+                vmux_ecs::Active,
                 LastActivatedAt(1),
                 ChildOf(space_b),
             ))
@@ -1702,7 +1702,7 @@ mod tests {
         let mut app = App::new();
         let main = app.world_mut().spawn(crate::window::Main).id();
         app.world_mut()
-            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)));
+            .spawn((crate::space::Space, vmux_ecs::Active, ChildOf(main)));
         let tab = app
             .world_mut()
             .spawn((Tab::default(), LastActivatedAt(5), ChildOf(main)))

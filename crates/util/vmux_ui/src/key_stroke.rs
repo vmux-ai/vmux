@@ -1,7 +1,7 @@
 use dioxus::prelude::KeyboardData;
 use dioxus::prelude::ModifiersInteraction;
 use dioxus::prelude::keyboard_types::Modifiers;
-use vmux_core::input::{KeyModifiers, KeyStroke};
+use vmux_api::input::{KeyModifiers, KeyStroke};
 
 pub struct PressedKey<'a>(&'a KeyboardData);
 

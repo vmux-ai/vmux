@@ -2,16 +2,16 @@ use std::collections::BTreeSet;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+use crate::state::{
+    ToolAdoptRequest, ToolCategory, ToolImportRequest, ToolInstallRequest, ToolItem,
+    ToolLinkRequest, ToolOperationKind, ToolProvider, ToolStatus, ToolUninstallRequest,
+    ToolUnlinkRequest, ToolUpdateRequest,
+};
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::{Added, Commands, Component as EcsComponent, Entity, Query, With, Without};
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_tasks::IoTaskPool;
 use serde::{Deserialize, Serialize};
-use vmux_core::tool::{
-    ToolAdoptRequest, ToolCategory, ToolImportRequest, ToolInstallRequest, ToolItem,
-    ToolLinkRequest, ToolOperationKind, ToolProvider, ToolStatus, ToolUninstallRequest,
-    ToolUnlinkRequest, ToolUpdateRequest,
-};
 
 use crate::manifest::{ToolStore, ToolsManifest};
 use crate::{

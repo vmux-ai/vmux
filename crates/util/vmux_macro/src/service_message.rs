@@ -75,7 +75,7 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
         #[derive(::bevy::ecs::message::Message)]
         #input
 
-        impl ::vmux_core::service::ServiceMessageVariant for #ident {
+        impl ::vmux_api::service::ServiceMessageVariant for #ident {
             fn from_service_message(
                 message: &::vmux_api::protocol::ServiceMessage,
             ) -> ::core::option::Option<Self> {

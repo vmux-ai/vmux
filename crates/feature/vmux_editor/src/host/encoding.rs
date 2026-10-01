@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::Encoding;
-use vmux_core::event::{
+use vmux_ecs::event::{
     FileEncoding, FileEncodingEvent, FileEncodingReopenRequest, FileEncodingSaveRequest,
 };
 
@@ -71,7 +71,7 @@ fn save_with(
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+    commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
         entity,
         &FileEncodingEvent {
             encoding: edit.core.buffer.encoding,

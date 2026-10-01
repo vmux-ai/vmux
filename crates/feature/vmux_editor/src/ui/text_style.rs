@@ -1,4 +1,4 @@
-use vmux_core::event::StyledSpan;
+use vmux_ecs::event::StyledSpan;
 
 pub(super) struct StyledSpanStyle;
 

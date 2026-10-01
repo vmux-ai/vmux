@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use vmux_api::protocol::AgentCommandResult;
-use vmux_core::agent::{
+use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
 };
-use vmux_core::{KeyboardOwner, LastActivatedAt, PageMetadata};
+use vmux_ecs::{KeyboardOwner, LastActivatedAt, PageMetadata};
 use vmux_layout::pane::{Pane, PaneSplit};
 use vmux_layout::stack::FocusedStack;
 use vmux_setting::AppSettings;

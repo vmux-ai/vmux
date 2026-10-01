@@ -5,7 +5,7 @@ use std::path::Path;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 use serde_json::Value;
-use vmux_core::event::{LspCatalog, LspCatalogRequest, LspPackage, LspPkgStatus};
+use vmux_ecs::event::{LspCatalog, LspCatalogRequest, LspPackage, LspPkgStatus};
 
 use crate::lsp::archive::ArchiveKind;
 use crate::lsp::download::{self, RemoteArtifact};

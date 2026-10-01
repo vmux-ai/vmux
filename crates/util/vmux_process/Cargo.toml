@@ -13,7 +13,7 @@ rkyv = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }
 vmux_api = { path = "../vmux_api" }
-vmux_core = { path = "../vmux_core" }
+vmux_ecs = { path = "../vmux_ecs" }
 vte = "0.15"
 
 [target.'cfg(unix)'.dependencies]

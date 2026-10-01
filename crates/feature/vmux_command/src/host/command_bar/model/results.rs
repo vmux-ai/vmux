@@ -3,14 +3,74 @@ use vmux_api::chat::{ResumableSessionEntry, SlashCommand, SlashCommandEntry};
 use vmux_api::command_bar::{
     CommandBarCommandEntry, CommandBarPage, CommandBarPick, CommandBarPickRow, CommandBarPicker,
     CommandBarRecentFile, CommandBarSpace, CommandBarTab, CommandBarWorkDir, HistoryEntry,
-    SearchEngine,
+    ResumeSection, SearchEngine,
 };
-use vmux_core::chat_projection::ResumeRows;
 use vmux_ui::i18n::translate;
 
 pub use vmux_api::command_bar::CommandBarResultItem;
 
 use super::{PaletteRows, query::PaletteQuery};
+
+pub struct ResumeRows;
+
+impl ResumeRows {
+    pub fn all(sessions: &[ResumableSessionEntry]) -> Vec<CommandBarResultItem> {
+        Self::filtered("", sessions)
+    }
+
+    pub fn filtered(query: &str, sessions: &[ResumableSessionEntry]) -> Vec<CommandBarResultItem> {
+        let needle = query.trim().to_lowercase();
+        let mut groups: Vec<(ResumeSection, Vec<ResumableSessionEntry>)> = Vec::new();
+        for entry in sessions {
+            if !needle.is_empty()
+                && !entry.title.to_lowercase().contains(&needle)
+                && !entry.latest.to_lowercase().contains(&needle)
+                && !entry.subtitle.to_lowercase().contains(&needle)
+                && !entry.agent_name.to_lowercase().contains(&needle)
+                && !entry.project.to_lowercase().contains(&needle)
+                && !entry.branch.to_lowercase().contains(&needle)
+            {
+                continue;
+            }
+            let section = Self::section(entry);
+            if let Some((_, entries)) = groups.iter_mut().find(|(held, _)| *held == section) {
+                entries.push(entry.clone());
+            } else {
+                groups.push((section, vec![entry.clone()]));
+            }
+        }
+        let mut rows = Vec::new();
+        for (mut section, entries) in groups {
+            section.count = entries.len();
+            let mut first = true;
+            for entry in entries {
+                rows.push(CommandBarResultItem::Resume {
+                    entry: Box::new(entry),
+                    section: first.then(|| section.clone()),
+                });
+                first = false;
+            }
+        }
+        rows
+    }
+
+    fn section(entry: &ResumableSessionEntry) -> ResumeSection {
+        let agent = match entry.agent_name.is_empty() {
+            true => entry.kind.clone(),
+            false => entry.agent_name.clone(),
+        };
+        let project = match entry.project.is_empty() {
+            true => entry.subtitle.clone(),
+            false => entry.project.clone(),
+        };
+        ResumeSection {
+            agent,
+            project,
+            branch: entry.branch.clone(),
+            count: 0,
+        }
+    }
+}
 
 pub struct SlashRows;
 

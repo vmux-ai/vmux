@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use vmux_core::ProcessId;
-use vmux_core::agent::McpServerConfig;
+use vmux_ecs::ProcessId;
+use vmux_ecs::agent::McpServerConfig;
 
 const LONG_RUN_TIMEOUT_SECS: u64 = 600;
 
@@ -24,7 +24,7 @@ impl McpLaunchSpec {
 
     pub fn resolve(self) -> Result<McpServerConfig, String> {
         let sidecar = Self::sidecar_path()?;
-        let profile = vmux_core::profile::Profile::current().into_id();
+        let profile = vmux_ecs::profile::Profile::current().into_id();
         self.resolve_with_sidecar(&sidecar, &profile)
     }
 
@@ -33,7 +33,7 @@ impl McpLaunchSpec {
         sidecar: &Path,
         profile: &str,
     ) -> Result<McpServerConfig, String> {
-        if vmux_core::Executable::at(sidecar).is_some() {
+        if vmux_path::Executable::at(sidecar).is_some() {
             return Ok(McpServerConfig {
                 command: sidecar.to_string_lossy().to_string(),
                 args: self.args(profile),

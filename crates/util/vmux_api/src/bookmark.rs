@@ -1,5 +1,23 @@
 use crate::PageMetadata;
 
+#[cfg(bevy_linked)]
+use bevy_ecs::component::Component;
+#[cfg(bevy_linked)]
+use bevy_ecs::reflect::ReflectComponent;
+#[cfg(bevy_linked)]
+use bevy_reflect::Reflect;
+
+#[vmux_api::contract(Copy, Eq)]
+#[cfg_attr(bevy_linked, derive(Component, Reflect))]
+#[cfg_attr(bevy_linked, reflect(Component))]
+#[cfg_attr(bevy_linked, type_path = "vmux_api")]
+#[serde(rename_all = "snake_case")]
+pub enum SmartBookmarkFolder {
+    Projects,
+    Knowledge,
+    Tools,
+}
+
 #[vmux_api::contract(Eq, Default)]
 pub struct BookmarkRow {
     pub uuid: String,

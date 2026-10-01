@@ -26,8 +26,8 @@ use base64::Engine;
 use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-use vmux_core::ProcessId;
-use vmux_core::host::workspace::WorkspaceLocation;
+use vmux_ecs::ProcessId;
+use vmux_ecs::host::workspace::WorkspaceLocation;
 
 use super::AcpProjectionInput;
 #[cfg(test)]
@@ -1495,11 +1495,11 @@ mod tests {
                 wake,
             ));
             let mut app = App::new();
-            app.add_systems(Update, super::super::project_acp_sessions);
+            app.add_systems(Update, super::super::project);
             let entity = app
                 .world_mut()
                 .spawn((
-                    vmux_core::agent::SessionId("s1".into()),
+                    vmux_ecs::agent::SessionId("s1".into()),
                     super::super::AcpSessionShared(Arc::clone(&shared)),
                     super::super::AcpProjectionInbox(projection_rx),
                     AcpProjector::default(),

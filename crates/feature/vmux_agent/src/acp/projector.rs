@@ -7,7 +7,7 @@ use agent_client_protocol::schema::v1::{
 use bevy::prelude::Component;
 use vmux_api::protocol::AgentAttachment;
 use vmux_api::room::{AssistantBlock, Message, PlanStep};
-use vmux_core::host::workspace::WorkspaceLocation;
+use vmux_ecs::host::workspace::WorkspaceLocation;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intent {
