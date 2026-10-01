@@ -9,7 +9,7 @@ impl<'a> PaletteQuery<'a> {
         Self(value)
     }
 
-    pub(crate) fn opens_typed_url_on_enter(
+    pub fn opens_typed_url_on_enter(
         &self,
         open_target: Option<OpenTarget>,
         nav_mode: bool,
@@ -22,7 +22,7 @@ impl<'a> PaletteQuery<'a> {
             && Self::new(query).looks_like_url()
     }
 
-    pub(crate) fn is_start_prompt(&self) -> bool {
+    pub fn is_start_prompt(&self) -> bool {
         let query = self.0.trim();
         !query.is_empty()
             && !query.starts_with('>')
@@ -30,7 +30,7 @@ impl<'a> PaletteQuery<'a> {
             && !Self::new(query).looks_like_explicit_path()
     }
 
-    pub(crate) fn slash_token(&self) -> Option<(&str, &str)> {
+    pub fn slash_token(&self) -> Option<(&str, &str)> {
         let rest = self.0.trim_start().strip_prefix('/')?;
         let (name, tail) = match rest.find(char::is_whitespace) {
             Some(at) => (&rest[..at], rest[at..].trim_start()),
@@ -46,7 +46,7 @@ impl<'a> PaletteQuery<'a> {
     }
 
     #[cfg(any(host, test))]
-    pub(crate) fn mcp_filter(&self) -> Option<&str> {
+    pub fn mcp_filter(&self) -> Option<&str> {
         let rest = self.0.strip_prefix("/mcp")?;
         if rest.is_empty() {
             return Some("");

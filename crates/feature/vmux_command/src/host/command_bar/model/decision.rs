@@ -414,7 +414,7 @@ impl PaletteState {
 pub(super) struct TypedRow;
 
 impl TypedRow {
-    pub(super) fn beats_a_guessed_url(row: Option<&CommandBarResultItem>, query: &str) -> bool {
+    pub fn beats_a_guessed_url(row: Option<&CommandBarResultItem>, query: &str) -> bool {
         let query = query.trim();
         let Some(row) = row else {
             return false;
@@ -471,7 +471,7 @@ impl Placeholder {
 pub(super) struct RowText;
 
 impl RowText {
-    pub(super) fn over(item: Option<&CommandBarResultItem>, query: &str) -> Option<String> {
+    pub fn over(item: Option<&CommandBarResultItem>, query: &str) -> Option<String> {
         let item = item?;
         if Self::names_itself_in_the_row(item) {
             return None;

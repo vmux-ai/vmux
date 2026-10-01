@@ -182,7 +182,10 @@ mod tests {
 
     #[test]
     fn manifest_registers_command_tools() {
-        assert_eq!(CommandToolFixture::definitions(), ["open", "notify"]);
+        assert_eq!(
+            CommandToolFixture::definitions(),
+            ["open_command_bar", "notify"]
+        );
     }
 
     #[test]
@@ -193,7 +196,7 @@ mod tests {
             ("path", "command_bar_open_path"),
         ] {
             assert_eq!(
-                CommandToolFixture::dispatch("open", serde_json::json!({"mode": mode})),
+                CommandToolFixture::dispatch("open_command_bar", serde_json::json!({"mode": mode}),),
                 AgentRequest::encode(&AgentInvokeCommand {
                     id: id.to_string(),
                     args: JsonValue::Object(Vec::new()),
@@ -201,7 +204,8 @@ mod tests {
             );
         }
         assert!(
-            CommandToolFixture::dispatch("open", serde_json::json!({"mode": "other"})).is_err()
+            CommandToolFixture::dispatch("open_command_bar", serde_json::json!({"mode": "other"}),)
+                .is_err()
         );
     }
 

@@ -264,10 +264,7 @@ impl PageRows {
             .collect()
     }
 
-    pub(super) fn prompt_targets(
-        pages: &[CommandBarPage],
-        query: &str,
-    ) -> Vec<CommandBarResultItem> {
+    pub fn prompt_targets(pages: &[CommandBarPage], query: &str) -> Vec<CommandBarResultItem> {
         let search_lower = query.trim().to_lowercase();
         let targets: Vec<_> = pages.iter().filter(|page| page.prompt_target).collect();
         let matches: Vec<_> = targets
@@ -289,7 +286,7 @@ impl PageRows {
             .collect()
     }
 
-    pub(super) fn prompt_target_url(item: &CommandBarResultItem) -> Option<&str> {
+    pub fn prompt_target_url(item: &CommandBarResultItem) -> Option<&str> {
         match item {
             CommandBarResultItem::Page {
                 url,
@@ -300,7 +297,7 @@ impl PageRows {
         }
     }
 
-    pub(super) fn prompt_target_matches(item: &CommandBarResultItem, query: &str) -> bool {
+    pub fn prompt_target_matches(item: &CommandBarResultItem, query: &str) -> bool {
         let CommandBarResultItem::Page {
             url,
             title,
@@ -320,12 +317,12 @@ impl PageRows {
 pub(super) struct StartRows;
 
 impl StartRows {
-    pub(super) fn terminal_matches(query: &str) -> bool {
+    pub fn terminal_matches(query: &str) -> bool {
         let query = query.trim().to_lowercase();
         !query.is_empty() && "terminal".starts_with(&query)
     }
 
-    pub(super) fn prepend_targets(
+    pub fn prepend_targets(
         results: &mut Vec<CommandBarResultItem>,
         selected_target: Option<&CommandBarResultItem>,
         recent_targets: &[CommandBarResultItem],
@@ -380,7 +377,7 @@ impl StartRows {
 }
 
 impl PageRows {
-    pub(super) fn open_sessions(
+    pub fn open_sessions(
         tabs: &[CommandBarTab],
         pages: &[CommandBarPage],
     ) -> Vec<CommandBarResultItem> {
@@ -399,7 +396,7 @@ impl PageRows {
 }
 
 impl StartRows {
-    pub(super) fn start(
+    pub fn start(
         pages: &[CommandBarPage],
         work_dirs: &[CommandBarWorkDir],
         recent_files: &[CommandBarRecentFile],
@@ -510,7 +507,7 @@ impl SpaceRows {
             .collect()
     }
 
-    pub(super) fn space_switch(
+    pub fn space_switch(
         spaces: &[CommandBarSpace],
         pages: &[CommandBarPage],
         spaces_page_url: &str,
@@ -583,7 +580,7 @@ impl SearchRows {
         })
     }
 
-    pub(super) fn filter(input: SearchRowsInput<'_>) -> Vec<CommandBarResultItem> {
+    pub fn filter(input: SearchRowsInput<'_>) -> Vec<CommandBarResultItem> {
         let SearchRowsInput {
             query,
             tabs,

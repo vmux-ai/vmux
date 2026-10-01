@@ -211,6 +211,7 @@ pub struct PendingCommandBarReveal {
     open_id: OpenId,
     payload: Option<CommandBarOpenEvent>,
     started_at: Option<Instant>,
+    last_retry: Option<Instant>,
 }
 
 impl PendingCommandBarReveal {
@@ -283,6 +284,7 @@ impl PendingCommandBarReveal {
                 ..Default::default()
             }),
             started_at: Some(Instant::now()),
+            last_retry: None,
         }
     }
 }
@@ -375,6 +377,7 @@ fn prewarm(mut commands: Commands, mut modal_q: Query<PrewarmRow, With<CommandBa
         open_id: OpenId::NONE,
         payload: None,
         started_at: None,
+        last_retry: None,
     });
 }
 
@@ -795,7 +798,6 @@ fn retry(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     mut query: Query<RetryRow, With<CommandBar>>,
-    mut last_emit: Local<std::collections::HashMap<Entity, Instant>>,
 ) {
     let now = Instant::now();
     for (entity, mut pending, rendered, recreating) in &mut query {
@@ -807,15 +809,15 @@ fn retry(
             continue;
         };
         if !pending.should_retry(rendered_open_id) {
-            last_emit.remove(&entity);
+            pending.last_retry = None;
             continue;
         }
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        if last_emit
-            .get(&entity)
-            .is_some_and(|last| now.duration_since(*last) < COMMAND_BAR_OPEN_RETRY_INTERVAL)
+        if pending
+            .last_retry
+            .is_some_and(|last| now.duration_since(last) < COMMAND_BAR_OPEN_RETRY_INTERVAL)
         {
             continue;
         }
@@ -823,7 +825,7 @@ fn retry(
             vmux_api::command_bar::CommandBarUiState,
         >::from_event(entity, payload));
         pending.started_at.get_or_insert(now);
-        last_emit.insert(entity, now);
+        pending.last_retry = Some(now);
     }
 }
 
@@ -1207,6 +1209,7 @@ mod tests {
                         ..Default::default()
                     }),
                     started_at: Some(Instant::now() - COMMAND_BAR_NATIVE_REVEAL_TIMEOUT),
+                    last_retry: None,
                 },
             ))
             .id();
@@ -1238,6 +1241,7 @@ mod tests {
                         ..Default::default()
                     }),
                     started_at: Some(Instant::now()),
+                    last_retry: None,
                 },
             ))
             .id();
@@ -1272,6 +1276,7 @@ mod tests {
                 ..Default::default()
             }),
             started_at: Some(Instant::now()),
+            last_retry: None,
         };
 
         assert!(pending.accepts_size());
@@ -1406,6 +1411,7 @@ mod tests {
             .add_message::<LauncherDismissRequest>()
             .init_resource::<EmittedToPage>()
             .add_observer(capture_page_emit)
+            .add_observer(close_panel)
             .add_systems(Update, open);
         app.world_mut().spawn((
             CommandBarWorkspaceSnapshot::default(),
@@ -1676,6 +1682,7 @@ mod tests {
                 open_id: OpenId::NONE,
                 payload: None,
                 started_at: None,
+                last_retry: None,
             }
             .is_active()
         );
@@ -1685,6 +1692,7 @@ mod tests {
                 open_id: OpenId(7),
                 payload: None,
                 started_at: Some(Instant::now()),
+                last_retry: None,
             }
             .is_active()
         );

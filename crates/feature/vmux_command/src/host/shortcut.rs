@@ -299,7 +299,7 @@ pub struct KeyCombo {
 }
 
 impl KeyCombo {
-    pub(super) fn parse(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         let mut modifiers = Modifiers::default();
         let mut key = None;
         for part in value.split('+').map(str::trim) {

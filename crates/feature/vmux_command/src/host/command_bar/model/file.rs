@@ -168,7 +168,7 @@ impl FileRows {
 pub(super) struct ProjectPath;
 
 impl ProjectPath {
-    pub(super) fn split(path: &str, projects: &[String]) -> Option<(String, String)> {
+    pub fn split(path: &str, projects: &[String]) -> Option<(String, String)> {
         let mut owner = "";
         for project in projects {
             let root = project.trim().trim_end_matches('/');

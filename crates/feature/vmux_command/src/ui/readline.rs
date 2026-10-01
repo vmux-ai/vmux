@@ -19,7 +19,7 @@ pub(crate) struct Edited {
 }
 
 impl TextEditCommand {
-    pub(crate) fn from_command(command: &str) -> Option<Self> {
+    pub fn from_command(command: &str) -> Option<Self> {
         match command {
             "command_bar_home" => Some(Self::Home),
             "command_bar_end" => Some(Self::End),
@@ -33,7 +33,7 @@ impl TextEditCommand {
         }
     }
 
-    pub(crate) fn apply(self, value: &str, caret: usize, ghost: &str) -> Edited {
+    pub fn apply(self, value: &str, caret: usize, ghost: &str) -> Edited {
         let caret = floor_char_boundary(value, caret);
         let kept = |caret| Edited {
             value: value.to_string(),
