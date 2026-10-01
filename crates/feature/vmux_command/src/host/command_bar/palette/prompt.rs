@@ -3,9 +3,8 @@ use bevy_cef::prelude::UiInput;
 use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
 use vmux_api::command_bar::{CommandBarUiState, CommandBarUiStatePatch};
 use vmux_ecs::host::UiStateWrite;
-use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
 
-use super::{OpenVersion, PaletteContext, PaletteSnapshot};
+use super::{NewPalette, OpenVersion, PaletteContext, PaletteSnapshot};
 
 pub(super) struct PalettePromptPlugin;
 
@@ -28,16 +27,7 @@ pub(super) struct PalettePrompt {
     inflight: Option<PromptFlight>,
 }
 
-fn attach(
-    pages: Query<
-        Entity,
-        (
-            Or<(With<RendersLauncherPanel>, With<HostsLauncher>)>,
-            Without<PalettePrompt>,
-        ),
-    >,
-    mut commands: Commands,
-) {
+fn attach(pages: Query<Entity, NewPalette<PalettePrompt>>, mut commands: Commands) {
     for page in &pages {
         commands.entity(page).insert(PalettePrompt::default());
     }

@@ -34,15 +34,48 @@ impl Plugin for CompletionPlugin {
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct Sources<'w, 's> {
+    workspace: Single<'w, 's, Ref<'static, CommandBarWorkspaceSnapshot>>,
+    projects: Single<'w, 's, Ref<'static, CommandBarProjectRoots>>,
+    work: Single<'w, 's, Ref<'static, CommandBarWorkSnapshot>>,
+}
+
+impl Sources<'_, '_> {
+    fn roots(&self, query: &str) -> Vec<PathBuf> {
+        ProjectQuery::roots_for(
+            query,
+            self.workspace.project_root.as_deref(),
+            &self.projects.roots,
+        )
+    }
+
+    fn all(&self) -> Vec<PathBuf> {
+        ProjectQuery::all(self.workspace.project_root.as_deref(), &self.projects.roots)
+    }
+
+    fn bias(&self) -> RankBias {
+        RankBias::new(
+            ProjectQuery::favoured(
+                self.projects.active.as_deref(),
+                self.workspace.project_root.as_deref(),
+            ),
+            &self.work.recent_files,
+        )
+    }
+
+    fn changed(&self) -> bool {
+        self.workspace.is_changed() || self.projects.is_changed() || self.work.is_changed()
+    }
+}
+
 fn spawn(mut commands: Commands) {
     commands.spawn((Name::new("Project file index"), ProjectIndex::default()));
 }
 
 fn request(
     trigger: On<UiInput<PathCompleteRequest>>,
-    workspace: Single<&CommandBarWorkspaceSnapshot>,
-    projects: Single<&CommandBarProjectRoots>,
-    work: Single<&CommandBarWorkSnapshot>,
+    sources: Sources,
     browsers: NonSend<Browsers>,
     pending: Query<&PendingProjectCompletion>,
     mut index: Single<&mut ProjectIndex>,
@@ -55,7 +88,7 @@ fn request(
     }
     let query = &trigger.event().payload.query;
     let request_id = trigger.event().payload.request_id;
-    let roots = ProjectQuery::roots_for(query, workspace.project_root.as_deref(), &projects.roots);
+    let roots = sources.roots(query);
     if roots.is_empty() {
         commands
             .entity(asking)
@@ -66,19 +99,13 @@ fn request(
             });
         return;
     }
-    let mut wanted = ProjectQuery::all(workspace.project_root.as_deref(), &projects.roots);
+    let mut wanted = sources.all();
     for request in &pending {
         ProjectQuery::include(&mut wanted, &request.roots);
     }
     ProjectQuery::include(&mut wanted, &roots);
     index.sync(&wanted, proxy.as_deref());
-    let bias = RankBias::new(
-        ProjectQuery::favoured(
-            projects.active.as_deref(),
-            workspace.project_root.as_deref(),
-        ),
-        &work.recent_files,
-    );
+    let bias = sources.bias();
     if index.walking(&roots) {
         commands.entity(asking).insert(PendingProjectCompletion {
             request_id,
@@ -107,16 +134,15 @@ fn request(
 }
 
 fn warm(
-    workspace: Single<Ref<CommandBarWorkspaceSnapshot>>,
-    projects: Single<Ref<CommandBarProjectRoots>>,
+    sources: Sources,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     pending: Query<&PendingProjectCompletion>,
     mut index: Single<&mut ProjectIndex>,
 ) {
-    if !workspace.is_changed() && !projects.is_changed() {
+    if !sources.changed() {
         return;
     }
-    let mut roots = ProjectQuery::all(workspace.project_root.as_deref(), &projects.roots);
+    let mut roots = sources.all();
     for request in &pending {
         ProjectQuery::include(&mut roots, &request.roots);
     }
@@ -127,9 +153,7 @@ fn warm(
 }
 
 fn answer_index(
-    workspace: Single<&CommandBarWorkspaceSnapshot>,
-    projects: Single<&CommandBarProjectRoots>,
-    work: Single<&CommandBarWorkSnapshot>,
+    sources: Sources,
     browsers: NonSend<Browsers>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut index: Single<&mut ProjectIndex>,
@@ -139,18 +163,12 @@ fn answer_index(
     if pending.is_empty() {
         return;
     }
-    let mut wanted = ProjectQuery::all(workspace.project_root.as_deref(), &projects.roots);
+    let mut wanted = sources.all();
     for (_, request) in pending.iter() {
         ProjectQuery::include(&mut wanted, &request.roots);
     }
     index.sync(&wanted, proxy.as_deref());
-    let bias = RankBias::new(
-        ProjectQuery::favoured(
-            projects.active.as_deref(),
-            workspace.project_root.as_deref(),
-        ),
-        &work.recent_files,
-    );
+    let bias = sources.bias();
     for (webview, mut request) in &mut pending {
         if !browsers.can_emit_to(&webview) {
             commands
@@ -160,11 +178,7 @@ fn answer_index(
                 .remove::<PathCompletionOperation>();
             continue;
         }
-        let roots = ProjectQuery::roots_for(
-            &request.query,
-            workspace.project_root.as_deref(),
-            &projects.roots,
-        );
+        let roots = sources.roots(&request.query);
         if roots.is_empty() {
             commands
                 .entity(webview)

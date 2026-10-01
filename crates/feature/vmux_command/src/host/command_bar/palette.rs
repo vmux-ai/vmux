@@ -131,6 +131,49 @@ struct PaletteDraftInput {
     history_scratch: String,
 }
 
+type NewPalette<T> = (
+    Or<(With<RendersLauncherPanel>, With<HostsLauncher>)>,
+    Without<T>,
+);
+type MenuCursorRow = (
+    &'static PaletteOpen,
+    &'static PaletteSnapshot,
+    &'static mut PaletteMenuCursor,
+    Has<AgentMenuOpen>,
+    Has<ModelMenuOpen>,
+    Has<PermissionMenuOpen>,
+    Has<ProjectMenuOpen>,
+    Has<BranchMenuOpen>,
+);
+type MenuActivationRow = (
+    &'static PaletteOpen,
+    &'static mut PaletteDraftInput,
+    &'static PaletteSnapshot,
+    Has<AgentMenuOpen>,
+    Has<ModelMenuOpen>,
+    Has<PermissionMenuOpen>,
+    Has<ProjectMenuOpen>,
+    Has<BranchMenuOpen>,
+);
+type ProjectionRow = (
+    &'static PaletteOpen,
+    &'static PaletteDraftInput,
+    Option<&'static PaletteMenuCursor>,
+    &'static PaletteMcp,
+    &'static mut PaletteContext,
+    &'static mut PaletteSnapshot,
+    Has<AgentMenuOpen>,
+    Has<ModelMenuOpen>,
+    Has<PermissionMenuOpen>,
+    Has<ProjectMenuOpen>,
+    Has<BranchMenuOpen>,
+);
+type DetachedPalette = (
+    With<PaletteSnapshot>,
+    Without<RendersLauncherPanel>,
+    Without<HostsLauncher>,
+);
+
 impl PaletteDraftInput {
     fn history(&mut self, history: &[String], older: bool) -> bool {
         if history.is_empty() {
@@ -304,16 +347,7 @@ fn bind(registry: CommandRegistry, mut commands: Commands) {
     registry.bind::<CommandBarMenuDismissBinding>(&mut commands);
 }
 
-fn attach(
-    pages: Query<
-        Entity,
-        (
-            Or<(With<RendersLauncherPanel>, With<HostsLauncher>)>,
-            Without<PaletteSnapshot>,
-        ),
-    >,
-    mut commands: Commands,
-) {
+fn attach(pages: Query<Entity, NewPalette<PaletteSnapshot>>, mut commands: Commands) {
     for page in &pages {
         commands.entity(page).insert((
             PaletteSnapshot::default(),
@@ -623,16 +657,7 @@ fn toggle_branch(
 
 fn navigate_menu(
     trigger: On<UiInput<CommandPaletteMenuMoveRequest>>,
-    mut palettes: Query<(
-        &PaletteOpen,
-        &PaletteSnapshot,
-        &mut PaletteMenuCursor,
-        Has<AgentMenuOpen>,
-        Has<ModelMenuOpen>,
-        Has<PermissionMenuOpen>,
-        Has<ProjectMenuOpen>,
-        Has<BranchMenuOpen>,
-    )>,
+    mut palettes: Query<MenuCursorRow>,
 ) {
     let Ok((opened, snapshot, mut cursor, agent, model, permission, project, branch)) =
         palettes.get_mut(trigger.event().webview)
@@ -667,16 +692,7 @@ fn navigate_menu(
 
 fn highlight_menu(
     trigger: On<UiInput<CommandPaletteMenuHighlightRequest>>,
-    mut palettes: Query<(
-        &PaletteOpen,
-        &PaletteSnapshot,
-        &mut PaletteMenuCursor,
-        Has<AgentMenuOpen>,
-        Has<ModelMenuOpen>,
-        Has<PermissionMenuOpen>,
-        Has<ProjectMenuOpen>,
-        Has<BranchMenuOpen>,
-    )>,
+    mut palettes: Query<MenuCursorRow>,
 ) {
     let Ok((opened, snapshot, mut cursor, agent, model, permission, project, branch)) =
         palettes.get_mut(trigger.event().webview)
@@ -711,16 +727,7 @@ fn highlight_menu(
 
 fn activate_menu(
     trigger: On<UiInput<CommandPaletteMenuActivateRequest>>,
-    mut palettes: Query<(
-        &PaletteOpen,
-        &mut PaletteDraftInput,
-        &PaletteSnapshot,
-        Has<AgentMenuOpen>,
-        Has<ModelMenuOpen>,
-        Has<PermissionMenuOpen>,
-        Has<ProjectMenuOpen>,
-        Has<BranchMenuOpen>,
-    )>,
+    mut palettes: Query<MenuActivationRow>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
@@ -1174,21 +1181,7 @@ fn dismiss_menu(
     });
 }
 
-fn project(
-    mut palettes: Query<(
-        &PaletteOpen,
-        &PaletteDraftInput,
-        Option<&PaletteMenuCursor>,
-        &PaletteMcp,
-        &mut PaletteContext,
-        &mut PaletteSnapshot,
-        Has<AgentMenuOpen>,
-        Has<ModelMenuOpen>,
-        Has<PermissionMenuOpen>,
-        Has<ProjectMenuOpen>,
-        Has<BranchMenuOpen>,
-    )>,
-) {
+fn project(mut palettes: Query<ProjectionRow>) {
     for (
         opened,
         input,
@@ -1282,17 +1275,7 @@ fn publish(
     }
 }
 
-fn detach(
-    pages: Query<
-        Entity,
-        (
-            With<PaletteSnapshot>,
-            Without<RendersLauncherPanel>,
-            Without<HostsLauncher>,
-        ),
-    >,
-    mut commands: Commands,
-) {
+fn detach(pages: Query<Entity, DetachedPalette>, mut commands: Commands) {
     for page in &pages {
         let mut page = commands.entity(page);
         page.remove::<(

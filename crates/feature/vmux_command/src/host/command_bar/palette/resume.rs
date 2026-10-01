@@ -5,11 +5,12 @@ use vmux_api::command_bar::{
     CommandBarUiState, CommandBarUiStatePatch, CommandPaletteDraftRequest,
 };
 use vmux_ecs::host::UiStateWrite;
-use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
 
 use super::super::model::PaletteQuery;
 
-use super::{OpenVersion, PaletteDraftInput, PaletteSnapshot, RequestGeneration, project};
+use super::{
+    NewPalette, OpenVersion, PaletteDraftInput, PaletteSnapshot, RequestGeneration, project,
+};
 
 pub(super) struct PaletteResumePlugin;
 
@@ -30,16 +31,7 @@ pub(super) struct PaletteResume {
     inflight: Option<ResumeFlight>,
 }
 
-fn attach(
-    pages: Query<
-        Entity,
-        (
-            Or<(With<RendersLauncherPanel>, With<HostsLauncher>)>,
-            Without<PaletteResume>,
-        ),
-    >,
-    mut commands: Commands,
-) {
+fn attach(pages: Query<Entity, NewPalette<PaletteResume>>, mut commands: Commands) {
     for page in &pages {
         commands.entity(page).insert(PaletteResume::default());
     }

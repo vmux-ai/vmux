@@ -11,10 +11,11 @@ impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
 }
 
 #[cfg(ui)]
-pub mod ui;
+mod ui;
+#[cfg(ui)]
+pub use ui::{CommandBarPanel, CommandPalette, PaletteProps, ResultRow, use_command_bar_ui};
 
 mod palette_surface;
-pub mod size;
 pub use palette_surface::CommandPaletteSurface;
 pub use vmux_api::open_target;
 pub use vmux_api::prompt_media;

@@ -546,6 +546,32 @@ impl SpaceRows {
 
 pub(super) struct SearchRows;
 
+#[derive(Default)]
+pub(super) struct SearchRowsInput<'a> {
+    pub(super) query: &'a str,
+    pub(super) tabs: &'a [CommandBarTab],
+    pub(super) commands: &'a [CommandBarCommandEntry],
+    pub(super) spaces: &'a [CommandBarSpace],
+    pub(super) pages: &'a [CommandBarPage],
+    pub(super) new_tab: bool,
+    pub(super) history: &'a [HistoryEntry],
+    pub(super) work_dirs: &'a [CommandBarWorkDir],
+    pub(super) recent_files: &'a [CommandBarRecentFile],
+    pub(super) spaces_page_url: &'a str,
+}
+
+#[cfg(test)]
+impl<'a> SearchRowsInput<'a> {
+    fn for_pages(query: &'a str, pages: &'a [CommandBarPage], spaces_page_url: &'a str) -> Self {
+        Self {
+            query,
+            pages,
+            spaces_page_url,
+            ..Self::default()
+        }
+    }
+}
+
 impl SearchRows {
     fn command_results(
         commands: &[CommandBarCommandEntry],
@@ -557,19 +583,19 @@ impl SearchRows {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn filter(
-        query: &str,
-        tabs: &[CommandBarTab],
-        commands: &[CommandBarCommandEntry],
-        spaces: &[CommandBarSpace],
-        pages: &[CommandBarPage],
-        new_tab: bool,
-        history: &[HistoryEntry],
-        work_dirs: &[CommandBarWorkDir],
-        recent_files: &[CommandBarRecentFile],
-        spaces_page_url: &str,
-    ) -> Vec<CommandBarResultItem> {
+    pub(super) fn filter(input: SearchRowsInput<'_>) -> Vec<CommandBarResultItem> {
+        let SearchRowsInput {
+            query,
+            tabs,
+            commands,
+            spaces,
+            pages,
+            new_tab,
+            history,
+            work_dirs,
+            recent_files,
+            spaces_page_url,
+        } = input;
         let q = query.trim();
 
         if SpaceRows::query_targets_spaces_page(q, spaces_page_url) {
@@ -885,18 +911,10 @@ mod tests {
             space("work", "Work", true),
         ];
 
-        let results = SearchRows::filter(
-            "vmux://spaces/",
-            &[],
-            &[] as &[CommandBarCommandEntry],
-            &spaces,
-            &sample_pages(),
-            false,
-            &[],
-            &[],
-            &[],
-            SPACES_PAGE_URL,
-        );
+        let results = SearchRows::filter(SearchRowsInput {
+            spaces: &spaces,
+            ..SearchRowsInput::for_pages("vmux://spaces/", &sample_pages(), SPACES_PAGE_URL)
+        });
 
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://spaces/".into(),
@@ -922,18 +940,10 @@ mod tests {
             shortcut: "super+k".to_string(),
         }];
 
-        let results = SearchRows::filter(
-            "vmux://spaces/",
-            &[],
-            &commands,
-            &[],
-            &sample_pages(),
-            false,
-            &[],
-            &[],
-            &[],
-            SPACES_PAGE_URL,
-        );
+        let results = SearchRows::filter(SearchRowsInput {
+            commands: &commands,
+            ..SearchRowsInput::for_pages("vmux://spaces/", &sample_pages(), SPACES_PAGE_URL)
+        });
 
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://spaces/".into(),
@@ -958,18 +968,10 @@ mod tests {
             shortcut: "<leader> s".to_string(),
         }];
 
-        let results = SearchRows::filter(
-            "spaces",
-            &[],
-            &commands,
-            &[],
-            &sample_pages(),
-            false,
-            &[],
-            &[],
-            &[],
-            SPACES_PAGE_URL,
-        );
+        let results = SearchRows::filter(SearchRowsInput {
+            commands: &commands,
+            ..SearchRowsInput::for_pages("spaces", &sample_pages(), SPACES_PAGE_URL)
+        });
 
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://spaces/".into(),
@@ -994,18 +996,11 @@ mod tests {
         ];
         let tabs: Vec<CommandBarTab> = Vec::new();
 
-        let results = SearchRows::filter(
-            "client",
-            &tabs,
-            &[],
-            &spaces,
-            &sample_pages(),
-            false,
-            &[],
-            &[],
-            &[],
-            SPACES_PAGE_URL,
-        );
+        let results = SearchRows::filter(SearchRowsInput {
+            tabs: &tabs,
+            spaces: &spaces,
+            ..SearchRowsInput::for_pages("client", &sample_pages(), SPACES_PAGE_URL)
+        });
 
         assert!(results.iter().any(|r| matches!(
             r, CommandBarResultItem::Space { id, .. } if id == "client"
@@ -1014,18 +1009,11 @@ mod tests {
 
     #[test]
     fn page_matched_by_keyword() {
-        let results = SearchRows::filter(
+        let results = SearchRows::filter(SearchRowsInput::for_pages(
             "preferences",
-            &[],
-            &[],
-            &[],
             &sample_pages(),
-            false,
-            &[],
-            &[],
-            &[],
             SPACES_PAGE_URL,
-        );
+        ));
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://settings/".into(),
             title: "Settings".into(),
@@ -1038,18 +1026,11 @@ mod tests {
 
     #[test]
     fn agent_page_matched_by_vmux_prefix_carries_favicon() {
-        let results = SearchRows::filter(
+        let results = SearchRows::filter(SearchRowsInput::for_pages(
             "vmux://",
-            &[],
-            &[],
-            &[],
             &sample_pages(),
-            false,
-            &[],
-            &[],
-            &[],
             SPACES_PAGE_URL,
-        );
+        ));
         assert!(results.iter().any(|r| matches!(
             r,
             CommandBarResultItem::Page { url, icon, .. }
@@ -1059,18 +1040,11 @@ mod tests {
 
     #[test]
     fn agent_page_matched_by_name() {
-        let results = SearchRows::filter(
+        let results = SearchRows::filter(SearchRowsInput::for_pages(
             "vibe",
-            &[],
-            &[],
-            &[],
             &sample_pages(),
-            false,
-            &[],
-            &[],
-            &[],
             SPACES_PAGE_URL,
-        );
+        ));
         assert!(results.iter().any(|r| matches!(
             r,
             CommandBarResultItem::Page { title, icon, .. }
@@ -1461,18 +1435,11 @@ mod tests {
 
     #[test]
     fn settings_page_reachable_by_name() {
-        let results = SearchRows::filter(
+        let results = SearchRows::filter(SearchRowsInput::for_pages(
             "setti",
-            &[],
-            &[],
-            &[],
             &sample_pages(),
-            false,
-            &[],
-            &[],
-            &[],
             SPACES_PAGE_URL,
-        );
+        ));
         assert!(results.iter().any(|r| matches!(
             r,
             CommandBarResultItem::Page { title, .. } if title == "Settings"
@@ -1487,18 +1454,10 @@ mod tests {
             shortcut: String::new(),
         }];
 
-        let results = SearchRows::filter(
-            "",
-            &[],
-            &commands,
-            &[],
-            &sample_pages(),
-            false,
-            &[],
-            &[],
-            &[],
-            SPACES_PAGE_URL,
-        );
+        let results = SearchRows::filter(SearchRowsInput {
+            commands: &commands,
+            ..SearchRowsInput::for_pages("", &sample_pages(), SPACES_PAGE_URL)
+        });
 
         let page_count = results
             .iter()
@@ -1519,18 +1478,11 @@ mod tests {
 
     #[test]
     fn pages_listed_alphabetically_by_url() {
-        let results = SearchRows::filter(
+        let results = SearchRows::filter(SearchRowsInput::for_pages(
             "",
-            &[],
-            &[],
-            &[],
             &sample_pages(),
-            false,
-            &[],
-            &[],
-            &[],
             SPACES_PAGE_URL,
-        );
+        ));
         let urls: Vec<String> = results
             .iter()
             .filter_map(|r| match r {
@@ -1551,18 +1503,11 @@ mod tests {
 
     #[test]
     fn page_carries_shortcut() {
-        let results = SearchRows::filter(
+        let results = SearchRows::filter(SearchRowsInput::for_pages(
             "history",
-            &[],
-            &[],
-            &[],
             &sample_pages(),
-            false,
-            &[],
-            &[],
-            &[],
             SPACES_PAGE_URL,
-        );
+        ));
         assert!(results.iter().any(|r| matches!(
             r,
             CommandBarResultItem::Page { title, shortcut, .. }
@@ -1572,18 +1517,11 @@ mod tests {
 
     #[test]
     fn command_prefix_excludes_pages() {
-        let results = SearchRows::filter(
+        let results = SearchRows::filter(SearchRowsInput::for_pages(
             "> set",
-            &[],
-            &[],
-            &[],
             &sample_pages(),
-            false,
-            &[],
-            &[],
-            &[],
             SPACES_PAGE_URL,
-        );
+        ));
         assert!(
             !results
                 .iter()
@@ -1607,18 +1545,11 @@ mod tests {
 
     #[test]
     fn empty_query_puts_work_after_pages() {
-        let results = SearchRows::filter(
-            "",
-            &[],
-            &[],
-            &[],
-            &sample_pages(),
-            false,
-            &[],
-            &sample_work_dirs(),
-            &sample_recent_files(),
-            SPACES_PAGE_URL,
-        );
+        let results = SearchRows::filter(SearchRowsInput {
+            work_dirs: &sample_work_dirs(),
+            recent_files: &sample_recent_files(),
+            ..SearchRowsInput::for_pages("", &sample_pages(), SPACES_PAGE_URL)
+        });
         let last_page = results
             .iter()
             .rposition(|r| matches!(r, CommandBarResultItem::Page { .. }))
@@ -1636,18 +1567,11 @@ mod tests {
     }
 
     fn path_results(query: &str) -> Vec<CommandBarResultItem> {
-        SearchRows::filter(
+        SearchRows::filter(SearchRowsInput::for_pages(
             query,
-            &[],
-            &[],
-            &[],
             &sample_pages(),
-            false,
-            &[],
-            &[],
-            &[],
             SPACES_PAGE_URL,
-        )
+        ))
     }
 
     #[test]
@@ -1696,18 +1620,11 @@ mod tests {
 
     #[test]
     fn work_dir_matched_by_query() {
-        let results = SearchRows::filter(
-            "proj",
-            &[],
-            &[],
-            &[],
-            &sample_pages(),
-            false,
-            &[],
-            &sample_work_dirs(),
-            &sample_recent_files(),
-            SPACES_PAGE_URL,
-        );
+        let results = SearchRows::filter(SearchRowsInput {
+            work_dirs: &sample_work_dirs(),
+            recent_files: &sample_recent_files(),
+            ..SearchRowsInput::for_pages("proj", &sample_pages(), SPACES_PAGE_URL)
+        });
         assert!(results.iter().any(|r| matches!(
             r, CommandBarResultItem::WorkDir { path, .. } if path == "/work/proj/main.rs"
         )));

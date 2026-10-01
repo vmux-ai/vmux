@@ -4,9 +4,8 @@ use vmux_api::command_bar::{
     CommandBarUiState, CommandBarUiStatePatch, StartBranchesRequest, StartProjectBranches,
 };
 use vmux_ecs::host::UiStateWrite;
-use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
 
-use super::{OpenVersion, PaletteContext, PaletteSnapshot};
+use super::{NewPalette, OpenVersion, PaletteContext, PaletteSnapshot};
 
 pub(super) struct PaletteBranchPlugin;
 
@@ -29,16 +28,7 @@ pub(super) struct PaletteBranch {
     inflight: Option<BranchFlight>,
 }
 
-fn attach(
-    pages: Query<
-        Entity,
-        (
-            Or<(With<RendersLauncherPanel>, With<HostsLauncher>)>,
-            Without<PaletteBranch>,
-        ),
-    >,
-    mut commands: Commands,
-) {
+fn attach(pages: Query<Entity, NewPalette<PaletteBranch>>, mut commands: Commands) {
     for page in &pages {
         commands.entity(page).insert(PaletteBranch::default());
     }

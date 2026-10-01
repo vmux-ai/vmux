@@ -2,7 +2,7 @@ use crate::ui::format::ResumeMenuState;
 use crate::ui::state::Chat;
 use dioxus::prelude::*;
 use vmux_api::command_bar::CommandBarResultItem;
-use vmux_command::ui::ResultRow;
+use vmux_command::ResultRow;
 use vmux_ui::components::prompt_box::PromptPopup;
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
 use vmux_ui::i18n::translate;

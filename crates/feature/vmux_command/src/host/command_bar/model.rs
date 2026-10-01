@@ -1,8 +1,8 @@
 use vmux_api::command_bar::{
     AgentModels, AgentModes, CommandBarOpenEvent, CommandBarPick, CommandBarPicker,
     CommandPaletteAgent, CommandPaletteComposer, CommandPaletteProjection, ExRequest, HistoryEntry,
-    InvokeRequest, OpenRequest, PathEntry, PickRequest, PromptRequest, SwitchSpaceRequest,
-    SwitchTabRequest, TerminalRequest,
+    InvokeRequest, OpenRequest, PaletteGlyph, PaletteMode, PathEntry, PickRequest, PromptRequest,
+    SwitchSpaceRequest, SwitchTabRequest, TerminalRequest,
 };
 use vmux_api::open_target::OpenTarget;
 use vmux_api::prompt_media::{ChatAttachment, ChatSubmitAttachment};
@@ -15,15 +15,14 @@ use crate::CommandPaletteSurface;
 
 pub use self::results::ResumeRows;
 use self::results::{
-    CommandBarResultItem, PageRows, PickerRows, SearchRows, SlashRows, SpaceRows, StartRows,
+    CommandBarResultItem, PageRows, PickerRows, SearchRows, SearchRowsInput, SlashRows, SpaceRows,
+    StartRows,
 };
 
 mod query;
 mod results;
 
 pub(super) use query::PaletteQuery;
-
-use vmux_api::command_bar::{PaletteGlyph, PaletteMode};
 
 #[derive(Clone, Debug, Default)]
 pub struct PaletteDraft {
@@ -278,18 +277,18 @@ impl PaletteRows {
             return Self::with_completions(query, draft, matched);
         }
         let is_new_tab = matches!(state.target, Some(OpenTarget::InNewStack));
-        let matched = SearchRows::filter(
+        let matched = SearchRows::filter(SearchRowsInput {
             query,
-            &state.tabs,
-            &state.commands,
-            &state.spaces,
-            &state.pages,
-            is_new_tab,
-            &draft.history,
-            &state.work_dirs,
-            &state.recent_files,
-            &state.spaces_page_url,
-        );
+            tabs: &state.tabs,
+            commands: &state.commands,
+            spaces: &state.spaces,
+            pages: &state.pages,
+            new_tab: is_new_tab,
+            history: &draft.history,
+            work_dirs: &state.work_dirs,
+            recent_files: &state.recent_files,
+            spaces_page_url: &state.spaces_page_url,
+        });
         let matched = Self::with_completions(query, draft, matched);
         if !is_start {
             return matched;

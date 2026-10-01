@@ -291,6 +291,48 @@ const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
 const COMMAND_BAR_NATIVE_REVEAL_TIMEOUT: Duration = Duration::from_secs(2);
 const COMMAND_BAR_OPEN_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
+type PrewarmRow = (
+    Entity,
+    &'static mut Node,
+    &'static mut Visibility,
+    Has<KeyboardOwner>,
+    Has<PendingCommandBarReveal>,
+    Has<WebviewNativeOverlay>,
+);
+type ResizeRow = (
+    &'static Visibility,
+    Option<&'static PendingCommandBarReveal>,
+    Option<&'static CommandBarNativeSize>,
+    Has<WebviewWindowed>,
+);
+type RevealRow = (
+    Entity,
+    &'static mut Visibility,
+    &'static mut PendingCommandBarReveal,
+    Option<&'static CommandBarRenderedOpen>,
+    Option<&'static CommandBarNativeSize>,
+    Has<WebviewWindowed>,
+    Has<WebviewNativeOverlay>,
+);
+type RetryRow = (
+    Entity,
+    &'static mut PendingCommandBarReveal,
+    Option<&'static CommandBarRenderedOpen>,
+    Has<CommandBarRecreating>,
+);
+type CloseRow = (
+    Entity,
+    &'static mut Node,
+    &'static mut Visibility,
+    Has<WebviewNativeOverlay>,
+);
+type LauncherLayout = (
+    Entity,
+    Has<CommandBarPanelActive>,
+    Option<&'static HostWindow>,
+);
+type BrowserPageFilter = Or<(With<WebviewSource>, With<HostsPage>)>;
+
 impl CommandBar {
     fn prepare(node: &mut Node, visibility: &mut Visibility, native_overlay: bool) {
         node.display = Display::Flex;
@@ -311,20 +353,7 @@ impl CommandBar {
     }
 }
 
-fn prewarm(
-    mut commands: Commands,
-    mut modal_q: Query<
-        (
-            Entity,
-            &mut Node,
-            &mut Visibility,
-            Has<KeyboardOwner>,
-            Has<PendingCommandBarReveal>,
-            Has<WebviewNativeOverlay>,
-        ),
-        With<CommandBar>,
-    >,
-) {
+fn prewarm(mut commands: Commands, mut modal_q: Query<PrewarmRow, With<CommandBar>>) {
     let Ok((
         modal_e,
         mut modal_node,
@@ -386,12 +415,7 @@ fn rendered(
 fn resize(
     trigger: On<UiInput<CommandBarSizeEvent>>,
     browsers: NonSend<Browsers>,
-    state: Query<(
-        &Visibility,
-        Option<&PendingCommandBarReveal>,
-        Option<&CommandBarNativeSize>,
-        Has<WebviewWindowed>,
-    )>,
+    state: Query<ResizeRow>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -507,7 +531,8 @@ impl CommandBarOpenState {
 }
 
 #[derive(SystemParam)]
-struct CommandBarOpenRequests<'w, 's> {
+struct OpenRequests<'w, 's> {
+    invocations: MessageReader<'w, 's, CommandInvocation>,
     toggle: MessageReader<'w, 's, CommandBarToggleRequest>,
     edit_page: MessageReader<'w, 's, CommandBarEditPageRequest>,
     path: MessageReader<'w, 's, CommandBarPathRequest>,
@@ -515,56 +540,100 @@ struct CommandBarOpenRequests<'w, 's> {
     open: MessageReader<'w, 's, CommandBarOpenRequest>,
 }
 
+impl OpenRequests<'_, '_> {
+    fn read(&mut self) -> CommandBarOpenState {
+        CommandBarOpenState::from_requests(
+            self.toggle.read().next().is_some(),
+            self.edit_page.read().next().is_some(),
+            self.path.read().next().is_some(),
+            self.commands.read().next().is_some(),
+            self.open.read(),
+            self.invocations
+                .read()
+                .map(|invocation| invocation.id.as_str()),
+        )
+    }
+}
+
+#[derive(SystemParam)]
+struct OpenSources<'w, 's> {
+    layouts: Query<'w, 's, LauncherLayout, With<RendersLauncherPanel>>,
+    windows: Query<'w, 's, &'static Window>,
+    children: Query<'w, 's, &'static Children>,
+    metadata: Query<'w, 's, &'static PageMetadata, BrowserPageFilter>,
+    workspace: Single<'w, 's, &'static CommandBarWorkspaceSnapshot>,
+    projects: Single<'w, 's, &'static CommandBarProjectRoots>,
+    spaces: Single<'w, 's, &'static CommandBarSpacesSnapshot>,
+    pages: Single<'w, 's, &'static CommandBarPagesSnapshot>,
+    work: Single<'w, 's, &'static CommandBarWorkSnapshot>,
+    terminal_page: Option<Single<'w, 's, &'static CommandBarTerminalPage>>,
+    projector: CommandBarProjector<'w, 's>,
+    locale: Option<Res<'w, ResolvedLocale>>,
+}
+
+impl OpenSources<'_, '_> {
+    fn layout(&self) -> Option<(Entity, bool)> {
+        self.layouts
+            .iter()
+            .find(|(_, _, host)| {
+                host.is_some_and(|host| self.windows.get(host.0).is_ok_and(|window| window.focused))
+            })
+            .or_else(|| self.layouts.iter().next())
+            .map(|(entity, open, _)| (entity, open))
+    }
+
+    fn current_url(&self, override_url: Option<String>) -> String {
+        if let Some(url) = override_url {
+            return url;
+        }
+        self.workspace
+            .stack
+            .and_then(|stack| {
+                let Ok(children) = self.children.get(stack) else {
+                    return None;
+                };
+                children
+                    .iter()
+                    .find_map(|entity| self.metadata.get(entity).ok())
+            })
+            .map(|metadata| metadata.url.clone())
+            .unwrap_or_default()
+    }
+
+    fn locale(&self) -> Locale {
+        self.locale
+            .as_deref()
+            .map(|locale| locale.0.clone())
+            .unwrap_or_else(Locale::preferred)
+    }
+
+    fn terminal_page_url(&self) -> String {
+        self.terminal_page
+            .as_deref()
+            .map(|page| page.0.clone())
+            .unwrap_or_default()
+    }
+}
+
 fn open(
-    mut reader: MessageReader<CommandInvocation>,
-    mut open_requests: CommandBarOpenRequests,
-    layout_q: Query<
-        (Entity, Has<CommandBarPanelActive>, Option<&HostWindow>),
-        With<RendersLauncherPanel>,
-    >,
-    windows: Query<&Window>,
-    all_children: Query<&Children>,
-    browser_meta: Query<&PageMetadata, Or<(With<WebviewSource>, With<HostsPage>)>>,
-    workspace: Single<&CommandBarWorkspaceSnapshot>,
-    projects: Single<&CommandBarProjectRoots>,
-    spaces: Single<&CommandBarSpacesSnapshot>,
-    pages: Single<&CommandBarPagesSnapshot>,
-    work: Single<&CommandBarWorkSnapshot>,
-    terminal_page: Option<Single<&CommandBarTerminalPage>>,
+    mut open_requests: OpenRequests,
+    sources: OpenSources,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
-    projector: CommandBarProjector,
-    locale: Option<Res<ResolvedLocale>>,
     mut commands: Commands,
 ) {
-    let request = CommandBarOpenState::from_requests(
-        open_requests.toggle.read().next().is_some(),
-        open_requests.edit_page.read().next().is_some(),
-        open_requests.path.read().next().is_some(),
-        open_requests.commands.read().next().is_some(),
-        open_requests.open.read(),
-        reader.read().map(|invocation| invocation.id.as_str()),
-    );
+    let request = open_requests.read();
     if !request.should_toggle && !request.should_dismiss && !request.should_dismiss_nav {
         return;
     }
 
-    let Some((layout_e, is_open, _)) = layout_q
-        .iter()
-        .find(|(_, _, host)| {
-            host.is_some_and(|host| windows.get(host.0).is_ok_and(|window| window.focused))
-        })
-        .or_else(|| layout_q.iter().next())
-    else {
+    let Some((layout_e, is_open)) = sources.layout() else {
         return;
     };
-    let focus = &*workspace;
+    let focus = &*sources.workspace;
     let active_stack_count = focus.stack_count;
-    let spaces_snapshot = &*spaces;
+    let spaces_snapshot = &*sources.spaces;
     let space_name = spaces_snapshot.active_space_name.clone();
-    let locale = locale
-        .as_deref()
-        .map(|locale| locale.0.clone())
-        .unwrap_or_else(Locale::preferred);
+    let locale = sources.locale();
     let toggle_closes = request.closes_visible_bar(is_open);
     let should_toggle = request.should_toggle;
     let should_dismiss = request.should_dismiss;
@@ -590,37 +659,21 @@ fn open(
         return;
     }
 
-    let current_url = if let Some(override_url) = url_override {
-        override_url
-    } else {
-        focus
-            .stack
-            .and_then(|tab| {
-                let Ok(children) = all_children.get(tab) else {
-                    return None;
-                };
-                children.iter().find_map(|e| browser_meta.get(e).ok())
-            })
-            .map(|meta| meta.url.clone())
-            .unwrap_or_default()
-    };
+    let current_url = sources.current_url(url_override);
 
     let bar_tabs = focus.tabs.clone();
 
     let target = replace_active_stack.then_some(crate::open_target::OpenTarget::InPlace);
-    let mut payload = projector.project(CommandBarOpenProjection {
+    let mut payload = sources.projector.project(CommandBarOpenProjection {
         open_id: OpenId(now_millis() as u64),
         native_windowed: false,
         space_name,
         url: current_url,
         spaces: (*spaces_snapshot).clone(),
-        terminal_page_url: terminal_page
-            .as_deref()
-            .map(|page| page.0.clone())
-            .unwrap_or_default(),
-        pages: (*pages).clone(),
-        projects: (*projects).clone(),
-        work: (*work).clone(),
+        terminal_page_url: sources.terminal_page_url(),
+        pages: (*sources.pages).clone(),
+        projects: (*sources.projects).clone(),
+        work: (*sources.work).clone(),
         locale: locale.clone(),
         active_stack_count,
         tabs: bar_tabs,
@@ -657,15 +710,7 @@ fn dismiss(trigger: On<UiInput<DismissRequest>>, mut commands: Commands) {
 fn close(
     trigger: On<CommandBarDismiss>,
     workspace: Single<&CommandBarWorkspaceSnapshot>,
-    mut modal_q: Query<
-        (
-            Entity,
-            &mut Node,
-            &mut Visibility,
-            Has<WebviewNativeOverlay>,
-        ),
-        With<CommandBar>,
-    >,
+    mut modal_q: Query<CloseRow, With<CommandBar>>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     mut commands: Commands,
 ) {
@@ -687,15 +732,7 @@ fn close(
 
 fn dismiss_requested(
     mut requests: MessageReader<LauncherDismissRequest>,
-    mut modal_q: Query<
-        (
-            Entity,
-            &mut Node,
-            &mut Visibility,
-            Has<WebviewNativeOverlay>,
-        ),
-        With<CommandBar>,
-    >,
+    mut modal_q: Query<CloseRow, With<CommandBar>>,
     panel_q: Query<Entity, (With<RendersLauncherPanel>, With<CommandBarPanelActive>)>,
     mut commands: Commands,
 ) {
@@ -718,21 +755,7 @@ fn dismiss_requested(
     }
 }
 
-fn reveal(
-    mut commands: Commands,
-    mut query: Query<
-        (
-            Entity,
-            &mut Visibility,
-            &mut PendingCommandBarReveal,
-            Option<&CommandBarRenderedOpen>,
-            Option<&CommandBarNativeSize>,
-            Has<WebviewWindowed>,
-            Has<WebviewNativeOverlay>,
-        ),
-        With<CommandBar>,
-    >,
-) {
+fn reveal(mut commands: Commands, mut query: Query<RevealRow, With<CommandBar>>) {
     for (entity, mut vis, mut pending, rendered, native_size, native_windowed, native_overlay) in
         &mut query
     {
@@ -770,15 +793,7 @@ fn reveal(
 fn retry(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    mut query: Query<
-        (
-            Entity,
-            &mut PendingCommandBarReveal,
-            Option<&CommandBarRenderedOpen>,
-            Has<CommandBarRecreating>,
-        ),
-        With<CommandBar>,
-    >,
+    mut query: Query<RetryRow, With<CommandBar>>,
     mut last_emit: Local<std::collections::HashMap<Entity, Instant>>,
 ) {
     let now = Instant::now();
@@ -943,16 +958,15 @@ mod tests {
     #[derive(Resource, Default)]
     struct CapturedCommandBarOpen(bool);
 
+    type CaptureRow = (
+        &'static Node,
+        &'static Visibility,
+        Has<KeyboardOwner>,
+        Has<vmux_ecs::overlay::OverlayShownInline>,
+    );
+
     fn capture_bar_open(
-        modal_q: Query<
-            (
-                &Node,
-                &Visibility,
-                Has<KeyboardOwner>,
-                Has<vmux_ecs::overlay::OverlayShownInline>,
-            ),
-            With<CommandBar>,
-        >,
+        modal_q: Query<CaptureRow, With<CommandBar>>,
         mut captured: ResMut<CapturedCommandBarOpen>,
     ) {
         captured.0 = OverlayState::from_surfaces(modal_q.iter()).owns_input();

@@ -9,9 +9,11 @@ use vmux_api::command_bar::{
     PathCompleteResponse,
 };
 use vmux_ecs::host::UiStateWrite;
-use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
 
-use super::{OpenVersion, PaletteSnapshot, PendingPaletteRequest, RequestDelay, RequestGeneration};
+use super::{
+    NewPalette, OpenVersion, PaletteSnapshot, PendingPaletteRequest, RequestDelay,
+    RequestGeneration,
+};
 
 const COMPLETION_DEBOUNCE: Duration = Duration::from_millis(60);
 const HISTORY_DEBOUNCE: Duration = Duration::from_millis(300);
@@ -38,16 +40,7 @@ pub(super) struct PaletteSearch {
     history_generation: RequestGeneration,
 }
 
-fn attach(
-    pages: Query<
-        Entity,
-        (
-            Or<(With<RendersLauncherPanel>, With<HostsLauncher>)>,
-            Without<PaletteSearch>,
-        ),
-    >,
-    mut commands: Commands,
-) {
+fn attach(pages: Query<Entity, NewPalette<PaletteSearch>>, mut commands: Commands) {
     for page in &pages {
         commands.entity(page).insert(PaletteSearch::default());
     }

@@ -18,7 +18,7 @@ use self::header::HeaderView;
 use self::side_sheet::SideSheetView;
 use self::state::LayoutUi;
 use dioxus::prelude::*;
-use vmux_command::ui::CommandBarPanel;
+use vmux_command::CommandBarPanel;
 use vmux_ui::hooks::use_theme;
 
 pub(crate) use error::ErrorPage;

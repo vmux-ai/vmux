@@ -13,14 +13,13 @@ use vmux_api::prompt_media::{
     PromptComposerAttachment, PromptMediaOption, inline_media_query, replace_inline_media_query,
 };
 use vmux_ecs::host::UiStateWrite;
-use vmux_ecs::launcher::{HostsLauncher, RendersLauncherPanel};
 use vmux_ui::file_icon::FilePath;
 
 use crate::{BindCommands, CommandDispatch, CommandRegistry};
 
 use super::{
-    OpenVersion, PaletteDraftInput, PaletteSnapshot, PendingPaletteRequest, RequestDelay,
-    RequestGeneration,
+    NewPalette, OpenVersion, PaletteDraftInput, PaletteSnapshot, PendingPaletteRequest,
+    RequestDelay, RequestGeneration,
 };
 
 const MEDIA_DEBOUNCE: Duration = Duration::from_millis(300);
@@ -139,16 +138,7 @@ fn bind(registry: CommandRegistry, mut commands: Commands) {
     registry.bind::<CommandBarMediaDismissBinding>(&mut commands);
 }
 
-fn attach(
-    pages: Query<
-        Entity,
-        (
-            Or<(With<RendersLauncherPanel>, With<HostsLauncher>)>,
-            Without<PaletteMedia>,
-        ),
-    >,
-    mut commands: Commands,
-) {
+fn attach(pages: Query<Entity, NewPalette<PaletteMedia>>, mut commands: Commands) {
     for page in &pages {
         commands.entity(page).insert(PaletteMedia::default());
     }

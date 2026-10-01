@@ -6,6 +6,7 @@ use vmux_history::LastActivatedAt;
 
 const WORK_DIR_ENTRIES_CAP: usize = 40;
 const RECENT_FILES_CAP: usize = 20;
+type RecentPageChange = Or<(Added<Url>, Changed<LastVisitedAt>)>;
 
 pub(super) struct Plugin;
 
@@ -141,7 +142,7 @@ fn directories(
 }
 
 fn recent(
-    changed: Query<(), Or<(Added<Url>, Changed<LastVisitedAt>)>>,
+    changed: Query<(), RecentPageChange>,
     urls: Query<(&PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
     mut initialized: Local<bool>,
     mut state: Single<&mut CommandBarWorkSnapshot>,
@@ -198,10 +199,12 @@ mod tests {
 
     use super::*;
 
-    impl CommandBarWorkSnapshot {
-        fn read(app: &mut App) -> Self {
+    struct WorkSnapshot;
+
+    impl WorkSnapshot {
+        fn read(app: &mut App) -> CommandBarWorkSnapshot {
             let world = app.world_mut();
-            let mut query = world.query::<&Self>();
+            let mut query = world.query::<&CommandBarWorkSnapshot>();
             query.single(world).unwrap().clone()
         }
     }
@@ -220,7 +223,7 @@ mod tests {
         app.world_mut().spawn(CommandBarWorkDirectory(cwd));
         app.update();
 
-        let snap = CommandBarWorkSnapshot::read(&mut app);
+        let snap = WorkSnapshot::read(&mut app);
         assert!(
             snap.work_dirs
                 .iter()
@@ -247,7 +250,7 @@ mod tests {
         app.world_mut()
             .spawn(CommandBarWorkDirectory(root.to_string_lossy().into_owned()));
         app.update();
-        let snap = CommandBarWorkSnapshot::read(&mut app);
+        let snap = WorkSnapshot::read(&mut app);
         assert!(
             snap.work_dirs
                 .iter()
@@ -270,7 +273,7 @@ mod tests {
         app.world_mut().spawn(CommandBarWorkDirectory(cwd.clone()));
         app.update();
 
-        let snap = CommandBarWorkSnapshot::read(&mut app);
+        let snap = WorkSnapshot::read(&mut app);
         assert!(
             snap.work_dirs
                 .iter()
@@ -306,7 +309,7 @@ mod tests {
             CreatedAt(0),
         ));
         app.update();
-        let snap = CommandBarWorkSnapshot::read(&mut app);
+        let snap = WorkSnapshot::read(&mut app);
         assert_eq!(snap.recent_files.len(), 1);
         assert_eq!(snap.recent_files[0].title, "main.rs");
     }
@@ -333,7 +336,7 @@ mod tests {
         }
         app.update();
 
-        let snapshot = CommandBarWorkSnapshot::read(&mut app);
+        let snapshot = WorkSnapshot::read(&mut app);
         let engines = &snapshot.search_engines;
         assert_eq!(engines.len(), SearchEngine::ALL.len());
         assert_eq!(

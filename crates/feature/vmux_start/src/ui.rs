@@ -4,8 +4,7 @@ use dioxus::prelude::*;
 use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, StartHero};
 use vmux_ui::hooks::use_theme;
 
-use vmux_command::CommandPaletteSurface;
-use vmux_command::ui::{CommandPalette, use_command_bar_ui};
+use vmux_command::{CommandPalette, CommandPaletteSurface, use_command_bar_ui};
 
 #[vmux_native::page(
     component = Page
