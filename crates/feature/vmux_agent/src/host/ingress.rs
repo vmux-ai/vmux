@@ -1,4 +1,4 @@
-use crate::event::{
+use crate::host::event::{
     AgentRequestInput, AgentToolCallRequest, CommandOrigin, UiAgentAcpTerminalCreated,
     UiAgentApprovalResolved, UiAgentAwaitingApproval, UiAgentDelta, UiAgentInfo, UiAgentRunStatus,
     UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState, UiAgentSessionCreated,

@@ -22,10 +22,10 @@ use super::page::PagePlugin;
 use super::snapshot::SnapshotPlugin;
 use super::tidy::Plugin as TidyPlugin;
 use super::toast::ToastPlugin;
-use crate::command_bar::CommandBarPlugin;
-use crate::event::{AgentRequestInput, AgentToolCallRequest};
+use crate::host::command_bar::CommandBarPlugin;
+use crate::host::event::{AgentRequestInput, AgentToolCallRequest};
+use crate::host::runtime::AgentRuntimePlugin;
 use crate::host::transcript::ChatTranscriptPlugin;
-use crate::runtime::AgentRuntimePlugin;
 
 pub struct AgentPlugin;
 
@@ -73,7 +73,7 @@ fn spawn_store_validator(mut commands: Commands) {
         Name::new("Agent workspace-store validator"),
         WorkspaceStoreValidator {
             name: "agent URL",
-            rejects: crate::AgentUrl::rejects_persisted_store,
+            rejects: crate::host::url::AgentUrl::rejects_persisted_store,
         },
     ));
 }

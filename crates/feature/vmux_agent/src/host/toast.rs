@@ -1,4 +1,4 @@
-use crate::run_state_kind::{AgentRunStateKind, LastRunStateKind};
+use crate::host::run_state_kind::{AgentRunStateKind, LastRunStateKind};
 use bevy::prelude::*;
 use bevy_cef::prelude::UiEventPlugin;
 use vmux_session::{AcpSession, AgentRunState};

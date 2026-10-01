@@ -16,9 +16,9 @@ use vmux_layout::worktree::TabWorktreeReady;
 use vmux_terminal::reattach_terminal_bundle;
 
 use super::handoff::PendingHandoff;
-use crate::acp_registry::{Registry, RegistryAgent};
-use crate::acp_tool::{AcpLaunchStarted, AcpToolPlugin};
-use crate::event::{
+use crate::host::acp::registry::{Registry, RegistryAgent};
+use crate::host::acp::{AcpLaunchStarted, AcpToolPlugin};
+use crate::host::event::{
     AgentApprovalRequest, UiAgentAcpTerminalCreated, UiAgentInfo,
     UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState, UiAgentSessionCreated,
     UiAgentWorkspaceChanged,
@@ -674,7 +674,7 @@ mod tests {
             description: None,
             icon: None,
             repository: None,
-            distribution: crate::acp_registry::Distribution::default(),
+            distribution: crate::host::acp::registry::Distribution::default(),
         }])
         .unwrap();
 
@@ -846,7 +846,7 @@ mod tests {
         let project_dir = repo.path().canonicalize().unwrap();
         let worktree_dir = worktree.canonicalize().unwrap();
         let mut app = App::new();
-        app.add_message::<crate::event::UiAgentWorkspaceChanged>()
+        app.add_message::<crate::host::event::UiAgentWorkspaceChanged>()
             .add_systems(Update, apply_workspace);
         let tab = app
             .world_mut()
@@ -881,8 +881,8 @@ mod tests {
             })
             .id();
         app.world_mut()
-            .resource_mut::<Messages<crate::event::UiAgentWorkspaceChanged>>()
-            .write(crate::event::UiAgentWorkspaceChanged {
+            .resource_mut::<Messages<crate::host::event::UiAgentWorkspaceChanged>>()
+            .write(crate::host::event::UiAgentWorkspaceChanged {
                 sid: "matching-sid".into(),
                 name: "quiet-amber-wolf".into(),
                 branch: "vibe/quiet-amber-wolf".into(),
@@ -912,7 +912,7 @@ mod tests {
 
     #[test]
     fn live_acp_identity_updates_only_matching_profile() {
-        use crate::event::UiAgentInfo;
+        use crate::host::event::UiAgentInfo;
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
@@ -973,7 +973,7 @@ mod tests {
 
     #[test]
     fn live_acp_config_state_updates_only_matching_session() {
-        use crate::event::UiAgentSessionConfigState;
+        use crate::host::event::UiAgentSessionConfigState;
         use vmux_api::protocol::{AcpSessionConfig, AcpSessionConfigValue};
 
         let mut app = App::new();
@@ -1031,7 +1031,7 @@ mod tests {
 
     #[test]
     fn config_results_preserve_latest_pending_selection() {
-        use crate::event::{UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState};
+        use crate::host::event::{UiAgentSessionConfigSelectionResult, UiAgentSessionConfigState};
         use vmux_api::protocol::{AcpSessionConfig, AcpSessionConfigValue};
 
         let values = ["default", "opus", "fable"]
@@ -1158,7 +1158,7 @@ mod tests {
 
     #[test]
     fn acp_terminal_stack_does_not_take_focus_from_agent() {
-        use crate::event::UiAgentAcpTerminalCreated;
+        use crate::host::event::UiAgentAcpTerminalCreated;
         use vmux_layout::pane::leaf_pane_bundle;
         use vmux_layout::stack::Stack;
         use vmux_layout::tab::tab_bundle;

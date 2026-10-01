@@ -12,8 +12,8 @@ pub struct ChatToolPlugin;
 impl Plugin for ChatToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .register_tool::<RequestUserChoiceArgs>()
-            .register_tool::<SetConversationTitleArgs>()
+            .bind_tool::<RequestUserChoiceArgs>()
+            .bind_tool::<SetConversationTitleArgs>()
             .add_systems(
                 Update,
                 (request_user_choice, set_conversation_title).in_set(ToolDispatchSet),

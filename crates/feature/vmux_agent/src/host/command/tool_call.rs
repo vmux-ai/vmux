@@ -7,7 +7,7 @@ use vmux_tool::{
     ToolQuery, ToolQueryRequest, ToolResolveSet,
 };
 
-use crate::event::{AgentRequestInput, AgentToolCallRequest, CommandOrigin};
+use crate::host::event::{AgentRequestInput, AgentToolCallRequest, CommandOrigin};
 
 use super::CommandSet;
 
@@ -188,7 +188,7 @@ mod tests {
             FeaturePlugin::<TestFeature>::default(),
             ToolCallPlugin,
         ))
-        .register_tool::<TestQueryArgs>()
+        .bind_tool::<TestQueryArgs>()
         .add_message::<AgentToolCallRequest>()
         .add_message::<AgentRequestInput>()
         .add_message::<ToolQueryRequest>()

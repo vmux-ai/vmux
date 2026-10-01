@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use vmux_core::ProcessId;
-pub use vmux_core::agent::McpServerConfig;
+use vmux_core::agent::McpServerConfig;
 
 const LONG_RUN_TIMEOUT_SECS: u64 = 600;
 

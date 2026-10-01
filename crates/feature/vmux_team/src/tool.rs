@@ -10,7 +10,7 @@ pub struct TeamToolPlugin;
 impl Plugin for TeamToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .register_tool::<RenameProfileArgs>()
+            .bind_tool::<RenameProfileArgs>()
             .add_systems(Update, rename_profile.in_set(ToolDispatchSet));
     }
 }

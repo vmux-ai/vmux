@@ -16,24 +16,10 @@ pub mod broker;
 #[cfg(all(host, feature = "app"))]
 mod host;
 #[cfg(all(host, feature = "app"))]
-pub mod managed_mcp;
+mod managed_mcp;
 #[cfg(all(host, feature = "app"))]
-pub mod mcp;
+mod mcp;
 #[cfg(all(host, feature = "app"))]
 mod policy;
 #[cfg(all(host, feature = "app"))]
 pub use host::AgentPlugin;
-#[cfg(all(test, host, feature = "app"))]
-pub(crate) use host::test_support;
-#[cfg(all(host, feature = "app"))]
-pub(crate) use host::{
-    AcpSession, AgentApprovalPolicy, AgentMessages, AgentRunStateKind, AgentToast, AgentUrl,
-    AssistantBlock, ChatRoom, CollaborativeDocument, CrdtChangeReceived, DocumentKind,
-    LastRunStateKind, MaterializedRoomEvent, MemberPresence, Message, MessageDelivery, PromptQueue,
-    QueuedPrompt, RoomAgentBinding, RoomEventIdentity, RoomMember, RoomMessageContent,
-    RoomMetadata, RoomOpCommitted, RoomOpReceived, RoomPlugin, RoomProjection, StreamingMessage,
-    ToastLevel, acp_registry, acp_tool, attach, attention, command, command_bar, event, follow,
-    message, run_state_kind, runtime, snapshot, toast, url,
-};
-#[cfg(all(host, feature = "app"))]
-pub(crate) use mcp::McpServerConfig;

@@ -15,7 +15,7 @@ impl Plugin for CommandBarPlugin {
             Update,
             publish_contributions
                 .in_set(WriteCommandBarSnapshots)
-                .after(crate::snapshot::SnapshotSet::AgentSessions),
+                .after(crate::host::snapshot::SnapshotSet::AgentSessions),
         );
     }
 }

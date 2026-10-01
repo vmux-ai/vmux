@@ -17,13 +17,13 @@ impl Plugin for BrowserToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
             .add_systems(Startup, register_agent_policy)
-            .register_tool::<BrowserNavigateArgs>()
-            .register_tool::<BrowserGoBackArgs>()
-            .register_tool::<BrowserGoForwardArgs>()
-            .register_tool::<BrowserHistorySearchArgs>()
-            .register_tool::<BrowserInstallExtensionArgs>()
-            .register_tool::<BrowserSnapshotArgs>()
-            .register_tool::<BrowserScrollArgs>()
+            .bind_tool::<BrowserNavigateArgs>()
+            .bind_tool::<BrowserGoBackArgs>()
+            .bind_tool::<BrowserGoForwardArgs>()
+            .bind_tool::<BrowserHistorySearchArgs>()
+            .bind_tool::<BrowserInstallExtensionArgs>()
+            .bind_tool::<BrowserSnapshotArgs>()
+            .bind_tool::<BrowserScrollArgs>()
             .add_systems(
                 Update,
                 (

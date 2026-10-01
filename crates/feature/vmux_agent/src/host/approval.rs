@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use crate::event::{AgentApprovalReply, ApprovalDecision};
+use crate::host::event::{AgentApprovalReply, ApprovalDecision};
 use vmux_api::protocol::{ClientMessage, SharedMessage};
 use vmux_chat::event::ChatApproval;
 use vmux_core::service::ServiceRequest;

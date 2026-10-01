@@ -15,7 +15,7 @@ use vmux_layout::stack::ComputeFocusSet;
 use vmux_session::{AcpSession, AgentRunState};
 use vmux_setting::{AppSettings, SettingsSaveRequest};
 
-use crate::follow::AgentFileLayout;
+use crate::host::follow::AgentFileLayout;
 
 pub struct Plugin;
 
@@ -34,7 +34,7 @@ impl bevy::app::Plugin for Plugin {
                 attention
                     .in_set(TidySet)
                     .after(ComputeFocusSet)
-                    .after(crate::attention::TurnEndedSet),
+                    .after(crate::host::attention::TurnEndedSet),
             )
             .add_systems(Update, idle.after(ComputeFocusSet));
     }

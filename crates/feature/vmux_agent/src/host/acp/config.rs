@@ -1,12 +1,12 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use crate::event::AgentRequestInput;
+use crate::host::event::AgentRequestInput;
 #[cfg(test)]
 use crate::host::model_selection::SavedAgentModel;
 use crate::host::model_selection::{AcpSessionConfigRequestCounter, ModelSelectionPlugin};
 use crate::host::model_selection::{AgentModeSelections, AgentModelSelections};
-use crate::runtime::{AcpSessionConfigState, PendingAcpSessionConfig};
+use crate::host::runtime::{AcpSessionConfigState, PendingAcpSessionConfig};
 use vmux_api::command_bar::{AgentModels, AgentModes};
 use vmux_api::command_bar::{StartSelectMode, StartSelectModel};
 use vmux_api::protocol::{
@@ -51,7 +51,7 @@ impl Plugin for AcpSessionConfigPlugin {
                     apply_session_selection,
                     push_state_to_page,
                     remove_state,
-                    apply_last_used_model.after(crate::runtime::AcpSessionConfigSet),
+                    apply_last_used_model.after(crate::host::runtime::AcpSessionConfigSet),
                     send_session_requests,
                     remember_model_lists,
                     remember_mode_lists,
@@ -628,7 +628,7 @@ mod tests {
                         ],
                     }],
                     pending: Vec::new(),
-                    initial: vec![crate::runtime::InitialAcpSessionConfig {
+                    initial: vec![crate::host::runtime::InitialAcpSessionConfig {
                         config_id: Some("model".into()),
                         value: "default".into(),
                     }],
@@ -736,7 +736,7 @@ mod tests {
                         ],
                     }],
                     pending: Vec::new(),
-                    initial: vec![crate::runtime::InitialAcpSessionConfig {
+                    initial: vec![crate::host::runtime::InitialAcpSessionConfig {
                         config_id: None,
                         value: "ask".into(),
                     }],
@@ -903,7 +903,7 @@ mod tests {
                         ],
                     }],
                     pending: Vec::new(),
-                    initial: vec![crate::runtime::InitialAcpSessionConfig {
+                    initial: vec![crate::host::runtime::InitialAcpSessionConfig {
                         config_id: Some("model".into()),
                         value: "default".into(),
                     }],

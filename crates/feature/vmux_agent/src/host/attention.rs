@@ -8,7 +8,7 @@ use vmux_core::team::{Agent, Profile};
 use vmux_layout::active_pane::ActiveStack;
 use vmux_layout::stack::{ComputeFocusSet, FocusedStack, Stack};
 
-use crate::event::AgentRequestInput;
+use crate::host::event::AgentRequestInput;
 use vmux_core::agent::SessionId;
 
 pub(super) struct AttentionPlugin;
@@ -198,7 +198,7 @@ fn handle_turn_ended(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::CommandOrigin;
+    use crate::host::event::CommandOrigin;
 
     pub(crate) fn bell_test_app() -> App {
         let mut app = App::new();

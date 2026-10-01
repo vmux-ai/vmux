@@ -561,16 +561,16 @@ mod tests {
             source_agent: "Codex".into(),
             source_sid: "codex-1".into(),
             messages: vec![
-                crate::Message::user("one"),
-                crate::Message::Assistant {
-                    blocks: vec![crate::AssistantBlock::ToolUse {
+                vmux_api::room::Message::user("one"),
+                vmux_api::room::Message::Assistant {
+                    blocks: vec![vmux_api::room::AssistantBlock::ToolUse {
                         call_id: "call-1".into(),
                         name: "run".into(),
                         args: "{}".into(),
                         parent_call_id: None,
                     }],
                 },
-                crate::Message::ToolResult {
+                vmux_api::room::Message::ToolResult {
                     call_id: "call-1".into(),
                     content: "two".into(),
                     is_error: false,

@@ -20,7 +20,7 @@ use vmux_start::{StartInlineTransition, StartInlineTransitionView};
 use super::attach::{
     AcpAgentAttachment, acp_icon_for_id, acp_profile_name_for_id, acp_registry_agent_for_id,
 };
-use crate::acp_registry::RegistryAgent;
+use crate::host::acp::registry::RegistryAgent;
 use vmux_terminal::agent_run::AgentCwd;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
@@ -72,12 +72,12 @@ struct AgentChatTarget {
 
 impl AgentChatTarget {
     fn parse(url: &str) -> Option<Self> {
-        match crate::AgentUrl::parse(url)? {
-            crate::AgentUrl::AcpDefault => Some(Self {
+        match crate::host::url::AgentUrl::parse(url)? {
+            crate::host::url::AgentUrl::AcpDefault => Some(Self {
                 url: "vmux://sessions/".to_string(),
                 title: "Agent".to_string(),
             }),
-            crate::AgentUrl::Acp { id, sid } => {
+            crate::host::url::AgentUrl::Acp { id, sid } => {
                 let url = match sid {
                     Some(sid) => format!("vmux://sessions/{id}/{sid}"),
                     None => format!("vmux://sessions/{id}"),
@@ -92,7 +92,7 @@ impl AgentChatTarget {
 }
 
 fn agent_url_uses_local_workspace(url: &str) -> bool {
-    crate::AgentUrl::parse(url).is_some()
+    crate::host::url::AgentUrl::parse(url).is_some()
 }
 
 fn ancestor_tab_entity(
@@ -315,7 +315,7 @@ fn open(
     mut commands: Commands,
     settings: Res<AppSettings>,
     workspace: AgentPageOpenWorkspace,
-    catalog: Option<Single<&crate::runtime::AcpCatalog>>,
+    catalog: Option<Single<&crate::host::runtime::AcpCatalog>>,
     transitions: Query<&StartInlineTransition>,
     launches: Query<&TerminalLaunch>,
 ) {
@@ -409,19 +409,19 @@ fn open(
 fn swap(
     mut reader: MessageReader<SwapStackSession>,
     settings: Res<AppSettings>,
-    catalog: Option<Single<&crate::runtime::AcpCatalog>>,
+    catalog: Option<Single<&crate::host::runtime::AcpCatalog>>,
     mut commands: Commands,
 ) {
     let catalog = catalog.as_ref().map(|catalog| **catalog);
     for ev in reader.read() {
-        let target = match crate::AgentUrl::parse(&ev.target_url) {
-            Some(target @ crate::AgentUrl::Acp { .. }) => target,
+        let target = match crate::host::url::AgentUrl::parse(&ev.target_url) {
+            Some(target @ crate::host::url::AgentUrl::Acp { .. }) => target,
             other => {
                 bevy::log::warn!("swap: unsupported target url {other:?} ({})", ev.target_url);
                 continue;
             }
         };
-        if let crate::AgentUrl::Acp { id, .. } = &target
+        if let crate::host::url::AgentUrl::Acp { id, .. } = &target
             && !settings.agent.acp.iter().any(|cfg| cfg.id == *id)
             && acp_registry_agent_for_id(catalog, id).is_none()
         {
@@ -447,9 +447,9 @@ fn swap(
         commands
             .entity(ev.stack)
             .remove::<AcpSession>()
-            .remove::<crate::acp_tool::AcpLaunchStarted>()
-            .remove::<crate::AgentMessages>()
-            .remove::<crate::AgentApprovalPolicy>()
+            .remove::<crate::host::acp::AcpLaunchStarted>()
+            .remove::<vmux_session::AgentMessages>()
+            .remove::<vmux_session::AgentApprovalPolicy>()
             .remove::<vmux_session::AgentRunState>()
             .remove::<ImportedConversation>()
             .remove::<super::handoff::PendingHandoff>()
@@ -459,7 +459,7 @@ fn swap(
         commands.entity(ev.stack).despawn_children();
 
         match target {
-            crate::AgentUrl::Acp { id, sid } => {
+            crate::host::url::AgentUrl::Acp { id, sid } => {
                 let cfg = settings.agent.acp.iter().find(|cfg| cfg.id == id);
                 let routing_sid = uuid::Uuid::new_v4().to_string();
                 let icon = acp_icon_for_id(catalog, &id);
@@ -486,10 +486,10 @@ fn handle_agent_page_open_task(
     commands: &mut Commands,
     default_cwd: &Path,
     acp_configs: &[vmux_setting::AcpAgentConfig],
-    catalog: Option<&crate::runtime::AcpCatalog>,
+    catalog: Option<&crate::host::runtime::AcpCatalog>,
 ) -> Result<(), String> {
-    let target = match crate::AgentUrl::parse(&task.url) {
-        Some(crate::AgentUrl::AcpDefault) => {
+    let target = match crate::host::url::AgentUrl::parse(&task.url) {
+        Some(crate::host::url::AgentUrl::AcpDefault) => {
             let id = acp_configs
                 .first()
                 .map(|config| config.id.clone())
@@ -503,13 +503,13 @@ fn handle_agent_page_open_task(
                     })
                 })
                 .ok_or_else(|| "no ACP agent is configured or installed".to_string())?;
-            crate::AgentUrl::Acp { id, sid: None }
+            crate::host::url::AgentUrl::Acp { id, sid: None }
         }
         Some(target) => target,
         None => return Err(format!("malformed agent URL '{}'", task.url)),
     };
     match target {
-        crate::AgentUrl::Acp { id, sid } => {
+        crate::host::url::AgentUrl::Acp { id, sid } => {
             let cfg = acp_configs.iter().find(|config| config.id == id);
             if cfg.is_none() && acp_registry_agent_for_id(catalog, &id).is_none() {
                 return Err(format!("ACP agent unavailable for '{id}'"));
@@ -534,7 +534,7 @@ fn handle_agent_page_open_task(
             insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
             Ok(())
         }
-        crate::AgentUrl::AcpDefault => unreachable!(),
+        crate::host::url::AgentUrl::AcpDefault => unreachable!(),
     }
 }
 

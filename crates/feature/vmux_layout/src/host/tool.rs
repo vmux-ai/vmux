@@ -22,10 +22,10 @@ pub struct LayoutToolPlugin;
 impl Plugin for LayoutToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .register_tool::<OpenPageArgs>()
-            .register_tool::<ReadLayoutArgs>()
-            .register_tool::<UpdateLayoutArgs>()
-            .register_tool::<SelectTabArgs>()
+            .bind_tool::<OpenPageArgs>()
+            .bind_tool::<ReadLayoutArgs>()
+            .bind_tool::<UpdateLayoutArgs>()
+            .bind_tool::<SelectTabArgs>()
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()

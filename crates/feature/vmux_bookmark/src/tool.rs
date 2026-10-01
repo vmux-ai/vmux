@@ -24,12 +24,12 @@ impl Plugin for BookmarkToolPlugin {
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
-            .register_tool::<BookmarkListArgs>()
-            .register_tool::<BookmarkAddArgs>()
-            .register_tool::<BookmarkRemoveArgs>()
-            .register_tool::<BookmarkPinArgs>()
-            .register_tool::<BookmarkUnpinArgs>()
-            .register_tool::<BookmarkFolderCreateArgs>()
+            .bind_tool::<BookmarkListArgs>()
+            .bind_tool::<BookmarkAddArgs>()
+            .bind_tool::<BookmarkRemoveArgs>()
+            .bind_tool::<BookmarkPinArgs>()
+            .bind_tool::<BookmarkUnpinArgs>()
+            .bind_tool::<BookmarkFolderCreateArgs>()
             .add_message::<BookmarkListRequest>()
             .add_systems(
                 Update,

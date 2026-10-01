@@ -52,11 +52,11 @@ impl Plugin for ToolRegistryPlugin {
 }
 
 pub trait ToolAppExt {
-    fn register_tool<T: ToolInput>(&mut self) -> &mut Self;
+    fn bind_tool<T: ToolInput>(&mut self) -> &mut Self;
 }
 
 impl ToolAppExt for App {
-    fn register_tool<T: ToolInput>(&mut self) -> &mut Self {
+    fn bind_tool<T: ToolInput>(&mut self) -> &mut Self {
         if !self.is_plugin_added::<ToolRegistryPlugin>() {
             self.add_plugins(ToolRegistryPlugin);
         }

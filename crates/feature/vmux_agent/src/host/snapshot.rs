@@ -5,7 +5,7 @@ use vmux_command::snapshot::{
 
 use vmux_core::{ArchivedPage, LastActivatedAt};
 
-use crate::acp_registry::RegistryAgent;
+use crate::host::acp::registry::RegistryAgent;
 
 pub(super) struct SnapshotPlugin;
 
@@ -16,7 +16,7 @@ pub(crate) enum SnapshotSet {
 
 impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<crate::acp_tool::AcpPackageChanged>()
+        app.add_message::<crate::host::acp::AcpPackageChanged>()
             .add_systems(
                 Update,
                 (
@@ -49,8 +49,8 @@ fn sync_work_directories(
 
 #[allow(clippy::type_complexity)]
 fn update_agents(
-    catalog: Option<Single<Ref<crate::runtime::AcpCatalog>>>,
-    mut package_changes: MessageReader<crate::acp_tool::AcpPackageChanged>,
+    catalog: Option<Single<Ref<crate::host::runtime::AcpCatalog>>>,
+    mut package_changes: MessageReader<crate::host::acp::AcpPackageChanged>,
     mut state: Single<&mut CommandBarProjection>,
 ) {
     let catalog_changed = catalog
@@ -117,8 +117,8 @@ fn update_recent_agents(
         );
     }
     for page in &archived_pages {
-        let target = match crate::url::AgentUrl::parse(&page.url) {
-            Some(crate::url::AgentUrl::Acp { id, .. }) => AgentPromptTarget::new(&id),
+        let target = match crate::host::url::AgentUrl::parse(&page.url) {
+            Some(crate::host::url::AgentUrl::Acp { id, .. }) => AgentPromptTarget::new(&id),
             _ => continue,
         };
         consider(page.closed_at, target);
@@ -170,7 +170,7 @@ mod tests {
             description: None,
             icon: None,
             repository: None,
-            distribution: crate::acp_registry::Distribution::default(),
+            distribution: crate::host::acp::registry::Distribution::default(),
         }
     }
 

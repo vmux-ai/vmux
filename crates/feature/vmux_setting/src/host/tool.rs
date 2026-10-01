@@ -16,8 +16,8 @@ pub struct SettingToolPlugin;
 impl Plugin for SettingToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .register_tool::<GetSettingsArgs>()
-            .register_tool::<UpdateSettingsArgs>()
+            .bind_tool::<GetSettingsArgs>()
+            .bind_tool::<UpdateSettingsArgs>()
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()

@@ -24,8 +24,8 @@ pub struct CommandToolPlugin;
 impl Plugin for CommandToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .register_tool::<OpenCommandBarArgs>()
-            .register_tool::<NotifyArgs>()
+            .bind_tool::<OpenCommandBarArgs>()
+            .bind_tool::<NotifyArgs>()
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()

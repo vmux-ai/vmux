@@ -25,12 +25,12 @@ pub struct SpaceToolPlugin;
 impl Plugin for SpaceToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FeaturePlugin::<crate::Feature>::default())
-            .register_tool::<ListSpacesArgs>()
-            .register_tool::<CreateSpaceArgs>()
-            .register_tool::<RenameSpaceArgs>()
-            .register_tool::<DeleteSpaceArgs>()
-            .register_tool::<SelectProjectArgs>()
-            .register_tool::<CreateWorktreeArgs>()
+            .bind_tool::<ListSpacesArgs>()
+            .bind_tool::<CreateSpaceArgs>()
+            .bind_tool::<RenameSpaceArgs>()
+            .bind_tool::<DeleteSpaceArgs>()
+            .bind_tool::<SelectProjectArgs>()
+            .bind_tool::<CreateWorktreeArgs>()
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()

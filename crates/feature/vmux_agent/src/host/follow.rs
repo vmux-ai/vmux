@@ -31,7 +31,7 @@ use vmux_layout::worktree::{
 };
 use vmux_setting::AppSettings;
 
-use crate::event::{AgentRequestInput, CommandOrigin};
+use crate::host::event::{AgentRequestInput, CommandOrigin};
 
 pub(super) struct FollowPlugin;
 

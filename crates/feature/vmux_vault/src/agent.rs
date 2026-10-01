@@ -22,8 +22,8 @@ impl Plugin for VaultToolPlugin {
             .add_message::<ToolQueryRequest>()
             .add_message::<ToolQueryHandled>()
             .add_message::<ServiceRequest>()
-            .register_tool::<VaultStatusArgs>()
-            .register_tool::<OpenVaultArgs>()
+            .bind_tool::<VaultStatusArgs>()
+            .bind_tool::<OpenVaultArgs>()
             .add_systems(Update, (status, open).in_set(ToolDispatchSet));
     }
 }

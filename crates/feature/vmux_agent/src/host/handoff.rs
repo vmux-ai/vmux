@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use std::path::PathBuf;
 use vmux_chat::host::ImportedConversation;
 
-use crate::Message;
+use vmux_api::room::Message;
 
 pub struct Plugin;
 
@@ -107,7 +107,7 @@ fn load(
 
 fn persist(
     directory: Single<&HandoffDirectory>,
-    mut created: MessageReader<crate::event::UiAgentSessionCreated>,
+    mut created: MessageReader<crate::host::event::UiAgentSessionCreated>,
     sessions: Query<(&vmux_session::AcpSession, &ImportedConversation)>,
 ) {
     for event in created.read() {
@@ -131,7 +131,7 @@ pub struct PendingHandoff {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AssistantBlock, Message};
+    use vmux_api::room::{AssistantBlock, Message};
 
     struct TestHandoffDirectory {
         directory: HandoffDirectory,
