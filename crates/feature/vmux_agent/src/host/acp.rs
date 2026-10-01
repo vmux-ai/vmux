@@ -26,7 +26,7 @@ pub mod registry;
 pub(super) use config::AcpSessionConfigPlugin;
 
 use self::environment::AcpEnvironment;
-use self::install::{resolve_from_registry, uninstall};
+use self::install::AgentInstaller;
 use self::registry::Registry;
 use vmux_session::AgentRunState;
 
@@ -117,7 +117,7 @@ fn operate_tool(
             if id.is_empty() {
                 return Err("package name is required".to_string());
             }
-            resolve_from_registry(id, None, |_, _, _| {})?;
+            AgentInstaller::current().resolve(id, None, |_, _, _| {})?;
             store.set_managed_package(ToolProvider::Acp, id, true)?;
             let operation = if operation.kind == ToolOperationKind::Install {
                 "installed"
@@ -130,7 +130,7 @@ fn operate_tool(
             if id.is_empty() {
                 return Err("package name is required".to_string());
             }
-            uninstall(id)?;
+            AgentInstaller::current().uninstall(id)?;
             store.set_managed_package(ToolProvider::Acp, id, false)?;
             Ok(format!("{id} removed"))
         }
@@ -463,10 +463,13 @@ fn resolve_acp_install(
         .fallback
         .as_ref()
         .and_then(|config| config.version.as_deref());
-    let resolved =
-        resolve_from_registry(&request.agent_id, pinned_version, |phase, pct, message| {
+    let resolved = AgentInstaller::current().resolve(
+        &request.agent_id,
+        pinned_version,
+        |phase, pct, message| {
             progress.publish(AcpInstallProgress::from_phase(phase, pct, message));
-        });
+        },
+    );
     let package_added = resolved
         .as_ref()
         .map(|resolved| resolved.package_added)

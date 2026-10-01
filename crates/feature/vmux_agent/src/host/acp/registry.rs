@@ -22,6 +22,10 @@ impl std::str::FromStr for Registry {
 }
 
 impl Registry {
+    pub fn agent(self, id: &str) -> Option<RegistryAgent> {
+        self.agents.into_iter().find(|agent| agent.id == id)
+    }
+
     pub fn cached() -> Option<Self> {
         std::fs::read_to_string(Self::cache_path())
             .ok()?
