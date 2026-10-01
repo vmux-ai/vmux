@@ -1,6 +1,7 @@
 use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use crossbeam_channel::{Receiver, Sender};
 use vmux_api::extension::{
     ExtInstallPhase, ExtInstallProgress, ExtOpenManagerRequest, ExtPinRequest, ExtToggleRequest,
     ExtUninstallRequest, ExtensionsEvent,
@@ -10,31 +11,29 @@ use vmux_ecs::host::UiStateWrite;
 use vmux_ecs::host::page::NativelyHosted;
 use vmux_layout::LayoutUiStateUpdates;
 
-use crate::{install, store};
+use crate::store;
 
 pub(crate) struct ExtensionCatalogPlugin;
 
 impl Plugin for ExtensionCatalogPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ExtensionInstallRequest>()
-            .add_message::<ExtensionInstallCompleted>()
-            .add_message::<OpenManagerRequest>()
-            .add_plugins(UiEventPlugin::<(
-                ExtToggleRequest,
-                ExtUninstallRequest,
-                ExtPinRequest,
-                ExtOpenManagerRequest,
-            )>::default())
+        app.add_message::<OpenManagerRequest>()
+            .add_plugins((
+                crate::install::InstallPlugin,
+                UiEventPlugin::<(
+                    ExtToggleRequest,
+                    ExtUninstallRequest,
+                    ExtPinRequest,
+                    ExtOpenManagerRequest,
+                )>::default(),
+            ))
             .add_observer(page_ready)
             .add_observer(toggle_request)
             .add_observer(uninstall_request)
             .add_observer(pin_request)
             .add_observer(open_manager_request)
             .add_systems(Startup, spawn)
-            .add_systems(
-                Update,
-                (start_installs, drain_outbox, emit_extensions_snapshot).chain(),
-            );
+            .add_systems(Update, (finish_tasks, emit_extensions_snapshot).chain());
 
         #[cfg(ui)]
         app.add_plugins(
@@ -49,125 +48,24 @@ impl Plugin for ExtensionCatalogPlugin {
     }
 }
 
-#[derive(Message, Clone, Debug)]
-pub struct ExtensionInstallRequest {
-    pub source: String,
-    pub requester: Option<Entity>,
-}
-
-#[derive(Message, Clone, Debug)]
-pub struct ExtensionInstallCompleted {
-    pub requester: Entity,
-    pub id: String,
-    pub success: bool,
-}
-
 #[derive(Message, Clone, Copy, Debug, Default)]
 pub struct OpenManagerRequest;
 
-enum OutMsg {
-    Progress(ExtInstallProgress),
-    List(ExtensionsEvent),
-    InstallCompleted {
-        entity: Entity,
-        id: String,
-        success: bool,
-    },
-}
-
-#[derive(Component, Clone)]
-struct ExtensionOutbox {
-    sender: Sender<OutMsg>,
-    receiver: Receiver<OutMsg>,
-}
-
-impl Default for ExtensionOutbox {
-    fn default() -> Self {
-        let (sender, receiver) = crossbeam_channel::unbounded();
-        Self { sender, receiver }
-    }
-}
-
-impl ExtensionOutbox {
-    fn push(&self, message: OutMsg) {
-        let _ = self.sender.send(message);
-    }
-
-    fn queue_snapshot(&self) {
-        self.push(OutMsg::List(ExtensionCatalog::load()));
-    }
-
-    fn install(&self, request: ExtensionInstallRequest) {
-        let sink = self.clone();
-        std::thread::spawn(move || {
-            let key = request.source.clone();
-            let progress_sink = sink.clone();
-            let result = install::install(
-                &request.source,
-                install::DEFAULT_PRODVERSION,
-                |phase, pct, message| {
-                    progress_sink.push(OutMsg::Progress(ExtInstallProgress {
-                        key: key.clone(),
-                        phase,
-                        pct,
-                        message: message.to_string(),
-                    }));
-                },
-            );
-            match result {
-                Ok(entry) => {
-                    if let Some(entity) = request.requester {
-                        sink.push(OutMsg::InstallCompleted {
-                            entity,
-                            id: entry.id,
-                            success: true,
-                        });
-                    }
-                }
-                Err(error) => {
-                    sink.push(OutMsg::Progress(ExtInstallProgress {
-                        key: key.clone(),
-                        phase: ExtInstallPhase::Failed,
-                        pct: None,
-                        message: error,
-                    }));
-                    if let Some(entity) = request.requester {
-                        sink.push(OutMsg::InstallCompleted {
-                            entity,
-                            id: key,
-                            success: false,
-                        });
-                    }
-                }
-            }
-            sink.queue_snapshot();
-        });
-    }
-}
-
 #[derive(Component, Default)]
-struct ExtensionCatalog {
+pub(crate) struct ExtensionCatalog {
     snapshot: ExtensionsEvent,
     revision: u64,
 }
 
 impl ExtensionCatalog {
-    fn load() -> ExtensionsEvent {
-        let store = store::ExtensionStore::current();
-        let profile = vmux_ecs::profile::Profile::current().into_id();
-        let index = store.load_index().unwrap_or_default();
-        let loaded = store.loaded_ids(&profile);
-        index.snapshot(&profile, &loaded)
-    }
-
-    fn replace(&mut self, mut snapshot: ExtensionsEvent) {
+    pub(crate) fn replace(&mut self, mut snapshot: ExtensionsEvent) {
         snapshot.loaded = true;
         snapshot.installing = std::mem::take(&mut self.snapshot.installing);
         self.snapshot = snapshot;
         self.revision = self.revision.wrapping_add(1);
     }
 
-    fn update_progress(&mut self, progress: ExtInstallProgress) {
+    pub(crate) fn update_progress(&mut self, progress: ExtInstallProgress) {
         let current = self
             .snapshot
             .installing
@@ -194,11 +92,30 @@ struct ExtensionSubscriber {
     revision: u64,
 }
 
-fn spawn(mut commands: Commands) {
-    let outbox = ExtensionOutbox::default();
-    let loader = outbox.clone();
-    std::thread::spawn(move || loader.queue_snapshot());
-    commands.spawn((ExtensionCatalog::default(), outbox));
+#[derive(Component)]
+struct ExtensionCatalogTask(Task<Result<Option<ExtensionsEvent>, String>>);
+
+#[derive(Component)]
+struct ExtensionCatalogKey(String);
+
+#[derive(Component)]
+struct InitialCatalogLoad;
+
+fn spawn(proxy: Option<Res<EventLoopProxyWrapper>>, mut commands: Commands) {
+    let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
+    let task = IoTaskPool::get().spawn(async move {
+        let store = store::ExtensionStore::current();
+        let profile = vmux_ecs::profile::Profile::current().into_id();
+        let result = store.snapshot(&profile).map(Some);
+        drop(wake);
+        result
+    });
+    commands.spawn((Name::new("Extension catalog"), ExtensionCatalog::default()));
+    commands.spawn((
+        Name::new("Load extensions"),
+        ExtensionCatalogTask(task),
+        InitialCatalogLoad,
+    ));
 }
 
 fn page_ready(
@@ -223,31 +140,60 @@ fn page_ready(
     }
 }
 
-fn toggle_request(trigger: On<UiInput<ExtToggleRequest>>, runtime: Single<&ExtensionOutbox>) {
+fn toggle_request(
+    trigger: On<UiInput<ExtToggleRequest>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
     let request = trigger.event().payload.clone();
-    let profile = vmux_ecs::profile::Profile::current().into_id();
-    let _ = store::ExtensionStore::current().update_index(|index| {
-        index.set_enabled_for(
-            &profile,
-            &request.id,
-            request.enabled,
-            request.approve_permissions,
-        );
+    let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
+    let task = IoTaskPool::get().spawn(async move {
+        let store = store::ExtensionStore::current();
+        let profile = vmux_ecs::profile::Profile::current().into_id();
+        let result = store.update_index(|index| {
+            index.set_enabled_for(
+                &profile,
+                &request.id,
+                request.enabled,
+                request.approve_permissions,
+            );
+        });
+        let result = result.and_then(|()| store.snapshot(&profile)).map(Some);
+        drop(wake);
+        result
     });
-    runtime.queue_snapshot();
+    commands.spawn((Name::new("Toggle extension"), ExtensionCatalogTask(task)));
 }
 
-fn uninstall_request(trigger: On<UiInput<ExtUninstallRequest>>, runtime: Single<&ExtensionOutbox>) {
-    let profile = vmux_ecs::profile::Profile::current().into_id();
-    let _ = store::ExtensionStore::current()
-        .uninstall_for_profile(&profile, &trigger.event().payload.id);
-    runtime.queue_snapshot();
-}
-
-fn pin_request(trigger: On<UiInput<ExtPinRequest>>, runtime: Single<&ExtensionOutbox>) {
+fn uninstall_request(
+    trigger: On<UiInput<ExtUninstallRequest>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
     let request = trigger.event().payload.clone();
-    let outbox = runtime.clone();
-    std::thread::spawn(move || {
+    let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
+    let task = IoTaskPool::get().spawn(async move {
+        let store = store::ExtensionStore::current();
+        let profile = vmux_ecs::profile::Profile::current().into_id();
+        let result = store
+            .uninstall_for_profile(&profile, &request.id)
+            .and_then(|()| store.snapshot(&profile))
+            .map(Some);
+        drop(wake);
+        result
+    });
+    commands.spawn((Name::new("Uninstall extension"), ExtensionCatalogTask(task)));
+}
+
+fn pin_request(
+    trigger: On<UiInput<ExtPinRequest>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let request = trigger.event().payload.clone();
+    let key = request.id.clone();
+    let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
+    let task = IoTaskPool::get().spawn(async move {
         let store = store::ExtensionStore::current();
         let profile = vmux_ecs::profile::Profile::current().into_id();
         let loaded = store.loaded_ids(&profile);
@@ -256,23 +202,53 @@ fn pin_request(trigger: On<UiInput<ExtPinRequest>>, runtime: Single<&ExtensionOu
                 .set_pinned_for(&profile, &request.id, request.pinned)
                 .then(|| index.snapshot(&profile, &loaded))
         });
+        drop(wake);
+        result
+    });
+    commands.spawn((
+        Name::new("Pin extension"),
+        ExtensionCatalogTask(task),
+        ExtensionCatalogKey(key),
+    ));
+}
+
+fn finish_tasks(
+    mut tasks: Query<(
+        Entity,
+        &Name,
+        &mut ExtensionCatalogTask,
+        Option<&ExtensionCatalogKey>,
+        Has<InitialCatalogLoad>,
+    )>,
+    mut catalog: Single<&mut ExtensionCatalog>,
+    mut commands: Commands,
+) {
+    for (entity, name, mut task, key, initial) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
         match result {
-            Ok(Some(snapshot)) => outbox.push(OutMsg::List(snapshot)),
+            Ok(Some(snapshot)) => catalog.replace(snapshot),
             Ok(None) => {}
             Err(error) => {
-                bevy::log::warn!(
-                    extension = request.id,
-                    "extension pin update failed: {error}"
-                );
-                outbox.push(OutMsg::Progress(ExtInstallProgress {
-                    key: request.id,
-                    phase: ExtInstallPhase::Failed,
-                    pct: None,
-                    message: error,
-                }));
+                warn!(operation = name.as_str(), "{error}");
+                if let Some(key) = key {
+                    catalog.update_progress(ExtInstallProgress {
+                        key: key.0.clone(),
+                        phase: ExtInstallPhase::Failed,
+                        pct: None,
+                        message: error,
+                    });
+                } else if initial {
+                    catalog.replace(ExtensionsEvent {
+                        loaded: true,
+                        ..default()
+                    });
+                }
             }
         }
-    });
+    }
 }
 
 fn open_manager_request(
@@ -291,45 +267,6 @@ fn open_manager(
         pages.write(vmux_layout::stack::OpenRequest {
             url: Some(crate::ui::ExtensionPage::URL.to_string()),
         });
-    }
-}
-
-fn start_installs(
-    mut requests: MessageReader<ExtensionInstallRequest>,
-    runtime: Single<&ExtensionOutbox>,
-) {
-    for request in requests.read() {
-        runtime.install(ExtensionInstallRequest {
-            source: request.source.clone(),
-            requester: request.requester,
-        });
-    }
-}
-
-fn drain_outbox(
-    runtime: Single<&ExtensionOutbox>,
-    mut catalog: Query<&mut ExtensionCatalog>,
-    mut completed: MessageWriter<ExtensionInstallCompleted>,
-) {
-    let Ok(mut catalog) = catalog.single_mut() else {
-        return;
-    };
-    for message in runtime.receiver.try_iter() {
-        match message {
-            OutMsg::List(snapshot) => catalog.replace(snapshot),
-            OutMsg::Progress(progress) => catalog.update_progress(progress),
-            OutMsg::InstallCompleted {
-                entity,
-                id,
-                success,
-            } => {
-                completed.write(ExtensionInstallCompleted {
-                    requester: entity,
-                    id,
-                    success,
-                });
-            }
-        }
     }
 }
 

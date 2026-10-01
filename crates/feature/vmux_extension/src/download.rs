@@ -1,27 +1,34 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
-pub fn fetch(
-    url: &str,
-    dest: &Path,
-    mut progress: impl FnMut(u64, Option<u64>),
-) -> Result<(), String> {
-    let mut resp = reqwest::blocking::get(url).map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("http {}", resp.status()));
-    }
-    let total = resp.content_length();
-    let mut file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
-    let mut buf = [0u8; 8192];
-    let mut got = 0u64;
-    loop {
-        let n = resp.read(&mut buf).map_err(|e| e.to_string())?;
-        if n == 0 {
-            break;
+pub(crate) struct Downloader;
+
+impl Downloader {
+    pub(crate) fn fetch(
+        url: &str,
+        destination: &Path,
+        mut progress: impl FnMut(u64, Option<u64>),
+    ) -> Result<(), String> {
+        let mut response = reqwest::blocking::get(url).map_err(|error| error.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!("http {}", response.status()));
         }
-        file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
-        got += n as u64;
-        progress(got, total);
+        let total = response.content_length();
+        let mut file = std::fs::File::create(destination).map_err(|error| error.to_string())?;
+        let mut buffer = [0u8; 8192];
+        let mut received = 0u64;
+        loop {
+            let count = response
+                .read(&mut buffer)
+                .map_err(|error| error.to_string())?;
+            if count == 0 {
+                break;
+            }
+            file.write_all(&buffer[..count])
+                .map_err(|error| error.to_string())?;
+            received += count as u64;
+            progress(received, total);
+        }
+        Ok(())
     }
-    Ok(())
 }

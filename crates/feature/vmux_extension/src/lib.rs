@@ -17,7 +17,7 @@ mod download;
 #[cfg(host)]
 mod host;
 #[cfg(host)]
-pub mod install;
+mod install;
 #[cfg(host)]
 pub mod manifest;
 #[cfg(host)]
@@ -32,6 +32,8 @@ mod ui;
 pub mod webstore;
 
 #[cfg(host)]
-pub use catalog::{ExtensionInstallCompleted, ExtensionInstallRequest, OpenManagerRequest};
+pub use catalog::OpenManagerRequest;
 #[cfg(host)]
 pub use host::ExtensionPlugin;
+#[cfg(host)]
+pub use install::{ExtensionInstallCompleted, ExtensionInstallRequest};

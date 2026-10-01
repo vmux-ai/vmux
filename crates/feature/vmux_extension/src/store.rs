@@ -472,6 +472,12 @@ impl ExtEntry {
 }
 
 impl ExtensionStore {
+    pub(crate) fn snapshot(&self, profile: &str) -> Result<ExtensionsEvent, String> {
+        let index = self.load_index()?;
+        let loaded = self.loaded_ids(profile);
+        Ok(index.snapshot(profile, &loaded))
+    }
+
     pub fn load_index(&self) -> Result<Index, String> {
         let path = self.root.join("index.json");
         if !path.exists() {

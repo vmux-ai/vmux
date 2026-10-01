@@ -98,11 +98,11 @@ struct BrowserInstallExtensionArgs {
 
 fn request_install(
     mut requests: MessageReader<AgentRequestMessage<AgentBrowserInstallExtension>>,
-    mut install: MessageWriter<crate::catalog::ExtensionInstallRequest>,
+    mut install: MessageWriter<crate::ExtensionInstallRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        install.write(crate::catalog::ExtensionInstallRequest {
+        install.write(crate::ExtensionInstallRequest {
             source: request.payload.source.clone(),
             requester: None,
         });
