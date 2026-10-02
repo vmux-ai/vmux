@@ -15,32 +15,6 @@
     --font-sans:
         -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --font-mono: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-
-    --animate-float: float 14s ease-in-out infinite;
-    --animate-slide: slide 4.5s ease-in-out infinite;
-    --animate-cue: cue 3s ease-in-out infinite;
-
-    @keyframes float {
-        0%, 100% { transform: translate3d(0, 0, 0); }
-        50% { transform: translate3d(0, -24px, 0); }
-    }
-    @keyframes slide {
-        0%, 100% { width: 24%; }
-        50% { width: 82%; }
-    }
-    @keyframes cue {
-        0%, 100% { opacity: 0.12; }
-        15% { opacity: 1; }
-        45% { opacity: 0.12; }
-    }
-
-    --animate-aurora: aurora 22s ease-in-out infinite;
-
-    @keyframes aurora {
-        0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
-        33% { transform: translate3d(4%, -3%, 0) scale(1.08); }
-        66% { transform: translate3d(-3%, 4%, 0) scale(1.05); }
-    }
 }
 
 @layer base {
@@ -51,77 +25,19 @@
         line-height: 1.6;
         -webkit-font-smoothing: antialiased;
     }
-}
 
-@layer components {
-    .toast-container {
-        @apply fixed bottom-5 right-5 z-50 max-w-sm;
+    button {
+        cursor: pointer;
     }
-    .toast-list {
-        @apply flex flex-col gap-3 list-none p-0 m-0;
-    }
-    .toast {
-        @apply flex items-center justify-between gap-3 bg-surface border border-border rounded-lg px-4 py-3 shadow-lg min-w-[18rem];
-    }
-    .toast-content {
-        @apply flex-1;
-    }
-    .toast-title {
-        @apply text-sm font-medium text-text;
-    }
-    .toast-description {
-        @apply text-xs text-text-muted mt-1;
-    }
-    .toast-close {
-        @apply text-text-muted hover:text-text bg-transparent border-0 cursor-pointer text-xl leading-none px-1;
-    }
-}
 
-@layer components {
-    .reveal {
-        opacity: 1;
-        transform: none;
-    }
-    .js .reveal {
-        opacity: 0;
-        transform: translateY(24px);
-        transition:
-            opacity 0.7s ease-out,
-            transform 0.7s ease-out;
-        will-change: opacity, transform;
-    }
-    .js .reveal.in {
-        opacity: 1;
-        transform: none;
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .js .reveal {
-        opacity: 1;
-        transform: none;
-        transition: none;
-    }
-}
-
-@layer base {
     [data-tone="dark"] {
         --color-bg: #0a0a0a;
         --color-surface: #151515;
         --color-text: #e0e0e0;
         --color-text-muted: #888;
-        --glass-bg: rgba(255, 255, 255, 0.06);
+        --glass-bg: rgba(20, 20, 24, 0.72);
         --glass-border: rgba(255, 255, 255, 0.12);
-        --glass-shadow: 0 40px 120px -30px rgba(0, 0, 0, 0.9);
-    }
-    [data-tone="light"] {
-        --color-bg: #eef1f7;
-        --color-surface: #ffffff;
-        --color-text: #10142a;
-        --color-text-muted: #565b73;
-        --glass-bg: rgba(255, 255, 255, 0.55);
-        --glass-border: rgba(255, 255, 255, 0.75);
-        --glass-shadow: 0 30px 90px -35px rgba(40, 50, 90, 0.45);
+        --glass-shadow: 0 30px 90px -35px rgba(0, 0, 0, 0.8);
     }
 }
 
@@ -133,48 +49,32 @@
         -webkit-backdrop-filter: blur(20px) saturate(1.2);
         box-shadow: var(--glass-shadow);
     }
-}
 
-@layer components {
-    .scene-cycle {
-        position: absolute;
-        inset: 0;
-        opacity: 0;
-        animation: scene 12s ease-in-out infinite;
+    .toast-container {
+        @apply fixed bottom-5 right-5 z-50 max-w-sm;
     }
-    .scene-dot {
-        opacity: 0.3;
-        animation: scenedot 12s ease-in-out infinite;
-    }
-}
 
-@keyframes scene {
-    0% { opacity: 0; }
-    3% { opacity: 1; }
-    30% { opacity: 1; }
-    36% { opacity: 0; }
-    100% { opacity: 0; }
-}
-
-@keyframes scenedot {
-    0%, 36%, 100% { opacity: 0.3; }
-    3%, 30% { opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .scene-stack {
-        height: auto;
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
+    .toast-list {
+        @apply m-0 flex list-none flex-col gap-3 p-0;
     }
-    .scene-cycle {
-        position: relative;
-        inset: auto;
-        opacity: 1;
-        animation: none;
+
+    .toast {
+        @apply flex min-w-[18rem] items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3 shadow-lg;
     }
-    .scene-dots {
-        display: none;
+
+    .toast-content {
+        @apply flex-1;
+    }
+
+    .toast-title {
+        @apply text-sm font-medium text-text;
+    }
+
+    .toast-description {
+        @apply mt-1 text-xs text-text-muted;
+    }
+
+    .toast-close {
+        @apply border-0 bg-transparent px-1 text-xl leading-none text-text-muted hover:text-text;
     }
 }
