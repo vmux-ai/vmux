@@ -606,7 +606,7 @@ fn RecoveryCard(
 
 fn copy_recovery_key(value: String, mut copied: Signal<bool>) {
     spawn(async move {
-        if vmux_ui::platform::copy_to_clipboard(value).await {
+        if vmux_ui::platform::Platform::copy(value).await {
             copied.set(true);
         }
     });

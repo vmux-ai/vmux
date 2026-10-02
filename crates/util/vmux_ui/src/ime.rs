@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::platform::now_millis;
+use crate::platform::Platform;
 
 pub fn use_ime_guard() -> ImeGuard {
     use_hook(|| ImeGuard {
@@ -23,7 +23,7 @@ impl ImeGuard {
     }
 
     pub fn commit(mut self) {
-        self.state.write().commit(now_millis());
+        self.state.write().commit(Platform::now());
     }
 
     pub fn input(mut self, value: String) -> Option<String> {
@@ -31,7 +31,7 @@ impl ImeGuard {
     }
 
     pub fn commit_input(mut self) -> Option<String> {
-        self.state.write().commit_input(now_millis())
+        self.state.write().commit_input(Platform::now())
     }
 
     pub fn swallows(mut self, event: &Event<KeyboardData>) -> bool {
@@ -39,7 +39,7 @@ impl ImeGuard {
         let verdict = self
             .state
             .write()
-            .saw_key(&data.key(), data.is_composing(), now_millis());
+            .saw_key(&data.key(), data.is_composing(), Platform::now());
         match verdict {
             ImeVerdict::Editor => false,
             ImeVerdict::Composing => true,

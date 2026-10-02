@@ -3,7 +3,7 @@ pub use agent::{
     AgentCreateWorktreeOnBranch, AgentListSpaces, AgentPrepareWorktree, AgentRenameProfile,
     AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
 };
-pub use cwd::valid_cwd;
+pub use cwd::WorkspaceCwd;
 pub use plugin::SpacePlugin;
 pub use project::{ExpandedProjectDirs, SpaceProjects};
 pub use spaces::Spaces;

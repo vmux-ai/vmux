@@ -15,7 +15,7 @@ use std::rc::Rc;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
-use vmux_ui::platform::sleep_ms;
+use vmux_ui::platform::Platform;
 use vmux_ui::script::PageScript;
 
 #[vmux_native::page(
@@ -783,7 +783,7 @@ impl PointerRelease {
                     button: HardwareButton::Home,
                 });
                 spawn(async move {
-                    sleep_ms(300).await;
+                    Platform::sleep(300).await;
                     home_progress.set(0.0);
                 });
             }

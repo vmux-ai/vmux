@@ -12,6 +12,7 @@ on:
       - "rust-toolchain.toml"
       - "tool-versions.env"
       - ".github/actions/setup-rust/action.yml"
+      - ".github/actions/setup-web/action.yml"
       - ".github/workflows/deploy-website.yml"
   workflow_dispatch:
 
@@ -38,41 +39,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Install Rust toolchain
-        uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-web
         with:
-          targets: wasm32-unknown-unknown
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: website
-          shared-key: deploy-website
-
-      - name: Cache tailwindcss
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/bin/tailwindcss
-          key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
-
-      - name: Cache binaryen
-        uses: actions/cache@v5
-        with:
-          path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
-          key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
-
-      - name: Add ~/.local/bin to PATH
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Install dioxus-cli
-        run: ./scripts/install-dioxus-cli.sh
-
-      - name: Install Binaryen
-        run: ./scripts/install-dioxus-binaryen.sh
-
-      - name: Install Tailwind CSS
-        run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
+          cache-key: deploy-website
+          tailwind: "true"
 
       - name: Build Tailwind CSS
         working-directory: website

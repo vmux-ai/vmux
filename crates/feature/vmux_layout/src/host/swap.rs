@@ -6,6 +6,20 @@ pub struct SiblingOrder {
 }
 
 impl SiblingOrder {
+    pub fn index(entity: Entity, children: &Children, kind_positions: &[usize]) -> Option<usize> {
+        kind_positions
+            .iter()
+            .position(|&position| children[position] == entity)
+    }
+
+    pub fn previous(active: usize) -> Option<(usize, usize)> {
+        active.checked_sub(1).map(|previous| (active, previous))
+    }
+
+    pub fn next(active: usize, len: usize) -> Option<(usize, usize)> {
+        (active + 1 < len).then(|| (active, active + 1))
+    }
+
     pub fn swapped(
         parent: Entity,
         children: &Children,
@@ -61,24 +75,6 @@ impl Command for SiblingOrder {
             world.entity_mut(child).insert(ChildOf(self.parent));
         }
     }
-}
-
-pub fn find_kind_index(
-    entity: Entity,
-    children: &Children,
-    kind_positions: &[usize],
-) -> Option<usize> {
-    kind_positions
-        .iter()
-        .position(|&pos| children[pos] == entity)
-}
-
-pub fn resolve_prev(active_idx: usize) -> Option<(usize, usize)> {
-    active_idx.checked_sub(1).map(|p| (active_idx, p))
-}
-
-pub fn resolve_next(active_idx: usize, len: usize) -> Option<(usize, usize)> {
-    (active_idx + 1 < len).then(|| (active_idx, active_idx + 1))
 }
 
 #[cfg(test)]

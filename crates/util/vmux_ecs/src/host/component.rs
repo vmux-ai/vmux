@@ -117,6 +117,12 @@ impl LastActivatedAt {
     pub fn now() -> Self {
         Self(UnixMillis::now().0)
     }
+
+    pub fn latest(entities: impl Iterator<Item = (Entity, Self)>) -> Option<Entity> {
+        entities
+            .max_by_key(|(_, activated_at)| activated_at.0)
+            .map(|(entity, _)| entity)
+    }
 }
 
 #[derive(EntityEvent, Clone, Copy, Debug)]

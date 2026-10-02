@@ -9,7 +9,7 @@ use vmux_ui::class::ClassList;
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
-use vmux_ui::favicon::favicon_src_for_url;
+use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
@@ -518,7 +518,7 @@ fn TeamFacepile(user: Option<TeamMemberRow>, agents: Vec<TeamMemberRow>) -> Elem
                 div { class: "flex items-center -space-x-1.5",
                     for m in agents.iter().take(max) {
                         {
-                            let src = favicon_src_for_url(&m.icon, &m.url);
+                            let src = FaviconSource::resolve(&m.icon, &m.url);
                             let id = m.id.clone();
                             rsx! {
                                 div {

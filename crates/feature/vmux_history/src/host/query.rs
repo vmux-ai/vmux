@@ -1,10 +1,10 @@
-use crate::ranking::score;
 use bevy::prelude::*;
 
 use crate::event::{
     HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry, HistoryLoadMoreRequest,
     HistoryOpenRequest, HistoryQueryRequest, HistorySuggestionsRequest, HistorySuggestionsResponse,
 };
+use crate::ranking::HistoryRank;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_ecs::{CreatedAt, LastVisitedAt, PageMetadata, Url, Visit, VisitCount, VisitedUrl};
 
@@ -26,7 +26,7 @@ impl Plugin for HistoryQueryPlugin {
         ))
         .add_message::<HistoryOpenIntent>()
         .add_observer(request)
-        .add_observer(load_more_request)
+        .add_observer(load_more)
         .add_observer(delete_request)
         .add_observer(clear_all_request)
         .add_observer(open_request)
@@ -46,7 +46,7 @@ fn request(trigger: On<UiInput<HistoryQueryRequest>>, mut pages: Query<&mut Hist
     state.search(&trigger.event().payload.query);
 }
 
-fn load_more_request(
+fn load_more(
     trigger: On<UiInput<HistoryLoadMoreRequest>>,
     mut pages: Query<&mut HistoryPageState>,
 ) {
@@ -56,83 +56,73 @@ fn load_more_request(
     state.load_more();
 }
 
-fn history_ui_state(
-    state: &HistoryPageState,
-    urls: &Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
-    visits: &Query<(&CreatedAt, &VisitedUrl), With<Visit>>,
-) -> crate::state::HistoryUiState {
-    let url_rows: Vec<_> = urls
-        .iter()
-        .map(|(entity, metadata, count, last)| (entity, metadata.clone(), *count, *last))
-        .collect();
-    let visit_rows: Vec<_> = visits
-        .iter()
-        .map(|(created, visited)| (*created, *visited))
-        .collect();
-    let entries = build_entries(
-        &state.query,
-        &url_rows,
-        &visit_rows,
-        vmux_ecs::UnixMillis::now().0,
-    );
-    let limit = state.limit as usize;
-    crate::state::HistoryUiState {
-        has_more: entries.len() > limit,
-        entries: entries.into_iter().take(limit).collect(),
-    }
-}
+struct HistoryEntries(Vec<HistoryEntry>);
 
-pub fn build_entries(
-    query: &Option<String>,
-    urls: &[(Entity, PageMetadata, VisitCount, LastVisitedAt)],
-    visits: &[(CreatedAt, VisitedUrl)],
-    now: i64,
-) -> Vec<HistoryEntry> {
-    match query {
-        None => {
-            let mut entries: Vec<HistoryEntry> = visits
-                .iter()
-                .filter_map(|(created, visited_url)| {
-                    let (e, meta, count, last) =
-                        urls.iter().find(|(e, _, _, _)| *e == visited_url.0)?;
-                    Some(HistoryEntry {
-                        url_entity_bits: e.to_bits(),
-                        url: meta.url.clone(),
-                        title: meta.title.clone(),
-                        favicon_url: meta.icon.favicon_url().to_string(),
+impl HistoryEntries {
+    fn build(
+        query: &Option<String>,
+        urls: &[(Entity, PageMetadata, VisitCount, LastVisitedAt)],
+        visits: &[(CreatedAt, VisitedUrl)],
+        now: i64,
+    ) -> Self {
+        let entries = match query {
+            None => {
+                let mut entries = Vec::new();
+                for (created, visited_url) in visits {
+                    let Some((entity, metadata, count, last)) = urls
+                        .iter()
+                        .find(|(entity, _, _, _)| *entity == visited_url.0)
+                    else {
+                        continue;
+                    };
+                    entries.push(HistoryEntry {
+                        url_entity_bits: entity.to_bits(),
+                        url: metadata.url.clone(),
+                        title: metadata.title.clone(),
+                        favicon_url: metadata.icon.favicon_url().to_string(),
                         visit_created_at: created.0,
                         visit_count: count.0,
                         last_visited_at: last.0,
-                    })
-                })
-                .collect();
-            entries.sort_by_key(|e| std::cmp::Reverse(e.visit_created_at));
-            entries
-        }
-        Some(q) => {
-            let mut scored: Vec<(f32, HistoryEntry)> = urls
-                .iter()
-                .filter_map(|(e, meta, count, last)| {
-                    let s = score(count.0, last.0, now, q, &meta.url, &meta.title);
-                    if s <= 0.0 {
-                        return None;
+                    });
+                }
+                entries.sort_by_key(|entry| std::cmp::Reverse(entry.visit_created_at));
+                entries
+            }
+            Some(query) => {
+                let mut scored = Vec::new();
+                for (entity, metadata, count, last) in urls {
+                    let score = HistoryRank::new(count.0, last.0, now).score(
+                        query,
+                        &metadata.url,
+                        &metadata.title,
+                    );
+                    if score <= 0.0 {
+                        continue;
                     }
-                    Some((
-                        s,
+                    scored.push((
+                        score,
                         HistoryEntry {
-                            url_entity_bits: e.to_bits(),
-                            url: meta.url.clone(),
-                            title: meta.title.clone(),
-                            favicon_url: meta.icon.favicon_url().to_string(),
+                            url_entity_bits: entity.to_bits(),
+                            url: metadata.url.clone(),
+                            title: metadata.title.clone(),
+                            favicon_url: metadata.icon.favicon_url().to_string(),
                             visit_created_at: last.0,
                             visit_count: count.0,
                             last_visited_at: last.0,
                         },
-                    ))
-                })
-                .collect();
-            scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-            scored.into_iter().map(|(_, e)| e).collect()
+                    ));
+                }
+                scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                scored.into_iter().map(|(_, entry)| entry).collect()
+            }
+        };
+        Self(entries)
+    }
+
+    fn state(self, limit: usize) -> crate::state::HistoryUiState {
+        crate::state::HistoryUiState {
+            has_more: self.0.len() > limit,
+            entries: self.0.into_iter().take(limit).collect(),
         }
     }
 }
@@ -211,7 +201,21 @@ fn publish_pages(
     mut commands: Commands,
 ) {
     for (entity, mut state) in &mut pages {
-        let snapshot = history_ui_state(&state, &urls, &visits);
+        let url_rows = urls
+            .iter()
+            .map(|(entity, metadata, count, last)| (entity, metadata.clone(), *count, *last))
+            .collect::<Vec<_>>();
+        let visit_rows = visits
+            .iter()
+            .map(|(created, visited)| (*created, *visited))
+            .collect::<Vec<_>>();
+        let snapshot = HistoryEntries::build(
+            &state.query,
+            &url_rows,
+            &visit_rows,
+            vmux_ecs::UnixMillis::now().0,
+        )
+        .state(state.limit as usize);
         state.bypass_change_detection().has_more = snapshot.has_more;
         commands.trigger(
             vmux_ecs::host::UiStateWrite::<crate::state::HistoryUiState>::from_event(
@@ -228,34 +232,13 @@ fn suggestions_request(
 ) {
     let req = &trigger.event().payload;
     let now = vmux_ecs::UnixMillis::now().0;
-
-    let mut scored: Vec<(f32, HistoryEntry)> = urls
+    let url_rows = urls
         .iter()
-        .filter_map(|(e, meta, count, last)| {
-            let s = score(count.0, last.0, now, &req.query, &meta.url, &meta.title);
-            if s <= 0.0 {
-                return None;
-            }
-            Some((
-                s,
-                HistoryEntry {
-                    url_entity_bits: e.to_bits(),
-                    url: meta.url.clone(),
-                    title: meta.title.clone(),
-                    favicon_url: meta.icon.favicon_url().to_string(),
-                    visit_created_at: last.0,
-                    visit_count: count.0,
-                    last_visited_at: last.0,
-                },
-            ))
-        })
-        .collect();
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    let entries: Vec<HistoryEntry> = scored
-        .into_iter()
-        .take(req.limit as usize)
-        .map(|(_, e)| e)
-        .collect();
+        .map(|(entity, metadata, count, last)| (entity, metadata.clone(), *count, *last))
+        .collect::<Vec<_>>();
+    let entries = HistoryEntries::build(&Some(req.query.clone()), &url_rows, &[], now)
+        .state(req.limit as usize)
+        .entries;
 
     commands.trigger(vmux_ecs::host::UiStateWrite::<
         vmux_api::command_bar::CommandBarUiState,
@@ -308,7 +291,7 @@ mod handler_tests {
             (CreatedAt(200), VisitedUrl(url_e)),
         ];
 
-        let entries = build_entries(&None, &url_rows, &visit_rows, 1000);
+        let entries = HistoryEntries::build(&None, &url_rows, &visit_rows, 1000).0;
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].visit_created_at, 200);
         assert_eq!(entries[1].visit_created_at, 100);
@@ -373,7 +356,7 @@ mod handler_tests {
         ];
         let visit_rows = vec![];
 
-        let entries = build_entries(&Some("git".into()), &url_rows, &visit_rows, 1000);
+        let entries = HistoryEntries::build(&Some("git".into()), &url_rows, &visit_rows, 1000).0;
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].url, "https://github.com");
     }
@@ -410,7 +393,7 @@ mod handler_tests {
             .map(|i| (CreatedAt(i * 100), VisitedUrl(url_e)))
             .collect();
 
-        let all = build_entries(&None, &url_rows, &visit_rows, 1000);
+        let all = HistoryEntries::build(&None, &url_rows, &visit_rows, 1000).0;
         assert_eq!(all.len(), 5);
 
         let page: Vec<_> = all.into_iter().skip(2).take(2).collect();

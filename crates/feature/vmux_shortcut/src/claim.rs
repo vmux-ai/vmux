@@ -7,6 +7,9 @@ use vmux_ecs::host::{UiState, UiStatePlugin, UiStateWrite};
 
 pub(crate) struct ClaimPlugin;
 
+type PageHost = Or<(With<WebviewSource>, With<HostsPage>)>;
+type MissingKeyContext = (PageHost, Without<KeyContext>);
+
 impl Plugin for ClaimPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiStatePlugin::<KeyClaims>::default())
@@ -15,16 +18,7 @@ impl Plugin for ClaimPlugin {
     }
 }
 
-fn spawn(
-    pages: Query<
-        Entity,
-        (
-            Or<(With<WebviewSource>, With<HostsPage>)>,
-            Without<KeyContext>,
-        ),
-    >,
-    mut commands: Commands,
-) {
+fn spawn(pages: Query<Entity, MissingKeyContext>, mut commands: Commands) {
     for entity in pages.iter() {
         commands
             .entity(entity)
@@ -41,7 +35,7 @@ fn receive(trigger: On<UiInput<UiKeyContext>>, mut contexts: Query<&mut KeyConte
 
 fn publish(
     keymaps: Query<Ref<Keymap>>,
-    contexts: Query<(Entity, Ref<KeyContext>), Or<(With<WebviewSource>, With<HostsPage>)>>,
+    contexts: Query<(Entity, Ref<KeyContext>), PageHost>,
     mut commands: Commands,
 ) {
     let Ok(keymap) = keymaps.single() else {

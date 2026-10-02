@@ -6,11 +6,11 @@ use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
+use super::VaultStorage;
 use super::keys::{KeyStore, SystemKeyStore};
 use super::repository::VaultRepositoryPath;
 use super::snapshot::{KEY_LEN, decode_hex, decrypt_bytes, encrypt_bytes, hex, validate_key};
 use super::sync::{reconcile_local, write_local_state};
-use super::{repository_dir, root_dir};
 
 pub(super) const RECOVERY_DIR: &str = "keys/recovery";
 pub(super) const RECOVERY_FILE: &str = "default.ron";
@@ -66,9 +66,10 @@ impl GeneratedRecoveryKey {
 
 impl VaultRecovery {
     pub fn current() -> Self {
+        let storage = VaultStorage::current();
         Self {
-            root: root_dir(),
-            repository: repository_dir(),
+            root: storage.root,
+            repository: storage.repository,
         }
     }
 

@@ -7,6 +7,38 @@ impl TextCaret {
     pub fn in_field(element_id: &'static str) -> Self {
         Self { element_id }
     }
+
+    pub fn floor_boundary(value: &str, mut byte: usize) -> usize {
+        if byte >= value.len() {
+            return value.len();
+        }
+        while byte > 0 && !value.is_char_boundary(byte) {
+            byte -= 1;
+        }
+        byte
+    }
+
+    pub fn byte_from_utf16(value: &str, utf16_offset: u32) -> usize {
+        let mut units = 0u32;
+        for (byte, character) in value.char_indices() {
+            if units >= utf16_offset {
+                return byte;
+            }
+            units += character.len_utf16() as u32;
+        }
+        value.len()
+    }
+
+    pub fn utf16_from_byte(value: &str, byte_offset: usize) -> u32 {
+        let mut units = 0u32;
+        for (byte, character) in value.char_indices() {
+            if byte >= byte_offset {
+                return units;
+            }
+            units += character.len_utf16() as u32;
+        }
+        units
+    }
 }
 
 pub struct EventSelection;
@@ -45,84 +77,56 @@ impl TextCaret {
     }
 }
 
-pub fn floor_char_boundary(s: &str, mut i: usize) -> usize {
-    if i >= s.len() {
-        return s.len();
-    }
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
-
-pub fn utf16_offset_to_byte(s: &str, utf16_offset: u32) -> usize {
-    let mut units = 0u32;
-    for (byte, ch) in s.char_indices() {
-        if units >= utf16_offset {
-            return byte;
-        }
-        units += ch.len_utf16() as u32;
-    }
-    s.len()
-}
-
-pub fn byte_offset_to_utf16(s: &str, byte_offset: usize) -> u32 {
-    let mut units = 0u32;
-    for (byte, ch) in s.char_indices() {
-        if byte >= byte_offset {
-            return units;
-        }
-        units += ch.len_utf16() as u32;
-    }
-    units
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn utf16_offset_maps_to_bytes_for_ascii() {
-        assert_eq!(utf16_offset_to_byte("hello", 0), 0);
-        assert_eq!(utf16_offset_to_byte("hello", 3), 3);
-        assert_eq!(utf16_offset_to_byte("hello", 5), 5);
+        assert_eq!(TextCaret::byte_from_utf16("hello", 0), 0);
+        assert_eq!(TextCaret::byte_from_utf16("hello", 3), 3);
+        assert_eq!(TextCaret::byte_from_utf16("hello", 5), 5);
     }
 
     #[test]
     fn utf16_offset_maps_to_bytes_across_multibyte_chars() {
         let s = "aé本b";
-        assert_eq!(utf16_offset_to_byte(s, 0), 0);
-        assert_eq!(utf16_offset_to_byte(s, 1), 1);
-        assert_eq!(utf16_offset_to_byte(s, 2), 3);
-        assert_eq!(utf16_offset_to_byte(s, 3), 6);
-        assert_eq!(utf16_offset_to_byte(s, 4), 7);
+        assert_eq!(TextCaret::byte_from_utf16(s, 0), 0);
+        assert_eq!(TextCaret::byte_from_utf16(s, 1), 1);
+        assert_eq!(TextCaret::byte_from_utf16(s, 2), 3);
+        assert_eq!(TextCaret::byte_from_utf16(s, 3), 6);
+        assert_eq!(TextCaret::byte_from_utf16(s, 4), 7);
     }
 
     #[test]
     fn utf16_offset_handles_surrogate_pairs_and_overflow() {
         let s = "x😀y";
-        assert_eq!(utf16_offset_to_byte(s, 1), 1);
-        assert_eq!(utf16_offset_to_byte(s, 3), 5);
-        assert_eq!(utf16_offset_to_byte(s, 99), s.len());
+        assert_eq!(TextCaret::byte_from_utf16(s, 1), 1);
+        assert_eq!(TextCaret::byte_from_utf16(s, 3), 5);
+        assert_eq!(TextCaret::byte_from_utf16(s, 99), s.len());
     }
 
     #[test]
     fn byte_and_utf16_offsets_round_trip() {
         for s in ["hello", "aé本b", "x😀y", ""] {
             for (byte, _) in s.char_indices().chain([(s.len(), ' ')]) {
-                let units = byte_offset_to_utf16(s, byte);
-                assert_eq!(utf16_offset_to_byte(s, units), byte, "{s:?} at byte {byte}");
+                let units = TextCaret::utf16_from_byte(s, byte);
+                assert_eq!(
+                    TextCaret::byte_from_utf16(s, units),
+                    byte,
+                    "{s:?} at byte {byte}"
+                );
             }
         }
-        assert_eq!(byte_offset_to_utf16("x😀y", 5), 3);
-        assert_eq!(byte_offset_to_utf16("x😀y", 99), 4);
+        assert_eq!(TextCaret::utf16_from_byte("x😀y", 5), 3);
+        assert_eq!(TextCaret::utf16_from_byte("x😀y", 99), 4);
     }
 
     #[test]
     fn a_byte_offset_inside_a_character_falls_back_to_its_start() {
-        assert_eq!(floor_char_boundary("aé本b", 4), 3);
-        assert_eq!(floor_char_boundary("aé本b", 3), 3);
-        assert_eq!(floor_char_boundary("aé本b", 99), 7);
-        assert_eq!(floor_char_boundary("", 5), 0);
+        assert_eq!(TextCaret::floor_boundary("aé本b", 4), 3);
+        assert_eq!(TextCaret::floor_boundary("aé本b", 3), 3);
+        assert_eq!(TextCaret::floor_boundary("aé本b", 99), 7);
+        assert_eq!(TextCaret::floor_boundary("", 5), 0);
     }
 }

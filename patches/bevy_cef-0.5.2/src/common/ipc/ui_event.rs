@@ -67,6 +67,7 @@ where
     T: UiEventList + Send + Sync + 'static,
 {
     fn build(&self, app: &mut App) {
+        app.init_resource::<BinIpcEventRawBuffer>();
         T::register_events(app);
     }
 }

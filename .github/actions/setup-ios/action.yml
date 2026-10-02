@@ -1,0 +1,48 @@
+name: Setup iOS
+description: Prepare a macOS runner for building vmux_mobile
+inputs:
+  cache-key:
+    description: Rust cache partition
+    required: true
+  dioxus:
+    description: Install the Dioxus CLI
+    required: false
+    default: "false"
+  tailwind:
+    description: Install Tailwind CSS
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup-rust
+      with:
+        targets: aarch64-apple-ios
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ inputs.cache-key }}
+
+    - name: Cache tailwindcss
+      if: inputs.tailwind == 'true'
+      uses: actions/cache@v5
+      with:
+        path: ~/.local/bin/tailwindcss
+        key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
+
+    - name: Add local binaries to PATH
+      if: inputs.dioxus == 'true' || inputs.tailwind == 'true'
+      shell: bash
+      run: |
+        mkdir -p "$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Install dioxus-cli
+      if: inputs.dioxus == 'true'
+      shell: bash
+      run: ./scripts/install-dioxus-cli.sh
+
+    - name: Install tailwindcss
+      if: inputs.tailwind == 'true'
+      shell: bash
+      run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh

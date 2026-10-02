@@ -12,7 +12,7 @@ use vmux_ui::components::select::{
     Select, SelectGroup, SelectItemIndicator, SelectList, SelectOption, SelectTrigger,
 };
 use vmux_ui::dioxus_ext::attributes;
-use vmux_ui::favicon::favicon_src_for_url;
+use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 
@@ -249,7 +249,7 @@ fn AgentRow(presentation: TeamAgentPresentation) -> Element {
 
 #[component]
 fn AgentAvatar(member: TeamMemberRow) -> Element {
-    let src = favicon_src_for_url(&member.icon, &member.url);
+    let src = FaviconSource::resolve(&member.icon, &member.url);
 
     rsx! {
         div { class: "relative shrink-0",

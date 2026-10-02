@@ -232,27 +232,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-ios
         with:
-          targets: aarch64-apple-ios
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ios
-
-      - name: Cache tailwindcss
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/bin/tailwindcss
-          key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
-
-      - name: Add ~/.local/bin to PATH
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Install tailwindcss
-        run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
+          cache-key: ios
+          tailwind: "true"
 
       - name: Generate the tailwind bundle dx would
         run: |
@@ -400,26 +383,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-web
         with:
-          targets: wasm32-unknown-unknown
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: website
-          shared-key: website
-
-      - name: Cache binaryen
-        uses: actions/cache@v5
-        with:
-          path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
-          key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
-
-      - name: Install dioxus-cli
-        run: ./scripts/install-dioxus-cli.sh
-
-      - name: Install binaryen
-        run: ./scripts/install-dioxus-binaryen.sh
+          cache-key: website
 
       - name: Build website
         working-directory: website
@@ -485,57 +451,10 @@ jobs:
             fi
           fi
 
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-macos
         with:
-          targets: wasm32-unknown-unknown
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: build-mac
-
-      - name: Cache cargo binaries
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp${{ env.CARGO_PACKAGER_VERSION }}-cba${{ env.BEVY_CEF_BUNDLE_APP_VERSION }}-cef${{ env.CEF_VERSION }}-v3
-
-      - name: Cache binaryen
-        uses: actions/cache@v5
-        with:
-          path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
-          key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
-
-      - name: Cache CEF framework
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/share/Chromium Embedded Framework.framework
-          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cef/manifest.toml') }}
-
-      - name: Cache tailwindcss
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/bin/tailwindcss
-          key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
-
-      - name: Add ~/.local/bin to PATH
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Install CEF framework
-        run: ./scripts/install-cef.sh
-
-      - name: Install dioxus-cli
-        run: ./scripts/install-dioxus-cli.sh
-
-      - name: Install binaryen
-        run: ./scripts/install-dioxus-binaryen.sh
-
-      - name: Install package tools
-        run: ./scripts/install-package-tools.sh
-
-      - name: Install tailwindcss
-        run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
+          cache-key: build-mac
+          cef-version: ${{ needs.cef-version.outputs.version }}
 
       - name: Check lean macOS desktop features
         run: env VMUX_SKIP_DX_BUILD=1 ./scripts/cargo-with-cef-cache.sh check -p vmux_desktop --no-default-features --features dev

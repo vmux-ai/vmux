@@ -7,7 +7,7 @@ use vmux_ecs::event::FileDirEntry;
 use crate::class::ClassList;
 use crate::file_icon::TypeIcon;
 use crate::focus::FocusClaim;
-use crate::platform::now_millis;
+use crate::platform::Platform;
 use crate::scroll::ScrollIntoView;
 
 #[component]
@@ -203,7 +203,7 @@ struct PendingOpen {
 
 impl PendingOpen {
     fn claims(&self, at: ClientPoint) -> bool {
-        now_millis() - self.at < DOUBLE_CLICK_MS
+        Platform::now() - self.at < DOUBLE_CLICK_MS
             && (at.x - self.origin.0).abs() <= DOUBLE_CLICK_SLOP_PX
             && (at.y - self.origin.1).abs() <= DOUBLE_CLICK_SLOP_PX
     }
@@ -245,7 +245,7 @@ impl DirectoryClick {
     fn remember(&mut self, entry: FileDirEntry, at: ClientPoint) {
         self.pending.set(Some(PendingOpen {
             entry,
-            at: now_millis(),
+            at: Platform::now(),
             origin: (at.x, at.y),
         }));
     }

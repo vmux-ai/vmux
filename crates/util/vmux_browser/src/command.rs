@@ -945,6 +945,14 @@ mod tests {
                 .spawn((Stack::bundle(), LastActivatedAt::now(), ChildOf(pane)))
                 .id();
             let view = app.world_mut().spawn((Browser, ChildOf(stack), page)).id();
+            app.world_mut().spawn(
+                vmux_layout::active_pane::ActiveStack {
+                    tab: Some(tab),
+                    pane: Some(pane),
+                    stack: Some(stack),
+                }
+                .local_bundle(),
+            );
 
             Self { app, view }
         }

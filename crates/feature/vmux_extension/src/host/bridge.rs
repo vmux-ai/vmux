@@ -172,6 +172,17 @@ struct ExtensionBridgeStartup {
     registrations: Vec<BridgeRegistration>,
 }
 
+struct BridgeAcceptLoop {
+    identities: HashMap<String, BridgeIdentity>,
+    inbound_tx: BridgeInboundQueue,
+    sessions: Arc<Mutex<HashMap<String, BridgeSession>>>,
+    shutdown: Arc<AtomicBool>,
+    active_connections: Arc<AtomicUsize>,
+    unauthenticated_connections: Arc<AtomicUsize>,
+    poller: Arc<Poller>,
+    next_session_id: Arc<AtomicU64>,
+}
+
 fn start(
     mut commands: bevy::prelude::Commands,
     startup: bevy::prelude::Single<(bevy::prelude::Entity, &ExtensionBridgeStartup)>,
@@ -234,17 +245,17 @@ impl ExtensionBridgeServer {
         let accept_worker = std::thread::Builder::new()
             .name("extension-bridge-accept".into())
             .spawn(move || {
-                accept_loop(
-                    listener,
-                    thread_identities,
+                BridgeAcceptLoop {
+                    identities: thread_identities,
                     inbound_tx,
-                    thread_sessions,
-                    thread_shutdown,
+                    sessions: thread_sessions,
+                    shutdown: thread_shutdown,
                     active_connections,
                     unauthenticated_connections,
-                    thread_accept_poller,
+                    poller: thread_accept_poller,
                     next_session_id,
-                );
+                }
+                .run(listener);
             })
             .map_err(|error| error.to_string())?;
         Ok(Self {
@@ -391,79 +402,83 @@ fn queue_session_message(
     session.poller.notify().map_err(|error| error.to_string())
 }
 
-fn accept_loop(
-    listener: TcpListener,
-    identities: HashMap<String, BridgeIdentity>,
-    inbound_tx: BridgeInboundQueue,
-    sessions: Arc<Mutex<HashMap<String, BridgeSession>>>,
-    shutdown: Arc<AtomicBool>,
-    active_connections: Arc<AtomicUsize>,
-    unauthenticated_connections: Arc<AtomicUsize>,
-    poller: Arc<Poller>,
-    next_session_id: Arc<AtomicU64>,
-) {
-    let mut events = Events::new();
-    while !shutdown.load(Ordering::Acquire) {
-        events.clear();
-        if let Err(error) = poller.wait(&mut events, None) {
-            bevy::log::warn!("extension bridge accept poll failed: {error}");
-            break;
-        }
-        if shutdown.load(Ordering::Acquire) {
-            break;
-        }
-        loop {
-            match listener.accept() {
-                Ok((stream, _)) => {
-                    let Some(active_permit) = try_acquire(&active_connections, MAX_CONNECTIONS)
-                    else {
-                        continue;
-                    };
-                    let Some(unauthenticated_permit) = try_acquire(
-                        &unauthenticated_connections,
-                        MAX_UNAUTHENTICATED_CONNECTIONS,
-                    ) else {
-                        drop(active_permit);
-                        continue;
-                    };
-                    let identities = identities.clone();
-                    let inbound_tx = inbound_tx.clone();
-                    let sessions = Arc::clone(&sessions);
-                    let shutdown = Arc::clone(&shutdown);
-                    let session_id = next_session_id.fetch_add(1, Ordering::AcqRel).max(1);
-                    if let Err(error) = std::thread::Builder::new()
-                        .name("extension-bridge-connection".into())
-                        .spawn(move || {
-                            let _active_permit = active_permit;
-                            if let Err(error) = handle_connection(
-                                stream,
-                                &identities,
-                                &inbound_tx,
-                                &sessions,
-                                &shutdown,
-                                unauthenticated_permit,
-                                session_id,
-                            ) {
-                                bevy::log::warn!("extension bridge connection failed: {error}");
-                            }
-                        })
-                    {
-                        bevy::log::warn!("failed to spawn extension bridge connection: {error}");
+impl BridgeAcceptLoop {
+    fn run(self, listener: TcpListener) {
+        let Self {
+            identities,
+            inbound_tx,
+            sessions,
+            shutdown,
+            active_connections,
+            unauthenticated_connections,
+            poller,
+            next_session_id,
+        } = self;
+        let mut events = Events::new();
+        while !shutdown.load(Ordering::Acquire) {
+            events.clear();
+            if let Err(error) = poller.wait(&mut events, None) {
+                bevy::log::warn!("extension bridge accept poll failed: {error}");
+                break;
+            }
+            if shutdown.load(Ordering::Acquire) {
+                break;
+            }
+            loop {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let Some(active_permit) = try_acquire(&active_connections, MAX_CONNECTIONS)
+                        else {
+                            continue;
+                        };
+                        let Some(unauthenticated_permit) = try_acquire(
+                            &unauthenticated_connections,
+                            MAX_UNAUTHENTICATED_CONNECTIONS,
+                        ) else {
+                            drop(active_permit);
+                            continue;
+                        };
+                        let identities = identities.clone();
+                        let inbound_tx = inbound_tx.clone();
+                        let sessions = Arc::clone(&sessions);
+                        let shutdown = Arc::clone(&shutdown);
+                        let session_id = next_session_id.fetch_add(1, Ordering::AcqRel).max(1);
+                        if let Err(error) = std::thread::Builder::new()
+                            .name("extension-bridge-connection".into())
+                            .spawn(move || {
+                                let _active_permit = active_permit;
+                                if let Err(error) = handle_connection(
+                                    stream,
+                                    &identities,
+                                    &inbound_tx,
+                                    &sessions,
+                                    &shutdown,
+                                    unauthenticated_permit,
+                                    session_id,
+                                ) {
+                                    bevy::log::warn!("extension bridge connection failed: {error}");
+                                }
+                            })
+                        {
+                            bevy::log::warn!(
+                                "failed to spawn extension bridge connection: {error}"
+                            );
+                        }
+                    }
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => break,
+                    Err(error) => {
+                        bevy::log::warn!("extension bridge accept failed: {error}");
+                        break;
                     }
                 }
-                Err(error) if error.kind() == ErrorKind::WouldBlock => break,
-                Err(error) => {
-                    bevy::log::warn!("extension bridge accept failed: {error}");
-                    break;
-                }
+            }
+            if let Err(error) = poller.modify(&listener, Event::readable(SOCKET_EVENT_KEY)) {
+                bevy::log::warn!("extension bridge accept rearm failed: {error}");
+                break;
             }
         }
-        if let Err(error) = poller.modify(&listener, Event::readable(SOCKET_EVENT_KEY)) {
-            bevy::log::warn!("extension bridge accept rearm failed: {error}");
-            break;
-        }
+        let _ = poller.delete(&listener);
     }
-    let _ = poller.delete(&listener);
 }
 
 struct CounterGuard {
@@ -556,17 +571,17 @@ fn handle_connection(
         },
     )
     .and_then(|()| {
-        route_connection(
-            &mut socket,
-            &extension_id,
+        ConnectionRoute {
+            extension_id: &extension_id,
             session_id,
             inbound_tx,
-            &outbound_rx,
-            &queued_bytes,
+            outbound_rx: &outbound_rx,
+            queued_bytes: &queued_bytes,
             shutdown,
-            &cancelled,
-            &poller,
-        )
+            cancelled: &cancelled,
+            poller: &poller,
+        }
+        .run(&mut socket)
     });
     let mut sessions = sessions.lock().unwrap_or_else(|error| error.into_inner());
     if sessions
@@ -707,70 +722,78 @@ fn reject_authentication(socket: &mut WebSocket<TcpStream>) -> Result<(), String
     socket.close(None).map_err(|error| error.to_string())
 }
 
-fn route_connection(
-    socket: &mut WebSocket<TcpStream>,
-    extension_id: &str,
+struct ConnectionRoute<'a> {
+    extension_id: &'a str,
     session_id: u64,
-    inbound_tx: &BridgeInboundQueue,
-    outbound_rx: &crossbeam_channel::Receiver<QueuedServerMessage>,
-    queued_bytes: &AtomicUsize,
-    shutdown: &AtomicBool,
-    cancelled: &AtomicBool,
-    poller: &Poller,
-) -> Result<(), String> {
-    let mut next_heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
-    let mut events = Events::new();
-    if !read_available_messages(socket, extension_id, session_id, inbound_tx)? {
-        return Ok(());
-    }
-    poller
-        .modify(socket.get_ref(), Event::readable(SOCKET_EVENT_KEY))
-        .map_err(|error| error.to_string())?;
-    while !shutdown.load(Ordering::Acquire) && !cancelled.load(Ordering::Acquire) {
-        loop {
-            match outbound_rx.try_recv() {
-                Ok(queued) => {
-                    queued_bytes.fetch_sub(queued.bytes, Ordering::AcqRel);
-                    let fatal = matches!(queued.message, BridgeServerMessage::Fatal(_));
-                    write_server_message(socket, &queued.message)?;
-                    if fatal {
-                        let _ = socket.close(None);
-                        return Ok(());
-                    }
-                }
-                Err(crossbeam_channel::TryRecvError::Empty) => break,
-                Err(crossbeam_channel::TryRecvError::Disconnected) => return Ok(()),
-            }
-        }
-        if Instant::now() >= next_heartbeat {
-            write_server_message(socket, &BridgeServerMessage::Heartbeat)?;
-            next_heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
-        }
-        events.clear();
-        poller
-            .wait(
-                &mut events,
-                Some(next_heartbeat.saturating_duration_since(Instant::now())),
-            )
-            .map_err(|error| error.to_string())?;
-        if shutdown.load(Ordering::Acquire) || cancelled.load(Ordering::Acquire) {
-            break;
-        }
-        if !events
-            .iter()
-            .any(|event| event.key == SOCKET_EVENT_KEY && event.readable)
-        {
-            continue;
-        }
-        if !read_available_messages(socket, extension_id, session_id, inbound_tx)? {
+    inbound_tx: &'a BridgeInboundQueue,
+    outbound_rx: &'a crossbeam_channel::Receiver<QueuedServerMessage>,
+    queued_bytes: &'a AtomicUsize,
+    shutdown: &'a AtomicBool,
+    cancelled: &'a AtomicBool,
+    poller: &'a Poller,
+}
+
+impl ConnectionRoute<'_> {
+    fn run(&self, socket: &mut WebSocket<TcpStream>) -> Result<(), String> {
+        let mut next_heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
+        let mut events = Events::new();
+        if !read_available_messages(socket, self.extension_id, self.session_id, self.inbound_tx)? {
             return Ok(());
         }
-        poller
+        self.poller
             .modify(socket.get_ref(), Event::readable(SOCKET_EVENT_KEY))
             .map_err(|error| error.to_string())?;
+        while !self.shutdown.load(Ordering::Acquire) && !self.cancelled.load(Ordering::Acquire) {
+            loop {
+                match self.outbound_rx.try_recv() {
+                    Ok(queued) => {
+                        self.queued_bytes.fetch_sub(queued.bytes, Ordering::AcqRel);
+                        let fatal = matches!(queued.message, BridgeServerMessage::Fatal(_));
+                        write_server_message(socket, &queued.message)?;
+                        if fatal {
+                            let _ = socket.close(None);
+                            return Ok(());
+                        }
+                    }
+                    Err(crossbeam_channel::TryRecvError::Empty) => break,
+                    Err(crossbeam_channel::TryRecvError::Disconnected) => return Ok(()),
+                }
+            }
+            if Instant::now() >= next_heartbeat {
+                write_server_message(socket, &BridgeServerMessage::Heartbeat)?;
+                next_heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
+            }
+            events.clear();
+            self.poller
+                .wait(
+                    &mut events,
+                    Some(next_heartbeat.saturating_duration_since(Instant::now())),
+                )
+                .map_err(|error| error.to_string())?;
+            if self.shutdown.load(Ordering::Acquire) || self.cancelled.load(Ordering::Acquire) {
+                break;
+            }
+            if !events
+                .iter()
+                .any(|event| event.key == SOCKET_EVENT_KEY && event.readable)
+            {
+                continue;
+            }
+            if !read_available_messages(
+                socket,
+                self.extension_id,
+                self.session_id,
+                self.inbound_tx,
+            )? {
+                return Ok(());
+            }
+            self.poller
+                .modify(socket.get_ref(), Event::readable(SOCKET_EVENT_KEY))
+                .map_err(|error| error.to_string())?;
+        }
+        let _ = socket.close(None);
+        Ok(())
     }
-    let _ = socket.close(None);
-    Ok(())
 }
 
 fn read_available_messages(

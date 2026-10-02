@@ -1100,6 +1100,14 @@ mod open_in_place_flow {
             .insert((ChildOf(pane), LastActivatedAt(1)))
             .id();
         app.world_mut().spawn(Browser).insert(ChildOf(stack));
+        app.world_mut().spawn(
+            vmux_layout::active_pane::ActiveStack {
+                tab: Some(tab),
+                pane: Some(pane),
+                stack: Some(stack),
+            }
+            .local_bundle(),
+        );
         space
     }
 
@@ -1130,6 +1138,14 @@ mod open_in_place_flow {
         app.world_mut()
             .spawn((Browser, Terminal))
             .insert(ChildOf(stack));
+        app.world_mut().spawn(
+            vmux_layout::active_pane::ActiveStack {
+                tab: Some(tab),
+                pane: Some(pane),
+                stack: Some(stack),
+            }
+            .local_bundle(),
+        );
         space
     }
 
@@ -1168,6 +1184,14 @@ mod open_in_place_flow {
                 },
             ))
             .insert(ChildOf(stack));
+        app.world_mut().spawn(
+            vmux_layout::active_pane::ActiveStack {
+                tab: Some(tab),
+                pane: Some(pane),
+                stack: Some(stack),
+            }
+            .local_bundle(),
+        );
         space
     }
 

@@ -23,7 +23,7 @@ use vmux_command::{
 use vmux_ecs::host::UiState;
 #[cfg(test)]
 use vmux_ecs::host::manifest::FeaturePlugin;
-use vmux_ui::hooks::{MenuDirection, move_selection};
+use vmux_ui::hooks::MenuDirection;
 use vmux_ui::prompt_recall::PromptHistoryDirection;
 
 use crate::selector::SelectorMode;
@@ -48,7 +48,7 @@ impl Plugin for ChatKeyPlugin {
             .add_observer(choose)
             .add_observer(choose_number)
             .add_observer(select_list)
-            .add_observer(update_composer_menu)
+            .add_observer(composer_menu)
             .add_observer(move_history)
             .add_observer(submit)
             .add_observer(dismiss_selector)
@@ -465,7 +465,7 @@ fn move_list(
     let kind = list.kind;
     let len = list.len;
     let selected = selection.current(&list);
-    *selected = move_selection(*selected, len, direction);
+    *selected = direction.move_selection(*selected, len);
     commands.trigger(
         vmux_ecs::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
             caller,
@@ -814,7 +814,7 @@ fn select_list(
     );
 }
 
-fn update_composer_menu(
+fn composer_menu(
     trigger: On<UiInput<ChatComposerMenuChanged>>,
     mut menus: Query<&mut ActiveComposerMenu>,
     mut selections: Query<&mut ChatListSelection>,

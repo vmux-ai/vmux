@@ -49,7 +49,7 @@ impl Plugin for AgentWorkspaceRequestPlugin {
             .add_message::<ServiceRequest>()
             .add_systems(
                 Update,
-                handle_requests
+                requests
                     .in_set(AgentWorkspaceRequestSet)
                     .in_set(AgentRequestPrerequisiteSet)
                     .in_set(WriteCommandRequests)
@@ -59,7 +59,7 @@ impl Plugin for AgentWorkspaceRequestPlugin {
     }
 }
 
-fn resolve_self_pane(
+fn self_pane(
     anchor: ProcessId,
     agent_terms: &Query<(Entity, &ProcessId, &ChildOf)>,
     child_of_q: &Query<&ChildOf>,
@@ -123,7 +123,7 @@ impl WorkspaceChoice {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn handle_requests(
+fn requests(
     mut reader: MessageReader<AgentRequestInput>,
     agent_terms: Query<(Entity, &ProcessId, &ChildOf)>,
     ctx: vmux_layout::pane::PanePlacement,
@@ -148,7 +148,7 @@ fn handle_requests(
         let request_anchor = workspace_request_anchor(request);
         let result = if let Some(command) = WorkspaceChoice::decode(request) {
             let anchor = command.anchor;
-            match resolve_self_pane(anchor, &agent_terms, &ctx.child_of_q) {
+            match self_pane(anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
                 Some((agent_entity, pane)) => {
                     let Some(tab_entity) =
@@ -213,7 +213,7 @@ fn handle_requests(
             let path = &command.path;
             let task = &command.task;
             let create = &command.create;
-            match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+            match self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
                 Some((agent_entity, pane)) => {
                     let Some(tab_entity) =
@@ -233,7 +233,7 @@ fn handle_requests(
                             .flatten()
                     });
                     if let Some(current_dir) = current_dir.as_deref()
-                        && vmux_git::worktree::is_linked_worktree(current_dir)
+                        && vmux_git::worktree::CheckoutInfo::is_linked(current_dir)
                     {
                         AgentCommandResult::Text(current_dir.to_string_lossy().into_owned())
                     } else {
@@ -315,11 +315,11 @@ fn handle_requests(
                                                 .map(|tab| tab.name.clone())
                                         })
                                         .unwrap_or_else(|| "task".to_string());
-                                    let slug_hint = vmux_layout::worktree::tab_worktree_slug_hint(
+                                    let slug_hint = vmux_layout::worktree::WorktreeName::hint(
                                         &name,
                                         &project_dir,
                                     );
-                                    match vmux_layout::worktree::create_worktree_blocking(
+                                    match vmux_layout::worktree::TabWorktreeActivation::create(
                                         &project_dir,
                                         &slug_hint,
                                         &managed_root,
@@ -337,8 +337,11 @@ fn handle_requests(
                                                 }
                                                 worktree_created_this_batch.insert(
                                                     tab_entity,
-                                                    vmux_git::worktree::head_ref(&execution_dir)
-                                                        .unwrap_or_default(),
+                                                    vmux_git::worktree::CheckoutInfo::try_from(
+                                                        execution_dir.as_path(),
+                                                    )
+                                                    .and_then(|checkout| checkout.head_ref())
+                                                    .unwrap_or_default(),
                                                 );
                                                 AgentCommandResult::Text(format!(
                                                     "Worktree ready: {}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools.",
@@ -357,7 +360,7 @@ fn handle_requests(
             }
         } else if let Ok(Some(command)) = request.decode::<AgentCreateWorktree>() {
             let anchor = &command.anchor;
-            match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+            match self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
                 Some((_, pane)) => {
                     let mut cur = pane;
@@ -424,7 +427,7 @@ fn handle_requests(
                                             "tab project directory is missing".to_string(),
                                         );
                                     };
-                                    if vmux_git::worktree::is_linked_worktree(&current_dir) {
+                                    if vmux_git::worktree::CheckoutInfo::is_linked(&current_dir) {
                                         AgentCommandResult::Text(
                                             current_dir.to_string_lossy().into_owned(),
                                         )
@@ -440,11 +443,10 @@ fn handle_requests(
                                                 },
                                             );
                                         }
-                                        let slug_hint =
-                                            vmux_layout::worktree::tab_worktree_slug_hint(
-                                                &name, &base_dir,
-                                            );
-                                        match vmux_layout::worktree::create_worktree_blocking(
+                                        let slug_hint = vmux_layout::worktree::WorktreeName::hint(
+                                            &name, &base_dir,
+                                        );
+                                        match vmux_layout::worktree::TabWorktreeActivation::create(
                                             &base_dir,
                                             &slug_hint,
                                             &managed_root,
@@ -483,7 +485,7 @@ fn handle_requests(
             let anchor = &command.anchor;
             let branch = &command.branch;
             let project = &command.project;
-            match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+            match self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
                 Some((agent_entity, pane)) => {
                     let Some(tab_entity) =
@@ -566,7 +568,7 @@ fn handle_requests(
                             ));
                             continue;
                         };
-                        match vmux_layout::worktree::create_worktree_for_branch_blocking(
+                        match vmux_layout::worktree::TabWorktreeActivation::create_branch(
                             &base_dir,
                             branch,
                             &managed_root,

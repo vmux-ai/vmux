@@ -88,6 +88,25 @@ pub struct ToolInventoryItem {
     pub removable: bool,
 }
 
+impl ToolInventoryItem {
+    fn operations(&self, managed: bool) -> Vec<ToolOperationKind> {
+        let mut operations = Vec::new();
+        if !managed && matches!(self.status, ToolStatus::Installed | ToolStatus::Outdated) {
+            operations.push(ToolOperationKind::Adopt);
+        }
+        if self.status == ToolStatus::Outdated {
+            operations.push(ToolOperationKind::Update);
+        }
+        if self.status == ToolStatus::Missing {
+            operations.push(ToolOperationKind::Install);
+        }
+        if self.removable {
+            operations.push(ToolOperationKind::Uninstall);
+        }
+        operations
+    }
+}
+
 pub struct ToolInventory {
     provider: ToolProvider,
     items: Vec<ToolInventoryItem>,
@@ -113,7 +132,7 @@ impl ToolInventory {
                 let managed = manifest.contains(self.provider.id(), &item.id);
                 ToolItem {
                     provider: self.provider,
-                    operations: package_operations(item.status, managed, item.removable),
+                    operations: item.operations(managed),
                     id: item.id,
                     name: item.name,
                     icon: item.icon,
@@ -155,27 +174,6 @@ impl ToolInventory {
             items,
         }
     }
-}
-
-fn package_operations(
-    status: ToolStatus,
-    managed: bool,
-    removable: bool,
-) -> Vec<ToolOperationKind> {
-    let mut operations = Vec::new();
-    if !managed && matches!(status, ToolStatus::Installed | ToolStatus::Outdated) {
-        operations.push(ToolOperationKind::Adopt);
-    }
-    if status == ToolStatus::Outdated {
-        operations.push(ToolOperationKind::Update);
-    }
-    if status == ToolStatus::Missing {
-        operations.push(ToolOperationKind::Install);
-    }
-    if removable {
-        operations.push(ToolOperationKind::Uninstall);
-    }
-    operations
 }
 
 #[cfg(test)]
@@ -229,7 +227,16 @@ mod tests {
 
     #[test]
     fn unmanaged_outdated_items_can_be_adopted_or_updated() {
-        let operations = package_operations(ToolStatus::Outdated, false, true);
+        let operations = ToolInventoryItem {
+            id: String::new(),
+            name: String::new(),
+            icon: None,
+            version: None,
+            detail: String::new(),
+            status: ToolStatus::Outdated,
+            removable: true,
+        }
+        .operations(false);
 
         assert_eq!(
             operations,

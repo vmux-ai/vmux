@@ -5,6 +5,7 @@
                 default_theme: "default",
                 confirm_close: true,
                 themes: [(
+                    name: "default",
                     color_scheme: "catppuccin-mocha",
                     font_family: "",
                     font_size: 14.0,

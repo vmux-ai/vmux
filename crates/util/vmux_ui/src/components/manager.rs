@@ -2,7 +2,7 @@ use crate::class::ClassList;
 use crate::components::badge::Badge;
 use crate::components::skeleton::Skeleton;
 use crate::hooks::use_selector;
-use crate::list_nav::{MenuDirection, move_selection};
+use crate::list_nav::MenuDirection;
 use dioxus::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -289,7 +289,7 @@ pub fn ManagerSelect(
             event.stop_propagation();
             if open() {
                 let current = highlighted().min(key_items.len() - 1);
-                highlighted.set(move_selection(current, key_items.len(), direction));
+                highlighted.set(direction.move_selection(current, key_items.len()));
             } else {
                 open.set(true);
                 highlighted.set(match direction {

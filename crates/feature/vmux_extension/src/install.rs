@@ -7,7 +7,11 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::Receiver;
 use vmux_api::extension::{ExtInstallPhase, ExtInstallProgress, ExtensionsEvent};
 
-use crate::{catalog::ExtensionCatalog, crx, download, manifest, store, webstore};
+#[cfg(test)]
+use crate::crx::ChromeExtensionId;
+use crate::crx::CrxArchive;
+use crate::webstore::ChromeWebStore;
+use crate::{catalog::ExtensionCatalog, download, manifest, store};
 
 const DEFAULT_PRODVERSION: &str = "120.0.0.0";
 
@@ -88,12 +92,12 @@ impl TryFrom<&str> for ResolvedInstall {
     type Error = String;
 
     fn try_from(source: &str) -> Result<Self, Self::Error> {
-        let id =
-            webstore::extension_id(source).ok_or("not a Chrome Web Store URL or extension id")?;
+        let id = ChromeWebStore::extension_id(source)
+            .ok_or("not a Chrome Web Store URL or extension id")?;
         let store = store::ExtensionStore::current();
         let staging = store.path().join("staging").join(&id);
         let crx_path = staging.join("download.crx");
-        let download_url = webstore::crx_url(&id, DEFAULT_PRODVERSION);
+        let download_url = ChromeWebStore::crx_url(&id, DEFAULT_PRODVERSION);
         Ok(ResolvedInstall {
             id,
             store,
@@ -131,13 +135,14 @@ impl DownloadedInstall {
             store: self.store,
             staging: self.staging,
         }
-        .unpack(&bytes)
+        .unpack(bytes)
     }
 }
 
 impl PackageInstaller {
-    fn unpack(self, bytes: &[u8]) -> Result<InstallOutput, String> {
-        let public_key = crx::crx_public_key_for(bytes, &self.id).ok_or_else(|| {
+    fn unpack(self, bytes: Vec<u8>) -> Result<InstallOutput, String> {
+        let archive = CrxArchive::new(bytes);
+        let public_key = archive.public_key_for(&self.id).ok_or_else(|| {
             format!(
                 "CRX does not contain the developer key for extension {}",
                 self.id
@@ -147,7 +152,7 @@ impl PackageInstaller {
         std::fs::create_dir_all(&self.staging).map_err(|error| error.to_string())?;
         let unpack_dir = self.staging.join("unpacked");
         let _ = std::fs::remove_dir_all(&unpack_dir);
-        crx::unpack_crx(bytes, &unpack_dir)?;
+        archive.unpack(&unpack_dir)?;
 
         let manifest_json = std::fs::read_to_string(unpack_dir.join("manifest.json"))
             .map_err(|error| error.to_string())?;
@@ -422,7 +427,7 @@ mod tests {
     impl FixtureCrx {
         fn new(manifest: &str) -> Self {
             let public_key = b"PUBKEY";
-            let id = crx::extension_id_from_key(public_key);
+            let id = String::from(ChromeExtensionId::from_public_key(public_key));
             let mut zip_bytes = Vec::new();
             {
                 let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut zip_bytes));
@@ -464,7 +469,7 @@ mod tests {
                 store: self.store.clone(),
                 staging,
             }
-            .unpack(&fixture.bytes)
+            .unpack(fixture.bytes.clone())
             .unwrap()
         }
     }

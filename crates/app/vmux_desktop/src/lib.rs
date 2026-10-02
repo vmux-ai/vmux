@@ -71,10 +71,44 @@ impl Plugin for VmuxPlugin {
 impl VmuxPlugin {
     fn window() -> WindowPlugin {
         WindowPlugin {
-            primary_window: Some(window_config(false)),
+            primary_window: Some(Self::window_config(false)),
             close_when_requested: false,
             exit_condition: ExitCondition::DontExit,
             ..default()
+        }
+    }
+
+    pub(crate) fn window_config(secondary: bool) -> NativeWindow {
+        NativeWindow {
+            title: Self::window_title(),
+            transparent: true,
+            composite_alpha_mode: CompositeAlphaMode::PostMultiplied,
+            decorations: true,
+            titlebar_shown: true,
+            titlebar_transparent: true,
+            titlebar_show_title: false,
+            titlebar_show_buttons: false,
+            movable_by_window_background: false,
+            fullsize_content_view: true,
+            resizable: true,
+            ime_enabled: true,
+            visible: !cfg!(all(target_os = "macos", feature = "native-glass")),
+            position: if secondary {
+                WindowPosition::Automatic
+            } else {
+                WindowPosition::Centered(MonitorSelection::Primary)
+            },
+            resolution: WindowResolution::new(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT),
+            ..default()
+        }
+    }
+
+    fn window_title() -> String {
+        match env!("VMUX_BUILD_PROFILE") {
+            "release" => "Vmux".to_string(),
+            "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),
+            "dev" => format!("Vmux Dev ({})", env!("VMUX_GIT_HASH")),
+            other => format!("Vmux ({})", other),
         }
     }
 }
@@ -82,54 +116,20 @@ impl VmuxPlugin {
 const DEFAULT_WINDOW_WIDTH: u32 = 1280;
 const DEFAULT_WINDOW_HEIGHT: u32 = 800;
 
-pub(crate) fn window_config(secondary: bool) -> NativeWindow {
-    NativeWindow {
-        title: window_title(),
-        transparent: true,
-        composite_alpha_mode: CompositeAlphaMode::PostMultiplied,
-        decorations: true,
-        titlebar_shown: true,
-        titlebar_transparent: true,
-        titlebar_show_title: false,
-        titlebar_show_buttons: false,
-        movable_by_window_background: false,
-        fullsize_content_view: true,
-        resizable: true,
-        ime_enabled: true,
-        visible: !cfg!(all(target_os = "macos", feature = "native-glass")),
-        position: if secondary {
-            WindowPosition::Automatic
-        } else {
-            WindowPosition::Centered(MonitorSelection::Primary)
-        },
-        resolution: WindowResolution::new(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT),
-        ..default()
-    }
-}
-
-fn window_title() -> String {
-    match env!("VMUX_BUILD_PROFILE") {
-        "release" => "Vmux".to_string(),
-        "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),
-        "dev" => format!("Vmux Dev ({})", env!("VMUX_GIT_HASH")),
-        other => format!("Vmux ({})", other),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn primary_window_enables_ime_input() {
-        let window = window_config(false);
+        let window = VmuxPlugin::window_config(false);
 
         assert!(window.ime_enabled);
     }
 
     #[test]
     fn primary_window_starts_hidden_when_native_glass_needs_backdrop_setup() {
-        let window = window_config(false);
+        let window = VmuxPlugin::window_config(false);
 
         assert_eq!(
             window.visible,
@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn primary_window_defaults_to_centered_default_size() {
-        let window = window_config(false);
+        let window = VmuxPlugin::window_config(false);
 
         assert!(matches!(
             window.position,
@@ -151,7 +151,10 @@ mod tests {
 
     #[test]
     fn secondary_window_uses_system_positioning() {
-        assert_eq!(window_config(true).position, WindowPosition::Automatic);
+        assert_eq!(
+            VmuxPlugin::window_config(true).position,
+            WindowPosition::Automatic
+        );
     }
 
     #[test]

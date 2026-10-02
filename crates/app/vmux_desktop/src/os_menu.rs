@@ -35,8 +35,10 @@ pub struct OsMenuPlugin;
 
 impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut()
+            .spawn((Name::new("OS menu runtime"), OsMenuState::default()));
         app.insert_non_send(OsMenuResource {
-            menu: Menu::new(),
+            menu: None,
             #[cfg(target_os = "macos")]
             context_menu: None,
             locale: Locale::preferred(),
@@ -45,6 +47,8 @@ impl Plugin for OsMenuPlugin {
             edit_items: Vec::new(),
         })
         .add_message::<OsMenuSelection>()
+        .add_message::<WindowCloseRequested>()
+        .add_message::<crate::runtime::HideAllWindowsRequest>()
         .add_message::<crate::window::CloseVmuxWindow>()
         .add_message::<CloseRequest>()
         .add_message::<OpenRequest>()
@@ -55,13 +59,7 @@ impl Plugin for OsMenuPlugin {
                 .chain()
                 .in_set(WriteCommandRequests),
         )
-        .add_systems(
-            Startup,
-            (spawn_runtime, setup)
-                .chain()
-                .after(SettingsLoadSet)
-                .after(BindCommands),
-        )
+        .add_systems(Startup, setup.after(SettingsLoadSet).after(BindCommands))
         .add_systems(
             Update,
             (
@@ -121,17 +119,13 @@ const NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
     std::time::Duration::from_millis(1500);
 
 struct OsMenuResource {
-    menu: Menu,
+    menu: Option<Menu>,
     #[cfg(target_os = "macos")]
     context_menu: Option<Menu>,
     locale: Locale,
     close_window: Option<MenuItem>,
     #[cfg(target_os = "macos")]
     edit_items: Vec<Retained<NSMenuItem>>,
-}
-
-fn spawn_runtime(mut commands: Commands) {
-    commands.spawn((Name::new("OS menu runtime"), OsMenuState::default()));
 }
 
 fn setup(
@@ -189,7 +183,7 @@ fn setup(
         commands.entity(entity).insert(OsMenuEntry::identified(id));
     }
     *menu_resource = OsMenuResource {
-        menu,
+        menu: Some(menu),
         #[cfg(target_os = "macos")]
         context_menu: None,
         locale,
@@ -248,8 +242,11 @@ fn sync_menu_locale(
     if menu.locale == locale {
         return;
     }
+    let Some(native_menu) = menu.menu.as_ref() else {
+        return;
+    };
     let definitions = definitions.iter().cloned().collect::<Vec<_>>();
-    localize_root_menu(&menu.menu, &menu.locale, &locale, &definitions);
+    localize_root_menu(native_menu, &menu.locale, &locale, &definitions);
     menu.locale = locale;
 }
 

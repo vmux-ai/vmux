@@ -21,77 +21,72 @@ pub(crate) struct NpmToolPlugin;
 
 impl Plugin for NpmToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_provider)
+        app.add_systems(Startup, spawn)
             .add_systems(Update, route.in_set(ToolOperationRouteSet))
-            .add_systems(Update, import_manifest.after(ToolOperationRouteFlush))
-            .add_systems(Update, complete);
+            .add_systems(Update, import.after(ToolOperationRouteFlush))
+            .add_systems(Update, finish);
     }
 }
 
-fn spawn_provider(mut commands: Commands) {
-    commands.spawn((
-        Name::new("NPM tool provider"),
-        ToolProviderId(ToolProvider::Npm),
-        ToolScanner::new(scan),
-        ToolOperator::new(operate),
-    ));
-}
+struct NpmProvider;
 
-fn scan(
-    _store: &ToolStore,
-    manifest: &mut ToolsManifest,
-    refresh: bool,
-) -> Result<ToolProviderSnapshot, String> {
-    Ok(
-        ToolInventory::new(ToolProvider::Npm, scan_inventory(refresh)?)
-            .reconcile(manifest)
-            .into(),
-    )
-}
-
-fn scan_inventory(refresh: bool) -> Result<Vec<ToolInventoryItem>, String> {
-    let Some(npm) = ToolProcess::find("npm") else {
-        return Ok(Vec::new());
-    };
-    let output = npm.output(&["list", "--global", "--depth=0", "--json"], false)?;
-    if output.stdout.is_empty() && !output.status.success() {
-        return Err(output_error("npm", &output));
+impl NpmProvider {
+    fn scan(
+        _store: &ToolStore,
+        manifest: &mut ToolsManifest,
+        refresh: bool,
+    ) -> Result<ToolProviderSnapshot, String> {
+        Ok(
+            ToolInventory::new(ToolProvider::Npm, Self::inventory(refresh)?)
+                .reconcile(manifest)
+                .into(),
+        )
     }
-    let outdated_output = refresh
-        .then(|| npm.output(&["outdated", "--global", "--json"], false).ok())
-        .flatten();
-    let outdated = outdated_output
-        .as_ref()
-        .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok())
-        .and_then(|value| {
-            value
-                .as_object()
-                .map(|packages| packages.keys().cloned().collect())
-        })
-        .unwrap_or_default();
-    parse_inventory(&output.stdout, &outdated)
-}
 
-fn parse_inventory(
-    bytes: &[u8],
-    outdated: &BTreeSet<String>,
-) -> Result<Vec<ToolInventoryItem>, String> {
-    let document: serde_json::Value =
-        serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
-    let dependencies = document
-        .get("dependencies")
-        .and_then(serde_json::Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    Ok(dependencies
-        .into_iter()
-        .map(|(name, metadata)| {
+    fn inventory(refresh: bool) -> Result<Vec<ToolInventoryItem>, String> {
+        let Some(npm) = ToolProcess::find("npm") else {
+            return Ok(Vec::new());
+        };
+        let output = npm.output(&["list", "--global", "--depth=0", "--json"], false)?;
+        if output.stdout.is_empty() && !output.status.success() {
+            return Err(Self::output_error(&output));
+        }
+        let outdated_output = if refresh {
+            npm.output(&["outdated", "--global", "--json"], false).ok()
+        } else {
+            None
+        };
+        let outdated = outdated_output
+            .as_ref()
+            .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok())
+            .and_then(|value| {
+                value
+                    .as_object()
+                    .map(|packages| packages.keys().cloned().collect())
+            })
+            .unwrap_or_default();
+        Self::parse_inventory(&output.stdout, &outdated)
+    }
+
+    fn parse_inventory(
+        bytes: &[u8],
+        outdated: &BTreeSet<String>,
+    ) -> Result<Vec<ToolInventoryItem>, String> {
+        let document: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+        let dependencies = document
+            .get("dependencies")
+            .and_then(serde_json::Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let mut items = Vec::new();
+        for (name, metadata) in dependencies {
             let status = if outdated.contains(&name) {
                 ToolStatus::Outdated
             } else {
                 ToolStatus::Installed
             };
-            ToolInventoryItem {
+            items.push(ToolInventoryItem {
                 id: name.clone(),
                 name,
                 icon: None,
@@ -102,72 +97,82 @@ fn parse_inventory(
                 detail: "Global NPM package".to_string(),
                 status,
                 removable: true,
+            });
+        }
+        Ok(items)
+    }
+
+    fn operate(
+        store: &ToolStore,
+        operation: &ToolOperationKey,
+        value: &str,
+    ) -> Result<String, String> {
+        let id = operation.item_id.trim();
+        match operation.kind {
+            ToolOperationKind::Install => {
+                Self::package_command("install", id)?;
+                store.set_managed_package(ToolProvider::Npm, id, true)?;
+                Ok(format!("{id} installed"))
             }
-        })
-        .collect())
-}
-
-fn operate(store: &ToolStore, operation: &ToolOperationKey, value: &str) -> Result<String, String> {
-    let id = operation.item_id.trim();
-    match operation.kind {
-        ToolOperationKind::Install => {
-            package_command("install", id)?;
-            store.set_managed_package(ToolProvider::Npm, id, true)?;
-            Ok(format!("{id} installed"))
-        }
-        ToolOperationKind::Update => {
-            package_command("update", id)?;
-            store.set_managed_package(ToolProvider::Npm, id, true)?;
-            Ok(format!("{id} updated"))
-        }
-        ToolOperationKind::Uninstall => {
-            let npm = ToolProcess::find("npm").ok_or_else(|| "npm is not installed".to_string())?;
-            if id.is_empty() {
-                return Err("package name is required".to_string());
+            ToolOperationKind::Update => {
+                Self::package_command("update", id)?;
+                store.set_managed_package(ToolProvider::Npm, id, true)?;
+                Ok(format!("{id} updated"))
             }
-            npm.output(&["uninstall", "--global", id], true)?;
-            store.set_managed_package(ToolProvider::Npm, id, false)?;
-            Ok(format!("{id} removed"))
+            ToolOperationKind::Uninstall => {
+                Self::package_command("uninstall", id)?;
+                store.set_managed_package(ToolProvider::Npm, id, false)?;
+                Ok(format!("{id} removed"))
+            }
+            ToolOperationKind::Forget => {
+                store.set_managed_package(ToolProvider::Npm, id, false)?;
+                Ok(format!("{id} removed from tools.toml"))
+            }
+            ToolOperationKind::Adopt => {
+                store.set_managed_package(ToolProvider::Npm, id, true)?;
+                Ok(format!("{id} is now managed"))
+            }
+            ToolOperationKind::Import if value.trim().is_empty() => {
+                let mut manifest = store.load()?;
+                let before = manifest.managed_packages(ToolProvider::Npm.id()).len();
+                let _ = Self::scan(store, &mut manifest, false)?;
+                let imported = manifest
+                    .managed_packages(ToolProvider::Npm.id())
+                    .len()
+                    .saturating_sub(before);
+                store.save(&manifest)?;
+                Ok(format!("imported {imported} npm item(s)"))
+            }
+            _ => Err(format!("NPM does not support {:?}", operation.kind)),
         }
-        ToolOperationKind::Forget => {
-            store.set_managed_package(ToolProvider::Npm, id, false)?;
-            Ok(format!("{id} removed from tools.toml"))
+    }
+
+    fn package_command(operation: &str, id: &str) -> Result<(), String> {
+        if id.is_empty() {
+            return Err("package name is required".to_string());
         }
-        ToolOperationKind::Adopt => {
-            store.set_managed_package(ToolProvider::Npm, id, true)?;
-            Ok(format!("{id} is now managed"))
+        let npm = ToolProcess::find("npm").ok_or_else(|| "npm is not installed".to_string())?;
+        npm.output(&[operation, "--global", id], true)?;
+        Ok(())
+    }
+
+    fn output_error(output: &std::process::Output) -> String {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if detail.is_empty() {
+            format!("npm exited with {}", output.status)
+        } else {
+            detail
         }
-        ToolOperationKind::Import if value.trim().is_empty() => {
-            let mut manifest = store.load()?;
-            let before = manifest.managed_packages(ToolProvider::Npm.id()).len();
-            let _ = scan(store, &mut manifest, false)?;
-            let imported = manifest
-                .managed_packages(ToolProvider::Npm.id())
-                .len()
-                .saturating_sub(before);
-            store.save(&manifest)?;
-            Ok(format!("imported {imported} npm item(s)"))
-        }
-        _ => Err(format!("NPM does not support {:?}", operation.kind)),
     }
 }
 
-fn package_command(operation: &str, id: &str) -> Result<(), String> {
-    if id.is_empty() {
-        return Err("package name is required".to_string());
-    }
-    let npm = ToolProcess::find("npm").ok_or_else(|| "npm is not installed".to_string())?;
-    npm.output(&[operation, "--global", id], true)?;
-    Ok(())
-}
-
-fn output_error(program: &str, output: &std::process::Output) -> String {
-    let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if detail.is_empty() {
-        format!("{program} exited with {}", output.status)
-    } else {
-        detail
-    }
+fn spawn(mut commands: Commands) {
+    commands.spawn((
+        Name::new("NPM tool provider"),
+        ToolProviderId(ToolProvider::Npm),
+        ToolScanner::new(NpmProvider::scan),
+        ToolOperator::new(NpmProvider::operate),
+    ));
 }
 
 fn route(
@@ -189,7 +194,7 @@ fn route(
     }
 }
 
-fn complete(
+fn finish(
     operations: Query<
         (Entity, &ImportedNpmManifest),
         (With<ToolStoreOperation>, Without<ToolOperationFinished>),
@@ -227,7 +232,7 @@ impl ImportedNpmManifest {
     }
 }
 
-fn import_manifest(
+fn import(
     operations: Query<
         (Entity, &ImportNpmManifest, &ToolStoreTarget),
         (
@@ -251,7 +256,7 @@ fn import_manifest(
         commands
             .entity(entity)
             .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                let packages = import_npm_manifest_in(&store, &path)?;
+                let packages = store.import_npm_manifest(&path)?;
                 Ok(ImportedNpmManifest { packages })
             })));
     }
@@ -259,40 +264,46 @@ fn import_manifest(
 
 impl ToolStore {
     pub fn import_npm_manifest(&self, path: &Path) -> Result<usize, String> {
-        import_npm_manifest_in(self, path)
+        self.migrate_legacy_storage()?;
+        let path = self.expand_user_path(path)?;
+        self.import_npm_manifest_to(&path, &self.manifest_path())
     }
-}
 
-fn import_npm_manifest_in(store: &ToolStore, path: &Path) -> Result<usize, String> {
-    store.migrate_legacy_storage()?;
-    let path = store.expand_user_path(path)?;
-    import_npm_manifest_to(&path, &store.manifest_path())
-}
-
-pub fn import_npm_manifest_to(path: &Path, manifest_path: &Path) -> Result<usize, String> {
-    let path = ToolStore::current().expand_user_path(path)?;
-    let source = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
-    let packages = parse_npm_manifest(&source)?;
-    if packages.is_empty() {
-        return Err(format!("no dependencies found in {}", path.display()));
-    }
-    let mut manifest = ToolsManifest::read(manifest_path)?;
-    let imported = manifest.add_packages("npm", &packages);
-    manifest.write_to(manifest_path)?;
-    Ok(imported)
-}
-
-pub fn parse_npm_manifest(source: &str) -> Result<Vec<String>, String> {
-    let document: serde_json::Value =
-        serde_json::from_str(source).map_err(|error| error.to_string())?;
-    let mut packages = Vec::new();
-    for field in ["dependencies", "devDependencies", "optionalDependencies"] {
-        if let Some(entries) = document.get(field).and_then(serde_json::Value::as_object) {
-            packages.extend(entries.keys().cloned());
+    pub fn import_npm_manifest_to(
+        &self,
+        path: &Path,
+        manifest_path: &Path,
+    ) -> Result<usize, String> {
+        let path = self.expand_user_path(path)?;
+        let source = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        let document = NpmManifest::parse(&source)?;
+        if document.packages.is_empty() {
+            return Err(format!("no dependencies found in {}", path.display()));
         }
+        let mut manifest = ToolsManifest::read(manifest_path)?;
+        let imported = manifest.add_packages("npm", &document.packages);
+        manifest.write_to(manifest_path)?;
+        Ok(imported)
     }
-    ToolsManifest::normalize_names(&mut packages);
-    Ok(packages)
+}
+
+pub struct NpmManifest {
+    pub packages: Vec<String>,
+}
+
+impl NpmManifest {
+    pub fn parse(source: &str) -> Result<Self, String> {
+        let document: serde_json::Value =
+            serde_json::from_str(source).map_err(|error| error.to_string())?;
+        let mut packages = Vec::new();
+        for field in ["dependencies", "devDependencies", "optionalDependencies"] {
+            if let Some(entries) = document.get(field).and_then(serde_json::Value::as_object) {
+                packages.extend(entries.keys().cloned());
+            }
+        }
+        ToolsManifest::normalize_names(&mut packages);
+        Ok(Self { packages })
+    }
 }
 
 #[cfg(test)]
@@ -301,7 +312,7 @@ mod tests {
 
     #[test]
     fn parses_scoped_packages_and_outdated_state() {
-        let inventory = parse_inventory(
+        let inventory = NpmProvider::parse_inventory(
             br#"{"dependencies":{"@scope/tool":{"version":"2.0.0"},"typescript":{"version":"5.9.0"}}}"#,
             &BTreeSet::from(["@scope/tool".to_string()]),
         )

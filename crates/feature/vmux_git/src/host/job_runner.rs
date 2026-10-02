@@ -139,6 +139,53 @@ struct OperationOutput {
     status: Option<Result<GitFileStatus, GitOperationError>>,
 }
 
+impl OperationOutput {
+    fn success_with_status(
+        repository: &GitRepository,
+        path: &Path,
+        operation: &str,
+        message: &str,
+    ) -> Self {
+        Self {
+            result: GitOperationResult {
+                operation: operation.to_string(),
+                ok: true,
+                message: message.to_string(),
+            },
+            status: Some(
+                repository
+                    .status(path)
+                    .map_err(|error| GitOperationError { message: error.0 }),
+            ),
+        }
+    }
+
+    fn from_result(operation: &str, result: Result<String, super::repository::GitError>) -> Self {
+        match result {
+            Ok(message) => Self {
+                result: GitOperationResult {
+                    operation: operation.to_string(),
+                    ok: true,
+                    message,
+                },
+                status: None,
+            },
+            Err(error) => Self::failure(operation, error),
+        }
+    }
+
+    fn failure(operation: &str, error: super::repository::GitError) -> Self {
+        Self {
+            result: GitOperationResult {
+                operation: operation.to_string(),
+                ok: false,
+                message: error.0,
+            },
+            status: None,
+        }
+    }
+}
+
 #[derive(Component)]
 struct FailureOutput(GitOperationError);
 
@@ -450,7 +497,7 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
                 Ok(all_lines) => {
                     let markers = super::diff::GitDiffMarkers::from_lines(&all_lines).into_inner();
                     let (total_lines, lines) =
-                        super::parse::window(&all_lines, job.top_line, job.rows);
+                        super::parse::DiffParser::window(&all_lines, job.top_line, job.rows);
                     DiffOutput(GitDiffViewport {
                         generation: job.generation,
                         first_line: job.top_line.min(total_lines),
@@ -480,8 +527,8 @@ fn start_diff_jobs(jobs: PendingGitJobs<DiffJob>, mut commands: Commands) {
 fn start_stage_jobs(jobs: PendingGitJobs<StageJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || match repository.stage(&job.path) {
-            Ok(()) => result_then_status(&repository, &job.path, "stage", "ok"),
-            Err(error) => failed_operation("stage", error),
+            Ok(()) => OperationOutput::success_with_status(&repository, &job.path, "stage", "ok"),
+            Err(error) => OperationOutput::failure("stage", error),
         });
         commands
             .entity(entity)
@@ -493,8 +540,8 @@ fn start_stage_jobs(jobs: PendingGitJobs<StageJob>, mut commands: Commands) {
 fn start_unstage_jobs(jobs: PendingGitJobs<UnstageJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || match repository.unstage(&job.path) {
-            Ok(()) => result_then_status(&repository, &job.path, "unstage", "ok"),
-            Err(error) => failed_operation("unstage", error),
+            Ok(()) => OperationOutput::success_with_status(&repository, &job.path, "unstage", "ok"),
+            Err(error) => OperationOutput::failure("unstage", error),
         });
         commands
             .entity(entity)
@@ -506,8 +553,8 @@ fn start_unstage_jobs(jobs: PendingGitJobs<UnstageJob>, mut commands: Commands) 
 fn start_discard_jobs(jobs: PendingGitJobs<DiscardJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || match repository.discard(&job.path) {
-            Ok(()) => result_then_status(&repository, &job.path, "discard", "ok"),
-            Err(error) => failed_operation("discard", error),
+            Ok(()) => OperationOutput::success_with_status(&repository, &job.path, "discard", "ok"),
+            Err(error) => OperationOutput::failure("discard", error),
         });
         commands
             .entity(entity)
@@ -520,10 +567,15 @@ fn start_commit_jobs(jobs: PendingGitJobs<CommitJob>, mut commands: Commands) {
     for (entity, job, wake) in jobs.ready() {
         let task = GitJobTask::spawn(wake, move || match GitRepository::discover(&job.path) {
             Ok(repository) => match repository.commit(&job.message) {
-                Ok(()) => result_then_status(&repository, &job.path, "commit", "committed"),
-                Err(error) => failed_operation("commit", error),
+                Ok(()) => OperationOutput::success_with_status(
+                    &repository,
+                    &job.path,
+                    "commit",
+                    "committed",
+                ),
+                Err(error) => OperationOutput::failure("commit", error),
             },
-            Err(error) => failed_operation("commit", error),
+            Err(error) => OperationOutput::failure("commit", error),
         });
         commands
             .entity(entity)
@@ -536,10 +588,12 @@ fn start_fetch_jobs(jobs: PendingGitJobs<FetchJob>, mut commands: Commands) {
     for (entity, job, wake) in jobs.ready() {
         let task = GitJobTask::spawn(wake, move || match GitRepository::discover(&job.path) {
             Ok(repository) => match repository.fetch() {
-                Ok(()) => result_then_status(&repository, &job.path, "fetch", "fetched"),
-                Err(error) => failed_operation("fetch", error),
+                Ok(()) => {
+                    OperationOutput::success_with_status(&repository, &job.path, "fetch", "fetched")
+                }
+                Err(error) => OperationOutput::failure("fetch", error),
             },
-            Err(error) => failed_operation("fetch", error),
+            Err(error) => OperationOutput::failure("fetch", error),
         });
         commands
             .entity(entity)
@@ -552,10 +606,12 @@ fn start_pull_jobs(jobs: PendingGitJobs<PullJob>, mut commands: Commands) {
     for (entity, job, wake) in jobs.ready() {
         let task = GitJobTask::spawn(wake, move || match GitRepository::discover(&job.path) {
             Ok(repository) => match repository.pull() {
-                Ok(()) => result_then_status(&repository, &job.path, "pull", "pulled"),
-                Err(error) => failed_operation("pull", error),
+                Ok(()) => {
+                    OperationOutput::success_with_status(&repository, &job.path, "pull", "pulled")
+                }
+                Err(error) => OperationOutput::failure("pull", error),
             },
-            Err(error) => failed_operation("pull", error),
+            Err(error) => OperationOutput::failure("pull", error),
         });
         commands
             .entity(entity)
@@ -568,10 +624,12 @@ fn start_push_jobs(jobs: PendingGitJobs<PushJob>, mut commands: Commands) {
     for (entity, job, wake) in jobs.ready() {
         let task = GitJobTask::spawn(wake, move || match GitRepository::discover(&job.path) {
             Ok(repository) => match repository.push() {
-                Ok(()) => result_then_status(&repository, &job.path, "push", "pushed"),
-                Err(error) => failed_operation("push", error),
+                Ok(()) => {
+                    OperationOutput::success_with_status(&repository, &job.path, "push", "pushed")
+                }
+                Err(error) => OperationOutput::failure("push", error),
             },
-            Err(error) => failed_operation("push", error),
+            Err(error) => OperationOutput::failure("push", error),
         });
         commands
             .entity(entity)
@@ -584,10 +642,15 @@ fn start_stage_all_jobs(jobs: PendingGitJobs<StageAllJob>, mut commands: Command
     for (entity, job, wake) in jobs.ready() {
         let task = GitJobTask::spawn(wake, move || match GitRepository::discover(&job.path) {
             Ok(repository) => match repository.stage_all() {
-                Ok(()) => result_then_status(&repository, &job.path, "stage all", "staged"),
-                Err(error) => failed_operation("stage all", error),
+                Ok(()) => OperationOutput::success_with_status(
+                    &repository,
+                    &job.path,
+                    "stage all",
+                    "staged",
+                ),
+                Err(error) => OperationOutput::failure("stage all", error),
             },
-            Err(error) => failed_operation("stage all", error),
+            Err(error) => OperationOutput::failure("stage all", error),
         });
         commands
             .entity(entity)
@@ -600,13 +663,13 @@ fn start_hunk_jobs(jobs: PendingGitJobs<HunkJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || {
             match repository.apply_hunk(&job.path, job.hunk, job.accept) {
-                Ok(()) => result_then_status(
+                Ok(()) => OperationOutput::success_with_status(
                     &repository,
                     &job.path,
                     if job.accept { "accept" } else { "reject" },
                     "ok",
                 ),
-                Err(error) => failed_operation("hunk", error),
+                Err(error) => OperationOutput::failure("hunk", error),
             }
         });
         commands
@@ -618,7 +681,9 @@ fn start_hunk_jobs(jobs: PendingGitJobs<HunkJob>, mut commands: Commands) {
 
 fn start_amend_jobs(jobs: PendingGitJobs<AmendJob>, mut commands: Commands) {
     for (entity, _, repository, wake) in jobs.ready_with_repository() {
-        let task = GitJobTask::spawn(wake, move || operation("amend", repository.amend()));
+        let task = GitJobTask::spawn(wake, move || {
+            OperationOutput::from_result("amend", repository.amend())
+        });
         commands
             .entity(entity)
             .remove::<AmendJob>()
@@ -629,7 +694,7 @@ fn start_amend_jobs(jobs: PendingGitJobs<AmendJob>, mut commands: Commands) {
 fn start_checkout_commit_jobs(jobs: PendingGitJobs<CheckoutCommitJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || {
-            operation("checkout commit", repository.checkout_commit(&job.commit))
+            OperationOutput::from_result("checkout commit", repository.checkout_commit(&job.commit))
         });
         commands
             .entity(entity)
@@ -641,7 +706,7 @@ fn start_checkout_commit_jobs(jobs: PendingGitJobs<CheckoutCommitJob>, mut comma
 fn start_cherry_pick_jobs(jobs: PendingGitJobs<CherryPickJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || {
-            operation("cherry-pick", repository.cherry_pick(&job.commit))
+            OperationOutput::from_result("cherry-pick", repository.cherry_pick(&job.commit))
         });
         commands
             .entity(entity)
@@ -653,7 +718,7 @@ fn start_cherry_pick_jobs(jobs: PendingGitJobs<CherryPickJob>, mut commands: Com
 fn start_create_branch_jobs(jobs: PendingGitJobs<CreateBranchJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || {
-            operation(
+            OperationOutput::from_result(
                 "new branch",
                 repository.create_branch(&job.branch, &job.start_point),
             )
@@ -668,7 +733,7 @@ fn start_create_branch_jobs(jobs: PendingGitJobs<CreateBranchJob>, mut commands:
 fn start_delete_branch_jobs(jobs: PendingGitJobs<DeleteBranchJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || {
-            operation("delete branch", repository.delete_branch(&job.branch))
+            OperationOutput::from_result("delete branch", repository.delete_branch(&job.branch))
         });
         commands
             .entity(entity)
@@ -680,7 +745,7 @@ fn start_delete_branch_jobs(jobs: PendingGitJobs<DeleteBranchJob>, mut commands:
 fn start_fast_forward_jobs(jobs: PendingGitJobs<FastForwardJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || {
-            operation("fast-forward", repository.fast_forward(&job.branch))
+            OperationOutput::from_result("fast-forward", repository.fast_forward(&job.branch))
         });
         commands
             .entity(entity)
@@ -692,7 +757,7 @@ fn start_fast_forward_jobs(jobs: PendingGitJobs<FastForwardJob>, mut commands: C
 fn start_merge_jobs(jobs: PendingGitJobs<MergeJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || {
-            operation("merge", repository.merge(&job.branch))
+            OperationOutput::from_result("merge", repository.merge(&job.branch))
         });
         commands
             .entity(entity)
@@ -704,7 +769,7 @@ fn start_merge_jobs(jobs: PendingGitJobs<MergeJob>, mut commands: Commands) {
 fn start_rebase_jobs(jobs: PendingGitJobs<RebaseJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || {
-            operation("rebase", repository.rebase(&job.branch))
+            OperationOutput::from_result("rebase", repository.rebase(&job.branch))
         });
         commands
             .entity(entity)
@@ -716,7 +781,7 @@ fn start_rebase_jobs(jobs: PendingGitJobs<RebaseJob>, mut commands: Commands) {
 fn start_revert_jobs(jobs: PendingGitJobs<RevertJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || {
-            operation("revert", repository.revert(&job.commit))
+            OperationOutput::from_result("revert", repository.revert(&job.commit))
         });
         commands
             .entity(entity)
@@ -728,7 +793,7 @@ fn start_revert_jobs(jobs: PendingGitJobs<RevertJob>, mut commands: Commands) {
 fn start_stash_drop_jobs(jobs: PendingGitJobs<StashDropJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || {
-            operation("stash drop", repository.stash_drop(&job.reference))
+            OperationOutput::from_result("stash drop", repository.stash_drop(&job.reference))
         });
         commands
             .entity(entity)
@@ -740,7 +805,7 @@ fn start_stash_drop_jobs(jobs: PendingGitJobs<StashDropJob>, mut commands: Comma
 fn start_stash_pop_jobs(jobs: PendingGitJobs<StashPopJob>, mut commands: Commands) {
     for (entity, job, repository, wake) in jobs.ready_with_repository() {
         let task = GitJobTask::spawn(wake, move || {
-            operation("stash pop", repository.stash_pop(&job.reference))
+            OperationOutput::from_result("stash pop", repository.stash_pop(&job.reference))
         });
         commands
             .entity(entity)
@@ -751,59 +816,13 @@ fn start_stash_pop_jobs(jobs: PendingGitJobs<StashPopJob>, mut commands: Command
 
 fn start_stash_push_jobs(jobs: PendingGitJobs<StashPushJob>, mut commands: Commands) {
     for (entity, _, repository, wake) in jobs.ready_with_repository() {
-        let task = GitJobTask::spawn(wake, move || operation("stash", repository.stash_push()));
+        let task = GitJobTask::spawn(wake, move || {
+            OperationOutput::from_result("stash", repository.stash_push())
+        });
         commands
             .entity(entity)
             .remove::<StashPushJob>()
             .insert((GitJobRunning, task));
-    }
-}
-
-fn result_then_status(
-    repository: &GitRepository,
-    path: &Path,
-    operation: &str,
-    message: &str,
-) -> OperationOutput {
-    OperationOutput {
-        result: GitOperationResult {
-            operation: operation.to_string(),
-            ok: true,
-            message: message.to_string(),
-        },
-        status: Some(
-            repository
-                .status(path)
-                .map_err(|error| GitOperationError { message: error.0 }),
-        ),
-    }
-}
-
-fn operation(
-    operation: &str,
-    result: Result<String, super::repository::GitError>,
-) -> OperationOutput {
-    match result {
-        Ok(message) => OperationOutput {
-            result: GitOperationResult {
-                operation: operation.to_string(),
-                ok: true,
-                message,
-            },
-            status: None,
-        },
-        Err(error) => failed_operation(operation, error),
-    }
-}
-
-fn failed_operation(operation: &str, error: super::repository::GitError) -> OperationOutput {
-    OperationOutput {
-        result: GitOperationResult {
-            operation: operation.to_string(),
-            ok: false,
-            message: error.0,
-        },
-        status: None,
     }
 }
 

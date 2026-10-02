@@ -1,23 +1,34 @@
 use bevy_cef_core::prelude::{CefTransitionCore, CefTransitionQualifiers};
 use vmux_ecs::TransitionType;
 
-pub fn map(core: CefTransitionCore, qual: CefTransitionQualifiers) -> TransitionType {
-    if qual.forward_back {
-        return TransitionType::BackForward;
+pub struct HistoryTransition {
+    core: CefTransitionCore,
+    qualifiers: CefTransitionQualifiers,
+}
+
+impl HistoryTransition {
+    pub fn new(core: CefTransitionCore, qualifiers: CefTransitionQualifiers) -> Self {
+        Self { core, qualifiers }
     }
-    if qual.client_redirect || qual.server_redirect {
-        return TransitionType::Redirect;
-    }
-    match core {
-        CefTransitionCore::Reload => TransitionType::Reload,
-        CefTransitionCore::Explicit
-        | CefTransitionCore::Generated
-        | CefTransitionCore::Keyword
-        | CefTransitionCore::KeywordGenerated => TransitionType::Typed,
-        CefTransitionCore::Link
-        | CefTransitionCore::FormSubmit
-        | CefTransitionCore::AutoBookmark => TransitionType::Link,
-        _ => TransitionType::Other,
+
+    pub fn kind(&self) -> TransitionType {
+        if self.qualifiers.forward_back {
+            return TransitionType::BackForward;
+        }
+        if self.qualifiers.client_redirect || self.qualifiers.server_redirect {
+            return TransitionType::Redirect;
+        }
+        match self.core {
+            CefTransitionCore::Reload => TransitionType::Reload,
+            CefTransitionCore::Explicit
+            | CefTransitionCore::Generated
+            | CefTransitionCore::Keyword
+            | CefTransitionCore::KeywordGenerated => TransitionType::Typed,
+            CefTransitionCore::Link
+            | CefTransitionCore::FormSubmit
+            | CefTransitionCore::AutoBookmark => TransitionType::Link,
+            _ => TransitionType::Other,
+        }
     }
 }
 
@@ -36,7 +47,7 @@ mod tests {
             ..no_qual()
         };
         assert_eq!(
-            map(CefTransitionCore::Explicit, qual),
+            HistoryTransition::new(CefTransitionCore::Explicit, qual).kind(),
             TransitionType::BackForward
         );
     }
@@ -47,13 +58,16 @@ mod tests {
             server_redirect: true,
             ..no_qual()
         };
-        assert_eq!(map(CefTransitionCore::Link, qual), TransitionType::Redirect);
+        assert_eq!(
+            HistoryTransition::new(CefTransitionCore::Link, qual).kind(),
+            TransitionType::Redirect
+        );
     }
 
     #[test]
     fn typed_from_explicit() {
         assert_eq!(
-            map(CefTransitionCore::Explicit, no_qual()),
+            HistoryTransition::new(CefTransitionCore::Explicit, no_qual()).kind(),
             TransitionType::Typed
         );
     }
@@ -61,7 +75,7 @@ mod tests {
     #[test]
     fn typed_from_generated() {
         assert_eq!(
-            map(CefTransitionCore::Generated, no_qual()),
+            HistoryTransition::new(CefTransitionCore::Generated, no_qual()).kind(),
             TransitionType::Typed
         );
     }
@@ -69,11 +83,11 @@ mod tests {
     #[test]
     fn link_from_link_and_form_submit() {
         assert_eq!(
-            map(CefTransitionCore::Link, no_qual()),
+            HistoryTransition::new(CefTransitionCore::Link, no_qual()).kind(),
             TransitionType::Link
         );
         assert_eq!(
-            map(CefTransitionCore::FormSubmit, no_qual()),
+            HistoryTransition::new(CefTransitionCore::FormSubmit, no_qual()).kind(),
             TransitionType::Link
         );
     }
@@ -81,7 +95,7 @@ mod tests {
     #[test]
     fn reload_maps_directly() {
         assert_eq!(
-            map(CefTransitionCore::Reload, no_qual()),
+            HistoryTransition::new(CefTransitionCore::Reload, no_qual()).kind(),
             TransitionType::Reload
         );
     }
@@ -89,7 +103,7 @@ mod tests {
     #[test]
     fn subframe_falls_to_other() {
         assert_eq!(
-            map(CefTransitionCore::AutoSubframe, no_qual()),
+            HistoryTransition::new(CefTransitionCore::AutoSubframe, no_qual()).kind(),
             TransitionType::Other
         );
     }

@@ -1,3 +1,4 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
@@ -49,6 +50,69 @@ struct ChatProjection {
     transcript: TranscriptTail,
 }
 
+type ChangedSession = (
+    Entity,
+    &'static AcpSession,
+    Ref<'static, AgentMessages>,
+    Ref<'static, AgentMessageTimes>,
+    Ref<'static, AgentRunState>,
+    Option<Ref<'static, AgentTurnMeta>>,
+    Option<Ref<'static, Profile>>,
+    Option<&'static PageMetadata>,
+    Ref<'static, PromptQueue>,
+    Option<Ref<'static, ImportedConversation>>,
+    Option<Ref<'static, AgentConversationTitle>>,
+);
+
+type ProjectionView = (
+    &'static mut ChatTranscriptProjection,
+    &'static mut ChatSnapshotProjection,
+    &'static ChatAttachmentProjection,
+);
+
+#[derive(SystemParam)]
+struct PushWorld<'w, 's> {
+    sessions: Query<'w, 's, ChangedSession>,
+    children: Query<'w, 's, &'static Children>,
+    chat_views: Query<'w, 's, ProjectionView, With<ChatView>>,
+    choices: Query<'w, 's, &'static PendingAgentChoice>,
+    user_profiles: Query<'w, 's, Ref<'static, Profile>, With<User>>,
+}
+
+type ReadyView = (
+    Entity,
+    &'static mut ChatTranscriptProjection,
+    &'static mut ChatSnapshotProjection,
+    &'static ChatAttachmentProjection,
+);
+
+type ReadyViewFilter = (
+    With<ChatView>,
+    With<vmux_ecs::page::PageReady>,
+    Without<ChatSynced>,
+);
+
+type SessionProjection = (
+    &'static AcpSession,
+    &'static AgentMessages,
+    &'static AgentMessageTimes,
+    &'static AgentRunState,
+    Option<&'static AgentTurnMeta>,
+    Option<&'static Profile>,
+    Option<&'static PageMetadata>,
+    &'static PromptQueue,
+    Option<&'static ImportedConversation>,
+    Option<&'static AgentConversationTitle>,
+);
+
+type HistorySource = (
+    &'static AgentMessages,
+    &'static AgentMessageTimes,
+    &'static AgentRunState,
+    Option<&'static AgentTurnMeta>,
+    Option<&'static ImportedConversation>,
+);
+
 fn track_turn_duration(
     time: Res<Time>,
     mut sessions: Query<(&AgentRunState, &mut AgentTurnMeta), Changed<AgentRunState>>,
@@ -72,36 +136,13 @@ fn track_turn_duration(
 }
 
 fn push_to_page(
-    sessions: Query<(
-        Entity,
-        &AcpSession,
-        Ref<AgentMessages>,
-        Ref<AgentMessageTimes>,
-        Ref<AgentRunState>,
-        Option<Ref<AgentTurnMeta>>,
-        Option<Ref<Profile>>,
-        Option<&PageMetadata>,
-        Ref<PromptQueue>,
-        Option<Ref<ImportedConversation>>,
-        Option<Ref<AgentConversationTitle>>,
-    )>,
-    children: Query<&Children>,
-    mut chat_views: Query<
-        (
-            &mut ChatTranscriptProjection,
-            &mut ChatSnapshotProjection,
-            &ChatAttachmentProjection,
-        ),
-        With<ChatView>,
-    >,
-    choices: Query<&PendingAgentChoice>,
-    user_profiles: Query<Ref<Profile>, With<User>>,
+    mut world: PushWorld,
     mut last_push: Local<std::collections::HashMap<Entity, std::time::Instant>>,
     mut owed: Local<std::collections::HashSet<Entity>>,
     mut removed_messages: RemovedComponents<AgentMessages>,
     mut commands: Commands,
 ) {
-    let user_profile = user_profiles.single().ok();
+    let user_profile = world.user_profiles.single().ok();
     let user_moved = user_profile
         .as_ref()
         .is_some_and(|profile| profile.is_changed());
@@ -121,7 +162,7 @@ fn push_to_page(
         queue,
         imported,
         title,
-    ) in &sessions
+    ) in &world.sessions
     {
         let moved = user_moved
             || state.is_changed()
@@ -136,11 +177,11 @@ fn push_to_page(
         {
             continue;
         }
-        let Ok(kids) = children.get(stack) else {
+        let Ok(kids) = world.children.get(stack) else {
             owed.insert(stack);
             continue;
         };
-        let Some(webview) = kids.iter().find(|&e| chat_views.contains(e)) else {
+        let Some(webview) = kids.iter().find(|&e| world.chat_views.contains(e)) else {
             owed.insert(stack);
             continue;
         };
@@ -165,9 +206,10 @@ fn push_to_page(
             &queue,
             imported.as_deref(),
             title.as_deref(),
-            choices.get(webview).ok(),
+            world.choices.get(webview).ok(),
         );
-        let Ok((mut transcript, mut snapshot, attachments)) = chat_views.get_mut(webview) else {
+        let Ok((mut transcript, mut snapshot, attachments)) = world.chat_views.get_mut(webview)
+        else {
             owed.insert(stack);
             continue;
         };
@@ -346,32 +388,9 @@ impl ChatProjection {
 }
 
 fn sync_ready_views(
-    mut pending: Query<
-        (
-            Entity,
-            &mut ChatTranscriptProjection,
-            &mut ChatSnapshotProjection,
-            &ChatAttachmentProjection,
-        ),
-        (
-            With<ChatView>,
-            With<vmux_ecs::page::PageReady>,
-            Without<ChatSynced>,
-        ),
-    >,
+    mut pending: Query<ReadyView, ReadyViewFilter>,
     child_of: Query<&ChildOf>,
-    sessions: Query<(
-        &AcpSession,
-        &AgentMessages,
-        &AgentMessageTimes,
-        &AgentRunState,
-        Option<&AgentTurnMeta>,
-        Option<&Profile>,
-        Option<&PageMetadata>,
-        &PromptQueue,
-        Option<&ImportedConversation>,
-        Option<&AgentConversationTitle>,
-    )>,
+    sessions: Query<SessionProjection>,
     choices: Query<&PendingAgentChoice>,
     user_profiles: Query<&Profile, With<User>>,
     mut commands: Commands,
@@ -475,13 +494,7 @@ fn request_more(
 
 fn resolve_queries(
     queries: Query<(Entity, &ChatHistoryQuery)>,
-    sessions: Query<(
-        &AgentMessages,
-        &AgentMessageTimes,
-        &AgentRunState,
-        Option<&AgentTurnMeta>,
-        Option<&ImportedConversation>,
-    )>,
+    sessions: Query<HistorySource>,
     mut commands: Commands,
 ) {
     for (entity, query) in &queries {

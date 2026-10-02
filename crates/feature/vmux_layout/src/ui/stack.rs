@@ -221,7 +221,7 @@ impl StackTitle {
         if !title.trim().is_empty() {
             return title;
         }
-        if let Some(host) = vmux_ui::favicon::host_for_favicon_fallback(&stack.url) {
+        if let Some(host) = vmux_ui::favicon::FaviconSource::host(&stack.url) {
             return host.to_string();
         }
         if stack.is_loading {

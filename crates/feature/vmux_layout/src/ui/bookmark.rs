@@ -23,7 +23,7 @@ use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
-use vmux_ui::platform::sleep_ms;
+use vmux_ui::platform::Platform;
 
 use crate::event::{
     BookmarkEntryState, BookmarkFolderState, BookmarkTreeState, BookmarkUiState,
@@ -573,7 +573,7 @@ fn perform_bookmark_drop(item: BookmarkDragItem, target: BookmarkDragTarget) {
 
 fn clear_bookmark_drag_after_click(mut state: Signal<Option<BookmarkDragState>>) {
     spawn(async move {
-        sleep_ms(0).await;
+        Platform::sleep(0).await;
         state.set(None);
     });
 }
@@ -656,7 +656,7 @@ fn set_bookmark_context_menu_active(active: bool) {
 fn begin_inline_rename(mut editing: Signal<bool>, mut draft: Signal<String>, name: String) {
     draft.set(name);
     spawn(async move {
-        sleep_ms(0).await;
+        Platform::sleep(0).await;
         editing.set(true);
     });
 }

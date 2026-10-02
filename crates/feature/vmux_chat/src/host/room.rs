@@ -84,7 +84,7 @@ fn fold_conversation(
                 }
                 conversation.status = session.status.clone();
                 conversation.approval = session.approval.clone();
-                conversation.session = Some(session.clone());
+                conversation.session = Some(session.as_ref().clone());
             }
             RemoteEvent::Snapshot {
                 room_id,
@@ -603,7 +603,7 @@ mod tests {
         let session = moved.session.as_mut().expect("a session");
         session.room_id = RoomId::from("elsewhere");
         started.report(RemoteEvent::Session {
-            session: session.clone(),
+            session: Box::new(session.clone()),
         });
         assert!(started.log().events.is_empty());
         assert_eq!(started.log().room_id, None);

@@ -3,7 +3,7 @@ use std::rc::Rc;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_ui::hooks::send;
-use vmux_ui::platform::sleep_ms;
+use vmux_ui::platform::Platform;
 
 use crate::event::{TabActivateRequest, TabDropPlacement, TabReorderRequest};
 
@@ -218,7 +218,7 @@ impl TabDrag {
         self.state.set(None);
         let mut click_block = self.click_block;
         spawn(async move {
-            sleep_ms(100).await;
+            Platform::sleep(100).await;
             if click_block() == Some(block) {
                 click_block.set(None);
             }

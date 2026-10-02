@@ -24,7 +24,7 @@ impl Plugin for ToolRegistryPlugin {
                 .chain(),
         )
         .add_systems(Startup, spawn.in_set(ToolStartupSet::Registry))
-        .add_systems(Startup, register_manifests.in_set(ToolStartupSet::Manifest))
+        .add_systems(Startup, register.in_set(ToolStartupSet::Manifest))
         .configure_sets(
             Update,
             (
@@ -36,10 +36,7 @@ impl Plugin for ToolRegistryPlugin {
             )
                 .chain(),
         )
-        .add_systems(
-            Update,
-            (resolve_catalogs, resolve_invocations).in_set(ToolResolveSet),
-        )
+        .add_systems(Update, (catalogs, invocations).in_set(ToolResolveSet))
         .add_systems(
             Update,
             bevy_ecs::schedule::ApplyDeferred.in_set(ToolRequestFlush),
@@ -82,7 +79,7 @@ fn spawn(mut commands: Commands) {
     commands.spawn((Name::new("Tool registry"), NextToolOrder::default()));
 }
 
-fn register_manifests(
+fn register(
     features: Query<&FeatureManifest>,
     mut commands: Commands,
     mut next_order: Single<&mut NextToolOrder>,
@@ -220,7 +217,7 @@ pub struct AcpSessionContext;
 #[derive(Component, Clone, Copy)]
 pub struct AcpTerminalContext;
 
-fn resolve_catalogs(
+fn catalogs(
     requests: Query<
         (
             Entity,
@@ -265,7 +262,7 @@ fn resolve_catalogs(
     }
 }
 
-fn resolve_invocations(
+fn invocations(
     invocations: Query<
         (
             Entity,
@@ -283,7 +280,10 @@ fn resolve_invocations(
     for (request_entity, requested_name, _, acp_session, acp_terminals, command_fallback) in
         &invocations
     {
-        let normalized = canonical_tool_name(requested_name.as_str());
+        let normalized = requested_name
+            .as_str()
+            .strip_prefix("vmux_")
+            .unwrap_or(requested_name.as_str());
         let mut matched = None;
         for (tool_entity, name, aliases, _, _, access, _, _) in &tools {
             if name.as_str() != normalized && !aliases.0.iter().any(|alias| alias == normalized) {
@@ -418,10 +418,6 @@ impl From<ToolEntry> for ToolSeed {
             shell_aware: entry.shell_aware,
         }
     }
-}
-
-pub fn canonical_tool_name(name: &str) -> &str {
-    name.strip_prefix("vmux_").unwrap_or(name)
 }
 
 pub struct ShellNote;

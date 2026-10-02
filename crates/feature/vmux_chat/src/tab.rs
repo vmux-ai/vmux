@@ -8,7 +8,7 @@ impl Accent {
     pub fn for_agent(profile_color: &str, agent: &str) -> Self {
         Self::resolve(
             profile_color,
-            vmux_ui::agent_accent::agent_accent(agent).rain_rgb,
+            vmux_ui::agent_accent::AgentAccent::for_agent(agent).rain_rgb,
         )
     }
 

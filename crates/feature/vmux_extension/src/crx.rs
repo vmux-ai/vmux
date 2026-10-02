@@ -2,174 +2,195 @@ use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::Path;
 
-pub fn zip_offset(bytes: &[u8]) -> Result<usize, String> {
-    if bytes.len() < 16 || &bytes[0..4] != b"Cr24" {
-        return Err("not a crx (bad magic)".into());
+pub struct CrxArchive(Vec<u8>);
+
+impl CrxArchive {
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Self(bytes)
     }
-    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
-    match version {
-        3 => {
-            let header_len = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-            let off = 12usize
-                .checked_add(header_len)
-                .filter(|off| *off <= bytes.len())
-                .ok_or("crx3 header length out of range")?;
-            Ok(off)
+
+    pub fn zip_offset(&self) -> Result<usize, String> {
+        if self.0.len() < 16 || &self.0[0..4] != b"Cr24" {
+            return Err("not a crx (bad magic)".into());
         }
-        2 => {
-            let pubkey_len = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-            let sig_len = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
-            let off = 16usize
-                .checked_add(pubkey_len)
-                .and_then(|x| x.checked_add(sig_len))
-                .filter(|off| *off <= bytes.len())
-                .ok_or("crx2 header length out of range")?;
-            Ok(off)
-        }
-        v => Err(format!("unsupported crx version {v}")),
-    }
-}
-
-pub fn unpack_crx(bytes: &[u8], dest: &Path) -> Result<(), String> {
-    let off = zip_offset(bytes)?;
-    let cursor = std::io::Cursor::new(&bytes[off..]);
-    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let Some(name) = file.enclosed_name() else {
-            continue;
-        };
-        let out_path = dest.join(name);
-        if file.is_dir() {
-            std::fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
-            continue;
-        }
-        if let Some(parent) = out_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf).map_err(|e| e.to_string())?;
-        std::fs::write(&out_path, buf).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-pub fn crx_public_key_for(bytes: &[u8], expected_id: &str) -> Option<Vec<u8>> {
-    crx_public_keys(bytes)
-        .into_iter()
-        .find(|pk| extension_id_from_key(pk) == expected_id)
-}
-
-pub fn crx_public_keys(bytes: &[u8]) -> Vec<Vec<u8>> {
-    if bytes.len() < 12 || &bytes[0..4] != b"Cr24" {
-        return Vec::new();
-    }
-    if u32::from_le_bytes(bytes[4..8].try_into().unwrap_or_default()) != 3 {
-        return Vec::new();
-    }
-    let header_len = u32::from_le_bytes(bytes[8..12].try_into().unwrap_or_default()) as usize;
-    let Some(end) = 12usize.checked_add(header_len) else {
-        return Vec::new();
-    };
-    if end > bytes.len() {
-        return Vec::new();
-    }
-    header_public_keys(&bytes[12..end])
-}
-
-pub fn extension_id_from_key(pubkey_der: &[u8]) -> String {
-    let digest = Sha256::digest(pubkey_der);
-    let mut id = String::with_capacity(32);
-    for byte in &digest[..16] {
-        id.push((b'a' + (byte >> 4)) as char);
-        id.push((b'a' + (byte & 0x0f)) as char);
-    }
-    id
-}
-
-fn header_public_keys(header: &[u8]) -> Vec<Vec<u8>> {
-    let mut keys = Vec::new();
-    let mut i = 0;
-    while i < header.len() {
-        let Some((tag, adv)) = read_varint(header, i) else {
-            break;
-        };
-        i += adv;
-        match tag & 7 {
-            0 => {
-                let Some((_, n)) = read_varint(header, i) else {
-                    break;
-                };
-                i += n;
+        let version = u32::from_le_bytes(self.0[4..8].try_into().unwrap());
+        match version {
+            3 => {
+                let header_len = u32::from_le_bytes(self.0[8..12].try_into().unwrap()) as usize;
+                12usize
+                    .checked_add(header_len)
+                    .filter(|offset| *offset <= self.0.len())
+                    .ok_or_else(|| "crx3 header length out of range".to_string())
             }
-            1 => i += 8,
-            5 => i += 4,
             2 => {
-                let Some((len, n)) = read_varint(header, i) else {
-                    break;
-                };
-                i += n;
-                let Some(stop) = i.checked_add(len as usize) else {
-                    break;
-                };
-                if stop > header.len() {
-                    break;
-                }
-                if tag >> 3 == 2
-                    && let Some(pk) = proof_public_key(&header[i..stop])
-                {
-                    keys.push(pk);
-                }
-                i = stop;
+                let public_key_len = u32::from_le_bytes(self.0[8..12].try_into().unwrap()) as usize;
+                let signature_len = u32::from_le_bytes(self.0[12..16].try_into().unwrap()) as usize;
+                16usize
+                    .checked_add(public_key_len)
+                    .and_then(|offset| offset.checked_add(signature_len))
+                    .filter(|offset| *offset <= self.0.len())
+                    .ok_or_else(|| "crx2 header length out of range".to_string())
             }
-            _ => break,
+            version => Err(format!("unsupported crx version {version}")),
         }
     }
-    keys
-}
 
-fn proof_public_key(msg: &[u8]) -> Option<Vec<u8>> {
-    let mut i = 0;
-    while i < msg.len() {
-        let (tag, adv) = read_varint(msg, i)?;
-        i += adv;
-        match tag & 7 {
-            0 => i += read_varint(msg, i)?.1,
-            1 => i += 8,
-            5 => i += 4,
-            2 => {
-                let (len, n) = read_varint(msg, i)?;
-                i += n;
-                let stop = i.checked_add(len as usize)?;
-                if stop > msg.len() {
-                    return None;
-                }
-                if tag >> 3 == 1 {
-                    return Some(msg[i..stop].to_vec());
-                }
-                i = stop;
+    pub fn unpack(&self, destination: &Path) -> Result<(), String> {
+        let offset = self.zip_offset()?;
+        let cursor = std::io::Cursor::new(&self.0[offset..]);
+        let mut archive = zip::ZipArchive::new(cursor).map_err(|error| error.to_string())?;
+        for index in 0..archive.len() {
+            let mut file = archive.by_index(index).map_err(|error| error.to_string())?;
+            let Some(name) = file.enclosed_name() else {
+                continue;
+            };
+            let output = destination.join(name);
+            if file.is_dir() {
+                std::fs::create_dir_all(&output).map_err(|error| error.to_string())?;
+                continue;
             }
-            _ => return None,
+            if let Some(parent) = output.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)
+                .map_err(|error| error.to_string())?;
+            std::fs::write(&output, bytes).map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
+    pub fn public_key_for(&self, expected_id: &str) -> Option<Vec<u8>> {
+        self.public_keys().into_iter().find(|public_key| {
+            ChromeExtensionId::from_public_key(public_key).as_str() == expected_id
+        })
+    }
+
+    pub fn public_keys(&self) -> Vec<Vec<u8>> {
+        if self.0.len() < 12 || &self.0[0..4] != b"Cr24" {
+            return Vec::new();
+        }
+        if u32::from_le_bytes(self.0[4..8].try_into().unwrap_or_default()) != 3 {
+            return Vec::new();
+        }
+        let header_len = u32::from_le_bytes(self.0[8..12].try_into().unwrap_or_default()) as usize;
+        let Some(end) = 12usize.checked_add(header_len) else {
+            return Vec::new();
+        };
+        if end > self.0.len() {
+            return Vec::new();
+        }
+        Self::header_public_keys(&self.0[12..end])
+    }
+
+    fn header_public_keys(header: &[u8]) -> Vec<Vec<u8>> {
+        let mut keys = Vec::new();
+        let mut index = 0;
+        while index < header.len() {
+            let Some((tag, advanced)) = Self::read_varint(header, index) else {
+                break;
+            };
+            index += advanced;
+            match tag & 7 {
+                0 => {
+                    let Some((_, advanced)) = Self::read_varint(header, index) else {
+                        break;
+                    };
+                    index += advanced;
+                }
+                1 => index += 8,
+                5 => index += 4,
+                2 => {
+                    let Some((length, advanced)) = Self::read_varint(header, index) else {
+                        break;
+                    };
+                    index += advanced;
+                    let Some(stop) = index.checked_add(length as usize) else {
+                        break;
+                    };
+                    if stop > header.len() {
+                        break;
+                    }
+                    if tag >> 3 == 2
+                        && let Some(public_key) = Self::proof_public_key(&header[index..stop])
+                    {
+                        keys.push(public_key);
+                    }
+                    index = stop;
+                }
+                _ => break,
+            }
+        }
+        keys
+    }
+
+    fn proof_public_key(message: &[u8]) -> Option<Vec<u8>> {
+        let mut index = 0;
+        while index < message.len() {
+            let (tag, advanced) = Self::read_varint(message, index)?;
+            index += advanced;
+            match tag & 7 {
+                0 => index += Self::read_varint(message, index)?.1,
+                1 => index += 8,
+                5 => index += 4,
+                2 => {
+                    let (length, advanced) = Self::read_varint(message, index)?;
+                    index += advanced;
+                    let stop = index.checked_add(length as usize)?;
+                    if stop > message.len() {
+                        return None;
+                    }
+                    if tag >> 3 == 1 {
+                        return Some(message[index..stop].to_vec());
+                    }
+                    index = stop;
+                }
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    fn read_varint(bytes: &[u8], start: usize) -> Option<(u64, usize)> {
+        let mut value = 0u64;
+        let mut shift = 0u32;
+        let mut index = start;
+        loop {
+            let byte = *bytes.get(index)?;
+            index += 1;
+            value |= ((byte & 0x7f) as u64) << shift;
+            if byte & 0x80 == 0 {
+                return Some((value, index - start));
+            }
+            shift += 7;
+            if shift >= 64 {
+                return None;
+            }
         }
     }
-    None
 }
 
-fn read_varint(b: &[u8], start: usize) -> Option<(u64, usize)> {
-    let mut val = 0u64;
-    let mut shift = 0u32;
-    let mut i = start;
-    loop {
-        let byte = *b.get(i)?;
-        i += 1;
-        val |= ((byte & 0x7f) as u64) << shift;
-        if byte & 0x80 == 0 {
-            return Some((val, i - start));
+pub struct ChromeExtensionId(String);
+
+impl ChromeExtensionId {
+    pub fn from_public_key(public_key: &[u8]) -> Self {
+        let digest = Sha256::digest(public_key);
+        let mut id = String::with_capacity(32);
+        for byte in &digest[..16] {
+            id.push((b'a' + (byte >> 4)) as char);
+            id.push((b'a' + (byte & 0x0f)) as char);
         }
-        shift += 7;
-        if shift >= 64 {
-            return None;
-        }
+        Self(id)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<ChromeExtensionId> for String {
+    fn from(id: ChromeExtensionId) -> Self {
+        id.0
     }
 }
 
@@ -208,7 +229,7 @@ mod tests {
     fn unpacks_crx3_to_dir() {
         let dir = tempfile::tempdir().unwrap();
         let crx = make_crx3(&make_zip());
-        unpack_crx(&crx, dir.path()).unwrap();
+        CrxArchive::new(crx).unpack(dir.path()).unwrap();
         let manifest = std::fs::read_to_string(dir.path().join("manifest.json")).unwrap();
         assert!(manifest.contains("\"version\":\"1.0\""));
         assert!(dir.path().join("sub/popup.html").exists());
@@ -217,13 +238,20 @@ mod tests {
     #[test]
     fn rejects_bad_magic() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(unpack_crx(b"NOPExxxxxxxxxxxx", dir.path()).is_err());
+        assert!(
+            CrxArchive::new(b"NOPExxxxxxxxxxxx".to_vec())
+                .unpack(dir.path())
+                .is_err()
+        );
     }
 
     #[test]
     fn computes_crx3_offset() {
         let crx = make_crx3(&make_zip());
-        assert_eq!(zip_offset(&crx).unwrap(), 12 + "fakeheaderbytes".len());
+        assert_eq!(
+            CrxArchive::new(crx).zip_offset().unwrap(),
+            12 + "fakeheaderbytes".len()
+        );
     }
 
     #[test]
@@ -234,11 +262,17 @@ mod tests {
         crx.extend_from_slice(&3u32.to_le_bytes());
         crx.extend_from_slice(&(header.len() as u32).to_le_bytes());
         crx.extend_from_slice(&header);
-        assert_eq!(crx_public_keys(&crx), vec![b"PUBKEY".to_vec()]);
-        let id = extension_id_from_key(b"PUBKEY");
+        let archive = CrxArchive::new(crx);
+        assert_eq!(archive.public_keys(), vec![b"PUBKEY".to_vec()]);
+        let id = ChromeExtensionId::from_public_key(b"PUBKEY");
+        let id = id.as_str();
         assert_eq!(id.len(), 32);
         assert!(id.bytes().all(|b| (b'a'..=b'p').contains(&b)));
-        assert_eq!(crx_public_key_for(&crx, &id).unwrap(), b"PUBKEY");
-        assert!(crx_public_key_for(&crx, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").is_none());
+        assert_eq!(archive.public_key_for(id).unwrap(), b"PUBKEY");
+        assert!(
+            archive
+                .public_key_for("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                .is_none()
+        );
     }
 }

@@ -1,11 +1,12 @@
-use crate::{
-    ExtensionInstallCompleted, ExtensionInstallRequest, OpenManagerRequest, store, webstore,
-};
+use crate::webstore::ChromeWebStore;
+use crate::{ExtensionInstallCompleted, ExtensionInstallRequest, OpenManagerRequest, store};
 use bevy::prelude::*;
 use bevy_cef::prelude::{
     Browsers, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput, WebviewCommittedNavigationEvent,
 };
 use vmux_api::extension::ExtBrowseStoreRequest;
+
+use super::super::template::Template;
 
 pub(super) struct WebStorePlugin;
 
@@ -73,7 +74,7 @@ impl WebStoreInjection<'_, '_> {
             self.commands.entity(webview).remove::<WebStoreInjector>();
             return;
         }
-        let Some(extension_id) = webstore::extension_id(url) else {
+        let Some(extension_id) = ChromeWebStore::extension_id(url) else {
             self.commands.entity(webview).remove::<WebStoreInjector>();
             return;
         };
@@ -98,7 +99,7 @@ impl WebStoreInjection<'_, '_> {
                 serde_json::to_string(&injector.nonce).expect("serializable web store nonce"),
             ),
         ];
-        if let Ok(script) = super::super::template::render(INJECTOR_JS, &replacements) {
+        if let Ok(script) = Template::new(INJECTOR_JS).render(&replacements) {
             self.browsers.execute_js(&webview, &script);
         }
         self.commands.entity(webview).insert(injector);
@@ -189,7 +190,7 @@ fn add(
     let Ok(injector) = injectors.get(trigger.event().webview) else {
         return;
     };
-    let Some(id) = webstore::extension_id(&request.id) else {
+    let Some(id) = ChromeWebStore::extension_id(&request.id) else {
         return;
     };
     if injector.nonce != request.nonce || injector.extension_id != id {
@@ -231,14 +232,12 @@ mod tests {
 
     #[test]
     fn web_store_injector_renders_without_page_globals() {
-        let source = super::super::super::template::render(
-            INJECTOR_JS,
-            &[
+        let source = Template::new(INJECTOR_JS)
+            .render(&[
                 ("__VMUX_WEBSTORE_INSTALLED__", "[]".into()),
                 ("__VMUX_WEBSTORE_NONCE__", "\"nonce\"".into()),
-            ],
-        )
-        .unwrap();
+            ])
+            .unwrap();
 
         assert!(!source.contains("__VMUX_"));
         assert!(!source.contains("window.__VMUX_NONCE__"));

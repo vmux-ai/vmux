@@ -32,7 +32,7 @@ impl Plugin for WindowPlugin {
                 Update,
                 (
                     ensure_geometry_singleton,
-                    apply_geometry_on_load,
+                    restore_geometry,
                     capture_geometry,
                 )
                     .chain(),
@@ -41,7 +41,7 @@ impl Plugin for WindowPlugin {
         #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
         app.add_systems(
             Update,
-            (sync_fullscreen, restore_fullscreen).in_set(WindowFullscreenSet),
+            (fullscreen, restore_fullscreen).in_set(WindowFullscreenSet),
         );
     }
 }
@@ -110,7 +110,7 @@ fn open_windows(
             commands.entity(window).remove::<vmux_ecs::Active>();
         }
         commands.spawn((
-            crate::window_config(true),
+            crate::VmuxPlugin::window_config(true),
             NewWindowWorkspace,
             vmux_ecs::Active,
         ));
@@ -183,7 +183,7 @@ fn ensure_geometry_singleton(
     commands.spawn(WindowGeometry::default());
 }
 
-fn apply_geometry_on_load(
+fn restore_geometry(
     geometry: Query<&WindowGeometry, Added<WindowGeometry>>,
     mut window: Query<
         (
@@ -242,7 +242,7 @@ fn capture_geometry(
 }
 
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
-fn sync_fullscreen(mut windows: Query<(&Window, &mut WindowFullscreen)>) {
+fn fullscreen(mut windows: Query<(&Window, &mut WindowFullscreen)>) {
     for (window, mut fullscreen) in &mut windows {
         let is_fullscreen = matches!(
             window.mode,
@@ -488,7 +488,7 @@ mod tests {
     #[test]
     fn apply_geometry_sets_window_position_and_size() {
         let mut app = geometry_app();
-        app.add_systems(Update, apply_geometry_on_load);
+        app.add_systems(Update, restore_geometry);
         app.world_mut().spawn(WindowGeometry {
             fullscreen: false,
             position: Some(IVec2::new(123, 456)),
@@ -509,7 +509,7 @@ mod tests {
     #[test]
     fn apply_geometry_inserts_pending_fullscreen_intent() {
         let mut app = geometry_app();
-        app.add_systems(Update, apply_geometry_on_load);
+        app.add_systems(Update, restore_geometry);
         app.world_mut().spawn(WindowGeometry {
             fullscreen: true,
             position: None,

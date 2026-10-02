@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_ecs::page::PageReady;
-use vmux_setting::{AppSettings, SettingsSaveRequest};
+use vmux_setting::{AppSettings, SettingsSaveRequest, themes::TerminalColorScheme};
 
 use crate::{Terminal, event::TermThemeEvent};
 
@@ -12,11 +12,8 @@ pub struct TerminalThemePlugin;
 impl Plugin for TerminalThemePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::contract::TerminalContractPlugin)
-            .add_systems(
-                Update,
-                handle_font_size.after(vmux_command::ReadCommandRequests),
-            )
-            .add_systems(Update, sync.after(handle_font_size));
+            .add_systems(Update, font_size.after(vmux_command::ReadCommandRequests))
+            .add_systems(Update, sync.after(font_size));
     }
 }
 
@@ -27,7 +24,7 @@ pub enum TerminalFontSizeCommand {
     Reset,
 }
 
-fn handle_font_size(
+fn font_size(
     mut reader: MessageReader<TerminalFontSizeCommand>,
     mut settings: ResMut<AppSettings>,
     mut saves: MessageWriter<SettingsSaveRequest>,
@@ -61,10 +58,7 @@ fn handle_font_size(
     }
 }
 
-fn theme_signature(
-    theme: &vmux_setting::TerminalTheme,
-    colors: &vmux_setting::themes::TerminalColorScheme,
-) -> u64 {
+fn theme_signature(theme: &vmux_setting::TerminalTheme, colors: &TerminalColorScheme) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     colors.foreground.hash(&mut hasher);
     colors.background.hash(&mut hasher);
@@ -110,7 +104,7 @@ fn sync(
         .map(|scheme| matches!(scheme.0, vmux_setting::ResolvedScheme::Dark))
         .unwrap_or(true);
     let scheme_name = scheme_for_appearance(&theme.color_scheme, dark);
-    let colors = vmux_setting::themes::resolve_theme(scheme_name, &terminal_settings.custom_themes);
+    let colors = TerminalColorScheme::resolve(scheme_name, &terminal_settings.custom_themes);
     let hash = theme_signature(&theme, &colors);
 
     let theme_changed = hash != *last_theme_hash;
@@ -183,7 +177,7 @@ mod tests {
             .insert_resource(settings_with_font(start))
             .add_message::<TerminalFontSizeCommand>()
             .add_message::<SettingsSaveRequest>()
-            .add_systems(Update, handle_font_size);
+            .add_systems(Update, font_size);
         app.world_mut()
             .resource_mut::<Messages<TerminalFontSizeCommand>>()
             .write(command);
@@ -219,7 +213,7 @@ mod tests {
             .insert_resource(settings)
             .add_message::<TerminalFontSizeCommand>()
             .add_message::<SettingsSaveRequest>()
-            .add_systems(Update, handle_font_size);
+            .add_systems(Update, font_size);
         app.world_mut()
             .resource_mut::<Messages<TerminalFontSizeCommand>>()
             .write(TerminalFontSizeCommand::Increase);
@@ -280,7 +274,7 @@ mod tests {
 
     #[test]
     fn theme_signature_changes_with_font_size() {
-        let colors = vmux_setting::themes::resolve_theme("catppuccin-mocha", &[]);
+        let colors = TerminalColorScheme::resolve("catppuccin-mocha", &[]);
         let small = terminal_theme(14.0);
         let large = terminal_theme(15.0);
         assert_ne!(

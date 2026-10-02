@@ -8,7 +8,7 @@ use vmux_ecs::{
 pub struct HistorySpawnPlugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct HistoryWriteSet;
+pub(super) struct HistoryWriteSet;
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct VisitWriter<'w, 's> {
@@ -89,7 +89,8 @@ fn spawn(
             continue;
         }
         let now = UnixMillis::now().0;
-        let transition = super::transition::map(ev.transition, ev.qualifiers);
+        let transition =
+            super::transition::HistoryTransition::new(ev.transition, ev.qualifiers).kind();
         visits.record(&ev.url, "", transition, now);
     }
 }

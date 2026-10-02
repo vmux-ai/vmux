@@ -4,6 +4,7 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, futures_lite::future};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use vmux_ecs::profile::vault::VaultStorage;
 
 use crate::state::{VaultOperationKind, VaultRepository, VaultSnapshot, VaultSyncRequest};
 
@@ -41,7 +42,7 @@ struct VaultWatch {
 
 impl VaultWatch {
     fn new(app: &App) -> Option<Self> {
-        let vault_root = vmux_ecs::profile::vault::root_dir();
+        let vault_root = VaultStorage::current().root().to_path_buf();
         let _ = std::fs::create_dir_all(&vault_root);
         let (watch_tx, watch_rx) = mpsc::channel();
         let watch_wake = app
@@ -127,7 +128,7 @@ impl VaultWatch {
                 && event
                     .paths
                     .iter()
-                    .any(|path| vmux_ecs::profile::vault::is_managed_local_path(path))
+                    .any(|path| VaultStorage::current().manages(path))
         })
     }
 }
@@ -395,7 +396,7 @@ mod tests {
 
     #[test]
     fn vault_backup_watcher_ignores_runtime_and_access_events() {
-        let root = vmux_ecs::profile::vault::root_dir();
+        let root = VaultStorage::current().root().to_path_buf();
         let knowledge =
             notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Any))
                 .add_path(root.join("knowledge/note.md"));

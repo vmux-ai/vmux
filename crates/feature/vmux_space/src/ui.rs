@@ -15,7 +15,7 @@ use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem, ManagerSele
 use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{send, use_key_claim, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::platform::sleep_ms;
+use vmux_ui::platform::Platform;
 
 #[vmux_native::page(
     component = Page
@@ -264,7 +264,7 @@ fn NewSpaceCard() -> Element {
 fn begin_space_rename(mut editing: Signal<bool>, mut draft: Signal<String>, name: String) {
     draft.set(name);
     spawn(async move {
-        sleep_ms(0).await;
+        Platform::sleep(0).await;
         editing.set(true);
     });
 }

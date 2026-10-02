@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy::window::{MonitorSelection, WindowMode, WindowPosition};
 use bevy_cef::prelude::RequestNavigate;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashSet};
 use vmux_ecs::PageMetadata;
 use vmux_history::LastActivatedAt;
@@ -31,8 +31,7 @@ impl Plugin for ExtensionWindowsPlugin {
             )
             .add_systems(
                 Update,
-                (open, route_close, apply_host_window_updates)
-                    .after(super::ExtensionSystemSet::DrainBridge),
+                (open, route_close, host_update).after(super::ExtensionSystemSet::DrainBridge),
             );
     }
 }
@@ -70,6 +69,134 @@ impl Default for ExtensionWindows {
     }
 }
 
+impl ExtensionWindows {
+    fn contains_id(&self, id: i32, model: &ExtensionModel) -> bool {
+        self.windows.contains_key(&id) || model.windows.iter().any(|window| window.id == id)
+    }
+
+    fn current_id(&self, caller: &ExtensionCallerContext, model: &ExtensionModel) -> Option<i32> {
+        if let Some(caller_url) = caller.url()
+            && let Some(id) = self.windows.iter().find_map(|(id, window)| {
+                window
+                    .urls
+                    .iter()
+                    .any(|url| ExtensionWindow::page_matches(url, caller_url))
+                    .then_some(*id)
+            })
+        {
+            return Some(id);
+        }
+        self.windows
+            .values()
+            .find(|window| window.window.focused)
+            .map(|window| window.window.id)
+            .or_else(|| model.focused_window_id())
+            .or_else(|| model.windows.first().map(|window| window.id))
+            .or(Some(FALLBACK_HOST_WINDOW_ID))
+    }
+
+    fn resolve_id(
+        &self,
+        id: i32,
+        caller: &ExtensionCallerContext,
+        model: &ExtensionModel,
+    ) -> Result<i32, ExtensionApiError> {
+        if matches!(id, WINDOW_ID_NONE | WINDOW_ID_CURRENT) {
+            return self.current_id(caller, model).ok_or_else(|| {
+                ExtensionApiError::new("window_not_found", "current window is unavailable")
+            });
+        }
+        if id < 0 {
+            return Err(ExtensionApiError::new(
+                "invalid_arguments",
+                "windowId is invalid",
+            ));
+        }
+        Ok(id)
+    }
+
+    fn resolve_native_alias(
+        &self,
+        id: i32,
+        model: &ExtensionModel,
+    ) -> Result<i32, ExtensionApiError> {
+        if self.contains_id(id, model) {
+            return Ok(id);
+        }
+        if id >= FIRST_EXTENSION_WINDOW_ID && id < self.next_id {
+            return Err(ExtensionApiError::new(
+                "window_not_found",
+                "extension window is unavailable",
+            ));
+        }
+        Ok(model
+            .focused_window_id()
+            .or_else(|| model.windows.first().map(|window| window.id))
+            .unwrap_or(id))
+    }
+}
+
+impl ExtensionWindow {
+    fn same_document(expected: &str, actual: &str) -> bool {
+        let (Ok(mut expected), Ok(mut actual)) =
+            (url::Url::parse(expected), url::Url::parse(actual))
+        else {
+            return expected == actual;
+        };
+        expected.set_fragment(None);
+        actual.set_fragment(None);
+        expected == actual
+    }
+
+    fn page_matches(expected: &str, actual: &str) -> bool {
+        if Self::same_document(expected, actual) {
+            return true;
+        }
+        let (Ok(expected), Ok(actual)) = (url::Url::parse(expected), url::Url::parse(actual))
+        else {
+            return false;
+        };
+        expected.scheme() == "chrome-extension"
+            && expected.scheme() == actual.scheme()
+            && expected.host_str() == actual.host_str()
+            && expected.path() == actual.path()
+    }
+
+    fn tabs(&self, model: &ExtensionModel) -> Vec<ExtensionTabSnapshot> {
+        self.tab_ids
+            .iter()
+            .filter_map(|id| model.tabs.iter().find(|tab| tab.id == *id).cloned())
+            .collect()
+    }
+
+    fn refresh_tabs(&mut self, model: &ExtensionModel, claimed: &mut HashSet<i32>) {
+        self.tab_ids
+            .retain(|id| model.tabs.iter().any(|tab| tab.id == *id));
+        claimed.extend(self.tab_ids.iter().copied());
+        for url in &self.urls {
+            let exact = model
+                .tabs
+                .iter()
+                .find(|tab| !claimed.contains(&tab.id) && Self::same_document(url, &tab.url));
+            if let Some(tab) = exact {
+                self.tab_ids.push(tab.id);
+                claimed.insert(tab.id);
+            }
+        }
+        self.tab_ids.sort_unstable();
+        self.tab_ids.dedup();
+    }
+}
+
+impl ExtensionModel {
+    fn focused_window_id(&self) -> Option<i32> {
+        self.windows
+            .iter()
+            .find(|window| window.focused)
+            .map(|window| window.id)
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostWindowUpdate {
@@ -80,6 +207,273 @@ pub struct HostWindowUpdate {
     pub focused: Option<bool>,
     pub draw_attention: Option<bool>,
     pub state: Option<String>,
+}
+
+impl HostWindowUpdate {
+    fn validate(&self) -> Result<(), ExtensionApiError> {
+        if let Some(state) = self.state.as_deref() {
+            Self::validate_state(state)?;
+            if state != "normal"
+                && (self.left.is_some()
+                    || self.top.is_some()
+                    || self.width.is_some()
+                    || self.height.is_some())
+            {
+                return Err(ExtensionApiError::new(
+                    "invalid_arguments",
+                    "window bounds cannot be combined with this state",
+                ));
+            }
+            if state == "minimized" && self.focused == Some(true) {
+                return Err(ExtensionApiError::new(
+                    "invalid_arguments",
+                    "a minimized window cannot be focused",
+                ));
+            }
+            if matches!(state, "fullscreen" | "maximized") && self.focused == Some(false) {
+                return Err(ExtensionApiError::new(
+                    "invalid_arguments",
+                    "a fullscreen or maximized window cannot be unfocused",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_to(&self, window: &mut ExtensionWindowSnapshot) {
+        if let Some(left) = self.left {
+            window.left = left;
+        }
+        if let Some(top) = self.top {
+            window.top = top;
+        }
+        if let Some(width) = self.width {
+            window.width = width as i32;
+        }
+        if let Some(height) = self.height {
+            window.height = height as i32;
+        }
+        if let Some(focused) = self.focused {
+            window.focused = focused;
+        }
+        if let Some(state) = &self.state {
+            window.state.clone_from(state);
+        }
+    }
+
+    fn validate_state(state: &str) -> Result<(), ExtensionApiError> {
+        if matches!(state, "normal" | "minimized" | "maximized" | "fullscreen") {
+            Ok(())
+        } else {
+            Err(ExtensionApiError::new(
+                "invalid_arguments",
+                "window state is invalid",
+            ))
+        }
+    }
+}
+
+struct WindowCreateOptions {
+    fields: Map<String, Value>,
+    extension_id: String,
+}
+
+impl WindowCreateOptions {
+    fn from_request(request: &ApiRequest) -> Self {
+        Self {
+            fields: request
+                .argument(0)
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default(),
+            extension_id: request.caller_context.extension_id().to_string(),
+        }
+    }
+
+    fn validate(&self) -> Result<(), ExtensionApiError> {
+        if self.boolean("incognito") == Some(true) {
+            return Err(ExtensionApiError::new(
+                "unsupported_option",
+                "incognito extension windows are unavailable",
+            ));
+        }
+        let state = self.state();
+        HostWindowUpdate::validate_state(state)?;
+        if state != "normal"
+            && ["left", "top", "width", "height"]
+                .iter()
+                .any(|key| self.fields.contains_key(*key))
+        {
+            return Err(ExtensionApiError::new(
+                "invalid_arguments",
+                "window bounds cannot be combined with this state",
+            ));
+        }
+        if !matches!(self.window_type(), "normal" | "popup" | "panel") {
+            return Err(ExtensionApiError::new(
+                "invalid_arguments",
+                "extension window type is invalid",
+            ));
+        }
+        if self.fields.contains_key("tabId") {
+            return Err(ExtensionApiError::new(
+                "unsupported_option",
+                "moving an existing tab into an extension window is unavailable",
+            ));
+        }
+        Ok(())
+    }
+
+    fn urls(&self) -> Result<Vec<String>, ExtensionApiError> {
+        match self.fields.get("url") {
+            Some(Value::String(url)) => Ok(vec![self.resolve_url(url)?]),
+            Some(Value::Array(values)) => values
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .ok_or_else(|| {
+                            ExtensionApiError::new("invalid_arguments", "window URL is invalid")
+                        })
+                        .and_then(|url| self.resolve_url(url))
+                })
+                .collect(),
+            Some(_) => Err(ExtensionApiError::new(
+                "invalid_arguments",
+                "window URL is invalid",
+            )),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    fn resolve_url(&self, url: &str) -> Result<String, ExtensionApiError> {
+        let parsed = url::Url::parse(url).or_else(|_| {
+            url::Url::parse(&format!("chrome-extension://{}/", self.extension_id))?.join(url)
+        });
+        let parsed =
+            parsed.map_err(|_| ExtensionApiError::new("invalid_url", "window URL is invalid"))?;
+        match parsed.scheme() {
+            "http" | "https" => {}
+            "chrome-extension" if parsed.host_str() == Some(&self.extension_id) => {}
+            _ => {
+                return Err(ExtensionApiError::new(
+                    "invalid_url",
+                    "window URL uses an unsupported scheme",
+                ));
+            }
+        }
+        Ok(parsed.to_string())
+    }
+
+    fn boolean(&self, key: &str) -> Option<bool> {
+        self.fields.get(key).and_then(Value::as_bool)
+    }
+
+    fn integer(&self, key: &str) -> Option<i32> {
+        self.fields
+            .get(key)
+            .and_then(Value::as_i64)
+            .and_then(|value| i32::try_from(value).ok())
+    }
+
+    fn positive_integer(&self, key: &str) -> Option<u32> {
+        self.fields
+            .get(key)
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+    }
+
+    fn focused(&self) -> bool {
+        self.boolean("focused").unwrap_or(true)
+    }
+
+    fn window_type(&self) -> &str {
+        self.fields
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("normal")
+    }
+
+    fn state(&self) -> &str {
+        self.fields
+            .get("state")
+            .and_then(Value::as_str)
+            .unwrap_or("normal")
+    }
+}
+
+impl ExtensionWindowSnapshot {
+    fn fallback(id: i32) -> Self {
+        Self {
+            id,
+            focused: true,
+            left: 0,
+            top: 0,
+            width: 1920,
+            height: 1080,
+            incognito: false,
+            window_type: "normal".into(),
+            state: "normal".into(),
+            always_on_top: false,
+        }
+    }
+
+    fn disclosed_value(
+        &self,
+        tabs: Vec<ExtensionTabSnapshot>,
+        populate: bool,
+        request: &ApiRequest,
+        authorization: &BridgeAuthorization,
+    ) -> Value {
+        let mut value = serde_json::to_value(self).expect("extension window serializes");
+        if populate {
+            value.as_object_mut().expect("window object").insert(
+                "tabs".into(),
+                Value::Array(
+                    tabs.into_iter()
+                        .enumerate()
+                        .map(|(index, tab)| {
+                            tab.disclosed_value(self.id, index as u32, request, authorization)
+                        })
+                        .collect(),
+                ),
+            );
+        }
+        value
+    }
+
+    fn matches_type(&self, options: Option<&Value>) -> bool {
+        options
+            .and_then(|options| options.get("windowTypes"))
+            .and_then(Value::as_array)
+            .is_none_or(|types| {
+                types
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|window_type| window_type == self.window_type)
+            })
+    }
+
+    fn events_since(&self, before: &Self) -> Vec<ExtensionModelEvent> {
+        let mut events = Vec::new();
+        if before.left != self.left
+            || before.top != self.top
+            || before.width != self.width
+            || before.height != self.height
+        {
+            events.push(ExtensionModelEvent::WindowBoundsChanged(self.clone()));
+        }
+        if before.focused != self.focused {
+            events.push(ExtensionModelEvent::WindowFocusChanged {
+                window_id: if self.focused {
+                    self.id
+                } else {
+                    WINDOW_ID_NONE
+                },
+            });
+        }
+        events
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,6 +496,20 @@ pub struct OpenExtensionWindowRequest {
 pub struct CloseExtensionWindowRequest {
     pub tab_ids: Vec<i32>,
     pub urls: Vec<String>,
+}
+
+impl CloseExtensionWindowRequest {
+    fn matches_document(&self, actual: &str) -> bool {
+        self.urls
+            .iter()
+            .any(|expected| ExtensionWindow::same_document(expected, actual))
+    }
+
+    fn matches_page(&self, actual: &str) -> bool {
+        self.urls
+            .iter()
+            .any(|expected| ExtensionWindow::page_matches(expected, actual))
+    }
 }
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
@@ -139,24 +547,36 @@ fn open(
     }
 }
 
-pub fn dispatch(
-    request: &ApiRequest,
-    model: &ExtensionModel,
-    windows: &mut ExtensionWindows,
-    authorization: &BridgeAuthorization,
-) -> Result<WindowDispatch, ExtensionApiError> {
-    match request.method.as_str() {
-        "get" => get(request, model, windows, authorization),
-        "getCurrent" => get_current(request, model, windows, authorization),
-        "getLastFocused" => get_last_focused(request, model, windows, authorization),
-        "getAll" => get_all(request, model, windows, authorization),
-        "create" => create(request, model, windows, authorization),
-        "update" => update(request, model, windows, authorization),
-        "remove" => remove(request, model, windows),
-        _ => Err(ExtensionApiError::new(
-            "unsupported_api",
-            format!("windows.{} is not supported", request.method),
-        )),
+impl WindowDispatch {
+    fn success(result: Value) -> Self {
+        Self {
+            result,
+            open_window: None,
+            close_window: None,
+            update_host_window: None,
+            events: Vec::new(),
+        }
+    }
+
+    pub fn from_request(
+        request: &ApiRequest,
+        model: &ExtensionModel,
+        windows: &mut ExtensionWindows,
+        authorization: &BridgeAuthorization,
+    ) -> Result<Self, ExtensionApiError> {
+        match request.method.as_str() {
+            "get" => get(request, model, windows, authorization),
+            "getCurrent" => get_current(request, model, windows, authorization),
+            "getLastFocused" => get_last_focused(request, model, windows, authorization),
+            "getAll" => get_all(request, model, windows, authorization),
+            "create" => create(request, model, windows, authorization),
+            "update" => update(request, model, windows, authorization),
+            "remove" => remove(request, model, windows),
+            _ => Err(ExtensionApiError::new(
+                "unsupported_api",
+                format!("windows.{} is not supported", request.method),
+            )),
+        }
     }
 }
 
@@ -179,11 +599,7 @@ fn route_close(
         }
         if targets.is_empty() {
             for (entity, metadata, _) in &stacks {
-                if request
-                    .urls
-                    .iter()
-                    .any(|url| same_document(url, &metadata.url))
-                {
+                if request.matches_document(&metadata.url) {
                     targets.insert(entity);
                 }
             }
@@ -191,12 +607,7 @@ fn route_close(
         if targets.is_empty()
             && let Some(entity) = stacks
                 .iter()
-                .filter(|(_, metadata, _)| {
-                    request
-                        .urls
-                        .iter()
-                        .any(|url| extension_page_matches(url, &metadata.url))
-                })
+                .filter(|(_, metadata, _)| request.matches_page(&metadata.url))
                 .max_by_key(|(_, _, activated)| activated.map_or(0, |activated| activated.0))
                 .map(|(entity, _, _)| entity)
         {
@@ -214,11 +625,11 @@ fn sync(model: Single<Ref<ExtensionModel>>, mut windows: Single<&mut ExtensionWi
     }
     let mut claimed = HashSet::new();
     for window in windows.windows.values_mut() {
-        refresh_tab_ids(window, &model, &mut claimed);
+        window.refresh_tabs(&model, &mut claimed);
     }
 }
 
-fn apply_host_window_updates(
+fn host_update(
     mut requests: MessageReader<UpdateHostWindowRequest>,
     mut native_windows: Query<(&ExtensionWindowId, &mut Window)>,
 ) {
@@ -266,15 +677,16 @@ fn get(
     windows: &mut ExtensionWindows,
     authorization: &BridgeAuthorization,
 ) -> Result<WindowDispatch, ExtensionApiError> {
-    let id = argument(request, 0)
+    let id = request
+        .argument(0)
         .and_then(Value::as_i64)
         .and_then(|id| i32::try_from(id).ok())
         .ok_or_else(|| ExtensionApiError::new("invalid_arguments", "windowId is required"))?;
-    let options = argument(request, 1);
-    let id = resolve_window_id(id, &request.caller_context, model, windows)?;
-    let id = resolve_native_window_alias(id, model, windows)?;
-    let result = window_by_id(id, options, model, windows, request, authorization)?;
-    Ok(success(result))
+    let options = request.argument(1);
+    let id = windows.resolve_id(id, &request.caller_context, model)?;
+    let id = windows.resolve_native_alias(id, model)?;
+    let result = windows.value_by_id(id, options, model, request, authorization)?;
+    Ok(WindowDispatch::success(result))
 }
 
 fn get_current(
@@ -283,18 +695,13 @@ fn get_current(
     windows: &mut ExtensionWindows,
     authorization: &BridgeAuthorization,
 ) -> Result<WindowDispatch, ExtensionApiError> {
-    let id = current_window_id(&request.caller_context, model, windows).ok_or_else(|| {
-        ExtensionApiError::new("window_not_found", "current window is unavailable")
-    })?;
-    let result = window_by_id(
-        id,
-        argument(request, 0),
-        model,
-        windows,
-        request,
-        authorization,
-    )?;
-    Ok(success(result))
+    let id = windows
+        .current_id(&request.caller_context, model)
+        .ok_or_else(|| {
+            ExtensionApiError::new("window_not_found", "current window is unavailable")
+        })?;
+    let result = windows.value_by_id(id, request.argument(0), model, request, authorization)?;
+    Ok(WindowDispatch::success(result))
 }
 
 fn get_last_focused(
@@ -305,19 +712,12 @@ fn get_last_focused(
 ) -> Result<WindowDispatch, ExtensionApiError> {
     let id = windows
         .last_focused
-        .filter(|id| window_exists(*id, model, windows))
-        .or_else(|| focused_host_window(model))
+        .filter(|id| windows.contains_id(*id, model))
+        .or_else(|| model.focused_window_id())
         .or_else(|| model.windows.first().map(|window| window.id))
         .unwrap_or(FALLBACK_HOST_WINDOW_ID);
-    let result = window_by_id(
-        id,
-        argument(request, 0),
-        model,
-        windows,
-        request,
-        authorization,
-    )?;
-    Ok(success(result))
+    let result = windows.value_by_id(id, request.argument(0), model, request, authorization)?;
+    Ok(WindowDispatch::success(result))
 }
 
 fn get_all(
@@ -326,8 +726,11 @@ fn get_all(
     windows: &mut ExtensionWindows,
     authorization: &BridgeAuthorization,
 ) -> Result<WindowDispatch, ExtensionApiError> {
-    let options = argument(request, 0);
-    let populate = populate(options);
+    let options = request.argument(0);
+    let populate = options
+        .and_then(|options| options.get("populate"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let mut claimed = HashSet::new();
     let ids = windows.windows.keys().copied().collect::<Vec<_>>();
     let mut virtual_values = Vec::new();
@@ -336,11 +739,10 @@ fn get_all(
             .windows
             .get_mut(&id)
             .expect("known extension window");
-        refresh_tab_ids(extension_window, model, &mut claimed);
-        if type_matches(&extension_window.window, options) {
-            virtual_values.push(window_value(
-                &extension_window.window,
-                virtual_tabs(extension_window, model),
+        extension_window.refresh_tabs(model, &mut claimed);
+        if extension_window.window.matches_type(options) {
+            virtual_values.push(extension_window.window.disclosed_value(
+                extension_window.tabs(model),
                 populate,
                 request,
                 authorization,
@@ -350,10 +752,9 @@ fn get_all(
     let mut values = model
         .windows
         .iter()
-        .filter(|window| type_matches(window, options))
+        .filter(|window| window.matches_type(options))
         .map(|window| {
-            window_value(
-                window,
+            window.disclosed_value(
                 model
                     .tabs
                     .iter()
@@ -367,7 +768,7 @@ fn get_all(
         })
         .collect::<Vec<_>>();
     values.extend(virtual_values);
-    Ok(success(Value::Array(values)))
+    Ok(WindowDispatch::success(Value::Array(values)))
 }
 
 fn create(
@@ -376,43 +777,17 @@ fn create(
     windows: &mut ExtensionWindows,
     authorization: &BridgeAuthorization,
 ) -> Result<WindowDispatch, ExtensionApiError> {
-    let data = argument(request, 0).and_then(Value::as_object);
-    if data
-        .and_then(|data| data.get("incognito"))
-        .and_then(Value::as_bool)
-        == Some(true)
-    {
-        return Err(ExtensionApiError::new(
-            "unsupported_option",
-            "incognito extension windows are unavailable",
-        ));
-    }
-    validate_state_and_bounds(data)?;
-    let urls = create_urls(data, request)?;
+    let options = WindowCreateOptions::from_request(request);
+    options.validate()?;
+    let urls = options.urls()?;
     let base = model
         .windows
         .iter()
         .find(|window| window.focused)
         .or_else(|| model.windows.first());
-    let focused = data
-        .and_then(|data| data.get("focused"))
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-    let window_type = data
-        .and_then(|data| data.get("type"))
-        .and_then(Value::as_str)
-        .unwrap_or("normal");
-    if !matches!(window_type, "normal" | "popup" | "panel") {
-        return Err(ExtensionApiError::new(
-            "invalid_arguments",
-            "extension window type is invalid",
-        ));
-    }
-    let state = data
-        .and_then(|data| data.get("state"))
-        .and_then(Value::as_str)
-        .unwrap_or("normal");
-    validate_state(state)?;
+    let focused = options.focused();
+    let window_type = options.window_type();
+    let state = options.state();
     let id = windows.next_id;
     windows.next_id = windows
         .next_id
@@ -427,17 +802,21 @@ fn create(
     let window = ExtensionWindowSnapshot {
         id,
         focused,
-        left: integer(data, "left")
+        left: options
+            .integer("left")
             .or_else(|| base.map(|window| window.left))
             .unwrap_or(0),
-        top: integer(data, "top")
+        top: options
+            .integer("top")
             .or_else(|| base.map(|window| window.top))
             .unwrap_or(0),
-        width: positive_integer(data, "width")
+        width: options
+            .positive_integer("width")
             .map(|value| value as i32)
             .or_else(|| base.map(|window| window.width))
             .unwrap_or(800),
-        height: positive_integer(data, "height")
+        height: options
+            .positive_integer("height")
             .map(|value| value as i32)
             .or_else(|| base.map(|window| window.height))
             .unwrap_or(600),
@@ -451,7 +830,7 @@ fn create(
         urls: urls.clone(),
         tab_ids: Vec::new(),
     };
-    let result = window_value(&window, Vec::new(), true, request, authorization);
+    let result = window.disclosed_value(Vec::new(), true, request, authorization);
     windows.windows.insert(id, extension_window);
     let mut events = vec![ExtensionModelEvent::WindowCreated(window)];
     if focused {
@@ -481,17 +860,19 @@ fn update(
     windows: &mut ExtensionWindows,
     authorization: &BridgeAuthorization,
 ) -> Result<WindowDispatch, ExtensionApiError> {
-    let requested_id = argument(request, 0)
+    let requested_id = request
+        .argument(0)
         .and_then(Value::as_i64)
         .and_then(|id| i32::try_from(id).ok())
         .ok_or_else(|| ExtensionApiError::new("invalid_arguments", "windowId is required"))?;
-    let update_value = argument(request, 1)
+    let update_value = request
+        .argument(1)
         .cloned()
         .ok_or_else(|| ExtensionApiError::new("invalid_arguments", "updateInfo is required"))?;
     let update: HostWindowUpdate = serde_json::from_value(update_value)
         .map_err(|_| ExtensionApiError::new("invalid_arguments", "updateInfo is invalid"))?;
-    validate_update(&update)?;
-    let id = resolve_window_id(requested_id, &request.caller_context, model, windows)?;
+    update.validate()?;
+    let id = windows.resolve_id(requested_id, &request.caller_context, model)?;
     if windows.windows.contains_key(&id) {
         let was_focused = windows.windows[&id].window.focused;
         if update.focused == Some(true) {
@@ -505,24 +886,20 @@ fn update(
             .get_mut(&id)
             .expect("known extension window");
         let before = entry.window.clone();
-        apply_update(&mut entry.window, &update);
-        let mut events = window_update_events(&before, &entry.window);
+        update.apply_to(&mut entry.window);
+        let mut events = entry.window.events_since(&before);
         if update.focused == Some(false) && was_focused {
             entry.window.focused = false;
-            let fallback = focused_host_window(model).unwrap_or(WINDOW_ID_NONE);
+            let fallback = model.focused_window_id().unwrap_or(WINDOW_ID_NONE);
             windows.last_focused = (fallback >= 0).then_some(fallback);
             events.push(ExtensionModelEvent::WindowFocusChanged {
                 window_id: fallback,
             });
         }
         return Ok(WindowDispatch {
-            result: window_value(
-                &entry.window,
-                virtual_tabs(entry, model),
-                true,
-                request,
-                authorization,
-            ),
+            result: entry
+                .window
+                .disclosed_value(entry.tabs(model), true, request, authorization),
             open_window: None,
             close_window: None,
             update_host_window: None,
@@ -536,13 +913,12 @@ fn update(
         .cloned()
         .ok_or_else(|| ExtensionApiError::new("window_not_found", "window is unavailable"))?;
     let mut after = before.clone();
-    apply_update(&mut after, &update);
+    update.apply_to(&mut after);
     if update.focused == Some(true) {
         windows.last_focused = Some(id);
     }
     Ok(WindowDispatch {
-        result: window_value(
-            &after,
+        result: after.disclosed_value(
             model
                 .tabs
                 .iter()
@@ -559,7 +935,7 @@ fn update(
             window_id: id,
             update,
         }),
-        events: window_update_events(&before, &after),
+        events: after.events_since(&before),
     })
 }
 
@@ -568,17 +944,18 @@ fn remove(
     model: &ExtensionModel,
     windows: &mut ExtensionWindows,
 ) -> Result<WindowDispatch, ExtensionApiError> {
-    let id = argument(request, 0)
+    let id = request
+        .argument(0)
         .and_then(Value::as_i64)
         .and_then(|id| i32::try_from(id).ok())
         .ok_or_else(|| ExtensionApiError::new("invalid_arguments", "windowId is required"))?;
     let mut entry = windows.windows.remove(&id).ok_or_else(|| {
         ExtensionApiError::new("window_not_found", "extension window is unavailable")
     })?;
-    refresh_tab_ids(&mut entry, model, &mut HashSet::new());
+    entry.refresh_tabs(model, &mut HashSet::new());
     let mut events = vec![ExtensionModelEvent::WindowRemoved { window_id: id }];
     if entry.window.focused {
-        let fallback = focused_host_window(model).unwrap_or(WINDOW_ID_NONE);
+        let fallback = model.focused_window_id().unwrap_or(WINDOW_ID_NONE);
         windows.last_focused = (fallback >= 0).then_some(fallback);
         events.push(ExtensionModelEvent::WindowFocusChanged {
             window_id: fallback,
@@ -596,457 +973,76 @@ fn remove(
     })
 }
 
-fn success(result: Value) -> WindowDispatch {
-    WindowDispatch {
-        result,
-        open_window: None,
-        close_window: None,
-        update_host_window: None,
-        events: Vec::new(),
-    }
-}
-
-fn argument(request: &ApiRequest, index: usize) -> Option<&Value> {
-    match &request.arguments {
-        Value::Array(arguments) => arguments.get(index),
-        value if index == 0 => Some(value),
-        _ => None,
-    }
-}
-
-fn resolve_window_id(
-    id: i32,
-    caller: &ExtensionCallerContext,
-    model: &ExtensionModel,
-    windows: &ExtensionWindows,
-) -> Result<i32, ExtensionApiError> {
-    if matches!(id, WINDOW_ID_NONE | WINDOW_ID_CURRENT) {
-        return current_window_id(caller, model, windows).ok_or_else(|| {
-            ExtensionApiError::new("window_not_found", "current window is unavailable")
-        });
-    }
-    if id < 0 {
-        return Err(ExtensionApiError::new(
-            "invalid_arguments",
-            "windowId is invalid",
-        ));
-    }
-    Ok(id)
-}
-
-fn current_window_id(
-    caller: &ExtensionCallerContext,
-    model: &ExtensionModel,
-    windows: &ExtensionWindows,
-) -> Option<i32> {
-    if let Some(caller_url) = caller.url()
-        && let Some(id) = windows.windows.iter().find_map(|(id, window)| {
+impl ExtensionWindows {
+    fn value_by_id(
+        &mut self,
+        id: i32,
+        options: Option<&Value>,
+        model: &ExtensionModel,
+        request: &ApiRequest,
+        authorization: &BridgeAuthorization,
+    ) -> Result<Value, ExtensionApiError> {
+        let populate = options
+            .and_then(|options| options.get("populate"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if let Some(window) = self.windows.get_mut(&id) {
+            window.refresh_tabs(model, &mut HashSet::new());
+            if !window.window.matches_type(options) {
+                return Err(ExtensionApiError::new(
+                    "window_not_found",
+                    "window type is filtered out",
+                ));
+            }
+            return Ok(window.window.disclosed_value(
+                window.tabs(model),
+                populate,
+                request,
+                authorization,
+            ));
+        }
+        let fallback;
+        let window = if let Some(window) = model.windows.iter().find(|window| window.id == id) {
             window
-                .urls
-                .iter()
-                .any(|url| extension_page_matches(url, caller_url))
-                .then_some(*id)
-        })
-    {
-        return Some(id);
-    }
-    windows
-        .windows
-        .values()
-        .find(|window| window.window.focused)
-        .map(|window| window.window.id)
-        .or_else(|| focused_host_window(model))
-        .or_else(|| model.windows.first().map(|window| window.id))
-        .or(Some(FALLBACK_HOST_WINDOW_ID))
-}
-
-fn focused_host_window(model: &ExtensionModel) -> Option<i32> {
-    model
-        .windows
-        .iter()
-        .find(|window| window.focused)
-        .map(|window| window.id)
-}
-
-fn window_exists(id: i32, model: &ExtensionModel, windows: &ExtensionWindows) -> bool {
-    windows.windows.contains_key(&id) || model.windows.iter().any(|window| window.id == id)
-}
-
-fn resolve_native_window_alias(
-    id: i32,
-    model: &ExtensionModel,
-    windows: &ExtensionWindows,
-) -> Result<i32, ExtensionApiError> {
-    if window_exists(id, model, windows) {
-        return Ok(id);
-    }
-    if id >= FIRST_EXTENSION_WINDOW_ID && id < windows.next_id {
-        return Err(ExtensionApiError::new(
-            "window_not_found",
-            "extension window is unavailable",
-        ));
-    }
-    Ok(focused_host_window(model)
-        .or_else(|| model.windows.first().map(|window| window.id))
-        .unwrap_or(id))
-}
-
-fn window_by_id(
-    id: i32,
-    options: Option<&Value>,
-    model: &ExtensionModel,
-    windows: &mut ExtensionWindows,
-    request: &ApiRequest,
-    authorization: &BridgeAuthorization,
-) -> Result<Value, ExtensionApiError> {
-    if let Some(window) = windows.windows.get_mut(&id) {
-        refresh_tab_ids(window, model, &mut HashSet::new());
-        if !type_matches(&window.window, options) {
+        } else {
+            fallback = ExtensionWindowSnapshot::fallback(id);
+            &fallback
+        };
+        if !window.matches_type(options) {
             return Err(ExtensionApiError::new(
                 "window_not_found",
                 "window type is filtered out",
             ));
         }
-        return Ok(window_value(
-            &window.window,
-            virtual_tabs(window, model),
-            populate(options),
+        Ok(window.disclosed_value(
+            model
+                .tabs
+                .iter()
+                .filter(|tab| tab.window_id == id)
+                .cloned()
+                .collect(),
+            populate,
             request,
             authorization,
-        ));
-    }
-    let fallback;
-    let window = if let Some(window) = model.windows.iter().find(|window| window.id == id) {
-        window
-    } else {
-        fallback = fallback_host_window(id);
-        &fallback
-    };
-    if !type_matches(window, options) {
-        return Err(ExtensionApiError::new(
-            "window_not_found",
-            "window type is filtered out",
-        ));
-    }
-    Ok(window_value(
-        window,
-        model
-            .tabs
-            .iter()
-            .filter(|tab| tab.window_id == id)
-            .cloned()
-            .collect(),
-        populate(options),
-        request,
-        authorization,
-    ))
-}
-
-fn fallback_host_window(id: i32) -> ExtensionWindowSnapshot {
-    ExtensionWindowSnapshot {
-        id,
-        focused: true,
-        left: 0,
-        top: 0,
-        width: 1920,
-        height: 1080,
-        incognito: false,
-        window_type: "normal".into(),
-        state: "normal".into(),
-        always_on_top: false,
-    }
-}
-
-fn window_value(
-    window: &ExtensionWindowSnapshot,
-    tabs: Vec<ExtensionTabSnapshot>,
-    populate: bool,
-    request: &ApiRequest,
-    authorization: &BridgeAuthorization,
-) -> Value {
-    let mut value = serde_json::to_value(window).expect("extension window serializes");
-    if populate {
-        value.as_object_mut().expect("window object").insert(
-            "tabs".into(),
-            Value::Array(
-                tabs.into_iter()
-                    .enumerate()
-                    .map(|(index, tab)| {
-                        tab.disclosed_value(window.id, index as u32, request, authorization)
-                    })
-                    .collect(),
-            ),
-        );
-    }
-    value
-}
-
-fn virtual_tabs(window: &ExtensionWindow, model: &ExtensionModel) -> Vec<ExtensionTabSnapshot> {
-    window
-        .tab_ids
-        .iter()
-        .filter_map(|id| model.tabs.iter().find(|tab| tab.id == *id).cloned())
-        .collect()
-}
-
-fn refresh_tab_ids(
-    window: &mut ExtensionWindow,
-    model: &ExtensionModel,
-    claimed: &mut HashSet<i32>,
-) {
-    window
-        .tab_ids
-        .retain(|id| model.tabs.iter().any(|tab| tab.id == *id));
-    claimed.extend(window.tab_ids.iter().copied());
-    for url in &window.urls {
-        let exact = model
-            .tabs
-            .iter()
-            .find(|tab| !claimed.contains(&tab.id) && same_document(url, &tab.url));
-        if let Some(tab) = exact {
-            window.tab_ids.push(tab.id);
-            claimed.insert(tab.id);
-        }
-    }
-    window.tab_ids.sort_unstable();
-    window.tab_ids.dedup();
-}
-
-fn same_document(expected: &str, actual: &str) -> bool {
-    let (Ok(mut expected), Ok(mut actual)) = (url::Url::parse(expected), url::Url::parse(actual))
-    else {
-        return expected == actual;
-    };
-    expected.set_fragment(None);
-    actual.set_fragment(None);
-    expected == actual
-}
-
-fn extension_page_matches(expected: &str, actual: &str) -> bool {
-    if same_document(expected, actual) {
-        return true;
-    }
-    let (Ok(expected), Ok(actual)) = (url::Url::parse(expected), url::Url::parse(actual)) else {
-        return false;
-    };
-    expected.scheme() == "chrome-extension"
-        && expected.scheme() == actual.scheme()
-        && expected.host_str() == actual.host_str()
-        && expected.path() == actual.path()
-}
-
-fn populate(options: Option<&Value>) -> bool {
-    options
-        .and_then(|options| options.get("populate"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
-
-fn type_matches(window: &ExtensionWindowSnapshot, options: Option<&Value>) -> bool {
-    options
-        .and_then(|options| options.get("windowTypes"))
-        .and_then(Value::as_array)
-        .is_none_or(|types| {
-            types
-                .iter()
-                .filter_map(Value::as_str)
-                .any(|window_type| window_type == window.window_type)
-        })
-}
-
-fn create_urls(
-    data: Option<&serde_json::Map<String, Value>>,
-    request: &ApiRequest,
-) -> Result<Vec<String>, ExtensionApiError> {
-    let urls = match data.and_then(|data| data.get("url")) {
-        Some(Value::String(url)) => vec![resolve_url(url, request)?],
-        Some(Value::Array(values)) => values
-            .iter()
-            .map(|value| {
-                value
-                    .as_str()
-                    .ok_or_else(|| {
-                        ExtensionApiError::new("invalid_arguments", "window URL is invalid")
-                    })
-                    .and_then(|url| resolve_url(url, request))
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        Some(_) => {
-            return Err(ExtensionApiError::new(
-                "invalid_arguments",
-                "window URL is invalid",
-            ));
-        }
-        None => Vec::new(),
-    };
-    if data.is_some_and(|data| data.contains_key("tabId")) {
-        return Err(ExtensionApiError::new(
-            "unsupported_option",
-            "moving an existing tab into an extension window is unavailable",
-        ));
-    }
-    Ok(urls)
-}
-
-fn resolve_url(url: &str, request: &ApiRequest) -> Result<String, ExtensionApiError> {
-    let parsed = url::Url::parse(url).or_else(|_| {
-        url::Url::parse(&format!(
-            "chrome-extension://{}/",
-            request.caller_context.extension_id()
-        ))?
-        .join(url)
-    });
-    let parsed =
-        parsed.map_err(|_| ExtensionApiError::new("invalid_url", "window URL is invalid"))?;
-    match parsed.scheme() {
-        "http" | "https" => {}
-        "chrome-extension" if parsed.host_str() == Some(request.caller_context.extension_id()) => {}
-        _ => {
-            return Err(ExtensionApiError::new(
-                "invalid_url",
-                "window URL uses an unsupported scheme",
-            ));
-        }
-    }
-    Ok(parsed.to_string())
-}
-
-fn integer(data: Option<&serde_json::Map<String, Value>>, key: &str) -> Option<i32> {
-    data.and_then(|data| data.get(key))
-        .and_then(Value::as_i64)
-        .and_then(|value| i32::try_from(value).ok())
-}
-
-fn positive_integer(data: Option<&serde_json::Map<String, Value>>, key: &str) -> Option<u32> {
-    data.and_then(|data| data.get(key))
-        .and_then(Value::as_u64)
-        .and_then(|value| u32::try_from(value).ok())
-}
-
-fn validate_state_and_bounds(
-    data: Option<&serde_json::Map<String, Value>>,
-) -> Result<(), ExtensionApiError> {
-    let state = data
-        .and_then(|data| data.get("state"))
-        .and_then(Value::as_str)
-        .unwrap_or("normal");
-    validate_state(state)?;
-    if state != "normal"
-        && data.is_some_and(|data| {
-            ["left", "top", "width", "height"]
-                .iter()
-                .any(|key| data.contains_key(*key))
-        })
-    {
-        return Err(ExtensionApiError::new(
-            "invalid_arguments",
-            "window bounds cannot be combined with this state",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_update(update: &HostWindowUpdate) -> Result<(), ExtensionApiError> {
-    if let Some(state) = update.state.as_deref() {
-        validate_state(state)?;
-        if state != "normal"
-            && (update.left.is_some()
-                || update.top.is_some()
-                || update.width.is_some()
-                || update.height.is_some())
-        {
-            return Err(ExtensionApiError::new(
-                "invalid_arguments",
-                "window bounds cannot be combined with this state",
-            ));
-        }
-        if state == "minimized" && update.focused == Some(true) {
-            return Err(ExtensionApiError::new(
-                "invalid_arguments",
-                "a minimized window cannot be focused",
-            ));
-        }
-        if matches!(state, "fullscreen" | "maximized") && update.focused == Some(false) {
-            return Err(ExtensionApiError::new(
-                "invalid_arguments",
-                "a fullscreen or maximized window cannot be unfocused",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn validate_state(state: &str) -> Result<(), ExtensionApiError> {
-    if matches!(state, "normal" | "minimized" | "maximized" | "fullscreen") {
-        Ok(())
-    } else {
-        Err(ExtensionApiError::new(
-            "invalid_arguments",
-            "window state is invalid",
         ))
     }
 }
 
-fn apply_update(window: &mut ExtensionWindowSnapshot, update: &HostWindowUpdate) {
-    if let Some(left) = update.left {
-        window.left = left;
-    }
-    if let Some(top) = update.top {
-        window.top = top;
-    }
-    if let Some(width) = update.width {
-        window.width = width as i32;
-    }
-    if let Some(height) = update.height {
-        window.height = height as i32;
-    }
-    if let Some(focused) = update.focused {
-        window.focused = focused;
-    }
-    if let Some(state) = &update.state {
-        window.state.clone_from(state);
-    }
-}
-
-fn window_update_events(
-    before: &ExtensionWindowSnapshot,
-    after: &ExtensionWindowSnapshot,
-) -> Vec<ExtensionModelEvent> {
-    let mut events = Vec::new();
-    if before.left != after.left
-        || before.top != after.top
-        || before.width != after.width
-        || before.height != after.height
-    {
-        events.push(ExtensionModelEvent::WindowBoundsChanged(after.clone()));
-    }
-    if before.focused != after.focused {
-        events.push(ExtensionModelEvent::WindowFocusChanged {
-            window_id: if after.focused {
-                after.id
-            } else {
-                WINDOW_ID_NONE
-            },
-        });
-    }
-    events
-}
-
-pub fn event_payload(event: &ExtensionModelEvent) -> Option<(&'static str, Value)> {
-    match event {
-        ExtensionModelEvent::WindowCreated(window) => Some((
-            "onCreated",
-            json!([serde_json::to_value(window).expect("extension window serializes")]),
-        )),
-        ExtensionModelEvent::WindowRemoved { window_id } => Some(("onRemoved", json!([window_id]))),
-        ExtensionModelEvent::WindowFocusChanged { window_id } => {
-            Some(("onFocusChanged", json!([window_id])))
+impl ExtensionModelEvent {
+    pub fn window_payload(&self) -> Option<(&'static str, Value)> {
+        match self {
+            Self::WindowCreated(window) => Some((
+                "onCreated",
+                json!([serde_json::to_value(window).expect("extension window serializes")]),
+            )),
+            Self::WindowRemoved { window_id } => Some(("onRemoved", json!([window_id]))),
+            Self::WindowFocusChanged { window_id } => Some(("onFocusChanged", json!([window_id]))),
+            Self::WindowBoundsChanged(window) => Some((
+                "onBoundsChanged",
+                json!([serde_json::to_value(window).expect("extension window serializes")]),
+            )),
+            _ => None,
         }
-        ExtensionModelEvent::WindowBoundsChanged(window) => Some((
-            "onBoundsChanged",
-            json!([serde_json::to_value(window).expect("extension window serializes")]),
-        )),
-        _ => None,
     }
 }
 
@@ -1103,7 +1099,7 @@ mod tests {
         let mut model = model();
         let mut windows = ExtensionWindows::default();
         let popout_url = format!("chrome-extension://{EXTENSION_ID}/popup/index.html?x=1#/fido2");
-        let created = dispatch(
+        let created = WindowDispatch::from_request(
             &request(
                 "create",
                 json!([{
@@ -1133,7 +1129,7 @@ mod tests {
             status: "complete".into(),
         });
 
-        let all = dispatch(
+        let all = WindowDispatch::from_request(
             &request("getAll", json!([{ "populate": true }])),
             &model,
             &mut windows,
@@ -1150,7 +1146,7 @@ mod tests {
             .unwrap();
         assert_eq!(virtual_window["tabs"][0]["windowId"], id);
 
-        let updated = dispatch(
+        let updated = WindowDispatch::from_request(
             &request("update", json!([id, { "left": 42, "focused": true }])),
             &model,
             &mut windows,
@@ -1159,7 +1155,7 @@ mod tests {
         .unwrap();
         assert_eq!(updated.result["left"], 42);
 
-        let removed = dispatch(
+        let removed = WindowDispatch::from_request(
             &request("remove", json!([id])),
             &model,
             &mut windows,
@@ -1177,7 +1173,7 @@ mod tests {
     fn current_window_resolves_extension_page_url() {
         let model = model();
         let mut windows = ExtensionWindows::default();
-        let created = dispatch(
+        let created = WindowDispatch::from_request(
             &request(
                 "create",
                 json!([{ "url": format!("chrome-extension://{EXTENSION_ID}/popup/index.html?x=1#/fido2") }]),
@@ -1196,7 +1192,7 @@ mod tests {
             document_id: "document".into(),
         };
 
-        let result = dispatch(
+        let result = WindowDispatch::from_request(
             &current,
             &model,
             &mut windows,
@@ -1212,7 +1208,7 @@ mod tests {
         let model = model();
         let mut windows = ExtensionWindows::default();
 
-        let result = dispatch(
+        let result = WindowDispatch::from_request(
             &request("get", json!([1_798_152_106, { "populate": true }])),
             &model,
             &mut windows,
@@ -1227,7 +1223,7 @@ mod tests {
 
     #[test]
     fn get_maps_window_id_none_to_current_window_with_geometry() {
-        let result = dispatch(
+        let result = WindowDispatch::from_request(
             &request("get", json!([WINDOW_ID_NONE, { "populate": true }])),
             &model(),
             &mut ExtensionWindows::default(),
@@ -1251,14 +1247,14 @@ mod tests {
         };
         let mut windows = ExtensionWindows::default();
 
-        let by_id = dispatch(
+        let by_id = WindowDispatch::from_request(
             &request("get", json!([1_798_152_106, { "populate": true }])),
             &model,
             &mut windows,
             &BridgeAuthorization::default(),
         )
         .unwrap();
-        let current = dispatch(
+        let current = WindowDispatch::from_request(
             &request("getCurrent", json!([{ "populate": true }])),
             &model,
             &mut windows,
@@ -1278,7 +1274,7 @@ mod tests {
 
     #[test]
     fn populated_windows_redact_tab_details_without_permission() {
-        let result = dispatch(
+        let result = WindowDispatch::from_request(
             &request("getAll", json!([{ "populate": true }])),
             &model(),
             &mut ExtensionWindows::default(),
@@ -1298,7 +1294,7 @@ mod tests {
             permissions: ["tabs".into()].into_iter().collect(),
             ..Default::default()
         };
-        let result = dispatch(
+        let result = WindowDispatch::from_request(
             &request("getAll", json!([{ "populate": true }])),
             &model(),
             &mut ExtensionWindows::default(),
@@ -1313,7 +1309,7 @@ mod tests {
 
     #[test]
     fn create_rejects_existing_tab_id() {
-        let error = dispatch(
+        let error = WindowDispatch::from_request(
             &request("create", json!([{ "tabId": 7 }])),
             &model(),
             &mut ExtensionWindows::default(),

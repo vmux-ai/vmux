@@ -10,10 +10,7 @@ impl Plugin for AppearancePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn)
             .add_message::<ColorSchemeChanged>()
-            .add_systems(
-                Update,
-                (track_window_theme, update_resolved_color_scheme).chain(),
-            );
+            .add_systems(Update, (track_window_theme, resolve).chain());
     }
 }
 
@@ -31,6 +28,16 @@ pub enum ResolvedScheme {
     Dark,
 }
 
+impl ResolvedScheme {
+    pub fn resolve(mode: ColorScheme, system: Option<Self>) -> Self {
+        match mode {
+            ColorScheme::Light => Self::Light,
+            ColorScheme::Dark => Self::Dark,
+            ColorScheme::Device => system.unwrap_or(Self::Dark),
+        }
+    }
+}
+
 #[derive(Component, Default, Clone, Copy, Debug)]
 pub struct SystemAppearance(pub Option<ResolvedScheme>);
 
@@ -45,14 +52,6 @@ impl Default for ResolvedColorScheme {
 
 #[derive(Message, Clone, Copy, Debug)]
 pub struct ColorSchemeChanged(pub ResolvedScheme);
-
-pub fn resolve(mode: ColorScheme, system: Option<ResolvedScheme>) -> ResolvedScheme {
-    match mode {
-        ColorScheme::Light => ResolvedScheme::Light,
-        ColorScheme::Dark => ResolvedScheme::Dark,
-        ColorScheme::Device => system.unwrap_or(ResolvedScheme::Dark),
-    }
-}
 
 fn track_window_theme(
     mut reader: MessageReader<WindowThemeChanged>,
@@ -69,7 +68,7 @@ fn track_window_theme(
     }
 }
 
-fn update_resolved_color_scheme(
+fn resolve(
     settings: Res<crate::AppSettings>,
     system: Single<Ref<SystemAppearance>>,
     mut resolved: Single<&mut ResolvedColorScheme>,
@@ -78,7 +77,7 @@ fn update_resolved_color_scheme(
     if !settings.is_changed() && !system.is_changed() {
         return;
     }
-    let next = resolve(settings.appearance.mode, system.0);
+    let next = ResolvedScheme::resolve(settings.appearance.mode, system.0);
     if resolved.0 != next {
         resolved.0 = next;
         changed.write(ColorSchemeChanged(next));
@@ -92,11 +91,11 @@ mod tests {
     #[test]
     fn explicit_modes_ignore_os() {
         assert_eq!(
-            resolve(ColorScheme::Light, Some(ResolvedScheme::Dark)),
+            ResolvedScheme::resolve(ColorScheme::Light, Some(ResolvedScheme::Dark)),
             ResolvedScheme::Light
         );
         assert_eq!(
-            resolve(ColorScheme::Dark, Some(ResolvedScheme::Light)),
+            ResolvedScheme::resolve(ColorScheme::Dark, Some(ResolvedScheme::Light)),
             ResolvedScheme::Dark
         );
     }
@@ -104,13 +103,16 @@ mod tests {
     #[test]
     fn device_follows_os_and_defaults_dark() {
         assert_eq!(
-            resolve(ColorScheme::Device, Some(ResolvedScheme::Light)),
+            ResolvedScheme::resolve(ColorScheme::Device, Some(ResolvedScheme::Light)),
             ResolvedScheme::Light
         );
         assert_eq!(
-            resolve(ColorScheme::Device, Some(ResolvedScheme::Dark)),
+            ResolvedScheme::resolve(ColorScheme::Device, Some(ResolvedScheme::Dark)),
             ResolvedScheme::Dark
         );
-        assert_eq!(resolve(ColorScheme::Device, None), ResolvedScheme::Dark);
+        assert_eq!(
+            ResolvedScheme::resolve(ColorScheme::Device, None),
+            ResolvedScheme::Dark
+        );
     }
 }

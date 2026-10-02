@@ -31,14 +31,15 @@ impl Plugin for ExtensionPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::ExtensionPage::plugin());
 
-        let prepared = load::apply_env().unwrap_or_else(|error| {
+        let prepared = load::PreparedExtensions::load().unwrap_or_else(|error| {
             bevy::log::error!(%error, "failed to prepare extensions; starting without them");
             unsafe { std::env::remove_var("VMUX_LOAD_EXTENSIONS") };
-            Vec::new()
+            load::PreparedExtensions::default()
         });
         let profile = vmux_ecs::profile::Profile::current().into_id();
         let conformance_extension = std::env::var("VMUX_EXTENSION_CONFORMANCE_ID").ok();
         let registrations = prepared
+            .0
             .iter()
             .map(|runtime| bridge::BridgeRegistration {
                 extension_id: runtime.extension_id.clone(),
@@ -59,8 +60,7 @@ impl Plugin for ExtensionPlugin {
                 },
             })
             .collect();
-        app.world_mut()
-            .spawn((Name::new("Extensions"), load::PreparedExtensions(prepared)));
+        app.world_mut().spawn((Name::new("Extensions"), prepared));
         app.add_agent_request::<AgentBrowserInstallExtension>()
             .bind_tool::<BrowserInstallExtensionArgs>()
             .add_plugins((

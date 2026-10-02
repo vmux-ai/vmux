@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 use vmux_ui::back::BackButton;
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::composer_bar::StatusDot;
-use vmux_ui::favicon::favicon_src_for_url;
+use vmux_ui::favicon::FaviconSource;
 use vmux_ui::i18n::{TranslationValue, translate_with};
 
 #[component]
@@ -48,7 +48,7 @@ pub(super) fn ChatHeader(chat: Chat) -> Element {
 fn AgentAvatar(chat: Chat, size_class: String) -> Element {
     let agent = chat.agent();
     let accent = chat.identity.accent();
-    let src = favicon_src_for_url(
+    let src = FaviconSource::resolve(
         &chat.identity.icon(),
         &format!("{}{agent}", crate::ChatPlugin::URL),
     );

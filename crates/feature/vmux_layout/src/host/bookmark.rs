@@ -68,47 +68,47 @@ impl Plugin for BookmarkPlugin {
                 BookmarkContextMenuRequest,
                 BookmarkDropRequest,
             )>::default())
-            .add_observer(toggle_request)
-            .add_observer(menu_request::<BookmarkMenuRootRequest>)
-            .add_observer(menu_request::<BookmarkMenuPinRequest>)
-            .add_observer(menu_request::<BookmarkMenuEntryRequest>)
-            .add_observer(menu_request::<BookmarkMenuFolderRequest>)
-            .add_observer(open_request)
-            .add_observer(add_request)
-            .add_observer(pin_url_request)
-            .add_observer(remove_request)
-            .add_observer(rename_request)
-            .add_observer(move_request)
-            .add_observer(pin_request)
-            .add_observer(unpin_request)
+            .add_observer(request_toggle)
+            .add_observer(request_menu::<BookmarkMenuRootRequest>)
+            .add_observer(request_menu::<BookmarkMenuPinRequest>)
+            .add_observer(request_menu::<BookmarkMenuEntryRequest>)
+            .add_observer(request_menu::<BookmarkMenuFolderRequest>)
+            .add_observer(request_open)
+            .add_observer(request_add)
+            .add_observer(request_pin_url)
+            .add_observer(request_remove)
+            .add_observer(request_rename)
+            .add_observer(request_move)
+            .add_observer(request_pin)
+            .add_observer(request_unpin)
             .add_observer(toggle_folder)
             .add_observer(create_folder)
-            .add_observer(folder_move_request)
+            .add_observer(request_folder_move)
             .add_observer(rename_folder)
-            .add_observer(remove_folder)
-            .add_observer(text_input_request)
+            .add_observer(request_remove_folder)
+            .add_observer(text_input)
             .add_observer(open_context_menu)
-            .add_observer(drop_request)
+            .add_observer(request_drop)
             .add_systems(
                 Update,
                 (
-                    handle_requests.in_set(LayoutRequestSet::Handle),
+                    commands.in_set(LayoutRequestSet::Handle),
                     (
-                        apply_toggle_for_url_requests,
-                        apply_add_requests,
-                        apply_remove_requests,
-                        apply_rename_requests,
-                        apply_move_requests,
-                        apply_move_pin_requests,
-                        apply_reorder_pin_requests,
-                        apply_create_folder_requests,
-                        apply_move_folder_requests,
-                        apply_remove_folder_requests,
-                        apply_rename_folder_requests,
-                        apply_toggle_folder_requests,
-                        apply_pin_requests,
-                        apply_pin_url_requests,
-                        apply_unpin_requests,
+                        toggle,
+                        add,
+                        remove,
+                        rename,
+                        move_entry,
+                        move_pin,
+                        reorder_pin,
+                        add_folder,
+                        move_folder,
+                        remove_folder,
+                        rename_folder_request,
+                        toggle_folder_request,
+                        pin,
+                        pin_url,
+                        unpin,
                     )
                         .chain()
                         .in_set(BookmarkRequestSet),
@@ -298,7 +298,7 @@ fn open_context_menu(trigger: On<UiInput<BookmarkContextMenuRequest>>, mut comma
     }
 }
 
-fn text_input_request(trigger: On<UiInput<BookmarkTextInputRequest>>, mut commands: Commands) {
+fn text_input(trigger: On<UiInput<BookmarkTextInputRequest>>, mut commands: Commands) {
     let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
         return;
     };
@@ -309,17 +309,29 @@ fn text_input_request(trigger: On<UiInput<BookmarkTextInputRequest>>, mut comman
     }
 }
 
-fn new_uuid() -> Uuid {
-    Uuid(uuid::Uuid::new_v4().to_string())
-}
-
 #[derive(SystemParam)]
 struct BookmarkEntities<'w, 's> {
     ids: Query<'w, 's, (Entity, &'static Uuid)>,
     parents: Query<'w, 's, &'static ChildOf>,
+    orders: Query<'w, 's, &'static BookmarkOrder>,
 }
 
 impl BookmarkEntities<'_, '_> {
+    fn new_uuid(&self) -> Uuid {
+        Uuid(uuid::Uuid::new_v4().to_string())
+    }
+
+    fn next_order(&self) -> BookmarkOrder {
+        BookmarkOrder(
+            self.orders
+                .iter()
+                .map(|order| order.0)
+                .max()
+                .map(|order| order + 1)
+                .unwrap_or(0),
+        )
+    }
+
     fn find(&self, target: &str) -> Option<Entity> {
         self.ids
             .iter()
@@ -344,15 +356,11 @@ impl BookmarkEntities<'_, '_> {
     }
 }
 
-fn next_top_order(orders: impl Iterator<Item = u32>) -> BookmarkOrder {
-    BookmarkOrder(orders.max().map(|m| m + 1).unwrap_or(0))
-}
-
-fn apply_toggle_for_url_requests(
+fn toggle(
     mut reader: MessageReader<ToggleForUrlRequest>,
+    entities: BookmarkEntities,
     bookmarks: Query<(Entity, &PageMetadata), With<Bookmark>>,
     pinned: Query<(Entity, &PageMetadata), With<Pin>>,
-    orders: Query<&BookmarkOrder>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -376,19 +384,22 @@ fn apply_toggle_for_url_requests(
         {
             commands.entity(entity).insert((Bookmark, metadata.clone()));
         } else {
-            let order = next_top_order(orders.iter().map(|order| order.0));
-            commands.spawn((Bookmark, new_uuid(), metadata.clone(), order));
+            commands.spawn((
+                Bookmark,
+                entities.new_uuid(),
+                metadata.clone(),
+                entities.next_order(),
+            ));
         }
     }
 }
 
-fn apply_add_requests(
+fn add(
     mut reader: MessageReader<AddRequest>,
     entities: BookmarkEntities,
     bookmarks: Query<(Entity, &PageMetadata), With<Bookmark>>,
     pinned: Query<(Entity, &PageMetadata), With<Pin>>,
     folders: Query<(), With<Folder>>,
-    orders: Query<&BookmarkOrder>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -421,15 +432,19 @@ fn apply_add_requests(
             }
             continue;
         }
-        let order = next_top_order(orders.iter().map(|order| order.0));
-        let mut entity = commands.spawn((Bookmark, new_uuid(), request.metadata.clone(), order));
+        let mut entity = commands.spawn((
+            Bookmark,
+            entities.new_uuid(),
+            request.metadata.clone(),
+            entities.next_order(),
+        ));
         if let Some(folder_entity) = folder_entity {
             entity.insert(ChildOf(folder_entity));
         }
     }
 }
 
-fn apply_remove_requests(
+fn remove(
     mut reader: MessageReader<RemoveRequest>,
     entities: BookmarkEntities,
     bookmarks: Query<(), With<Bookmark>>,
@@ -452,7 +467,7 @@ fn apply_remove_requests(
     }
 }
 
-fn apply_rename_requests(
+fn rename(
     mut reader: MessageReader<RenameRequest>,
     entities: BookmarkEntities,
     bookmarks: Query<&PageMetadata, With<Bookmark>>,
@@ -473,7 +488,7 @@ fn apply_rename_requests(
     }
 }
 
-fn apply_move_requests(
+fn move_entry(
     mut reader: MessageReader<MoveRequest>,
     entities: BookmarkEntities,
     bookmarks: Query<(), With<Bookmark>>,
@@ -496,7 +511,7 @@ fn apply_move_requests(
     }
 }
 
-fn apply_move_pin_requests(
+fn move_pin(
     mut reader: MessageReader<MovePinRequest>,
     entities: BookmarkEntities,
     pinned: Query<(), With<Pin>>,
@@ -525,7 +540,7 @@ fn apply_move_pin_requests(
     }
 }
 
-fn apply_reorder_pin_requests(
+fn reorder_pin(
     mut reader: MessageReader<ReorderPinRequest>,
     pin_orders: Query<(Entity, &Uuid, &BookmarkOrder), With<Pin>>,
     mut commands: Commands,
@@ -557,11 +572,10 @@ fn apply_reorder_pin_requests(
     }
 }
 
-fn apply_create_folder_requests(
+fn add_folder(
     mut reader: MessageReader<CreateFolderRequest>,
     entities: BookmarkEntities,
     folders: Query<(), With<Folder>>,
-    orders: Query<&BookmarkOrder>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -580,15 +594,19 @@ fn apply_create_folder_requests(
         } else {
             None
         };
-        let order = next_top_order(orders.iter().map(|order| order.0));
-        let mut entity = commands.spawn((Folder, new_uuid(), Name::new(name.to_string()), order));
+        let mut entity = commands.spawn((
+            Folder,
+            entities.new_uuid(),
+            Name::new(name.to_string()),
+            entities.next_order(),
+        ));
         if let Some(parent_entity) = parent_entity {
             entity.insert(ChildOf(parent_entity));
         }
     }
 }
 
-fn apply_move_folder_requests(
+fn move_folder(
     mut reader: MessageReader<MoveFolderRequest>,
     entities: BookmarkEntities,
     folders: Query<(), With<Folder>>,
@@ -618,7 +636,7 @@ fn apply_move_folder_requests(
     }
 }
 
-fn apply_remove_folder_requests(
+fn remove_folder(
     mut reader: MessageReader<RemoveFolderRequest>,
     entities: BookmarkEntities,
     folders: Query<(), With<Folder>>,
@@ -644,7 +662,7 @@ fn apply_remove_folder_requests(
     }
 }
 
-fn apply_rename_folder_requests(
+fn rename_folder_request(
     mut reader: MessageReader<RenameFolderRequest>,
     entities: BookmarkEntities,
     folders: Query<(), With<Folder>>,
@@ -665,7 +683,7 @@ fn apply_rename_folder_requests(
     }
 }
 
-fn apply_toggle_folder_requests(
+fn toggle_folder_request(
     mut reader: MessageReader<ToggleFolderRequest>,
     entities: BookmarkEntities,
     folders: Query<(), With<Folder>>,
@@ -685,7 +703,7 @@ fn apply_toggle_folder_requests(
     }
 }
 
-fn apply_pin_requests(
+fn pin(
     mut reader: MessageReader<PinRequest>,
     entities: BookmarkEntities,
     bookmarks: Query<(), With<Bookmark>>,
@@ -700,11 +718,11 @@ fn apply_pin_requests(
     }
 }
 
-fn apply_pin_url_requests(
+fn pin_url(
     mut reader: MessageReader<PinUrlRequest>,
+    entities: BookmarkEntities,
     pinned: Query<(Entity, &PageMetadata), With<Pin>>,
     bookmarks: Query<(Entity, &PageMetadata), With<Bookmark>>,
-    orders: Query<&BookmarkOrder>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -724,12 +742,16 @@ fn apply_pin_url_requests(
                 .insert((Pin, request.metadata.clone()));
             continue;
         }
-        let order = next_top_order(orders.iter().map(|order| order.0));
-        commands.spawn((Pin, new_uuid(), request.metadata.clone(), order));
+        commands.spawn((
+            Pin,
+            entities.new_uuid(),
+            request.metadata.clone(),
+            entities.next_order(),
+        ));
     }
 }
 
-fn apply_unpin_requests(
+fn unpin(
     mut reader: MessageReader<UnpinRequest>,
     entities: BookmarkEntities,
     pinned: Query<(), With<Pin>>,
@@ -816,14 +838,14 @@ fn sync_metadata(
     }
 }
 
-fn toggle_request(
+fn request_toggle(
     _trigger: On<UiInput<BookmarkToggleRequest>>,
     mut requests: MessageWriter<BookmarkToggleActiveRequest>,
 ) {
     requests.write(BookmarkToggleActiveRequest);
 }
 
-fn open_request(
+fn request_open(
     trigger: On<UiInput<BookmarkOpenRequest>>,
     mut requests: MessageWriter<OpenRequest>,
 ) {
@@ -832,7 +854,7 @@ fn open_request(
     });
 }
 
-fn menu_request<R>(trigger: On<UiInput<R>>, mut menu_req: MessageWriter<ShowBookmarkMenuRequest>)
+fn request_menu<R>(trigger: On<UiInput<R>>, mut menu_req: MessageWriter<ShowBookmarkMenuRequest>)
 where
     R: Clone + Send + Sync + 'static,
     BookmarkMenuTarget: From<R>,
@@ -843,7 +865,7 @@ where
     });
 }
 
-fn add_request(
+fn request_add(
     trigger: On<UiInput<BookmarkAddUiRequest>>,
     mut requests: MessageWriter<AddRequest>,
 ) {
@@ -853,7 +875,7 @@ fn add_request(
     });
 }
 
-fn pin_url_request(
+fn request_pin_url(
     trigger: On<UiInput<BookmarkPinUrlUiRequest>>,
     mut requests: MessageWriter<PinUrlRequest>,
 ) {
@@ -862,7 +884,7 @@ fn pin_url_request(
     });
 }
 
-fn remove_request(
+fn request_remove(
     trigger: On<UiInput<BookmarkRemoveUiRequest>>,
     mut requests: MessageWriter<RemoveRequest>,
 ) {
@@ -871,7 +893,7 @@ fn remove_request(
     });
 }
 
-fn rename_request(
+fn request_rename(
     trigger: On<UiInput<BookmarkRenameUiRequest>>,
     mut requests: MessageWriter<RenameRequest>,
 ) {
@@ -885,7 +907,7 @@ fn rename_request(
     });
 }
 
-fn move_request(
+fn request_move(
     trigger: On<UiInput<BookmarkMoveUiRequest>>,
     mut requests: MessageWriter<MoveRequest>,
 ) {
@@ -895,7 +917,7 @@ fn move_request(
     });
 }
 
-fn drop_request(
+fn request_drop(
     trigger: On<UiInput<BookmarkDropRequest>>,
     mut add_requests: MessageWriter<AddRequest>,
     mut move_requests: MessageWriter<MoveRequest>,
@@ -967,7 +989,7 @@ fn drop_request(
     }
 }
 
-fn pin_request(
+fn request_pin(
     trigger: On<UiInput<BookmarkPinUiRequest>>,
     mut requests: MessageWriter<PinRequest>,
 ) {
@@ -976,7 +998,7 @@ fn pin_request(
     });
 }
 
-fn unpin_request(
+fn request_unpin(
     trigger: On<UiInput<BookmarkUnpinUiRequest>>,
     mut requests: MessageWriter<UnpinRequest>,
 ) {
@@ -1008,7 +1030,7 @@ fn create_folder(
     });
 }
 
-fn folder_move_request(
+fn request_folder_move(
     trigger: On<UiInput<BookmarkFolderMoveUiRequest>>,
     mut requests: MessageWriter<MoveFolderRequest>,
 ) {
@@ -1037,7 +1059,7 @@ fn rename_folder(
     });
 }
 
-fn remove_folder(
+fn request_remove_folder(
     trigger: On<UiInput<BookmarkFolderRemoveUiRequest>>,
     mut requests: MessageWriter<RemoveFolderRequest>,
 ) {
@@ -1073,7 +1095,7 @@ impl From<BookmarkMenuFolderRequest> for BookmarkMenuTarget {
     }
 }
 
-fn handle_requests(
+fn commands(
     mut toggles: MessageReader<BookmarkToggleActiveRequest>,
     mut pins: MessageReader<BookmarkPinActiveRequest>,
     active_tab_param: ActiveTabParam,
@@ -1147,21 +1169,21 @@ mod tests {
             .add_systems(
                 Update,
                 (
-                    apply_toggle_for_url_requests,
-                    apply_add_requests,
-                    apply_remove_requests,
-                    apply_rename_requests,
-                    apply_move_requests,
-                    apply_move_pin_requests,
-                    apply_reorder_pin_requests,
-                    apply_create_folder_requests,
-                    apply_move_folder_requests,
-                    apply_remove_folder_requests,
-                    apply_rename_folder_requests,
-                    apply_toggle_folder_requests,
-                    apply_pin_requests,
-                    apply_pin_url_requests,
-                    apply_unpin_requests,
+                    toggle,
+                    add,
+                    remove,
+                    rename,
+                    move_entry,
+                    move_pin,
+                    reorder_pin,
+                    add_folder,
+                    move_folder,
+                    remove_folder,
+                    rename_folder_request,
+                    toggle_folder_request,
+                    pin,
+                    pin_url,
+                    unpin,
                     sync_metadata,
                 )
                     .chain(),
@@ -1199,7 +1221,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<ShowBookmarkMenuRequest>()
             .add_message::<OpenRequest>()
-            .add_observer(open_request);
+            .add_observer(request_open);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().trigger(UiInput::<BookmarkOpenRequest> {
             webview,
@@ -1229,7 +1251,7 @@ mod tests {
             .add_message::<MovePinRequest>()
             .add_message::<ReorderPinRequest>()
             .add_message::<MoveFolderRequest>()
-            .add_observer(drop_request);
+            .add_observer(request_drop);
         let webview = app.world_mut().spawn_empty().id();
         for payload in [
             BookmarkDropRequest {
@@ -1324,8 +1346,7 @@ mod tests {
     #[test]
     fn text_input_event_toggles_layout_keyboard_marker() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_observer(text_input_request);
+        app.add_plugins(MinimalPlugins).add_observer(text_input);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut()
             .trigger(UiInput::<BookmarkTextInputRequest> {

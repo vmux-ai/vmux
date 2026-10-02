@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
 use std::process::Command;
 
+use super::VaultStorage;
 use super::files::FileAttributes;
 use super::keys::{KeyStore, SystemKeyStore};
 use super::recovery::load_repository_key;
@@ -10,7 +11,6 @@ use super::snapshot::{
     EntryKind, LocalEntry, LocalFingerprint, LocalState, LocalStateEntry, modified_time,
     random_hex, validate_relative_path,
 };
-use super::{repository_dir, root_dir};
 
 const IGNORED_ROOTS: [&str; 9] = [
     "agents",
@@ -65,12 +65,14 @@ enum TextMergeStrategy {
     Union,
 }
 
-pub fn sync() -> Result<String, String> {
-    sync_paths(&root_dir(), &repository_dir(), &SystemKeyStore)
-}
+impl VaultStorage {
+    pub fn sync(&self) -> Result<String, String> {
+        sync_paths(&self.root, &self.repository, &SystemKeyStore)
+    }
 
-pub fn initialize() -> Result<(), String> {
-    initialize_paths(&root_dir(), &repository_dir(), &SystemKeyStore)
+    pub fn initialize(&self) -> Result<(), String> {
+        initialize_paths(&self.root, &self.repository, &SystemKeyStore)
+    }
 }
 
 pub(super) fn sync_paths<K: KeyStore>(

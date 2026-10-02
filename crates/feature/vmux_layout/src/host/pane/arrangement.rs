@@ -1,5 +1,8 @@
-use crate::host::swap::{SiblingOrder, find_kind_index, resolve_next, resolve_prev};
-use bevy::{ecs::relationship::Relationship, prelude::*};
+use crate::host::swap::SiblingOrder;
+use bevy::{
+    ecs::{relationship::Relationship, system::SystemParam},
+    prelude::*,
+};
 
 use super::{ArrangeRequest, ArrangementSet, Pane, PaneArrangement, PaneSplit, PaneSplitDirection};
 use crate::{
@@ -24,12 +27,8 @@ impl Plugin for ArrangementPlugin {
 fn arrange_from_commands(
     mut reader: MessageReader<ArrangeRequest>,
     active_tab: ActiveTabParam,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     focus: LayoutFocus,
-    parents: Query<&ChildOf>,
-    splits: Query<&PaneSplit>,
-    mut commands: Commands,
+    mut tree: PaneTree,
 ) {
     for request in reader.read() {
         let arrangement = request.0;
@@ -40,143 +39,135 @@ fn arrange_from_commands(
 
         match arrangement {
             PaneArrangement::Swap(direction) => {
-                let Ok(parent) = parents.get(active).map(Relationship::get) else {
+                let Ok(parent) = tree.parents.get(active).map(Relationship::get) else {
                     continue;
                 };
-                if !splits.contains(parent) {
+                if !tree.splits.contains(parent) {
                     continue;
                 }
-                let Ok(children) = all_children.get(parent) else {
+                let Ok(children) = tree.children.get(parent) else {
                     continue;
                 };
                 let pane_positions: Vec<usize> = children
                     .iter()
                     .enumerate()
-                    .filter(|(_, entity)| leaf_panes.contains(*entity) || splits.contains(*entity))
+                    .filter(|(_, entity)| {
+                        tree.leaves.contains(*entity) || tree.splits.contains(*entity)
+                    })
                     .map(|(index, _)| index)
                     .collect();
-                let Some(active_index) = find_kind_index(active, children, &pane_positions) else {
+                let Some(active_index) = SiblingOrder::index(active, children, &pane_positions)
+                else {
                     continue;
                 };
                 let pair = if direction == SiblingDirection::Previous {
-                    resolve_prev(active_index)
+                    SiblingOrder::previous(active_index)
                 } else {
-                    resolve_next(active_index, pane_positions.len())
+                    SiblingOrder::next(active_index, pane_positions.len())
                 };
-                if let Some((from, to)) = pair {
-                    if let Some(order) =
+                if let Some((from, to)) = pair
+                    && let Some(order) =
                         SiblingOrder::swapped(parent, children, &pane_positions, from, to)
-                    {
-                        commands.queue(order);
-                    }
+                {
+                    tree.commands.queue(order);
                 }
             }
             PaneArrangement::Rotate(direction) => {
                 let Some(tab) = tab else {
                     continue;
                 };
-                rotate_panes(
-                    tab,
-                    direction == SiblingDirection::Next,
-                    &all_children,
-                    &leaf_panes,
-                    &mut commands,
-                );
+                tree.rotate(tab, direction == SiblingDirection::Next);
             }
             PaneArrangement::Mirror(direction) => {
                 let Some(tab) = tab else {
                     continue;
                 };
-                mirror_panes(tab, direction, &all_children, &splits, &mut commands);
+                tree.mirror(tab, direction);
             }
         }
     }
 }
 
-fn rotate_panes(
-    tab: Entity,
-    forward: bool,
-    children: &Query<&Children>,
-    leaves: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    commands: &mut Commands,
-) {
-    let mut panes = Vec::new();
-    collect_leaves(tab, children, leaves, &mut panes);
-    if panes.len() <= 1 {
-        return;
-    }
-    let groups = panes
-        .iter()
-        .map(|pane| {
-            children
-                .get(*pane)
-                .map(|children| children.iter().collect::<Vec<_>>())
-                .unwrap_or_default()
-        })
-        .collect::<Vec<_>>();
-    for group in &groups {
-        for child in group {
-            commands.entity(*child).remove::<ChildOf>();
+#[derive(SystemParam)]
+struct PaneTree<'w, 's> {
+    children: Query<'w, 's, &'static Children>,
+    leaves: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+    parents: Query<'w, 's, &'static ChildOf>,
+    splits: Query<'w, 's, &'static PaneSplit>,
+    commands: Commands<'w, 's>,
+}
+
+impl PaneTree<'_, '_> {
+    fn rotate(&mut self, tab: Entity, forward: bool) {
+        let mut panes = Vec::new();
+        self.collect_leaves(tab, &mut panes);
+        if panes.len() <= 1 {
+            return;
+        }
+        let groups = panes
+            .iter()
+            .map(|pane| {
+                self.children
+                    .get(*pane)
+                    .map(|children| children.iter().collect::<Vec<_>>())
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>();
+        for group in &groups {
+            for child in group {
+                self.commands.entity(*child).remove::<ChildOf>();
+            }
+        }
+        for (index, group) in groups.into_iter().enumerate() {
+            let destination = if forward {
+                (index + 1) % panes.len()
+            } else {
+                (index + panes.len() - 1) % panes.len()
+            };
+            for child in group {
+                self.commands
+                    .entity(child)
+                    .insert(ChildOf(panes[destination]));
+            }
         }
     }
-    for (index, group) in groups.into_iter().enumerate() {
-        let destination = if forward {
-            (index + 1) % panes.len()
-        } else {
-            (index + panes.len() - 1) % panes.len()
+
+    fn mirror(&mut self, root: Entity, direction: Option<PaneSplitDirection>) {
+        let Ok(descendants) = self.children.get(root) else {
+            return;
         };
-        for child in group {
-            commands.entity(child).insert(ChildOf(panes[destination]));
+        let descendants = descendants.iter().collect::<Vec<_>>();
+        for child in descendants {
+            let Ok(split) = self.splits.get(child) else {
+                continue;
+            };
+            if direction.is_none_or(|direction| split.direction == direction)
+                && let Ok(split_children) = self.children.get(child)
+            {
+                let mut reversed = split_children.iter().collect::<Vec<_>>();
+                reversed.reverse();
+                for entity in &reversed {
+                    self.commands.entity(*entity).remove::<ChildOf>();
+                }
+                for entity in &reversed {
+                    self.commands.entity(*entity).insert(ChildOf(child));
+                }
+            }
+            self.mirror(child, direction);
         }
     }
-}
 
-fn mirror_panes(
-    root: Entity,
-    direction: Option<PaneSplitDirection>,
-    children: &Query<&Children>,
-    splits: &Query<&PaneSplit>,
-    commands: &mut Commands,
-) {
-    let Ok(descendants) = children.get(root) else {
-        return;
-    };
-    let descendants = descendants.iter().collect::<Vec<_>>();
-    for child in descendants {
-        let Ok(split) = splits.get(child) else {
-            continue;
+    fn collect_leaves(&self, root: Entity, output: &mut Vec<Entity>) {
+        if self.leaves.contains(root) {
+            output.push(root);
+            return;
+        }
+        let Ok(descendants) = self.children.get(root) else {
+            return;
         };
-        if direction.is_none_or(|direction| split.direction == direction)
-            && let Ok(split_children) = children.get(child)
-        {
-            let mut reversed = split_children.iter().collect::<Vec<_>>();
-            reversed.reverse();
-            for entity in &reversed {
-                commands.entity(*entity).remove::<ChildOf>();
-            }
-            for entity in &reversed {
-                commands.entity(*entity).insert(ChildOf(child));
-            }
+        for child in descendants.iter() {
+            self.collect_leaves(child, output);
         }
-        mirror_panes(child, direction, children, splits, commands);
-    }
-}
-
-fn collect_leaves(
-    root: Entity,
-    children: &Query<&Children>,
-    leaves: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    output: &mut Vec<Entity>,
-) {
-    if leaves.contains(root) {
-        output.push(root);
-        return;
-    }
-    let Ok(descendants) = children.get(root) else {
-        return;
-    };
-    for child in descendants.iter() {
-        collect_leaves(child, children, leaves, output);
     }
 }
 
@@ -197,13 +188,7 @@ mod tests {
         let c = app.world_mut().spawn(ChildOf(right)).id();
 
         app.world_mut()
-            .run_system_once(
-                move |children: Query<&Children>,
-                      leaves: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-                      mut commands: Commands| {
-                    rotate_panes(tab, true, &children, &leaves, &mut commands);
-                },
-            )
+            .run_system_once(move |mut tree: PaneTree| tree.rotate(tab, true))
             .unwrap();
 
         assert_eq!(app.world().get::<ChildOf>(a).unwrap().parent(), middle);
@@ -229,19 +214,9 @@ mod tests {
         let right = app.world_mut().spawn((Pane, ChildOf(row))).id();
 
         app.world_mut()
-            .run_system_once(
-                move |children: Query<&Children>,
-                      splits: Query<&PaneSplit>,
-                      mut commands: Commands| {
-                    mirror_panes(
-                        tab,
-                        Some(PaneSplitDirection::Row),
-                        &children,
-                        &splits,
-                        &mut commands,
-                    );
-                },
-            )
+            .run_system_once(move |mut tree: PaneTree| {
+                tree.mirror(tab, Some(PaneSplitDirection::Row));
+            })
             .unwrap();
 
         assert_eq!(
@@ -283,13 +258,7 @@ mod tests {
         let bottom = app.world_mut().spawn((Pane, ChildOf(column))).id();
 
         app.world_mut()
-            .run_system_once(
-                move |children: Query<&Children>,
-                      splits: Query<&PaneSplit>,
-                      mut commands: Commands| {
-                    mirror_panes(tab, None, &children, &splits, &mut commands);
-                },
-            )
+            .run_system_once(move |mut tree: PaneTree| tree.mirror(tab, None))
             .unwrap();
 
         assert_eq!(

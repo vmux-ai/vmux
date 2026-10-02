@@ -492,16 +492,15 @@ fn initialization_commits_only_encrypted_paths_and_content() {
 
 #[test]
 fn managed_path_filter_includes_authored_vault_content_only() {
-    let root = root_dir();
+    let storage = VaultStorage::current();
+    let root = storage.root();
 
-    assert!(is_managed_local_path(&root.join("settings.ron")));
-    assert!(is_managed_local_path(&root.join("knowledge/note.md")));
-    assert!(is_managed_local_path(&root.join("tools/Brewfile")));
-    assert!(!is_managed_local_path(&root.join("workspace/repo/file.rs")));
-    assert!(!is_managed_local_path(
-        &root.join("profiles/personal/store.ron")
-    ));
-    assert!(!is_managed_local_path(&root.join("knowledge/.DS_Store")));
+    assert!(storage.manages(&root.join("settings.ron")));
+    assert!(storage.manages(&root.join("knowledge/note.md")));
+    assert!(storage.manages(&root.join("tools/Brewfile")));
+    assert!(!storage.manages(&root.join("workspace/repo/file.rs")));
+    assert!(!storage.manages(&root.join("profiles/personal/store.ron")));
+    assert!(!storage.manages(&root.join("knowledge/.DS_Store")));
 }
 
 #[test]
@@ -706,10 +705,12 @@ fn same_structured_key_prefers_the_local_value() {
     let ron::Value::Map(settings) = ron::from_str::<ron::Value>(&source).unwrap() else {
         panic!("settings must remain a RON map");
     };
-    assert_eq!(
-        ron_map_get(&settings, &ron::Value::String("value".to_string())),
-        Some(&ron::Value::Number(ron::value::Number::new(3i64)))
-    );
+    let value = ron_map_get(&settings, &ron::Value::String("value".to_string()))
+        .cloned()
+        .unwrap()
+        .into_rust::<i64>()
+        .unwrap();
+    assert_eq!(value, 3);
 }
 
 #[test]

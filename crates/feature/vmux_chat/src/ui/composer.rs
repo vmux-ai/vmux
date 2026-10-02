@@ -6,7 +6,7 @@ use super::state::Chat;
 use super::transcript::QueuedPrompts;
 use crate::event::{ChatPasteMedia, ChatPickFiles};
 use dioxus::prelude::*;
-use vmux_ui::agent_accent::agent_accent;
+use vmux_ui::agent_accent::AgentAccent;
 use vmux_ui::components::composer::PromptComposer;
 use vmux_ui::components::composer_bar::ComposerBar;
 use vmux_ui::components::mcp_menu::McpMenu;
@@ -51,7 +51,7 @@ pub(super) fn ChatDock(chat: Chat) -> Element {
 
 #[component]
 fn ChatComposer(chat: Chat) -> Element {
-    let accent = agent_accent(&chat.agent());
+    let accent = AgentAccent::for_agent(&chat.agent());
     let keys = use_context::<ChatKeys>();
     let drafted = chat.draft();
     rsx! {

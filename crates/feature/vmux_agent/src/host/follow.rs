@@ -37,10 +37,7 @@ impl Plugin for FollowPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (
-                handle_file_touch.before(TabDirectoryRebindSet),
-                handle_file_search,
-            )
+            (file_touch.before(TabDirectoryRebindSet), file_search)
                 .chain()
                 .in_set(WriteCommandRequests)
                 .after(ServiceMessageSet)
@@ -59,7 +56,7 @@ struct AgentFileResolve<'w, 's> {
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct AgentFileLayout<'w, 's> {
+pub(super) struct AgentFileLayout<'w, 's> {
     agent_terms: Query<'w, 's, (Entity, &'static ProcessId, &'static ChildOf)>,
     child_of: Query<'w, 's, &'static ChildOf>,
     file_pages: Query<
@@ -78,7 +75,7 @@ pub(crate) struct AgentFileLayout<'w, 's> {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct FilePageTarget {
+struct FilePageTarget {
     stack: Entity,
     pane: Entity,
     navigate: bool,
@@ -94,7 +91,7 @@ struct PendingFilePreview {
 }
 
 impl AgentFileLayout<'_, '_> {
-    pub(crate) fn agent_pane(&self, anchor: ProcessId) -> Option<Entity> {
+    pub(super) fn agent_pane(&self, anchor: ProcessId) -> Option<Entity> {
         let (_, _, term_co) = self
             .agent_terms
             .iter()
@@ -245,7 +242,7 @@ impl AgentFileLayout<'_, '_> {
     }
 }
 
-fn handle_file_touch(
+fn file_touch(
     mut reader: MessageReader<AgentRequestInput>,
     mut resolve: AgentFileResolve,
     settings: Res<AppSettings>,
@@ -375,7 +372,7 @@ fn handle_file_touch(
     }
 }
 
-fn handle_file_search(
+fn file_search(
     mut reader: MessageReader<AgentRequestInput>,
     mut writer: MessageWriter<GlobalSearchRequest>,
 ) {
@@ -454,7 +451,7 @@ mod tests {
             .add_message::<AgentRequestInput>()
             .add_message::<PageOpenRequest>()
             .insert_resource(test_settings())
-            .add_systems(Update, handle_file_touch);
+            .add_systems(Update, file_touch);
         app
     }
 
@@ -615,7 +612,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, EditorContractPlugin))
             .add_message::<AgentRequestInput>()
-            .add_systems(Update, handle_file_search);
+            .add_systems(Update, file_search);
         let anchor = ProcessId::new();
         app.world_mut()
             .resource_mut::<Messages<AgentRequestInput>>()
@@ -787,7 +784,7 @@ mod tests {
             .add_message::<AgentRequestInput>()
             .add_message::<PageOpenRequest>()
             .insert_resource(test_settings())
-            .add_systems(Update, handle_file_touch);
+            .add_systems(Update, file_touch);
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -833,7 +830,7 @@ mod tests {
             .add_message::<AgentRequestInput>()
             .add_message::<PageOpenRequest>()
             .insert_resource(settings)
-            .add_systems(Update, handle_file_touch);
+            .add_systems(Update, file_touch);
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -892,7 +889,7 @@ mod tests {
             .add_message::<AgentRequestInput>()
             .add_message::<PageOpenRequest>()
             .insert_resource(settings)
-            .add_systems(Update, handle_file_touch);
+            .add_systems(Update, file_touch);
 
         let tab = app.world_mut().spawn(Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -1024,7 +1021,7 @@ mod tests {
         .add_systems(
             Update,
             (
-                handle_file_touch.before(TabDirectoryRebindSet),
+                file_touch.before(TabDirectoryRebindSet),
                 capture_run_cwd.after(TabDirectoryRebindSet),
             ),
         );

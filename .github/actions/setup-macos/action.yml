@@ -1,0 +1,69 @@
+name: Setup macOS
+description: Prepare a macOS runner for building and packaging vmux
+inputs:
+  cache-key:
+    description: Rust cache partition
+    required: true
+  cef-version:
+    description: CEF crate version
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup-rust
+      with:
+        targets: wasm32-unknown-unknown
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ inputs.cache-key }}
+
+    - name: Cache cargo binaries
+      uses: actions/cache@v5
+      with:
+        path: ~/.cargo/bin
+        key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp${{ env.CARGO_PACKAGER_VERSION }}-cba${{ env.BEVY_CEF_BUNDLE_APP_VERSION }}-cef${{ inputs.cef-version }}-v3
+
+    - name: Cache binaryen
+      uses: actions/cache@v5
+      with:
+        path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
+        key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
+
+    - name: Cache CEF framework
+      uses: actions/cache@v5
+      with:
+        path: ~/.local/share/Chromium Embedded Framework.framework
+        key: cef-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cef-version }}-${{ hashFiles('cef/manifest.toml') }}
+
+    - name: Cache tailwindcss
+      uses: actions/cache@v5
+      with:
+        path: ~/.local/bin/tailwindcss
+        key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
+
+    - name: Add local binaries to PATH
+      shell: bash
+      run: |
+        mkdir -p "$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Install CEF framework
+      shell: bash
+      run: ./scripts/install-cef.sh
+
+    - name: Install dioxus-cli
+      shell: bash
+      run: ./scripts/install-dioxus-cli.sh
+
+    - name: Install binaryen
+      shell: bash
+      run: ./scripts/install-dioxus-binaryen.sh
+
+    - name: Install package tools
+      shell: bash
+      run: ./scripts/install-package-tools.sh
+
+    - name: Install tailwindcss
+      shell: bash
+      run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh

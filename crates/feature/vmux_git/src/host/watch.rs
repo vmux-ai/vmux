@@ -18,12 +18,7 @@ impl Plugin for WatchPlugin {
             .add_systems(Startup, spawn_repo_info_cache)
             .add_systems(
                 Update,
-                (
-                    drain,
-                    start_repo_info_loads,
-                    poll_repo_info_cache,
-                    sync_repo_info_watches,
-                )
+                (drain, start_repo_info_loads, poll_info, info)
                     .chain()
                     .in_set(GitUpdateSet::Watch),
             );
@@ -36,7 +31,7 @@ fn initialize(world: &mut World) {
         .get_resource::<EventLoopProxyWrapper>()
         .map(|wrapper| (**wrapper).clone());
     match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
-        if !should_forward_git_watch_result(&result) {
+        if !GitWatch::should_forward(&result) {
             return;
         }
         let _ = tx.send(result);
@@ -217,70 +212,106 @@ impl RepoInfoCache {
 const WATCH_DRAIN_BUDGET: usize = 256;
 const CANONICAL_CAP: usize = 4096;
 
-fn resolve_git_path(root: &Path, value: &str) -> PathBuf {
-    let path = PathBuf::from(value.trim());
-    let path = if path.is_absolute() {
-        path
-    } else {
-        root.join(path)
-    };
-    PathIdentity::resolve(&path).into_path_buf()
-}
-
-fn git_watch_targets(
-    file: &Path,
-) -> Result<(PathBuf, Vec<GitWatchTarget>), super::repository::GitError> {
-    let repository = super::repository::GitRepository::discover(file)?;
-    let root = repository.path().to_path_buf();
-    let (stdout, stderr, ok) = super::repository::GitCommand::run(
-        &root,
-        &["rev-parse", "--absolute-git-dir", "--git-common-dir"],
-    )?;
-    if !ok {
-        return Err(super::repository::GitCommand::error(&stdout, &stderr));
-    }
-    let mut lines = stdout.lines();
-    let git_dir = lines
-        .next()
-        .map(|line| resolve_git_path(&root, line))
-        .ok_or_else(|| super::repository::GitError("missing git directory".into()))?;
-    let common_dir = lines
-        .next()
-        .map(|line| resolve_git_path(&root, line))
-        .ok_or_else(|| super::repository::GitError("missing common git directory".into()))?;
-    let mut targets = vec![
-        GitWatchTarget {
-            path: PathIdentity::resolve(&root).into_path_buf(),
+impl GitWatchTarget {
+    fn for_checkout(file: &Path) -> Result<(PathBuf, Vec<Self>), super::repository::GitError> {
+        let repository = super::repository::GitRepository::discover(file)?;
+        let root = repository.path().to_path_buf();
+        let (stdout, stderr, ok) = super::repository::GitCommand::run(
+            &root,
+            &["rev-parse", "--absolute-git-dir", "--git-common-dir"],
+        )?;
+        if !ok {
+            return Err(super::repository::GitCommand::error(&stdout, &stderr));
+        }
+        let mut lines = stdout.lines();
+        let git_dir = lines
+            .next()
+            .map(|line| Self::resolve_path(&root, line))
+            .ok_or_else(|| super::repository::GitError("missing git directory".into()))?;
+        let common_dir = lines
+            .next()
+            .map(|line| Self::resolve_path(&root, line))
+            .ok_or_else(|| super::repository::GitError("missing common git directory".into()))?;
+        let mut targets = vec![
+            Self {
+                path: PathIdentity::resolve(&root).into_path_buf(),
+                recursive: true,
+                kind: GitWatchKind::Worktree,
+            },
+            Self {
+                path: git_dir.clone(),
+                recursive: false,
+                kind: GitWatchKind::Metadata,
+            },
+        ];
+        if common_dir != git_dir {
+            targets.push(Self {
+                path: common_dir.clone(),
+                recursive: false,
+                kind: GitWatchKind::Metadata,
+            });
+        }
+        targets.push(Self {
+            path: common_dir.join("refs"),
             recursive: true,
-            kind: GitWatchKind::Worktree,
-        },
-        GitWatchTarget {
-            path: git_dir.clone(),
-            recursive: false,
-            kind: GitWatchKind::Metadata,
-        },
-    ];
-    if common_dir != git_dir {
-        targets.push(GitWatchTarget {
-            path: common_dir.clone(),
-            recursive: false,
             kind: GitWatchKind::Metadata,
         });
+        Ok((root, targets))
     }
-    targets.push(GitWatchTarget {
-        path: common_dir.join("refs"),
-        recursive: true,
-        kind: GitWatchKind::Metadata,
-    });
-    Ok((root, targets))
-}
 
-fn is_git_lock_path(path: &Path) -> bool {
-    path.file_name()
-        .is_some_and(|name| name.to_string_lossy().ends_with(".lock"))
-}
+    fn for_repo_info(path: &Path, info: Option<&super::worktree::RepoInfo>) -> Vec<Self> {
+        let Some(info) = info else {
+            return vec![Self {
+                path: PathIdentity::resolve(path).into_path_buf(),
+                recursive: true,
+                kind: GitWatchKind::Worktree,
+            }];
+        };
+        let repo_root = PathIdentity::resolve(&info.repo_root).into_path_buf();
+        let git_dir = PathIdentity::resolve(&info.git_dir).into_path_buf();
+        let common_dir = PathIdentity::resolve(&info.common_dir).into_path_buf();
+        let mut targets = vec![
+            Self {
+                path: repo_root,
+                recursive: true,
+                kind: GitWatchKind::Worktree,
+            },
+            Self {
+                path: git_dir.clone(),
+                recursive: false,
+                kind: GitWatchKind::Metadata,
+            },
+        ];
+        if common_dir != git_dir {
+            targets.push(Self {
+                path: common_dir.clone(),
+                recursive: false,
+                kind: GitWatchKind::Metadata,
+            });
+        }
+        targets.push(Self {
+            path: common_dir.join("refs"),
+            recursive: true,
+            kind: GitWatchKind::Metadata,
+        });
+        targets
+    }
 
-impl GitWatchTarget {
+    fn resolve_path(root: &Path, value: &str) -> PathBuf {
+        let path = PathBuf::from(value.trim());
+        let path = if path.is_absolute() {
+            path
+        } else {
+            root.join(path)
+        };
+        PathIdentity::resolve(&path).into_path_buf()
+    }
+
+    fn is_lock_path(path: &Path) -> bool {
+        path.file_name()
+            .is_some_and(|name| name.to_string_lossy().ends_with(".lock"))
+    }
+
     fn matches(&self, changed: &Path) -> bool {
         let matches = changed == self.path
             || if self.recursive {
@@ -292,7 +323,7 @@ impl GitWatchTarget {
             return false;
         }
         match self.kind {
-            GitWatchKind::Metadata => !is_git_lock_path(changed),
+            GitWatchKind::Metadata => !Self::is_lock_path(changed),
             GitWatchKind::Worktree => {
                 changed
                     .strip_prefix(&self.path)
@@ -307,58 +338,20 @@ impl GitWatchTarget {
     }
 }
 
-fn repo_info_watch_targets(
-    path: &Path,
-    info: Option<&super::worktree::RepoInfo>,
-) -> Vec<GitWatchTarget> {
-    let Some(info) = info else {
-        return vec![GitWatchTarget {
-            path: PathIdentity::resolve(path).into_path_buf(),
-            recursive: true,
-            kind: GitWatchKind::Worktree,
-        }];
-    };
-    let repo_root = PathIdentity::resolve(&info.repo_root).into_path_buf();
-    let git_dir = PathIdentity::resolve(&info.git_dir).into_path_buf();
-    let common_dir = PathIdentity::resolve(&info.common_dir).into_path_buf();
-    let mut targets = vec![
-        GitWatchTarget {
-            path: repo_root,
-            recursive: true,
-            kind: GitWatchKind::Worktree,
-        },
-        GitWatchTarget {
-            path: git_dir.clone(),
-            recursive: false,
-            kind: GitWatchKind::Metadata,
-        },
-    ];
-    if common_dir != git_dir {
-        targets.push(GitWatchTarget {
-            path: common_dir.clone(),
-            recursive: false,
-            kind: GitWatchKind::Metadata,
-        });
-    }
-    targets.push(GitWatchTarget {
-        path: common_dir.join("refs"),
-        recursive: true,
-        kind: GitWatchKind::Metadata,
-    });
-    targets
-}
-
-fn should_forward_git_watch_result(result: &notify::Result<notify::Event>) -> bool {
-    match result {
-        Ok(event) => {
-            !matches!(event.kind, EventKind::Access(_))
-                && event.paths.iter().any(|path| !is_git_lock_path(path))
-        }
-        Err(_) => true,
-    }
-}
-
 impl GitWatch {
+    fn should_forward(result: &notify::Result<notify::Event>) -> bool {
+        match result {
+            Ok(event) => {
+                !matches!(event.kind, EventKind::Access(_))
+                    && event
+                        .paths
+                        .iter()
+                        .any(|path| !GitWatchTarget::is_lock_path(path))
+            }
+            Err(_) => true,
+        }
+    }
+
     pub(super) fn subscribe(
         &mut self,
         entity: Entity,
@@ -372,7 +365,7 @@ impl GitWatch {
         {
             return Ok(subscription.repo_root.clone());
         }
-        let (repo_root, targets) = match git_watch_targets(&path) {
+        let (repo_root, targets) = match GitWatchTarget::for_checkout(&path) {
             Ok(result) => result,
             Err(error) => {
                 if let Some(previous) = self.subscriptions.remove(&entity) {
@@ -459,7 +452,7 @@ impl GitWatch {
         info: Option<&super::worktree::RepoInfo>,
     ) -> bool {
         let path = PathIdentity::resolve(path).into_path_buf();
-        let targets = repo_info_watch_targets(&path, info);
+        let targets = GitWatchTarget::for_repo_info(&path, info);
         if self.repo_info_subscriptions.get(&path) == Some(&targets) {
             return true;
         }
@@ -584,7 +577,7 @@ fn start_repo_info_loads(mut repo_info: Single<&mut RepoInfoCache>) {
             if !delay.is_zero() {
                 std::thread::sleep(delay);
             }
-            let info = super::worktree::repo_info(&path);
+            let info = super::worktree::RepoInfo::read(&path);
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
@@ -593,7 +586,7 @@ fn start_repo_info_loads(mut repo_info: Single<&mut RepoInfoCache>) {
     }
 }
 
-fn poll_repo_info_cache(mut repo_info: Single<&mut RepoInfoCache>) {
+fn poll_info(mut repo_info: Single<&mut RepoInfoCache>) {
     let changed = {
         let repo_info = repo_info.bypass_change_detection();
         let mut changed = false;
@@ -619,10 +612,7 @@ fn poll_repo_info_cache(mut repo_info: Single<&mut RepoInfoCache>) {
     }
 }
 
-fn sync_repo_info_watches(
-    watch: Option<NonSendMut<GitWatch>>,
-    mut repo_info: Single<&mut RepoInfoCache>,
-) {
+fn info(watch: Option<NonSendMut<GitWatch>>, mut repo_info: Single<&mut RepoInfoCache>) {
     let repo_info = repo_info.bypass_change_detection();
     let Some(mut watch) = watch else {
         for path in repo_info.inactive_paths() {
@@ -657,9 +647,9 @@ mod tests {
     fn git_watch_targets_cover_index_and_refs() {
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
-        let (_, targets) = git_watch_targets(&file).unwrap();
+        let (_, targets) = GitWatchTarget::for_checkout(&file).unwrap();
         let root = PathIdentity::resolve(repo.path()).into_path_buf();
-        let git_dir = PathIdentity::resolve(&repo.path().join(".git")).into_path_buf();
+        let git_dir = PathIdentity::resolve(repo.path().join(".git")).into_path_buf();
 
         assert!(targets.contains(&GitWatchTarget {
             path: root,
@@ -698,9 +688,9 @@ mod tests {
             ],
         );
 
-        let (_, targets) = git_watch_targets(&worktree.join("a.txt")).unwrap();
+        let (_, targets) = GitWatchTarget::for_checkout(&worktree.join("a.txt")).unwrap();
         let worktree_root = PathIdentity::resolve(&worktree).into_path_buf();
-        let common = PathIdentity::resolve(&repo.path().join(".git")).into_path_buf();
+        let common = PathIdentity::resolve(repo.path().join(".git")).into_path_buf();
 
         assert!(targets.contains(&GitWatchTarget {
             path: worktree_root,
@@ -730,9 +720,9 @@ mod tests {
         let second = test_repo::init();
         let first_file = test_repo::write(first.path(), "a.txt", "one\n");
         let second_file = test_repo::write(second.path(), "b.txt", "two\n");
-        let first_info = super::super::worktree::repo_info(first.path()).unwrap();
-        let first_targets = git_watch_targets(&first_file).unwrap().1;
-        let second_targets = git_watch_targets(&second_file).unwrap().1;
+        let first_info = super::super::worktree::RepoInfo::read(first.path()).unwrap();
+        let first_targets = GitWatchTarget::for_checkout(&first_file).unwrap().1;
+        let second_targets = GitWatchTarget::for_checkout(&second_file).unwrap().1;
         let entity = Entity::from_bits(1);
         let mut watch = GitWatch::test();
 
@@ -767,9 +757,9 @@ mod tests {
         let stale_repo = test_repo::init();
         let active_path = PathIdentity::resolve(active_repo.path()).into_path_buf();
         let stale_path = PathIdentity::resolve(stale_repo.path()).into_path_buf();
-        let active_info = super::super::worktree::repo_info(&active_path).unwrap();
-        let stale_info = super::super::worktree::repo_info(&stale_path).unwrap();
-        let stale_targets = repo_info_watch_targets(&stale_path, Some(&stale_info));
+        let active_info = super::super::worktree::RepoInfo::read(&active_path).unwrap();
+        let stale_info = super::super::worktree::RepoInfo::read(&stale_path).unwrap();
+        let stale_targets = GitWatchTarget::for_repo_info(&stale_path, Some(&stale_info));
         let mut cache = RepoInfoCache {
             entries: HashMap::from([
                 (
@@ -855,12 +845,12 @@ mod tests {
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
-        let info = super::super::worktree::repo_info(repo.path()).unwrap();
-        let targets = repo_info_watch_targets(repo.path(), Some(&info));
+        let info = super::super::worktree::RepoInfo::read(repo.path()).unwrap();
+        let targets = GitWatchTarget::for_repo_info(repo.path(), Some(&info));
 
         let file = PathIdentity::resolve(&file).into_path_buf();
-        let head = PathIdentity::resolve(&info.git_dir.join("HEAD")).into_path_buf();
-        let lock = PathIdentity::resolve(&info.git_dir.join("index.lock")).into_path_buf();
+        let head = PathIdentity::resolve(info.git_dir.join("HEAD")).into_path_buf();
+        let lock = PathIdentity::resolve(info.git_dir.join("index.lock")).into_path_buf();
 
         assert!(targets.iter().any(|target| target.matches(&file)));
         assert!(targets.iter().any(|target| target.matches(&head)));
@@ -913,10 +903,8 @@ mod tests {
             wake: None,
         };
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_systems(
-            Update,
-            (start_repo_info_loads, poll_repo_info_cache).chain(),
-        );
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, (start_repo_info_loads, poll_info).chain());
         let cache = app.world_mut().spawn(cache).id();
         let wait_for = |app: &mut App, expected| {
             for _ in 0..500 {
@@ -962,7 +950,7 @@ mod tests {
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         let path = PathIdentity::resolve(repo.path()).into_path_buf();
-        let stale = super::super::worktree::repo_info(&path);
+        let stale = super::super::worktree::RepoInfo::read(&path);
         test_repo::write(repo.path(), "a.txt", "two\n");
         let cache = RepoInfoCache {
             canonical: HashMap::new(),
@@ -982,10 +970,8 @@ mod tests {
             wake: None,
         };
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_systems(
-            Update,
-            (start_repo_info_loads, poll_repo_info_cache).chain(),
-        );
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, (start_repo_info_loads, poll_info).chain());
         let cache = app.world_mut().spawn(cache).id();
         app.world_mut()
             .get_mut::<RepoInfoCache>(cache)

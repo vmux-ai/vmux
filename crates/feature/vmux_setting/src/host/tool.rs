@@ -36,7 +36,7 @@ impl Plugin for SettingToolPlugin {
 
 fn answer_settings_queries(
     mut queries: MessageReader<ToolQueryRequest>,
-    settings: Res<crate::AppSettings>,
+    settings: Option<Res<crate::AppSettings>>,
     mut handled: MessageWriter<ToolQueryHandled>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -45,9 +45,15 @@ fn answer_settings_queries(
             continue;
         }
         handled.write(ToolQueryHandled(request.request_id));
-        let result = serde_json::from_slice::<AgentGetSettings>(&request.query.body)
-            .map_err(|error| error.to_string())
-            .and_then(|_| serde_json::to_string(&*settings).map_err(|error| error.to_string()));
+        let result = match serde_json::from_slice::<AgentGetSettings>(&request.query.body) {
+            Ok(_) => match settings.as_deref() {
+                Some(settings) => {
+                    serde_json::to_string(settings).map_err(|error| error.to_string())
+                }
+                None => Err("settings unavailable".to_string()),
+            },
+            Err(error) => Err(error.to_string()),
+        };
         service_requests.write(ServiceRequest(ClientMessage::AgentQueryResult(
             AgentQueryResult::text(request.request_id, result),
         )));

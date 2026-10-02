@@ -677,52 +677,55 @@ async fn prompt_content_blocks(
     blocks
 }
 
-pub async fn run(
-    command: String,
-    args: Vec<String>,
-    env: Vec<(String, String)>,
-    mcp_servers: Vec<McpServer>,
-    resume: Option<String>,
-    shared: Arc<AcpShared>,
-    mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
-) {
-    let agent_cwd = shared.cwd();
-    let mut child = match Command::new(&command)
-        .args(&args)
-        .envs(env)
-        .current_dir(agent_cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(err) => {
-            shared
-                .projection
-                .status(AgentRunStatus::Errored(format!("acp spawn failed: {err}")));
-            return;
+pub(super) struct AcpDriver;
+
+impl AcpDriver {
+    pub(super) async fn run(
+        command: String,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
+        mcp_servers: Vec<McpServer>,
+        resume: Option<String>,
+        shared: Arc<AcpShared>,
+        mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
+    ) {
+        let agent_cwd = shared.cwd();
+        let mut child = match Command::new(&command)
+            .args(&args)
+            .envs(env)
+            .current_dir(agent_cwd)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(err) => {
+                shared
+                    .projection
+                    .status(AgentRunStatus::Errored(format!("acp spawn failed: {err}")));
+                return;
+            }
+        };
+        let stdin = child.stdin.take().expect("piped stdin").compat_write();
+        let stdout = child.stdout.take().expect("piped stdout").compat();
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(drain_stderr(stderr, shared.clone()));
         }
-    };
-    let stdin = child.stdin.take().expect("piped stdin").compat_write();
-    let stdout = child.stdout.take().expect("piped stdout").compat();
-    if let Some(stderr) = child.stderr.take() {
-        tokio::spawn(drain_stderr(stderr, shared.clone()));
-    }
-    let transport = agent_client_protocol::ByteStreams::new(stdin, stdout);
+        let transport = agent_client_protocol::ByteStreams::new(stdin, stdout);
 
-    let perm_shared = shared.clone();
-    let update_shared = shared.clone();
-    let main_shared = shared.clone();
-    let create_shared = shared.clone();
-    let output_shared = shared.clone();
-    let wait_shared = shared.clone();
-    let kill_shared = shared.clone();
-    let release_shared = shared.clone();
-    let read_shared = shared.clone();
-    let write_shared = shared.clone();
+        let perm_shared = shared.clone();
+        let update_shared = shared.clone();
+        let main_shared = shared.clone();
+        let create_shared = shared.clone();
+        let output_shared = shared.clone();
+        let wait_shared = shared.clone();
+        let kill_shared = shared.clone();
+        let release_shared = shared.clone();
+        let read_shared = shared.clone();
+        let write_shared = shared.clone();
 
-    let result = Client
+        let result = Client
         .builder()
         .on_receive_request(
             async move |req: RequestPermissionRequest,
@@ -863,7 +866,7 @@ pub async fn run(
             async move |note: SessionNotification, _cx| {
                 update_shared
                     .projection
-                    .transcript(AcpTranscriptInput::Update(note.update));
+                    .transcript(AcpTranscriptInput::Update(Box::new(note.update)));
                 Ok(())
             },
             agent_client_protocol::on_receive_notification!(),
@@ -1214,13 +1217,14 @@ pub async fn run(
         })
         .await;
 
-    if let Err(err) = result {
-        shared.projection.status(AgentRunStatus::Errored(format!(
-            "acp connection ended: {err}{}",
-            shared.stderr_detail()
-        )));
+        if let Err(err) = result {
+            shared.projection.status(AgentRunStatus::Errored(format!(
+                "acp connection ended: {err}{}",
+                shared.stderr_detail()
+            )));
+        }
+        let _ = child.kill().await;
     }
-    let _ = child.kill().await;
 }
 
 async fn load_requested_session<F, Fut, E>(
@@ -1848,8 +1852,10 @@ mod tests {
         harness
             .shared
             .projection
-            .transcript(AcpTranscriptInput::Update(SessionUpdate::UserMessageChunk(
-                ContentChunk::new(ContentBlock::Text(TextContent::new("hello"))),
+            .transcript(AcpTranscriptInput::Update(Box::new(
+                SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(
+                    TextContent::new("hello"),
+                ))),
             )));
         harness.update();
         let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) = harness
@@ -1864,11 +1870,11 @@ mod tests {
             harness
                 .shared
                 .projection
-                .transcript(AcpTranscriptInput::Update(
+                .transcript(AcpTranscriptInput::Update(Box::new(
                     SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
                         TextContent::new("x"),
                     ))),
-                ));
+                )));
         }
         harness.update();
 
@@ -1910,8 +1916,10 @@ mod tests {
         harness
             .shared
             .projection
-            .transcript(AcpTranscriptInput::Update(SessionUpdate::UserMessageChunk(
-                ContentChunk::new(ContentBlock::Text(TextContent::new("partial"))),
+            .transcript(AcpTranscriptInput::Update(Box::new(
+                SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(
+                    TextContent::new("partial"),
+                ))),
             )));
         harness.update();
 
@@ -2058,9 +2066,11 @@ mod tests {
         harness
             .shared
             .projection
-            .transcript(AcpTranscriptInput::Update(SessionUpdate::ToolCall(
-                ToolCall::new("call-1", "vmux.run")
-                    .raw_input(serde_json::json!({"command": "echo hi"})),
+            .transcript(AcpTranscriptInput::Update(Box::new(
+                SessionUpdate::ToolCall(
+                    ToolCall::new("call-1", "vmux.run")
+                        .raw_input(serde_json::json!({"command": "echo hi"})),
+                ),
             )));
         harness.update();
         tokio::task::yield_now().await;
@@ -2081,9 +2091,11 @@ mod tests {
         harness
             .shared
             .projection
-            .transcript(AcpTranscriptInput::Update(SessionUpdate::ToolCall(
-                ToolCall::new("title-1", "mcp__vmux__set_conversation_title")
-                    .raw_input(serde_json::json!({"title": "Paris Izakaya Website"})),
+            .transcript(AcpTranscriptInput::Update(Box::new(
+                SessionUpdate::ToolCall(
+                    ToolCall::new("title-1", "mcp__vmux__set_conversation_title")
+                        .raw_input(serde_json::json!({"title": "Paris Izakaya Website"})),
+                ),
             )));
         harness.update();
         let request = RequestPermissionRequest::new(

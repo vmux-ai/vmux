@@ -10,7 +10,7 @@ use super::{FocusRequest, Pane, PaneDrag, PaneFocus, PaneSplit};
 use crate::stack::Stack;
 use crate::{
     host::command::LayoutRequestSet,
-    stack::{ActiveTabParam, LayoutFocus, active_among},
+    stack::{ActiveTabParam, LayoutFocus},
 };
 
 #[cfg_attr(target_os = "macos", allow(dead_code))]
@@ -107,10 +107,11 @@ fn select(
                         candidates.push(*pane);
                     }
                 }
-                let Some(target) = active_among(
+                let Some(target) = LastActivatedAt::latest(
                     candidates
                         .iter()
-                        .filter_map(|&entity| pane_activity.get(entity).ok()),
+                        .filter_map(|&entity| pane_activity.get(entity).ok())
+                        .map(|(entity, activated_at)| (entity, *activated_at)),
                 ) else {
                     continue;
                 };
@@ -168,10 +169,11 @@ fn poll_cursor(
     let Some(target) = hovered_pane else {
         return;
     };
-    let current = active_among(
+    let current = LastActivatedAt::latest(
         window_panes
             .iter()
-            .filter_map(|&entity| pane_activity.get(entity).ok()),
+            .filter_map(|&entity| pane_activity.get(entity).ok())
+            .map(|(entity, activated_at)| (entity, *activated_at)),
     );
     if let Some(current) = current
         && let Ok(cooldown) = pane_cooldowns.get(current)
@@ -225,10 +227,11 @@ fn apply_pending_hover(
     let Some(target) = target else {
         return;
     };
-    let current = active_among(
+    let current = LastActivatedAt::latest(
         window_panes
             .iter()
-            .filter_map(|&entity| pane_activity.get(entity).ok()),
+            .filter_map(|&entity| pane_activity.get(entity).ok())
+            .map(|(entity, activated_at)| (entity, *activated_at)),
     );
     if let Some(current) = current
         && let Ok(cooldown) = pane_cooldowns.get(current)

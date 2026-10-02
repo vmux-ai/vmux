@@ -14,7 +14,7 @@ use vmux_layout::tab::Tab;
 use super::bridge_page::ExtensionBridgeWebview;
 use super::model::{
     ExtensionIdSequence, ExtensionModel, ExtensionModelEvent, ExtensionTabId, ExtensionTabSnapshot,
-    ExtensionWindowId, ExtensionWindowSnapshot, extension_visible_url,
+    ExtensionWindowId, ExtensionWindowSnapshot,
 };
 
 pub(crate) struct ExtensionProjectPlugin;
@@ -287,7 +287,7 @@ impl ProjectionData<'_, '_> {
     fn page(&self, entity: Entity) -> Option<PageCandidate> {
         let (_, metadata, id, activated, identity, is_bridge, loading) =
             self.pages.get(entity).ok()?;
-        if is_bridge || !extension_visible_url(&metadata.url) {
+        if is_bridge || !PageCandidate::visible_url(&metadata.url) {
             return None;
         }
         let child_loading = self
@@ -353,6 +353,12 @@ impl ProjectionData<'_, '_> {
 }
 
 impl PageCandidate {
+    fn visible_url(url: &str) -> bool {
+        url.starts_with("http://")
+            || url.starts_with("https://")
+            || url.starts_with("chrome-extension://")
+    }
+
     fn title(metadata: &PageMetadata, identity: Option<&vmux_ecs::PageIdentity>) -> String {
         match identity.and_then(|identity| identity.title.as_deref()) {
             Some(title) if !title.is_empty() => title.to_string(),
@@ -486,5 +492,21 @@ impl ExtensionModel {
             }
         }
         events
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PageCandidate;
+
+    #[test]
+    fn filters_extension_visible_urls() {
+        assert!(PageCandidate::visible_url("https://example.com/"));
+        assert!(PageCandidate::visible_url("http://example.com/"));
+        assert!(PageCandidate::visible_url(
+            "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/popup.html"
+        ));
+        assert!(!PageCandidate::visible_url("vmux://terminal/"));
+        assert!(!PageCandidate::visible_url("file:///Users/x/notes.md"));
     }
 }

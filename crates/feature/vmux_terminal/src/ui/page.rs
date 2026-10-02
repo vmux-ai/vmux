@@ -11,7 +11,7 @@ use std::rc::Rc;
 use unicode_width::UnicodeWidthChar;
 use vmux_api::terminal::CursorStyle;
 use vmux_ecs::scroll::{BottomPadding, EDGE_TRIGGER_K, ScrollWindow};
-use vmux_ui::agent_accent::agent_accent;
+use vmux_ui::agent_accent::AgentAccent;
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{send, use_key_claim, use_theme};
@@ -376,7 +376,7 @@ pub fn Page() -> Element {
             {
                 let state = loading.read().clone();
                 state.map(|(label, segment)| {
-                    let accent = agent_accent(&segment);
+                    let accent = AgentAccent::for_agent(&segment);
                     let display_label = if segment == "terminal" {
                         translate("command-terminal")
                     } else {

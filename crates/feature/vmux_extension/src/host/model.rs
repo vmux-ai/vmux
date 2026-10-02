@@ -127,12 +127,6 @@ pub enum ExtensionModelEvent {
     },
 }
 
-pub fn extension_visible_url(url: &str) -> bool {
-    url.starts_with("http://")
-        || url.starts_with("https://")
-        || url.starts_with("chrome-extension://")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,17 +285,6 @@ mod tests {
             event,
             ExtensionModelEvent::TabRemoved { tab_id, .. } if *tab_id == first_id
         )));
-    }
-
-    #[test]
-    fn filters_extension_visible_urls() {
-        assert!(extension_visible_url("https://example.com/"));
-        assert!(extension_visible_url("http://example.com/"));
-        assert!(extension_visible_url(
-            "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/popup.html"
-        ));
-        assert!(!extension_visible_url("vmux://terminal/"));
-        assert!(!extension_visible_url("file:///Users/x/notes.md"));
     }
 }
 #[derive(Component)]

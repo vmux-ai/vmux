@@ -13,7 +13,7 @@ use vmux_ui::icon::{LineIcon, LineIconView};
 use super::activity::{ActivityIconView, FileActivityIcon, ToolActivityIcon};
 use crate::activity::{ActivityIcon, ToolPresentation};
 use vmux_ui::clipboard::Clipboard;
-use vmux_ui::platform::{random_index, sleep_ms};
+use vmux_ui::platform::Platform;
 
 use pulldown_cmark::{Event, Options, Parser, html};
 
@@ -325,15 +325,15 @@ pub fn WorkingIndicator() -> Element {
     let mut verb = use_signal(|| translate("agent-working-working"));
     use_future(move || async move {
         loop {
-            sleep_ms(1000).await;
+            Platform::sleep(1000).await;
             elapsed.set(elapsed() + 1);
         }
     });
     use_future(move || async move {
         loop {
-            sleep_ms(2500).await;
+            Platform::sleep(2500).await;
             verb.set(translate(
-                WORKING_VERB_IDS[random_index(WORKING_VERB_IDS.len())],
+                WORKING_VERB_IDS[Platform::random_index(WORKING_VERB_IDS.len())],
             ));
         }
     });

@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::path::Path;
 
-use crate::match_pattern::{ExtensionMatchPattern, is_match_pattern_candidate};
+use crate::match_pattern::ExtensionMatchPattern;
 
 const MAX_PERMISSION_COUNT: usize = 256;
 const MAX_PERMISSION_LENGTH: usize = 1024;
@@ -247,7 +247,7 @@ impl ExtensionManifest {
     }
 
     fn is_host_permission(permission: &str) -> bool {
-        is_match_pattern_candidate(permission)
+        ExtensionMatchPattern::is_candidate(permission)
     }
 
     fn pick_icon(v: &Value) -> Option<String> {

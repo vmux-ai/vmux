@@ -326,7 +326,7 @@ fn finish_workspace_pickers(
             && path.is_dir()
         {
             if initialize_git {
-                let _ = vmux_git::worktree::repository_init(&path);
+                let _ = vmux_git::worktree::CheckoutInfo::initialize(&path);
             }
             commands.trigger(ChosenProject {
                 tab: picker.tab,
@@ -367,7 +367,9 @@ fn read_branches(
         let task = IoTaskPool::get().spawn(async move {
             let _wake = wake;
             let mut branches = Vec::new();
-            if let Ok(holders) = vmux_git::worktree::branch_holders(&root) {
+            if let Ok(checkout) = vmux_git::worktree::CheckoutInfo::try_from(root.as_path())
+                && let Ok(holders) = checkout.branch_holders()
+            {
                 branches.reserve(holders.len());
                 for holder in holders {
                     let checkout = holder.checkout_path();
@@ -494,7 +496,7 @@ fn apply_chosen_project(
     };
     let dir = request.path.to_string_lossy().into_owned();
     tab.startup_dir = Some(dir.clone());
-    if vmux_layout::worktree::is_generated_tab_name(&tab.name)
+    if vmux_layout::worktree::WorktreeName::is_generated(&tab.name)
         && let Some(name) = request.path.file_name().and_then(|name| name.to_str())
         && !name.is_empty()
     {

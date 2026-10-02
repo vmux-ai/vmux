@@ -1,8 +1,8 @@
-use super::format::{PromptEdit, PromptHistoryDirection, prompt_history_direction};
+use super::format::{PromptEdit, PromptHistoryDirection};
 use super::state::Chat;
 use dioxus::prelude::*;
 use vmux_api::input::{KeyStroke, UiKeyContext};
-use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
+use vmux_ui::caret::{EventSelection, TextCaret};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{KeyClaim, send, use_key_claim};
@@ -87,12 +87,12 @@ impl ChatKeyHandler {
     fn history_direction(&self, key: &str, ctrl: bool) -> Option<PromptHistoryDirection> {
         let draft = self.0.draft();
         let (start, end) = EventSelection::in_field(PROMPT_INPUT_ID);
-        prompt_history_direction(
+        PromptHistoryDirection::from_key(
             key,
             ctrl,
             &draft,
-            byte_offset_to_utf16(&draft, start),
-            byte_offset_to_utf16(&draft, end),
+            TextCaret::utf16_from_byte(&draft, start),
+            TextCaret::utf16_from_byte(&draft, end),
         )
     }
 }

@@ -91,6 +91,16 @@ pub struct ApiRequest {
     pub caller_context: ExtensionCallerContext,
 }
 
+impl ApiRequest {
+    pub(crate) fn argument(&self, index: usize) -> Option<&serde_json::Value> {
+        match &self.arguments {
+            serde_json::Value::Array(arguments) => arguments.get(index),
+            value if index == 0 => Some(value),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventSubscribe {
     pub subscription_id: String,

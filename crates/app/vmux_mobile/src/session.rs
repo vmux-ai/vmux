@@ -15,7 +15,7 @@ use vmux_api::room::{NewChatRequest, RemoteEvent, RemoteSession};
 use vmux_chat::host::{ChatRuntime, Conversation, LiveTurn, Log, Reported};
 
 use crate::pairing::ConnectionState;
-use crate::remote::{Api, ApiError, next_client_op_id, remote_event_from_shared};
+use crate::remote::{Api, ApiError, ClientOperationIds};
 use crate::runtime::RuntimeHandle;
 use crate::transition;
 
@@ -33,12 +33,12 @@ impl Plugin for Plugin {
                 Update,
                 (
                     start_chats,
-                    finish_chats,
+                    finish,
                     open,
                     leave,
                     restart,
                     read_streams,
-                    sync_remote,
+                    remote,
                     publish,
                 )
                     .chain(),
@@ -151,7 +151,7 @@ impl SessionStream {
                             return;
                         }
                         while let Some(event) = subscription.next().await {
-                            let Some(event) = remote_event_from_shared(event) else {
+                            let Some(event) = Api::event(event) else {
                                 tracing::warn!("room event not understood");
                                 continue;
                             };
@@ -222,7 +222,7 @@ fn start_chats(
         let api = api.clone();
         let task = IoTaskPool::get().spawn(async move {
             let request = NewChatRequest {
-                client_op_id: next_client_op_id(),
+                client_op_id: ClientOperationIds::next(),
                 text,
                 agent_url,
             };
@@ -248,7 +248,7 @@ fn start_chats(
     }
 }
 
-fn finish_chats(
+fn finish(
     mut operations: Query<(Entity, &mut StartChatOperation)>,
     mut connections: Query<&mut ConnectionState>,
     mut openings: MessageWriter<OpenSession>,
@@ -391,13 +391,13 @@ fn read_streams(
     }
 }
 
-fn sync_remote(mut events: MessageReader<Reported>, mut sessions: Query<&mut SessionState>) {
+fn remote(mut events: MessageReader<Reported>, mut sessions: Query<&mut SessionState>) {
     let Ok(mut state) = sessions.single_mut() else {
         return;
     };
     for Reported(event) in events.read() {
         if let RemoteEvent::Session { session } = event {
-            state.view.current = Some(session.clone());
+            state.view.current = Some(session.as_ref().clone());
         }
     }
 }

@@ -154,10 +154,9 @@ fn reconcile_dialer(
             continue;
         }
         tracing::info!("remote quic: dialing the relay");
-        let task = runtime.runtime.spawn(super::quic::dialer::run(
-            state.clone(),
-            runtime.liveness.subscribe(),
-        ));
+        let task = runtime
+            .runtime
+            .spawn(state.clone().dial(runtime.liveness.subscribe()));
         commands.entity(entity).insert(RemoteDialerTask(task));
     }
 }

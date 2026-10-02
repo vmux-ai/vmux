@@ -10,14 +10,10 @@ use vmux_command::WriteCommandRequests;
 use vmux_ecs::AgentWorkingDir;
 use vmux_ecs::agent::{AgentContinuationRequest, AgentSessionRoot};
 use vmux_ecs::service::{ServiceMessageSet, ServiceRequest};
-use vmux_git::worktree::{
-    CheckoutInfo, is_linked_worktree, repository_init, worktree_registrations,
-};
-#[cfg(test)]
-use vmux_git::worktree::{worktree_add, worktree_list};
+use vmux_git::worktree::CheckoutInfo;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_layout::worktree::{
-    ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady, is_generated_tab_name,
+    ManagedWorktreeRoot, TabWorktreeActivation, TabWorktreeReady, WorktreeName,
 };
 use vmux_session::AcpSession;
 
@@ -86,7 +82,7 @@ impl PendingWorkspacePicker {
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct AgentWorkspacePicker<'w, 's> {
+pub(super) struct AgentWorkspacePicker<'w, 's> {
     pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
     choices: Query<'w, 's, &'static PendingAgentChoice>,
     session_roots: Query<'w, 's, (), With<AgentSessionRoot>>,
@@ -94,18 +90,18 @@ pub(crate) struct AgentWorkspacePicker<'w, 's> {
 }
 
 impl AgentWorkspacePicker<'_, '_> {
-    pub(crate) fn pending_tabs(&self) -> std::collections::HashSet<Entity> {
+    pub(super) fn pending_tabs(&self) -> std::collections::HashSet<Entity> {
         self.pickers
             .iter()
             .map(|picker| picker.tab_entity)
             .collect()
     }
 
-    pub(crate) fn choice_pending(&self, agent: Entity) -> bool {
+    pub(super) fn choice_pending(&self, agent: Entity) -> bool {
         self.choices.contains(agent)
     }
 
-    pub(crate) fn session(&self, entity: Entity, child_of: &Query<&ChildOf>) -> Option<Entity> {
+    pub(super) fn session(&self, entity: Entity, child_of: &Query<&ChildOf>) -> Option<Entity> {
         let mut current = entity;
         loop {
             if self.session_roots.contains(current) {
@@ -115,7 +111,7 @@ impl AgentWorkspacePicker<'_, '_> {
         }
     }
 
-    pub(crate) fn choose(&self, requested: Option<PathBuf>) -> Task<Option<PathBuf>> {
+    pub(super) fn choose(&self, requested: Option<PathBuf>) -> Task<Option<PathBuf>> {
         let wake = self.proxy.as_deref().map(|proxy| (**proxy).clone());
         let initial_dir = requested
             .filter(|path| path.is_dir())
@@ -142,7 +138,7 @@ impl AgentWorkspacePicker<'_, '_> {
         })
     }
 
-    pub(crate) fn accept(&self, path: PathBuf) -> Task<Option<PathBuf>> {
+    pub(super) fn accept(&self, path: PathBuf) -> Task<Option<PathBuf>> {
         let wake = self.proxy.as_deref().map(|proxy| (**proxy).clone());
         IoTaskPool::get().spawn(async move {
             if let Some(wake) = wake {
@@ -170,8 +166,8 @@ fn initialize_git_agent_choice(
     let continuation = if !tabs.contains(initialize.tab_entity) {
         failed_workspace_continuation("The project tab no longer exists")
     } else if event.payload.index == 0 {
-        match repository_init(&initialize.workspace) {
-            Ok(root) => new_git_workspace_ready_continuation(&root),
+        match CheckoutInfo::initialize(&initialize.workspace) {
+            Ok(checkout) => new_git_workspace_ready_continuation(&checkout.root),
             Err(error) => git_initialization_failed_continuation(&initialize.workspace, &error.0),
         }
     } else {
@@ -189,7 +185,7 @@ fn initialize_git_agent_choice(
 
 fn bind_tab_workspace(tab: &mut Tab, project_dir: &Path, execution_dir: &Path) {
     tab.startup_dir = Some(execution_dir.to_string_lossy().into_owned());
-    if is_generated_tab_name(&tab.name)
+    if WorktreeName::is_generated(&tab.name)
         && let Some(name) = project_dir.file_name().and_then(|name| name.to_str())
         && !name.is_empty()
     {
@@ -232,18 +228,18 @@ fn failed_workspace_continuation(message: &str) -> String {
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct AgentWorkspaceState<'w, 's> {
-    pub(crate) tabs: Query<'w, 's, &'static mut Tab>,
-    pub(crate) worktrees: Query<'w, 's, &'static TabWorktree>,
-    pub(crate) workspaces: Query<'w, 's, &'static TabWorkspace>,
-    pub(crate) pending_projects: Query<'w, 's, &'static PendingProject>,
-    pub(crate) managed_root: Option<Res<'w, ManagedWorktreeRoot>>,
+pub(super) struct AgentWorkspaceState<'w, 's> {
+    pub(super) tabs: Query<'w, 's, &'static mut Tab>,
+    pub(super) worktrees: Query<'w, 's, &'static TabWorktree>,
+    pub(super) workspaces: Query<'w, 's, &'static TabWorkspace>,
+    pub(super) pending_projects: Query<'w, 's, &'static PendingProject>,
+    pub(super) managed_root: Option<Res<'w, ManagedWorktreeRoot>>,
     acp_sessions: Query<'w, 's, &'static mut AcpSession>,
     child_of: Query<'w, 's, &'static ChildOf>,
 }
 
 impl AgentWorkspaceState<'_, '_> {
-    pub(crate) fn activate_worktree(
+    pub(super) fn activate_worktree(
         &mut self,
         tab_entity: Entity,
         agent_entity: Entity,
@@ -270,7 +266,7 @@ impl AgentWorkspaceState<'_, '_> {
         Ok((execution_dir, rebind))
     }
 
-    pub(crate) fn activate_directory(
+    pub(super) fn activate_directory(
         &mut self,
         tab_entity: Entity,
         agent_entity: Entity,
@@ -307,7 +303,7 @@ impl AgentWorkspaceState<'_, '_> {
                 format!("selected project has invalid Git metadata: {}", error.0)
             })?;
             SelectedWorkspaceKind::Git {
-                needs_worktree: !is_linked_worktree(selected),
+                needs_worktree: !CheckoutInfo::is_linked(selected),
             }
         } else {
             SelectedWorkspaceKind::Plain
@@ -395,14 +391,15 @@ impl ExistingWorktreeCandidates {
         let relative_dir = project_dir
             .strip_prefix(&project_checkout.root)
             .map_err(|_| "project directory is outside its checkout".to_string())?;
-        let mut candidates = worktree_registrations(&project_checkout.root)
+        let mut candidates = project_checkout
+            .worktree_registrations()
             .map_err(|error| error.0)?
             .into_iter()
             .filter_map(|registration| {
                 let branch = registration.branch?;
                 let checkout = CheckoutInfo::try_from(registration.path.as_path()).ok()?;
                 if checkout.common_dir != project_checkout.common_dir
-                    || !is_linked_worktree(&checkout.root)
+                    || !CheckoutInfo::is_linked(&checkout.root)
                 {
                     return None;
                 }
@@ -675,7 +672,7 @@ mod tests {
         let repo = TestRepository::new();
         let project_dir = repo.path().canonicalize().unwrap();
         let managed_root = tempfile::tempdir().unwrap();
-        let activation = vmux_layout::worktree::create_worktree_for_branch_blocking(
+        let activation = vmux_layout::worktree::TabWorktreeActivation::create_branch(
             &project_dir,
             "feature/fun-terminal",
             managed_root.path(),
@@ -773,7 +770,10 @@ mod tests {
         let project_dir = repo.path().canonicalize().unwrap();
         let external_root = tempfile::tempdir().unwrap();
         let external = external_root.path().join("existing");
-        worktree_add(&project_dir, &external, "feature/existing", "main").unwrap();
+        let checkout = CheckoutInfo::try_from(project_dir.as_path()).unwrap();
+        checkout
+            .add_worktree(&external, "feature/existing", "main")
+            .unwrap();
         let external = external.canonicalize().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
@@ -817,7 +817,7 @@ mod tests {
                 .project_dir,
             external.to_string_lossy()
         );
-        assert_eq!(worktree_list(&project_dir).unwrap().len(), 2);
+        assert_eq!(checkout.worktrees().unwrap().len(), 2);
 
         let managed_tab = app
             .world_mut()
@@ -858,7 +858,7 @@ mod tests {
                 .project_dir,
             project_dir.to_string_lossy()
         );
-        assert_eq!(worktree_list(&project_dir).unwrap().len(), 2);
+        assert_eq!(checkout.worktrees().unwrap().len(), 2);
     }
 
     #[test]
@@ -903,8 +903,13 @@ mod tests {
         let roots = tempfile::tempdir().unwrap();
         let first = roots.path().join("first");
         let second = roots.path().join("second");
-        worktree_add(&project_dir, &first, "feature/first", "main").unwrap();
-        worktree_add(&project_dir, &second, "feature/second", "main").unwrap();
+        let checkout = CheckoutInfo::try_from(project_dir.as_path()).unwrap();
+        checkout
+            .add_worktree(&first, "feature/first", "main")
+            .unwrap();
+        checkout
+            .add_worktree(&second, "feature/second", "main")
+            .unwrap();
 
         let candidates = ExistingWorktreeCandidates::for_project(&project_dir).unwrap();
         let resolved = ExistingWorktreeCandidates::resolve(&project_dir, &first).unwrap();

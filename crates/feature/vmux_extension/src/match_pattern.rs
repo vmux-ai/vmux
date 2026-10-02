@@ -21,6 +21,10 @@ enum Host {
 }
 
 impl ExtensionMatchPattern {
+    pub fn is_candidate(value: &str) -> bool {
+        value == "<all_urls>" || value.contains("://")
+    }
+
     pub fn parse(pattern: &str) -> Result<Self, String> {
         if pattern == "<all_urls>" {
             return Ok(Self {
@@ -84,44 +88,40 @@ impl ExtensionMatchPattern {
             }
             Host::Empty => url_host.is_empty(),
         };
-        host_matches && wildcard_matches(&self.path, url.path())
+        host_matches && Self::wildcard_matches(&self.path, url.path())
     }
-}
 
-pub fn is_match_pattern_candidate(value: &str) -> bool {
-    value == "<all_urls>" || value.contains("://")
-}
-
-fn wildcard_matches(pattern: &str, value: &str) -> bool {
-    let starts_with_wildcard = pattern.starts_with('*');
-    let ends_with_wildcard = pattern.ends_with('*');
-    let parts = pattern
-        .split('*')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if parts.is_empty() {
-        return true;
-    }
-    let mut offset = 0;
-    for (index, part) in parts.iter().enumerate() {
-        let first = index == 0;
-        let last = index + 1 == parts.len();
-        if first && !starts_with_wildcard {
-            if !value.starts_with(part) {
-                return false;
+    fn wildcard_matches(pattern: &str, value: &str) -> bool {
+        let starts_with_wildcard = pattern.starts_with('*');
+        let ends_with_wildcard = pattern.ends_with('*');
+        let parts = pattern
+            .split('*')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        if parts.is_empty() {
+            return true;
+        }
+        let mut offset = 0;
+        for (index, part) in parts.iter().enumerate() {
+            let first = index == 0;
+            let last = index + 1 == parts.len();
+            if first && !starts_with_wildcard {
+                if !value.starts_with(part) {
+                    return false;
+                }
+                offset = part.len();
+                continue;
             }
-            offset = part.len();
-            continue;
+            if last && !ends_with_wildcard {
+                return value[offset..].ends_with(part);
+            }
+            let Some(found) = value[offset..].find(part) else {
+                return false;
+            };
+            offset += found + part.len();
         }
-        if last && !ends_with_wildcard {
-            return value[offset..].ends_with(part);
-        }
-        let Some(found) = value[offset..].find(part) else {
-            return false;
-        };
-        offset += found + part.len();
+        ends_with_wildcard || offset == value.len()
     }
-    ends_with_wildcard || offset == value.len()
 }
 
 #[cfg(test)]

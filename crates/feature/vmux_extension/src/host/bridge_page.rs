@@ -1,3 +1,4 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::{
@@ -37,6 +38,15 @@ pub enum ExtensionBridgeRole {
 #[derive(Component)]
 struct ExtensionBridgeStopping;
 
+#[derive(SystemParam)]
+struct BridgePages<'w, 's> {
+    primary_window: Query<'w, 's, (), With<PrimaryWindow>>,
+    added_primary_window: Query<'w, 's, (), Added<PrimaryWindow>>,
+    pages: Query<'w, 's, (Entity, &'static ExtensionBridgeWebview)>,
+    removed_pages: RemovedComponents<'w, 's, ExtensionBridgeWebview>,
+    stopping: Query<'w, 's, (), With<ExtensionBridgeStopping>>,
+}
+
 fn stop_bridge_pages(
     mut exits: MessageReader<AppExit>,
     pages: Query<Entity, With<ExtensionBridgeWebview>>,
@@ -58,31 +68,27 @@ fn stop_bridge_pages(
 fn spawn_bridge_pages(
     mut commands: Commands,
     runtime: Single<(Ref<PreparedExtensions>, &ExtensionBridgeServer)>,
-    primary_window: Query<(), With<PrimaryWindow>>,
-    added_primary_window: Query<(), Added<PrimaryWindow>>,
-    pages: Query<(Entity, &ExtensionBridgeWebview)>,
-    mut removed_pages: RemovedComponents<ExtensionBridgeWebview>,
+    mut world: BridgePages,
     shutdown: Option<Res<CefShutdownState>>,
-    stopping: Query<(), With<ExtensionBridgeStopping>>,
     mut initialized: Local<bool>,
 ) {
     let (prepared, server) = runtime.into_inner();
     let should_reconcile = !*initialized
         || prepared.is_changed()
-        || !added_primary_window.is_empty()
-        || removed_pages.read().count() > 0
+        || !world.added_primary_window.is_empty()
+        || world.removed_pages.read().count() > 0
         || shutdown.as_ref().is_some_and(|state| state.is_changed());
     *initialized = true;
     if !should_reconcile {
         return;
     }
-    if !stopping.is_empty()
+    if !world.stopping.is_empty()
         || shutdown.is_some_and(|state| state.started())
-        || primary_window.is_empty()
+        || world.primary_window.is_empty()
     {
         return;
     }
-    let conformance = super::broker::extension_conformance_enabled();
+    let conformance = super::broker::ExtensionEnvironment::conformance_enabled();
     let mut desired = prepared
         .0
         .iter()
@@ -97,7 +103,7 @@ fn spawn_bridge_pages(
             roles
         })
         .collect::<HashSet<_>>();
-    for (entity, page) in &pages {
+    for (entity, page) in &world.pages {
         let key = (page.extension_id.clone(), page.role);
         if desired.remove(&key) {
             continue;
@@ -160,13 +166,14 @@ fn bridge_config_source(
     identity: &BridgeIdentity,
     conformance: bool,
 ) -> String {
-    super::runtime::bridge_source(&super::runtime::BridgeConfig {
-        endpoint: server.endpoint(),
-        extension: &identity.extension_id,
-        profile: &identity.profile_id,
-        token: &identity.token,
+    super::runtime::BridgeConfig {
+        endpoint: server.endpoint().to_string(),
+        extension: identity.extension_id.clone(),
+        profile: identity.profile_id.clone(),
+        token: identity.token.clone(),
         conformance,
-    })
+    }
+    .source()
     .expect("valid embedded extension bridge template")
 }
 

@@ -33,9 +33,9 @@ use vmux_api::room::{
 use vmux_api::team::TeamEvent;
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
-use vmux_ui::platform::sleep_ms;
+use vmux_ui::platform::Platform;
 
-use crate::remote::{Api, ApiError, next_client_op_id};
+use crate::remote::{Api, ApiError, ClientOperationIds};
 use crate::session::Session;
 
 const TEAM_POLL_INTERVAL_MS: u32 = 3_000;
@@ -77,10 +77,6 @@ pub(super) fn install(
         session,
         composer,
     }));
-}
-
-fn superseded(epoch: u64) -> bool {
-    EPOCH.with(|current| current.get()) != epoch
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -143,35 +139,35 @@ impl ComposerExchange {
 impl PageHost for MobileHost {
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
         match id {
-            ChatSubmit::ID => submit(self, decode(bytes)?),
+            ChatSubmit::ID => self.submit(Self::decode(bytes)?),
             ChatDraftChanged::ID => {
-                let payload: ChatDraftChanged = decode(bytes)?;
+                let payload: ChatDraftChanged = Self::decode(bytes)?;
                 self.composer.change_draft(payload.text);
                 Ok(())
             }
-            ChatRemoveAttachment::ID => remove_attachment(self, decode(bytes)?),
-            ChatCancel::ID | ChatStop::ID => cancel(self),
-            ChatEscape::ID => escape(self),
-            ChatApproval::ID => approve(self, decode(bytes)?),
+            ChatRemoveAttachment::ID => self.remove_attachment(Self::decode(bytes)?),
+            ChatCancel::ID | ChatStop::ID => self.cancel(),
+            ChatEscape::ID => self.escape(),
+            ChatApproval::ID => self.approve(Self::decode(bytes)?),
             SelectModel::ID => {
-                let payload: SelectModel = decode(bytes)?;
-                agent_call(self, move |api, sid| async move {
+                let payload: SelectModel = Self::decode(bytes)?;
+                self.agent_call(move |api, sid| async move {
                     if let Err(error) = api.select_model(&sid, &payload.model_id).await {
                         tracing::warn!("selecting the model failed: {error:?}");
                     }
                 })
             }
             SetAgentEffort::ID => {
-                let payload: SetAgentEffort = decode(bytes)?;
-                agent_call(self, move |api, sid| async move {
+                let payload: SetAgentEffort = Self::decode(bytes)?;
+                self.agent_call(move |api, sid| async move {
                     if let Err(error) = api.set_effort(&sid, &payload.level).await {
                         tracing::warn!("setting the effort failed: {error:?}");
                     }
                 })
             }
-            ChatAttachPaths::ID => attach(self, decode(bytes)?),
-            CommandBarPromptRequest::ID => prompt(self, decode(bytes)?),
-            SwitchTabRequest::ID => switch_tab(self, decode(bytes)?),
+            ChatAttachPaths::ID => self.attach(Self::decode(bytes)?),
+            CommandBarPromptRequest::ID => self.prompt(Self::decode(bytes)?),
+            SwitchTabRequest::ID => self.switch_tab(Self::decode(bytes)?),
             CommandBarDismissRequest::ID => Ok(()),
             CommandBarOpenRequest::ID
             | CommandBarTerminalRequest::ID
@@ -186,8 +182,8 @@ impl PageHost for MobileHost {
     fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
         match id {
             ChatUiState::ID => {
-                poll_models(self);
-                poll_media(self);
+                self.poll_models();
+                self.poll_media();
                 self.runtime
                     .listen(ChatUiState::ID, on_bytes, RepublishChatUiState);
             }
@@ -196,7 +192,7 @@ impl PageHost for MobileHost {
                     .listen(CommandBarUiState::ID, on_bytes, RepublishLauncher);
             }
             TeamEvent::ID => {
-                poll_team(self);
+                self.poll_team();
                 self.runtime.listen(TeamEvent::ID, on_bytes, RepublishTeam);
             }
             _ => return Err(EventListenerError::Unsupported),
@@ -205,267 +201,272 @@ impl PageHost for MobileHost {
     }
 }
 
-fn submit(host: &MobileHost, payload: ChatSubmit) -> Result<(), EventListenerError> {
-    if host.session.sid().is_empty() {
-        return Err(EventListenerError::Unsupported);
+impl MobileHost {
+    fn superseded(epoch: u64) -> bool {
+        EPOCH.with(|current| current.get()) != epoch
     }
-    let attachments = host
-        .runtime
-        .project(|selected: &Attachments| {
-            selected
-                .0
-                .iter()
-                .map(|attachment| AgentAttachment {
-                    path: attachment.path.clone(),
-                    name: attachment.name.clone(),
-                    mime_type: attachment.mime_type.clone(),
-                    size: attachment.size,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    let effect = host.composer.clear_effect();
-    host.runtime.send(Submitted);
-    if let Some(effect) = effect {
-        host.runtime.send(PublishComposerEffect(effect));
-    }
-    let runtime = host.runtime.clone();
-    agent_call(host, move |api, sid| async move {
-        let request = PromptRequest {
-            client_op_id: next_client_op_id(),
-            text: payload.text,
-            attachments,
-        };
-        if let Err(ApiError::Message(message)) = api.send_prompt(&sid, &request).await {
-            report(&runtime, RemoteStatus::Errored(message));
+
+    fn submit(&self, payload: ChatSubmit) -> Result<(), EventListenerError> {
+        if self.session.sid().is_empty() {
+            return Err(EventListenerError::Unsupported);
         }
-    })
-}
-
-fn remove_attachment(
-    host: &MobileHost,
-    payload: ChatRemoveAttachment,
-) -> Result<(), EventListenerError> {
-    host.runtime.send(RemoveAttachment(payload.path));
-    Ok(())
-}
-
-fn report(runtime: &RuntimeHandle, status: RemoteStatus) {
-    runtime.send(Reported(RemoteEvent::Status { status }));
-}
-
-fn cancel(host: &MobileHost) -> Result<(), EventListenerError> {
-    agent_call(host, |api, sid| async move {
-        if let Err(error) = api.cancel(&sid).await {
-            tracing::warn!("cancelling failed: {error:?}");
+        let attachments = self
+            .runtime
+            .project(|selected: &Attachments| {
+                selected
+                    .0
+                    .iter()
+                    .map(|attachment| AgentAttachment {
+                        path: attachment.path.clone(),
+                        name: attachment.name.clone(),
+                        mime_type: attachment.mime_type.clone(),
+                        size: attachment.size,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let effect = self.composer.clear_effect();
+        self.runtime.send(Submitted);
+        if let Some(effect) = effect {
+            self.runtime.send(PublishComposerEffect(effect));
         }
-    })
-}
-
-fn escape(host: &MobileHost) -> Result<(), EventListenerError> {
-    let running = host
-        .runtime
-        .project(|conversation: &Conversation| {
-            matches!(&conversation.status, RemoteStatus::Streaming)
-        })
-        .unwrap_or_default();
-    if !running && let Some(effect) = host.composer.clear_effect() {
-        host.runtime.send(PublishComposerEffect(effect));
-    }
-    cancel(host)
-}
-
-fn approve(host: &MobileHost, payload: ChatApproval) -> Result<(), EventListenerError> {
-    host.runtime
-        .send(Reported(RemoteEvent::Approval { approval: None }));
-    agent_call(host, move |api, sid| async move {
-        let request = ApprovalRequest {
-            call_id: payload.call_id,
-            decision: payload.decision,
-        };
-        if let Err(error) = api.approve(&sid, &request).await {
-            tracing::warn!("approving failed: {error:?}");
-        }
-    })
-}
-
-fn attach(host: &MobileHost, payload: ChatAttachPaths) -> Result<(), EventListenerError> {
-    let offered = host.composer.offered.read();
-    let mut resolved = Vec::with_capacity(payload.paths.len());
-    for path in &payload.paths {
-        for entry in offered.iter() {
-            if &entry.path != path || entry.is_dir {
-                continue;
+        let runtime = self.runtime.clone();
+        self.agent_call(move |api, sid| async move {
+            let request = PromptRequest {
+                client_op_id: ClientOperationIds::next(),
+                text: payload.text,
+                attachments,
+            };
+            if let Err(ApiError::Message(message)) = api.send_prompt(&sid, &request).await {
+                Self::report(&runtime, RemoteStatus::Errored(message));
             }
-            resolved.push(ChatAttachment {
-                path: entry.path.clone(),
-                name: entry.name.clone(),
-                mime_type: entry.mime_type.clone(),
-                size: entry.size,
-                preview_data_url: entry.preview_data_url.clone(),
-            });
-            break;
-        }
+        })
     }
-    host.runtime.send(Attach(resolved));
-    Ok(())
-}
 
-fn prompt(host: &MobileHost, request: CommandBarPromptRequest) -> Result<(), EventListenerError> {
-    host.runtime.send(crate::session::StartChatRequest {
-        text: request.text,
-        agent_url: request.target_url,
-    });
-    Ok(())
-}
-
-fn switch_tab(host: &MobileHost, request: SwitchTabRequest) -> Result<(), EventListenerError> {
-    let Some(session) = host.sessions.read().get(request.index).cloned() else {
-        return Err(EventListenerError::Unsupported);
-    };
-    host.runtime.send(crate::session::OpenSession(session));
-    Ok(())
-}
-
-fn agent_call<F, Fut>(host: &MobileHost, call: F) -> Result<(), EventListenerError>
-where
-    F: FnOnce(Api, String) -> Fut + 'static,
-    Fut: std::future::Future<Output = ()> + 'static,
-{
-    let sid = host.session.sid();
-    if sid.is_empty() {
-        return Err(EventListenerError::Unsupported);
+    fn remove_attachment(&self, payload: ChatRemoveAttachment) -> Result<(), EventListenerError> {
+        self.runtime.send(RemoveAttachment(payload.path));
+        Ok(())
     }
-    let api = host.api.clone();
-    spawn(call(api, sid));
-    Ok(())
-}
 
-fn poll_models(host: &MobileHost) {
-    let (api, session) = (host.api.clone(), host.session);
-    let runtime = host.runtime.clone();
-    let epoch = host.epoch;
-    let (rc, mut changed) = ReactiveContext::new();
-    spawn(async move {
-        loop {
-            if superseded(epoch) {
-                return;
+    fn report(runtime: &RuntimeHandle, status: RemoteStatus) {
+        runtime.send(Reported(RemoteEvent::Status { status }));
+    }
+
+    fn cancel(&self) -> Result<(), EventListenerError> {
+        self.agent_call(|api, sid| async move {
+            if let Err(error) = api.cancel(&sid).await {
+                tracing::warn!("cancelling failed: {error:?}");
             }
-            let sid = rc.reset_and_run_in(|| session.sid());
-            let mut attempts = MODEL_FETCH_ATTEMPTS;
-            while !sid.is_empty() && attempts > 0 {
-                attempts -= 1;
-                let fetched = api.models(&sid).await;
-                if superseded(epoch) {
+        })
+    }
+
+    fn escape(&self) -> Result<(), EventListenerError> {
+        let running = self
+            .runtime
+            .project(|conversation: &Conversation| {
+                matches!(&conversation.status, RemoteStatus::Streaming)
+            })
+            .unwrap_or_default();
+        if !running && let Some(effect) = self.composer.clear_effect() {
+            self.runtime.send(PublishComposerEffect(effect));
+        }
+        self.cancel()
+    }
+
+    fn approve(&self, payload: ChatApproval) -> Result<(), EventListenerError> {
+        self.runtime
+            .send(Reported(RemoteEvent::Approval { approval: None }));
+        self.agent_call(move |api, sid| async move {
+            let request = ApprovalRequest {
+                call_id: payload.call_id,
+                decision: payload.decision,
+            };
+            if let Err(error) = api.approve(&sid, &request).await {
+                tracing::warn!("approving failed: {error:?}");
+            }
+        })
+    }
+
+    fn attach(&self, payload: ChatAttachPaths) -> Result<(), EventListenerError> {
+        let offered = self.composer.offered.read();
+        let mut resolved = Vec::with_capacity(payload.paths.len());
+        for path in &payload.paths {
+            for entry in offered.iter() {
+                if &entry.path != path || entry.is_dir {
+                    continue;
+                }
+                resolved.push(ChatAttachment {
+                    path: entry.path.clone(),
+                    name: entry.name.clone(),
+                    mime_type: entry.mime_type.clone(),
+                    size: entry.size,
+                    preview_data_url: entry.preview_data_url.clone(),
+                });
+                break;
+            }
+        }
+        self.runtime.send(Attach(resolved));
+        Ok(())
+    }
+
+    fn prompt(&self, request: CommandBarPromptRequest) -> Result<(), EventListenerError> {
+        self.runtime.send(crate::session::StartChatRequest {
+            text: request.text,
+            agent_url: request.target_url,
+        });
+        Ok(())
+    }
+
+    fn switch_tab(&self, request: SwitchTabRequest) -> Result<(), EventListenerError> {
+        let Some(session) = self.sessions.read().get(request.index).cloned() else {
+            return Err(EventListenerError::Unsupported);
+        };
+        self.runtime.send(crate::session::OpenSession(session));
+        Ok(())
+    }
+
+    fn agent_call<F, Fut>(&self, call: F) -> Result<(), EventListenerError>
+    where
+        F: FnOnce(Api, String) -> Fut + 'static,
+        Fut: std::future::Future<Output = ()> + 'static,
+    {
+        let sid = self.session.sid();
+        if sid.is_empty() {
+            return Err(EventListenerError::Unsupported);
+        }
+        let api = self.api.clone();
+        spawn(call(api, sid));
+        Ok(())
+    }
+
+    fn poll_models(&self) {
+        let (api, session) = (self.api.clone(), self.session);
+        let runtime = self.runtime.clone();
+        let epoch = self.epoch;
+        let (rc, mut changed) = ReactiveContext::new();
+        spawn(async move {
+            loop {
+                if Self::superseded(epoch) {
+                    return;
+                }
+                let sid = rc.reset_and_run_in(|| session.sid());
+                let mut attempts = MODEL_FETCH_ATTEMPTS;
+                while !sid.is_empty() && attempts > 0 {
+                    attempts -= 1;
+                    let fetched = api.models(&sid).await;
+                    if Self::superseded(epoch) {
+                        return;
+                    }
+                    match fetched {
+                        Ok(state) => {
+                            runtime.send(Models(state));
+                            break;
+                        }
+                        Err(ApiError::Unauthorized | ApiError::NotFound) => return,
+                        Err(ApiError::Message(_)) => Platform::sleep(MODEL_RETRY_INTERVAL_MS).await,
+                    }
+                }
+                if changed.next().await.is_none() {
+                    return;
+                }
+            }
+        });
+    }
+
+    fn poll_media(&self) {
+        let (api, session) = (self.api.clone(), self.session);
+        let runtime = self.runtime.clone();
+        let composer = self.composer;
+        let mut offered = composer.offered;
+        let epoch = self.epoch;
+        let (rc, mut changed) = ReactiveContext::new();
+        spawn(async move {
+            loop {
+                if Self::superseded(epoch) {
+                    return;
+                }
+                let asked = rc.reset_and_run_in(|| composer.media_request.read().clone());
+                let sid = session.sid();
+                if let Some(request) = asked {
+                    if request.query.is_empty() {
+                        offered.set(Vec::new());
+                        runtime.send(Browsed {
+                            request_id: request.request_id,
+                            query: request.query,
+                            entries: Vec::new(),
+                        });
+                        if changed.next().await.is_none() {
+                            return;
+                        }
+                        continue;
+                    }
+                    if sid.is_empty() {
+                        if changed.next().await.is_none() {
+                            return;
+                        }
+                        continue;
+                    }
+                    let fetched = api.media(&sid, &request.query).await;
+                    if Self::superseded(epoch) {
+                        return;
+                    }
+                    let current = composer.media_request.peek();
+                    if current.as_ref().is_none_or(|current| {
+                        current.request_id != request.request_id || current.query != request.query
+                    }) {
+                        if changed.next().await.is_none() {
+                            return;
+                        }
+                        continue;
+                    }
+                    if let Ok(found) = fetched {
+                        offered.set(found.clone());
+                        runtime.send(Browsed {
+                            request_id: request.request_id,
+                            query: request.query,
+                            entries: found,
+                        });
+                    }
+                }
+                if changed.next().await.is_none() {
+                    return;
+                }
+            }
+        });
+    }
+
+    fn poll_team(&self) {
+        let (api, epoch) = (self.api.clone(), self.epoch);
+        let runtime = self.runtime.clone();
+        spawn(async move {
+            loop {
+                if Self::superseded(epoch) {
+                    return;
+                }
+                let fetched = api.team().await;
+                if Self::superseded(epoch) {
                     return;
                 }
                 match fetched {
-                    Ok(state) => {
-                        runtime.send(Models(state));
-                        break;
-                    }
+                    Ok(members) => runtime.send(Members(members)),
                     Err(ApiError::Unauthorized | ApiError::NotFound) => return,
-                    Err(ApiError::Message(_)) => sleep_ms(MODEL_RETRY_INTERVAL_MS).await,
+                    Err(ApiError::Message(_)) => {}
                 }
+                Platform::sleep(TEAM_POLL_INTERVAL_MS).await;
             }
-            if changed.next().await.is_none() {
-                return;
-            }
-        }
-    });
-}
+        });
+    }
 
-fn poll_media(host: &MobileHost) {
-    let (api, session) = (host.api.clone(), host.session);
-    let runtime = host.runtime.clone();
-    let composer = host.composer;
-    let mut offered = composer.offered;
-    let epoch = host.epoch;
-    let (rc, mut changed) = ReactiveContext::new();
-    spawn(async move {
-        loop {
-            if superseded(epoch) {
-                return;
-            }
-            let asked = rc.reset_and_run_in(|| composer.media_request.read().clone());
-            let sid = session.sid();
-            if let Some(request) = asked {
-                if request.query.is_empty() {
-                    offered.set(Vec::new());
-                    runtime.send(Browsed {
-                        request_id: request.request_id,
-                        query: request.query,
-                        entries: Vec::new(),
-                    });
-                    if changed.next().await.is_none() {
-                        return;
-                    }
-                    continue;
-                }
-                if sid.is_empty() {
-                    if changed.next().await.is_none() {
-                        return;
-                    }
-                    continue;
-                }
-                let fetched = api.media(&sid, &request.query).await;
-                if superseded(epoch) {
-                    return;
-                }
-                let current = composer.media_request.peek();
-                if current.as_ref().is_none_or(|current| {
-                    current.request_id != request.request_id || current.query != request.query
-                }) {
-                    if changed.next().await.is_none() {
-                        return;
-                    }
-                    continue;
-                }
-                if let Ok(found) = fetched {
-                    offered.set(found.clone());
-                    runtime.send(Browsed {
-                        request_id: request.request_id,
-                        query: request.query,
-                        entries: found,
-                    });
-                }
-            }
-            if changed.next().await.is_none() {
-                return;
-            }
-        }
-    });
-}
-
-fn poll_team(host: &MobileHost) {
-    let (api, epoch) = (host.api.clone(), host.epoch);
-    let runtime = host.runtime.clone();
-    spawn(async move {
-        loop {
-            if superseded(epoch) {
-                return;
-            }
-            let fetched = api.team().await;
-            if superseded(epoch) {
-                return;
-            }
-            match fetched {
-                Ok(members) => runtime.send(Members(members)),
-                Err(ApiError::Unauthorized | ApiError::NotFound) => return,
-                Err(ApiError::Message(_)) => {}
-            }
-            sleep_ms(TEAM_POLL_INTERVAL_MS).await;
-        }
-    });
-}
-
-fn decode<T>(bytes: &[u8]) -> Result<T, EventListenerError>
-where
-    T: rkyv::Archive,
-    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
-        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
-{
-    HostPayload::new(bytes)
-        .decode::<T>()
-        .ok_or(EventListenerError::SerializePayload)
+    fn decode<T>(bytes: &[u8]) -> Result<T, EventListenerError>
+    where
+        T: rkyv::Archive,
+        T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+            + for<'a> rkyv::bytecheck::CheckBytes<
+                rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>,
+            >,
+    {
+        HostPayload::new(bytes)
+            .decode::<T>()
+            .ok_or(EventListenerError::SerializePayload)
+    }
 }

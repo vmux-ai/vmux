@@ -120,8 +120,7 @@ mod tests {
         }
 
         fn snapshot(&self) -> &CommandBarSpacesSnapshot {
-            &self
-                .app
+            self.app
                 .world()
                 .iter_entities()
                 .find_map(|entity| entity.get::<CommandBarSpacesSnapshot>())

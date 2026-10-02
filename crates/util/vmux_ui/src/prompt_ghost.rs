@@ -115,7 +115,7 @@ mod component {
     use dioxus::prelude::*;
 
     use super::{AGENT_PROMPT_EXAMPLES, PromptTypewriter, TERMINAL_PROMPT_EXAMPLES};
-    use crate::platform::{random_index, sleep_ms};
+    use crate::platform::Platform;
 
     const TICK_MS: u32 = 50;
 
@@ -127,13 +127,13 @@ mod component {
             AGENT_PROMPT_EXAMPLES
         };
         let mut typewriter =
-            use_signal(|| PromptTypewriter::new(examples, random_index(examples.len())));
+            use_signal(|| PromptTypewriter::new(examples, Platform::random_index(examples.len())));
 
         use_future(move || async move {
             loop {
-                sleep_ms(TICK_MS).await;
+                Platform::sleep(TICK_MS).await;
                 let mut next = *typewriter.peek();
-                next.advance(random_index(examples.len()));
+                next.advance(Platform::random_index(examples.len()));
                 typewriter.set(next);
             }
         });

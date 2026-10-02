@@ -17,7 +17,7 @@ use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::ime::use_ime_guard;
-use vmux_ui::platform::sleep_ms;
+use vmux_ui::platform::Platform;
 use vmux_ui::scroll::ScrollIntoView;
 
 const TREE_MOTION_MS: u32 = 170;
@@ -389,7 +389,7 @@ fn schedule_tree_focus(path: String, mut generation: Signal<u32>, reveal: Explor
     let id = generation().wrapping_add(1);
     generation.set(id);
     spawn(async move {
-        sleep_ms(TREE_MOTION_MS + 20).await;
+        Platform::sleep(TREE_MOTION_MS + 20).await;
         if generation() != id {
             return;
         }
@@ -438,7 +438,7 @@ impl TreeRows {
             .collect();
         rows.set(merged);
         spawn(async move {
-            sleep_ms(0).await;
+            Platform::sleep(0).await;
             if generation() != id {
                 return;
             }
@@ -450,7 +450,7 @@ impl TreeRows {
             }
             rows.set(opening);
 
-            sleep_ms(TREE_MOTION_MS).await;
+            Platform::sleep(TREE_MOTION_MS).await;
             if generation() != id {
                 return;
             }
@@ -728,7 +728,7 @@ fn show_notice(
     generation.set(id);
     notice.set(Some(value));
     spawn(async move {
-        sleep_ms(NOTICE_MS).await;
+        Platform::sleep(NOTICE_MS).await;
         if generation() == id {
             notice.set(None);
         }
@@ -1412,7 +1412,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
             outline.read().len(),
         );
         spawn(async move {
-            sleep_ms(TREE_MOTION_MS + 60).await;
+            Platform::sleep(TREE_MOTION_MS + 60).await;
             files_sticky.measure();
             outline_sticky.measure();
         });

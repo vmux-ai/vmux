@@ -45,7 +45,7 @@ impl TabWorkspaceSelection {
             return Self::from_checkout(&project_dir, std::path::Path::new(checkout));
         }
         if !branch.trim().is_empty() {
-            let activation = crate::worktree::create_worktree_for_existing_branch_blocking(
+            let activation = crate::worktree::TabWorktreeActivation::checkout_branch(
                 &project_dir,
                 branch.trim(),
                 managed_root,
@@ -69,7 +69,7 @@ impl TabWorkspaceSelection {
         let checkout_dir = checkout_dir
             .canonicalize()
             .map_err(|error| format!("invalid checkout directory: {error}"))?;
-        let Some(info) = vmux_git::worktree::repo_info(&checkout_dir) else {
+        let Some(info) = vmux_git::worktree::RepoInfo::read(&checkout_dir) else {
             return Ok(Self {
                 startup_dir: checkout_dir.to_string_lossy().into_owned(),
                 project_dir: checkout_dir.to_string_lossy().into_owned(),
@@ -110,39 +110,50 @@ impl TabWorkspaceSelection {
     }
 }
 
-fn apply_tab_workspace_selection(
-    selection: TabWorkspaceSelection,
-    tab_entity: Entity,
-    tab: &mut Tab,
-    commands: &mut Commands,
-) -> String {
-    tab.startup_dir = Some(selection.startup_dir.clone());
-    if crate::worktree::is_generated_tab_name(&tab.name)
-        && let Some(name) = std::path::Path::new(&selection.project_dir)
-            .file_name()
-            .and_then(|name| name.to_str())
-        && !name.is_empty()
-    {
-        tab.name = name.to_string();
-    }
-    let mut entity = commands.entity(tab_entity);
-    entity.insert((
-        TabWorkspace {
-            project_dir: selection.project_dir,
-        },
-        TabDirDecided,
-    ));
-    match selection.worktree {
-        Some((metadata, ready)) => {
-            entity
-                .insert((metadata, ready))
-                .remove::<TabWorktreeUnavailable>();
+#[derive(bevy::ecs::system::SystemParam)]
+struct WorkspaceWriter<'w, 's> {
+    tabs: Query<'w, 's, &'static mut Tab>,
+    commands: Commands<'w, 's>,
+}
+
+impl WorkspaceWriter<'_, '_> {
+    fn apply(
+        &mut self,
+        selection: TabWorkspaceSelection,
+        tab_entity: Entity,
+    ) -> Result<String, String> {
+        let mut tab = self
+            .tabs
+            .get_mut(tab_entity)
+            .map_err(|error| error.to_string())?;
+        tab.startup_dir = Some(selection.startup_dir.clone());
+        if crate::worktree::WorktreeName::is_generated(&tab.name)
+            && let Some(name) = std::path::Path::new(&selection.project_dir)
+                .file_name()
+                .and_then(|name| name.to_str())
+            && !name.is_empty()
+        {
+            tab.name = name.to_string();
         }
-        None => {
-            entity.remove::<(TabWorktree, TabWorktreeReady, TabWorktreeUnavailable)>();
+        let mut entity = self.commands.entity(tab_entity);
+        entity.insert((
+            TabWorkspace {
+                project_dir: selection.project_dir,
+            },
+            TabDirDecided,
+        ));
+        match selection.worktree {
+            Some((metadata, ready)) => {
+                entity
+                    .insert((metadata, ready))
+                    .remove::<TabWorktreeUnavailable>();
+            }
+            None => {
+                entity.remove::<(TabWorktree, TabWorktreeReady, TabWorktreeUnavailable)>();
+            }
         }
+        Ok(selection.startup_dir)
     }
-    selection.startup_dir
 }
 
 fn git_page_ready(
@@ -185,9 +196,8 @@ fn project_activate(
     tab_entities: Query<(), With<Tab>>,
     pane_entities: Query<Entity, With<crate::pane::Pane>>,
     pages: Query<Entity, With<vmux_ecs::PageMetadata>>,
-    mut tabs: Query<&mut Tab>,
     managed_root: Res<ManagedWorktreeRoot>,
-    mut commands: Commands,
+    mut writer: WorkspaceWriter,
 ) {
     let webview = trigger.event().webview;
     let ProjectActivateRequest {
@@ -213,13 +223,8 @@ fn project_activate(
         current = parent.parent();
     };
     let result = match tab_entity {
-        Some(tab_entity) => match tabs.get_mut(tab_entity) {
-            Ok(mut tab) => TabWorkspaceSelection::resolve(path, branch, checkout, &managed_root.0)
-                .map(|selection| {
-                    apply_tab_workspace_selection(selection, tab_entity, &mut tab, &mut commands)
-                }),
-            Err(error) => Err(error.to_string()),
-        },
+        Some(tab_entity) => TabWorkspaceSelection::resolve(path, branch, checkout, &managed_root.0)
+            .and_then(|selection| writer.apply(selection, tab_entity)),
         None => Err("tab workspace is unavailable".to_string()),
     };
     let (path, error) = match result {
@@ -232,7 +237,7 @@ fn project_activate(
         error,
     };
     let Some(tab_entity) = tab_entity else {
-        commands.trigger(
+        writer.commands.trigger(
             vmux_ecs::host::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
                 webview, &event,
             ),
@@ -243,7 +248,7 @@ fn project_activate(
         let mut current = page;
         loop {
             if current == tab_entity {
-                commands.trigger(
+                writer.commands.trigger(
                     vmux_ecs::host::UiStateWrite::<vmux_git::state::GitUiState>::from_event(
                         page, &event,
                     ),

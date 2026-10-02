@@ -153,7 +153,9 @@ mod capture {
     use crossbeam_channel::Sender;
     use objc2::AllocAnyThread;
     use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-    use objc2_core_graphics::{CGBitmapContextCreate, CGImage, CGImageAlphaInfo};
+    use objc2_core_graphics::{
+        CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo,
+    };
     use objc2_foundation::NSError;
     use objc2_screen_capture_kit::{
         SCContentFilter, SCScreenshotManager, SCShareableContent, SCStreamConfiguration,
@@ -164,9 +166,6 @@ mod capture {
 
     use bevy::winit::WINIT_WINDOWS;
     use objc2_app_kit::NSView;
-    use objc2_core_graphics::{
-        CGColorSpaceCreateDeviceRGB, CGContextDrawImage, CGImageGetHeight, CGImageGetWidth,
-    };
     use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -199,16 +198,15 @@ mod capture {
         })
     }
 
-    #[allow(deprecated)]
     fn cgimage_to_rgba(image: &CGImage) -> Result<image::RgbaImage, String> {
-        let width = CGImageGetWidth(Some(image)) as u32;
-        let height = CGImageGetHeight(Some(image)) as u32;
+        let width = CGImage::width(Some(image)) as u32;
+        let height = CGImage::height(Some(image)) as u32;
         if width == 0 || height == 0 {
             return Err("captured image has zero dimension".into());
         }
         let bytes_per_row = width as usize * 4;
         let mut buf = vec![0u8; bytes_per_row * height as usize];
-        let color_space = CGColorSpaceCreateDeviceRGB().ok_or("failed to create color space")?;
+        let color_space = CGColorSpace::new_device_rgb().ok_or("failed to create color space")?;
         let ctx = unsafe {
             CGBitmapContextCreate(
                 buf.as_mut_ptr() as *mut c_void,
@@ -225,7 +223,7 @@ mod capture {
             CGPoint::new(0.0, 0.0),
             CGSize::new(width as f64, height as f64),
         );
-        CGContextDrawImage(Some(&ctx), rect, Some(image));
+        CGContext::draw_image(Some(&ctx), rect, Some(image));
         drop(ctx);
         image::RgbaImage::from_raw(width, height, buf).ok_or_else(|| "pixel buffer mismatch".into())
     }

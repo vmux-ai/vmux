@@ -12,7 +12,7 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
-use vmux_ui::platform::sleep_ms;
+use vmux_ui::platform::Platform;
 use vmux_ui::scroll::ScrollIntoView;
 use vmux_ui::text_run::TextRun;
 
@@ -97,7 +97,7 @@ impl NoteCursor {
     fn activate_with_scroll(self, block_index: usize, line: u32, center: bool) {
         self.activate_line(block_index, line);
         spawn(async move {
-            sleep_ms(0).await;
+            Platform::sleep(0).await;
             EditorFocus::file();
             if center {
                 NoteCaretAnchor::new(block_index, line).center();

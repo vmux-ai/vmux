@@ -6,7 +6,7 @@ use vmux_ecs::host::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
-use super::resize::PaneSize;
+use super::{identity::SpawnSeq, resize::PaneSize};
 
 pub(super) struct TreePlugin;
 
@@ -126,10 +126,14 @@ impl PaneHierarchy<'_, '_> {
 
 #[derive(SystemParam)]
 pub struct PaneTree<'w, 's> {
-    commands: Commands<'w, 's>,
+    pub(super) commands: Commands<'w, 's>,
 }
 
 impl PaneTree<'_, '_> {
+    pub fn set_spawn_sequence(&mut self, pane: Entity, sequence: SpawnSeq) {
+        self.commands.entity(pane).insert(sequence);
+    }
+
     pub(crate) fn split_leaf(
         &mut self,
         active: Entity,
@@ -210,7 +214,7 @@ pub enum PaneSplitDirection {
 }
 
 impl PaneSplitDirection {
-    fn flex_direction(self) -> FlexDirection {
+    pub(super) fn flex_direction(self) -> FlexDirection {
         match self {
             Self::Row => FlexDirection::Row,
             Self::Column => FlexDirection::Column,

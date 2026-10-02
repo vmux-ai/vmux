@@ -1,3 +1,4 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use crossbeam_channel::Receiver;
 use vmux_api::protocol::{AcpSessionConfig, ApprovalDecision, ClientMessage, SharedMessage};
@@ -30,7 +31,7 @@ use vmux_session::{AcpSession, AgentApprovalPolicy, PromptQueue};
 pub struct AgentRuntimePlugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct AcpSessionConfigSet;
+pub(super) struct AcpSessionConfigSet;
 
 impl Plugin for AgentRuntimePlugin {
     fn build(&self, app: &mut App) {
@@ -50,14 +51,14 @@ impl Plugin for AgentRuntimePlugin {
         .add_systems(
             Update,
             (
-                send_input,
+                input,
                 receive_catalog,
                 (
-                    apply_info,
-                    apply_workspace,
-                    (apply_config.in_set(AcpSessionConfigSet), apply_selection).chain(),
-                    apply_session,
-                    apply_terminal,
+                    info,
+                    workspace,
+                    (config.in_set(AcpSessionConfigSet), selection).chain(),
+                    session,
+                    terminal,
                 )
                     .after(ServiceMessageSet),
             ),
@@ -68,12 +69,26 @@ impl Plugin for AgentRuntimePlugin {
 }
 
 impl AcpWorkspaceState {
-    fn context<'a>(self, policy: &'a AcpWorkspacePolicy) -> Option<&'a str> {
+    fn context(self, policy: &AcpWorkspacePolicy) -> Option<&str> {
         match self {
             Self::Bound => None,
             Self::Unbound => Some(&policy.unbound),
             Self::PendingWorktree => Some(&policy.pending_worktree),
             Self::RepositoryNeedsWorktree => Some(&policy.repository_needs_worktree),
+        }
+    }
+
+    fn prompt(
+        policy: &AcpWorkspacePolicy,
+        handoff: Option<String>,
+        state: Option<Self>,
+    ) -> Option<String> {
+        let policy = state.and_then(|state| state.context(policy));
+        match (handoff, policy) {
+            (Some(handoff), Some(policy)) => Some(format!("{handoff}\n\n{policy}")),
+            (Some(handoff), None) => Some(handoff),
+            (None, Some(policy)) => Some(policy.to_string()),
+            (None, None) => None,
         }
     }
 }
@@ -86,64 +101,54 @@ enum AcpWorkspaceState {
     RepositoryNeedsWorktree,
 }
 
-fn ancestor_acp_workspace_state(
-    entity: Entity,
-    child_of: &Query<&ChildOf>,
-    tabs: &Query<&Tab>,
-    workspaces: &Query<(), With<TabWorkspace>>,
-    pending_projects: &Query<(), With<vmux_space::PendingProject>>,
-    repositories_needing_worktrees: &Query<(), With<vmux_space::RepositoryNeedsWorktree>>,
-) -> Option<AcpWorkspaceState> {
-    let mut current = entity;
-    loop {
-        if let Ok(tab) = tabs.get(current) {
-            let state = match tab.startup_dir.as_deref() {
-                Some(_) if repositories_needing_worktrees.contains(current) => {
-                    AcpWorkspaceState::RepositoryNeedsWorktree
-                }
-                Some(_) => AcpWorkspaceState::Bound,
-                None if workspaces.contains(current) => AcpWorkspaceState::Bound,
-                None if pending_projects.contains(current) => AcpWorkspaceState::PendingWorktree,
-                None => AcpWorkspaceState::Unbound,
-            };
-            return Some(state);
-        }
-        current = child_of.get(current).ok()?.parent();
-    }
+#[derive(SystemParam)]
+struct PromptWorkspace<'w, 's> {
+    child_of: Query<'w, 's, &'static ChildOf>,
+    tabs: Query<'w, 's, &'static Tab>,
+    workspaces: Query<'w, 's, (), With<TabWorkspace>>,
+    pending: Query<'w, 's, (), With<vmux_space::PendingProject>>,
+    worktrees: Query<'w, 's, (), With<vmux_space::RepositoryNeedsWorktree>>,
 }
 
-fn acp_prompt_context(
-    policy: &AcpWorkspacePolicy,
-    handoff: Option<String>,
-    workspace_state: Option<AcpWorkspaceState>,
-) -> Option<String> {
-    let policy = workspace_state.and_then(|state| state.context(policy));
-    match (handoff, policy) {
-        (Some(handoff), Some(policy)) => Some(format!("{handoff}\n\n{policy}")),
-        (Some(handoff), None) => Some(handoff),
-        (None, Some(policy)) => Some(policy.to_string()),
-        (None, None) => None,
+impl PromptWorkspace<'_, '_> {
+    fn state(&self, entity: Entity) -> Option<AcpWorkspaceState> {
+        let mut current = entity;
+        loop {
+            if let Ok(tab) = self.tabs.get(current) {
+                let state = match tab.startup_dir.as_deref() {
+                    Some(_) if self.worktrees.contains(current) => {
+                        AcpWorkspaceState::RepositoryNeedsWorktree
+                    }
+                    Some(_) => AcpWorkspaceState::Bound,
+                    None if self.workspaces.contains(current) => AcpWorkspaceState::Bound,
+                    None if self.pending.contains(current) => AcpWorkspaceState::PendingWorktree,
+                    None => AcpWorkspaceState::Unbound,
+                };
+                return Some(state);
+            }
+            current = self.child_of.get(current).ok()?.parent();
+        }
     }
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct AcpSessionConfigState {
     pub configs: Vec<AcpSessionConfig>,
-    pub(crate) pending: Vec<PendingAcpSessionConfig>,
-    pub(crate) initial: Vec<InitialAcpSessionConfig>,
+    pub(super) pending: Vec<PendingAcpSessionConfig>,
+    pub(super) initial: Vec<InitialAcpSessionConfig>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PendingAcpSessionConfig {
+pub(super) struct PendingAcpSessionConfig {
     pub request_id: u64,
     pub config_id: Option<String>,
     pub value: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct InitialAcpSessionConfig {
-    pub(crate) config_id: Option<String>,
-    pub(crate) value: String,
+pub(super) struct InitialAcpSessionConfig {
+    pub(super) config_id: Option<String>,
+    pub(super) value: String,
 }
 
 impl AcpSessionConfigState {
@@ -223,10 +228,7 @@ fn receive_catalog(
     }
 }
 
-fn apply_info(
-    mut reader: MessageReader<UiAgentInfo>,
-    mut sessions: Query<(&AcpSession, &mut Profile)>,
-) {
+fn info(mut reader: MessageReader<UiAgentInfo>, mut sessions: Query<(&AcpSession, &mut Profile)>) {
     for event in reader.read() {
         let name = event.name.trim();
         if name.is_empty() {
@@ -240,14 +242,14 @@ fn apply_info(
     }
 }
 
-fn validate_acp_workspace(
-    event: &UiAgentWorkspaceChanged,
-) -> Result<ValidatedLinkedWorkspace, String> {
-    vmux_git::worktree::validate_linked_workspace(
-        std::path::Path::new(&event.cwd),
-        std::path::Path::new(&event.workspace_cwd),
-        &event.branch,
-    )
+impl UiAgentWorkspaceChanged {
+    fn validated(&self) -> Result<ValidatedLinkedWorkspace, String> {
+        ValidatedLinkedWorkspace::new(
+            std::path::Path::new(&self.cwd),
+            std::path::Path::new(&self.workspace_cwd),
+            &self.branch,
+        )
+    }
 }
 
 fn ancestor_tab(
@@ -264,7 +266,7 @@ fn ancestor_tab(
     }
 }
 
-fn apply_workspace(
+fn workspace(
     mut reader: MessageReader<UiAgentWorkspaceChanged>,
     mut sessions: Query<(Entity, &mut AcpSession)>,
     child_of: Query<&ChildOf>,
@@ -275,7 +277,7 @@ fn apply_workspace(
     mut commands: Commands,
 ) {
     for event in reader.read() {
-        let Ok(validated) = validate_acp_workspace(event) else {
+        let Ok(validated) = event.validated() else {
             bevy::log::warn!(sid = %event.sid, "ignored invalid ACP worktree metadata");
             continue;
         };
@@ -329,7 +331,7 @@ fn apply_workspace(
     }
 }
 
-fn apply_config(
+fn config(
     mut reader: MessageReader<UiAgentSessionConfigState>,
     mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpSessionConfigState>)>,
     mut commands: Commands,
@@ -387,7 +389,7 @@ fn apply_config(
     }
 }
 
-fn apply_selection(
+fn selection(
     mut reader: MessageReader<UiAgentSessionConfigSelectionResult>,
     mut sessions: Query<(&AcpSession, &mut AcpSessionConfigState)>,
 ) {
@@ -438,7 +440,7 @@ fn auto_allow(
 }
 
 #[allow(clippy::type_complexity)]
-fn apply_session(
+fn session(
     mut reader: MessageReader<UiAgentSessionCreated>,
     mut sessions: Query<(Entity, &mut AcpSession, &mut PageMetadata), Without<ChatView>>,
     children: Query<&Children>,
@@ -467,7 +469,7 @@ fn apply_session(
     }
 }
 
-fn apply_terminal(
+fn terminal(
     mut reader: MessageReader<UiAgentAcpTerminalCreated>,
     sessions: Query<(Entity, &AcpSession)>,
     mut ctx: PanePlacement,
@@ -502,7 +504,7 @@ fn apply_terminal(
     }
 }
 
-fn send_input(
+fn input(
     mut q: Query<(
         Entity,
         &AcpSession,
@@ -512,11 +514,7 @@ fn send_input(
         Option<&mut PendingHandoff>,
         Option<&mut ImportedConversation>,
     )>,
-    child_of: Query<&ChildOf>,
-    tabs: Query<&Tab>,
-    workspaces: Query<(), With<TabWorkspace>>,
-    pending_projects: Query<(), With<vmux_space::PendingProject>>,
-    repositories_needing_worktrees: Query<(), With<vmux_space::RepositoryNeedsWorktree>>,
+    workspace: PromptWorkspace,
     policy: Single<&AcpWorkspacePolicy>,
     modes: Option<Single<&crate::host::model_selection::AgentModeSelections>>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -544,15 +542,8 @@ fn send_input(
         {
             imported.first_prompt = Some(text.clone());
         }
-        let workspace_state = ancestor_acp_workspace_state(
-            entity,
-            &child_of,
-            &tabs,
-            &workspaces,
-            &pending_projects,
-            &repositories_needing_worktrees,
-        );
-        let context = acp_prompt_context(&policy, handoff, workspace_state);
+        let workspace_state = workspace.state(entity);
+        let context = AcpWorkspaceState::prompt(&policy, handoff, workspace_state);
         let preferred_mode = modes
             .as_ref()
             .map(|modes| modes.selected_for(&session.agent_id).to_string())
@@ -690,7 +681,8 @@ mod tests {
     #[test]
     fn unbound_workspace_context_requires_project_selection_before_file_access() {
         let policy = AcpWorkspacePolicy::bundled();
-        let context = acp_prompt_context(&policy, None, Some(AcpWorkspaceState::Unbound)).unwrap();
+        let context =
+            AcpWorkspaceState::prompt(&policy, None, Some(AcpWorkspaceState::Unbound)).unwrap();
 
         assert!(context.contains("Before accessing project files"));
         assert!(context.contains("select_project"));
@@ -707,7 +699,7 @@ mod tests {
     #[test]
     fn repository_context_defers_worktree_until_mutation() {
         let policy = AcpWorkspacePolicy::bundled();
-        let context = acp_prompt_context(
+        let context = AcpWorkspaceState::prompt(
             &policy,
             None,
             Some(AcpWorkspaceState::RepositoryNeedsWorktree),
@@ -725,7 +717,7 @@ mod tests {
     #[test]
     fn pending_worktree_context_requires_waiting_for_activation() {
         let policy = AcpWorkspacePolicy::bundled();
-        let context = acp_prompt_context(
+        let context = AcpWorkspaceState::prompt(
             &policy,
             Some("prior conversation".into()),
             Some(AcpWorkspaceState::PendingWorktree),
@@ -742,7 +734,7 @@ mod tests {
     fn bound_workspace_keeps_only_handoff_context() {
         let policy = AcpWorkspacePolicy::bundled();
         assert_eq!(
-            acp_prompt_context(
+            AcpWorkspaceState::prompt(
                 &policy,
                 Some("prior conversation".into()),
                 Some(AcpWorkspaceState::Bound),
@@ -765,25 +757,7 @@ mod tests {
         let stack = app.world_mut().spawn(ChildOf(tab)).id();
         let state = |world: &mut World| {
             world
-                .run_system_once(
-                    move |child_of: Query<&ChildOf>,
-                          tabs: Query<&Tab>,
-                          workspaces: Query<(), With<TabWorkspace>>,
-                          pending: Query<(), With<vmux_space::PendingProject>>,
-                          needs_worktree: Query<
-                        (),
-                        With<vmux_space::RepositoryNeedsWorktree>,
-                    >| {
-                        ancestor_acp_workspace_state(
-                            stack,
-                            &child_of,
-                            &tabs,
-                            &workspaces,
-                            &pending,
-                            &needs_worktree,
-                        )
-                    },
-                )
+                .run_system_once(move |workspace: PromptWorkspace| workspace.state(stack))
                 .unwrap()
         };
 
@@ -839,13 +813,15 @@ mod tests {
         git(&["commit", "-qm", "init"]);
         let worktree_parent = tempfile::tempdir().unwrap();
         let worktree = worktree_parent.path().join("quiet-amber-wolf");
-        vmux_git::worktree::worktree_add(repo.path(), &worktree, "vibe/quiet-amber-wolf", "main")
+        vmux_git::worktree::CheckoutInfo::try_from(repo.path())
+            .unwrap()
+            .add_worktree(&worktree, "vibe/quiet-amber-wolf", "main")
             .unwrap();
         let project_dir = repo.path().canonicalize().unwrap();
         let worktree_dir = worktree.canonicalize().unwrap();
         let mut app = App::new();
         app.add_message::<crate::host::event::UiAgentWorkspaceChanged>()
-            .add_systems(Update, apply_workspace);
+            .add_systems(Update, workspace);
         let tab = app
             .world_mut()
             .spawn((
@@ -1035,7 +1011,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<UiAgentSessionConfigState>()
             .add_message::<UiAgentSessionConfigSelectionResult>()
-            .add_systems(Update, (apply_config, apply_selection).chain());
+            .add_systems(Update, (config, selection).chain());
         let entity = app
             .world_mut()
             .spawn((
@@ -1149,7 +1125,7 @@ mod tests {
     fn acp_terminal_stack_does_not_take_focus_from_agent() {
         let mut app = App::new();
         app.add_message::<UiAgentAcpTerminalCreated>()
-            .add_systems(Update, apply_terminal);
+            .add_systems(Update, terminal);
         let tab = app.world_mut().spawn(Tab::bundle()).id();
         let pane = app.world_mut().spawn((Pane::bundle(), ChildOf(tab))).id();
         let agent = app

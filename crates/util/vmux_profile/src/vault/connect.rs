@@ -8,10 +8,10 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
+use super::VaultStorage;
 use super::keys::{KeyStore, SystemKeyStore};
 use super::repository::{GitHubCli, OutputText, VaultRepositoryPath};
 use super::sync::{collect_local_files, initialize_paths, reconcile_local, write_local_state};
-use super::{repository_dir, root_dir};
 
 const GITHUB_VIEWER_QUERY: &str = "query { viewer { login organizations(first: 100) { nodes { login viewerCanCreateRepositories } } } }";
 
@@ -74,46 +74,6 @@ struct GhOrganizations {
 struct GhOrganization {
     login: String,
     viewer_can_create_repositories: bool,
-}
-
-pub fn connect_github_with_progress<F, C>(mut progress: F, canceled: C) -> Result<String, String>
-where
-    F: FnMut(String),
-    C: Fn() -> bool,
-{
-    let has_saved_account = github_has_saved_account()?;
-    let mut command = GitHubCli::command()?;
-    if has_saved_account {
-        command.args([
-            "auth",
-            "refresh",
-            "--hostname",
-            "github.com",
-            "--reset-scopes",
-            "--clipboard",
-        ]);
-    } else {
-        command.args([
-            "auth",
-            "login",
-            "--hostname",
-            "github.com",
-            "--git-protocol",
-            "https",
-            "--web",
-            "--clipboard",
-            "--skip-ssh-key",
-        ]);
-    }
-    run_github_auth(&mut command, &mut progress, &canceled)?;
-    if canceled() {
-        return Err("GitHub authorization canceled".to_string());
-    }
-    GitHubCli::command()?
-        .args(["api", "user", "--jq", ".login"])
-        .output()
-        .map_err(|error| format!("failed to run gh: {error}"))?
-        .success_text()
 }
 
 pub(super) fn run_github_auth<F, C>(
@@ -219,22 +179,72 @@ pub(super) fn github_device_code(line: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-pub fn connect_folder(folder: &Path) -> Result<String, String> {
-    connect_folder_paths(&root_dir(), &repository_dir(), folder, &SystemKeyStore)
-}
+impl VaultStorage {
+    pub fn connect_github_with_progress<F, C>(
+        &self,
+        mut progress: F,
+        canceled: C,
+    ) -> Result<String, String>
+    where
+        F: FnMut(String),
+        C: Fn() -> bool,
+    {
+        let has_saved_account = github_has_saved_account()?;
+        let mut command = GitHubCli::command()?;
+        if has_saved_account {
+            command.args([
+                "auth",
+                "refresh",
+                "--hostname",
+                "github.com",
+                "--reset-scopes",
+                "--clipboard",
+            ]);
+        } else {
+            command.args([
+                "auth",
+                "login",
+                "--hostname",
+                "github.com",
+                "--git-protocol",
+                "https",
+                "--web",
+                "--clipboard",
+                "--skip-ssh-key",
+            ]);
+        }
+        run_github_auth(&mut command, &mut progress, &canceled)?;
+        if canceled() {
+            return Err("GitHub authorization canceled".to_string());
+        }
+        GitHubCli::command()?
+            .args(["api", "user", "--jq", ".login"])
+            .output()
+            .map_err(|error| format!("failed to run gh: {error}"))?
+            .success_text()
+    }
 
-pub fn create_remote(repository: &str, visibility: RepositoryVisibility) -> Result<String, String> {
-    create_remote_paths(
-        &root_dir(),
-        &repository_dir(),
-        repository,
-        visibility,
-        &SystemKeyStore,
-    )
-}
+    pub fn connect_folder(&self, folder: &Path) -> Result<String, String> {
+        connect_folder_paths(&self.root, &self.repository, folder, &SystemKeyStore)
+    }
 
-pub fn connect_remote(repository: &str) -> Result<String, String> {
-    connect_remote_paths(&root_dir(), &repository_dir(), repository, &SystemKeyStore)
+    pub fn create_remote(
+        &self,
+        repository: &str,
+        visibility: RepositoryVisibility,
+    ) -> Result<String, String> {
+        create_remote_paths(
+            &self.root,
+            &self.repository,
+            repository,
+            visibility,
+            &SystemKeyStore,
+        )
+    }
+
+    pub fn connect_remote(&self, repository: &str) -> Result<String, String> {
+        connect_remote_paths(&self.root, &self.repository, repository, &SystemKeyStore)
+    }
 }
 
 pub(super) fn connect_folder_paths<K: KeyStore>(

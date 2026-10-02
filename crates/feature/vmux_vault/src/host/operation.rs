@@ -10,7 +10,7 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use parking_lot::Mutex;
-use vmux_ecs::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
+use vmux_ecs::profile::vault::{GeneratedRecoveryKey, VaultRecovery, VaultStorage};
 
 use crate::state::{
     VaultAuthorization, VaultChooseCloudFolderRequest, VaultCompletion, VaultConnectCloudRequest,
@@ -100,7 +100,7 @@ fn create_vault(
         } else {
             vmux_ecs::profile::vault::RepositoryVisibility::Public
         };
-        let message = vmux_ecs::profile::vault::create_remote(&request.repository, visibility)?;
+        let message = VaultStorage::current().create_remote(&request.repository, visibility)?;
         Ok(VaultOperationOutput::message(message))
     })
 }
@@ -113,7 +113,7 @@ fn connect_vault(
     _canceled: VaultCancellation,
 ) -> VaultOperationFuture {
     Box::pin(async move {
-        let message = vmux_ecs::profile::vault::connect_remote(&request.repository)?;
+        let message = VaultStorage::current().connect_remote(&request.repository)?;
         Ok(VaultOperationOutput::message(message))
     })
 }
@@ -126,7 +126,7 @@ fn sync_vault(
     _canceled: VaultCancellation,
 ) -> VaultOperationFuture {
     Box::pin(async move {
-        let message = vmux_ecs::profile::vault::sync()?;
+        let message = VaultStorage::current().sync()?;
         Ok(VaultOperationOutput::message(message))
     })
 }
@@ -139,7 +139,7 @@ fn connect_vault_github(
     canceled: VaultCancellation,
 ) -> VaultOperationFuture {
     Box::pin(async move {
-        let message = vmux_ecs::profile::vault::connect_github_with_progress(
+        let message = VaultStorage::current().connect_github_with_progress(
             |code| {
                 progress(VaultAuthorization {
                     code,
@@ -172,7 +172,7 @@ fn connect_vault_folder(
         let Some(folder) = dialog.pick_folder().await else {
             return Err(String::new());
         };
-        let message = vmux_ecs::profile::vault::connect_folder(folder.path())?;
+        let message = VaultStorage::current().connect_folder(folder.path())?;
         Ok(VaultOperationOutput::message(message))
     })
 }
@@ -248,7 +248,7 @@ fn create_vault_cloud_folder(
 ) -> VaultOperationFuture {
     Box::pin(async move {
         let folder = Path::new(&request.root).join(&request.folder_name);
-        let message = vmux_ecs::profile::vault::connect_folder(&folder)?;
+        let message = VaultStorage::current().connect_folder(&folder)?;
         Ok(VaultOperationOutput::message(message))
     })
 }
@@ -281,7 +281,7 @@ fn choose_vault_cloud_folder(
         if !remote.exists() {
             return Err("selected folder does not contain a Vault".to_string());
         }
-        let message = vmux_ecs::profile::vault::connect_folder(folder.path())?;
+        let message = VaultStorage::current().connect_folder(folder.path())?;
         Ok(VaultOperationOutput::message(message))
     })
 }

@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn brewfile_import_separates_formulae_and_casks() {
-        let imported = parse_brewfile(
+        let imported = BrewfileImport::parse(
             r#"
 tap "homebrew/cask-fonts"
 brew "ripgrep"
@@ -316,7 +316,7 @@ brew "ripgrep"
 
     #[test]
     fn npm_import_combines_runtime_development_and_optional_dependencies() {
-        let imported = parse_npm_manifest(
+        let imported = NpmManifest::parse(
             r#"{
                 "dependencies": {"typescript": "^5"},
                 "devDependencies": {"eslint": "^9"},
@@ -326,7 +326,7 @@ brew "ripgrep"
         )
         .unwrap();
 
-        assert_eq!(imported, ["eslint", "prettier", "typescript"]);
+        assert_eq!(imported.packages, ["eslint", "prettier", "typescript"]);
     }
 
     #[test]
@@ -442,7 +442,7 @@ brew "ripgrep"
 
     #[test]
     fn mcp_import_normalizes_codex_and_vibe_formats() {
-        let codex = parse_mcp_config(
+        let codex = McpConfigDocument::parse(
             r#"
 [mcp_servers.docs]
 url = "https://example.com/mcp"
@@ -456,6 +456,7 @@ MODE = "local"
 "#,
         )
         .unwrap();
+        let codex = codex.servers();
         assert_eq!(codex["docs"].transport, McpTransport::Http);
         assert_eq!(
             codex["docs"].bearer_token_env_var.as_deref(),
@@ -464,7 +465,7 @@ MODE = "local"
         assert_eq!(codex["local"].command.as_deref(), Some("npx"));
         assert_eq!(codex["local"].env["MODE"], "local");
 
-        let vibe = parse_mcp_config(
+        let vibe = McpConfigDocument::parse(
             r#"
 [[mcp_servers]]
 name = "figma"
@@ -478,12 +479,15 @@ command = "vmux"
 "#,
         )
         .unwrap();
-        assert_eq!(vibe.keys().cloned().collect::<Vec<_>>(), ["figma"]);
+        assert_eq!(
+            vibe.servers().keys().cloned().collect::<Vec<_>>(),
+            ["figma"]
+        );
     }
 
     #[test]
     fn mcp_import_normalizes_claude_json() {
-        let imported = parse_mcp_config(
+        let imported = McpConfigDocument::parse(
             r#"{
                 "mcpServers": {
                     "notion": {"type": "http", "url": "https://example.com/notion"},
@@ -493,16 +497,22 @@ command = "vmux"
         )
         .unwrap();
 
-        assert_eq!(imported["notion"].transport, McpTransport::Http);
-        assert_eq!(imported["local"].transport, McpTransport::Stdio);
+        assert_eq!(imported.servers()["notion"].transport, McpTransport::Http);
+        assert_eq!(imported.servers()["local"].transport, McpTransport::Stdio);
     }
 
     #[test]
     fn config_without_mcp_section_is_ignored_during_discovery() {
-        assert!(parse_mcp_config(r#"{"theme":"dark"}"#).unwrap().is_empty());
         assert!(
-            parse_mcp_config("model = \"default\"\n")
+            McpConfigDocument::parse(r#"{"theme":"dark"}"#)
                 .unwrap()
+                .servers()
+                .is_empty()
+        );
+        assert!(
+            McpConfigDocument::parse("model = \"default\"\n")
+                .unwrap()
+                .servers()
                 .is_empty()
         );
     }
@@ -525,15 +535,17 @@ command = "vmux"
         )
         .unwrap();
 
+        let store = ToolStore::new(temp.path(), temp.path());
         assert_eq!(
-            import_brewfile_to(&brewfile, &manifest_path).unwrap(),
+            store.import_brewfile_to(&brewfile, &manifest_path).unwrap(),
             (1, 1)
         );
         assert_eq!(
-            import_npm_manifest_to(&package_json, &manifest_path).unwrap(),
+            store
+                .import_npm_manifest_to(&package_json, &manifest_path)
+                .unwrap(),
             1
         );
-        let store = ToolStore::new(temp.path(), temp.path());
         assert_eq!(store.import_mcp_config_to(&mcp, &manifest_path).unwrap(), 1);
         let loaded = ToolsManifest::read(&manifest_path).unwrap();
         assert_eq!(loaded.packages["npm"], ["eslint", "existing"]);

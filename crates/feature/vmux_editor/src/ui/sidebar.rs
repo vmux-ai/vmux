@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use vmux_ecs::event::{ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPanelWidth};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
-use vmux_ui::platform::{now_millis, random_index, sleep_ms};
+use vmux_ui::platform::Platform;
 
 use super::explorer::{ExplorerPanel, SidebarView};
 use super::key::FileKeys;
@@ -79,7 +79,9 @@ impl ExplorerPane {
             preferred_visible: use_signal(|| false),
             width: use_signal(|| 240),
             page_width,
-            client_id: use_signal(|| ((now_millis() as u64) << 12) ^ random_index(4096) as u64),
+            client_id: use_signal(|| {
+                ((Platform::now() as u64) << 12) ^ Platform::random_index(4096) as u64
+            }),
             request_id: use_signal(|| 0),
             reflowed_at: use_signal(|| None),
             user_chose: use_signal(|| false),
@@ -167,7 +169,7 @@ impl ExplorerPane {
 
     pub(super) fn show_if_room(self, mode: Signal<Mode>) {
         spawn(async move {
-            sleep_ms(0).await;
+            Platform::sleep(0).await;
             if (self.visible)() || !self.has_room() {
                 return;
             }

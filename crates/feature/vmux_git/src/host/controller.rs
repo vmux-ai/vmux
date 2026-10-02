@@ -863,10 +863,10 @@ fn branch_select_request(
     let Some(repository) = state.repository() else {
         return;
     };
-    if controller.select_branch(&trigger.event().payload.reference, repository) {
-        if let Some(input) = controller.branch_log_input(webview, state) {
-            commands.trigger(input);
-        }
+    if controller.select_branch(&trigger.event().payload.reference, repository)
+        && let Some(input) = controller.branch_log_input(webview, state)
+    {
+        commands.trigger(input);
     }
 }
 

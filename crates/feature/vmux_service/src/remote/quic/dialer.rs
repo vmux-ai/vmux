@@ -16,13 +16,15 @@ const MIN_INNER_MTU: usize = 1200;
 
 const TUNNEL_OVERHEAD: usize = 64;
 
-pub async fn run(state: RemoteState, liveness: watch::Receiver<bool>) {
-    RegisteredDevice::release_stale();
-    let mut backoff = Backoff::new();
-    loop {
-        let ended = Registration::hold(&state, &liveness).await;
-        ended.report();
-        tokio::time::sleep(backoff.after(&ended)).await;
+impl RemoteState {
+    pub(crate) async fn dial(self, liveness: watch::Receiver<bool>) {
+        RegisteredDevice::release_stale();
+        let mut backoff = Backoff::new();
+        loop {
+            let ended = Registration::hold(&self, &liveness).await;
+            ended.report();
+            tokio::time::sleep(backoff.after(&ended)).await;
+        }
     }
 }
 

@@ -1,89 +1,85 @@
+use vmux_agent::acp::AcpInput;
 use vmux_api::protocol::{
-    AgentListAgents, AgentListModels, AgentListTeam, AgentNewChat, AgentRequest, AgentSelectModel,
-    AgentSetEffort, SharedFailure, SharedMessage, SharedResponse,
+    AgentCommandResult, AgentListAgents, AgentListModels, AgentListTeam, AgentNewChat,
+    AgentRequest, AgentSelectModel, AgentSetEffort, SharedFailure, SharedMessage, SharedResponse,
 };
 use vmux_api::room::RemoteSession;
 
 use super::super::server::{
     MAX_PROMPT_BYTES, RemoteAttachments, RemoteClientOpId, RemoteMediaQuery, RemoteState,
 };
-use vmux_agent::acp::AcpInput;
-
-use vmux_api::protocol::AgentCommandResult;
-
-pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> SharedResponse {
-    match request {
-        SharedMessage::ListSessions => SharedResponse::Sessions(state.sessions().await),
-
-        SharedMessage::AgentAttach { sid } => state.attach(&sid).await,
-
-        SharedMessage::AgentInput {
-            sid,
-            text,
-            context,
-            attachments,
-            preferred_mode,
-        } => {
-            state
-                .prompt(&sid, text, context, attachments, preferred_mode)
-                .await
-        }
-
-        SharedMessage::AgentCancel { sid } => state.push_input(&sid, AcpInput::Cancel).await,
-
-        SharedMessage::AgentApprove {
-            sid,
-            call_id,
-            decision,
-        } => {
-            state
-                .push_input(&sid, AcpInput::Approve { call_id, decision })
-                .await
-        }
-
-        SharedMessage::AgentListMedia { sid, query } => state.media(&sid, query).await,
-
-        SharedMessage::AgentNewChat {
-            client_op_id,
-            prompt,
-            agent_url,
-        } => {
-            if !RemoteClientOpId(&client_op_id).valid() {
-                return SharedResponse::Failed(SharedFailure::Invalid);
-            }
-            if !state.client_ops.claim(client_op_id.clone()).await {
-                return SharedResponse::AlreadyApplied;
-            }
-            let response = state
-                .broker(AgentNewChat {
-                    client_op_id: client_op_id.clone(),
-                    prompt,
-                    agent_url,
-                })
-                .await;
-            if matches!(response, SharedResponse::Failed(_)) {
-                state.client_ops.release(client_op_id).await;
-            }
-            response
-        }
-
-        SharedMessage::AgentListAgents => state.broker(AgentListAgents).await,
-
-        SharedMessage::AgentListTeam => state.broker(AgentListTeam).await,
-
-        SharedMessage::AgentListModels { sid } => state.broker(AgentListModels { sid }).await,
-
-        SharedMessage::AgentSelectModel { sid, model_id } => {
-            state.broker(AgentSelectModel { sid, model_id }).await
-        }
-
-        SharedMessage::AgentSetEffort { sid, level } => {
-            state.broker(AgentSetEffort { sid, level }).await
-        }
-    }
-}
 
 impl RemoteState {
+    pub(crate) async fn dispatch(&self, request: SharedMessage) -> SharedResponse {
+        match request {
+            SharedMessage::ListSessions => SharedResponse::Sessions(self.sessions().await),
+
+            SharedMessage::AgentAttach { sid } => self.attach(&sid).await,
+
+            SharedMessage::AgentInput {
+                sid,
+                text,
+                context,
+                attachments,
+                preferred_mode,
+            } => {
+                self.prompt(&sid, text, context, attachments, preferred_mode)
+                    .await
+            }
+
+            SharedMessage::AgentCancel { sid } => self.push_input(&sid, AcpInput::Cancel).await,
+
+            SharedMessage::AgentApprove {
+                sid,
+                call_id,
+                decision,
+            } => {
+                self.push_input(&sid, AcpInput::Approve { call_id, decision })
+                    .await
+            }
+
+            SharedMessage::AgentListMedia { sid, query } => self.media(&sid, query).await,
+
+            SharedMessage::AgentNewChat {
+                client_op_id,
+                prompt,
+                agent_url,
+            } => {
+                if !RemoteClientOpId(&client_op_id).valid() {
+                    return SharedResponse::Failed(SharedFailure::Invalid);
+                }
+                if !self.client_ops.claim(client_op_id.clone()).await {
+                    return SharedResponse::AlreadyApplied;
+                }
+                let response = self
+                    .broker(AgentNewChat {
+                        client_op_id: client_op_id.clone(),
+                        prompt,
+                        agent_url,
+                    })
+                    .await;
+                if matches!(response, SharedResponse::Failed(_)) {
+                    self.client_ops.release(client_op_id).await;
+                }
+                response
+            }
+
+            SharedMessage::AgentListAgents => self.broker(AgentListAgents).await,
+
+            SharedMessage::AgentListTeam => self.broker(AgentListTeam).await,
+
+            SharedMessage::AgentListModels { sid } => self.broker(AgentListModels { sid }).await,
+
+            SharedMessage::AgentSelectModel { sid, model_id } => {
+                self.broker(AgentSelectModel { sid, model_id }).await
+            }
+
+            SharedMessage::AgentSetEffort { sid, level } => {
+                self.broker(AgentSetEffort { sid, level }).await
+            }
+        }
+    }
+
     async fn attach(&self, sid: &str) -> SharedResponse {
         if self.acp.remote_session(sid.to_string()).await.is_some() {
             return SharedResponse::Ok;
@@ -210,8 +206,8 @@ mod tests {
     async fn an_oversized_prompt_is_refused_before_any_session_lookup() {
         let state = empty_state();
 
-        let over = dispatch(&state, prompt_of(MAX_PROMPT_BYTES + 1)).await;
-        let under = dispatch(&state, prompt_of(16)).await;
+        let over = state.dispatch(prompt_of(MAX_PROMPT_BYTES + 1)).await;
+        let under = state.dispatch(prompt_of(16)).await;
 
         assert!(matches!(
             over,
@@ -227,17 +223,15 @@ mod tests {
     async fn an_empty_prompt_is_refused() {
         let state = empty_state();
 
-        let response = dispatch(
-            &state,
-            SharedMessage::AgentInput {
+        let response = state
+            .dispatch(SharedMessage::AgentInput {
                 sid: "s".into(),
                 text: "   ".into(),
                 context: None,
                 attachments: Vec::new(),
                 preferred_mode: None,
-            },
-        )
-        .await;
+            })
+            .await;
 
         assert!(matches!(
             response,
@@ -249,7 +243,7 @@ mod tests {
     async fn a_broker_request_with_no_desktop_attached_says_so() {
         let state = empty_state();
 
-        let response = dispatch(&state, SharedMessage::AgentListAgents).await;
+        let response = state.dispatch(SharedMessage::AgentListAgents).await;
 
         assert!(matches!(
             response,
@@ -275,7 +269,7 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    dispatch(&state, request).await,
+                    state.dispatch(request).await,
                     SharedResponse::Failed(SharedFailure::NotFound)
                 ),
                 "unknown session should be NotFound"
@@ -288,15 +282,13 @@ mod tests {
         let state = empty_state();
         let oversized = ClientOpId::new("x".repeat(4096));
 
-        let response = dispatch(
-            &state,
-            SharedMessage::AgentNewChat {
+        let response = state
+            .dispatch(SharedMessage::AgentNewChat {
                 client_op_id: oversized.clone(),
                 prompt: "hello".into(),
                 agent_url: None,
-            },
-        )
-        .await;
+            })
+            .await;
 
         assert!(matches!(
             response,

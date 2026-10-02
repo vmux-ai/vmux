@@ -1,5 +1,5 @@
 #[cfg(ui)]
-pub(crate) use vmux_ui::prompt_recall::{PromptHistoryDirection, prompt_history_direction};
+pub(crate) use vmux_ui::prompt_recall::PromptHistoryDirection;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PromptEdit {

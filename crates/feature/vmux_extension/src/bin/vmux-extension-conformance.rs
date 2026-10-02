@@ -177,7 +177,7 @@ fn capture(target: &str, browser: &Path, diagnostics: &Path) -> Result<Capture, 
         .tempdir_in("/tmp")
         .map_err(|error| error.to_string())?;
     let extension = prepare_fixture(temp.path(), target, &collector)?;
-    let extension_id = crx::extension_id_from_key(FIXTURE_PUBLIC_KEY);
+    let extension_id = String::from(crx::ChromeExtensionId::from_public_key(FIXTURE_PUBLIC_KEY));
     let mut command = Command::new(browser);
     let child_home = temp.path().join("home");
     let child_tmp = child_home.join("tmp");
@@ -984,7 +984,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let extension = prepare_fixture(temp.path(), "vmux", "http://127.0.0.1/capture").unwrap();
         let home = temp.path().join("home");
-        let extension_id = crx::extension_id_from_key(FIXTURE_PUBLIC_KEY);
+        let extension_id =
+            String::from(crx::ChromeExtensionId::from_public_key(FIXTURE_PUBLIC_KEY));
 
         install_vmux_fixture(&home, &extension, &extension_id).unwrap();
 

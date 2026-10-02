@@ -109,10 +109,11 @@ impl WindowFrameQueries<'_, '_> {
     fn active_tab(&self, tab: Entity) -> Option<Entity> {
         let space = self.child_of.get(tab).ok()?.get();
         let children = self.all_children.get(space).ok()?;
-        vmux_layout::stack::active_among(
+        LastActivatedAt::latest(
             children
                 .iter()
-                .filter_map(|entity| self.tabs.get(entity).ok()),
+                .filter_map(|entity| self.tabs.get(entity).ok())
+                .map(|(entity, activated_at)| (entity, *activated_at)),
         )
     }
 

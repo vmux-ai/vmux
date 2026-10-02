@@ -71,10 +71,6 @@ impl LayoutGeometry {
     }
 }
 
-pub fn url_bar_top() -> f32 {
-    SPACES_ROW_HEIGHT_PX
-}
-
 fn default_header_height() -> f32 {
     HEADER_HEIGHT_PX
 }
@@ -376,7 +372,7 @@ pub struct AddressParts {
 
 impl AddressParts {
     pub fn web(url: &str, title: &str) -> Self {
-        let host = vmux_ui::favicon::host_for_favicon_fallback(url).unwrap_or_default();
+        let host = vmux_ui::favicon::FaviconSource::host(url).unwrap_or_default();
         let title = title.trim();
         if title.is_empty() {
             return match host.is_empty() {

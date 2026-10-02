@@ -58,9 +58,11 @@ impl KnowledgeVault {
 
     pub(crate) fn ensure_repository(&self) -> Result<(), String> {
         if !self.root.join(".git").exists() {
-            vmux_git::worktree::repository_init(&self.root).map_err(|error| error.0)?;
+            vmux_git::worktree::CheckoutInfo::initialize(&self.root).map_err(|error| error.0)?;
         }
-        vmux_git::worktree::ensure_initial_snapshot(&self.root, "Initialize Knowledge vault")
+        vmux_git::worktree::CheckoutInfo::try_from(self.root.as_path())
+            .map_err(|error| error.0)?
+            .ensure_initial_snapshot("Initialize Knowledge vault")
             .map_err(|error| error.0)
     }
 

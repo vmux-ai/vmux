@@ -15,7 +15,7 @@ use vmux_session::AgentRunState;
 pub struct Plugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct ApprovalSyncSet;
+struct ApprovalSyncSet;
 
 impl bevy::app::Plugin for Plugin {
     fn build(&self, app: &mut App) {
@@ -23,7 +23,7 @@ impl bevy::app::Plugin for Plugin {
             .add_systems(Startup, spawn)
             .add_observer(receive)
             .add_observer(reply)
-            .add_systems(Update, sync_policy.in_set(ApprovalSyncSet));
+            .add_systems(Update, policy.in_set(ApprovalSyncSet));
     }
 }
 
@@ -126,7 +126,7 @@ impl AgentApprovalStore {
     }
 }
 
-fn sync_policy(
+fn policy(
     store: Single<&AgentApprovalStore>,
     mut sessions: Query<(&AcpSession, &mut AgentApprovalPolicy), Changed<AcpSession>>,
 ) {
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn approval_grants_persist_by_agent_repository_and_tool() {
         let directory = tempfile::tempdir().unwrap();
-        vmux_git::worktree::repository_init(directory.path()).unwrap();
+        vmux_git::worktree::CheckoutInfo::initialize(directory.path()).unwrap();
         let path = directory.path().join("approvals.json");
         let mut store = AgentApprovalStore::load_from(path.clone());
         store.remember("codex-acp", directory.path(), "mcp__vmux__run");

@@ -696,14 +696,17 @@ mod projection_tests {
     #[test]
     fn initial_settings_state_projects_typed_fields() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_ecs::host::manifest::FeaturePlugin::<crate::Feature>::default(),
-            ProjectionPlugin,
-        ))
-        .insert_resource(AppSettings::default())
-        .init_resource::<Emitted>()
-        .add_observer(record_settings_state);
+        app.add_plugins((MinimalPlugins, ProjectionPlugin))
+            .insert_resource(AppSettings::default())
+            .init_resource::<Emitted>()
+            .add_observer(record_settings_state);
+        let feature =
+            vmux_ecs::host::manifest::FeatureManifest::parse(include_str!("../feature.ron"));
+        let settings = feature
+            .settings::<SettingsManifest>()
+            .unwrap()
+            .expect("settings manifest");
+        app.world_mut().spawn((feature, settings));
         let entity = app.world_mut().spawn((Settings, PageReady)).id();
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(entity);

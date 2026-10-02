@@ -1,4 +1,4 @@
-use crate::{focus::FocusClaim, ime::use_ime_guard, platform::sleep_ms};
+use crate::{focus::FocusClaim, ime::use_ime_guard, platform::Platform};
 use dioxus::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -80,7 +80,7 @@ pub fn EditableText(
                             generation,
                         }));
                         spawn(async move {
-                            sleep_ms(1_500).await;
+                            Platform::sleep(1_500).await;
                             if optimistic
                                 .peek()
                                 .as_ref()
@@ -259,7 +259,7 @@ impl FocusReturn {
             return;
         };
         spawn(async move {
-            sleep_ms(0).await;
+            Platform::sleep(0).await;
             FocusClaim::new(id).request();
         });
     }

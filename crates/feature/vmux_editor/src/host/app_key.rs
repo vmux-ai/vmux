@@ -249,7 +249,7 @@ fn open_status_picker(
                 trigger.event().payload.picker,
             ));
         }
-        CommandBarPicker::Space => return,
+        CommandBarPicker::Space => {}
     }
 }
 

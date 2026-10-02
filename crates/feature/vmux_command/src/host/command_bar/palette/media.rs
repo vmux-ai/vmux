@@ -107,9 +107,7 @@ impl PaletteMedia {
         snapshot.media_options.clear();
         snapshot.media_loading = query.is_some();
         snapshot.media_selected = 0;
-        let Some(query) = query else {
-            return None;
-        };
+        let query = query?;
         Some(MediaRequestDelay(RequestDelay::new(
             target,
             generation,

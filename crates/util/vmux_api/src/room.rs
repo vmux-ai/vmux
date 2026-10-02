@@ -212,7 +212,7 @@ pub struct RemoteSession {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteEvent {
     Session {
-        session: RemoteSession,
+        session: Box<RemoteSession>,
     },
     Snapshot {
         room_id: RoomId,

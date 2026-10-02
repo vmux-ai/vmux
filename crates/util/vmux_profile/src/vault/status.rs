@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
+use super::VaultStorage;
 use super::connect::{VaultRepository, github_identity_and_repositories};
 use super::keys::{KeyStore, SilentSystemKeyStore};
 use super::recovery::read_recovery_envelope;
 use super::repository::VaultRepositoryPath;
 use super::sync::local_change_count;
-use super::{repository_dir, root_dir};
 
 use vmux_api::vault::VaultProvider;
 use vmux_api::vault::VaultStatusSnapshot;
@@ -31,7 +31,8 @@ pub struct VaultStatus {
 
 impl VaultStatus {
     pub fn current() -> Self {
-        Self::at(&root_dir(), &repository_dir(), &SilentSystemKeyStore)
+        let storage = VaultStorage::current();
+        Self::at(storage.root(), storage.repository(), &SilentSystemKeyStore)
     }
 
     pub fn current_with_repositories() -> Self {

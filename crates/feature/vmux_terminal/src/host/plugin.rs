@@ -227,7 +227,7 @@ impl Plugin for TerminalInputPlugin {
 }
 
 fn prewarm(settings: Res<AppSettings>) {
-    super::LoginShellEnvironment::prewarm(terminal_shell(&settings));
+    super::LoginShellEnvironment::prewarm(TerminalBundle::default_shell(&settings));
 }
 
 fn initialize_state(terminals: Query<Entity, Added<Terminal>>, mut commands: Commands) {
@@ -461,8 +461,8 @@ fn handle_page_open(
         let cwd = if let Some(launch) = saved_launch.as_ref() {
             Some(PathBuf::from(&launch.cwd))
         } else if let Some(cwd) = cwd_param.as_deref() {
-            match vmux_space::valid_cwd(cwd) {
-                Ok(cwd) => cwd,
+            match vmux_space::WorkspaceCwd::try_from(cwd) {
+                Ok(cwd) => cwd.into_path(),
                 Err(message) => {
                     commands.entity(entity).insert(PageOpenError { message });
                     continue;
@@ -562,6 +562,14 @@ pub struct TerminalBundle {
 }
 
 impl TerminalBundle {
+    fn default_shell(settings: &AppSettings) -> String {
+        settings
+            .terminal
+            .as_ref()
+            .map(|terminal| terminal.resolve_theme(&terminal.default_theme).shell)
+            .unwrap_or_else(TerminalTheme::default_shell)
+    }
+
     pub fn new(settings: &AppSettings) -> Self {
         Self::with_cwd(settings, None)
     }
@@ -733,8 +741,10 @@ struct PendingServiceAttach;
 #[derive(Component)]
 pub(crate) struct ShellOutputSeen;
 
-fn shell_prompt_ready(has_content: bool, cursor_col: u16) -> bool {
-    has_content && cursor_col > 0
+impl ShellOutputSeen {
+    fn ready(has_content: bool, cursor_col: u16) -> bool {
+        has_content && cursor_col > 0
+    }
 }
 
 #[derive(Component)]
@@ -759,70 +769,49 @@ fn restart(trigger: On<TerminalRestartRequest>, mut commands: Commands) {
         ));
 }
 
-fn apply_process_created(
-    commands: &mut Commands,
-    entity: Entity,
-    process_id: ProcessId,
-    process_pid: u32,
-) {
-    commands
-        .entity(entity)
-        .insert(process_id)
-        .insert(pid::Pid(process_pid))
-        .remove::<AwaitingProcessCreated>();
-}
-
-fn apply_process_create_failed(commands: &mut Commands, entity: Entity) {
-    commands.entity(entity).despawn();
-}
-
-fn terminal_shell(settings: &AppSettings) -> String {
-    settings
-        .terminal
-        .as_ref()
-        .map(|t| t.resolve_theme(&t.default_theme).shell)
-        .unwrap_or_else(TerminalTheme::default_shell)
-}
-
 const MAX_CONCURRENT_PROCESS_CREATES: usize = 8;
 
-fn process_create_budget(in_flight: usize, max_concurrent: usize) -> usize {
-    max_concurrent.saturating_sub(in_flight)
+impl PendingServiceCreate {
+    fn budget(in_flight: usize, max_concurrent: usize) -> usize {
+        max_concurrent.saturating_sub(in_flight)
+    }
 }
 
-fn missing_process_id(message: &str) -> Option<ProcessId> {
-    message
-        .strip_prefix("process not found: ")
-        .and_then(|id| id.parse().ok())
+impl TerminalServiceError {
+    fn missing_process_id(&self) -> Option<ProcessId> {
+        self.message
+            .strip_prefix("process not found: ")
+            .and_then(|id| id.parse().ok())
+    }
 }
 
-fn broadcast_service_unavailable(
-    terminals: &Query<Entity, With<Terminal>>,
-    commands: &mut Commands,
-    message: String,
-) {
-    let evt = ServiceUnavailableEvent { message };
-    for entity in terminals.iter() {
-        commands.trigger(UiStateWrite::<TerminalUiState>::from_event(entity, &evt));
+#[derive(bevy::ecs::system::SystemParam)]
+struct TerminalServiceStatus<'w, 's> {
+    terminals: Query<'w, 's, Entity, With<Terminal>>,
+    commands: Commands<'w, 's>,
+}
+
+impl TerminalServiceStatus<'_, '_> {
+    fn broadcast(&mut self, message: String) {
+        let event = ServiceUnavailableEvent { message };
+        for entity in &self.terminals {
+            self.commands
+                .trigger(UiStateWrite::<TerminalUiState>::from_event(entity, &event));
+        }
     }
 }
 
 fn publish_service_status(
     connected: Query<(), Added<ServiceConnected>>,
     unavailable: Query<&ServiceUnavailable, Changed<ServiceUnavailable>>,
-    terminal_webviews: Query<Entity, With<Terminal>>,
-    mut commands: Commands,
+    mut status: TerminalServiceStatus,
 ) {
     if !connected.is_empty() {
-        broadcast_service_unavailable(&terminal_webviews, &mut commands, String::new());
+        status.broadcast(String::new());
     }
     for unavailable in &unavailable {
-        broadcast_service_unavailable(&terminal_webviews, &mut commands, unavailable.0.clone());
+        status.broadcast(unavailable.0.clone());
     }
-}
-
-fn line_has_content(line: &vmux_ecs::event::TermLine) -> bool {
-    line.spans.iter().any(|s| !s.text.trim().is_empty())
 }
 
 fn resolve_pending_cwd(
@@ -869,14 +858,17 @@ fn send_service_requests(
         return;
     }
 
-    let create_budget = process_create_budget(
+    let create_budget = PendingServiceCreate::budget(
         awaiting_create.iter().count(),
         MAX_CONCURRENT_PROCESS_CREATES,
     );
     for (entity, process_id, launch, agent_run) in pending_create.iter().take(create_budget) {
         let mut env = launch.env.clone();
         if agent_run {
-            super::LoginShellEnvironment::merge(&mut env, &terminal_shell(&settings));
+            super::LoginShellEnvironment::merge(
+                &mut env,
+                &TerminalBundle::default_shell(&settings),
+            );
         }
         service_requests.write(ServiceRequest(ClientMessage::CreateProcess {
             process_id: *process_id,
@@ -920,7 +912,11 @@ fn apply_process_start(
             service_requests.write(ServiceRequest(ClientMessage::AttachProcess {
                 process_id: created.process_id,
             }));
-            apply_process_created(&mut commands, entity, created.process_id, created.pid);
+            commands
+                .entity(entity)
+                .insert(created.process_id)
+                .insert(pid::Pid(created.pid))
+                .remove::<AwaitingProcessCreated>();
         } else {
             bevy::log::warn!(
                 "ProcessCreated for unknown process_id {}; dropping",
@@ -935,7 +931,7 @@ fn apply_process_start(
             .get(&failed.process_id)
             .filter(|entity| awaiting_create.contains(*entity))
         {
-            apply_process_create_failed(&mut commands, entity);
+            commands.entity(entity).despawn();
         }
     }
 }
@@ -960,8 +956,8 @@ fn apply_viewport_updates(
                 .patch
                 .changed_lines
                 .iter()
-                .any(|(_, line)| line_has_content(line));
-            if shell_prompt_ready(has_content, update.patch.cursor.col) {
+                .any(|(_, line)| line.spans.iter().any(|span| !span.text.trim().is_empty()));
+            if ShellOutputSeen::ready(has_content, update.patch.cursor.col) {
                 commands.entity(entity).insert(ShellOutputSeen);
             }
         }
@@ -973,7 +969,7 @@ fn apply_viewport_updates(
         }
         let mut patch = update.patch.clone();
         for (_, line) in patch.changed_lines.iter_mut() {
-            super::link::annotate_links(line, None);
+            super::link::LinkDetector::new(None).annotate(line);
         }
         commands.trigger(UiStateWrite::<TerminalUiState>::from_event(entity, &patch));
     }
@@ -1037,7 +1033,7 @@ fn apply_service_errors(
 ) {
     let mut restarted_missing_processes = Vec::new();
     for error in errors.read() {
-        if let Some(stale_pid) = missing_process_id(&error.message)
+        if let Some(stale_pid) = error.missing_process_id()
             && !restarted_missing_processes.contains(&stale_pid)
             && let Some(entity) = process_index.get(&stale_pid)
             && terminals.contains(entity)
@@ -1046,7 +1042,7 @@ fn apply_service_errors(
                 .get(entity)
                 .cloned()
                 .unwrap_or_else(|_| TerminalLaunch {
-                    command: terminal_shell(&settings),
+                    command: TerminalBundle::default_shell(&settings),
                     args: vec![],
                     cwd: String::new(),
                     env: vec![],
@@ -1329,110 +1325,114 @@ fn resolve_terminal_input_targets(
     focused.unwrap_or_default()
 }
 
-fn logical_key_to_bytes(key: &Key, ctrl: bool, alt: bool) -> Vec<u8> {
-    match key {
-        Key::Character(s) => {
-            if ctrl && let Some(c) = s.chars().next() {
-                let code = (c.to_ascii_lowercase() as u8)
-                    .wrapping_sub(b'a')
-                    .wrapping_add(1);
-                if code <= 26 {
+struct TerminalInput;
+
+impl TerminalInput {
+    fn bytes_for_key(key: &Key, ctrl: bool, alt: bool) -> Vec<u8> {
+        match key {
+            Key::Character(s) => {
+                if ctrl && let Some(c) = s.chars().next() {
+                    let code = (c.to_ascii_lowercase() as u8)
+                        .wrapping_sub(b'a')
+                        .wrapping_add(1);
+                    if code <= 26 {
+                        let mut v = Vec::new();
+                        if alt {
+                            v.push(0x1b);
+                        }
+                        v.push(code);
+                        return v;
+                    }
+                }
+                if alt {
+                    let mut v = vec![0x1b];
+                    v.extend_from_slice(s.as_bytes());
+                    return v;
+                }
+                s.as_bytes().to_vec()
+            }
+            Key::Enter => b"\r".to_vec(),
+            Key::Backspace => {
+                if ctrl {
+                    vec![0x08]
+                } else {
+                    vec![0x7f]
+                }
+            }
+            Key::Tab => b"\t".to_vec(),
+            Key::Escape => vec![0x1b],
+            Key::Space => {
+                if ctrl {
                     let mut v = Vec::new();
                     if alt {
                         v.push(0x1b);
                     }
-                    v.push(code);
+                    v.push(0);
                     return v;
                 }
+                b" ".to_vec()
             }
-            if alt {
-                let mut v = vec![0x1b];
-                v.extend_from_slice(s.as_bytes());
-                return v;
-            }
-            s.as_bytes().to_vec()
+            Key::ArrowUp => b"\x1b[A".to_vec(),
+            Key::ArrowDown => b"\x1b[B".to_vec(),
+            Key::ArrowRight => b"\x1b[C".to_vec(),
+            Key::ArrowLeft => b"\x1b[D".to_vec(),
+            Key::Home => b"\x1b[H".to_vec(),
+            Key::End => b"\x1b[F".to_vec(),
+            Key::PageUp => b"\x1b[5~".to_vec(),
+            Key::PageDown => b"\x1b[6~".to_vec(),
+            Key::Delete => b"\x1b[3~".to_vec(),
+            Key::Insert => b"\x1b[2~".to_vec(),
+            _ => Vec::new(),
         }
-        Key::Enter => b"\r".to_vec(),
-        Key::Backspace => {
-            if ctrl {
-                vec![0x08]
-            } else {
-                vec![0x7f]
-            }
+    }
+
+    fn key(event: &KeyStroke) -> Key {
+        match event.key.as_str() {
+            "Enter" => Key::Enter,
+            "Backspace" => Key::Backspace,
+            "Tab" => Key::Tab,
+            "Escape" | "Esc" => Key::Escape,
+            " " | "Space" => Key::Space,
+            "ArrowUp" => Key::ArrowUp,
+            "ArrowDown" => Key::ArrowDown,
+            "ArrowRight" => Key::ArrowRight,
+            "ArrowLeft" => Key::ArrowLeft,
+            "Home" => Key::Home,
+            "End" => Key::End,
+            "PageUp" => Key::PageUp,
+            "PageDown" => Key::PageDown,
+            "Delete" => Key::Delete,
+            "Insert" => Key::Insert,
+            _ => Key::Character(event.typed_text().into()),
         }
-        Key::Tab => b"\t".to_vec(),
-        Key::Escape => vec![0x1b],
-        Key::Space => {
-            if ctrl {
-                let mut v = Vec::new();
-                if alt {
-                    v.push(0x1b);
-                }
-                v.push(0);
-                return v;
-            }
-            b" ".to_vec()
+    }
+
+    fn bracketed(payload: &[u8]) -> Vec<u8> {
+        let mut data = Vec::with_capacity(payload.len() + 12);
+        data.extend_from_slice(b"\x1b[200~");
+        data.extend_from_slice(payload);
+        data.extend_from_slice(b"\x1b[201~");
+        data
+    }
+
+    fn paste() -> Option<Vec<u8>> {
+        if let Some(path) = Clipboard::image_file_path() {
+            return Some(Self::bracketed(path.as_bytes()));
         }
-        Key::ArrowUp => b"\x1b[A".to_vec(),
-        Key::ArrowDown => b"\x1b[B".to_vec(),
-        Key::ArrowRight => b"\x1b[C".to_vec(),
-        Key::ArrowLeft => b"\x1b[D".to_vec(),
-        Key::Home => b"\x1b[H".to_vec(),
-        Key::End => b"\x1b[F".to_vec(),
-        Key::PageUp => b"\x1b[5~".to_vec(),
-        Key::PageDown => b"\x1b[6~".to_vec(),
-        Key::Delete => b"\x1b[3~".to_vec(),
-        Key::Insert => b"\x1b[2~".to_vec(),
-        _ => Vec::new(),
+        if Clipboard::has_image() {
+            return Some(vec![CTRL_V]);
+        }
+        let text = Clipboard::read_text()?;
+        (!text.is_empty()).then(|| Self::bracketed(text.as_bytes()))
     }
-}
 
-fn term_key_event_to_key(event: &KeyStroke) -> Key {
-    match event.key.as_str() {
-        "Enter" => Key::Enter,
-        "Backspace" => Key::Backspace,
-        "Tab" => Key::Tab,
-        "Escape" | "Esc" => Key::Escape,
-        " " | "Space" => Key::Space,
-        "ArrowUp" => Key::ArrowUp,
-        "ArrowDown" => Key::ArrowDown,
-        "ArrowRight" => Key::ArrowRight,
-        "ArrowLeft" => Key::ArrowLeft,
-        "Home" => Key::Home,
-        "End" => Key::End,
-        "PageUp" => Key::PageUp,
-        "PageDown" => Key::PageDown,
-        "Delete" => Key::Delete,
-        "Insert" => Key::Insert,
-        _ => Key::Character(event.typed_text().into()),
+    fn bytes(event: &KeyStroke) -> Vec<u8> {
+        if event.is_modifier_key() {
+            return Vec::new();
+        }
+        let key = Self::key(event);
+        Self::bytes_for_key(&key, event.mods.ctrl, event.mods.alt)
     }
-}
-
-fn bracketed_paste(payload: &[u8]) -> Vec<u8> {
-    let mut data = Vec::with_capacity(payload.len() + 12);
-    data.extend_from_slice(b"\x1b[200~");
-    data.extend_from_slice(payload);
-    data.extend_from_slice(b"\x1b[201~");
-    data
-}
-
-fn resolve_paste() -> Option<Vec<u8>> {
-    if let Some(path) = Clipboard::image_file_path() {
-        return Some(bracketed_paste(path.as_bytes()));
-    }
-    if Clipboard::has_image() {
-        return Some(vec![CTRL_V]);
-    }
-    let text = Clipboard::read_text()?;
-    (!text.is_empty()).then(|| bracketed_paste(text.as_bytes()))
-}
-
-fn term_key_event_to_bytes(event: &KeyStroke) -> Vec<u8> {
-    if event.is_modifier_key() {
-        return Vec::new();
-    }
-    let key = term_key_event_to_key(event);
-    logical_key_to_bytes(&key, event.mods.ctrl, event.mods.alt)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1442,148 +1442,148 @@ enum TerminalWebShortcutResolution {
     PassThrough,
 }
 
-fn resolve_terminal_web_shortcut(
-    event: &KeyStroke,
-    map: &Keymap,
-    state: &mut TerminalShortcutState,
-) -> TerminalWebShortcutResolution {
-    let Some(combo) = term_key_event_to_shortcut_combo(event) else {
-        return TerminalWebShortcutResolution::PassThrough;
-    };
-    let now = Instant::now();
-    if let Some((_, started)) = state.pending_prefix.as_ref()
-        && now.duration_since(*started) > Duration::from_millis(map.chord_timeout_ms)
-    {
-        state.pending_prefix = None;
-    }
+impl TerminalShortcutState {
+    fn resolve(&mut self, event: &KeyStroke, map: &Keymap) -> TerminalWebShortcutResolution {
+        let Some(combo) = TerminalInput::shortcut(event) else {
+            return TerminalWebShortcutResolution::PassThrough;
+        };
+        let now = Instant::now();
+        if let Some((_, started)) = self.pending_prefix.as_ref()
+            && now.duration_since(*started) > Duration::from_millis(map.chord_timeout_ms)
+        {
+            self.pending_prefix = None;
+        }
 
-    if let Some((prefix, _)) = state.pending_prefix.clone() {
-        if let Some(cmd) = map.chord(&prefix, &combo) {
-            state.pending_prefix = None;
+        if let Some((prefix, _)) = self.pending_prefix.clone() {
+            if let Some(cmd) = map.chord(&prefix, &combo) {
+                self.pending_prefix = None;
+                return TerminalWebShortcutResolution::Command(cmd);
+            }
+            self.pending_prefix = None;
+        }
+
+        if let Some(cmd) = map.direct(&combo)
+            && (combo.modifiers.ctrl || combo.modifiers.alt || combo.modifiers.super_key)
+        {
             return TerminalWebShortcutResolution::Command(cmd);
         }
-        state.pending_prefix = None;
-    }
 
-    if let Some(cmd) = map.direct(&combo)
-        && (combo.modifiers.ctrl || combo.modifiers.alt || combo.modifiers.super_key)
-    {
-        return TerminalWebShortcutResolution::Command(cmd);
-    }
+        if map.has_chord_prefix(&combo) {
+            self.pending_prefix = Some((combo, now));
+            return TerminalWebShortcutResolution::Consume;
+        }
 
-    if map.has_chord_prefix(&combo) {
-        state.pending_prefix = Some((combo, now));
-        return TerminalWebShortcutResolution::Consume;
-    }
-
-    TerminalWebShortcutResolution::PassThrough
-}
-
-fn term_key_event_to_shortcut_combo(event: &KeyStroke) -> Option<KeyCombo> {
-    if event.is_modifier_key() {
-        return None;
-    }
-    let key = shortcut_key_code_from_web_code(&event.code)?;
-    Some(KeyCombo {
-        key,
-        modifiers: Modifiers {
-            ctrl: event.mods.ctrl,
-            shift: event.mods.shift,
-            alt: event.mods.alt,
-            super_key: event.mods.super_key,
-        },
-    })
-}
-
-fn shortcut_key_code_from_web_code(code: &str) -> Option<KeyCode> {
-    let key = key_code_from_web_code(code);
-    if matches!(
-        key,
-        KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified)
-    ) {
-        None
-    } else {
-        Some(key)
+        TerminalWebShortcutResolution::PassThrough
     }
 }
 
-fn key_code_from_web_code(code: &str) -> KeyCode {
-    match code {
-        "KeyA" => KeyCode::KeyA,
-        "KeyB" => KeyCode::KeyB,
-        "KeyC" => KeyCode::KeyC,
-        "KeyD" => KeyCode::KeyD,
-        "KeyE" => KeyCode::KeyE,
-        "KeyF" => KeyCode::KeyF,
-        "KeyG" => KeyCode::KeyG,
-        "KeyH" => KeyCode::KeyH,
-        "KeyI" => KeyCode::KeyI,
-        "KeyJ" => KeyCode::KeyJ,
-        "KeyK" => KeyCode::KeyK,
-        "KeyL" => KeyCode::KeyL,
-        "KeyM" => KeyCode::KeyM,
-        "KeyN" => KeyCode::KeyN,
-        "KeyO" => KeyCode::KeyO,
-        "KeyP" => KeyCode::KeyP,
-        "KeyQ" => KeyCode::KeyQ,
-        "KeyR" => KeyCode::KeyR,
-        "KeyS" => KeyCode::KeyS,
-        "KeyT" => KeyCode::KeyT,
-        "KeyU" => KeyCode::KeyU,
-        "KeyV" => KeyCode::KeyV,
-        "KeyW" => KeyCode::KeyW,
-        "KeyX" => KeyCode::KeyX,
-        "KeyY" => KeyCode::KeyY,
-        "KeyZ" => KeyCode::KeyZ,
-        "Digit0" => KeyCode::Digit0,
-        "Digit1" => KeyCode::Digit1,
-        "Digit2" => KeyCode::Digit2,
-        "Digit3" => KeyCode::Digit3,
-        "Digit4" => KeyCode::Digit4,
-        "Digit5" => KeyCode::Digit5,
-        "Digit6" => KeyCode::Digit6,
-        "Digit7" => KeyCode::Digit7,
-        "Digit8" => KeyCode::Digit8,
-        "Digit9" => KeyCode::Digit9,
-        "Equal" => KeyCode::Equal,
-        "Minus" => KeyCode::Minus,
-        "Period" => KeyCode::Period,
-        "Comma" => KeyCode::Comma,
-        "Quote" => KeyCode::Quote,
-        "Semicolon" => KeyCode::Semicolon,
-        "Slash" => KeyCode::Slash,
-        "Backslash" => KeyCode::Backslash,
-        "Backquote" => KeyCode::Backquote,
-        "BracketLeft" => KeyCode::BracketLeft,
-        "BracketRight" => KeyCode::BracketRight,
-        "Enter" => KeyCode::Enter,
-        "Space" => KeyCode::Space,
-        "Tab" => KeyCode::Tab,
-        "Backspace" => KeyCode::Backspace,
-        "Delete" => KeyCode::Delete,
-        "Insert" => KeyCode::Insert,
-        "Home" => KeyCode::Home,
-        "End" => KeyCode::End,
-        "PageUp" => KeyCode::PageUp,
-        "PageDown" => KeyCode::PageDown,
-        "ArrowUp" => KeyCode::ArrowUp,
-        "ArrowDown" => KeyCode::ArrowDown,
-        "ArrowLeft" => KeyCode::ArrowLeft,
-        "ArrowRight" => KeyCode::ArrowRight,
-        "Escape" => KeyCode::Escape,
-        "F1" => KeyCode::F1,
-        "F2" => KeyCode::F2,
-        "F3" => KeyCode::F3,
-        "F4" => KeyCode::F4,
-        "F5" => KeyCode::F5,
-        "F6" => KeyCode::F6,
-        "F7" => KeyCode::F7,
-        "F8" => KeyCode::F8,
-        "F9" => KeyCode::F9,
-        "F10" => KeyCode::F10,
-        "F11" => KeyCode::F11,
-        "F12" => KeyCode::F12,
-        _ => KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified),
+impl TerminalInput {
+    fn shortcut(event: &KeyStroke) -> Option<KeyCombo> {
+        if event.is_modifier_key() {
+            return None;
+        }
+        let key = Self::shortcut_code(&event.code)?;
+        Some(KeyCombo {
+            key,
+            modifiers: Modifiers {
+                ctrl: event.mods.ctrl,
+                shift: event.mods.shift,
+                alt: event.mods.alt,
+                super_key: event.mods.super_key,
+            },
+        })
+    }
+
+    fn shortcut_code(code: &str) -> Option<KeyCode> {
+        let key = Self::key_code(code);
+        if matches!(
+            key,
+            KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified)
+        ) {
+            None
+        } else {
+            Some(key)
+        }
+    }
+
+    fn key_code(code: &str) -> KeyCode {
+        match code {
+            "KeyA" => KeyCode::KeyA,
+            "KeyB" => KeyCode::KeyB,
+            "KeyC" => KeyCode::KeyC,
+            "KeyD" => KeyCode::KeyD,
+            "KeyE" => KeyCode::KeyE,
+            "KeyF" => KeyCode::KeyF,
+            "KeyG" => KeyCode::KeyG,
+            "KeyH" => KeyCode::KeyH,
+            "KeyI" => KeyCode::KeyI,
+            "KeyJ" => KeyCode::KeyJ,
+            "KeyK" => KeyCode::KeyK,
+            "KeyL" => KeyCode::KeyL,
+            "KeyM" => KeyCode::KeyM,
+            "KeyN" => KeyCode::KeyN,
+            "KeyO" => KeyCode::KeyO,
+            "KeyP" => KeyCode::KeyP,
+            "KeyQ" => KeyCode::KeyQ,
+            "KeyR" => KeyCode::KeyR,
+            "KeyS" => KeyCode::KeyS,
+            "KeyT" => KeyCode::KeyT,
+            "KeyU" => KeyCode::KeyU,
+            "KeyV" => KeyCode::KeyV,
+            "KeyW" => KeyCode::KeyW,
+            "KeyX" => KeyCode::KeyX,
+            "KeyY" => KeyCode::KeyY,
+            "KeyZ" => KeyCode::KeyZ,
+            "Digit0" => KeyCode::Digit0,
+            "Digit1" => KeyCode::Digit1,
+            "Digit2" => KeyCode::Digit2,
+            "Digit3" => KeyCode::Digit3,
+            "Digit4" => KeyCode::Digit4,
+            "Digit5" => KeyCode::Digit5,
+            "Digit6" => KeyCode::Digit6,
+            "Digit7" => KeyCode::Digit7,
+            "Digit8" => KeyCode::Digit8,
+            "Digit9" => KeyCode::Digit9,
+            "Equal" => KeyCode::Equal,
+            "Minus" => KeyCode::Minus,
+            "Period" => KeyCode::Period,
+            "Comma" => KeyCode::Comma,
+            "Quote" => KeyCode::Quote,
+            "Semicolon" => KeyCode::Semicolon,
+            "Slash" => KeyCode::Slash,
+            "Backslash" => KeyCode::Backslash,
+            "Backquote" => KeyCode::Backquote,
+            "BracketLeft" => KeyCode::BracketLeft,
+            "BracketRight" => KeyCode::BracketRight,
+            "Enter" => KeyCode::Enter,
+            "Space" => KeyCode::Space,
+            "Tab" => KeyCode::Tab,
+            "Backspace" => KeyCode::Backspace,
+            "Delete" => KeyCode::Delete,
+            "Insert" => KeyCode::Insert,
+            "Home" => KeyCode::Home,
+            "End" => KeyCode::End,
+            "PageUp" => KeyCode::PageUp,
+            "PageDown" => KeyCode::PageDown,
+            "ArrowUp" => KeyCode::ArrowUp,
+            "ArrowDown" => KeyCode::ArrowDown,
+            "ArrowLeft" => KeyCode::ArrowLeft,
+            "ArrowRight" => KeyCode::ArrowRight,
+            "Escape" => KeyCode::Escape,
+            "F1" => KeyCode::F1,
+            "F2" => KeyCode::F2,
+            "F3" => KeyCode::F3,
+            "F4" => KeyCode::F4,
+            "F5" => KeyCode::F5,
+            "F6" => KeyCode::F6,
+            "F7" => KeyCode::F7,
+            "F8" => KeyCode::F8,
+            "F9" => KeyCode::F9,
+            "F10" => KeyCode::F10,
+            "F11" => KeyCode::F11,
+            "F12" => KeyCode::F12,
+            _ => KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified),
+        }
     }
 }
 
@@ -1609,7 +1609,7 @@ fn term_key(
     let Ok((pid, mode, mut copy_mode, mut shortcuts)) = terminals.get_mut(entity) else {
         return;
     };
-    match resolve_terminal_web_shortcut(event, &keymap, &mut shortcuts) {
+    match shortcuts.resolve(event, &keymap) {
         TerminalWebShortcutResolution::Command(id) => {
             let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
             command_invocations.write(CommandInvocation::new(caller, id));
@@ -1629,7 +1629,7 @@ fn term_key(
     if super_key {
         match event.code.as_str() {
             "KeyV" => {
-                if let Some(data) = resolve_paste() {
+                if let Some(data) = TerminalInput::paste() {
                     service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
                         process_id,
                         data,
@@ -1648,12 +1648,12 @@ fn term_key(
     }
 
     if is_copy_mode_active(mode, &copy_mode) {
-        let key = term_key_event_to_key(event);
+        let key = TerminalInput::key(event);
         let mapped = map_copy_mode_keys_with_state(
             &mut copy_mode,
             CopyModeKeyInput {
                 key: &key,
-                key_code: key_code_from_web_code(&event.code),
+                key_code: TerminalInput::key_code(&event.code),
                 ctrl: event.mods.ctrl,
                 shift: event.mods.shift,
             },
@@ -1670,7 +1670,7 @@ fn term_key(
         return;
     }
 
-    let data = term_key_event_to_bytes(event);
+    let data = TerminalInput::bytes(event);
     if !data.is_empty() {
         service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
             process_id,
@@ -1718,7 +1718,7 @@ fn restart_pty(
         }
     };
     if agent_run {
-        super::LoginShellEnvironment::merge(&mut env, &terminal_shell(&settings));
+        super::LoginShellEnvironment::merge(&mut env, &TerminalBundle::default_shell(&settings));
     }
 
     let (cols, rows) = grid.map(|g| (g.cols, g.rows)).unwrap_or((80, 24));
@@ -1940,7 +1940,10 @@ mod tests {
 
     #[test]
     fn bracketed_paste_wraps_payload() {
-        assert_eq!(bracketed_paste(b"hi"), b"\x1b[200~hi\x1b[201~".to_vec());
+        assert_eq!(
+            TerminalInput::bracketed(b"hi"),
+            b"\x1b[200~hi\x1b[201~".to_vec()
+        );
     }
 
     fn process_id(byte: u8) -> ProcessId {
@@ -2326,14 +2329,18 @@ mod tests {
     #[test]
     fn process_create_budget_bounds_in_flight() {
         assert_eq!(
-            process_create_budget(0, 8),
+            PendingServiceCreate::budget(0, 8),
             8,
             "full budget when nothing in flight"
         );
-        assert_eq!(process_create_budget(3, 8), 5);
-        assert_eq!(process_create_budget(8, 8), 0, "no budget at the cap");
+        assert_eq!(PendingServiceCreate::budget(3, 8), 5);
         assert_eq!(
-            process_create_budget(99, 8),
+            PendingServiceCreate::budget(8, 8),
+            0,
+            "no budget at the cap"
+        );
+        assert_eq!(
+            PendingServiceCreate::budget(99, 8),
             0,
             "never negative when over the cap"
         );
@@ -2344,10 +2351,19 @@ mod tests {
         let missing = process_id(9);
 
         assert_eq!(
-            missing_process_id(&format!("process not found: {missing}")),
+            TerminalServiceError {
+                message: format!("process not found: {missing}"),
+            }
+            .missing_process_id(),
             Some(missing)
         );
-        assert_eq!(missing_process_id("permission denied"), None);
+        assert_eq!(
+            TerminalServiceError {
+                message: "permission denied".to_string(),
+            }
+            .missing_process_id(),
+            None
+        );
     }
 
     #[test]
@@ -2449,7 +2465,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(term_key_event_to_bytes(&event), b"a".to_vec());
+        assert_eq!(TerminalInput::bytes(&event), b"a".to_vec());
     }
 
     #[test]
@@ -2464,7 +2480,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(term_key_event_to_bytes(&event), vec![3]);
+        assert_eq!(TerminalInput::bytes(&event), vec![3]);
     }
 
     #[test]
@@ -2479,7 +2495,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(term_key_event_to_bytes(&event).is_empty());
+        assert!(TerminalInput::bytes(&event).is_empty());
     }
 
     #[test]
@@ -2503,7 +2519,7 @@ mod tests {
         let keymap = Keymap::defaults_with(&definitions);
 
         assert_eq!(
-            resolve_terminal_web_shortcut(&event, &keymap, &mut state),
+            state.resolve(&event, &keymap),
             TerminalWebShortcutResolution::Command("command_bar_edit_page".to_string())
         );
     }
@@ -2530,24 +2546,24 @@ mod tests {
         let keymap = Keymap::defaults_with(&definitions);
 
         assert_eq!(
-            resolve_terminal_web_shortcut(&event, &keymap, &mut state),
+            state.resolve(&event, &keymap),
             TerminalWebShortcutResolution::Command("toggle_layout".to_string())
         );
     }
 
     #[test]
     fn shell_prompt_ready_only_once_cursor_is_past_column_zero() {
-        assert!(!shell_prompt_ready(false, 0), "no output yet");
+        assert!(!ShellOutputSeen::ready(false, 0), "no output yet");
         assert!(
-            !shell_prompt_ready(true, 0),
+            !ShellOutputSeen::ready(true, 0),
             "banner line ends in a newline (cursor at column 0)"
         );
         assert!(
-            !shell_prompt_ready(true, 0),
+            !ShellOutputSeen::ready(true, 0),
             "further banner lines are still column 0"
         );
         assert!(
-            shell_prompt_ready(true, 3),
+            ShellOutputSeen::ready(true, 3),
             "drawn prompt leaves the cursor after the prompt string"
         );
     }
@@ -2745,6 +2761,10 @@ mod tests {
     #[test]
     fn process_created_matches_by_id_not_by_position() {
         let mut app = bevy::prelude::App::new();
+        app.add_plugins((MinimalPlugins, InputQueuePlugin))
+            .add_message::<TerminalProcessCreated>()
+            .add_message::<TerminalProcessCreateFailed>()
+            .add_systems(Update, apply_process_start);
         let id1 = ProcessId::new();
         let id2 = ProcessId::new();
         let id3 = ProcessId::new();
@@ -2792,24 +2812,13 @@ mod tests {
             ))
             .id();
 
+        app.update();
         for (process_id, pid) in [(id3, 333u32), (id1, 111), (id2, 222)] {
-            let entity = app
-            .world_mut()
-            .query_filtered::<(bevy::prelude::Entity, &ProcessId), With<AwaitingProcessCreated>>()
-            .iter(app.world())
-            .find(|(_, pid_c)| **pid_c == process_id)
-            .map(|(e, _)| e)
-            .expect("matching entity for process_id");
             app.world_mut()
-                .run_system_cached_with(
-                    |In((entity, process_id, pid)): In<(Entity, ProcessId, u32)>,
-                     mut commands: Commands| {
-                        apply_process_created(&mut commands, entity, process_id, pid);
-                    },
-                    (entity, process_id, pid),
-                )
-                .unwrap();
+                .resource_mut::<Messages<TerminalProcessCreated>>()
+                .write(TerminalProcessCreated { process_id, pid });
         }
+        app.update();
 
         let world = app.world();
         assert_eq!(world.get::<pid::Pid>(e1).map(|p| p.0), Some(111));
@@ -2818,47 +2827,25 @@ mod tests {
     }
 
     #[test]
-    fn apply_process_created_stamps_pid_and_process_id() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        let entity = app
-            .world_mut()
-            .spawn((Terminal, AwaitingProcessCreated))
-            .id();
-        let id = process_id(7);
-        let pid_val = 4242u32;
-        app.world_mut()
-            .run_system_cached_with(
-                |In((entity, id, pid_val)): In<(Entity, ProcessId, u32)>,
-                 mut commands: Commands| {
-                    apply_process_created(&mut commands, entity, id, pid_val);
-                },
-                (entity, id, pid_val),
-            )
-            .unwrap();
-        let stored_pid = app.world().get::<pid::Pid>(entity).unwrap();
-        assert_eq!(stored_pid.0, pid_val);
-        assert!(app.world().get::<AwaitingProcessCreated>(entity).is_none());
-        let stored_process_id = app.world().get::<ProcessId>(entity).unwrap();
-        assert_eq!(*stored_process_id, id);
-    }
-
-    #[test]
     fn apply_process_create_failed_despawns_terminal() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
+        app.add_plugins((MinimalPlugins, InputQueuePlugin))
+            .add_message::<TerminalProcessCreated>()
+            .add_message::<TerminalProcessCreateFailed>()
+            .add_systems(Update, apply_process_start);
+        let process_id = ProcessId::new();
         let entity = app
             .world_mut()
-            .spawn((Terminal, AwaitingProcessCreated))
+            .spawn((Terminal, process_id, AwaitingProcessCreated))
             .id();
+        app.update();
         app.world_mut()
-            .run_system_cached_with(
-                |In(entity): In<Entity>, mut commands: Commands| {
-                    apply_process_create_failed(&mut commands, entity);
-                },
-                entity,
-            )
-            .unwrap();
+            .resource_mut::<Messages<TerminalProcessCreateFailed>>()
+            .write(TerminalProcessCreateFailed {
+                process_id,
+                reason: String::new(),
+            });
+        app.update();
         assert!(
             !app.world().entities().contains(entity),
             "failed create must despawn the orphaned terminal so no system is left to drive or reap it"

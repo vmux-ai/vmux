@@ -228,7 +228,7 @@ impl ToolStore {
                     tools_root.display()
                 ));
             }
-            rename_for_migration(&legacy_root, &tools_root)?;
+            Self::rename_for_migration(&legacy_root, &tools_root)?;
         }
         let legacy_manifest = tools_root.join("registry.toml");
         let tools_manifest = tools_root.join("tools.toml");
@@ -240,19 +240,21 @@ impl ToolStore {
                     tools_manifest.display()
                 ));
             }
-            rename_for_migration(&legacy_manifest, &tools_manifest)?;
+            Self::rename_for_migration(&legacy_manifest, &tools_manifest)?;
         }
         Ok(())
     }
-}
 
-fn rename_for_migration(source: &Path, destination: &Path) -> Result<(), String> {
-    match std::fs::rename(source, destination) {
-        Ok(()) => Ok(()),
-        Err(_) if source.symlink_metadata().is_err() && destination.symlink_metadata().is_ok() => {
-            Ok(())
+    fn rename_for_migration(source: &Path, destination: &Path) -> Result<(), String> {
+        match std::fs::rename(source, destination) {
+            Ok(()) => Ok(()),
+            Err(_)
+                if source.symlink_metadata().is_err() && destination.symlink_metadata().is_ok() =>
+            {
+                Ok(())
+            }
+            Err(error) => Err(error.to_string()),
         }
-        Err(error) => Err(error.to_string()),
     }
 }
 

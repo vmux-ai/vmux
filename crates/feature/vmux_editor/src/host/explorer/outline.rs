@@ -153,6 +153,21 @@ fn emit_markdown(
     }
 }
 
+fn clear_on_file_change(
+    query: Query<Entity, (With<FileView>, Changed<FileView>)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for entity in &query {
+        if browsers.can_emit_to(&entity) {
+            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+                entity,
+                &OutlineEvent { items: Vec::new() },
+            ));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,20 +243,5 @@ mod tests {
         let rows = OutlineRows::from_lsp(&value).into_vec();
         assert_eq!(rows[0].line, 3);
         assert_eq!(rows[0].end_line, OutlineRow::OPEN_END);
-    }
-}
-
-fn clear_on_file_change(
-    query: Query<Entity, (With<FileView>, Changed<FileView>)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for entity in &query {
-        if browsers.can_emit_to(&entity) {
-            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                entity,
-                &OutlineEvent { items: Vec::new() },
-            ));
-        }
     }
 }

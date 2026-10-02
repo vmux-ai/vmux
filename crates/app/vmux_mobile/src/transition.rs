@@ -135,7 +135,7 @@ mod platform {
     }
 
     async fn wait_for_paint() {
-        vmux_ui::platform::sleep_ms(48).await;
+        vmux_ui::platform::Platform::sleep(48).await;
     }
 }
 

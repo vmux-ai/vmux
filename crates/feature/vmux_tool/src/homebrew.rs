@@ -21,205 +21,243 @@ pub(crate) struct HomebrewToolPlugin;
 
 impl Plugin for HomebrewToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_providers)
+        app.add_systems(Startup, spawn)
             .add_systems(Update, route.in_set(ToolOperationRouteSet))
-            .add_systems(Update, import_brewfile.after(ToolOperationRouteFlush))
-            .add_systems(Update, complete);
+            .add_systems(Update, import.after(ToolOperationRouteFlush))
+            .add_systems(Update, finish);
     }
 }
 
-fn spawn_providers(mut commands: Commands) {
-    commands.spawn((
-        Name::new("Homebrew formula tool provider"),
-        ToolProviderId(ToolProvider::HomebrewFormula),
-        ToolScanner::new(scan_formulae),
-        ToolOperator::new(operate_formula),
-    ));
-    commands.spawn((
-        Name::new("Homebrew cask tool provider"),
-        ToolProviderId(ToolProvider::HomebrewCask),
-        ToolScanner::new(scan_casks),
-        ToolOperator::new(operate_cask),
-    ));
+#[derive(Clone, Copy)]
+enum HomebrewPackage {
+    Formula,
+    Cask,
 }
 
-fn scan_formulae(
-    _store: &ToolStore,
-    manifest: &mut ToolsManifest,
-    refresh: bool,
-) -> Result<ToolProviderSnapshot, String> {
-    Ok(ToolInventory::new(
-        ToolProvider::HomebrewFormula,
-        scan_homebrew(false, refresh)?,
-    )
-    .reconcile(manifest)
-    .into())
-}
+impl HomebrewPackage {
+    fn scan_formulae(
+        store: &ToolStore,
+        manifest: &mut ToolsManifest,
+        refresh: bool,
+    ) -> Result<ToolProviderSnapshot, String> {
+        Self::Formula.scan(store, manifest, refresh)
+    }
 
-fn scan_casks(
-    _store: &ToolStore,
-    manifest: &mut ToolsManifest,
-    refresh: bool,
-) -> Result<ToolProviderSnapshot, String> {
-    Ok(
-        ToolInventory::new(ToolProvider::HomebrewCask, scan_homebrew(true, refresh)?)
-            .reconcile(manifest)
-            .into(),
-    )
-}
+    fn scan_casks(
+        store: &ToolStore,
+        manifest: &mut ToolsManifest,
+        refresh: bool,
+    ) -> Result<ToolProviderSnapshot, String> {
+        Self::Cask.scan(store, manifest, refresh)
+    }
 
-fn scan_homebrew(cask: bool, refresh: bool) -> Result<Vec<ToolInventoryItem>, String> {
-    let Some(brew) = ToolProcess::find("brew") else {
-        return Ok(Vec::new());
-    };
-    let mut args = vec!["list"];
-    args.push(if cask { "--cask" } else { "--formula" });
-    args.push("--versions");
-    let output = brew.output(&args, true)?;
-    let outdated = if refresh {
-        let mut outdated_args = vec!["outdated"];
-        outdated_args.push(if cask { "--cask" } else { "--formula" });
-        brew.output(&outdated_args, false)
-            .map(|output| parse_name_lines(&output.stdout))
-            .unwrap_or_default()
-    } else {
-        BTreeSet::new()
-    };
-    Ok(parse_brew_versions(&output.stdout)
-        .into_iter()
-        .map(|(name, version)| {
+    fn operate_formula(
+        store: &ToolStore,
+        operation: &ToolOperationKey,
+        value: &str,
+    ) -> Result<String, String> {
+        Self::Formula.operate(store, operation, value)
+    }
+
+    fn operate_cask(
+        store: &ToolStore,
+        operation: &ToolOperationKey,
+        value: &str,
+    ) -> Result<String, String> {
+        Self::Cask.operate(store, operation, value)
+    }
+
+    fn provider(self) -> ToolProvider {
+        match self {
+            Self::Formula => ToolProvider::HomebrewFormula,
+            Self::Cask => ToolProvider::HomebrewCask,
+        }
+    }
+
+    fn is_cask(self) -> bool {
+        matches!(self, Self::Cask)
+    }
+
+    fn detail(self) -> &'static str {
+        match self {
+            Self::Formula => "Homebrew formula",
+            Self::Cask => "Homebrew cask",
+        }
+    }
+
+    fn scan(
+        self,
+        _store: &ToolStore,
+        manifest: &mut ToolsManifest,
+        refresh: bool,
+    ) -> Result<ToolProviderSnapshot, String> {
+        Ok(
+            ToolInventory::new(self.provider(), self.inventory(refresh)?)
+                .reconcile(manifest)
+                .into(),
+        )
+    }
+
+    fn inventory(self, refresh: bool) -> Result<Vec<ToolInventoryItem>, String> {
+        let Some(brew) = ToolProcess::find("brew") else {
+            return Ok(Vec::new());
+        };
+        let mut args = vec!["list"];
+        args.push(if self.is_cask() {
+            "--cask"
+        } else {
+            "--formula"
+        });
+        args.push("--versions");
+        let output = brew.output(&args, true)?;
+        let outdated = if refresh {
+            let mut outdated_args = vec!["outdated"];
+            outdated_args.push(if self.is_cask() {
+                "--cask"
+            } else {
+                "--formula"
+            });
+            brew.output(&outdated_args, false)
+                .map(|output| Self::names(&output.stdout))
+                .unwrap_or_default()
+        } else {
+            BTreeSet::new()
+        };
+        let mut items = Vec::new();
+        for (name, version) in Self::versions(&output.stdout) {
             let status = if outdated.contains(&name) {
                 ToolStatus::Outdated
             } else {
                 ToolStatus::Installed
             };
-            let removable = !cask || name != "vmux";
-            ToolInventoryItem {
+            let removable = !self.is_cask() || name != "vmux";
+            items.push(ToolInventoryItem {
                 id: name.clone(),
                 name,
                 icon: None,
                 version,
-                detail: if cask {
-                    "Homebrew cask".to_string()
-                } else {
-                    "Homebrew formula".to_string()
-                },
+                detail: self.detail().to_string(),
                 status,
                 removable,
-            }
-        })
-        .collect())
-}
+            });
+        }
+        Ok(items)
+    }
 
-fn parse_brew_versions(bytes: &[u8]) -> Vec<(String, Option<String>)> {
-    String::from_utf8_lossy(bytes)
-        .lines()
-        .filter_map(|line| {
+    fn versions(bytes: &[u8]) -> Vec<(String, Option<String>)> {
+        let mut versions = Vec::new();
+        for line in String::from_utf8_lossy(bytes).lines() {
             let mut fields = line.split_whitespace();
-            let name = fields.next()?.to_string();
+            let Some(name) = fields.next() else {
+                continue;
+            };
             let version = fields.collect::<Vec<_>>().join(" ");
-            Some((name, (!version.is_empty()).then_some(version)))
-        })
-        .collect()
-}
+            versions.push((name.to_string(), (!version.is_empty()).then_some(version)));
+        }
+        versions
+    }
 
-fn parse_name_lines(bytes: &[u8]) -> BTreeSet<String> {
-    String::from_utf8_lossy(bytes)
-        .lines()
-        .filter_map(|line| line.split_whitespace().next().map(str::to_string))
-        .collect()
-}
+    fn names(bytes: &[u8]) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        for line in String::from_utf8_lossy(bytes).lines() {
+            let Some(name) = line.split_whitespace().next() else {
+                continue;
+            };
+            names.insert(name.to_string());
+        }
+        names
+    }
 
-fn operate_formula(
-    store: &ToolStore,
-    operation: &ToolOperationKey,
-    value: &str,
-) -> Result<String, String> {
-    operate_homebrew(store, operation, value, false)
-}
+    fn operate(
+        self,
+        store: &ToolStore,
+        operation: &ToolOperationKey,
+        value: &str,
+    ) -> Result<String, String> {
+        let id = operation.item_id.trim();
+        match operation.kind {
+            ToolOperationKind::Install => {
+                self.command("install", id)?;
+                store.set_managed_package(operation.provider, id, true)?;
+                Ok(format!("{id} installed"))
+            }
+            ToolOperationKind::Update => {
+                self.command("upgrade", id)?;
+                store.set_managed_package(operation.provider, id, true)?;
+                Ok(format!("{id} updated"))
+            }
+            ToolOperationKind::Uninstall => {
+                self.command("uninstall", id)?;
+                store.set_managed_package(operation.provider, id, false)?;
+                Ok(format!("{id} removed"))
+            }
+            ToolOperationKind::Forget => {
+                store.set_managed_package(operation.provider, id, false)?;
+                Ok(format!("{id} removed from tools.toml"))
+            }
+            ToolOperationKind::Adopt => {
+                store.set_managed_package(operation.provider, id, true)?;
+                Ok(format!("{id} is now managed"))
+            }
+            ToolOperationKind::Import if value.trim().is_empty() => Self::import_installed(store),
+            _ => Err(format!(
+                "{} does not support {:?}",
+                operation.provider.title(),
+                operation.kind
+            )),
+        }
+    }
 
-fn operate_cask(
-    store: &ToolStore,
-    operation: &ToolOperationKey,
-    value: &str,
-) -> Result<String, String> {
-    operate_homebrew(store, operation, value, true)
-}
+    fn command(self, operation: &str, id: &str) -> Result<(), String> {
+        if id.is_empty() {
+            return Err("package name is required".to_string());
+        }
+        let brew = ToolProcess::find("brew").ok_or_else(|| "brew is not installed".to_string())?;
+        let args = if self.is_cask() {
+            vec![operation, "--cask", id]
+        } else {
+            vec![operation, id]
+        };
+        brew.output(&args, true)?;
+        Ok(())
+    }
 
-fn operate_homebrew(
-    store: &ToolStore,
-    operation: &ToolOperationKey,
-    value: &str,
-    cask: bool,
-) -> Result<String, String> {
-    let id = operation.item_id.trim();
-    match operation.kind {
-        ToolOperationKind::Install => {
-            package_command("install", cask, id)?;
-            store.set_managed_package(operation.provider, id, true)?;
-            Ok(format!("{id} installed"))
-        }
-        ToolOperationKind::Update => {
-            package_command("upgrade", cask, id)?;
-            store.set_managed_package(operation.provider, id, true)?;
-            Ok(format!("{id} updated"))
-        }
-        ToolOperationKind::Uninstall => {
-            package_command("uninstall", cask, id)?;
-            store.set_managed_package(operation.provider, id, false)?;
-            Ok(format!("{id} removed"))
-        }
-        ToolOperationKind::Forget => {
-            store.set_managed_package(operation.provider, id, false)?;
-            Ok(format!("{id} removed from tools.toml"))
-        }
-        ToolOperationKind::Adopt => {
-            store.set_managed_package(operation.provider, id, true)?;
-            Ok(format!("{id} is now managed"))
-        }
-        ToolOperationKind::Import if value.trim().is_empty() => import_installed(store),
-        _ => Err(format!(
-            "{} does not support {:?}",
-            operation.provider.title(),
-            operation.kind
-        )),
+    fn import_installed(store: &ToolStore) -> Result<String, String> {
+        let mut manifest = store.load()?;
+        let before_formulae = manifest
+            .managed_packages(ToolProvider::HomebrewFormula.id())
+            .len();
+        let before_casks = manifest
+            .managed_packages(ToolProvider::HomebrewCask.id())
+            .len();
+        let _ = Self::Formula.scan(store, &mut manifest, false)?;
+        let _ = Self::Cask.scan(store, &mut manifest, false)?;
+        let formulae = manifest
+            .managed_packages(ToolProvider::HomebrewFormula.id())
+            .len()
+            .saturating_sub(before_formulae);
+        let casks = manifest
+            .managed_packages(ToolProvider::HomebrewCask.id())
+            .len()
+            .saturating_sub(before_casks);
+        store.save(&manifest)?;
+        Ok(format!("imported {formulae} formulae and {casks} casks"))
     }
 }
 
-fn package_command(operation: &str, cask: bool, id: &str) -> Result<(), String> {
-    if id.is_empty() {
-        return Err("package name is required".to_string());
-    }
-    let brew = ToolProcess::find("brew").ok_or_else(|| "brew is not installed".to_string())?;
-    let args = if cask {
-        vec![operation, "--cask", id]
-    } else {
-        vec![operation, id]
-    };
-    brew.output(&args, true)?;
-    Ok(())
-}
-
-fn import_installed(store: &ToolStore) -> Result<String, String> {
-    let mut manifest = store.load()?;
-    let before_formulae = manifest
-        .managed_packages(ToolProvider::HomebrewFormula.id())
-        .len();
-    let before_casks = manifest
-        .managed_packages(ToolProvider::HomebrewCask.id())
-        .len();
-    let _ = scan_formulae(store, &mut manifest, false)?;
-    let _ = scan_casks(store, &mut manifest, false)?;
-    let formulae = manifest
-        .managed_packages(ToolProvider::HomebrewFormula.id())
-        .len()
-        .saturating_sub(before_formulae);
-    let casks = manifest
-        .managed_packages(ToolProvider::HomebrewCask.id())
-        .len()
-        .saturating_sub(before_casks);
-    store.save(&manifest)?;
-    Ok(format!("imported {formulae} formulae and {casks} casks"))
+fn spawn(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Homebrew formula tool provider"),
+        ToolProviderId(ToolProvider::HomebrewFormula),
+        ToolScanner::new(HomebrewPackage::scan_formulae),
+        ToolOperator::new(HomebrewPackage::operate_formula),
+    ));
+    commands.spawn((
+        Name::new("Homebrew cask tool provider"),
+        ToolProviderId(ToolProvider::HomebrewCask),
+        ToolScanner::new(HomebrewPackage::scan_casks),
+        ToolOperator::new(HomebrewPackage::operate_cask),
+    ));
 }
 
 fn route(
@@ -244,7 +282,7 @@ fn route(
     }
 }
 
-fn complete(
+fn finish(
     operations: Query<
         (Entity, &ImportedBrewfile),
         (With<ToolStoreOperation>, Without<ToolOperationFinished>),
@@ -279,7 +317,7 @@ pub(super) struct ImportedBrewfile {
     casks: usize,
 }
 
-fn import_brewfile(
+fn import(
     operations: Query<
         (Entity, &ImportBrewfile, &ToolStoreTarget),
         (
@@ -303,7 +341,7 @@ fn import_brewfile(
         commands
             .entity(entity)
             .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
-                let (formulae, casks) = import_brewfile_in(&store, &path)?;
+                let (formulae, casks) = store.import_brewfile(&path)?;
                 Ok(ImportedBrewfile { formulae, casks })
             })));
     }
@@ -317,65 +355,95 @@ pub struct BrewfileImport {
 
 impl ToolStore {
     pub fn import_brewfile(&self, path: &Path) -> Result<(usize, usize), String> {
-        import_brewfile_in(self, path)
+        self.migrate_legacy_storage()?;
+        let source_path = self.expand_user_path(path)?;
+        let source = std::fs::read_to_string(&source_path).map_err(|error| error.to_string())?;
+        let imported = self.import_brewfile_to(&source_path, &self.manifest_path())?;
+        vmux_path::AtomicFile::write(self.brewfile_path(), source.as_bytes())
+            .map_err(|error| error.to_string())?;
+        let manifest = ToolsManifest::read(&self.manifest_path())?;
+        self.write_brewfile(&manifest)?;
+        Ok(imported)
     }
-}
 
-pub fn import_brewfile_to(path: &Path, manifest_path: &Path) -> Result<(usize, usize), String> {
-    let path = ToolStore::current().expand_user_path(path)?;
-    let source = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
-    let imported = parse_brewfile(&source);
-    if imported.formulae.is_empty() && imported.casks.is_empty() {
-        return Err(format!("no formulae or casks found in {}", path.display()));
-    }
-    let mut manifest = ToolsManifest::read(manifest_path)?;
-    let formulae = manifest.add_packages("homebrew-formula", &imported.formulae);
-    let casks = manifest.add_packages("homebrew-cask", &imported.casks);
-    manifest.write_to(manifest_path)?;
-    Ok((formulae, casks))
-}
-
-pub fn parse_brewfile(source: &str) -> BrewfileImport {
-    let mut import = BrewfileImport::default();
-    for line in source.lines() {
-        if let Some(name) = parse_quoted_call(line, "brew") {
-            import.formulae.push(name);
-        } else if let Some(name) = parse_quoted_call(line, "cask") {
-            import.casks.push(name);
+    pub fn import_brewfile_to(
+        &self,
+        path: &Path,
+        manifest_path: &Path,
+    ) -> Result<(usize, usize), String> {
+        let path = self.expand_user_path(path)?;
+        let source = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        let imported = BrewfileImport::parse(&source);
+        if imported.formulae.is_empty() && imported.casks.is_empty() {
+            return Err(format!("no formulae or casks found in {}", path.display()));
         }
+        let mut manifest = ToolsManifest::read(manifest_path)?;
+        let formulae = manifest.add_packages("homebrew-formula", &imported.formulae);
+        let casks = manifest.add_packages("homebrew-cask", &imported.casks);
+        manifest.write_to(manifest_path)?;
+        Ok((formulae, casks))
     }
-    ToolsManifest::normalize_names(&mut import.formulae);
-    ToolsManifest::normalize_names(&mut import.casks);
-    import
 }
 
-fn set_packages(manifest: &mut ToolsManifest, provider: &str, packages: Vec<String>) {
-    if packages.is_empty() {
-        manifest.packages.remove(provider);
-    } else {
-        manifest.packages.insert(provider.to_string(), packages);
+impl BrewfileImport {
+    pub fn parse(source: &str) -> Self {
+        let mut import = Self::default();
+        for line in source.lines() {
+            if let Some(name) = Self::quoted_call(line, "brew") {
+                import.formulae.push(name);
+            } else if let Some(name) = Self::quoted_call(line, "cask") {
+                import.casks.push(name);
+            }
+        }
+        ToolsManifest::normalize_names(&mut import.formulae);
+        ToolsManifest::normalize_names(&mut import.casks);
+        import
     }
-    manifest.normalize();
-}
 
-fn import_brewfile_in(store: &ToolStore, path: &Path) -> Result<(usize, usize), String> {
-    store.migrate_legacy_storage()?;
-    let source_path = store.expand_user_path(path)?;
-    let source = std::fs::read_to_string(&source_path).map_err(|error| error.to_string())?;
-    let imported = import_brewfile_to(&source_path, &store.manifest_path())?;
-    vmux_path::AtomicFile::write(store.brewfile_path(), source.as_bytes())
-        .map_err(|error| error.to_string())?;
-    let manifest = ToolsManifest::read(&store.manifest_path())?;
-    store.write_brewfile(&manifest)?;
-    Ok(imported)
+    fn quoted_call(line: &str, call: &str) -> Option<String> {
+        let line = line.trim_start();
+        let rest = line.strip_prefix(call)?;
+        if !rest.starts_with(char::is_whitespace) {
+            return None;
+        }
+        let rest = rest.trim_start();
+        let quote = rest.chars().next()?;
+        if !matches!(quote, '\'' | '"') {
+            return None;
+        }
+        let mut escaped = false;
+        let mut name = String::new();
+        for character in rest[quote.len_utf8()..].chars() {
+            if escaped {
+                name.push(character);
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == quote {
+                return (!name.is_empty()).then_some(name);
+            } else {
+                name.push(character);
+            }
+        }
+        None
+    }
 }
 
 impl ToolsManifest {
+    fn set_packages(&mut self, provider: &str, packages: Vec<String>) {
+        if packages.is_empty() {
+            self.packages.remove(provider);
+        } else {
+            self.packages.insert(provider.to_string(), packages);
+        }
+        self.normalize();
+    }
+
     pub(crate) fn sync_brewfile(&mut self, path: &Path) -> Result<(), String> {
         let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-        let imported = parse_brewfile(&source);
-        set_packages(self, "homebrew-formula", imported.formulae);
-        set_packages(self, "homebrew-cask", imported.casks);
+        let imported = BrewfileImport::parse(&source);
+        self.set_packages("homebrew-formula", imported.formulae);
+        self.set_packages("homebrew-cask", imported.casks);
         Ok(())
     }
 
@@ -394,8 +462,46 @@ impl ToolsManifest {
             return Ok(());
         }
         let existing = std::fs::read_to_string(path).unwrap_or_default();
-        let source = merge_brewfile(&existing, &formulae, &casks);
+        let source = Self::merged_brewfile(&existing, &formulae, &casks);
         vmux_path::AtomicFile::write(path, source.as_bytes()).map_err(|error| error.to_string())
+    }
+
+    fn merged_brewfile(source: &str, formulae: &[String], casks: &[String]) -> String {
+        let desired_formulae = formulae.iter().map(String::as_str).collect::<BTreeSet<_>>();
+        let desired_casks = casks.iter().map(String::as_str).collect::<BTreeSet<_>>();
+        let mut seen_formulae = BTreeSet::new();
+        let mut seen_casks = BTreeSet::new();
+        let mut lines = Vec::new();
+        for line in source.lines() {
+            if let Some(name) = BrewfileImport::quoted_call(line, "brew") {
+                if desired_formulae.contains(name.as_str()) {
+                    seen_formulae.insert(name);
+                    lines.push(line.to_string());
+                }
+            } else if let Some(name) = BrewfileImport::quoted_call(line, "cask") {
+                if desired_casks.contains(name.as_str()) {
+                    seen_casks.insert(name);
+                    lines.push(line.to_string());
+                }
+            } else {
+                lines.push(line.to_string());
+            }
+        }
+        for package in formulae {
+            if !seen_formulae.contains(package) {
+                lines.push(format!("brew {:?}", package));
+            }
+        }
+        for package in casks {
+            if !seen_casks.contains(package) {
+                lines.push(format!("cask {:?}", package));
+            }
+        }
+        if lines.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", lines.join("\n"))
+        }
     }
 }
 
@@ -405,72 +511,6 @@ impl ToolStore {
     }
 }
 
-fn merge_brewfile(source: &str, formulae: &[String], casks: &[String]) -> String {
-    let desired_formulae = formulae.iter().map(String::as_str).collect::<BTreeSet<_>>();
-    let desired_casks = casks.iter().map(String::as_str).collect::<BTreeSet<_>>();
-    let mut seen_formulae = BTreeSet::new();
-    let mut seen_casks = BTreeSet::new();
-    let mut lines = Vec::new();
-    for line in source.lines() {
-        if let Some(name) = parse_quoted_call(line, "brew") {
-            if desired_formulae.contains(name.as_str()) {
-                seen_formulae.insert(name);
-                lines.push(line.to_string());
-            }
-        } else if let Some(name) = parse_quoted_call(line, "cask") {
-            if desired_casks.contains(name.as_str()) {
-                seen_casks.insert(name);
-                lines.push(line.to_string());
-            }
-        } else {
-            lines.push(line.to_string());
-        }
-    }
-    for package in formulae {
-        if !seen_formulae.contains(package) {
-            lines.push(format!("brew {:?}", package));
-        }
-    }
-    for package in casks {
-        if !seen_casks.contains(package) {
-            lines.push(format!("cask {:?}", package));
-        }
-    }
-    if lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", lines.join("\n"))
-    }
-}
-
-fn parse_quoted_call(line: &str, call: &str) -> Option<String> {
-    let line = line.trim_start();
-    let rest = line.strip_prefix(call)?;
-    if !rest.starts_with(char::is_whitespace) {
-        return None;
-    }
-    let rest = rest.trim_start();
-    let quote = rest.chars().next()?;
-    if !matches!(quote, '\'' | '"') {
-        return None;
-    }
-    let mut escaped = false;
-    let mut name = String::new();
-    for character in rest[quote.len_utf8()..].chars() {
-        if escaped {
-            name.push(character);
-            escaped = false;
-        } else if character == '\\' {
-            escaped = true;
-        } else if character == quote {
-            return (!name.is_empty()).then_some(name);
-        } else {
-            name.push(character);
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -478,7 +518,7 @@ mod tests {
     #[test]
     fn parses_inventory_versions() {
         assert_eq!(
-            parse_brew_versions(b"ripgrep 14.1.1\nopenssl@3 3.5.0 3.5.1\n"),
+            HomebrewPackage::versions(b"ripgrep 14.1.1\nopenssl@3 3.5.0 3.5.1\n"),
             vec![
                 ("ripgrep".to_string(), Some("14.1.1".to_string())),
                 ("openssl@3".to_string(), Some("3.5.0 3.5.1".to_string())),

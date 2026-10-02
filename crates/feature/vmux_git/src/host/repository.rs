@@ -76,7 +76,7 @@ impl GitRepository {
             return Err(GitError(stderr.trim().to_string()));
         }
         let repo_root = self.0.to_string_lossy().into_owned();
-        let parsed = parse::parse_porcelain_v2_statuses(&stdout);
+        let parsed = parse::ParsedStatuses::parse(&stdout);
         Ok(files
             .iter()
             .map(|file| {
@@ -109,7 +109,7 @@ impl GitRepository {
         if !ok {
             return Err(GitError(stderr.trim().to_string()));
         }
-        Ok(parse::parse_porcelain_v2_statuses(&stdout).into_file_statuses())
+        Ok(parse::ParsedStatuses::parse(&stdout).into_file_statuses())
     }
 
     pub fn dirty_paths(&self) -> Result<HashSet<String>, GitError> {
@@ -120,7 +120,7 @@ impl GitRepository {
         if !ok {
             return Err(GitError(stderr.trim().to_string()));
         }
-        Ok(parse::changed_paths(&stdout))
+        Ok(parse::ParsedStatuses::changed_paths(&stdout))
     }
 
     pub(crate) fn config_path(&self) -> Result<PathBuf, GitError> {
@@ -151,7 +151,7 @@ impl GitRepository {
         let target = self.relative_path(file);
         let baseline = self.index_text(&target)?;
         let staged = self.staged_lines(&target);
-        let new_spans = crate::host::highlight::highlight_file(content, file);
+        let new_spans = crate::host::highlight::Highlighter::file(content, file);
         let mut old_no = 1u32;
         let mut new_no = 1u32;
         let mut lines = Vec::new();
@@ -172,7 +172,9 @@ impl GitRepository {
                         spans: new_spans
                             .get(new_no.saturating_sub(1) as usize)
                             .cloned()
-                            .unwrap_or_else(|| crate::host::highlight::highlight_line(text, file)),
+                            .unwrap_or_else(|| {
+                                crate::host::highlight::Highlighter::line(text, file)
+                            }),
                     });
                     old_no += 1;
                     new_no += 1;
@@ -183,7 +185,7 @@ impl GitRepository {
                         old_no: Some(old_no),
                         new_no: None,
                         hunk: None,
-                        spans: crate::host::highlight::highlight_line(text, file),
+                        spans: crate::host::highlight::Highlighter::line(text, file),
                     });
                     old_no += 1;
                 }
@@ -196,7 +198,9 @@ impl GitRepository {
                         spans: new_spans
                             .get(new_no.saturating_sub(1) as usize)
                             .cloned()
-                            .unwrap_or_else(|| crate::host::highlight::highlight_line(text, file)),
+                            .unwrap_or_else(|| {
+                                crate::host::highlight::Highlighter::line(text, file)
+                            }),
                     });
                     new_no += 1;
                 }
@@ -217,13 +221,13 @@ impl GitRepository {
             }
             return self.staged_only_lines(file, &target, &staged);
         }
-        let ranges = parse::hunk_ranges(&self.diff_text(&target, false, 0)?);
+        let ranges = parse::HunkRange::parse_all(&self.diff_text(&target, false, 0)?);
 
         let new_spans = std::fs::read_to_string(file)
-            .map(|content| crate::host::highlight::highlight_file(&content, file))
+            .map(|content| crate::host::highlight::Highlighter::file(&content, file))
             .unwrap_or_default();
 
-        let lines = parse::parse_unified_diff(&unstaged)
+        let lines = parse::DiffParser::parse(&unstaged)
             .into_iter()
             .filter(|line| !matches!(line.kind, DiffKind::Hunk))
             .map(|mut line| {
@@ -238,8 +242,8 @@ impl GitRepository {
                         .new_no
                         .and_then(|line| new_spans.get(line.saturating_sub(1) as usize))
                         .cloned()
-                        .unwrap_or_else(|| crate::host::highlight::highlight_line(&text, file)),
-                    _ => crate::host::highlight::highlight_line(&text, file),
+                        .unwrap_or_else(|| crate::host::highlight::Highlighter::line(&text, file)),
+                    _ => crate::host::highlight::Highlighter::line(&text, file),
                 };
                 if matches!(line.kind, DiffKind::Context)
                     && line.old_no.is_some_and(|line| staged.contains(&line))
@@ -267,7 +271,7 @@ impl GitRepository {
         if !ok {
             return Err(GitCommand::error(&stdout, &stderr));
         }
-        Ok(parse::parse_unified_diff(&stdout))
+        Ok(parse::DiffParser::parse(&stdout))
     }
 
     pub fn apply_hunk(&self, file: &Path, index: u32, accept: bool) -> Result<(), GitError> {
@@ -276,7 +280,7 @@ impl GitRepository {
         if diff.trim().is_empty() {
             return Err(GitError("no unstaged changes for this file".into()));
         }
-        let (header, hunks) = parse::hunk_patches(&diff);
+        let (header, hunks) = parse::HunkPatches::parse(&diff).into_parts();
         let body = hunks
             .get(index as usize)
             .ok_or_else(|| GitError("hunk index out of range".into()))?;
@@ -333,7 +337,8 @@ impl GitRepository {
         branch: &str,
         start_point: &str,
     ) -> Result<String, GitError> {
-        crate::host::worktree::validate_branch_name(&self.0, branch)?;
+        crate::host::worktree::CheckoutInfo::try_from(self.0.as_path())?
+            .validate_branch_name(branch)?;
         self.operation(&["branch", "--", branch, start_point])
     }
 
@@ -412,7 +417,7 @@ impl GitRepository {
 
     fn diff_text(&self, target: &Path, cached: bool, context: u32) -> Result<String, GitError> {
         let unified = format!("--unified={context}");
-        let mut command = GitCommand::new(&self.0);
+        let mut command = GitCommand::command(&self.0);
         command.arg("diff");
         if cached {
             command.arg("--cached");
@@ -434,7 +439,7 @@ impl GitRepository {
     fn staged_lines(&self, target: &Path) -> HashSet<u32> {
         self.diff_text(target, true, 0)
             .map(|text| {
-                parse::hunk_ranges(&text)
+                parse::HunkRange::parse_all(&text)
                     .iter()
                     .flat_map(|range| range.new_start..range.new_start + range.new_count)
                     .collect()
@@ -476,7 +481,7 @@ impl GitRepository {
             return Ok(Vec::new());
         }
         let content = std::fs::read_to_string(file).unwrap_or_default();
-        let spans = crate::host::highlight::highlight_file(&content, file);
+        let spans = crate::host::highlight::Highlighter::file(&content, file);
         let lines = content
             .lines()
             .enumerate()
@@ -508,7 +513,7 @@ impl GitRepository {
         #[cfg(not(unix))]
         let spec = OsString::from(format!(":{}", target.to_string_lossy()));
 
-        let output = GitCommand::new(&self.0)
+        let output = GitCommand::command(&self.0)
             .arg("show")
             .arg(spec)
             .output()
@@ -527,7 +532,7 @@ impl GitRepository {
             args.push("--cached");
         }
         args.push("--unidiff-zero");
-        let mut child = GitCommand::new(&self.0)
+        let mut child = GitCommand::command(&self.0)
             .args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -554,7 +559,7 @@ impl GitRepository {
 
     fn file_operation(&self, file: &Path, verb: &[&str]) -> Result<(), GitError> {
         let target = self.relative_path(file);
-        let output = GitCommand::new(&self.0)
+        let output = GitCommand::command(&self.0)
             .args(verb)
             .arg(&target)
             .output()
@@ -616,7 +621,7 @@ impl GitCommand {
         })
     }
 
-    fn new(root: &Path) -> Command {
+    fn command(root: &Path) -> Command {
         let mut command = Command::new("git");
         command.current_dir(root).env("GIT_TERMINAL_PROMPT", "0");
         for variable in Self::local_env_vars() {
@@ -626,7 +631,7 @@ impl GitCommand {
     }
 
     pub(crate) fn run(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
-        let output = Self::new(root)
+        let output = Self::command(root)
             .args(args)
             .output()
             .map_err(|error| GitError(format!("failed to run git: {error}")))?;
@@ -643,7 +648,7 @@ impl GitCommand {
     }
 
     fn read_bytes(root: &Path, args: &[&str]) -> Result<(Vec<u8>, String, bool), GitError> {
-        let output = Self::new(root)
+        let output = Self::command(root)
             .env("GIT_OPTIONAL_LOCKS", "0")
             .args(args)
             .output()
@@ -781,7 +786,8 @@ impl GitCommitEntry {
 
 impl GitBranchEntry {
     fn local(root: &Path, current: &str) -> Result<Vec<Self>, GitError> {
-        let registrations = crate::host::worktree::worktree_registrations(root)?;
+        let registrations =
+            crate::host::worktree::CheckoutInfo::try_from(root)?.worktree_registrations()?;
         let (_, _, has_head) = GitCommand::read(root, &["rev-parse", "--verify", "HEAD"])?;
         let format = if has_head {
             "--format=%(refname:short)%00%(HEAD)%00%(upstream:short)%00%(objectname:short)%00%(ahead-behind:HEAD)"
@@ -967,7 +973,7 @@ impl GitRepositorySnapshot {
                 &stderr,
             ));
         }
-        let parsed = parse::parse_porcelain_v2_statuses(&stdout);
+        let parsed = parse::ParsedStatuses::parse(&stdout);
         let branch = parsed.branch.clone();
         let upstream = parsed.upstream.clone();
         let ahead = parsed.ahead;
@@ -1006,7 +1012,7 @@ pub(crate) mod test_repo {
     use super::*;
 
     pub fn run(dir: &Path, args: &[&str]) {
-        let status = GitCommand::new(dir)
+        let status = GitCommand::command(dir)
             .args(args)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
@@ -1042,7 +1048,7 @@ mod tests {
 
     #[test]
     fn git_command_scrubs_all_local_env_vars() {
-        let cmd = GitCommand::new(Path::new("."));
+        let cmd = GitCommand::command(Path::new("."));
         let removed: HashSet<&OsStr> = cmd
             .get_envs()
             .filter(|(_, v)| v.is_none())

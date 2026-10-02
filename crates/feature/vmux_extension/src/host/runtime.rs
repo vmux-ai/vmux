@@ -6,7 +6,8 @@ use crate::{manifest, store};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-use super::shim;
+use super::shim::ExtensionShim;
+use super::template::Template;
 
 const WORKER_TEMPLATE: &str = include_str!("runtime/worker.js");
 const CONTENT_SCRIPT: &str = include_str!("runtime/content.js");
@@ -53,103 +54,94 @@ pub(crate) enum PrepareRuntimeError {
 }
 
 #[derive(serde::Serialize)]
-pub(crate) struct BridgeConfig<'a> {
-    pub endpoint: &'a str,
-    pub extension: &'a str,
-    pub profile: &'a str,
-    pub token: &'a str,
+pub(crate) struct BridgeConfig {
+    pub endpoint: String,
+    pub extension: String,
+    pub profile: String,
+    pub token: String,
     pub conformance: bool,
 }
 
-pub(crate) fn prepare_runtime_in(
-    store: &store::ExtensionStore,
-    runtime_store: &store::ExtensionStore,
-    profile: &str,
-    entry: &store::ExtEntry,
-) -> Result<PreparedRuntime, PrepareRuntimeError> {
-    let expected_source = store.source_dir(&entry.id, &entry.version);
-    let source = if expected_source.exists() {
-        expected_source
-    } else {
-        store
-            .migrate_legacy_package(entry)
-            .map_err(PrepareRuntimeError::Infrastructure)?
-    };
-    let source_hash = store
-        .source_hash(&source)
-        .map_err(PrepareRuntimeError::Infrastructure)?;
-    if !entry.source_hash.is_empty() && source_hash != entry.source_hash {
-        return Err(PrepareRuntimeError::Corrupt(format!(
-            "source hash mismatch for {}",
-            entry.id
-        )));
-    }
-
-    let worker_source = render_worker_source().map_err(PrepareRuntimeError::Infrastructure)?;
-    let runtime_hash =
-        runtime_hash(&source_hash, &worker_source).map_err(PrepareRuntimeError::Infrastructure)?;
-    let runtime_root = runtime_store.runtime_dir(profile, &entry.id);
-    std::fs::create_dir_all(&runtime_root)
-        .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
-    let temp_dir = runtime_root.join(format!("current-{runtime_hash}.tmp"));
-    let final_dir = runtime_root.join("current");
-    if temp_dir.exists() {
-        std::fs::remove_dir_all(&temp_dir)
-            .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
-    }
-    copy_tree(&source, &temp_dir).map_err(PrepareRuntimeError::Infrastructure)?;
-    if let Some(key) = entry.public_key_b64.as_deref() {
-        manifest::ExtensionManifest::prepare_unpacked(&temp_dir, key, entry.popup.as_deref())
+impl PreparedRuntime {
+    pub(crate) fn prepare(
+        store: &store::ExtensionStore,
+        runtime_store: &store::ExtensionStore,
+        profile: &str,
+        entry: &store::ExtEntry,
+    ) -> Result<Self, PrepareRuntimeError> {
+        let expected_source = store.source_dir(&entry.id, &entry.version);
+        let source = if expected_source.exists() {
+            expected_source
+        } else {
+            store
+                .migrate_legacy_package(entry)
+                .map_err(PrepareRuntimeError::Infrastructure)?
+        };
+        let source_hash = store
+            .source_hash(&source)
             .map_err(PrepareRuntimeError::Infrastructure)?;
-    }
-    std::fs::write(temp_dir.join("vmux_runtime.js"), worker_source)
-        .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
-    std::fs::write(temp_dir.join("vmux_bridge.html"), BRIDGE_HTML)
-        .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
-    install_content_script(&temp_dir).map_err(PrepareRuntimeError::Infrastructure)?;
-    let loader = shim::install_worker_loader(&temp_dir, "vmux_runtime.js")
-        .map_err(PrepareRuntimeError::Infrastructure)?;
-    if let Some(popup) = entry.popup.as_deref() {
-        shim::install_page_loader(&temp_dir, popup).map_err(PrepareRuntimeError::Infrastructure)?;
-    }
-    validate_runtime(&temp_dir, &loader).map_err(PrepareRuntimeError::Infrastructure)?;
-    if final_dir.exists() {
-        std::fs::remove_dir_all(&final_dir)
+        if !entry.source_hash.is_empty() && source_hash != entry.source_hash {
+            return Err(PrepareRuntimeError::Corrupt(format!(
+                "source hash mismatch for {}",
+                entry.id
+            )));
+        }
+
+        let worker_source = Self::worker_source().map_err(PrepareRuntimeError::Infrastructure)?;
+        let runtime_hash = Self::runtime_hash(&source_hash, &worker_source)
+            .map_err(PrepareRuntimeError::Infrastructure)?;
+        let runtime_root = runtime_store.runtime_dir(profile, &entry.id);
+        std::fs::create_dir_all(&runtime_root)
             .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
+        let temp_dir = runtime_root.join(format!("current-{runtime_hash}.tmp"));
+        let final_dir = runtime_root.join("current");
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir)
+                .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
+        }
+        Self::copy_tree(&source, &temp_dir).map_err(PrepareRuntimeError::Infrastructure)?;
+        if let Some(key) = entry.public_key_b64.as_deref() {
+            manifest::ExtensionManifest::prepare_unpacked(&temp_dir, key, entry.popup.as_deref())
+                .map_err(PrepareRuntimeError::Infrastructure)?;
+        }
+        std::fs::write(temp_dir.join("vmux_runtime.js"), worker_source)
+            .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
+        std::fs::write(temp_dir.join("vmux_bridge.html"), BRIDGE_HTML)
+            .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
+        Self::install_content_script(&temp_dir).map_err(PrepareRuntimeError::Infrastructure)?;
+        let loader = ExtensionShim::install_worker_loader(&temp_dir, "vmux_runtime.js")
+            .map_err(PrepareRuntimeError::Infrastructure)?;
+        if let Some(popup) = entry.popup.as_deref() {
+            ExtensionShim::install_page_loader(&temp_dir, popup)
+                .map_err(PrepareRuntimeError::Infrastructure)?;
+        }
+        Self::validate(&temp_dir, &loader).map_err(PrepareRuntimeError::Infrastructure)?;
+        if final_dir.exists() {
+            std::fs::remove_dir_all(&final_dir)
+                .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
+        }
+        std::fs::rename(&temp_dir, &final_dir)
+            .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
+        Self::remove_siblings(&runtime_root, &final_dir)
+            .map_err(PrepareRuntimeError::Infrastructure)?;
+
+        let grants = entry.grants_for(profile);
+        Ok(Self {
+            extension_id: entry.id.clone(),
+            dir: final_dir,
+            runtime_hash,
+            source_hash,
+            permissions: entry.permissions.clone(),
+            optional_permissions: entry.optional_permissions.clone(),
+            host_permissions: entry.host_permissions.clone(),
+            optional_host_permissions: entry.optional_host_permissions.clone(),
+            granted_permissions: grants.permissions,
+            granted_host_permissions: grants.host_permissions,
+        })
     }
-    std::fs::rename(&temp_dir, &final_dir)
-        .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
-    remove_sibling_runtimes(&runtime_root, &final_dir)
-        .map_err(PrepareRuntimeError::Infrastructure)?;
 
-    let grants = entry.grants_for(profile);
-    Ok(PreparedRuntime {
-        extension_id: entry.id.clone(),
-        dir: final_dir,
-        runtime_hash,
-        source_hash,
-        permissions: entry.permissions.clone(),
-        optional_permissions: entry.optional_permissions.clone(),
-        host_permissions: entry.host_permissions.clone(),
-        optional_host_permissions: entry.optional_host_permissions.clone(),
-        granted_permissions: grants.permissions,
-        granted_host_permissions: grants.host_permissions,
-    })
-}
-
-pub(crate) fn bridge_source(config: &BridgeConfig<'_>) -> Result<String, String> {
-    let mut replacements = protocol_replacements()?;
-    replacements.push((
-        "__VMUX_BRIDGE_CONFIG__",
-        serde_json::to_string(config).map_err(|error| error.to_string())?,
-    ));
-    super::template::render(BRIDGE_TEMPLATE, &replacements)
-}
-
-fn render_worker_source() -> Result<String, String> {
-    super::template::render(
-        WORKER_TEMPLATE,
-        &[
+    fn worker_source() -> Result<String, String> {
+        Template::new(WORKER_TEMPLATE).render(&[
             (
                 "__VMUX_BRIDGE_CHANNEL__",
                 serde_json::to_string(BRIDGE_CHANNEL).map_err(|error| error.to_string())?,
@@ -158,155 +150,167 @@ fn render_worker_source() -> Result<String, String> {
                 "__VMUX_KEEPALIVE_CHANNEL__",
                 serde_json::to_string(KEEPALIVE_CHANNEL).map_err(|error| error.to_string())?,
             ),
-        ],
-    )
-}
+        ])
+    }
 
-fn install_content_script(dir: &Path) -> Result<(), String> {
-    let manifest_path = dir.join("manifest.json");
-    let mut manifest: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
-    let Some(content_scripts) = manifest
-        .get_mut("content_scripts")
-        .and_then(serde_json::Value::as_array_mut)
-    else {
-        return Ok(());
-    };
-    let mut installed = false;
-    for content_script in content_scripts {
-        let Some(scripts) = content_script
-            .get_mut("js")
+    fn install_content_script(dir: &Path) -> Result<(), String> {
+        let manifest_path = dir.join("manifest.json");
+        let mut manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        let Some(content_scripts) = manifest
+            .get_mut("content_scripts")
             .and_then(serde_json::Value::as_array_mut)
         else {
-            continue;
+            return Ok(());
         };
-        if scripts
-            .iter()
-            .any(|script| script.as_str() == Some(CONTENT_SCRIPT_FILE))
-        {
-            continue;
+        let mut installed = false;
+        for content_script in content_scripts {
+            let Some(scripts) = content_script
+                .get_mut("js")
+                .and_then(serde_json::Value::as_array_mut)
+            else {
+                continue;
+            };
+            if scripts
+                .iter()
+                .any(|script| script.as_str() == Some(CONTENT_SCRIPT_FILE))
+            {
+                continue;
+            }
+            scripts.insert(
+                0,
+                serde_json::Value::String(CONTENT_SCRIPT_FILE.to_string()),
+            );
+            installed = true;
         }
-        scripts.insert(
-            0,
-            serde_json::Value::String(CONTENT_SCRIPT_FILE.to_string()),
-        );
-        installed = true;
+        if !installed {
+            return Ok(());
+        }
+        std::fs::write(dir.join(CONTENT_SCRIPT_FILE), CONTENT_SCRIPT)
+            .map_err(|error| error.to_string())?;
+        std::fs::write(
+            manifest_path,
+            serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())
     }
-    if !installed {
-        return Ok(());
+
+    fn runtime_hash(source_hash: &str, worker_source: &str) -> Result<String, String> {
+        let mut hasher = Sha256::new();
+        hasher.update(source_hash.as_bytes());
+        hasher.update(worker_source.as_bytes());
+        hasher.update(CONTENT_SCRIPT.as_bytes());
+        hasher.update(BRIDGE_HTML.as_bytes());
+        hasher.update(ExtensionShim::patch_source()?.as_bytes());
+        Ok(format!("{:x}", hasher.finalize()))
     }
-    std::fs::write(dir.join(CONTENT_SCRIPT_FILE), CONTENT_SCRIPT)
+
+    fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
+        std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+        for entry in std::fs::read_dir(source).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let file_type = entry.file_type().map_err(|error| error.to_string())?;
+            let target = destination.join(entry.file_name());
+            if file_type.is_dir() {
+                Self::copy_tree(&entry.path(), &target)?;
+            } else if file_type.is_file() {
+                std::fs::copy(entry.path(), target).map_err(|error| error.to_string())?;
+            } else {
+                return Err(format!(
+                    "unsupported extension source entry: {}",
+                    entry.path().display()
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate(dir: &Path, loader: &str) -> Result<(), String> {
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("manifest.json"))
+                .map_err(|error| error.to_string())?,
+        )
         .map_err(|error| error.to_string())?;
-    std::fs::write(
-        manifest_path,
-        serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())
-}
-
-fn protocol_replacements() -> Result<Vec<(&'static str, String)>, String> {
-    Ok(vec![
-        (
-            "__VMUX_BRIDGE_CHANNEL__",
-            serde_json::to_string(BRIDGE_CHANNEL).map_err(|error| error.to_string())?,
-        ),
-        (
-            "__VMUX_KEEPALIVE_CHANNEL__",
-            serde_json::to_string(KEEPALIVE_CHANNEL).map_err(|error| error.to_string())?,
-        ),
-        (
-            "__VMUX_BRIDGE_CONTEXT_ID__",
-            serde_json::to_string(BRIDGE_CONTEXT_ID).map_err(|error| error.to_string())?,
-        ),
-        (
-            "__VMUX_BRIDGE_PROTOCOL_VERSION__",
-            BRIDGE_PROTOCOL_VERSION.to_string(),
-        ),
-        (
-            "__VMUX_BRIDGE_MAX_FRAME_SIZE__",
-            BRIDGE_MAX_FRAME_SIZE.to_string(),
-        ),
-        (
-            "__VMUX_BRIDGE_MAX_MESSAGE_SIZE__",
-            BRIDGE_MAX_MESSAGE_SIZE.to_string(),
-        ),
-    ])
-}
-
-fn runtime_hash(source_hash: &str, worker_source: &str) -> Result<String, String> {
-    let mut hasher = Sha256::new();
-    hasher.update(source_hash.as_bytes());
-    hasher.update(worker_source.as_bytes());
-    hasher.update(CONTENT_SCRIPT.as_bytes());
-    hasher.update(BRIDGE_HTML.as_bytes());
-    hasher.update(shim::patch_source()?.as_bytes());
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
-fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
-    for entry in std::fs::read_dir(source).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let file_type = entry.file_type().map_err(|error| error.to_string())?;
-        let target = destination.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_tree(&entry.path(), &target)?;
-        } else if file_type.is_file() {
-            std::fs::copy(entry.path(), target).map_err(|error| error.to_string())?;
-        } else {
-            return Err(format!(
-                "unsupported extension source entry: {}",
-                entry.path().display()
-            ));
+        if !manifest.is_object() {
+            return Err("runtime manifest is not an object".into());
         }
+        if !dir.join(loader).is_file() {
+            return Err("runtime worker loader is missing".into());
+        }
+        let has_content_scripts = manifest
+            .get("content_scripts")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|content_scripts| {
+                content_scripts.iter().any(|content_script| {
+                    content_script
+                        .get("js")
+                        .and_then(serde_json::Value::as_array)
+                        .is_some_and(|scripts| !scripts.is_empty())
+                })
+            });
+        if has_content_scripts && !dir.join(CONTENT_SCRIPT_FILE).is_file() {
+            return Err("runtime content script is missing".into());
+        }
+        Ok(())
     }
-    Ok(())
+
+    fn remove_siblings(runtime_root: &Path, keep: &Path) -> Result<(), String> {
+        for entry in std::fs::read_dir(runtime_root).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            if path == keep {
+                continue;
+            }
+            if path.is_dir() {
+                std::fs::remove_dir_all(path).map_err(|error| error.to_string())?;
+            } else {
+                std::fs::remove_file(path).map_err(|error| error.to_string())?;
+            }
+        }
+        Ok(())
+    }
 }
 
-fn validate_runtime(dir: &Path, loader: &str) -> Result<(), String> {
-    let manifest: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(dir.join("manifest.json")).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
-    if !manifest.is_object() {
-        return Err("runtime manifest is not an object".into());
+impl BridgeConfig {
+    pub(crate) fn source(&self) -> Result<String, String> {
+        let mut replacements = Self::protocol_replacements()?;
+        replacements.push((
+            "__VMUX_BRIDGE_CONFIG__",
+            serde_json::to_string(self).map_err(|error| error.to_string())?,
+        ));
+        Template::new(BRIDGE_TEMPLATE).render(&replacements)
     }
-    if !dir.join(loader).is_file() {
-        return Err("runtime worker loader is missing".into());
-    }
-    let has_content_scripts = manifest
-        .get("content_scripts")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|content_scripts| {
-            content_scripts.iter().any(|content_script| {
-                content_script
-                    .get("js")
-                    .and_then(serde_json::Value::as_array)
-                    .is_some_and(|scripts| !scripts.is_empty())
-            })
-        });
-    if has_content_scripts && !dir.join(CONTENT_SCRIPT_FILE).is_file() {
-        return Err("runtime content script is missing".into());
-    }
-    Ok(())
-}
 
-fn remove_sibling_runtimes(runtime_root: &Path, keep: &Path) -> Result<(), String> {
-    for entry in std::fs::read_dir(runtime_root).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let path = entry.path();
-        if path == keep {
-            continue;
-        }
-        if path.is_dir() {
-            std::fs::remove_dir_all(path).map_err(|error| error.to_string())?;
-        } else {
-            std::fs::remove_file(path).map_err(|error| error.to_string())?;
-        }
+    fn protocol_replacements() -> Result<Vec<(&'static str, String)>, String> {
+        Ok(vec![
+            (
+                "__VMUX_BRIDGE_CHANNEL__",
+                serde_json::to_string(BRIDGE_CHANNEL).map_err(|error| error.to_string())?,
+            ),
+            (
+                "__VMUX_KEEPALIVE_CHANNEL__",
+                serde_json::to_string(KEEPALIVE_CHANNEL).map_err(|error| error.to_string())?,
+            ),
+            (
+                "__VMUX_BRIDGE_CONTEXT_ID__",
+                serde_json::to_string(BRIDGE_CONTEXT_ID).map_err(|error| error.to_string())?,
+            ),
+            (
+                "__VMUX_BRIDGE_PROTOCOL_VERSION__",
+                BRIDGE_PROTOCOL_VERSION.to_string(),
+            ),
+            (
+                "__VMUX_BRIDGE_MAX_FRAME_SIZE__",
+                BRIDGE_MAX_FRAME_SIZE.to_string(),
+            ),
+            (
+                "__VMUX_BRIDGE_MAX_MESSAGE_SIZE__",
+                BRIDGE_MAX_MESSAGE_SIZE.to_string(),
+            ),
+        ])
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -361,7 +365,7 @@ mod tests {
         let store = store::ExtensionStore::at(root.path());
         let (entry, source, original_manifest) = source_entry(&store, "background.js", false);
 
-        let prepared = prepare_runtime_in(&store, &store, "personal", &entry).unwrap();
+        let prepared = PreparedRuntime::prepare(&store, &store, "personal", &entry).unwrap();
 
         assert!(
             prepared
@@ -389,13 +393,14 @@ mod tests {
                 .unwrap()
                 .contains("__vmux_extension_keepalive_v1")
         );
-        let bridge = bridge_source(&BridgeConfig {
-            endpoint: "ws://127.0.0.1:1",
-            extension: &entry.id,
-            profile: "personal",
-            token: "token",
+        let bridge = BridgeConfig {
+            endpoint: "ws://127.0.0.1:1".to_string(),
+            extension: entry.id.clone(),
+            profile: "personal".to_string(),
+            token: "token".to_string(),
             conformance: false,
-        })
+        }
+        .source()
         .unwrap();
         assert!(bridge.contains("pulseWorker"));
         assert!(bridge.contains("CLOSE_POLICY_ERROR = 4008"));
@@ -414,7 +419,8 @@ mod tests {
         let runtime_store = store::ExtensionStore::at(runtime_store.path());
         let (entry, _, _) = source_entry(&store, "background.js", false);
 
-        let prepared = prepare_runtime_in(&store, &runtime_store, "personal", &entry).unwrap();
+        let prepared =
+            PreparedRuntime::prepare(&store, &runtime_store, "personal", &entry).unwrap();
 
         assert!(
             prepared
@@ -430,7 +436,7 @@ mod tests {
         let store = store::ExtensionStore::at(root.path());
         let (entry, _, _) = source_entry(&store, "sw/main.js", true);
 
-        let prepared = prepare_runtime_in(&store, &store, "personal", &entry).unwrap();
+        let prepared = PreparedRuntime::prepare(&store, &store, "personal", &entry).unwrap();
 
         let generated: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(prepared.dir.join("manifest.json")).unwrap(),
@@ -466,7 +472,7 @@ mod tests {
         .unwrap();
         entry.source_hash = store.source_hash(&source).unwrap();
 
-        let prepared = prepare_runtime_in(&store, &store, "personal", &entry).unwrap();
+        let prepared = PreparedRuntime::prepare(&store, &store, "personal", &entry).unwrap();
 
         let generated: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(prepared.dir.join("manifest.json")).unwrap(),
@@ -504,7 +510,7 @@ mod tests {
         .unwrap();
         entry.source_hash = store.source_hash(&source).unwrap();
 
-        let prepared = prepare_runtime_in(&store, &store, "personal", &entry).unwrap();
+        let prepared = PreparedRuntime::prepare(&store, &store, "personal", &entry).unwrap();
 
         let popup = std::fs::read_to_string(prepared.dir.join("popup/index.html")).unwrap();
         assert!(popup.find("/vmux_runtime.js").unwrap() < popup.find("/vmux_patch.js").unwrap());

@@ -8,7 +8,7 @@ use vmux_ecs::event::{
 use vmux_git::event::GitLineStatus;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
-use vmux_ui::platform::sleep_ms;
+use vmux_ui::platform::Platform;
 
 use super::diagnostic::DiagnosticPresentation;
 use super::text_geometry::{CellMetrics, ColumnRuler, column_in_line, gutter_px};
@@ -280,7 +280,7 @@ fn EditorLineRow(
                     hover_pos.set(Some((ln, col)));
                     lsp_hover.set(None);
                     spawn(async move {
-                        sleep_ms(HOVER_DELAY_MS).await;
+                        Platform::sleep(HOVER_DELAY_MS).await;
                         if hover_pos() != Some((ln, col)) {
                             return;
                         }

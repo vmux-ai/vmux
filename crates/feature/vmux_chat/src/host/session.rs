@@ -73,10 +73,7 @@ impl Plugin for ChatHostPlugin {
 
 fn submit_from_command_bar(
     trigger: On<UiInput<PromptRequest>>,
-    launcher_hosts: Query<(), With<HostsLauncher>>,
-    child_of: Query<&ChildOf>,
-    contributed_pages: ContributedPages,
-    workspace: Single<&CommandBarWorkspaceSnapshot>,
+    target: PromptTarget,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut inline_transition: MessageWriter<InlineTransitionRequested>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -96,14 +93,17 @@ fn submit_from_command_bar(
             size: attachment.size,
         })
         .collect::<Vec<_>>();
-    let inline_stack = launcher_hosts
+    let inline_stack = target
+        .launcher_hosts
         .contains(webview)
-        .then(|| child_of.get(webview).ok().map(|parent| parent.0))
+        .then(|| target.child_of.get(webview).ok().map(|parent| parent.0))
         .flatten();
     let mut opened = false;
     if (!prompt.is_empty() || !attachments.is_empty())
-        && let Some(stack) = workspace.stack
-        && let Some(url) = contributed_pages.prompt_url(request.target_url.as_deref())
+        && let Some(stack) = target.workspace.stack
+        && let Some(url) = target
+            .contributed_pages
+            .prompt_url(request.target_url.as_deref())
     {
         if inline_stack == Some(stack)
             && vmux_api::VmuxRoute::parse(&url)
@@ -132,6 +132,14 @@ fn submit_from_command_bar(
         opened = true;
     }
     commands.trigger(CommandBarDismiss::new(webview, !opened));
+}
+
+#[derive(SystemParam)]
+struct PromptTarget<'w, 's> {
+    launcher_hosts: Query<'w, 's, (), With<HostsLauncher>>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    contributed_pages: ContributedPages<'w, 's>,
+    workspace: Single<'w, 's, &'static CommandBarWorkspaceSnapshot>,
 }
 
 struct ChatAgentPlugin;

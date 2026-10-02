@@ -801,7 +801,7 @@ mod tests {
     }
 
     #[test]
-    fn acp_mode_catalog_uses_the_canonical_launcher_identity() {
+    fn acp_mode_catalog_uses_the_session_agent_identity() {
         let mut app = App::new();
         let registry = app.world_mut().spawn(AgentModeSelections::default()).id();
         app.add_systems(
@@ -845,8 +845,8 @@ mod tests {
             .iter_entities()
             .find_map(|entity| entity.get::<ContributedAgentModes>())
             .unwrap();
-        assert_eq!(published.0.agent_key, "codex");
-        assert_eq!(published.0.url, "vmux://sessions/codex");
+        assert_eq!(published.0.agent_key, "codex-acp");
+        assert_eq!(published.0.url, "vmux://sessions/codex-acp");
         assert_eq!(published.0.selected, "agent");
         assert_eq!(
             app.world()

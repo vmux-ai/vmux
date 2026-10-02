@@ -259,7 +259,7 @@ mod tests {
             .unwrap();
         let messages = directory.directory.load("agent", "plain").unwrap().messages;
 
-        assert_eq!(messages, vec![user(&text)]);
+        assert_eq!(messages, vec![user(text)]);
     }
 
     #[test]

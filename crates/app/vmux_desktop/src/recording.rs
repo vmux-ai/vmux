@@ -18,12 +18,7 @@ impl Plugin for RecordingPlugin {
             .add_systems(Startup, spawn_runtime)
             .add_systems(
                 Update,
-                (
-                    start,
-                    handle_control,
-                    auto_stop_recordings,
-                    drain_recordings,
-                )
+                (start, control, auto_stop_recordings, drain_recordings)
                     .chain()
                     .after(vmux_command::WriteCommandRequests),
             );
@@ -89,7 +84,7 @@ pub(crate) enum RecordingControl {
     Done,
 }
 
-fn handle_control(
+fn control(
     _non_send: NonSendMarker,
     mut reader: MessageReader<RecordingControl>,
     mut runtime: Query<(&mut RecordingBridge, &mut RecordingStatus)>,
@@ -115,37 +110,51 @@ fn handle_control(
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn start_err(request_id: [u8; 16], message: impl Into<String>) -> RecordStartResponse {
-    RecordStartResponse {
-        request_id,
-        result: Err(message.into()),
-    }
-}
-
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn should_sample_gif_frame(
+pub(crate) struct GifSampling {
     elapsed_ms: u64,
     last_sampled_ms: Option<u64>,
     fps: u32,
-) -> bool {
-    let interval = (1000 / fps.max(1)) as u64;
-    match last_sampled_ms {
-        None => true,
-        Some(last) => elapsed_ms.saturating_sub(last) >= interval,
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+impl GifSampling {
+    pub(crate) fn new(elapsed_ms: u64, last_sampled_ms: Option<u64>, fps: u32) -> Self {
+        Self {
+            elapsed_ms,
+            last_sampled_ms,
+            fps,
+        }
+    }
+
+    pub(crate) fn should_sample(&self) -> bool {
+        let interval = (1000 / self.fps.max(1)) as u64;
+        match self.last_sampled_ms {
+            None => true,
+            Some(last) => self.elapsed_ms.saturating_sub(last) >= interval,
+        }
     }
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
-    let mut out = vec![0u8; bgra.len()];
-    for (i, px) in bgra.chunks_exact(4).enumerate() {
-        let o = i * 4;
-        out[o] = px[2];
-        out[o + 1] = px[1];
-        out[o + 2] = px[0];
-        out[o + 3] = px[3];
+pub(crate) struct BgraFrame(Vec<u8>);
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+impl BgraFrame {
+    pub(crate) fn new(bytes: Vec<u8>) -> Self {
+        Self(bytes)
     }
-    out
+
+    pub(crate) fn rgba(&self) -> Vec<u8> {
+        let mut output = vec![0u8; self.0.len()];
+        for (index, pixel) in self.0.chunks_exact(4).enumerate() {
+            let offset = index * 4;
+            output[offset] = pixel[2];
+            output[offset + 1] = pixel[1];
+            output[offset + 2] = pixel[0];
+            output[offset + 3] = pixel[3];
+        }
+        output
+    }
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -172,7 +181,10 @@ fn start(
         let capture = match source.resolve(req.pane.as_deref()) {
             Ok(capture) => capture,
             Err(message) => {
-                start_responses.write(start_err(req.request_id, message));
+                start_responses.write(RecordStartResponse {
+                    request_id: req.request_id,
+                    result: Err(message),
+                });
                 continue;
             }
         };
@@ -250,15 +262,15 @@ mod tests {
 
     #[test]
     fn gif_sampling_respects_fps() {
-        assert!(should_sample_gif_frame(0, None, 12));
-        assert!(!should_sample_gif_frame(40, Some(0), 12));
-        assert!(should_sample_gif_frame(90, Some(0), 12));
+        assert!(GifSampling::new(0, None, 12).should_sample());
+        assert!(!GifSampling::new(40, Some(0), 12).should_sample());
+        assert!(GifSampling::new(90, Some(0), 12).should_sample());
     }
 
     #[test]
     fn bgra_to_rgba_swaps_channels() {
         let bgra = vec![1u8, 2, 3, 4];
-        assert_eq!(bgra_to_rgba(&bgra), vec![3, 2, 1, 4]);
+        assert_eq!(BgraFrame::new(bgra).rgba(), vec![3, 2, 1, 4]);
     }
 }
 

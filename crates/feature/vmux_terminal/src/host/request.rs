@@ -15,10 +15,7 @@ impl Plugin for TerminalRequestPlugin {
         if !app.is_plugin_added::<InputQueuePlugin>() {
             app.add_plugins(InputQueuePlugin);
         }
-        app.add_systems(
-            Update,
-            (handle_send_requests, handle_run_shell_requests).after(ServiceMessageSet),
-        );
+        app.add_systems(Update, (send, shell).after(ServiceMessageSet));
     }
 }
 
@@ -49,7 +46,7 @@ impl RunShellRequest {
     }
 }
 
-fn handle_send_requests(
+fn send(
     mut reader: MessageReader<TerminalSendRequest>,
     focus: vmux_layout::stack::FocusedStack,
     process_index: Single<&TerminalProcessIndex>,
@@ -90,7 +87,7 @@ fn handle_send_requests(
     }
 }
 
-fn handle_run_shell_requests(
+fn shell(
     mut reader: MessageReader<RunShellRequest>,
     focus: vmux_layout::stack::FocusedStack,
     panes: Query<
@@ -131,9 +128,10 @@ fn handle_run_shell_requests(
         let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane)) else {
             continue;
         };
-        let Ok(cwd) = vmux_space::valid_cwd(&cwd) else {
+        let Ok(cwd) = vmux_space::WorkspaceCwd::try_from(cwd.as_str()) else {
             continue;
         };
+        let cwd = cwd.into_path();
         terminal_stack_spawns.write(TerminalStackSpawnRequest {
             pane,
             cwd,

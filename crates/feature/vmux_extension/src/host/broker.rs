@@ -2,6 +2,7 @@ use crate::protocol::{
     ApiEvent, ApiRequest, ApiResponse, BridgeClientMessage, BridgeServerMessage, ExtensionApiError,
     ExtensionCallerContext,
 };
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::RecvTimeoutError;
@@ -59,7 +60,7 @@ fn spawn(manifests: Query<&vmux_ecs::host::manifest::FeatureManifest>, mut comma
         PendingBridgeEvents::default(),
         matrix,
     ));
-    if extension_conformance_enabled() {
+    if ExtensionEnvironment::conformance_enabled() {
         entity.insert(ConformanceWakeTimer::default());
     }
 }
@@ -138,6 +139,15 @@ impl Default for ConformanceWakeTimer {
     }
 }
 
+#[derive(SystemParam)]
+struct BridgeRequestWriters<'w> {
+    stack: MessageWriter<'w, vmux_layout::stack::OpenRequest>,
+    open_window: MessageWriter<'w, OpenExtensionWindowRequest>,
+    close_window: MessageWriter<'w, CloseExtensionWindowRequest>,
+    update_host_window: MessageWriter<'w, UpdateHostWindowRequest>,
+    model: MessageWriter<'w, ExtensionModelEvent>,
+}
+
 fn drain_bridge_requests(
     server: Single<&ExtensionBridgeServer>,
     broker: Single<(
@@ -151,11 +161,7 @@ fn drain_bridge_requests(
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut extension_windows: Single<&mut ExtensionWindows>,
     mut seen: Local<SeenBridgeRequests>,
-    mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
-    mut open_window_requests: MessageWriter<OpenExtensionWindowRequest>,
-    mut close_window_requests: MessageWriter<CloseExtensionWindowRequest>,
-    mut update_host_window_requests: MessageWriter<UpdateHostWindowRequest>,
-    mut model_events: MessageWriter<ExtensionModelEvent>,
+    mut requests: BridgeRequestWriters,
 ) {
     let (mut subscriptions, mut pending, mut response_cache, mut wake_timer, matrix) =
         broker.into_inner();
@@ -226,11 +232,11 @@ fn drain_bridge_requests(
                     }
                     continue;
                 }
-                let requests = seen
+                let seen_requests = seen
                     .0
                     .entry((extension_id.clone(), session_id))
                     .or_default();
-                if requests.contains(&request_id) {
+                if seen_requests.contains(&request_id) {
                     let duplicate = BridgeServerMessage::Response(ApiResponse::failure(
                         request_id,
                         ExtensionApiError::new("duplicate_request", "duplicate bridge request id"),
@@ -241,9 +247,9 @@ fn drain_bridge_requests(
                     }
                     continue;
                 }
-                requests.push_back(request_id.clone());
-                while requests.len() > MAX_SEEN_REQUESTS {
-                    requests.pop_front();
+                seen_requests.push_back(request_id.clone());
+                while seen_requests.len() > MAX_SEEN_REQUESTS {
+                    seen_requests.pop_front();
                 }
                 let dispatched = dispatch_api_request(
                     matrix,
@@ -251,22 +257,22 @@ fn drain_bridge_requests(
                     &model,
                     &mut extension_windows,
                     authorization,
-                    extension_conformance_enabled(),
+                    ExtensionEnvironment::conformance_enabled(),
                 );
                 for request in dispatched.requests {
-                    stack_requests.write(request);
+                    requests.stack.write(request);
                 }
                 if let Some(request) = dispatched.open_window {
-                    open_window_requests.write(request);
+                    requests.open_window.write(request);
                 }
                 if let Some(request) = dispatched.close_window {
-                    close_window_requests.write(request);
+                    requests.close_window.write(request);
                 }
                 if let Some(request) = dispatched.update_host_window {
-                    update_host_window_requests.write(request);
+                    requests.update_host_window.write(request);
                 }
                 for event in dispatched.events {
-                    model_events.write(event);
+                    requests.model.write(event);
                 }
                 let response = dispatched.response;
                 let responses = response_cache.0.entry(extension_id.clone()).or_default();
@@ -466,7 +472,7 @@ fn authorize_api_request(
         )
     })?;
     if request.namespace == CONFORMANCE_NAMESPACE {
-        if extension_conformance_enabled() && authorization.conformance {
+        if ExtensionEnvironment::conformance_enabled() && authorization.conformance {
             return Ok(());
         }
         return Err(ExtensionApiError::new(
@@ -736,7 +742,7 @@ fn forward_model_events(
                     serde_json::json!([value]),
                 );
             }
-            if let Some((event_name, arguments)) = super::windows::event_payload(event)
+            if let Some((event_name, arguments)) = event.window_payload()
                 && entries
                     .iter()
                     .any(|entry| entry.namespace == "windows" && entry.event == event_name)
@@ -869,7 +875,12 @@ fn dispatch_api_request(
         )));
     }
     if request.namespace == "windows" {
-        return match super::windows::dispatch(&request, model, extension_windows, authorization) {
+        return match super::windows::WindowDispatch::from_request(
+            &request,
+            model,
+            extension_windows,
+            authorization,
+        ) {
             Ok(dispatched) => DispatchedApiRequest {
                 response: BridgeServerMessage::Response(ApiResponse::success(
                     request.request_id,
@@ -926,7 +937,7 @@ fn dispatch_api_request(
     }
     let member = format!("{}.{}", request.namespace, request.method);
     let Some(capability) = matrix.lookup(
-        current_platform(),
+        ExtensionEnvironment::platform(),
         &request.namespace,
         &request.method,
         CapabilityKind::Method,
@@ -938,7 +949,7 @@ fn dispatch_api_request(
                 format!(
                     "{member} is not listed for Chromium {} on {}",
                     matrix.chromium_major,
-                    current_platform()
+                    ExtensionEnvironment::platform()
                 ),
             ),
         )));
@@ -958,7 +969,7 @@ fn dispatch_api_request(
             format!(
                 "{member} is {status} for Chromium {} on {}",
                 matrix.chromium_major,
-                current_platform()
+                ExtensionEnvironment::platform()
             ),
         ),
     )))
@@ -1045,23 +1056,27 @@ fn send_fatal_to_session(
     }
 }
 
-pub(crate) fn extension_conformance_enabled() -> bool {
-    cfg!(feature = "conformance")
-        && std::env::var("VMUX_EXTENSION_CONFORMANCE").ok().as_deref() == Some("1")
-}
+pub(crate) struct ExtensionEnvironment;
 
-pub(crate) const fn current_platform() -> &'static str {
-    #[cfg(target_os = "macos")]
-    {
-        "macos"
+impl ExtensionEnvironment {
+    pub(crate) fn conformance_enabled() -> bool {
+        cfg!(feature = "conformance")
+            && std::env::var("VMUX_EXTENSION_CONFORMANCE").ok().as_deref() == Some("1")
     }
-    #[cfg(target_os = "linux")]
-    {
-        "linux"
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    {
-        "unsupported"
+
+    pub(crate) const fn platform() -> &'static str {
+        #[cfg(target_os = "macos")]
+        {
+            "macos"
+        }
+        #[cfg(target_os = "linux")]
+        {
+            "linux"
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            "unsupported"
+        }
     }
 }
 
@@ -1117,6 +1132,7 @@ mod tests {
                 BridgeSubscriptions::default(),
                 BridgeResponseCache::default(),
                 pending,
+                CapabilityMatrix::embedded().unwrap(),
             ))
             .id();
         if let Some(timer) = timer {
@@ -1299,10 +1315,7 @@ mod tests {
             .add_message::<ExtensionModelEvent>()
             .add_systems(Update, drain_bridge_requests);
         app.world_mut().spawn(ExtensionModel::default());
-        for _ in 0..20 {
-            app.update();
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        pump(&mut app);
 
         let response: BridgeServerMessage = match socket.read().unwrap() {
             Message::Text(text) => serde_json::from_str(&text).unwrap(),
@@ -1316,7 +1329,7 @@ mod tests {
                     "unsupported_api",
                     format!(
                         "runtime.sendMessage is Untested for Chromium 148 on {}",
-                        current_platform()
+                        ExtensionEnvironment::platform()
                     )
                 )
             ))

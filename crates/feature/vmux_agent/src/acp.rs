@@ -62,7 +62,7 @@ impl Plugin for AcpSessionPlugin {
 
 enum AcpTranscriptInput {
     BeginHistoryReplay,
-    Update(SessionUpdate),
+    Update(Box<SessionUpdate>),
     FinishHistoryReplay(bool),
     PushUser {
         text: String,
@@ -796,7 +796,7 @@ fn spawn(
                 request.processes.clone(),
                 projection,
             ));
-            let task = runtime.0.spawn(driver::run(
+            let task = runtime.0.spawn(driver::AcpDriver::run(
                 std::mem::take(&mut request.command),
                 std::mem::take(&mut request.args),
                 std::mem::take(&mut request.env),
@@ -849,7 +849,7 @@ fn project_transcript(
                     replay.updates = 0;
                 }
                 AcpTranscriptInput::Update(update) => {
-                    match &update {
+                    match update.as_ref() {
                         SessionUpdate::ConfigOptionUpdate(config) => {
                             let legacy = configs
                                 .0
@@ -892,7 +892,7 @@ fn project_transcript(
                         }
                         _ => {}
                     }
-                    let intents = projector.apply(update);
+                    let intents = projector.apply(*update);
                     shared
                         .0
                         .projector_updates
@@ -1148,10 +1148,10 @@ fn project_approval_resolved(
 ) {
     for (sid, shared, mut inbox, mut approval) in &mut sessions {
         while let Ok(call_id) = inbox.0.try_recv() {
-            if !approval
+            if approval
                 .0
                 .as_ref()
-                .is_some_and(|pending| pending.call_id == call_id)
+                .is_none_or(|pending| pending.call_id != call_id)
             {
                 continue;
             }

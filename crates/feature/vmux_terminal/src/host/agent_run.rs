@@ -34,7 +34,7 @@ use crate::launch::TerminalLaunch;
 use crate::{
     AgentRunTerminal, ProcessExited, Terminal, TerminalReinputRequest, TerminalStackSpawnRequest,
 };
-use vmux_space::valid_cwd;
+use vmux_space::WorkspaceCwd;
 
 #[vmux_api::contract(Copy, Eq)]
 pub enum PlacementMode {
@@ -127,7 +127,10 @@ struct RunTerminalCandidate {
 
 impl RunTerminalCandidate {
     fn launch_matches_canonical_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
-        let Some(launch_cwd) = valid_cwd(launch_cwd).ok().flatten() else {
+        let Some(launch_cwd) = WorkspaceCwd::try_from(launch_cwd)
+            .ok()
+            .and_then(WorkspaceCwd::into_path)
+        else {
             return false;
         };
         let launch_cwd = launch_cwd.canonicalize().unwrap_or(launch_cwd);
@@ -587,8 +590,12 @@ impl<'a> AgentCwd<'a> {
         if let Some(path) = self.stored()? {
             return Ok(path);
         }
-        if let Some(Ok(Some(path))) = agent_launch_cwd.map(valid_cwd) {
-            return Ok(path);
+        if let Some(cwd) = agent_launch_cwd
+            && let Ok(cwd) = WorkspaceCwd::try_from(cwd)
+        {
+            return cwd
+                .into_path()
+                .ok_or_else(|| "agent project directory is missing".to_string());
         }
         Err("tab and agent project directories are missing".to_string())
     }
@@ -834,7 +841,11 @@ fn run_agent_commands(
                 ),
             };
             let sequence = context.next_pane_sequence.take();
-            commands.entity(target_pane).insert(sequence);
+            context
+                .panes
+                .placement
+                .tree
+                .set_spawn_sequence(target_pane, sequence);
             let process_id = ProcessId::new();
             let request_index = queued_spawns.len();
             queued_spawns.push(TerminalStackSpawnRequest {
@@ -1629,7 +1640,6 @@ mod tests {
     fn split_run_pane(
         input: Res<SplitRunPaneInput>,
         mut out: ResMut<SplitRunPaneOutput>,
-        mut commands: Commands,
         mut panes: AgentPanes,
         mut next_sequence: NextPaneSpawnSequence,
     ) {
@@ -1648,7 +1658,7 @@ mod tests {
             split.already_split,
         );
         let sequence = next_sequence.take();
-        commands.entity(target).insert(sequence);
+        panes.placement.tree.set_spawn_sequence(target, sequence);
         out.0 = Some(target);
     }
 

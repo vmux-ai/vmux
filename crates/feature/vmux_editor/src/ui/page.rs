@@ -34,7 +34,7 @@ use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::ime::use_ime_guard;
-use vmux_ui::platform::sleep_ms;
+use vmux_ui::platform::Platform;
 use vmux_ui::scroll::ScrollIntoView;
 
 #[component]
@@ -176,7 +176,7 @@ pub fn Page() -> Element {
             if event.search && event.search_focus_revision > explorer_search_focus_revision() {
                 explorer_search_focus_revision.set(event.search_focus_revision);
                 spawn(async move {
-                    sleep_ms(0).await;
+                    Platform::sleep(0).await;
                     FocusClaim::new(super::explorer::SEARCH_INPUT_ID).request();
                 });
             }
@@ -197,7 +197,7 @@ pub fn Page() -> Element {
             forward.set(event.forward);
             if event.open {
                 spawn(async move {
-                    sleep_ms(0).await;
+                    Platform::sleep(0).await;
                     EditorFocus::find();
                 });
             }
@@ -509,7 +509,7 @@ pub fn Page() -> Element {
             }
             panel_focus_revision.set(focus.revision);
             spawn(async move {
-                sleep_ms(0).await;
+                Platform::sleep(0).await;
                 match focus.target {
                     FilePanelFocusTarget::None => {}
                     FilePanelFocusTarget::References => {
@@ -608,7 +608,7 @@ pub fn Page() -> Element {
             let id = rename_failed_generation().wrapping_add(1);
             rename_failed_generation.set(id);
             spawn(async move {
-                sleep_ms(RENAME_NOTICE_MS).await;
+                Platform::sleep(RENAME_NOTICE_MS).await;
                 if rename_failed_generation() == id {
                     rename_failed.set(String::new());
                 }
@@ -1900,7 +1900,7 @@ fn schedule_lsp_notice_clear(
     let id = generation().wrapping_add(1);
     generation.set(id);
     spawn(async move {
-        sleep_ms(delay).await;
+        Platform::sleep(delay).await;
         if generation() == id {
             notice.set(None);
         }

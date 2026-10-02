@@ -226,7 +226,10 @@ fn chat_branches_request(
     let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
     let task = bevy::tasks::IoTaskPool::get().spawn(async move {
         let _wake = wake;
-        let Ok(holders) = vmux_git::worktree::branch_holders(&root) else {
+        let Ok(checkout) = vmux_git::worktree::CheckoutInfo::try_from(root.as_path()) else {
+            return Vec::new();
+        };
+        let Ok(holders) = checkout.branch_holders() else {
             return Vec::new();
         };
         let mut branches = Vec::with_capacity(holders.len());

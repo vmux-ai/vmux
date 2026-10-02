@@ -29,7 +29,9 @@ impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(test)]
         app.add_plugins(FeaturePlugin::<crate::Feature>::default());
-        app.add_message::<vmux_ecs::service::ServiceRequest>();
+        app.add_message::<vmux_ecs::service::ServiceRequest>()
+            .add_message::<WebviewCommittedNavigationEvent>()
+            .add_message::<HostHistoryStep>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -488,6 +490,7 @@ mod command_definition_tests {
         let mut query = app.world_mut().query::<&CommandDefinition>();
         let tools = query
             .iter(app.world())
+            .filter(|definition| definition.matches("browser_open_history"))
             .filter_map(CommandDefinition::agent_tool)
             .collect::<Vec<_>>();
         assert_eq!(

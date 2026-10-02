@@ -94,15 +94,15 @@ impl CropRect {
     }
 }
 
-pub(crate) struct ResolvedCapture {
-    pub(crate) window: Entity,
-    pub(crate) size: CaptureSize,
-    pub(crate) scale: f64,
-    pub(crate) crop: Option<CropRect>,
+pub(super) struct ResolvedCapture {
+    pub(super) window: Entity,
+    pub(super) size: CaptureSize,
+    pub(super) scale: f64,
+    pub(super) crop: Option<CropRect>,
 }
 
 #[derive(SystemParam)]
-pub(crate) struct CaptureSource<'w, 's> {
+pub(super) struct CaptureSource<'w, 's> {
     focused_window: vmux_layout::window::FocusedWindow<'w, 's>,
     hierarchy: vmux_layout::window::WindowHierarchy<'w, 's>,
     windows: Query<'w, 's, (Entity, &'static Window)>,
@@ -111,7 +111,7 @@ pub(crate) struct CaptureSource<'w, 's> {
 }
 
 impl CaptureSource<'_, '_> {
-    pub(crate) fn resolve(&self, pane: Option<&str>) -> Result<ResolvedCapture, String> {
+    pub(super) fn resolve(&self, pane: Option<&str>) -> Result<ResolvedCapture, String> {
         let pane_window = pane.and_then(|id| {
             let (_, bits) = vmux_layout::protocol::NodeKind::parse_id(id).ok()?;
             self.hierarchy.get(Entity::from_bits(bits))

@@ -500,7 +500,7 @@ mod tests {
         let save_path = path.clone();
         save_app.add_systems(Update, move |mut commands: Commands| {
             let mut save = SaveWorld::<BookmarkFilter>::into_file(save_path.clone());
-            save.components = bookmark_scene_filter();
+            save.components = BookmarkPersistencePath::scene_filter();
             commands.trigger_save(save);
         });
         save_app.update();

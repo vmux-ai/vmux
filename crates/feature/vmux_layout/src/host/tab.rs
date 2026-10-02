@@ -1,10 +1,7 @@
 #[cfg(test)]
 use crate::event::TabDropPlacement;
 use crate::event::{TabActivateRequest, TabCloseRequest, TabCreateRequest, TabReorderRequest};
-use crate::{
-    TabLayoutSpawnContent, TabLayoutSpawnRequest,
-    host::swap::{SiblingOrder, find_kind_index, resolve_next, resolve_prev},
-};
+use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest, host::swap::SiblingOrder};
 #[cfg(test)]
 use bevy::window::PrimaryWindow;
 use bevy::{ecs::relationship::Relationship, prelude::*};
@@ -45,27 +42,20 @@ impl Plugin for TabPlugin {
                 TabActivateRequest,
                 TabReorderRequest,
             )>::default())
-            .add_observer(create_request)
-            .add_observer(close_request)
-            .add_observer(activate_request)
-            .add_observer(reorder_request)
+            .add_observer(request_create)
+            .add_observer(request_close)
+            .add_observer(request_activate)
+            .add_observer(request_reorder)
             .add_systems(
                 Update,
-                (
-                    handle_open_requests,
-                    handle_create_requests,
-                    handle_close_requests,
-                    handle_focus_requests,
-                    handle_move_requests,
-                    handle_new_requests,
-                )
+                (open, create, close, focus, shift, new)
                     .chain()
                     .in_set(LayoutRequestSet::Handle)
                     .in_set(TabCommandSet)
                     .after(crate::space::EffectiveStartupSet),
             )
-            .add_systems(PostUpdate, sync_visibility.before(LayoutSystems::Layout))
-            .add_systems(PostUpdate, sync_order)
+            .add_systems(PostUpdate, visibility.before(LayoutSystems::Layout))
+            .add_systems(PostUpdate, order)
             .add_systems(Update, dismiss_launcher);
     }
 }
@@ -303,7 +293,7 @@ impl TabHierarchy<'_, '_> {
 #[derive(Event, Clone, Copy, Debug)]
 pub struct TabClosed;
 
-fn handle_open_requests(
+fn open(
     mut requests: MessageReader<OpenRequest>,
     tabs: Query<Entity, With<Tab>>,
     focused_window: crate::window::FocusedWindow,
@@ -341,7 +331,7 @@ fn handle_open_requests(
     }
 }
 
-fn handle_create_requests(
+fn create(
     mut requests: MessageReader<CreateRequest>,
     tabs: Query<Entity, With<Tab>>,
     focused_window: crate::window::FocusedWindow,
@@ -367,7 +357,7 @@ fn handle_create_requests(
     }
 }
 
-fn handle_close_requests(
+fn close(
     mut requests: MessageReader<CloseRequest>,
     active_tab: crate::stack::ActiveTabParam,
     mut close_requests: MessageWriter<CloseTabRequest>,
@@ -380,7 +370,7 @@ fn handle_close_requests(
     }
 }
 
-fn handle_focus_requests(
+fn focus(
     mut requests: MessageReader<FocusRequest>,
     active_tab: crate::stack::ActiveTabParam,
     hierarchy: TabHierarchy,
@@ -421,7 +411,7 @@ fn handle_focus_requests(
     }
 }
 
-fn handle_move_requests(
+fn shift(
     mut requests: MessageReader<MoveRequest>,
     active_tab: crate::stack::ActiveTabParam,
     tabs: Query<Entity, With<Tab>>,
@@ -446,23 +436,23 @@ fn handle_move_requests(
             .filter(|(_, entity)| tabs.contains(*entity))
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
-        let Some(active_index) = find_kind_index(active, children, &positions) else {
+        let Some(active_index) = SiblingOrder::index(active, children, &positions) else {
             continue;
         };
         let pair = if request.0 == SiblingDirection::Previous {
-            resolve_prev(active_index)
+            SiblingOrder::previous(active_index)
         } else {
-            resolve_next(active_index, positions.len())
+            SiblingOrder::next(active_index, positions.len())
         };
-        if let Some((left, right)) = pair {
-            if let Some(order) = SiblingOrder::swapped(parent, children, &positions, left, right) {
-                commands.queue(order);
-            }
+        if let Some((left, right)) = pair
+            && let Some(order) = SiblingOrder::swapped(parent, children, &positions, left, right)
+        {
+            commands.queue(order);
         }
     }
 }
 
-fn handle_new_requests(
+fn new(
     mut requests: MessageReader<crate::NewTabRequest>,
     tabs: Query<Entity, With<Tab>>,
     focused_window: crate::window::FocusedWindow,
@@ -507,7 +497,7 @@ impl Tab {
     }
 }
 
-fn sync_visibility(mut tabs: Query<(&mut Node, &mut Visibility, Has<Active>), With<Tab>>) {
+fn visibility(mut tabs: Query<(&mut Node, &mut Visibility, Has<Active>), With<Tab>>) {
     for (mut node, mut vis, active) in &mut tabs {
         let target_display = if active { Display::Flex } else { Display::None };
         if node.display != target_display {
@@ -524,7 +514,7 @@ fn sync_visibility(mut tabs: Query<(&mut Node, &mut Visibility, Has<Active>), Wi
     }
 }
 
-fn sync_order(
+fn order(
     spaces: Query<&Children, (With<crate::space::Space>, Changed<Children>)>,
     tab_q: Query<(), With<Tab>>,
     mut order_q: Query<&mut Order>,
@@ -551,14 +541,14 @@ fn sync_order(
     }
 }
 
-fn create_request(
+fn request_create(
     _trigger: On<UiInput<TabCreateRequest>>,
     mut requests: MessageWriter<OpenRequest>,
 ) {
     requests.write(OpenRequest { url: None });
 }
 
-fn close_request(
+fn request_close(
     trigger: On<UiInput<TabCloseRequest>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab_param: crate::stack::ActiveTabParam,
@@ -574,7 +564,7 @@ fn close_request(
     close_requests.write(CloseTabRequest { tab: target });
 }
 
-fn activate_request(
+fn request_activate(
     trigger: On<UiInput<TabActivateRequest>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     mut commands: Commands,
@@ -588,7 +578,7 @@ fn activate_request(
     commands.entity(target).insert(LastActivatedAt::now());
 }
 
-fn reorder_request(
+fn request_reorder(
     trigger: On<UiInput<TabReorderRequest>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of: Query<&ChildOf>,
@@ -630,10 +620,10 @@ fn reorder_request(
         .filter(|(_, entity)| tabs.contains(*entity))
         .map(|(index, _)| index)
         .collect::<Vec<_>>();
-    let Some(from) = find_kind_index(source, siblings, &kind_positions) else {
+    let Some(from) = SiblingOrder::index(source, siblings, &kind_positions) else {
         return;
     };
-    let Some(to) = find_kind_index(target, siblings, &kind_positions) else {
+    let Some(to) = SiblingOrder::index(target, siblings, &kind_positions) else {
         return;
     };
     let destination = request
@@ -769,8 +759,7 @@ mod tests {
 
     fn order_app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, sync_order);
+        app.add_plugins(MinimalPlugins).add_systems(Update, order);
         app
     }
 
@@ -913,14 +902,7 @@ mod tests {
             .init_resource::<CollectedSpawns>()
             .add_systems(
                 Update,
-                (
-                    handle_open_requests,
-                    handle_create_requests,
-                    handle_close_requests,
-                    handle_focus_requests,
-                    handle_move_requests,
-                    handle_new_requests,
-                )
+                (open, create, close, focus, shift, new)
                     .chain()
                     .before(crate::window::TabLayoutSpawnSet),
             )
@@ -1021,7 +1003,7 @@ mod tests {
     #[test]
     fn open_in_new_tab_none_url_opens_the_start_page() {
         let mut app = build_app();
-        build_main_and_tab(&mut app, "");
+        build_main_and_tab(&mut app, "vmux://start/");
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
@@ -1335,7 +1317,7 @@ mod tests {
         .add_message::<CloseRequest>()
         .add_message::<crate::TabLayoutSpawnRequest>()
         .add_message::<crate::NewTabRequest>()
-        .add_systems(Update, handle_close_requests.in_set(TabCommandSet));
+        .add_systems(Update, close.in_set(TabCommandSet));
 
         app.world_mut()
             .spawn((Window::default(), PrimaryWindow, vmux_ecs::Active));
@@ -1394,7 +1376,7 @@ mod tests {
         ))
         .add_message::<crate::TabLayoutSpawnRequest>()
         .add_message::<CloseTabRequest>()
-        .add_observer(close_request);
+        .add_observer(request_close);
 
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut()

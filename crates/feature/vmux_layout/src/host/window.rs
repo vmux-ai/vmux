@@ -60,13 +60,10 @@ impl Plugin for WindowLayoutPlugin {
                     .in_set(LayoutStartupSet::Post)
                     .after(crate::stack::OpenStartupPageSet),
             )
-            .add_systems(
-                PostUpdate,
-                (fit_to_screen, sync_to_settings, sync_main_column_gap),
-            )
+            .add_systems(PostUpdate, (fit_to_screen, persist, gap))
             .add_systems(
                 Update,
-                (sync_focused, bevy::ecs::schedule::ApplyDeferred)
+                (focused, bevy::ecs::schedule::ApplyDeferred)
                     .chain()
                     .in_set(WindowFocusSet),
             )
@@ -271,7 +268,7 @@ pub struct WindowGeometry {
     pub size: Option<Vec2>,
 }
 
-fn sync_focused(
+fn focused(
     windows: Query<(Entity, &Window, Has<PrimaryWindow>, Has<Active>)>,
     mut commands: Commands,
 ) {
@@ -563,19 +560,29 @@ fn request_default(
     });
 }
 
-pub(crate) struct TabScaffold {
-    pub(crate) tab: Entity,
-    pub(crate) pane: Entity,
-    pub(crate) stack: Entity,
+pub(super) struct TabScaffold {
+    tab: Entity,
+    pane: Entity,
+    stack: Entity,
+}
+
+impl TabScaffold {
+    pub(super) fn tab(&self) -> Entity {
+        self.tab
+    }
+
+    pub(super) fn stack(&self) -> Entity {
+        self.stack
+    }
 }
 
 #[derive(SystemParam)]
-pub(crate) struct TabSpawner<'w, 's> {
+pub(super) struct TabSpawner<'w, 's> {
     commands: Commands<'w, 's>,
 }
 
 impl TabSpawner<'_, '_> {
-    pub(crate) fn spawn(
+    pub(super) fn spawn(
         &mut self,
         space: Entity,
         primary_window: Entity,
@@ -688,7 +695,7 @@ fn spawn_requested_tab_layouts(
     }
 }
 
-fn sync_to_settings(
+fn persist(
     settings: Res<LayoutSettings>,
     hidden_windows: Query<(), With<crate::toggle::LayoutHidden>>,
     mut window_q: Query<
@@ -749,7 +756,7 @@ fn sync_to_settings(
     }
 }
 
-fn sync_main_column_gap(
+fn gap(
     focus: crate::stack::FocusedStack,
     layout_focus: crate::stack::LayoutFocus,
     mut main_column_q: Query<&mut Node, With<MainColumn>>,
@@ -1044,11 +1051,10 @@ mod tests {
             .world_mut()
             .spawn((crate::space::Space, ChildOf(main)))
             .id();
-        app.world_mut()
-            .entity_mut(space)
-            .insert(crate::space::EffectiveStartupDir(Some(
-                startup_dir.path().to_path_buf(),
-            )));
+        app.world_mut().entity_mut(space).insert((
+            crate::space::EffectiveStartupDir(Some(startup_dir.path().to_path_buf())),
+            vmux_ecs::EffectiveStartupUrl("vmux://start/".to_string()),
+        ));
 
         app.update();
 
@@ -1293,7 +1299,7 @@ mod tests {
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
-            .add_systems(Update, sync_to_settings);
+            .add_systems(Update, persist);
         let window = app
             .world_mut()
             .spawn((

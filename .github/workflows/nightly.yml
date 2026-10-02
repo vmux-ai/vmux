@@ -51,54 +51,10 @@ jobs:
           echo "NIGHTLY_DATE=$date" >> "$GITHUB_ENV"
           echo "NIGHTLY_VERSION=$version" >> "$GITHUB_ENV"
 
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-macos
         with:
-          targets: wasm32-unknown-unknown
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: nightly-mac
-
-      - name: Cache cargo binaries
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp${{ env.CARGO_PACKAGER_VERSION }}-cba${{ env.BEVY_CEF_BUNDLE_APP_VERSION }}-cef${{ steps.cef.outputs.version }}-v3
-
-      - name: Cache binaryen
-        uses: actions/cache@v5
-        with:
-          path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
-          key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
-
-      - name: Cache CEF framework
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/share/Chromium Embedded Framework.framework
-          key: cef-${{ runner.os }}-${{ steps.cef.outputs.version }}
-
-      - name: Cache tailwindcss
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/bin/tailwindcss
-          key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
-
-      - name: Add local binaries to PATH
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Install build dependencies
-        run: |
-          set -euo pipefail
-          if [ ! -d "$HOME/.local/share/Chromium Embedded Framework.framework" ]; then
-            command -v export-cef-dir >/dev/null 2>&1 || cargo install "export-cef-dir@${CEF_VERSION}"
-            export-cef-dir --force "$HOME/.local/share"
-          fi
-          ./scripts/install-dioxus-cli.sh
-          ./scripts/install-dioxus-binaryen.sh
-          ./scripts/install-package-tools.sh
-          TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
+          cache-key: nightly-mac
+          cef-version: ${{ steps.cef.outputs.version }}
 
       - name: Build, sign, notarize, and package
         env:

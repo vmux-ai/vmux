@@ -115,6 +115,7 @@ fn close(
     child_of: Query<&ChildOf>,
     splits: Query<&PaneSplit>,
     stacks: Query<Entity, With<Stack>>,
+    mut nodes: Query<&mut Node, With<Pane>>,
     focused_space: crate::space::FocusedSpace,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
@@ -188,6 +189,12 @@ fn close(
             commands.entity(sibling).remove::<ChildOf>();
             commands.entity(sibling).despawn();
             commands.entity(parent).insert(PaneSplit { direction });
+            if let Ok(mut node) = nodes.get_mut(parent) {
+                node.flex_direction = direction.flex_direction();
+                let gaps = direction.gaps(crate::event::PANE_GAP_PX);
+                node.column_gap = gaps.column_gap;
+                node.row_gap = gaps.row_gap;
+            }
         } else {
             new_active_pane = parent;
             commands.entity(parent).remove::<PaneSplit>();

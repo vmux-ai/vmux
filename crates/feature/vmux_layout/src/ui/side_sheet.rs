@@ -123,7 +123,7 @@ fn SideSheetContent() -> Element {
         state.window_pad_left,
         state.window_pad_top,
         state.window_pad_bottom,
-        crate::event::url_bar_top(),
+        crate::event::SPACES_ROW_HEIGHT_PX,
     );
     let active_pane = side_sheet.active_pane;
     let drag_state = use_signal(|| None::<BookmarkDragState>);

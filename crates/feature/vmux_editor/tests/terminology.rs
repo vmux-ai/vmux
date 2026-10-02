@@ -2,12 +2,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const ALLOWED_PREFIXES: &[&str] = &[
-    "crates/util/vmux_browser/src/extension/",
+    "crates/feature/vmux_extension/",
     "crates/util/vmux_ecs/src/host/extension/",
 ];
 const ALLOWED_FILES: &[&str] = &[
     "crates/util/vmux_mcp/src/tools/param.rs",
-    "crates/util/vmux_browser/src/bin/vmux-extension-conformance.rs",
     "crates/util/vmux_browser/src/lib.rs",
     "crates/util/vmux_browser/src/page_life.rs",
 ];

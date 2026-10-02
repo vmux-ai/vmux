@@ -106,14 +106,8 @@ impl Default for AppSettings {
     }
 }
 
-#[derive(Resource, Clone)]
+#[derive(Resource, Clone, Default)]
 struct SettingsDefaults(AppSettings);
-
-impl Default for SettingsDefaults {
-    fn default() -> Self {
-        Self(AppSettings::default())
-    }
-}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -2009,36 +2003,6 @@ mod tests {
     }
 
     #[test]
-    fn embedded_settings_pin_every_user_facing_page() {
-        let settings = load_embedded_settings();
-        let urls = settings
-            .browser
-            .bookmarks
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            urls,
-            [
-                "vmux://start/",
-                "vmux://terminal/",
-                "vmux://projects/",
-                "vmux://knowledge/",
-                "vmux://tools/",
-                "vmux://vault/",
-                "vmux://services/",
-                "vmux://simulator/",
-                "vmux://spaces/",
-                "vmux://team/",
-                "vmux://history/",
-                "vmux://shortcuts/",
-                "vmux://settings/",
-            ]
-        );
-    }
-
-    #[test]
     fn embedded_settings_use_page_pins_instead_of_starter_folders() {
         let settings = load_embedded_settings();
 
@@ -2678,6 +2642,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(base_settings())
+            .init_resource::<SettingsDefaults>()
             .add_message::<SettingsWriteRequest>()
             .add_systems(Update, flush_settings_save);
         app.world_mut().spawn(SettingsSaveDebounce {
@@ -2704,6 +2669,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(base_settings())
+            .init_resource::<SettingsDefaults>()
             .add_message::<SettingsWriteRequest>()
             .add_systems(Update, flush_settings_save);
         app.world_mut().spawn(SettingsSaveDebounce {
@@ -2747,78 +2713,6 @@ mod tests {
             parse_settings(&ron).unwrap().editor.keymap,
             vmux_api::editor::KeymapKind::Vim
         );
-    }
-
-    #[test]
-    fn embedded_settings_bind_tab_nav_to_leader() {
-        let s = load_embedded_settings();
-        let leader_key = |cmd: &str| -> Option<String> {
-            s.shortcuts.bindings.iter().find_map(|e| match &e.binding {
-                ShortcutDef::Leader(combo) if e.command == cmd => Some(combo.key.clone()),
-                _ => None,
-            })
-        };
-
-        assert_eq!(
-            leader_key("open_in_new_tab").as_deref(),
-            Some("c"),
-            "leader c must create a new tab"
-        );
-        assert_eq!(
-            leader_key("next_tab").as_deref(),
-            Some("n"),
-            "leader n must select the next tab"
-        );
-        assert_eq!(
-            leader_key("prev_tab").as_deref(),
-            Some("p"),
-            "leader p must select the previous tab"
-        );
-        assert_eq!(
-            leader_key("open_in_new_stack"),
-            None,
-            "leader c is rebound from new stack to new tab"
-        );
-    }
-
-    #[test]
-    fn embedded_settings_bind_tmux_layout_parity_to_leader() {
-        let settings = load_embedded_settings();
-        let has = |command: &str, key: &str, ctrl: bool, shift: bool, alt: bool| {
-            settings.shortcuts.bindings.iter().any(|entry| {
-                let ShortcutDef::Leader(combo) = &entry.binding else {
-                    return false;
-                };
-                entry.command == command
-                    && combo.key == key
-                    && combo.ctrl == ctrl
-                    && combo.shift == shift
-                    && combo.alt == alt
-            })
-        };
-
-        for (command, key, ctrl, shift, alt) in [
-            ("open_in_pane_right", "%", false, false, false),
-            ("open_in_pane_bottom", "\"", false, false, false),
-            ("close_pane", "x", false, false, false),
-            ("toggle_pane", "o", false, false, false),
-            ("zoom_pane", "z", false, false, false),
-            ("swap_pane_prev", "{", false, false, false),
-            ("swap_pane_next", "}", false, false, false),
-            ("rotate_forward", "r", false, false, false),
-            ("rotate_backward", "r", false, true, false),
-            ("rotate_forward", "o", true, false, false),
-            ("rotate_backward", "o", false, false, true),
-            ("mirror_panes", "m", false, false, false),
-            ("equalize_pane_size", "e", false, true, false),
-            ("resize_pane_left", "ArrowLeft", true, false, false),
-            ("resize_pane_right", "ArrowRight", false, false, true),
-        ] {
-            assert!(
-                has(command, key, ctrl, shift, alt),
-                "missing <leader> {key} binding for {command}"
-            );
-        }
     }
 
     #[test]

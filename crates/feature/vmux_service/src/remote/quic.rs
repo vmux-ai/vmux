@@ -300,7 +300,7 @@ impl ControlStream {
             return;
         }
 
-        let response = dispatch::dispatch(&state, request).await;
+        let response = state.dispatch(request).await;
         let Ok(encoded) = rkyv::to_bytes::<rkyv::rancor::Error>(&response) else {
             self.refuse(Rejection::Malformed);
             return;

@@ -15,7 +15,7 @@ use crate::event::ChatDraftChanged;
 #[cfg(host)]
 use crate::event::{ChatPickFiles, ChatResumeQueryRequest, ChatSlashCommandRequest};
 use crate::selector::SelectorMode;
-use vmux_ui::prompt_recall::{PromptHistoryDirection, move_prompt_history};
+use vmux_ui::prompt_recall::PromptHistoryDirection;
 
 #[derive(Component, Default)]
 pub(super) struct ComposerState {
@@ -57,12 +57,11 @@ impl ComposerState {
         history: &[String],
         direction: PromptHistoryDirection,
     ) -> ChatComposerEffect {
-        let (draft, cursor, scratch) = move_prompt_history(
+        let (draft, cursor, scratch) = direction.move_in(
             history,
             self.history_cursor,
             &self.history_scratch,
             &self.draft,
-            direction,
         );
         self.history_cursor = cursor;
         self.history_scratch = scratch;

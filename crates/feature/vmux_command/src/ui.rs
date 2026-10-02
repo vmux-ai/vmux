@@ -15,8 +15,8 @@ use vmux_api::command_bar::{
 };
 use vmux_api::input::UiKeyContext;
 use vmux_api::prompt_media::{ChatPasteMedia, ChatPickFiles};
-use vmux_ui::agent_accent::agent_accent;
-use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
+use vmux_ui::agent_accent::AgentAccent;
+use vmux_ui::caret::{EventSelection, TextCaret};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposer, focus_prompt_end};
 use vmux_ui::components::composer_bar::ComposerBar;
 use vmux_ui::components::icon::Icon;
@@ -27,7 +27,7 @@ use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_ui_state};
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
-use vmux_ui::prompt_recall::{PromptHistoryDirection, prompt_history_direction};
+use vmux_ui::prompt_recall::PromptHistoryDirection;
 use vmux_ui::scroll::ScrollIntoView;
 
 use crate::CommandPaletteSurface;
@@ -207,8 +207,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     let composer = projection.composer.clone();
-    let accent = projection.accent_agent.as_deref().map(agent_accent);
-    let start_accent = accent.unwrap_or_else(|| agent_accent("vibe"));
+    let accent = projection
+        .accent_agent
+        .as_deref()
+        .map(AgentAccent::for_agent);
+    let start_accent = accent.unwrap_or_else(|| AgentAccent::for_agent("vibe"));
     let start_prompt_attachments = palette_data.composer_attachments.clone();
     let start_submission_enabled = !q.trim().is_empty() || !attachments.is_empty();
     let chips = ComposerChips::build(&composer, state_val.open_id);
@@ -363,12 +366,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     let entering = go_up && projection.selected == 0;
                     entering
                         .then(|| {
-                            prompt_history_direction(
+                            PromptHistoryDirection::from_key(
                                 &e.key().to_string(),
                                 ctrl,
                                 &query,
-                                byte_offset_to_utf16(&query, start),
-                                byte_offset_to_utf16(&query, end),
+                                TextCaret::utf16_from_byte(&query, start),
+                                TextCaret::utf16_from_byte(&query, end),
                             )
                         })
                         .flatten()

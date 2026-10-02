@@ -68,14 +68,13 @@ struct PaneOpenResolver<'w, 's> {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct PaneOpenWriter<'w, 's> {
-    commands: Commands<'w, 's>,
     requests: MessageWriter<'w, PageOpenRequest>,
     counter: Single<'w, 's, &'static mut SpawnCounter>,
     sequences: Query<'w, 's, &'static SpawnSeq>,
 }
 
 impl PaneOpenWriter<'_, '_> {
-    fn touch(&mut self, pane: Entity) -> SpawnSeq {
+    fn touch(&mut self, commands: &mut Commands, pane: Entity) -> SpawnSeq {
         let max_existing = self
             .sequences
             .iter()
@@ -87,7 +86,7 @@ impl PaneOpenWriter<'_, '_> {
         }
         self.counter.0 += 1;
         let sequence = SpawnSeq(self.counter.0);
-        self.commands.entity(pane).insert(sequence);
+        commands.entity(pane).insert(sequence);
         sequence
     }
 
@@ -142,7 +141,7 @@ fn handle_beside_requests(
                 writer.open(hit.stack, req.url.clone(), None);
             }
             if req.focus {
-                focus_reuse_hit(&mut writer.commands, &child_of_q, hit);
+                focus_reuse_hit(&mut tree.commands, &child_of_q, hit);
             }
             continue;
         }
@@ -155,7 +154,7 @@ fn handle_beside_requests(
                 *pending_url = req.url.clone();
             }
             if req.focus {
-                focus_stack_in_layout(&mut writer.commands, &child_of_q, &focus, *stack);
+                focus_stack_in_layout(&mut tree.commands, &child_of_q, &focus, *stack);
             }
             continue;
         }
@@ -195,6 +194,7 @@ fn handle_beside_requests(
                             &mut retired_leaf_panes,
                         );
                         stamp_split_panes_for_batch(
+                            &mut tree.commands,
                             &mut writer,
                             &mut spawn_seq_overrides,
                             &mut pending_leaf_infos,
@@ -208,6 +208,7 @@ fn handle_beside_requests(
                     }
                 };
             let stack = spawn_beside_stack(
+                &mut tree.commands,
                 target_pane,
                 req,
                 &mut writer,
@@ -223,6 +224,7 @@ fn handle_beside_requests(
 
         let Some(tab) = focus.tab_of(req.pane) else {
             let stack = spawn_beside_stack(
+                &mut tree.commands,
                 req.pane,
                 req,
                 &mut writer,
@@ -250,7 +252,7 @@ fn handle_beside_requests(
 
         match Placement::resolve(&req.url, reuse, &leaves, req.pane) {
             Placement::Focus { tab, stack } => {
-                focus_reuse_hit(&mut writer.commands, &child_of_q, ReuseHit { tab, stack });
+                focus_reuse_hit(&mut tree.commands, &child_of_q, ReuseHit { tab, stack });
             }
             Placement::AddTab { pane } => {
                 let refresh_spawn_seq = matches!(
@@ -258,6 +260,7 @@ fn handle_beside_requests(
                     PageKind::File | PageKind::Terminal
                 );
                 let stack = spawn_beside_stack(
+                    &mut tree.commands,
                     pane,
                     req,
                     &mut writer,
@@ -292,6 +295,7 @@ fn handle_beside_requests(
                     &mut retired_leaf_panes,
                 );
                 stamp_split_panes_for_batch(
+                    &mut tree.commands,
                     &mut writer,
                     &mut spawn_seq_overrides,
                     &mut pending_leaf_infos,
@@ -302,6 +306,7 @@ fn handle_beside_requests(
                     .target_size
                     .unwrap_or_else(|| pane_size(anchor, &resolver.node_q));
                 let stack = spawn_beside_stack(
+                    &mut tree.commands,
                     split.target,
                     req,
                     &mut writer,
@@ -368,6 +373,7 @@ fn split_or_extend_for_batch(
 
 #[allow(clippy::too_many_arguments)]
 fn stamp_split_panes_for_batch(
+    commands: &mut Commands,
     writer: &mut PaneOpenWriter,
     spawn_seq_overrides: &mut std::collections::HashMap<Entity, u64>,
     pending_leaf_infos: &mut std::collections::HashMap<Entity, LeafInfo>,
@@ -375,7 +381,7 @@ fn stamp_split_panes_for_batch(
     target: Entity,
 ) {
     let mut stamp = |pane| {
-        let seq = writer.touch(pane);
+        let seq = writer.touch(commands, pane);
         spawn_seq_overrides.insert(pane, seq.0);
         if let Some(info) = pending_leaf_infos.get_mut(&pane) {
             info.spawn_seq = seq.0;
@@ -428,6 +434,7 @@ fn current_pane_spawn_seq(
 }
 
 fn spawn_beside_stack(
+    commands: &mut Commands,
     target_pane: Entity,
     req: &OpenBesideRequest,
     writer: &mut PaneOpenWriter,
@@ -438,7 +445,7 @@ fn spawn_beside_stack(
     refresh_spawn_seq: bool,
 ) -> Entity {
     let spawn_seq = if refresh_spawn_seq {
-        let seq = writer.touch(target_pane);
+        let seq = writer.touch(commands, target_pane);
         spawn_seq_overrides.insert(target_pane, seq.0);
         seq.0
     } else {
@@ -461,11 +468,10 @@ fn spawn_beside_stack(
     } else {
         LastActivatedAt(0)
     };
-    let new_stack = writer
-        .commands
+    let new_stack = commands
         .spawn((Stack::bundle(), stack_ts, ChildOf(target_pane)))
         .id();
-    writer.commands.entity(new_stack).insert(PageMetadata {
+    commands.entity(new_stack).insert(PageMetadata {
         url: req.url.clone(),
         ..default()
     });

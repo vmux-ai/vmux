@@ -796,7 +796,7 @@ mod tests {
         assert!(!missing.exists);
         assert_eq!(
             missing.path,
-            PathIdentity::resolve(&temp.path().join("projects/Missing Note.md")).into_path_buf()
+            PathIdentity::resolve(temp.path().join("projects/Missing Note.md")).into_path_buf()
         );
     }
 

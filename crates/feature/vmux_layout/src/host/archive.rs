@@ -63,7 +63,10 @@ impl Plugin for ArchivePlugin {
         }
         app.add_message::<ReopenClosedPage>()
             .add_message::<PageArchiveRequest>()
+            .add_message::<CloseStackRequest>()
             .add_message::<CloseTabRequest>()
+            .add_message::<TabLayoutSpawnRequest>()
+            .init_resource::<LayoutSettings>()
             .add_systems(Startup, bind_command.in_set(BindCommands))
             .add_observer(issue_reopen_closed_page)
             .add_systems(Update, (capture_archived_pages, maintain))
@@ -74,7 +77,8 @@ impl Plugin for ArchivePlugin {
                     handle_reopen_closed_page,
                     handle_close_tab_requests
                         .after(TabCommandSet)
-                        .after(StackCommandSet),
+                        .after(StackCommandSet)
+                        .after(CloseStackSet),
                 )
                     .in_set(LayoutRequestSet::Handle),
             );
@@ -947,9 +951,11 @@ fn resolve_reopen_stack(
 
     let scaffold = tabs.spawn(space, primary_window, gap);
     if origin_matches && let Some(idx) = tab_index {
-        commands.entity(space).insert_children(idx, &[scaffold.tab]);
+        commands
+            .entity(space)
+            .insert_children(idx, &[scaffold.tab()]);
     }
-    (scaffold.stack, scaffold.tab)
+    (scaffold.stack(), scaffold.tab())
 }
 
 fn spawn_stack_in_leaf(

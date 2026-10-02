@@ -244,11 +244,15 @@ fn launch_detached(
     }
 }
 
+type ConnectRuntime = (
+    Entity,
+    &'static mut ServiceConnectRetry,
+    &'static ServiceWakeCallback,
+);
+type DisconnectedService = (Without<ServiceClient>, Without<ServiceConnectTask>);
+
 fn start_connection(
-    mut runtimes: Query<
-        (Entity, &mut ServiceConnectRetry, &ServiceWakeCallback),
-        (Without<ServiceClient>, Without<ServiceConnectTask>),
-    >,
+    mut runtimes: Query<ConnectRuntime, DisconnectedService>,
     time: Res<Time>,
     mut commands: Commands,
 ) {

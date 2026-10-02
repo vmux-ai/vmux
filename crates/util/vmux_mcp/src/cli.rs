@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
 
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use vmux_ecs::ProcessId;
@@ -16,6 +16,10 @@ pub struct McpCliPlugin;
 
 impl Plugin for McpCliPlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut().spawn((
+            Name::new("MCP async runtime"),
+            McpRuntime(tokio::runtime::Handle::current()),
+        ));
         app.add_plugins((FeaturePlugin::<crate::Feature>::default(), McpPlugin))
             .add_systems(
                 Update,
@@ -24,16 +28,8 @@ impl Plugin for McpCliPlugin {
             .add_systems(
                 Update,
                 (write_stdio, finish_stdio).chain().in_set(McpSet::Output),
-            )
-            .add_systems(Startup, spawn_runtime);
+            );
     }
-}
-
-fn spawn_runtime(mut commands: Commands) {
-    commands.spawn((
-        Name::new("MCP async runtime"),
-        McpRuntime(tokio::runtime::Handle::current()),
-    ));
 }
 
 struct McpCliOptions {
@@ -116,8 +112,8 @@ fn start_stdio(
                 let stdin = io::stdin();
                 let mut reader = stdin.lock();
                 loop {
-                    match crate::protocol::read_json_line(&mut reader) {
-                        Ok(Some(value)) => {
+                    match McpInput::read(&mut reader) {
+                        Ok(Some(McpInput(value))) => {
                             if sender.send(McpStdin::Input(value)).is_err() {
                                 return;
                             }

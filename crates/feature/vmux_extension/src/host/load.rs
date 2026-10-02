@@ -8,116 +8,120 @@ use super::service_worker_cache::ServiceWorkerCache;
 #[derive(Component, Clone, Debug, Default)]
 pub struct PreparedExtensions(pub Vec<PreparedRuntime>);
 
-pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
-    let store = store::ExtensionStore::current();
-    let runtime_store = store::ExtensionStore::at(runtime_store_root());
-    let profile = vmux_ecs::profile::Profile::current().into_id();
-    let mut idx = store.load_index()?;
-    let migrating = idx.requires_save();
-    let mut index_changed = migrating;
-    if migrating {
-        migrate_index_permissions(&store, &mut idx)?;
+impl PreparedExtensions {
+    pub fn load() -> Result<Self, String> {
+        let store = store::ExtensionStore::current();
+        let runtime_store = store::ExtensionStore::at(Self::runtime_store_root());
+        let profile = vmux_ecs::profile::Profile::current().into_id();
+        let mut index = store.load_index()?;
+        let migrating = index.requires_save();
+        let mut index_changed = migrating;
+        if migrating {
+            Self::migrate_index_permissions(&store, &mut index)?;
+        }
+        let (prepared, preparation_changed) =
+            Self::prepare_enabled_entries(&profile, &mut index.entries, |entry| {
+                PreparedRuntime::prepare(&store, &runtime_store, &profile, entry)
+            })?;
+        index_changed |= preparation_changed;
+        if index_changed {
+            store.save_index(&index)?;
+        }
+        let profile_dir = vmux_ecs::profile::ProfilePaths::current().profile();
+        ServiceWorkerCache::from(profile_dir.as_path()).reconcile(&prepared)?;
+        let directories = prepared
+            .iter()
+            .map(|item| item.dir.to_string_lossy())
+            .collect::<Vec<_>>();
+        if directories.is_empty() {
+            unsafe { std::env::remove_var("VMUX_LOAD_EXTENSIONS") };
+        } else {
+            unsafe { std::env::set_var("VMUX_LOAD_EXTENSIONS", directories.join(",")) };
+        }
+        store.save_loaded_ids(&profile, &index.enabled_ids_for(&profile))?;
+        Ok(Self(prepared))
     }
-    let (prepared, preparation_changed) =
-        prepare_enabled_entries(&profile, &mut idx.entries, |entry| {
-            runtime::prepare_runtime_in(&store, &runtime_store, &profile, entry)
-        })?;
-    index_changed |= preparation_changed;
-    if index_changed {
-        store.save_index(&idx)?;
-    }
-    let profile_dir = vmux_ecs::profile::ProfilePaths::current().profile();
-    ServiceWorkerCache::from(profile_dir.as_path()).reconcile(&prepared)?;
-    let dirs = prepared
-        .iter()
-        .map(|item| item.dir.to_string_lossy())
-        .collect::<Vec<_>>();
-    if dirs.is_empty() {
-        unsafe { std::env::remove_var("VMUX_LOAD_EXTENSIONS") };
-    } else {
-        unsafe { std::env::set_var("VMUX_LOAD_EXTENSIONS", dirs.join(",")) };
-    }
-    store.save_loaded_ids(&profile, &idx.enabled_ids_for(&profile))?;
-    Ok(prepared)
-}
 
-fn prepare_enabled_entries(
-    profile: &str,
-    entries: &mut [store::ExtEntry],
-    mut prepare: impl FnMut(&store::ExtEntry) -> Result<PreparedRuntime, runtime::PrepareRuntimeError>,
-) -> Result<(Vec<PreparedRuntime>, bool), String> {
-    let mut prepared = Vec::new();
-    let mut changed = false;
-    for entry in entries
-        .iter_mut()
-        .filter(|entry| entry.enabled_for(profile))
-    {
-        match prepare(entry) {
-            Ok(item) => {
-                if entry.source_hash.is_empty() {
-                    entry.source_hash.clone_from(&item.source_hash);
+    fn prepare_enabled_entries(
+        profile: &str,
+        entries: &mut [store::ExtEntry],
+        mut prepare: impl FnMut(
+            &store::ExtEntry,
+        ) -> Result<PreparedRuntime, runtime::PrepareRuntimeError>,
+    ) -> Result<(Vec<PreparedRuntime>, bool), String> {
+        let mut prepared = Vec::new();
+        let mut changed = false;
+        for entry in entries
+            .iter_mut()
+            .filter(|entry| entry.enabled_for(profile))
+        {
+            match prepare(entry) {
+                Ok(item) => {
+                    if entry.source_hash.is_empty() {
+                        entry.source_hash.clone_from(&item.source_hash);
+                        changed = true;
+                    }
+                    prepared.push(item);
+                }
+                Err(runtime::PrepareRuntimeError::Corrupt(error)) => {
+                    bevy::log::error!(
+                        extension_id = %entry.id,
+                        %profile,
+                        %error,
+                        "disabling extension after preparation failure"
+                    );
+                    entry.profile_enabled.insert(profile.to_string(), false);
                     changed = true;
                 }
-                prepared.push(item);
+                Err(runtime::PrepareRuntimeError::Infrastructure(error)) => {
+                    return Err(format!("failed to prepare extension {}: {error}", entry.id));
+                }
             }
-            Err(runtime::PrepareRuntimeError::Corrupt(error)) => {
-                bevy::log::error!(
-                    extension_id = %entry.id,
-                    %profile,
-                    %error,
-                    "disabling extension after preparation failure"
+        }
+        Ok((prepared, changed))
+    }
+
+    fn runtime_store_root() -> std::path::PathBuf {
+        vmux_ecs::profile::ProfilePaths::current()
+            .shared_data()
+            .join("extensions")
+    }
+
+    fn migrate_index_permissions(
+        store: &store::ExtensionStore,
+        index: &mut store::Index,
+    ) -> Result<(), String> {
+        for entry in &mut index.entries {
+            let expected = store.source_dir(&entry.id, &entry.version);
+            let source = if expected.exists() {
+                expected
+            } else {
+                store.migrate_legacy_package(entry)?
+            };
+            let text = std::fs::read_to_string(source.join("manifest.json"))
+                .map_err(|error| error.to_string())?;
+            let parsed = manifest::ExtensionManifest::parse(&text)?;
+            entry.permissions = parsed.permissions;
+            entry.optional_permissions = parsed.optional_permissions;
+            entry.host_permissions = parsed.host_permissions;
+            entry.optional_host_permissions = parsed.optional_host_permissions;
+            for profile in entry
+                .profile_enabled
+                .iter()
+                .filter_map(|(profile, enabled)| enabled.then_some(profile.clone()))
+                .collect::<Vec<_>>()
+            {
+                entry.approved_grants.insert(
+                    profile,
+                    store::ExtensionGrants {
+                        permissions: entry.permissions.clone(),
+                        host_permissions: entry.host_permissions.clone(),
+                    },
                 );
-                entry.profile_enabled.insert(profile.to_string(), false);
-                changed = true;
-            }
-            Err(runtime::PrepareRuntimeError::Infrastructure(error)) => {
-                return Err(format!("failed to prepare extension {}: {error}", entry.id));
             }
         }
+        Ok(())
     }
-    Ok((prepared, changed))
-}
-
-fn runtime_store_root() -> std::path::PathBuf {
-    vmux_ecs::profile::ProfilePaths::current()
-        .shared_data()
-        .join("extensions")
-}
-
-fn migrate_index_permissions(
-    store: &store::ExtensionStore,
-    index: &mut store::Index,
-) -> Result<(), String> {
-    for entry in &mut index.entries {
-        let expected = store.source_dir(&entry.id, &entry.version);
-        let source = if expected.exists() {
-            expected
-        } else {
-            store.migrate_legacy_package(entry)?
-        };
-        let text = std::fs::read_to_string(source.join("manifest.json"))
-            .map_err(|error| error.to_string())?;
-        let parsed = manifest::ExtensionManifest::parse(&text)?;
-        entry.permissions = parsed.permissions;
-        entry.optional_permissions = parsed.optional_permissions;
-        entry.host_permissions = parsed.host_permissions;
-        entry.optional_host_permissions = parsed.optional_host_permissions;
-        for profile in entry
-            .profile_enabled
-            .iter()
-            .filter_map(|(profile, enabled)| enabled.then_some(profile.clone()))
-            .collect::<Vec<_>>()
-        {
-            entry.approved_grants.insert(
-                profile,
-                store::ExtensionGrants {
-                    permissions: entry.permissions.clone(),
-                    host_permissions: entry.host_permissions.clone(),
-                },
-            );
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -150,16 +154,17 @@ mod tests {
     fn preparation_failure_disables_only_the_broken_extension() {
         let mut entries = vec![enabled_entry("broken"), enabled_entry("working")];
 
-        let (prepared, changed) = prepare_enabled_entries("personal", &mut entries, |entry| {
-            if entry.id == "broken" {
-                Err(runtime::PrepareRuntimeError::Corrupt(
-                    "source hash mismatch".to_string(),
-                ))
-            } else {
-                Ok(PreparedRuntime::fixture(&entry.id, "runtime-hash"))
-            }
-        })
-        .unwrap();
+        let (prepared, changed) =
+            PreparedExtensions::prepare_enabled_entries("personal", &mut entries, |entry| {
+                if entry.id == "broken" {
+                    Err(runtime::PrepareRuntimeError::Corrupt(
+                        "source hash mismatch".to_string(),
+                    ))
+                } else {
+                    Ok(PreparedRuntime::fixture(&entry.id, "runtime-hash"))
+                }
+            })
+            .unwrap();
 
         assert!(changed);
         assert!(!entries[0].enabled_for("personal"));
@@ -177,16 +182,17 @@ mod tests {
     fn infrastructure_failure_keeps_extensions_enabled() {
         let mut entries = vec![enabled_entry("broken"), enabled_entry("working")];
 
-        let error = prepare_enabled_entries("personal", &mut entries, |entry| {
-            if entry.id == "broken" {
-                Err(runtime::PrepareRuntimeError::Infrastructure(
-                    "read-only runtime store".to_string(),
-                ))
-            } else {
-                Ok(PreparedRuntime::fixture(&entry.id, "runtime-hash"))
-            }
-        })
-        .unwrap_err();
+        let error =
+            PreparedExtensions::prepare_enabled_entries("personal", &mut entries, |entry| {
+                if entry.id == "broken" {
+                    Err(runtime::PrepareRuntimeError::Infrastructure(
+                        "read-only runtime store".to_string(),
+                    ))
+                } else {
+                    Ok(PreparedRuntime::fixture(&entry.id, "runtime-hash"))
+                }
+            })
+            .unwrap_err();
 
         assert_eq!(
             error,
@@ -240,7 +246,7 @@ mod tests {
         .unwrap();
         let mut index = store.load_index().unwrap();
 
-        migrate_index_permissions(&store, &mut index).unwrap();
+        PreparedExtensions::migrate_index_permissions(&store, &mut index).unwrap();
 
         assert_eq!(index.entries[0].permissions, ["storage"]);
         assert_eq!(

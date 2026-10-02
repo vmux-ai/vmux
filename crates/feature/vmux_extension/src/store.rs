@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::webstore;
+use crate::webstore::ChromeWebStore;
 use vmux_api::extension::{ExtRow, ExtStatus, ExtensionsEvent};
 
 use sha2::{Digest, Sha256};
@@ -164,139 +164,133 @@ impl ExtensionStore {
     }
 
     pub fn source_hash(&self, source: &Path) -> Result<String, String> {
-        tree_sha256(source)
+        let mut files = Vec::new();
+        Self::collect_files(source, source, &mut files)?;
+        files.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut hasher = Sha256::new();
+        for (relative, absolute) in files {
+            hasher.update(relative.as_bytes());
+            hasher.update([0]);
+            hasher.update(std::fs::read(absolute).map_err(|error| error.to_string())?);
+            hasher.update([0]);
+        }
+        Ok(format!("{:x}", hasher.finalize()))
     }
 
     fn loaded_path(&self, profile: &str) -> PathBuf {
         self.root.join("loaded").join(format!("{profile}.txt"))
     }
-}
 
-fn tree_sha256(root: &Path) -> Result<String, String> {
-    let mut files = Vec::new();
-    collect_files(root, root, &mut files)?;
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut hasher = Sha256::new();
-    for (relative, absolute) in files {
-        hasher.update(relative.as_bytes());
-        hasher.update([0]);
-        hasher.update(std::fs::read(absolute).map_err(|error| error.to_string())?);
-        hasher.update([0]);
-    }
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
-fn collect_files(
-    root: &Path,
-    current: &Path,
-    out: &mut Vec<(String, PathBuf)>,
-) -> Result<(), String> {
-    for entry in std::fs::read_dir(current).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_files(root, &path, out)?;
-        } else {
-            let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
-            out.push((relative.to_string_lossy().replace('\\', "/"), path));
+    fn collect_files(
+        root: &Path,
+        current: &Path,
+        output: &mut Vec<(String, PathBuf)>,
+    ) -> Result<(), String> {
+        for entry in std::fs::read_dir(current).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            if path.is_dir() {
+                Self::collect_files(root, &path, output)?;
+            } else {
+                let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
+                output.push((relative.to_string_lossy().replace('\\', "/"), path));
+            }
         }
+        Ok(())
     }
-    Ok(())
-}
 
-fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
-    for entry in std::fs::read_dir(source).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let file_type = entry.file_type().map_err(|error| error.to_string())?;
-        let target = destination.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_tree(&entry.path(), &target)?;
-        } else if file_type.is_file() {
-            std::fs::copy(entry.path(), target).map_err(|error| error.to_string())?;
-        } else {
-            return Err(format!(
-                "unsupported legacy package entry: {}",
-                entry.path().display()
-            ));
+    fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
+        std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+        for entry in std::fs::read_dir(source).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let file_type = entry.file_type().map_err(|error| error.to_string())?;
+            let target = destination.join(entry.file_name());
+            if file_type.is_dir() {
+                Self::copy_tree(&entry.path(), &target)?;
+            } else if file_type.is_file() {
+                std::fs::copy(entry.path(), target).map_err(|error| error.to_string())?;
+            } else {
+                return Err(format!(
+                    "unsupported legacy package entry: {}",
+                    entry.path().display()
+                ));
+            }
         }
+        Ok(())
     }
-    Ok(())
-}
 
-fn is_vmux_generated(name: &str) -> bool {
-    name == "vmux_patch.js"
-        || name == "vmux_shim.js"
-        || name == "vmux_shim.json"
-        || name.starts_with("vmux_sw_") && name.ends_with(".js")
-}
-
-fn remove_generated_files(dir: &Path) -> Result<(), String> {
-    for entry in std::fs::read_dir(dir).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let path = entry.path();
-        if path.is_dir() {
-            remove_generated_files(&path)?;
-        } else if is_vmux_generated(&entry.file_name().to_string_lossy()) {
-            std::fs::remove_file(path).map_err(|error| error.to_string())?;
-        }
+    fn generated(name: &str) -> bool {
+        name == "vmux_patch.js"
+            || name == "vmux_shim.js"
+            || name == "vmux_shim.json"
+            || name.starts_with("vmux_sw_") && name.ends_with(".js")
     }
-    Ok(())
-}
 
-fn restore_original_worker(dir: &Path) -> Result<(), String> {
-    let sidecar_path = dir.join("vmux_shim.json");
-    if sidecar_path.exists() {
-        let sidecar: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&sidecar_path).map_err(|error| error.to_string())?,
-        )
-        .map_err(|error| error.to_string())?;
-        let original = sidecar
-            .get("original")
-            .and_then(serde_json::Value::as_str)
-            .ok_or("legacy shim sidecar has no original worker")?;
-        if is_vmux_generated(original) {
-            return Err("legacy shim sidecar points to a generated worker".into());
+    fn remove_generated_files(dir: &Path) -> Result<(), String> {
+        for entry in std::fs::read_dir(dir).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            if path.is_dir() {
+                Self::remove_generated_files(&path)?;
+            } else if Self::generated(&entry.file_name().to_string_lossy()) {
+                std::fs::remove_file(path).map_err(|error| error.to_string())?;
+            }
         }
+        Ok(())
+    }
+
+    fn restore_original_worker(dir: &Path) -> Result<(), String> {
+        let sidecar_path = dir.join("vmux_shim.json");
+        if sidecar_path.exists() {
+            let sidecar: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&sidecar_path).map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            let original = sidecar
+                .get("original")
+                .and_then(serde_json::Value::as_str)
+                .ok_or("legacy shim sidecar has no original worker")?;
+            if Self::generated(original) {
+                return Err("legacy shim sidecar points to a generated worker".into());
+            }
+            let manifest_path = dir.join("manifest.json");
+            let mut manifest: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            let background = manifest
+                .get_mut("background")
+                .and_then(serde_json::Value::as_object_mut)
+                .ok_or("legacy manifest has no background object")?;
+            background.insert(
+                "service_worker".into(),
+                serde_json::Value::String(original.into()),
+            );
+            std::fs::write(
+                manifest_path,
+                serde_json::to_string_pretty(&manifest).map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        Self::remove_generated_files(dir)
+    }
+
+    fn validate_source(dir: &Path) -> Result<(), String> {
         let manifest_path = dir.join("manifest.json");
-        let mut manifest: serde_json::Value = serde_json::from_str(
+        let manifest: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?,
         )
         .map_err(|error| error.to_string())?;
-        let background = manifest
-            .get_mut("background")
-            .and_then(serde_json::Value::as_object_mut)
-            .ok_or("legacy manifest has no background object")?;
-        background.insert(
-            "service_worker".into(),
-            serde_json::Value::String(original.into()),
-        );
-        std::fs::write(
-            manifest_path,
-            serde_json::to_string_pretty(&manifest).map_err(|error| error.to_string())?,
-        )
-        .map_err(|error| error.to_string())?;
+        if !manifest.is_object() {
+            return Err("manifest is not an object".into());
+        }
+        Ok(())
     }
-    remove_generated_files(dir)
-}
 
-fn validate_source(dir: &Path) -> Result<(), String> {
-    let manifest_path = dir.join("manifest.json");
-    let manifest: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
-    if !manifest.is_object() {
-        return Err("manifest is not an object".into());
-    }
-    Ok(())
-}
-
-impl ExtensionStore {
     pub fn migrate_legacy_package(&self, entry: &ExtEntry) -> Result<PathBuf, String> {
         let source = self.source_dir(&entry.id, &entry.version);
         if source.exists() {
-            validate_source(&source)?;
+            Self::validate_source(&source)?;
             let hash = self.source_hash(&source)?;
             if !entry.source_hash.is_empty() && hash != entry.source_hash {
                 return Err(format!("source hash mismatch for {}", entry.id));
@@ -314,9 +308,9 @@ impl ExtensionStore {
         if temporary.exists() {
             std::fs::remove_dir_all(&temporary).map_err(|error| error.to_string())?;
         }
-        copy_tree(&legacy, &temporary)?;
-        restore_original_worker(&temporary)?;
-        validate_source(&temporary)?;
+        Self::copy_tree(&legacy, &temporary)?;
+        Self::restore_original_worker(&temporary)?;
+        Self::validate_source(&temporary)?;
         self.source_hash(&temporary)?;
         std::fs::rename(&temporary, &source).map_err(|error| error.to_string())?;
         Ok(source)
@@ -544,7 +538,7 @@ impl ExtensionStore {
     }
 
     pub fn uninstall(&self, id: &str) -> Result<(), String> {
-        if webstore::extension_id(id).as_deref() != Some(id) {
+        if ChromeWebStore::extension_id(id).as_deref() != Some(id) {
             return Err(format!("invalid extension id: {id}"));
         }
         let _guard = INDEX_LOCK.lock().unwrap_or_else(|error| error.into_inner());
@@ -569,7 +563,7 @@ impl ExtensionStore {
     }
 
     pub fn uninstall_for_profile(&self, profile: &str, id: &str) -> Result<(), String> {
-        if webstore::extension_id(id).as_deref() != Some(id) {
+        if ChromeWebStore::extension_id(id).as_deref() != Some(id) {
             return Err(format!("invalid extension id: {id}"));
         }
         let _guard = INDEX_LOCK.lock().unwrap_or_else(|error| error.into_inner());

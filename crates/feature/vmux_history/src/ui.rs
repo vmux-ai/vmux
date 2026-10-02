@@ -13,7 +13,7 @@ use vmux_ui::components::alert_dialog::{
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::platform::now_millis;
+use vmux_ui::platform::Platform;
 
 #[vmux_native::page(component = Page)]
 pub(crate) struct HistoryPage;
@@ -44,7 +44,7 @@ pub fn Page() -> Element {
         let _ = send(&HistoryQueryRequest { query: query_value });
     };
 
-    let groups = group_by_day(&snapshot.entries, now_millis());
+    let groups = group_by_day(&snapshot.entries, Platform::now());
     let entry_count = snapshot.entries.len();
 
     rsx! {

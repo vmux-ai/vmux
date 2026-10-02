@@ -100,6 +100,165 @@ pub(crate) struct McpInput(pub(crate) Value);
 #[derive(Message)]
 pub(crate) struct McpOutput(pub(crate) Value);
 
+pub struct McpResponse;
+
+impl McpInput {
+    pub(crate) fn read(reader: &mut impl BufRead) -> io::Result<Option<Self>> {
+        let mut line = String::new();
+        let read = reader.read_line(&mut line)?;
+        if read == 0 {
+            return Ok(None);
+        }
+        let value = serde_json::from_str(line.trim_end())
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        Ok(Some(Self(value)))
+    }
+}
+
+impl McpResponse {
+    fn initialize(params: &Value) -> Value {
+        let protocol_version = params
+            .get("protocolVersion")
+            .and_then(Value::as_str)
+            .unwrap_or("2025-11-25");
+        json!({
+            "protocolVersion": protocol_version,
+            "capabilities": {
+                "tools": {}
+            },
+            "serverInfo": {
+                "name": "vmux",
+                "version": env!("CARGO_PKG_VERSION")
+            }
+        })
+    }
+
+    pub fn command_result(result: AgentCommandResult) -> Result<Value, String> {
+        match result {
+            AgentCommandResult::Ok => Ok(json!({
+                "content": [{"type": "text", "text": "ok"}]
+            })),
+            AgentCommandResult::Text(text) => Ok(json!({
+                "content": [{"type": "text", "text": text}]
+            })),
+            AgentCommandResult::Error(message) => Err(message),
+        }
+    }
+
+    pub fn query_response(response: ServiceMessage) -> Value {
+        match response {
+            ServiceMessage::AgentQueryResult(result) => {
+                if result.is_error {
+                    return Self::error(&result.content);
+                }
+                let mut content = vec![json!({"type": "text", "text": result.content})];
+                if let Some(image) = result.image {
+                    let data = base64::engine::general_purpose::STANDARD.encode(&image.png);
+                    content.push(json!({
+                        "type": "image",
+                        "data": data,
+                        "mimeType": "image/png"
+                    }));
+                }
+                json!({"content": content})
+            }
+            _ => Self::error("unexpected agent query response"),
+        }
+    }
+
+    fn error(message: &str) -> Value {
+        json!({
+            "isError": true,
+            "content": [
+                {
+                    "type": "text",
+                    "text": message
+                }
+            ]
+        })
+    }
+}
+
+struct AgentBridge;
+
+impl AgentBridge {
+    async fn command(request: AgentRequest, anchor: Option<ProcessId>) -> Result<Value, String> {
+        let request_id = AgentRequestId::new();
+        let connection = ServiceConnection::connect()
+            .await
+            .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
+        connection
+            .send(&ClientMessage::AgentRequest {
+                request_id,
+                anchor,
+                request,
+            })
+            .await
+            .map_err(|error| format!("cannot send agent command: {error}"))?;
+
+        loop {
+            let Some(message) = connection
+                .recv()
+                .await
+                .map_err(|error| format!("cannot read service response: {error}"))?
+            else {
+                return Err("vmux_service disconnected".to_string());
+            };
+            match message {
+                ServiceMessage::AgentCommandResult {
+                    request_id: received,
+                    result,
+                } if received == request_id => {
+                    return McpResponse::command_result(result);
+                }
+                ServiceMessage::Error { message } => return Err(message),
+                _ => {}
+            }
+        }
+    }
+
+    async fn query(query: AgentRequest) -> Result<Value, String> {
+        let connection = ServiceConnection::connect()
+            .await
+            .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
+        let response = Self::query_with(&connection, query).await?;
+        Ok(McpResponse::query_response(response))
+    }
+
+    async fn query_with(
+        connection: &ServiceConnection,
+        query: AgentRequest,
+    ) -> Result<ServiceMessage, String> {
+        let request_id = AgentRequestId::new();
+        connection
+            .send(&ClientMessage::AgentQuery { request_id, query })
+            .await
+            .map_err(|error| format!("cannot send query: {error}"))?;
+        loop {
+            let Some(message) = connection
+                .recv()
+                .await
+                .map_err(|error| format!("cannot read query response: {error}"))?
+            else {
+                return Err("vmux_service disconnected".to_string());
+            };
+            if Self::response_request_id(&message) == Some(request_id) {
+                return Ok(message);
+            }
+            if let ServiceMessage::Error { message } = message {
+                return Err(message);
+            }
+        }
+    }
+
+    fn response_request_id(message: &ServiceMessage) -> Option<AgentRequestId> {
+        match message {
+            ServiceMessage::AgentQueryResult(result) => Some(result.request_id),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct McpRequest {
     run_block_timeout: Duration,
@@ -162,17 +321,6 @@ type PendingRequests<'w, 's> = Query<
     (With<McpRequest>, Without<McpRouted>),
 >;
 
-pub fn read_json_line(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
-    let mut line = String::new();
-    let read = reader.read_line(&mut line)?;
-    if read == 0 {
-        return Ok(None);
-    }
-    let value = serde_json::from_str(line.trim_end())
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    Ok(Some(value))
-}
-
 fn receive_requests(
     mut input: MessageReader<McpInput>,
     mut servers: Query<(&mut McpServer, &McpConfig)>,
@@ -219,7 +367,7 @@ fn route_request(mut commands: Commands, requests: PendingRequests, configs: Que
         "initialize" => {
             commands
                 .entity(entity)
-                .insert(McpReply::Result(Ok(initialize_result(&params.0))));
+                .insert(McpReply::Result(Ok(McpResponse::initialize(&params.0))));
         }
         "tools/list" => {
             let mut request = commands.entity(entity);
@@ -296,8 +444,11 @@ fn start_list_tools(
             .remove::<ToolCatalog>()
             .insert(McpExecution::new(async move {
                 if let Ok(connection) = ServiceConnection::connect().await
-                    && let Ok(ServiceMessage::AgentQueryResult(result)) =
-                        agent_query(&connection, AgentRequest::encode(&AgentListCommands)?).await
+                    && let Ok(ServiceMessage::AgentQueryResult(result)) = AgentBridge::query_with(
+                        &connection,
+                        AgentRequest::encode(&AgentListCommands)?,
+                    )
+                    .await
                     && !result.is_error
                     && let Ok(commands) = serde_json::from_str(&result.content)
                 {
@@ -325,7 +476,7 @@ fn start_tool_commands(
                 continue;
             }
         };
-        request.insert(McpExecution::new(run_agent_command(
+        request.insert(McpExecution::new(AgentBridge::command(
             command,
             anchor.map(|anchor| anchor.0),
         )));
@@ -349,7 +500,7 @@ fn start_tool_queries(
                 continue;
             }
         };
-        request.insert(McpExecution::new(run_agent_query(query)));
+        request.insert(McpExecution::new(AgentBridge::query(query)));
     }
 }
 
@@ -410,7 +561,7 @@ fn build_responses(
             McpReply::Result(Err(message)) => json!({
                 "jsonrpc": "2.0",
                 "id": id.0,
-                "result": tool_error(message)
+                "result": McpResponse::error(message)
             }),
             McpReply::ProtocolError { code, message } => json!({
                 "jsonrpc": "2.0",
@@ -426,147 +577,6 @@ fn build_responses(
     }
 }
 
-fn initialize_result(params: &Value) -> Value {
-    let protocol_version = params
-        .get("protocolVersion")
-        .and_then(Value::as_str)
-        .unwrap_or("2025-11-25");
-    json!({
-        "protocolVersion": protocol_version,
-        "capabilities": {
-            "tools": {}
-        },
-        "serverInfo": {
-            "name": "vmux",
-            "version": env!("CARGO_PKG_VERSION")
-        }
-    })
-}
-
-async fn run_agent_command(
-    request: AgentRequest,
-    anchor: Option<ProcessId>,
-) -> Result<Value, String> {
-    let request_id = AgentRequestId::new();
-    let connection = ServiceConnection::connect()
-        .await
-        .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
-    connection
-        .send(&ClientMessage::AgentRequest {
-            request_id,
-            anchor,
-            request,
-        })
-        .await
-        .map_err(|error| format!("cannot send agent command: {error}"))?;
-
-    loop {
-        let Some(message) = connection
-            .recv()
-            .await
-            .map_err(|error| format!("cannot read service response: {error}"))?
-        else {
-            return Err("vmux_service disconnected".to_string());
-        };
-        match message {
-            ServiceMessage::AgentCommandResult {
-                request_id: received,
-                result,
-            } if received == request_id => {
-                return command_result_to_mcp_response(result);
-            }
-            ServiceMessage::Error { message } => return Err(message),
-            _ => {}
-        }
-    }
-}
-
-pub fn command_result_to_mcp_response(result: AgentCommandResult) -> Result<Value, String> {
-    match result {
-        AgentCommandResult::Ok => Ok(json!({
-            "content": [{"type": "text", "text": "ok"}]
-        })),
-        AgentCommandResult::Text(text) => Ok(json!({
-            "content": [{"type": "text", "text": text}]
-        })),
-        AgentCommandResult::Error(message) => Err(message),
-    }
-}
-
-async fn agent_query(
-    connection: &ServiceConnection,
-    query: AgentRequest,
-) -> Result<ServiceMessage, String> {
-    let request_id = AgentRequestId::new();
-    connection
-        .send(&ClientMessage::AgentQuery { request_id, query })
-        .await
-        .map_err(|error| format!("cannot send query: {error}"))?;
-    loop {
-        let Some(message) = connection
-            .recv()
-            .await
-            .map_err(|error| format!("cannot read query response: {error}"))?
-        else {
-            return Err("vmux_service disconnected".to_string());
-        };
-        if query_response_request_id(&message) == Some(request_id) {
-            return Ok(message);
-        }
-        if let ServiceMessage::Error { message } = message {
-            return Err(message);
-        }
-    }
-}
-
-fn query_response_request_id(message: &ServiceMessage) -> Option<AgentRequestId> {
-    match message {
-        ServiceMessage::AgentQueryResult(result) => Some(result.request_id),
-        _ => None,
-    }
-}
-
-async fn run_agent_query(query: AgentRequest) -> Result<Value, String> {
-    let connection = ServiceConnection::connect()
-        .await
-        .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
-    let response = agent_query(&connection, query).await?;
-    Ok(query_response_to_mcp_response(response))
-}
-
-pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
-    match response {
-        ServiceMessage::AgentQueryResult(result) => {
-            if result.is_error {
-                return tool_error(&result.content);
-            }
-            let mut content = vec![json!({"type": "text", "text": result.content})];
-            if let Some(image) = result.image {
-                let data = base64::engine::general_purpose::STANDARD.encode(&image.png);
-                content.push(json!({
-                    "type": "image",
-                    "data": data,
-                    "mimeType": "image/png"
-                }));
-            }
-            json!({"content": content})
-        }
-        _ => tool_error("unexpected agent query response"),
-    }
-}
-
-pub fn tool_error(message: &str) -> Value {
-    json!({
-        "isError": true,
-        "content": [
-            {
-                "type": "text",
-                "text": message
-            }
-        ]
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,14 +584,14 @@ mod tests {
     #[test]
     fn newline_framing_reads_single_json_message() {
         let mut lines = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n".as_slice();
-        let request = read_json_line(&mut lines).unwrap().unwrap();
+        let request = McpInput::read(&mut lines).unwrap().unwrap().0;
 
         assert_eq!(request["method"], "tools/list");
     }
 
     #[test]
     fn image_query_result_maps_to_text_and_image_blocks() {
-        let resp = query_response_to_mcp_response(ServiceMessage::AgentQueryResult(
+        let resp = McpResponse::query_response(ServiceMessage::AgentQueryResult(
             vmux_api::protocol::AgentQueryResult {
                 request_id: AgentRequestId::new(),
                 content: "saved /tmp/shot.png (800×600)".to_string(),
@@ -611,7 +621,7 @@ mod tests {
 
     #[test]
     fn recording_maps_to_text_block() {
-        let v = query_response_to_mcp_response(ServiceMessage::AgentQueryResult(
+        let v = McpResponse::query_response(ServiceMessage::AgentQueryResult(
             vmux_api::protocol::AgentQueryResult {
                 request_id: AgentRequestId::new(),
                 content: "recorded 7.4s → /tmp/x.mp4 (1000000 bytes) + /tmp/x.gif (auto-stopped)"

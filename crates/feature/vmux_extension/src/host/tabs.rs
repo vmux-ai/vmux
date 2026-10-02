@@ -33,7 +33,7 @@ impl ExtensionTabs<'_> {
     }
 
     fn query(&self, request: &ApiRequest, authorization: &BridgeAuthorization) -> Value {
-        let filter = TabFilter::from_options(Self::argument(request));
+        let filter = TabFilter::from_options(request.argument(0));
         let mut matched = Vec::new();
         for tab in &self.model.tabs {
             if filter.matches(tab, self.focused_window()) {
@@ -53,7 +53,8 @@ impl ExtensionTabs<'_> {
         request: &ApiRequest,
         authorization: &BridgeAuthorization,
     ) -> Result<Value, ExtensionApiError> {
-        let id = Self::argument(request)
+        let id = request
+            .argument(0)
             .and_then(Value::as_i64)
             .and_then(|id| i32::try_from(id).ok());
         let Some(id) = id else {
@@ -71,13 +72,6 @@ impl ExtensionTabs<'_> {
         Ok(tab
             .clone()
             .disclosed_value(tab.window_id, tab.index, request, authorization))
-    }
-
-    fn argument(request: &ApiRequest) -> Option<&Value> {
-        match &request.arguments {
-            Value::Array(arguments) => arguments.first(),
-            value => Some(value),
-        }
     }
 
     fn focused_window(&self) -> Option<i32> {

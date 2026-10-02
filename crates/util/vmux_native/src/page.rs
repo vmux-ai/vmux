@@ -96,8 +96,8 @@ impl NativePage {
 impl NativePage {
     pub(crate) fn shell(&self) -> wry::http::Response<Vec<u8>> {
         let favicon = if self.favicon {
-            vmux_ui::favicon::vmux_favicon_src_for_url(self.url)
-                .or_else(|| vmux_ui::favicon::vmux_favicon_src_for_url(self.document_url()))
+            vmux_ui::favicon::FaviconSource::vmux(self.url)
+                .or_else(|| vmux_ui::favicon::FaviconSource::vmux(self.document_url()))
                 .map(|url| format!(r#"<link rel="icon" type="image/svg+xml" href="{url}"/>"#))
                 .unwrap_or_default()
         } else {
@@ -185,8 +185,12 @@ mod tests {
 
     #[test]
     fn a_logical_route_change_preserves_the_matching_document_dom() {
-        let directory = NativePage::pane("vmux://knowledge/", first).sharing_dom("editor");
-        let file = NativePage::pane("file://", second).sharing_dom("editor");
+        let directory = NativePage::pane("vmux://knowledge/", first)
+            .served_from("vmux://files/")
+            .sharing_dom("editor");
+        let file = NativePage::pane("file://", second)
+            .served_from("vmux://files/")
+            .sharing_dom("editor");
 
         assert!(directory.preserves_dom_for(&file));
     }

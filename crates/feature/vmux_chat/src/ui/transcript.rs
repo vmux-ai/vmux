@@ -5,8 +5,8 @@ use super::state::Chat;
 use crate::event::{ChatCancelQueuedPrompt, ChatClearQueue, ChatResume};
 use dioxus::prelude::*;
 use vmux_api::prompt_media::ChatAttachment;
-use vmux_ui::agent_accent::agent_accent;
-use vmux_ui::favicon::favicon_src_for_url;
+use vmux_ui::agent_accent::AgentAccent;
+use vmux_ui::favicon::FaviconSource;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
@@ -61,7 +61,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let handoff_truncated = chat.handoff.truncated();
     let agent = chat.agent();
     let agent_name = chat.header_name();
-    let agent_avatar = favicon_src_for_url(
+    let agent_avatar = FaviconSource::resolve(
         &chat.identity.icon(),
         &format!("{}{agent}", crate::ChatPlugin::URL),
     );
@@ -133,7 +133,7 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
 
 #[component]
 fn InstallIntro(chat: Chat, detail: String) -> Element {
-    let accent = agent_accent(&chat.agent());
+    let accent = AgentAccent::for_agent(&chat.agent());
     rsx! {
         div { class: "my-auto flex flex-col items-center gap-3 py-12 text-center",
             AgentBanner { chat }

@@ -11,7 +11,7 @@ pub use host::{
     AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename, ExpandedProjectDirs, PendingProject,
     RepositoryNeedsWorktree, SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest,
     SpaceOpenPageRequest, SpacePlugin, SpaceProjects, SpaceRenameRequest, SpaceToolPlugin, Spaces,
-    valid_cwd,
+    WorkspaceCwd,
 };
 pub use vmux_api::space as event;
 

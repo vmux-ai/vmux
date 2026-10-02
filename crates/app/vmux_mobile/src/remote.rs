@@ -14,13 +14,17 @@ use vmux_api::protocol::SharedFailure;
 
 static NEXT_CLIENT_OP_ID: AtomicU64 = AtomicU64::new(0);
 
-pub(crate) fn next_client_op_id() -> ClientOpId {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let sequence = NEXT_CLIENT_OP_ID.fetch_add(1, Ordering::Relaxed);
-    ClientOpId::new(format!("mobile:{timestamp}:{sequence}"))
+pub(crate) struct ClientOperationIds;
+
+impl ClientOperationIds {
+    pub(crate) fn next() -> ClientOpId {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let sequence = NEXT_CLIENT_OP_ID.fetch_add(1, Ordering::Relaxed);
+        ClientOpId::new(format!("mobile:{timestamp}:{sequence}"))
+    }
 }
 
 #[derive(Clone)]
@@ -78,7 +82,7 @@ impl Api {
     }
 
     pub(crate) async fn agents(&self) -> Result<Vec<RemoteAgent>, ApiError> {
-        broker_json(&self.quic, SharedMessage::AgentListAgents).await
+        self.broker_json(SharedMessage::AgentListAgents).await
     }
 
     pub(crate) async fn sessions(&self) -> Result<Vec<RemoteSession>, ApiError> {
@@ -92,12 +96,9 @@ impl Api {
     }
 
     pub(crate) async fn models(&self, sid: &str) -> Result<RemoteModelState, ApiError> {
-        broker_json(
-            &self.quic,
-            SharedMessage::AgentListModels {
-                sid: sid.to_string(),
-            },
-        )
+        self.broker_json(SharedMessage::AgentListModels {
+            sid: sid.to_string(),
+        })
         .await
     }
 
@@ -122,7 +123,7 @@ impl Api {
     }
 
     pub(crate) async fn team(&self) -> Result<Vec<vmux_api::team::TeamMemberRow>, ApiError> {
-        broker_json(&self.quic, SharedMessage::AgentListTeam).await
+        self.broker_json(SharedMessage::AgentListTeam).await
     }
 
     pub(crate) async fn subscribe(&self, sid: &str) -> Result<crate::quic::Subscription, ApiError> {
@@ -203,58 +204,58 @@ impl Api {
             Err(error) => Err(error.into()),
         }
     }
-}
 
-pub(crate) fn remote_event_from_shared(
-    event: vmux_api::protocol::SharedEvent,
-) -> Option<RemoteEvent> {
-    match event {
-        Shared::AgentDelta { sid, text } => Some(RemoteEvent::Delta {
-            room_id: vmux_api::room::RoomId::for_session(&sid),
-            text,
-        }),
-        Shared::AgentRunStatusChanged { status, .. } => Some(RemoteEvent::Status {
-            status: RemoteStatus::from(&status),
-        }),
-        Shared::AgentAwaitingApproval {
-            call_id,
-            name,
-            args,
-            ..
-        } => Some(RemoteEvent::Approval {
-            approval: Some(RemoteApproval {
+    pub(crate) fn event(event: vmux_api::protocol::SharedEvent) -> Option<RemoteEvent> {
+        match event {
+            Shared::AgentDelta { sid, text } => Some(RemoteEvent::Delta {
+                room_id: vmux_api::room::RoomId::for_session(&sid),
+                text,
+            }),
+            Shared::AgentRunStatusChanged { status, .. } => Some(RemoteEvent::Status {
+                status: RemoteStatus::from(&status),
+            }),
+            Shared::AgentAwaitingApproval {
                 call_id,
                 name,
                 args,
+                ..
+            } => Some(RemoteEvent::Approval {
+                approval: Some(RemoteApproval {
+                    call_id,
+                    name,
+                    args,
+                }),
             }),
-        }),
-        Shared::AgentApprovalResolved { .. } => Some(RemoteEvent::Approval { approval: None }),
-        Shared::AgentMessagesSnapshot { sid, messages } => {
-            let room_id = vmux_api::room::RoomId::for_session(&sid);
-            let events = vmux_session::room::RoomEvents::from_messages(&sid, 0, &messages);
-            Some(RemoteEvent::Snapshot {
-                room_id,
-                through_seq: events.len() as u64,
-                events,
-            })
+            Shared::AgentApprovalResolved { .. } => Some(RemoteEvent::Approval { approval: None }),
+            Shared::AgentMessagesSnapshot { sid, messages } => {
+                let room_id = vmux_api::room::RoomId::for_session(&sid);
+                let events = vmux_session::room::RoomEvents::from_messages(&sid, 0, &messages);
+                Some(RemoteEvent::Snapshot {
+                    room_id,
+                    through_seq: events.len() as u64,
+                    events,
+                })
+            }
+            Shared::Session { session } => Some(RemoteEvent::Session {
+                session: Box::new(session),
+            }),
+            Shared::AcpAgentInfo { .. } | Shared::AcpWorkspaceChanged { .. } => None,
         }
-        Shared::Session { session } => Some(RemoteEvent::Session { session }),
-        Shared::AcpAgentInfo { .. } | Shared::AcpWorkspaceChanged { .. } => None,
     }
-}
 
-async fn broker_json<T: serde::de::DeserializeOwned>(
-    quic: &crate::quic::QuicApi,
-    request: SharedMessage,
-) -> Result<T, ApiError> {
-    match quic.request(request).await {
-        Ok(SharedResponse::BrokerJson(json)) => {
-            serde_json::from_str(&json).map_err(|error| ApiError::Message(error.to_string()))
+    async fn broker_json<T: serde::de::DeserializeOwned>(
+        &self,
+        request: SharedMessage,
+    ) -> Result<T, ApiError> {
+        match self.quic.request(request).await {
+            Ok(SharedResponse::BrokerJson(json)) => {
+                serde_json::from_str(&json).map_err(|error| ApiError::Message(error.to_string()))
+            }
+            Ok(_) => Err(ApiError::Message(translate(
+                "mobile-error-unexpected-answer",
+            ))),
+            Err(error) => Err(error.into()),
         }
-        Ok(_) => Err(ApiError::Message(translate(
-            "mobile-error-unexpected-answer",
-        ))),
-        Err(error) => Err(error.into()),
     }
 }
 

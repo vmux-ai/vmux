@@ -20,24 +20,15 @@ impl MenuDirection {
             _ => None,
         }
     }
-}
 
-pub fn choice_number_index(key: &str, len: usize) -> Option<usize> {
-    let number = key.parse::<usize>().ok()?;
-    if number == 0 || number > len {
-        None
-    } else {
-        Some(number - 1)
-    }
-}
-
-pub fn move_selection(current: usize, len: usize, direction: MenuDirection) -> usize {
-    if len == 0 {
-        return 0;
-    }
-    match direction {
-        MenuDirection::Next => (current + 1) % len,
-        MenuDirection::Previous => (current + len - 1) % len,
+    pub fn move_selection(self, current: usize, len: usize) -> usize {
+        if len == 0 {
+            return 0;
+        }
+        match self {
+            Self::Next => (current + 1) % len,
+            Self::Previous => (current + len - 1) % len,
+        }
     }
 }
 
@@ -124,16 +115,8 @@ mod tests {
 
     #[test]
     fn a_selection_wraps_at_both_ends() {
-        assert_eq!(move_selection(2, 3, MenuDirection::Next), 0);
-        assert_eq!(move_selection(0, 3, MenuDirection::Previous), 2);
-        assert_eq!(move_selection(0, 0, MenuDirection::Next), 0);
-    }
-
-    #[test]
-    fn a_number_key_names_a_row_only_when_the_row_exists() {
-        assert_eq!(choice_number_index("2", 3), Some(1));
-        assert_eq!(choice_number_index("4", 3), None);
-        assert_eq!(choice_number_index("0", 3), None);
-        assert_eq!(choice_number_index("Enter", 3), None);
+        assert_eq!(MenuDirection::Next.move_selection(2, 3), 0);
+        assert_eq!(MenuDirection::Previous.move_selection(0, 3), 2);
+        assert_eq!(MenuDirection::Next.move_selection(0, 0), 0);
     }
 }

@@ -1,6 +1,6 @@
 use crate::{
     active_pane::{ActiveStack, ProfileId},
-    host::swap::{SiblingOrder, find_kind_index, resolve_next, resolve_prev},
+    host::swap::SiblingOrder,
     pane::{Pane, PaneHierarchy, PaneSplit, PaneStacks, PendingCursorWarp},
     tab::{CloseTabRequest, Tab},
 };
@@ -52,19 +52,14 @@ impl Plugin for StackPlugin {
             .add_message::<CloseStackRequest>()
             .add_systems(
                 Update,
-                (
-                    handle_open_requests,
-                    handle_close_requests,
-                    handle_focus_requests,
-                    handle_move_requests,
-                )
+                (open, close, focus, shift)
                     .chain()
                     .in_set(StackCommandSet)
                     .in_set(LayoutRequestSet::Handle),
             )
             .add_systems(
                 Update,
-                apply_closures
+                close_pending
                     .in_set(CloseStackSet)
                     .in_set(LayoutRequestSet::Handle),
             )
@@ -73,6 +68,7 @@ impl Plugin for StackPlugin {
                 compute_focused
                     .in_set(ComputeFocusSet)
                     .after(LayoutRequestSet::Handle)
+                    .after(crate::window::TabLayoutSpawnSet)
                     .after(crate::active::ActiveSystemSet::Descendants),
             )
             .add_systems(
@@ -191,7 +187,7 @@ pub enum CloseStackReason {
     Tidying,
 }
 
-fn apply_closures(
+fn close_pending(
     mut reader: MessageReader<CloseStackRequest>,
     mut closer: StackCloser,
     mut commands: Commands,
@@ -220,10 +216,11 @@ struct StackCloser<'w, 's> {
 impl StackCloser<'_, '_> {
     fn active_stack(&self, pane: Entity) -> Option<Entity> {
         self.panes.children.get(pane).ok().and_then(|children| {
-            active_among(
+            LastActivatedAt::latest(
                 children
                     .iter()
-                    .filter_map(|entity| self.stack_ts.get(entity).ok()),
+                    .filter_map(|entity| self.stack_ts.get(entity).ok())
+                    .map(|(entity, activated_at)| (entity, *activated_at)),
             )
         })
     }
@@ -254,11 +251,12 @@ fn close_stack(request: CloseStackRequest, closer: &mut StackCloser, commands: &
     if !was_active {
         return;
     }
-    let successor = active_among(
+    let successor = LastActivatedAt::latest(
         stacks_in_pane
             .iter()
             .filter(|&&entity| entity != request.stack)
-            .filter_map(|&entity| closer.stack_ts.get(entity).ok()),
+            .filter_map(|&entity| closer.stack_ts.get(entity).ok())
+            .map(|(entity, activated_at)| (entity, *activated_at)),
     );
     if let Some(successor) = successor {
         commands.entity(successor).insert(LastActivatedAt::now());
@@ -423,12 +421,6 @@ impl Stack {
     }
 }
 
-pub fn active_among<'a>(
-    entities: impl Iterator<Item = (Entity, &'a LastActivatedAt)>,
-) -> Option<Entity> {
-    entities.max_by_key(|(_, ts)| ts.0).map(|(e, _)| e)
-}
-
 #[derive(SystemParam)]
 pub struct ActiveTabParam<'w, 's> {
     tabs: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Tab>>,
@@ -449,7 +441,11 @@ impl ActiveTabParam<'_, '_> {
         if scoped.is_some() {
             return scoped;
         }
-        active_among(self.tabs.iter())
+        LastActivatedAt::latest(
+            self.tabs
+                .iter()
+                .map(|(entity, activated_at)| (entity, *activated_at)),
+        )
     }
 }
 
@@ -493,19 +489,21 @@ impl LayoutFocus<'_, '_> {
     pub fn pane(&self, tab: Entity) -> Option<Entity> {
         let mut panes = Vec::new();
         self.collect_leaf_panes(tab, &mut panes);
-        active_among(
+        LastActivatedAt::latest(
             panes
                 .iter()
-                .filter_map(|&entity| self.pane_activity.get(entity).ok()),
+                .filter_map(|&entity| self.pane_activity.get(entity).ok())
+                .map(|(entity, activated_at)| (entity, *activated_at)),
         )
     }
 
     pub fn stack(&self, pane: Entity) -> Option<Entity> {
         self.pane_children.get(pane).ok().and_then(|children| {
-            active_among(
+            LastActivatedAt::latest(
                 children
                     .iter()
-                    .filter_map(|entity| self.stack_activity.get(entity).ok()),
+                    .filter_map(|entity| self.stack_activity.get(entity).ok())
+                    .map(|(entity, activated_at)| (entity, *activated_at)),
             )
         })
     }
@@ -551,7 +549,7 @@ fn compute_focused(
     commands.spawn(next.local_bundle());
 }
 
-fn handle_open_requests(
+fn open(
     mut reader: MessageReader<OpenRequest>,
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
@@ -580,7 +578,7 @@ fn handle_open_requests(
     }
 }
 
-fn handle_close_requests(
+fn close(
     mut reader: MessageReader<CloseRequest>,
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
@@ -595,7 +593,7 @@ fn handle_close_requests(
     }
 }
 
-fn handle_focus_requests(
+fn focus(
     mut reader: MessageReader<FocusRequest>,
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
@@ -643,7 +641,7 @@ fn handle_focus_requests(
     }
 }
 
-fn handle_move_requests(
+fn shift(
     mut reader: MessageReader<MoveRequest>,
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
@@ -667,19 +665,18 @@ fn handle_move_requests(
             .filter(|(_, entity)| stack_q.contains(*entity))
             .map(|(index, _)| index)
             .collect();
-        let Some(active_index) = find_kind_index(stack, children, &kind_positions) else {
+        let Some(active_index) = SiblingOrder::index(stack, children, &kind_positions) else {
             continue;
         };
         let pair = if request.0 == SiblingDirection::Previous {
-            resolve_prev(active_index)
+            SiblingOrder::previous(active_index)
         } else {
-            resolve_next(active_index, kind_positions.len())
+            SiblingOrder::next(active_index, kind_positions.len())
         };
-        if let Some((left, right)) = pair {
-            if let Some(order) = SiblingOrder::swapped(pane, children, &kind_positions, left, right)
-            {
-                commands.queue(order);
-            }
+        if let Some((left, right)) = pair
+            && let Some(order) = SiblingOrder::swapped(pane, children, &kind_positions, left, right)
+        {
+            commands.queue(order);
         }
     }
 }
@@ -793,7 +790,7 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
-            .add_systems(Update, apply_closures);
+            .add_systems(Update, close_pending);
         app
     }
 
@@ -1029,11 +1026,10 @@ mod tests {
             ))
             .id();
         let worktree = tempfile::tempdir().unwrap();
-        app.world_mut()
-            .entity_mut(space)
-            .insert(crate::space::EffectiveStartupDir(Some(
-                worktree.path().to_path_buf(),
-            )));
+        app.world_mut().entity_mut(space).insert((
+            crate::space::EffectiveStartupDir(Some(worktree.path().to_path_buf())),
+            vmux_ecs::EffectiveStartupUrl("vmux://start/".to_string()),
+        ));
         let tab_e = app
             .world_mut()
             .spawn((
@@ -1240,7 +1236,7 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
             .insert_resource(test_settings())
-            .add_systems(Update, (handle_close_requests, apply_closures).chain());
+            .add_systems(Update, (close, close_pending).chain());
 
         let tab = app
             .world_mut()
@@ -1300,7 +1296,7 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_message::<LauncherDismissRequest>()
             .insert_resource(test_settings())
-            .add_systems(Update, (handle_close_requests, apply_closures).chain());
+            .add_systems(Update, (close, close_pending).chain());
 
         let tab = app
             .world_mut()
@@ -1387,6 +1383,12 @@ mod tests {
             .add_message::<LauncherDismissRequest>()
             .add_message::<PageOpenRequest>()
             .add_systems(Update, open_startup_url_if_no_stacks);
+
+        app.world_mut().spawn((
+            crate::space::Space,
+            vmux_ecs::Active,
+            vmux_ecs::EffectiveStartupUrl("vmux://start/".to_string()),
+        ));
 
         let old_tab = app
             .world_mut()
@@ -1519,13 +1521,7 @@ mod tests {
             .init_resource::<CollectedSpawns>()
             .add_systems(
                 Update,
-                (
-                    handle_open_requests,
-                    handle_close_requests,
-                    apply_closures,
-                    collect_spawn_requests,
-                )
-                    .chain(),
+                (open, close, close_pending, collect_spawn_requests).chain(),
             );
         app
     }
@@ -1619,7 +1615,7 @@ mod tests {
     #[test]
     fn open_in_new_stack_none_url_opens_the_start_page() {
         let mut app = build_app_with_collector();
-        let (_tab, pane, _stack) = build_hierarchy(&mut app, "");
+        let (_tab, pane, _stack) = build_hierarchy(&mut app, "vmux://start/");
 
         app.world_mut()
             .resource_mut::<Messages<OpenRequest>>()
