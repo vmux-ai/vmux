@@ -5,6 +5,7 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
 use vmux_ecs::event::{ExplorerCreate, ExplorerDelete, ExplorerFsResult, ExplorerRename};
 
+use super::fs::ExplorerFs;
 use super::{
     ExplorerState, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty, OpenEditorsDirty,
     UsesExplorerTree,
@@ -83,7 +84,7 @@ fn create(
     let name = payload.name.clone();
     let is_dir = payload.is_dir;
     let task = IoTaskPool::get().spawn(async move {
-        let path = super::fs::create_entry(&root, &parent, &name, is_dir)?;
+        let path = ExplorerFs::new(&root)?.create(&parent, &name, is_dir)?;
         Ok(ExplorerCreateOutcome {
             path,
             parent,
@@ -133,7 +134,7 @@ fn rename(
                 .map_err(|error| error.to_string())
         })
         .transpose()?;
-        let (new_path, was_dir) = super::fs::rename_entry(&root, &old_path, &name)?;
+        let (new_path, was_dir) = ExplorerFs::new(&root)?.rename(&old_path, &name)?;
         if let Some(plan) = rename_plan {
             plan.apply().map_err(|error| error.to_string())?;
         }
@@ -166,7 +167,7 @@ fn delete(
     let root = tree.root.clone();
     let path = PathBuf::from(&trigger.event().payload.path);
     let task = IoTaskPool::get().spawn(async move {
-        let (parent, was_dir) = super::fs::delete_entry(&root, &path)?;
+        let (parent, was_dir) = ExplorerFs::new(&root)?.delete(&path)?;
         Ok(ExplorerDeleteOutcome {
             path,
             parent,

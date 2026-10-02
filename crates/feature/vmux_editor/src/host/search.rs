@@ -7,7 +7,7 @@ use ignore::WalkBuilder;
 use regex::{Regex, RegexBuilder};
 use vmux_ecs::event::{ExplorerSearchFile, ExplorerSearchMatch, ExplorerSearchRequest};
 
-use super::directory::project_root;
+use super::file_lifecycle::FileDir;
 use crate::{FileView, GlobalSearchRequest};
 
 const MAX_MATCHES: usize = 500;
@@ -83,7 +83,7 @@ impl ProjectSearch {
     fn compile(start: &Path, request: &ExplorerSearchRequest) -> Option<Self> {
         let pattern = SearchPattern::compile(request)?;
         Some(Self {
-            root: project_root(start),
+            root: FileDir::project_root(start),
             query: request.query.clone(),
             pattern,
         })

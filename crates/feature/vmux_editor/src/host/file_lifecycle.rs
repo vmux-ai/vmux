@@ -8,7 +8,6 @@ use bevy_cef::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_ecs::event::*;
 
-use super::directory::list_dir;
 use super::editor::{Editor, FileView, ParkedEdits};
 use super::explorer::OutlineDirty;
 use super::explorer::{
@@ -179,7 +178,7 @@ impl FileLoad {
     fn read(path: &Path, forced: Option<FileEncoding>) -> Self {
         let metadata = std::fs::metadata(path);
         if metadata.as_ref().is_ok_and(|metadata| metadata.is_dir()) {
-            return Self::Directory(list_dir(path));
+            return Self::Directory(FileDir::read(path));
         }
 
         let path_text = path.to_string_lossy();
@@ -539,7 +538,7 @@ fn reload_changed_files(
         let ready = browsers.can_emit_to(&entity);
 
         if file.path.is_dir() {
-            let entries = list_dir(&file.path);
+            let entries = FileDir::read(&file.path);
             commands
                 .entity(entity)
                 .insert(FileDir { entries })

@@ -155,7 +155,7 @@ fn initialize(
     for (entity, file, directory, mut navigation, target) in &mut directories {
         let path_changed = navigation.path != file.path;
         navigation.path.clone_from(&file.path);
-        let (parent_path, parent_entries) = parent_listing(&file.path);
+        let (parent_path, parent_entries) = FileDir::parent(&file.path);
         navigation.parent_path = PathBuf::from(parent_path);
         navigation.parent_entries = parent_entries;
         let visible = FileDirectoryNavigation::visible(&directory.entries, navigation.show_hidden);
@@ -415,70 +415,76 @@ fn toggle_hidden(
     navigation.selected = navigation.selected.min(visible.len().saturating_sub(1));
 }
 
-pub fn list_dir(path: &Path) -> Vec<FileDirEntry> {
-    let Ok(read) = std::fs::read_dir(path) else {
-        return Vec::new();
-    };
-    let mut entries: Vec<FileDirEntry> = read
-        .flatten()
-        .map(|e| {
-            let path = e.path();
-            let is_dir = e
-                .file_type()
-                .map(|kind| {
-                    kind.is_dir()
-                        || kind.is_symlink()
-                            && std::fs::metadata(&path)
-                                .map(|metadata| metadata.is_dir())
-                                .unwrap_or(false)
-                })
-                .unwrap_or(false);
-            FileDirEntry {
-                name: e.file_name().to_string_lossy().to_string(),
-                path: path.to_string_lossy().to_string(),
-                is_dir,
+impl FileDir {
+    pub(crate) fn read(path: &Path) -> Vec<FileDirEntry> {
+        let Ok(read) = std::fs::read_dir(path) else {
+            return Vec::new();
+        };
+        let mut entries: Vec<FileDirEntry> = read
+            .flatten()
+            .map(|entry| {
+                let path = entry.path();
+                let is_dir = entry
+                    .file_type()
+                    .map(|kind| {
+                        kind.is_dir()
+                            || kind.is_symlink()
+                                && std::fs::metadata(&path)
+                                    .map(|metadata| metadata.is_dir())
+                                    .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+                FileDirEntry {
+                    name: entry.file_name().to_string_lossy().to_string(),
+                    path: path.to_string_lossy().to_string(),
+                    is_dir,
+                }
+            })
+            .collect();
+        entries.sort_by(|left, right| {
+            right
+                .is_dir
+                .cmp(&left.is_dir)
+                .then(left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+        });
+        entries
+    }
+
+    pub(crate) fn parent(path: &Path) -> (String, Vec<FileDirEntry>) {
+        match path.parent() {
+            Some(parent) => (parent.to_string_lossy().to_string(), Self::read(parent)),
+            None => (String::new(), Vec::new()),
+        }
+    }
+
+    pub(crate) fn project_root(start: &Path) -> PathBuf {
+        Self::project_root_with_knowledge(
+            start,
+            &vmux_knowledge::KnowledgeVault::user().into_root(),
+        )
+    }
+
+    fn project_root_with_knowledge(start: &Path, knowledge: &Path) -> PathBuf {
+        let base = if start.is_dir() {
+            start
+        } else {
+            start.parent().unwrap_or(start)
+        };
+        if base.starts_with(knowledge) {
+            return knowledge.to_path_buf();
+        }
+        let mut directory = base;
+        loop {
+            if directory.join(".git").exists() {
+                return directory.to_path_buf();
             }
-        })
-        .collect();
-    entries.sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
-    entries
-}
-
-pub fn parent_listing(path: &Path) -> (String, Vec<FileDirEntry>) {
-    match path.parent() {
-        Some(p) => (p.to_string_lossy().to_string(), list_dir(p)),
-        None => (String::new(), Vec::new()),
-    }
-}
-
-pub fn project_root(start: &Path) -> PathBuf {
-    project_root_with_knowledge(start, &vmux_knowledge::KnowledgeVault::user().into_root())
-}
-
-fn project_root_with_knowledge(start: &Path, knowledge: &Path) -> PathBuf {
-    let base = if start.is_dir() {
-        start
-    } else {
-        start.parent().unwrap_or(start)
-    };
-    if base.starts_with(knowledge) {
-        return knowledge.to_path_buf();
-    }
-    let mut dir = base;
-    loop {
-        if dir.join(".git").exists() {
-            return dir.to_path_buf();
+            match directory.parent() {
+                Some(parent) => directory = parent,
+                None => break,
+            }
         }
-        match dir.parent() {
-            Some(p) => dir = p,
-            None => break,
-        }
+        base.to_path_buf()
     }
-    base.to_path_buf()
 }
 
 #[cfg(test)]
@@ -526,7 +532,7 @@ mod tests {
         fs::create_dir(tmp.path().join("zdir")).unwrap();
         fs::write(tmp.path().join("a.txt"), "x").unwrap();
         fs::write(tmp.path().join(".hidden"), "x").unwrap();
-        let entries = list_dir(tmp.path());
+        let entries = FileDir::read(tmp.path());
         let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, vec!["zdir", ".hidden", "a.txt"]);
     }
@@ -540,8 +546,8 @@ mod tests {
         fs::create_dir_all(&sub).unwrap();
         let file = sub.join("lib.rs");
         fs::write(&file, "x").unwrap();
-        assert_eq!(project_root(&file), root);
-        assert_eq!(project_root(&sub), root);
+        assert_eq!(FileDir::project_root(&file), root);
+        assert_eq!(FileDir::project_root(&sub), root);
     }
 
     #[test]
@@ -551,7 +557,7 @@ mod tests {
         fs::create_dir(&sub).unwrap();
         let file = sub.join("a.txt");
         fs::write(&file, "x").unwrap();
-        assert_eq!(project_root(&file), sub);
+        assert_eq!(FileDir::project_root(&file), sub);
     }
 
     #[test]
@@ -562,7 +568,10 @@ mod tests {
         fs::create_dir_all(&projects).unwrap();
         let file = projects.join("note.md");
         fs::write(&file, "# Note").unwrap();
-        assert_eq!(project_root_with_knowledge(&file, &knowledge), knowledge);
+        assert_eq!(
+            FileDir::project_root_with_knowledge(&file, &knowledge),
+            knowledge
+        );
     }
 
     #[test]
@@ -570,11 +579,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let child = tmp.path().join("child");
         fs::create_dir(&child).unwrap();
-        let (pp, pe) = parent_listing(&child);
+        let (pp, pe) = FileDir::parent(&child);
         assert_eq!(pp, tmp.path().to_string_lossy());
         assert!(pe.iter().any(|e| e.name == "child"));
 
-        let (rp, re) = parent_listing(Path::new("/"));
+        let (rp, re) = FileDir::parent(Path::new("/"));
         assert!(rp.is_empty());
         assert!(re.is_empty());
     }

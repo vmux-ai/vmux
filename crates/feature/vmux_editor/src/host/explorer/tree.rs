@@ -10,8 +10,8 @@ use super::{
     ExplorerPanelDefaults, ExplorerState, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty,
     ExplorerTreeUsers, IDLE_TREE_CAPACITY, RevealCurrent, UsesExplorerTree,
 };
-use crate::host::directory::{list_dir, project_root};
 use crate::host::editor::FileView;
+use crate::host::file_lifecycle::FileDir;
 
 #[derive(Component)]
 pub(crate) struct ExplorerDirLoadRequest {
@@ -127,7 +127,7 @@ fn init_state(
     mut commands: Commands,
 ) {
     for (entity, view, mut state, tree_of) in &mut query {
-        let root = project_root(&view.path);
+        let root = FileDir::project_root(&view.path);
         if let Some(tree_of) = tree_of
             && let Ok((_, tree)) = trees.get_mut(tree_of.0)
             && tree.answers_for(&root)
@@ -172,7 +172,7 @@ fn start_dir_loads(
     for (entity, request) in &requests {
         let path = request.path.clone();
         let task = IoTaskPool::get().spawn(async move {
-            let entries = list_dir(&path);
+            let entries = FileDir::read(&path);
             (path, entries)
         });
         commands

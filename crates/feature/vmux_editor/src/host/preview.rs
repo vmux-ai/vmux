@@ -2,7 +2,7 @@ use std::path::Path;
 
 use vmux_ecs::event::{FileLine, PreviewKind};
 
-use super::directory::list_dir;
+use super::file_lifecycle::FileDir;
 use crate::host::highlight::{Highlighter, LoadError};
 
 const TEXT_PREVIEW_LINES: usize = 200;
@@ -33,7 +33,7 @@ impl PreviewBuilder {
 
     fn build_with_cap(path: &Path, cap: u64) -> PreviewKind {
         if path.is_dir() {
-            return PreviewKind::Dir(list_dir(path));
+            return PreviewKind::Dir(FileDir::read(path));
         }
         let metadata = match std::fs::metadata(path) {
             Ok(metadata) => metadata,
