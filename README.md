@@ -56,6 +56,10 @@ Requires macOS 13.0 (Ventura) or later.
 
 ## Architecture
 
+**Flexible by composition. Predictable by design.** ECS composition lets Vmux add platforms
+and capabilities without multiplying architecture. The same small vocabulary gives people and
+coding agents an expected place for every change, so PRs fit the system without surprise layers.
+
 ```text
 feature = state + systems + UI + commands + tools + contracts
 runtime = feature plugins + platform adapters

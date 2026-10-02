@@ -147,10 +147,10 @@ fn FrameworkTeaser() -> Element {
                         "Built on the Vmux Framework"
                     }
                     h2 { class: "mt-3 text-3xl font-bold tracking-tight sm:text-4xl",
-                        "One IDE. One framework. Every platform."
+                        "Flexible by composition. Predictable by design."
                     }
                     p { class: "mt-4 leading-relaxed text-text-muted",
-                        "Use Vmux with any stack, or build cross-platform applications from the same plugin architecture that powers Vmux itself."
+                        "Build cross-platform applications without multiplying architecture—and give people and agents the same clear path from feature to PR."
                     }
                 }
                 Link {

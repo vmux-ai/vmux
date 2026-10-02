@@ -31,11 +31,11 @@ fn Hero() -> Element {
                     "Vmux Framework"
                 }
                 h1 { class: "mt-5 text-5xl font-bold tracking-[-0.05em] sm:text-7xl lg:text-8xl",
-                    "One IDE."
-                    span { class: "block text-text-muted", "One framework. Every platform." }
+                    "Flexible by composition."
+                    span { class: "block text-text-muted", "Predictable by design." }
                 }
                 p { class: "mx-auto mt-7 max-w-3xl text-lg leading-relaxed text-text-muted sm:text-xl",
-                    "Use Vmux IDE and any ACP agent with any stack. Choose Vmux Framework when you want one application architecture across UI, services, agents, and platforms."
+                    "Extend the product without multiplying architecture. One typed vocabulary guides people and agents from feature idea to a PR that fits—no surprise integration layer."
                 }
                 div { class: "mt-9 flex flex-wrap justify-center gap-3",
                     Link {
@@ -63,25 +63,28 @@ fn Foundation() -> Element {
             div { class: "mx-auto max-w-6xl",
                 div { class: "mx-auto max-w-3xl text-center",
                     p { class: "text-sm font-semibold uppercase tracking-[0.2em] text-accent",
-                        "Available today"
+                        "Why Vmux architecture"
                     }
                     h2 { class: "mt-3 text-3xl font-bold tracking-tight sm:text-5xl",
-                        "The architecture already powering Vmux."
+                        "Complex capability. Small set of design choices."
                     }
                 }
                 div { class: "mt-12 grid gap-4 md:grid-cols-3",
                     FoundationPoint {
-                        title: "Feature plugins",
-                        body: "A feature owns its state, systems, UI, commands, tools, persistence, and contracts.",
+                        title: "Flexible by composition",
+                        body: "Build each runtime from feature plugins and platform adapters instead of branching the application architecture.",
                     }
                     FoundationPoint {
-                        title: "Typed boundaries",
-                        body: "The same Rust contract crosses UI, process, network, CLI, and agent boundaries.",
+                        title: "Extensible through ECS",
+                        body: "Add capabilities with entities, components, systems, and typed events without a central integration switchboard.",
                     }
                     FoundationPoint {
-                        title: "Runtime composition",
-                        body: "Desktop, mobile, services, CLI, and MCP compose the capabilities they need.",
+                        title: "No-surprise PRs",
+                        body: "Crate, Plugin, Entity, Component, System, Event, UiEvent, and UiState tell humans and agents where every change belongs.",
                     }
+                }
+                p { class: "mx-auto mt-10 max-w-3xl text-center leading-relaxed text-text-muted",
+                    "This is the architecture already powering Vmux across desktop, mobile, services, CLI, MCP, and ACP agents."
                 }
             }
         }
