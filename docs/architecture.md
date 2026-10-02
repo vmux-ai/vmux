@@ -17,18 +17,16 @@ truth. `AGENTS.md` owns repository workflow and coding rules.
 
 ## System map
 
-```mermaid
-flowchart LR
-    person["person"] --> desktop["desktop app"]
-    agent["ACP agent"] --> desktop
-    external["external agent"] --> mcp["MCP server"]
-    cli["CLI"] --> service["background service"]
-    desktop --> service
-    mcp --> service
-    phone["mobile app"] --> relay["opaque relay"]
-    relay --> desktop
-    desktop --> host["browser · files · processes · credentials"]
-    service --> host
+```text
+person + ACP agent ──> desktop app ──> browser · files · processes · credentials
+                            │                           ▲
+                            ▼                           │
+                    background service ────────────────┘
+                       ▲           ▲
+                       │           │
+                     CLI       MCP server <── external agent
+
+mobile app ──> opaque relay ──> desktop app
 ```
 
 - **Desktop app** owns windows, layout, input, native integration, and the visible host ECS.
@@ -741,18 +739,15 @@ page revision before replacing the current view.
 
 The normal page path is one direction around a loop.
 
-```mermaid
-sequenceDiagram
-    participant UI as Dioxus page
-    participant Host as host ECS
-    participant Boundary as service or platform boundary
-
-    UI->>Host: typed input request
-    Host->>Host: validate and update entities
-    Host->>Boundary: typed operation when needed
-    Boundary->>Host: result or state change
-    Host->>UI: UiState snapshot or patch
-    UI->>UI: render and perform DOM-local effects
+```text
+Dioxus page
+    │ typed input request
+    ▼
+host ECS ── typed operation ──> service or platform boundary
+    ▲                                  │
+    └──── result or state change ──────┘
+    │
+    └─> UiState · event · effect ──> Dioxus page
 ```
 
 Everything the page loads arrives over a `vmux://` custom protocol registered on **that
@@ -979,17 +974,13 @@ once on entry, and the status bar reports the character column, as VS Code does.
 The desktop is behind NAT, so it dials out and holds the connection open. Three modules own
 that on this side; what the relay does in the middle belongs to `vmux-cloud`.
 
-```mermaid
-flowchart TB
-    window["Window"] --> space["Space"]
-    space --> tab["Tab"]
-    tab --> split["PaneSplit"]
-    split --> paneA["Pane"]
-    split --> paneB["Pane"]
-    paneA --> stackA["Stack"]
-    paneB --> stackB["Stack"]
-    stackA --> pageA["Page"]
-    stackB --> pageB["Page"]
+```text
+Window
+└── Space
+    └── Tab
+        └── PaneSplit
+            ├── Pane ──> Stack ──> Page
+            └── Pane ──> Stack ──> Page
 ```
 
 Position in the tree defines ownership. Each native window owns a complete tree. Spaces

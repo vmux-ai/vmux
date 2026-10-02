@@ -14,10 +14,10 @@ commands, and tools.
 
 ## What you can do
 
-- **Ship with agents** — Ask an agent to investigate, edit, run checks, and prepare a pull
-  request while you review the same workspace.
 - **Stay in one context** — Browse documentation, inspect the running product, edit code, and
   use the terminal without moving the task between applications.
+- **Collaborate with agents** — Give any ACP agent a task while you browse, review, and steer
+  the work in the same workspace.
 - **Work in parallel** — Give projects and agents their own Spaces, then return to the same
   pages, processes, and sessions.
 - **Reconnect remotely** — Pair the iPhone app with your Mac and reach the same workspace
