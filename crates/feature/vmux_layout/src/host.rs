@@ -145,9 +145,3 @@ pub struct BrowserGoForwardRequest {
 pub struct OpenInNewStackRequest {
     pub url: String,
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn debug_manifest_and_url_are_consistent() {}
-}
