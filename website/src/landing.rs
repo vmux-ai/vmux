@@ -102,7 +102,7 @@ fn Proof() -> Element {
                 Link {
                     class: "mx-auto mt-8 flex w-fit items-center gap-2 font-semibold text-accent no-underline hover:text-accent-hover",
                     to: Route::UseCasesPage {},
-                    "Explore use cases →"
+                    "See what Vmux can get done →"
                 }
             }
         }
