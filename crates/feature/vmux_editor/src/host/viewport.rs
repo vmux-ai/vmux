@@ -9,6 +9,7 @@ use vmux_ecs::scroll::{clamp_top_line, rows_from_viewport, window_range};
 use crate::host::edit::Selection;
 use crate::host::editor::{Editor, FileView};
 use crate::host::file_lifecycle::EditorFileLoadedSet;
+use crate::host::fold::FoldState;
 use crate::host::highlight::Highlighter;
 use crate::host::keymap::EditorKeymap;
 
@@ -515,12 +516,12 @@ fn apply_lsp_folds(
         {
             continue;
         }
-        let regions = if fold.regions.is_empty() {
-            crate::host::fold::indent_regions(&edit.core.buffer.rope)
+        if fold.regions.is_empty() {
+            let regions = FoldState::indent_regions(&edit.core.buffer.rope);
+            edit.folds.set_regions(regions);
         } else {
-            fold.regions.clone()
-        };
-        edit.folds.set_regions(regions);
+            edit.folds.set_regions(fold.regions.clone());
+        }
         edit.sync_fold_view();
         commands.trigger(ViewportRenderRequest::new(fold.entity));
         commands.trigger(CursorRenderRequest::new(fold.entity));
@@ -626,7 +627,7 @@ mod tests {
                 crate::host::edit::EditMode::Normal,
             );
             let mut folds = crate::host::fold::FoldState::default();
-            folds.set_regions(crate::host::fold::indent_regions(&core.buffer.rope));
+            folds.set_indented(&core.buffer.rope);
             let mut edit = Editor::new(core, HighlightCache::new(&path), folds);
             edit.sync_fold_view();
             edit
@@ -654,7 +655,7 @@ mod tests {
     fn collapsed_region_is_hidden_from_the_window() {
         let rope = Rope::from_str("fn a() {\n    x;\n    y;\n}\nz;\n");
         let mut folds = crate::host::fold::FoldState::default();
-        folds.set_regions(crate::host::fold::indent_regions(&rope));
+        folds.set_indented(&rope);
         folds.close(0);
         let view = folds.view(rope.len_lines() as u32);
         let visible = view.lines_for_window(0, view.visible_count());
@@ -772,8 +773,7 @@ mod tests {
             edit.core.apply(command);
             let (line, _) = edit.core.buffer.char_to_coords(edit.core.primary().head);
             edit.hl.invalidate_from(line.saturating_sub(1));
-            edit.folds
-                .set_regions(crate::host::fold::indent_regions(&edit.core.buffer.rope));
+            edit.folds.set_indented(&edit.core.buffer.rope);
             edit.sync_fold_view();
             assert!(TestEditorWindow::paired(&viewport.patch(&mut edit)));
         }

@@ -5,7 +5,7 @@ use std::sync::mpsc;
 
 use serde_json::Value;
 
-use crate::lsp::client::path_from_uri;
+use crate::lsp::client::ServerClient;
 use crate::lsp::framing::LspFrame;
 use crate::lsp::server_request::{ApplyEditInput, ReplyHandle, ServerInputSender, ServerLogInput};
 use crate::lsp::wire::{ErrorCode, Incoming, RequestId};
@@ -125,7 +125,7 @@ impl Reader {
         else {
             return;
         };
-        let Some(path) = path_from_uri(parsed.uri.as_str()) else {
+        let Some(path) = ServerClient::path_from_uri(parsed.uri.as_str()) else {
             return;
         };
         self.diagnostics.send((path, parsed.diagnostics));

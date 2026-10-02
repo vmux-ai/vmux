@@ -798,7 +798,7 @@ fn markdown_to_hover_blocks(md: &str) -> Vec<HoverBlock> {
 }
 
 fn loc_tuple(uri: &lsp_types::Uri, pos: lsp_types::Position) -> Option<(PathBuf, u32, u32)> {
-    let path = crate::lsp::client::path_from_uri(uri.as_str())?;
+    let path = ServerClient::path_from_uri(uri.as_str())?;
     Some((path, pos.line, pos.character))
 }
 

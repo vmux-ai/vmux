@@ -13,6 +13,7 @@ use crate::edit::{EditCommand, Motion, Selection};
 use crate::host::editor::Editor;
 use crate::host::explorer::{OpenEditorsDirty, OutlineDirty};
 use crate::host::file_lifecycle::SelfWrites;
+use crate::host::fold::FoldState;
 use crate::host::keymap::{EditorKeymap, KeymapConfig};
 use crate::host::language::{
     EditorCompletionRequest, EditorDefinitionRequest, EditorHoverRequest, EditorReferencesRequest,
@@ -548,7 +549,7 @@ fn apply_edit_request(
         }
     }
     if text_changed {
-        let regions = crate::fold::indent_regions(&edit.core.buffer.rope);
+        let regions = FoldState::indent_regions(&edit.core.buffer.rope);
         edit.folds.set_regions(regions);
         edit.sync_fold_view();
     }

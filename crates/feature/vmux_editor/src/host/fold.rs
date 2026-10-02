@@ -31,6 +31,49 @@ impl FoldState {
         self.reconcile();
     }
 
+    pub(crate) fn set_indented(&mut self, rope: &Rope) {
+        self.set_regions(Self::indent_regions(rope));
+    }
+
+    pub(crate) fn indent_regions(rope: &Rope) -> Vec<FoldRegion> {
+        let total = rope.len_lines();
+        let indents: Vec<Option<usize>> = (0..total)
+            .map(|line| {
+                let text: String = rope
+                    .line(line)
+                    .chars()
+                    .filter(|character| *character != '\n' && *character != '\r')
+                    .collect();
+                indent_width(&text)
+            })
+            .collect();
+        let mut regions = Vec::new();
+        for line in 0..total {
+            let Some(indent) = indents[line] else {
+                continue;
+            };
+            let mut next = line + 1;
+            let mut last = line;
+            while next < total {
+                match indents[next] {
+                    None => next += 1,
+                    Some(next_indent) if next_indent > indent => {
+                        last = next;
+                        next += 1;
+                    }
+                    Some(_) => break,
+                }
+            }
+            if last > line {
+                regions.push(FoldRegion {
+                    start: line as u32,
+                    end: last as u32,
+                });
+            }
+        }
+        regions
+    }
+
     fn region_at_start(&self, start: u32) -> Option<FoldRegion> {
         self.regions.iter().copied().find(|r| r.start == start)
     }
@@ -315,43 +358,6 @@ impl<'a> IndentGuides<'a> {
     }
 }
 
-pub fn indent_regions(rope: &Rope) -> Vec<FoldRegion> {
-    let total = rope.len_lines();
-    let indents: Vec<Option<usize>> = (0..total)
-        .map(|i| {
-            let s: String = rope
-                .line(i)
-                .chars()
-                .filter(|c| *c != '\n' && *c != '\r')
-                .collect();
-            indent_width(&s)
-        })
-        .collect();
-    let mut regions = Vec::new();
-    for i in 0..total {
-        let Some(cur) = indents[i] else { continue };
-        let mut j = i + 1;
-        let mut last = i;
-        while j < total {
-            match indents[j] {
-                None => j += 1,
-                Some(d) if d > cur => {
-                    last = j;
-                    j += 1;
-                }
-                Some(_) => break,
-            }
-        }
-        if last > i {
-            regions.push(FoldRegion {
-                start: i as u32,
-                end: last as u32,
-            });
-        }
-    }
-    regions
-}
-
 #[cfg(test)]
 mod indent_tests {
     use super::*;
@@ -359,21 +365,21 @@ mod indent_tests {
     #[test]
     fn folds_indented_block() {
         let r = Rope::from_str("fn a() {\n    x;\n    y;\n}\nz;\n");
-        let regs = indent_regions(&r);
+        let regs = FoldState::indent_regions(&r);
         assert!(regs.contains(&FoldRegion { start: 0, end: 2 }));
     }
 
     #[test]
     fn excludes_trailing_blanks() {
         let r = Rope::from_str("a:\n  b\n\n\nc\n");
-        let regs = indent_regions(&r);
+        let regs = FoldState::indent_regions(&r);
         assert_eq!(regs, vec![FoldRegion { start: 0, end: 1 }]);
     }
 
     #[test]
     fn nests_deeper_blocks() {
         let r = Rope::from_str("a:\n  b:\n    c\n  d\ne\n");
-        let regs = indent_regions(&r);
+        let regs = FoldState::indent_regions(&r);
         assert!(regs.contains(&FoldRegion { start: 0, end: 3 }));
         assert!(regs.contains(&FoldRegion { start: 1, end: 2 }));
     }

@@ -51,13 +51,16 @@ fn record_file_view_visit(
 mod tests {
     use super::*;
     use bevy_cef::prelude::UiInput;
-    use vmux_ecs::PageOpenId;
     use vmux_ecs::event::FileOpenEvent;
     use vmux_ecs::host::page::{HostHistoryDelta, HostHistoryStep};
     use vmux_ecs::page_open::PageOpenTask;
+    use vmux_ecs::{EcsPlugin, PageOpenId};
 
     use crate::host::navigation::NavigationPlugin;
     use crate::host::page_open::PageOpenPlugin;
+    use crate::lsp::LspDiagnosticsSender;
+    use crate::lsp::manager::LspManager;
+    use crate::lsp::server_request::ServerInputSender;
 
     struct Editor {
         app: App,
@@ -70,13 +73,13 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_plugins(vmux_ecs::EcsPlugin)
+                .add_plugins(EcsPlugin)
                 .add_plugins(NavigationPlugin)
                 .add_plugins(HistoryPlugin)
                 .add_plugins(PageOpenPlugin);
-            app.world_mut().spawn(crate::lsp::manager::LspManager::new(
-                crate::lsp::LspDiagnosticsSender::default(),
-                crate::lsp::server_request::ServerInputSender::default(),
+            app.world_mut().spawn(LspManager::new(
+                LspDiagnosticsSender::default(),
+                ServerInputSender::default(),
             ));
             let stack = app.world_mut().spawn_empty().id();
             app.world_mut().spawn(PageOpenTask {

@@ -380,7 +380,7 @@ fn apply_loaded_file_buffers(
                 core.buffer.encoding = encoding;
                 let mut folds = crate::fold::FoldState::default();
                 if !heavy {
-                    folds.set_regions(crate::fold::indent_regions(&core.buffer.rope));
+                    folds.set_indented(&core.buffer.rope);
                     if let Some(store) = &store {
                         folds.collapsed.extend(store.get(&view.path));
                         folds.reconcile();

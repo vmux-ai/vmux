@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::lsp::client::path_from_uri;
+use crate::lsp::client::ServerClient;
 
 #[derive(Debug)]
 pub struct WorkspaceEditPlan {
@@ -27,7 +27,7 @@ impl WorkspaceEditPlan {
             None => {
                 let changes = edit.changes.iter().flatten();
                 for (uri, edits) in changes {
-                    let Some(path) = path_from_uri(uri.as_str()) else {
+                    let Some(path) = ServerClient::path_from_uri(uri.as_str()) else {
                         return Err(PlanRefusal::UnsupportedUri);
                     };
                     let path = vmux_path::ScopedPath::resolve(root, path)
@@ -54,7 +54,7 @@ pub struct PlannedDocument {
 
 impl PlannedDocument {
     fn within(root: &Path, doc: &lsp_types::TextDocumentEdit) -> Result<Self, PlanRefusal> {
-        let Some(path) = path_from_uri(doc.text_document.uri.as_str()) else {
+        let Some(path) = ServerClient::path_from_uri(doc.text_document.uri.as_str()) else {
             return Err(PlanRefusal::UnsupportedUri);
         };
         let path = vmux_path::ScopedPath::resolve(root, path)

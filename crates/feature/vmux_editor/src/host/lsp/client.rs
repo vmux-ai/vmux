@@ -17,10 +17,6 @@ use std::time::Duration;
 
 use std::io::BufRead;
 
-pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
-    url::Url::parse(uri).ok()?.to_file_path().ok()
-}
-
 pub struct ServerClient {
     child: Child,
     outgoing: mpsc::Sender<serde_json::Value>,
@@ -30,6 +26,12 @@ pub struct ServerClient {
     _reader: JoinHandle<()>,
     _writer: JoinHandle<()>,
     _stderr: JoinHandle<()>,
+}
+
+impl ServerClient {
+    pub(crate) fn path_from_uri(uri: &str) -> Option<PathBuf> {
+        url::Url::parse(uri).ok()?.to_file_path().ok()
+    }
 }
 
 #[derive(Default)]
