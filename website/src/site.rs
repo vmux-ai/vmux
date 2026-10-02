@@ -21,12 +21,17 @@ pub fn SiteNav() -> Element {
                     "Vmux"
                 }
                 Link {
-                    class: "hidden px-2 py-1 text-text-muted no-underline hover:text-text sm:block",
+                    class: "px-2 py-1 text-text-muted no-underline hover:text-text",
+                    to: Route::UseCasesPage {},
+                    "Use cases"
+                }
+                Link {
+                    class: "hidden px-2 py-1 text-text-muted no-underline hover:text-text md:block",
                     to: Route::FrameworkPage {},
                     "Framework"
                 }
                 Link {
-                    class: "px-2 py-1 text-text-muted no-underline hover:text-text",
+                    class: "hidden px-2 py-1 text-text-muted no-underline hover:text-text sm:block",
                     to: Route::DocsIndex {},
                     "Docs"
                 }

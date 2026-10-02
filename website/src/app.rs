@@ -1,17 +1,20 @@
 use dioxus::prelude::*;
 use dioxus_primitives::toast::ToastProvider;
 
-use crate::{docs, framework, landing, markdown};
+use crate::{docs, framework, landing, markdown, use_cases};
 
 const PRODUCT_TITLE: &str = "Vmux — One prompt. Anything, done.";
 const PRODUCT_DESCRIPTION: &str =
     "The browser that gets sh*t done. Work with your team and any ACP agent with full IDE support.";
+const USE_CASES_TITLE: &str = "Vmux Use Cases — Start with the browser. Finish the task.";
+const USE_CASES_DESCRIPTION: &str = "Research, build, review, and keep work moving with your team, any ACP agent, and a full IDE in one browser.";
 const FRAMEWORK_TITLE: &str = "Vmux Framework — One IDE. Every platform.";
 const FRAMEWORK_DESCRIPTION: &str = "Build cross-platform applications from typed feature plugins, contracts, manifests, and platform adapters.";
 const DOCS_TITLE: &str = "Vmux Architecture";
 const DOCS_DESCRIPTION: &str =
     "The stable architecture, ownership, state flow, and trust boundaries behind Vmux.";
 const SITE_URL: &str = "https://vmux.ai/";
+const USE_CASES_URL: &str = "https://vmux.ai/use-cases";
 const FRAMEWORK_URL: &str = "https://vmux.ai/framework";
 const DOCS_URL: &str = "https://vmux.ai/docs";
 const OG_IMAGE: &str = "https://vmux.ai/og.png";
@@ -35,6 +38,8 @@ pub enum Route {
     Home {},
     #[route("/_home")]
     HomeStatic {},
+    #[route("/use-cases")]
+    UseCasesPage {},
     #[route("/framework")]
     FrameworkPage {},
     #[layout(DocsLayout)]
@@ -49,6 +54,7 @@ async fn static_routes() -> Result<Vec<String>, ServerFnError> {
     let mut routes = vec![
         "/".to_string(),
         "/_home".to_string(),
+        "/use-cases".to_string(),
         "/framework".to_string(),
         "/docs".to_string(),
     ];
@@ -103,6 +109,19 @@ fn HomeStatic() -> Element {
             url: SITE_URL.to_string(),
         }
         landing::Landing {}
+    }
+}
+
+#[component]
+fn UseCasesPage() -> Element {
+    rsx! {
+        Metadata {
+            title: USE_CASES_TITLE.to_string(),
+            description: USE_CASES_DESCRIPTION.to_string(),
+            keywords: "vmux use cases, browser, ACP agents, agent harness, IDE, team workspace".to_string(),
+            url: USE_CASES_URL.to_string(),
+        }
+        use_cases::UseCases {}
     }
 }
 
