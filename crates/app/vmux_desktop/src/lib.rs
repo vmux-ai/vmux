@@ -38,9 +38,6 @@ mod relaunch;
 mod runtime;
 #[cfg(feature = "screenshots")]
 mod screenshot;
-#[cfg(test)]
-mod source_policy;
-
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod splash;
 
