@@ -23,6 +23,8 @@ commands, and tools.
 - **Reconnect remotely** — Pair the iPhone app with your Mac and reach the same workspace
   through an end-to-end encrypted connection.
 
+See more [Vmux use cases](https://vmux.ai/use-cases).
+
 ## Any stack
 
 Vmux IDE and its ACP agent harness work with existing projects. React, Rust, or anything else:

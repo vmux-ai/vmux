@@ -99,6 +99,11 @@ fn Proof() -> Element {
                         body: "Browser, editor, terminal, Git, files, commands, and tools stay in one workspace.",
                     }
                 }
+                Link {
+                    class: "mx-auto mt-8 flex w-fit items-center gap-2 font-semibold text-accent no-underline hover:text-accent-hover",
+                    to: Route::UseCasesPage {},
+                    "Explore use cases →"
+                }
             }
         }
     }
