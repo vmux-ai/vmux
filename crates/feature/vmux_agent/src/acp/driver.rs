@@ -14,13 +14,15 @@ use agent_client_protocol::schema::v1::{
     PromptCapabilities, PromptRequest, ReadTextFileRequest, ReadTextFileResponse,
     ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome,
-    SessionConfigOption, SessionId, SessionModeState, SessionNotification,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, TerminalExitStatus, TerminalId,
-    TerminalOutputRequest, TerminalOutputResponse, TextContent, WaitForTerminalExitRequest,
-    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
+    SessionId, SessionNotification, SetSessionConfigOptionRequest, SetSessionModeRequest,
+    TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse, TextContent,
+    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    WriteTextFileResponse,
 };
 #[cfg(test)]
-use agent_client_protocol::schema::v1::{SessionConfigOptionCategory, SessionUpdate};
+use agent_client_protocol::schema::v1::{
+    SessionConfigOption, SessionConfigOptionCategory, SessionModeState, SessionUpdate,
+};
 use agent_client_protocol::{Client, Responder};
 use base64::Engine;
 use tokio::process::Command;
@@ -29,10 +31,12 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use vmux_ecs::ProcessId;
 use vmux_ecs::host::workspace::WorkspaceLocation;
 
-use super::AcpProjectionInput;
 #[cfg(test)]
 use super::projector::AcpProjector;
 use super::projector::{AcpToolTitle, ApprovalDetailsQuery};
+use super::{
+    AcpConfigStateInput, AcpProjectionSenders, AcpSelectedConfigInput, AcpTranscriptInput,
+};
 use vmux_api::protocol::{
     AgentAttachment, AgentRunStatus, ApprovalDecision, ServiceMessage, SharedEvent,
     compose_agent_prompt,
@@ -461,8 +465,7 @@ pub(super) struct AcpShared {
     cwd: Mutex<PathBuf>,
     pub anchor: ProcessId,
     pub stream_tx: broadcast::Sender<ServiceMessage>,
-    projection: mpsc::UnboundedSender<AcpProjectionInput>,
-    wake: mpsc::UnboundedSender<()>,
+    projection: AcpProjectionSenders,
     pub(super) projector_updates: watch::Sender<u64>,
     pub pending_perms: Mutex<HashMap<String, oneshot::Sender<ApprovalDecision>>>,
     terminals: AcpTerminals,
@@ -481,9 +484,9 @@ impl AcpShared {
         stream_tx: broadcast::Sender<ServiceMessage>,
         processes: impl Into<AcpProcesses>,
     ) -> Self {
-        let (projection, _) = mpsc::unbounded_channel();
         let (wake, _) = mpsc::unbounded_channel();
-        Self::with_projection(sid, cwd, anchor, stream_tx, processes, projection, wake)
+        let (projection, _) = AcpProjectionSenders::open(wake);
+        Self::with_projection(sid, cwd, anchor, stream_tx, processes, projection)
     }
 
     pub(super) fn with_projection(
@@ -492,8 +495,7 @@ impl AcpShared {
         anchor: ProcessId,
         stream_tx: broadcast::Sender<ServiceMessage>,
         processes: impl Into<AcpProcesses>,
-        projection: mpsc::UnboundedSender<AcpProjectionInput>,
-        wake: mpsc::UnboundedSender<()>,
+        projection: AcpProjectionSenders,
     ) -> Self {
         Self {
             sid,
@@ -501,7 +503,6 @@ impl AcpShared {
             anchor,
             stream_tx,
             projection,
-            wake,
             projector_updates: watch::channel(0).0,
             pending_perms: Mutex::new(HashMap::new()),
             terminals: AcpTerminals::default(),
@@ -554,54 +555,8 @@ impl AcpShared {
         }));
     }
 
-    fn publish_agent_info(&self, name: String) {
-        self.project(AcpProjectionInput::AgentInfo(name));
-    }
-
-    fn publish_config_state(
-        &self,
-        config_options: &[SessionConfigOption],
-        modes: Option<&SessionModeState>,
-    ) {
-        self.project(AcpProjectionInput::ConfigState {
-            config_options: config_options.to_vec(),
-            modes: modes.cloned(),
-        });
-    }
-
-    fn publish_selected_config(
-        &self,
-        config_id: Option<&str>,
-        value: &str,
-        config_options: &[SessionConfigOption],
-    ) {
-        self.project(AcpProjectionInput::SelectedConfig {
-            config_id: config_id.map(str::to_string),
-            value: value.to_string(),
-            config_options: config_options.to_vec(),
-        });
-    }
-
-    fn begin_history_replay(&self) {
-        self.project(AcpProjectionInput::BeginHistoryReplay);
-    }
-
-    fn finish_history_replay(&self, loaded: bool) {
-        self.project(AcpProjectionInput::FinishHistoryReplay(loaded));
-    }
-
-    fn project(&self, input: AcpProjectionInput) {
-        if self.projection.send(input).is_ok() {
-            let _ = self.wake.send(());
-        }
-    }
-
     pub(super) fn emit(&self, msg: ServiceMessage) {
         let _ = self.stream_tx.send(msg);
-    }
-
-    fn emit_status(&self, status: AgentRunStatus) {
-        self.project(AcpProjectionInput::Status(status));
     }
 
     fn publish_config_selection_result(
@@ -620,12 +575,6 @@ impl AcpShared {
         });
     }
 
-    async fn selection_snapshot(&self) -> super::AcpSelectionSnapshot {
-        let (response, receiver) = oneshot::channel();
-        self.project(AcpProjectionInput::SelectionSnapshot(response));
-        receiver.await.unwrap_or_default()
-    }
-
     fn stderr_detail(&self) -> String {
         self.stderr_tail.detail(STDERR_TAIL_SHOWN)
     }
@@ -641,10 +590,7 @@ async fn resolve_approval_details(
     let fallback = query.fallback();
     loop {
         let (response, receiver) = oneshot::channel();
-        shared.project(AcpProjectionInput::ApprovalDetails {
-            query: query.clone(),
-            response,
-        });
+        shared.projection.approval_details(query.clone(), response);
         match tokio::time::timeout_at(deadline, receiver).await {
             Ok(Ok(Some(details))) => return Some(details),
             Ok(Ok(None)) => {}
@@ -752,7 +698,9 @@ pub async fn run(
     {
         Ok(child) => child,
         Err(err) => {
-            shared.emit_status(AgentRunStatus::Errored(format!("acp spawn failed: {err}")));
+            shared
+                .projection
+                .status(AgentRunStatus::Errored(format!("acp spawn failed: {err}")));
             return;
         }
     };
@@ -809,13 +757,15 @@ pub async fn run(
                     .lock()
                     .unwrap()
                     .insert(call_id.clone(), tx);
-                perm_shared.project(AcpProjectionInput::ApprovalRequested(RemoteApproval {
-                    call_id: call_id.clone(),
-                    name: name.clone(),
-                    args: vmux_api::json::JsonValue::parse_or_string(&args_json),
-                }));
+                perm_shared
+                    .projection
+                    .approval_requested(RemoteApproval {
+                        call_id: call_id.clone(),
+                        name: name.clone(),
+                        args: vmux_api::json::JsonValue::parse_or_string(&args_json),
+                    });
                 let decision = rx.await.unwrap_or(ApprovalDecision::Deny);
-                perm_shared.project(AcpProjectionInput::ApprovalResolved(call_id));
+                perm_shared.projection.approval_resolved(call_id);
                 let outcome = match AcpPermissionOptions(&req.options).select(decision) {
                     Some(id) => {
                         RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(id))
@@ -911,7 +861,9 @@ pub async fn run(
         )
         .on_receive_notification(
             async move |note: SessionNotification, _cx| {
-                update_shared.project(AcpProjectionInput::Update(note.update));
+                update_shared
+                    .projection
+                    .transcript(AcpTranscriptInput::Update(note.update));
                 Ok(())
             },
             agent_client_protocol::on_receive_notification!(),
@@ -927,14 +879,14 @@ pub async fn run(
                 {
                     Ok(Ok(resp)) => resp,
                     Ok(Err(err)) => {
-                        main_shared.emit_status(AgentRunStatus::Errored(format!(
+                        main_shared.projection.status(AgentRunStatus::Errored(format!(
                             "agent failed to start: {err}{}",
                             main_shared.stderr_detail()
                         )));
                         return Ok(());
                     }
                     Err(_) => {
-                        main_shared.emit_status(AgentRunStatus::Errored(format!(
+                        main_shared.projection.status(AgentRunStatus::Errored(format!(
                             "agent did not start within {}s{}",
                             ACP_STARTUP_TIMEOUT.as_secs(),
                             main_shared.stderr_detail()
@@ -946,12 +898,14 @@ pub async fn run(
             let prompt_capabilities = init_resp.agent_capabilities.prompt_capabilities.clone();
 
             if let Some(name) = AcpAgentInfo(init_resp.agent_info.as_ref()).display_name() {
-                main_shared.publish_agent_info(name);
+                main_shared.projection.agent_info(name);
             }
 
             let resume_requested = resume.is_some() && init_resp.agent_capabilities.load_session;
             if resume_requested {
-                main_shared.begin_history_replay();
+                main_shared
+                    .projection
+                    .transcript(AcpTranscriptInput::BeginHistoryReplay);
             }
             let mut session_id =
                 load_requested_session(resume, init_resp.agent_capabilities.load_session, |sid| {
@@ -975,13 +929,18 @@ pub async fn run(
                         };
                         let response = loaded.map_err(|err| err.to_string())?;
                         let config_options = response.config_options.as_deref().unwrap_or_default();
-                        shared.publish_config_state(config_options, response.modes.as_ref());
+                        shared.projection.config_state(AcpConfigStateInput {
+                            config_options: config_options.to_vec(),
+                            modes: response.modes.clone(),
+                        });
                         Ok(())
                     }
                 })
                 .await;
             if resume_requested {
-                main_shared.finish_history_replay(session_id.is_some());
+                main_shared
+                    .projection
+                    .transcript(AcpTranscriptInput::FinishHistoryReplay(session_id.is_some()));
             }
             if let Some(sid) = &session_id {
                 main_shared.emit(ServiceMessage::AcpSessionCreated {
@@ -1005,10 +964,10 @@ pub async fn run(
                             Ok(Ok(response)) => {
                                 let config_options =
                                     response.config_options.as_deref().unwrap_or_default();
-                                shared.publish_config_state(
-                                    config_options,
-                                    response.modes.as_ref(),
-                                );
+                                shared.projection.config_state(AcpConfigStateInput {
+                                    config_options: config_options.to_vec(),
+                                    modes: response.modes.clone(),
+                                });
                                 Ok(response.session_id)
                             }
                             Ok(Err(err)) => Err(err.to_string()),
@@ -1031,7 +990,7 @@ pub async fn run(
                         }
                     }
                     Err(err) => {
-                        main_shared.emit_status(AgentRunStatus::Errored(format!(
+                        main_shared.projection.status(AgentRunStatus::Errored(format!(
                             "acp session/new failed: {err}"
                         )));
                         return Ok(());
@@ -1039,7 +998,7 @@ pub async fn run(
                 }
             }
             main_shared.mark_startup_ready();
-            main_shared.emit_status(AgentRunStatus::Idle);
+            main_shared.projection.status(AgentRunStatus::Idle);
 
             while let Some(input) = input_rx.recv().await {
                 match input {
@@ -1050,11 +1009,11 @@ pub async fn run(
                         preferred_mode,
                     } => {
                         main_shared.cancel_requested.store(false, Ordering::SeqCst);
-                        main_shared.project(AcpProjectionInput::PushUser {
+                        main_shared.projection.transcript(AcpTranscriptInput::PushUser {
                             text: text.clone(),
                             attachments: attachments.clone(),
                         });
-                        main_shared.emit_status(AgentRunStatus::Streaming);
+                        main_shared.projection.status(AgentRunStatus::Streaming);
                         let ensured = ensure_session(&mut session_id, || {
                             let mut new_session = NewSessionRequest::new(main_shared.cwd());
                             new_session.mcp_servers = mcp_servers.clone();
@@ -1067,10 +1026,10 @@ pub async fn run(
                                     .map(|response| {
                                         let config_options =
                                             response.config_options.as_deref().unwrap_or_default();
-                                        shared.publish_config_state(
-                                            config_options,
-                                            response.modes.as_ref(),
-                                        );
+                                        shared.projection.config_state(AcpConfigStateInput {
+                                            config_options: config_options.to_vec(),
+                                            modes: response.modes.clone(),
+                                        });
                                         response.session_id
                                     })
                             }
@@ -1079,7 +1038,7 @@ pub async fn run(
                         let (active_session_id, created) = match ensured {
                             Ok(value) => value,
                             Err(err) => {
-                                main_shared.emit_status(AgentRunStatus::Errored(format!(
+                                main_shared.projection.status(AgentRunStatus::Errored(format!(
                                     "acp session/new failed: {err}"
                                 )));
                                 continue;
@@ -1092,6 +1051,7 @@ pub async fn run(
                             });
                         }
                         let available_mode = main_shared
+                            .projection
                             .selection_snapshot()
                             .await
                             .configs
@@ -1112,10 +1072,12 @@ pub async fn run(
                                     .block_task()
                                     .await
                                 {
-                                    Ok(response) => main_shared.publish_selected_config(
-                                        Some(config_id),
-                                        &mode_id,
-                                        &response.config_options,
+                                    Ok(response) => main_shared.projection.selected_config(
+                                        AcpSelectedConfigInput {
+                                            config_id: Some(config_id.clone()),
+                                            value: mode_id.clone(),
+                                            config_options: response.config_options,
+                                        },
                                     ),
                                     Err(error) => tracing::warn!(target: "acp", sid = %main_shared.sid, "initial mode selection failed: {error}"),
                                 }
@@ -1128,10 +1090,12 @@ pub async fn run(
                                     .block_task()
                                     .await
                                 {
-                                    Ok(_) => main_shared.publish_selected_config(
-                                        None,
-                                        &mode_id,
-                                        &[],
+                                    Ok(_) => main_shared.projection.selected_config(
+                                        AcpSelectedConfigInput {
+                                            config_id: None,
+                                            value: mode_id.clone(),
+                                            config_options: Vec::new(),
+                                        },
                                     ),
                                     Err(error) => tracing::warn!(target: "acp", sid = %main_shared.sid, "initial mode selection failed: {error}"),
                                 }
@@ -1156,8 +1120,10 @@ pub async fn run(
                                 Err(err) => Some(err.to_string()),
                             };
                             let cancelled = shared.cancel_requested.swap(false, Ordering::SeqCst);
-                            shared.project(AcpProjectionInput::Snapshot);
-                            shared.emit_status(
+                            shared
+                                .projection
+                                .transcript(AcpTranscriptInput::Snapshot);
+                            shared.projection.status(
                                 PromptCompletion {
                                     cancelled,
                                     error: errored,
@@ -1204,11 +1170,11 @@ pub async fn run(
                         };
                         match result {
                             Ok(config_options) => {
-                                main_shared.publish_selected_config(
-                                    config_id.as_deref(),
-                                    &value,
-                                    &config_options,
-                                );
+                                main_shared.projection.selected_config(AcpSelectedConfigInput {
+                                    config_id: config_id.clone(),
+                                    value: value.clone(),
+                                    config_options,
+                                });
                                 main_shared.publish_config_selection_result(
                                     request_id,
                                     config_id.as_deref(),
@@ -1249,7 +1215,7 @@ pub async fn run(
         .await;
 
     if let Err(err) = result {
-        shared.emit_status(AgentRunStatus::Errored(format!(
+        shared.projection.status(AgentRunStatus::Errored(format!(
             "acp connection ended: {err}{}",
             shared.stderr_detail()
         )));
@@ -1294,7 +1260,7 @@ async fn drain_stderr(stderr: tokio::process::ChildStderr, shared: Arc<AcpShared
         shared.stderr_tail.push(line);
     }
     if !shared.startup_ready() {
-        shared.emit_status(AgentRunStatus::Errored(format!(
+        shared.projection.status(AgentRunStatus::Errored(format!(
             "agent exited during startup{}",
             shared.stderr_detail()
         )));
@@ -1472,7 +1438,7 @@ mod tests {
         ContentChunk, Implementation, PermissionOptionKind, SessionConfigSelectGroup,
         SessionConfigSelectOption, SessionMode, ToolCall, ToolCallUpdateFields, ToolKind,
     };
-    use bevy::prelude::{App, Entity, Update};
+    use bevy::prelude::{App, Entity, IntoScheduleConfigs, Update};
 
     struct ProjectionHarness {
         app: App,
@@ -1484,25 +1450,37 @@ mod tests {
     impl ProjectionHarness {
         fn new(capacity: usize) -> Self {
             let (stream_tx, stream) = broadcast::channel(capacity);
-            let (projection_tx, projection_rx) = mpsc::unbounded_channel();
             let (wake, _) = mpsc::unbounded_channel();
+            let (projection, projection_inboxes) = AcpProjectionSenders::open(wake);
             let shared = Arc::new(AcpShared::with_projection(
                 "s1".into(),
                 PathBuf::from("/tmp"),
                 ProcessId::new(),
                 stream_tx,
                 Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-                projection_tx,
-                wake,
+                projection,
             ));
             let mut app = App::new();
-            app.add_systems(Update, super::super::project);
+            app.add_systems(
+                Update,
+                (
+                    super::super::project_transcript,
+                    super::super::project_agent_info,
+                    super::super::project_config_state,
+                    super::super::project_selected_config,
+                    super::super::project_status,
+                    super::super::project_approval_requested,
+                    super::super::project_approval_resolved,
+                    super::super::snapshot_selection,
+                )
+                    .chain(),
+            );
             let entity = app
                 .world_mut()
                 .spawn((
                     vmux_ecs::agent::SessionId("s1".into()),
                     super::super::AcpSessionShared(Arc::clone(&shared)),
-                    super::super::AcpProjectionInbox(projection_rx),
+                    projection_inboxes,
                     AcpProjector::default(),
                     super::super::AcpAgentName::default(),
                     super::super::AcpSessionConfigs::default(),
@@ -1656,7 +1634,7 @@ mod tests {
     #[test]
     fn acp_agent_info_is_replayable_without_a_subscriber() {
         let mut harness = ProjectionHarness::new(1);
-        harness.shared.publish_agent_info("Antigravity".into());
+        harness.shared.projection.agent_info("Antigravity".into());
         harness.update();
 
         let name = harness
@@ -1805,13 +1783,21 @@ mod tests {
             ],
         )
         .category(SessionConfigOptionCategory::Mode);
-        harness.shared.publish_config_state(&[config], None);
+        harness.shared.projection.config_state(AcpConfigStateInput {
+            config_options: vec![config],
+            modes: None,
+        });
         harness.update();
         let _ = harness.stream.try_recv();
 
         harness
             .shared
-            .publish_selected_config(Some("approval"), "auto", &[]);
+            .projection
+            .selected_config(AcpSelectedConfigInput {
+                config_id: Some("approval".into()),
+                value: "auto".into(),
+                config_options: Vec::new(),
+            });
         harness.update();
 
         match harness.stream.try_recv().expect("selected config update") {
@@ -1834,7 +1820,10 @@ mod tests {
         )
         .category(SessionConfigOptionCategory::Model);
 
-        harness.shared.publish_config_state(&[config], None);
+        harness.shared.projection.config_state(AcpConfigStateInput {
+            config_options: vec![config],
+            modes: None,
+        });
         harness.update();
 
         let configs = harness
@@ -1850,12 +1839,16 @@ mod tests {
     #[test]
     fn history_replay_emits_progressive_and_final_snapshots() {
         let mut harness = ProjectionHarness::new(64);
-        harness.shared.begin_history_replay();
+        harness
+            .shared
+            .projection
+            .transcript(AcpTranscriptInput::BeginHistoryReplay);
         harness.update();
 
         harness
             .shared
-            .project(AcpProjectionInput::Update(SessionUpdate::UserMessageChunk(
+            .projection
+            .transcript(AcpTranscriptInput::Update(SessionUpdate::UserMessageChunk(
                 ContentChunk::new(ContentBlock::Text(TextContent::new("hello"))),
             )));
         harness.update();
@@ -1868,11 +1861,14 @@ mod tests {
         };
         assert_eq!(messages.len(), 1);
         for _ in 0..300 {
-            harness.shared.project(AcpProjectionInput::Update(
-                SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
-                    TextContent::new("x"),
-                ))),
-            ));
+            harness
+                .shared
+                .projection
+                .transcript(AcpTranscriptInput::Update(
+                    SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                        TextContent::new("x"),
+                    ))),
+                ));
         }
         harness.update();
 
@@ -1880,7 +1876,10 @@ mod tests {
             std::iter::from_fn(|| harness.stream.try_recv().ok()).collect();
         assert!(snapshots.len() > 1);
         assert!(snapshots.len() < 64);
-        harness.shared.finish_history_replay(true);
+        harness
+            .shared
+            .projection
+            .transcript(AcpTranscriptInput::FinishHistoryReplay(true));
         harness.update();
 
         let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
@@ -1903,11 +1902,15 @@ mod tests {
     #[test]
     fn failed_history_replay_discards_partial_transcript() {
         let mut harness = ProjectionHarness::new(64);
-        harness.shared.begin_history_replay();
+        harness
+            .shared
+            .projection
+            .transcript(AcpTranscriptInput::BeginHistoryReplay);
         harness.update();
         harness
             .shared
-            .project(AcpProjectionInput::Update(SessionUpdate::UserMessageChunk(
+            .projection
+            .transcript(AcpTranscriptInput::Update(SessionUpdate::UserMessageChunk(
                 ContentChunk::new(ContentBlock::Text(TextContent::new("partial"))),
             )));
         harness.update();
@@ -1919,7 +1922,10 @@ mod tests {
         };
         assert_eq!(messages.len(), 1);
 
-        harness.shared.finish_history_replay(false);
+        harness
+            .shared
+            .projection
+            .transcript(AcpTranscriptInput::FinishHistoryReplay(false));
         harness.update();
 
         assert!(
@@ -2051,7 +2057,8 @@ mod tests {
         harness.update();
         harness
             .shared
-            .project(AcpProjectionInput::Update(SessionUpdate::ToolCall(
+            .projection
+            .transcript(AcpTranscriptInput::Update(SessionUpdate::ToolCall(
                 ToolCall::new("call-1", "vmux.run")
                     .raw_input(serde_json::json!({"command": "echo hi"})),
             )));
@@ -2073,7 +2080,8 @@ mod tests {
         let mut harness = ProjectionHarness::new(2);
         harness
             .shared
-            .project(AcpProjectionInput::Update(SessionUpdate::ToolCall(
+            .projection
+            .transcript(AcpTranscriptInput::Update(SessionUpdate::ToolCall(
                 ToolCall::new("title-1", "mcp__vmux__set_conversation_title")
                     .raw_input(serde_json::json!({"title": "Paris Izakaya Website"})),
             )));
@@ -2340,17 +2348,16 @@ mod tests {
         let mut harness = ProjectionHarness::new(4);
         harness
             .shared
-            .project(AcpProjectionInput::ApprovalRequested(RemoteApproval {
+            .projection
+            .approval_requested(RemoteApproval {
                 call_id: "call-1".into(),
                 name: "run".into(),
                 args: vmux_api::json::JsonValue::Object(Vec::new()),
-            }));
+            });
         harness.update();
         let _ = harness.stream.try_recv();
 
-        harness
-            .shared
-            .project(AcpProjectionInput::ApprovalResolved("call-1".into()));
+        harness.shared.projection.approval_resolved("call-1".into());
         harness.update();
         assert!(matches!(
             harness.stream.try_recv(),
