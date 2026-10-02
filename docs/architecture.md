@@ -17,18 +17,16 @@ truth. `AGENTS.md` owns repository workflow and coding rules.
 
 ## System map
 
-```mermaid
-flowchart LR
-    person["person"] --> desktop["desktop app"]
-    agent["ACP agent"] --> desktop
-    external["external agent"] --> mcp["MCP server"]
-    cli["CLI"] --> service["background service"]
-    desktop --> service
-    mcp --> service
-    phone["mobile app"] --> relay["opaque relay"]
-    relay --> desktop
-    desktop --> host["browser · files · processes · credentials"]
-    service --> host
+```text
+person + ACP agent ──> desktop app ──> browser · files · processes · credentials
+                            │                           ▲
+                            ▼                           │
+                    background service ────────────────┘
+                       ▲           ▲
+                       │           │
+                     CLI       MCP server <── external agent
+
+mobile app ──> opaque relay ──> desktop app
 ```
 
 - **Desktop app** owns windows, layout, input, native integration, and the visible host ECS.
@@ -155,18 +153,15 @@ catalogs query that data. Application crates do not enumerate feature-owned comm
 
 The normal page path is one direction around a loop.
 
-```mermaid
-sequenceDiagram
-    participant UI as Dioxus page
-    participant Host as host ECS
-    participant Boundary as service or platform boundary
-
-    UI->>Host: typed input request
-    Host->>Host: validate and update entities
-    Host->>Boundary: typed operation when needed
-    Boundary->>Host: result or state change
-    Host->>UI: UiState snapshot or patch
-    UI->>UI: render and perform DOM-local effects
+```text
+Dioxus page
+    │ typed input request
+    ▼
+host ECS ── typed operation ──> service or platform boundary
+    ▲                                  │
+    └──── result or state change ──────┘
+    │
+    └─> UiState · event · effect ──> Dioxus page
 ```
 
 The UI may own text editing, selection during a pointer gesture, focus, scrolling, and layout
@@ -220,17 +215,13 @@ Bevy world or unrestricted native APIs.
 
 The workspace is a tree.
 
-```mermaid
-flowchart TB
-    window["Window"] --> space["Space"]
-    space --> tab["Tab"]
-    tab --> split["PaneSplit"]
-    split --> paneA["Pane"]
-    split --> paneB["Pane"]
-    paneA --> stackA["Stack"]
-    paneB --> stackB["Stack"]
-    stackA --> pageA["Page"]
-    stackB --> pageB["Page"]
+```text
+Window
+└── Space
+    └── Tab
+        └── PaneSplit
+            ├── Pane ──> Stack ──> Page
+            └── Pane ──> Stack ──> Page
 ```
 
 Position in the tree defines ownership. Each native window owns a complete tree. Spaces
