@@ -1,9 +1,28 @@
 # Vmux architecture
 
-Vmux is a graph of plugins composed around a shared ECS world.
+> Flexible by composition. Predictable by design.
+
+Vmux uses ECS composition to gain flexibility and extensibility without making every new
+feature an integration project. Capabilities are added as plugins, entities, components,
+systems, and typed events. Existing features do not need a new central switch, callback layer,
+or parallel data model each time the product grows.
+
+The same constrained vocabulary also makes the architecture predictable to coding agents. A
+new capability has an expected owner, state shape, operation boundary, and UI flow before the
+first line is written. A person or agent should produce a PR that fits the system without
+inventing a surprising second architecture.
 
 This document is a map. Code, tests, typed contracts, and `feature.ron` are the source of
 truth. `AGENTS.md` owns repository workflow and coding rules.
+
+## Why this architecture
+
+- **Flexible without branching the architecture.** Runtimes select the plugins and adapters
+  they need instead of rebuilding the feature for desktop, mobile, service, CLI, and agents.
+- **Extensible without a central switchboard.** New behavior attaches through components and
+  typed events. Existing features do not need to know every extension.
+- **Predictable for humans and agents.** Crate, Plugin, Entity, Component, System, Event,
+  `UiEvent`, and `UiState` give every change a small set of expected design choices.
 
 ## Plugin and ECS composition
 
