@@ -43,57 +43,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: [cef-version, changes]
     if: needs.changes.outputs.code == 'true'
-    env:
-      CEF_VERSION: ${{ needs.cef-version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
-            /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
-            /usr/local/share/chromium /usr/local/share/edge
-          sudo docker image prune --all --force || true
-          df -h /
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            pkg-config \
-            libssl-dev \
-            libasound2-dev \
-            libudev-dev \
-            libx11-dev \
-            libxi-dev \
-            libxcursor-dev \
-            libxrandr-dev \
-            libxinerama-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libgtk-3-dev \
-            libxdo-dev \
-            libvulkan-dev
-
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-linux
         with:
           components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: lint
-
-      - name: Cache cargo binaries
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cef${{ env.CEF_VERSION }}-v3
-
-      - name: Cache CEF framework
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/share/Chromium Embedded Framework.framework
-          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ env.CEF_VERSION }}-${{ hashFiles('cef/manifest.toml') }}
+          cache-key: lint
+          cef-version: ${{ needs.cef-version.outputs.version }}
 
       - name: Compute workspace packages (excluding patches)
         id: pkgs
@@ -106,9 +63,6 @@ jobs:
       - name: Check formatting
         run: cargo fmt ${{ steps.pkgs.outputs.args }} -- --check
 
-      - name: Install CEF framework
-        run: test -d "$HOME/.local/share/Chromium Embedded Framework.framework" || ./scripts/install-cef.sh
-
       - name: Clippy
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.pkgs.outputs.args }} --all-targets -- -D warnings
 
@@ -120,58 +74,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: [cef-version, changes]
     if: needs.changes.outputs.code == 'true'
-    env:
-      CEF_VERSION: ${{ needs.cef-version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
-            /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
-            /usr/local/share/chromium /usr/local/share/edge
-          sudo docker image prune --all --force || true
-          df -h /
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            pkg-config \
-            libssl-dev \
-            libasound2-dev \
-            libudev-dev \
-            libx11-dev \
-            libxi-dev \
-            libxcursor-dev \
-            libxrandr-dev \
-            libxinerama-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libgtk-3-dev \
-            libxdo-dev \
-            libvulkan-dev
-
-      - uses: ./.github/actions/setup-rust
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup-linux
         with:
-          shared-key: test
-
-      - name: Cache cargo binaries
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cef${{ env.CEF_VERSION }}-v3
-
-      - name: Cache CEF framework
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/share/Chromium Embedded Framework.framework
-          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ env.CEF_VERSION }}-${{ hashFiles('cef/manifest.toml') }}
-
-      - name: Install CEF framework
-        run: test -d "$HOME/.local/share/Chromium Embedded Framework.framework" || ./scripts/install-cef.sh
+          cache-key: test
+          cef-version: ${{ needs.cef-version.outputs.version }}
 
       - name: Run tests
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --workspace
@@ -203,6 +112,7 @@ jobs:
               - 'Makefile'
               - 'rust-toolchain.toml'
               - 'scripts/**'
+              - '.github/actions/**'
               - '.github/workflows/ci.yml'
               - '.github/workflows/nightly.yml'
               - '.github/workflows/build-cef.yml'
@@ -214,6 +124,7 @@ jobs:
               - 'patches/**'
               - 'packaging/**'
               - 'scripts/**'
+              - '.github/actions/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'Makefile'
@@ -233,6 +144,7 @@ jobs:
               - 'Makefile'
               - 'rust-toolchain.toml'
               - 'scripts/*ios*'
+              - '.github/actions/**'
               - '.github/workflows/ci.yml'
               - '!crates/app/vmux_desktop/**'
               - '!crates/util/vmux_native/**'
