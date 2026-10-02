@@ -29,6 +29,13 @@ pub struct QueuedPromptSnapshot {
 pub struct ChatSnapshot {
     pub status: String,
     pub error: String,
+    pub header_name: String,
+    pub page_title: String,
+    pub accent_rgb: String,
+    pub installing: bool,
+    pub installing_splash: bool,
+    pub streaming: bool,
+    pub choice_pending: bool,
     pub approval: Option<PendingApproval>,
     pub queued: Vec<QueuedPromptSnapshot>,
     pub paused: bool,

@@ -1,4 +1,5 @@
 use super::group::ChatMessages;
+use super::presentation::ChatPresentation;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::chat::ChatItem;
@@ -250,7 +251,7 @@ fn project_snapshot(mut runtimes: ChangedChatProjection) {
         active_tasks,
         ..ChatTranscriptState::default()
     };
-    snapshot.0 = ChatSnapshot {
+    let mut next = ChatSnapshot {
         status: conversation.status.page_status().to_string(),
         error,
         approval,
@@ -261,6 +262,8 @@ fn project_snapshot(mut runtimes: ChangedChatProjection) {
         accent_color: vmux_api::avatar::agent_color(&agent_id),
         ..ChatSnapshot::default()
     };
+    ChatPresentation::apply(&mut next, transcript.state.items.is_empty());
+    snapshot.0 = next;
 }
 
 fn receive_agents(

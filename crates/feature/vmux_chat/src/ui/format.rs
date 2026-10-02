@@ -1,8 +1,6 @@
-use unicode_segmentation::UnicodeSegmentation;
 #[cfg(ui)]
 pub(crate) use vmux_ui::prompt_recall::{PromptHistoryDirection, prompt_history_direction};
 
-const CHAT_PAGE_TITLE_MAX_GRAPHEMES: usize = 64;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PromptEdit {
     Insert(String),
@@ -41,80 +39,6 @@ impl ImportedMessages {
 
     pub(crate) fn boundary(&self, message_index: usize) -> bool {
         self.0 != 0 && message_index + 1 == self.0 as usize
-    }
-}
-
-pub(crate) struct ChatPageTitle;
-
-impl ChatPageTitle {
-    pub(crate) fn resolve(generated_title: &str, agent_name: &str) -> String {
-        let title = Self::normalize(generated_title);
-        if title.is_empty() {
-            return Self::normalize(agent_name);
-        }
-        title
-    }
-
-    fn normalize(value: &str) -> String {
-        let mut title = String::new();
-        let mut graphemes_written = 0;
-        let mut pending_space = false;
-        let mut truncated = false;
-
-        for grapheme in value.graphemes(true) {
-            if grapheme.chars().all(char::is_whitespace) {
-                pending_space = !title.is_empty();
-                continue;
-            }
-            let grapheme = grapheme
-                .chars()
-                .filter(|character| !Self::disallowed(*character))
-                .collect::<String>();
-            if grapheme.is_empty() {
-                continue;
-            }
-            if pending_space {
-                if graphemes_written >= CHAT_PAGE_TITLE_MAX_GRAPHEMES {
-                    truncated = true;
-                    break;
-                }
-                title.push(' ');
-                graphemes_written += 1;
-                pending_space = false;
-            }
-            if graphemes_written >= CHAT_PAGE_TITLE_MAX_GRAPHEMES {
-                truncated = true;
-                break;
-            }
-            title.push_str(&grapheme);
-            graphemes_written += 1;
-        }
-
-        if truncated {
-            if let Some((start, _)) = title.grapheme_indices(true).next_back() {
-                title.truncate(start);
-            }
-            title.push('…');
-        }
-        title
-    }
-
-    fn disallowed(character: char) -> bool {
-        character.is_control()
-            || matches!(
-                character,
-                '\u{00AD}'
-                    | '\u{034F}'
-                    | '\u{061C}'
-                    | '\u{180E}'
-                    | '\u{200B}'
-                    | '\u{200E}'..='\u{200F}'
-                    | '\u{202A}'..='\u{202E}'
-                    | '\u{2060}'..='\u{206F}'
-                    | '\u{FEFF}'
-                    | '\u{FFF9}'..='\u{FFFB}'
-                    | '\u{1BCA0}'..='\u{1BCA3}'
-            )
     }
 }
 
@@ -200,33 +124,6 @@ mod tests {
         assert_eq!(
             ResumeMenuState::resolve(true, false, "match", 1),
             ResumeMenuState::Results
-        );
-    }
-
-    #[test]
-    fn chat_page_title_uses_model_written_summary() {
-        assert_eq!(
-            ChatPageTitle::resolve("  Refine model-generated\n summaries  ", "Codex"),
-            "Refine model-generated summaries"
-        );
-        assert_eq!(ChatPageTitle::resolve("", "Codex"), "Codex");
-    }
-
-    #[test]
-    fn chat_page_title_falls_back_to_agent_and_truncates_topic() {
-        assert_eq!(ChatPageTitle::resolve("", "Codex"), "Codex");
-
-        let generated = "a".repeat(CHAT_PAGE_TITLE_MAX_GRAPHEMES + 10);
-        let title = ChatPageTitle::resolve(&generated, "Codex");
-        assert_eq!(title.graphemes(true).count(), CHAT_PAGE_TITLE_MAX_GRAPHEMES);
-        assert!(title.ends_with('…'));
-        assert_eq!(
-            ChatPageTitle::resolve("Fix \u{202E}\x1b title", "Codex"),
-            "Fix title"
-        );
-        assert_eq!(
-            ChatPageTitle::resolve("Keep 👩‍💻 and فارسی\u{200C}", "Codex"),
-            "Keep 👩‍💻 and فارسی\u{200C}"
         );
     }
 

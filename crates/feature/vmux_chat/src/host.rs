@@ -30,6 +30,7 @@ mod key;
 #[cfg(host)]
 mod media;
 mod model;
+mod presentation;
 mod projection;
 mod prompt;
 mod room;

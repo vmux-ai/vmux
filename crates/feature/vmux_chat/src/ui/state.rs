@@ -1,4 +1,4 @@
-use super::format::{ChatPageTitle, ImportedMessages, ResumeMenuState};
+use super::format::{ImportedMessages, ResumeMenuState};
 use super::scroll;
 use crate::event::ChatResumeState;
 use crate::event::{
@@ -15,7 +15,6 @@ use dioxus::prelude::*;
 use vmux_api::prompt_media::{
     PromptComposerAttachment, PromptMediaOption, inline_media_query, replace_inline_media_query,
 };
-use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, focus_prompt_end};
 use vmux_ui::components::composer_bar::{
     ComposerChip, ComposerMenu, ComposerMenuKind, use_composer_menu,
@@ -244,19 +243,19 @@ impl Chat {
     }
 
     pub fn header_name(&self) -> String {
-        let name = self.identity.name();
-        if name.is_empty() { self.agent() } else { name }
+        self.identity.snapshot.value.read().header_name.clone()
     }
 
     pub fn title(&self) -> String {
-        ChatPageTitle::resolve(&self.identity.title(), &self.header_name())
+        self.identity.snapshot.value.read().page_title.clone()
     }
 
     pub fn accent(&self) -> Accent {
-        Accent::resolve(
-            &self.identity.accent(),
-            agent_accent(&self.agent()).rain_rgb,
-        )
+        let snapshot = self.identity.snapshot.value.read();
+        Accent {
+            css: snapshot.accent_color.clone(),
+            rgb: snapshot.accent_rgb.clone(),
+        }
     }
 
     pub fn status(&self) -> String {
@@ -264,11 +263,11 @@ impl Chat {
     }
 
     pub fn installing(&self) -> bool {
-        self.status() == "installing"
+        self.identity.snapshot.value.read().installing
     }
 
     pub fn installing_splash(&self) -> bool {
-        self.installing() && self.transcript.state.read().items.is_empty()
+        self.identity.snapshot.value.read().installing_splash
     }
 
     pub fn install_detail(&self) -> String {
@@ -368,7 +367,7 @@ impl Chat {
     }
 
     pub fn streaming(&self) -> bool {
-        matches!(self.status().as_str(), "streaming" | "awaiting")
+        self.identity.snapshot.value.read().streaming
     }
 
     pub fn prompt_mode(&self) -> PromptComposerMode {
@@ -403,7 +402,7 @@ impl Chat {
     }
 
     pub fn choice_pending(&self) -> bool {
-        !self.run.choice_options().is_empty() || self.run.approval().is_some()
+        self.identity.snapshot.value.read().choice_pending
     }
 }
 
@@ -759,14 +758,6 @@ pub struct AgentIdentity {
 impl AgentIdentity {
     pub fn id(self) -> String {
         self.snapshot.value.read().agent_id.clone()
-    }
-
-    pub fn name(self) -> String {
-        self.snapshot.value.read().agent_name.clone()
-    }
-
-    pub fn title(self) -> String {
-        self.snapshot.value.read().conversation_title.clone()
     }
 
     pub fn icon(self) -> String {

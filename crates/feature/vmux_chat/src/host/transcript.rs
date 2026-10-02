@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use super::group::ChatMessages;
+use super::presentation::ChatPresentation;
 #[cfg(test)]
 use crate::event::ChatItem;
 use crate::event::{
@@ -277,61 +278,64 @@ impl ChatProjection {
         let agent_icon = meta
             .map(|m| m.icon.favicon_url().to_string())
             .unwrap_or_default();
+        let transcript_empty = page.items.is_empty();
+        let mut snapshot = ChatSnapshot {
+            status: state.status().to_string(),
+            error,
+            approval,
+            agent_id: session.agent_id.clone(),
+            agent_name,
+            conversation_title: conversation_title
+                .map(|title| title.0.clone())
+                .unwrap_or_default(),
+            agent_icon,
+            accent_color,
+            user_name,
+            user_initials,
+            user_color,
+            handoff_source: imported
+                .map(|imported| imported.source_agent.clone())
+                .unwrap_or_default(),
+            handoff_truncated: imported.is_some_and(|imported| imported.truncated),
+            handoff_message_count: imported
+                .map(|imported| {
+                    u32::try_from(
+                        ChatMessages::new(&imported.messages, &[], &[], &[], false).item_count(),
+                    )
+                    .unwrap_or(u32::MAX)
+                })
+                .unwrap_or_default(),
+            choice_question: choice
+                .map(|choice| choice.question.clone())
+                .unwrap_or_default(),
+            choice_options: choice
+                .map(|choice| choice.options.clone())
+                .unwrap_or_default(),
+            queued: queue
+                .items
+                .iter()
+                .map(|item| QueuedPromptSnapshot {
+                    id: item.id,
+                    text: item.text.clone(),
+                    attachments: item
+                        .attachments
+                        .iter()
+                        .map(|attachment| crate::event::ChatAttachment {
+                            path: attachment.path.clone(),
+                            name: attachment.name.clone(),
+                            mime_type: attachment.mime_type.clone(),
+                            size: attachment.size,
+                            preview_data_url: String::new(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            paused: queue.paused,
+            ..Default::default()
+        };
+        ChatPresentation::apply(&mut snapshot, transcript_empty);
         Self {
-            snapshot: ChatSnapshot {
-                status: state.status().to_string(),
-                error,
-                approval,
-                agent_id: session.agent_id.clone(),
-                agent_name,
-                conversation_title: conversation_title
-                    .map(|title| title.0.clone())
-                    .unwrap_or_default(),
-                agent_icon,
-                accent_color,
-                user_name,
-                user_initials,
-                user_color,
-                handoff_source: imported
-                    .map(|imported| imported.source_agent.clone())
-                    .unwrap_or_default(),
-                handoff_truncated: imported.is_some_and(|imported| imported.truncated),
-                handoff_message_count: imported
-                    .map(|imported| {
-                        u32::try_from(
-                            ChatMessages::new(&imported.messages, &[], &[], &[], false)
-                                .item_count(),
-                        )
-                        .unwrap_or(u32::MAX)
-                    })
-                    .unwrap_or_default(),
-                choice_question: choice
-                    .map(|choice| choice.question.clone())
-                    .unwrap_or_default(),
-                choice_options: choice
-                    .map(|choice| choice.options.clone())
-                    .unwrap_or_default(),
-                queued: queue
-                    .items
-                    .iter()
-                    .map(|item| QueuedPromptSnapshot {
-                        id: item.id,
-                        text: item.text.clone(),
-                        attachments: item
-                            .attachments
-                            .iter()
-                            .map(|attachment| crate::event::ChatAttachment {
-                                path: attachment.path.clone(),
-                                name: attachment.name.clone(),
-                                mime_type: attachment.mime_type.clone(),
-                                size: attachment.size,
-                                preview_data_url: String::new(),
-                            })
-                            .collect(),
-                    })
-                    .collect(),
-                paused: queue.paused,
-            },
+            snapshot,
             transcript: TranscriptTail {
                 items: page.items,
                 start: u32::try_from(page.start).unwrap_or(u32::MAX),
