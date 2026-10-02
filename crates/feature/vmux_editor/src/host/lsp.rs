@@ -38,9 +38,12 @@ pub struct LspPlugin;
 impl Plugin for LspPlugin {
     fn build(&self, app: &mut App) {
         let (diagnostics, inbox) = LspDiagnosticsSender::channel();
-        app.add_plugins((catalog::CatalogPlugin, server_request::ServerRequestPlugin))
-            .add_systems(Startup, spawn_tool_provider);
-        manager::build(app, diagnostics, inbox);
+        app.add_plugins((
+            catalog::CatalogPlugin,
+            server_request::ServerRequestPlugin,
+            manager::ManagerPlugin::new(diagnostics, inbox),
+        ))
+        .add_systems(Startup, spawn_tool_provider);
         app.add_plugins(manager_page::ManagerPlugin);
     }
 }
@@ -216,7 +219,7 @@ impl Default for LspDiagnosticsSender {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct LspDiagnosticsInbox(pub crossbeam_channel::Receiver<PathDiagnostics>);
 
 impl LspDiagnosticsInbox {
@@ -241,7 +244,7 @@ impl LintDiagnosticsSender {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 struct LintDiagnosticsInbox(crossbeam_channel::Receiver<PathLintDiagnostics>);
 
 impl LintDiagnosticsInbox {

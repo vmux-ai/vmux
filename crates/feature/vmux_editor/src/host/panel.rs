@@ -10,6 +10,7 @@ use vmux_ecs::event::{
 use crate::edit::{EditCommand, Selection};
 use crate::host::editing::EditRequest;
 use crate::host::editor::{Editor, FileView};
+use crate::lsp::manager::LspLine;
 
 pub(super) struct PanelPlugin;
 
@@ -435,12 +436,13 @@ fn choose_item(
     match choice {
         Some(FilePanelChoice::Reference(item)) => {
             let path = PathBuf::from(item.path);
-            let line_text = crate::lsp::manager::disk_line(&path, item.line);
+            let line_text = LspLine::read(&path, item.line);
+            let utf16_col = line_text.utf16_col(item.col);
             goto.write(crate::lsp::manager::LspGoto {
                 entity,
                 path,
                 line: item.line,
-                utf16_col: crate::lsp::manager::char_to_utf16_col(&line_text, item.col),
+                utf16_col,
             });
         }
         Some(FilePanelChoice::Completion {

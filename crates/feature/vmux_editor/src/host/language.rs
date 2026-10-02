@@ -7,6 +7,7 @@ use crate::event::*;
 use crate::host::editing::EditRequest;
 use crate::host::editor::{Editor, FileView};
 use crate::host::markdown::ParsedNote;
+use crate::lsp::manager::LspLine;
 use crate::text::DisplayCells;
 
 pub(super) struct LanguagePlugin;
@@ -176,12 +177,13 @@ struct LspPosition {
 impl LspPosition {
     fn from_char_col(line: u32, line_text: String, char_col: usize) -> Self {
         let char_col = char_col.min(line_text.chars().count());
-        let utf16_col = crate::lsp::manager::char_to_utf16_col(&line_text, char_col as u32);
+        let line_text = LspLine::new(line_text);
+        let utf16_col = line_text.utf16_col(char_col as u32);
         Self {
             line,
             utf16_col,
             char_col,
-            line_text,
+            line_text: line_text.into_string(),
         }
     }
 

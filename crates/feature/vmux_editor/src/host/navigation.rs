@@ -15,6 +15,7 @@ use crate::host::note::NoteRevealLine;
 use crate::host::note::NoteSent;
 use crate::host::status::FileInitialMetaSent;
 use crate::host::viewport::{CursorRenderRequest, FileViewport, ViewportRenderRequest};
+use crate::lsp::manager::LspLine;
 
 pub(crate) struct NavigationPlugin;
 
@@ -244,7 +245,7 @@ fn goto_caret(
         .chars()
         .filter(|character| *character != '\n' && *character != '\r')
         .collect::<String>();
-    let character_column = crate::lsp::manager::utf16_to_char_col(&line_text, utf16_col);
+    let character_column = LspLine::new(line_text).char_col(utf16_col);
     let caret = edit
         .core
         .buffer
@@ -361,9 +362,9 @@ fn apply_pending_goto(
                 .chars()
                 .filter(|character| *character != '\n' && *character != '\r')
                 .collect::<String>();
-            let start =
-                crate::lsp::manager::utf16_to_char_col(&line_text, pending.utf16_col) as usize;
-            let end = crate::lsp::manager::utf16_to_char_col(&line_text, end) as usize;
+            let line_text = LspLine::new(line_text);
+            let start = line_text.char_col(pending.utf16_col) as usize;
+            let end = line_text.char_col(end) as usize;
             let anchor = edit.core.buffer.coords_to_char(line, start);
             let head = edit.core.buffer.coords_to_char(line, end);
             edit.core.selections = vec![Selection { anchor, head }];

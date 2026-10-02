@@ -3,10 +3,12 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiInput};
+#[cfg(test)]
+use vmux_ecs::event::FileLine;
 use vmux_ecs::event::{
     CompletionItem, DiagSeverity, EditorCapability, FileCodeActionPick, FileCodeActions,
-    FileDiagnostic, FileDiagnostics, FileEditFailure, FileHover, FileLine, FileLspStatus,
-    HoverBlock, LspServerState, OutlineEvent, RefItem,
+    FileDiagnostic, FileDiagnostics, FileEditFailure, FileHover, FileLspStatus, HoverBlock,
+    LspServerState, OutlineEvent, RefItem,
 };
 use vmux_ecs::host::FileUiStateWrite;
 use vmux_ecs::page::PageReady;
@@ -29,84 +31,124 @@ use bevy::tasks::futures_lite::future;
 use lsp_types::GotoDefinitionResponse::*;
 use lsp_types::{HoverContents, MarkedString};
 
-pub fn line_text(line: &FileLine) -> String {
-    line.spans.iter().map(|s| s.text.as_str()).collect()
-}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LspLine(String);
 
-pub fn utf16_to_char_col(text: &str, utf16_col: u32) -> u32 {
-    let mut utf16 = 0u32;
-    let mut chars = 0u32;
-    for ch in text.chars() {
-        if utf16 >= utf16_col {
-            return chars;
+impl LspLine {
+    pub(crate) fn new(text: String) -> Self {
+        Self(text)
+    }
+
+    #[cfg(test)]
+    fn from_file_line(line: &FileLine) -> Self {
+        Self(line.spans.iter().map(|span| span.text.as_str()).collect())
+    }
+
+    fn from_rope(rope: &ropey::Rope, line: u32) -> Self {
+        let line = line as usize;
+        if line >= rope.len_lines() {
+            return Self::default();
         }
-        utf16 += ch.len_utf16() as u32;
-        chars += 1;
+        Self(
+            rope.line(line)
+                .chars()
+                .filter(|character| *character != '\n' && *character != '\r')
+                .collect(),
+        )
     }
-    chars
-}
 
-pub fn char_to_utf16_col(text: &str, char_col: u32) -> u32 {
-    text.chars()
-        .take(char_col as usize)
-        .map(|c| c.len_utf16() as u32)
-        .sum()
-}
-
-fn map_severity(sev: Option<lsp_types::DiagnosticSeverity>) -> DiagSeverity {
-    match sev {
-        Some(s) if s == lsp_types::DiagnosticSeverity::ERROR => DiagSeverity::Error,
-        Some(s) if s == lsp_types::DiagnosticSeverity::WARNING => DiagSeverity::Warning,
-        Some(s) if s == lsp_types::DiagnosticSeverity::HINT => DiagSeverity::Hint,
-        _ => DiagSeverity::Info,
+    pub(crate) fn read(path: &Path, line: u32) -> Self {
+        let Ok(content) = std::fs::read_to_string(path) else {
+            return Self::default();
+        };
+        Self(
+            content
+                .lines()
+                .nth(line as usize)
+                .unwrap_or_default()
+                .to_string(),
+        )
     }
-}
 
-pub fn to_file_diagnostics(
-    lines: &[FileLine],
-    diags: &[lsp_types::Diagnostic],
-) -> Vec<FileDiagnostic> {
-    map_diags(diags, |line| {
-        lines.get(line as usize).map(line_text).unwrap_or_default()
-    })
-}
-
-fn map_diags(
-    diags: &[lsp_types::Diagnostic],
-    line_text: impl Fn(u32) -> String,
-) -> Vec<FileDiagnostic> {
-    diags
-        .iter()
-        .map(|d| {
-            let line = d.range.start.line;
-            let text = line_text(line);
-            let start_col = utf16_to_char_col(&text, d.range.start.character);
-            let end_col = if d.range.end.line == line {
-                utf16_to_char_col(&text, d.range.end.character).max(start_col)
-            } else {
-                text.chars().count() as u32
-            };
-            FileDiagnostic {
-                line,
-                start_col,
-                end_col,
-                severity: map_severity(d.severity),
-                message: d.message.clone(),
-                source: d.source.clone(),
+    pub(crate) fn char_col(&self, utf16_col: u32) -> u32 {
+        let mut utf16 = 0u32;
+        let mut chars = 0u32;
+        for character in self.0.chars() {
+            if utf16 >= utf16_col {
+                return chars;
             }
-        })
-        .collect()
+            utf16 += character.len_utf16() as u32;
+            chars += 1;
+        }
+        chars
+    }
+
+    pub(crate) fn utf16_col(&self, char_col: u32) -> u32 {
+        self.0
+            .chars()
+            .take(char_col as usize)
+            .map(|character| character.len_utf16() as u32)
+            .sum()
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub(crate) fn into_string(self) -> String {
+        self.0
+    }
 }
 
-fn rope_line_text(rope: &ropey::Rope, line: u32) -> String {
-    let l = line as usize;
-    if l >= rope.len_lines() {
-        return String::new();
+impl LspDiagnostics {
+    #[cfg(test)]
+    fn from_lines(
+        lines: &[FileLine],
+        diagnostics: &[lsp_types::Diagnostic],
+    ) -> Vec<FileDiagnostic> {
+        Self::map(diagnostics, |line| {
+            lines
+                .get(line as usize)
+                .map(LspLine::from_file_line)
+                .unwrap_or_default()
+        })
     }
-    rope.line(l)
-        .chars()
-        .filter(|c| *c != '\n' && *c != '\r')
-        .collect()
+
+    fn map(
+        diagnostics: &[lsp_types::Diagnostic],
+        line_text: impl Fn(u32) -> LspLine,
+    ) -> Vec<FileDiagnostic> {
+        diagnostics
+            .iter()
+            .map(|diagnostic| {
+                let line = diagnostic.range.start.line;
+                let text = line_text(line);
+                let start_col = text.char_col(diagnostic.range.start.character);
+                let end_col = if diagnostic.range.end.line == line {
+                    text.char_col(diagnostic.range.end.character).max(start_col)
+                } else {
+                    text.as_str().chars().count() as u32
+                };
+                FileDiagnostic {
+                    line,
+                    start_col,
+                    end_col,
+                    severity: Self::severity(diagnostic.severity),
+                    message: diagnostic.message.clone(),
+                    source: diagnostic.source.clone(),
+                }
+            })
+            .collect()
+    }
+
+    fn severity(severity: Option<lsp_types::DiagnosticSeverity>) -> DiagSeverity {
+        match severity {
+            Some(value) if value == lsp_types::DiagnosticSeverity::ERROR => DiagSeverity::Error,
+            Some(value) if value == lsp_types::DiagnosticSeverity::WARNING => DiagSeverity::Warning,
+            Some(value) if value == lsp_types::DiagnosticSeverity::HINT => DiagSeverity::Hint,
+            _ => DiagSeverity::Info,
+        }
+    }
 }
 
 type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
@@ -148,27 +190,30 @@ pub struct LspFolds {
     pub regions: Vec<crate::fold::FoldRegion>,
 }
 
+impl LspFolds {
+    fn regions(value: &serde_json::Value) -> Vec<crate::fold::FoldRegion> {
+        value
+            .as_array()
+            .map(|ranges| {
+                ranges
+                    .iter()
+                    .filter_map(|range| {
+                        let start = range.get("startLine")?.as_u64()? as u32;
+                        let end = range.get("endLine")?.as_u64()? as u32;
+                        (end > start).then_some(crate::fold::FoldRegion { start, end })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
 #[derive(Message)]
 pub struct LspRequestedEdit {
     pub entity: Entity,
     pub root: PathBuf,
     pub result: Result<lsp_types::WorkspaceEdit, String>,
 }
-pub fn parse_folding_ranges(value: &serde_json::Value) -> Vec<crate::fold::FoldRegion> {
-    value
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|r| {
-                    let s = r.get("startLine")?.as_u64()? as u32;
-                    let e = r.get("endLine")?.as_u64()? as u32;
-                    (e > s).then_some(crate::fold::FoldRegion { start: s, end: e })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 #[derive(Component)]
 pub struct LspManager {
     servers: HashMap<ServerKey, ServerClient>,
@@ -814,17 +859,6 @@ fn parse_completion(value: &serde_json::Value) -> Vec<CompletionItem> {
         .collect()
 }
 
-pub fn disk_line(path: &Path, line: u32) -> String {
-    let Ok(content) = std::fs::read_to_string(path) else {
-        return String::new();
-    };
-    content
-        .lines()
-        .nth(line as usize)
-        .unwrap_or_default()
-        .to_string()
-}
-
 fn ref_display(path: &Path, line: u32) -> String {
     let name = path
         .file_name()
@@ -1136,14 +1170,14 @@ fn drain_requests(
                 let items: Vec<RefItem> = parse_references(&value)
                     .into_iter()
                     .map(|(path, line, utf16_col)| {
-                        let text = disk_line(&path, line);
-                        let col = utf16_to_char_col(&text, utf16_col);
+                        let text = LspLine::read(&path, line);
+                        let col = text.char_col(utf16_col);
                         RefItem {
                             display: ref_display(&path, line),
                             path: path.to_string_lossy().into_owned(),
                             line,
                             col,
-                            preview: text.trim().to_string(),
+                            preview: text.as_str().trim().to_string(),
                         }
                     })
                     .collect();
@@ -1168,7 +1202,7 @@ fn drain_requests(
                 writers.folds.write(LspFolds {
                     entity: request.target,
                     path: path.clone(),
-                    regions: parse_folding_ranges(&value),
+                    regions: LspFolds::regions(&value),
                 });
             }
             ReqKind::DocumentSymbol => {
@@ -1235,55 +1269,93 @@ fn apply_semantic_tokens(
     }
 }
 
-pub fn build(
-    app: &mut App,
+pub(crate) struct ManagerPlugin {
     diagnostics: LspDiagnosticsSender,
     diagnostics_inbox: LspDiagnosticsInbox,
+}
+
+impl ManagerPlugin {
+    pub(crate) fn new(
+        diagnostics: LspDiagnosticsSender,
+        diagnostics_inbox: LspDiagnosticsInbox,
+    ) -> Self {
+        Self {
+            diagnostics,
+            diagnostics_inbox,
+        }
+    }
+}
+
+impl Plugin for ManagerPlugin {
+    fn build(&self, app: &mut App) {
+        let (lint, lint_inbox) = LintDiagnosticsSender::channel();
+        app.world_mut().spawn((
+            Name::new("LSP startup"),
+            LspStartup {
+                diagnostics: self.diagnostics.clone(),
+                diagnostics_inbox: self.diagnostics_inbox.clone(),
+                lint,
+                lint_inbox,
+            },
+        ));
+        app.add_systems(Startup, start)
+            .add_message::<LspGoto>()
+            .add_message::<LspFolds>()
+            .add_message::<LspSemantic>()
+            .add_message::<LspRequestedEdit>()
+            .add_message::<LspCodeActionRequest>()
+            .add_message::<LspDocumentChangeRequest>()
+            .add_message::<LspDocumentCloseRequest>()
+            .add_observer(file_code_action_pick)
+            .add_systems(
+                Update,
+                (
+                    finish_server_starts,
+                    close_documents,
+                    change_documents,
+                    open_documents,
+                    lint_on_open,
+                    drain_diagnostics,
+                    drain_lint,
+                    request_code_actions,
+                    drain_requests,
+                    apply_semantic_tokens,
+                    emit_diagnostics,
+                    publish_status,
+                )
+                    .chain(),
+            );
+    }
+}
+
+#[derive(Component)]
+struct LspStartup {
+    diagnostics: LspDiagnosticsSender,
+    diagnostics_inbox: LspDiagnosticsInbox,
+    lint: LintDiagnosticsSender,
+    lint_inbox: LintDiagnosticsInbox,
+}
+
+fn start(
+    startup: Single<(Entity, &LspStartup)>,
+    inputs: Single<&ServerInputSender>,
+    mut commands: Commands,
 ) {
-    let (lint, lint_inbox) = LintDiagnosticsSender::channel();
-    let startup = std::sync::Mutex::new(Some((diagnostics, diagnostics_inbox, lint, lint_inbox)));
-    app.add_systems(
-        Startup,
-        move |inputs: Single<&ServerInputSender>, mut commands: Commands| {
-            let (diagnostics, diagnostics_inbox, lint, lint_inbox) = startup
-                .lock()
-                .unwrap()
-                .take()
-                .expect("LSP runtime can only start once");
-            commands.spawn((
-                Name::new("LSP manager"),
-                LspManager::new(diagnostics, inputs.clone()),
-            ));
-            commands.spawn((Name::new("LSP diagnostics"), diagnostics_inbox));
-            commands.spawn((Name::new("Lint diagnostics"), lint, lint_inbox));
-        },
-    )
-    .add_message::<LspGoto>()
-    .add_message::<LspFolds>()
-    .add_message::<LspSemantic>()
-    .add_message::<LspRequestedEdit>()
-    .add_message::<LspCodeActionRequest>()
-    .add_message::<LspDocumentChangeRequest>()
-    .add_message::<LspDocumentCloseRequest>()
-    .add_observer(file_code_action_pick)
-    .add_systems(
-        Update,
-        (
-            finish_server_starts,
-            close_documents,
-            change_documents,
-            open_documents,
-            lint_on_open,
-            drain_diagnostics,
-            drain_lint,
-            request_code_actions,
-            drain_requests,
-            apply_semantic_tokens,
-            emit_diagnostics,
-            publish_status,
-        )
-            .chain(),
-    );
+    let (entity, startup) = *startup;
+    commands.spawn((
+        Name::new("LSP manager"),
+        LspManager::new(startup.diagnostics.clone(), inputs.clone()),
+    ));
+    commands.spawn((
+        Name::new("LSP diagnostics"),
+        startup.diagnostics_inbox.clone(),
+    ));
+    commands.spawn((
+        Name::new("Lint diagnostics"),
+        startup.lint.clone(),
+        startup.lint_inbox.clone(),
+    ));
+    commands.entity(entity).despawn();
 }
 
 fn file_code_action_pick(
@@ -1393,7 +1465,9 @@ fn drain_diagnostics(
             if PathIdentity::resolve(&view.path) != target {
                 continue;
             }
-            let mapped = map_diags(&diags, |line| rope_line_text(&edit.core.buffer.rope, line));
+            let mapped = LspDiagnostics::map(&diags, |line| {
+                LspLine::from_rope(&edit.core.buffer.rope, line)
+            });
             commands.entity(entity).insert(LspDiagnostics {
                 mapped,
                 raw: diags.clone(),
@@ -1624,7 +1698,7 @@ mod tests {
     #[test]
     fn ascii_columns_pass_through() {
         let lines = vec![fline(0, "let x = 1;")];
-        let out = to_file_diagnostics(&lines, &[diag(0, 4, 0, 5, 1, "unused")]);
+        let out = LspDiagnostics::from_lines(&lines, &[diag(0, 4, 0, 5, 1, "unused")]);
         assert_eq!(out[0].start_col, 4);
         assert_eq!(out[0].end_col, 5);
         assert_eq!(out[0].severity, DiagSeverity::Error);
@@ -1636,16 +1710,17 @@ mod tests {
             { "startLine": 0, "endLine": 3 },
             { "startLine": 1, "endLine": 1 },
         ]);
-        let regs = parse_folding_ranges(&v);
+        let regs = LspFolds::regions(&v);
         assert_eq!(regs, vec![crate::fold::FoldRegion { start: 0, end: 3 }]);
     }
 
     #[test]
     fn utf16_emoji_maps_to_char_index() {
         let lines = vec![fline(0, "😀ab")];
-        assert_eq!(utf16_to_char_col("😀ab", 2), 1);
-        assert_eq!(utf16_to_char_col("😀ab", 3), 2);
-        let out = to_file_diagnostics(&lines, &[diag(0, 2, 0, 3, 2, "warn")]);
+        let line = LspLine::new("😀ab".to_string());
+        assert_eq!(line.char_col(2), 1);
+        assert_eq!(line.char_col(3), 2);
+        let out = LspDiagnostics::from_lines(&lines, &[diag(0, 2, 0, 3, 2, "warn")]);
         assert_eq!(out[0].start_col, 1);
         assert_eq!(out[0].end_col, 2);
         assert_eq!(out[0].severity, DiagSeverity::Warning);
@@ -1654,7 +1729,7 @@ mod tests {
     #[test]
     fn out_of_range_columns_clamp() {
         let lines = vec![fline(0, "ab")];
-        let out = to_file_diagnostics(&lines, &[diag(0, 99, 0, 99, 1, "x")]);
+        let out = LspDiagnostics::from_lines(&lines, &[diag(0, 99, 0, 99, 1, "x")]);
         assert_eq!(out[0].start_col, 2);
         assert_eq!(out[0].end_col, 2);
     }
@@ -1662,7 +1737,7 @@ mod tests {
     #[test]
     fn multiline_range_underlines_first_line_to_eol() {
         let lines = vec![fline(0, "abcdef"), fline(1, "ghi")];
-        let out = to_file_diagnostics(&lines, &[diag(0, 2, 1, 1, 1, "multi")]);
+        let out = LspDiagnostics::from_lines(&lines, &[diag(0, 2, 1, 1, 1, "multi")]);
         assert_eq!(out[0].line, 0);
         assert_eq!(out[0].start_col, 2);
         assert_eq!(out[0].end_col, 6);
@@ -1686,11 +1761,12 @@ mod tests {
     #[test]
     fn char_utf16_roundtrip_surrogate_pair() {
         let text = "a😀b";
-        assert_eq!(char_to_utf16_col(text, 0), 0);
-        assert_eq!(char_to_utf16_col(text, 1), 1);
-        assert_eq!(char_to_utf16_col(text, 2), 3);
-        assert_eq!(char_to_utf16_col(text, 3), 4);
-        assert_eq!(utf16_to_char_col(text, 3), 2);
+        let line = LspLine::new(text.to_string());
+        assert_eq!(line.utf16_col(0), 0);
+        assert_eq!(line.utf16_col(1), 1);
+        assert_eq!(line.utf16_col(2), 3);
+        assert_eq!(line.utf16_col(3), 4);
+        assert_eq!(line.char_col(3), 2);
     }
 
     #[test]
