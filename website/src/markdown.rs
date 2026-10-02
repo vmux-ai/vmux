@@ -11,6 +11,22 @@ use syntect::util::LinesWithEndings;
 static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
 static THEMES: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
+include!(concat!(env!("OUT_DIR"), "/mermaid.rs"));
+
+pub struct Diagram;
+
+impl Diagram {
+    pub fn svg(source: &str) -> Option<&'static str> {
+        let wanted = source.trim_end();
+        for (diagram, svg) in DIAGRAMS {
+            if diagram.trim_end() == wanted {
+                return Some(svg);
+            }
+        }
+        None
+    }
+}
+
 fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -263,6 +279,13 @@ fn render_node(n: &Node) -> Element {
             }
         },
         Node::CodeBlock(lang, code) => {
+            if lang == "mermaid"
+                && let Some(svg) = Diagram::svg(code)
+            {
+                return rsx! {
+                    DiagramFigure { svg: svg.to_string() }
+                };
+            }
             let html = highlight_code(lang, code);
             rsx! {
                 pre { class: "bg-code-bg border border-border rounded-lg p-4 my-5 overflow-x-auto",
@@ -391,6 +414,43 @@ fn resolve_link(href: &str) -> String {
 }
 
 #[component]
+fn DiagramFigure(svg: String) -> Element {
+    let mut zoomed = use_signal(|| false);
+    rsx! {
+        figure {
+            class: "my-6 -mx-6 px-6 overflow-x-auto sm:-mx-10 sm:px-10 cursor-zoom-in",
+            tabindex: "0",
+            role: "button",
+            aria_label: "Open the diagram at full size",
+            onclick: move |_| zoomed.set(true),
+            onkeydown: move |event| {
+                let key = event.key();
+                if key == Key::Enter || key == Key::Character(" ".to_string()) {
+                    zoomed.set(true);
+                }
+            },
+            dangerous_inner_html: "{svg}",
+        }
+        if zoomed() {
+            div {
+                class: "fixed inset-0 z-50 overflow-auto bg-bg/95 p-6 cursor-zoom-out sm:p-10",
+                tabindex: "0",
+                autofocus: true,
+                onclick: move |_| zoomed.set(false),
+                onkeydown: move |event| {
+                    if event.key() == Key::Escape {
+                        zoomed.set(false);
+                    }
+                },
+                div { class: "grid min-h-full w-max min-w-full place-items-center",
+                    div { dangerous_inner_html: "{svg}" }
+                }
+            }
+        }
+    }
+}
+
+#[component]
 pub fn Markdown(content: String) -> Element {
     let nodes = parse(&content);
     rsx! {
@@ -407,5 +467,60 @@ mod tests {
         let html = highlight_code("rust", "pub fn x() {}");
         assert!(html.contains("span"));
         assert!(!html.is_empty());
+    }
+
+    fn code_blocks(nodes: &[Node], found: &mut Vec<(String, String)>) {
+        for node in nodes {
+            match node {
+                Node::CodeBlock(lang, code) => found.push((lang.clone(), code.clone())),
+                Node::Heading(_, children)
+                | Node::Paragraph(children)
+                | Node::BlockQuote(children)
+                | Node::Strong(children)
+                | Node::Emphasis(children)
+                | Node::Strikethrough(children)
+                | Node::Link(_, children) => code_blocks(children, found),
+                Node::List(_, items) => {
+                    for item in items {
+                        code_blocks(item, found);
+                    }
+                }
+                Node::Table(header, rows) => {
+                    for cell in header {
+                        code_blocks(cell, found);
+                    }
+                    for row in rows {
+                        for cell in row {
+                            code_blocks(cell, found);
+                        }
+                    }
+                }
+                Node::Rule | Node::Text(_) | Node::Code(_) | Node::SoftBreak | Node::HardBreak => {}
+            }
+        }
+    }
+
+    #[test]
+    fn every_published_mermaid_block_resolves_to_an_svg_as_the_parser_yields_it() {
+        let mut checked = 0;
+        for doc in crate::docs::DOCS {
+            let mut blocks = Vec::new();
+            code_blocks(&parse(doc.content), &mut blocks);
+            for (lang, code) in blocks {
+                if lang != "mermaid" {
+                    continue;
+                }
+                assert!(
+                    Diagram::svg(&code).is_some_and(|svg| svg.contains("<svg")),
+                    "{}: a mermaid block has no build-time SVG, so the page shows its source:\n{code}",
+                    doc.slug
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked > 0,
+            "no mermaid blocks found, so this proves nothing"
+        );
     }
 }

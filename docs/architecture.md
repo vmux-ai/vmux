@@ -1,6 +1,30 @@
 # Vmux architecture
 
-Vmux is one application model composed into several runtimes.
+Vmux is a graph of plugins composed around a shared ECS world.
+
+This document is a map. Code, tests, typed contracts, and `feature.ron` are the source of
+truth. `AGENTS.md` owns repository workflow and coding rules.
+
+## Plugin and ECS composition
+
+A **plugin** installs one capability: its components, messages, systems, schedule, and any
+pages, commands, tools, persistence, or boundary adapters it owns. The **ECS world** is where
+those plugins integrate. Systems find typed data and react to typed messages instead of calling
+into another feature's internals.
+
+A runtime is a selected plugin graph. Desktop, mobile, the background service, CLI, and MCP
+server use the same composition model and differ only in the features and platform adapters they
+install.
+
+```mermaid
+flowchart LR
+    profile["runtime profile"] --> features["feature plugins"]
+    profile --> adapters["platform adapters"]
+    features -->|install| world["ECS world<br/>state · lifecycle · schedules"]
+    adapters -->|install| world
+    surfaces["pages · commands · ACP agents"] -->|typed requests| world
+    world -->|state · results · effects| surfaces
+```
 
 ```text
 feature = state + systems + UI + commands + tools + contracts
@@ -8,25 +32,46 @@ runtime = feature plugins + platform adapters
 boundary = typed value + transport adapter
 ```
 
-The desktop app, mobile app, background service, CLI, and MCP server are Rust programs built
-from the same Bevy ECS vocabulary. They differ by composition, not by having separate product
-architectures.
+`vmux_app` is the platform-neutral composition root. A runtime selects a profile and installs
+the feature plugins that profile needs.
 
-This document is a map. Code, tests, typed contracts, and `feature.ron` are the source of
-truth. `AGENTS.md` owns repository workflow and coding rules.
+```rust
+app.add_plugins(
+    VmuxPlugin::builder()
+        .desktop()
+        .git(false)
+        .simulator(false)
+        .build(),
+);
+```
+
+Cargo features decide what is compiled. Builder options decide which compiled plugins are
+installed. Platform crates then add only their adapters:
+
+| Runtime | Adds |
+|---|---|
+| `vmux_desktop` | windows, menus, native input, packaging, desktop credentials |
+| `vmux_mobile` | mobile lifecycle, pairing, remote transport |
+| `vmux_service` | local server, durable processes and sessions |
+| `vmux_cli` | argument parsing and one-shot execution |
+| `vmux_mcp` | JSON-RPC transport and tool publication |
+
+A feature plugin never installs a sibling feature. Shared composition belongs in `vmux_app`.
 
 ## System map
 
-```text
-person + ACP agent ──> desktop app ──> browser · files · processes · credentials
-                            │                           ▲
-                            ▼                           │
-                    background service ────────────────┘
-                       ▲           ▲
-                       │           │
-                     CLI       MCP server <── external agent
-
-mobile app ──> opaque relay ──> desktop app
+```mermaid
+flowchart LR
+    person["person"] --> desktop["desktop app"]
+    agent["ACP agent"] --> desktop
+    external["external agent"] --> mcp["MCP server"]
+    cli["CLI"] --> service["background service"]
+    desktop --> service
+    mcp --> service
+    phone["mobile app"] --> relay["opaque relay"]
+    relay --> desktop
+    desktop --> host["browser · files · processes · credentials"]
+    service --> host
 ```
 
 - **Desktop app** owns windows, layout, input, native integration, and the visible host ECS.
@@ -739,15 +784,18 @@ page revision before replacing the current view.
 
 The normal page path is one direction around a loop.
 
-```text
-Dioxus page
-    │ typed input request
-    ▼
-host ECS ── typed operation ──> service or platform boundary
-    ▲                                  │
-    └──── result or state change ──────┘
-    │
-    └─> UiState · event · effect ──> Dioxus page
+```mermaid
+sequenceDiagram
+    participant UI as Dioxus page
+    participant Host as host ECS
+    participant Boundary as service or platform boundary
+
+    UI->>Host: typed input request
+    Host->>Host: validate and update entities
+    Host->>Boundary: typed operation when needed
+    Boundary->>Host: result or state change
+    Host->>UI: UiState snapshot or patch
+    UI->>UI: render and perform DOM-local effects
 ```
 
 Everything the page loads arrives over a `vmux://` custom protocol registered on **that
@@ -974,13 +1022,17 @@ once on entry, and the status bar reports the character column, as VS Code does.
 The desktop is behind NAT, so it dials out and holds the connection open. Three modules own
 that on this side; what the relay does in the middle belongs to `vmux-cloud`.
 
-```text
-Window
-└── Space
-    └── Tab
-        └── PaneSplit
-            ├── Pane ──> Stack ──> Page
-            └── Pane ──> Stack ──> Page
+```mermaid
+flowchart TB
+    window["Window"] --> space["Space"]
+    space --> tab["Tab"]
+    tab --> split["PaneSplit"]
+    split --> paneA["Pane"]
+    split --> paneB["Pane"]
+    paneA --> stackA["Stack"]
+    paneB --> stackB["Stack"]
+    stackA --> pageA["Page"]
+    stackB --> pageB["Page"]
 ```
 
 Position in the tree defines ownership. Each native window owns a complete tree. Spaces
