@@ -25,7 +25,7 @@ impl Mods {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KeyInput {
     pub key: String,
     pub mods: Mods,

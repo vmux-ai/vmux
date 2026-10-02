@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 use serde_json::Value;
 use vmux_ecs::event::{LspCatalog, LspCatalogRequest, LspPackage, LspPkgStatus};
+use vmux_path::Executable;
 
 use crate::lsp::archive::ArchiveKind;
 use crate::lsp::download::{self, RemoteArtifact};
@@ -245,8 +246,8 @@ impl Package {
             LspPkgStatus::Available
         };
         let toolchain = source.as_ref().and_then(Purl::toolchain);
-        let installable =
-            kind == "github" || toolchain.is_some_and(crate::lsp::registry::executable_on_path);
+        let installable = kind == "github"
+            || toolchain.is_some_and(|command| Executable::find(command).is_some());
         let requires = if installable {
             None
         } else {

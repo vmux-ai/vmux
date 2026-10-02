@@ -4,6 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use vmux_ecs::event::InstallPhase;
+use vmux_path::Executable;
 
 use crate::lsp::download::RemoteArtifact;
 #[cfg(test)]
@@ -316,7 +317,7 @@ impl Package {
         mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
     ) -> Result<store::Receipt, String> {
         let toolchain = source.toolchain().ok_or("unknown source")?;
-        if !crate::lsp::registry::executable_on_path(toolchain) {
+        if Executable::find(toolchain).is_none() {
             return Err(format!("requires {toolchain}"));
         }
         let staging_root = store.staging_dir();

@@ -1,6 +1,6 @@
 use crate::edit::buffer::TextBuffer;
 use crate::edit::command::Motion;
-use crate::edit::text_object::char_class;
+use crate::edit::text_object::TextObjectKind;
 use crate::fold::FoldView;
 
 pub(super) struct MotionResolver<'a> {
@@ -269,7 +269,7 @@ impl<'a> MotionResolver<'a> {
         if big {
             if ch.is_whitespace() { 0 } else { 1 }
         } else {
-            char_class(ch)
+            TextObjectKind::char_class(ch)
         }
     }
 

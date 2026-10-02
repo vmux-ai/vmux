@@ -20,7 +20,7 @@ use crate::host::highlight::{HIGHLIGHT_MAX_BYTES, Highlighter};
 use crate::host::markdown::ParsedNote;
 use crate::host::viewport::ViewportRenderRequest;
 use crate::lsp::client::ServerClient;
-use crate::lsp::registry::{ServerSpec, resolve_spec, workspace_root};
+use crate::lsp::registry::{LinterSpec, ServerSpec};
 use crate::lsp::server_request::ServerInputSender;
 use crate::lsp::{
     LintDiagnosticsInbox, LintDiagnosticsSender, LspDiagnosticsInbox, LspDiagnosticsSender,
@@ -994,7 +994,7 @@ fn open_documents(
         if let Some(document) = manager.open_docs.get_mut(&fv.path) {
             document.refs += 1;
         } else if let Some(ext) = fv.path.extension().and_then(|extension| extension.to_str())
-            && let Some(mut spec) = resolve_spec(ext, &overrides)
+            && let Some(mut spec) = ServerSpec::resolve(ext, &overrides)
         {
             match store::PackageStore::lsp().resolve_command(&spec.command) {
                 store::Resolution::Managed(path) => {
@@ -1008,7 +1008,7 @@ fn open_documents(
                 }
             }
             let directory = fv.path.parent().unwrap_or(&fv.path);
-            let root = workspace_root(directory, &spec.root_markers);
+            let root = spec.workspace_root(directory);
             let key = ServerKey::new(&root, &spec.command);
             if failed.contains(&key) {
                 commands.entity(entity).insert(LspOpened);
@@ -1539,7 +1539,7 @@ fn lint_on_open(
         let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
             continue;
         };
-        let Some(spec) = crate::lsp::registry::linter_for(ext) else {
+        let Some(spec) = LinterSpec::for_extension(ext) else {
             continue;
         };
         if matches!(
@@ -1577,7 +1577,7 @@ fn publish_status(
         let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
             continue;
         };
-        let Some(spec) = resolve_spec(ext, &overrides) else {
+        let Some(spec) = ServerSpec::resolve(ext, &overrides) else {
             continue;
         };
         let desired = match store.resolve_command(&spec.command) {
@@ -1592,7 +1592,7 @@ fn publish_status(
             continue;
         }
         let package = (!overrides.contains_key(ext))
-            .then(|| crate::lsp::registry::preferred_package(ext))
+            .then(|| ServerSpec::preferred_package(ext))
             .flatten()
             .map(str::to_string);
         commands.trigger(FileUiStateWrite::from_event(

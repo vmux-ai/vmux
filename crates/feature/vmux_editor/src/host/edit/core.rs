@@ -7,7 +7,7 @@ use crate::edit::command::{
 };
 use crate::edit::motion::MotionResolver;
 use crate::edit::register::{RegisterKind, RegisterValue, Registers};
-use crate::edit::text_object::char_class;
+use crate::edit::text_object::TextObjectKind;
 use crate::text::DisplayCells;
 
 use crate::edit::ex::ExRange;
@@ -718,17 +718,17 @@ impl EditCore {
         }
         let head = self.primary().head.min(len - 1);
         let mut start = head;
-        while start < len && char_class(self.buffer.rope.char(start)) != 1 {
+        while start < len && TextObjectKind::char_class(self.buffer.rope.char(start)) != 1 {
             start += 1;
         }
         if start >= len || self.buffer.char_to_line(start) != self.buffer.char_to_line(head) {
             return None;
         }
         let mut end = start;
-        while start > 0 && char_class(self.buffer.rope.char(start - 1)) == 1 {
+        while start > 0 && TextObjectKind::char_class(self.buffer.rope.char(start - 1)) == 1 {
             start -= 1;
         }
-        while end < len && char_class(self.buffer.rope.char(end)) == 1 {
+        while end < len && TextObjectKind::char_class(self.buffer.rope.char(end)) == 1 {
             end += 1;
         }
         Some(self.buffer.rope.slice(start..end).chars().collect())
@@ -909,7 +909,7 @@ impl EditCore {
                 RegisterKind::Linewise,
             )),
             Target::TextObject(obj) => {
-                let r = crate::edit::text_object::resolve(&self.buffer, self.primary().head, obj)?;
+                let r = obj.resolve(&self.buffer, self.primary().head)?;
                 if r.start >= r.end {
                     return None;
                 }
@@ -1773,8 +1773,7 @@ impl EditCore {
                 });
             }
             EditCommand::SelectTextObject(obj) => {
-                if let Some(r) =
-                    crate::edit::text_object::resolve(&self.buffer, self.primary().head, obj)
+                if let Some(r) = obj.resolve(&self.buffer, self.primary().head)
                     && r.start < r.end
                 {
                     self.set_active(Selection {

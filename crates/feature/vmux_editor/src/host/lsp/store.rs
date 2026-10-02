@@ -3,6 +3,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use vmux_path::Executable;
 
 use crate::lsp::package_path::{PackageName, PackagePath};
 
@@ -193,7 +194,7 @@ impl PackageStore {
         if managed.is_file() || managed.is_symlink() {
             return Resolution::Managed(managed);
         }
-        if crate::lsp::registry::executable_on_path(command) {
+        if Executable::find(command).is_some() {
             return Resolution::OnPath;
         }
         Resolution::Missing

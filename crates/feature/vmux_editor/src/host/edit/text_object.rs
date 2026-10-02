@@ -2,16 +2,6 @@ use std::ops::Range;
 
 use crate::edit::buffer::TextBuffer;
 
-pub fn char_class(c: char) -> u8 {
-    if c.is_whitespace() {
-        0
-    } else if c.is_alphanumeric() || c == '_' {
-        1
-    } else {
-        2
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextObjectKind {
     Word,
@@ -29,6 +19,16 @@ pub enum TextObjectKind {
 }
 
 impl TextObjectKind {
+    pub(crate) fn char_class(character: char) -> u8 {
+        if character.is_whitespace() {
+            0
+        } else if character.is_alphanumeric() || character == '_' {
+            1
+        } else {
+            2
+        }
+    }
+
     fn delimiters(self) -> Option<(char, char)> {
         Some(match self {
             TextObjectKind::Paren => ('(', ')'),
@@ -60,22 +60,32 @@ pub struct TextObject {
     pub count: usize,
 }
 
-pub fn resolve(buf: &TextBuffer, head: usize, obj: TextObject) -> Option<Range<usize>> {
-    let count = obj.count.max(1);
-    match obj.kind {
-        TextObjectKind::Word => word(buf, head, false, obj.around),
-        TextObjectKind::BigWord => word(buf, head, true, obj.around),
-        TextObjectKind::Sentence => sentence(buf, head, obj.around),
-        TextObjectKind::Paragraph => paragraph(buf, head, obj.around),
-        TextObjectKind::Tag => tag(buf, head, obj.around),
-        kind => {
-            if let Some((open, close)) = kind.delimiters() {
-                let (o, c) = enclosing_pair(buf, head, open, close, count)?;
-                return Some(if obj.around { o..c + 1 } else { o + 1..c });
+impl TextObject {
+    pub(crate) fn resolve(self, buffer: &TextBuffer, head: usize) -> Option<Range<usize>> {
+        let count = self.count.max(1);
+        match self.kind {
+            TextObjectKind::Word => word(buffer, head, false, self.around),
+            TextObjectKind::BigWord => word(buffer, head, true, self.around),
+            TextObjectKind::Sentence => sentence(buffer, head, self.around),
+            TextObjectKind::Paragraph => paragraph(buffer, head, self.around),
+            TextObjectKind::Tag => tag(buffer, head, self.around),
+            kind => {
+                if let Some((open, close)) = kind.delimiters() {
+                    let (open, close) = enclosing_pair(buffer, head, open, close, count)?;
+                    return Some(if self.around {
+                        open..close + 1
+                    } else {
+                        open + 1..close
+                    });
+                }
+                let quote = kind.quote()?;
+                let (open, close) = quoted(buffer, head, quote)?;
+                Some(if self.around {
+                    open..close + 1
+                } else {
+                    open + 1..close
+                })
             }
-            let q = kind.quote()?;
-            let (o, c) = quoted(buf, head, q)?;
-            Some(if obj.around { o..c + 1 } else { o + 1..c })
         }
     }
 }
@@ -94,7 +104,7 @@ fn word(buf: &TextBuffer, head: usize, big: bool, around: bool) -> Option<Range<
         if big {
             if c.is_whitespace() { 0 } else { 1 }
         } else {
-            char_class(c)
+            TextObjectKind::char_class(c)
         }
     };
     let base = class_at(head);
@@ -341,15 +351,12 @@ mod tests {
 
     fn slice(text: &str, head: usize, kind: TextObjectKind, around: bool) -> Option<String> {
         let b = buf(text);
-        let r = resolve(
-            &b,
-            head,
-            TextObject {
-                kind,
-                around,
-                count: 1,
-            },
-        )?;
+        let r = TextObject {
+            kind,
+            around,
+            count: 1,
+        }
+        .resolve(&b, head)?;
         Some(b.rope.slice(r).chars().collect())
     }
 
@@ -408,15 +415,12 @@ mod tests {
     #[test]
     fn counted_bracket_object_walks_outward() {
         let b = buf("a(b(c)d)e");
-        let r = resolve(
-            &b,
-            4,
-            TextObject {
-                kind: TextObjectKind::Paren,
-                around: false,
-                count: 2,
-            },
-        )
+        let r = TextObject {
+            kind: TextObjectKind::Paren,
+            around: false,
+            count: 2,
+        }
+        .resolve(&b, 4)
         .unwrap();
         let got: String = b.rope.slice(r).chars().collect();
         assert_eq!(got, "b(c)d");

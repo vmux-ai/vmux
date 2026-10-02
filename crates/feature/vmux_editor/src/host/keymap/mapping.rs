@@ -2,14 +2,14 @@ use crate::edit::command::EditMode;
 use crate::keymap::{KeyInput, Mods};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MapScope {
-    pub normal: bool,
-    pub insert: bool,
-    pub visual: bool,
+struct MapScope {
+    normal: bool,
+    insert: bool,
+    visual: bool,
 }
 
 impl MapScope {
-    pub fn parse(spec: &str) -> Self {
+    fn parse(spec: &str) -> Self {
         let spec = spec.trim();
         if spec.is_empty() {
             return Self {
@@ -25,7 +25,7 @@ impl MapScope {
         }
     }
 
-    pub fn covers(self, mode: EditMode) -> bool {
+    fn covers(self, mode: EditMode) -> bool {
         match mode {
             EditMode::Normal => self.normal,
             EditMode::Insert | EditMode::Replace => self.insert,
@@ -35,132 +35,134 @@ impl MapScope {
     }
 }
 
-pub fn parse_keys(notation: &str, leader: &str) -> Vec<KeyInput> {
-    let mut out = Vec::new();
-    let mut rest = notation;
-    while !rest.is_empty() {
-        if let Some(after) = rest.strip_prefix('<')
-            && let Some(close) = after.find('>')
-        {
-            let name = &after[..close];
-            if name.eq_ignore_ascii_case("leader") {
-                out.extend(parse_keys(leader, ""));
-                rest = &after[close + 1..];
-                continue;
+impl KeyInput {
+    fn parse(notation: &str, leader: &str) -> Vec<Self> {
+        let mut keys = Vec::new();
+        let mut rest = notation;
+        while !rest.is_empty() {
+            if let Some(after) = rest.strip_prefix('<')
+                && let Some(close) = after.find('>')
+            {
+                let name = &after[..close];
+                if name.eq_ignore_ascii_case("leader") {
+                    keys.extend(Self::parse(leader, ""));
+                    rest = &after[close + 1..];
+                    continue;
+                }
+                if let Some(key) = Self::named(name) {
+                    keys.push(key);
+                    rest = &after[close + 1..];
+                    continue;
+                }
             }
-            if let Some(key) = named_key(name) {
-                out.push(key);
-                rest = &after[close + 1..];
-                continue;
-            }
+            let character = rest.chars().next().expect("rest is non-empty");
+            keys.push(Self::plain(&character.to_string()));
+            rest = &rest[character.len_utf8()..];
         }
-        let c = rest.chars().next().expect("rest is non-empty");
-        out.push(plain(&c.to_string()));
-        rest = &rest[c.len_utf8()..];
+        keys
     }
-    out
+
+    fn plain(key: &str) -> Self {
+        Self {
+            key: key.to_string(),
+            mods: Mods::default(),
+            repeat: false,
+        }
+    }
+
+    fn named(name: &str) -> Option<Self> {
+        let lower = name.to_ascii_lowercase();
+        if let Some(rest) = lower.strip_prefix("c-") {
+            let mut key = Self::plain(rest);
+            key.mods.ctrl = true;
+            return Some(key);
+        }
+        if let Some(rest) = lower.strip_prefix("a-").or(lower.strip_prefix("m-")) {
+            let mut key = Self::plain(rest);
+            key.mods.alt = true;
+            return Some(key);
+        }
+        if let Some(rest) = lower.strip_prefix("d-") {
+            let mut key = Self::plain(rest);
+            key.mods.meta = true;
+            return Some(key);
+        }
+        if let Some(rest) = name.strip_prefix("S-").or(name.strip_prefix("s-")) {
+            let mut key = Self::plain(&rest.to_ascii_uppercase());
+            key.mods.shift = true;
+            return Some(key);
+        }
+        Some(match lower.as_str() {
+            "esc" => Self::plain("Escape"),
+            "cr" | "enter" | "return" => Self::plain("Enter"),
+            "tab" => Self::plain("Tab"),
+            "space" => Self::plain(" "),
+            "bs" => Self::plain("Backspace"),
+            "del" => Self::plain("Delete"),
+            "up" => Self::plain("ArrowUp"),
+            "down" => Self::plain("ArrowDown"),
+            "left" => Self::plain("ArrowLeft"),
+            "right" => Self::plain("ArrowRight"),
+            "lt" => Self::plain("<"),
+            "bar" => Self::plain("|"),
+            "nop" => Self::plain(""),
+            _ => return None,
+        })
+    }
 }
 
-fn plain(key: &str) -> KeyInput {
-    KeyInput {
-        key: key.to_string(),
-        mods: Mods::default(),
-        repeat: false,
-    }
-}
-
-fn named_key(name: &str) -> Option<KeyInput> {
-    let lower = name.to_ascii_lowercase();
-    if let Some(rest) = lower.strip_prefix("c-") {
-        let mut key = plain(rest);
-        key.mods.ctrl = true;
-        return Some(key);
-    }
-    if let Some(rest) = lower.strip_prefix("a-").or(lower.strip_prefix("m-")) {
-        let mut key = plain(rest);
-        key.mods.alt = true;
-        return Some(key);
-    }
-    if let Some(rest) = lower.strip_prefix("d-") {
-        let mut key = plain(rest);
-        key.mods.meta = true;
-        return Some(key);
-    }
-    if let Some(rest) = name.strip_prefix("S-").or(name.strip_prefix("s-")) {
-        let mut key = plain(&rest.to_ascii_uppercase());
-        key.mods.shift = true;
-        return Some(key);
-    }
-    Some(match lower.as_str() {
-        "esc" => plain("Escape"),
-        "cr" | "enter" | "return" => plain("Enter"),
-        "tab" => plain("Tab"),
-        "space" => plain(" "),
-        "bs" => plain("Backspace"),
-        "del" => plain("Delete"),
-        "up" => plain("ArrowUp"),
-        "down" => plain("ArrowDown"),
-        "left" => plain("ArrowLeft"),
-        "right" => plain("ArrowRight"),
-        "lt" => plain("<"),
-        "bar" => plain("|"),
-        "nop" => plain(""),
-        _ => return None,
-    })
-}
-
-fn same_key(a: &KeyInput, b: &KeyInput) -> bool {
-    a.key == b.key && a.mods == b.mods
-}
-
-pub struct Mapping {
+struct Mapping {
     scope: MapScope,
     lhs: Vec<KeyInput>,
     rhs: Vec<KeyInput>,
 }
 
-pub enum MatchResult {
+pub(crate) enum MatchResult {
     Pending,
     Expand(Vec<KeyInput>),
     Miss,
 }
 
 #[derive(Default)]
-pub struct Mappings {
+pub(crate) struct Mappings {
     entries: Vec<Mapping>,
 }
 
 impl Mappings {
-    pub fn new(specs: &[vmux_api::editor::KeyMapping], leader: &str) -> Self {
+    pub(crate) fn new(specs: &[vmux_api::editor::KeyMapping], leader: &str) -> Self {
         let entries = specs
             .iter()
             .filter_map(|spec| {
-                let lhs = parse_keys(&spec.lhs, leader);
+                let lhs = KeyInput::parse(&spec.lhs, leader);
                 if lhs.is_empty() {
                     return None;
                 }
                 Some(Mapping {
                     scope: MapScope::parse(&spec.mode),
                     lhs,
-                    rhs: parse_keys(&spec.rhs, leader),
+                    rhs: KeyInput::parse(&spec.rhs, leader),
                 })
             })
             .collect();
         Self { entries }
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    pub fn match_keys(&self, mode: EditMode, pending: &[KeyInput]) -> MatchResult {
+    pub(crate) fn match_keys(&self, mode: EditMode, pending: &[KeyInput]) -> MatchResult {
         let active = self
             .entries
             .iter()
             .filter(|entry| entry.scope.covers(mode))
             .filter(|entry| {
                 entry.lhs.len() >= pending.len()
-                    && entry.lhs.iter().zip(pending).all(|(a, b)| same_key(a, b))
+                    && entry
+                        .lhs
+                        .iter()
+                        .zip(pending)
+                        .all(|(left, right)| left == right)
             });
         let mut longer = false;
         for entry in active {
@@ -191,18 +193,18 @@ mod tests {
 
     #[test]
     fn notation_expands_leader_and_named_keys() {
-        let keys = parse_keys("<leader>w", " ");
+        let keys = KeyInput::parse("<leader>w", " ");
         assert_eq!(keys.len(), 2);
         assert_eq!(keys[0].key, " ");
         assert_eq!(keys[1].key, "w");
 
-        let esc = parse_keys("<Esc>", "");
+        let esc = KeyInput::parse("<Esc>", "");
         assert_eq!(esc[0].key, "Escape");
     }
 
     #[test]
     fn modifier_notation_sets_mods() {
-        let keys = parse_keys("<C-x>", "");
+        let keys = KeyInput::parse("<C-x>", "");
         assert!(keys[0].mods.ctrl);
         assert_eq!(keys[0].key, "x");
     }
@@ -210,17 +212,17 @@ mod tests {
     #[test]
     fn an_exact_match_expands_and_a_prefix_pends() {
         let maps = Mappings::new(&[spec("n", "gh", "^"), spec("n", "ghi", "$")], " ");
-        let g = parse_keys("g", "");
+        let g = KeyInput::parse("g", "");
         assert!(matches!(
             maps.match_keys(EditMode::Normal, &g),
             MatchResult::Pending
         ));
-        let gh = parse_keys("gh", "");
+        let gh = KeyInput::parse("gh", "");
         assert!(matches!(
             maps.match_keys(EditMode::Normal, &gh),
             MatchResult::Expand(_)
         ));
-        let zz = parse_keys("zz", "");
+        let zz = KeyInput::parse("zz", "");
         assert!(matches!(
             maps.match_keys(EditMode::Normal, &zz),
             MatchResult::Miss
@@ -230,7 +232,7 @@ mod tests {
     #[test]
     fn scope_limits_which_mode_sees_a_mapping() {
         let maps = Mappings::new(&[spec("i", "jk", "<Esc>")], " ");
-        let j = parse_keys("j", "");
+        let j = KeyInput::parse("j", "");
         assert!(matches!(
             maps.match_keys(EditMode::Insert, &j),
             MatchResult::Pending

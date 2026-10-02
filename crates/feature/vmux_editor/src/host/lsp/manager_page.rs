@@ -11,8 +11,11 @@ use vmux_ecs::event::{
 use vmux_ecs::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_ecs::page::PageReady;
 use vmux_layout::native_open::HostedUiPlugin;
+#[cfg(test)]
+use vmux_path::Executable;
 
 use crate::lsp::catalog::{CatalogOutput, CatalogReady, CatalogSearch, Package};
+use crate::lsp::registry::ServerSpec;
 use crate::lsp::{store, target::PlatformTarget};
 
 #[vmux_native::page(page = "lsp")]
@@ -436,7 +439,7 @@ impl crate::host::editor::FileView {
         self.path
             .extension()
             .and_then(|extension| extension.to_str())
-            .and_then(crate::lsp::registry::preferred_package)
+            .and_then(ServerSpec::preferred_package)
             == Some(package)
     }
 }
@@ -631,7 +634,7 @@ mod tests {
         assert_eq!(gh.status, LspPkgStatus::Available);
 
         let np = pkg("zzz-fake-ts", "pkg:npm/zzz-fake-ts@1").snapshot(&store);
-        let npm_present = crate::lsp::registry::executable_on_path("npm");
+        let npm_present = Executable::find("npm").is_some();
         assert_eq!(np.installable, npm_present);
         assert_eq!(np.requires.is_some(), !npm_present);
 
