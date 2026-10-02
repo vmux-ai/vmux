@@ -6,7 +6,9 @@ use bevy::{ecs::system::NonSendMarker, winit::WINIT_WINDOWS};
 use vmux_ecs::host::persistence::PersistenceAppExt;
 use vmux_flex::prelude::*;
 
+#[cfg(target_os = "macos")]
 use objc_ffi::sel;
+#[cfg(target_os = "macos")]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 impl Plugin for SideSheetLayoutPlugin {

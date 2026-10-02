@@ -16,6 +16,7 @@ path = "src/lib.rs"
 [dependencies]
 rkyv = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 vmux_ecs = { path = "../../util/vmux_ecs" }
 vmux_native = { path = "../../util/vmux_native" }
 vmux_ui = { path = "../../util/vmux_ui", default-features = false }
@@ -48,7 +49,6 @@ vmux_tool = { path = "../vmux_tool" }
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
-serde_json = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 
 [target.'cfg(not(target_os = "ios"))'.dev-dependencies]
