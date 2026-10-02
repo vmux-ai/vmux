@@ -8,8 +8,8 @@ const PRODUCT_DESCRIPTION: &str =
     "The browser that gets sh*t done. Work with your team and any ACP agent with full IDE support.";
 const USE_CASES_TITLE: &str = "Vmux Use Cases — Four prompts. Four things done.";
 const USE_CASES_DESCRIPTION: &str = "Fix software, find a flight, ship a client PoC, or launch a restaurant website with a browser, any ACP agent, and a full IDE.";
-const FRAMEWORK_TITLE: &str = "Vmux Framework — One IDE. Every platform.";
-const FRAMEWORK_DESCRIPTION: &str = "Build cross-platform applications from typed feature plugins, contracts, manifests, and platform adapters.";
+const FRAMEWORK_TITLE: &str = "Vmux Framework — Flexible by composition";
+const FRAMEWORK_DESCRIPTION: &str = "Build extensible cross-platform applications with ECS composition and a predictable architecture for people and coding agents.";
 const DOCS_TITLE: &str = "Vmux Architecture";
 const DOCS_DESCRIPTION: &str =
     "The stable architecture, ownership, state flow, and trust boundaries behind Vmux.";
