@@ -32,21 +32,6 @@ pub struct PreviewLine {
     pub text: String,
 }
 
-pub fn format_mem(bytes: u64) -> String {
-    const MB: f64 = 1024.0 * 1024.0;
-    const GB: f64 = MB * 1024.0;
-    let b = bytes as f64;
-    if bytes == 0 {
-        "—".to_string()
-    } else if b < MB {
-        "<1 MB".to_string()
-    } else if b < GB {
-        format!("{:.0} MB", b / MB)
-    } else {
-        format!("{:.1} GB", b / GB)
-    }
-}
-
 #[vmux_api::ui_event]
 pub struct ProcessNavigateEvent {
     pub process_id: String,
@@ -66,16 +51,3 @@ pub struct ProcessKillAllEvent {
 
 #[vmux_api::ui_event]
 pub struct RelaunchRequest;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn format_mem_buckets() {
-        assert_eq!(format_mem(0), "—");
-        assert_eq!(format_mem(512 * 1024), "<1 MB");
-        assert_eq!(format_mem(332 * 1024 * 1024), "332 MB");
-        assert_eq!(format_mem(3 * 1024 * 1024 * 1024 / 2), "1.5 GB");
-    }
-}

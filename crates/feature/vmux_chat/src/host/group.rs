@@ -1,10 +1,7 @@
 use vmux_api::chat::{ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn};
 use vmux_api::prompt_media::ChatAttachment;
-use vmux_api::protocol::{AgentAttachment, extract_display_prompt, split_private_context_prompt};
+use vmux_api::protocol::{AgentAttachment, AgentPromptEnvelope};
 use vmux_api::room::{AssistantBlock, Message, PlanStep, SubagentBlock};
-
-#[cfg(test)]
-use vmux_api::protocol::compose_agent_prompt;
 
 pub(super) struct ChatItemPage {
     pub items: Vec<ChatItem>,
@@ -47,7 +44,7 @@ impl<'a> ChatMessages<'a> {
                     if current_turn {
                         count += 1;
                     }
-                    let text = extract_display_prompt(text).unwrap_or(text);
+                    let text = AgentPromptEnvelope::new(text).display().unwrap_or(text);
                     if !text.trim().is_empty() || !attachments.is_empty() {
                         count += 1;
                     }
@@ -132,7 +129,8 @@ impl PageBuilder<'_> {
         match message {
             Message::User { text, attachments } => {
                 self.flush_turn();
-                let (context, text) = split_private_context_prompt(text)
+                let (context, text) = AgentPromptEnvelope::new(text)
+                    .split()
                     .map(|(context, display)| (Some(context), display))
                     .unwrap_or((None, text));
                 if !text.trim().is_empty() || !attachments.is_empty() {
@@ -574,8 +572,10 @@ mod tests {
 
     #[test]
     fn private_continuation_starts_hidden_turn() {
-        let private =
-            compose_agent_prompt("", Some("Project selected. Continue the original request."));
+        let private = AgentPromptEnvelope::compose(
+            "",
+            Some("Project selected. Continue the original request."),
+        );
         let messages = vec![
             Message::user("fix it"),
             assistant(vec![AssistantBlock::Text("Choose a project.".into())]),
@@ -601,7 +601,7 @@ mod tests {
 
     #[test]
     fn private_context_is_collapsed_separately_from_display_prompt() {
-        let private = compose_agent_prompt("show me something fun", Some("project policy"));
+        let private = AgentPromptEnvelope::compose("show me something fun", Some("project policy"));
         let messages = vec![Message::user(format!("show me something fun{private}"))];
 
         let items = ChatMessages::new(&[], &messages, &[], &[], false).all();

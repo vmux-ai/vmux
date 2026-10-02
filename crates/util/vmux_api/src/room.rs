@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub use crate::prompt_media::{InlineMediaQuery, inline_media_query, replace_inline_media_query};
+pub use crate::prompt_media::InlineMediaQuery;
 pub use crate::protocol::AgentAttachment;
 use crate::protocol::AgentRunStatus;
 
@@ -353,13 +353,13 @@ mod tests {
     #[test]
     fn inline_media_query_requires_an_open_token() {
         assert_eq!(
-            inline_media_query("inspect @Pictures/scr"),
+            InlineMediaQuery::parse("inspect @Pictures/scr"),
             Some(InlineMediaQuery {
                 start: 8,
                 query: "Pictures/scr",
             })
         );
-        assert_eq!(inline_media_query("mail@example.com"), None);
-        assert_eq!(inline_media_query("inspect @image.png next"), None);
+        assert_eq!(InlineMediaQuery::parse("mail@example.com"), None);
+        assert_eq!(InlineMediaQuery::parse("inspect @image.png next"), None);
     }
 }

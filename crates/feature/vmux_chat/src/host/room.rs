@@ -259,7 +259,7 @@ fn project_snapshot(mut runtimes: ChangedChatProjection) {
         agent_name: session.name.clone(),
         conversation_title: session.name.clone(),
         agent_icon,
-        accent_color: vmux_api::avatar::agent_color(&agent_id),
+        accent_color: vmux_api::avatar::AvatarSpec::agent_color(&agent_id),
         ..ChatSnapshot::default()
     };
     ChatPresentation::apply(&mut next, transcript.state.items.is_empty());
@@ -622,7 +622,7 @@ mod tests {
         );
         assert_eq!(
             started.snapshot().accent_color,
-            vmux_api::avatar::agent_color("ada")
+            vmux_api::avatar::AvatarSpec::agent_color("ada")
         );
     }
 }

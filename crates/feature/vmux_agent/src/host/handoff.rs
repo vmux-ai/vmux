@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use std::path::PathBuf;
 use vmux_chat::host::ImportedConversation;
 
+use vmux_api::protocol::AgentPromptEnvelope;
 use vmux_api::room::Message;
 
 pub struct Plugin;
@@ -44,11 +45,10 @@ impl HandoffDirectory {
             let Message::User { text, .. } = message else {
                 continue;
             };
-            if let Some(display_text) =
-                vmux_api::protocol::extract_display_prompt(text).map(str::to_string)
-            {
+            let prompt = AgentPromptEnvelope::new(text);
+            if let Some(display_text) = prompt.display().map(str::to_string) {
                 *text = display_text;
-            } else if vmux_api::protocol::has_private_context_envelope(text)
+            } else if prompt.has_private_context()
                 && let Some(display_text) = fallback.take()
             {
                 *text = display_text.to_string();
@@ -171,10 +171,9 @@ mod tests {
 
     #[test]
     fn private_wire_prompt_keeps_display_prompt_separate() {
-        let prompt =
-            vmux_api::protocol::compose_agent_prompt("continue here", Some("prior conversation"));
+        let prompt = AgentPromptEnvelope::compose("continue here", Some("prior conversation"));
 
-        assert!(prompt.starts_with(vmux_api::protocol::PRIVATE_CONTEXT_PREFIX));
+        assert!(AgentPromptEnvelope::new(&prompt).has_private_context());
         assert!(prompt.contains("prior conversation"));
         assert!(prompt.ends_with("continue here"));
     }
@@ -182,7 +181,7 @@ mod tests {
     #[test]
     fn replay_private_prompt_is_replaced_with_display_prompt() {
         let messages = vec![
-            user(&vmux_api::protocol::compose_agent_prompt(
+            user(&AgentPromptEnvelope::compose(
                 "continue here",
                 Some("prior conversation"),
             )),
@@ -214,11 +213,11 @@ mod tests {
     #[test]
     fn replay_sanitizes_every_retried_private_prompt_from_its_own_payload() {
         let messages = vec![
-            user(&vmux_api::protocol::compose_agent_prompt(
+            user(&AgentPromptEnvelope::compose(
                 "first try",
                 Some("prior conversation"),
             )),
-            user(&vmux_api::protocol::compose_agent_prompt(
+            user(&AgentPromptEnvelope::compose(
                 "second try",
                 Some("prior conversation"),
             )),
@@ -243,11 +242,8 @@ mod tests {
 
     #[test]
     fn replay_preserves_plain_prompt_starting_with_private_prefix() {
-        let text = format!(
-            "{} ordinary user text",
-            vmux_api::protocol::PRIVATE_CONTEXT_PREFIX
-        );
-        let messages = vec![user(&text)];
+        let text = "<vmux_handoff_context> ordinary user text";
+        let messages = vec![user(text)];
 
         let directory = TestHandoffDirectory::new("plain");
         let imported = ImportedConversation {

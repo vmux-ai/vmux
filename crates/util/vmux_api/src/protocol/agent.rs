@@ -182,55 +182,67 @@ pub struct AgentAttachment {
     pub size: u64,
 }
 
-pub const PRIVATE_CONTEXT_PREFIX: &str = "<vmux_handoff_context>";
-pub const PRIVATE_CONTEXT_PROMPT_MARKER: &str = "\n\nCurrent user prompt:\n";
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AgentPromptEnvelope<'a>(&'a str);
+
+const PRIVATE_CONTEXT_PREFIX: &str = "<vmux_handoff_context>";
+const PRIVATE_CONTEXT_PROMPT_MARKER: &str = "\n\nCurrent user prompt:\n";
 const PRIVATE_CONTEXT_LENGTH_PREFIX: &str = "Context bytes: ";
 const PRIVATE_CONTEXT_CLOSING_TAG: &str = "\n</vmux_handoff_context>";
 
-pub fn compose_agent_prompt(display_text: &str, context: Option<&str>) -> String {
-    match context {
-        Some(context) => format!(
-            "{PRIVATE_CONTEXT_PREFIX}\n{PRIVATE_CONTEXT_LENGTH_PREFIX}{}\n{context}{PRIVATE_CONTEXT_CLOSING_TAG}{PRIVATE_CONTEXT_PROMPT_MARKER}{display_text}",
-            context.len()
-        ),
-        None => display_text.to_string(),
+impl AgentPromptEnvelope<'static> {
+    pub fn compose(display_text: &str, context: Option<&str>) -> String {
+        match context {
+            Some(context) => format!(
+                "{PRIVATE_CONTEXT_PREFIX}\n{PRIVATE_CONTEXT_LENGTH_PREFIX}{}\n{context}{PRIVATE_CONTEXT_CLOSING_TAG}{PRIVATE_CONTEXT_PROMPT_MARKER}{display_text}",
+                context.len()
+            ),
+            None => display_text.to_string(),
+        }
     }
 }
 
-pub fn extract_display_prompt(prompt: &str) -> Option<&str> {
-    split_private_context_prompt(prompt).map(|(_, display)| display)
-}
+impl<'a> AgentPromptEnvelope<'a> {
+    pub fn new(prompt: &'a str) -> Self {
+        Self(prompt)
+    }
 
-pub fn split_private_context_prompt(prompt: &str) -> Option<(&str, &str)> {
-    split_length_delimited_private_context(prompt).or_else(|| {
-        let body = private_context_body(prompt)?;
-        let separator = format!("{PRIVATE_CONTEXT_CLOSING_TAG}{PRIVATE_CONTEXT_PROMPT_MARKER}");
-        body.rsplit_once(&separator)
-    })
-}
+    pub fn display(self) -> Option<&'a str> {
+        self.split().map(|(_, display)| display)
+    }
 
-pub fn has_private_context_envelope(prompt: &str) -> bool {
-    private_context_body(prompt).is_some_and(|body| body.contains(PRIVATE_CONTEXT_CLOSING_TAG))
-}
+    pub fn split(self) -> Option<(&'a str, &'a str)> {
+        self.split_length_delimited().or_else(|| {
+            let body = self.body()?;
+            let separator = format!("{PRIVATE_CONTEXT_CLOSING_TAG}{PRIVATE_CONTEXT_PROMPT_MARKER}");
+            body.rsplit_once(&separator)
+        })
+    }
 
-fn private_context_body(prompt: &str) -> Option<&str> {
-    prompt
-        .find(PRIVATE_CONTEXT_PREFIX)
-        .and_then(|start| prompt.get(start + PRIVATE_CONTEXT_PREFIX.len()..))?
-        .strip_prefix('\n')
-}
+    pub fn has_private_context(self) -> bool {
+        self.body()
+            .is_some_and(|body| body.contains(PRIVATE_CONTEXT_CLOSING_TAG))
+    }
 
-fn split_length_delimited_private_context(prompt: &str) -> Option<(&str, &str)> {
-    let body = private_context_body(prompt)?;
-    let (length, body) = body.split_once('\n')?;
-    let context_len = length
-        .strip_prefix(PRIVATE_CONTEXT_LENGTH_PREFIX)?
-        .parse::<usize>()
-        .ok()?;
-    let context = body.get(..context_len)?;
-    let display = body
-        .get(context_len..)?
-        .strip_prefix(PRIVATE_CONTEXT_CLOSING_TAG)?
-        .strip_prefix(PRIVATE_CONTEXT_PROMPT_MARKER)?;
-    Some((context, display))
+    fn body(self) -> Option<&'a str> {
+        self.0
+            .find(PRIVATE_CONTEXT_PREFIX)
+            .and_then(|start| self.0.get(start + PRIVATE_CONTEXT_PREFIX.len()..))?
+            .strip_prefix('\n')
+    }
+
+    fn split_length_delimited(self) -> Option<(&'a str, &'a str)> {
+        let body = self.body()?;
+        let (length, body) = body.split_once('\n')?;
+        let context_len = length
+            .strip_prefix(PRIVATE_CONTEXT_LENGTH_PREFIX)?
+            .parse::<usize>()
+            .ok()?;
+        let context = body.get(..context_len)?;
+        let display = body
+            .get(context_len..)?
+            .strip_prefix(PRIVATE_CONTEXT_CLOSING_TAG)?
+            .strip_prefix(PRIVATE_CONTEXT_PROMPT_MARKER)?;
+        Some((context, display))
+    }
 }

@@ -139,28 +139,25 @@ pub struct InlineMediaQuery<'a> {
     pub query: &'a str,
 }
 
-pub fn inline_media_query(draft: &str) -> Option<InlineMediaQuery<'_>> {
-    draft.rmatch_indices('@').find_map(|(start, _)| {
-        let boundary = start == 0
-            || draft[..start]
-                .chars()
-                .next_back()
-                .is_some_and(char::is_whitespace);
-        let query = &draft[start + 1..];
-        (boundary && !query.chars().any(char::is_whitespace))
-            .then_some(InlineMediaQuery { start, query })
-    })
-}
+impl<'a> InlineMediaQuery<'a> {
+    pub fn parse(draft: &'a str) -> Option<Self> {
+        draft.rmatch_indices('@').find_map(|(start, _)| {
+            let boundary = start == 0
+                || draft[..start]
+                    .chars()
+                    .next_back()
+                    .is_some_and(char::is_whitespace);
+            let query = &draft[start + 1..];
+            (boundary && !query.chars().any(char::is_whitespace)).then_some(Self { start, query })
+        })
+    }
 
-pub fn replace_inline_media_query(
-    draft: &str,
-    query: InlineMediaQuery<'_>,
-    replacement: &str,
-) -> String {
-    let mut value = String::with_capacity(draft.len() + replacement.len());
-    value.push_str(&draft[..query.start]);
-    value.push_str(replacement);
-    value
+    pub fn replace(self, draft: &str, replacement: &str) -> String {
+        let mut value = String::with_capacity(draft.len() + replacement.len());
+        value.push_str(&draft[..self.start]);
+        value.push_str(replacement);
+        value
+    }
 }
 
 #[cfg(test)]
@@ -170,32 +167,32 @@ mod tests {
     #[test]
     fn inline_media_query_requires_a_token_boundary_and_open_tail() {
         assert_eq!(
-            inline_media_query("inspect @Pictures/scr"),
+            InlineMediaQuery::parse("inspect @Pictures/scr"),
             Some(InlineMediaQuery {
                 start: 8,
                 query: "Pictures/scr",
             })
         );
         assert_eq!(
-            inline_media_query("@"),
+            InlineMediaQuery::parse("@"),
             Some(InlineMediaQuery {
                 start: 0,
                 query: "",
             })
         );
-        assert_eq!(inline_media_query("mail@example.com"), None);
-        assert_eq!(inline_media_query("inspect @image.png next"), None);
+        assert_eq!(InlineMediaQuery::parse("mail@example.com"), None);
+        assert_eq!(InlineMediaQuery::parse("inspect @image.png next"), None);
     }
 
     #[test]
     fn inline_media_replacement_preserves_prompt_prefix() {
         let draft = "inspect @Pictures/scr";
-        let query = inline_media_query(draft).unwrap();
+        let query = InlineMediaQuery::parse(draft).unwrap();
         assert_eq!(
-            replace_inline_media_query(draft, query, "@Pictures/photo.png "),
+            query.replace(draft, "@Pictures/photo.png "),
             "inspect @Pictures/photo.png "
         );
-        assert_eq!(replace_inline_media_query(draft, query, ""), "inspect ");
+        assert_eq!(query.replace(draft, ""), "inspect ");
     }
 
     #[test]

@@ -16,7 +16,7 @@ use bevy_cef::prelude::UiInput;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use vmux_api::mcp::{McpServerEntry, McpServerRequest, McpServers};
-use vmux_api::prompt_media::{inline_media_query, replace_inline_media_query};
+use vmux_api::prompt_media::InlineMediaQuery;
 use vmux_command::{
     BindCommands, CommandBinding, CommandDispatch, CommandRegistry, CommandRuntimePlugin,
 };
@@ -286,7 +286,7 @@ impl ChatLists<'_, '_> {
                 initial: menu.index,
             });
         }
-        if let Some(query) = inline_media_query(draft) {
+        if let Some(query) = InlineMediaQuery::parse(draft) {
             let projection = self.media.get(webview).ok();
             return Some(ActiveChatList {
                 kind: ChatListKind::Media,
@@ -660,7 +660,7 @@ fn choose(
             let Some(entry) = media.0.entries.get(selected) else {
                 return;
             };
-            let Some(query) = inline_media_query(composer.draft()) else {
+            let Some(query) = InlineMediaQuery::parse(composer.draft()) else {
                 return;
             };
             let reference = entry.reference();
@@ -675,11 +675,7 @@ fn choose(
                 });
                 String::new()
             };
-            change_composer = Some(replace_inline_media_query(
-                composer.draft(),
-                query,
-                &replacement,
-            ));
+            change_composer = Some(query.replace(composer.draft(), &replacement));
         }
         ChatListKind::Mcp => {
             let Ok(state) = lists.mcp.get(caller) else {

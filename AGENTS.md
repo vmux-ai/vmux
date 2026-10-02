@@ -37,6 +37,8 @@ Source scans are allowed only for explicit repository-wide policies or packaging
 
 Before adding a test, verify that it would fail under a realistic bug and remain valid after a behavior-preserving refactor. If not, do not add it.
 
+Keep module-specific tests inline. Split tests only when they form an independently reusable integration harness; never move them solely to reduce a source file's line count. Structural size audits measure production items and exclude `#[cfg(test)]` modules.
+
 ## Debugging
 
 **Never launch or run vmux yourself.** Do not execute `make dev`, `vmux_desktop`, `Vmux.app`, or automate input against the app. Build it when needed, then ask the user to run the normal build. After the user runs it, inspect the app logs directly.

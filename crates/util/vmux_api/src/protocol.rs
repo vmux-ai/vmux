@@ -3,7 +3,6 @@ pub use crate::json::JsonValue;
 pub use agent::*;
 pub use layout::{
     Focus, LayoutIdParseError, LayoutNode, LayoutSnapshot, NodeKind, SplitDirection, Stack, Tab,
-    format_id, parse_id,
 };
 pub use process::*;
 pub use query::*;
@@ -25,32 +24,33 @@ mod tests {
     use super::*;
     #[test]
     fn composed_agent_prompt_preserves_marker_literals_in_display_text() {
-        let display = format!("before{PRIVATE_CONTEXT_PROMPT_MARKER}after");
-        let wire = compose_agent_prompt(&display, Some("context"));
+        let display = "before\n\nCurrent user prompt:\nafter".to_string();
+        let wire = AgentPromptEnvelope::compose(&display, Some("context"));
 
         assert!(wire.contains("Context bytes: 7\ncontext"));
-        assert_eq!(extract_display_prompt(&wire), Some(display.as_str()));
+        assert_eq!(
+            AgentPromptEnvelope::new(&wire).display(),
+            Some(display.as_str())
+        );
     }
 
     #[test]
     fn legacy_composed_agent_prompt_remains_decodable() {
-        let wire = format!(
-            "{PRIVATE_CONTEXT_PREFIX}\ncontext\n</vmux_handoff_context>{PRIVATE_CONTEXT_PROMPT_MARKER}display"
-        );
+        let wire = "<vmux_handoff_context>\ncontext\n</vmux_handoff_context>\n\nCurrent user prompt:\ndisplay";
 
-        assert_eq!(extract_display_prompt(&wire), Some("display"));
+        assert_eq!(AgentPromptEnvelope::new(wire).display(), Some("display"));
     }
 
     #[test]
     fn embedded_private_context_is_split_from_visible_prompt() {
-        let envelope = compose_agent_prompt("show me something fun", Some("host policy"));
+        let envelope = AgentPromptEnvelope::compose("show me something fun", Some("host policy"));
         let echoed = format!("show me something fun{envelope}");
 
         assert_eq!(
-            split_private_context_prompt(&echoed),
+            AgentPromptEnvelope::new(&echoed).split(),
             Some(("host policy", "show me something fun"))
         );
-        assert!(has_private_context_envelope(&echoed));
+        assert!(AgentPromptEnvelope::new(&echoed).has_private_context());
     }
 
     #[test]

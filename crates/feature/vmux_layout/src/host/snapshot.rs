@@ -3,7 +3,6 @@ use vmux_ecs::PageMetadata;
 
 use crate::active_pane::ActiveStack;
 use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, Zoomed};
-use crate::protocol::format_id;
 use crate::protocol::{
     Focus, LayoutNode, LayoutSnapshot, NodeKind, SplitDirection, Stack as StackDto, Tab as TabDto,
 };
@@ -46,7 +45,7 @@ impl LayoutSnapshotQuery<'_, '_> {
                         stacks: Vec::new(),
                     });
                 TabDto {
-                    id: Some(format_id(NodeKind::Tab, tab_entity.to_bits())),
+                    id: Some(NodeKind::Tab.id(tab_entity.to_bits())),
                     name: tab.name.clone(),
                     is_active: Some(tab_entity) == active_tab,
                     root,
@@ -57,15 +56,13 @@ impl LayoutSnapshotQuery<'_, '_> {
         LayoutSnapshot {
             tabs,
             focused: Focus {
-                tab: focused
-                    .tab
-                    .map(|entity| format_id(NodeKind::Tab, entity.to_bits())),
+                tab: focused.tab.map(|entity| NodeKind::Tab.id(entity.to_bits())),
                 pane: focused
                     .pane
-                    .map(|entity| format_id(NodeKind::Pane, entity.to_bits())),
+                    .map(|entity| NodeKind::Pane.id(entity.to_bits())),
                 stack: focused
                     .stack
-                    .map(|entity| format_id(NodeKind::Stack, entity.to_bits())),
+                    .map(|entity| NodeKind::Stack.id(entity.to_bits())),
             },
         }
     }
@@ -94,7 +91,7 @@ impl LayoutSnapshotQuery<'_, '_> {
                 .map(|child| self.node(child, zoomed_leaf, self_stack))
                 .collect();
             return LayoutNode::Split {
-                id: Some(format_id(NodeKind::Split, split_entity.to_bits())),
+                id: Some(NodeKind::Split.id(split_entity.to_bits())),
                 direction: match split.direction {
                     PaneSplitDirection::Row => SplitDirection::Row,
                     PaneSplitDirection::Column => SplitDirection::Column,
@@ -114,7 +111,7 @@ impl LayoutSnapshotQuery<'_, '_> {
                 })
                 .unwrap_or_default();
             return LayoutNode::Pane {
-                id: Some(format_id(NodeKind::Pane, leaf_entity.to_bits())),
+                id: Some(NodeKind::Pane.id(leaf_entity.to_bits())),
                 is_zoomed: zoomed_leaf == Some(leaf_entity),
                 stacks,
             };
@@ -144,7 +141,7 @@ fn build_stack(
 ) -> StackDto {
     let url = page.map(|p| p.url.clone()).unwrap_or_default();
     StackDto {
-        id: Some(format_id(NodeKind::Stack, stack_entity.to_bits())),
+        id: Some(NodeKind::Stack.id(stack_entity.to_bits())),
         title: page.map(|p| p.title.clone()).unwrap_or_default(),
         kind: stack_kind_for_url(&url).to_string(),
         url,
@@ -432,7 +429,7 @@ mod tests {
         };
         let zoomed_flag = children.iter().find_map(|c| match c {
             LayoutNode::Pane { id, is_zoomed, .. } => {
-                let expected_id = format_id(NodeKind::Pane, zoomed_pane.to_bits());
+                let expected_id = NodeKind::Pane.id(zoomed_pane.to_bits());
                 if id.as_deref() == Some(expected_id.as_str()) {
                     Some(*is_zoomed)
                 } else {
@@ -445,7 +442,7 @@ mod tests {
 
         let other_flag = children.iter().find_map(|c| match c {
             LayoutNode::Pane { id, is_zoomed, .. } => {
-                let expected_id = format_id(NodeKind::Pane, other_pane.to_bits());
+                let expected_id = NodeKind::Pane.id(other_pane.to_bits());
                 if id.as_deref() == Some(expected_id.as_str()) {
                     Some(*is_zoomed)
                 } else {

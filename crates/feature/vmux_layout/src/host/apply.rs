@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::collections::HashSet as ApplyHashSet;
 
-use crate::protocol::{LayoutNode, LayoutSnapshot, NodeKind, parse_id};
+use crate::protocol::{LayoutNode, LayoutSnapshot, NodeKind};
 use crate::reconcile::*;
 
 use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
 use crate::protocol as proto;
-use crate::protocol::format_id;
 use crate::snapshot::LayoutSnapshotQuery;
 use crate::stack::Stack;
 use crate::tab::Tab as LayoutTab;
@@ -94,7 +93,7 @@ fn serve_snapshot_requests(
             snapshot.tabs.retain(|tab| {
                 tab.id
                     .as_deref()
-                    .and_then(|id| parse_id(id).ok())
+                    .and_then(|id| NodeKind::parse_id(id).ok())
                     .map(|(_, bits)| space_hierarchy.get(Entity::from_bits(bits)) == Some(target))
                     .unwrap_or(true)
             });
@@ -119,7 +118,7 @@ fn fill_process_ids(node: &mut LayoutNode, pid_by_stack: &HashMap<u64, String>) 
         LayoutNode::Pane { stacks, .. } => {
             for stack in stacks {
                 if let Some(id) = &stack.id
-                    && let Ok((NodeKind::Stack, bits)) = parse_id(id)
+                    && let Ok((NodeKind::Stack, bits)) = NodeKind::parse_id(id)
                     && let Some(pid) = pid_by_stack.get(&bits)
                 {
                     stack.process_id = Some(pid.clone());
@@ -246,12 +245,12 @@ fn apply_layout_plan(
         .tabs
         .iter()
         .filter_map(|t| t.id.as_deref())
-        .filter_map(|id| parse_id(id).ok())
+        .filter_map(|id| NodeKind::parse_id(id).ok())
         .map(|(_, v)| Entity::from_bits(v))
         .find_map(|entity| child_of.get(entity).ok().map(|parent| parent.parent()));
     for tab in &snapshot.tabs {
         let (tab_entity, activated_at) = match &tab.id {
-            Some(id) => match parse_id(id) {
+            Some(id) => match NodeKind::parse_id(id) {
                 Ok((_, value)) => {
                     let entity = Entity::from_bits(value);
                     let activated_at = activated.get(entity).map_or(0, |value| value.0);
@@ -314,7 +313,7 @@ fn apply_layout_plan(
                 proto::LayoutNode::Split { .. } => NodeKind::Split,
                 proto::LayoutNode::Pane { .. } => NodeKind::Pane,
             };
-            let id = format_id(kind, entity.to_bits());
+            let id = kind.id(entity.to_bits());
             plan.closes.contains(&id).then_some(id)
         })
         .collect();
@@ -340,7 +339,7 @@ fn materialize_descendants(
 ) {
     let node_entity = match node {
         proto::LayoutNode::Split { id, direction, .. } => match id {
-            Some(id_str) => match parse_id(id_str) {
+            Some(id_str) => match NodeKind::parse_id(id_str) {
                 Ok((_, v)) => Entity::from_bits(v),
                 Err(_) => return,
             },
@@ -369,7 +368,7 @@ fn materialize_descendants(
             }
         },
         proto::LayoutNode::Pane { id, .. } => match id {
-            Some(id_str) => match parse_id(id_str) {
+            Some(id_str) => match NodeKind::parse_id(id_str) {
                 Ok((_, v)) => Entity::from_bits(v),
                 Err(_) => return,
             },
@@ -463,7 +462,7 @@ fn set_split_direction(
 }
 
 fn apply_close(id: &str, commands: &mut Commands) {
-    let Ok((_kind, value)) = parse_id(id) else {
+    let Ok((_kind, value)) = NodeKind::parse_id(id) else {
         return;
     };
     commands.entity(Entity::from_bits(value)).try_despawn();
@@ -484,13 +483,13 @@ fn collect_ids_recursive(
         return;
     };
     if is_tab {
-        out.insert(format_id(NodeKind::Tab, entity.to_bits()));
+        out.insert(NodeKind::Tab.id(entity.to_bits()));
     } else if is_split {
-        out.insert(format_id(NodeKind::Split, entity.to_bits()));
+        out.insert(NodeKind::Split.id(entity.to_bits()));
     } else if is_pane {
-        out.insert(format_id(NodeKind::Pane, entity.to_bits()));
+        out.insert(NodeKind::Pane.id(entity.to_bits()));
     } else if is_stack {
-        out.insert(format_id(NodeKind::Stack, entity.to_bits()));
+        out.insert(NodeKind::Stack.id(entity.to_bits()));
     }
     if let Some(children) = children {
         for child in children.iter() {
@@ -529,7 +528,7 @@ fn apply_tab(
     metadata: &mut Query<&mut PageMetadata>,
 ) {
     if let Some(id) = &tab.id
-        && let Ok((_, value)) = parse_id(id)
+        && let Ok((_, value)) = NodeKind::parse_id(id)
     {
         let entity = Entity::from_bits(value);
         if let Ok(mut layout_tab) = tabs.get_mut(entity) {
@@ -568,7 +567,7 @@ fn apply_structure(
         proto::LayoutNode::Pane { stacks, .. } => {
             for t in stacks {
                 if let Some(tid) = t.id.as_deref()
-                    && let Ok((_, value)) = parse_id(tid)
+                    && let Ok((_, value)) = NodeKind::parse_id(tid)
                 {
                     commands
                         .entity(Entity::from_bits(value))
@@ -587,7 +586,9 @@ fn resolve_node_entity(
         proto::LayoutNode::Split { id, .. } | proto::LayoutNode::Pane { id, .. } => id.as_deref(),
     };
     if let Some(id_str) = id {
-        parse_id(id_str).ok().map(|(_, v)| Entity::from_bits(v))
+        NodeKind::parse_id(id_str)
+            .ok()
+            .map(|(_, v)| Entity::from_bits(v))
     } else {
         new_entities.get(&(node as *const _)).copied()
     }
@@ -607,7 +608,7 @@ fn apply_node(
             children,
         } => {
             if let Some(id) = id
-                && let Ok((_, value)) = parse_id(id)
+                && let Ok((_, value)) = NodeKind::parse_id(id)
             {
                 let entity = Entity::from_bits(value);
                 let pane_split_dir = match direction {
@@ -643,7 +644,7 @@ fn apply_node(
         proto::LayoutNode::Pane { stacks, .. } => {
             for t in stacks {
                 if let Some(tid) = &t.id
-                    && let Ok((_, value)) = parse_id(tid)
+                    && let Ok((_, value)) = NodeKind::parse_id(tid)
                 {
                     let entity = Entity::from_bits(value);
                     if !t.title.is_empty()
@@ -669,13 +670,19 @@ fn apply_focus(
             continue;
         }
         if let Some(id) = focus.tab.as_deref() {
-            active.tab = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
+            active.tab = NodeKind::parse_id(id)
+                .ok()
+                .map(|(_, v)| Entity::from_bits(v));
         }
         if let Some(id) = focus.pane.as_deref() {
-            active.pane = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
+            active.pane = NodeKind::parse_id(id)
+                .ok()
+                .map(|(_, v)| Entity::from_bits(v));
         }
         if let Some(id) = focus.stack.as_deref() {
-            active.stack = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
+            active.stack = NodeKind::parse_id(id)
+                .ok()
+                .map(|(_, v)| Entity::from_bits(v));
         }
         return;
     }
@@ -683,9 +690,13 @@ fn apply_focus(
 
 fn node_entity(node: &proto::LayoutNode) -> Option<Entity> {
     match node {
-        proto::LayoutNode::Split { id, .. } | proto::LayoutNode::Pane { id, .. } => id
-            .as_deref()
-            .and_then(|id| parse_id(id).ok().map(|(_, value)| Entity::from_bits(value))),
+        proto::LayoutNode::Split { id, .. } | proto::LayoutNode::Pane { id, .. } => {
+            id.as_deref().and_then(|id| {
+                NodeKind::parse_id(id)
+                    .ok()
+                    .map(|(_, value)| Entity::from_bits(value))
+            })
+        }
     }
 }
 
@@ -759,11 +770,11 @@ mod tests {
         let pane_b = app.world_mut().spawn((Pane, ChildOf(tab_b))).id();
         let snapshot = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab_a.to_bits())),
+                id: Some(NodeKind::Tab.id(tab_a.to_bits())),
                 name: String::new(),
                 is_active: true,
                 root: proto::LayoutNode::Pane {
-                    id: Some(format_id(NodeKind::Pane, pane_a.to_bits())),
+                    id: Some(NodeKind::Pane.id(pane_a.to_bits())),
                     is_zoomed: false,
                     stacks: vec![],
                 },
@@ -1081,11 +1092,11 @@ mod tests {
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
-                    id: Some(format_id(NodeKind::Split, split_e.to_bits())),
+                    id: Some(NodeKind::Split.id(split_e.to_bits())),
                     direction: proto::SplitDirection::Column,
                     flex_weights: vec![],
                     children: vec![],
@@ -1131,21 +1142,21 @@ mod tests {
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
-                    id: Some(format_id(NodeKind::Split, split_e.to_bits())),
+                    id: Some(NodeKind::Split.id(split_e.to_bits())),
                     direction: proto::SplitDirection::Row,
                     flex_weights: vec![3.0, 1.0],
                     children: vec![
                         proto::LayoutNode::Pane {
-                            id: Some(format_id(NodeKind::Pane, pane_a.to_bits())),
+                            id: Some(NodeKind::Pane.id(pane_a.to_bits())),
                             is_zoomed: false,
                             stacks: vec![],
                         },
                         proto::LayoutNode::Pane {
-                            id: Some(format_id(NodeKind::Pane, pane_b.to_bits())),
+                            id: Some(NodeKind::Pane.id(pane_b.to_bits())),
                             is_zoomed: false,
                             stacks: vec![],
                         },
@@ -1196,19 +1207,19 @@ mod tests {
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
-                    id: Some(format_id(NodeKind::Split, split_a.to_bits())),
+                    id: Some(NodeKind::Split.id(split_a.to_bits())),
                     direction: proto::SplitDirection::Row,
                     flex_weights: vec![],
                     children: vec![proto::LayoutNode::Split {
-                        id: Some(format_id(NodeKind::Split, split_b.to_bits())),
+                        id: Some(NodeKind::Split.id(split_b.to_bits())),
                         direction: proto::SplitDirection::Row,
                         flex_weights: vec![],
                         children: vec![proto::LayoutNode::Pane {
-                            id: Some(format_id(NodeKind::Pane, moved.to_bits())),
+                            id: Some(NodeKind::Pane.id(moved.to_bits())),
                             is_zoomed: false,
                             stacks: vec![],
                         }],
@@ -1245,11 +1256,11 @@ mod tests {
         let snap = LayoutSnapshot {
             tabs: vec![
                 proto::Tab {
-                    id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                    id: Some(NodeKind::Tab.id(tab.to_bits())),
                     name: "S".into(),
                     is_active: false,
                     root: proto::LayoutNode::Pane {
-                        id: Some(format_id(NodeKind::Pane, pane.to_bits())),
+                        id: Some(NodeKind::Pane.id(pane.to_bits())),
                         is_zoomed: false,
                         stacks: vec![],
                     },
@@ -1262,7 +1273,7 @@ mod tests {
                         id: None,
                         is_zoomed: false,
                         stacks: vec![proto::Stack {
-                            id: Some(format_id(NodeKind::Stack, stack.to_bits())),
+                            id: Some(NodeKind::Stack.id(stack.to_bits())),
                             ..Default::default()
                         }],
                     },
@@ -1309,11 +1320,11 @@ mod tests {
         let snap = LayoutSnapshot {
             tabs: vec![
                 proto::Tab {
-                    id: Some(format_id(NodeKind::Tab, active_tab.to_bits())),
+                    id: Some(NodeKind::Tab.id(active_tab.to_bits())),
                     name: "A".into(),
                     is_active: true,
                     root: proto::LayoutNode::Pane {
-                        id: Some(format_id(NodeKind::Pane, active_pane.to_bits())),
+                        id: Some(NodeKind::Pane.id(active_pane.to_bits())),
                         is_zoomed: false,
                         stacks: vec![],
                     },
@@ -1381,11 +1392,11 @@ mod tests {
         let snap = LayoutSnapshot {
             tabs: vec![
                 proto::Tab {
-                    id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                    id: Some(NodeKind::Tab.id(tab.to_bits())),
                     name: "A".into(),
                     is_active: true,
                     root: proto::LayoutNode::Pane {
-                        id: Some(format_id(NodeKind::Pane, pane.to_bits())),
+                        id: Some(NodeKind::Pane.id(pane.to_bits())),
                         is_zoomed: false,
                         stacks: vec![],
                     },
@@ -1450,15 +1461,15 @@ mod tests {
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
-                    id: Some(format_id(NodeKind::Split, split_e.to_bits())),
+                    id: Some(NodeKind::Split.id(split_e.to_bits())),
                     direction: proto::SplitDirection::Row,
                     flex_weights: vec![],
                     children: vec![proto::LayoutNode::Pane {
-                        id: Some(format_id(NodeKind::Pane, keep.to_bits())),
+                        id: Some(NodeKind::Pane.id(keep.to_bits())),
                         is_zoomed: false,
                         stacks: vec![],
                     }],
@@ -1498,14 +1509,14 @@ mod tests {
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Pane {
-                    id: Some(format_id(NodeKind::Pane, pane_e.to_bits())),
+                    id: Some(NodeKind::Pane.id(pane_e.to_bits())),
                     is_zoomed: false,
                     stacks: vec![proto::Stack {
-                        id: Some(format_id(NodeKind::Stack, dead_stack.to_bits())),
+                        id: Some(NodeKind::Stack.id(dead_stack.to_bits())),
                         ..Default::default()
                     }],
                 },
@@ -1535,11 +1546,11 @@ mod tests {
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Pane {
-                    id: Some(format_id(NodeKind::Pane, pane_e.to_bits())),
+                    id: Some(NodeKind::Pane.id(pane_e.to_bits())),
                     is_zoomed: false,
                     stacks: vec![proto::Stack {
                         id: None,
@@ -1597,7 +1608,7 @@ mod tests {
             &mut app,
             LayoutSnapshot {
                 tabs: vec![TabDto {
-                    id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                    id: Some(NodeKind::Tab.id(tab.to_bits())),
                     name: "S".into(),
                     is_active: true,
                     root: bad_node,
@@ -1659,7 +1670,7 @@ mod tests {
             &mut app,
             LayoutSnapshot {
                 tabs: vec![TabDto {
-                    id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                    id: Some(NodeKind::Tab.id(tab.to_bits())),
                     name: "S".into(),
                     is_active: true,
                     root: bad_node,
@@ -1716,26 +1727,26 @@ mod tests {
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
-                    id: Some(format_id(NodeKind::Split, split_e.to_bits())),
+                    id: Some(NodeKind::Split.id(split_e.to_bits())),
                     direction: proto::SplitDirection::Row,
                     flex_weights: vec![],
                     children: vec![
                         proto::LayoutNode::Pane {
-                            id: Some(format_id(NodeKind::Pane, pane_c.to_bits())),
+                            id: Some(NodeKind::Pane.id(pane_c.to_bits())),
                             is_zoomed: false,
                             stacks: vec![],
                         },
                         proto::LayoutNode::Pane {
-                            id: Some(format_id(NodeKind::Pane, pane_a.to_bits())),
+                            id: Some(NodeKind::Pane.id(pane_a.to_bits())),
                             is_zoomed: false,
                             stacks: vec![],
                         },
                         proto::LayoutNode::Pane {
-                            id: Some(format_id(NodeKind::Pane, pane_b.to_bits())),
+                            id: Some(NodeKind::Pane.id(pane_b.to_bits())),
                             is_zoomed: false,
                             stacks: vec![],
                         },
@@ -1779,22 +1790,22 @@ mod tests {
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Pane {
-                    id: Some(format_id(NodeKind::Pane, pane_e.to_bits())),
+                    id: Some(NodeKind::Pane.id(pane_e.to_bits())),
                     is_zoomed: false,
                     stacks: vec![proto::Stack {
-                        id: Some(format_id(NodeKind::Stack, stack.to_bits())),
+                        id: Some(NodeKind::Stack.id(stack.to_bits())),
                         ..Default::default()
                     }],
                 },
             }],
             focused: proto::Focus {
-                tab: Some(format_id(NodeKind::Tab, tab.to_bits())),
-                pane: Some(format_id(NodeKind::Pane, pane_e.to_bits())),
-                stack: Some(format_id(NodeKind::Stack, stack.to_bits())),
+                tab: Some(NodeKind::Tab.id(tab.to_bits())),
+                pane: Some(NodeKind::Pane.id(pane_e.to_bits())),
+                stack: Some(NodeKind::Stack.id(stack.to_bits())),
             },
         };
 
@@ -1845,14 +1856,14 @@ mod tests {
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Pane {
-                    id: Some(format_id(NodeKind::Pane, pane_e.to_bits())),
+                    id: Some(NodeKind::Pane.id(pane_e.to_bits())),
                     is_zoomed: false,
                     stacks: vec![proto::Stack {
-                        id: Some(format_id(NodeKind::Stack, stack.to_bits())),
+                        id: Some(NodeKind::Stack.id(stack.to_bits())),
                         ..Default::default()
                     }],
                 },
@@ -1891,7 +1902,7 @@ mod tests {
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
@@ -1900,7 +1911,7 @@ mod tests {
                     flex_weights: vec![],
                     children: vec![
                         proto::LayoutNode::Pane {
-                            id: Some(format_id(NodeKind::Pane, pane_e.to_bits())),
+                            id: Some(NodeKind::Pane.id(pane_e.to_bits())),
                             is_zoomed: false,
                             stacks: vec![],
                         },
@@ -1959,7 +1970,7 @@ mod tests {
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
@@ -1968,10 +1979,10 @@ mod tests {
                     flex_weights: vec![],
                     children: vec![
                         proto::LayoutNode::Pane {
-                            id: Some(format_id(NodeKind::Pane, existing_pane.to_bits())),
+                            id: Some(NodeKind::Pane.id(existing_pane.to_bits())),
                             is_zoomed: false,
                             stacks: vec![proto::Stack {
-                                id: Some(format_id(NodeKind::Stack, stack.to_bits())),
+                                id: Some(NodeKind::Stack.id(stack.to_bits())),
                                 ..Default::default()
                             }],
                         },
@@ -2064,7 +2075,7 @@ mod tests {
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
@@ -2073,10 +2084,10 @@ mod tests {
                     flex_weights: vec![],
                     children: vec![
                         proto::LayoutNode::Pane {
-                            id: Some(format_id(NodeKind::Pane, existing_leaf.to_bits())),
+                            id: Some(NodeKind::Pane.id(existing_leaf.to_bits())),
                             is_zoomed: false,
                             stacks: vec![proto::Stack {
-                                id: Some(format_id(NodeKind::Stack, stack.to_bits())),
+                                id: Some(NodeKind::Stack.id(stack.to_bits())),
                                 ..Default::default()
                             }],
                         },
@@ -2168,11 +2179,11 @@ mod tests {
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Pane {
-                    id: Some(format_id(NodeKind::Pane, pane.to_bits())),
+                    id: Some(NodeKind::Pane.id(pane.to_bits())),
                     is_zoomed: false,
                     stacks: vec![],
                 },
@@ -2209,7 +2220,7 @@ mod tests {
 
         let snap = LayoutSnapshot {
             tabs: vec![proto::Tab {
-                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                id: Some(NodeKind::Tab.id(tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
@@ -2228,10 +2239,10 @@ mod tests {
                             }],
                         },
                         proto::LayoutNode::Pane {
-                            id: Some(format_id(NodeKind::Pane, existing_pane.to_bits())),
+                            id: Some(NodeKind::Pane.id(existing_pane.to_bits())),
                             is_zoomed: false,
                             stacks: vec![proto::Stack {
-                                id: Some(format_id(NodeKind::Stack, stack.to_bits())),
+                                id: Some(NodeKind::Stack.id(stack.to_bits())),
                                 ..Default::default()
                             }],
                         },

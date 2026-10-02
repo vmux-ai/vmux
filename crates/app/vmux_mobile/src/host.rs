@@ -105,7 +105,7 @@ impl ComposerExchange {
         let mut draft = self.draft;
         let mut request = self.media_request;
         draft.set(text.clone());
-        let query = vmux_api::prompt_media::inline_media_query(&text)
+        let query = vmux_api::prompt_media::InlineMediaQuery::parse(&text)
             .map(|query| query.query.to_string())
             .unwrap_or_default();
         if request

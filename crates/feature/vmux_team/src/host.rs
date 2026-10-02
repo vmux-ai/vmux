@@ -2,7 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use vmux_api::avatar::hash_color;
+use vmux_api::avatar::AvatarSpec;
 use vmux_api::protocol::{AgentCommandResult, AgentListTeam};
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentRequestAppExt, AgentRequestMessage, AgentRequestRouteSet,
@@ -235,7 +235,7 @@ impl TeamProjector<'_, '_> {
             profiles.push(ProfileRow {
                 id: id.0.clone(),
                 name: name.as_str().to_string(),
-                color: hash_color(&id.0),
+                color: AvatarSpec::color(&id.0),
                 is_active,
             });
         }

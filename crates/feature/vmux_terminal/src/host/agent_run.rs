@@ -18,7 +18,7 @@ use vmux_layout::AgentPaneDirection;
 #[cfg(test)]
 use vmux_layout::LayoutContractPlugin;
 #[cfg(test)]
-use vmux_layout::pane::{Pane, PaneSplit};
+use vmux_layout::pane::Pane;
 use vmux_layout::pane::{PaneSplitDirection, SpawnCounter, SpawnSeq};
 use vmux_layout::placement::PageKind;
 #[cfg(test)]
@@ -1272,18 +1272,10 @@ mod tests {
     fn collect_run_candidates(
         input: Res<RunTerminalCandidateInput>,
         terminals: RunTerminals,
-        child_of_q: Query<&ChildOf>,
-        tab_q: Query<Entity, With<Tab>>,
-        seq_q: Query<&SpawnSeq>,
+        panes: AgentPanes,
         mut out: ResMut<RunTerminalCandidateOutput>,
     ) {
-        out.0 = terminals.candidates(
-            input.agent_pane,
-            &child_of_q,
-            &tab_q,
-            &seq_q,
-            &input.desired_cwd,
-        );
+        out.0 = terminals.candidates(input.agent_pane, &panes, &input.desired_cwd);
     }
 
     #[test]

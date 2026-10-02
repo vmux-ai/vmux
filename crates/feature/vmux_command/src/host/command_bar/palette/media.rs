@@ -9,8 +9,8 @@ use vmux_api::command_bar::{
     CommandPaletteRemoveAttachmentRequest, CommandPaletteUiState,
 };
 use vmux_api::prompt_media::{
-    ChatAttachPaths, ChatAttachments, ChatMediaEntries, ChatMediaListRequest,
-    PromptComposerAttachment, PromptMediaOption, inline_media_query, replace_inline_media_query,
+    ChatAttachPaths, ChatAttachments, ChatMediaEntries, ChatMediaListRequest, InlineMediaQuery,
+    PromptComposerAttachment, PromptMediaOption,
 };
 use vmux_ecs::host::UiStateWrite;
 use vmux_ui::file_icon::FilePath;
@@ -172,7 +172,7 @@ fn update(
     }
     media.start = request.start;
     let query = if request.start {
-        inline_media_query(&request.query).map(|query| query.query.to_string())
+        InlineMediaQuery::parse(&request.query).map(|query| query.query.to_string())
     } else {
         None
     };
@@ -311,7 +311,7 @@ fn activate(
     let Some(entry) = snapshot.0.media_entries.get(index).cloned() else {
         return;
     };
-    let Some(query) = inline_media_query(&draft.query) else {
+    let Some(query) = InlineMediaQuery::parse(&draft.query) else {
         return;
     };
     let reference = entry.reference();
@@ -326,11 +326,11 @@ fn activate(
         });
         String::new()
     };
-    draft.query = replace_inline_media_query(&draft.query, query, &replacement);
+    draft.query = query.replace(&draft.query, &replacement);
     draft.selected = 0;
     draft.navigating = false;
     draft.input_revision = draft.input_revision.wrapping_add(1).max(1);
-    let next_query = inline_media_query(&draft.query).map(|query| query.query.to_string());
+    let next_query = InlineMediaQuery::parse(&draft.query).map(|query| query.query.to_string());
     if let Some(request) = media.update_query(target, next_query, &mut snapshot.0) {
         commands.spawn((
             Name::new("Command Palette Media Request"),
@@ -357,10 +357,10 @@ fn dismiss(
     if !media.open.matches(request.open_id) || !media.start {
         return;
     }
-    let Some(query) = inline_media_query(&draft.query) else {
+    let Some(query) = InlineMediaQuery::parse(&draft.query) else {
         return;
     };
-    draft.query = replace_inline_media_query(&draft.query, query, "");
+    draft.query = query.replace(&draft.query, "");
     draft.selected = 0;
     draft.navigating = false;
     draft.input_revision = draft.input_revision.wrapping_add(1).max(1);

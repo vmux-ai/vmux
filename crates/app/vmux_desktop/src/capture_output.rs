@@ -113,7 +113,7 @@ pub(crate) struct CaptureSource<'w, 's> {
 impl CaptureSource<'_, '_> {
     pub(crate) fn resolve(&self, pane: Option<&str>) -> Result<ResolvedCapture, String> {
         let pane_window = pane.and_then(|id| {
-            let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
+            let (_, bits) = vmux_layout::protocol::NodeKind::parse_id(id).ok()?;
             self.hierarchy.get(Entity::from_bits(bits))
         });
         let window = pane_window
@@ -143,7 +143,7 @@ impl CaptureSource<'_, '_> {
     }
 
     fn crop(&self, id: &str, image: CaptureSize) -> Option<CropRect> {
-        let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
+        let (_, bits) = vmux_layout::protocol::NodeKind::parse_id(id).ok()?;
         let mut entity = Entity::from_bits(bits);
         for _ in 0..8 {
             if let Ok(&computed) = self.nodes.get(entity) {

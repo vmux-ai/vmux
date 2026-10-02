@@ -533,7 +533,8 @@ command = "vmux"
             import_npm_manifest_to(&package_json, &manifest_path).unwrap(),
             1
         );
-        assert_eq!(import_mcp_config_to(&mcp, &manifest_path).unwrap(), 1);
+        let store = ToolStore::new(temp.path(), temp.path());
+        assert_eq!(store.import_mcp_config_to(&mcp, &manifest_path).unwrap(), 1);
         let loaded = ToolsManifest::read(&manifest_path).unwrap();
         assert_eq!(loaded.packages["npm"], ["eslint", "existing"]);
         assert!(loaded.mcp.servers.contains_key("docs"));

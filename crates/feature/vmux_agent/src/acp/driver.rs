@@ -38,8 +38,8 @@ use super::{
     AcpConfigStateInput, AcpProjectionSenders, AcpSelectedConfigInput, AcpTranscriptInput,
 };
 use vmux_api::protocol::{
-    AgentAttachment, AgentRunStatus, ApprovalDecision, ServiceMessage, SharedEvent,
-    compose_agent_prompt,
+    AgentAttachment, AgentPromptEnvelope, AgentRunStatus, ApprovalDecision, ServiceMessage,
+    SharedEvent,
 };
 #[cfg(test)]
 use vmux_api::room::AssistantBlock;
@@ -638,7 +638,7 @@ async fn prompt_content_blocks(
 ) -> Vec<ContentBlock> {
     let mut blocks = Vec::with_capacity(attachments.len() + 1);
     let mut remaining_media_bytes = PROMPT_MEDIA_TOTAL_LIMIT;
-    let text = compose_agent_prompt(text, context);
+    let text = AgentPromptEnvelope::compose(text, context);
     if !text.is_empty() {
         blocks.push(ContentBlock::Text(TextContent::new(text)));
     }
@@ -2231,12 +2231,12 @@ mod tests {
 
     #[test]
     fn private_context_wraps_wire_prompt_without_changing_display_text() {
-        let wire = compose_agent_prompt("continue here", Some("prior conversation"));
+        let wire = AgentPromptEnvelope::compose("continue here", Some("prior conversation"));
 
-        assert!(wire.starts_with(vmux_api::protocol::PRIVATE_CONTEXT_PREFIX));
+        assert!(AgentPromptEnvelope::new(&wire).has_private_context());
         assert!(wire.contains("prior conversation"));
         assert!(wire.ends_with("continue here"));
-        assert_eq!(compose_agent_prompt("plain", None), "plain");
+        assert_eq!(AgentPromptEnvelope::compose("plain", None), "plain");
     }
 
     #[test]

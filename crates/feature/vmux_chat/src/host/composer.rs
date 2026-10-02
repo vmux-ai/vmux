@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::*;
 use vmux_api::chat::SlashCommand;
-use vmux_api::prompt_media::{inline_media_query, replace_inline_media_query};
+use vmux_api::prompt_media::InlineMediaQuery;
 
 #[cfg(host)]
 use bevy_app::{App, Plugin};
@@ -76,8 +76,8 @@ impl ComposerState {
     }
 
     pub(super) fn dismiss_selector(&mut self) -> Option<ChatComposerEffect> {
-        let draft = if let Some(query) = inline_media_query(&self.draft) {
-            replace_inline_media_query(&self.draft, query, "")
+        let draft = if let Some(query) = InlineMediaQuery::parse(&self.draft) {
+            query.replace(&self.draft, "")
         } else if SelectorMode::from_draft(&self.draft) != SelectorMode::None {
             String::new()
         } else {
@@ -173,7 +173,7 @@ fn project_queries(
     let Ok((composer, mut selectors)) = composers.get_mut(webview) else {
         return;
     };
-    let media_query = inline_media_query(&composer.draft)
+    let media_query = InlineMediaQuery::parse(&composer.draft)
         .map(|query| query.query.to_string())
         .unwrap_or_default();
     if selectors.media_query != media_query {

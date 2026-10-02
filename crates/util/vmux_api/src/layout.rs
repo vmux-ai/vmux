@@ -6,6 +6,45 @@ pub enum NodeKind {
     Stack,
 }
 
+impl NodeKind {
+    pub fn id(self, value: u64) -> String {
+        match self {
+            Self::Tab => format!("tab:{value}"),
+            Self::Pane => format!("pane:{value}"),
+            Self::Split => format!("split:{value}"),
+            Self::Stack => format!("stack:{value}"),
+        }
+    }
+
+    pub fn parse_id(input: &str) -> Result<(Self, u64), LayoutIdParseError> {
+        let (prefix, rest) =
+            input
+                .split_once(':')
+                .ok_or_else(|| LayoutIdParseError::MissingSeparator {
+                    input: input.to_string(),
+                })?;
+        let kind = match prefix {
+            "tab" => Self::Tab,
+            "pane" => Self::Pane,
+            "split" => Self::Split,
+            "stack" => Self::Stack,
+            _ => {
+                return Err(LayoutIdParseError::UnknownPrefix {
+                    input: input.to_string(),
+                    prefix: prefix.to_string(),
+                });
+            }
+        };
+        let value = rest
+            .parse()
+            .map_err(|source| LayoutIdParseError::InvalidValue {
+                input: input.to_string(),
+                source,
+            })?;
+        Ok((kind, value))
+    }
+}
+
 #[derive(Debug)]
 pub enum LayoutIdParseError {
     MissingSeparator {
@@ -119,43 +158,6 @@ pub struct LayoutSnapshot {
     pub focused: Focus,
 }
 
-pub fn format_id(kind: NodeKind, value: u64) -> String {
-    match kind {
-        NodeKind::Tab => format!("tab:{value}"),
-        NodeKind::Pane => format!("pane:{value}"),
-        NodeKind::Split => format!("split:{value}"),
-        NodeKind::Stack => format!("stack:{value}"),
-    }
-}
-
-pub fn parse_id(input: &str) -> Result<(NodeKind, u64), LayoutIdParseError> {
-    let (prefix, rest) =
-        input
-            .split_once(':')
-            .ok_or_else(|| LayoutIdParseError::MissingSeparator {
-                input: input.to_string(),
-            })?;
-    let kind = match prefix {
-        "tab" => NodeKind::Tab,
-        "pane" => NodeKind::Pane,
-        "split" => NodeKind::Split,
-        "stack" => NodeKind::Stack,
-        _ => {
-            return Err(LayoutIdParseError::UnknownPrefix {
-                input: input.to_string(),
-                prefix: prefix.to_string(),
-            });
-        }
-    };
-    let value = rest
-        .parse()
-        .map_err(|source| LayoutIdParseError::InvalidValue {
-            input: input.to_string(),
-            source,
-        })?;
-    Ok((kind, value))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,8 +170,8 @@ mod tests {
             (NodeKind::Split, 17),
             (NodeKind::Stack, 9999),
         ] {
-            let formatted = format_id(kind, value);
-            let (parsed_kind, parsed_value) = parse_id(&formatted).unwrap();
+            let formatted = kind.id(value);
+            let (parsed_kind, parsed_value) = NodeKind::parse_id(&formatted).unwrap();
             assert_eq!(parsed_kind, kind);
             assert_eq!(parsed_value, value);
         }
@@ -178,7 +180,7 @@ mod tests {
     #[test]
     fn parse_id_rejects_missing_separator() {
         assert!(matches!(
-            parse_id("pane42"),
+            NodeKind::parse_id("pane42"),
             Err(LayoutIdParseError::MissingSeparator { .. })
         ));
     }
@@ -186,7 +188,7 @@ mod tests {
     #[test]
     fn parse_id_rejects_unknown_prefix() {
         assert!(matches!(
-            parse_id("window:1"),
+            NodeKind::parse_id("window:1"),
             Err(LayoutIdParseError::UnknownPrefix { .. })
         ));
     }
@@ -194,7 +196,7 @@ mod tests {
     #[test]
     fn parse_id_rejects_non_numeric_value() {
         assert!(matches!(
-            parse_id("pane:abc"),
+            NodeKind::parse_id("pane:abc"),
             Err(LayoutIdParseError::InvalidValue { .. })
         ));
     }

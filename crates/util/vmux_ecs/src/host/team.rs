@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-pub use vmux_api::avatar::{AvatarSpec, hash_color, initials_of};
+pub use vmux_api::avatar::AvatarSpec;
 
 #[derive(Component, Clone, Debug)]
 pub struct Profile {

@@ -23,6 +23,71 @@ struct ProcessMonitorUi {
     processes: Memo<Vec<ProcessEntry>>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ProcessMemory(u64);
+
+impl ProcessMemory {
+    fn label(self) -> String {
+        const MB: f64 = 1024.0 * 1024.0;
+        const GB: f64 = MB * 1024.0;
+        let bytes = self.0 as f64;
+        if self.0 == 0 {
+            "—".to_string()
+        } else if bytes < MB {
+            "<1 MB".to_string()
+        } else if bytes < GB {
+            format!("{:.0} MB", bytes / MB)
+        } else {
+            format!("{:.1} GB", bytes / GB)
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ProcessUptime(u64);
+
+impl ProcessUptime {
+    fn label(self) -> String {
+        let seconds = self.0;
+        if seconds < 60 {
+            translate_with(
+                "services-uptime-seconds",
+                &[("seconds", TranslationValue::Number(seconds as i64))],
+            )
+        } else if seconds < 3600 {
+            translate_with(
+                "services-uptime-minutes",
+                &[
+                    ("minutes", TranslationValue::Number((seconds / 60) as i64)),
+                    ("seconds", TranslationValue::Number((seconds % 60) as i64)),
+                ],
+            )
+        } else if seconds < 86400 {
+            translate_with(
+                "services-uptime-hours",
+                &[
+                    ("hours", TranslationValue::Number((seconds / 3600) as i64)),
+                    (
+                        "minutes",
+                        TranslationValue::Number(((seconds % 3600) / 60) as i64),
+                    ),
+                ],
+            )
+        } else {
+            translate_with(
+                "services-uptime-days",
+                &[
+                    ("days", TranslationValue::Number((seconds / 86400) as i64)),
+                    (
+                        "hours",
+                        TranslationValue::Number(((seconds % 86400) / 3600) as i64),
+                    ),
+                ],
+            )
+        }
+    }
+}
+
 fn use_process_monitor_ui() -> ProcessMonitorUi {
     use_theme();
     let snapshot = use_ui_state::<ProcessesUiState>().state;
@@ -183,7 +248,7 @@ fn ServiceDashboard(processes: Vec<ProcessEntry>, history: ServiceHistory) -> El
             UsageChart {
                 class: String::new(),
                 label: translate("services-memory"),
-                value: format_mem(total_memory),
+                value: ProcessMemory(total_memory).label(),
                 peak: format!("↑ {:.0} MB", peak_memory_mb.max(memory_mb as f32)),
                 samples: history.memory.iter().copied().collect(),
                 floor: 128.0,
@@ -357,7 +422,7 @@ fn StatusBadge(connected: bool) -> Element {
 
 #[component]
 fn ProcessRow(process: ProcessEntry) -> Element {
-    let uptime = format_uptime(process.uptime_secs);
+    let uptime = ProcessUptime(process.uptime_secs).label();
     let shell_name = process
         .shell
         .rsplit('/')
@@ -414,7 +479,7 @@ fn ProcessRow(process: ProcessEntry) -> Element {
                 }
             }
             span { class: if process.cpu_percent >= 25.0 { "text-right font-mono text-[10px] font-semibold tabular-nums text-amber-400" } else { "text-right font-mono text-[10px] tabular-nums text-foreground" }, "{process.cpu_percent:.1}" }
-            span { class: "text-right font-mono text-[9px] tabular-nums text-foreground", {format_mem(process.mem_bytes)} }
+            span { class: "text-right font-mono text-[9px] tabular-nums text-foreground", {ProcessMemory(process.mem_bytes).label()} }
             span { class: "hidden text-right font-mono text-[9px] tabular-nums text-muted-foreground sm:block", "{uptime}" }
             if managed {
                 button {
@@ -431,45 +496,6 @@ fn ProcessRow(process: ProcessEntry) -> Element {
                 }
             }
         }
-    }
-}
-
-fn format_uptime(secs: u64) -> String {
-    if secs < 60 {
-        translate_with(
-            "services-uptime-seconds",
-            &[("seconds", TranslationValue::Number(secs as i64))],
-        )
-    } else if secs < 3600 {
-        translate_with(
-            "services-uptime-minutes",
-            &[
-                ("minutes", TranslationValue::Number((secs / 60) as i64)),
-                ("seconds", TranslationValue::Number((secs % 60) as i64)),
-            ],
-        )
-    } else if secs < 86400 {
-        translate_with(
-            "services-uptime-hours",
-            &[
-                ("hours", TranslationValue::Number((secs / 3600) as i64)),
-                (
-                    "minutes",
-                    TranslationValue::Number(((secs % 3600) / 60) as i64),
-                ),
-            ],
-        )
-    } else {
-        translate_with(
-            "services-uptime-days",
-            &[
-                ("days", TranslationValue::Number((secs / 86400) as i64)),
-                (
-                    "hours",
-                    TranslationValue::Number(((secs % 86400) / 3600) as i64),
-                ),
-            ],
-        )
     }
 }
 
@@ -494,5 +520,13 @@ mod tests {
 
         assert_eq!(graph.line, "0.00,39.00 50.00,20.50 100.00,2.00");
         assert!(graph.area.starts_with("0,40 "));
+    }
+
+    #[test]
+    fn process_memory_uses_readable_units() {
+        assert_eq!(ProcessMemory(0).label(), "—");
+        assert_eq!(ProcessMemory(512 * 1024).label(), "<1 MB");
+        assert_eq!(ProcessMemory(332 * 1024 * 1024).label(), "332 MB");
+        assert_eq!(ProcessMemory(3 * 1024 * 1024 * 1024 / 2).label(), "1.5 GB");
     }
 }

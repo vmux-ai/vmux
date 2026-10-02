@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::protocol::{Focus, LayoutNode, LayoutSnapshot, NodeKind, Stack as StackDto, parse_id};
+use crate::protocol::{Focus, LayoutNode, LayoutSnapshot, NodeKind, Stack as StackDto};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ValidationError {
@@ -32,7 +32,7 @@ pub fn validate(snapshot: &LayoutSnapshot) -> Result<(), ValidationError> {
     for tab in &snapshot.tabs {
         if let Some(id) = &tab.id {
             let (kind, _) =
-                parse_id(id).map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
+                NodeKind::parse_id(id).map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
             if kind != NodeKind::Tab {
                 return Err(ValidationError::WrongKindForPosition {
                     id: id.clone(),
@@ -67,8 +67,8 @@ fn validate_node(
             ..
         } => {
             if let Some(id) = id {
-                let (kind, _) =
-                    parse_id(id).map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
+                let (kind, _) = NodeKind::parse_id(id)
+                    .map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
                 if kind != NodeKind::Split {
                     return Err(ValidationError::WrongKindForPosition {
                         id: id.clone(),
@@ -94,8 +94,8 @@ fn validate_node(
         }
         LayoutNode::Pane { id, stacks, .. } => {
             if let Some(id) = id {
-                let (kind, _) =
-                    parse_id(id).map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
+                let (kind, _) = NodeKind::parse_id(id)
+                    .map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
                 if kind != NodeKind::Pane {
                     return Err(ValidationError::WrongKindForPosition {
                         id: id.clone(),
@@ -124,7 +124,8 @@ fn validate_stack(
     all_ids: &mut HashSet<String>,
 ) -> Result<(), ValidationError> {
     if let Some(id) = &stack.id {
-        let (kind, _) = parse_id(id).map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
+        let (kind, _) =
+            NodeKind::parse_id(id).map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
         if kind != NodeKind::Stack {
             return Err(ValidationError::WrongKindForPosition {
                 id: id.clone(),
@@ -186,7 +187,7 @@ pub fn plan_diff(
     for tab in &snapshot.tabs {
         if let Some(id) = &tab.id {
             referenced.insert(id.clone());
-            let (_, value) = parse_id(id).expect("validated above");
+            let (_, value) = NodeKind::parse_id(id).expect("validated above");
             actions_by_id.insert(
                 id.clone(),
                 NodePlan::Match {
@@ -222,7 +223,7 @@ fn plan_node(
         LayoutNode::Split { id, children, .. } => {
             if let Some(id) = id {
                 referenced.insert(id.clone());
-                let (_, value) = parse_id(id).expect("validated");
+                let (_, value) = NodeKind::parse_id(id).expect("validated");
                 actions_by_id.insert(
                     id.clone(),
                     NodePlan::Match {
@@ -238,7 +239,7 @@ fn plan_node(
         LayoutNode::Pane { id, stacks, .. } => {
             if let Some(id) = id {
                 referenced.insert(id.clone());
-                let (_, value) = parse_id(id).expect("validated");
+                let (_, value) = NodeKind::parse_id(id).expect("validated");
                 actions_by_id.insert(
                     id.clone(),
                     NodePlan::Match {
@@ -250,7 +251,7 @@ fn plan_node(
             for t in stacks {
                 if let Some(tid) = &t.id {
                     referenced.insert(tid.clone());
-                    let (_, value) = parse_id(tid).expect("validated");
+                    let (_, value) = NodeKind::parse_id(tid).expect("validated");
                     actions_by_id.insert(
                         tid.clone(),
                         NodePlan::Match {

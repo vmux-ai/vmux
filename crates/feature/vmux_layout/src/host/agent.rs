@@ -143,7 +143,7 @@ impl CurrentFocus {
     }
 
     fn id(self, kind: crate::protocol::NodeKind, entity: Option<Entity>) -> Option<String> {
-        entity.map(|entity| crate::protocol::format_id(kind, entity.to_bits()))
+        entity.map(|entity| kind.id(entity.to_bits()))
     }
 }
 
@@ -167,7 +167,7 @@ fn request_focus(
 
 fn focus_pane(mut requests: MessageReader<FocusPaneRequest>, mut commands: Commands) {
     for request in requests.read() {
-        let Ok((_, bits)) = crate::protocol::parse_id(&request.pane) else {
+        let Ok((_, bits)) = crate::protocol::NodeKind::parse_id(&request.pane) else {
             continue;
         };
         commands.trigger(vmux_ecs::ActivateRequest {

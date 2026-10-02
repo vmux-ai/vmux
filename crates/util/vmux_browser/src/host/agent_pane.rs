@@ -121,9 +121,9 @@ impl AgentBrowserResolve<'_, '_> {
             };
         };
         let pane = if let Some(stack) = claim.stack {
-            vmux_api::protocol::format_id(vmux_api::protocol::NodeKind::Stack, stack.to_bits())
+            vmux_api::protocol::NodeKind::Stack.id(stack.to_bits())
         } else {
-            vmux_api::protocol::format_id(vmux_api::protocol::NodeKind::Pane, claim.pane.to_bits())
+            vmux_api::protocol::NodeKind::Pane.id(claim.pane.to_bits())
         };
         AgentBrowserPaneResolution {
             pane: Some(pane),

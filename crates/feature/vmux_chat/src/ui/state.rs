@@ -12,9 +12,7 @@ use crate::event::{
 use crate::state::ChatUiState;
 use crate::tab::Accent;
 use dioxus::prelude::*;
-use vmux_api::prompt_media::{
-    PromptComposerAttachment, PromptMediaOption, inline_media_query, replace_inline_media_query,
-};
+use vmux_api::prompt_media::{InlineMediaQuery, PromptComposerAttachment, PromptMediaOption};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, focus_prompt_end};
 use vmux_ui::components::composer_bar::{
     ComposerChip, ComposerMenu, ComposerMenuKind, use_composer_menu,
@@ -629,8 +627,8 @@ impl Chat {
         }
         let mut menu_sel = self.slash.menu_sel;
         let value = self.composer.draft.peek().clone();
-        if let Some(query) = inline_media_query(&value) {
-            self.set_draft(replace_inline_media_query(&value, query, ""));
+        if let Some(query) = InlineMediaQuery::parse(&value) {
+            self.set_draft(query.replace(&value, ""));
             focus_prompt_end(PROMPT_INPUT_ID);
         } else {
             self.set_draft(String::new());

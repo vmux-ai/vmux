@@ -3,8 +3,8 @@ use std::path::Path;
 
 use syn::visit::{self, Visit};
 use syn::{
-    Attribute, Block, Expr, ExprMethodCall, ExprPath, FnArg, ImplItem, Item, ItemFn, Stmt, Type,
-    TypePath, UseTree, Visibility,
+    Attribute, Block, Expr, ExprMethodCall, ExprPath, FnArg, ImplItem, ImplItemFn, Item, ItemFn,
+    Stmt, TraitItemFn, Type, TypePath, UseTree, Visibility,
 };
 
 const GENERIC_MODULES: &[&str] = &[
@@ -396,6 +396,152 @@ fn imports_are_declared_at_module_top() {
         "imports must appear before every other item in their module and never inside a function:\n{}",
         violations.join("\n")
     );
+}
+
+#[test]
+fn functions_are_declared_at_module_scope() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .expect("workspace root");
+    let mut violations = Vec::new();
+
+    for root in [workspace.join("crates"), workspace.join("website")] {
+        walk(&root, &mut |path, source| {
+            if test_source(path) {
+                return;
+            }
+            let file = match syn::parse_file(source) {
+                Ok(file) => file,
+                Err(error) => {
+                    violations.push(format!("{}: {error}", path.display()));
+                    return;
+                }
+            };
+            let mut audit = NestedFunctions {
+                path,
+                callable_depth: 0,
+                violations: &mut violations,
+            };
+            audit.visit_file(&file);
+        });
+    }
+
+    assert!(
+        violations.is_empty(),
+        "functions must be declared at module scope:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn vmux_api_exports_contract_types_instead_of_loose_functions() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .expect("workspace root");
+    let root = workspace.join("crates/util/vmux_api/src");
+    let mut violations = Vec::new();
+
+    walk(&root, &mut |path, source| {
+        if test_source(path) {
+            return;
+        }
+        let file = match syn::parse_file(source) {
+            Ok(file) => file,
+            Err(error) => {
+                violations.push(format!("{}: {error}", path.display()));
+                return;
+            }
+        };
+        audit_public_functions(path, &file.items, "crate", &mut violations);
+    });
+
+    assert!(
+        violations.is_empty(),
+        "vmux_api must expose typed contracts and type-owned behavior, not loose functions:\n{}",
+        violations.join("\n")
+    );
+}
+
+fn audit_public_functions(path: &Path, items: &[Item], scope: &str, violations: &mut Vec<String>) {
+    for item in items {
+        match item {
+            Item::Fn(function)
+                if !cfg_test(&function.attrs) && !matches!(function.vis, Visibility::Inherited) =>
+            {
+                violations.push(format!(
+                    "{}:{} ({scope}): {}",
+                    path.display(),
+                    function.sig.fn_token.span.start().line,
+                    function.sig.ident
+                ));
+            }
+            Item::Mod(module) if !cfg_test(&module.attrs) => {
+                let Some((_, nested)) = &module.content else {
+                    continue;
+                };
+                let nested_scope = format!("{scope}::{}", module.ident);
+                audit_public_functions(path, nested, &nested_scope, violations);
+            }
+            _ => {}
+        }
+    }
+}
+
+struct NestedFunctions<'a> {
+    path: &'a Path,
+    callable_depth: usize,
+    violations: &'a mut Vec<String>,
+}
+
+impl NestedFunctions<'_> {
+    fn record(&mut self, function: &ItemFn) {
+        self.violations.push(format!(
+            "{}:{}: {}",
+            self.path.display(),
+            function.sig.fn_token.span.start().line,
+            function.sig.ident
+        ));
+    }
+}
+
+impl<'ast> Visit<'ast> for NestedFunctions<'_> {
+    fn visit_item_mod(&mut self, module: &'ast syn::ItemMod) {
+        if !cfg_test(&module.attrs) {
+            visit::visit_item_mod(self, module);
+        }
+    }
+
+    fn visit_item_fn(&mut self, function: &'ast ItemFn) {
+        if cfg_test(&function.attrs) {
+            return;
+        }
+        if self.callable_depth > 0 {
+            self.record(function);
+        }
+        self.callable_depth += 1;
+        visit::visit_item_fn(self, function);
+        self.callable_depth -= 1;
+    }
+
+    fn visit_impl_item_fn(&mut self, function: &'ast ImplItemFn) {
+        if cfg_test(&function.attrs) {
+            return;
+        }
+        self.callable_depth += 1;
+        visit::visit_impl_item_fn(self, function);
+        self.callable_depth -= 1;
+    }
+
+    fn visit_trait_item_fn(&mut self, function: &'ast TraitItemFn) {
+        if cfg_test(&function.attrs) {
+            return;
+        }
+        self.callable_depth += 1;
+        visit::visit_trait_item_fn(self, function);
+        self.callable_depth -= 1;
+    }
 }
 
 #[test]

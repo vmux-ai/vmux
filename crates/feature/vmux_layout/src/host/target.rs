@@ -38,7 +38,7 @@ impl<B: Component> BrowserTargets<'_, '_, B> {
     }
 
     pub fn pane(&self, value: &str) -> Option<Entity> {
-        let bits = match vmux_api::protocol::parse_id(value) {
+        let bits = match vmux_api::protocol::NodeKind::parse_id(value) {
             Ok((vmux_api::protocol::NodeKind::Pane, bits)) => bits,
             Ok(_) => return None,
             Err(_) => value.parse::<u64>().ok()?,
@@ -48,7 +48,7 @@ impl<B: Component> BrowserTargets<'_, '_, B> {
     }
 
     pub fn target(&self, value: &str) -> Option<BrowserTarget> {
-        if let Ok((kind, bits)) = vmux_api::protocol::parse_id(value) {
+        if let Ok((kind, bits)) = vmux_api::protocol::NodeKind::parse_id(value) {
             let entity = Entity::try_from_bits(bits)?;
             return match kind {
                 vmux_api::protocol::NodeKind::Pane if self.panes.contains(entity) => {
