@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin as BevyPlugin, Startup, Update};
 use bevy_ecs::change_detection::{DetectChanges, Ref};
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
@@ -21,7 +21,7 @@ use crate::transition;
 
 pub struct Plugin;
 
-impl Plugin for Plugin {
+impl BevyPlugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<OpenSession>()
             .add_message::<LeaveSession>()

@@ -47,6 +47,7 @@ mod provider;
 #[cfg(host)]
 mod query;
 mod registry;
+#[cfg(ui)]
 mod route;
 pub mod state;
 #[cfg(ui)]

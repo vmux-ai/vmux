@@ -11,16 +11,16 @@ pub struct ChatModelPlugin;
 
 impl Plugin for ChatModelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<Models>()
-            .add_systems(
-                Update,
-                (
-                    receive_models,
-                    project_picker.in_set(ModelProjection),
-                    emit_picker.after(ModelProjection),
-                ),
-            )
-            .add_observer(publish_state)
+        app.add_message::<Models>().add_systems(
+            Update,
+            (
+                receive_models,
+                project_picker.in_set(ModelProjection),
+                emit_picker.after(ModelProjection),
+            ),
+        );
+        #[cfg(host)]
+        app.add_observer(publish_state)
             .add_observer(publish_mode_state);
     }
 }
@@ -144,6 +144,7 @@ fn emit_picker(
     }
 }
 
+#[cfg(host)]
 fn publish_state(trigger: On<ChatModelStateChanged>, mut commands: Commands) {
     let event = trigger.event();
     commands
@@ -182,6 +183,7 @@ fn publish_state(trigger: On<ChatModelStateChanged>, mut commands: Commands) {
         }));
 }
 
+#[cfg(host)]
 fn publish_mode_state(trigger: On<ChatModeStateChanged>, mut commands: Commands) {
     let event = trigger.event();
     commands

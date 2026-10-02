@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin as BevyPlugin, Startup, Update};
 use bevy_ecs::change_detection::{DetectChanges, Ref};
 use bevy_ecs::component::Component;
 use bevy_ecs::message::{Message, MessageReader, MessageWriter};
@@ -23,7 +23,7 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
 pub struct Plugin;
 
-impl Plugin for Plugin {
+impl BevyPlugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<PairLinkChanged>()
             .add_message::<PairRequest>()

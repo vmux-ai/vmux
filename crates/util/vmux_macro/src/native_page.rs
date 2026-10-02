@@ -239,6 +239,7 @@ fn expand_manifest(args: TokenStream, input: DeriveInput) -> syn::Result<TokenSt
 
         impl #ident {
             pub const URL: &'static str = #url;
+            #[cfg(host)]
             pub const MANIFEST: ::vmux_ecs::page::PageManifest = #manifest;
         }
     })

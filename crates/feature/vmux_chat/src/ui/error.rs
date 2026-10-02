@@ -7,6 +7,10 @@ use vmux_ui::i18n::translate;
 #[component]
 pub(super) fn ChatErrorCard(message: String) -> Element {
     let is_startup = message.to_lowercase().contains("startup");
+    #[cfg(not(target_os = "ios"))]
+    let version_error_target = Some(format!("{}acp", vmux_tool::ToolPlugin::URL));
+    #[cfg(target_os = "ios")]
+    let version_error_target: Option<String> = None;
     let title = if is_startup {
         translate("agent-error-startup-title")
     } else {
@@ -70,27 +74,27 @@ pub(super) fn ChatErrorCard(message: String) -> Element {
                 }
                 div { class: "flex min-w-0 flex-1 flex-col gap-2.5",
                     p { class: "text-sm leading-relaxed text-foreground", {translate("agent-error-version-suggestion")} }
-                    button {
-                        class: "vmux-gradient-outline inline-flex items-center gap-2 self-end rounded-xl px-6 py-3 text-sm font-semibold transition hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.98]",
-                        onclick: move |_| {
-                            let _ = send(&ChatOpenPage {
-                                url: format!("{}acp", vmux_tool::ToolPlugin::URL),
-                            });
-                        },
-                        svg {
-                            class: "h-4 w-4 text-indigo-500",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "1.8",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            path { d: "M15 3h6v6" }
-                            path { d: "M10 14 21 3" }
-                            path { d: "M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" }
-                        }
-                        span { class: "bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent",
-                            {translate("agent-error-open-agents")}
+                    if let Some(url) = version_error_target {
+                        button {
+                            class: "vmux-gradient-outline inline-flex items-center gap-2 self-end rounded-xl px-6 py-3 text-sm font-semibold transition hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.98]",
+                            onclick: move |_| {
+                                let _ = send(&ChatOpenPage { url: url.clone() });
+                            },
+                            svg {
+                                class: "h-4 w-4 text-indigo-500",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "1.8",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                path { d: "M15 3h6v6" }
+                                path { d: "M10 14 21 3" }
+                                path { d: "M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" }
+                            }
+                            span { class: "bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent",
+                                {translate("agent-error-open-agents")}
+                            }
                         }
                     }
                 }

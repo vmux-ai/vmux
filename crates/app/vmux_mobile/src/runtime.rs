@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use bevy_app::{App, Plugin, PluginsState};
+use bevy_app::{App, Plugin as BevyPlugin, PluginsState};
 use bevy_ecs::component::Component;
 use bevy_ecs::message::{Message, MessageReader};
 use bevy_ecs::schedule::ScheduleLabel;
@@ -32,7 +32,7 @@ pub struct Plugin;
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 struct DeliverUiStateEmits;
 
-impl Plugin for Plugin {
+impl BevyPlugin for Plugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AppLifecycle>()
             .add_message::<UiStateEmit>()
