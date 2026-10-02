@@ -764,7 +764,7 @@ fn window_value(
     request: &ApiRequest,
     authorization: &BridgeAuthorization,
 ) -> Value {
-    let mut value = window_base_value(window);
+    let mut value = serde_json::to_value(window).expect("extension window serializes");
     if populate {
         value.as_object_mut().expect("window object").insert(
             "tabs".into(),
@@ -779,10 +779,6 @@ fn window_value(
         );
     }
     value
-}
-
-fn window_base_value(window: &ExtensionWindowSnapshot) -> Value {
-    serde_json::to_value(window).expect("extension window serializes")
 }
 
 fn virtual_tabs(window: &ExtensionWindow, model: &ExtensionModel) -> Vec<ExtensionTabSnapshot> {
@@ -1038,16 +1034,18 @@ fn window_update_events(
 
 pub fn event_payload(event: &ExtensionModelEvent) -> Option<(&'static str, Value)> {
     match event {
-        ExtensionModelEvent::WindowCreated(window) => {
-            Some(("onCreated", json!([window_base_value(window)])))
-        }
+        ExtensionModelEvent::WindowCreated(window) => Some((
+            "onCreated",
+            json!([serde_json::to_value(window).expect("extension window serializes")]),
+        )),
         ExtensionModelEvent::WindowRemoved { window_id } => Some(("onRemoved", json!([window_id]))),
         ExtensionModelEvent::WindowFocusChanged { window_id } => {
             Some(("onFocusChanged", json!([window_id])))
         }
-        ExtensionModelEvent::WindowBoundsChanged(window) => {
-            Some(("onBoundsChanged", json!([window_base_value(window)])))
-        }
+        ExtensionModelEvent::WindowBoundsChanged(window) => Some((
+            "onBoundsChanged",
+            json!([serde_json::to_value(window).expect("extension window serializes")]),
+        )),
         _ => None,
     }
 }

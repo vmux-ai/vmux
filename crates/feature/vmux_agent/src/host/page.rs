@@ -125,10 +125,6 @@ impl AgentChatTarget {
     }
 }
 
-fn agent_url_uses_local_workspace(url: &str) -> bool {
-    AcpRoute::parse(url).is_some()
-}
-
 fn ancestor_tab_entity(
     entity: Entity,
     child_of: &Query<&ChildOf>,
@@ -191,7 +187,7 @@ fn prepare(
         .collect();
     let mut opened_stacks = std::collections::HashSet::new();
     for (task_entity, task) in &tasks {
-        if !agent_url_uses_local_workspace(&task.url) {
+        if AcpRoute::parse(&task.url).is_none() {
             continue;
         }
         let Some(tab_entity) = ancestor_tab_entity(task.stack, &child_of, &tabs) else {

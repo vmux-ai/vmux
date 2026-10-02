@@ -960,7 +960,7 @@ pub struct TerminalTheme {
     pub cursor_style: vmux_api::terminal::CursorStyle,
     #[serde(default = "default_cursor_blink")]
     pub cursor_blink: bool,
-    #[serde(default = "default_shell")]
+    #[serde(default = "TerminalTheme::default_shell")]
     pub shell: String,
 }
 
@@ -1008,12 +1008,14 @@ fn default_cursor_blink() -> bool {
     true
 }
 
-fn default_shell() -> String {
-    std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
-}
-
 fn default_terminal_font_family() -> String {
     String::new()
+}
+
+impl TerminalTheme {
+    pub fn default_shell() -> String {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+    }
 }
 
 impl TerminalSettings {
@@ -1033,7 +1035,10 @@ impl TerminalSettings {
             padding: default_padding(),
             cursor_style: default_cursor_style(),
             cursor_blink: default_cursor_blink(),
-            shell: self.shell.clone().unwrap_or_else(default_shell),
+            shell: self
+                .shell
+                .clone()
+                .unwrap_or_else(TerminalTheme::default_shell),
         }
     }
 }
@@ -1537,7 +1542,11 @@ fn sparse_theme_ron(theme: &TerminalTheme, base: Option<&TerminalTheme>) -> Resu
     {
         fields.push(format!("cursor_blink: {}", leaf_ron(&theme.cursor_blink)?));
     }
-    if theme.shell != base.map(|b| b.shell.clone()).unwrap_or_else(default_shell) {
+    if theme.shell
+        != base
+            .map(|b| b.shell.clone())
+            .unwrap_or_else(TerminalTheme::default_shell)
+    {
         fields.push(format!("shell: {}", leaf_ron(&theme.shell)?));
     }
     Ok(format!("({})", fields.join(", ")))
@@ -2276,7 +2285,7 @@ mod tests {
         let s = load_embedded_settings();
         let terminal = s.terminal.expect("embedded settings define terminal");
         let shell = terminal.resolve_theme(&terminal.default_theme).shell;
-        assert_eq!(shell, default_shell());
+        assert_eq!(shell, TerminalTheme::default_shell());
     }
 
     #[test]

@@ -27,27 +27,33 @@ fn opt_no(n: Option<u32>) -> String {
     n.map(|v| v.to_string()).unwrap_or_default()
 }
 
-fn diff_tone(kind: DiffKind) -> Option<DiffTone> {
-    match kind {
-        DiffKind::Add => Some(DiffTone::Added),
-        DiffKind::Remove => Some(DiffTone::Deleted),
-        DiffKind::Staged => Some(DiffTone::Staged),
-        DiffKind::Context | DiffKind::Hunk => None,
+struct DiffPresentation(Option<DiffTone>);
+
+impl From<DiffKind> for DiffPresentation {
+    fn from(kind: DiffKind) -> Self {
+        Self(match kind {
+            DiffKind::Add => Some(DiffTone::Added),
+            DiffKind::Remove => Some(DiffTone::Deleted),
+            DiffKind::Staged => Some(DiffTone::Staged),
+            DiffKind::Context | DiffKind::Hunk => None,
+        })
     }
 }
 
-fn sign(kind: DiffKind) -> &'static str {
-    diff_tone(kind).map(DiffTone::sign).unwrap_or(" ")
-}
+impl DiffPresentation {
+    fn sign(&self) -> &'static str {
+        self.0.map(DiffTone::sign).unwrap_or(" ")
+    }
 
-fn row_class(kind: DiffKind) -> &'static str {
-    diff_tone(kind).map(DiffTone::row_class).unwrap_or("")
-}
+    fn row_class(&self) -> &'static str {
+        self.0.map(DiffTone::row_class).unwrap_or("")
+    }
 
-fn text_class(kind: DiffKind) -> &'static str {
-    diff_tone(kind)
-        .map(DiffTone::text_class)
-        .unwrap_or("text-muted-foreground")
+    fn text_class(&self) -> &'static str {
+        self.0
+            .map(DiffTone::text_class)
+            .unwrap_or("text-muted-foreground")
+    }
 }
 
 #[component]
@@ -226,7 +232,7 @@ pub fn DiffView(
                         let line = &rows[index];
                         rsx! {
                             div { key: "line-{index}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
-                                div { class: "group flex min-w-max whitespace-pre transition-colors {row_class(line.kind)}",
+                                div { class: "group flex min-w-max whitespace-pre transition-colors {DiffPresentation::from(line.kind).row_class()}",
                                     span { class: "sticky left-0 z-[1] flex shrink-0 select-none border-r border-foreground/[0.08] bg-background/95 shadow-[4px_0_10px_-8px_rgba(0,0,0,0.8)] backdrop-blur-sm",
                                         span {
                                             class: "flex shrink-0 items-center justify-end px-2 text-right tabular-nums text-muted-foreground/45 group-hover:text-muted-foreground/75",
@@ -239,8 +245,8 @@ pub fn DiffView(
                                             "{opt_no(line.new_no)}"
                                         }
                                         span {
-                                            class: "flex w-6 shrink-0 items-center justify-center border-l border-foreground/[0.045] font-semibold {text_class(line.kind)}",
-                                            "{sign(line.kind)}"
+                                            class: "flex w-6 shrink-0 items-center justify-center border-l border-foreground/[0.045] font-semibold {DiffPresentation::from(line.kind).text_class()}",
+                                            "{DiffPresentation::from(line.kind).sign()}"
                                         }
                                     }
                                     span { class: "min-w-0 pr-8",

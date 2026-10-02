@@ -41,9 +41,9 @@ use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest, Focuse
 use vmux_layout::tab::Tab;
 use vmux_layout::tab::TabHierarchy;
 use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
-use vmux_setting::AppSettings;
 #[cfg(test)]
 use vmux_setting::SpaceOverrides;
+use vmux_setting::{AppSettings, TerminalTheme};
 use vmux_space::model::BOOTSTRAP_SPACE_ID;
 #[cfg(test)]
 use vmux_space::model::SpaceRecord;
@@ -580,7 +580,7 @@ impl TerminalBundle {
                 .terminal
                 .as_ref()
                 .map(|t| t.resolve_theme(&t.default_theme).shell)
-                .unwrap_or_else(default_shell)
+                .unwrap_or_else(TerminalTheme::default_shell)
         });
         let cwd = cwd
             .filter(|directory| !directory.to_string_lossy().contains("://"))
@@ -776,16 +776,12 @@ fn apply_process_create_failed(commands: &mut Commands, entity: Entity) {
     commands.entity(entity).despawn();
 }
 
-fn default_shell() -> String {
-    std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
-}
-
 fn terminal_shell(settings: &AppSettings) -> String {
     settings
         .terminal
         .as_ref()
         .map(|t| t.resolve_theme(&t.default_theme).shell)
-        .unwrap_or_else(default_shell)
+        .unwrap_or_else(TerminalTheme::default_shell)
 }
 
 const MAX_CONCURRENT_PROCESS_CREATES: usize = 8;
@@ -1717,7 +1713,7 @@ fn restart_pty(
                 .terminal
                 .as_ref()
                 .map(|t| t.resolve_theme(&t.default_theme).shell)
-                .unwrap_or_else(default_shell);
+                .unwrap_or_else(TerminalTheme::default_shell);
             (shell, vec![], String::new(), Vec::new())
         }
     };

@@ -345,10 +345,6 @@ impl<'a> FilePath<'a> {
     }
 }
 
-pub fn ext_of(path: &str) -> String {
-    FilePath(path).extension()
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FileIcon {
     Folder,
@@ -366,19 +362,15 @@ pub struct Logo {
     pub colour: &'static str,
 }
 
-pub fn file_icon_kind(path: &str, is_dir: bool) -> FileIcon {
-    FilePath(path).icon(is_dir)
-}
-
 mod components {
-    use super::{FileIcon, file_icon_kind};
+    use super::{FileIcon, FilePath};
     use crate::components::icon::Icon;
     use dioxus::prelude::*;
 
     const LOGO_INSET: f32 = 20.0 / 24.0;
     #[component]
     pub fn TypeIcon(path: String, is_dir: bool, class: String) -> Element {
-        match file_icon_kind(&path, is_dir) {
+        match FilePath(&path).icon(is_dir) {
             FileIcon::Folder => rsx! {
                 Icon { class: "{class}",
                     path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
@@ -434,9 +426,9 @@ mod tests {
 
     #[test]
     fn ext_of_reads_last_segment_extension() {
-        assert_eq!(ext_of("file:///a/b/main.rs"), "rs");
-        assert_eq!(ext_of("/x/Photo.PNG"), "png");
-        assert_eq!(ext_of("/x/noext"), "");
+        assert_eq!(FilePath("file:///a/b/main.rs").extension(), "rs");
+        assert_eq!(FilePath("/x/Photo.PNG").extension(), "png");
+        assert_eq!(FilePath("/x/noext").extension(), "");
     }
 
     #[test]
@@ -460,7 +452,7 @@ mod tests {
     #[test]
     fn rust_file_uses_rust_logo() {
         assert_eq!(
-            file_icon_kind("file:///x/main.rs", false),
+            FilePath("file:///x/main.rs").icon(false),
             FileIcon::Logo(lang_logo("rs").unwrap())
         );
     }
@@ -468,25 +460,25 @@ mod tests {
     #[test]
     fn dockerfile_by_name_uses_docker_logo() {
         assert_eq!(
-            file_icon_kind("/x/Dockerfile", false),
+            FilePath("/x/Dockerfile").icon(false),
             FileIcon::Logo(lang_logo("dockerfile").unwrap())
         );
     }
 
     #[test]
     fn directory_uses_folder() {
-        assert_eq!(file_icon_kind("/x/src", true), FileIcon::Folder);
+        assert_eq!(FilePath("/x/src").icon(true), FileIcon::Folder);
     }
 
     #[test]
     fn image_uses_image() {
-        assert_eq!(file_icon_kind("/x/a.png", false), FileIcon::Image);
+        assert_eq!(FilePath("/x/a.png").icon(false), FileIcon::Image);
     }
 
     #[test]
     fn text_and_code_and_unknown_fall_back() {
-        assert_eq!(file_icon_kind("/x/notes.txt", false), FileIcon::Text);
-        assert_eq!(file_icon_kind("/x/space.ron", false), FileIcon::Code);
-        assert_eq!(file_icon_kind("/x/data.bin", false), FileIcon::File);
+        assert_eq!(FilePath("/x/notes.txt").icon(false), FileIcon::Text);
+        assert_eq!(FilePath("/x/space.ron").icon(false), FileIcon::Code);
+        assert_eq!(FilePath("/x/data.bin").icon(false), FileIcon::File);
     }
 }

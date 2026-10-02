@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use bevy::prelude::*;
 use vmux_api::protocol::AcpModeOption;
 use vmux_chat::event::ModelOptionEntry;
@@ -61,11 +63,11 @@ pub(super) enum SavedAgentModel {
     Selected(String),
 }
 
-impl SavedAgentModel {
-    pub(super) fn memory(self) -> AgentModelMemory {
-        match self {
-            Self::Remembered(memory) => memory,
-            Self::Selected(selected) => AgentModelMemory {
+impl From<SavedAgentModel> for AgentModelMemory {
+    fn from(saved: SavedAgentModel) -> Self {
+        match saved {
+            SavedAgentModel::Remembered(memory) => memory,
+            SavedAgentModel::Selected(selected) => AgentModelMemory {
                 url: String::new(),
                 selected,
                 models: Vec::new(),
@@ -74,12 +76,16 @@ impl SavedAgentModel {
     }
 }
 
-fn agent_model_selections_path() -> std::path::PathBuf {
-    ProfilePaths::current().profile().join("agent-models.json")
+impl AgentModelSelections {
+    fn path() -> PathBuf {
+        ProfilePaths::current().profile().join("agent-models.json")
+    }
 }
 
-fn agent_mode_selections_path() -> std::path::PathBuf {
-    ProfilePaths::current().profile().join("agent-modes.json")
+impl AgentModeSelections {
+    fn path() -> PathBuf {
+        ProfilePaths::current().profile().join("agent-modes.json")
+    }
 }
 
 fn spawn_model_registry(mut commands: Commands) {
@@ -92,7 +98,7 @@ fn spawn_model_registry(mut commands: Commands) {
 }
 
 fn load_model_selections(mut models: Single<&mut AgentModelSelections>) {
-    let Ok(bytes) = std::fs::read(agent_model_selections_path()) else {
+    let Ok(bytes) = std::fs::read(AgentModelSelections::path()) else {
         return;
     };
     let Ok(saved) =
@@ -101,7 +107,7 @@ fn load_model_selections(mut models: Single<&mut AgentModelSelections>) {
         return;
     };
     for (agent, entry) in saved {
-        let mut memory = entry.memory();
+        let mut memory = AgentModelMemory::from(entry);
         if !memory.url.is_empty() {
             memory.url = AcpRoute::agent(&agent).url();
         }
@@ -111,7 +117,7 @@ fn load_model_selections(mut models: Single<&mut AgentModelSelections>) {
 }
 
 fn load_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
-    let Ok(bytes) = std::fs::read(agent_mode_selections_path()) else {
+    let Ok(bytes) = std::fs::read(AgentModeSelections::path()) else {
         return;
     };
     let Ok(saved) =
@@ -130,7 +136,7 @@ fn save_model_selections(mut models: Single<&mut AgentModelSelections>) {
     if !models.dirty {
         return;
     }
-    let path = agent_model_selections_path();
+    let path = AgentModelSelections::path();
     let Ok(bytes) = serde_json::to_vec_pretty(&models.by_agent) else {
         return;
     };
@@ -143,7 +149,7 @@ fn save_mode_selections(mut modes: Single<&mut AgentModeSelections>) {
     if !modes.dirty {
         return;
     }
-    let path = agent_mode_selections_path();
+    let path = AgentModeSelections::path();
     let Ok(bytes) = serde_json::to_vec_pretty(&modes.by_agent) else {
         return;
     };

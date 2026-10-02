@@ -755,7 +755,7 @@ pub(super) fn NoteBlockView(
             },
             if let Some(marker) = note_diff_marker {
                 span {
-                    class: "pointer-events-none absolute -left-4 bottom-1 top-1 w-[3px] rounded-full opacity-80 {note_diff_marker_class(marker)}"
+                    class: "pointer-events-none absolute -left-4 bottom-1 top-1 w-[3px] rounded-full opacity-80 {diff_tone(marker).marker_class()}"
                 }
             }
             RenderedNoteBlock {
@@ -902,10 +902,6 @@ pub(super) fn NoteBlockView(
             }
         }
     }
-}
-
-fn note_diff_marker_class(marker: GitLineStatus) -> &'static str {
-    diff_tone(marker).marker_class()
 }
 
 fn note_block_diff_marker(

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use syn::visit::{self, Visit};
-use syn::{Expr, ExprMethodCall, Item, ItemFn, UseTree, Visibility};
+use syn::{Block, Expr, ExprMethodCall, Item, ItemFn, Stmt, UseTree, Visibility};
 
 const GENERIC_MODULES: &[&str] = &[
     "bin", "host", "lib", "main", "plugin", "runtime", "src", "test", "tests", "ui",
@@ -347,10 +347,14 @@ fn files_do_not_mix_imported_and_qualified_paths_for_one_type() {
         .expect("workspace root");
     let mut violations = Vec::new();
 
-    for root in [workspace.join("crates"), workspace.join("website/src")] {
+    for root in [workspace.join("crates"), workspace.join("website")] {
         walk(&root, &mut |path, source| {
-            let Ok(file) = syn::parse_file(source) else {
-                return;
+            let file = match syn::parse_file(source) {
+                Ok(file) => file,
+                Err(error) => {
+                    violations.push(format!("{}: {error}", path.display()));
+                    return;
+                }
             };
             audit_imports(path, &file.items, "crate", &mut violations);
         });
@@ -361,6 +365,96 @@ fn files_do_not_mix_imported_and_qualified_paths_for_one_type() {
         "use either an import or a qualified path for one type within a file:\n{}",
         violations.join("\n")
     );
+}
+
+#[test]
+fn imports_are_declared_at_module_top() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .expect("workspace root");
+    let mut violations = Vec::new();
+
+    for root in [workspace.join("crates"), workspace.join("website")] {
+        walk(&root, &mut |path, source| {
+            let file = match syn::parse_file(source) {
+                Ok(file) => file,
+                Err(error) => {
+                    violations.push(format!("{}: {error}", path.display()));
+                    return;
+                }
+            };
+            audit_import_placement(path, &file.items, "crate", &mut violations);
+        });
+    }
+
+    assert!(
+        violations.is_empty(),
+        "imports must appear before every other item in their module and never inside a function:\n{}",
+        violations.join("\n")
+    );
+}
+
+fn audit_import_placement(path: &Path, items: &[Item], scope: &str, violations: &mut Vec<String>) {
+    let mut body_started = false;
+    for item in items {
+        match item {
+            Item::Use(import) => {
+                if body_started {
+                    violations.push(format!(
+                        "{}:{} ({scope}): import follows another item",
+                        path.display(),
+                        import.use_token.span.start().line
+                    ));
+                }
+            }
+            Item::ExternCrate(_) => {}
+            _ => body_started = true,
+        }
+
+        let Item::Mod(module) = item else {
+            continue;
+        };
+        let Some((_, nested)) = &module.content else {
+            continue;
+        };
+        let nested_scope = format!("{scope}::{}", module.ident);
+        audit_import_placement(path, nested, &nested_scope, violations);
+    }
+
+    let mut block_imports = BlockImports {
+        path,
+        scope,
+        violations,
+    };
+    for item in items {
+        if !matches!(item, Item::Mod(_) | Item::Use(_)) {
+            block_imports.visit_item(item);
+        }
+    }
+}
+
+struct BlockImports<'a> {
+    path: &'a Path,
+    scope: &'a str,
+    violations: &'a mut Vec<String>,
+}
+
+impl<'ast> Visit<'ast> for BlockImports<'_> {
+    fn visit_block(&mut self, block: &'ast Block) {
+        for statement in &block.stmts {
+            let Stmt::Item(Item::Use(import)) = statement else {
+                continue;
+            };
+            self.violations.push(format!(
+                "{}:{} ({}): import inside a function or block",
+                self.path.display(),
+                import.use_token.span.start().line,
+                self.scope
+            ));
+        }
+        visit::visit_block(self, block);
+    }
 }
 
 fn audit_imports(path: &Path, items: &[Item], scope: &str, violations: &mut Vec<String>) {

@@ -13,9 +13,7 @@ use vmux_ui::platform::sleep_ms;
 use super::diagnostic::DiagnosticPresentation;
 use super::text_geometry::{CellMetrics, ColumnRuler, column_in_line, gutter_px};
 use super::text_style::StyledSpanStyle;
-use super::{
-    EditorFocus, HOVER_DELAY_MS, diff_marker_row_class, diff_marker_sign, diff_marker_text_class,
-};
+use super::{EditorFocus, HOVER_DELAY_MS, diff_tone};
 
 #[component]
 pub(super) fn EditorLines(
@@ -207,7 +205,7 @@ fn EditorLineRow(
     };
     rsx! {
         div {
-            class: if let Some(marker) = diff_marker { "group absolute inset-x-0 flex items-start {diff_marker_row_class(marker)}" } else { "group absolute inset-x-0 flex items-start" },
+            class: if let Some(marker) = diff_marker { "group absolute inset-x-0 flex items-start {diff_tone(marker).row_class()}" } else { "group absolute inset-x-0 flex items-start" },
             style: "top:{lt}px;height:{line_height}px;",
             onpointerdown: move |e: Event<PointerData>| {
                 e.prevent_default();
@@ -297,14 +295,14 @@ fn EditorLineRow(
                     span { class: "pointer-events-none absolute left-1 {DiagnosticPresentation::color_class(s)}", "●" }
                 }
                 span {
-                    class: if let Some(marker) = diff_marker { "shrink-0 text-right opacity-90 {diff_marker_text_class(marker)}" } else { "shrink-0 text-right opacity-40 group-hover:opacity-90" },
+                    class: if let Some(marker) = diff_marker { "shrink-0 text-right opacity-90 {diff_tone(marker).text_class()}" } else { "shrink-0 text-right opacity-40 group-hover:opacity-90" },
                     style: "width:calc(var(--cw, 1ch) * {gw});",
                     "{ln + 1}"
                 }
                 span {
-                    class: if let Some(marker) = diff_marker { "ml-1 w-[1ch] shrink-0 text-center font-semibold {diff_marker_text_class(marker)}" } else { "ml-1 w-[1ch] shrink-0" },
+                    class: if let Some(marker) = diff_marker { "ml-1 w-[1ch] shrink-0 text-center font-semibold {diff_tone(marker).text_class()}" } else { "ml-1 w-[1ch] shrink-0" },
                     if let Some(marker) = diff_marker {
-                        span { title: translate("editor-changed-line"), "{diff_marker_sign(marker)}" }
+                        span { title: translate("editor-changed-line"), "{diff_tone(marker).sign()}" }
                     }
                 }
                 match fold {

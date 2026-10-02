@@ -1,8 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
+use vmux_api::media::MediaKind;
 use vmux_ecs::event::{
     FileMediaEvent, FileOpenExternalRequest, FilePreviewEvent, FilePreviewRequest, FileVideoRect,
     PreviewKind,
@@ -43,7 +44,7 @@ impl Plugin for MediaPlugin {
 
 #[derive(Component, Clone, Debug)]
 pub struct FileMedia {
-    pub kind: vmux_api::media::MediaKind,
+    pub kind: MediaKind,
     pub mime: String,
 }
 
@@ -99,16 +100,14 @@ fn send_initial(
     }
 }
 
-fn needs_native_video(path: &Path) -> bool {
-    vmux_api::media::MediaKind::requires_native_video(&path.to_string_lossy())
-}
-
 fn attach_video_overlays(
     media: Query<(Entity, &FileView, &FileMedia)>,
     browsers: NonSend<Browsers>,
 ) {
     for (entity, file, media) in &media {
-        if media.kind != vmux_api::media::MediaKind::Video || !needs_native_video(&file.path) {
+        if media.kind != MediaKind::Video
+            || !MediaKind::requires_native_video(&file.path.to_string_lossy())
+        {
             continue;
         }
         if !browsers.has_browser(entity) {
@@ -128,10 +127,7 @@ fn file_video_rect(
         return;
     }
     let rect = &trigger.event().payload;
-    if !vmux_api::media::MediaKind::requires_native_video(&rect.path)
-        || rect.w <= 0.0
-        || rect.h <= 0.0
-    {
+    if !MediaKind::requires_native_video(&rect.path) || rect.w <= 0.0 || rect.h <= 0.0 {
         return;
     }
     browsers.set_media_overlay(&entity, &rect.path, (rect.x, rect.y, rect.w, rect.h));
@@ -179,7 +175,7 @@ fn load_file_preview(
         None
     };
     let path = PathBuf::from(&request.path);
-    if !needs_native_video(&path) {
+    if !MediaKind::requires_native_video(&path.to_string_lossy()) {
         browsers.detach_media_overlay(&entity);
     }
     if request.thumb && PreviewBuilder::is_image(&path) {

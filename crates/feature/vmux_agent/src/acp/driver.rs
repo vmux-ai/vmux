@@ -1465,7 +1465,7 @@ mod tests {
                 Update,
                 (
                     super::super::project_transcript,
-                    super::super::project_agent_info,
+                    super::super::project_info,
                     super::super::project_config_state,
                     super::super::project_selected_config,
                     super::super::project_status,

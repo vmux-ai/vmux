@@ -3,6 +3,7 @@ use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 
 use vmux_ecs::event::{MdBlock, MdInline, NoteBlock};
+use vmux_path::PathIdentity;
 
 use crate::{MarkdownMetadata, WikiLink};
 
@@ -218,10 +219,6 @@ fn relative_without_extension(root: &Path, path: &Path) -> String {
     relative.to_string_lossy().replace('\\', "/")
 }
 
-fn normalized_path(path: &Path) -> PathBuf {
-    vmux_path::PathIdentity::resolve(path).into_path_buf()
-}
-
 fn note_title(path: &Path, metadata: &MarkdownMetadata, text: &str) -> String {
     if !metadata.title.is_empty() {
         metadata.title.clone()
@@ -246,7 +243,8 @@ fn safe_candidate(root: &Path, source: &Path, target: &str) -> Option<PathBuf> {
     let base = if target.components().count() > 1 {
         root.to_path_buf()
     } else {
-        normalized_path(source)
+        PathIdentity::resolve(source)
+            .into_path_buf()
             .parent()
             .unwrap_or(root)
             .to_path_buf()
@@ -357,7 +355,7 @@ impl KnowledgeIndex {
     }
 
     fn note_index(&self, source: &Path, target: &str) -> Option<usize> {
-        let source = normalized_path(source);
+        let source = PathIdentity::resolve(source).into_path_buf();
         if target.trim().is_empty() {
             return self.notes.iter().position(|note| note.path == source);
         }
@@ -451,20 +449,20 @@ impl KnowledgeIndex {
 
     pub fn backlinks(&self, path: &Path) -> Vec<KnowledgeBacklink> {
         self.backlinks
-            .get(&normalized_path(path))
+            .get(&PathIdentity::resolve(path).into_path_buf())
             .cloned()
             .unwrap_or_default()
     }
 
     pub fn broken_links(&self, path: &Path) -> Vec<KnowledgeBrokenLink> {
         self.broken
-            .get(&normalized_path(path))
+            .get(&PathIdentity::resolve(path).into_path_buf())
             .cloned()
             .unwrap_or_default()
     }
 
     pub fn unlinked_mentions(&self, path: &Path, limit: usize) -> Vec<KnowledgeBacklink> {
-        let path = normalized_path(path);
+        let path = PathIdentity::resolve(path).into_path_buf();
         let Some(target) = self.notes.iter().find(|note| note.path == path) else {
             return Vec::new();
         };
@@ -702,8 +700,8 @@ fn replacement_text(link: &WikiLink, note: &str) -> String {
 
 impl KnowledgeRenamePlan {
     pub fn build(index: &KnowledgeIndex, old: &Path, new: &Path) -> Self {
-        let old = normalized_path(old);
-        let new = normalized_path(new);
+        let old = PathIdentity::resolve(old).into_path_buf();
+        let new = PathIdentity::resolve(new).into_path_buf();
         let mut edits = Vec::new();
         for source in &index.notes {
             let mut replacements = Vec::new();
@@ -798,7 +796,7 @@ mod tests {
         assert!(!missing.exists);
         assert_eq!(
             missing.path,
-            normalized_path(&temp.path().join("projects/Missing Note.md"))
+            PathIdentity::resolve(&temp.path().join("projects/Missing Note.md")).into_path_buf()
         );
     }
 

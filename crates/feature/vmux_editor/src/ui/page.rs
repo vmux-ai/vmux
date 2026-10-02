@@ -1888,18 +1888,6 @@ impl NoteCursorActivation {
     }
 }
 
-pub(crate) fn diff_marker_sign(marker: GitLineStatus) -> &'static str {
-    diff_tone(marker).sign()
-}
-
-pub(crate) fn diff_marker_text_class(marker: GitLineStatus) -> &'static str {
-    diff_tone(marker).text_class()
-}
-
-pub(crate) fn diff_marker_row_class(marker: GitLineStatus) -> &'static str {
-    diff_tone(marker).row_class()
-}
-
 pub(crate) fn diff_tone(marker: GitLineStatus) -> DiffTone {
     match marker {
         GitLineStatus::Added => DiffTone::Added,

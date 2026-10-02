@@ -40,7 +40,7 @@ impl Plugin for AcpSessionPlugin {
                 ApplyDeferred,
                 spawn,
                 project_transcript,
-                project_agent_info,
+                project_info,
                 project_config_state,
                 project_selected_config,
                 project_status,
@@ -227,10 +227,7 @@ impl AcpSessionConfigs {
         values
     }
 
-    fn from_acp(
-        config_options: &[agent_client_protocol::schema::v1::SessionConfigOption],
-        legacy: Option<&agent_client_protocol::schema::v1::SessionModeState>,
-    ) -> Self {
+    fn from_acp(config_options: &[SessionConfigOption], legacy: Option<&SessionModeState>) -> Self {
         let mut configs = Vec::new();
         for config in config_options {
             let SessionConfigKind::Select(select) = &config.kind else {
@@ -995,7 +992,7 @@ fn project_transcript(
     }
 }
 
-fn project_agent_info(
+fn project_info(
     mut sessions: Query<(
         &SessionId,
         &AcpSessionShared,

@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use vmux_path::PathIdentity;
 
 pub(super) struct WatchPlugin;
 
@@ -117,7 +118,7 @@ struct GuessedPath {
 impl From<&Path> for GuessedPath {
     fn from(path: &Path) -> Self {
         Self {
-            guess: canonical(path),
+            guess: PathIdentity::resolve(path).into_path_buf(),
             made_at: Instant::now(),
         }
     }
@@ -216,10 +217,6 @@ impl RepoInfoCache {
 const WATCH_DRAIN_BUDGET: usize = 256;
 const CANONICAL_CAP: usize = 4096;
 
-fn canonical(path: &Path) -> PathBuf {
-    vmux_path::PathIdentity::resolve(path).into_path_buf()
-}
-
 fn resolve_git_path(root: &Path, value: &str) -> PathBuf {
     let path = PathBuf::from(value.trim());
     let path = if path.is_absolute() {
@@ -227,7 +224,7 @@ fn resolve_git_path(root: &Path, value: &str) -> PathBuf {
     } else {
         root.join(path)
     };
-    canonical(&path)
+    PathIdentity::resolve(&path).into_path_buf()
 }
 
 fn git_watch_targets(
@@ -253,7 +250,7 @@ fn git_watch_targets(
         .ok_or_else(|| super::repository::GitError("missing common git directory".into()))?;
     let mut targets = vec![
         GitWatchTarget {
-            path: canonical(&root),
+            path: PathIdentity::resolve(&root).into_path_buf(),
             recursive: true,
             kind: GitWatchKind::Worktree,
         },
@@ -316,14 +313,14 @@ fn repo_info_watch_targets(
 ) -> Vec<GitWatchTarget> {
     let Some(info) = info else {
         return vec![GitWatchTarget {
-            path: canonical(path),
+            path: PathIdentity::resolve(path).into_path_buf(),
             recursive: true,
             kind: GitWatchKind::Worktree,
         }];
     };
-    let repo_root = canonical(&info.repo_root);
-    let git_dir = canonical(&info.git_dir);
-    let common_dir = canonical(&info.common_dir);
+    let repo_root = PathIdentity::resolve(&info.repo_root).into_path_buf();
+    let git_dir = PathIdentity::resolve(&info.git_dir).into_path_buf();
+    let common_dir = PathIdentity::resolve(&info.common_dir).into_path_buf();
     let mut targets = vec![
         GitWatchTarget {
             path: repo_root,
@@ -367,7 +364,7 @@ impl GitWatch {
         entity: Entity,
         path: &Path,
     ) -> Result<PathBuf, super::repository::GitError> {
-        let path = canonical(path);
+        let path = PathIdentity::resolve(path).into_path_buf();
         if let Some(subscription) = self
             .subscriptions
             .get(&entity)
@@ -461,7 +458,7 @@ impl GitWatch {
         path: &Path,
         info: Option<&super::worktree::RepoInfo>,
     ) -> bool {
-        let path = canonical(path);
+        let path = PathIdentity::resolve(path).into_path_buf();
         let targets = repo_info_watch_targets(&path, info);
         if self.repo_info_subscriptions.get(&path) == Some(&targets) {
             return true;
@@ -661,8 +658,8 @@ mod tests {
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
         let (_, targets) = git_watch_targets(&file).unwrap();
-        let root = canonical(repo.path());
-        let git_dir = canonical(&repo.path().join(".git"));
+        let root = PathIdentity::resolve(repo.path()).into_path_buf();
+        let git_dir = PathIdentity::resolve(&repo.path().join(".git")).into_path_buf();
 
         assert!(targets.contains(&GitWatchTarget {
             path: root,
@@ -702,8 +699,8 @@ mod tests {
         );
 
         let (_, targets) = git_watch_targets(&worktree.join("a.txt")).unwrap();
-        let worktree_root = canonical(&worktree);
-        let common = canonical(&repo.path().join(".git"));
+        let worktree_root = PathIdentity::resolve(&worktree).into_path_buf();
+        let common = PathIdentity::resolve(&repo.path().join(".git")).into_path_buf();
 
         assert!(targets.contains(&GitWatchTarget {
             path: worktree_root,
@@ -768,8 +765,8 @@ mod tests {
     fn inactive_repo_info_entries_release_their_watch_targets() {
         let active_repo = test_repo::init();
         let stale_repo = test_repo::init();
-        let active_path = canonical(active_repo.path());
-        let stale_path = canonical(stale_repo.path());
+        let active_path = PathIdentity::resolve(active_repo.path()).into_path_buf();
+        let stale_path = PathIdentity::resolve(stale_repo.path()).into_path_buf();
         let active_info = super::super::worktree::repo_info(&active_path).unwrap();
         let stale_info = super::super::worktree::repo_info(&stale_path).unwrap();
         let stale_targets = repo_info_watch_targets(&stale_path, Some(&stale_info));
@@ -825,7 +822,7 @@ mod tests {
 
     #[test]
     fn watch_target_matching_respects_recursion() {
-        let root = canonical(Path::new("/tmp/vmux-git-watch"));
+        let root = PathIdentity::resolve(Path::new("/tmp/vmux-git-watch")).into_path_buf();
         let direct = GitWatchTarget {
             path: root.clone(),
             recursive: false,
@@ -861,9 +858,9 @@ mod tests {
         let info = super::super::worktree::repo_info(repo.path()).unwrap();
         let targets = repo_info_watch_targets(repo.path(), Some(&info));
 
-        let file = canonical(&file);
-        let head = canonical(&info.git_dir.join("HEAD"));
-        let lock = canonical(&info.git_dir.join("index.lock"));
+        let file = PathIdentity::resolve(&file).into_path_buf();
+        let head = PathIdentity::resolve(&info.git_dir.join("HEAD")).into_path_buf();
+        let lock = PathIdentity::resolve(&info.git_dir.join("index.lock")).into_path_buf();
 
         assert!(targets.iter().any(|target| target.matches(&file)));
         assert!(targets.iter().any(|target| target.matches(&head)));
@@ -908,7 +905,7 @@ mod tests {
         test_repo::write(repo.path(), "a.txt", "one\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
-        let path = canonical(repo.path());
+        let path = PathIdentity::resolve(repo.path()).into_path_buf();
         let cache = RepoInfoCache {
             entries: HashMap::new(),
             canonical: HashMap::new(),
@@ -964,7 +961,7 @@ mod tests {
         test_repo::write(repo.path(), "a.txt", "one\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
-        let path = canonical(repo.path());
+        let path = PathIdentity::resolve(repo.path()).into_path_buf();
         let stale = super::super::worktree::repo_info(&path);
         test_repo::write(repo.path(), "a.txt", "two\n");
         let cache = RepoInfoCache {

@@ -12,6 +12,7 @@ use vmux_ecs::team::Agent;
 use vmux_git::GitRepository;
 use vmux_layout::CloseStackRequest;
 use vmux_layout::stack::ComputeFocusSet;
+use vmux_path::FileUrl;
 use vmux_session::{AcpSession, AgentRunState};
 use vmux_setting::{AppSettings, SettingsSaveRequest};
 
@@ -86,46 +87,6 @@ fn request(
     }
 }
 
-fn path_from_file_url(url: &str) -> Option<PathBuf> {
-    let rest = url
-        .strip_prefix("file://")
-        .or_else(|| url.strip_prefix("file:"))?;
-    let no_frag = rest.split('#').next().unwrap_or(rest);
-    let decoded = percent_decode(no_frag);
-    if decoded.is_empty() {
-        return None;
-    }
-    Some(PathBuf::from(decoded))
-}
-
-fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let (Some(h), Some(l)) = (hex(bytes[i + 1]), hex(bytes[i + 2]))
-        {
-            out.push(h * 16 + l);
-            i += 3;
-            continue;
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-fn hex(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
-}
-
 fn decide_closable(stacks: &[(Entity, i64, bool)], max: usize) -> Vec<Entity> {
     if stacks.len() <= max {
         return Vec::new();
@@ -192,7 +153,8 @@ fn tidy_follow_pane(
                 .get(*stack)
                 .map(|timestamp| timestamp.0)
                 .unwrap_or(i64::MIN);
-            let changed = path_from_file_url(url)
+            let changed = FileUrl::parse(url)
+                .and_then(|url| url.path())
                 .map(|path| is_changed(&path, &mut repos))
                 .unwrap_or(false);
             (*stack, timestamp, changed)
@@ -305,21 +267,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_file_url_stripping_scheme_fragment_and_encoding() {
+    fn parses_canonical_file_urls() {
         assert_eq!(
-            path_from_file_url("file:///a/b.rs#L3:1-4"),
+            FileUrl::parse("file:///a/b.rs#L3:1-4").and_then(|url| url.path()),
             Some(PathBuf::from("/a/b.rs"))
         );
         assert_eq!(
-            path_from_file_url("file:///a/my%20file.rs"),
+            FileUrl::parse("file:///a/my%20file.rs").and_then(|url| url.path()),
             Some(PathBuf::from("/a/my file.rs"))
         );
-        assert_eq!(
-            path_from_file_url("file:/rel#x"),
-            Some(PathBuf::from("/rel"))
-        );
-        assert_eq!(path_from_file_url("https://x/y"), None);
-        assert_eq!(path_from_file_url("file://"), None);
+        assert!(FileUrl::parse("file:/rel#x").is_none());
+        assert!(FileUrl::parse("https://x/y").is_none());
+        assert_eq!(FileUrl::parse("file://").and_then(|url| url.path()), None);
     }
 
     #[test]

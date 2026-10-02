@@ -409,7 +409,8 @@ fn sync_codex_config(path: &Path, skills: &[PathBuf], memories_bytes: usize) -> 
         .map(|skill| {
             format!(
                 "[[skills.config]]\npath = {}\nenabled = true",
-                toml_string(&skill.to_string_lossy())
+                serde_json::to_string(skill.to_string_lossy().as_ref())
+                    .unwrap_or_else(|_| "\"\"".to_string())
             )
         })
         .collect::<Vec<_>>()
@@ -484,7 +485,7 @@ fn sync_vibe_config(path: &Path, skills_root: &Path) -> io::Result<()> {
         "[{}]",
         values
             .iter()
-            .map(|value| toml_string(value))
+            .map(|value| serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string()))
             .collect::<Vec<_>>()
             .join(", ")
     );
@@ -587,10 +588,6 @@ fn array_end(text: &str) -> Option<usize> {
         }
     }
     None
-}
-
-fn toml_string(value: &str) -> String {
-    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }
 
 fn read_optional(path: &Path) -> io::Result<String> {
