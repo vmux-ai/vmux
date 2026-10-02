@@ -17,7 +17,7 @@ use vmux_api::input::KeyModifiers;
 use vmux_command::{CommandInvocation, WriteCommandRequests};
 use vmux_command::{KeyCombo, Keymap, Modifiers};
 use vmux_ecs::team::User;
-use vmux_ecs::{Active, WindowFullscreen, WindowFullscreenSet, now_millis};
+use vmux_ecs::{Active, UnixMillis, WindowFullscreen, WindowFullscreenSet};
 
 use crate::{ExitFullscreenShortcut, HideWindowsShortcut, KeyboardContext, KeyboardContextSet};
 
@@ -301,7 +301,7 @@ fn native_input(event: &NSEvent, native_code: u16, flags: NSEventModifierFlags) 
         repeat: event.isARepeat(),
         captured: false,
         claim: None,
-        pressed_at_ms: now_millis(),
+        pressed_at_ms: UnixMillis::now().0,
     }
 }
 

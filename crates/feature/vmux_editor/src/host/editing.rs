@@ -24,7 +24,7 @@ use crate::host::note::NoteSent;
 use crate::host::status::SharedFileViewMode;
 use crate::host::viewport::{CursorRenderRequest, FileViewport, FoldsDirty, ViewportRenderRequest};
 use crate::keymap::{KeyInput, Mods};
-use vmux_ecs::scroll::clamp_top_line;
+use vmux_ecs::scroll::ScrollWindow;
 
 pub(super) struct EditorPlugin;
 
@@ -358,7 +358,7 @@ fn apply_edit_request(
         if let EditCommand::ScrollViewport(lines) = &cmd {
             let visible = vp.visible_rows(&mut edit);
             let target = (vp.top_row as i64 + *lines as i64).clamp(0, u32::MAX as i64) as u32;
-            let target = clamp_top_line(target, visible, vp.rows);
+            let target = ScrollWindow::new(visible, target, vp.rows).top();
             if let Some(scroll) = vp.set_top(target)
                 && browsers.can_emit_to(&entity)
             {

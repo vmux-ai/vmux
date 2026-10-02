@@ -5,8 +5,8 @@ pub use component::{
     ActivateRequest, Active, AgentWorkingDir, Bookmark, BookmarkOrder, Collapsed, CreatedAt,
     EffectiveStartupUrl, EntityTarget, Folder, HostShell, JsonArguments, KeyboardOwner,
     LastActivatedAt, LastVisitedAt, Order, Pin, ProcessAnchor, Ready, RegistrationOrder,
-    TransitionType, Url, Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen,
-    WindowFullscreenSet, now_millis,
+    TransitionType, UnixMillis, Url, Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen,
+    WindowFullscreenSet,
 };
 pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
 pub use host_spawn::HostSpawnRoute;

@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use vmux_api::VmuxRoute;
 use vmux_ecs::{
-    CreatedAt, LastVisitedAt, PageMetadata, TransitionType, Url, Visit, VisitCount, VisitedUrl,
-    now_millis, page::PageReady,
+    CreatedAt, LastVisitedAt, PageMetadata, TransitionType, UnixMillis, Url, Visit, VisitCount,
+    VisitedUrl, page::PageReady,
 };
 
 pub struct HistorySpawnPlugin;
@@ -88,7 +88,7 @@ fn spawn(
         if VmuxRoute::parse(&ev.url).is_some() || ev.url.is_empty() {
             continue;
         }
-        let now = now_millis();
+        let now = UnixMillis::now().0;
         let transition = super::transition::map(ev.transition, ev.qualifiers);
         visits.record(&ev.url, "", transition, now);
     }
@@ -98,7 +98,7 @@ fn record_requested_visits(
     mut reader: bevy::ecs::message::MessageReader<vmux_ecs::event::RecordVisitRequest>,
     mut visits: VisitWriter,
 ) {
-    let now = now_millis();
+    let now = UnixMillis::now().0;
     for req in reader.read() {
         if req.url.is_empty() || VmuxRoute::parse(&req.url).is_some() {
             continue;
@@ -111,7 +111,7 @@ fn record_vmux_pages(
     pages: Query<&PageMetadata, (Added<PageReady>, Without<Url>)>,
     mut visits: VisitWriter,
 ) {
-    let now = now_millis();
+    let now = UnixMillis::now().0;
     for page in &pages {
         if !recordable_vmux_url(&page.url) {
             continue;

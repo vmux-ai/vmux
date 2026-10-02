@@ -1,4 +1,6 @@
 use bevy::ecs::schedule::common_conditions::any_with_component;
+#[cfg(test)]
+use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 #[cfg(test)]
@@ -12,8 +14,8 @@ use vmux_ecs::BuiltinIcon;
 #[cfg(test)]
 use vmux_ecs::host::persistence::PersistenceAppExt;
 use vmux_ecs::host::persistence::{
-    PersistenceDirty, WorkspaceRestore, WorkspaceSaveRequest, WorkspaceStoreValidators,
-    persisted_components,
+    PersistenceDirty, WorkspacePersisted, WorkspaceRestore, WorkspaceSaveRequest,
+    WorkspaceStoreValidators,
 };
 use vmux_ecs::profile::{ProfilePaths, is_test_session};
 #[cfg(test)]
@@ -55,7 +57,7 @@ impl Plugin for WorkspacePersistencePlugin {
 }
 
 fn spawn(registry: Res<AppTypeRegistry>, mut commands: Commands) {
-    let components = persisted_components(&registry.read())
+    let components = WorkspacePersisted::filter(&registry.read())
         .allow::<Save>()
         .allow::<ChildOf>()
         .allow::<Children>()
@@ -242,14 +244,14 @@ fn auto_save(
 
 #[cfg(test)]
 fn save_space_to_path(world: &mut World, path: PathBuf) {
-    let components = persisted_components(&world.resource::<AppTypeRegistry>().read())
+    let components = WorkspacePersisted::filter(&world.resource::<AppTypeRegistry>().read())
         .allow::<Save>()
         .allow::<ChildOf>()
         .allow::<Children>()
         .allow::<Name>();
     world
         .run_system_once(move |mut saver: SpaceSaver| {
-            saver.save(path, std::iter::empty(), components);
+            saver.save(path.clone(), std::iter::empty(), components.clone());
         })
         .unwrap();
 }

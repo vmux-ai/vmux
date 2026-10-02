@@ -97,13 +97,15 @@ pub struct CursorRowUpdate {
     pub set: Option<u32>,
 }
 
-pub fn cursor_row_update(previous: Option<&TermCursor>, next: &TermCursor) -> CursorRowUpdate {
-    let clear = previous
-        .filter(|cursor| cursor.visible && (!next.visible || cursor.row != next.row))
-        .map(|cursor| cursor.row);
-    let set = next.visible.then_some(next.row);
+impl CursorRowUpdate {
+    pub fn between(previous: Option<&TermCursor>, next: &TermCursor) -> Self {
+        let clear = previous
+            .filter(|cursor| cursor.visible && (!next.visible || cursor.row != next.row))
+            .map(|cursor| cursor.row);
+        let set = next.visible.then_some(next.row);
 
-    CursorRowUpdate { clear, set }
+        Self { clear, set }
+    }
 }
 
 pub const MOD_CTRL: u8 = 1;

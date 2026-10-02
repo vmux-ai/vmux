@@ -12,6 +12,18 @@ impl<T> FromType<T> for WorkspacePersisted {
     }
 }
 
+impl WorkspacePersisted {
+    pub fn filter(registry: &TypeRegistry) -> WorldFilter {
+        let mut filter = WorldFilter::deny_all();
+        for registration in registry.iter() {
+            if registration.data::<Self>().is_some() {
+                filter = filter.allow_by_id(registration.type_id());
+            }
+        }
+        filter
+    }
+}
+
 #[derive(Event, Clone, Copy, Debug, Default)]
 pub struct PersistenceDirty;
 
@@ -89,16 +101,6 @@ fn detect_change<T: Component>(
     }
 }
 
-pub fn persisted_components(registry: &TypeRegistry) -> WorldFilter {
-    let mut filter = WorldFilter::deny_all();
-    for registration in registry.iter() {
-        if registration.data::<WorkspacePersisted>().is_some() {
-            filter = filter.allow_by_id(registration.type_id());
-        }
-    }
-    filter
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,7 +119,7 @@ mod tests {
         app.register_persisted::<Saved>()
             .register_type::<Transient>();
         let registry = app.world().resource::<AppTypeRegistry>().read();
-        let filter = persisted_components(&registry);
+        let filter = WorkspacePersisted::filter(&registry);
 
         assert!(filter.is_allowed::<Saved>());
         assert!(!filter.is_allowed::<Transient>());

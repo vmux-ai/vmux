@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
+use vmux_ecs::scroll::{OVERSCAN_CAP, OVERSCAN_FLOOR, Overscan, TERMINAL_OVERSCAN_K};
 
 use crate::event::{
     AgentPromptDraftEvent, ServiceUnavailableEvent, TermCursor, TermLine, TermLoadingEvent,
@@ -113,12 +114,13 @@ impl TerminalState {
             cols.set(patch.cols);
         }
 
-        let overscan = vmux_ecs::scroll::overscan_for(
+        let overscan = Overscan::new(
             patch.rows,
-            vmux_ecs::scroll::TERMINAL_OVERSCAN_K,
-            vmux_ecs::scroll::OVERSCAN_FLOOR,
-            vmux_ecs::scroll::OVERSCAN_CAP,
-        );
+            TERMINAL_OVERSCAN_K,
+            OVERSCAN_FLOOR,
+            OVERSCAN_CAP,
+        )
+        .rows();
         let keep_hi =
             (first + patch.rows as u32 + overscan * 2 + 2).min(patch.total_rows.saturating_sub(1));
         let previous_cursor = cursor.peek().clone();

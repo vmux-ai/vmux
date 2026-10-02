@@ -350,7 +350,7 @@ fn probe_press_request(
     view.probe.capture(
         trigger.event().payload.stroke.clone(),
         &catalog,
-        vmux_ecs::now_millis(),
+        vmux_ecs::UnixMillis::now().0,
     );
 }
 
@@ -421,7 +421,7 @@ fn capture_native_keys(
 }
 
 fn expire_probe(mut views: Query<&mut Shortcuts>) {
-    let now = vmux_ecs::now_millis();
+    let now = vmux_ecs::UnixMillis::now().0;
     for mut view in &mut views {
         let timeout_ms = view.catalog.chord_timeout_ms;
         if view.bypass_change_detection().probe.expire(now, timeout_ms) {

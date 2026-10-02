@@ -24,7 +24,7 @@ use vmux_api::editor::KeymapKind;
 use vmux_api::editor::{CursorPos, EditMode, SelSpan};
 use vmux_api::media::MediaKind;
 use vmux_ecs::event::*;
-use vmux_ecs::scroll::{EDGE_TRIGGER_K, needs_refetch};
+use vmux_ecs::scroll::{EDGE_TRIGGER_K, ScrollWindow};
 use vmux_git::event::{FileGitState, GitLineStatus};
 use vmux_git::ui::{DiffView, GitFooter};
 use vmux_knowledge::{KnowledgeProperty, KnowledgeReference};
@@ -1437,13 +1437,8 @@ pub fn Page() -> Element {
                                             .read()
                                             .last()
                                             .map_or(0, |line| line.row + line.rows as u32 - rfirst);
-                                        let needs_rows = needs_refetch(
-                                            vis_first,
-                                            vis_rows,
-                                            rfirst,
-                                            loaded_len,
-                                            trigger,
-                                        );
+                                        let needs_rows = ScrollWindow::new(total_lines(), vis_first, vis_rows)
+                                            .needs_refetch(rfirst, loaded_len, trigger);
                                         let _ = send(&FileScrollEvent {
                                             top_row: vis_first,
                                             needs_rows,

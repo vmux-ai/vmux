@@ -435,31 +435,35 @@ fn functions_are_declared_at_module_scope() {
 }
 
 #[test]
-fn vmux_api_exports_contract_types_instead_of_loose_functions() {
+fn shared_contract_and_ecs_crates_do_not_export_loose_functions() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(3)
         .expect("workspace root");
-    let root = workspace.join("crates/util/vmux_api/src");
     let mut violations = Vec::new();
 
-    walk(&root, &mut |path, source| {
-        if test_source(path) {
-            return;
-        }
-        let file = match syn::parse_file(source) {
-            Ok(file) => file,
-            Err(error) => {
-                violations.push(format!("{}: {error}", path.display()));
+    for root in [
+        workspace.join("crates/util/vmux_api/src"),
+        workspace.join("crates/util/vmux_ecs/src"),
+    ] {
+        walk(&root, &mut |path, source| {
+            if test_source(path) {
                 return;
             }
-        };
-        audit_public_functions(path, &file.items, "crate", &mut violations);
-    });
+            let file = match syn::parse_file(source) {
+                Ok(file) => file,
+                Err(error) => {
+                    violations.push(format!("{}: {error}", path.display()));
+                    return;
+                }
+            };
+            audit_public_functions(path, &file.items, "crate", &mut violations);
+        });
+    }
 
     assert!(
         violations.is_empty(),
-        "vmux_api must expose typed contracts and type-owned behavior, not loose functions:\n{}",
+        "vmux_api and vmux_ecs must expose types and type-owned behavior, not loose functions:\n{}",
         violations.join("\n")
     );
 }

@@ -10,11 +10,11 @@ pub use host::{
     PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask,
     PaneStep, PendingPrompt, PendingPromptAttachments, Pin, ProcessAnchor, Ready,
     RegistrationOrder, RendersLauncherPanel, RestoreKeyboardToStack, SplitAxis, StackCommandSet,
-    StackInPaneChosen, TabCommandSet, TransitionType, UiState, UiStatePlugin, UiStateWrite, Url,
-    Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen, WindowFullscreenSet, WindowOverlay,
-    agent, archive, browser, component, file_ui_state, host_spawn, launcher, manifest, notify,
-    now_millis, overlay, page, page_open, persistence, plugin, profile, team, terminal, ui_state,
-    wake, workspace,
+    StackInPaneChosen, TabCommandSet, TransitionType, UiState, UiStatePlugin, UiStateWrite,
+    UnixMillis, Url, Uuid, Visit, VisitCount, VisitedUrl, WindowFullscreen, WindowFullscreenSet,
+    WindowOverlay, agent, archive, browser, component, file_ui_state, host_spawn, launcher,
+    manifest, notify, overlay, page, page_open, persistence, plugin, profile, team, terminal,
+    ui_state, wake, workspace,
 };
 pub use icon::{BuiltinIcon, PageIcon};
 pub use page_metadata::{PageIdentity, PageMetadata};

@@ -4,56 +4,85 @@ pub const OVERSCAN_FLOOR: u32 = 48;
 pub const OVERSCAN_CAP: u32 = 512;
 pub const EDGE_TRIGGER_K: f32 = 1.0;
 
-pub fn clamp_top_line(top_line: u32, total_lines: u32, rows: u16) -> u32 {
-    let max_top = total_lines.saturating_sub(rows as u32);
-    top_line.min(max_top)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScrollWindow {
+    total_lines: u32,
+    top_line: u32,
+    rows: u32,
 }
 
-pub fn window_range(total_lines: u32, top_line: u32, rows: u16) -> (u32, u32) {
-    let first = clamp_top_line(top_line, total_lines, rows);
-    let end = first.saturating_add(rows as u32).min(total_lines);
-    (first, end)
-}
-
-pub fn rows_from_viewport(char_height: f32, viewport_height: f32) -> u16 {
-    if char_height <= 0.0 || viewport_height <= 0.0 {
-        return 0;
+impl ScrollWindow {
+    pub fn new(total_lines: u32, top_line: u32, rows: impl Into<u32>) -> Self {
+        Self {
+            total_lines,
+            top_line,
+            rows: rows.into(),
+        }
     }
-    (viewport_height / char_height).floor() as u16
-}
 
-pub fn visible_slice(total: u32, top_line: u32, rows: u16) -> std::ops::Range<usize> {
-    let (first, end) = window_range(total, top_line, rows);
-    (first as usize)..(end as usize)
-}
-
-pub fn overscan_for(visible: u16, k: f32, floor: u32, cap: u32) -> u32 {
-    let scaled = (visible as f32 * k).ceil() as u32;
-    scaled.clamp(floor, cap)
-}
-
-pub fn needs_refetch(
-    vis_first: u32,
-    vis_rows: u32,
-    loaded_first: u32,
-    loaded_len: u32,
-    trigger: u32,
-) -> bool {
-    let loaded_end = loaded_first.saturating_add(loaded_len);
-    let near_top = vis_first < loaded_first.saturating_add(trigger);
-    let near_bot = vis_first + vis_rows + trigger > loaded_end;
-    near_top || near_bot
-}
-
-pub fn doc_row_to_line(doc_row: u32, history_size: u32) -> i32 {
-    doc_row as i32 - history_size as i32
-}
-
-pub fn follow_bottom_pad(client_h: f32, pad: f32, ch: f32) -> f32 {
-    if ch <= 0.0 {
-        return 0.0;
+    pub fn top(self) -> u32 {
+        self.top_line
+            .min(self.total_lines.saturating_sub(self.rows))
     }
-    (client_h - pad).rem_euclid(ch)
+
+    pub fn range(self) -> (u32, u32) {
+        let first = self.top();
+        let end = first.saturating_add(self.rows).min(self.total_lines);
+        (first, end)
+    }
+
+    pub fn needs_refetch(self, loaded_first: u32, loaded_len: u32, trigger: u32) -> bool {
+        let loaded_end = loaded_first.saturating_add(loaded_len);
+        let near_top = self.top_line < loaded_first.saturating_add(trigger);
+        let near_bottom = self.top_line + self.rows + trigger > loaded_end;
+        near_top || near_bottom
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ViewportRows(u16);
+
+impl ViewportRows {
+    pub fn from_pixels(character_height: f32, viewport_height: f32) -> Self {
+        if character_height <= 0.0 || viewport_height <= 0.0 {
+            return Self(0);
+        }
+        Self((viewport_height / character_height).floor() as u16)
+    }
+
+    pub fn get(self) -> u16 {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Overscan(u32);
+
+impl Overscan {
+    pub fn new(visible: u16, factor: f32, floor: u32, cap: u32) -> Self {
+        let scaled = (visible as f32 * factor).ceil() as u32;
+        Self(scaled.clamp(floor, cap))
+    }
+
+    pub fn rows(self) -> u32 {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BottomPadding(f32);
+
+impl BottomPadding {
+    pub fn aligned(client_height: f32, padding: f32, character_height: f32) -> Self {
+        if character_height <= 0.0 {
+            return Self(0.0);
+        }
+        Self((client_height - padding).rem_euclid(character_height))
+    }
+
+    pub fn pixels(self) -> f32 {
+        self.0
+    }
 }
 
 #[cfg(test)]
@@ -62,45 +91,38 @@ mod tests {
 
     #[test]
     fn window_clamps_at_end() {
-        assert_eq!(window_range(10, 8, 4), (6, 10));
+        assert_eq!(ScrollWindow::new(10, 8, 4_u16).range(), (6, 10));
     }
 
     #[test]
     fn window_from_top() {
-        assert_eq!(window_range(10, 0, 4), (0, 4));
+        assert_eq!(ScrollWindow::new(10, 0, 4_u16).range(), (0, 4));
     }
 
     #[test]
     fn window_smaller_than_viewport() {
-        assert_eq!(window_range(3, 0, 10), (0, 3));
+        assert_eq!(ScrollWindow::new(3, 0, 10_u16).range(), (0, 3));
     }
 
     #[test]
     fn clamp_caps_at_max_scroll() {
-        assert_eq!(clamp_top_line(99, 10, 4), 6);
-        assert_eq!(clamp_top_line(2, 10, 4), 2);
-        assert_eq!(clamp_top_line(5, 3, 10), 0);
+        assert_eq!(ScrollWindow::new(10, 99, 4_u16).top(), 6);
+        assert_eq!(ScrollWindow::new(10, 2, 4_u16).top(), 2);
+        assert_eq!(ScrollWindow::new(3, 5, 10_u16).top(), 0);
     }
 
     #[test]
     fn overscan_scales_and_clamps() {
-        assert_eq!(overscan_for(50, 2.0, 48, 512), 100);
-        assert_eq!(overscan_for(10, 2.0, 48, 512), 48);
-        assert_eq!(overscan_for(400, 2.0, 48, 512), 512);
+        assert_eq!(Overscan::new(50, 2.0, 48, 512).rows(), 100);
+        assert_eq!(Overscan::new(10, 2.0, 48, 512).rows(), 48);
+        assert_eq!(Overscan::new(400, 2.0, 48, 512).rows(), 512);
     }
 
     #[test]
     fn refetch_fires_near_edges_only() {
-        assert!(needs_refetch(120, 50, 100, 200, 50));
-        assert!(needs_refetch(220, 50, 100, 200, 50));
-        assert!(!needs_refetch(170, 50, 100, 200, 50));
-    }
-
-    #[test]
-    fn doc_row_maps_to_line() {
-        assert_eq!(doc_row_to_line(0, 100), -100);
-        assert_eq!(doc_row_to_line(100, 100), 0);
-        assert_eq!(doc_row_to_line(149, 100), 49);
+        assert!(ScrollWindow::new(u32::MAX, 120, 50_u32).needs_refetch(100, 200, 50));
+        assert!(ScrollWindow::new(u32::MAX, 220, 50_u32).needs_refetch(100, 200, 50));
+        assert!(!ScrollWindow::new(u32::MAX, 170, 50_u32).needs_refetch(100, 200, 50));
     }
 
     #[test]
@@ -113,7 +135,7 @@ mod tests {
             (1234.0, 0.0, 19.0),
         ];
         for (client_h, pad, ch) in cases {
-            let e = follow_bottom_pad(client_h, pad, ch);
+            let e = BottomPadding::aligned(client_h, pad, ch).pixels();
             assert!((0.0..ch).contains(&e), "e={e} out of [0,{ch})");
             let total = 200.0_f32;
             let scroll_height = total * ch + 2.0 * pad + e;
@@ -129,6 +151,6 @@ mod tests {
 
     #[test]
     fn follow_bottom_pad_zero_ch_is_safe() {
-        assert_eq!(follow_bottom_pad(800.0, 4.0, 0.0), 0.0);
+        assert_eq!(BottomPadding::aligned(800.0, 4.0, 0.0).pixels(), 0.0);
     }
 }

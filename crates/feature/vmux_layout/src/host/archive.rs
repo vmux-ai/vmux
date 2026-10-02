@@ -15,7 +15,7 @@ use vmux_ecs::host::manifest::FeaturePlugin;
 use vmux_ecs::terminal::{TerminalLaunch, TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_ecs::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
-    PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, TabCommandSet, now_millis,
+    PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, TabCommandSet, UnixMillis,
 };
 use vmux_history::LastActivatedAt;
 
@@ -119,7 +119,7 @@ fn stack_close(
 
 fn capture_archived_pages(mut reader: MessageReader<PageArchiveRequest>, mut commands: Commands) {
     for request in reader.read() {
-        if let Some(bundle) = ArchivedPageBundle::new(request, now_millis(), None) {
+        if let Some(bundle) = ArchivedPageBundle::new(request, UnixMillis::now().0, None) {
             commands.queue(bundle);
         }
     }
@@ -174,7 +174,7 @@ fn maintain(
     archived: Query<(Entity, &ArchivedPage, Option<&ArchivedTabPage>)>,
     mut commands: Commands,
 ) {
-    let now = now_millis();
+    let now = UnixMillis::now().0;
     let mut groups: HashMap<String, (i64, Vec<Entity>)> = HashMap::new();
     let mut singles = Vec::new();
     for (entity, page, tab) in &archived {
@@ -422,7 +422,7 @@ fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, command
             .unwrap_or_default()
     });
     let group_id = uuid::Uuid::new_v4().to_string();
-    let closed_at = now_millis();
+    let closed_at = UnixMillis::now().0;
 
     for stack in stacks {
         let Ok((_, metadata, launch, _)) = layout.stack_pages.get(stack) else {
@@ -774,7 +774,7 @@ fn restore_archived_tab(
         let stack = commands
             .spawn((
                 Stack::bundle(),
-                LastActivatedAt(if active { now_millis() } else { 0 }),
+                LastActivatedAt(if active { UnixMillis::now().0 } else { 0 }),
                 CreatedAt::now(),
                 ChildOf(leaf),
             ))
@@ -1238,7 +1238,7 @@ mod tests {
     fn maintain_enforces_cap_dropping_oldest() {
         let mut app = App::new();
         app.add_systems(Update, maintain);
-        let now = now_millis();
+        let now = UnixMillis::now().0;
         for i in 0..(MAX_ARCHIVE_ENTRIES as i64 + 1) {
             app.world_mut().spawn(page(&format!("u{i}"), now - i));
         }
@@ -1254,7 +1254,7 @@ mod tests {
     fn maintain_purges_expired() {
         let mut app = App::new();
         app.add_systems(Update, maintain);
-        let now = now_millis();
+        let now = UnixMillis::now().0;
         app.world_mut().spawn(page("fresh", now));
         app.world_mut()
             .spawn(page("stale", now - ARCHIVE_TTL_MS - 1));

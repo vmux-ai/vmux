@@ -69,7 +69,12 @@ fn history_ui_state(
         .iter()
         .map(|(created, visited)| (*created, *visited))
         .collect();
-    let entries = build_entries(&state.query, &url_rows, &visit_rows, vmux_ecs::now_millis());
+    let entries = build_entries(
+        &state.query,
+        &url_rows,
+        &visit_rows,
+        vmux_ecs::UnixMillis::now().0,
+    );
     let limit = state.limit as usize;
     crate::state::HistoryUiState {
         has_more: entries.len() > limit,
@@ -222,7 +227,7 @@ fn suggestions_request(
     mut commands: Commands,
 ) {
     let req = &trigger.event().payload;
-    let now = vmux_ecs::now_millis();
+    let now = vmux_ecs::UnixMillis::now().0;
 
     let mut scored: Vec<(f32, HistoryEntry)> = urls
         .iter()

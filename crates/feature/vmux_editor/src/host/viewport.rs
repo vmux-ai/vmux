@@ -4,7 +4,9 @@ use vmux_ecs::event::{
     FileCursorEvent, FileFoldToggle, FileResizeEvent, FileScrollByEvent, FileScrollEvent,
     FileViewportPatch,
 };
-use vmux_ecs::scroll::{clamp_top_line, rows_from_viewport, window_range};
+use vmux_ecs::scroll::{
+    EDITOR_OVERSCAN_K, OVERSCAN_CAP, OVERSCAN_FLOOR, Overscan, ScrollWindow, ViewportRows,
+};
 
 use crate::host::edit::Selection;
 use crate::host::editor::{Editor, FileView};
@@ -92,13 +94,10 @@ impl FileViewport {
         let total = edit.core.buffer.len_lines() as u32;
         let wrap = edit.wrapped_view(self);
         let (visible, wrap_columns) = (wrap.total_rows(), wrap.columns());
-        let (visible_first, visible_end) = window_range(visible, self.top_row, self.rows);
-        let overscan = vmux_ecs::scroll::overscan_for(
-            self.rows,
-            vmux_ecs::scroll::EDITOR_OVERSCAN_K,
-            vmux_ecs::scroll::OVERSCAN_FLOOR,
-            vmux_ecs::scroll::OVERSCAN_CAP,
-        );
+        let (visible_first, visible_end) =
+            ScrollWindow::new(visible, self.top_row, self.rows).range();
+        let overscan =
+            Overscan::new(self.rows, EDITOR_OVERSCAN_K, OVERSCAN_FLOOR, OVERSCAN_CAP).rows();
         let first_row = visible_first.saturating_sub(overscan);
         let end_row = (visible_end + overscan).min(visible);
         let visible_top = wrap.line_at(visible_first);
@@ -285,13 +284,15 @@ impl HighlightedLines {
     fn window(edit: &mut Editor, viewport: &FileViewport) -> (u32, u16) {
         let wrap = edit.wrapped_view(viewport);
         let visible = wrap.total_rows();
-        let (first_row, end_row) = window_range(visible, viewport.top_row, viewport.rows);
-        let overscan = vmux_ecs::scroll::overscan_for(
+        let (first_row, end_row) =
+            ScrollWindow::new(visible, viewport.top_row, viewport.rows).range();
+        let overscan = Overscan::new(
             viewport.rows,
-            vmux_ecs::scroll::EDITOR_OVERSCAN_K,
-            vmux_ecs::scroll::OVERSCAN_FLOOR,
-            vmux_ecs::scroll::OVERSCAN_CAP,
-        );
+            EDITOR_OVERSCAN_K,
+            OVERSCAN_FLOOR,
+            OVERSCAN_CAP,
+        )
+        .rows();
         let from = first_row.saturating_sub(overscan);
         let to = end_row.saturating_add(overscan).min(visible);
         let first_line = wrap.line_at(from).unwrap_or(0);
@@ -310,12 +311,13 @@ impl DriftedWindow {
     fn between(previous_top: u32, viewport: &FileViewport) -> Self {
         Self {
             rows: viewport.top_row.abs_diff(previous_top),
-            overscan: vmux_ecs::scroll::overscan_for(
+            overscan: Overscan::new(
                 viewport.rows,
-                vmux_ecs::scroll::EDITOR_OVERSCAN_K,
-                vmux_ecs::scroll::OVERSCAN_FLOOR,
-                vmux_ecs::scroll::OVERSCAN_CAP,
-            ),
+                EDITOR_OVERSCAN_K,
+                OVERSCAN_FLOOR,
+                OVERSCAN_CAP,
+            )
+            .rows(),
         }
     }
 
@@ -431,7 +433,7 @@ fn file_resize(
     let Ok((mut viewport, edit, has_keymap)) = views.get_mut(entity) else {
         return;
     };
-    let rows = rows_from_viewport(event.char_height, event.viewport_height);
+    let rows = ViewportRows::from_pixels(event.char_height, event.viewport_height).get();
     if viewport.rows == rows && viewport.wrap_columns == event.wrap_columns {
         return;
     }
@@ -458,7 +460,7 @@ fn file_scroll(
         return;
     };
     let visible = viewport.visible_rows(&mut edit);
-    viewport.top_row = clamp_top_line(event.top_row, visible, viewport.rows);
+    viewport.top_row = ScrollWindow::new(visible, event.top_row, viewport.rows).top();
     edit.core.top_row = viewport.top_row;
     if !event.needs_rows {
         return;

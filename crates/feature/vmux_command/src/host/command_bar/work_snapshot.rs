@@ -151,7 +151,7 @@ fn recent(
         return;
     }
     *initialized = true;
-    let now = vmux_ecs::now_millis();
+    let now = vmux_ecs::UnixMillis::now().0;
     let mut scored = Vec::new();
     for (metadata, visit_count, last_visited_at) in &urls {
         if let Some(file) = RecentFile::from_page(metadata, *visit_count, *last_visited_at, now) {

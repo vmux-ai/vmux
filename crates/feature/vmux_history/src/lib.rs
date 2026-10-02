@@ -2,7 +2,7 @@
 pub use host::{HistoryOpenIntent, HistoryPlugin};
 pub use vmux_api::history as event;
 #[cfg(host)]
-pub use vmux_ecs::{CreatedAt, LastActivatedAt, Visit, now_millis};
+pub use vmux_ecs::{CreatedAt, LastActivatedAt, UnixMillis, Visit};
 
 #[cfg(host)]
 pub(crate) struct Feature;

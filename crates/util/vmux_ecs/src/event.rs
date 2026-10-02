@@ -403,21 +403,21 @@ mod tests {
         };
 
         assert_eq!(
-            cursor_row_update(Some(&old), &new),
+            CursorRowUpdate::between(Some(&old), &new),
             CursorRowUpdate {
                 clear: Some(2),
                 set: Some(5)
             }
         );
         assert_eq!(
-            cursor_row_update(Some(&new), &new),
+            CursorRowUpdate::between(Some(&new), &new),
             CursorRowUpdate {
                 clear: None,
                 set: Some(5)
             }
         );
         assert_eq!(
-            cursor_row_update(
+            CursorRowUpdate::between(
                 Some(&old),
                 &TermCursor {
                     visible: false,

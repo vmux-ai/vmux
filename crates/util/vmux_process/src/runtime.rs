@@ -20,6 +20,7 @@ use std::{os::unix::ffi::OsStrExt, path::Component};
 use tokio::sync::{broadcast, mpsc};
 use vmux_api::protocol::{ProcessId, ProcessInfo};
 use vmux_ecs::event::*;
+use vmux_ecs::scroll::{OVERSCAN_CAP, OVERSCAN_FLOOR, Overscan, ScrollWindow, TERMINAL_OVERSCAN_K};
 use vmux_profile::ServicePaths;
 
 use crate::render::{build_line, hash_grid_row};
@@ -1765,17 +1766,12 @@ impl Process {
         let overscan = if self.following {
             0
         } else {
-            vmux_ecs::scroll::overscan_for(
-                visible,
-                vmux_ecs::scroll::TERMINAL_OVERSCAN_K,
-                vmux_ecs::scroll::OVERSCAN_FLOOR,
-                vmux_ecs::scroll::OVERSCAN_CAP,
-            )
+            Overscan::new(visible, TERMINAL_OVERSCAN_K, OVERSCAN_FLOOR, OVERSCAN_CAP).rows()
         };
         let view_top = if self.following {
             history
         } else {
-            vmux_ecs::scroll::clamp_top_line(self.view_top, total_rows, visible)
+            ScrollWindow::new(total_rows, self.view_top, visible).top()
         };
         let first_row = view_top.saturating_sub(overscan);
         let end_row = (view_top + visible as u32 + overscan).min(total_rows);

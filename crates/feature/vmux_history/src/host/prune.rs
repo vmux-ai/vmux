@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_ecs::{CreatedAt, LastVisitedAt, Url, Visit, VisitedUrl, now_millis};
+use vmux_ecs::{CreatedAt, LastVisitedAt, UnixMillis, Url, Visit, VisitedUrl};
 
 pub struct HistoryPrunePlugin;
 
@@ -21,7 +21,7 @@ fn prune(
     visits: Query<(Entity, &CreatedAt, &VisitedUrl), With<Visit>>,
     urls: Query<(Entity, &LastVisitedAt), With<Url>>,
 ) {
-    let cutoff = now_millis() - RETENTION_MS;
+    let cutoff = UnixMillis::now().0 - RETENTION_MS;
 
     let mut pruned_visits = Vec::<Entity>::new();
     for (e, created, _) in visits.iter() {
@@ -59,7 +59,7 @@ mod tests {
     #[test]
     fn removes_old_visits_and_urls() {
         let mut a = app();
-        let old = now_millis() - RETENTION_MS - 1000;
+        let old = UnixMillis::now().0 - RETENTION_MS - 1000;
         let url_e = a
             .world_mut()
             .spawn((
@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn keeps_recent_entries() {
         let mut a = app();
-        let now = now_millis();
+        let now = UnixMillis::now().0;
         let url_e = a
             .world_mut()
             .spawn((
@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn keeps_url_when_recent_visit_exists() {
         let mut a = app();
-        let now = now_millis();
+        let now = UnixMillis::now().0;
         let old = now - RETENTION_MS - 1000;
         let url_e = a
             .world_mut()

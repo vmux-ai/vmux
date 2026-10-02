@@ -2,11 +2,18 @@ use bevy::prelude::*;
 use moonshine_save::prelude::*;
 use std::path::PathBuf;
 
-pub fn now_millis() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UnixMillis(pub i64);
+
+impl UnixMillis {
+    pub fn now() -> Self {
+        Self(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64,
+        )
+    }
 }
 
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -96,7 +103,7 @@ pub struct CreatedAt(pub i64);
 
 impl CreatedAt {
     pub fn now() -> Self {
-        Self(now_millis())
+        Self(UnixMillis::now().0)
     }
 }
 
@@ -108,7 +115,7 @@ pub struct LastActivatedAt(pub i64);
 
 impl LastActivatedAt {
     pub fn now() -> Self {
-        Self(now_millis())
+        Self(UnixMillis::now().0)
     }
 }
 

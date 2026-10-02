@@ -23,7 +23,7 @@ use bevy::{
 use bevy_cef::prelude::*;
 use vmux_ecs::PageMetadata;
 use vmux_ecs::host::page::HostsPage;
-use vmux_history::now_millis;
+use vmux_history::UnixMillis;
 use vmux_ui::i18n::Locale;
 
 use crate::ResolvedLocale;
@@ -669,7 +669,7 @@ fn open(
 
     let target = replace_active_stack.then_some(OpenTarget::InPlace);
     let mut payload = sources.projector.project(CommandBarOpenProjection {
-        open_id: OpenId(now_millis() as u64),
+        open_id: OpenId(UnixMillis::now().0 as u64),
         native_windowed: false,
         space_name,
         url: current_url,
