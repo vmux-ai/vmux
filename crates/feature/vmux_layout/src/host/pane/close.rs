@@ -17,7 +17,7 @@ use crate::{
 
 #[cfg(test)]
 use super::PaneSplitDirection;
-use super::{CloseRequest, Pane, PaneSplit, PaneStacks};
+use super::{CloseRequest, Pane, PaneHierarchy, PaneSplit, PaneStacks};
 use crate::host::command::LayoutRequestSet;
 
 pub(super) struct ClosePlugin;
@@ -108,8 +108,7 @@ fn request(
 
 fn close(
     mut requests: MessageReader<PaneCloseRequest>,
-    pane_children: Query<&Children, With<Pane>>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    panes: PaneHierarchy,
     pane_times: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_stacks: PaneStacks,
     focus: LayoutFocus,
@@ -142,13 +141,13 @@ fn close(
             continue;
         }
 
-        let Ok(children) = pane_children.get(parent) else {
+        let Ok(children) = panes.children.get(parent) else {
             continue;
         };
         let siblings: Vec<Entity> = children
             .iter()
             .filter(|&entity| {
-                entity != active && (leaf_panes.contains(entity) || splits.contains(entity))
+                entity != active && (panes.leaves.contains(entity) || splits.contains(entity))
             })
             .collect();
 
@@ -159,7 +158,7 @@ fn close(
                 .copied()
                 .max_by_key(|&entity| pane_times.get(entity).map(|(_, time)| time.0).unwrap_or(0))
                 .unwrap_or(siblings[0]);
-            let leaf = Pane::first_leaf(newest, &pane_children, &leaf_panes);
+            let leaf = panes.first_leaf(newest);
             commands.entity(leaf).insert(LastActivatedAt::now());
             if let Some(stack) = focus.stack(leaf).or_else(|| pane_stacks.first(leaf)) {
                 commands.entity(stack).insert(LastActivatedAt::now());
@@ -170,7 +169,8 @@ fn close(
         let Some(sibling) = siblings.into_iter().next() else {
             continue;
         };
-        let sibling_children: Vec<Entity> = pane_children
+        let sibling_children: Vec<Entity> = panes
+            .children
             .get(sibling)
             .map(|children| children.iter().collect())
             .unwrap_or_default();
@@ -184,7 +184,7 @@ fn close(
                 .get(sibling)
                 .map(|split| split.direction)
                 .unwrap_or_default();
-            new_active_pane = Pane::first_leaf(sibling, &pane_children, &leaf_panes);
+            new_active_pane = panes.first_leaf(sibling);
             commands.entity(sibling).remove::<ChildOf>();
             commands.entity(sibling).despawn();
             commands.entity(parent).insert(PaneSplit { direction });

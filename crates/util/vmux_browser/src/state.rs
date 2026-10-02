@@ -55,10 +55,8 @@ impl PagePresentation {
 #[derive(bevy::ecs::system::SystemParam)]
 struct TabProjectionData<'w, 's> {
     tabs: Query<'w, 's, (Entity, &'static Tab, &'static LastActivatedAt)>,
-    tab_entities: Query<'w, 's, Entity, With<Tab>>,
+    hierarchy: vmux_layout::tab::TabHierarchy<'w, 's>,
     active_tab: ActiveTabParam<'w, 's>,
-    child_of: Query<'w, 's, &'static ChildOf>,
-    all_children: Query<'w, 's, &'static Children>,
     focus: LayoutFocus<'w, 's>,
     stack_timestamps: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
     stack_children: Query<'w, 's, &'static Children>,
@@ -68,17 +66,6 @@ struct TabProjectionData<'w, 's> {
 }
 
 impl TabProjectionData<'_, '_> {
-    fn tab_of(&self, start: Entity) -> Option<Entity> {
-        let mut entity = start;
-        loop {
-            if self.tab_entities.contains(entity) {
-                return Some(entity);
-            }
-            let parent = self.child_of.get(entity).ok()?;
-            entity = parent.get();
-        }
-    }
-
     fn active_stack(&self, tab: Entity) -> Option<Entity> {
         self.focus
             .leaves(tab)
@@ -101,15 +88,10 @@ impl TabProjectionData<'_, '_> {
         let done_tabs = self
             .done_agents
             .iter()
-            .filter_map(|agent| self.tab_of(agent))
+            .filter_map(|agent| self.hierarchy.entity(agent))
             .collect::<std::collections::HashSet<_>>();
         let ordered = match active_tab {
-            Some(anchor) => Tab::siblings(
-                anchor,
-                &self.child_of,
-                &self.all_children,
-                &self.tab_entities,
-            ),
+            Some(anchor) => self.hierarchy.siblings(anchor),
             None => Vec::new(),
         };
         let mut rows = Vec::new();

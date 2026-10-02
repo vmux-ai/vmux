@@ -1,7 +1,7 @@
 use crate::{
     active_pane::{ActiveStack, ProfileId},
     host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
-    pane::{Pane, PaneSplit, PaneStacks, PendingCursorWarp},
+    pane::{Pane, PaneHierarchy, PaneSplit, PaneStacks, PendingCursorWarp},
     tab::{CloseTabRequest, Tab},
 };
 use bevy::{
@@ -205,9 +205,8 @@ fn apply_closures(
 struct StackCloser<'w, 's> {
     active_tab: ActiveTabParam<'w, 's>,
     all_children: Query<'w, 's, &'static Children>,
-    leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+    panes: PaneHierarchy<'w, 's>,
     pane_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
-    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
     stack_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
     stacks: Query<'w, 's, Entity, With<Stack>>,
     pane_stacks: PaneStacks<'w, 's>,
@@ -222,7 +221,7 @@ fn close_stack(request: CloseStackRequest, closer: &mut StackCloser, commands: &
     let Ok(pane) = closer.child_of.get(request.stack).map(Relationship::get) else {
         return;
     };
-    let Ok(children) = closer.pane_children.get(pane) else {
+    let Ok(children) = closer.panes.children.get(pane) else {
         return;
     };
     let stacks_in_pane: Vec<Entity> = children
@@ -239,7 +238,7 @@ fn close_stack(request: CloseStackRequest, closer: &mut StackCloser, commands: &
     }
 
     let was_active =
-        active_stack_in_pane(pane, &closer.pane_children, &closer.stack_ts) == Some(request.stack);
+        active_stack_in_pane(pane, &closer.panes.children, &closer.stack_ts) == Some(request.stack);
     commands.entity(request.stack).despawn();
     if !was_active {
         return;
@@ -285,13 +284,14 @@ fn close_last_stack_in_pane(
     };
 
     commands.entity(stack).despawn();
-    let Ok(siblings) = closer.pane_children.get(parent) else {
+    let Ok(siblings) = closer.panes.children.get(parent) else {
         return;
     };
     let pane_siblings: Vec<Entity> = siblings
         .iter()
         .filter(|&entity| {
-            entity != pane && (closer.leaf_panes.contains(entity) || closer.splits.contains(entity))
+            entity != pane
+                && (closer.panes.leaves.contains(entity) || closer.splits.contains(entity))
         })
         .collect();
 
@@ -308,8 +308,7 @@ fn close_last_stack_in_pane(
                     .unwrap_or(0)
             })
             .unwrap_or(pane_siblings[0]);
-        let focus_leaf =
-            Pane::first_leaf(new_active_pane, &closer.pane_children, &closer.leaf_panes);
+        let focus_leaf = closer.panes.first_leaf(new_active_pane);
         commands.entity(focus_leaf).insert(LastActivatedAt::now());
         if let Some(next) = first_stack_to_activate(focus_leaf, closer) {
             commands.entity(next).insert(LastActivatedAt::now());
@@ -321,7 +320,8 @@ fn close_last_stack_in_pane(
         return;
     };
     let sibling_children: Vec<Entity> = closer
-        .pane_children
+        .panes
+        .children
         .get(sibling)
         .map(|children| children.iter().collect())
         .unwrap_or_default();
@@ -337,7 +337,7 @@ fn close_last_stack_in_pane(
             .get(sibling)
             .map(|split| split.direction)
             .unwrap_or_default();
-        new_active_pane = Pane::first_leaf(sibling, &closer.pane_children, &closer.leaf_panes);
+        new_active_pane = closer.panes.first_leaf(sibling);
         commands.entity(sibling).remove::<ChildOf>();
         commands.entity(sibling).despawn();
         commands.entity(parent).insert(PaneSplit {
@@ -372,7 +372,7 @@ fn close_last_stack_in_pane(
 }
 
 fn first_stack_to_activate(pane: Entity, closer: &StackCloser) -> Option<Entity> {
-    active_stack_in_pane(pane, &closer.pane_children, &closer.stack_ts)
+    active_stack_in_pane(pane, &closer.panes.children, &closer.stack_ts)
         .or_else(|| closer.pane_stacks.first(pane))
 }
 

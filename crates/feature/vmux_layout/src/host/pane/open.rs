@@ -14,7 +14,7 @@ use super::{
     OpenRequest, PaneStacks,
     focus::PendingCursorWarp,
     identity::{SpawnCounter, SpawnSeq},
-    tree::{Pane, PaneSplit, PaneSplitDirection, PaneTree},
+    tree::{Pane, PaneHierarchy, PaneSplit, PaneSplitDirection, PaneTree},
 };
 use crate::host::command::LayoutRequestSet;
 
@@ -73,6 +73,7 @@ fn handle_beside_requests(
     tab_filter: Query<Entity, With<Stack>>,
     child_of_q: Query<&ChildOf>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_hierarchy: PaneHierarchy,
     resolver: PaneOpenResolver,
     mut tree: PaneTree,
     mut commands: Commands,
@@ -140,8 +141,7 @@ fn handle_beside_requests(
                 &direction,
                 &child_of_q,
                 &split_dir_q,
-                &pane_children,
-                &leaf_panes,
+                &pane_hierarchy,
             ) {
                 Some(sibling) => (sibling, pane_size(sibling, &resolver.node_q), false),
                 None => {
@@ -820,8 +820,7 @@ fn find_sibling_pane(
     direction: &PaneDirection,
     child_of_q: &Query<&ChildOf>,
     split_dir_q: &Query<&PaneSplit>,
-    pane_children: &Query<&Children, With<Pane>>,
-    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    panes: &PaneHierarchy,
 ) -> Option<Entity> {
     let target_split = PaneSplitDirection::from(*direction);
     let after = is_after_direction(direction);
@@ -840,7 +839,7 @@ fn find_sibling_pane(
             cur = parent;
             continue;
         }
-        let Ok(children) = pane_children.get(parent) else {
+        let Ok(children) = panes.children.get(parent) else {
             cur = parent;
             continue;
         };
@@ -851,7 +850,7 @@ fn find_sibling_pane(
         };
         let sibling_idx = if after { idx + 1 } else { idx.wrapping_sub(1) };
         let sibling = sibs.get(sibling_idx).copied()?;
-        return Some(Pane::first_leaf(sibling, pane_children, leaf_panes));
+        return Some(panes.first_leaf(sibling));
     }
     None
 }
@@ -860,13 +859,13 @@ fn handle_in(
     mut reader: MessageReader<OpenRequest>,
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
     tab_filter: Query<Entity, With<Stack>>,
     pane_stacks: PaneStacks,
     focused_space: crate::space::FocusedSpace,
+    pane_hierarchy: PaneHierarchy,
     mut tree: PaneTree,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
@@ -898,8 +897,7 @@ fn handle_in(
                     direction,
                     &child_of_q,
                     &split_dir_q,
-                    &pane_children,
-                    &leaf_panes,
+                    &pane_hierarchy,
                 ) {
                     Some(sibling) => (sibling, false),
                     None => {

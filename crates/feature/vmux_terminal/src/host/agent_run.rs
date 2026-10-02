@@ -8,6 +8,7 @@ use vmux_api::service::RUN_OSC;
 #[cfg(test)]
 use vmux_api::terminal::CursorStyle;
 use vmux_ecs::LastActivatedAt;
+#[cfg(test)]
 use vmux_ecs::PageMetadata;
 use vmux_ecs::agent::{
     AgentCommandResponse, AgentReply, AgentRequestApplySet, AgentRequestBlocked, AgentRequestInput,
@@ -17,9 +18,10 @@ use vmux_layout::AgentPaneDirection;
 #[cfg(test)]
 use vmux_layout::LayoutContractPlugin;
 #[cfg(test)]
-use vmux_layout::pane::PaneTree;
-use vmux_layout::pane::{Pane, PaneSplit, PaneSplitDirection, SpawnCounter, SpawnSeq};
+use vmux_layout::pane::{Pane, PaneSplit};
+use vmux_layout::pane::{PaneSplitDirection, SpawnCounter, SpawnSeq};
 use vmux_layout::placement::PageKind;
+#[cfg(test)]
 use vmux_layout::stack::Stack;
 use vmux_layout::tab::Tab;
 use vmux_setting::{AppSettings, StartupDir};
@@ -33,8 +35,6 @@ use crate::{
     AgentRunTerminal, ProcessExited, Terminal, TerminalReinputRequest, TerminalStackSpawnRequest,
 };
 use vmux_space::valid_cwd;
-
-use AgentPaneDirection as D;
 
 #[vmux_api::contract(Copy, Eq)]
 pub enum PlacementMode {
@@ -126,18 +126,6 @@ struct RunTerminalCandidate {
 }
 
 impl RunTerminalCandidate {
-    fn activation_entities(
-        &self,
-        child_of_q: &Query<&ChildOf>,
-        tab_q: &Query<Entity, With<Tab>>,
-    ) -> Vec<Entity> {
-        let mut entities = vec![self.stack, self.pane];
-        if let Some(tab) = AgentPane::new(self.pane).tab(child_of_q, tab_q) {
-            entities.push(tab);
-        }
-        entities
-    }
-
     fn launch_matches_canonical_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
         let Some(launch_cwd) = valid_cwd(launch_cwd).ok().flatten() else {
             return false;
@@ -176,12 +164,10 @@ impl RunTerminals<'_, '_> {
     fn candidates(
         &self,
         agent_pane: Entity,
-        child_of_q: &Query<&ChildOf>,
-        tab_q: &Query<Entity, With<Tab>>,
-        seq_q: &Query<&SpawnSeq>,
+        panes: &AgentPanes,
         desired_cwd: &Path,
     ) -> Vec<RunTerminalCandidate> {
-        let Some(agent_tab) = AgentPane::new(agent_pane).tab(child_of_q, tab_q) else {
+        let Some(agent_tab) = panes.tab(agent_pane) else {
             return Vec::new();
         };
         let desired_cwd = desired_cwd
@@ -193,12 +179,12 @@ impl RunTerminals<'_, '_> {
                 if !agent_run {
                     return None;
                 }
-                let stack = child_of_q.get(terminal).ok()?.get();
-                let pane = child_of_q.get(stack).ok()?.get();
+                let stack = panes.placement.child_of_q.get(terminal).ok()?.get();
+                let pane = panes.placement.child_of_q.get(stack).ok()?.get();
                 if pane == agent_pane {
                     return None;
                 }
-                if AgentPane::new(pane).tab(child_of_q, tab_q) != Some(agent_tab) {
+                if panes.tab(pane) != Some(agent_tab) {
                     return None;
                 }
                 if !RunTerminalCandidate::launch_matches_canonical_cwd(&launch.cwd, &desired_cwd) {
@@ -209,19 +195,24 @@ impl RunTerminals<'_, '_> {
                     pid: *pid,
                     stack,
                     pane,
-                    pane_spawn_seq: seq_q.get(pane).map(|s| s.0).unwrap_or(0),
+                    pane_spawn_seq: panes.placement.seq_q.get(pane).map(|s| s.0).unwrap_or(0),
                 })
             })
             .collect()
     }
 
-    fn pane(&self, process_id: ProcessId, child_of_q: &Query<&ChildOf>) -> Option<Entity> {
+    fn pane(&self, process_id: ProcessId, panes: &AgentPanes) -> Option<Entity> {
         let (terminal, _) = self
             .terminals
             .iter()
             .find(|(_, candidate)| **candidate == process_id)?;
-        let stack = child_of_q.get(terminal).ok()?.get();
-        child_of_q.get(stack).ok().map(Relationship::get)
+        let stack = panes.placement.child_of_q.get(terminal).ok()?.get();
+        panes
+            .placement
+            .child_of_q
+            .get(stack)
+            .ok()
+            .map(Relationship::get)
     }
 
     fn launch(&self, process_id: ProcessId) -> Result<TerminalLaunch, String> {
@@ -246,47 +237,46 @@ impl RunTerminals<'_, '_> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct AgentPane(Entity);
+#[derive(bevy::ecs::system::SystemParam)]
+struct AgentPanes<'w, 's> {
+    placement: vmux_layout::pane::PanePlacement<'w, 's>,
+}
 
-impl AgentPane {
-    fn new(pane: Entity) -> Self {
-        Self(pane)
-    }
-
-    fn tab(
-        &self,
-        child_of_q: &Query<&ChildOf>,
-        tab_q: &Query<Entity, With<Tab>>,
-    ) -> Option<Entity> {
-        let mut cur = self.0;
+impl AgentPanes<'_, '_> {
+    fn tab(&self, pane: Entity) -> Option<Entity> {
+        let mut cur = pane;
         for _ in 0..32 {
-            if tab_q.contains(cur) {
+            if self.placement.tab_q.contains(cur) {
                 return Some(cur);
             }
-            cur = child_of_q.get(cur).ok()?.get();
+            cur = self.placement.child_of_q.get(cur).ok()?.get();
         }
         None
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn split(
         &self,
+        pane: Entity,
         direction: &AgentPaneDirection,
         focus: bool,
-        pane_children: &Query<&Children, With<Pane>>,
-        tab_filter: &Query<Entity, With<Stack>>,
-        split_dir_q: &Query<&PaneSplit>,
         split_this_batch: &mut std::collections::HashSet<Entity>,
     ) -> AgentPaneSplit {
-        let existing_tabs: Vec<Entity> = pane_children
-            .get(self.0)
-            .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
+        let existing_tabs: Vec<Entity> = self
+            .placement
+            .pane_children
+            .get(pane)
+            .map(|children| {
+                children
+                    .iter()
+                    .filter(|&entity| self.placement.tab_filter.contains(entity))
+                    .collect()
+            })
             .unwrap_or_default();
-        let split_dir = PaneSplitDirection::from(Self::direction(direction));
-        let already_split = !split_this_batch.insert(self.0) || split_dir_q.contains(self.0);
+        let split_dir = PaneSplitDirection::from(PaneDirection::from(*direction));
+        let already_split =
+            !split_this_batch.insert(pane) || self.placement.split_dir_q.contains(pane);
         AgentPaneSplit {
-            pane: self.0,
+            pane,
             direction: split_dir,
             existing_tabs,
             focus,
@@ -294,13 +284,55 @@ impl AgentPane {
         }
     }
 
-    fn direction(d: &AgentPaneDirection) -> PaneDirection {
-        match d {
-            D::Top => PaneDirection::Top,
-            D::Right => PaneDirection::Right,
-            D::Bottom => PaneDirection::Bottom,
-            D::Left => PaneDirection::Left,
+    fn activation_entities(&self, candidate: RunTerminalCandidate) -> Vec<Entity> {
+        let mut entities = vec![candidate.stack, candidate.pane];
+        if let Some(tab) = self.tab(candidate.pane) {
+            entities.push(tab);
         }
+        entities
+    }
+
+    fn bucket_panes(&self, agent_pane: Entity) -> RunTerminalBucketPanes {
+        let Some(agent_tab) = self.tab(agent_pane) else {
+            return RunTerminalBucketPanes(Vec::new());
+        };
+        let mut candidates = Vec::new();
+        for pane in &self.placement.leaf_panes {
+            if pane == agent_pane || self.tab(pane) != Some(agent_tab) {
+                continue;
+            }
+            let Ok(children) = self.placement.pane_children.get(pane) else {
+                continue;
+            };
+            let mut has_stack = false;
+            let mut valid = true;
+            for stack in children
+                .iter()
+                .filter(|&child| self.placement.tab_filter.contains(child))
+            {
+                has_stack = true;
+                let Ok(meta) = self.placement.page_q.get(stack) else {
+                    valid = false;
+                    break;
+                };
+                if PageKind::for_url(&meta.url) != PageKind::Terminal {
+                    valid = false;
+                    break;
+                }
+            }
+            if has_stack && valid {
+                candidates.push(RunTerminalBucketPaneCandidate {
+                    pane,
+                    pane_spawn_seq: self
+                        .placement
+                        .seq_q
+                        .get(pane)
+                        .map(|sequence| sequence.0)
+                        .unwrap_or(0),
+                });
+            }
+        }
+        RunTerminalBucketPanes(candidates)
     }
 }
 
@@ -343,47 +375,6 @@ struct RunTerminalBucketPaneCandidate {
 struct RunTerminalBucketPanes(Vec<RunTerminalBucketPaneCandidate>);
 
 impl RunTerminalBucketPanes {
-    fn collect(
-        agent_pane: Entity,
-        child_of_q: &Query<&ChildOf>,
-        tab_q: &Query<Entity, With<Tab>>,
-        leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-        pane_children: &Query<&Children, With<Pane>>,
-        stack_q: &Query<Entity, With<Stack>>,
-        page_q: &Query<&PageMetadata, With<Stack>>,
-        seq_q: &Query<&SpawnSeq>,
-    ) -> Self {
-        let Some(agent_tab) = AgentPane::new(agent_pane).tab(child_of_q, tab_q) else {
-            return Self(Vec::new());
-        };
-        Self(
-            leaf_panes
-                .iter()
-                .filter_map(|pane| {
-                    if pane == agent_pane {
-                        return None;
-                    }
-                    if AgentPane::new(pane).tab(child_of_q, tab_q) != Some(agent_tab) {
-                        return None;
-                    }
-                    let children = pane_children.get(pane).ok()?;
-                    let mut has_stack = false;
-                    for stack in children.iter().filter(|&child| stack_q.contains(child)) {
-                        has_stack = true;
-                        let meta = page_q.get(stack).ok()?;
-                        if PageKind::for_url(&meta.url) != PageKind::Terminal {
-                            return None;
-                        }
-                    }
-                    has_stack.then(|| RunTerminalBucketPaneCandidate {
-                        pane,
-                        pane_spawn_seq: seq_q.get(pane).map(|s| s.0).unwrap_or(0),
-                    })
-                })
-                .collect(),
-        )
-    }
-
     fn newest(&self, agent_pane: Entity) -> Option<Entity> {
         self.0
             .iter()
@@ -645,7 +636,7 @@ pub(super) struct AgentRunContext<'w, 's> {
     >,
     terminals: RunTerminals<'w, 's>,
     acp_sessions: Query<'w, 's, &'static vmux_session::AcpSession>,
-    panes: vmux_layout::pane::PanePlacement<'w, 's>,
+    panes: AgentPanes<'w, 's>,
     tabs: Query<'w, 's, &'static Tab>,
     next_pane_sequence: NextPaneSpawnSequence<'w, 's>,
 }
@@ -657,7 +648,7 @@ impl AgentRunContext<'_, '_> {
             .iter()
             .find(|(_, process_id, _, _)| **process_id == anchor)?;
         let stack = terminal_parent.get();
-        let pane = self.panes.child_of_q.get(stack).ok()?.get();
+        let pane = self.panes.placement.child_of_q.get(stack).ok()?.get();
         Some((terminal, pane, region.copied().unwrap_or_default()))
     }
 
@@ -667,7 +658,7 @@ impl AgentRunContext<'_, '_> {
             if let Ok(tab) = self.tabs.get(current) {
                 return tab.startup_dir.clone();
             }
-            current = self.panes.child_of_q.get(current).ok()?.parent();
+            current = self.panes.placement.child_of_q.get(current).ok()?.parent();
         }
     }
 
@@ -678,7 +669,7 @@ impl AgentRunContext<'_, '_> {
                 if let Ok(session) = self.acp_sessions.get(current) {
                     return Some(session.cwd.to_string_lossy().into_owned());
                 }
-                current = self.panes.child_of_q.get(current).ok()?.parent();
+                current = self.panes.placement.child_of_q.get(current).ok()?.parent();
             }
         })
     }
@@ -751,23 +742,10 @@ fn run_agent_commands(
                 Ok(cwd) => cwd,
                 Err(message) => break 'run AgentCommandResult::Error(message),
             };
-            let candidates = context.terminals.candidates(
-                agent_pane,
-                &context.panes.child_of_q,
-                &context.panes.tab_q,
-                &context.panes.seq_q,
-                &cwd,
-            );
-            let terminal_bucket_panes = RunTerminalBucketPanes::collect(
-                agent_pane,
-                &context.panes.child_of_q,
-                &context.panes.tab_q,
-                &context.panes.leaf_panes,
-                &context.panes.pane_children,
-                &context.panes.tab_filter,
-                &context.panes.page_q,
-                &context.panes.seq_q,
-            );
+            let candidates = context
+                .terminals
+                .candidates(agent_pane, &context.panes, &cwd);
+            let terminal_bucket_panes = context.panes.bucket_panes(agent_pane);
             if run.beside.is_none()
                 && run.mode == PlacementMode::Auto
                 && let Some(process_id) =
@@ -794,19 +772,14 @@ fn run_agent_commands(
                 let sequence = context.next_pane_sequence.take();
                 commands.entity(candidate.pane).insert(sequence);
                 if focus {
-                    for entity in candidate
-                        .activation_entities(&context.panes.child_of_q, &context.panes.tab_q)
-                    {
+                    for entity in context.panes.activation_entities(candidate) {
                         commands.entity(entity).insert(LastActivatedAt::now());
                     }
                 }
                 break 'run AgentCommandResult::Text(candidate.pid.to_string());
             }
             let beside_pane = match run.beside {
-                Some(process_id) => match context
-                    .terminals
-                    .pane(process_id, &context.panes.child_of_q)
-                {
+                Some(process_id) => match context.terminals.pane(process_id, &context.panes) {
                     Some(pane) => Some(pane),
                     None => {
                         break 'run AgentCommandResult::Error(format!(
@@ -835,17 +808,15 @@ fn run_agent_commands(
                     if let Some(pane) = bucket_pane {
                         pane
                     } else {
-                        let anchor_pane =
-                            anchor_pane.unwrap_or_else(|| context.panes.split_anchor(agent_pane));
-                        let split = AgentPane::new(anchor_pane).split(
+                        let anchor_pane = anchor_pane
+                            .unwrap_or_else(|| context.panes.placement.split_anchor(agent_pane));
+                        let split = context.panes.split(
+                            anchor_pane,
                             &run.direction,
                             focus,
-                            &context.panes.pane_children,
-                            &context.panes.tab_filter,
-                            &context.panes.split_dir_q,
                             &mut split_this_batch,
                         );
-                        context.panes.tree.split_or_extend(
+                        context.panes.placement.tree.split_or_extend(
                             split.pane,
                             split.direction,
                             &split.existing_tabs,
@@ -855,7 +826,7 @@ fn run_agent_commands(
                     }
                 }
                 (Some(pane), _) => pane,
-                (None, _) => context.panes.resolve_spiral(
+                (None, _) => context.panes.placement.resolve_spiral(
                     agent_pane,
                     crate::TerminalPlugin::URL,
                     focus,
@@ -1497,29 +1468,15 @@ mod tests {
 
     fn collect_run_bucket_panes(
         input: Res<RunTerminalBucketPaneInput>,
-        child_of_q: Query<&ChildOf>,
-        tab_q: Query<Entity, With<Tab>>,
-        leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-        pane_children: Query<&Children, With<Pane>>,
-        stack_q: Query<Entity, With<Stack>>,
-        page_q: Query<&PageMetadata, With<Stack>>,
-        seq_q: Query<&SpawnSeq>,
+        panes: AgentPanes,
         mut out: ResMut<RunTerminalBucketPaneOutput>,
     ) {
-        out.0 = RunTerminalBucketPanes::collect(
-            input.agent_pane,
-            &child_of_q,
-            &tab_q,
-            &leaf_panes,
-            &pane_children,
-            &stack_q,
-            &page_q,
-            &seq_q,
-        )
-        .0
-        .into_iter()
-        .map(|candidate| candidate.pane)
-        .collect();
+        out.0 = panes
+            .bucket_panes(input.agent_pane)
+            .0
+            .into_iter()
+            .map(|candidate| candidate.pane)
+            .collect();
     }
 
     #[test]
@@ -1681,22 +1638,17 @@ mod tests {
         input: Res<SplitRunPaneInput>,
         mut out: ResMut<SplitRunPaneOutput>,
         mut commands: Commands,
-        mut tree: PaneTree,
+        mut panes: AgentPanes,
         mut next_sequence: NextPaneSpawnSequence,
-        pane_children: Query<&Children, With<Pane>>,
-        tab_filter: Query<Entity, With<Stack>>,
-        split_dir_q: Query<&PaneSplit>,
     ) {
         let mut split_batch = std::collections::HashSet::new();
-        let split = AgentPane::new(input.pane).split(
+        let split = panes.split(
+            input.pane,
             &AgentPaneDirection::Bottom,
             false,
-            &pane_children,
-            &tab_filter,
-            &split_dir_q,
             &mut split_batch,
         );
-        let target = tree.split_or_extend(
+        let target = panes.placement.tree.split_or_extend(
             split.pane,
             split.direction,
             &split.existing_tabs,
@@ -1835,10 +1787,9 @@ mod tests {
     fn focus_reused_run(
         input: Res<ReusedRunTerminalFocusInput>,
         mut commands: Commands,
-        child_of_q: Query<&ChildOf>,
-        tab_q: Query<Entity, With<Tab>>,
+        panes: AgentPanes,
     ) {
-        for entity in input.candidate.activation_entities(&child_of_q, &tab_q) {
+        for entity in panes.activation_entities(input.candidate) {
             commands.entity(entity).insert(LastActivatedAt::now());
         }
     }

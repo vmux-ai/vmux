@@ -632,7 +632,7 @@ fn attach_paths(
     spawn_selected_attachment_tasks(
         trigger.event().webview,
         paths,
-        vmux_ecs::host::wake::Wake::from_resource(proxy),
+        vmux_ecs::host::wake::Wake::beside(proxy.as_deref()),
         &mut commands,
     );
 }
@@ -652,7 +652,7 @@ fn hydrate_attachments(
         request.webview,
         ChatAttachmentDelivery::Hydrated,
         paths,
-        vmux_ecs::host::wake::Wake::from_resource(proxy),
+        vmux_ecs::host::wake::Wake::beside(proxy.as_deref()),
         &mut commands,
     );
 }
@@ -701,7 +701,7 @@ fn pick_files(
     spawn_selected_attachment_tasks(
         trigger.event().webview,
         paths,
-        vmux_ecs::host::wake::Wake::from_resource(proxy),
+        vmux_ecs::host::wake::Wake::beside(proxy.as_deref()),
         &mut commands,
     );
 }
@@ -738,7 +738,7 @@ fn paste(
     spawn_selected_attachment_tasks(
         trigger.event().webview,
         vec![path],
-        vmux_ecs::host::wake::Wake::from_resource(proxy),
+        vmux_ecs::host::wake::Wake::beside(proxy.as_deref()),
         &mut commands,
     );
 }

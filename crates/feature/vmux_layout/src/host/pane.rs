@@ -26,6 +26,7 @@ use open::{BesideOpenPlugin, DirectionalOpenPlugin};
 pub use open::{OpenBesideRequest, PanePlacement};
 use resize::ResizePlugin;
 pub use resize::{PaneDrag, PaneSize, PaneSplitGaps};
+pub(crate) use tree::PaneHierarchy;
 use tree::TreePlugin;
 pub use tree::{Pane, PaneSplit, PaneSplitDirection, PaneTree};
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};

@@ -266,6 +266,7 @@ pub struct TabDirDecided;
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct TabHierarchy<'w, 's> {
     child_of: Query<'w, 's, &'static ChildOf>,
+    children: Query<'w, 's, &'static Children>,
     tabs: Query<'w, 's, &'static Tab>,
 }
 
@@ -283,6 +284,19 @@ impl TabHierarchy<'_, '_> {
     pub fn startup_dir(&self, entity: Entity) -> Option<String> {
         let tab = self.entity(entity)?;
         self.tabs.get(tab).ok()?.startup_dir.clone()
+    }
+
+    pub fn siblings(&self, active: Entity) -> Vec<Entity> {
+        let Ok(child_of) = self.child_of.get(active) else {
+            return vec![active];
+        };
+        let Ok(children) = self.children.get(child_of.get()) else {
+            return vec![active];
+        };
+        children
+            .iter()
+            .filter(|entity| self.tabs.contains(*entity))
+            .collect()
     }
 }
 
@@ -369,16 +383,14 @@ fn handle_close_requests(
 fn handle_focus_requests(
     mut requests: MessageReader<FocusRequest>,
     active_tab: crate::stack::ActiveTabParam,
-    tabs: Query<Entity, With<Tab>>,
-    child_of: Query<&ChildOf>,
-    children: Query<&Children>,
+    hierarchy: TabHierarchy,
     mut commands: Commands,
 ) {
     for request in requests.read() {
         let Some(active) = active_tab.get() else {
             continue;
         };
-        let siblings = Tab::siblings(active, &child_of, &children, &tabs);
+        let siblings = hierarchy.siblings(active);
         if siblings.is_empty() {
             continue;
         }
@@ -479,24 +491,6 @@ fn handle_new_requests(
 }
 
 impl Tab {
-    pub fn siblings(
-        active: Entity,
-        child_of_q: &Query<&ChildOf>,
-        all_children: &Query<&Children>,
-        tab_q: &Query<Entity, With<Tab>>,
-    ) -> Vec<Entity> {
-        let Ok(child_of) = child_of_q.get(active) else {
-            return vec![active];
-        };
-        let Ok(children) = all_children.get(child_of.get()) else {
-            return vec![active];
-        };
-        children
-            .iter()
-            .filter(|entity| tab_q.contains(*entity))
-            .collect()
-    }
-
     pub(crate) fn next_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
         if siblings.len() <= 1 {
             return None;
@@ -768,13 +762,7 @@ mod tests {
             .id();
         let siblings = app
             .world_mut()
-            .run_system_once(
-                move |child_of_q: Query<&ChildOf>,
-                      all_children: Query<&Children>,
-                      tab_q: Query<Entity, With<Tab>>| {
-                    Tab::siblings(a1, &child_of_q, &all_children, &tab_q)
-                },
-            )
+            .run_system_once(move |hierarchy: TabHierarchy| hierarchy.siblings(a1))
             .unwrap();
         assert_eq!(siblings.len(), 2);
         assert!(siblings.contains(&a1));

@@ -74,8 +74,7 @@ fn repair_stack_parents(
         (Entity, &Children),
         (With<PaneSplit>, Or<(Added<PaneSplit>, Changed<Children>)>),
     >,
-    pane_children: Query<&Children, With<Pane>>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    panes: super::tree::PaneHierarchy,
     stacks: Query<(), With<Stack>>,
     mut commands: Commands,
 ) {
@@ -87,7 +86,7 @@ fn repair_stack_parents(
         if direct_stacks.is_empty() {
             continue;
         }
-        let mut leaf = Pane::first_leaf(split, &pane_children, &leaf_panes);
+        let mut leaf = panes.first_leaf(split);
         if leaf == split {
             leaf = commands
                 .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(split)))

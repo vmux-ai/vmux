@@ -59,22 +59,26 @@ impl Pane {
             },
         )
     }
+}
 
-    pub(crate) fn first_leaf(
-        entity: Entity,
-        pane_children: &Query<&Children, With<Pane>>,
-        leaves: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    ) -> Entity {
-        if leaves.contains(entity) {
+#[derive(SystemParam)]
+pub(crate) struct PaneHierarchy<'w, 's> {
+    pub(crate) children: Query<'w, 's, &'static Children, With<Pane>>,
+    pub(crate) leaves: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+}
+
+impl PaneHierarchy<'_, '_> {
+    pub(crate) fn first_leaf(&self, entity: Entity) -> Entity {
+        if self.leaves.contains(entity) {
             return entity;
         }
-        if let Ok(children) = pane_children.get(entity) {
+        if let Ok(children) = self.children.get(entity) {
             for child in children.iter() {
-                if leaves.contains(child) {
+                if self.leaves.contains(child) {
                     return child;
                 }
-                let found = Self::first_leaf(child, pane_children, leaves);
-                if found != child || leaves.contains(found) {
+                let found = self.first_leaf(child);
+                if found != child || self.leaves.contains(found) {
                     return found;
                 }
             }

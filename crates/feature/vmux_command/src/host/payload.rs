@@ -19,41 +19,6 @@ struct CommandBarEntry {
     pub shortcut: String,
 }
 
-impl CommandBarEntry {
-    fn list(
-        locale: &Locale,
-        contributed: Vec<Self>,
-        superseded: &[&str],
-        definitions: &Query<&CommandDefinition>,
-    ) -> Vec<Self> {
-        let mut entries = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        for definition in definitions {
-            if definition.hidden
-                || superseded.contains(&definition.id.as_str())
-                || !seen.insert(definition.id.as_str())
-            {
-                continue;
-            }
-            entries.push(Self {
-                id: definition.id.to_string(),
-                name: definition.localized_name(locale.as_str()),
-                shortcut: definition.shortcut_label(),
-            });
-        }
-        entries.extend(contributed);
-        entries
-    }
-
-    fn shortcut(id: &str, definitions: &Query<&CommandDefinition>) -> String {
-        definitions
-            .iter()
-            .find(|definition| definition.id == id)
-            .map(CommandDefinition::shortcut_label)
-            .unwrap_or_default()
-    }
-}
-
 pub(super) struct CommandBarPicks;
 
 impl CommandBarPicks {
@@ -156,6 +121,39 @@ pub struct CommandBarOpenProjection {
 }
 
 impl CommandBarProjector<'_, '_> {
+    fn entries(
+        &self,
+        locale: &Locale,
+        contributed: Vec<CommandBarEntry>,
+        superseded: &[&str],
+    ) -> Vec<CommandBarEntry> {
+        let mut entries = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for definition in &self.definitions {
+            if definition.hidden
+                || superseded.contains(&definition.id.as_str())
+                || !seen.insert(definition.id.as_str())
+            {
+                continue;
+            }
+            entries.push(CommandBarEntry {
+                id: definition.id.to_string(),
+                name: definition.localized_name(locale.as_str()),
+                shortcut: definition.shortcut_label(),
+            });
+        }
+        entries.extend(contributed);
+        entries
+    }
+
+    fn shortcut(&self, id: &str) -> String {
+        self.definitions
+            .iter()
+            .find(|definition| definition.id == id)
+            .map(CommandDefinition::shortcut_label)
+            .unwrap_or_default()
+    }
+
     pub fn project(&self, projection: CommandBarOpenProjection) -> CommandBarOpenEvent {
         let mut contributed = Vec::new();
         for command in &self.commands {
@@ -178,7 +176,7 @@ impl CommandBarProjector<'_, '_> {
                 page.title = projection.locale.translate(message_id);
             }
             if let Some(command_id) = entry.replaces_command.as_deref() {
-                page.shortcut = CommandBarEntry::shortcut(command_id, &self.definitions);
+                page.shortcut = self.shortcut(command_id);
                 superseded.push(command_id);
             }
             pages.push(page);
@@ -187,12 +185,7 @@ impl CommandBarProjector<'_, '_> {
             pages.push(entry.page);
         }
 
-        let entries = CommandBarEntry::list(
-            &projection.locale,
-            contributed,
-            &superseded,
-            &self.definitions,
-        );
+        let entries = self.entries(&projection.locale, contributed, &superseded);
         let mut commands = Vec::new();
         for entry in entries {
             commands.push(CommandBarCommandEntry {

@@ -1,4 +1,5 @@
 use bevy::ecs::relationship::Relationship;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowPosition};
 use bevy_cef::prelude::HostWindow;
@@ -60,6 +61,23 @@ type PageData = (
     Has<Loading>,
 );
 
+#[derive(SystemParam)]
+struct ProjectionData<'w, 's> {
+    windows: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Window,
+            &'static ExtensionWindowId,
+            Has<PrimaryWindow>,
+        ),
+    >,
+    spaces: Query<'w, 's, (Entity, Option<&'static Order>), With<Space>>,
+    hierarchy: Query<'w, 's, HierarchyData>,
+    pages: Query<'w, 's, PageData>,
+}
+
 struct WindowCandidate {
     entity: Entity,
     id: i32,
@@ -106,23 +124,20 @@ fn assign_ids(
 }
 
 fn rebuild_model(
-    window_query: Query<(Entity, &Window, &ExtensionWindowId, Has<PrimaryWindow>)>,
-    space_query: Query<(Entity, Option<&Order>), With<Space>>,
-    hierarchy: Query<HierarchyData>,
-    page_query: Query<PageData>,
+    projection: ProjectionData,
     focused_stack: FocusedStack,
     mut current: Single<&mut ExtensionModel>,
     mut events: MessageWriter<ExtensionModelEvent>,
 ) {
     let previous = (**current).clone();
     let focused_stack = focused_stack.as_ref().and_then(|focused| focused.stack);
-    let windows = WindowCandidate::collect(&window_query);
+    let windows = projection.windows();
     let primary_window = windows
         .iter()
         .find(|window| window.primary)
         .or_else(|| windows.first())
         .map(|window| window.entity);
-    let pages = PageCandidate::collect(&space_query, &hierarchy, &page_query);
+    let pages = projection.pages();
 
     let (projected_windows, mut projected_tabs) = {
         let window_ids = windows
@@ -189,11 +204,10 @@ fn rebuild_model(
     }
 }
 
-impl WindowCandidate {
-    fn collect(
-        query: &Query<(Entity, &Window, &ExtensionWindowId, Has<PrimaryWindow>)>,
-    ) -> Vec<Self> {
-        let mut windows = query
+impl ProjectionData<'_, '_> {
+    fn windows(&self) -> Vec<WindowCandidate> {
+        let mut windows = self
+            .windows
             .iter()
             .map(|(entity, window, id, primary)| {
                 let scale = window.resolution.scale_factor().max(f32::EPSILON);
@@ -219,28 +233,23 @@ impl WindowCandidate {
         windows.sort_by_key(|window| (!window.primary, window.entity.to_bits()));
         windows
     }
-}
 
-impl PageCandidate {
-    fn collect(
-        space_query: &Query<(Entity, Option<&Order>), With<Space>>,
-        hierarchy: &Query<HierarchyData>,
-        page_query: &Query<PageData>,
-    ) -> Vec<Self> {
-        let mut spaces = space_query
+    fn pages(&self) -> Vec<PageCandidate> {
+        let mut spaces = self
+            .spaces
             .iter()
             .map(|(entity, order)| (order.map_or(u32::MAX, |order| order.0), entity))
             .collect::<Vec<_>>();
         spaces.sort_by_key(|(order, entity)| (*order, entity.to_bits()));
         let mut pages = Vec::new();
         for (_, space) in spaces {
-            let Ok((Some(children), _, _, _, _, _, _)) = hierarchy.get(space) else {
+            let Ok((Some(children), _, _, _, _, _, _)) = self.hierarchy.get(space) else {
                 continue;
             };
             let mut tabs = children
                 .iter()
                 .filter_map(|entity| {
-                    let Ok((_, _, order, is_tab, _, _, _)) = hierarchy.get(entity) else {
+                    let Ok((_, _, order, is_tab, _, _, _)) = self.hierarchy.get(entity) else {
                         return None;
                     };
                     is_tab.then_some((order.map_or(u32::MAX, |order| order.0), entity))
@@ -249,9 +258,9 @@ impl PageCandidate {
             tabs.sort_by_key(|(order, entity)| (*order, entity.to_bits()));
             for (_, tab) in tabs {
                 let mut stacks = Vec::new();
-                Self::collect_stacks(hierarchy, tab, &mut stacks);
+                self.collect_stacks(tab, &mut stacks);
                 for stack in stacks {
-                    if let Some(page) = Self::from_entity(hierarchy, page_query, stack) {
+                    if let Some(page) = self.page(stack) {
                         pages.push(page);
                     }
                 }
@@ -260,8 +269,8 @@ impl PageCandidate {
         pages
     }
 
-    fn collect_stacks(hierarchy: &Query<HierarchyData>, entity: Entity, stacks: &mut Vec<Entity>) {
-        let Ok((children, _, _, _, is_stack, _, _)) = hierarchy.get(entity) else {
+    fn collect_stacks(&self, entity: Entity, stacks: &mut Vec<Entity>) {
+        let Ok((children, _, _, _, is_stack, _, _)) = self.hierarchy.get(entity) else {
             return;
         };
         if is_stack {
@@ -270,39 +279,36 @@ impl PageCandidate {
         }
         if let Some(children) = children {
             for child in children.iter() {
-                Self::collect_stacks(hierarchy, child, stacks);
+                self.collect_stacks(child, stacks);
             }
         }
     }
 
-    fn from_entity(
-        hierarchy: &Query<HierarchyData>,
-        page_query: &Query<PageData>,
-        entity: Entity,
-    ) -> Option<Self> {
+    fn page(&self, entity: Entity) -> Option<PageCandidate> {
         let (_, metadata, id, activated, identity, is_bridge, loading) =
-            page_query.get(entity).ok()?;
+            self.pages.get(entity).ok()?;
         if is_bridge || !extension_visible_url(&metadata.url) {
             return None;
         }
-        let child_loading = hierarchy
+        let child_loading = self
+            .hierarchy
             .get(entity)
             .ok()
             .and_then(|(children, _, _, _, _, _, _)| children)
             .is_some_and(|children| {
                 children.iter().any(|child| {
-                    hierarchy
+                    self.hierarchy
                         .get(child)
                         .is_ok_and(|(_, _, _, _, _, _, loading)| loading)
                 })
             });
-        Some(Self {
+        Some(PageCandidate {
             entity,
             id: id.0,
-            host_window: Self::host_window(hierarchy, entity),
+            host_window: self.host_window(entity),
             activated_at: activated.map_or(0, |activated| activated.0),
             url: metadata.url.clone(),
-            title: Self::title(metadata, identity),
+            title: PageCandidate::title(metadata, identity),
             status: if loading || child_loading {
                 "loading"
             } else {
@@ -312,8 +318,8 @@ impl PageCandidate {
         })
     }
 
-    fn host_window(hierarchy: &Query<HierarchyData>, entity: Entity) -> Option<Entity> {
-        let (children, _, _, _, _, host, _) = hierarchy.get(entity).ok()?;
+    fn host_window(&self, entity: Entity) -> Option<Entity> {
+        let (children, _, _, _, _, host, _) = self.hierarchy.get(entity).ok()?;
         if let Some(host) = host {
             return Some(host.0);
         }
@@ -321,7 +327,7 @@ impl PageCandidate {
             .into_iter()
             .flat_map(|children| children.iter())
             .find_map(|child| {
-                hierarchy
+                self.hierarchy
                     .get(child)
                     .ok()
                     .and_then(|(_, _, _, _, _, host, _)| host)
@@ -330,20 +336,23 @@ impl PageCandidate {
             return Some(host.0);
         }
         let mut current = entity;
-        while let Some(parent) = hierarchy
+        while let Some(parent) = self
+            .hierarchy
             .get(current)
             .ok()
             .and_then(|(_, parent, _, _, _, _, _)| parent)
             .map(Relationship::get)
         {
-            if let Ok((_, _, _, _, _, Some(host), _)) = hierarchy.get(parent) {
+            if let Ok((_, _, _, _, _, Some(host), _)) = self.hierarchy.get(parent) {
                 return Some(host.0);
             }
             current = parent;
         }
         None
     }
+}
 
+impl PageCandidate {
     fn title(metadata: &PageMetadata, identity: Option<&vmux_ecs::PageIdentity>) -> String {
         match identity.and_then(|identity| identity.title.as_deref()) {
             Some(title) if !title.is_empty() => title.to_string(),

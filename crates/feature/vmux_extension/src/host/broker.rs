@@ -42,8 +42,16 @@ impl Plugin for ExtensionBrokerPlugin {
 }
 
 fn spawn(manifests: Query<&vmux_ecs::host::manifest::FeatureManifest>, mut commands: Commands) {
-    let matrix = CapabilityMatrix::from_features(&manifests)
-        .expect("browser feature manifest contains a valid extension policy");
+    let mut matrix = None;
+    for manifest in &manifests {
+        let candidate = CapabilityMatrix::from_manifest(manifest)
+            .expect("browser feature manifest contains a valid extension policy");
+        if candidate.is_some() {
+            matrix = candidate;
+            break;
+        }
+    }
+    let matrix = matrix.expect("browser feature manifest has an extension policy");
     let mut entity = commands.spawn((
         Name::new("Extension broker"),
         BridgeSubscriptions::default(),

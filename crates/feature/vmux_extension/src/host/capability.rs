@@ -1,4 +1,4 @@
-use bevy::prelude::{Component, Query};
+use bevy::prelude::Component;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use vmux_ecs::host::manifest::FeatureManifest;
@@ -41,15 +41,12 @@ pub struct CapabilityMatrix {
 }
 
 impl CapabilityMatrix {
-    pub(super) fn from_features(manifests: &Query<&FeatureManifest>) -> Result<Self, String> {
-        for manifest in manifests.iter() {
-            let Ok(Some(policy)) = manifest.policy::<BrowserFeaturePolicy>() else {
-                continue;
-            };
-            policy.extension.validate()?;
-            return Ok(policy.extension);
-        }
-        Err("browser feature manifest has no extension policy".to_string())
+    pub(super) fn from_manifest(manifest: &FeatureManifest) -> Result<Option<Self>, String> {
+        let Some(policy) = manifest.policy::<BrowserFeaturePolicy>()? else {
+            return Ok(None);
+        };
+        policy.extension.validate()?;
+        Ok(Some(policy.extension))
     }
 
     #[cfg(test)]

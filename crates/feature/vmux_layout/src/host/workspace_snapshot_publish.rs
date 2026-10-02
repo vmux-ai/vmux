@@ -33,7 +33,28 @@ fn publish_workspace_snapshot(
     mut state: Single<&mut CommandBarWorkspaceSnapshot>,
 ) {
     let active_tab = tab_gather.active_tab.get();
-    let project_root = ProjectRoot::resolve(active_tab, &projects);
+    let project_root = 'root: {
+        let Some(active_tab) = active_tab else {
+            break 'root None;
+        };
+        let Ok((tab, workspace)) = projects.get(active_tab) else {
+            break 'root None;
+        };
+        if let Some(workspace) = workspace {
+            let dir = workspace.project_dir.trim();
+            if !dir.is_empty() {
+                break 'root Some(dir.to_string());
+            }
+        }
+        let Some(dir) = tab.startup_dir.as_deref() else {
+            break 'root None;
+        };
+        let dir = dir.trim();
+        if dir.is_empty() {
+            break 'root None;
+        }
+        Some(dir.to_string())
+    };
     let (_, pane, stack) = tab_gather.focus.resolve(active_tab);
     let locale = locale
         .as_deref()
@@ -49,29 +70,5 @@ fn publish_workspace_snapshot(
     };
     if **state != next {
         **state = next;
-    }
-}
-
-struct ProjectRoot;
-
-impl ProjectRoot {
-    fn resolve(
-        active_tab: Option<Entity>,
-        projects: &Query<(&crate::tab::Tab, Option<&crate::tab::TabWorkspace>)>,
-    ) -> Option<String> {
-        let Ok((tab, workspace)) = projects.get(active_tab?) else {
-            return None;
-        };
-        if let Some(workspace) = workspace {
-            let dir = workspace.project_dir.trim();
-            if !dir.is_empty() {
-                return Some(dir.to_string());
-            }
-        }
-        let dir = tab.startup_dir.as_deref()?.trim();
-        if dir.is_empty() {
-            return None;
-        }
-        Some(dir.to_string())
     }
 }

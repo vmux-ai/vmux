@@ -547,34 +547,25 @@ impl<'ast> Visit<'ast> for EcsRuntimeType {
         self.found |= path.path.segments.iter().any(|segment| {
             matches!(
                 segment.ident.to_string().as_str(),
-                "Commands" | "EventWriter" | "MessageWriter" | "NonSendMut" | "ResMut" | "World"
+                "Commands"
+                    | "DeferredWorld"
+                    | "EntityCommands"
+                    | "EventReader"
+                    | "EventWriter"
+                    | "Local"
+                    | "MessageReader"
+                    | "MessageWriter"
+                    | "NonSend"
+                    | "NonSendMut"
+                    | "ParamSet"
+                    | "Query"
+                    | "RemovedComponents"
+                    | "Res"
+                    | "ResMut"
+                    | "Single"
+                    | "World"
             )
         });
-        visit::visit_type_path(self, path);
-    }
-
-    fn visit_type_reference(&mut self, reference: &'ast syn::TypeReference) {
-        if reference.mutability.is_some() {
-            let mut query = MutableEcsQuery::default();
-            query.visit_type(&reference.elem);
-            self.found |= query.found;
-        }
-        visit::visit_type_reference(self, reference);
-    }
-}
-
-#[derive(Default)]
-struct MutableEcsQuery {
-    found: bool,
-}
-
-impl<'ast> Visit<'ast> for MutableEcsQuery {
-    fn visit_type_path(&mut self, path: &'ast TypePath) {
-        self.found |= path
-            .path
-            .segments
-            .iter()
-            .any(|segment| matches!(segment.ident.to_string().as_str(), "Query" | "Single"));
         visit::visit_type_path(self, path);
     }
 }

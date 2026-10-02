@@ -28,7 +28,7 @@ use crate::stack::CloseRequest;
 use crate::stack::{
     ActiveTabParam, CloseStackReason, CloseStackRequest, CloseStackSet, Stack, StackCommandSet,
 };
-use crate::tab::{CloseTabRequest, Tab, TabClosed};
+use crate::tab::{CloseTabRequest, Tab, TabClosed, TabHierarchy};
 use crate::window::TabSpawner;
 use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
@@ -297,8 +297,8 @@ impl TabArchiveLayout<'_, '_> {
 #[derive(SystemParam)]
 struct TabCloseLayout<'w, 's> {
     active_tab: ActiveTabParam<'w, 's>,
+    hierarchy: TabHierarchy<'w, 's>,
     tabs: Query<'w, 's, &'static Tab>,
-    tab_entities: Query<'w, 's, Entity, With<Tab>>,
     archive: TabArchiveLayout<'w, 's>,
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
     layout_requests: MessageWriter<'w, TabLayoutSpawnRequest>,
@@ -322,12 +322,7 @@ fn handle_close_tab_requests(
         let Ok(tab) = layout.tabs.get(request.tab) else {
             continue;
         };
-        let siblings = Tab::siblings(
-            request.tab,
-            &layout.archive.child_of,
-            &layout.archive.children_q,
-            &layout.tab_entities,
-        );
+        let siblings = layout.hierarchy.siblings(request.tab);
         let surviving_siblings: Vec<Entity> = siblings
             .iter()
             .copied()

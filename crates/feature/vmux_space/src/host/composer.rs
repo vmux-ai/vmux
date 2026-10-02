@@ -73,7 +73,7 @@ struct ComposerProjection<'w, 's> {
 impl ComposerProjection<'_, '_> {
     fn context(&mut self, stack: Entity) -> Option<ComposerContext> {
         let (acp, policy) = self.sessions.get(stack).ok()?;
-        let mut input = ComposerContextInput::at(stack, acp, policy, &self.child_of, &self.tabs);
+        let mut input = self.input(stack, acp, policy);
         input.projects = self.space_projects.rows(stack);
         let info = if input.cwd.as_os_str().is_empty() {
             None
@@ -83,6 +83,42 @@ impl ComposerProjection<'_, '_> {
                 .and_then(|cache| cache.bypass_change_detection().lookup(&input.cwd))
         };
         Some(input.context(info.as_ref()))
+    }
+
+    fn input(
+        &self,
+        stack: Entity,
+        acp: Option<&AcpSession>,
+        policy: Option<&AgentApprovalPolicy>,
+    ) -> ComposerContextInput {
+        let mut current = stack;
+        let mut tab_dir = None;
+        let mut workspace_selected = false;
+        let mut worktree = None;
+        loop {
+            if let Ok((tab, workspace, managed)) = self.tabs.get(current) {
+                tab_dir = tab.startup_dir.as_ref().map(std::path::PathBuf::from);
+                workspace_selected = workspace.is_some() || tab.startup_dir.is_some();
+                worktree = managed.cloned();
+                break;
+            }
+            let Ok(parent) = self.child_of.get(current) else {
+                break;
+            };
+            current = parent.parent();
+        }
+        ComposerContextInput {
+            cwd: tab_dir
+                .or_else(|| acp.map(|session| session.cwd.clone()))
+                .unwrap_or_default(),
+            workspace_selected,
+            worktree,
+            can_manage_workspace: acp.is_some(),
+            auto_allow_count: policy
+                .map(|policy| u32::try_from(policy.auto.len()).unwrap_or(u32::MAX))
+                .unwrap_or_default(),
+            projects: Vec::new(),
+        }
     }
 }
 
@@ -115,43 +151,6 @@ fn push_context_to_page(
 }
 
 impl ComposerContextInput {
-    fn at(
-        stack: Entity,
-        acp: Option<&AcpSession>,
-        policy: Option<&AgentApprovalPolicy>,
-        child_of: &Query<&ChildOf>,
-        tabs: &Query<(&Tab, Option<&TabWorkspace>, Option<&TabWorktree>)>,
-    ) -> Self {
-        let mut current = stack;
-        let mut tab_dir = None;
-        let mut workspace_selected = false;
-        let mut worktree = None;
-        loop {
-            if let Ok((tab, workspace, managed)) = tabs.get(current) {
-                tab_dir = tab.startup_dir.as_ref().map(std::path::PathBuf::from);
-                workspace_selected = workspace.is_some() || tab.startup_dir.is_some();
-                worktree = managed.cloned();
-                break;
-            }
-            let Ok(parent) = child_of.get(current) else {
-                break;
-            };
-            current = parent.parent();
-        }
-        Self {
-            cwd: tab_dir
-                .or_else(|| acp.map(|session| session.cwd.clone()))
-                .unwrap_or_default(),
-            workspace_selected,
-            worktree,
-            can_manage_workspace: acp.is_some(),
-            auto_allow_count: policy
-                .map(|policy| u32::try_from(policy.auto.len()).unwrap_or(u32::MAX))
-                .unwrap_or_default(),
-            projects: Vec::new(),
-        }
-    }
-
     fn context(&self, info: Option<&RepoInfo>) -> ComposerContext {
         let is_git_repo =
             info.is_some() || self.worktree.is_some() || self.cwd.join(".git").exists();
@@ -224,7 +223,7 @@ fn chat_branches_request(
         ),
     );
     let root = std::path::PathBuf::from(&project);
-    let wake = vmux_ecs::host::wake::Wake::from_resource(proxy);
+    let wake = vmux_ecs::host::wake::Wake::beside(proxy.as_deref());
     let task = bevy::tasks::IoTaskPool::get().spawn(async move {
         let _wake = wake;
         let Ok(holders) = vmux_git::worktree::branch_holders(&root) else {

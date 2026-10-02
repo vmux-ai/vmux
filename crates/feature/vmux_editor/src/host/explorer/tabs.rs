@@ -90,28 +90,6 @@ impl OpenEditorPath {
     }
 }
 
-struct EditorPageClose(Entity);
-
-impl EditorPageClose {
-    fn holding(
-        webview: Entity,
-        child_of: &Query<&ChildOf>,
-        stacks: &Query<(), With<vmux_layout::stack::Stack>>,
-    ) -> Option<Self> {
-        let mut current = webview;
-        for _ in 0..8 {
-            if stacks.contains(current) {
-                return Some(Self(current));
-            }
-            let Ok(parent) = child_of.get(current) else {
-                return None;
-            };
-            current = parent.parent();
-        }
-        None
-    }
-}
-
 fn close(
     trigger: On<UiInput<ExplorerCloseEditor>>,
     mut states: Query<&mut ExplorerState>,
@@ -129,8 +107,16 @@ fn close(
     let next = state.close_editor(&path);
     commands.entity(entity).insert(OpenEditorsDirty);
     let Some(next) = next else {
-        if let Some(close) = EditorPageClose::holding(entity, &child_of, &stacks) {
-            closing.write(vmux_layout::CloseStackRequest::by_user(close.0));
+        let mut current = entity;
+        for _ in 0..8 {
+            if stacks.contains(current) {
+                closing.write(vmux_layout::CloseStackRequest::by_user(current));
+                break;
+            }
+            let Ok(parent) = child_of.get(current) else {
+                break;
+            };
+            current = parent.parent();
         }
         return;
     };
