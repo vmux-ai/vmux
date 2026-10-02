@@ -28,6 +28,7 @@ impl vmux_ecs::host::manifest::FeatureManifestSource for Feature {
 }
 
 pub mod event;
+#[cfg(any(ui, test))]
 mod render_model;
 
 pub mod ui;

@@ -1,7 +1,7 @@
 #[cfg(ui)]
 pub use page::*;
 
-#[cfg(host)]
+#[cfg(ui)]
 pub(crate) mod monitor;
 #[cfg(ui)]
 mod page;

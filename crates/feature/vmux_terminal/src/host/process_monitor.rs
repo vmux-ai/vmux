@@ -22,6 +22,9 @@ use vmux_layout::{
     stack::{ActiveTabParam, LayoutFocus, OpenRequest, Stack},
 };
 
+#[vmux_native::page(page = "process_monitor")]
+struct ProcessMonitorPageManifest;
+
 pub struct ProcessMonitorPlugin;
 
 impl Plugin for ProcessMonitorPlugin {
@@ -64,7 +67,7 @@ impl Plugin for ProcessMonitorPlugin {
             .add_observer(process_kill)
             .add_observer(process_kill_all)
             .add_plugins(HostedUiPlugin::<ProcessMonitorView>::new(
-                crate::ui::monitor::ProcessMonitorPage::MANIFEST,
+                ProcessMonitorPageManifest::MANIFEST,
             ));
     }
 }
@@ -97,7 +100,7 @@ fn open_services(
 ) {
     for _ in requests.read() {
         stack_requests.write(OpenRequest {
-            url: Some(crate::ui::monitor::ProcessMonitorPage::URL.to_string()),
+            url: Some(ProcessMonitorPageManifest::URL.to_string()),
         });
     }
 }
