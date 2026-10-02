@@ -29,7 +29,7 @@ use crate::stack::{
     ActiveTabParam, CloseStackReason, CloseStackRequest, CloseStackSet, Stack, StackCommandSet,
 };
 use crate::tab::{CloseTabRequest, Tab, TabClosed};
-use crate::window::TabScaffold;
+use crate::window::TabSpawner;
 use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
@@ -527,6 +527,7 @@ fn handle_reopen_closed_page(
     archived: Query<(Entity, &ArchivedPage, Option<&ArchivedTabPage>)>,
     positions: Query<&ArchivedPagePosition>,
     layout: ReopenLayout,
+    mut tabs: TabSpawner,
     mut commands: Commands,
 ) {
     let mut reopen = false;
@@ -585,6 +586,7 @@ fn handle_reopen_closed_page(
         position.as_ref(),
         &layout,
         &mut commands,
+        &mut tabs,
         target.window,
         layout.settings.pane.gap,
     );
@@ -893,6 +895,7 @@ fn resolve_reopen_stack(
     position: Option<&ArchivedPagePosition>,
     layout: &ReopenLayout,
     commands: &mut Commands,
+    tabs: &mut TabSpawner,
     primary_window: Entity,
     gap: f32,
 ) -> (Entity, Entity) {
@@ -917,7 +920,7 @@ fn resolve_reopen_stack(
         }
     }
 
-    let scaffold = TabScaffold::spawn(commands, space, primary_window, gap);
+    let scaffold = tabs.spawn(space, primary_window, gap);
     if origin_matches && let Some(idx) = tab_index {
         commands.entity(space).insert_children(idx, &[scaffold.tab]);
     }

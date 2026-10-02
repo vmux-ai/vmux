@@ -1,23 +1,25 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use crate::computed::{ComputedNode, Insets};
 use crate::tree::FlexTree;
 
-pub(crate) struct GeometryWalk<'a> {
-    pub(crate) tree: &'a FlexTree,
-    pub(crate) inverse_scale_factor: f32,
+#[derive(SystemParam)]
+pub(crate) struct GeometryWriter<'w, 's> {
+    pub(crate) children: Query<'w, 's, &'static Children>,
+    out: Query<'w, 's, &'static mut ComputedNode>,
 }
 
-impl GeometryWalk<'_> {
+impl GeometryWriter<'_, '_> {
     pub(crate) fn descend(
-        &self,
+        &mut self,
+        tree: &FlexTree,
+        inverse_scale_factor: f32,
         entity: Entity,
         parent_size: Vec2,
         parent_center: Vec2,
-        children: &Query<&Children>,
-        out: &mut Query<&mut ComputedNode>,
     ) {
-        let Some(layout) = self.tree.layout_of(entity) else {
+        let Some(layout) = tree.layout_of(entity) else {
             return;
         };
         let size = Vec2::new(layout.size.width, layout.size.height);
@@ -28,25 +30,26 @@ impl GeometryWalk<'_> {
         };
         let center = parent_center + location + 0.5 * (size - parent_size);
 
-        if let Ok(mut computed) = out.get_mut(entity) {
+        if let Ok(mut computed) = self.out.get_mut(entity) {
             if computed.size != size
                 || computed.center != center
-                || computed.inverse_scale_factor != self.inverse_scale_factor
+                || computed.inverse_scale_factor != inverse_scale_factor
             {
                 computed.size = size;
                 computed.center = center;
-                computed.inverse_scale_factor = self.inverse_scale_factor;
+                computed.inverse_scale_factor = inverse_scale_factor;
             }
             if computed.padding != padding {
                 computed.bypass_change_detection().padding = padding;
             }
         }
 
-        let Ok(kids) = children.get(entity) else {
+        let Ok(kids) = self.children.get(entity) else {
             return;
         };
-        for child in kids.iter() {
-            self.descend(child, size, center, children, out);
+        let children = kids.iter().collect::<Vec<_>>();
+        for child in children {
+            self.descend(tree, inverse_scale_factor, child, size, center);
         }
     }
 }

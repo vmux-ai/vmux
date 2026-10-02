@@ -89,7 +89,21 @@ fn register_manifests(
 ) {
     for feature in &features {
         for entry in feature.tools.iter().cloned() {
-            ToolSeed::from(entry).spawn(&mut commands, &mut next_order);
+            let seed = ToolSeed::from(entry);
+            let order = next_order.0;
+            next_order.0 += 1;
+            let mut entity = commands.spawn((
+                RegisteredTool,
+                Name::new(seed.name),
+                ToolAliases(seed.aliases),
+                ToolDescription(seed.description),
+                ToolInputSchema(seed.input_schema),
+                ToolAccess(seed.availability),
+                RegistrationOrder(order),
+            ));
+            if seed.shell_aware {
+                entity.insert(ShellAware);
+            }
         }
     }
 }
@@ -391,25 +405,6 @@ struct ToolSeed {
     input_schema: JsonSchema,
     availability: ToolAvailability,
     shell_aware: bool,
-}
-
-impl ToolSeed {
-    fn spawn(self, commands: &mut Commands, next_order: &mut NextToolOrder) {
-        let order = next_order.0;
-        next_order.0 += 1;
-        let mut entity = commands.spawn((
-            RegisteredTool,
-            Name::new(self.name),
-            ToolAliases(self.aliases),
-            ToolDescription(self.description),
-            ToolInputSchema(self.input_schema),
-            ToolAccess(self.availability),
-            RegistrationOrder(order),
-        ));
-        if self.shell_aware {
-            entity.insert(ShellAware);
-        }
-    }
 }
 
 impl From<ToolEntry> for ToolSeed {

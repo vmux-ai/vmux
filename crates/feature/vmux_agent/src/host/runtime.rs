@@ -470,7 +470,7 @@ fn apply_session(
 fn apply_terminal(
     mut reader: MessageReader<UiAgentAcpTerminalCreated>,
     sessions: Query<(Entity, &AcpSession)>,
-    ctx: PanePlacement,
+    mut ctx: PanePlacement,
     mut commands: Commands,
 ) {
     let mut split_batch = std::collections::HashSet::new();
@@ -486,7 +486,6 @@ fn apply_terminal(
             continue;
         };
         let target_pane = ctx.resolve_spiral(
-            &mut commands,
             agent_pane,
             vmux_terminal::TerminalPlugin::URL,
             false,

@@ -569,14 +569,20 @@ pub(crate) struct TabScaffold {
     pub(crate) stack: Entity,
 }
 
-impl TabScaffold {
+#[derive(SystemParam)]
+pub(crate) struct TabSpawner<'w, 's> {
+    commands: Commands<'w, 's>,
+}
+
+impl TabSpawner<'_, '_> {
     pub(crate) fn spawn(
-        commands: &mut Commands,
+        &mut self,
         space: Entity,
         primary_window: Entity,
         gap_px: f32,
-    ) -> Self {
-        let tab = commands
+    ) -> TabScaffold {
+        let tab = self
+            .commands
             .spawn((
                 Tab::bundle(),
                 LastActivatedAt::now(),
@@ -586,7 +592,8 @@ impl TabScaffold {
             .id();
 
         let gap = PaneSplitDirection::Row.gaps(gap_px);
-        let split_root = commands
+        let split_root = self
+            .commands
             .spawn((
                 Pane,
                 PaneSplit {
@@ -605,11 +612,13 @@ impl TabScaffold {
             ))
             .id();
 
-        let pane = commands
+        let pane = self
+            .commands
             .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(split_root)))
             .id();
 
-        let stack = commands
+        let stack = self
+            .commands
             .spawn((
                 Stack::bundle(),
                 LastActivatedAt::now(),
@@ -618,7 +627,7 @@ impl TabScaffold {
             ))
             .id();
 
-        Self { tab, pane, stack }
+        TabScaffold { tab, pane, stack }
     }
 }
 
@@ -627,6 +636,7 @@ fn spawn_requested_tab_layouts(
     settings: Res<LayoutSettings>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     spaces: Query<&EffectiveStartupUrl, With<crate::space::Space>>,
+    mut tabs: TabSpawner,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -643,12 +653,7 @@ fn spawn_requested_tab_layouts(
             tab: tab_e,
             pane: leaf,
             stack,
-        } = TabScaffold::spawn(
-            &mut commands,
-            request.space,
-            request.primary_window,
-            settings.pane.gap,
-        );
+        } = tabs.spawn(request.space, request.primary_window, settings.pane.gap);
         commands.entity(tab_e).insert(Tab {
             name: request.name.clone().unwrap_or_default(),
             startup_dir,
@@ -807,9 +812,9 @@ mod tests {
         let window = app.world_mut().spawn_empty().id();
         let result = {
             let world = app.world_mut();
-            let mut state = SystemState::<Commands>::new(world);
-            let mut commands = state.get_mut(world).unwrap();
-            let r = TabScaffold::spawn(&mut commands, space, window, 8.0);
+            let mut state = SystemState::<TabSpawner>::new(world);
+            let mut tabs = state.get_mut(world).unwrap();
+            let r = tabs.spawn(space, window, 8.0);
             state.apply(world);
             r
         };

@@ -339,9 +339,9 @@ fn close_last_stack_in_pane(
             .unwrap_or_default();
         new_active_pane = Pane::first_leaf(sibling, &closer.pane_children, &closer.leaf_panes);
         commands.entity(sibling).remove::<ChildOf>();
-        commands.queue(move |world: &mut World| {
-            world.despawn(sibling);
-            sibling_direction.apply(world, parent);
+        commands.entity(sibling).despawn();
+        commands.entity(parent).insert(PaneSplit {
+            direction: sibling_direction,
         });
     } else {
         new_active_pane = parent;

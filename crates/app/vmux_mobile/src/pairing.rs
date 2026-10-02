@@ -228,13 +228,12 @@ struct ConnectionAttemptOutput {
 }
 
 impl ConnectionAttempt {
-    fn spawn(
-        commands: &mut Commands,
+    fn new(
         target: bevy_ecs::entity::Entity,
         generation: u64,
         source: ConnectionSource,
         credentials: Credentials,
-    ) {
+    ) -> Self {
         let task = IoTaskPool::get().spawn(async move {
             let api = Api::new(credentials)?;
             let sessions = api.sessions().await;
@@ -251,12 +250,12 @@ impl ConnectionAttempt {
                 credentials,
             })
         });
-        commands.spawn(Self {
+        Self {
             target,
             generation,
             source,
             task,
-        });
+        }
     }
 }
 
@@ -280,13 +279,12 @@ fn restore_connection(
     };
     state.view.pair_url = credentials.pairing_url();
     state.operation_generation = state.operation_generation.wrapping_add(1);
-    ConnectionAttempt::spawn(
-        &mut commands,
+    commands.spawn(ConnectionAttempt::new(
         entity,
         state.operation_generation,
         ConnectionSource::Restore,
         credentials,
-    );
+    ));
 }
 
 fn change_link(
@@ -330,13 +328,12 @@ fn pair(
         };
         state.view.pairing = true;
         state.operation_generation = state.operation_generation.wrapping_add(1);
-        ConnectionAttempt::spawn(
-            &mut commands,
+        commands.spawn(ConnectionAttempt::new(
             entity,
             state.operation_generation,
             ConnectionSource::Pair,
             credentials,
-        );
+        ));
     }
 }
 

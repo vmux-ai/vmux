@@ -14,7 +14,7 @@ use super::{
     OpenRequest, PaneStacks,
     focus::PendingCursorWarp,
     identity::{SpawnCounter, SpawnSeq},
-    tree::{Pane, PaneSplit, PaneSplitDirection},
+    tree::{Pane, PaneSplit, PaneSplitDirection, PaneTree},
 };
 use crate::host::command::LayoutRequestSet;
 
@@ -74,6 +74,7 @@ fn handle_beside_requests(
     child_of_q: Query<&ChildOf>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     resolver: PaneOpenResolver,
+    mut tree: PaneTree,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut spawn_counter: Single<&mut SpawnCounter>,
@@ -162,7 +163,7 @@ fn handle_beside_requests(
                     let already_split =
                         !split_this_batch.insert(req.pane) || split_dir_q.contains(req.pane);
                     let split = split_or_extend_for_batch(
-                        &mut commands,
+                        &mut tree,
                         req.pane,
                         split_dir,
                         &existing_tabs,
@@ -270,7 +271,7 @@ fn handle_beside_requests(
                 let already_split =
                     !split_this_batch.insert(anchor) || split_dir_q.contains(anchor);
                 let split = split_or_extend_for_batch(
-                    &mut commands,
+                    &mut tree,
                     anchor,
                     axis,
                     &existing_tabs,
@@ -319,7 +320,7 @@ struct BatchSplit {
 }
 
 fn split_or_extend_for_batch(
-    commands: &mut Commands,
+    tree: &mut PaneTree,
     anchor: Entity,
     split_dir: PaneSplitDirection,
     existing_tabs: &[Entity],
@@ -332,14 +333,7 @@ fn split_or_extend_for_batch(
 ) -> BatchSplit {
     if already_split {
         return BatchSplit {
-            target: Pane::split_or_extend(
-                commands,
-                anchor,
-                split_dir,
-                existing_tabs,
-                activate_new,
-                true,
-            ),
+            target: tree.split_or_extend(anchor, split_dir, existing_tabs, activate_new, true),
             holder: None,
             target_size: None,
         };
@@ -347,8 +341,7 @@ fn split_or_extend_for_batch(
 
     let pending_info = pending_leaf_infos.remove(&anchor);
     pending_leaf_stacks.remove(&anchor);
-    let (holder, target) =
-        Pane::spawn_split(commands, anchor, split_dir, existing_tabs, activate_new);
+    let (holder, target) = tree.spawn_split(anchor, split_dir, existing_tabs, activate_new);
     retired_leaf_panes.insert(anchor);
     let target_size = pending_info
         .as_ref()
@@ -754,12 +747,12 @@ pub struct PanePlacement<'w, 's> {
     pub seq_q: Query<'w, 's, &'static SpawnSeq>,
     pub node_q: Query<'w, 's, &'static ComputedNode>,
     pub page_q: Query<'w, 's, &'static PageMetadata, With<Stack>>,
+    pub tree: PaneTree<'w, 's>,
 }
 
 impl PanePlacement<'_, '_> {
     pub fn resolve_spiral(
-        &self,
-        commands: &mut Commands,
+        &mut self,
         anchor_pane: Entity,
         url: &str,
         focus: bool,
@@ -793,7 +786,8 @@ impl PanePlacement<'_, '_> {
                     .unwrap_or_default();
                 let already_split =
                     !split_batch.insert(anchor) || self.split_dir_q.contains(anchor);
-                Pane::split_or_extend(commands, anchor, axis, &existing_tabs, focus, already_split)
+                self.tree
+                    .split_or_extend(anchor, axis, &existing_tabs, focus, already_split)
             }
             Placement::Focus { .. } => anchor_pane,
         }
@@ -873,6 +867,7 @@ fn handle_in(
     tab_filter: Query<Entity, With<Stack>>,
     pane_stacks: PaneStacks,
     focused_space: crate::space::FocusedSpace,
+    mut tree: PaneTree,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
 ) {
@@ -912,13 +907,7 @@ fn handle_in(
                             .get(active)
                             .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                             .unwrap_or_default();
-                        let p2 = Pane::split_leaf(
-                            &mut commands,
-                            active,
-                            split_dir,
-                            &existing_tabs,
-                            true,
-                        );
+                        let p2 = tree.split_leaf(active, split_dir, &existing_tabs, true);
                         (p2, true)
                     }
                 }
@@ -928,7 +917,7 @@ fn handle_in(
                     .get(active)
                     .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                     .unwrap_or_default();
-                let p2 = Pane::split_leaf(&mut commands, active, split_dir, &existing_tabs, true);
+                let p2 = tree.split_leaf(active, split_dir, &existing_tabs, true);
                 (p2, true)
             }
         };

@@ -96,10 +96,9 @@ impl PaletteMedia {
         target: Entity,
         query: Option<String>,
         snapshot: &mut CommandPaletteUiState,
-        commands: &mut Commands,
-    ) {
+    ) -> Option<MediaRequestDelay> {
         if self.query == query {
-            return;
+            return None;
         }
         self.query = query.clone();
         let generation = self.generation.advance();
@@ -109,13 +108,14 @@ impl PaletteMedia {
         snapshot.media_loading = query.is_some();
         snapshot.media_selected = 0;
         let Some(query) = query else {
-            return;
+            return None;
         };
-        commands.spawn((
-            Name::new("Command Palette Media Request"),
-            MediaRequestDelay(RequestDelay::new(target, generation, query, MEDIA_DEBOUNCE)),
-            PendingPaletteRequest,
-        ));
+        Some(MediaRequestDelay(RequestDelay::new(
+            target,
+            generation,
+            query,
+            MEDIA_DEBOUNCE,
+        )))
     }
 }
 
@@ -176,7 +176,13 @@ fn update(
     } else {
         None
     };
-    media.update_query(target, query, &mut snapshot.0, &mut commands);
+    if let Some(request) = media.update_query(target, query, &mut snapshot.0) {
+        commands.spawn((
+            Name::new("Command Palette Media Request"),
+            request,
+            PendingPaletteRequest,
+        ));
+    }
 }
 
 fn move_selection(
@@ -325,7 +331,13 @@ fn activate(
     draft.navigating = false;
     draft.input_revision = draft.input_revision.wrapping_add(1).max(1);
     let next_query = inline_media_query(&draft.query).map(|query| query.query.to_string());
-    media.update_query(target, next_query, &mut snapshot.0, &mut commands);
+    if let Some(request) = media.update_query(target, next_query, &mut snapshot.0) {
+        commands.spawn((
+            Name::new("Command Palette Media Request"),
+            request,
+            PendingPaletteRequest,
+        ));
+    }
 }
 
 fn dismiss(
@@ -352,7 +364,13 @@ fn dismiss(
     draft.selected = 0;
     draft.navigating = false;
     draft.input_revision = draft.input_revision.wrapping_add(1).max(1);
-    media.update_query(target, None, &mut snapshot.0, &mut commands);
+    if let Some(request) = media.update_query(target, None, &mut snapshot.0) {
+        commands.spawn((
+            Name::new("Command Palette Media Request"),
+            request,
+            PendingPaletteRequest,
+        ));
+    }
 }
 
 fn remove_attachment(

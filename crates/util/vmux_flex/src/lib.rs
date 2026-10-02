@@ -8,7 +8,7 @@ pub use node::{
 };
 pub use tree::{FlexTree, LayoutContext};
 pub use visibility::Visibility;
-use write::GeometryWalk;
+use write::GeometryWriter;
 
 pub mod computed;
 pub mod node;
@@ -57,12 +57,11 @@ fn compute_layout(
     primary_window: Query<Entity, With<PrimaryWindow>>,
     nodes: NodeQuery,
     added: Query<(), Added<Node>>,
-    children_q: Query<&Children>,
     changed_children: Query<(), Changed<Children>>,
     roots: RootQuery,
     mut removed_nodes: RemovedComponents<Node>,
     mut removed_children: RemovedComponents<Children>,
-    mut out: Query<&mut ComputedNode>,
+    mut geometry: GeometryWriter,
 ) {
     for entity in removed_children.read() {
         tree.set_children(entity, &[]);
@@ -92,16 +91,18 @@ fn compute_layout(
             &context,
             context_changed,
             &nodes,
-            &children_q,
+            &geometry.children,
             &added,
             &changed_children,
         );
         tree.compute(&context, root);
-        let walk = GeometryWalk {
-            tree: &tree,
-            inverse_scale_factor: context.scale_factor.recip(),
-        };
-        walk.descend(root, Vec2::ZERO, Vec2::ZERO, &children_q, &mut out);
+        geometry.descend(
+            &tree,
+            context.scale_factor.recip(),
+            root,
+            Vec2::ZERO,
+            Vec2::ZERO,
+        );
     }
 }
 

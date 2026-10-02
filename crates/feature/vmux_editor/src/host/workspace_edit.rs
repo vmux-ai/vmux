@@ -74,56 +74,33 @@ struct WorkspaceEdits<'w, 's> {
 
 impl WorkspaceEdits<'_, '_> {
     fn apply(&mut self, plan: WorkspaceEditPlan) -> Option<String> {
-        let prepared = match PreparedWorkspaceEdit::new(plan, &self.views, &self.manager) {
+        let prepared = match self.prepare(plan) {
             Ok(prepared) => prepared,
             Err(reason) => return Some(reason),
         };
-        prepared
-            .apply(&mut self.self_writes, &mut self.commands)
-            .err()
+        for document in prepared.documents {
+            if let Err(reason) = self.apply_document(document) {
+                return Some(reason);
+            }
+        }
+        None
     }
-}
 
-struct PreparedWorkspaceEdit {
-    documents: Vec<PreparedDocument>,
-}
-
-impl PreparedWorkspaceEdit {
-    fn new(
-        plan: WorkspaceEditPlan,
-        views: &Query<(Entity, &FileView, &Editor)>,
-        manager: &crate::lsp::manager::LspManager,
-    ) -> Result<Self, String> {
+    fn prepare(&self, plan: WorkspaceEditPlan) -> Result<PreparedWorkspaceEdit, String> {
         let mut documents = Vec::with_capacity(plan.documents.len());
         for document in plan.documents {
-            documents.push(PreparedDocument::new(document, views, manager)?);
+            documents.push(self.prepare_document(document)?);
         }
-        Ok(Self { documents })
+        Ok(PreparedWorkspaceEdit { documents })
     }
 
-    fn apply(self, self_writes: &mut SelfWrites, commands: &mut Commands) -> Result<(), String> {
-        for document in self.documents {
-            document.apply(self_writes, commands)?;
-        }
-        Ok(())
-    }
-}
-
-struct PreparedDocument {
-    path: vmux_path::ScopedPath,
-    targets: Vec<Entity>,
-    updated: String,
-}
-
-impl PreparedDocument {
-    fn new(
+    fn prepare_document(
+        &self,
         document: crate::lsp::workspace_edit::PlannedDocument,
-        views: &Query<(Entity, &FileView, &Editor)>,
-        manager: &crate::lsp::manager::LspManager,
-    ) -> Result<Self, String> {
+    ) -> Result<PreparedDocument, String> {
         if let (Some(expected), Some(actual)) = (
             document.version,
-            manager.document_version(document.path.as_path()),
+            self.manager.document_version(document.path.as_path()),
         ) && expected != actual
         {
             return Err(format!(
@@ -133,7 +110,8 @@ impl PreparedDocument {
         }
 
         let wanted = vmux_path::PathIdentity::resolve(document.path.as_path());
-        let targets: Vec<Entity> = views
+        let targets: Vec<Entity> = self
+            .views
             .iter()
             .filter(|(_, view, ..)| vmux_path::PathIdentity::resolve(&view.path) == wanted)
             .map(|(entity, ..)| entity)
@@ -144,7 +122,7 @@ impl PreparedDocument {
         } else {
             let mut texts = targets
                 .iter()
-                .filter_map(|entity| views.get(*entity).ok())
+                .filter_map(|entity| self.views.get(*entity).ok())
                 .map(|(_, _, editor)| editor.core.buffer.text());
             let first = texts.next().unwrap_or_default();
             if texts.any(|text| text != first) {
@@ -163,31 +141,41 @@ impl PreparedDocument {
         let updated = buffer
             .with_lsp_edits(&document.edits)
             .map_err(|error| format!("{}: {error}", document.path.as_path().display()))?;
-        Ok(Self {
+        Ok(PreparedDocument {
             path: document.path,
             targets,
             updated,
         })
     }
 
-    fn apply(self, self_writes: &mut SelfWrites, commands: &mut Commands) -> Result<(), String> {
-        if self.targets.is_empty() {
-            vmux_path::AtomicFile::write(self.path.as_path(), self.updated.as_bytes())
-                .map_err(|error| format!("{}: {error}", self.path.as_path().display()))?;
-            self_writes.0.insert(
-                vmux_path::PathIdentity::resolve(self.path.as_path()).into_path_buf(),
+    fn apply_document(&mut self, document: PreparedDocument) -> Result<(), String> {
+        if document.targets.is_empty() {
+            vmux_path::AtomicFile::write(document.path.as_path(), document.updated.as_bytes())
+                .map_err(|error| format!("{}: {error}", document.path.as_path().display()))?;
+            self.self_writes.0.insert(
+                vmux_path::PathIdentity::resolve(document.path.as_path()).into_path_buf(),
                 std::time::Instant::now(),
             );
             return Ok(());
         }
-        for entity in self.targets {
-            commands.trigger(EditRequest::new(
+        for entity in document.targets {
+            self.commands.trigger(EditRequest::new(
                 entity,
-                vec![EditCommand::ReplaceText(self.updated.clone())],
+                vec![EditCommand::ReplaceText(document.updated.clone())],
             ));
         }
         Ok(())
     }
+}
+
+struct PreparedWorkspaceEdit {
+    documents: Vec<PreparedDocument>,
+}
+
+struct PreparedDocument {
+    path: vmux_path::ScopedPath,
+    targets: Vec<Entity>,
+    updated: String,
 }
 
 #[cfg(test)]

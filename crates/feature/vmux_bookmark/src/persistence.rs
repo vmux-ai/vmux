@@ -53,37 +53,24 @@ impl Default for BookmarkPersistencePath {
 }
 
 impl BookmarkPersistencePath {
-    fn save(&self, commands: &mut Commands) {
-        if is_test_session() {
-            return;
-        }
-        if let Some(parent) = self.0.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let mut save = SaveWorld::<BookmarkFilter>::into_file(self.0.clone());
-        save.components = bookmark_scene_filter();
-        save.resources = bookmark_resource_filter();
-        commands.trigger_save(save);
+    fn scene_filter() -> WorldFilter {
+        WorldFilter::deny_all()
+            .allow::<ChildOf>()
+            .allow::<Children>()
+            .allow::<Name>()
+            .allow::<Pin>()
+            .allow::<Bookmark>()
+            .allow::<Folder>()
+            .allow::<SmartBookmarkFolder>()
+            .allow::<Collapsed>()
+            .allow::<Uuid>()
+            .allow::<BookmarkOrder>()
+            .allow::<PageMetadata>()
     }
-}
 
-fn bookmark_scene_filter() -> WorldFilter {
-    WorldFilter::deny_all()
-        .allow::<ChildOf>()
-        .allow::<Children>()
-        .allow::<Name>()
-        .allow::<Pin>()
-        .allow::<Bookmark>()
-        .allow::<Folder>()
-        .allow::<SmartBookmarkFolder>()
-        .allow::<Collapsed>()
-        .allow::<Uuid>()
-        .allow::<BookmarkOrder>()
-        .allow::<PageMetadata>()
-}
-
-fn bookmark_resource_filter() -> WorldFilter {
-    WorldFilter::deny_all().allow::<OfferedBookmarkDefaults>()
+    fn resource_filter() -> WorldFilter {
+        WorldFilter::deny_all().allow::<OfferedBookmarkDefaults>()
+    }
 }
 
 fn load_bookmarks_on_startup(
@@ -338,7 +325,15 @@ fn autosave_bookmarks(
     if !auto.dirty {
         return;
     }
-    path.save(&mut commands);
+    if !is_test_session() {
+        if let Some(parent) = path.0.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let mut save = SaveWorld::<BookmarkFilter>::into_file(path.0.clone());
+        save.components = BookmarkPersistencePath::scene_filter();
+        save.resources = BookmarkPersistencePath::resource_filter();
+        commands.trigger_save(save);
+    }
     auto.dirty = false;
 }
 
@@ -387,8 +382,8 @@ mod tests {
         let p = path.clone();
         save_app.add_systems(Update, move |mut c: Commands| {
             let mut s = SaveWorld::<BookmarkFilter>::into_file(p.clone());
-            s.components = bookmark_scene_filter();
-            s.resources = bookmark_resource_filter();
+            s.components = BookmarkPersistencePath::scene_filter();
+            s.resources = BookmarkPersistencePath::resource_filter();
             c.trigger_save(s);
         });
         save_app.update();

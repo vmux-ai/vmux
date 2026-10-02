@@ -16,6 +16,8 @@ use vmux_ecs::profile::ProjectsDirectory;
 use vmux_layout::AgentPaneDirection;
 #[cfg(test)]
 use vmux_layout::LayoutContractPlugin;
+#[cfg(test)]
+use vmux_layout::pane::PaneTree;
 use vmux_layout::pane::{Pane, PaneSplit, PaneSplitDirection, SpawnCounter, SpawnSeq};
 use vmux_layout::placement::PageKind;
 use vmux_layout::stack::Stack;
@@ -843,8 +845,7 @@ fn run_agent_commands(
                             &context.panes.split_dir_q,
                             &mut split_this_batch,
                         );
-                        Pane::split_or_extend(
-                            &mut commands,
+                        context.panes.tree.split_or_extend(
                             split.pane,
                             split.direction,
                             &split.existing_tabs,
@@ -855,7 +856,6 @@ fn run_agent_commands(
                 }
                 (Some(pane), _) => pane,
                 (None, _) => context.panes.resolve_spiral(
-                    &mut commands,
                     agent_pane,
                     crate::TerminalPlugin::URL,
                     focus,
@@ -1681,6 +1681,7 @@ mod tests {
         input: Res<SplitRunPaneInput>,
         mut out: ResMut<SplitRunPaneOutput>,
         mut commands: Commands,
+        mut tree: PaneTree,
         mut next_sequence: NextPaneSpawnSequence,
         pane_children: Query<&Children, With<Pane>>,
         tab_filter: Query<Entity, With<Stack>>,
@@ -1695,8 +1696,7 @@ mod tests {
             &split_dir_q,
             &mut split_batch,
         );
-        let target = Pane::split_or_extend(
-            &mut commands,
+        let target = tree.split_or_extend(
             split.pane,
             split.direction,
             &split.existing_tabs,

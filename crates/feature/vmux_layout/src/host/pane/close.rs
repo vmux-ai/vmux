@@ -186,10 +186,8 @@ fn close(
                 .unwrap_or_default();
             new_active_pane = Pane::first_leaf(sibling, &pane_children, &leaf_panes);
             commands.entity(sibling).remove::<ChildOf>();
-            commands.queue(move |world: &mut World| {
-                world.despawn(sibling);
-                direction.apply(world, parent);
-            });
+            commands.entity(sibling).despawn();
+            commands.entity(parent).insert(PaneSplit { direction });
         } else {
             new_active_pane = parent;
             commands.entity(parent).remove::<PaneSplit>();

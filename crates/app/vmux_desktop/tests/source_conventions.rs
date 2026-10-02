@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use syn::visit::{self, Visit};
-use syn::{Block, Expr, ExprMethodCall, Item, ItemFn, Stmt, UseTree, Visibility};
+use syn::{
+    Attribute, Block, Expr, ExprMethodCall, FnArg, ImplItem, Item, ItemFn, Stmt, Type, TypePath,
+    UseTree, Visibility,
+};
 
 const GENERIC_MODULES: &[&str] = &[
     "bin", "host", "lib", "main", "plugin", "runtime", "src", "test", "tests", "ui",
@@ -393,6 +396,187 @@ fn imports_are_declared_at_module_top() {
         "imports must appear before every other item in their module and never inside a function:\n{}",
         violations.join("\n")
     );
+}
+
+#[test]
+fn inherent_methods_do_not_own_ecs_runtime_parameters() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .expect("workspace root");
+    let mut violations = Vec::new();
+
+    for root in [workspace.join("crates"), workspace.join("website")] {
+        walk(&root, &mut |path, source| {
+            if test_source(path)
+                || path
+                    .components()
+                    .any(|part| part.as_os_str() == "vmux_native")
+            {
+                return;
+            }
+            let file = match syn::parse_file(source) {
+                Ok(file) => file,
+                Err(error) => {
+                    violations.push(format!("{}: {error}", path.display()));
+                    return;
+                }
+            };
+            audit_inherent_ecs_methods(path, &file.items, "crate", &mut violations);
+        });
+    }
+
+    assert!(
+        violations.is_empty(),
+        "ECS runtime mutation and lookup belong in systems or SystemParam methods:\n{}",
+        violations.join("\n")
+    );
+}
+
+fn audit_inherent_ecs_methods(
+    path: &Path,
+    items: &[Item],
+    scope: &str,
+    violations: &mut Vec<String>,
+) {
+    let system_params = items
+        .iter()
+        .filter_map(|item| {
+            let Item::Struct(item) = item else {
+                return None;
+            };
+            has_derive(&item.attrs, "SystemParam").then(|| item.ident.to_string())
+        })
+        .collect::<BTreeSet<_>>();
+
+    for item in items {
+        if let Item::Impl(item) = item
+            && item.trait_.is_none()
+            && let Type::Path(self_type) = item.self_ty.as_ref()
+            && let Some(name) = self_type.path.segments.last()
+            && !system_params.contains(&name.ident.to_string())
+        {
+            for member in &item.items {
+                let ImplItem::Fn(method) = member else {
+                    continue;
+                };
+                if cfg_test(&method.attrs) {
+                    continue;
+                }
+                let mut runtime = EcsRuntimeType::default();
+                for input in &method.sig.inputs {
+                    let FnArg::Typed(input) = input else {
+                        continue;
+                    };
+                    runtime.visit_type(&input.ty);
+                }
+                if runtime.found {
+                    violations.push(format!(
+                        "{}:{} ({scope}): {}::{}",
+                        path.display(),
+                        method.sig.fn_token.span.start().line,
+                        name.ident,
+                        method.sig.ident
+                    ));
+                }
+            }
+        }
+
+        let Item::Mod(module) = item else {
+            continue;
+        };
+        if cfg_test(&module.attrs) {
+            continue;
+        }
+        let Some((_, nested)) = &module.content else {
+            continue;
+        };
+        let nested_scope = format!("{scope}::{}", module.ident);
+        audit_inherent_ecs_methods(path, nested, &nested_scope, violations);
+    }
+}
+
+fn has_derive(attributes: &[Attribute], name: &str) -> bool {
+    attributes.iter().any(|attribute| {
+        if !attribute.path().is_ident("derive") {
+            return false;
+        }
+        let mut found = false;
+        let _ = attribute.parse_nested_meta(|meta| {
+            if meta
+                .path
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident == name)
+            {
+                found = true;
+            }
+            Ok(())
+        });
+        found
+    })
+}
+
+fn cfg_test(attributes: &[Attribute]) -> bool {
+    attributes.iter().any(|attribute| {
+        if !attribute.path().is_ident("cfg") {
+            return false;
+        }
+        let syn::Meta::List(list) = &attribute.meta else {
+            return false;
+        };
+        list.tokens
+            .to_string()
+            .split(|character: char| !character.is_alphanumeric() && character != '_')
+            .any(|segment| segment == "test")
+    })
+}
+
+fn test_source(path: &Path) -> bool {
+    path.components().any(|part| part.as_os_str() == "tests")
+        || path.file_stem().and_then(|name| name.to_str()) == Some("tests")
+}
+
+#[derive(Default)]
+struct EcsRuntimeType {
+    found: bool,
+}
+
+impl<'ast> Visit<'ast> for EcsRuntimeType {
+    fn visit_type_path(&mut self, path: &'ast TypePath) {
+        self.found |= path.path.segments.iter().any(|segment| {
+            matches!(
+                segment.ident.to_string().as_str(),
+                "Commands" | "EventWriter" | "MessageWriter" | "NonSendMut" | "ResMut" | "World"
+            )
+        });
+        visit::visit_type_path(self, path);
+    }
+
+    fn visit_type_reference(&mut self, reference: &'ast syn::TypeReference) {
+        if reference.mutability.is_some() {
+            let mut query = MutableEcsQuery::default();
+            query.visit_type(&reference.elem);
+            self.found |= query.found;
+        }
+        visit::visit_type_reference(self, reference);
+    }
+}
+
+#[derive(Default)]
+struct MutableEcsQuery {
+    found: bool,
+}
+
+impl<'ast> Visit<'ast> for MutableEcsQuery {
+    fn visit_type_path(&mut self, path: &'ast TypePath) {
+        self.found |= path
+            .path
+            .segments
+            .iter()
+            .any(|segment| matches!(segment.ident.to_string().as_str(), "Query" | "Single"));
+        visit::visit_type_path(self, path);
+    }
 }
 
 fn audit_import_placement(path: &Path, items: &[Item], scope: &str, violations: &mut Vec<String>) {

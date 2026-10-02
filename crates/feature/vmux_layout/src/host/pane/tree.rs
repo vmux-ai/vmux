@@ -1,3 +1,4 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_api::open_target::PaneDirection;
@@ -13,7 +14,8 @@ impl Plugin for TreePlugin {
     fn build(&self, app: &mut App) {
         app.register_persisted::<Pane>()
             .register_persisted::<PaneSplit>()
-            .register_type::<PaneSplitDirection>();
+            .register_type::<PaneSplitDirection>()
+            .add_systems(PostUpdate, sync_direction);
     }
 }
 
@@ -79,19 +81,27 @@ impl Pane {
         }
         entity
     }
+}
 
+#[derive(SystemParam)]
+pub struct PaneTree<'w, 's> {
+    commands: Commands<'w, 's>,
+}
+
+impl PaneTree<'_, '_> {
     pub(crate) fn split_leaf(
-        commands: &mut Commands,
+        &mut self,
         active: Entity,
         direction: PaneSplitDirection,
         existing_tabs: &[Entity],
         activate_new: bool,
     ) -> Entity {
-        Self::spawn_split(commands, active, direction, existing_tabs, activate_new).1
+        self.spawn_split(active, direction, existing_tabs, activate_new)
+            .1
     }
 
     pub fn split_or_extend(
-        commands: &mut Commands,
+        &mut self,
         anchor: Entity,
         direction: PaneSplitDirection,
         existing_tabs: &[Entity],
@@ -104,15 +114,16 @@ impl Pane {
             } else {
                 LastActivatedAt(0)
             };
-            return commands
+            return self
+                .commands
                 .spawn((Pane::bundle(), activity, ChildOf(anchor)))
                 .id();
         }
-        Self::split_leaf(commands, anchor, direction, existing_tabs, activate_new)
+        self.split_leaf(anchor, direction, existing_tabs, activate_new)
     }
 
     pub(crate) fn spawn_split(
-        commands: &mut Commands,
+        &mut self,
         active: Entity,
         direction: PaneSplitDirection,
         existing_tabs: &[Entity],
@@ -123,16 +134,18 @@ impl Pane {
         } else {
             LastActivatedAt(0)
         };
-        let existing = commands
+        let existing = self
+            .commands
             .spawn((Pane::bundle(), LastActivatedAt::now(), ChildOf(active)))
             .id();
-        let new = commands
+        let new = self
+            .commands
             .spawn((Pane::bundle(), new_activity, ChildOf(active)))
             .id();
         for tab in existing_tabs {
-            commands.entity(*tab).insert(ChildOf(existing));
+            self.commands.entity(*tab).insert(ChildOf(existing));
         }
-        commands
+        self.commands
             .entity(active)
             .insert(Pane::split_bundle(direction));
         (existing, new)
@@ -156,23 +169,20 @@ pub enum PaneSplitDirection {
 }
 
 impl PaneSplitDirection {
-    pub(crate) fn apply(self, world: &mut World, entity: Entity) {
-        if let Some(mut split) = world.get_mut::<PaneSplit>(entity) {
-            split.direction = self;
-        }
-        if let Some(mut node) = world.get_mut::<Node>(entity) {
-            node.flex_direction = self.flex_direction();
-            let gaps = self.gaps(crate::event::PANE_GAP_PX);
-            node.column_gap = gaps.column_gap;
-            node.row_gap = gaps.row_gap;
-        }
-    }
-
     fn flex_direction(self) -> FlexDirection {
         match self {
             Self::Row => FlexDirection::Row,
             Self::Column => FlexDirection::Column,
         }
+    }
+}
+
+fn sync_direction(mut panes: Query<(&PaneSplit, &mut Node), Changed<PaneSplit>>) {
+    for (split, mut node) in &mut panes {
+        node.flex_direction = split.direction.flex_direction();
+        let gaps = split.direction.gaps(crate::event::PANE_GAP_PX);
+        node.column_gap = gaps.column_gap;
+        node.row_gap = gaps.row_gap;
     }
 }
 
@@ -207,7 +217,7 @@ mod tests {
         let new = app
             .world_mut()
             .run_system_once(
-                move |mut commands: Commands,
+                move |mut tree: PaneTree,
                       children: Query<&Children, With<Pane>>,
                       stacks: Query<Entity, With<Stack>>| {
                     let existing_tabs: Vec<Entity> = children
@@ -219,13 +229,7 @@ mod tests {
                                 .collect()
                         })
                         .unwrap_or_default();
-                    Pane::split_leaf(
-                        &mut commands,
-                        active,
-                        PaneSplitDirection::Row,
-                        &existing_tabs,
-                        true,
-                    )
+                    tree.split_leaf(active, PaneSplitDirection::Row, &existing_tabs, true)
                 },
             )
             .unwrap();
@@ -254,24 +258,12 @@ mod tests {
 
         let (first, second) = app
             .world_mut()
-            .run_system_once(move |mut commands: Commands| {
+            .run_system_once(move |mut tree: PaneTree| {
                 let existing = [existing_stack];
-                let first = Pane::split_or_extend(
-                    &mut commands,
-                    anchor,
-                    PaneSplitDirection::Row,
-                    &existing,
-                    false,
-                    false,
-                );
-                let second = Pane::split_or_extend(
-                    &mut commands,
-                    anchor,
-                    PaneSplitDirection::Row,
-                    &existing,
-                    false,
-                    true,
-                );
+                let first =
+                    tree.split_or_extend(anchor, PaneSplitDirection::Row, &existing, false, false);
+                let second =
+                    tree.split_or_extend(anchor, PaneSplitDirection::Row, &existing, false, true);
                 (first, second)
             })
             .unwrap();

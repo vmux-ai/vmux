@@ -27,7 +27,7 @@ pub use open::{OpenBesideRequest, PanePlacement};
 use resize::ResizePlugin;
 pub use resize::{PaneDrag, PaneSize, PaneSplitGaps};
 use tree::TreePlugin;
-pub use tree::{Pane, PaneSplit, PaneSplitDirection};
+pub use tree::{Pane, PaneSplit, PaneSplitDirection, PaneTree};
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
 use vmux_command::{BindCommands, CommandInvocation, CommandRegistry, CommandRuntimePlugin};
 #[cfg(test)]
@@ -1900,13 +1900,11 @@ mod tests {
 
     fn spiral_test_sys(
         input: Res<SpiralInput>,
-        mut commands: Commands,
-        ctx: PanePlacement,
+        mut ctx: PanePlacement,
         mut out: ResMut<SpiralOut>,
     ) {
         let mut batch = std::collections::HashSet::new();
-        out.0 =
-            Some(ctx.resolve_spiral(&mut commands, input.anchor, &input.url, false, &mut batch));
+        out.0 = Some(ctx.resolve_spiral(input.anchor, &input.url, false, &mut batch));
     }
 
     fn spiral_app(anchor_url: &str, other: Option<(&str, u64, Vec2)>) -> (App, Entity) {
