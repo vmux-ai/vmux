@@ -5,6 +5,8 @@ use vmux_api::protocol::{AgentTurnEnded, ProcessId};
 use vmux_ecs::notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 use vmux_ecs::service::ServiceMessageSet;
 use vmux_ecs::team::{Agent, Profile};
+#[cfg(test)]
+use vmux_layout::active_pane::ActiveStack;
 use vmux_layout::stack::{ComputeFocusSet, FocusedStack, Stack};
 
 use crate::host::event::AgentRequestInput;

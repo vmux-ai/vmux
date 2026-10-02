@@ -166,9 +166,8 @@ fn start_scan(
     let previous = state.snapshot.clone();
     state.dirty = false;
     state.load_repositories = false;
-    let task = IoTaskPool::get().spawn(async move {
-        VaultSnapshot::scan(load_repositories, previous)
-    });
+    let task =
+        IoTaskPool::get().spawn(async move { VaultSnapshot::scan(load_repositories, previous) });
     commands.spawn(VaultScanTask { generation, task });
 }
 

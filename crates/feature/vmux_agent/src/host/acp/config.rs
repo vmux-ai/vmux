@@ -595,6 +595,7 @@ fn send_session_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::model_selection::AgentModelMemory;
 
     #[test]
     fn model_selection_updates_cached_state_before_response() {
@@ -792,7 +793,7 @@ mod tests {
             serde_json::from_slice(legacy).expect("parse");
         let mut models = AgentModelSelections::default();
         for (agent, entry) in saved {
-            models.by_agent.insert(agent, entry.memory());
+            models.by_agent.insert(agent, AgentModelMemory::from(entry));
         }
 
         assert_eq!(models.selected_for("claude"), "fable");
