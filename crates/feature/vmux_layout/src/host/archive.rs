@@ -118,37 +118,55 @@ fn stack_close(
 }
 
 fn capture_archived_pages(mut reader: MessageReader<PageArchiveRequest>, mut commands: Commands) {
-    for req in reader.read() {
-        spawn_archived_page(&mut commands, req, now_millis(), None);
+    for request in reader.read() {
+        if let Some(bundle) = ArchivedPageBundle::new(request, now_millis(), None) {
+            commands.queue(bundle);
+        }
     }
 }
 
-fn spawn_archived_page(
-    commands: &mut Commands,
-    req: &PageArchiveRequest,
-    closed_at: i64,
+struct ArchivedPageBundle {
+    page: ArchivedPage,
+    position: ArchivedPagePosition,
     tab: Option<ArchivedTabPage>,
-) {
-    if req.url.is_empty() && tab.is_none() {
-        return;
+}
+
+impl Command for ArchivedPageBundle {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        let mut entity = world.spawn((self.page, self.position));
+        if let Some(tab) = self.tab {
+            entity.insert(tab);
+        }
     }
-    let mut entity = commands.spawn((
-        ArchivedPage {
-            url: req.url.clone(),
-            title: req.title.clone(),
-            space_id: req.space_id.clone(),
-            closed_at,
-            launch: req.launch.clone(),
-            tab_index: req.tab_index,
-        },
-        ArchivedPagePosition {
-            leaf_pane_id: req.leaf_pane_id.clone(),
-            stack_index: req.stack_index,
-            pane_path: req.pane_path.clone(),
-        },
-    ));
-    if let Some(tab) = tab {
-        entity.insert(tab);
+}
+
+impl ArchivedPageBundle {
+    fn new(
+        request: &PageArchiveRequest,
+        closed_at: i64,
+        tab: Option<ArchivedTabPage>,
+    ) -> Option<Self> {
+        if request.url.is_empty() && tab.is_none() {
+            return None;
+        }
+        Some(Self {
+            page: ArchivedPage {
+                url: request.url.clone(),
+                title: request.title.clone(),
+                space_id: request.space_id.clone(),
+                closed_at,
+                launch: request.launch.clone(),
+                tab_index: request.tab_index,
+            },
+            position: ArchivedPagePosition {
+                leaf_pane_id: request.leaf_pane_id.clone(),
+                stack_index: request.stack_index,
+                pane_path: request.pane_path.clone(),
+            },
+            tab,
+        })
     }
 }
 
@@ -421,8 +439,7 @@ fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, command
             stack_index,
             pane_path,
         };
-        spawn_archived_page(
-            commands,
+        if let Some(bundle) = ArchivedPageBundle::new(
             &request,
             closed_at,
             Some(ArchivedTabPage {
@@ -431,7 +448,9 @@ fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, command
                 tab_startup_dir: tab.startup_dir.clone(),
                 active: active_stack == Some(stack),
             }),
-        );
+        ) {
+            commands.queue(bundle);
+        }
     }
 }
 
@@ -506,6 +525,17 @@ impl ReopenLayout<'_, '_> {
             origin_matches: origin_space == Some(space),
             window,
         })
+    }
+
+    fn pane_in_space(&self, pane: Entity, space: Entity) -> bool {
+        let mut current = pane;
+        while let Ok(parent) = self.child_of.get(current) {
+            if parent.parent() == space {
+                return true;
+            }
+            current = parent.parent();
+        }
+        false
     }
 }
 
@@ -900,7 +930,7 @@ fn resolve_reopen_stack(
             .iter()
             .find(|(e, id)| id.0 == pos.leaf_pane_id && layout.leaf_panes.contains(*e))
             .map(|(e, _)| e)
-            .filter(|&leaf| pane_in_space(leaf, space, &layout.child_of))
+            .filter(|&leaf| layout.pane_in_space(leaf, space))
         {
             return (
                 spawn_stack_in_leaf(leaf, pos.stack_index, layout, commands),
@@ -920,18 +950,6 @@ fn resolve_reopen_stack(
         commands.entity(space).insert_children(idx, &[scaffold.tab]);
     }
     (scaffold.stack, scaffold.tab)
-}
-
-fn pane_in_space(pane: Entity, space: Entity, child_of: &Query<&ChildOf>) -> bool {
-    let mut cur = pane;
-    while let Ok(rel) = child_of.get(cur) {
-        let parent = rel.parent();
-        if parent == space {
-            return true;
-        }
-        cur = parent;
-    }
-    false
 }
 
 fn spawn_stack_in_leaf(
@@ -979,7 +997,7 @@ fn reattach_along_path(
         .iter()
         .find(|(_, id)| id.0 == root_step.split_id)
         .map(|(e, _)| e)?;
-    if !pane_in_space(root, space, &layout.child_of) {
+    if !layout.pane_in_space(root, space) {
         return None;
     }
 

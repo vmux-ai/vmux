@@ -231,6 +231,17 @@ impl GitController {
         })
     }
 
+    fn branch_log_input(
+        &self,
+        webview: Entity,
+        state: &GitState,
+    ) -> Option<UiInput<GitBranchLogRequest>> {
+        Some(UiInput {
+            webview,
+            payload: self.branch_log_request(state)?,
+        })
+    }
+
     fn move_selection(
         &mut self,
         direction: SelectionDirection,
@@ -380,7 +391,9 @@ fn dispatch_git_key(
         };
         if let Some(effect) = controller.move_selection(direction, repository) {
             commands.trigger(UiStateWrite::<GitUiState>::from_event(webview, &effect));
-            request_branch_log(controller, webview, state, commands);
+            if let Some(input) = controller.branch_log_input(webview, state) {
+                commands.trigger(input);
+            }
         }
         return;
     }
@@ -400,12 +413,16 @@ fn dispatch_git_key(
             controller.state.focused_panel.next(request.modifiers.shift),
             state.repository(),
         );
-        request_branch_log(controller, webview, state, commands);
+        if let Some(input) = controller.branch_log_input(webview, state) {
+            commands.trigger(input);
+        }
         return;
     }
     if let Some(panel) = GitPanel::from_key(&request.key) {
         controller.select_panel(panel, state.repository());
-        request_branch_log(controller, webview, state, commands);
+        if let Some(input) = controller.branch_log_input(webview, state) {
+            commands.trigger(input);
+        }
         return;
     }
     let Some(repository) = state.repository() else {
@@ -601,18 +618,6 @@ fn dispatch_git_key(
     }
 }
 
-fn request_branch_log(
-    controller: &GitController,
-    webview: Entity,
-    state: &GitState,
-    commands: &mut Commands,
-) {
-    let Some(payload) = controller.branch_log_request(state) else {
-        return;
-    };
-    commands.trigger(UiInput { webview, payload });
-}
-
 impl GitOperationEligibility {
     fn for_controller(
         controller: &GitPageControllerState,
@@ -800,7 +805,9 @@ fn panel_select_request(
         return;
     };
     controller.select_panel(trigger.event().payload.panel, state.repository());
-    request_branch_log(&controller, webview, state, &mut commands);
+    if let Some(input) = controller.branch_log_input(webview, state) {
+        commands.trigger(input);
+    }
 }
 
 fn shortcut_help_request(
@@ -839,7 +846,9 @@ fn select_branch_collection(
         return;
     };
     controller.select_branch_collection(trigger.event().payload.collection, repository);
-    request_branch_log(&controller, webview, state, &mut commands);
+    if let Some(input) = controller.branch_log_input(webview, state) {
+        commands.trigger(input);
+    }
 }
 
 fn branch_select_request(
@@ -855,7 +864,9 @@ fn branch_select_request(
         return;
     };
     if controller.select_branch(&trigger.event().payload.reference, repository) {
-        request_branch_log(&controller, webview, state, &mut commands);
+        if let Some(input) = controller.branch_log_input(webview, state) {
+            commands.trigger(input);
+        }
     }
 }
 

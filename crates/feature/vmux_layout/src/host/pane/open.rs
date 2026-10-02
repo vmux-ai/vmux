@@ -66,6 +66,40 @@ struct PaneOpenResolver<'w, 's> {
     tab_q: Query<'w, 's, Entity, With<Tab>>,
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct PaneOpenWriter<'w, 's> {
+    commands: Commands<'w, 's>,
+    requests: MessageWriter<'w, PageOpenRequest>,
+    counter: Single<'w, 's, &'static mut SpawnCounter>,
+    sequences: Query<'w, 's, &'static SpawnSeq>,
+}
+
+impl PaneOpenWriter<'_, '_> {
+    fn touch(&mut self, pane: Entity) -> SpawnSeq {
+        let max_existing = self
+            .sequences
+            .iter()
+            .map(|sequence| sequence.0)
+            .max()
+            .unwrap_or(0);
+        if self.counter.0 <= max_existing {
+            self.counter.0 = max_existing;
+        }
+        self.counter.0 += 1;
+        let sequence = SpawnSeq(self.counter.0);
+        self.commands.entity(pane).insert(sequence);
+        sequence
+    }
+
+    fn open(&mut self, stack: Entity, url: String, request_id: Option<[u8; 16]>) {
+        self.requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(stack),
+            url,
+            request_id,
+        });
+    }
+}
+
 fn handle_beside_requests(
     mut reader: MessageReader<OpenBesideRequest>,
     pane_children: Query<&Children, With<Pane>>,
@@ -74,11 +108,10 @@ fn handle_beside_requests(
     child_of_q: Query<&ChildOf>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_hierarchy: PaneHierarchy,
+    focus: LayoutFocus,
     resolver: PaneOpenResolver,
     mut tree: PaneTree,
-    mut commands: Commands,
-    mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut spawn_counter: Single<&mut SpawnCounter>,
+    mut writer: PaneOpenWriter,
 ) {
     let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     let mut spawn_seq_overrides: std::collections::HashMap<Entity, u64> =
@@ -106,14 +139,10 @@ fn handle_beside_requests(
             if let Ok(meta) = resolver.page_q.get(hit.stack)
                 && meta.url != req.url
             {
-                page_open_requests.write(PageOpenRequest {
-                    target: PageOpenTarget::Stack(hit.stack),
-                    url: req.url.clone(),
-                    request_id: None,
-                });
+                writer.open(hit.stack, req.url.clone(), None);
             }
             if req.focus {
-                focus_reuse_hit(&mut commands, &child_of_q, hit);
+                focus_reuse_hit(&mut writer.commands, &child_of_q, hit);
             }
             continue;
         }
@@ -122,80 +151,66 @@ fn handle_beside_requests(
         {
             let (pending_url, stack) = &mut pending_open_stacks[index];
             if *pending_url != req.url {
-                page_open_requests.write(PageOpenRequest {
-                    target: PageOpenTarget::Stack(*stack),
-                    url: req.url.clone(),
-                    request_id: None,
-                });
+                writer.open(*stack, req.url.clone(), None);
                 *pending_url = req.url.clone();
             }
             if req.focus {
-                focus_stack_in_layout(&mut commands, &child_of_q, &resolver.tab_q, *stack);
+                focus_stack_in_layout(&mut writer.commands, &child_of_q, &focus, *stack);
             }
             continue;
         }
 
         if let Some(direction) = req.direction {
-            let (target_pane, pending_size, refresh_spawn_seq) = match find_sibling_pane(
-                req.pane,
-                &direction,
-                &child_of_q,
-                &split_dir_q,
-                &pane_hierarchy,
-            ) {
-                Some(sibling) => (sibling, pane_size(sibling, &resolver.node_q), false),
-                None => {
-                    let existing_tabs = stack_children_for_split(
-                        req.pane,
-                        &pane_children,
-                        &tab_filter,
-                        &pending_leaf_stacks,
-                    );
-                    let old_leaf_info = leaf_info_for_pane(
-                        req.pane,
-                        &pane_children,
-                        &resolver.seq_q,
-                        &resolver.node_q,
-                        &resolver.page_q,
-                        &spawn_seq_overrides,
-                    );
-                    let split_dir = PaneSplitDirection::from(direction);
-                    let already_split =
-                        !split_this_batch.insert(req.pane) || split_dir_q.contains(req.pane);
-                    let split = split_or_extend_for_batch(
-                        &mut tree,
-                        req.pane,
-                        split_dir,
-                        &existing_tabs,
-                        req.focus,
-                        already_split,
-                        old_leaf_info,
-                        &mut pending_leaf_infos,
-                        &mut pending_leaf_stacks,
-                        &mut retired_leaf_panes,
-                    );
-                    stamp_split_panes_for_batch(
-                        &mut commands,
-                        &mut spawn_counter,
-                        &resolver.seq_q,
-                        &mut spawn_seq_overrides,
-                        &mut pending_leaf_infos,
-                        split.holder,
-                        split.target,
-                    );
-                    let pending_size = split
-                        .target_size
-                        .unwrap_or_else(|| pane_size(split.target, &resolver.node_q));
-                    (split.target, pending_size, false)
-                }
-            };
+            let (target_pane, pending_size, refresh_spawn_seq) =
+                match pane_hierarchy.sibling(req.pane, direction) {
+                    Some(sibling) => (sibling, pane_size(sibling, &resolver.node_q), false),
+                    None => {
+                        let existing_tabs = stack_children_for_split(
+                            req.pane,
+                            &pane_children,
+                            &tab_filter,
+                            &pending_leaf_stacks,
+                        );
+                        let old_leaf_info = leaf_info_for_pane(
+                            req.pane,
+                            &pane_children,
+                            &resolver.seq_q,
+                            &resolver.node_q,
+                            &resolver.page_q,
+                            &spawn_seq_overrides,
+                        );
+                        let split_dir = PaneSplitDirection::from(direction);
+                        let already_split =
+                            !split_this_batch.insert(req.pane) || split_dir_q.contains(req.pane);
+                        let split = split_or_extend_for_batch(
+                            &mut tree,
+                            req.pane,
+                            split_dir,
+                            &existing_tabs,
+                            req.focus,
+                            already_split,
+                            old_leaf_info,
+                            &mut pending_leaf_infos,
+                            &mut pending_leaf_stacks,
+                            &mut retired_leaf_panes,
+                        );
+                        stamp_split_panes_for_batch(
+                            &mut writer,
+                            &mut spawn_seq_overrides,
+                            &mut pending_leaf_infos,
+                            split.holder,
+                            split.target,
+                        );
+                        let pending_size = split
+                            .target_size
+                            .unwrap_or_else(|| pane_size(split.target, &resolver.node_q));
+                        (split.target, pending_size, false)
+                    }
+                };
             let stack = spawn_beside_stack(
                 target_pane,
                 req,
-                &mut commands,
-                &mut page_open_requests,
-                &mut spawn_counter,
-                &resolver.seq_q,
+                &mut writer,
                 &mut spawn_seq_overrides,
                 &mut pending_leaf_infos,
                 &mut pending_leaf_stacks,
@@ -206,14 +221,11 @@ fn handle_beside_requests(
             continue;
         }
 
-        let Some(tab) = tab_of_pane(req.pane, &child_of_q, &resolver.tab_q) else {
+        let Some(tab) = focus.tab_of(req.pane) else {
             let stack = spawn_beside_stack(
                 req.pane,
                 req,
-                &mut commands,
-                &mut page_open_requests,
-                &mut spawn_counter,
-                &resolver.seq_q,
+                &mut writer,
                 &mut spawn_seq_overrides,
                 &mut pending_leaf_infos,
                 &mut pending_leaf_stacks,
@@ -223,7 +235,7 @@ fn handle_beside_requests(
             pending_open_stacks.push((req.url.clone(), stack));
             continue;
         };
-        let mut leaves = collect_leaf_infos(
+        let mut leaves = PanePlacement::collect_leaf_infos(
             tab,
             &resolver.all_children,
             &leaf_panes,
@@ -238,7 +250,7 @@ fn handle_beside_requests(
 
         match Placement::resolve(&req.url, reuse, &leaves, req.pane) {
             Placement::Focus { tab, stack } => {
-                focus_reuse_hit(&mut commands, &child_of_q, ReuseHit { tab, stack });
+                focus_reuse_hit(&mut writer.commands, &child_of_q, ReuseHit { tab, stack });
             }
             Placement::AddTab { pane } => {
                 let refresh_spawn_seq = matches!(
@@ -248,10 +260,7 @@ fn handle_beside_requests(
                 let stack = spawn_beside_stack(
                     pane,
                     req,
-                    &mut commands,
-                    &mut page_open_requests,
-                    &mut spawn_counter,
-                    &resolver.seq_q,
+                    &mut writer,
                     &mut spawn_seq_overrides,
                     &mut pending_leaf_infos,
                     &mut pending_leaf_stacks,
@@ -283,9 +292,7 @@ fn handle_beside_requests(
                     &mut retired_leaf_panes,
                 );
                 stamp_split_panes_for_batch(
-                    &mut commands,
-                    &mut spawn_counter,
-                    &resolver.seq_q,
+                    &mut writer,
                     &mut spawn_seq_overrides,
                     &mut pending_leaf_infos,
                     split.holder,
@@ -297,10 +304,7 @@ fn handle_beside_requests(
                 let stack = spawn_beside_stack(
                     split.target,
                     req,
-                    &mut commands,
-                    &mut page_open_requests,
-                    &mut spawn_counter,
-                    &resolver.seq_q,
+                    &mut writer,
                     &mut spawn_seq_overrides,
                     &mut pending_leaf_infos,
                     &mut pending_leaf_stacks,
@@ -364,16 +368,14 @@ fn split_or_extend_for_batch(
 
 #[allow(clippy::too_many_arguments)]
 fn stamp_split_panes_for_batch(
-    commands: &mut Commands,
-    spawn_counter: &mut SpawnCounter,
-    seq_q: &Query<&SpawnSeq>,
+    writer: &mut PaneOpenWriter,
     spawn_seq_overrides: &mut std::collections::HashMap<Entity, u64>,
     pending_leaf_infos: &mut std::collections::HashMap<Entity, LeafInfo>,
     holder: Option<Entity>,
     target: Entity,
 ) {
     let mut stamp = |pane| {
-        let seq = touch_pane_spawn_seq(pane, commands, spawn_counter, seq_q);
+        let seq = writer.touch(pane);
         spawn_seq_overrides.insert(pane, seq.0);
         if let Some(info) = pending_leaf_infos.get_mut(&pane) {
             info.spawn_seq = seq.0;
@@ -398,33 +400,17 @@ fn focus_reuse_hit(commands: &mut Commands, child_of_q: &Query<&ChildOf>, hit: R
 fn focus_stack_in_layout(
     commands: &mut Commands,
     child_of_q: &Query<&ChildOf>,
-    tab_q: &Query<Entity, With<Tab>>,
+    focus: &LayoutFocus,
     stack: Entity,
 ) {
     if let Ok(co) = child_of_q.get(stack) {
         let pane = co.get();
         commands.entity(pane).insert(LastActivatedAt::now());
-        if let Some(tab) = tab_of_pane(pane, child_of_q, tab_q) {
+        if let Some(tab) = focus.tab_of(pane) {
             commands.entity(tab).insert(LastActivatedAt::now());
         }
     }
     commands.entity(stack).insert(LastActivatedAt::now());
-}
-
-fn touch_pane_spawn_seq(
-    target_pane: Entity,
-    commands: &mut Commands,
-    spawn_counter: &mut SpawnCounter,
-    seq_q: &Query<&SpawnSeq>,
-) -> SpawnSeq {
-    let max_existing = seq_q.iter().map(|s| s.0).max().unwrap_or(0);
-    if spawn_counter.0 <= max_existing {
-        spawn_counter.0 = max_existing;
-    }
-    spawn_counter.0 += 1;
-    let seq = SpawnSeq(spawn_counter.0);
-    commands.entity(target_pane).insert(seq);
-    seq
 }
 
 fn current_pane_spawn_seq(
@@ -444,10 +430,7 @@ fn current_pane_spawn_seq(
 fn spawn_beside_stack(
     target_pane: Entity,
     req: &OpenBesideRequest,
-    commands: &mut Commands,
-    page_open_requests: &mut MessageWriter<PageOpenRequest>,
-    spawn_counter: &mut SpawnCounter,
-    seq_q: &Query<&SpawnSeq>,
+    writer: &mut PaneOpenWriter,
     spawn_seq_overrides: &mut std::collections::HashMap<Entity, u64>,
     pending_leaf_infos: &mut std::collections::HashMap<Entity, LeafInfo>,
     pending_leaf_stacks: &mut std::collections::HashMap<Entity, Vec<Entity>>,
@@ -455,11 +438,16 @@ fn spawn_beside_stack(
     refresh_spawn_seq: bool,
 ) -> Entity {
     let spawn_seq = if refresh_spawn_seq {
-        let seq = touch_pane_spawn_seq(target_pane, commands, spawn_counter, seq_q);
+        let seq = writer.touch(target_pane);
         spawn_seq_overrides.insert(target_pane, seq.0);
         seq.0
     } else {
-        current_pane_spawn_seq(target_pane, seq_q, spawn_seq_overrides, pending_leaf_infos)
+        current_pane_spawn_seq(
+            target_pane,
+            &writer.sequences,
+            spawn_seq_overrides,
+            pending_leaf_infos,
+        )
     };
     record_pending_leaf_info(
         pending_leaf_infos,
@@ -473,10 +461,11 @@ fn spawn_beside_stack(
     } else {
         LastActivatedAt(0)
     };
-    let new_stack = commands
+    let new_stack = writer
+        .commands
         .spawn((Stack::bundle(), stack_ts, ChildOf(target_pane)))
         .id();
-    commands.entity(new_stack).insert(PageMetadata {
+    writer.commands.entity(new_stack).insert(PageMetadata {
         url: req.url.clone(),
         ..default()
     });
@@ -484,12 +473,11 @@ fn spawn_beside_stack(
         .entry(target_pane)
         .or_default()
         .push(new_stack);
-    open_stack(
+    writer.open(
         new_stack,
         req.url.clone(),
         (!req.url.starts_with("file:") && VmuxRoute::parse(&req.url).is_none())
             .then_some(req.request_id),
-        page_open_requests,
     );
     new_stack
 }
@@ -602,68 +590,6 @@ fn leaf_info_for_pane(
     })
 }
 
-fn tab_of_pane(
-    pane: Entity,
-    child_of_q: &Query<&ChildOf>,
-    tab_q: &Query<Entity, With<Tab>>,
-) -> Option<Entity> {
-    let mut cur = pane;
-    for _ in 0..32 {
-        if tab_q.contains(cur) {
-            return Some(cur);
-        }
-        cur = child_of_q.get(cur).ok()?.get();
-    }
-    None
-}
-
-fn collect_leaf_infos(
-    tab: Entity,
-    all_children: &Query<&Children>,
-    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_children: &Query<&Children, With<Pane>>,
-    seq_q: &Query<&SpawnSeq>,
-    node_q: &Query<&ComputedNode>,
-    page_q: &Query<&PageMetadata, With<Stack>>,
-    spawn_seq_overrides: &std::collections::HashMap<Entity, u64>,
-) -> Vec<LeafInfo> {
-    let mut panes = Vec::new();
-    let mut pending = vec![tab];
-    while let Some(entity) = pending.pop() {
-        if leaf_panes.contains(entity) {
-            panes.push(entity);
-        }
-        if let Ok(children) = all_children.get(entity) {
-            pending.extend(children.iter());
-        }
-    }
-    panes
-        .into_iter()
-        .map(|pane| {
-            let kinds = pane_children
-                .get(pane)
-                .map(|c| {
-                    unique_page_kinds(
-                        c.iter()
-                            .filter_map(|child| page_q.get(child).ok())
-                            .map(|p| p.url.as_str()),
-                    )
-                })
-                .unwrap_or_default();
-            LeafInfo {
-                pane,
-                kinds,
-                spawn_seq: spawn_seq_overrides
-                    .get(&pane)
-                    .copied()
-                    .or_else(|| seq_q.get(pane).ok().map(|s| s.0))
-                    .unwrap_or(0),
-                size: node_q.get(pane).map(|n| n.size).unwrap_or(Vec2::ZERO),
-            }
-        })
-        .collect()
-}
-
 fn unique_page_kinds<'a>(urls: impl Iterator<Item = &'a str>) -> Vec<PageKind> {
     let mut kinds = Vec::new();
     for url in urls {
@@ -751,6 +677,65 @@ pub struct PanePlacement<'w, 's> {
 }
 
 impl PanePlacement<'_, '_> {
+    fn collect_leaf_infos(
+        tab: Entity,
+        all_children: &Query<&Children>,
+        leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+        pane_children: &Query<&Children, With<Pane>>,
+        seq_q: &Query<&SpawnSeq>,
+        node_q: &Query<&ComputedNode>,
+        page_q: &Query<&PageMetadata, With<Stack>>,
+        spawn_seq_overrides: &std::collections::HashMap<Entity, u64>,
+    ) -> Vec<LeafInfo> {
+        let mut panes = Vec::new();
+        let mut pending = vec![tab];
+        while let Some(entity) = pending.pop() {
+            if leaf_panes.contains(entity) {
+                panes.push(entity);
+            }
+            if let Ok(children) = all_children.get(entity) {
+                pending.extend(children.iter());
+            }
+        }
+        panes
+            .into_iter()
+            .map(|pane| {
+                let kinds = pane_children
+                    .get(pane)
+                    .map(|children| {
+                        unique_page_kinds(
+                            children
+                                .iter()
+                                .filter_map(|child| page_q.get(child).ok())
+                                .map(|page| page.url.as_str()),
+                        )
+                    })
+                    .unwrap_or_default();
+                LeafInfo {
+                    pane,
+                    kinds,
+                    spawn_seq: spawn_seq_overrides
+                        .get(&pane)
+                        .copied()
+                        .or_else(|| seq_q.get(pane).ok().map(|sequence| sequence.0))
+                        .unwrap_or(0),
+                    size: node_q.get(pane).map(|node| node.size).unwrap_or(Vec2::ZERO),
+                }
+            })
+            .collect()
+    }
+
+    fn tab_of(&self, entity: Entity) -> Option<Entity> {
+        let mut current = entity;
+        for _ in 0..32 {
+            if self.tab_q.contains(current) {
+                return Some(current);
+            }
+            current = self.child_of_q.get(current).ok()?.parent();
+        }
+        None
+    }
+
     pub fn resolve_spiral(
         &mut self,
         anchor_pane: Entity,
@@ -758,10 +743,10 @@ impl PanePlacement<'_, '_> {
         focus: bool,
         split_batch: &mut std::collections::HashSet<Entity>,
     ) -> Entity {
-        let Some(tab) = tab_of_pane(anchor_pane, &self.child_of_q, &self.tab_q) else {
+        let Some(tab) = self.tab_of(anchor_pane) else {
             return anchor_pane;
         };
-        let leaves = collect_leaf_infos(
+        let leaves = Self::collect_leaf_infos(
             tab,
             &self.all_children,
             &self.leaf_panes,
@@ -794,10 +779,10 @@ impl PanePlacement<'_, '_> {
     }
 
     pub fn split_anchor(&self, anchor_pane: Entity) -> Entity {
-        let Some(tab) = tab_of_pane(anchor_pane, &self.child_of_q, &self.tab_q) else {
+        let Some(tab) = self.tab_of(anchor_pane) else {
             return anchor_pane;
         };
-        let leaves = collect_leaf_infos(
+        let leaves = Self::collect_leaf_infos(
             tab,
             &self.all_children,
             &self.leaf_panes,
@@ -811,57 +796,11 @@ impl PanePlacement<'_, '_> {
     }
 }
 
-fn is_after_direction(direction: &PaneDirection) -> bool {
-    matches!(direction, PaneDirection::Right | PaneDirection::Bottom)
-}
-
-fn find_sibling_pane(
-    active: Entity,
-    direction: &PaneDirection,
-    child_of_q: &Query<&ChildOf>,
-    split_dir_q: &Query<&PaneSplit>,
-    panes: &PaneHierarchy,
-) -> Option<Entity> {
-    let target_split = PaneSplitDirection::from(*direction);
-    let after = is_after_direction(direction);
-
-    let mut cur = active;
-    for _ in 0..20 {
-        let Ok(co) = child_of_q.get(cur) else {
-            return None;
-        };
-        let parent = co.get();
-        let Ok(ps) = split_dir_q.get(parent) else {
-            cur = parent;
-            continue;
-        };
-        if ps.direction != target_split {
-            cur = parent;
-            continue;
-        }
-        let Ok(children) = panes.children.get(parent) else {
-            cur = parent;
-            continue;
-        };
-        let sibs: Vec<Entity> = children.iter().collect();
-        let Some(idx) = sibs.iter().position(|&e| e == cur) else {
-            cur = parent;
-            continue;
-        };
-        let sibling_idx = if after { idx + 1 } else { idx.wrapping_sub(1) };
-        let sibling = sibs.get(sibling_idx).copied()?;
-        return Some(panes.first_leaf(sibling));
-    }
-    None
-}
-
 fn handle_in(
     mut reader: MessageReader<OpenRequest>,
     active_tab_param: ActiveTabParam,
     focus: LayoutFocus,
     pane_children: Query<&Children, With<Pane>>,
-    child_of_q: Query<&ChildOf>,
-    split_dir_q: Query<&PaneSplit>,
     tab_filter: Query<Entity, With<Stack>>,
     pane_stacks: PaneStacks,
     focused_space: crate::space::FocusedSpace,
@@ -891,25 +830,17 @@ fn handle_in(
         let split_dir = PaneSplitDirection::from(*direction);
 
         let (target_pane, was_split) = match target {
-            PaneTarget::Existing => {
-                match find_sibling_pane(
-                    active,
-                    direction,
-                    &child_of_q,
-                    &split_dir_q,
-                    &pane_hierarchy,
-                ) {
-                    Some(sibling) => (sibling, false),
-                    None => {
-                        let existing_tabs: Vec<Entity> = pane_children
-                            .get(active)
-                            .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
-                            .unwrap_or_default();
-                        let p2 = tree.split_leaf(active, split_dir, &existing_tabs, true);
-                        (p2, true)
-                    }
+            PaneTarget::Existing => match pane_hierarchy.sibling(active, *direction) {
+                Some(sibling) => (sibling, false),
+                None => {
+                    let existing_tabs: Vec<Entity> = pane_children
+                        .get(active)
+                        .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
+                        .unwrap_or_default();
+                    let p2 = tree.split_leaf(active, split_dir, &existing_tabs, true);
+                    (p2, true)
                 }
-            }
+            },
             PaneTarget::NewSplit => {
                 let existing_tabs: Vec<Entity> = pane_children
                     .get(active)
@@ -928,7 +859,11 @@ fn handle_in(
                     ChildOf(target_pane),
                 ))
                 .id();
-            open_stack(new_stack, resolved, None, &mut page_open_requests);
+            page_open_requests.write(PageOpenRequest {
+                target: PageOpenTarget::Stack(new_stack),
+                url: resolved,
+                request_id: None,
+            });
         } else {
             match mode {
                 PaneOpenMode::InPlace => {
@@ -936,7 +871,11 @@ fn handle_in(
                         .stack(target_pane)
                         .or_else(|| pane_stacks.first(target_pane));
                     if let Some(stack) = active_stack {
-                        open_stack(stack, resolved, None, &mut page_open_requests);
+                        page_open_requests.write(PageOpenRequest {
+                            target: PageOpenTarget::Stack(stack),
+                            url: resolved,
+                            request_id: None,
+                        });
                     }
                 }
                 PaneOpenMode::NewStack => {
@@ -947,23 +886,14 @@ fn handle_in(
                             ChildOf(target_pane),
                         ))
                         .id();
-                    open_stack(new_stack, resolved, None, &mut page_open_requests);
+                    page_open_requests.write(PageOpenRequest {
+                        target: PageOpenTarget::Stack(new_stack),
+                        url: resolved,
+                        request_id: None,
+                    });
                 }
             }
         }
         commands.entity(target_pane).insert(PendingCursorWarp);
     }
-}
-
-fn open_stack(
-    stack: Entity,
-    url: String,
-    request_id: Option<[u8; 16]>,
-    page_open_requests: &mut MessageWriter<PageOpenRequest>,
-) {
-    page_open_requests.write(PageOpenRequest {
-        target: PageOpenTarget::Stack(stack),
-        url,
-        request_id,
-    });
 }

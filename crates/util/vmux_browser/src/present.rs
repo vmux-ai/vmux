@@ -95,6 +95,35 @@ struct WindowFrameQueries<'w, 's> {
     all_children: Query<'w, 's, &'static Children>,
 }
 
+impl WindowFrameQueries<'_, '_> {
+    fn tab_ancestor(&self, start: Entity) -> Option<Entity> {
+        let mut entity = start;
+        loop {
+            if self.tabs.contains(entity) {
+                return Some(entity);
+            }
+            entity = self.child_of.get(entity).ok()?.get();
+        }
+    }
+
+    fn active_tab(&self, tab: Entity) -> Option<Entity> {
+        let space = self.child_of.get(tab).ok()?.get();
+        let children = self.all_children.get(space).ok()?;
+        vmux_layout::stack::active_among(
+            children
+                .iter()
+                .filter_map(|entity| self.tabs.get(entity).ok()),
+        )
+    }
+
+    fn tab_is_visible(&self, tab: Option<Entity>) -> bool {
+        let Some(tab) = tab else {
+            return true;
+        };
+        active_candidate(self.active_tab(tab), tab)
+    }
+}
+
 fn sync_keyboard_target(
     focus: vmux_layout::stack::FocusedStack,
     child_of_q: Query<&ChildOf>,
@@ -154,23 +183,6 @@ fn sync_keyboard_target(
     }
 }
 
-fn tab_ancestor(
-    start: Entity,
-    child_of_q: &Query<&ChildOf>,
-    tabs_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
-) -> Option<Entity> {
-    let mut e = start;
-    loop {
-        if tabs_q.contains(e) {
-            return Some(e);
-        }
-        match child_of_q.get(e) {
-            Ok(co) => e = co.get(),
-            Err(_) => return None,
-        }
-    }
-}
-
 fn sync_children_to_ui(
     mut browser_q: Query<
         (
@@ -191,12 +203,7 @@ fn sync_children_to_ui(
         ),
         With<Browser>,
     >,
-    hierarchy: WindowHierarchy,
-    parents: Query<&ChildOf>,
-    layout_focus: LayoutFocus,
-    pane_rect: Query<&ComputedNode, With<Pane>>,
-    all_children: Query<&Children>,
-    tabs_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    queries: WindowFrameQueries,
     roots: Query<(Entity, &HostWindow, &ComputedNode), With<VmuxWindow>>,
 ) {
     for (
@@ -216,7 +223,7 @@ fn sync_children_to_ui(
         is_windowed,
     ) in browser_q.iter_mut()
     {
-        let Some(host_window) = hierarchy.get(browser) else {
+        let Some(host_window) = queries.hierarchy.get(browser) else {
             continue;
         };
         let Some((glass_entity, _, glass_node)) =
@@ -227,8 +234,12 @@ fn sync_children_to_ui(
         let glass_rect = *glass_node;
         let glass_size_px = glass_rect.padding_box();
         let parent = child_of.get();
-        let pane_entity = parents.get(parent).map(|co| co.get()).unwrap_or(parent);
-        let computed = match pane_rect.get(pane_entity) {
+        let pane_entity = queries
+            .child_of
+            .get(parent)
+            .map(|co| co.get())
+            .unwrap_or(parent);
+        let computed = match queries.pane_rect.get(pane_entity) {
             Ok(cn) => cn,
             Err(_) => self_computed,
         };
@@ -241,10 +252,8 @@ fn sync_children_to_ui(
 
         let under_inactive_tab = parent != glass_entity
             && !is_cef_ui
-            && match tab_ancestor(parent, &parents, &tabs_q) {
-                Some(tab) => {
-                    active_tab_in_space(tab, &parents, &all_children, &tabs_q) != Some(tab)
-                }
+            && match queries.tab_ancestor(parent) {
+                Some(tab) => queries.active_tab(tab) != Some(tab),
                 None => false,
             };
 
@@ -270,7 +279,7 @@ fn sync_children_to_ui(
         }
 
         let is_active_stack = if parent != glass_entity && !is_cef_ui {
-            active_candidate(layout_focus.stack(pane_entity), parent)
+            active_candidate(queries.focus.stack(pane_entity), parent)
         } else {
             true
         };
@@ -327,31 +336,8 @@ fn sync_children_to_ui(
     }
 }
 
-fn active_tab_in_space(
-    tab: Entity,
-    child_of: &Query<&ChildOf>,
-    all_children: &Query<&Children>,
-    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
-) -> Option<Entity> {
-    let space = child_of.get(tab).ok()?.get();
-    let children = all_children.get(space).ok()?;
-    vmux_layout::stack::active_among(children.iter().filter_map(|entity| tabs.get(entity).ok()))
-}
-
 fn active_candidate(active: Option<Entity>, candidate: Entity) -> bool {
     active.is_none_or(|active| active == candidate)
-}
-
-fn active_tab_is_visible(
-    tab: Option<Entity>,
-    child_of: &Query<&ChildOf>,
-    all_children: &Query<&Children>,
-    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
-) -> bool {
-    let Some(tab) = tab else {
-        return true;
-    };
-    active_candidate(active_tab_in_space(tab, child_of, all_children, tabs), tab)
 }
 
 struct AgentRingColor;
@@ -446,9 +432,8 @@ fn sync_windowed_frames(
             .map(|co| co.get())
             .unwrap_or(parent);
         let computed = queries.pane_rect.get(pane_entity).unwrap_or(self_computed);
-        let tab = tab_ancestor(parent, &queries.child_of, &queries.tabs);
-        let tab_active =
-            active_tab_is_visible(tab, &queries.child_of, &queries.all_children, &queries.tabs);
+        let tab = queries.tab_ancestor(parent);
+        let tab_active = queries.tab_is_visible(tab);
         let stack_active = active_candidate(queries.focus.stack(pane_entity), parent);
         let focused_stack = focus.stack == Some(parent);
         let renderable = computed.size.x > 0.0 && computed.size.y > 0.0;

@@ -3,7 +3,7 @@ use crate::event::TabDropPlacement;
 use crate::event::{TabActivateRequest, TabCloseRequest, TabCreateRequest, TabReorderRequest};
 use crate::{
     TabLayoutSpawnContent, TabLayoutSpawnRequest,
-    host::swap::{find_kind_index, move_sibling, resolve_next, resolve_prev, swap_siblings},
+    host::swap::{SiblingOrder, find_kind_index, resolve_next, resolve_prev},
 };
 #[cfg(test)]
 use bevy::window::PrimaryWindow;
@@ -455,7 +455,9 @@ fn handle_move_requests(
             resolve_next(active_index, positions.len())
         };
         if let Some((left, right)) = pair {
-            swap_siblings(&mut commands, parent, children, &positions, left, right);
+            if let Some(order) = SiblingOrder::swapped(parent, children, &positions, left, right) {
+                commands.queue(order);
+            }
         }
     }
 }
@@ -637,14 +639,9 @@ fn reorder_request(
     let destination = request
         .drop_placement
         .destination(from, to, kind_positions.len());
-    move_sibling(
-        &mut commands,
-        parent,
-        siblings,
-        &kind_positions,
-        from,
-        destination,
-    );
+    if let Some(order) = SiblingOrder::moved(parent, siblings, &kind_positions, from, destination) {
+        commands.queue(order);
+    }
 }
 
 fn tab_target(id: Option<&str>, tabs: impl IntoIterator<Item = Entity>) -> Option<Entity> {

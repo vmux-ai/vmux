@@ -69,6 +69,52 @@ impl PendingGoto {
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct GotoActions<'w, 's> {
+    browsers: Option<NonSend<'w, Browsers>>,
+    commands: Commands<'w, 's>,
+}
+
+impl GotoActions<'_, '_> {
+    fn caret(
+        &mut self,
+        entity: Entity,
+        edit: &mut Editor,
+        line: u32,
+        utf16_col: u32,
+        viewport: &mut FileViewport,
+    ) {
+        let Some(browsers) = self.browsers.as_deref() else {
+            return;
+        };
+        let line = (line as usize).min(edit.core.buffer.len_lines().saturating_sub(1));
+        let line_text = edit
+            .core
+            .buffer
+            .rope
+            .line(line)
+            .chars()
+            .filter(|character| *character != '\n' && *character != '\r')
+            .collect::<String>();
+        let character_column = LspLine::new(line_text).char_col(utf16_col);
+        let caret = edit
+            .core
+            .buffer
+            .coords_to_char(line, character_column as usize);
+        edit.core.set_caret(caret);
+        if let Some(top) = viewport.autoscroll(edit)
+            && let Some(scroll) = viewport.set_top(top)
+            && browsers.can_emit_to(&entity)
+        {
+            self.commands
+                .trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+                    entity, &scroll,
+                ));
+        }
+        edit.core.top_row = viewport.top_row;
+    }
+}
+
 fn file_open(trigger: On<UiInput<FileOpenEvent>>, mut commands: Commands) {
     let entity = trigger.event().webview;
     let path = PathBuf::from(&trigger.event().payload.path);
@@ -227,42 +273,6 @@ fn knowledge_link_open(
     });
 }
 
-fn goto_caret(
-    entity: Entity,
-    edit: &mut Editor,
-    line: u32,
-    utf16_col: u32,
-    viewport: &mut FileViewport,
-    browsers: &Browsers,
-    commands: &mut Commands,
-) {
-    let line = (line as usize).min(edit.core.buffer.len_lines().saturating_sub(1));
-    let line_text = edit
-        .core
-        .buffer
-        .rope
-        .line(line)
-        .chars()
-        .filter(|character| *character != '\n' && *character != '\r')
-        .collect::<String>();
-    let character_column = LspLine::new(line_text).char_col(utf16_col);
-    let caret = edit
-        .core
-        .buffer
-        .coords_to_char(line, character_column as usize);
-    edit.core.set_caret(caret);
-    if let Some(top) = viewport.autoscroll(edit) {
-        if let Some(scroll) = viewport.set_top(top)
-            && browsers.can_emit_to(&entity)
-        {
-            commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-                entity, &scroll,
-            ));
-        }
-        edit.core.top_row = viewport.top_row;
-    }
-}
-
 #[allow(clippy::type_complexity)]
 fn apply_goto(
     mut messages: MessageReader<crate::lsp::manager::LspGoto>,
@@ -273,12 +283,11 @@ fn apply_goto(
         &mut PageMetadata,
     )>,
     mut lsp_closes: Option<MessageWriter<crate::lsp::manager::LspDocumentCloseRequest>>,
-    browsers: Option<NonSend<Browsers>>,
-    mut commands: Commands,
+    mut actions: GotoActions,
 ) {
-    let Some(browsers) = browsers.as_deref() else {
+    if actions.browsers.is_none() {
         return;
-    };
+    }
     for goto in messages.read() {
         let Ok((mut edit, mut viewport, mut view, mut metadata)) = views.get_mut(goto.entity)
         else {
@@ -287,17 +296,19 @@ fn apply_goto(
         if vmux_path::PathIdentity::resolve(&view.path)
             == vmux_path::PathIdentity::resolve(&goto.path)
         {
-            goto_caret(
+            actions.caret(
                 goto.entity,
                 &mut edit,
                 goto.line,
                 goto.utf16_col,
                 &mut viewport,
-                browsers,
-                &mut commands,
             );
-            commands.trigger(ViewportRenderRequest::new(goto.entity));
-            commands.trigger(CursorRenderRequest::new(goto.entity));
+            actions
+                .commands
+                .trigger(ViewportRenderRequest::new(goto.entity));
+            actions
+                .commands
+                .trigger(CursorRenderRequest::new(goto.entity));
             continue;
         }
         if let Some(lsp_closes) = lsp_closes.as_mut() {
@@ -315,7 +326,8 @@ fn apply_goto(
             .unwrap_or_else(|_| format!("file://{}", goto.path.to_string_lossy()));
         view.path = goto.path.clone();
         viewport.top_row = 0;
-        commands
+        actions
+            .commands
             .entity(goto.entity)
             .remove::<Editor>()
             .remove::<vmux_git::GitDiffSource>()
@@ -336,21 +348,18 @@ fn apply_goto(
 
 fn apply_pending_goto(
     mut views: Query<(Entity, &mut Editor, &mut FileViewport, &PendingGoto)>,
-    browsers: Option<NonSend<Browsers>>,
-    mut commands: Commands,
+    mut actions: GotoActions,
 ) {
-    let Some(browsers) = browsers.as_deref() else {
+    if actions.browsers.is_none() {
         return;
-    };
+    }
     for (entity, mut edit, mut viewport, pending) in &mut views {
-        goto_caret(
+        actions.caret(
             entity,
             &mut edit,
             pending.line,
             pending.utf16_col,
             &mut viewport,
-            browsers,
-            &mut commands,
         );
         if let Some(end) = pending.select_end_col {
             let line = (pending.line as usize).min(edit.core.buffer.len_lines().saturating_sub(1));
@@ -369,9 +378,9 @@ fn apply_pending_goto(
             let head = edit.core.buffer.coords_to_char(line, end);
             edit.core.selections = vec![Selection { anchor, head }];
         }
-        commands.trigger(ViewportRenderRequest::new(entity));
-        commands.trigger(CursorRenderRequest::new(entity));
-        commands.entity(entity).remove::<PendingGoto>();
+        actions.commands.trigger(ViewportRenderRequest::new(entity));
+        actions.commands.trigger(CursorRenderRequest::new(entity));
+        actions.commands.entity(entity).remove::<PendingGoto>();
     }
 }
 

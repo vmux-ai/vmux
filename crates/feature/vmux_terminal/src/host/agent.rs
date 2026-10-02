@@ -48,9 +48,9 @@ impl Plugin for AgentTerminalPlugin {
             .add_message::<ProcessStackSpawnRequest>()
             .add_systems(
                 Update,
-                (open_tab, run_shell, send_to)
-                    .after(AgentRequestRouteSet)
-                    .before(respond_process_stack_spawn),
+                (open_tab, run_shell, send_to, respond_process_stack_spawn)
+                    .chain()
+                    .after(AgentRequestRouteSet),
             );
     }
 }

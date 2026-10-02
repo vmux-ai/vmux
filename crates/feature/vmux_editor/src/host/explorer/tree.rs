@@ -33,6 +33,78 @@ struct ExplorerDirLoadTask {
 
 type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_ecs::page::PageReady>);
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct ExplorerTreeActions<'w, 's> {
+    trees: Query<'w, 's, &'static mut ExplorerTree>,
+    browsers: Option<NonSend<'w, Browsers>>,
+    commands: Commands<'w, 's>,
+}
+
+impl ExplorerTreeActions<'_, '_> {
+    fn reveal(
+        &mut self,
+        entity: Entity,
+        current: &Path,
+        state: &mut ExplorerState,
+        tree_entity: Entity,
+    ) {
+        let Ok(mut tree) = self.trees.get_mut(tree_entity) else {
+            return;
+        };
+        let mut tree_changed = false;
+        let current_dir = if current.is_dir() {
+            current
+        } else {
+            current.parent().unwrap_or(current)
+        };
+        let Ok(relative) = current_dir.strip_prefix(&tree.root) else {
+            return;
+        };
+        let mut dir = tree.root.clone();
+        tree_changed |= tree.expanded.insert(dir.clone());
+        if tree.begin_dir_load(&dir, false) {
+            self.commands
+                .spawn(ExplorerDirLoadRequest::new(tree_entity, dir.clone()));
+            tree_changed = true;
+        }
+        for component in relative.components() {
+            dir.push(component);
+            tree_changed |= tree.expanded.insert(dir.clone());
+            if tree.begin_dir_load(&dir, false) {
+                self.commands
+                    .spawn(ExplorerDirLoadRequest::new(tree_entity, dir.clone()));
+                tree_changed = true;
+            }
+        }
+        if tree_changed {
+            tree.use_now();
+            self.commands.trigger(ExplorerTreeChanged(tree_entity));
+            state.focus_path = Some(current.to_path_buf());
+            self.commands.entity(entity).insert(ExplorerTreeDirty);
+        }
+    }
+
+    fn focus(
+        &mut self,
+        entity: Entity,
+        current: &Path,
+        reveal: ExplorerReveal,
+        state: &mut ExplorerState,
+    ) {
+        let Some(browsers) = self.browsers.as_deref() else {
+            return;
+        };
+        if !browsers.can_emit_to(&entity) {
+            return;
+        }
+        let effect = state.focus_effect(current, reveal);
+        self.commands
+            .trigger(vmux_ecs::host::FileUiStateWrite::from_event(
+                entity, &effect,
+            ));
+    }
+}
+
 pub(super) struct TreePlugin;
 
 impl Plugin for TreePlugin {
@@ -56,63 +128,6 @@ impl Plugin for TreePlugin {
         .add_observer(toggle)
         .add_observer(prefetch)
         .add_observer(refresh);
-    }
-}
-
-fn reveal_current_in_tree(
-    entity: Entity,
-    current: &Path,
-    state: &mut ExplorerState,
-    tree_entity: Entity,
-    tree: &mut ExplorerTree,
-    commands: &mut Commands,
-) {
-    let mut tree_changed = false;
-    let current_dir = if current.is_dir() {
-        current
-    } else {
-        current.parent().unwrap_or(current)
-    };
-    let Ok(relative) = current_dir.strip_prefix(&tree.root) else {
-        return;
-    };
-    let mut dir = tree.root.clone();
-    tree_changed |= tree.expanded.insert(dir.clone());
-    if tree.begin_dir_load(&dir, false) {
-        commands.spawn(ExplorerDirLoadRequest::new(tree_entity, dir.clone()));
-        tree_changed = true;
-    }
-    for component in relative.components() {
-        dir.push(component);
-        tree_changed |= tree.expanded.insert(dir.clone());
-        if tree.begin_dir_load(&dir, false) {
-            commands.spawn(ExplorerDirLoadRequest::new(tree_entity, dir.clone()));
-            tree_changed = true;
-        }
-    }
-    if tree_changed {
-        tree.use_now();
-        commands.trigger(ExplorerTreeChanged(tree_entity));
-    }
-    if tree_changed {
-        state.focus_path = Some(current.to_path_buf());
-        commands.entity(entity).insert(ExplorerTreeDirty);
-    }
-}
-
-fn emit_explorer_focus(
-    entity: Entity,
-    current: &Path,
-    reveal: ExplorerReveal,
-    state: &mut ExplorerState,
-    browsers: &Browsers,
-    commands: &mut Commands,
-) {
-    if browsers.can_emit_to(&entity) {
-        let effect = state.focus_effect(current, reveal);
-        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-            entity, &effect,
-        ));
     }
 }
 
@@ -268,11 +283,8 @@ fn reveal_on_file_change(
     child_of: Query<&ChildOf>,
     visibility: Query<&StackExplorerVisibility>,
     panel: Single<&ExplorerPanelDefaults>,
-    mut trees: Query<&mut ExplorerTree>,
-    browsers: Option<NonSend<Browsers>>,
-    mut commands: Commands,
+    mut actions: ExplorerTreeActions,
 ) {
-    let browsers = browsers.as_deref();
     for (entity, view, mut state, tree_of) in &mut views {
         let scope = child_of.get(entity).map(ChildOf::parent).unwrap_or(entity);
         let visible = visibility
@@ -282,45 +294,27 @@ fn reveal_on_file_change(
         if !visible {
             continue;
         }
-        let Ok(mut tree) = trees.get_mut(tree_of.0) else {
-            continue;
-        };
-        reveal_current_in_tree(
-            entity,
-            &view.path,
-            &mut state,
-            tree_of.0,
-            &mut tree,
-            &mut commands,
-        );
-        let Some(browsers) = browsers else {
-            continue;
-        };
-        emit_explorer_focus(
-            entity,
-            &view.path,
-            ExplorerReveal::Followed,
-            &mut state,
-            browsers,
-            &mut commands,
-        );
+        actions.reveal(entity, &view.path, &mut state, tree_of.0);
+        actions.focus(entity, &view.path, ExplorerReveal::Followed, &mut state);
     }
 }
 
 fn emit(
     mut query: Query<(Entity, &FileView, &mut ExplorerState, &UsesExplorerTree), TreeDirtyReady>,
-    trees: Query<&ExplorerTree>,
-    browsers: Option<NonSend<Browsers>>,
-    mut commands: Commands,
+    mut actions: ExplorerTreeActions,
 ) {
-    let Some(browsers) = browsers else {
+    if actions.browsers.is_none() {
         return;
-    };
+    }
     for (entity, view, mut state, tree_of) in &mut query {
-        if !browsers.can_emit_to(&entity) {
+        if !actions
+            .browsers
+            .as_deref()
+            .is_some_and(|browsers| browsers.can_emit_to(&entity))
+        {
             continue;
         }
-        let Ok(tree) = trees.get(tree_of.0) else {
+        let Ok(tree) = actions.trees.get(tree_of.0) else {
             continue;
         };
         let rows = tree.rows(&tree.root);
@@ -332,27 +326,25 @@ fn emit(
         } else {
             None
         };
-        commands.trigger(vmux_ecs::host::FileUiStateWrite::from_event(
-            entity,
-            &ExplorerTreeEvent {
-                root_name: ExplorerRoot::name(&tree.root),
-                root_path: tree.root.to_string_lossy().into_owned(),
-                current_path: view.path.to_string_lossy().into_owned(),
-                loading: tree.is_loading(&tree.root),
-                rows,
-            },
-        ));
-        if let Some(focus_path) = focus_path {
-            emit_explorer_focus(
+        actions
+            .commands
+            .trigger(vmux_ecs::host::FileUiStateWrite::from_event(
                 entity,
-                &focus_path,
-                ExplorerReveal::Followed,
-                &mut state,
-                &browsers,
-                &mut commands,
-            );
+                &ExplorerTreeEvent {
+                    root_name: ExplorerRoot::name(&tree.root),
+                    root_path: tree.root.to_string_lossy().into_owned(),
+                    current_path: view.path.to_string_lossy().into_owned(),
+                    loading: tree.is_loading(&tree.root),
+                    rows,
+                },
+            ));
+        if let Some(focus_path) = focus_path {
+            actions.focus(entity, &focus_path, ExplorerReveal::Followed, &mut state);
         }
-        commands.entity(entity).remove::<ExplorerTreeDirty>();
+        actions
+            .commands
+            .entity(entity)
+            .remove::<ExplorerTreeDirty>();
     }
 }
 
@@ -443,35 +435,14 @@ fn request_reveal(trigger: On<UiInput<ExplorerRevealCurrent>>, mut commands: Com
 fn reveal_current(
     trigger: On<RevealCurrent>,
     mut query: Query<(&FileView, &mut ExplorerState, &UsesExplorerTree)>,
-    mut trees: Query<&mut ExplorerTree>,
-    browsers: Option<NonSend<Browsers>>,
-    mut commands: Commands,
+    mut actions: ExplorerTreeActions,
 ) {
     let entity = trigger.event().entity;
     let Ok((view, mut state, tree_of)) = query.get_mut(entity) else {
         return;
     };
-    let Ok(mut tree) = trees.get_mut(tree_of.0) else {
-        return;
-    };
-    reveal_current_in_tree(
-        entity,
-        &view.path,
-        &mut state,
-        tree_of.0,
-        &mut tree,
-        &mut commands,
-    );
-    if let Some(browsers) = browsers {
-        emit_explorer_focus(
-            entity,
-            &view.path,
-            trigger.event().reveal,
-            &mut state,
-            &browsers,
-            &mut commands,
-        );
-    }
+    actions.reveal(entity, &view.path, &mut state, tree_of.0);
+    actions.focus(entity, &view.path, trigger.event().reveal, &mut state);
 }
 
 fn collapse_all(

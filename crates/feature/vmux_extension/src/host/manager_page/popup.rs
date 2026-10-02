@@ -38,26 +38,31 @@ impl Plugin for PopupPlugin {
     }
 }
 
-fn close_extension_popup(
-    owner: Entity,
-    popups: &Query<(Entity, &ExtensionPopup)>,
-    browsers: &Browsers,
-    commands: &mut Commands,
-) {
-    let mut closed = false;
-    for (entity, popup) in popups {
-        if popup.owner != owner {
-            continue;
+#[derive(bevy::ecs::system::SystemParam)]
+struct PopupActions<'w, 's> {
+    popups: Query<'w, 's, (Entity, &'static ExtensionPopup)>,
+    browsers: NonSend<'w, Browsers>,
+    commands: Commands<'w, 's>,
+}
+
+impl PopupActions<'_, '_> {
+    fn close(&mut self, owner: Entity) {
+        let mut closed = false;
+        for (entity, popup) in &self.popups {
+            if popup.owner != owner {
+                continue;
+            }
+            self.browsers.hide_child_window(&entity);
+            self.commands.entity(entity).try_despawn();
+            closed = true;
         }
-        browsers.hide_child_window(&entity);
-        commands.entity(entity).try_despawn();
-        closed = true;
-    }
-    if closed {
-        commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
-            owner,
-            &ExtensionPopupEvent::default(),
-        ));
+        if closed {
+            self.commands
+                .trigger(UiStateWrite::<LayoutUiState>::from_event(
+                    owner,
+                    &ExtensionPopupEvent::default(),
+                ));
+        }
     }
 }
 
@@ -105,9 +110,7 @@ fn open_request(
     trigger: On<UiInput<ExtensionPopupOpenRequest>>,
     layouts: Query<(Entity, Option<&HostWindow>), With<LayoutCef>>,
     host_windows: Query<&HostWindow>,
-    popups: Query<(Entity, &ExtensionPopup)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
+    mut actions: PopupActions,
 ) {
     let id = trigger.event().payload.id.clone();
     let index = store::ExtensionStore::current()
@@ -132,8 +135,9 @@ fn open_request(
     let Some(owner) = owner else {
         return;
     };
-    close_extension_popup(owner, &popups, &browsers, &mut commands);
-    commands
+    actions.close(owner);
+    actions
+        .commands
         .spawn(Browser::new_with_title(&url, &entry.name))
         .insert((
             Name::new(format!("Extension popup: {}", entry.name)),
@@ -145,15 +149,17 @@ fn open_request(
             vmux_browser::PopupWebview,
             Visibility::Hidden,
         ));
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
-        owner,
-        &ExtensionPopupEvent {
-            id,
-            name: entry.name,
-            icon: entry.icon,
-            anchor: trigger.event().payload.anchor,
-        },
-    ));
+    actions
+        .commands
+        .trigger(UiStateWrite::<LayoutUiState>::from_event(
+            owner,
+            &ExtensionPopupEvent {
+                id,
+                name: entry.name,
+                icon: entry.icon,
+                anchor: trigger.event().payload.anchor,
+            },
+        ));
 }
 
 fn bounds_request(
@@ -173,13 +179,8 @@ fn bounds_request(
     }
 }
 
-fn close_request(
-    trigger: On<UiInput<ExtensionPopupCloseRequest>>,
-    popups: Query<(Entity, &ExtensionPopup)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    close_extension_popup(trigger.event().webview, &popups, &browsers, &mut commands);
+fn close_request(trigger: On<UiInput<ExtensionPopupCloseRequest>>, mut actions: PopupActions) {
+    actions.close(trigger.event().webview);
 }
 
 fn inject_sizing(

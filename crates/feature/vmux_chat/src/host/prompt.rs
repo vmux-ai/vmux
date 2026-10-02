@@ -52,6 +52,23 @@ impl Plugin for ChatPromptPlugin {
 pub(crate) struct ChatPromptInputPlugin;
 
 #[cfg(host)]
+#[derive(bevy_ecs::system::SystemParam)]
+struct SessionControl<'w> {
+    requests: MessageWriter<'w, ServiceRequest>,
+}
+
+#[cfg(host)]
+impl SessionControl<'_> {
+    fn cancel(&mut self, session: &AcpSession) {
+        self.requests.write(ServiceRequest(ClientMessage::Shared(
+            SharedMessage::AgentCancel {
+                sid: session.sid.clone(),
+            },
+        )));
+    }
+}
+
+#[cfg(host)]
 impl Plugin for ChatPromptInputPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
@@ -136,7 +153,7 @@ fn stop(
     trigger: On<UiInput<ChatStop>>,
     child_of: Query<&ChildOf>,
     mut sessions: Query<(&mut PromptQueue, &mut AgentRunState, &AcpSession)>,
-    mut service_requests: MessageWriter<ServiceRequest>,
+    mut control: SessionControl,
 ) {
     let Ok(parent) = child_of.get(trigger.event().webview) else {
         return;
@@ -148,7 +165,7 @@ fn stop(
         if queue.flush_pending() {
             queue.cancel_flush();
         }
-        cancel_session(session, &mut service_requests);
+        control.cancel(session);
         return;
     }
     if queue.request_flush() && matches!(*state, AgentRunState::Errored(_)) {
@@ -158,7 +175,7 @@ fn stop(
         *state,
         AgentRunState::Streaming | AgentRunState::AwaitingApproval { .. }
     ) {
-        cancel_session(session, &mut service_requests);
+        control.cancel(session);
     }
 }
 
@@ -180,7 +197,7 @@ fn cancel(
     trigger: On<UiInput<ChatCancel>>,
     child_of: Query<&ChildOf>,
     mut sessions: Query<(&mut PromptQueue, &AcpSession)>,
-    mut service_requests: MessageWriter<ServiceRequest>,
+    mut control: SessionControl,
 ) {
     let Ok(parent) = child_of.get(trigger.event().webview) else {
         return;
@@ -191,16 +208,7 @@ fn cancel(
     if queue.flush_pending() {
         queue.cancel_flush();
     }
-    cancel_session(session, &mut service_requests);
-}
-
-#[cfg(host)]
-fn cancel_session(session: &AcpSession, service_requests: &mut MessageWriter<ServiceRequest>) {
-    service_requests.write(ServiceRequest(ClientMessage::Shared(
-        SharedMessage::AgentCancel {
-            sid: session.sid.clone(),
-        },
-    )));
+    control.cancel(session);
 }
 
 #[cfg(host)]
@@ -210,7 +218,7 @@ fn escape(
     mut composers: Query<&mut ComposerState, With<ChatView>>,
     mut sessions: Query<(&mut PromptQueue, &mut AgentRunState, &AcpSession)>,
     mut commands: Commands,
-    mut service_requests: MessageWriter<ServiceRequest>,
+    mut control: SessionControl,
 ) {
     let webview = trigger.event().webview;
     let Ok(parent) = child_of.get(webview) else {
@@ -235,7 +243,7 @@ fn escape(
         *state = AgentRunState::Idle;
     }
     if running {
-        cancel_session(session, &mut service_requests);
+        control.cancel(session);
     }
     let Ok(mut composer) = composers.get_mut(webview) else {
         return;

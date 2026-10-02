@@ -10,125 +10,120 @@ use crate::protocol::{
 use crate::stack::Stack;
 use crate::tab::Tab as LayoutTab;
 
-pub fn build_layout_snapshot(
-    tabs_q: &Query<(Entity, &LayoutTab, Option<&Children>)>,
-    splits_q: &Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
-    leaves_q: &Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
-    stacks_q: &Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
-    pane_sizes_q: &Query<&PaneSize>,
-    zoomed_q: &Query<&Zoomed>,
-    focused: &ActiveStack,
-    self_stack: Option<Entity>,
-) -> LayoutSnapshot {
-    let active_tab = focused.tab;
-    let tabs = tabs_q
-        .iter()
-        .map(|(tab_entity, tab, children)| {
-            let zoomed_leaf = zoomed_q.get(tab_entity).ok().map(|z| z.leaf);
-            let root = children
-                .and_then(|c| c.iter().next())
-                .map(|root_entity| {
-                    build_node(
-                        root_entity,
-                        splits_q,
-                        leaves_q,
-                        stacks_q,
-                        pane_sizes_q,
-                        zoomed_leaf,
-                        self_stack,
-                    )
-                })
-                .unwrap_or(LayoutNode::Pane {
-                    id: None,
-                    is_zoomed: false,
-                    stacks: Vec::new(),
-                });
-            TabDto {
-                id: Some(format_id(NodeKind::Tab, tab_entity.to_bits())),
-                name: tab.name.clone(),
-                is_active: Some(tab_entity) == active_tab,
-                root,
-            }
-        })
-        .collect();
-
-    LayoutSnapshot {
-        tabs,
-        focused: Focus {
-            tab: focused.tab.map(|e| format_id(NodeKind::Tab, e.to_bits())),
-            pane: focused.pane.map(|e| format_id(NodeKind::Pane, e.to_bits())),
-            stack: focused
-                .stack
-                .map(|e| format_id(NodeKind::Stack, e.to_bits())),
-        },
-    }
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct LayoutSnapshotQuery<'w, 's> {
+    tabs: Query<'w, 's, (Entity, &'static LayoutTab, Option<&'static Children>)>,
+    splits: Query<'w, 's, (Entity, &'static PaneSplit, Option<&'static Children>), With<Pane>>,
+    leaves: Query<'w, 's, (Entity, Option<&'static Children>), (With<Pane>, Without<PaneSplit>)>,
+    stacks: Query<
+        'w,
+        's,
+        (
+            Entity,
+            Option<&'static Children>,
+            Option<&'static PageMetadata>,
+        ),
+        With<Stack>,
+    >,
+    pane_sizes: Query<'w, 's, &'static PaneSize>,
+    zoomed: Query<'w, 's, &'static Zoomed>,
 }
 
-fn build_node(
-    entity: Entity,
-    splits_q: &Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
-    leaves_q: &Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
-    stacks_q: &Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
-    pane_sizes_q: &Query<&PaneSize>,
-    zoomed_leaf: Option<Entity>,
-    self_stack: Option<Entity>,
-) -> LayoutNode {
-    if let Ok((split_entity, split, children)) = splits_q.get(entity) {
-        let child_entities: Vec<Entity> = children.map(|c| c.iter().collect()).unwrap_or_default();
-        let flex_weights = child_entities
+impl LayoutSnapshotQuery<'_, '_> {
+    pub fn build(&self, focused: &ActiveStack, self_stack: Option<Entity>) -> LayoutSnapshot {
+        let active_tab = focused.tab;
+        let tabs = self
+            .tabs
             .iter()
-            .map(|child| {
-                pane_sizes_q
-                    .get(*child)
-                    .map(|ps| ps.flex_grow)
-                    .unwrap_or(1.0)
+            .map(|(tab_entity, tab, children)| {
+                let zoomed_leaf = self.zoomed.get(tab_entity).ok().map(|zoomed| zoomed.leaf);
+                let root = children
+                    .and_then(|children| children.iter().next())
+                    .map(|root| self.node(root, zoomed_leaf, self_stack))
+                    .unwrap_or(LayoutNode::Pane {
+                        id: None,
+                        is_zoomed: false,
+                        stacks: Vec::new(),
+                    });
+                TabDto {
+                    id: Some(format_id(NodeKind::Tab, tab_entity.to_bits())),
+                    name: tab.name.clone(),
+                    is_active: Some(tab_entity) == active_tab,
+                    root,
+                }
             })
             .collect();
-        let children_dto = child_entities
-            .into_iter()
-            .map(|child| {
-                build_node(
-                    child,
-                    splits_q,
-                    leaves_q,
-                    stacks_q,
-                    pane_sizes_q,
-                    zoomed_leaf,
-                    self_stack,
-                )
-            })
-            .collect();
-        return LayoutNode::Split {
-            id: Some(format_id(NodeKind::Split, split_entity.to_bits())),
-            direction: match split.direction {
-                PaneSplitDirection::Row => SplitDirection::Row,
-                PaneSplitDirection::Column => SplitDirection::Column,
+
+        LayoutSnapshot {
+            tabs,
+            focused: Focus {
+                tab: focused
+                    .tab
+                    .map(|entity| format_id(NodeKind::Tab, entity.to_bits())),
+                pane: focused
+                    .pane
+                    .map(|entity| format_id(NodeKind::Pane, entity.to_bits())),
+                stack: focused
+                    .stack
+                    .map(|entity| format_id(NodeKind::Stack, entity.to_bits())),
             },
-            flex_weights,
-            children: children_dto,
-        };
+        }
     }
-    if let Ok((leaf_entity, leaf_children)) = leaves_q.get(entity) {
-        let stacks = leaf_children
-            .map(|c| {
-                c.iter()
-                    .filter_map(|child| stacks_q.get(child).ok())
-                    .map(|(stack_entity, _stack_children, page)| {
-                        build_stack(stack_entity, page, self_stack)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        return LayoutNode::Pane {
-            id: Some(format_id(NodeKind::Pane, leaf_entity.to_bits())),
-            is_zoomed: zoomed_leaf == Some(leaf_entity),
-            stacks,
-        };
-    }
-    LayoutNode::Pane {
-        id: None,
-        is_zoomed: false,
-        stacks: Vec::new(),
+
+    fn node(
+        &self,
+        entity: Entity,
+        zoomed_leaf: Option<Entity>,
+        self_stack: Option<Entity>,
+    ) -> LayoutNode {
+        if let Ok((split_entity, split, children)) = self.splits.get(entity) {
+            let child_entities = children
+                .map(|children| children.iter().collect::<Vec<_>>())
+                .unwrap_or_default();
+            let flex_weights = child_entities
+                .iter()
+                .map(|child| {
+                    self.pane_sizes
+                        .get(*child)
+                        .map(|size| size.flex_grow)
+                        .unwrap_or(1.0)
+                })
+                .collect();
+            let children = child_entities
+                .into_iter()
+                .map(|child| self.node(child, zoomed_leaf, self_stack))
+                .collect();
+            return LayoutNode::Split {
+                id: Some(format_id(NodeKind::Split, split_entity.to_bits())),
+                direction: match split.direction {
+                    PaneSplitDirection::Row => SplitDirection::Row,
+                    PaneSplitDirection::Column => SplitDirection::Column,
+                },
+                flex_weights,
+                children,
+            };
+        }
+        if let Ok((leaf_entity, leaf_children)) = self.leaves.get(entity) {
+            let stacks = leaf_children
+                .map(|children| {
+                    children
+                        .iter()
+                        .filter_map(|child| self.stacks.get(child).ok())
+                        .map(|(stack, _, page)| build_stack(stack, page, self_stack))
+                        .collect()
+                })
+                .unwrap_or_default();
+            return LayoutNode::Pane {
+                id: Some(format_id(NodeKind::Pane, leaf_entity.to_bits())),
+                is_zoomed: zoomed_leaf == Some(leaf_entity),
+                stacks,
+            };
+        }
+        LayoutNode::Pane {
+            id: None,
+            is_zoomed: false,
+            stacks: Vec::new(),
+        }
     }
 }
 
@@ -167,8 +162,6 @@ mod tests {
     use crate::stack::Stack;
     use bevy::ecs::system::RunSystemOnce;
     use vmux_history::LastActivatedAt;
-
-    use bevy::ecs::system::SystemState;
 
     fn make_app() -> App {
         let mut app = App::new();
@@ -209,28 +202,16 @@ mod tests {
             bg_color: None,
         });
 
-        let world = app.world_mut();
-        let mut state: SystemState<(
-            Query<(Entity, &LayoutTab, Option<&Children>)>,
-            Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
-            Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
-            Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
-            Query<&PaneSize>,
-            Query<&Zoomed>,
-            Single<&ActiveStack, With<crate::active_pane::ProfileId>>,
-        )> = SystemState::new(world);
-        let (tabs_q, splits_q, leaves_q, stacks_q, pane_sizes_q, zoomed_q, focused) =
-            state.get(world).unwrap();
-        let snap = build_layout_snapshot(
-            &tabs_q,
-            &splits_q,
-            &leaves_q,
-            &stacks_q,
-            &pane_sizes_q,
-            &zoomed_q,
-            &focused,
-            Some(stack),
-        );
+        let snap = app
+            .world_mut()
+            .run_system_once(
+                move |snapshot: LayoutSnapshotQuery,
+                      focused: Single<
+                    &ActiveStack,
+                    With<crate::active_pane::ProfileId>,
+                >| { snapshot.build(&focused, Some(stack)) },
+            )
+            .unwrap();
 
         let LayoutNode::Pane { stacks, .. } = &snap.tabs[0].root else {
             panic!("expected pane");
@@ -266,26 +247,9 @@ mod tests {
         let snap = app
             .world_mut()
             .run_system_once(
-                |tabs_q: Query<(Entity, &LayoutTab, Option<&Children>)>,
-                 splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
-                 leaves_q: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
-                 stacks_q: Query<
-                    (Entity, Option<&Children>, Option<&PageMetadata>),
-                    With<Stack>,
-                >,
-                 pane_sizes_q: Query<&PaneSize>,
-                 zoomed_q: Query<&Zoomed>,
+                |snapshot: LayoutSnapshotQuery,
                  focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
-                    build_layout_snapshot(
-                        &tabs_q,
-                        &splits_q,
-                        &leaves_q,
-                        &stacks_q,
-                        &pane_sizes_q,
-                        &zoomed_q,
-                        &focused,
-                        None,
-                    )
+                    snapshot.build(&focused, None)
                 },
             )
             .unwrap();
@@ -325,26 +289,9 @@ mod tests {
         let snap = app
             .world_mut()
             .run_system_once(
-                |tabs_q: Query<(Entity, &LayoutTab, Option<&Children>)>,
-                 splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
-                 leaves_q: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
-                 stacks_q: Query<
-                    (Entity, Option<&Children>, Option<&PageMetadata>),
-                    With<Stack>,
-                >,
-                 pane_sizes_q: Query<&PaneSize>,
-                 zoomed_q: Query<&Zoomed>,
+                |snapshot: LayoutSnapshotQuery,
                  focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
-                    build_layout_snapshot(
-                        &tabs_q,
-                        &splits_q,
-                        &leaves_q,
-                        &stacks_q,
-                        &pane_sizes_q,
-                        &zoomed_q,
-                        &focused,
-                        None,
-                    )
+                    snapshot.build(&focused, None)
                 },
             )
             .unwrap();
@@ -362,23 +309,9 @@ mod tests {
         let snapshot = app
             .world_mut()
             .run_system_once(
-                |tabs: Query<(Entity, &LayoutTab, Option<&Children>)>,
-                 splits: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
-                 leaves: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
-                 stacks: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
-                 pane_sizes: Query<&PaneSize>,
-                 zoomed_q: Query<&Zoomed>,
+                |snapshot: LayoutSnapshotQuery,
                  focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
-                    build_layout_snapshot(
-                        &tabs,
-                        &splits,
-                        &leaves,
-                        &stacks,
-                        &pane_sizes,
-                        &zoomed_q,
-                        &focused,
-                        None,
-                    )
+                    snapshot.build(&focused, None)
                 },
             )
             .unwrap();
@@ -425,23 +358,9 @@ mod tests {
         let snapshot = app
             .world_mut()
             .run_system_once(
-                |tabs: Query<(Entity, &LayoutTab, Option<&Children>)>,
-                 splits: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
-                 leaves: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
-                 stacks: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
-                 pane_sizes: Query<&PaneSize>,
-                 zoomed_q: Query<&Zoomed>,
+                |snapshot: LayoutSnapshotQuery,
                  focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
-                    build_layout_snapshot(
-                        &tabs,
-                        &splits,
-                        &leaves,
-                        &stacks,
-                        &pane_sizes,
-                        &zoomed_q,
-                        &focused,
-                        None,
-                    )
+                    snapshot.build(&focused, None)
                 },
             )
             .unwrap();
@@ -500,23 +419,9 @@ mod tests {
         let snapshot = app
             .world_mut()
             .run_system_once(
-                |tabs: Query<(Entity, &LayoutTab, Option<&Children>)>,
-                 splits: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
-                 leaves: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
-                 stacks: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
-                 pane_sizes: Query<&PaneSize>,
-                 zoomed_q: Query<&Zoomed>,
+                |snapshot: LayoutSnapshotQuery,
                  focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
-                    build_layout_snapshot(
-                        &tabs,
-                        &splits,
-                        &leaves,
-                        &stacks,
-                        &pane_sizes,
-                        &zoomed_q,
-                        &focused,
-                        None,
-                    )
+                    snapshot.build(&focused, None)
                 },
             )
             .unwrap();
@@ -580,26 +485,9 @@ mod tests {
         let snap = app
             .world_mut()
             .run_system_once(
-                |tabs_q: Query<(Entity, &LayoutTab, Option<&Children>)>,
-                 splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
-                 leaves_q: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
-                 stacks_q: Query<
-                    (Entity, Option<&Children>, Option<&PageMetadata>),
-                    With<Stack>,
-                >,
-                 pane_sizes_q: Query<&PaneSize>,
-                 zoomed_q: Query<&Zoomed>,
+                |snapshot: LayoutSnapshotQuery,
                  focused: Single<&ActiveStack, With<crate::active_pane::ProfileId>>| {
-                    build_layout_snapshot(
-                        &tabs_q,
-                        &splits_q,
-                        &leaves_q,
-                        &stacks_q,
-                        &pane_sizes_q,
-                        &zoomed_q,
-                        &focused,
-                        None,
-                    )
+                    snapshot.build(&focused, None)
                 },
             )
             .unwrap();

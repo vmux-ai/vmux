@@ -1,4 +1,4 @@
-use crate::host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings};
+use crate::host::swap::{SiblingOrder, find_kind_index, resolve_next, resolve_prev};
 use bevy::{ecs::relationship::Relationship, prelude::*};
 
 use super::{ArrangeRequest, ArrangementSet, Pane, PaneArrangement, PaneSplit, PaneSplitDirection};
@@ -64,7 +64,11 @@ fn arrange_from_commands(
                     resolve_next(active_index, pane_positions.len())
                 };
                 if let Some((from, to)) = pair {
-                    swap_siblings(&mut commands, parent, children, &pane_positions, from, to);
+                    if let Some(order) =
+                        SiblingOrder::swapped(parent, children, &pane_positions, from, to)
+                    {
+                        commands.queue(order);
+                    }
                 }
             }
             PaneArrangement::Rotate(direction) => {

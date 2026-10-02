@@ -5,7 +5,6 @@ use vmux_api::protocol::{AgentTurnEnded, ProcessId};
 use vmux_ecs::notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 use vmux_ecs::service::ServiceMessageSet;
 use vmux_ecs::team::{Agent, Profile};
-use vmux_layout::active_pane::ActiveStack;
 use vmux_layout::stack::{ComputeFocusSet, FocusedStack, Stack};
 
 use crate::host::event::AgentRequestInput;
@@ -57,51 +56,47 @@ fn bell(
 
 const DONE_DEDUP_WINDOW_SECS: f64 = 3.0;
 
-fn window_foreground(windows: &Query<&Window, With<bevy::window::PrimaryWindow>>) -> bool {
-    windows
-        .iter()
-        .next()
-        .map(|w| w.focused && w.visible)
-        .unwrap_or(false)
+#[derive(bevy::ecs::system::SystemParam)]
+struct AttentionContext<'w, 's> {
+    windows: Query<'w, 's, &'static Window, With<bevy::window::PrimaryWindow>>,
+    focused: FocusedStack<'w, 's>,
+    stacks: Query<'w, 's, (), With<Stack>>,
+    child_of: Query<'w, 's, &'static ChildOf>,
 }
 
-fn agent_is_viewed(
-    entity: Entity,
-    foreground: bool,
-    focused: &ActiveStack,
-    stacks: &Query<(), With<Stack>>,
-    child_of: &Query<&ChildOf>,
-) -> bool {
-    foreground && focused.stack == agent_stack(entity, stacks, child_of)
-}
+impl AttentionContext<'_, '_> {
+    fn foreground(&self) -> bool {
+        self.windows
+            .iter()
+            .next()
+            .map(|window| window.focused && window.visible)
+            .unwrap_or(false)
+    }
 
-fn agent_stack(
-    entity: Entity,
-    stacks: &Query<(), With<Stack>>,
-    child_of: &Query<&ChildOf>,
-) -> Option<Entity> {
-    stacks
-        .get(entity)
-        .is_ok()
-        .then_some(entity)
-        .or_else(|| child_of.get(entity).ok().map(|child| child.parent()))
+    fn stack(&self, entity: Entity) -> Option<Entity> {
+        self.stacks
+            .get(entity)
+            .is_ok()
+            .then_some(entity)
+            .or_else(|| self.child_of.get(entity).ok().map(|child| child.parent()))
+    }
+
+    fn viewed(&self, entity: Entity) -> bool {
+        self.foreground() && self.focused.stack == self.stack(entity)
+    }
 }
 
 fn mark_done(
     mut reader: MessageReader<AgentAttention>,
     mut notify: MessageWriter<OsNotify>,
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    focused: FocusedStack,
-    stacks: Query<(), With<Stack>>,
-    child_of: Query<&ChildOf>,
+    context: AttentionContext,
     meta: Query<(&Profile, Option<&SessionId>, Option<&Agent>)>,
     time: Res<Time>,
     mut last_notify: Local<std::collections::HashMap<Entity, f64>>,
     mut commands: Commands,
 ) {
-    let foreground = window_foreground(&windows);
     for att in reader.read() {
-        if agent_is_viewed(att.entity, foreground, &focused, &stacks, &child_of) {
+        if context.viewed(att.entity) {
             commands.entity(att.entity).remove::<AgentDoneUnseen>();
             continue;
         }
@@ -152,15 +147,15 @@ fn mark_done(
 
 fn clear_done(
     done: Query<Entity, With<AgentDoneUnseen>>,
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    focused: FocusedStack,
-    stacks: Query<(), With<Stack>>,
-    child_of: Query<&ChildOf>,
+    context: AttentionContext,
     mut prev_focused: Local<Option<Entity>>,
     mut commands: Commands,
 ) {
-    let foreground = window_foreground(&windows);
-    let current = if foreground { focused.stack } else { None };
+    let current = if context.foreground() {
+        context.focused.stack
+    } else {
+        None
+    };
     if current == *prev_focused {
         return;
     }
@@ -169,7 +164,7 @@ fn clear_done(
         return;
     };
     for entity in &done {
-        if agent_stack(entity, &stacks, &child_of) == Some(stack) {
+        if context.stack(entity) == Some(stack) {
             commands.entity(entity).remove::<AgentDoneUnseen>();
         }
     }

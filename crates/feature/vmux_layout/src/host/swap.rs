@@ -1,63 +1,65 @@
 use bevy::prelude::*;
 
-pub fn swap_siblings(
-    commands: &mut Commands,
+pub struct SiblingOrder {
     parent: Entity,
-    children: &Children,
-    kind_positions: &[usize],
-    a: usize,
-    b: usize,
-) {
-    if a == b {
-        return;
-    }
-    let Some(&pos_a) = kind_positions.get(a) else {
-        return;
-    };
-    let Some(&pos_b) = kind_positions.get(b) else {
-        return;
-    };
+    children: Vec<Entity>,
+}
 
-    let mut ordered: Vec<Entity> = children.iter().collect();
-    ordered.swap(pos_a, pos_b);
-
-    for &child in &ordered {
-        commands.entity(child).remove::<ChildOf>();
+impl SiblingOrder {
+    pub fn swapped(
+        parent: Entity,
+        children: &Children,
+        kind_positions: &[usize],
+        a: usize,
+        b: usize,
+    ) -> Option<Self> {
+        if a == b {
+            return None;
+        }
+        let &position_a = kind_positions.get(a)?;
+        let &position_b = kind_positions.get(b)?;
+        let mut children = children.iter().collect::<Vec<_>>();
+        children.swap(position_a, position_b);
+        Some(Self { parent, children })
     }
-    for &child in &ordered {
-        commands.entity(child).insert(ChildOf(parent));
+
+    pub fn moved(
+        parent: Entity,
+        children: &Children,
+        kind_positions: &[usize],
+        from: usize,
+        to: usize,
+    ) -> Option<Self> {
+        if from == to {
+            return None;
+        }
+        let mut kinds = kind_positions
+            .iter()
+            .map(|position| children[*position])
+            .collect::<Vec<_>>();
+        if from >= kinds.len() || to >= kinds.len() {
+            return None;
+        }
+        let moved = kinds.remove(from);
+        kinds.insert(to, moved);
+        let mut children = children.iter().collect::<Vec<_>>();
+        for (position, entity) in kind_positions.iter().zip(kinds) {
+            children[*position] = entity;
+        }
+        Some(Self { parent, children })
     }
 }
 
-pub fn move_sibling(
-    commands: &mut Commands,
-    parent: Entity,
-    children: &Children,
-    kind_positions: &[usize],
-    from: usize,
-    to: usize,
-) {
-    if from == to {
-        return;
-    }
-    let mut kinds = kind_positions
-        .iter()
-        .map(|position| children[*position])
-        .collect::<Vec<_>>();
-    if from >= kinds.len() || to >= kinds.len() {
-        return;
-    }
-    let moved = kinds.remove(from);
-    kinds.insert(to, moved);
-    let mut ordered: Vec<Entity> = children.iter().collect();
-    for (position, entity) in kind_positions.iter().zip(kinds) {
-        ordered[*position] = entity;
-    }
-    for &child in &ordered {
-        commands.entity(child).remove::<ChildOf>();
-    }
-    for &child in &ordered {
-        commands.entity(child).insert(ChildOf(parent));
+impl Command for SiblingOrder {
+    type Out = ();
+
+    fn apply(self, world: &mut World) {
+        for child in &self.children {
+            world.entity_mut(*child).remove::<ChildOf>();
+        }
+        for child in self.children {
+            world.entity_mut(child).insert(ChildOf(self.parent));
+        }
     }
 }
 
@@ -96,7 +98,9 @@ mod tests {
         app.world_mut()
             .run_system_once(move |children: Query<&Children>, mut commands: Commands| {
                 let siblings = children.get(parent).unwrap();
-                move_sibling(&mut commands, parent, siblings, &[0, 2, 3], 0, 2);
+                if let Some(order) = SiblingOrder::moved(parent, siblings, &[0, 2, 3], 0, 2) {
+                    commands.queue(order);
+                }
             })
             .unwrap();
 

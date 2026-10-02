@@ -76,11 +76,10 @@ fn handle_save_requests(
     mut requests: MessageReader<WorkspaceSaveRequest>,
     save_entities: SpaceSaveEntities,
     persistence: Single<&AutoSave>,
-    mut commands: Commands,
+    mut saver: SpaceSaver,
 ) {
     for request in requests.read() {
-        save_space_to_path_excluding(
-            &mut commands,
+        saver.save(
             request.path.clone(),
             save_entities.excluded(),
             persistence.components.clone(),
@@ -123,6 +122,32 @@ struct SpaceSaveEntities<'w, 's> {
     hierarchy: WindowHierarchy<'w, 's>,
     windows: Query<'w, 's, (), With<Window>>,
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct SpaceSaver<'w, 's> {
+    commands: Commands<'w, 's>,
+}
+
+impl SpaceSaver<'_, '_> {
+    fn save(
+        &mut self,
+        path: PathBuf,
+        excluded: impl IntoIterator<Item = Entity>,
+        components: WorldFilter,
+    ) {
+        if is_test_session() {
+            return;
+        }
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        WorkspaceStorePath(path.clone()).write_schema_version();
+        let mut save = SaveWorld::default_into_file(path);
+        save.entities = EntityFilter::block(excluded);
+        save.components = components;
+        self.commands.trigger_save(save);
+    }
 }
 
 impl SpaceSaveEntities<'_, '_> {
@@ -186,7 +211,7 @@ fn auto_save(
     path: Single<&WorkspaceStorePath>,
     spaces: Query<(), With<Space>>,
     save_entities: SpaceSaveEntities,
-    mut commands: Commands,
+    mut saver: SpaceSaver,
 ) {
     auto_save.periodic.tick(time.delta());
 
@@ -197,8 +222,7 @@ fn auto_save(
     if auto_save.dirty {
         auto_save.debounce.tick(time.delta());
         if auto_save.debounce.is_finished() {
-            save_space_to_path_excluding(
-                &mut commands,
+            saver.save(
                 path.0.clone(),
                 save_entities.excluded(),
                 auto_save.components.clone(),
@@ -208,8 +232,7 @@ fn auto_save(
     }
 
     if auto_save.periodic.just_finished() {
-        save_space_to_path_excluding(
-            &mut commands,
+        saver.save(
             path.0.clone(),
             save_entities.excluded(),
             auto_save.components.clone(),
@@ -224,26 +247,11 @@ fn save_space_to_path(world: &mut World, path: PathBuf) {
         .allow::<ChildOf>()
         .allow::<Children>()
         .allow::<Name>();
-    save_space_to_path_excluding(&mut world.commands(), path, std::iter::empty(), components);
-}
-
-fn save_space_to_path_excluding(
-    commands: &mut Commands,
-    path: PathBuf,
-    excluded: impl IntoIterator<Item = Entity>,
-    components: WorldFilter,
-) {
-    if is_test_session() {
-        return;
-    }
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    WorkspaceStorePath(path.clone()).write_schema_version();
-    let mut save = SaveWorld::default_into_file(path);
-    save.entities = EntityFilter::block(excluded);
-    save.components = components;
-    commands.trigger_save(save);
+    world
+        .run_system_once(move |mut saver: SpaceSaver| {
+            saver.save(path, std::iter::empty(), components);
+        })
+        .unwrap();
 }
 
 fn load_on_startup(

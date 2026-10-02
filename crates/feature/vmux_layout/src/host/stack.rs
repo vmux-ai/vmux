@@ -1,6 +1,6 @@
 use crate::{
     active_pane::{ActiveStack, ProfileId},
-    host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
+    host::swap::{SiblingOrder, find_kind_index, resolve_next, resolve_prev},
     pane::{Pane, PaneHierarchy, PaneSplit, PaneStacks, PendingCursorWarp},
     tab::{CloseTabRequest, Tab},
 };
@@ -217,6 +217,18 @@ struct StackCloser<'w, 's> {
     page_open_requests: MessageWriter<'w, PageOpenRequest>,
 }
 
+impl StackCloser<'_, '_> {
+    fn active_stack(&self, pane: Entity) -> Option<Entity> {
+        self.panes.children.get(pane).ok().and_then(|children| {
+            active_among(
+                children
+                    .iter()
+                    .filter_map(|entity| self.stack_ts.get(entity).ok()),
+            )
+        })
+    }
+}
+
 fn close_stack(request: CloseStackRequest, closer: &mut StackCloser, commands: &mut Commands) {
     let Ok(pane) = closer.child_of.get(request.stack).map(Relationship::get) else {
         return;
@@ -237,8 +249,7 @@ fn close_stack(request: CloseStackRequest, closer: &mut StackCloser, commands: &
         return;
     }
 
-    let was_active =
-        active_stack_in_pane(pane, &closer.panes.children, &closer.stack_ts) == Some(request.stack);
+    let was_active = closer.active_stack(pane) == Some(request.stack);
     commands.entity(request.stack).despawn();
     if !was_active {
         return;
@@ -372,7 +383,8 @@ fn close_last_stack_in_pane(
 }
 
 fn first_stack_to_activate(pane: Entity, closer: &StackCloser) -> Option<Entity> {
-    active_stack_in_pane(pane, &closer.panes.children, &closer.stack_ts)
+    closer
+        .active_stack(pane)
         .or_else(|| closer.pane_stacks.first(pane))
 }
 
@@ -417,44 +429,6 @@ pub fn active_among<'a>(
     entities.max_by_key(|(_, ts)| ts.0).map(|(e, _)| e)
 }
 
-fn collect_leaf_panes(
-    root: Entity,
-    all_children: &Query<&Children>,
-    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    result: &mut Vec<Entity>,
-) {
-    if leaf_panes.contains(root) {
-        result.push(root);
-    }
-    if let Ok(children) = all_children.get(root) {
-        for child in children.iter() {
-            collect_leaf_panes(child, all_children, leaf_panes, result);
-        }
-    }
-}
-
-fn active_pane_in_tab(
-    tab: Entity,
-    all_children: &Query<&Children>,
-    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: &Query<(Entity, &LastActivatedAt), With<Pane>>,
-) -> Option<Entity> {
-    let mut panes = Vec::new();
-    collect_leaf_panes(tab, all_children, leaf_panes, &mut panes);
-    active_among(panes.iter().filter_map(|&e| pane_ts.get(e).ok()))
-}
-
-fn active_stack_in_pane(
-    pane: Entity,
-    pane_children: &Query<&Children, With<Pane>>,
-    tab_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
-) -> Option<Entity> {
-    pane_children
-        .get(pane)
-        .ok()
-        .and_then(|children| active_among(children.iter().filter_map(|e| tab_ts.get(e).ok())))
-}
-
 #[derive(SystemParam)]
 pub struct ActiveTabParam<'w, 's> {
     tabs: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Tab>>,
@@ -486,9 +460,22 @@ pub struct LayoutFocus<'w, 's> {
     pane_activity: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
     pane_children: Query<'w, 's, &'static Children, With<Pane>>,
     stack_activity: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
+    parents: Query<'w, 's, &'static ChildOf>,
+    tabs: Query<'w, 's, (), With<Tab>>,
 }
 
 impl LayoutFocus<'_, '_> {
+    fn collect_leaf_panes(&self, root: Entity, result: &mut Vec<Entity>) {
+        if self.leaf_panes.contains(root) {
+            result.push(root);
+        }
+        if let Ok(children) = self.all_children.get(root) {
+            for child in children.iter() {
+                self.collect_leaf_panes(child, result);
+            }
+        }
+    }
+
     pub fn is_leaf(&self, entity: Entity) -> bool {
         self.leaf_panes.contains(entity)
     }
@@ -499,21 +486,28 @@ impl LayoutFocus<'_, '_> {
 
     pub fn leaves(&self, root: Entity) -> Vec<Entity> {
         let mut panes = Vec::new();
-        collect_leaf_panes(root, &self.all_children, &self.leaf_panes, &mut panes);
+        self.collect_leaf_panes(root, &mut panes);
         panes
     }
 
     pub fn pane(&self, tab: Entity) -> Option<Entity> {
-        active_pane_in_tab(
-            tab,
-            &self.all_children,
-            &self.leaf_panes,
-            &self.pane_activity,
+        let mut panes = Vec::new();
+        self.collect_leaf_panes(tab, &mut panes);
+        active_among(
+            panes
+                .iter()
+                .filter_map(|&entity| self.pane_activity.get(entity).ok()),
         )
     }
 
     pub fn stack(&self, pane: Entity) -> Option<Entity> {
-        active_stack_in_pane(pane, &self.pane_children, &self.stack_activity)
+        self.pane_children.get(pane).ok().and_then(|children| {
+            active_among(
+                children
+                    .iter()
+                    .filter_map(|entity| self.stack_activity.get(entity).ok()),
+            )
+        })
     }
 
     pub fn resolve(
@@ -523,6 +517,17 @@ impl LayoutFocus<'_, '_> {
         let pane = active_tab.and_then(|tab| self.pane(tab));
         let stack = pane.and_then(|pane| self.stack(pane));
         (active_tab, pane, stack)
+    }
+
+    pub fn tab_of(&self, entity: Entity) -> Option<Entity> {
+        let mut current = entity;
+        for _ in 0..32 {
+            if self.tabs.contains(current) {
+                return Some(current);
+            }
+            current = self.parents.get(current).ok()?.parent();
+        }
+        None
     }
 }
 
@@ -671,7 +676,10 @@ fn handle_move_requests(
             resolve_next(active_index, kind_positions.len())
         };
         if let Some((left, right)) = pair {
-            swap_siblings(&mut commands, pane, children, &kind_positions, left, right);
+            if let Some(order) = SiblingOrder::swapped(pane, children, &kind_positions, left, right)
+            {
+                commands.queue(order);
+            }
         }
     }
 }

@@ -10,6 +10,59 @@ pub struct HistorySpawnPlugin;
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct HistoryWriteSet;
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct VisitWriter<'w, 's> {
+    urls: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static PageMetadata,
+            &'static mut VisitCount,
+            &'static mut LastVisitedAt,
+        ),
+        With<Url>,
+    >,
+    commands: Commands<'w, 's>,
+}
+
+impl VisitWriter<'_, '_> {
+    fn record(&mut self, url: &str, title: &str, transition: TransitionType, now: i64) {
+        let mut url_entity = None;
+        for (entity, metadata, mut count, mut last) in &mut self.urls {
+            if metadata.url == url {
+                count.0 = count.0.saturating_add(1);
+                last.0 = now;
+                url_entity = Some(entity);
+                break;
+            }
+        }
+
+        let url_entity = match url_entity {
+            Some(entity) => entity,
+            None => self
+                .commands
+                .spawn((
+                    Url,
+                    PageMetadata {
+                        url: url.to_string(),
+                        title: title.to_string(),
+                        ..default()
+                    },
+                    VisitCount(1),
+                    LastVisitedAt(now),
+                    CreatedAt(now),
+                ))
+                .id(),
+        };
+
+        if transition != TransitionType::BackForward {
+            self.commands
+                .spawn((Visit, CreatedAt(now), VisitedUrl(url_entity), transition));
+        }
+    }
+}
+
 impl Plugin for HistorySpawnPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<vmux_ecs::event::RecordVisitRequest>()
@@ -26,8 +79,7 @@ fn spawn(
     mut events: bevy::ecs::message::MessageReader<
         bevy_cef_core::prelude::WebviewCommittedNavigationEvent,
     >,
-    mut commands: Commands,
-    mut urls: Query<(Entity, &PageMetadata, &mut VisitCount, &mut LastVisitedAt), With<Url>>,
+    mut visits: VisitWriter,
 ) {
     for ev in events.read() {
         if !ev.is_main_frame {
@@ -38,89 +90,33 @@ fn spawn(
         }
         let now = now_millis();
         let transition = super::transition::map(ev.transition, ev.qualifiers);
-        record_visit(&mut commands, &mut urls, &ev.url, "", transition, now);
-    }
-}
-
-fn record_visit(
-    commands: &mut Commands,
-    urls: &mut Query<(Entity, &PageMetadata, &mut VisitCount, &mut LastVisitedAt), With<Url>>,
-    url: &str,
-    title: &str,
-    transition: TransitionType,
-    now: i64,
-) {
-    let mut url_entity = None;
-    for (e, meta, mut count, mut last) in urls.iter_mut() {
-        if meta.url == url {
-            count.0 = count.0.saturating_add(1);
-            last.0 = now;
-            url_entity = Some(e);
-            break;
-        }
-    }
-
-    let url_e = match url_entity {
-        Some(e) => e,
-        None => commands
-            .spawn((
-                Url,
-                PageMetadata {
-                    url: url.to_string(),
-                    title: title.to_string(),
-                    ..default()
-                },
-                VisitCount(1),
-                LastVisitedAt(now),
-                CreatedAt(now),
-            ))
-            .id(),
-    };
-
-    if transition != TransitionType::BackForward {
-        commands.spawn((Visit, CreatedAt(now), VisitedUrl(url_e), transition));
+        visits.record(&ev.url, "", transition, now);
     }
 }
 
 fn record_requested_visits(
     mut reader: bevy::ecs::message::MessageReader<vmux_ecs::event::RecordVisitRequest>,
-    mut commands: Commands,
-    mut urls: Query<(Entity, &PageMetadata, &mut VisitCount, &mut LastVisitedAt), With<Url>>,
+    mut visits: VisitWriter,
 ) {
     let now = now_millis();
     for req in reader.read() {
         if req.url.is_empty() || VmuxRoute::parse(&req.url).is_some() {
             continue;
         }
-        record_visit(
-            &mut commands,
-            &mut urls,
-            &req.url,
-            &req.title,
-            TransitionType::Typed,
-            now,
-        );
+        visits.record(&req.url, &req.title, TransitionType::Typed, now);
     }
 }
 
 fn record_vmux_pages(
     pages: Query<&PageMetadata, (Added<PageReady>, Without<Url>)>,
-    mut commands: Commands,
-    mut urls: Query<(Entity, &PageMetadata, &mut VisitCount, &mut LastVisitedAt), With<Url>>,
+    mut visits: VisitWriter,
 ) {
     let now = now_millis();
     for page in &pages {
         if !recordable_vmux_url(&page.url) {
             continue;
         }
-        record_visit(
-            &mut commands,
-            &mut urls,
-            &page.url,
-            &page.title,
-            TransitionType::Typed,
-            now,
-        );
+        visits.record(&page.url, &page.title, TransitionType::Typed, now);
     }
 }
 

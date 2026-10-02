@@ -46,6 +46,71 @@ struct PendingTidy {
     closable: Vec<Entity>,
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct TidyFiles<'w, 's> {
+    layout: AgentFileLayout<'w, 's>,
+    last_activated: Query<'w, 's, &'static LastActivatedAt>,
+    pending: Query<'w, 's, (), With<PendingTidy>>,
+    close: MessageWriter<'w, CloseStackRequest>,
+    commands: Commands<'w, 's>,
+}
+
+impl TidyFiles<'_, '_> {
+    fn run(&mut self, agent_pane: Entity, settings: &AppSettings) {
+        let Some((follow_pane, stacks)) = self.layout.file_stacks_for(agent_pane) else {
+            return;
+        };
+        if self.pending.get(follow_pane).is_ok() {
+            return;
+        }
+        let mut repos: Vec<(PathBuf, std::collections::HashSet<String>)> = Vec::new();
+        let rows: Vec<(Entity, i64, bool)> = stacks
+            .iter()
+            .map(|(stack, _page, url)| {
+                let timestamp = self
+                    .last_activated
+                    .get(*stack)
+                    .map(|timestamp| timestamp.0)
+                    .unwrap_or(i64::MIN);
+                let changed = FileUrl::parse(url)
+                    .and_then(|url| url.path())
+                    .map(|path| is_changed(&path, &mut repos))
+                    .unwrap_or(false);
+                (*stack, timestamp, changed)
+            })
+            .collect();
+        let closable = decide_closable(&rows, settings.agent.tidy_files_max);
+        if closable.is_empty() {
+            return;
+        }
+        if settings.agent.tidy_files_auto {
+            for stack in closable {
+                self.close.write(CloseStackRequest::tidying(stack));
+            }
+            return;
+        }
+        let count = closable.len() as u32;
+        let active_page = stacks
+            .iter()
+            .max_by_key(|(stack, _, _)| {
+                self.last_activated
+                    .get(*stack)
+                    .map(|timestamp| timestamp.0)
+                    .unwrap_or(i64::MIN)
+            })
+            .map(|(_, page, _)| *page);
+        if let Some(page) = active_page {
+            self.commands.trigger(FileUiStateWrite::from_event(
+                page,
+                &FileTidyPromptEvent { count },
+            ));
+            self.commands
+                .entity(follow_pane)
+                .insert(PendingTidy { closable });
+        }
+    }
+}
+
 fn request(
     trigger: On<UiInput<FileTidyRequest>>,
     child_of: Query<&ChildOf>,
@@ -129,77 +194,11 @@ fn rel_str(root: &std::path::Path, abs: &std::path::Path) -> String {
         .unwrap_or_default()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn tidy_follow_pane(
-    agent_pane: Entity,
-    settings: &AppSettings,
-    layout: &AgentFileLayout,
-    last_activated: &Query<&LastActivatedAt>,
-    pending: &Query<(), With<PendingTidy>>,
-    close: &mut MessageWriter<CloseStackRequest>,
-    commands: &mut Commands,
-) {
-    let Some((follow_pane, stacks)) = layout.file_stacks_for(agent_pane) else {
-        return;
-    };
-    if pending.get(follow_pane).is_ok() {
-        return;
-    }
-    let mut repos: Vec<(PathBuf, std::collections::HashSet<String>)> = Vec::new();
-    let rows: Vec<(Entity, i64, bool)> = stacks
-        .iter()
-        .map(|(stack, _page, url)| {
-            let timestamp = last_activated
-                .get(*stack)
-                .map(|timestamp| timestamp.0)
-                .unwrap_or(i64::MIN);
-            let changed = FileUrl::parse(url)
-                .and_then(|url| url.path())
-                .map(|path| is_changed(&path, &mut repos))
-                .unwrap_or(false);
-            (*stack, timestamp, changed)
-        })
-        .collect();
-    let closable = decide_closable(&rows, settings.agent.tidy_files_max);
-    if closable.is_empty() {
-        return;
-    }
-    if settings.agent.tidy_files_auto {
-        for stack in closable {
-            close.write(CloseStackRequest::tidying(stack));
-        }
-        return;
-    }
-    let count = closable.len() as u32;
-    let active_page = stacks
-        .iter()
-        .max_by_key(|(stack, _, _)| {
-            last_activated
-                .get(*stack)
-                .map(|timestamp| timestamp.0)
-                .unwrap_or(i64::MIN)
-        })
-        .map(|(_, page, _)| *page);
-    if let Some(page) = active_page {
-        commands.trigger(FileUiStateWrite::from_event(
-            page,
-            &FileTidyPromptEvent { count },
-        ));
-        commands
-            .entity(follow_pane)
-            .insert(PendingTidy { closable });
-    }
-}
-
 fn attention(
     mut reader: MessageReader<AgentAttention>,
     settings: Option<Res<AppSettings>>,
     agents: Query<&ProcessId, With<Agent>>,
-    layout: AgentFileLayout,
-    last_activated: Query<&LastActivatedAt>,
-    pending: Query<(), With<PendingTidy>>,
-    mut close: MessageWriter<CloseStackRequest>,
-    mut commands: Commands,
+    mut tidy: TidyFiles,
 ) {
     let Some(settings) = settings else {
         for _ in reader.read() {}
@@ -213,29 +212,17 @@ fn attention(
         let Ok(process) = agents.get(attention.entity) else {
             continue;
         };
-        let Some(agent_pane) = layout.agent_pane(*process) else {
+        let Some(agent_pane) = tidy.layout.agent_pane(*process) else {
             continue;
         };
-        tidy_follow_pane(
-            agent_pane,
-            &settings,
-            &layout,
-            &last_activated,
-            &pending,
-            &mut close,
-            &mut commands,
-        );
+        tidy.run(agent_pane, &settings);
     }
 }
 
 fn idle(
     settings: Option<Res<AppSettings>>,
     sessions: Query<(&AcpSession, &AgentRunState), Changed<AgentRunState>>,
-    layout: AgentFileLayout,
-    last_activated: Query<&LastActivatedAt>,
-    pending: Query<(), With<PendingTidy>>,
-    mut close: MessageWriter<CloseStackRequest>,
-    mut commands: Commands,
+    mut tidy: TidyFiles,
 ) {
     let Some(settings) = settings else {
         return;
@@ -247,18 +234,10 @@ fn idle(
         if !matches!(state, AgentRunState::Idle) {
             continue;
         }
-        let Some(agent_pane) = layout.agent_pane(session.anchor) else {
+        let Some(agent_pane) = tidy.layout.agent_pane(session.anchor) else {
             continue;
         };
-        tidy_follow_pane(
-            agent_pane,
-            &settings,
-            &layout,
-            &last_activated,
-            &pending,
-            &mut close,
-            &mut commands,
-        );
+        tidy.run(agent_pane, &settings);
     }
 }
 

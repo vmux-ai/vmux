@@ -7,6 +7,7 @@ use crate::reconcile::*;
 use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection};
 use crate::protocol as proto;
 use crate::protocol::format_id;
+use crate::snapshot::LayoutSnapshotQuery;
 use crate::stack::Stack;
 use crate::tab::Tab as LayoutTab;
 use crate::{TerminalLayoutSpawnRequest, event::PANE_GAP_PX};
@@ -67,12 +68,7 @@ struct LayoutApplyResult {
 
 fn serve_snapshot_requests(
     mut reader: MessageReader<LayoutSnapshotRequest>,
-    tabs_q: Query<(Entity, &LayoutTab, Option<&Children>)>,
-    splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
-    leaves_q: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
-    stacks_q: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
-    pane_sizes_q: Query<&PaneSize>,
-    zoomed_q: Query<&crate::pane::Zoomed>,
+    snapshot_query: LayoutSnapshotQuery,
     focused: crate::stack::FocusedStack,
     process_ids: Query<(&vmux_ecs::ProcessId, &ChildOf)>,
     space_hierarchy: crate::space::SpaceHierarchy,
@@ -93,16 +89,7 @@ fn serve_snapshot_requests(
         let target_space = self_stack
             .and_then(|stack| space_hierarchy.get(stack))
             .or_else(|| active_space_q.iter().next());
-        let mut snapshot = crate::snapshot::build_layout_snapshot(
-            &tabs_q,
-            &splits_q,
-            &leaves_q,
-            &stacks_q,
-            &pane_sizes_q,
-            &zoomed_q,
-            &focused,
-            self_stack,
-        );
+        let mut snapshot = snapshot_query.build(&focused, self_stack);
         if let Some(target) = target_space {
             snapshot.tabs.retain(|tab| {
                 tab.id
@@ -219,27 +206,13 @@ fn apply(
 
 fn respond_to(
     mut reader: MessageReader<LayoutApplyResult>,
-    tabs_q: Query<(Entity, &LayoutTab, Option<&Children>)>,
-    splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
-    leaves_q: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
-    stacks_q: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
-    pane_sizes_q: Query<&PaneSize>,
-    zoomed_q: Query<&crate::pane::Zoomed>,
+    snapshot_query: LayoutSnapshotQuery,
     focused: crate::stack::FocusedStack,
     mut writer: MessageWriter<LayoutApplyResponse>,
 ) {
     for result in reader.read() {
         let response = match &result.result {
-            Ok(()) => Ok(crate::snapshot::build_layout_snapshot(
-                &tabs_q,
-                &splits_q,
-                &leaves_q,
-                &stacks_q,
-                &pane_sizes_q,
-                &zoomed_q,
-                &focused,
-                None,
-            )),
+            Ok(()) => Ok(snapshot_query.build(&focused, None)),
             Err(error) => Err(error.clone()),
         };
         writer.write(LayoutApplyResponse {

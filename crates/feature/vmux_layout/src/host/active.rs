@@ -35,15 +35,22 @@ impl Plugin for ActivePlugin {
     }
 }
 
-fn apply_active(entries: &[(Entity, i64, bool)], commands: &mut Commands) {
-    let Some(&(target, _, _)) = entries.iter().max_by_key(|(_, ts, _)| *ts) else {
-        return;
-    };
-    for &(entity, _, active) in entries {
-        if entity == target && !active {
-            commands.entity(entity).insert(Active);
-        } else if entity != target && active {
-            commands.entity(entity).remove::<Active>();
+#[derive(bevy::ecs::system::SystemParam)]
+struct ActiveWriter<'w, 's> {
+    commands: Commands<'w, 's>,
+}
+
+impl ActiveWriter<'_, '_> {
+    fn apply(&mut self, entries: &[(Entity, i64, bool)]) {
+        let Some(&(target, _, _)) = entries.iter().max_by_key(|(_, ts, _)| *ts) else {
+            return;
+        };
+        for &(entity, _, active) in entries {
+            if entity == target && !active {
+                self.commands.entity(entity).insert(Active);
+            } else if entity != target && active {
+                self.commands.entity(entity).remove::<Active>();
+            }
         }
     }
 }
@@ -51,7 +58,7 @@ fn apply_active(entries: &[(Entity, i64, bool)], commands: &mut Commands) {
 fn ensure_space(
     mains: Query<&Children, With<crate::window::Main>>,
     spaces: Query<(Entity, Option<&LastActivatedAt>, Has<Active>), With<Space>>,
-    mut commands: Commands,
+    mut active: ActiveWriter,
 ) {
     for children in &mains {
         let mut entries = Vec::new();
@@ -60,14 +67,14 @@ fn ensure_space(
                 entries.push((entity, ts.map(|t| t.0).unwrap_or(0), active));
             }
         }
-        apply_active(&entries, &mut commands);
+        active.apply(&entries);
     }
 }
 
 fn ensure_tab(
     spaces: Query<&Children, With<Space>>,
     tabs: Query<(&LastActivatedAt, Has<Active>), With<Tab>>,
-    mut commands: Commands,
+    mut active: ActiveWriter,
 ) {
     for children in &spaces {
         let mut entries = Vec::new();
@@ -76,14 +83,14 @@ fn ensure_tab(
                 entries.push((child, ts.0, active));
             }
         }
-        apply_active(&entries, &mut commands);
+        active.apply(&entries);
     }
 }
 
 fn ensure_stack(
     leaves: Query<&Children, (With<Pane>, Without<PaneSplit>)>,
     stacks: Query<(&LastActivatedAt, Has<Active>), With<Stack>>,
-    mut commands: Commands,
+    mut active: ActiveWriter,
 ) {
     for children in &leaves {
         let mut entries = Vec::new();
@@ -92,14 +99,14 @@ fn ensure_stack(
                 entries.push((child, ts.0, active));
             }
         }
-        apply_active(&entries, &mut commands);
+        active.apply(&entries);
     }
 }
 
 fn ensure_branch(
     splits: Query<&Children, With<PaneSplit>>,
     branches: Query<(Option<&LastActivatedAt>, Has<Active>), With<Pane>>,
-    mut commands: Commands,
+    mut active: ActiveWriter,
 ) {
     for children in &splits {
         let mut entries = Vec::new();
@@ -108,7 +115,7 @@ fn ensure_branch(
                 entries.push((child, ts.map(|t| t.0).unwrap_or(0), active));
             }
         }
-        apply_active(&entries, &mut commands);
+        active.apply(&entries);
     }
 }
 

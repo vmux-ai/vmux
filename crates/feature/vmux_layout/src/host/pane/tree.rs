@@ -65,6 +65,8 @@ impl Pane {
 pub(crate) struct PaneHierarchy<'w, 's> {
     pub(crate) children: Query<'w, 's, &'static Children, With<Pane>>,
     pub(crate) leaves: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+    parents: Query<'w, 's, &'static ChildOf>,
+    splits: Query<'w, 's, &'static PaneSplit>,
 }
 
 impl PaneHierarchy<'_, '_> {
@@ -84,6 +86,41 @@ impl PaneHierarchy<'_, '_> {
             }
         }
         entity
+    }
+
+    pub(crate) fn sibling(&self, active: Entity, direction: PaneDirection) -> Option<Entity> {
+        let target_split = PaneSplitDirection::from(direction);
+        let after = matches!(direction, PaneDirection::Right | PaneDirection::Bottom);
+        let mut current = active;
+        for _ in 0..20 {
+            let parent = self.parents.get(current).ok()?.parent();
+            let Ok(split) = self.splits.get(parent) else {
+                current = parent;
+                continue;
+            };
+            if split.direction != target_split {
+                current = parent;
+                continue;
+            }
+            let Ok(children) = self.children.get(parent) else {
+                current = parent;
+                continue;
+            };
+            let siblings = children.iter().collect::<Vec<_>>();
+            let Some(index) = siblings.iter().position(|entity| *entity == current) else {
+                current = parent;
+                continue;
+            };
+            let sibling = if after {
+                siblings.get(index + 1).copied()
+            } else {
+                index
+                    .checked_sub(1)
+                    .and_then(|index| siblings.get(index).copied())
+            }?;
+            return Some(self.first_leaf(sibling));
+        }
+        None
     }
 }
 

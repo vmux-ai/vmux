@@ -60,6 +60,50 @@ enum ChatAttachmentDelivery {
     Hydrated,
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct AttachmentTasks<'w, 's> {
+    proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
+    commands: Commands<'w, 's>,
+}
+
+impl AttachmentTasks<'_, '_> {
+    fn spawn(
+        &mut self,
+        webview: Entity,
+        delivery: ChatAttachmentDelivery,
+        paths: Vec<std::path::PathBuf>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        let requested = paths
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+        let wake = vmux_ecs::host::wake::Wake::beside(self.proxy.as_deref());
+        let task = IoTaskPool::get().spawn(async move {
+            let _wake = wake;
+            paths
+                .into_iter()
+                .filter_map(match delivery {
+                    ChatAttachmentDelivery::Hydrated => chat_attachment_preview,
+                    ChatAttachmentDelivery::Selected => chat_attachment,
+                })
+                .collect()
+        });
+        self.commands.spawn(ChatAttachmentTask {
+            webview,
+            delivery,
+            paths: requested,
+            task,
+        });
+    }
+
+    fn selected(&mut self, webview: Entity, paths: Vec<std::path::PathBuf>) {
+        self.spawn(webview, ChatAttachmentDelivery::Selected, paths);
+    }
+}
+
 #[derive(Event)]
 pub struct ChatAttachmentHydrationRequest {
     pub webview: Entity,
@@ -361,53 +405,6 @@ fn chat_attachment_preview(path: std::path::PathBuf) -> Option<ChatAttachment> {
     (!attachment.preview_data_url.is_empty()).then_some(attachment)
 }
 
-fn spawn_chat_attachment_task(
-    webview: Entity,
-    delivery: ChatAttachmentDelivery,
-    paths: Vec<std::path::PathBuf>,
-    wake: vmux_ecs::host::wake::Wake,
-    commands: &mut Commands,
-) {
-    if paths.is_empty() {
-        return;
-    }
-    let requested = paths
-        .iter()
-        .map(|path| path.to_string_lossy().into_owned())
-        .collect();
-    let task = IoTaskPool::get().spawn(async move {
-        let _wake = wake;
-        paths
-            .into_iter()
-            .filter_map(match delivery {
-                ChatAttachmentDelivery::Hydrated => chat_attachment_preview,
-                ChatAttachmentDelivery::Selected => chat_attachment,
-            })
-            .collect()
-    });
-    commands.spawn(ChatAttachmentTask {
-        webview,
-        delivery,
-        paths: requested,
-        task,
-    });
-}
-
-fn spawn_selected_attachment_tasks(
-    webview: Entity,
-    paths: Vec<std::path::PathBuf>,
-    wake: vmux_ecs::host::wake::Wake,
-    commands: &mut Commands,
-) {
-    spawn_chat_attachment_task(
-        webview,
-        ChatAttachmentDelivery::Selected,
-        paths.clone(),
-        wake,
-        commands,
-    );
-}
-
 fn decode_media_query_path(value: &str) -> std::path::PathBuf {
     let bytes = value.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
@@ -616,11 +613,7 @@ fn query(
     commands.spawn(ChatMediaListTask { webview, task });
 }
 
-fn attach_paths(
-    trigger: On<UiInput<ChatAttachPaths>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
+fn attach_paths(trigger: On<UiInput<ChatAttachPaths>>, mut tasks: AttachmentTasks) {
     let paths = trigger
         .event()
         .payload
@@ -629,32 +622,20 @@ fn attach_paths(
         .filter(|path| !path.is_empty())
         .map(std::path::PathBuf::from)
         .collect();
-    spawn_selected_attachment_tasks(
-        trigger.event().webview,
-        paths,
-        vmux_ecs::host::wake::Wake::beside(proxy.as_deref()),
-        &mut commands,
-    );
+    tasks.selected(trigger.event().webview, paths);
 }
 
 fn hydrate_attachments(
     trigger: On<ChatAttachmentHydrationRequest>,
     mut projections: Query<&mut ChatAttachmentProjection, With<ChatView>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
+    mut tasks: AttachmentTasks,
 ) {
     let request = trigger.event();
     let Ok(mut projection) = projections.get_mut(request.webview) else {
         return;
     };
     let paths = projection.start_hydration(&request.paths);
-    spawn_chat_attachment_task(
-        request.webview,
-        ChatAttachmentDelivery::Hydrated,
-        paths,
-        vmux_ecs::host::wake::Wake::beside(proxy.as_deref()),
-        &mut commands,
-    );
+    tasks.spawn(request.webview, ChatAttachmentDelivery::Hydrated, paths);
 }
 
 fn remove_attachment(
@@ -686,11 +667,7 @@ fn remove_attachment(
     );
 }
 
-fn pick_files(
-    trigger: On<UiInput<ChatPickFiles>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
+fn pick_files(trigger: On<UiInput<ChatPickFiles>>, mut tasks: AttachmentTasks) {
     let mut dialog = rfd::FileDialog::new();
     if let Some(home) = std::env::var_os("HOME") {
         dialog = dialog.set_directory(std::path::PathBuf::from(home));
@@ -698,12 +675,7 @@ fn pick_files(
     let Some(paths) = dialog.pick_files() else {
         return;
     };
-    spawn_selected_attachment_tasks(
-        trigger.event().webview,
-        paths,
-        vmux_ecs::host::wake::Wake::beside(proxy.as_deref()),
-        &mut commands,
-    );
+    tasks.selected(trigger.event().webview, paths);
 }
 
 fn tiff_to_png(bytes: &[u8]) -> Option<Vec<u8>> {
@@ -727,20 +699,11 @@ fn clipboard_image_path() -> Option<std::path::PathBuf> {
     Some(path)
 }
 
-fn paste(
-    trigger: On<UiInput<ChatPasteMedia>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
+fn paste(trigger: On<UiInput<ChatPasteMedia>>, mut tasks: AttachmentTasks) {
     let Some(path) = clipboard_image_path() else {
         return;
     };
-    spawn_selected_attachment_tasks(
-        trigger.event().webview,
-        vec![path],
-        vmux_ecs::host::wake::Wake::beside(proxy.as_deref()),
-        &mut commands,
-    );
+    tasks.selected(trigger.event().webview, vec![path]);
 }
 
 fn drain_attachment_tasks(
@@ -754,8 +717,7 @@ fn drain_attachment_tasks(
         ),
         With<ChatView>,
     >,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
+    mut attachment_tasks: AttachmentTasks,
 ) {
     for (entity, mut pending) in &mut tasks {
         let Some(attachments) = future::block_on(future::poll_once(&mut pending.task)) else {
@@ -768,10 +730,10 @@ fn drain_attachment_tasks(
                 ChatAttachmentDelivery::Selected => {
                     let incoming = ChatAttachments { attachments };
                     if projection.merge_selected(&incoming) {
-                        commands.trigger(vmux_ecs::host::UiStateWrite::<
+                        attachment_tasks.commands.trigger(vmux_ecs::host::UiStateWrite::<
                             vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &projection.state()));
-                        commands.trigger(vmux_ecs::host::UiStateWrite::<
+                        attachment_tasks.commands.trigger(vmux_ecs::host::UiStateWrite::<
                             vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &focus.next()));
                     }
@@ -782,17 +744,17 @@ fn drain_attachment_tasks(
                     let transcript_changed = projection.hydrate_transcript(&mut transcript.state);
                     let snapshot_changed = projection.hydrate_snapshot(&mut snapshot.0);
                     if selected_changed {
-                        commands.trigger(vmux_ecs::host::UiStateWrite::<
+                        attachment_tasks.commands.trigger(vmux_ecs::host::UiStateWrite::<
                             vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &projection.state()));
                     }
                     if transcript_changed {
-                        commands.trigger(vmux_ecs::host::UiStateWrite::<
+                        attachment_tasks.commands.trigger(vmux_ecs::host::UiStateWrite::<
                             vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &transcript.state));
                     }
                     if snapshot_changed {
-                        commands.trigger(vmux_ecs::host::UiStateWrite::<
+                        attachment_tasks.commands.trigger(vmux_ecs::host::UiStateWrite::<
                             vmux_chat::state::ChatUiState,
                         >::from_event(pending.webview, &snapshot.0));
                     }
@@ -800,34 +762,32 @@ fn drain_attachment_tasks(
             }
             let paths = projection.hydration_paths(&transcript.state, &snapshot.0);
             if !paths.is_empty() {
-                commands.trigger(ChatAttachmentHydrationRequest {
-                    webview: pending.webview,
-                    paths,
-                });
+                attachment_tasks
+                    .commands
+                    .trigger(ChatAttachmentHydrationRequest {
+                        webview: pending.webview,
+                        paths,
+                    });
             }
         } else {
             let response = ChatAttachments {
                 attachments: attachments.clone(),
             };
-            commands.trigger(vmux_ecs::host::UiStateWrite::<
-                vmux_api::command_bar::CommandBarUiState,
-            >::from_event(pending.webview, &response));
+            attachment_tasks
+                .commands
+                .trigger(vmux_ecs::host::UiStateWrite::<
+                    vmux_api::command_bar::CommandBarUiState,
+                >::from_event(pending.webview, &response));
             if matches!(pending.delivery, ChatAttachmentDelivery::Selected) {
                 let paths = attachments
                     .iter()
                     .filter(|attachment| attachment.mime_type.starts_with("image/"))
                     .map(|attachment| std::path::PathBuf::from(&attachment.path))
                     .collect();
-                spawn_chat_attachment_task(
-                    pending.webview,
-                    ChatAttachmentDelivery::Hydrated,
-                    paths,
-                    vmux_ecs::host::wake::Wake::beside(proxy.as_deref()),
-                    &mut commands,
-                );
+                attachment_tasks.spawn(pending.webview, ChatAttachmentDelivery::Hydrated, paths);
             }
         }
-        commands.entity(entity).despawn();
+        attachment_tasks.commands.entity(entity).despawn();
     }
 }
 

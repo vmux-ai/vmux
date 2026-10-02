@@ -3,8 +3,8 @@ use std::path::Path;
 
 use syn::visit::{self, Visit};
 use syn::{
-    Attribute, Block, Expr, ExprMethodCall, FnArg, ImplItem, Item, ItemFn, Stmt, Type, TypePath,
-    UseTree, Visibility,
+    Attribute, Block, Expr, ExprMethodCall, ExprPath, FnArg, ImplItem, Item, ItemFn, Stmt, Type,
+    TypePath, UseTree, Visibility,
 };
 
 const GENERIC_MODULES: &[&str] = &[
@@ -431,6 +431,153 @@ fn inherent_methods_do_not_own_ecs_runtime_parameters() {
         "ECS runtime mutation and lookup belong in systems or SystemParam methods:\n{}",
         violations.join("\n")
     );
+}
+
+#[test]
+fn ecs_runtime_helpers_are_private_and_local() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .expect("workspace root");
+    let mut violations = Vec::new();
+
+    for root in [workspace.join("crates"), workspace.join("website")] {
+        walk(&root, &mut |path, source| {
+            if test_source(path)
+                || path
+                    .components()
+                    .any(|part| part.as_os_str() == "vmux_native")
+            {
+                return;
+            }
+            let file = match syn::parse_file(source) {
+                Ok(file) => file,
+                Err(error) => {
+                    violations.push(format!("{}: {error}", path.display()));
+                    return;
+                }
+            };
+            audit_free_ecs_functions(path, &file.items, "crate", &mut violations);
+        });
+    }
+
+    assert!(
+        violations.is_empty(),
+        "ECS runtime helpers must be private and called from one system/helper chain:\n{}",
+        violations.join("\n")
+    );
+}
+
+fn audit_free_ecs_functions(
+    path: &Path,
+    items: &[Item],
+    scope: &str,
+    violations: &mut Vec<String>,
+) {
+    let mut systems = RegisteredSystems::default();
+    for item in items {
+        if !matches!(item, Item::Mod(_)) {
+            systems.visit_item(item);
+        }
+    }
+
+    let functions = items
+        .iter()
+        .filter_map(|item| {
+            let Item::Fn(function) = item else {
+                return None;
+            };
+            (!cfg_test(&function.attrs)).then_some(function)
+        })
+        .collect::<Vec<_>>();
+    let names = functions
+        .iter()
+        .map(|function| function.sig.ident.to_string())
+        .collect::<BTreeSet<_>>();
+    let mut callers = BTreeMap::<String, BTreeSet<String>>::new();
+    for function in &functions {
+        let caller = function.sig.ident.to_string();
+        let mut calls = FunctionCalls::new(&names);
+        calls.visit_block(&function.block);
+        for callee in calls.0 {
+            if callee != caller {
+                callers.entry(callee).or_default().insert(caller.clone());
+            }
+        }
+    }
+    for item in items {
+        let Item::Impl(item) = item else {
+            continue;
+        };
+        for member in &item.items {
+            let ImplItem::Fn(method) = member else {
+                continue;
+            };
+            let caller = method.sig.ident.to_string();
+            let mut calls = FunctionCalls::new(&names);
+            calls.visit_block(&method.block);
+            for callee in calls.0 {
+                callers.entry(callee).or_default().insert(caller.clone());
+            }
+        }
+    }
+
+    for function in functions {
+        let mut runtime = EcsRuntimeType::default();
+        for input in &function.sig.inputs {
+            let FnArg::Typed(input) = input else {
+                continue;
+            };
+            runtime.visit_type(&input.ty);
+        }
+        if runtime.found && !systems.0.contains(&function.sig.ident.to_string()) {
+            let name = function.sig.ident.to_string();
+            let function_callers = callers.get(&name).cloned().unwrap_or_default();
+            if !matches!(function.vis, Visibility::Inherited) || function_callers.len() != 1 {
+                violations.push(format!(
+                    "{}:{} ({scope}): {} called by {:?}",
+                    path.display(),
+                    function.sig.fn_token.span.start().line,
+                    function.sig.ident,
+                    function_callers
+                ));
+            }
+        }
+    }
+
+    for item in items {
+        let Item::Mod(module) = item else {
+            continue;
+        };
+        if cfg_test(&module.attrs) {
+            continue;
+        }
+        let Some((_, nested)) = &module.content else {
+            continue;
+        };
+        let nested_scope = format!("{scope}::{}", module.ident);
+        audit_free_ecs_functions(path, nested, &nested_scope, violations);
+    }
+}
+
+struct FunctionCalls<'a>(BTreeSet<String>, &'a BTreeSet<String>);
+
+impl<'a> FunctionCalls<'a> {
+    fn new(names: &'a BTreeSet<String>) -> Self {
+        Self(BTreeSet::new(), names)
+    }
+}
+
+impl<'ast> Visit<'ast> for FunctionCalls<'_> {
+    fn visit_expr_path(&mut self, path: &'ast ExprPath) {
+        if let Some(segment) = path.path.segments.last() {
+            let name = segment.ident.to_string();
+            if self.1.contains(&name) {
+                self.0.insert(name);
+            }
+        }
+        visit::visit_expr_path(self, path);
+    }
 }
 
 fn audit_inherent_ecs_methods(
