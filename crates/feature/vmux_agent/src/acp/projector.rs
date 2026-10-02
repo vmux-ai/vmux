@@ -24,7 +24,7 @@ pub enum Intent {
     FileTouched {
         path: String,
         line: Option<u32>,
-        kind: vmux_api::protocol::FileTouchKind,
+        kind: FileTouchKind,
     },
     WorkspaceChanged(WorkspaceLocation),
 }
@@ -116,7 +116,7 @@ impl FileTouchState {
         }
     }
 
-    fn kind(kind: ToolKind) -> Option<vmux_api::protocol::FileTouchKind> {
+    fn kind(kind: ToolKind) -> Option<FileTouchKind> {
         match kind {
             ToolKind::Read => Some(FileTouchKind::Read),
             ToolKind::Edit | ToolKind::Delete | ToolKind::Move => Some(FileTouchKind::Edit),
@@ -916,7 +916,7 @@ mod tests {
                 intent,
                 Intent::FileTouched { path, line: None, kind }
                     if path == "/repo/src/main.rs"
-                        && *kind == vmux_api::protocol::FileTouchKind::Edit
+                        && *kind == FileTouchKind::Edit
             )));
         }
     }
@@ -993,7 +993,7 @@ mod tests {
         assert!(intents.iter().any(|i| matches!(
             i,
             Intent::FileTouched { path, line: None, kind }
-                if path == "/repo/src/main.rs" && *kind == vmux_api::protocol::FileTouchKind::Read
+                if path == "/repo/src/main.rs" && *kind == FileTouchKind::Read
         )));
     }
 
@@ -1013,7 +1013,7 @@ mod tests {
         assert!(intents.iter().any(|intent| matches!(
             intent,
             Intent::FileTouched { path, line: None, kind }
-                if path == "/repo/new.rs" && *kind == vmux_api::protocol::FileTouchKind::Edit
+                if path == "/repo/new.rs" && *kind == FileTouchKind::Edit
         )));
     }
 
@@ -1065,7 +1065,7 @@ mod tests {
         assert!(intents.iter().any(|intent| matches!(
             intent,
             Intent::FileTouched { path, line: None, kind }
-                if path == "/repo/new.rs" && *kind == vmux_api::protocol::FileTouchKind::Edit
+                if path == "/repo/new.rs" && *kind == FileTouchKind::Edit
         )));
     }
 
@@ -1087,7 +1087,7 @@ mod tests {
         assert!(intents.iter().any(|intent| matches!(
             intent,
             Intent::FileTouched { path, line: None, kind }
-                if path == "/repo/new.rs" && *kind == vmux_api::protocol::FileTouchKind::Edit
+                if path == "/repo/new.rs" && *kind == FileTouchKind::Edit
         )));
     }
 
@@ -1146,7 +1146,7 @@ mod tests {
             vec![&Intent::FileTouched {
                 path: "/repo/new.rs".to_string(),
                 line: None,
-                kind: vmux_api::protocol::FileTouchKind::Read,
+                kind: FileTouchKind::Read,
             }]
         );
     }

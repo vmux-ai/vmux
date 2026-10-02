@@ -87,9 +87,7 @@ enum AcpProjectionInput {
 struct AcpSessionConfigs(Vec<AcpSessionConfig>);
 
 impl AcpSessionConfigs {
-    fn category_name(
-        category: &agent_client_protocol::schema::v1::SessionConfigOptionCategory,
-    ) -> String {
+    fn category_name(category: &SessionConfigOptionCategory) -> String {
         match category {
             SessionConfigOptionCategory::Mode => "mode".to_string(),
             SessionConfigOptionCategory::Model => "model".to_string(),
@@ -100,9 +98,7 @@ impl AcpSessionConfigs {
         }
     }
 
-    fn options(
-        options: &agent_client_protocol::schema::v1::SessionConfigSelectOptions,
-    ) -> Vec<AcpSessionConfigValue> {
+    fn options(options: &SessionConfigSelectOptions) -> Vec<AcpSessionConfigValue> {
         let mut values = Vec::new();
         match options {
             SessionConfigSelectOptions::Ungrouped(options) => {
@@ -247,7 +243,7 @@ struct AcpSelectionSnapshot {
     configs: Vec<AcpSessionConfig>,
 }
 
-struct AcpMcpServers(Vec<agent_client_protocol::schema::v1::McpServer>);
+struct AcpMcpServers(Vec<McpServer>);
 
 impl AcpMcpServers {
     fn from_sources(
@@ -269,9 +265,7 @@ impl AcpMcpServers {
         Self(servers)
     }
 
-    fn from_managed(
-        server: ManagedMcpServer,
-    ) -> Option<agent_client_protocol::schema::v1::McpServer> {
+    fn from_managed(server: ManagedMcpServer) -> Option<McpServer> {
         if server.transport == ManagedMcpTransport::Stdio && server.cwd.is_some() {
             tracing::warn!(
                 "managed MCP server {} skipped for ACP because ACP v1 does not support stdio cwd",
@@ -580,7 +574,7 @@ struct SpawnAcpSession {
     cwd: PathBuf,
     anchor: ProcessId,
     processes: ProcessRuntime,
-    mcp_servers: Vec<agent_client_protocol::schema::v1::McpServer>,
+    mcp_servers: Vec<McpServer>,
     resume: Option<String>,
     response: Option<oneshot::Sender<()>>,
 }

@@ -223,7 +223,7 @@ fn present_context_menus(
                 continue;
             }
             if separators.contains(child) {
-                let _ = menu.append(&muda::PredefinedMenuItem::separator());
+                let _ = menu.append(&PredefinedMenuItem::separator());
             }
         }
         menu_resource.context_menu = Some(menu);

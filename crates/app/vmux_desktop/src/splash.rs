@@ -47,7 +47,7 @@ fn splash_decision(visible: bool, dismissed: bool, elapsed: Duration) -> SplashD
 #[derive(Default)]
 struct SplashState {
     window: Option<Retained<NSPanel>>,
-    status_label: Option<Retained<objc2_app_kit::NSTextField>>,
+    status_label: Option<Retained<NSTextField>>,
     shown: bool,
     dismissed: bool,
     created_at: Option<Instant>,

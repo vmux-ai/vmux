@@ -47,7 +47,7 @@ fn seed(_non_send: bevy::ecs::system::NonSendMarker, mut system: Single<&mut Sys
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return;
     };
-    let appearance = objc2_app_kit::NSApp(mtm).effectiveAppearance().name();
+    let appearance = NSApp(mtm).effectiveAppearance().name();
     system.0 = Some(if appearance.to_string().contains("Dark") {
         ResolvedScheme::Dark
     } else {
@@ -258,8 +258,8 @@ fn wake_throttle(name: &'static str, callback: impl Fn() + Send + 'static) -> Wa
     })
 }
 
-impl From<objc2_foundation::NSRect> for WindowFrame {
-    fn from(rect: objc2_foundation::NSRect) -> Self {
+impl From<NSRect> for WindowFrame {
+    fn from(rect: NSRect) -> Self {
         Self {
             x: rect.origin.x,
             y: rect.origin.y,
@@ -269,7 +269,7 @@ impl From<objc2_foundation::NSRect> for WindowFrame {
     }
 }
 
-impl From<WindowFrame> for objc2_foundation::NSRect {
+impl From<WindowFrame> for NSRect {
     fn from(frame: WindowFrame) -> Self {
         NSRect::new(
             NSPoint::new(frame.x, frame.y),
@@ -278,7 +278,7 @@ impl From<WindowFrame> for objc2_foundation::NSRect {
     }
 }
 
-fn begin_window_resize(event: &objc2_app_kit::NSEvent) -> Option<WindowResizeDrag> {
+fn begin_window_resize(event: &NSEvent) -> Option<WindowResizeDrag> {
     let mtm = objc2::MainThreadMarker::new()?;
     let window = event.window(mtm)?;
     let style = window.styleMask();
@@ -305,7 +305,7 @@ fn begin_window_resize(event: &objc2_app_kit::NSEvent) -> Option<WindowResizeDra
     })
 }
 
-fn update_window_resize(event: &objc2_app_kit::NSEvent, drag: WindowResizeDrag) {
+fn update_window_resize(event: &NSEvent, drag: WindowResizeDrag) {
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return;
     };
@@ -321,7 +321,7 @@ const TITLEBAR_DOUBLE_CLICK_SLOP_PX: f32 = 8.0;
 
 impl WindowTitlebarGesture {
     fn capture(
-        event: &objc2_app_kit::NSEvent,
+        event: &NSEvent,
         clicks: &mut TitlebarClicks,
         zoom: &mut WindowZoom,
     ) -> Option<Self> {
@@ -341,7 +341,7 @@ impl WindowTitlebarGesture {
                 x,
                 y,
             },
-            objc2_app_kit::NSEvent::doubleClickInterval(),
+            NSEvent::doubleClickInterval(),
             TITLEBAR_DOUBLE_CLICK_SLOP_PX,
         );
         let gesture = Self::resolve(count, Self::double_click_action().as_deref());
@@ -611,7 +611,7 @@ fn install_live_resize_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     LIVE_RESIZE_MONITOR_INSTALLED.store(true, Ordering::Relaxed);
 }
 
-fn event_location_in_window_physical_px(event: &objc2_app_kit::NSEvent) -> Option<(f32, f32)> {
+fn event_location_in_window_physical_px(event: &NSEvent) -> Option<(f32, f32)> {
     let mtm = objc2::MainThreadMarker::new()?;
     let window = event.window(mtm)?;
     let content = window.contentView()?;
@@ -626,14 +626,14 @@ fn event_location_in_window_physical_px(event: &objc2_app_kit::NSEvent) -> Optio
     }
 }
 
-fn event_window_is_key(event: &objc2_app_kit::NSEvent) -> bool {
+fn event_window_is_key(event: &NSEvent) -> bool {
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return false;
     };
     event.window(mtm).is_some_and(|window| window.isKeyWindow())
 }
 
-fn event_belongs_to_main_window_frame(event: &objc2_app_kit::NSEvent) -> bool {
+fn event_belongs_to_main_window_frame(event: &NSEvent) -> bool {
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return false;
     };
@@ -643,7 +643,7 @@ fn event_belongs_to_main_window_frame(event: &objc2_app_kit::NSEvent) -> bool {
 }
 
 fn mouse_buttons() -> bevy_cef_core::prelude::NativeMouseButtons {
-    let pressed = objc2_app_kit::NSEvent::pressedMouseButtons();
+    let pressed = NSEvent::pressedMouseButtons();
     bevy_cef_core::prelude::NativeMouseButtons {
         left: pressed & 1 != 0,
         right: pressed & (1 << 1) != 0,

@@ -95,11 +95,7 @@ impl Plugin for CommandPlugin {
 struct PageOpenCommand;
 
 impl PageOpenCommand {
-    fn for_target(
-        caller: Entity,
-        target: Option<vmux_api::open_target::OpenTarget>,
-        url: String,
-    ) -> CommandInvocation {
+    fn for_target(caller: Entity, target: Option<OpenTarget>, url: String) -> CommandInvocation {
         let (id, arguments) = match target {
             Some(OpenTarget::InPlace) | None => {
                 ("open_in_place", serde_json::json!({ "url": url }))
@@ -232,11 +228,8 @@ fn open_from_bar(
             &value,
             search_engine.map(|setting| setting.0).unwrap_or_default(),
         );
-        let inline_transitioned = if matches!(
-            request.open,
-            None | Some(vmux_api::open_target::OpenTarget::InPlace)
-        ) && VmuxRoute::parse(&url)
-            .is_some_and(|route| route.supports_inline_transition())
+        let inline_transitioned = if matches!(request.open, None | Some(OpenTarget::InPlace))
+            && VmuxRoute::parse(&url).is_some_and(|route| route.supports_inline_transition())
             && let Some(stack) = inline_stack
         {
             inline_transition.write(InlineTransitionRequested { stack, webview });

@@ -200,8 +200,6 @@ mod tests {
     use super::*;
     use crate::host::event::CommandOrigin;
 
-    use ProcessId;
-
     pub(crate) fn bell_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)

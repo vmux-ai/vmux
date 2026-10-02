@@ -16,7 +16,7 @@ pub use vmux_layout::settings::{
 
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
-use vmux_ecs::event::ProjectRow;
+use vmux_ecs::event::{ProjectRow, ProjectRowKind};
 
 pub struct SettingsRuntimePlugin;
 
@@ -514,7 +514,7 @@ impl SpaceOverrides {
         self.projects = roots;
     }
 
-    pub fn project_rows(&self) -> Vec<vmux_ecs::event::ProjectRow> {
+    pub fn project_rows(&self) -> Vec<ProjectRow> {
         let active = self.active_dir();
         let mut rows = Vec::with_capacity(self.projects.len());
         for project in &self.projects {
@@ -528,7 +528,7 @@ impl SpaceOverrides {
                 is_worktree: project.checkout.is_some(),
                 missing: !std::path::Path::new(in_use).is_dir(),
                 branch: String::new(),
-                kind: vmux_ecs::event::ProjectRowKind::Project,
+                kind: ProjectRowKind::Project,
                 expanded: false,
             });
         }

@@ -8,7 +8,7 @@ use alacritty_terminal::{
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::{
     collections::HashMap,
-    io::{Read, Write},
+    io::{self, Read, Write},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -42,7 +42,7 @@ pub enum ProcessUpdate {
 }
 
 impl ProcessUpdate {
-    pub fn into_service_message(self, process_id: ProcessId) -> vmux_api::protocol::ServiceMessage {
+    pub fn into_service_message(self, process_id: ProcessId) -> ServiceMessage {
         match self {
             Self::Viewport(patch) => ServiceMessage::ViewportPatch {
                 process_id,
@@ -108,8 +108,8 @@ pub struct ProcessSnapshot {
 }
 
 impl ProcessSnapshot {
-    pub fn into_service_message(self, process_id: ProcessId) -> vmux_api::protocol::ServiceMessage {
-        vmux_api::protocol::ServiceMessage::Snapshot {
+    pub fn into_service_message(self, process_id: ProcessId) -> ServiceMessage {
+        ServiceMessage::Snapshot {
             process_id,
             lines: self.lines,
             cursor: self.cursor,
@@ -234,7 +234,7 @@ fn run_pty_reader(
         };
         let ready = unsafe { libc::poll(&mut poll_fd, 1, -1) };
         if ready < 0 {
-            if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+            if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
                 continue;
             }
             break;
@@ -256,7 +256,7 @@ fn run_pty_reader(
                 }
                 let _ = wake_tx.send(());
             }
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {
                 in_flight.store(false, Ordering::Release);
             }
             Err(_) => {
@@ -412,12 +412,12 @@ fn offset_row(row: u16, delta: i32) -> u16 {
 }
 
 fn copy_mode_scroll_input(
-    mode: &alacritty_terminal::term::TermMode,
+    mode: &TermMode,
     delta: i32,
     cols: u16,
     rows: u16,
 ) -> Option<(Vec<u8>, i32)> {
-    if !mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN) {
+    if !mode.contains(TermMode::ALT_SCREEN) {
         return None;
     }
     let button = match delta.cmp(&0) {
@@ -1642,8 +1642,8 @@ impl Process {
     fn sync_viewport(&mut self) -> usize {
         let mode = self.term.mode();
         let passthrough = self.copy_mode.is_some()
-            || mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN)
-            || mode.intersects(alacritty_terminal::term::TermMode::MOUSE_MODE);
+            || mode.contains(TermMode::ALT_SCREEN)
+            || mode.intersects(TermMode::MOUSE_MODE);
         if passthrough != self.last_passthrough {
             self.line_hashes.clear();
             self.win_hashes.clear();
@@ -1663,8 +1663,8 @@ impl Process {
         let num_cols = grid.columns();
         let offset = grid.display_offset() as i32;
         let mode = self.term.mode();
-        let alt = mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
-        let mouse = mode.intersects(alacritty_terminal::term::TermMode::MOUSE_MODE);
+        let alt = mode.contains(TermMode::ALT_SCREEN);
+        let mouse = mode.intersects(TermMode::MOUSE_MODE);
 
         let full = self.line_hashes.len() != num_lines;
         if self.line_hashes.len() != num_lines {
@@ -1945,8 +1945,6 @@ mod tests {
     use crate::ProcessManager;
     use std::time::{Duration, Instant};
 
-    use std::io;
-
     #[test]
     fn heavy_output_waits_for_frame_interval_but_sparse_and_final_output_do_not() {
         let start = Instant::now();
@@ -2000,7 +1998,7 @@ mod tests {
 
     #[test]
     fn input_priority_waits_for_fresh_pty_output() {
-        let writer = PtyInputWriter::new(Box::new(std::io::sink()));
+        let writer = PtyInputWriter::new(Box::new(io::sink()));
         writer.input_pending.store(true, Ordering::Release);
 
         assert!(!writer.take_keystroke(false));
@@ -2271,12 +2269,12 @@ mod tests {
         struct CapturingWriter(Arc<Mutex<Vec<u8>>>);
 
         impl Write for CapturingWriter {
-            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
                 self.0.lock().unwrap().extend_from_slice(buf);
                 Ok(buf.len())
             }
 
-            fn flush(&mut self) -> std::io::Result<()> {
+            fn flush(&mut self) -> io::Result<()> {
                 Ok(())
             }
         }
@@ -2296,12 +2294,12 @@ mod tests {
         struct CapturingWriter(Arc<Mutex<Vec<u8>>>);
 
         impl Write for CapturingWriter {
-            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
                 self.0.lock().unwrap().extend_from_slice(buf);
                 Ok(buf.len())
             }
 
-            fn flush(&mut self) -> std::io::Result<()> {
+            fn flush(&mut self) -> io::Result<()> {
                 Ok(())
             }
         }
@@ -2338,12 +2336,12 @@ mod tests {
         struct CapturingWriter(Arc<Mutex<Vec<u8>>>);
 
         impl Write for CapturingWriter {
-            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
                 self.0.lock().unwrap().extend_from_slice(buf);
                 Ok(buf.len())
             }
 
-            fn flush(&mut self) -> std::io::Result<()> {
+            fn flush(&mut self) -> io::Result<()> {
                 Ok(())
             }
         }

@@ -263,8 +263,8 @@ struct AgentContent {
     is_error: bool,
 }
 
-impl From<vmux_api::protocol::AgentCommandResult> for AgentContent {
-    fn from(result: vmux_api::protocol::AgentCommandResult) -> Self {
+impl From<AgentCommandResult> for AgentContent {
+    fn from(result: AgentCommandResult) -> Self {
         match result {
             AgentCommandResult::Ok => Self {
                 content: "ok".to_string(),

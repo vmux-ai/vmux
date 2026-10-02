@@ -15,6 +15,7 @@ mod tests {
             .expect("workspace root");
         let mut files = Vec::new();
         RustFiles::collect(&workspace.join("crates"), &mut files);
+        RustFiles::collect(&workspace.join("website/src"), &mut files);
         let mut offenders = Vec::new();
         for path in files {
             let source = fs::read_to_string(&path).expect("Rust source");

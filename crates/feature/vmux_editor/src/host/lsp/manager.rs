@@ -718,7 +718,7 @@ impl LspManager {
     }
 }
 
-fn hover_contents_to_string(c: lsp_types::HoverContents) -> String {
+fn hover_contents_to_string(c: HoverContents) -> String {
     let marked = |m: MarkedString| match m {
         MarkedString::String(s) => s,
         MarkedString::LanguageString(ls) => {
@@ -1633,12 +1633,11 @@ mod tests {
 
     #[test]
     fn a_language_string_hover_survives_as_a_highlighted_code_block() {
-        let contents = lsp_types::HoverContents::Scalar(lsp_types::MarkedString::LanguageString(
-            lsp_types::LanguageString {
+        let contents =
+            HoverContents::Scalar(MarkedString::LanguageString(lsp_types::LanguageString {
                 language: "rust".into(),
                 value: "fn build(self) -> StartHeroProps".into(),
-            },
-        ));
+            }));
         let blocks = markdown_to_hover_blocks(&hover_contents_to_string(contents));
 
         let [block] = blocks.as_slice() else {

@@ -70,7 +70,7 @@ pub(crate) struct AppearancePlugin;
 
 impl Plugin for AppearancePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiStatePlugin::<vmux_ui::theme::ThemeEvent>::default())
+        app.add_plugins(UiStatePlugin::<ThemeEvent>::default())
             .add_observer(webview_ready_send_theme)
             .add_systems(
                 Update,
@@ -107,7 +107,7 @@ fn webview_ready_send_theme(
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    commands.trigger(UiStateWrite::<vmux_ui::theme::ThemeEvent>::from_event(
+    commands.trigger(UiStateWrite::<ThemeEvent>::from_event(
         entity,
         &BrowserAppearance(&settings).theme(),
     ));
@@ -147,9 +147,7 @@ fn sync_to_cef(
     }
     let payload = appearance.theme();
     for entity in &ready {
-        commands.trigger(UiStateWrite::<vmux_ui::theme::ThemeEvent>::from_event(
-            entity, &payload,
-        ));
+        commands.trigger(UiStateWrite::<ThemeEvent>::from_event(entity, &payload));
     }
 }
 

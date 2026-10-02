@@ -175,7 +175,7 @@ impl Api {
 
     pub(crate) fn applied(
         &self,
-        outcome: Result<SharedResponse, crate::quic::QuicError>,
+        outcome: Result<SharedResponse, QuicError>,
     ) -> Result<(), ApiError> {
         match outcome {
             Ok(SharedResponse::Ok | SharedResponse::AlreadyApplied) => Ok(()),
@@ -258,8 +258,8 @@ async fn broker_json<T: serde::de::DeserializeOwned>(
     }
 }
 
-impl From<crate::quic::QuicError> for ApiError {
-    fn from(error: crate::quic::QuicError) -> Self {
+impl From<QuicError> for ApiError {
+    fn from(error: QuicError) -> Self {
         match error {
             QuicError::Unauthorized => Self::Unauthorized,
             QuicError::Refused(SharedFailure::NotFound) => Self::NotFound,

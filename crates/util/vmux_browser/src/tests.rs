@@ -693,8 +693,7 @@ mod browser_navigate_flow {
         app.insert_resource(test_settings())
             .init_resource::<CapturedNavigateUrls>()
             .add_observer(
-                |trigger: On<bevy_cef::prelude::RequestNavigate>,
-                 mut captured: ResMut<CapturedNavigateUrls>| {
+                |trigger: On<RequestNavigate>, mut captured: ResMut<CapturedNavigateUrls>| {
                     captured.0.push(trigger.url.clone());
                 },
             );

@@ -541,14 +541,14 @@ impl PageWaker {
     }
 }
 
-static PAGE_WAKE_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static PAGE_WAKE_PENDING: AtomicBool = AtomicBool::new(false);
 
 impl NativeWake for PageWaker {
     fn wake(&self) {
         let Some(proxy) = self.0.as_ref() else {
             return;
         };
-        if PAGE_WAKE_PENDING.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        if PAGE_WAKE_PENDING.swap(true, Ordering::AcqRel) {
             return;
         }
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
@@ -556,7 +556,7 @@ impl NativeWake for PageWaker {
 }
 
 fn accept_wakes(_: bevy::ecs::system::NonSendMarker) {
-    PAGE_WAKE_PENDING.store(false, std::sync::atomic::Ordering::Release);
+    PAGE_WAKE_PENDING.store(false, Ordering::Release);
 }
 
 struct PageOutbox {

@@ -1,9 +1,10 @@
+use std::cell::Cell;
+
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::Closure;
 use web_sys::HtmlElement;
 
 pub fn init() {
-    use std::cell::Cell;
     thread_local! {
         static INITED: Cell<bool> = const { Cell::new(false) };
     }

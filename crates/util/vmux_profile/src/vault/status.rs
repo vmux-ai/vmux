@@ -98,7 +98,7 @@ impl VaultStatus {
         status
     }
 
-    pub fn snapshot(&self) -> vmux_api::vault::VaultStatusSnapshot {
+    pub fn snapshot(&self) -> VaultStatusSnapshot {
         let remote = self.sanitized_remote();
         let connected = self.initialized && remote.is_some();
         let provider = if !connected {
@@ -142,7 +142,7 @@ impl VaultStatus {
         Some(remote.to_string())
     }
 
-    fn provider(remote: &str) -> vmux_api::vault::VaultProvider {
+    fn provider(remote: &str) -> VaultProvider {
         if Path::new(remote).is_absolute() {
             return VaultProvider::CloudFolder;
         }

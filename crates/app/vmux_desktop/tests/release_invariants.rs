@@ -185,7 +185,7 @@ fn cef_target_relocator_rewrites_only_cef_build_state() {
 fn nightly_version_sorts_between_current_and_next_stable() {
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../scripts/nightly-version.sh");
-    let output = std::process::Command::new("bash")
+    let output = Command::new("bash")
         .arg(script)
         .args(["0.0.34", "20260921", "42", "1"])
         .output()

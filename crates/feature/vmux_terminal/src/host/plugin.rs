@@ -48,6 +48,8 @@ use vmux_space::model::BOOTSTRAP_SPACE_ID;
 #[cfg(test)]
 use vmux_space::model::SpaceRecord;
 
+use crate::launch::TerminalLaunch;
+
 #[cfg(test)]
 use super::input_queue::InputQueuePlugin;
 #[cfg(test)]
@@ -100,7 +102,7 @@ impl Plugin for TerminalPlugin {
         .add_plugins(crate::contract::TerminalContractPlugin)
         .add_plugins(UiEventPlugin::<(CommandBarTerminalRequest,)>::default())
         .add_observer(open_from_command_bar)
-        .register_persisted::<crate::launch::TerminalLaunch>()
+        .register_persisted::<TerminalLaunch>()
         .add_systems(Update, sync_launch_to_stack)
         .add_message::<TerminalStackSpawnRequest>()
         .add_message::<TerminalSpawnRequest>()
@@ -240,10 +242,7 @@ fn initialize_state(terminals: Query<Entity, Added<Terminal>>, mut commands: Com
 }
 
 fn sync_launch_to_stack(
-    terminals: Query<
-        (&ChildOf, &crate::launch::TerminalLaunch),
-        (With<Terminal>, Changed<crate::launch::TerminalLaunch>),
-    >,
+    terminals: Query<(&ChildOf, &TerminalLaunch), (With<Terminal>, Changed<TerminalLaunch>)>,
     stacks: Query<(), With<Stack>>,
     mut commands: Commands,
 ) {
@@ -408,7 +407,7 @@ fn handle_page_open(
     tasks: Query<(Entity, &PageOpenTask, Has<PageRestore>), PendingPageOpen>,
     pid_indexes: Query<&pid::PidToEntity>,
     tabs: TabHierarchy,
-    saved_launches: Query<&crate::launch::TerminalLaunch, With<Stack>>,
+    saved_launches: Query<&TerminalLaunch, With<Stack>>,
     settings: Res<AppSettings>,
     active_space: FocusedSpace,
     mut commands: Commands,
@@ -549,7 +548,7 @@ pub struct TerminalBundle {
     browser: Browser,
     close_confirmation: CloseRequiresConfirmation,
     process_id: ProcessId,
-    launch: crate::launch::TerminalLaunch,
+    launch: TerminalLaunch,
     pending_create: PendingServiceCreate,
     metadata: PageMetadata,
     webview: WebviewWindowed,
@@ -593,7 +592,7 @@ impl TerminalBundle {
             browser: Browser,
             close_confirmation: CloseRequiresConfirmation,
             process_id,
-            launch: crate::launch::TerminalLaunch {
+            launch: TerminalLaunch {
                 command: shell,
                 args: Vec::new(),
                 cwd,
@@ -831,10 +830,7 @@ fn line_has_content(line: &vmux_ecs::event::TermLine) -> bool {
 }
 
 fn resolve_pending_cwd(
-    mut pending: Query<
-        (Entity, &mut crate::launch::TerminalLaunch),
-        (With<Terminal>, With<PendingServiceCreate>),
-    >,
+    mut pending: Query<(Entity, &mut TerminalLaunch), (With<Terminal>, With<PendingServiceCreate>)>,
     tabs: TabHierarchy,
     space_hierarchy: vmux_layout::space::SpaceHierarchy,
     settings: Res<AppSettings>,
@@ -861,7 +857,7 @@ fn send_service_requests(
         (
             Entity,
             &ProcessId,
-            &crate::launch::TerminalLaunch,
+            &TerminalLaunch,
             Has<crate::AgentRunTerminal>,
         ),
         (With<Terminal>, With<PendingServiceCreate>),
@@ -1038,7 +1034,7 @@ fn apply_service_errors(
     mut errors: MessageReader<TerminalServiceError>,
     terminals: Query<(), ServiceTerminalFilter>,
     process_index: Single<&TerminalProcessIndex>,
-    launches: Query<&crate::launch::TerminalLaunch>,
+    launches: Query<&TerminalLaunch>,
     settings: Res<AppSettings>,
     mut service_requests: MessageWriter<ServiceRequest>,
     mut commands: Commands,
@@ -1050,16 +1046,15 @@ fn apply_service_errors(
             && let Some(entity) = process_index.get(&stale_pid)
             && terminals.contains(entity)
         {
-            let launch =
-                launches
-                    .get(entity)
-                    .cloned()
-                    .unwrap_or_else(|_| crate::launch::TerminalLaunch {
-                        command: terminal_shell(&settings),
-                        args: vec![],
-                        cwd: String::new(),
-                        env: vec![],
-                    });
+            let launch = launches
+                .get(entity)
+                .cloned()
+                .unwrap_or_else(|_| TerminalLaunch {
+                    command: terminal_shell(&settings),
+                    args: vec![],
+                    cwd: String::new(),
+                    env: vec![],
+                });
             let new_id = ProcessId::new();
             restarted_missing_processes.push(stale_pid);
             service_requests.write(ServiceRequest(ClientMessage::CreateProcess {
@@ -1693,7 +1688,7 @@ fn restart_pty(
     mut q: Query<(
         &mut ProcessId,
         &mut PageMetadata,
-        Option<&mut crate::launch::TerminalLaunch>,
+        Option<&mut TerminalLaunch>,
         Option<&TerminalGridSize>,
         Has<crate::AgentRunTerminal>,
     )>,
@@ -1939,7 +1934,6 @@ mod tests {
     };
     use vmux_setting::{BrowserSettings, ShortcutSettings};
 
-    use crate::launch::TerminalLaunch;
     use CopyModeKey as K;
     use bevy::ecs::message::Messages;
 
@@ -2086,7 +2080,7 @@ mod tests {
 
         let mut launches = app
             .world_mut()
-            .query_filtered::<(Entity, &crate::launch::TerminalLaunch), With<Terminal>>();
+            .query_filtered::<(Entity, &TerminalLaunch), With<Terminal>>();
         let (terminal, launch) = launches.iter(app.world()).next().expect("terminal spawned");
         assert_eq!(launch.command, "/bin/agent-sh");
         assert!(
@@ -2160,7 +2154,7 @@ mod tests {
 
         let mut launches = app
             .world_mut()
-            .query_filtered::<&crate::launch::TerminalLaunch, With<Terminal>>();
+            .query_filtered::<&TerminalLaunch, With<Terminal>>();
         let launch = launches.iter(app.world()).next().expect("terminal spawned");
         assert_eq!(launch.cwd, dir.path().to_string_lossy());
     }
@@ -2186,7 +2180,7 @@ mod tests {
 
         let mut launches = app
             .world_mut()
-            .query_filtered::<&crate::launch::TerminalLaunch, With<Terminal>>();
+            .query_filtered::<&TerminalLaunch, With<Terminal>>();
         let launch = launches.iter(app.world()).next().expect("terminal spawned");
         assert!(launch.cwd.is_empty());
     }
@@ -2231,7 +2225,7 @@ mod tests {
 
         let mut launches = app
             .world_mut()
-            .query_filtered::<&crate::launch::TerminalLaunch, With<Terminal>>();
+            .query_filtered::<&TerminalLaunch, With<Terminal>>();
         let launch = launches.iter(app.world()).next().expect("terminal spawned");
         assert_eq!(
             launch.cwd,

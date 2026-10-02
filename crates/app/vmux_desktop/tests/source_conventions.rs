@@ -341,18 +341,20 @@ fn system_name_policy_detects_framework_and_module_repetition() {
 
 #[test]
 fn files_do_not_mix_imported_and_qualified_paths_for_one_type() {
-    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
-        .nth(2)
-        .expect("crates dir");
+        .nth(3)
+        .expect("workspace root");
     let mut violations = Vec::new();
 
-    walk(crates_dir, &mut |path, source| {
-        let Ok(file) = syn::parse_file(source) else {
-            return;
-        };
-        audit_imports(path, &file.items, "crate", &mut violations);
-    });
+    for root in [workspace.join("crates"), workspace.join("website/src")] {
+        walk(&root, &mut |path, source| {
+            let Ok(file) = syn::parse_file(source) else {
+                return;
+            };
+            audit_imports(path, &file.items, "crate", &mut violations);
+        });
+    }
 
     assert!(
         violations.is_empty(),

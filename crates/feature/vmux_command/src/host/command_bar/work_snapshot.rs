@@ -236,15 +236,15 @@ mod tests {
                 .any(|e| e.path.ends_with("/sub") && e.is_dir),
             "lists subdirs in the work dir"
         );
-        let _ = std::fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
     fn work_dirs_include_vmux_managed_worktree() {
         let base = std::env::temp_dir().join(format!("vmux-worktree-{}", std::process::id()));
         let root = base.join(".vmux/worktrees/repo/task");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join("changed.rs"), "").unwrap();
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("changed.rs"), "").unwrap();
         let mut app = App::new();
         app.add_plugins(Plugin);
         app.world_mut()
@@ -257,7 +257,7 @@ mod tests {
                 .any(|entry| entry.path.ends_with("/changed.rs")),
             "includes files from vmux-managed worktrees"
         );
-        let _ = std::fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(base);
     }
 
     #[test]
@@ -280,7 +280,7 @@ mod tests {
                 .any(|e| e.path.ends_with("/notes.md") && !e.is_dir),
             "lists files in the ACP agent's cwd"
         );
-        let _ = std::fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

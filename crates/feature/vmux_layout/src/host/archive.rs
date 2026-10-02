@@ -2360,7 +2360,7 @@ mod tests {
         ));
         dispatch_reopen(&mut app);
 
-        let mut ids = app.world_mut().query::<&crate::pane::PaneId>();
+        let mut ids = app.world_mut().query::<&PaneId>();
         let recreated_nested = ids.iter(app.world()).any(|id| id.0 == "nested");
         assert!(recreated_nested, "nested split recreated by id");
         let stack_count = app.world_mut().query::<&Stack>().iter(app.world()).count();

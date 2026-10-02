@@ -345,7 +345,7 @@ mod tests {
         );
     }
 
-    fn walk_rs_files(dir: &std::path::Path, visit: &mut dyn FnMut(&std::path::Path, &str)) {
+    fn walk_rs_files(dir: &Path, visit: &mut dyn FnMut(&Path, &str)) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };

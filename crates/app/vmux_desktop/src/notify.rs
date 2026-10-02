@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use vmux_ecs::notify::OsNotify;
 
 use block2::RcBlock;
+use objc2::rc::Retained;
 use objc2::runtime::Bool;
 use objc2_foundation::NSBundle;
 use objc2_foundation::NSError;
@@ -35,8 +36,7 @@ fn request_notification_auth() {
 }
 
 #[cfg(target_os = "macos")]
-fn current_center()
--> Option<objc2::rc::Retained<objc2_user_notifications::UNUserNotificationCenter>> {
+fn current_center() -> Option<Retained<UNUserNotificationCenter>> {
     NSBundle::mainBundle().bundleIdentifier()?;
     Some(UNUserNotificationCenter::currentNotificationCenter())
 }
@@ -58,7 +58,7 @@ fn post_os_notifications(mut reader: MessageReader<OsNotify>) {
 }
 
 #[cfg(target_os = "macos")]
-fn post_native(center: &objc2_user_notifications::UNUserNotificationCenter, events: &[OsNotify]) {
+fn post_native(center: &UNUserNotificationCenter, events: &[OsNotify]) {
     static NOTIF_SEQ: AtomicU64 = AtomicU64::new(0);
     for ev in events {
         let content = UNMutableNotificationContent::new();

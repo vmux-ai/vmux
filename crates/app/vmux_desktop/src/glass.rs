@@ -57,9 +57,9 @@ struct WindowGlass {
     revealed: bool,
     revealed_at: Option<Instant>,
     active_confirmed: bool,
-    _glass: Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
-    _backdrop_window: Option<objc2::rc::Retained<objc2_app_kit::NSPanel>>,
-    _parent_window: Option<objc2::rc::Retained<objc2_app_kit::NSWindow>>,
+    _glass: Option<Retained<NSGlassEffectView>>,
+    _backdrop_window: Option<Retained<NSPanel>>,
+    _parent_window: Option<Retained<objc2_app_kit::NSWindow>>,
 }
 
 impl WindowGlass {
@@ -351,7 +351,7 @@ fn sync_window_visibility(
             continue;
         }
         if let Some(effect) = &glass._glass {
-            let glass_view: &objc2_app_kit::NSView = effect;
+            let glass_view: &NSView = effect;
             glass_view.setHidden(!visible);
         }
         glass.visible = visible;

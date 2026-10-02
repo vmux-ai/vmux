@@ -970,7 +970,7 @@ impl EditCore {
         }
     }
 
-    fn ex_range(&self, range: crate::edit::ex::ExRange) -> std::ops::Range<usize> {
+    fn ex_range(&self, range: ExRange) -> std::ops::Range<usize> {
         match range {
             ExRange::CurrentLine => self.line_span(self.primary().head, 1),
             ExRange::WholeFile => 0..self.buffer.len_chars(),
@@ -990,13 +990,7 @@ impl EditCore {
         }
     }
 
-    fn substitute(
-        &mut self,
-        range: crate::edit::ex::ExRange,
-        pattern: &str,
-        replacement: &str,
-        all: bool,
-    ) -> bool {
+    fn substitute(&mut self, range: ExRange, pattern: &str, replacement: &str, all: bool) -> bool {
         let span = self.ex_range(range);
         if span.start >= span.end {
             return false;
@@ -2653,7 +2647,7 @@ mod tests {
         let mut c = core("aa bb aa\naa cc\n");
         c.mode = EditMode::Normal;
         c.apply(EditCommand::Substitute {
-            range: crate::edit::ex::ExRange::WholeFile,
+            range: ExRange::WholeFile,
             pattern: "aa".into(),
             replacement: "X".into(),
             all: false,
@@ -2666,7 +2660,7 @@ mod tests {
         let mut c = core("aa bb aa\n");
         c.mode = EditMode::Normal;
         c.apply(EditCommand::Substitute {
-            range: crate::edit::ex::ExRange::WholeFile,
+            range: ExRange::WholeFile,
             pattern: "aa".into(),
             replacement: "X".into(),
             all: true,
@@ -2679,7 +2673,7 @@ mod tests {
         let mut c = core("a\na\na\n");
         c.mode = EditMode::Normal;
         c.apply(EditCommand::Substitute {
-            range: crate::edit::ex::ExRange::Lines(1, 1),
+            range: ExRange::Lines(1, 1),
             pattern: "a".into(),
             replacement: "b".into(),
             all: false,
@@ -2692,7 +2686,7 @@ mod tests {
         let mut c = core("cat\n");
         c.mode = EditMode::Normal;
         c.apply(EditCommand::Substitute {
-            range: crate::edit::ex::ExRange::WholeFile,
+            range: ExRange::WholeFile,
             pattern: "cat".into(),
             replacement: "[&]".into(),
             all: false,
@@ -2740,7 +2734,7 @@ mod tests {
     fn ex_delete_removes_lines_and_yanks_them_linewise() {
         let mut c = core("one\ntwo\nthree\n");
         c.mode = EditMode::Normal;
-        c.apply(EditCommand::ExDelete(crate::edit::ex::ExRange::Lines(0, 1)));
+        c.apply(EditCommand::ExDelete(ExRange::Lines(0, 1)));
         assert_eq!(text_of(&c), "three\n");
         assert_eq!(
             c.registers.read(None),
