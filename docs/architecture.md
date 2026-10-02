@@ -58,6 +58,50 @@ installed. Platform crates then add only their adapters:
 
 A feature plugin never installs a sibling feature. Shared composition belongs in `vmux_app`.
 
+### Design vocabulary
+
+These eight building blocks are enough to design most Vmux features.
+
+| Building block | Use it for | Rule |
+|---|---|---|
+| **Crate** | Ownership | One user-facing capability gets one feature crate. It owns the capability from UI to persistence and external contracts. |
+| **Plugin** | Composition | The crate's entry point. It installs the capability's systems, messages, observers, child plugins, manifest, and adapters into an app. |
+| **Entity** | Identity and lifecycle | Make something an entity when it must be addressed, related, observed, persisted, or removed independently: a page, pane, file, process, or agent session. |
+| **Component** | State or capability | Attach small typed facts to an entity. Compose existing components before creating an aggregate that repeats the same data. |
+| **System** | Behavior and internal API | Its typed parameters declare the inputs, dependencies, state access, and outputs of one operation. Keep it private and let the owning plugin register it. |
+| **Event** | Transient intent or fact inside ECS | Send an event when behavior should happen once without the sender calling the receiver. Target the entity when the behavior belongs to one identity. Use a queued message when ordered stream processing is required. |
+| **UiEvent** | UI → host intent | A typed, permission-checked request from a native page. It asks the host to act; it never becomes the authoritative state. |
+| **UiState** | Host → UI projection | A typed snapshot or patch derived from ECS. The page renders it and keeps only immediate DOM-local state. |
+
+Treat a system like an internal API endpoint. An event or message is its request; queries and
+resources declare its dependencies; component mutations, emitted events, and `UiState` are its
+outputs. The function signature is the interface. Other features call that interface through
+typed data, not by making the system public or invoking it directly.
+
+The default feature flow is:
+
+```mermaid
+flowchart LR
+    plugin["Plugin"] -. registers .-> system["System<br/>typed internal API"]
+    page["native page"] -->|UiEvent| system
+    caller["other feature · command · agent"] -->|Event or Message| system
+    system -->|query · add · update · remove| entity["Entity + Components"]
+    entity -->|derive snapshot or patch| state["UiState"]
+    state -->|render| page
+```
+
+For a new capability:
+
+1. Choose the crate that owns the user-visible behavior; create a feature crate only when no
+   existing owner fits.
+2. Make its root plugin the complete composition entry point.
+3. Identify the entities whose identity or lifecycle must survive individual interactions.
+4. Represent their state and capabilities as components.
+5. Design each system as one typed operation over that data.
+6. Use events or messages to call the operation without coupling senders to its implementation.
+7. Add a `UiEvent` only when intent crosses from a native page into the host.
+8. Add `UiState` only for the host-owned state the page must render.
+
 ## System map
 
 ```mermaid
@@ -192,15 +236,6 @@ Current values use `UiState`. One-shot notifications use typed events. Versioned
 cover DOM actions such as focus or scroll when they must be requested by the host.
 
 ## ECS lifecycle
-
-| ECS term | Meaning in Vmux |
-|---|---|
-| Entity | stable identity for a pane, process, session, request, tool, or operation |
-| Component | state or capability attached to an entity |
-| System | private behavior over matching data |
-| Message | ordered input between systems or features |
-| Plugin | one installable capability and its schedule |
-| World | the runtime's authoritative in-memory state |
 
 Components compose capabilities. A system depends on the data it queries, not on the code that
 created that data. This lets a feature extend an existing entity without importing or rewriting
