@@ -6,8 +6,8 @@ use crate::{docs, framework, landing, markdown, use_cases};
 const PRODUCT_TITLE: &str = "Vmux — One prompt. Anything, done.";
 const PRODUCT_DESCRIPTION: &str =
     "The browser that gets sh*t done. Work with your team and any ACP agent with full IDE support.";
-const USE_CASES_TITLE: &str = "Vmux Use Cases — Start with the browser. Finish the task.";
-const USE_CASES_DESCRIPTION: &str = "Research, build, review, and keep work moving with your team, any ACP agent, and a full IDE in one browser.";
+const USE_CASES_TITLE: &str = "Vmux Use Cases — Four prompts. Four things done.";
+const USE_CASES_DESCRIPTION: &str = "Fix software, find a flight, ship a client PoC, or launch a restaurant website with a browser, any ACP agent, and a full IDE.";
 const FRAMEWORK_TITLE: &str = "Vmux Framework — One IDE. Every platform.";
 const FRAMEWORK_DESCRIPTION: &str = "Build cross-platform applications from typed feature plugins, contracts, manifests, and platform adapters.";
 const DOCS_TITLE: &str = "Vmux Architecture";
