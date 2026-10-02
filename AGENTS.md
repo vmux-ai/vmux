@@ -123,10 +123,12 @@ After merging, clean up: remove the worktree (`git worktree remove .worktrees/<n
 
 ## Documentation
 
-- **No design specs, no plan files, no dated design records.** Git, GitHub and Linear already hold the history, and a copy in the tree is one that goes stale silently — with nothing to catch it, because no test reads a spec. Write the decision into the architecture doc it changes, in the same PR as the behaviour.
-- **`docs/architecture.md` is the only file in `docs/`, and the only design document.** vmux.ai serves it as the single `/docs` page, via `include_str!` in `website/src/docs.rs` — so a change to it ships with the site. It is not an index and it does not link out to deep dives; a subject that will not fit belongs in the prose of the section that covers it, or does not belong yet. Keep it short and keep the diagrams.
-- There is no API reference and no `vmux_docs` generator. Rustdoc therefore has no consumer, which is why the no-comments rule above admits no exception for it.
-- **Relay internals belong to `vmux-cloud`, not here.** This repo says what the client sends, what it pins, and what it does when the relay is unreachable. It does not explain the registry, tag routing, admission limits or deployment. The *Three roles* section names the relay as a node and then defers, which is the boundary to hold.
+- **Documentation is a map, not a mirror.** Code, tests, typed contracts, and `feature.ron` are the source of truth. Documentation gives people and agents the stable context needed to find and change that truth.
+- Give each fact one owner. The landing page owns adoption and value; `README.md` owns product scope, status, installation, and the development entry point; `docs/architecture.md` owns stable boundaries, invariants, and change routing; `AGENTS.md` owns mandatory workflow, coding, safety, and verification rules; GitHub and Linear own plans, history, and current status. Link to the owner instead of copying it.
+- **No design specs, plan files, dated design records, implementation inventories, or walkthroughs.** They duplicate the tree and decay silently. Record a lasting architectural decision in `docs/architecture.md` in the same PR as the behaviour it changes. Leave temporary reasoning in Linear or the PR.
+- **`docs/architecture.md` is the only file in `docs/`, and the only design document.** vmux.ai serves it as `/docs` through `website/src/docs.rs`. Keep it short, prefer diagrams for structure, and document only concepts that remain useful after files and names move.
+- There is no API reference or `vmux_docs` generator. Rustdoc has no consumer, so the no-comments rule above has no documentation exception.
+- **Relay internals belong to `vmux-cloud`, not here.** This repo documents only the client-side contract and failure behaviour at that boundary.
 
 ## Git
 
