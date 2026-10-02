@@ -1,7 +1,7 @@
 use crate::event::{ChatGoToBranch, ChatSelectWorkspace, ModelOptionEntry, SetAgentEffort};
 use crate::ui::state::Chat;
 use dioxus::prelude::*;
-use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
+use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptFocus};
 use vmux_ui::components::composer_bar::{
     BranchMenuData, ComposerMenus, EffortMenuData, PermissionMenuData, ProjectMenuData,
 };
@@ -49,7 +49,7 @@ impl From<Chat> for ChatMenuSet {
                     agent_key: agent_key.clone(),
                     level,
                 });
-                focus_prompt_end(PROMPT_INPUT_ID);
+                PromptFocus::end(PROMPT_INPUT_ID);
             }),
         };
         let permission_state = chat.permissions.current();
@@ -66,7 +66,7 @@ impl From<Chat> for ChatMenuSet {
             on_pick: EventHandler::new(Self::go_to),
             on_choose_another: EventHandler::new(move |()| {
                 let _ = send(&ChatSelectWorkspace);
-                focus_prompt_end(PROMPT_INPUT_ID);
+                PromptFocus::end(PROMPT_INPUT_ID);
             }),
         };
         let branches = chat.projects.branches();
@@ -93,7 +93,7 @@ impl ChatMenuSet {
             branch: pick.branch,
             checkout: pick.checkout,
         });
-        focus_prompt_end(PROMPT_INPUT_ID);
+        PromptFocus::end(PROMPT_INPUT_ID);
     }
 }
 

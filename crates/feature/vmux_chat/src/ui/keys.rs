@@ -3,7 +3,7 @@ use super::state::Chat;
 use dioxus::prelude::*;
 use vmux_api::input::{KeyStroke, UiKeyContext};
 use vmux_ui::caret::{EventSelection, TextCaret};
-use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
+use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptFocus};
 use vmux_ui::hooks::Unclaimed;
 use vmux_ui::hooks::{KeyClaim, send, use_key_claim};
 
@@ -115,6 +115,6 @@ impl ChatKeyHandler {
         let end = current.encode_utf16().count() as u32;
         let (value, _caret) = edit.apply(&current, end, end);
         self.0.edit_draft(value);
-        focus_prompt_end(PROMPT_INPUT_ID);
+        PromptFocus::end(PROMPT_INPUT_ID);
     }
 }

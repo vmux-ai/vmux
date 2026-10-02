@@ -707,12 +707,16 @@ mod tests {
         assert!(matches!(
             &calls[0].arguments,
             ChatToolArguments::Fields(fields)
-                if matches!(fields[0].value, ChatToolArgumentValue::Path(_))
+                if fields
+                    .iter()
+                    .any(|field| matches!(field.value, ChatToolArgumentValue::Path(_)))
         ));
         assert!(matches!(
             &calls[1].arguments,
             ChatToolArguments::Fields(fields)
-                if matches!(fields[0].value, ChatToolArgumentValue::Code(_))
+                if fields
+                    .iter()
+                    .any(|field| matches!(field.value, ChatToolArgumentValue::Code(_)))
         ));
     }
 

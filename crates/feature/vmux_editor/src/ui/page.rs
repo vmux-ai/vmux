@@ -2,7 +2,7 @@
 
 use super::breadcrumb::EditorBreadcrumbs;
 use super::diagnostic::DiagnosticPresentation;
-use super::directory::{Preview, PreviewPane, clear_preview, image_data_url, toggle_video};
+use super::directory::{Preview, PreviewPane};
 use super::dom::{EditorDom, ScrolledLineHeight};
 use super::editor::{EditorLines, StickyScope};
 use super::explorer::SidebarView;
@@ -25,10 +25,9 @@ use vmux_api::editor::{CursorPos, EditMode, SelSpan};
 use vmux_api::media::MediaKind;
 use vmux_ecs::event::*;
 use vmux_ecs::scroll::{EDGE_TRIGGER_K, ScrollWindow};
-use vmux_git::event::{FileGitState, GitLineStatus};
+use vmux_git::event::FileGitState;
 use vmux_git::ui::{DiffView, GitFooter};
 use vmux_knowledge::{KnowledgeProperty, KnowledgeReference};
-use vmux_ui::diff::DiffTone;
 use vmux_ui::directory::DirectoryNavigator;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send, use_theme, use_ui_state};
@@ -230,7 +229,7 @@ pub fn Page() -> Element {
                 return;
             }
             error.set(String::new());
-            clear_preview(preview, thumbs);
+            Preview::clear(preview, thumbs);
             media.set(None);
             dom.reset();
             last_scroll_req.set(0);
@@ -650,7 +649,7 @@ pub fn Page() -> Element {
     use_effect(move || {
         media_event.for_each(|e| {
             error.set(String::new());
-            clear_preview(preview, thumbs);
+            Preview::clear(preview, thumbs);
             let kind = e.kind;
             media.set(Some(e));
             mode.set(Mode::Media(kind));
@@ -665,15 +664,13 @@ pub fn Page() -> Element {
         preview_event.for_each(|ev| {
             if ev.thumb {
                 if let PreviewKind::Image { bytes, .. } = ev.kind {
-                    let url = image_data_url(&bytes, &ev.path);
+                    let url = Preview::image_url(&bytes, &ev.path);
                     thumbs.write().insert(ev.path.clone(), url);
                 }
                 return;
             }
             let next = match ev.kind {
-                PreviewKind::Image { bytes, .. } => {
-                    Preview::Image(image_data_url(&bytes, &ev.path))
-                }
+                PreviewKind::Image { bytes, .. } => Preview::image(bytes, &ev.path),
                 PreviewKind::Video { url, path, native } => Preview::Video { url, path, native },
                 PreviewKind::Text(l) => Preview::Text(l),
                 PreviewKind::Dir(e) => Preview::Dir(e),
@@ -833,7 +830,7 @@ pub fn Page() -> Element {
                         }
                         " " => {
                             e.prevent_default();
-                            toggle_video();
+                            Preview::toggle_video();
                         }
                         _ => {
                             keys.offer(&e);
@@ -1880,15 +1877,6 @@ impl NoteCursorActivation {
         reveal_line
             .map(Self::Center)
             .or_else(|| restore_vim_cursor.then_some(Self::PreserveViewport(cursor_line)))
-    }
-}
-
-pub(crate) fn diff_tone(marker: GitLineStatus) -> DiffTone {
-    match marker {
-        GitLineStatus::Added => DiffTone::Added,
-        GitLineStatus::Modified => DiffTone::Modified,
-        GitLineStatus::Deleted => DiffTone::Deleted,
-        GitLineStatus::Staged => DiffTone::Staged,
     }
 }
 

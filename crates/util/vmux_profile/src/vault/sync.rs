@@ -5,11 +5,11 @@ use std::process::Command;
 use super::VaultStorage;
 use super::files::FileAttributes;
 use super::keys::{KeyStore, SystemKeyStore};
-use super::recovery::load_repository_key;
+use super::recovery::RepositoryKey;
 use super::repository::VaultRepositoryPath;
 use super::snapshot::{
-    EntryKind, LocalEntry, LocalFingerprint, LocalState, LocalStateEntry, modified_time,
-    random_hex, validate_relative_path,
+    EntryKind, FileTimestamp, Hex, LocalEntry, LocalFingerprint, LocalState, LocalStateEntry,
+    SnapshotPath,
 };
 
 const IGNORED_ROOTS: [&str; 9] = [
@@ -65,62 +65,81 @@ enum TextMergeStrategy {
     Union,
 }
 
+pub(super) struct VaultSync;
+
+pub(super) struct VaultReconcile;
+
+pub(super) struct VaultLocalState;
+
+pub(super) struct ManagedPath<'a>(pub(super) &'a Path);
+
+pub(super) struct LocalPath<'a>(pub(super) &'a Path);
+
+pub(super) struct RonMap<'a>(pub(super) &'a ron::value::Map);
+
 impl VaultStorage {
     pub fn sync(&self) -> Result<String, String> {
-        sync_paths(&self.root, &self.repository, &SystemKeyStore)
+        VaultSync::run(&self.root, &self.repository, &SystemKeyStore)
     }
 
     pub fn initialize(&self) -> Result<(), String> {
-        initialize_paths(&self.root, &self.repository, &SystemKeyStore)
+        VaultSync::initialize(&self.root, &self.repository, &SystemKeyStore)
     }
 }
 
-pub(super) fn sync_paths<K: KeyStore>(
-    root: &Path,
-    repository: &Path,
-    keys: &K,
-) -> Result<String, String> {
-    let vault = VaultRepositoryPath::at(repository);
-    let git = vault.git();
-    if !repository.join(".git").is_dir() {
-        return Err("Vault is not connected to Git".to_string());
-    }
-    if git.optional(&["remote", "get-url", "origin"]).is_empty() {
-        return Err("Vault has no origin remote".to_string());
-    }
-    let manifest = vault.manifest()?;
-    let key = load_repository_key(repository, keys, &manifest.vault_id)?;
-    let baseline = baseline_files(repository).unwrap_or_else(|_| {
-        vault
-            .load_encrypted_snapshot(&key)
-            .map(|(_, files)| files)
-            .unwrap_or_default()
-    });
-    let branch = git.current_branch()?;
-    for attempt in 0..3 {
-        git.run(&["fetch", "origin"])?;
-        if let Some(remote_branch) = git.remote_branch() {
-            vault.validate_remote_history(&remote_branch)?;
-            if git.run(&["merge-base", "HEAD", &remote_branch]).is_err() {
-                return Err("Vault remote has unrelated history".to_string());
-            }
-            git.run(&["reset", "--hard", &remote_branch])?;
+impl VaultSync {
+    pub(super) fn run<K: KeyStore>(
+        root: &Path,
+        repository: &Path,
+        keys: &K,
+    ) -> Result<String, String> {
+        let vault = VaultRepositoryPath::at(repository);
+        let git = vault.git();
+        if !repository.join(".git").is_dir() {
+            return Err("Vault is not connected to Git".to_string());
         }
-        let (_, remote_files) = vault.load_encrypted_snapshot(&key)?;
-        let outcome = reconcile_local(root, &baseline, &remote_files)?;
-        let files = collect_local_files(root)?;
-        vault.write_encrypted_snapshot(&manifest.vault_id, &key, &files, Some(&remote_files))?;
-        git.commit("Sync vmux Vault")?;
-        match git.run(&["push", "-u", "origin", &branch]) {
-            Ok(_) => {
-                write_local_state(root, repository)?;
-                return Ok(outcome.message());
-            }
-            Err(error) if attempt < 2 && push_rejected_for_remote_change(&error) => {}
-            Err(error) => return Err(error),
+        if git.optional(&["remote", "get-url", "origin"]).is_empty() {
+            return Err("Vault has no origin remote".to_string());
         }
+        let manifest = vault.manifest()?;
+        let key = RepositoryKey::new(repository, keys).load(&manifest.vault_id)?;
+        let baseline = baseline_files(repository).unwrap_or_else(|_| {
+            vault
+                .load_encrypted_snapshot(&key)
+                .map(|(_, files)| files)
+                .unwrap_or_default()
+        });
+        let branch = git.current_branch()?;
+        for attempt in 0..3 {
+            git.run(&["fetch", "origin"])?;
+            if let Some(remote_branch) = git.remote_branch() {
+                vault.validate_remote_history(&remote_branch)?;
+                if git.run(&["merge-base", "HEAD", &remote_branch]).is_err() {
+                    return Err("Vault remote has unrelated history".to_string());
+                }
+                git.run(&["reset", "--hard", &remote_branch])?;
+            }
+            let (_, remote_files) = vault.load_encrypted_snapshot(&key)?;
+            let outcome = VaultReconcile::run(root, &baseline, &remote_files)?;
+            let files = Self::collect(root)?;
+            vault.write_encrypted_snapshot(
+                &manifest.vault_id,
+                &key,
+                &files,
+                Some(&remote_files),
+            )?;
+            git.commit("Sync vmux Vault")?;
+            match git.run(&["push", "-u", "origin", &branch]) {
+                Ok(_) => {
+                    VaultLocalState::write(root, repository)?;
+                    return Ok(outcome.message());
+                }
+                Err(error) if attempt < 2 && push_rejected_for_remote_change(&error) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Err("Vault remote kept changing during sync".to_string())
     }
-    Err("Vault remote kept changing during sync".to_string())
 }
 
 fn push_rejected_for_remote_change(error: &str) -> bool {
@@ -130,41 +149,43 @@ fn push_rejected_for_remote_change(error: &str) -> bool {
         || error.contains("failed to push some refs")
 }
 
-pub(super) fn initialize_paths<K: KeyStore>(
-    root: &Path,
-    repository: &Path,
-    keys: &K,
-) -> Result<(), String> {
-    let vault = VaultRepositoryPath::at(repository);
-    vault.ensure()?;
-    let (vault_id, key, previous) = match vault.manifest() {
-        Ok(manifest) => {
-            let key = load_repository_key(repository, keys, &manifest.vault_id)?;
-            let previous = vault
-                .load_encrypted_snapshot(&key)
-                .ok()
-                .map(|(_, files)| files);
-            (manifest.vault_id, key, previous)
-        }
-        Err(_) => {
-            vault.validate_empty()?;
-            let vault_id = random_hex(16)?;
-            let key = keys.create(&vault_id)?;
-            (vault_id, key, None)
-        }
-    };
-    let files = collect_local_files(root)?;
-    vault.write_encrypted_snapshot(&vault_id, &key, &files, previous.as_ref())?;
-    vault.git().commit("Initialize vmux Vault")
-}
-
-pub(super) fn collect_local_files(root: &Path) -> Result<BTreeMap<String, LocalEntry>, String> {
-    let mut files = BTreeMap::new();
-    if !root.exists() {
-        return Ok(files);
+impl VaultSync {
+    pub(super) fn initialize<K: KeyStore>(
+        root: &Path,
+        repository: &Path,
+        keys: &K,
+    ) -> Result<(), String> {
+        let vault = VaultRepositoryPath::at(repository);
+        vault.ensure()?;
+        let (vault_id, key, previous) = match vault.manifest() {
+            Ok(manifest) => {
+                let key = RepositoryKey::new(repository, keys).load(&manifest.vault_id)?;
+                let previous = vault
+                    .load_encrypted_snapshot(&key)
+                    .ok()
+                    .map(|(_, files)| files);
+                (manifest.vault_id, key, previous)
+            }
+            Err(_) => {
+                vault.validate_empty()?;
+                let vault_id = Hex::random(16)?;
+                let key = keys.create(&vault_id)?;
+                (vault_id, key, None)
+            }
+        };
+        let files = Self::collect(root)?;
+        vault.write_encrypted_snapshot(&vault_id, &key, &files, previous.as_ref())?;
+        vault.git().commit("Initialize vmux Vault")
     }
-    collect_directory(root, root, &mut files)?;
-    Ok(files)
+
+    pub(super) fn collect(root: &Path) -> Result<BTreeMap<String, LocalEntry>, String> {
+        let mut files = BTreeMap::new();
+        if !root.exists() {
+            return Ok(files);
+        }
+        collect_directory(root, root, &mut files)?;
+        Ok(files)
+    }
 }
 
 fn collect_directory(
@@ -180,7 +201,7 @@ fn collect_directory(
     for entry in entries {
         let path = entry.path();
         let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
-        if ignored_path(relative) {
+        if ManagedPath(relative).ignored() {
             continue;
         }
         let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
@@ -199,13 +220,13 @@ fn collect_directory(
             .to_str()
             .ok_or_else(|| "Vault paths must be valid UTF-8".to_string())?
             .replace(std::path::MAIN_SEPARATOR, "/");
-        validate_relative_path(&relative)?;
+        SnapshotPath(&relative).validate()?;
         let data = match kind {
             EntryKind::File => std::fs::read(&path).map_err(|error| error.to_string())?,
             EntryKind::Symlink => FileAttributes::symlink_target(&path)?,
         };
         let mode = FileAttributes::mode(&metadata);
-        let (modified_secs, modified_nanos) = modified_time(&metadata);
+        let (modified_secs, modified_nanos) = FileTimestamp(&metadata).get();
         let digest = kind.digest(mode, &data);
         files.insert(
             relative,
@@ -240,7 +261,7 @@ fn collect_fingerprint_directory(
         let entry = entry.map_err(|error| error.to_string())?;
         let path = entry.path();
         let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
-        if ignored_path(relative) {
+        if ManagedPath(relative).ignored() {
             continue;
         }
         let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
@@ -259,8 +280,8 @@ fn collect_fingerprint_directory(
             .to_str()
             .ok_or_else(|| "Vault paths must be valid UTF-8".to_string())?
             .replace(std::path::MAIN_SEPARATOR, "/");
-        validate_relative_path(&relative)?;
-        let (modified_secs, modified_nanos) = modified_time(&metadata);
+        SnapshotPath(&relative).validate()?;
+        let (modified_secs, modified_nanos) = FileTimestamp(&metadata).get();
         files.insert(
             relative,
             LocalFingerprint {
@@ -275,74 +296,79 @@ fn collect_fingerprint_directory(
     Ok(())
 }
 
-pub(super) fn ignored_path(relative: &Path) -> bool {
-    if relative.file_name().is_some_and(|name| name == ".DS_Store") {
-        return true;
+impl ManagedPath<'_> {
+    pub(super) fn ignored(&self) -> bool {
+        if self.0.file_name().is_some_and(|name| name == ".DS_Store") {
+            return true;
+        }
+        let first = self
+            .0
+            .components()
+            .next()
+            .and_then(|component| match component {
+                Component::Normal(value) => value.to_str(),
+                _ => None,
+            });
+        first.is_some_and(|name| {
+            name == ".git" || name == ".vmux-vault" || IGNORED_ROOTS.contains(&name)
+        })
     }
-    let first = relative
-        .components()
-        .next()
-        .and_then(|component| match component {
-            Component::Normal(value) => value.to_str(),
-            _ => None,
-        });
-    first.is_some_and(|name| {
-        name == ".git" || name == ".vmux-vault" || IGNORED_ROOTS.contains(&name)
-    })
 }
 
-pub(super) fn reconcile_local(
-    root: &Path,
-    baseline: &BTreeMap<String, LocalEntry>,
-    remote: &BTreeMap<String, LocalEntry>,
-) -> Result<ReconcileOutcome, String> {
-    let local = collect_local_files(root)?;
-    let paths = baseline
-        .keys()
-        .chain(local.keys())
-        .chain(remote.keys())
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let mut updates = Vec::new();
-    let mut occupied = paths.clone();
-    let mut outcome = ReconcileOutcome::default();
-    for path in paths {
-        let baseline_entry = baseline.get(&path);
-        let local_entry = local.get(&path);
-        let remote_entry = remote.get(&path);
-        let local_changed = !same_entry(local_entry, baseline_entry);
-        let remote_changed = !same_entry(remote_entry, baseline_entry);
-        if local_changed && remote_changed && !same_entry(local_entry, remote_entry) {
-            if let Some(entry) =
-                merge_changed_file(&path, baseline_entry, local_entry, remote_entry)?
-            {
-                updates.push((path, Some(entry)));
-                outcome.automatic_merges += 1;
-                continue;
+impl VaultReconcile {
+    pub(super) fn run(
+        root: &Path,
+        baseline: &BTreeMap<String, LocalEntry>,
+        remote: &BTreeMap<String, LocalEntry>,
+    ) -> Result<ReconcileOutcome, String> {
+        let local = VaultSync::collect(root)?;
+        let paths = baseline
+            .keys()
+            .chain(local.keys())
+            .chain(remote.keys())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut updates = Vec::new();
+        let mut occupied = paths.clone();
+        let mut outcome = ReconcileOutcome::default();
+        for path in paths {
+            let baseline_entry = baseline.get(&path);
+            let local_entry = local.get(&path);
+            let remote_entry = remote.get(&path);
+            let local_changed = !LocalEntry::same(local_entry, baseline_entry);
+            let remote_changed = !LocalEntry::same(remote_entry, baseline_entry);
+            if local_changed && remote_changed && !LocalEntry::same(local_entry, remote_entry) {
+                if let Some(entry) =
+                    merge_changed_file(&path, baseline_entry, local_entry, remote_entry)?
+                {
+                    updates.push((path, Some(entry)));
+                    outcome.automatic_merges += 1;
+                    continue;
+                }
+                updates.push((path.clone(), remote_entry.cloned()));
+                if let Some(local_entry) = local_entry {
+                    let copy_path = conflict_copy_path(&path, &mut occupied)?;
+                    updates.push((copy_path, Some(local_entry.clone())));
+                    outcome.conflict_copies += 1;
+                }
+            } else if remote_changed && !local_changed {
+                updates.push((path, remote_entry.cloned()));
             }
-            updates.push((path.clone(), remote_entry.cloned()));
-            if let Some(local_entry) = local_entry {
-                let copy_path = conflict_copy_path(&path, &mut occupied)?;
-                updates.push((copy_path, Some(local_entry.clone())));
-                outcome.conflict_copies += 1;
+        }
+        let mut merged = local.clone();
+        for (path, entry) in &updates {
+            if let Some(entry) = entry {
+                merged.insert(path.clone(), entry.clone());
+            } else {
+                merged.remove(path);
             }
-        } else if remote_changed && !local_changed {
-            updates.push((path, remote_entry.cloned()));
         }
-    }
-    let mut merged = local.clone();
-    for (path, entry) in &updates {
-        if let Some(entry) = entry {
-            merged.insert(path.clone(), entry.clone());
-        } else {
-            merged.remove(path);
+        validate_file_tree(&merged)?;
+        for (path, entry) in updates {
+            apply_local_entry(root, &path, entry.as_ref())?;
         }
+        Ok(outcome)
     }
-    validate_file_tree(&merged)?;
-    for (path, entry) in updates {
-        apply_local_entry(root, &path, entry.as_ref())?;
-    }
-    Ok(outcome)
 }
 
 fn merge_changed_file(
@@ -442,7 +468,7 @@ fn merge_text(
     {
         return Err("Vault text merge requires UTF-8 files".to_string());
     }
-    let directory = std::env::temp_dir().join(format!("vmux-vault-merge-{}", random_hex(8)?));
+    let directory = std::env::temp_dir().join(format!("vmux-vault-merge-{}", Hex::random(8)?));
     std::fs::create_dir(&directory).map_err(|error| error.to_string())?;
     let baseline_path = directory.join("baseline");
     let local_path = directory.join("local");
@@ -554,9 +580,9 @@ fn merge_ron_value(
                 keys.into_iter()
                     .filter_map(|key| {
                         merge_ron_value(
-                            ron_map_get(baseline, &key),
-                            ron_map_get(local, &key),
-                            ron_map_get(remote, &key),
+                            RonMap(baseline).get(&key),
+                            RonMap(local).get(&key),
+                            RonMap(remote).get(&key),
                         )
                         .map(|value| (key, value))
                     })
@@ -580,7 +606,9 @@ fn ron_values_equal(left: &ron::Value, right: &ron::Value) -> bool {
         (ron::Value::Map(left), ron::Value::Map(right)) => {
             left.len() == right.len()
                 && left.iter().all(|(key, value)| {
-                    ron_map_get(right, key).is_some_and(|other| ron_values_equal(value, other))
+                    RonMap(right)
+                        .get(key)
+                        .is_some_and(|other| ron_values_equal(value, other))
                 })
         }
         (ron::Value::Seq(left), ron::Value::Seq(right)) => {
@@ -597,12 +625,12 @@ fn ron_values_equal(left: &ron::Value, right: &ron::Value) -> bool {
     }
 }
 
-pub(super) fn ron_map_get<'a>(
-    map: &'a ron::value::Map,
-    key: &ron::Value,
-) -> Option<&'a ron::Value> {
-    map.iter()
-        .find_map(|(candidate, value)| (candidate == key).then_some(value))
+impl<'a> RonMap<'a> {
+    pub(super) fn get(&self, key: &ron::Value) -> Option<&'a ron::Value> {
+        self.0
+            .iter()
+            .find_map(|(candidate, value)| (candidate == key).then_some(value))
+    }
 }
 
 fn merge_toml_value(
@@ -723,7 +751,7 @@ fn conflict_copy_path(path: &str, occupied: &mut BTreeSet<String>) -> Result<Str
             None => format!("{stem} (Conflicted copy {label}){suffix}"),
         };
         let candidate = parent.join(file_name).to_string_lossy().replace('\\', "/");
-        validate_relative_path(&candidate)?;
+        SnapshotPath(&candidate).validate()?;
         if occupied.insert(candidate.clone()) {
             return Ok(candidate);
         }
@@ -775,13 +803,15 @@ fn validate_file_tree(files: &BTreeMap<String, LocalEntry>) -> Result<(), String
     Ok(())
 }
 
-pub(super) fn same_entry(left: Option<&LocalEntry>, right: Option<&LocalEntry>) -> bool {
-    match (left, right) {
-        (Some(left), Some(right)) => {
-            left.digest == right.digest && left.kind == right.kind && left.mode == right.mode
+impl LocalEntry {
+    pub(super) fn same(left: Option<&Self>, right: Option<&Self>) -> bool {
+        match (left, right) {
+            (Some(left), Some(right)) => {
+                left.digest == right.digest && left.kind == right.kind && left.mode == right.mode
+            }
+            (None, None) => true,
+            _ => false,
         }
-        (None, None) => true,
-        _ => false,
     }
 }
 
@@ -790,14 +820,14 @@ fn apply_local_entry(
     relative: &str,
     entry: Option<&LocalEntry>,
 ) -> Result<(), String> {
-    validate_relative_path(relative)?;
+    SnapshotPath(relative).validate()?;
     let path = root.join(relative);
     match entry {
         Some(entry) => {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
             }
-            remove_existing_path(&path)?;
+            LocalPath(&path).remove()?;
             match entry.kind {
                 EntryKind::File => {
                     vmux_path::AtomicFile::write(&path, &entry.data)
@@ -808,21 +838,23 @@ fn apply_local_entry(
             }
         }
         None => {
-            remove_existing_path(&path)?;
+            LocalPath(&path).remove()?;
             prune_empty_parents(root, path.parent());
         }
     }
     Ok(())
 }
 
-pub(super) fn remove_existing_path(path: &Path) -> Result<(), String> {
-    let Ok(metadata) = std::fs::symlink_metadata(path) else {
-        return Ok(());
-    };
-    if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
-        std::fs::remove_dir_all(path).map_err(|error| error.to_string())
-    } else {
-        std::fs::remove_file(path).map_err(|error| error.to_string())
+impl LocalPath<'_> {
+    pub(super) fn remove(&self) -> Result<(), String> {
+        let Ok(metadata) = std::fs::symlink_metadata(self.0) else {
+            return Ok(());
+        };
+        if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+            std::fs::remove_dir_all(self.0).map_err(|error| error.to_string())
+        } else {
+            std::fs::remove_file(self.0).map_err(|error| error.to_string())
+        }
     }
 }
 
@@ -838,58 +870,60 @@ fn prune_empty_parents(root: &Path, mut parent: Option<&Path>) {
     }
 }
 
-pub(super) fn write_local_state(root: &Path, repository: &Path) -> Result<(), String> {
-    let files = collect_local_files(root)?;
-    let state = LocalState {
-        version: FORMAT_VERSION,
-        files: files
-            .into_iter()
-            .map(|(path, entry)| LocalStateEntry {
-                path,
-                digest: entry.digest,
-                kind: entry.kind,
-                mode: entry.mode,
-                data: Some(entry.data),
-                size: entry.size,
-                modified_secs: entry.modified_secs,
-                modified_nanos: entry.modified_nanos,
-            })
-            .collect(),
-    };
-    let source = ron::ser::to_string(&state).map_err(|error| error.to_string())?;
-    vmux_path::AtomicFile::write(
-        VaultRepositoryPath::at(repository).state_path(),
-        source.as_bytes(),
-    )
-    .map_err(|error| error.to_string())
-}
+impl VaultLocalState {
+    pub(super) fn write(root: &Path, repository: &Path) -> Result<(), String> {
+        let files = VaultSync::collect(root)?;
+        let state = LocalState {
+            version: FORMAT_VERSION,
+            files: files
+                .into_iter()
+                .map(|(path, entry)| LocalStateEntry {
+                    path,
+                    digest: entry.digest,
+                    kind: entry.kind,
+                    mode: entry.mode,
+                    data: Some(entry.data),
+                    size: entry.size,
+                    modified_secs: entry.modified_secs,
+                    modified_nanos: entry.modified_nanos,
+                })
+                .collect(),
+        };
+        let source = ron::ser::to_string(&state).map_err(|error| error.to_string())?;
+        vmux_path::AtomicFile::write(
+            VaultRepositoryPath::at(repository).state_path(),
+            source.as_bytes(),
+        )
+        .map_err(|error| error.to_string())
+    }
 
-pub(super) fn local_change_count(root: &Path, repository: &Path) -> Result<u32, String> {
-    let local = collect_local_fingerprints(root)?;
-    let state = read_local_state(repository).unwrap_or_default();
-    let paths = local
-        .keys()
-        .chain(state.keys())
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    Ok(paths
-        .into_iter()
-        .filter(|path| {
-            let local = local.get(path);
-            let state = state.get(path);
-            match (local, state) {
-                (Some(local), Some(state)) => {
-                    local.kind != state.kind
-                        || local.mode != state.mode
-                        || local.size != state.size
-                        || local.modified_secs != state.modified_secs
-                        || local.modified_nanos != state.modified_nanos
+    pub(super) fn change_count(root: &Path, repository: &Path) -> Result<u32, String> {
+        let local = collect_local_fingerprints(root)?;
+        let state = read_local_state(repository).unwrap_or_default();
+        let paths = local
+            .keys()
+            .chain(state.keys())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        Ok(paths
+            .into_iter()
+            .filter(|path| {
+                let local = local.get(path);
+                let state = state.get(path);
+                match (local, state) {
+                    (Some(local), Some(state)) => {
+                        local.kind != state.kind
+                            || local.mode != state.mode
+                            || local.size != state.size
+                            || local.modified_secs != state.modified_secs
+                            || local.modified_nanos != state.modified_nanos
+                    }
+                    (None, None) => false,
+                    _ => true,
                 }
-                (None, None) => false,
-                _ => true,
-            }
-        })
-        .count() as u32)
+            })
+            .count() as u32)
+    }
 }
 
 fn read_local_state(repository: &Path) -> Result<BTreeMap<String, LocalStateEntry>, String> {

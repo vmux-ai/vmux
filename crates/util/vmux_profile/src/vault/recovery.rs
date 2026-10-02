@@ -9,8 +9,8 @@ use zeroize::Zeroizing;
 use super::VaultStorage;
 use super::keys::{KeyStore, SystemKeyStore};
 use super::repository::VaultRepositoryPath;
-use super::snapshot::{KEY_LEN, decode_hex, decrypt_bytes, encrypt_bytes, hex, validate_key};
-use super::sync::{reconcile_local, write_local_state};
+use super::snapshot::{Hex, KEY_LEN, VaultCrypto};
+use super::sync::{VaultLocalState, VaultReconcile};
 
 pub(super) const RECOVERY_DIR: &str = "keys/recovery";
 pub(super) const RECOVERY_FILE: &str = "default.ron";
@@ -56,11 +56,37 @@ impl GeneratedRecoveryKey {
     }
 
     pub fn display(&self) -> Zeroizing<String> {
-        Zeroizing::new(format_recovery_key(self.0.as_ref()))
+        Zeroizing::new(Self::format(self.0.as_ref()))
     }
 
     fn as_bytes(&self) -> &[u8] {
         self.0.as_ref()
+    }
+
+    pub(super) fn format(key: &[u8]) -> String {
+        let encoded = Hex::encode(key);
+        let groups = encoded
+            .as_bytes()
+            .chunks(4)
+            .map(|group| std::str::from_utf8(group).unwrap_or_default())
+            .collect::<Vec<_>>();
+        format!("vmux-{}", groups.join("-"))
+    }
+
+    pub(super) fn parse(source: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+        let compact = source
+            .trim()
+            .to_ascii_lowercase()
+            .chars()
+            .filter(|character| !character.is_ascii_whitespace() && *character != '-')
+            .collect::<String>();
+        let encoded = compact.strip_prefix("vmux").unwrap_or(&compact);
+        if encoded.len() != KEY_LEN * 2 {
+            return Err("Invalid Vault Recovery Key".to_string());
+        }
+        let key = Hex::decode(encoded).map_err(|_| "Invalid Vault Recovery Key".to_string())?;
+        VaultCrypto::new(&key).map_err(|_| "Invalid Vault Recovery Key".to_string())?;
+        Ok(Zeroizing::new(key))
     }
 }
 
@@ -99,17 +125,18 @@ impl VaultRecovery {
     ) -> Result<RecoveryKeyCreation, String> {
         let vault = VaultRepositoryPath::at(&self.repository);
         let git = vault.git();
-        if read_recovery_envelope(&self.repository)?.is_some() {
+        if RecoveryEnvelope::read(&self.repository)?.is_some() {
             return Err("This Vault already has a Recovery Key".to_string());
         }
         let mut manifest = vault.manifest()?;
         let previous_manifest = manifest.clone();
-        let key = load_repository_key(&self.repository, keys, &manifest.vault_id)?;
-        validate_key(recovery_key)?;
+        let key = RepositoryKey::new(&self.repository, keys).load(&manifest.vault_id)?;
+        VaultCrypto::new(recovery_key)?;
         let wrapping_key = derive_recovery_wrapping_key(recovery_key, &manifest.vault_id)?;
+        let wrapping_crypto = VaultCrypto::new(&wrapping_key)?;
         let envelope = RecoveryEnvelope {
             version: FORMAT_VERSION,
-            wrapped_key: encrypt_bytes(&wrapping_key, &recovery_aad(&manifest.vault_id), &key)?,
+            wrapped_key: wrapping_crypto.encrypt(&recovery_aad(&manifest.vault_id), &key)?,
         };
         let source = ron::ser::to_string_pretty(&envelope, ron::ser::PrettyConfig::new())
             .map_err(|error| error.to_string())?;
@@ -148,74 +175,70 @@ impl VaultRecovery {
         keys: &K,
         recovery_key: &str,
     ) -> Result<String, String> {
-        let recovery_key = parse_recovery_key(recovery_key)?;
+        let recovery_key = GeneratedRecoveryKey::parse(recovery_key)?;
         let vault = VaultRepositoryPath::at(&self.repository);
         let manifest = vault.manifest()?;
-        let envelope = read_recovery_envelope(&self.repository)?
+        let envelope = RecoveryEnvelope::read(&self.repository)?
             .ok_or_else(|| "This Vault has no Recovery Key".to_string())?;
         let wrapping_key = derive_recovery_wrapping_key(&recovery_key, &manifest.vault_id)?;
-        let key = Zeroizing::new(decrypt_bytes(
-            &wrapping_key,
-            &recovery_aad(&manifest.vault_id),
-            &envelope.wrapped_key,
-        )?);
-        validate_key(&key)?;
+        let key = Zeroizing::new(
+            VaultCrypto::new(&wrapping_key)?
+                .decrypt(&recovery_aad(&manifest.vault_id), &envelope.wrapped_key)?,
+        );
+        VaultCrypto::new(&key)?;
         let (_, remote_files) = vault.load_encrypted_snapshot(&key)?;
         keys.store(&manifest.vault_id, &key)?;
-        reconcile_local(&self.root, &BTreeMap::new(), &remote_files)?;
-        write_local_state(&self.root, &self.repository)?;
+        VaultReconcile::run(&self.root, &BTreeMap::new(), &remote_files)?;
+        VaultLocalState::write(&self.root, &self.repository)?;
         Ok("Vault unlocked".to_string())
     }
 }
 
-pub(super) fn format_recovery_key(key: &[u8]) -> String {
-    let encoded = hex(key);
-    let groups = encoded
-        .as_bytes()
-        .chunks(4)
-        .map(|group| std::str::from_utf8(group).unwrap_or_default())
-        .collect::<Vec<_>>();
-    format!("vmux-{}", groups.join("-"))
-}
-
-pub(super) fn read_recovery_envelope(
-    repository: &Path,
-) -> Result<Option<RecoveryEnvelope>, String> {
-    let path = repository.join(RECOVERY_DIR).join(RECOVERY_FILE);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let envelope = ron::from_str::<RecoveryEnvelope>(&source)
-        .map_err(|error| format!("invalid Vault Recovery Key recipient: {error}"))?;
-    if envelope.version != FORMAT_VERSION {
-        return Err("unsupported Vault Recovery Key recipient".to_string());
-    }
-    Ok(Some(envelope))
-}
-
-pub(super) fn load_repository_key<K: KeyStore>(
-    repository: &Path,
-    keys: &K,
-    vault_id: &str,
-) -> Result<Zeroizing<Vec<u8>>, String> {
-    keys.load(vault_id).map_err(|error| {
-        let has_recovery =
-            read_recovery_envelope(repository).is_ok_and(|envelope| envelope.is_some());
-        if !has_recovery {
-            "This Vault is locked on this device. No recovery method is registered. Open it on a device that can already unlock it, then add a Recovery Key."
-                .to_string()
-        } else {
-            error
+impl RecoveryEnvelope {
+    pub(super) fn read(repository: &Path) -> Result<Option<Self>, String> {
+        let path = repository.join(RECOVERY_DIR).join(RECOVERY_FILE);
+        if !path.exists() {
+            return Ok(None);
         }
-    })
+        let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+        let envelope = ron::from_str::<Self>(&source)
+            .map_err(|error| format!("invalid Vault Recovery Key recipient: {error}"))?;
+        if envelope.version != FORMAT_VERSION {
+            return Err("unsupported Vault Recovery Key recipient".to_string());
+        }
+        Ok(Some(envelope))
+    }
+}
+
+pub(super) struct RepositoryKey<'a, K> {
+    repository: &'a Path,
+    keys: &'a K,
+}
+
+impl<'a, K: KeyStore> RepositoryKey<'a, K> {
+    pub(super) fn new(repository: &'a Path, keys: &'a K) -> Self {
+        Self { repository, keys }
+    }
+
+    pub(super) fn load(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+        self.keys.load(vault_id).map_err(|error| {
+            let has_recovery = RecoveryEnvelope::read(self.repository)
+                .is_ok_and(|envelope| envelope.is_some());
+            if !has_recovery {
+                "This Vault is locked on this device. No recovery method is registered. Open it on a device that can already unlock it, then add a Recovery Key."
+                    .to_string()
+            } else {
+                error
+            }
+        })
+    }
 }
 
 fn derive_recovery_wrapping_key(
     recovery_key: &[u8],
     vault_id: &str,
 ) -> Result<[u8; KEY_LEN], String> {
-    validate_key(recovery_key)?;
+    VaultCrypto::new(recovery_key)?;
     let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, vault_id.as_bytes());
     let prk = salt.extract(recovery_key);
     let info = [RECOVERY_KDF_PREFIX];
@@ -234,20 +257,4 @@ fn recovery_aad(vault_id: &str) -> Vec<u8> {
     aad.extend_from_slice(RECOVERY_AAD_PREFIX);
     aad.extend_from_slice(vault_id.as_bytes());
     aad
-}
-
-pub(super) fn parse_recovery_key(source: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-    let compact = source
-        .trim()
-        .to_ascii_lowercase()
-        .chars()
-        .filter(|character| !character.is_ascii_whitespace() && *character != '-')
-        .collect::<String>();
-    let encoded = compact.strip_prefix("vmux").unwrap_or(&compact);
-    if encoded.len() != KEY_LEN * 2 {
-        return Err("Invalid Vault Recovery Key".to_string());
-    }
-    let key = decode_hex(encoded).map_err(|_| "Invalid Vault Recovery Key".to_string())?;
-    validate_key(&key).map_err(|_| "Invalid Vault Recovery Key".to_string())?;
-    Ok(Zeroizing::new(key))
 }

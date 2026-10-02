@@ -27,25 +27,29 @@ pub(super) enum Preview {
     Error(String),
 }
 
-pub(super) fn image_data_url(bytes: &[u8], path: &str) -> String {
-    let mime = vmux_api::media::MediaKind::image_mime(path).unwrap_or("application/octet-stream");
+impl Preview {
+    pub(super) fn image(bytes: Vec<u8>, path: &str) -> Self {
+        Self::Image(Self::image_url(&bytes, path))
+    }
 
-    format!(
-        "data:{mime};base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    )
-}
+    pub(super) fn image_url(bytes: &[u8], path: &str) -> String {
+        let mime =
+            vmux_api::media::MediaKind::image_mime(path).unwrap_or("application/octet-stream");
 
-pub(super) fn clear_preview(
-    mut preview: Signal<Preview>,
-    mut thumbs: Signal<HashMap<String, String>>,
-) {
-    preview.set(Preview::None);
-    thumbs.set(HashMap::new());
-}
+        format!(
+            "data:{mime};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )
+    }
 
-pub(super) fn toggle_video() {
-    MediaElement::with_id("preview-video").toggle_playback();
+    pub(super) fn clear(mut preview: Signal<Preview>, mut thumbs: Signal<HashMap<String, String>>) {
+        preview.set(Self::None);
+        thumbs.set(HashMap::new());
+    }
+
+    pub(super) fn toggle_video() {
+        MediaElement::with_id("preview-video").toggle_playback();
+    }
 }
 
 fn format_size(bytes: u64) -> String {

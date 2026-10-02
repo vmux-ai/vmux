@@ -13,7 +13,7 @@ use crate::state::ChatUiState;
 use crate::tab::Accent;
 use dioxus::prelude::*;
 use vmux_api::prompt_media::{InlineMediaQuery, PromptComposerAttachment, PromptMediaOption};
-use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, focus_prompt_end};
+use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerMode, PromptFocus};
 use vmux_ui::components::composer_bar::{
     ComposerChip, ComposerMenu, ComposerMenuKind, use_composer_menu,
 };
@@ -134,7 +134,7 @@ impl Chat {
             }
             let mut focus_revision = chat.composer.focus_revision;
             focus_revision.set(effect.revision);
-            focus_prompt_end(PROMPT_INPUT_ID);
+            PromptFocus::end(PROMPT_INPUT_ID);
         });
         let chat = *self;
         ui.use_updates::<ChatListSelectionState>(move |selection| {
@@ -188,13 +188,13 @@ impl Chat {
         draft.set(effect.draft.clone());
         menu_sel.set(0);
         if effect.focus {
-            focus_prompt_end(PROMPT_INPUT_ID);
+            PromptFocus::end(PROMPT_INPUT_ID);
         }
     }
 
     fn watch(&self) {
         let chat = *self;
-        use_effect(move || focus_prompt_end(PROMPT_INPUT_ID));
+        use_effect(move || PromptFocus::end(PROMPT_INPUT_ID));
         use_effect(move || {
             let menu = match chat.menu.opened() {
                 Some(ComposerMenuKind::Effort) => Some(ChatComposerMenuKind::Effort),
@@ -427,7 +427,7 @@ impl Chat {
             chat.menu.close();
             chat.set_draft("/model ".to_string());
             menu_sel.set(0);
-            focus_prompt_end(PROMPT_INPUT_ID);
+            PromptFocus::end(PROMPT_INPUT_ID);
         });
         Some(ComposerChip::ready(label, translate("agent-change-model")).opens(open))
     }
@@ -451,7 +451,7 @@ impl Chat {
         let chat = *self;
         let open = EventHandler::new(move |()| {
             chat.open_menu(ComposerMenuKind::Effort);
-            focus_prompt_end(PROMPT_INPUT_ID);
+            PromptFocus::end(PROMPT_INPUT_ID);
         });
         Some(ComposerChip::ready(label, translate("agent-effort-tooltip")).opens(open))
     }
@@ -480,7 +480,7 @@ impl Chat {
         let chat = *self;
         let open = EventHandler::new(move |()| {
             chat.open_menu_at(ComposerMenuKind::Permission, selected);
-            focus_prompt_end(PROMPT_INPUT_ID);
+            PromptFocus::end(PROMPT_INPUT_ID);
         });
         Some(ComposerChip::ready(label, title).opens(open))
     }
@@ -577,7 +577,7 @@ impl Chat {
 
     pub fn select_mode(&self, mode_id: String) {
         let _ = send(&SelectMode { mode_id });
-        focus_prompt_end(PROMPT_INPUT_ID);
+        PromptFocus::end(PROMPT_INPUT_ID);
     }
 
     pub fn choose_list(&self, index: usize) {
@@ -622,14 +622,14 @@ impl Chat {
     pub fn dismiss_selector(&self) {
         if self.menu.opened().is_some() {
             self.menu.close();
-            focus_prompt_end(PROMPT_INPUT_ID);
+            PromptFocus::end(PROMPT_INPUT_ID);
             return;
         }
         let mut menu_sel = self.slash.menu_sel;
         let value = self.composer.draft.peek().clone();
         if let Some(query) = InlineMediaQuery::parse(&value) {
             self.set_draft(query.replace(&value, ""));
-            focus_prompt_end(PROMPT_INPUT_ID);
+            PromptFocus::end(PROMPT_INPUT_ID);
         } else {
             self.set_draft(String::new());
         }

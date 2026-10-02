@@ -125,7 +125,7 @@ pub fn PromptComposer(
                                     onmousedown: move |event| event.prevent_default(),
                                     onclick: move |_| {
                                         on_remove_attachment.call(remove_index as usize);
-                                        focus_prompt_end(PROMPT_INPUT_ID);
+                                        PromptFocus::end(PROMPT_INPUT_ID);
                                     },
                                     svg {
                                         class: "h-3 w-3",
@@ -237,8 +237,12 @@ pub fn PromptComposer(
     }
 }
 
-pub fn focus_prompt_end(input_id: impl Into<std::borrow::Cow<'static, str>>) {
-    crate::focus::FocusClaim::new(input_id)
-        .caret_at_end()
-        .request();
+pub struct PromptFocus;
+
+impl PromptFocus {
+    pub fn end(input_id: impl Into<std::borrow::Cow<'static, str>>) {
+        crate::focus::FocusClaim::new(input_id)
+            .caret_at_end()
+            .request();
+    }
 }

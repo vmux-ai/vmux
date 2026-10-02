@@ -34,83 +34,83 @@ fn mix_color_hash(hash: &mut u64, color: &Color) {
     }
 }
 
-pub(crate) fn hash_grid_row<T: TermEventListener>(
-    term: &Term<T>,
-    row_idx: usize,
-    offset: i32,
-) -> u64 {
-    let mut hash = 0xcbf29ce484222325;
-    let grid = term.grid();
-    let num_cols = grid.columns();
-    let row = &grid[Line(row_idx as i32 - offset)];
-    for col_idx in 0..num_cols {
-        let cell = &row[Column(col_idx)];
-        mix_row_hash(&mut hash, cell.c as u32 as u64);
-        mix_color_hash(&mut hash, &cell.fg);
-        mix_color_hash(&mut hash, &cell.bg);
-        mix_row_hash(&mut hash, cell.flags.bits() as u64);
-    }
-    hash
-}
+pub(crate) struct TermRow;
 
-pub(crate) fn build_line<T: TermEventListener>(
-    term: &Term<T>,
-    row_idx: usize,
-    offset: i32,
-) -> TermLine {
-    let grid = term.grid();
-    let num_cols = grid.columns();
-    let row = &grid[Line(row_idx as i32 - offset)];
-    let mut spans = Vec::new();
-    let mut text = String::new();
-    let mut cur_fg = TermColor::Default;
-    let mut cur_bg = TermColor::Default;
-    let mut cur_flags: u16 = 0;
-    let mut span_col_start: u16 = 0;
-    let mut span_grid_cols: u16 = 0;
-
-    for col_idx in 0..num_cols {
-        let cell = &row[Column(col_idx)];
-        if cell.flags.contains(CellFlags::WIDE_CHAR_SPACER) {
-            span_grid_cols += 1;
-            continue;
+impl TermRow {
+    pub(crate) fn hash<T: TermEventListener>(term: &Term<T>, row_idx: usize, offset: i32) -> u64 {
+        let mut hash = 0xcbf29ce484222325;
+        let grid = term.grid();
+        let num_cols = grid.columns();
+        let row = &grid[Line(row_idx as i32 - offset)];
+        for col_idx in 0..num_cols {
+            let cell = &row[Column(col_idx)];
+            mix_row_hash(&mut hash, cell.c as u32 as u64);
+            mix_color_hash(&mut hash, &cell.fg);
+            mix_color_hash(&mut hash, &cell.bg);
+            mix_row_hash(&mut hash, cell.flags.bits() as u64);
         }
-        let fg = color_to_term_color(&cell.fg);
-        let bg = color_to_term_color(&cell.bg);
-        let flags = cell_flags_to_u16(cell.flags);
-        if fg != cur_fg || bg != cur_bg || flags != cur_flags {
-            if !text.is_empty() {
-                spans.push(TermSpan {
-                    text: std::mem::take(&mut text),
-                    fg: cur_fg,
-                    bg: cur_bg,
-                    flags: cur_flags,
-                    col: span_col_start,
-                    grid_cols: span_grid_cols,
-                });
-                span_col_start = col_idx as u16;
-                span_grid_cols = 0;
+        hash
+    }
+
+    pub(crate) fn line<T: TermEventListener>(
+        term: &Term<T>,
+        row_idx: usize,
+        offset: i32,
+    ) -> TermLine {
+        let grid = term.grid();
+        let num_cols = grid.columns();
+        let row = &grid[Line(row_idx as i32 - offset)];
+        let mut spans = Vec::new();
+        let mut text = String::new();
+        let mut cur_fg = TermColor::Default;
+        let mut cur_bg = TermColor::Default;
+        let mut cur_flags: u16 = 0;
+        let mut span_col_start: u16 = 0;
+        let mut span_grid_cols: u16 = 0;
+
+        for col_idx in 0..num_cols {
+            let cell = &row[Column(col_idx)];
+            if cell.flags.contains(CellFlags::WIDE_CHAR_SPACER) {
+                span_grid_cols += 1;
+                continue;
             }
-            cur_fg = fg;
-            cur_bg = bg;
-            cur_flags = flags;
+            let fg = color_to_term_color(&cell.fg);
+            let bg = color_to_term_color(&cell.bg);
+            let flags = cell_flags_to_u16(cell.flags);
+            if fg != cur_fg || bg != cur_bg || flags != cur_flags {
+                if !text.is_empty() {
+                    spans.push(TermSpan {
+                        text: std::mem::take(&mut text),
+                        fg: cur_fg,
+                        bg: cur_bg,
+                        flags: cur_flags,
+                        col: span_col_start,
+                        grid_cols: span_grid_cols,
+                    });
+                    span_col_start = col_idx as u16;
+                    span_grid_cols = 0;
+                }
+                cur_fg = fg;
+                cur_bg = bg;
+                cur_flags = flags;
+            }
+            text.push(cell.c);
+            span_grid_cols += 1;
         }
-        text.push(cell.c);
-        span_grid_cols += 1;
-    }
-    if !text.is_empty() {
-        spans.push(TermSpan {
-            text,
-            fg: cur_fg,
-            bg: cur_bg,
-            flags: cur_flags,
-            col: span_col_start,
-            grid_cols: span_grid_cols,
-        });
-    }
-    TermLine {
-        spans,
-        links: Vec::new(),
+        if !text.is_empty() {
+            spans.push(TermSpan {
+                text,
+                fg: cur_fg,
+                bg: cur_bg,
+                flags: cur_flags,
+                col: span_col_start,
+                grid_cols: span_grid_cols,
+            });
+        }
+        TermLine {
+            spans,
+            links: Vec::new(),
+        }
     }
 }
 

@@ -73,6 +73,30 @@ impl<'a> ColumnRuler<'a> {
         Self::new(&text[start..end.max(start)], metrics)
     }
 
+    pub(super) fn at_point(
+        at: ElementPoint,
+        gutter: f64,
+        metrics: CellMetrics,
+        text: &'a str,
+        wrap_columns: u16,
+        snap: bool,
+    ) -> (f64, u32) {
+        let x = at.x - gutter;
+        if !metrics.measured() {
+            return (x, 0);
+        }
+        if wrap_columns == 0 {
+            return (x, Self::new(text, metrics).col_at(x, snap));
+        }
+        let segment = (at.y.max(0.0) / metrics.height).floor() as u32;
+        let local = Self::wrapped_row(text, metrics, wrap_columns, segment).col_at(x, snap);
+
+        (
+            x,
+            segment * u32::from(wrap_columns) + local.min(u32::from(wrap_columns)),
+        )
+    }
+
     pub(super) fn x_of(&self, col: u32) -> f64 {
         let mut cells = 0;
         let mut x = 0.0;
@@ -164,34 +188,10 @@ impl GutterWidth {
         let digits = total_lines.max(1).to_string().len();
         digits.max(3)
     }
-}
 
-pub(super) fn column_in_line(
-    at: ElementPoint,
-    gutter: f64,
-    cell: CellMetrics,
-    text: &str,
-    wrap_columns: u16,
-    snap: bool,
-) -> (f64, u32) {
-    let x = at.x - gutter;
-    if !cell.measured() {
-        return (x, 0);
+    pub(super) fn pixels(total_lines: u32, char_width: f64) -> f64 {
+        Self::for_lines(total_lines) as f64 * char_width + 48.0
     }
-    if wrap_columns == 0 {
-        return (x, ColumnRuler::new(text, cell).col_at(x, snap));
-    }
-    let segment = (at.y.max(0.0) / cell.height).floor() as u32;
-    let local = ColumnRuler::wrapped_row(text, cell, wrap_columns, segment).col_at(x, snap);
-
-    (
-        x,
-        segment * u32::from(wrap_columns) + local.min(u32::from(wrap_columns)),
-    )
-}
-
-pub(super) fn gutter_px(total_lines: u32, char_width: f64) -> f64 {
-    GutterWidth::for_lines(total_lines) as f64 * char_width + 48.0
 }
 
 pub(super) struct RowRuler<'a> {

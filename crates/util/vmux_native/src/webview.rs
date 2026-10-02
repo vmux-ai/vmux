@@ -8,6 +8,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use tracing::error;
 
+#[cfg(target_os = "macos")]
 use wry::WebViewBuilderExtMacos;
 
 mod dom;

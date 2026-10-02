@@ -23,7 +23,7 @@ use vmux_ecs::event::*;
 use vmux_ecs::scroll::{OVERSCAN_CAP, OVERSCAN_FLOOR, Overscan, ScrollWindow, TERMINAL_OVERSCAN_K};
 use vmux_profile::ServicePaths;
 
-use crate::render::{build_line, hash_grid_row};
+use crate::render::TermRow;
 
 use vmux_api::protocol::CopyModeKey as K;
 use vmux_api::protocol::{CommandLifecycleKind, ServiceMessage};
@@ -1674,10 +1674,10 @@ impl Process {
 
         let mut changed_lines = Vec::new();
         for row_idx in 0..num_lines {
-            let hash = hash_grid_row(&self.term, row_idx, offset);
+            let hash = TermRow::hash(&self.term, row_idx, offset);
             if full || hash != self.line_hashes[row_idx] {
                 self.line_hashes[row_idx] = hash;
-                changed_lines.push((row_idx as u32, build_line(&self.term, row_idx, offset)));
+                changed_lines.push((row_idx as u32, TermRow::line(&self.term, row_idx, offset)));
             }
         }
 
@@ -1781,10 +1781,10 @@ impl Process {
         let mut changed_lines = Vec::new();
         let mut live: HashMap<u32, u64> = HashMap::new();
         for doc_row in first_row..end_row {
-            let hash = hash_grid_row(&self.term, doc_row as usize, offset);
+            let hash = TermRow::hash(&self.term, doc_row as usize, offset);
             live.insert(doc_row, hash);
             if self.win_hashes.get(&doc_row) != Some(&hash) {
-                changed_lines.push((doc_row, build_line(&self.term, doc_row as usize, offset)));
+                changed_lines.push((doc_row, TermRow::line(&self.term, doc_row as usize, offset)));
             }
         }
         let full = self.win_hashes.is_empty();
@@ -1886,7 +1886,7 @@ impl Process {
         let offset = grid.display_offset() as i32;
         let mut lines = Vec::with_capacity(num_lines);
         for row_idx in 0..num_lines {
-            lines.push(build_line(&self.term, row_idx, offset));
+            lines.push(TermRow::line(&self.term, row_idx, offset));
         }
         lines
     }

@@ -5,7 +5,7 @@ use moonshine_save::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use vmux_api::bookmark::SmartBookmarkFolder;
-use vmux_ecs::profile::{ProfilePaths, is_test_session};
+use vmux_ecs::profile::{ProfilePaths, SessionEnvironment};
 use vmux_ecs::{Bookmark, BookmarkOrder, Collapsed, Folder, PageIcon, PageMetadata, Pin, Uuid};
 use vmux_layout::LayoutStartupSet;
 use vmux_setting::{AppSettings, BookmarkFolderSettings};
@@ -78,7 +78,7 @@ fn load_bookmarks_on_startup(
     path: Single<&BookmarkPersistencePath>,
     mut commands: Commands,
 ) {
-    if is_test_session() {
+    if SessionEnvironment::is_test() {
         return;
     }
     let path = path.0.clone();
@@ -325,7 +325,7 @@ fn autosave_bookmarks(
     if !auto.dirty {
         return;
     }
-    if !is_test_session() {
+    if !SessionEnvironment::is_test() {
         if let Some(parent) = path.0.parent() {
             let _ = std::fs::create_dir_all(parent);
         }

@@ -1,4 +1,19 @@
 use vmux_ecs::event::StyledSpan;
+use vmux_git::event::GitLineStatus;
+use vmux_ui::diff::DiffTone;
+
+pub(super) struct GitLineTone;
+
+impl GitLineTone {
+    pub(super) const fn of(marker: GitLineStatus) -> DiffTone {
+        match marker {
+            GitLineStatus::Added => DiffTone::Added,
+            GitLineStatus::Modified => DiffTone::Modified,
+            GitLineStatus::Deleted => DiffTone::Deleted,
+            GitLineStatus::Staged => DiffTone::Staged,
+        }
+    }
+}
 
 pub(super) struct StyledSpanStyle;
 

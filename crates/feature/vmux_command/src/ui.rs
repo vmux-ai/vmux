@@ -17,7 +17,7 @@ use vmux_api::input::UiKeyContext;
 use vmux_api::prompt_media::{ChatPasteMedia, ChatPickFiles};
 use vmux_ui::agent_accent::AgentAccent;
 use vmux_ui::caret::{EventSelection, TextCaret};
-use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposer, focus_prompt_end};
+use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposer, PromptFocus};
 use vmux_ui::components::composer_bar::ComposerBar;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::mcp_menu::{McpMenu, use_mcp_connections};
@@ -51,7 +51,7 @@ pub fn use_command_bar_ui() -> Signal<CommandBarOpenEvent> {
         }
         handled_focus_revision.set(effect.revision);
         if effect.revision != 0 {
-            focus_prompt_end(PROMPT_INPUT_ID);
+            PromptFocus::end(PROMPT_INPUT_ID);
         }
     });
     state
@@ -96,7 +96,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         let opened = state();
         if input.refocus(opened.open_id) {
             if is_start {
-                focus_prompt_end(PROMPT_INPUT_ID);
+                PromptFocus::end(PROMPT_INPUT_ID);
             } else {
                 CommandBarField::focus(&opened);
             }
@@ -124,7 +124,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             return;
         }
         handled_attachment.set(Some(revision));
-        focus_prompt_end(PROMPT_INPUT_ID);
+        PromptFocus::end(PROMPT_INPUT_ID);
     });
 
     let input_id = if is_start {

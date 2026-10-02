@@ -1,7 +1,7 @@
 use super::McpOauthCredentials;
 
 #[cfg(target_os = "macos")]
-use crate::safe_storage::{ProtectedFile, SafeStorage, SafeStorageContext, encoded_file_name};
+use crate::safe_storage::{ProtectedFile, SafeStorage, SafeStorageContext, SafeStorageName};
 
 #[cfg(not(target_os = "macos"))]
 use std::io::Write;
@@ -45,7 +45,7 @@ impl McpCredentialFile {
     fn new(account: &str) -> Self {
         let context = SafeStorageContext::current();
         let file = context.protected_file(
-            std::path::PathBuf::from("mcp").join(format!("{}.bin", encoded_file_name(account))),
+            std::path::PathBuf::from("mcp").join(format!("{}.bin", SafeStorageName::of(account))),
         );
         Self {
             context,
@@ -137,7 +137,7 @@ impl McpCredentialStorage {
             .join("mcp-credentials")
             .join(format!(
                 "{}.json",
-                crate::safe_storage::encoded_file_name(account)
+                crate::safe_storage::SafeStorageName::of(account)
             ))
     }
 }
@@ -147,12 +147,12 @@ mod tests {
     #[test]
     fn credential_file_names_preserve_distinct_accounts() {
         assert_ne!(
-            crate::safe_storage::encoded_file_name("work.dev"),
-            crate::safe_storage::encoded_file_name("work-dev")
+            crate::safe_storage::SafeStorageName::of("work.dev"),
+            crate::safe_storage::SafeStorageName::of("work-dev")
         );
         assert_ne!(
-            crate::safe_storage::encoded_file_name("linear"),
-            crate::safe_storage::encoded_file_name("linear.")
+            crate::safe_storage::SafeStorageName::of("linear"),
+            crate::safe_storage::SafeStorageName::of("linear.")
         );
     }
 }

@@ -254,13 +254,13 @@ pub fn TurnView(
     let reconnecting = matches!(turn.rows.last(), Some(ChatTurnRow::Reconnect { .. }));
     let duration_label = turn.duration_secs.map(|duration| {
         if turn.step_count == 0 {
-            let elapsed = fmt_elapsed(duration);
+            let elapsed = Elapsed(duration).to_string();
             translate_with(
                 "agent-worked-for",
                 &[("duration", TranslationValue::String(&elapsed))],
             )
         } else if turn.step_count == 1 {
-            let elapsed = fmt_elapsed(duration);
+            let elapsed = Elapsed(duration).to_string();
             translate_with(
                 "agent-worked-for-steps",
                 &[
@@ -269,7 +269,7 @@ pub fn TurnView(
                 ],
             )
         } else {
-            let elapsed = fmt_elapsed(duration);
+            let elapsed = Elapsed(duration).to_string();
             translate_with(
                 "agent-worked-for-steps",
                 &[
@@ -338,7 +338,7 @@ pub fn WorkingIndicator() -> Element {
         }
     });
     let verb_text = verb();
-    let elapsed_text = fmt_elapsed(elapsed());
+    let elapsed_text = Elapsed(elapsed()).to_string();
     rsx! {
         div { class: "flex items-center gap-2 px-1 text-sm text-muted-foreground",
             span { class: "animate-pulse font-medium motion-reduce:animate-none", "{verb_text}" }
@@ -846,11 +846,14 @@ fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> E
     }
 }
 
-pub fn fmt_elapsed(secs: u32) -> String {
-    if secs >= 60 {
-        format!("{}:{:02}", secs / 60, secs % 60)
-    } else {
-        format!("{secs}s")
+struct Elapsed(u32);
+
+impl std::fmt::Display for Elapsed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0 >= 60 {
+            return write!(formatter, "{}:{:02}", self.0 / 60, self.0 % 60);
+        }
+        write!(formatter, "{}s", self.0)
     }
 }
 

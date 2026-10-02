@@ -3,7 +3,7 @@
 pub(crate) use input::EditorFocus;
 pub(crate) use lsp::LspPage;
 pub use page::Page;
-pub(super) use page::{HOVER_DELAY_MS, Mode, SCROLL_ID, diff_tone};
+pub(super) use page::{HOVER_DELAY_MS, Mode, SCROLL_ID};
 
 mod breadcrumb;
 mod diagnostic;

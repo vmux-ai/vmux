@@ -217,64 +217,66 @@ const SQLITE: Logo = Logo {
     colour: "#DAD8D8",
 };
 
-pub fn lang_logo(ext: &str) -> Option<Logo> {
-    Some(match ext {
-        "rs" => RUST,
-        "ts" | "mts" | "cts" => TYPESCRIPT,
-        "tsx" | "jsx" => REACT,
-        "js" | "mjs" | "cjs" => JAVASCRIPT,
-        "py" | "pyw" | "pyi" => PYTHON,
-        "go" => GO,
-        "rb" | "gemspec" | "rake" => RUBY,
-        "sh" | "bash" | "zsh" | "ksh" => GNUBASH,
-        "lua" => LUA,
-        "swift" => SWIFT,
-        "c" | "h" => C,
-        "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => CPLUSPLUS,
-        "php" => PHP,
-        "kt" | "kts" => KOTLIN,
-        "dart" => DART,
-        "ex" | "exs" | "heex" => ELIXIR,
-        "hs" | "lhs" => HASKELL,
-        "scala" | "sbt" | "sc" => SCALA,
-        "zig" => ZIG,
-        "nim" | "nims" => NIM,
-        "ml" | "mli" => OCAML,
-        "clj" | "cljs" | "cljc" | "edn" => CLOJURE,
-        "elm" => ELM,
-        "erl" | "hrl" => ERLANG,
-        "cr" => CRYSTAL,
-        "jl" => JULIA,
-        "r" => R,
-        "pl" | "pm" => PERL,
-        "fs" | "fsx" | "fsi" => FSHARP,
-        "v" => V,
-        "sol" => SOLIDITY,
-        "md" | "markdown" | "mdx" => MARKDOWN,
-        "html" | "htm" | "xhtml" => HTML5,
-        "css" => CSS,
-        "scss" | "sass" => SASS,
-        "vue" => VUEDOTJS,
-        "svelte" => SVELTE,
-        "astro" => ASTRO,
-        "graphql" | "gql" => GRAPHQL,
-        "json" | "jsonc" | "json5" => JSON,
-        "yaml" | "yml" => YAML,
-        "toml" => TOML,
-        "dockerfile" => DOCKER,
-        "tf" | "tfvars" | "hcl" => TERRAFORM,
-        "gradle" => GRADLE,
-        "cmake" => CMAKE,
-        "nix" => NIXOS,
-        "prisma" => PRISMA,
-        "ipynb" => JUPYTER,
-        "vim" => VIM,
-        "wasm" | "wat" => WEBASSEMBLY,
-        "ps1" | "psm1" | "psd1" => POWERSHELL,
-        "groovy" => GROOVY,
-        "db" | "sqlite" | "sqlite3" => SQLITE,
-        _ => return None,
-    })
+impl Logo {
+    pub fn for_extension(extension: &str) -> Option<Self> {
+        Some(match extension {
+            "rs" => RUST,
+            "ts" | "mts" | "cts" => TYPESCRIPT,
+            "tsx" | "jsx" => REACT,
+            "js" | "mjs" | "cjs" => JAVASCRIPT,
+            "py" | "pyw" | "pyi" => PYTHON,
+            "go" => GO,
+            "rb" | "gemspec" | "rake" => RUBY,
+            "sh" | "bash" | "zsh" | "ksh" => GNUBASH,
+            "lua" => LUA,
+            "swift" => SWIFT,
+            "c" | "h" => C,
+            "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => CPLUSPLUS,
+            "php" => PHP,
+            "kt" | "kts" => KOTLIN,
+            "dart" => DART,
+            "ex" | "exs" | "heex" => ELIXIR,
+            "hs" | "lhs" => HASKELL,
+            "scala" | "sbt" | "sc" => SCALA,
+            "zig" => ZIG,
+            "nim" | "nims" => NIM,
+            "ml" | "mli" => OCAML,
+            "clj" | "cljs" | "cljc" | "edn" => CLOJURE,
+            "elm" => ELM,
+            "erl" | "hrl" => ERLANG,
+            "cr" => CRYSTAL,
+            "jl" => JULIA,
+            "r" => R,
+            "pl" | "pm" => PERL,
+            "fs" | "fsx" | "fsi" => FSHARP,
+            "v" => V,
+            "sol" => SOLIDITY,
+            "md" | "markdown" | "mdx" => MARKDOWN,
+            "html" | "htm" | "xhtml" => HTML5,
+            "css" => CSS,
+            "scss" | "sass" => SASS,
+            "vue" => VUEDOTJS,
+            "svelte" => SVELTE,
+            "astro" => ASTRO,
+            "graphql" | "gql" => GRAPHQL,
+            "json" | "jsonc" | "json5" => JSON,
+            "yaml" | "yml" => YAML,
+            "toml" => TOML,
+            "dockerfile" => DOCKER,
+            "tf" | "tfvars" | "hcl" => TERRAFORM,
+            "gradle" => GRADLE,
+            "cmake" => CMAKE,
+            "nix" => NIXOS,
+            "prisma" => PRISMA,
+            "ipynb" => JUPYTER,
+            "vim" => VIM,
+            "wasm" | "wat" => WEBASSEMBLY,
+            "ps1" | "psm1" | "psd1" => POWERSHELL,
+            "groovy" => GROOVY,
+            "db" | "sqlite" | "sqlite3" => SQLITE,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -330,7 +332,7 @@ impl<'a> FilePath<'a> {
             "CMakeLists.txt" => "cmake",
             _ => ext.as_str(),
         };
-        if let Some(d) = lang_logo(key) {
+        if let Some(d) = Logo::for_extension(key) {
             return FileIcon::Logo(d);
         }
         match ext.as_str() {
@@ -453,7 +455,7 @@ mod tests {
     fn rust_file_uses_rust_logo() {
         assert_eq!(
             FilePath("file:///x/main.rs").icon(false),
-            FileIcon::Logo(lang_logo("rs").unwrap())
+            FileIcon::Logo(Logo::for_extension("rs").unwrap())
         );
     }
 
@@ -461,7 +463,7 @@ mod tests {
     fn dockerfile_by_name_uses_docker_logo() {
         assert_eq!(
             FilePath("/x/Dockerfile").icon(false),
-            FileIcon::Logo(lang_logo("dockerfile").unwrap())
+            FileIcon::Logo(Logo::for_extension("dockerfile").unwrap())
         );
     }
 

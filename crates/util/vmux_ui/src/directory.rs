@@ -117,7 +117,7 @@ pub fn DirectoryNavigator(
                             div {
                                 key: "{entry.path}",
                                 id: "dir-row-{index}",
-                                class: directory_row_class(index == selected),
+                                class: DirectoryRowStyle::class(index == selected),
                                 title: "{entry.path}",
                                 onclick: move |event: Event<MouseData>| {
                                     event.stop_propagation();
@@ -141,7 +141,7 @@ pub fn DirectoryNavigator(
                             rsx! {
                                 div {
                                     key: "{entry.path}",
-                                    class: directory_row_class(false),
+                                    class: DirectoryRowStyle::class(false),
                                     title: "{entry.path}",
                                     onclick: move |event: Event<MouseData>| {
                                         event.stop_propagation();
@@ -168,15 +168,18 @@ const DIRECTORY_NAVIGATOR_ID: &str = "directory-navigator";
 const DIRECTORY_PARENT_CLASS: &str = "flex items-center gap-2 rounded-md px-2 py-1 text-foreground/45 cursor-default transition-colors hover:bg-foreground/[0.04]";
 const DIRECTORY_PARENT_CURRENT_CLASS: &str = "flex items-center gap-2 rounded-md bg-primary/10 px-2 py-1 text-foreground cursor-default shadow-[inset_2px_0_0_0_color-mix(in_oklab,var(--primary)_60%,transparent)]";
 
-pub fn directory_row_class(selected: bool) -> String {
-    let base =
-        "flex items-center gap-2 rounded-md px-2 py-1 cursor-default transition-all duration-100";
-    let state = if selected {
-        "bg-primary/12 text-foreground shadow-[inset_2px_0_0_0_var(--primary),0_0_18px_-4px_color-mix(in_oklab,var(--primary)_45%,transparent)]"
-    } else {
-        "text-foreground/75 hover:bg-foreground/[0.05]"
-    };
-    ClassList::join([base, state])
+struct DirectoryRowStyle;
+
+impl DirectoryRowStyle {
+    fn class(selected: bool) -> String {
+        let base = "flex items-center gap-2 rounded-md px-2 py-1 cursor-default transition-all duration-100";
+        let state = if selected {
+            "bg-primary/12 text-foreground shadow-[inset_2px_0_0_0_var(--primary),0_0_18px_-4px_color-mix(in_oklab,var(--primary)_45%,transparent)]"
+        } else {
+            "text-foreground/75 hover:bg-foreground/[0.05]"
+        };
+        ClassList::join([base, state])
+    }
 }
 
 #[component]

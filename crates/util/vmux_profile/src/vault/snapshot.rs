@@ -6,7 +6,7 @@ use ring::{aead, digest, hmac};
 use serde::{Deserialize, Serialize};
 
 use super::repository::VaultRepositoryPath;
-use super::sync::{remove_existing_path, same_entry};
+use super::sync::LocalPath;
 
 pub(super) const FORMAT_VERSION: u32 = 1;
 pub(super) const MANIFEST_VERSION: u32 = 3;
@@ -34,7 +34,140 @@ impl EntryKind {
         });
         context.update(&mode.to_be_bytes());
         context.update(data);
-        hex(context.finish().as_ref())
+        Hex::encode(context.finish().as_ref())
+    }
+}
+
+pub(super) struct VaultCrypto<'a> {
+    key: &'a [u8],
+}
+
+impl<'a> VaultCrypto<'a> {
+    pub(super) fn new(key: &'a [u8]) -> Result<Self, String> {
+        if key.len() != KEY_LEN {
+            return Err("Vault encryption key has an invalid length".to_string());
+        }
+        Ok(Self { key })
+    }
+
+    pub(super) fn encrypt(&self, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, String> {
+        let mut nonce = [0_u8; NONCE_LEN];
+        SystemRandom::new()
+            .fill(&mut nonce)
+            .map_err(|_| "failed to generate Vault nonce".to_string())?;
+        let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, self.key)
+            .map_err(|_| "invalid Vault encryption key".to_string())?;
+        let key = aead::LessSafeKey::new(unbound);
+        let mut encrypted = plaintext.to_vec();
+        key.seal_in_place_append_tag(
+            aead::Nonce::assume_unique_for_key(nonce),
+            aead::Aad::from(aad),
+            &mut encrypted,
+        )
+        .map_err(|_| "failed to encrypt Vault data".to_string())?;
+        let mut output = nonce.to_vec();
+        output.extend_from_slice(&encrypted);
+        Ok(output)
+    }
+
+    pub(super) fn decrypt(&self, aad: &[u8], encrypted: &[u8]) -> Result<Vec<u8>, String> {
+        if encrypted.len() < NONCE_LEN + aead::AES_256_GCM.tag_len() {
+            return Err("encrypted Vault data is truncated".to_string());
+        }
+        let nonce = <[u8; NONCE_LEN]>::try_from(&encrypted[..NONCE_LEN])
+            .map_err(|_| "invalid Vault nonce".to_string())?;
+        let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, self.key)
+            .map_err(|_| "invalid Vault encryption key".to_string())?;
+        let key = aead::LessSafeKey::new(unbound);
+        let mut data = encrypted[NONCE_LEN..].to_vec();
+        let plaintext = key
+            .open_in_place(
+                aead::Nonce::assume_unique_for_key(nonce),
+                aead::Aad::from(aad),
+                &mut data,
+            )
+            .map_err(|_| "Vault data could not be decrypted or was modified".to_string())?;
+        Ok(plaintext.to_vec())
+    }
+
+    fn object_id(&self, path: &str) -> String {
+        let key = hmac::Key::new(hmac::HMAC_SHA256, self.key);
+        Hex::encode(hmac::sign(&key, path.as_bytes()).as_ref())
+    }
+}
+
+pub(super) struct Hex;
+
+impl Hex {
+    pub(super) fn random(bytes: usize) -> Result<String, String> {
+        let mut value = vec![0_u8; bytes];
+        SystemRandom::new()
+            .fill(&mut value)
+            .map_err(|_| "failed to generate secure random data".to_string())?;
+        Ok(Self::encode(&value))
+    }
+
+    pub(super) fn encode(bytes: &[u8]) -> String {
+        const DIGITS: &[u8; 16] = b"0123456789abcdef";
+        let mut output = String::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            output.push(DIGITS[(byte >> 4) as usize] as char);
+            output.push(DIGITS[(byte & 0x0f) as usize] as char);
+        }
+        output
+    }
+
+    pub(super) fn decode(source: &str) -> Result<Vec<u8>, String> {
+        if !source.len().is_multiple_of(2) {
+            return Err("invalid hexadecimal data".to_string());
+        }
+        source
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| {
+                let high = Self::decode_digit(pair[0])?;
+                let low = Self::decode_digit(pair[1])?;
+                Ok((high << 4) | low)
+            })
+            .collect()
+    }
+
+    fn decode_digit(byte: u8) -> Result<u8, String> {
+        match byte {
+            b'0'..=b'9' => Ok(byte - b'0'),
+            b'a'..=b'f' => Ok(byte - b'a' + 10),
+            _ => Err("invalid hexadecimal data".to_string()),
+        }
+    }
+}
+
+pub(super) struct SnapshotPath<'a>(pub(super) &'a str);
+
+impl SnapshotPath<'_> {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        let path = Path::new(self.0);
+        if path.as_os_str().is_empty()
+            || path.is_absolute()
+            || path
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return Err("encrypted Vault contains an unsafe path".to_string());
+        }
+        Ok(())
+    }
+}
+
+pub(super) struct FileTimestamp<'a>(pub(super) &'a std::fs::Metadata);
+
+impl FileTimestamp<'_> {
+    pub(super) fn get(&self) -> (u64, u32) {
+        self.0
+            .modified()
+            .ok()
+            .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| (duration.as_secs(), duration.subsec_nanos()))
+            .unwrap_or_default()
     }
 }
 
@@ -123,7 +256,7 @@ impl VaultRepositoryPath {
         previous: Option<&BTreeMap<String, LocalEntry>>,
     ) -> Result<(), String> {
         let repository = self.path();
-        validate_key(key)?;
+        let crypto = VaultCrypto::new(key)?;
         if previous.is_some_and(|previous| same_files(previous, files))
             && repository.join(MANIFEST_FILE).is_file()
             && repository.join(INDEX_FILE).is_file()
@@ -138,16 +271,16 @@ impl VaultRepositoryPath {
         let mut index_files = Vec::with_capacity(files.len());
         let mut retained = BTreeSet::new();
         for (path, entry) in files {
-            validate_relative_path(path)?;
-            let object = object_id(key, path);
+            SnapshotPath(path).validate()?;
+            let object = crypto.object_id(path);
             retained.insert(object.clone());
             let object_path = objects.join(&object);
             let unchanged = previous
                 .and_then(|files| files.get(path))
-                .is_some_and(|old| same_entry(Some(old), Some(entry)))
+                .is_some_and(|old| LocalEntry::same(Some(old), Some(entry)))
                 && object_path.is_file();
             if !unchanged {
-                let encrypted = encrypt_bytes(key, &object_aad(path), &entry.data)?;
+                let encrypted = crypto.encrypt(&object_aad(path), &entry.data)?;
                 vmux_path::AtomicFile::write(&object_path, &encrypted)
                     .map_err(|error| error.to_string())?;
             }
@@ -165,7 +298,7 @@ impl VaultRepositoryPath {
         {
             let name = entry.file_name().to_string_lossy().into_owned();
             if !retained.contains(&name) {
-                remove_existing_path(&entry.path())?;
+                LocalPath(&entry.path()).remove()?;
             }
         }
         let index = EncryptedIndex {
@@ -175,7 +308,7 @@ impl VaultRepositoryPath {
         let index_source = ron::ser::to_string(&index)
             .map_err(|error| error.to_string())?
             .into_bytes();
-        let encrypted_index = encrypt_bytes(key, INDEX_AAD, &index_source)?;
+        let encrypted_index = crypto.encrypt(INDEX_AAD, &index_source)?;
         vmux_path::AtomicFile::write(repository.join(INDEX_FILE), &encrypted_index)
             .map_err(|error| error.to_string())?;
         let manifest = RemoteManifest {
@@ -193,11 +326,11 @@ impl VaultRepositoryPath {
         key: &[u8],
     ) -> Result<(RemoteManifest, BTreeMap<String, LocalEntry>), String> {
         let repository = self.path();
-        validate_key(key)?;
+        let crypto = VaultCrypto::new(key)?;
         let manifest = self.manifest()?;
         let encrypted_index = std::fs::read(repository.join(&manifest.index))
             .map_err(|error| format!("failed to read encrypted Vault index: {error}"))?;
-        let index_source = decrypt_bytes(key, INDEX_AAD, &encrypted_index)?;
+        let index_source = crypto.decrypt(INDEX_AAD, &encrypted_index)?;
         let index_source = std::str::from_utf8(&index_source)
             .map_err(|error| format!("invalid encrypted Vault index: {error}"))?;
         let index = ron::from_str::<EncryptedIndex>(index_source)
@@ -210,14 +343,14 @@ impl VaultRepositoryPath {
         }
         let mut files = BTreeMap::new();
         for file in index.files {
-            validate_relative_path(&file.path)?;
-            let expected_object = object_id(key, &file.path);
+            SnapshotPath(&file.path).validate()?;
+            let expected_object = crypto.object_id(&file.path);
             if file.object != expected_object {
                 return Err(format!("encrypted Vault object mismatch for {}", file.path));
             }
             let encrypted = std::fs::read(repository.join(OBJECTS_DIR).join(&file.object))
                 .map_err(|error| format!("missing encrypted Vault object: {error}"))?;
-            let data = decrypt_bytes(key, &object_aad(&file.path), &encrypted)?;
+            let data = crypto.decrypt(&object_aad(&file.path), &encrypted)?;
             let actual_digest = file.kind.digest(file.mode, &data);
             if actual_digest != file.digest {
                 return Err(format!(
@@ -251,129 +384,11 @@ fn same_files(left: &BTreeMap<String, LocalEntry>, right: &BTreeMap<String, Loca
     left.len() == right.len()
         && left
             .iter()
-            .all(|(path, entry)| same_entry(Some(entry), right.get(path)))
-}
-
-pub(super) fn encrypt_bytes(key: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, String> {
-    validate_key(key)?;
-    let mut nonce = [0_u8; NONCE_LEN];
-    SystemRandom::new()
-        .fill(&mut nonce)
-        .map_err(|_| "failed to generate Vault nonce".to_string())?;
-    let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, key)
-        .map_err(|_| "invalid Vault encryption key".to_string())?;
-    let key = aead::LessSafeKey::new(unbound);
-    let mut encrypted = plaintext.to_vec();
-    key.seal_in_place_append_tag(
-        aead::Nonce::assume_unique_for_key(nonce),
-        aead::Aad::from(aad),
-        &mut encrypted,
-    )
-    .map_err(|_| "failed to encrypt Vault data".to_string())?;
-    let mut output = nonce.to_vec();
-    output.extend_from_slice(&encrypted);
-    Ok(output)
-}
-
-pub(super) fn decrypt_bytes(key: &[u8], aad: &[u8], encrypted: &[u8]) -> Result<Vec<u8>, String> {
-    validate_key(key)?;
-    if encrypted.len() < NONCE_LEN + aead::AES_256_GCM.tag_len() {
-        return Err("encrypted Vault data is truncated".to_string());
-    }
-    let nonce = <[u8; NONCE_LEN]>::try_from(&encrypted[..NONCE_LEN])
-        .map_err(|_| "invalid Vault nonce".to_string())?;
-    let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, key)
-        .map_err(|_| "invalid Vault encryption key".to_string())?;
-    let key = aead::LessSafeKey::new(unbound);
-    let mut data = encrypted[NONCE_LEN..].to_vec();
-    let plaintext = key
-        .open_in_place(
-            aead::Nonce::assume_unique_for_key(nonce),
-            aead::Aad::from(aad),
-            &mut data,
-        )
-        .map_err(|_| "Vault data could not be decrypted or was modified".to_string())?;
-    Ok(plaintext.to_vec())
-}
-
-fn object_id(key: &[u8], path: &str) -> String {
-    let key = hmac::Key::new(hmac::HMAC_SHA256, key);
-    hex(hmac::sign(&key, path.as_bytes()).as_ref())
+            .all(|(path, entry)| LocalEntry::same(Some(entry), right.get(path)))
 }
 
 fn object_aad(path: &str) -> Vec<u8> {
     let mut aad = OBJECT_AAD_PREFIX.to_vec();
     aad.extend_from_slice(path.as_bytes());
     aad
-}
-
-pub(super) fn validate_key(key: &[u8]) -> Result<(), String> {
-    if key.len() == KEY_LEN {
-        Ok(())
-    } else {
-        Err("Vault encryption key has an invalid length".to_string())
-    }
-}
-
-pub(super) fn validate_relative_path(path: &str) -> Result<(), String> {
-    let path = Path::new(path);
-    if path.as_os_str().is_empty()
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err("encrypted Vault contains an unsafe path".to_string());
-    }
-    Ok(())
-}
-
-pub(super) fn random_hex(bytes: usize) -> Result<String, String> {
-    let mut value = vec![0_u8; bytes];
-    SystemRandom::new()
-        .fill(&mut value)
-        .map_err(|_| "failed to generate secure random data".to_string())?;
-    Ok(hex(&value))
-}
-
-pub(super) fn modified_time(metadata: &std::fs::Metadata) -> (u64, u32) {
-    metadata
-        .modified()
-        .ok()
-        .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|duration| (duration.as_secs(), duration.subsec_nanos()))
-        .unwrap_or_default()
-}
-
-pub(super) fn hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(HEX[(byte >> 4) as usize] as char);
-        output.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    output
-}
-
-pub(super) fn decode_hex(source: &str) -> Result<Vec<u8>, String> {
-    if !source.len().is_multiple_of(2) {
-        return Err("invalid hexadecimal data".to_string());
-    }
-    source
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| {
-            let high = decode_hex_digit(pair[0])?;
-            let low = decode_hex_digit(pair[1])?;
-            Ok((high << 4) | low)
-        })
-        .collect()
-}
-
-fn decode_hex_digit(byte: u8) -> Result<u8, String> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        _ => Err("invalid hexadecimal data".to_string()),
-    }
 }

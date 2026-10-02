@@ -16,11 +16,12 @@ use vmux_ui::platform::Platform;
 use vmux_ui::scroll::ScrollIntoView;
 use vmux_ui::text_run::TextRun;
 
+use super::EditorFocus;
 use super::markdown::{
     HeadingStyle, ListEditLine, ListLineHit, MdBlockView, NoteLineChunk, NoteSourceLine,
 };
 use super::note_text::{NoteInlineKind, NoteInlineNode, NoteText};
-use super::{EditorFocus, diff_tone};
+use super::text_style::GitLineTone;
 
 const NOTE_CARET_ID: &str = "note-caret";
 
@@ -755,7 +756,7 @@ pub(super) fn NoteBlockView(
             },
             if let Some(marker) = note_diff_marker {
                 span {
-                    class: "pointer-events-none absolute -left-4 bottom-1 top-1 w-[3px] rounded-full opacity-80 {diff_tone(marker).marker_class()}"
+                    class: "pointer-events-none absolute -left-4 bottom-1 top-1 w-[3px] rounded-full opacity-80 {GitLineTone::of(marker).marker_class()}"
                 }
             }
             RenderedNoteBlock {

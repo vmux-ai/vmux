@@ -17,7 +17,7 @@ use vmux_ecs::host::persistence::{
     PersistenceDirty, WorkspacePersisted, WorkspaceRestore, WorkspaceSaveRequest,
     WorkspaceStoreValidators,
 };
-use vmux_ecs::profile::{ProfilePaths, is_test_session};
+use vmux_ecs::profile::{ProfilePaths, SessionEnvironment};
 #[cfg(test)]
 use vmux_ecs::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageMetadata};
 use vmux_layout::space::Space;
@@ -138,7 +138,7 @@ impl SpaceSaver<'_, '_> {
         excluded: impl IntoIterator<Item = Entity>,
         components: WorldFilter,
     ) {
-        if is_test_session() {
+        if SessionEnvironment::is_test() {
             return;
         }
         if let Some(parent) = path.parent() {
@@ -263,7 +263,7 @@ fn load_on_startup(
     path: Single<&WorkspaceStorePath>,
     mut commands: Commands,
 ) {
-    if is_test_session() {
+    if SessionEnvironment::is_test() {
         restore.complete = true;
         restore.store_present = false;
         return;

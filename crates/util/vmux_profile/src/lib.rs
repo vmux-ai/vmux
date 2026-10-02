@@ -20,11 +20,15 @@ pub struct Profile {
     id: String,
 }
 
-pub fn is_test_session() -> bool {
-    matches!(
-        std::env::var("VMUX_TEST").ok().as_deref(),
-        Some("1") | Some("true") | Some("yes")
-    )
+pub struct SessionEnvironment;
+
+impl SessionEnvironment {
+    pub fn is_test() -> bool {
+        matches!(
+            std::env::var("VMUX_TEST").ok().as_deref(),
+            Some("1") | Some("true") | Some("yes")
+        )
+    }
 }
 
 impl Profile {
@@ -64,7 +68,10 @@ impl Profile {
     }
 
     pub fn display_name(&self) -> String {
-        self.display_name_in(&ProfilePaths::current().shared_data(), is_test_session())
+        self.display_name_in(
+            &ProfilePaths::current().shared_data(),
+            SessionEnvironment::is_test(),
+        )
     }
 
     pub fn set_display_name(&self, name: &str) -> std::io::Result<()> {
@@ -99,7 +106,7 @@ impl Profile {
     }
 
     pub fn cef_keychain_switches(&self) -> &'static [&'static str] {
-        cef_keychain_switches_for(is_test_session())
+        cef_keychain_switches_for(SessionEnvironment::is_test())
     }
 
     fn display_name_path(&self, data: &Path) -> PathBuf {
@@ -316,7 +323,7 @@ impl ProfilePaths {
     }
 
     pub fn migrate_legacy_personal_layout(&self) {
-        if is_test_session() {
+        if SessionEnvironment::is_test() {
             return;
         }
         let home = home_dir();
@@ -577,12 +584,12 @@ mod tests {
     }
 
     #[test]
-    fn is_test_session_reads_env() {
+    fn session_environment_reads_env() {
         let prev = std::env::var("VMUX_TEST").ok();
         unsafe { std::env::set_var("VMUX_TEST", "1") };
-        assert!(is_test_session());
+        assert!(SessionEnvironment::is_test());
         unsafe { std::env::remove_var("VMUX_TEST") };
-        assert!(!is_test_session());
+        assert!(!SessionEnvironment::is_test());
         if let Some(p) = prev {
             unsafe { std::env::set_var("VMUX_TEST", p) };
         }

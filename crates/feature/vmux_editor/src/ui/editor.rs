@@ -11,9 +11,9 @@ use vmux_ui::i18n::translate;
 use vmux_ui::platform::Platform;
 
 use super::diagnostic::DiagnosticPresentation;
-use super::text_geometry::{CellMetrics, ColumnRuler, column_in_line, gutter_px};
-use super::text_style::StyledSpanStyle;
-use super::{EditorFocus, HOVER_DELAY_MS, diff_tone};
+use super::text_geometry::{CellMetrics, ColumnRuler, GutterWidth};
+use super::text_style::{GitLineTone, StyledSpanStyle};
+use super::{EditorFocus, HOVER_DELAY_MS};
 
 #[component]
 pub(super) fn EditorLines(
@@ -205,15 +205,15 @@ fn EditorLineRow(
     };
     rsx! {
         div {
-            class: if let Some(marker) = diff_marker { "group absolute inset-x-0 flex items-start {diff_tone(marker).row_class()}" } else { "group absolute inset-x-0 flex items-start" },
+            class: if let Some(marker) = diff_marker { "group absolute inset-x-0 flex items-start {GitLineTone::of(marker).row_class()}" } else { "group absolute inset-x-0 flex items-start" },
             style: "top:{lt}px;height:{line_height}px;",
             onpointerdown: move |e: Event<PointerData>| {
                 e.prevent_default();
                 ctx_menu.set(None);
                 let cell = cell_dims();
-                let (_, col) = column_in_line(
+                let (_, col) = ColumnRuler::at_point(
                     e.element_coordinates(),
-                    gutter_px(total_lines(), cell.narrow),
+                    GutterWidth::pixels(total_lines(), cell.narrow),
                     cell,
                     &pointer_text,
                     wrap_cols,
@@ -238,9 +238,9 @@ fn EditorLineRow(
             oncontextmenu: move |e: Event<MouseData>| {
                 e.prevent_default();
                 let cell = cell_dims();
-                let (_, col) = column_in_line(
+                let (_, col) = ColumnRuler::at_point(
                     e.element_coordinates(),
-                    gutter_px(total_lines(), cell.narrow),
+                    GutterWidth::pixels(total_lines(), cell.narrow),
                     cell,
                     &menu_text,
                     wrap_cols,
@@ -251,9 +251,9 @@ fn EditorLineRow(
             },
             onmousemove: move |e: Event<MouseData>| {
                 let cell = cell_dims();
-                let (x, col) = column_in_line(
+                let (x, col) = ColumnRuler::at_point(
                     e.element_coordinates(),
-                    gutter_px(total_lines(), cell.narrow),
+                    GutterWidth::pixels(total_lines(), cell.narrow),
                     cell,
                     &hover_text,
                     wrap_cols,
@@ -295,14 +295,14 @@ fn EditorLineRow(
                     span { class: "pointer-events-none absolute left-1 {DiagnosticPresentation::color_class(s)}", "●" }
                 }
                 span {
-                    class: if let Some(marker) = diff_marker { "shrink-0 text-right opacity-90 {diff_tone(marker).text_class()}" } else { "shrink-0 text-right opacity-40 group-hover:opacity-90" },
+                    class: if let Some(marker) = diff_marker { "shrink-0 text-right opacity-90 {GitLineTone::of(marker).text_class()}" } else { "shrink-0 text-right opacity-40 group-hover:opacity-90" },
                     style: "width:calc(var(--cw, 1ch) * {gw});",
                     "{ln + 1}"
                 }
                 span {
-                    class: if let Some(marker) = diff_marker { "ml-1 w-[1ch] shrink-0 text-center font-semibold {diff_tone(marker).text_class()}" } else { "ml-1 w-[1ch] shrink-0" },
+                    class: if let Some(marker) = diff_marker { "ml-1 w-[1ch] shrink-0 text-center font-semibold {GitLineTone::of(marker).text_class()}" } else { "ml-1 w-[1ch] shrink-0" },
                     if let Some(marker) = diff_marker {
-                        span { title: translate("editor-changed-line"), "{diff_tone(marker).sign()}" }
+                        span { title: translate("editor-changed-line"), "{GitLineTone::of(marker).sign()}" }
                     }
                 }
                 match fold {

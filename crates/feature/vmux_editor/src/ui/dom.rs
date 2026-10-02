@@ -5,7 +5,7 @@ use vmux_ecs::event::{FileDocumentKind, FileResizeEvent, FileViewMode};
 use vmux_ui::hooks::send;
 use vmux_ui::scroll::ScrollIntoView;
 
-use super::text_geometry::{CellMetrics, gutter_px};
+use super::text_geometry::{CellMetrics, GutterWidth};
 use super::{EditorFocus, SCROLL_ID};
 
 pub(super) struct ScrolledLineHeight;
@@ -48,7 +48,7 @@ impl ScrollBox {
         let next = FileResizeEvent {
             char_height: ch as f32,
             viewport_height: self.size.1 as f32,
-            wrap_columns: ((self.size.0 - gutter_px(total_lines, cw) - 32.0).max(cw) / cw)
+            wrap_columns: ((self.size.0 - GutterWidth::pixels(total_lines, cw) - 32.0).max(cw) / cw)
                 .floor()
                 .min(u16::MAX as f64) as u16,
         };

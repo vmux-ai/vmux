@@ -1,9 +1,9 @@
 use ring::rand::{SecureRandom, SystemRandom};
 use zeroize::Zeroizing;
 
-use super::super::snapshot::{KEY_LEN, validate_key};
+use super::super::snapshot::{KEY_LEN, VaultCrypto};
 use super::LOCKED;
-use crate::safe_storage::{ProtectedFile, SafeStorage, SafeStorageContext, encoded_file_name};
+use crate::safe_storage::{ProtectedFile, SafeStorage, SafeStorageContext, SafeStorageName};
 
 struct VaultKeyFile {
     context: SafeStorageContext,
@@ -15,7 +15,8 @@ impl VaultKeyFile {
     fn new(vault_id: &str) -> Self {
         let context = SafeStorageContext::current();
         let file = context.protected_file(
-            std::path::PathBuf::from("vault").join(format!("{}.bin", encoded_file_name(vault_id))),
+            std::path::PathBuf::from("vault")
+                .join(format!("{}.bin", SafeStorageName::of(vault_id))),
         );
         Self {
             context,
@@ -30,7 +31,7 @@ impl VaultKeyFile {
         };
         let key = SafeStorage::unwrap_vault_key(&self.context, &self.vault_id, &envelope)
             .map_err(|error| error.to_string())?;
-        validate_key(&key)?;
+        VaultCrypto::new(&key)?;
         Ok(Some(key))
     }
 
@@ -44,12 +45,12 @@ impl VaultKeyFile {
         else {
             return Ok(None);
         };
-        validate_key(&key)?;
+        VaultCrypto::new(&key)?;
         Ok(Some(key))
     }
 
     fn store(&self, key: &[u8]) -> Result<(), String> {
-        validate_key(key)?;
+        VaultCrypto::new(key)?;
         let envelope = SafeStorage::wrap_vault_key(&self.context, &self.vault_id, key)
             .map_err(|error| error.to_string())?;
         self.file

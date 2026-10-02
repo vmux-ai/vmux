@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use super::recovery::{RECOVERY_DIR, RECOVERY_FILE, read_recovery_envelope};
+use super::recovery::{RECOVERY_DIR, RECOVERY_FILE, RecoveryEnvelope};
 use super::snapshot::{
     FORMAT_VERSION, INDEX_FILE, MANIFEST_FILE, MANIFEST_VERSION, OBJECTS_DIR, RemoteManifest,
 };
@@ -163,7 +163,7 @@ impl VaultRepositoryPath {
             {
                 return Err("invalid Vault Recovery Key recipients".to_string());
             }
-            let _ = read_recovery_envelope(&self.root)?;
+            let _ = RecoveryEnvelope::read(&self.root)?;
         }
         Ok(())
     }

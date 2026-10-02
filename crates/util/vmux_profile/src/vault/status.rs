@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use super::VaultStorage;
-use super::connect::{VaultRepository, github_identity_and_repositories};
+use super::connect::{GitHubAuthorization, VaultRepository};
 use super::keys::{KeyStore, SilentSystemKeyStore};
-use super::recovery::read_recovery_envelope;
+use super::recovery::RecoveryEnvelope;
 use super::repository::VaultRepositoryPath;
-use super::sync::local_change_count;
+use super::sync::VaultLocalState;
 
 use vmux_api::vault::VaultProvider;
 use vmux_api::vault::VaultStatusSnapshot;
@@ -38,7 +38,7 @@ impl VaultStatus {
     pub fn current_with_repositories() -> Self {
         let mut status = Self::current();
         if !status.initialized || status.remote.is_empty() {
-            match github_identity_and_repositories() {
+            match GitHubAuthorization::identity_and_repositories() {
                 Ok((owner, owners, repositories)) => {
                     status.github_owner = owner;
                     status.github_owners = owners;
@@ -71,7 +71,7 @@ impl VaultStatus {
         };
         if let Some(manifest) = manifest {
             status.vault_id = manifest.vault_id.clone();
-            match read_recovery_envelope(repository) {
+            match RecoveryEnvelope::read(repository) {
                 Ok(envelope) => status.recovery_enabled = envelope.is_some(),
                 Err(error) => status.error = error,
             }
@@ -79,7 +79,7 @@ impl VaultStatus {
         if initialized {
             status.remote = git.optional(&["remote", "get-url", "origin"]);
             status.branch = git.optional(&["branch", "--show-current"]);
-            status.dirty = local_change_count(root, repository).unwrap_or(0);
+            status.dirty = VaultLocalState::change_count(root, repository).unwrap_or(0);
             if !status.remote.is_empty() {
                 let counts =
                     git.optional(&["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]);

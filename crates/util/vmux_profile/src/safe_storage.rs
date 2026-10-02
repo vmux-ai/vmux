@@ -156,7 +156,7 @@ impl SafeStorageContext {
     #[cfg(target_os = "macos")]
     pub fn current() -> Self {
         #[cfg(any(test, debug_assertions))]
-        let test_session = crate::is_test_session();
+        let test_session = crate::SessionEnvironment::is_test();
         #[cfg(not(any(test, debug_assertions)))]
         let test_session = false;
 
@@ -291,12 +291,16 @@ impl SafeStorage {
     }
 }
 
-pub(crate) fn encoded_file_name(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len() * 2);
-    for byte in value.as_bytes() {
-        write!(&mut encoded, "{byte:02x}").unwrap();
+pub(crate) struct SafeStorageName;
+
+impl SafeStorageName {
+    pub(crate) fn of(value: &str) -> String {
+        let mut encoded = String::with_capacity(value.len() * 2);
+        for byte in value.as_bytes() {
+            write!(&mut encoded, "{byte:02x}").unwrap();
+        }
+        encoded
     }
-    encoded
 }
 
 #[cfg(test)]
@@ -328,7 +332,13 @@ mod tests {
 
     #[test]
     fn encoded_names_are_injective_for_path_punctuation() {
-        assert_ne!(encoded_file_name("work.dev"), encoded_file_name("work-dev"));
-        assert_ne!(encoded_file_name("linear"), encoded_file_name("linear."));
+        assert_ne!(
+            SafeStorageName::of("work.dev"),
+            SafeStorageName::of("work-dev")
+        );
+        assert_ne!(
+            SafeStorageName::of("linear"),
+            SafeStorageName::of("linear.")
+        );
     }
 }

@@ -1,4 +1,4 @@
-use super::snapshot::validate_key;
+use super::snapshot::VaultCrypto;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use zeroize::Zeroizing;
@@ -73,7 +73,7 @@ fn load_session_key(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String
 }
 
 fn store_session_key(vault_id: &str, key: &[u8]) -> Result<(), String> {
-    validate_key(key)?;
+    VaultCrypto::new(key)?;
     SESSION_KEYS
         .get_or_init(Default::default)
         .lock()

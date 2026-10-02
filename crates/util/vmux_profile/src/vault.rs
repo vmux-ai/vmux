@@ -39,7 +39,7 @@ impl VaultStorage {
 
     pub fn manages(&self, path: &Path) -> bool {
         path.strip_prefix(&self.root).ok().is_some_and(|relative| {
-            !relative.as_os_str().is_empty() && !sync::ignored_path(relative)
+            !relative.as_os_str().is_empty() && !sync::ManagedPath(relative).ignored()
         })
     }
 }

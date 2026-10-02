@@ -7,7 +7,7 @@ use vmux_api::command_bar::{
     CommandPaletteUiState, OpenId,
 };
 use vmux_ui::components::agent_menu::AgentMenu;
-use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
+use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptFocus};
 use vmux_ui::components::composer_bar::{ComposerChip, ComposerMenuKind};
 use vmux_ui::components::model_menu::ModelMenu;
 use vmux_ui::components::permission_menu::PermissionMenu;
@@ -42,7 +42,7 @@ impl ComposerChips {
         )
         .opens(EventHandler::new(move |()| {
             let _ = send(&CommandPaletteAgentMenuToggleRequest { open_id });
-            focus_prompt_end(PROMPT_INPUT_ID);
+            PromptFocus::end(PROMPT_INPUT_ID);
         }));
         let model = match composer.model_name.is_empty() {
             true => None,
@@ -50,7 +50,7 @@ impl ComposerChips {
                 ComposerChip::ready(composer.model_name.clone(), translate("agent-change-model"))
                     .opens(EventHandler::new(move |()| {
                         let _ = send(&CommandPaletteModelMenuToggleRequest { open_id });
-                        focus_prompt_end(PROMPT_INPUT_ID);
+                        PromptFocus::end(PROMPT_INPUT_ID);
                     })),
             ),
         };
@@ -60,7 +60,7 @@ impl ComposerChips {
         )
         .opens(EventHandler::new(move |()| {
             let _ = send(&CommandPaletteProjectMenuToggleRequest { open_id });
-            focus_prompt_end(PROMPT_INPUT_ID);
+            PromptFocus::end(PROMPT_INPUT_ID);
         }));
         let branch = match composer.is_git_repo {
             false => None,
@@ -68,7 +68,7 @@ impl ComposerChips {
                 ComposerChip::ready(composer.branch_label.clone(), composer.branch_title.clone())
                     .opens(EventHandler::new(move |()| {
                         let _ = send(&CommandPaletteBranchMenuToggleRequest { open_id });
-                        focus_prompt_end(PROMPT_INPUT_ID);
+                        PromptFocus::end(PROMPT_INPUT_ID);
                     })),
             ),
         };
@@ -89,7 +89,7 @@ impl ComposerChips {
             Some(
                 ComposerChip::ready(label, title).opens(EventHandler::new(move |()| {
                     let _ = send(&CommandPalettePermissionMenuToggleRequest { open_id });
-                    focus_prompt_end(PROMPT_INPUT_ID);
+                    PromptFocus::end(PROMPT_INPUT_ID);
                 })),
             )
         };
@@ -113,7 +113,7 @@ impl MenuSelection {
             open_id: self.0,
             index: index as u32,
         });
-        focus_prompt_end(PROMPT_INPUT_ID);
+        PromptFocus::end(PROMPT_INPUT_ID);
     }
 
     fn agent(self, options: &[vmux_api::command_bar::CommandPaletteAgent], url: &str) {

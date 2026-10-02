@@ -14,7 +14,7 @@ use vmux_ecs::event::team::{
 use vmux_ecs::host::{UiStatePlugin, UiStateWrite};
 use vmux_ecs::notify::AgentDoneUnseen;
 use vmux_ecs::page::PageReady;
-use vmux_ecs::profile::{Profile as StoredProfile, ProfileId, ProfileLabel, is_test_session};
+use vmux_ecs::profile::{Profile as StoredProfile, ProfileId, ProfileLabel, SessionEnvironment};
 use vmux_ecs::team::{Agent, Profile, Tester, User};
 use vmux_ecs::{ActivateRequest, Active, PageMetadata};
 use vmux_layout::cef::LayoutCef;
@@ -91,7 +91,7 @@ struct TeamPresentation(TeamEvent);
 
 fn spawn_user_profile(mut commands: Commands) {
     let mut identity = commands.spawn((Profile::user(), User, Name::new("Profile: User")));
-    if is_test_session() {
+    if SessionEnvironment::is_test() {
         identity.insert(Tester);
     }
 }
