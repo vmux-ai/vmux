@@ -152,6 +152,9 @@ for attempt in 1 2 3; do
             --team-id "$APPLE_TEAM_ID" || true
         exit 1
     fi
+    if echo "$SUBMIT_OUTPUT" | grep -qi "required agreement"; then
+        exit "$SUBMIT_STATUS"
+    fi
     if [ "$SUBMIT_STATUS" -eq 0 ]; then
         break
     fi

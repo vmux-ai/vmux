@@ -469,7 +469,11 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VMUX_UPDATE_PUBLIC_KEY: ${{ secrets.VMUX_UPDATE_PUBLIC_KEY }}
-        run: ./scripts/build-mac-release.sh
+        run: |
+          if [ "$IS_RELEASE_PR" != "1" ]; then
+            export SKIP_NOTARIZE=1
+          fi
+          ./scripts/build-mac-release.sh
 
       - name: Smoke test bundled app
         if: env.PREP_DONE != '1'
