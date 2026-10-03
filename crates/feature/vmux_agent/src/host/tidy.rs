@@ -13,7 +13,7 @@ use vmux_layout::CloseStackRequest;
 use vmux_layout::stack::ComputeFocusSet;
 #[cfg(test)]
 use vmux_path::FileUrl;
-use vmux_session::{AcpSession, AgentRunState};
+use vmux_session::RunState;
 use vmux_setting::{AppSettings, SettingsSaveRequest};
 
 use super::tidy_driver::{PendingTidy, TidyFiles};
@@ -109,7 +109,7 @@ fn attention(
 
 fn idle(
     settings: Option<Res<AppSettings>>,
-    sessions: Query<(&AcpSession, &AgentRunState), Changed<AgentRunState>>,
+    sessions: Query<(&ProcessAnchor, &RunState), Changed<RunState>>,
     mut tidy: TidyFiles,
 ) {
     let Some(settings) = settings else {
@@ -118,8 +118,8 @@ fn idle(
     if !settings.agent.tidy_files {
         return;
     }
-    for (session, state) in &sessions {
-        if !matches!(state, AgentRunState::Idle) {
+    for (anchor, state) in &sessions {
+        if !matches!(state, RunState::Idle) {
             continue;
         }
         let Some(agent_pane) = tidy.agent_pane(session.anchor) else {

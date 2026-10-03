@@ -3,13 +3,9 @@ use std::time::Duration;
 
 #[derive(Component, Default)]
 #[require(AgentTurnMeta)]
-pub enum AgentRunState {
+pub enum RunState {
     #[default]
     Idle,
-    Installing {
-        pct: Option<u8>,
-        message: String,
-    },
     Streaming,
     AwaitingApproval {
         call_id: String,
@@ -19,11 +15,10 @@ pub enum AgentRunState {
     Errored(String),
 }
 
-impl AgentRunState {
+impl RunState {
     pub fn status(&self) -> &'static str {
         match self {
             Self::Idle => "idle",
-            Self::Installing { .. } => "installing",
             Self::Streaming => "streaming",
             Self::AwaitingApproval { .. } => "awaiting",
             Self::Errored(_) => "errored",
@@ -43,14 +38,14 @@ mod tests {
 
     #[test]
     fn default_is_idle() {
-        assert!(matches!(AgentRunState::default(), AgentRunState::Idle));
+        assert!(matches!(RunState::default(), RunState::Idle));
     }
 
     #[test]
     fn errored_holds_message() {
-        let s = AgentRunState::Errored("oops".into());
+        let s = RunState::Errored("oops".into());
         match s {
-            AgentRunState::Errored(m) => assert_eq!(m, "oops"),
+            RunState::Errored(m) => assert_eq!(m, "oops"),
             _ => panic!("wrong variant"),
         }
     }

@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
+use vmux_api::conversation::ModelOptionEntry;
 use vmux_api::protocol::AcpModeOption;
-use vmux_api::room::ModelOptionEntry;
 use vmux_api::space::{ProjectBranch, ProjectRow};
 
 use crate::cn::cn;

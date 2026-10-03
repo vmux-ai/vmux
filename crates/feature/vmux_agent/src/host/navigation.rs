@@ -7,8 +7,8 @@ use vmux_ecs::persistence::PageRestore;
 use vmux_ecs::profile::Projects;
 use vmux_ecs::terminal::TerminalLaunch;
 use vmux_ecs::{
-    PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
-    PendingPrompt, PendingPromptAttachments,
+    Cwd, EntityTarget, PageIcon, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
+    PageOpenSet, PageOpenTask, PendingPrompt, PendingPromptAttachments,
 };
 use vmux_layout::space::FocusedSpace;
 use vmux_layout::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
@@ -16,12 +16,12 @@ use vmux_layout::worktree::{PageOpenWaitForWorktree, TabWorktreePending, TabWork
 use vmux_session::AcpSession;
 use vmux_setting::AppSettings;
 use vmux_start::{StartInlineTransition, StartInlineTransitionView};
+use vmux_ui::i18n::translate;
 
 use super::attach::AcpAgentAttachment;
 use super::navigation_driver::{AcpCatalog, AgentPageOpenWorkspace, PageOpener};
 #[cfg(test)]
 use crate::host::acp::registry::RegistryAgent;
-use crate::route::AcpRoute;
 use vmux_terminal::AgentCwd;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
@@ -89,7 +89,7 @@ fn prepare(
         .collect();
     let mut opened_stacks = std::collections::HashSet::new();
     for (task_entity, task) in &tasks {
-        if AcpRoute::parse(&task.url).is_none() {
+        if Route::parse(&task.url).is_none() {
             continue;
         }
         let Some(tab_entity) = ancestor_tab_entity(task.stack, &child_of, &tabs) else {
@@ -269,7 +269,7 @@ fn open(
         .map(|(entity, task, restoring)| (entity, task.clone(), restoring))
         .collect();
     for (entity, task, restoring) in tasks {
-        if !vmux_api::VmuxRoute::parse(&task.url).is_some_and(|route| route.is_agent()) {
+        if Route::parse(&task.url).is_none() {
             continue;
         }
         let tab = workspace.tab(task.stack);
@@ -362,23 +362,25 @@ fn swap(
     mut reader: MessageReader<SwapStackSession>,
     settings: Res<AppSettings>,
     catalog: AcpCatalog,
+    targets: Query<&EntityTarget<Session>>,
+    sessions: Query<(&SessionId, &Name, &Cwd), With<Session>>,
     mut commands: Commands,
 ) {
     for ev in reader.read() {
-        let target = match AcpRoute::parse(&ev.target_url) {
-            Some(target @ AcpRoute::Acp { .. }) => target,
-            other => {
-                bevy::log::warn!("swap: unsupported target url {other:?} ({})", ev.target_url);
-                continue;
-            }
-        };
-        if let AcpRoute::Acp { id, .. } = &target
-            && !settings.agent.acp.iter().any(|cfg| cfg.id == *id)
-            && catalog.agent(id).is_none()
-        {
+        let id = ev.target_agent.as_str();
+        if !settings.agent.acp.iter().any(|cfg| cfg.id == id) && catalog.agent(id).is_none() {
             bevy::log::warn!("swap: ACP agent unavailable for '{id}'");
             continue;
-        }
+        };
+        let Ok(target) = targets.get(ev.stack) else {
+            bevy::log::warn!("swap: stack has no Session target");
+            continue;
+        };
+        let session_entity = target.entity();
+        let Ok((session_id, session_name, cwd)) = sessions.get(session_entity) else {
+            bevy::log::warn!("swap: Session target is unavailable");
+            continue;
+        };
         let imported = ev.handoff.as_ref().map(|handoff| {
             (
                 ImportedConversation {
@@ -396,33 +398,41 @@ fn swap(
         });
 
         commands
-            .entity(ev.stack)
-            .remove::<AcpSession>()
+            .entity(session_entity)
+            .remove::<AcpSessionId>()
+            .remove::<vmux_ecs::ProcessAnchor>()
             .remove::<crate::host::acp::AcpLaunchStarted>()
-            .remove::<vmux_session::AgentMessages>()
-            .remove::<vmux_session::AgentApprovalPolicy>()
-            .remove::<vmux_session::AgentRunState>()
+            .remove::<vmux_session::ApprovalPolicy>()
+            .remove::<vmux_session::RunState>()
             .remove::<ImportedConversation>()
             .remove::<super::handoff::PendingHandoff>()
-            .remove::<vmux_ecs::AgentWorkingDir>()
             .remove::<vmux_ecs::team::Agent>()
             .remove::<vmux_ecs::team::Profile>();
         commands.entity(ev.stack).despawn_children();
-
-        match target {
-            AcpRoute::Acp { id, sid } => {
-                let cfg = settings.agent.acp.iter().find(|cfg| cfg.id == id);
-                let routing_sid = uuid::Uuid::new_v4().to_string();
-                let icon = catalog.icon(&id);
-                let name = catalog.profile_name(&id, cfg);
-                let request =
-                    AcpAgentAttachment::new(id, name, routing_sid, ev.cwd.clone(), icon, sid);
-                commands.entity(ev.stack).insert(request);
-                if let Some((imported, pending)) = imported {
-                    commands.entity(ev.stack).insert((imported, pending));
-                }
-            }
-            _ => unreachable!(),
+        let cwd = if ev.cwd.as_os_str().is_empty() {
+            cwd.0.clone()
+        } else {
+            ev.cwd.clone()
+        };
+        commands
+            .entity(session_entity)
+            .insert((AgentId(id.to_string()), Cwd(cwd.clone())));
+        let cfg = settings.agent.acp.iter().find(|cfg| cfg.id == id);
+        let icon = catalog.icon(id);
+        let agent_name = catalog.profile_name(id, cfg);
+        commands.spawn(AcpAgentAttachment::new(
+            session_entity,
+            ev.stack,
+            id,
+            session_name.as_str(),
+            agent_name,
+            session_id.0.clone(),
+            cwd,
+            icon,
+            None,
+        ));
+        if let Some((imported, pending)) = imported {
+            commands.entity(session_entity).insert((imported, pending));
         }
     }
 }

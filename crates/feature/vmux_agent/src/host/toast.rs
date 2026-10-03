@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::UiEventPlugin;
-use vmux_session::{AcpSession, AgentRunState};
+#[cfg(test)]
+use vmux_session::Session;
+use vmux_session::{RunState, SessionId};
 
 pub(super) fn add(app: &mut App) {
     app.add_message::<AgentToast>()
@@ -45,7 +47,7 @@ fn surface_errors(
         }
         commands.entity(entity).insert(ErrorSurfaced);
         writer.write(AgentToast {
-            session_sid: session.sid.clone(),
+            session_sid: session.0.clone(),
             level: ToastLevel::Error,
             message: message.clone(),
         });
@@ -55,7 +57,6 @@ fn surface_errors(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::protocol::ProcessId;
 
     #[test]
     fn rkyv_roundtrip() {

@@ -4,7 +4,7 @@ use vmux_chat::event::ModelOptionEntry;
 use vmux_ecs::profile::CurrentProfile;
 use vmux_path::AtomicFile;
 
-use crate::route::AcpRoute;
+use crate::route::SessionRoute;
 
 pub(super) fn add(app: &mut App) {
     app.add_message::<RememberModel>()
@@ -110,7 +110,9 @@ fn load_mode_selections(profile: CurrentProfile, mut modes: Single<&mut AgentMod
         return;
     };
     for (agent, mut memory) in saved {
-        memory.url = AcpRoute::agent(&agent).url();
+        if !memory.url.is_empty() && SessionRoute::parse(&memory.url).is_none() {
+            memory.url.clear();
+        }
         modes.by_agent.insert(agent, memory);
     }
     modes.dirty = false;

@@ -51,6 +51,12 @@ pub struct AcpWorkspaceChanged {
     pub workspace_cwd: String,
 }
 
+#[vmux_api::service_message(SharedEvent::AgentMessagesSnapshot)]
+pub struct UiAgentMessagesSnapshot {
+    pub sid: String,
+    pub messages: Vec<Message>,
+}
+
 #[vmux_api::service_message(AcpSessionConfigState)]
 pub struct AcpSessionConfigSnapshot {
     pub sid: String,

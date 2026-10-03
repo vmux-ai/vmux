@@ -2,13 +2,13 @@ use bevy_app::{App, Plugin};
 #[cfg(host)]
 use vmux_ecs::manifest::FeaturePlugin;
 
+pub use conversation::{Agents, Conversation, LiveTurn, Log, Reported, Submitted};
 #[cfg(host)]
 pub use handoff::ImportedConversation;
 #[cfg(host)]
 pub use media::ChatAttachmentHydrationRequest;
 pub use model::{ChatModeStateChanged, ChatModelStateChanged, Models};
 pub use prompt::{Attach, Attachments, Browsed, RemoveAttachment};
-pub use room::{Agents, Conversation, LiveTurn, Log, Reported, Submitted};
 #[cfg(host)]
 pub use session::{
     ChatAttachmentProjection, ChatBranchesProjection, ChatComposerContext, ChatHistoryQuery,
@@ -24,6 +24,7 @@ pub use tool::ChatToolPlugin;
 mod command_bar;
 #[cfg(host)]
 mod composer;
+mod conversation;
 mod group;
 #[cfg(host)]
 mod handoff;
@@ -35,7 +36,6 @@ mod model;
 mod presentation;
 mod projection;
 mod prompt;
-mod room;
 #[cfg(host)]
 mod session;
 mod state;
@@ -53,7 +53,7 @@ impl Plugin for ChatPlugin {
             state::ChatUiStatePlugin,
             model::ChatModelPlugin,
             prompt::ChatPromptPlugin,
-            room::ChatRoomPlugin,
+            conversation::ChatConversationPlugin,
         ));
         #[cfg(host)]
         app.add_plugins((

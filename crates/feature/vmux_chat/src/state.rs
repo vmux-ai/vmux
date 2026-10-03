@@ -8,6 +8,7 @@ use vmux_api::mcp::McpServersUiState;
 
 #[vmux_api::ui_state_patch(Default)]
 pub struct ChatUiStatePatch {
+    pub sessions: Option<Box<CatalogSnapshot>>,
     pub snapshot: Option<Box<ChatSnapshot>>,
     pub composer: Option<ComposerContext>,
     pub composer_draft: Option<ChatComposerDraft>,

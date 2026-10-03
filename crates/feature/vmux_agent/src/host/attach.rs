@@ -14,10 +14,13 @@ fn attach(
     attachments: Query<
         (
             Entity,
-            &Name,
-            &AcpAgentId,
+            &SessionTarget,
+            &StackTarget,
+            &SessionName,
+            &AgentName,
+            &AcpId,
             &SessionId,
-            &AgentWorkingDir,
+            &WorkingDirectory,
             &AcpAttachmentIcon,
             &AcpResume,
             Option<&EntityTarget<vmux_chat::host::ChatView>>,
@@ -27,11 +30,14 @@ fn attach(
     mut commands: Commands,
 ) {
     for (
-        entity,
-        name,
-        AcpAgentId(agent_id),
+        operation,
+        SessionTarget(session_entity),
+        StackTarget(stack),
+        SessionName(session_name),
+        AgentName(agent_name),
+        AcpId(agent_id),
         SessionId(sid),
-        AgentWorkingDir(cwd),
+        WorkingDirectory(cwd),
         AcpAttachmentIcon(icon),
         AcpResume(resume),
         webview,
@@ -59,9 +65,28 @@ fn attach(
                 anchor,
                 resume: resume.clone(),
             },
-            vmux_ecs::team::Profile::registry(name, agent_id),
+        ));
+        let anchor = ProcessId::new();
+        commands.entity(*session_entity).insert((
+            vmux_ecs::agent::AgentSessionRoot,
+            vmux_session::AgentId(agent_id.to_string()),
+            Cwd(cwd.clone()),
+            ProcessAnchor(anchor),
+            vmux_session::RunState::default(),
+            vmux_session::ApprovalPolicy::default(),
+            vmux_session::PromptQueue::default(),
+            vmux_ecs::team::Profile::registry(agent_name, agent_id),
             vmux_ecs::team::Agent { sid: sid.clone() },
         ));
+        if let Some(resume) = resume.clone() {
+            commands
+                .entity(*session_entity)
+                .insert(vmux_session::AcpSessionId(resume));
+        } else {
+            commands
+                .entity(*session_entity)
+                .remove::<vmux_session::AcpSessionId>();
+        }
         let view = if let Some(webview) = webview {
             webview.entity()
         } else {
@@ -69,7 +94,7 @@ fn attach(
                 .spawn((
                     vmux_layout::Browser::hosted_page_with_icon(&url, name, icon.clone()),
                     vmux_chat::host::ChatView,
-                    ChildOf(entity),
+                    ChildOf(*stack),
                     anchor,
                 ))
                 .id()
@@ -78,7 +103,7 @@ fn attach(
             ChildOf(entity),
             PageMetadata {
                 url,
-                title: name.to_string(),
+                title: session_name.clone(),
                 bg_color: None,
                 icon: icon.clone(),
             },
@@ -92,13 +117,7 @@ fn attach(
                 vmux_ecs::page::PageReady,
             )>();
         }
-        commands.entity(entity).remove::<(
-            PendingAcpAgentAttachment,
-            AcpAgentId,
-            AcpAttachmentIcon,
-            AcpResume,
-            EntityTarget<vmux_chat::host::ChatView>,
-        )>();
+        commands.entity(operation).despawn();
     }
 }
 
@@ -112,26 +131,35 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         add(&mut app);
         let stack = app.world_mut().spawn_empty().id();
-        app.world_mut()
-            .entity_mut(stack)
-            .insert(AcpAgentAttachment::new(
-                "mistral-vibe",
-                "Mistral Vibe",
-                "sid-1",
-                std::path::PathBuf::from("/tmp"),
-                Some("https://cdn.example/vibe.svg".to_string()),
-                None,
-            ));
+        app.world_mut().spawn(AcpAgentAttachment::new(
+            session,
+            stack,
+            "mistral-vibe",
+            "Task",
+            "Mistral Vibe",
+            "sid-1",
+            std::path::PathBuf::from("/tmp"),
+            Some("https://cdn.example/vibe.svg".to_string()),
+            None,
+        ));
         app.update();
 
         let world = app.world();
         let profile = world
-            .get::<vmux_ecs::team::Profile>(stack)
+            .get::<vmux_ecs::team::Profile>(session)
             .expect("profile");
         assert_eq!(profile.name, "Mistral Vibe");
-        let agent = world.get::<vmux_ecs::team::Agent>(stack).expect("agent");
+        let agent = world.get::<vmux_ecs::team::Agent>(session).expect("agent");
         assert_eq!(agent.sid, "sid-1");
         let meta = world.get::<PageMetadata>(stack).expect("meta");
+        assert_eq!(meta.title, "Task");
         assert_eq!(meta.icon.favicon_url(), "https://cdn.example/vibe.svg");
+        assert_eq!(
+            world
+                .get::<EntityTarget<vmux_session::Session>>(stack)
+                .unwrap()
+                .entity(),
+            session
+        );
     }
 }

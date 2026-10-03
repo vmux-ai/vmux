@@ -1,5 +1,5 @@
 use crate::ProcessId;
-use crate::room::ClientOpId;
+use crate::conversation::ClientOpId;
 
 #[vmux_api::contract(Eq)]
 pub struct AgentRequest {

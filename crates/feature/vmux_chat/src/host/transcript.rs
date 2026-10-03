@@ -19,10 +19,11 @@ use crate::host::{
 use vmux_ecs::PageMetadata;
 use vmux_ecs::service::ServiceMessageSet;
 use vmux_ecs::team::{Profile, User};
+use vmux_ecs::{EntityTarget, PageMetadata};
 use vmux_session::{
-    AcpSession, AgentConversationTitle, AgentMessageTimes, AgentMessages, PromptQueue,
+    AgentConversationTitle, AgentId, PromptQueue, Session, Transcript, Transcripts,
 };
-use vmux_session::{AgentRunState, AgentTurnMeta};
+use vmux_session::{AgentTurnMeta, RunState};
 
 pub(super) struct Plugin;
 
@@ -54,13 +55,10 @@ struct ChatProjection {
 
 type ChangedSession = (
     Entity,
-    &'static AcpSession,
-    Ref<'static, AgentMessages>,
-    Ref<'static, AgentMessageTimes>,
-    Ref<'static, AgentRunState>,
+    &'static AgentId,
+    Ref<'static, RunState>,
     Option<Ref<'static, AgentTurnMeta>>,
     Option<Ref<'static, Profile>>,
-    Option<&'static PageMetadata>,
     Ref<'static, PromptQueue>,
     Option<Ref<'static, ImportedConversation>>,
     Option<Ref<'static, AgentConversationTitle>>,
@@ -75,10 +73,19 @@ type ProjectionView = (
 #[derive(SystemParam)]
 struct PushWorld<'w, 's> {
     sessions: Query<'w, 's, ChangedSession>,
-    children: Query<'w, 's, &'static Children>,
+    stacks: Query<
+        'w,
+        's,
+        (
+            &'static EntityTarget<Session>,
+            &'static Children,
+            Option<&'static PageMetadata>,
+        ),
+    >,
     chat_views: Query<'w, 's, ProjectionView, With<ChatView>>,
     choices: Query<'w, 's, &'static PendingAgentChoice>,
     user_profiles: Query<'w, 's, Ref<'static, Profile>, With<User>>,
+    transcripts: Transcripts<'w, 's>,
 }
 
 type ReadyView = (
@@ -94,45 +101,51 @@ type ReadyViewFilter = (
     Without<ChatSynced>,
 );
 
+#[derive(SystemParam)]
+struct ReadyWorld<'w, 's> {
+    targets: super::session::SessionViews<'w, 's>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    metadata: Query<'w, 's, &'static PageMetadata>,
+    sessions: Query<'w, 's, SessionProjection>,
+    transcripts: Transcripts<'w, 's>,
+    choices: Query<'w, 's, &'static PendingAgentChoice>,
+    user_profiles: Query<'w, 's, &'static Profile, With<User>>,
+}
+
 type SessionProjection = (
-    &'static AcpSession,
-    &'static AgentMessages,
-    &'static AgentMessageTimes,
-    &'static AgentRunState,
+    &'static AgentId,
+    &'static RunState,
     Option<&'static AgentTurnMeta>,
     Option<&'static Profile>,
-    Option<&'static PageMetadata>,
     &'static PromptQueue,
     Option<&'static ImportedConversation>,
     Option<&'static AgentConversationTitle>,
 );
 
 type HistorySource = (
-    &'static AgentMessages,
-    &'static AgentMessageTimes,
-    &'static AgentRunState,
+    &'static RunState,
     Option<&'static AgentTurnMeta>,
     Option<&'static ImportedConversation>,
 );
 
 fn track_turn_duration(
     time: Res<Time>,
-    mut sessions: Query<(&AgentRunState, &mut AgentTurnMeta), Changed<AgentRunState>>,
+    mut sessions: Query<(&RunState, &mut AgentTurnMeta), Changed<RunState>>,
 ) {
     for (state, mut meta) in &mut sessions {
         match state {
-            AgentRunState::Streaming => {
+            RunState::Streaming => {
                 if meta.turn_start.is_none() {
                     meta.turn_start = Some(time.elapsed());
                 }
             }
-            AgentRunState::Idle | AgentRunState::Errored(_) => {
+            RunState::Idle | RunState::Errored(_) => {
                 if let Some(start) = meta.turn_start.take() {
                     meta.durations
                         .push(time.elapsed().saturating_sub(start).as_secs() as u32);
                 }
             }
-            AgentRunState::AwaitingApproval { .. } | AgentRunState::Installing { .. } => {}
+            RunState::AwaitingApproval { .. } => {}
         }
     }
 }
@@ -140,32 +153,17 @@ fn track_turn_duration(
 fn push_to_page(
     mut world: PushWorld,
     mut last_push: Local<std::collections::HashMap<Entity, std::time::Instant>>,
+    mut last_transcripts: Local<std::collections::HashMap<Entity, Transcript>>,
     mut owed: Local<std::collections::HashSet<Entity>>,
-    mut removed_messages: RemovedComponents<AgentMessages>,
     mut commands: Commands,
 ) {
     let user_profile = world.user_profiles.single().ok();
     let user_moved = user_profile
         .as_ref()
         .is_some_and(|profile| profile.is_changed());
-    for stack in removed_messages.read() {
-        last_push.remove(&stack);
-        owed.remove(&stack);
-    }
-    for (
-        stack,
-        session,
-        messages,
-        message_times,
-        state,
-        turn_meta,
-        profile,
-        meta,
-        queue,
-        imported,
-        title,
-    ) in &world.sessions
-    {
+    for (stack, agent_id, state, turn_meta, profile, queue, imported, title) in &world.sessions {
+        let conversation = world.transcripts.get(stack);
+        let conversation_changed = last_transcripts.get(&stack) != Some(&conversation);
         let moved = user_moved
             || state.is_changed()
             || turn_meta.as_ref().is_some_and(|meta| meta.is_changed())
@@ -175,15 +173,18 @@ fn push_to_page(
                 .as_ref()
                 .is_some_and(|imported| imported.is_changed())
             || title.as_ref().is_some_and(|title| title.is_changed());
-        if !moved && !messages.is_changed() && !message_times.is_changed() && !owed.contains(&stack)
-        {
+        if !moved && !conversation_changed && !owed.contains(&stack) {
             continue;
         }
-        let Ok(kids) = world.children.get(stack) else {
-            owed.insert(stack);
-            continue;
-        };
-        let Some(webview) = kids.iter().find(|&e| world.chat_views.contains(e)) else {
+        let Some((webview, meta)) = world.stacks.iter().find_map(|(target, children, meta)| {
+            if target.entity() != stack {
+                return None;
+            }
+            children
+                .iter()
+                .find(|&entity| world.chat_views.contains(entity))
+                .map(|webview| (webview, meta))
+        }) else {
             owed.insert(stack);
             continue;
         };
@@ -191,15 +192,15 @@ fn push_to_page(
         let elapsed = last_push
             .get(&stack)
             .map(|last| now.saturating_duration_since(*last));
-        if !chat_snapshot_due(matches!(*state, AgentRunState::Streaming), moved, elapsed) {
+        if !chat_snapshot_due(matches!(*state, RunState::Streaming), moved, elapsed) {
             owed.insert(stack);
             continue;
         }
         owed.remove(&stack);
         let mut projection = ChatProjection::new(
-            session,
-            &messages,
-            &message_times,
+            agent_id,
+            &conversation.messages,
+            &conversation.created_at,
             &state,
             turn_meta.as_deref(),
             profile.as_deref(),
@@ -219,12 +220,12 @@ fn push_to_page(
         transcript_changed |= attachments.hydrate_transcript(&mut transcript.state);
         attachments.hydrate_snapshot(&mut projection.snapshot);
         snapshot.0 = projection.snapshot;
-        if !matches!(*state, AgentRunState::Streaming) {
+        if !matches!(*state, RunState::Streaming) {
             info!(
                 ?stack,
                 ?webview,
                 error = %snapshot.0.error,
-                items = messages.0.len(),
+                items = conversation.messages.len(),
                 "chat snapshot pushed"
             );
         }
@@ -244,6 +245,7 @@ fn push_to_page(
             commands.trigger(ChatAttachmentHydrationRequest { webview, paths });
         }
         last_push.insert(stack, now);
+        last_transcripts.insert(stack, conversation);
     }
 }
 
@@ -256,10 +258,10 @@ fn chat_snapshot_due(streaming: bool, urgent: bool, elapsed: Option<std::time::D
 impl ChatProjection {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        session: &AcpSession,
-        messages: &AgentMessages,
-        message_times: &AgentMessageTimes,
-        state: &AgentRunState,
+        agent_id: &AgentId,
+        messages: &[vmux_api::conversation::Message],
+        message_times: &[u64],
+        state: &RunState,
         turn_meta: Option<&AgentTurnMeta>,
         profile: Option<&Profile>,
         user_profile: Option<&Profile>,
@@ -270,28 +272,24 @@ impl ChatProjection {
         choice: Option<&PendingAgentChoice>,
     ) -> Self {
         let durations: &[u32] = turn_meta.map(|m| m.durations.as_slice()).unwrap_or(&[]);
-        let running = matches!(state, AgentRunState::Streaming);
+        let running = matches!(state, RunState::Streaming);
         let imported_messages = imported
             .map(|conversation| conversation.messages.as_slice())
             .unwrap_or_default();
         let page = ChatMessages::new(
             imported_messages,
-            &messages.0,
-            &message_times.0,
+            messages,
+            message_times,
             durations,
             running,
         )
         .tail(CHAT_INITIAL_ITEM_LIMIT as usize);
         let error = match state {
-            AgentRunState::Installing { pct, message } => match pct {
-                Some(pct) => format!("{message} ({pct}%)"),
-                None => message.clone(),
-            },
-            AgentRunState::Errored(message) => message.clone(),
+            RunState::Errored(message) => message.clone(),
             _ => String::new(),
         };
         let approval = match state {
-            AgentRunState::AwaitingApproval {
+            RunState::AwaitingApproval {
                 call_id,
                 name,
                 args,
@@ -324,7 +322,7 @@ impl ChatProjection {
             status: state.status().to_string(),
             error,
             approval,
-            agent_id: session.agent_id.clone(),
+            agent_id: agent_id.0.clone(),
             agent_name,
             conversation_title: conversation_title
                 .map(|title| title.0.clone())
@@ -388,46 +386,38 @@ impl ChatProjection {
 
 fn sync_ready_views(
     mut pending: Query<ReadyView, ReadyViewFilter>,
-    child_of: Query<&ChildOf>,
-    sessions: Query<SessionProjection>,
-    choices: Query<&PendingAgentChoice>,
-    user_profiles: Query<&Profile, With<User>>,
+    world: ReadyWorld,
     mut commands: Commands,
 ) {
-    let user_profile = user_profiles.single().ok();
+    let user_profile = world.user_profiles.single().ok();
     for (webview, mut transcript, mut snapshot, attachments) in &mut pending {
-        let Ok(parent) = child_of.get(webview) else {
+        let Some(session_entity) = world.targets.session(webview) else {
             continue;
         };
-        let stack = parent.parent();
-        let Ok((
-            session,
-            messages,
-            message_times,
-            state,
-            turn_meta,
-            profile,
-            meta,
-            queue,
-            imported,
-            title,
-        )) = sessions.get(stack)
+        let stack = world
+            .child_of
+            .get(webview)
+            .map(ChildOf::parent)
+            .unwrap_or(Entity::PLACEHOLDER);
+        let Ok((agent_id, state, turn_meta, profile, queue, imported, title)) =
+            world.sessions.get(session_entity)
         else {
             continue;
         };
+        let conversation = world.transcripts.get(session_entity);
         let mut projection = ChatProjection::new(
-            session,
-            messages,
-            message_times,
+            agent_id,
+            &conversation.messages,
+            &conversation.created_at,
             state,
             turn_meta,
             profile,
             user_profile,
-            meta,
+            world.metadata.get(stack).ok(),
             queue,
             imported,
             title,
-            choices.get(webview).ok(),
+            world.choices.get(webview).ok(),
         );
         transcript.merge_tail(projection.transcript);
         attachments.hydrate_transcript(&mut transcript.state);
@@ -469,14 +459,18 @@ fn reset_synced(
 
 fn request_more(
     trigger: On<UiInput<ChatHistoryMoreRequest>>,
-    mut views: Query<(&ChildOf, &mut ChatTranscriptProjection), With<ChatView>>,
+    targets: super::session::SessionViews,
+    mut views: Query<&mut ChatTranscriptProjection, With<ChatView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let Ok((parent, mut transcript)) = views.get_mut(webview) else {
+    let Some(session) = targets.session(webview) else {
         return;
     };
-    let Some(query) = transcript.start_history_query(webview, parent.parent()) else {
+    let Ok(mut transcript) = views.get_mut(webview) else {
+        return;
+    };
+    let Some(query) = transcript.start_history_query(webview, session) else {
         return;
     };
     commands.spawn(query);
@@ -488,11 +482,15 @@ fn request_more(
 fn resolve_queries(
     queries: Query<(Entity, &ChatHistoryQuery)>,
     sessions: Query<HistorySource>,
+    transcripts: Transcripts,
     mut commands: Commands,
 ) {
     for (entity, query) in &queries {
-        let page = sessions.get(query.session).ok().map(
-            |(messages, message_times, state, turn_meta, imported)| {
+        let page = sessions
+            .get(query.session)
+            .ok()
+            .map(|(state, turn_meta, imported)| {
+                let transcript = transcripts.get(query.session);
                 let imported_messages = imported
                     .map(|conversation| conversation.messages.as_slice())
                     .unwrap_or_default();
@@ -501,10 +499,10 @@ fn resolve_queries(
                     .unwrap_or(&[]);
                 let page = ChatMessages::new(
                     imported_messages,
-                    &messages.0,
-                    &message_times.0,
+                    &transcript.messages,
+                    &transcript.created_at,
                     durations,
-                    matches!(state, AgentRunState::Streaming),
+                    matches!(state, RunState::Streaming),
                 )
                 .before(query.before as usize, query.limit as usize);
                 TranscriptPage {
@@ -513,8 +511,7 @@ fn resolve_queries(
                     end: u32::try_from(page.end).unwrap_or(u32::MAX),
                     total: u32::try_from(page.total).unwrap_or(u32::MAX),
                 }
-            },
-        );
+            });
         commands
             .entity(entity)
             .remove::<ChatHistoryQuery>()
@@ -600,27 +597,21 @@ mod tests {
 
     #[test]
     fn snapshot_reports_grouped_imported_item_boundary() {
-        let session = AcpSession {
-            agent_id: "codex".into(),
-            sid: "session".into(),
-            cwd: std::path::PathBuf::new(),
-            anchor: vmux_ecs::ProcessId::new(),
-            resume: None,
-        };
+        let agent = AgentId("codex".into());
         let imported = ImportedConversation {
             source_agent: "Codex".into(),
             source_sid: "codex-1".into(),
             messages: vec![
-                vmux_api::room::Message::user("one"),
-                vmux_api::room::Message::Assistant {
-                    blocks: vec![vmux_api::room::AssistantBlock::ToolUse {
+                vmux_api::conversation::Message::user("one"),
+                vmux_api::conversation::Message::Assistant {
+                    blocks: vec![vmux_api::conversation::AssistantBlock::ToolUse {
                         call_id: "call-1".into(),
                         name: "run".into(),
                         args: "{}".into(),
                         parent_call_id: None,
                     }],
                 },
-                vmux_api::room::Message::ToolResult {
+                vmux_api::conversation::Message::ToolResult {
                     call_id: "call-1".into(),
                     content: "two".into(),
                     is_error: false,
@@ -630,10 +621,10 @@ mod tests {
             first_prompt: None,
         };
         let snapshot = ChatProjection::new(
-            &session,
-            &AgentMessages::default(),
-            &AgentMessageTimes::default(),
-            &AgentRunState::Idle,
+            &agent,
+            &[],
+            &[],
+            &RunState::Idle,
             None,
             None,
             None,
@@ -650,18 +641,12 @@ mod tests {
 
     #[test]
     fn snapshot_includes_approval_tool_and_input() {
-        let session = AcpSession {
-            agent_id: "codex".into(),
-            sid: "session".into(),
-            cwd: std::path::PathBuf::new(),
-            anchor: vmux_ecs::ProcessId::new(),
-            resume: None,
-        };
+        let agent = AgentId("codex".into());
         let snapshot = ChatProjection::new(
-            &session,
-            &AgentMessages::default(),
-            &AgentMessageTimes::default(),
-            &AgentRunState::AwaitingApproval {
+            &agent,
+            &[],
+            &[],
+            &RunState::AwaitingApproval {
                 call_id: "call-1".into(),
                 name: "vmux.run".into(),
                 args: serde_json::json!({"command": "echo hi", "focus": true}),
@@ -687,19 +672,13 @@ mod tests {
 
     #[test]
     fn snapshot_includes_model_written_conversation_title() {
-        let session = AcpSession {
-            agent_id: "codex".into(),
-            sid: "session".into(),
-            cwd: std::path::PathBuf::new(),
-            anchor: vmux_ecs::ProcessId::new(),
-            resume: None,
-        };
+        let agent = AgentId("codex".into());
         let title = AgentConversationTitle("Refine generated chat summaries".into());
         let snapshot = ChatProjection::new(
-            &session,
-            &AgentMessages::default(),
-            &AgentMessageTimes::default(),
-            &AgentRunState::Idle,
+            &agent,
+            &[],
+            &[],
+            &RunState::Idle,
             None,
             None,
             None,
@@ -719,19 +698,13 @@ mod tests {
 
     #[test]
     fn snapshot_uses_the_active_user_profile_avatar() {
-        let session = AcpSession {
-            agent_id: "codex".into(),
-            sid: "session".into(),
-            cwd: std::path::PathBuf::new(),
-            anchor: vmux_ecs::ProcessId::new(),
-            resume: None,
-        };
+        let agent = AgentId("codex".into());
         let profile = Profile::user_named("Personal".into());
         let snapshot = ChatProjection::new(
-            &session,
-            &AgentMessages::default(),
-            &AgentMessageTimes::default(),
-            &AgentRunState::Idle,
+            &agent,
+            &[],
+            &[],
+            &RunState::Idle,
             None,
             None,
             Some(&profile),
@@ -864,7 +837,7 @@ mod tests {
     #[test]
     fn streaming_then_idle_records_one_duration() {
         let mut app = duration_app();
-        let e = app.world_mut().spawn(AgentRunState::Streaming).id();
+        let e = app.world_mut().spawn(RunState::Streaming).id();
         app.update();
         assert!(
             app.world()
@@ -873,7 +846,7 @@ mod tests {
                 .turn_start
                 .is_some()
         );
-        *app.world_mut().get_mut::<AgentRunState>(e).unwrap() = AgentRunState::Idle;
+        *app.world_mut().get_mut::<RunState>(e).unwrap() = RunState::Idle;
         app.update();
         let meta = app.world().get::<AgentTurnMeta>(e).unwrap();
         assert_eq!(meta.durations.len(), 1);
@@ -883,9 +856,9 @@ mod tests {
     #[test]
     fn awaiting_approval_does_not_finalize() {
         let mut app = duration_app();
-        let e = app.world_mut().spawn(AgentRunState::Streaming).id();
+        let e = app.world_mut().spawn(RunState::Streaming).id();
         app.update();
-        *app.world_mut().get_mut::<AgentRunState>(e).unwrap() = AgentRunState::AwaitingApproval {
+        *app.world_mut().get_mut::<RunState>(e).unwrap() = RunState::AwaitingApproval {
             call_id: "c".into(),
             name: "n".into(),
             args: serde_json::Value::Null,

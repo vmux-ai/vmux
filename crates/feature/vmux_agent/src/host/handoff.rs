@@ -26,19 +26,16 @@ fn spawn(mut commands: Commands) {
 fn load(
     directory: Single<&HandoffDriver>,
     sessions: Query<
-        (Entity, &vmux_session::AcpSession),
+        (Entity, &vmux_session::AgentId, &vmux_session::AcpSessionId),
         (
-            Added<vmux_session::AcpSession>,
+            Added<vmux_session::AcpSessionId>,
             Without<ImportedConversation>,
         ),
     >,
     mut commands: Commands,
 ) {
-    for (entity, session) in &sessions {
-        let Some(session_id) = session.resume.as_deref() else {
-            continue;
-        };
-        let Some(imported) = directory.load(&session.agent_id, session_id) else {
+    for (entity, agent_id, session_id) in &sessions {
+        let Some(imported) = directory.load(&agent_id.0, &session_id.0) else {
             continue;
         };
         commands.entity(entity).insert(imported);
@@ -51,11 +48,11 @@ fn persist(
     sessions: Query<(&vmux_session::AcpSession, &ImportedConversation)>,
 ) {
     for event in created.read() {
-        for (session, imported) in &sessions {
-            if session.sid != event.sid || imported.first_prompt.is_none() {
+        for (session_id, agent_id, imported) in &sessions {
+            if session_id.0 != event.sid || imported.first_prompt.is_none() {
                 continue;
             }
-            if let Err(error) = directory.save(imported, &session.agent_id, &event.acp_session_id) {
+            if let Err(error) = directory.save(imported, &agent_id.0, &event.acp_session_id) {
                 bevy::log::warn!("acp: failed to persist handoff metadata: {error}");
             }
         }
@@ -71,7 +68,7 @@ pub struct PendingHandoff {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::room::{AssistantBlock, Message};
+    use vmux_api::conversation::{AssistantBlock, Message};
 
     fn user(text: &str) -> Message {
         Message::user(text)

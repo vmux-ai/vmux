@@ -57,6 +57,10 @@ fn HeaderContent() -> Element {
     let ui = layout.value();
     let stacks_state = ui.stacks.unwrap_or_default();
     let tab_strip = ui.tab_strip.unwrap_or_default();
+    let active_task = ui
+        .active_session
+        .as_ref()
+        .and_then(|session| session.task.clone());
     let crate::event::HeaderState {
         active: active_row,
         metadata: active_metadata,
@@ -161,6 +165,7 @@ fn HeaderContent() -> Element {
                     HeaderAddressBar {
                         active_row: active_row.clone(),
                         bg_color: active_bg_color.clone(),
+                        task: active_task,
                     }
                     if show_bookmark {
                         button {
@@ -457,7 +462,11 @@ fn NavButton(
 }
 
 #[component]
-fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> Element {
+fn HeaderAddressBar(
+    active_row: Option<StackRow>,
+    bg_color: Option<String>,
+    task: Option<crate::event::ActiveTask>,
+) -> Element {
     let has_content = active_row.as_ref().is_some_and(|row| !row.url.is_empty());
     let address = active_row.map(|row| row.address).unwrap_or_default();
     let empty_class = if bg_color.is_some() {
@@ -474,6 +483,11 @@ fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> E
             },
             if !has_content {
                 span { class: "truncate text-ui {empty_class}", {translate("layout-new-stack")} }
+            } else if let Some(task) = task {
+                span { class: "min-w-0 truncate text-ui font-medium", "{task.name}" }
+                span { class: "shrink-0 rounded-full bg-foreground/10 px-2 py-0.5 text-[10px] text-muted-foreground",
+                    {translate(&task.stage_name)}
+                }
             } else {
                 if !address.origin.is_empty() {
                     span {

@@ -24,8 +24,7 @@ use vmux_api::command_bar::{
     OpenRequest as CommandBarOpenRequest, PickRequest as CommandBarPickRequest,
     PromptRequest as CommandBarPromptRequest, SwitchTabRequest,
 };
-use vmux_api::prompt_media::{ChatAttachPaths, ChatAttachment, ChatMediaListRequest};
-use vmux_api::room::{
+use vmux_api::conversation::{
     AgentAttachment, ApprovalRequest, PromptRequest, RemoteEvent, RemoteMediaEntry, RemoteSession,
     RemoteStatus,
 };

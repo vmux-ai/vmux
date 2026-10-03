@@ -64,6 +64,18 @@ pub(super) fn add(app: &mut App) {
         .add_systems(Last, forward_command_responses);
 }
 
+fn route_messages(
+    mut inbound: MessageReader<UiAgentMessagesSnapshot>,
+    mut snapshots: MessageWriter<vmux_session::ConversationSnapshotReceived>,
+) {
+    for inbound in inbound.read() {
+        snapshots.write(vmux_session::ConversationSnapshotReceived {
+            session: SessionId(inbound.sid.clone()),
+            messages: inbound.messages.clone(),
+        });
+    }
+}
+
 fn subscribe_commands(
     connected: Query<(), Added<ServiceConnected>>,
     mut requests: MessageWriter<ServiceRequest>,

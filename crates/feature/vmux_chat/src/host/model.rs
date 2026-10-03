@@ -1,6 +1,6 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_api::room::RemoteModelState;
+use vmux_api::conversation::RemoteModelState;
 
 use super::state::{ChatRuntime, ChatUiStateProjection, RepublishChatUiState};
 use crate::event::{

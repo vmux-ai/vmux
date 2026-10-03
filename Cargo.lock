@@ -10916,10 +10916,15 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bevy_reflect",
+ "moonshine-save",
+ "rkyv",
+ "ron 0.12.1",
  "serde",
  "serde_json",
  "unicode-segmentation",
+ "url",
  "vmux_api",
+ "vmux_ecs",
 ]
 
 [[package]]

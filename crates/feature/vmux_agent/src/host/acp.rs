@@ -11,8 +11,9 @@ use vmux_ecs::event::InstallPhase;
 use vmux_ecs::profile::{CurrentProfile, McpCredentials};
 use vmux_ecs::service::ServiceConnected;
 use vmux_ecs::service::ServiceRequest;
+use vmux_ecs::{Cwd, EntityTarget, ProcessAnchor};
 use vmux_editor::lsp::store::PackageStore;
-use vmux_session::AcpSession;
+use vmux_session::{AcpSessionId, AgentId, Session, SessionId};
 use vmux_setting::{AcpAgentConfig, AppSettings};
 use vmux_tool::state::{ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus};
 use vmux_tool::{
@@ -168,7 +169,7 @@ pub(crate) struct AcpPackageChanged {
 
 #[derive(Component)]
 struct AcpInstallJob {
-    progress: Receiver<AcpInstallProgress>,
+    progress: Receiver<InstallState>,
     thread: Option<JoinHandle<AcpInstallOutcome>>,
     outcome: Option<AcpInstallOutcome>,
     package_reported: bool,
@@ -203,11 +204,10 @@ struct AcpInstallRequest {
     shell: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct AcpInstallProgress {
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+struct InstallState {
     pct: Option<u8>,
     message: String,
-    errored: bool,
 }
 
 #[derive(Clone)]
@@ -227,7 +227,7 @@ struct AcpLaunch {
 
 #[derive(Clone)]
 struct AcpInstallProgressSink {
-    pending: Sender<AcpInstallProgress>,
+    pending: Sender<InstallState>,
     wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
 }
 
@@ -276,31 +276,29 @@ mod tests {
         .key()
     }
 
-    fn acp_session(agent_id: &str, sid: &str) -> AcpSession {
-        AcpSession {
-            agent_id: agent_id.to_string(),
-            sid: sid.to_string(),
-            cwd: PathBuf::from("/workspace"),
-            anchor: vmux_ecs::ProcessId::new(),
-            resume: None,
+    struct TestSession;
+
+    impl TestSession {
+        fn bundle(agent_id: &str, sid: &str) -> impl Bundle {
+            (
+                Session,
+                SessionId(sid.to_string()),
+                AgentId(agent_id.to_string()),
+                Cwd(PathBuf::from("/workspace")),
+                ProcessAnchor(vmux_ecs::ProcessId::new()),
+            )
         }
     }
 
     #[test]
     fn completed_install_progress_describes_agent_startup() {
-        let progress = AcpInstallProgress::from_phase(InstallPhase::Done, Some(100), "ready");
+        let progress = InstallState::from_phase(InstallPhase::Done, Some(100), "ready");
         assert_eq!(progress.pct, None);
         assert_eq!(progress.message, "Starting agent…");
 
-        let progress =
-            AcpInstallProgress::from_phase(InstallPhase::Downloading, Some(42), "downloading");
+        let progress = InstallState::from_phase(InstallPhase::Downloading, Some(42), "downloading");
         assert_eq!(progress.pct, Some(42));
         assert_eq!(progress.message, "downloading");
-        assert_eq!(AcpLaunchStarted::ready_message(None), "Starting agent…");
-        assert_eq!(
-            AcpLaunchStarted::ready_message(Some("session-1")),
-            "Loading session history…"
-        );
     }
 
     #[test]
@@ -325,22 +323,23 @@ mod tests {
         let mut app = install_test_app();
         let job = app
             .world_mut()
-            .spawn((install_key("claude"), completed_job("stale failure")))
+            .spawn((
+                install_key("claude"),
+                InstallState::preparing(),
+                completed_job("stale failure"),
+            ))
             .id();
         let stack = app
             .world_mut()
             .spawn((
-                acp_session("codex", "new-session"),
+                TestSession::bundle("codex", "new-session"),
                 AcpLaunchStarted,
                 AcpInstallWaiter {
                     job,
                     sid: "old-session".to_string(),
                     agent_id: "claude".to_string(),
                 },
-                AgentRunState::Installing {
-                    pct: None,
-                    message: "Preparing agent…".to_string(),
-                },
+                RunState::Idle,
             ))
             .id();
 
@@ -349,44 +348,45 @@ mod tests {
         assert!(app.world().get::<AcpInstallWaiter>(stack).is_none());
         assert!(app.world().get::<AcpLaunchStarted>(stack).is_none());
         assert!(matches!(
-            app.world().get::<AgentRunState>(stack),
-            Some(AgentRunState::Installing { .. })
+            app.world().get::<RunState>(stack),
+            Some(RunState::Idle)
         ));
         assert!(app.world().get_entity(job).is_err());
     }
 
     #[test]
-    fn removing_acp_session_clears_install_waiter() {
+    fn removing_process_anchor_clears_install_waiter() {
         let mut app = install_test_app();
         let job = app
             .world_mut()
-            .spawn((install_key("claude"), completed_job("stale failure")))
+            .spawn((
+                install_key("claude"),
+                InstallState::preparing(),
+                completed_job("stale failure"),
+            ))
             .id();
         let stack = app
             .world_mut()
             .spawn((
-                acp_session("claude", "old-session"),
+                TestSession::bundle("claude", "old-session"),
                 AcpLaunchStarted,
                 AcpInstallWaiter {
                     job,
                     sid: "old-session".to_string(),
                     agent_id: "claude".to_string(),
                 },
-                AgentRunState::Installing {
-                    pct: None,
-                    message: "Preparing agent…".to_string(),
-                },
+                RunState::Idle,
             ))
             .id();
 
-        app.world_mut().entity_mut(stack).remove::<AcpSession>();
+        app.world_mut().entity_mut(stack).remove::<ProcessAnchor>();
         app.update();
 
         assert!(app.world().get::<AcpInstallWaiter>(stack).is_none());
         assert!(app.world().get::<AcpLaunchStarted>(stack).is_none());
         assert!(matches!(
-            app.world().get::<AgentRunState>(stack),
-            Some(AgentRunState::Installing { .. })
+            app.world().get::<RunState>(stack),
+            Some(RunState::Idle)
         ));
         assert!(app.world().get_entity(job).is_err());
     }

@@ -993,6 +993,7 @@ crates/
 │   ├── vmux_knowledge
 │   ├── vmux_layout
 │   ├── vmux_service
+│   ├── vmux_session
 │   ├── vmux_setting
 │   ├── vmux_shortcut
 │   ├── vmux_simulator
@@ -1014,7 +1015,6 @@ crates/
     ├── vmux_native         the VirtualDom driver and its wry webview
     ├── vmux_path           canonical and scoped path identities
     ├── vmux_profile
-    ├── vmux_session
     ├── vmux_transport
     └── vmux_ui
 ```
@@ -1032,11 +1032,16 @@ Only the application composition root knows which feature plugins are installed.
 And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated code while
 staying flat.
 
-`vmux_agent` owns session, runtime, and orchestration ECS. `vmux_chat` owns reusable chat state
-and Dioxus UI. Shared transcript grouping and projection live in `vmux_ecs`; neither feature
-reaches through the other's internals or through `vmux_service` for reusable chat behavior.
-The service carries serialized agent protocol messages and runs persistent daemon sessions;
-`vmux_agent` owns the client-host Bevy messages produced when those wire messages enter ECS.
+`vmux_session` owns the durable unit of work: one canonical Session entity with its stable ID,
+task metadata, working directory, stage, conversation-event children, and optional agent identity.
+Layout Stacks reference that entity and may close without deleting it. `vmux://sessions/` opens the
+manager; `vmux://sessions/{session_id}` opens a Session independently of its agent or provider
+conversation identity.
+
+`vmux_agent` attaches transient runtime and ACP capability state to Session entities.
+`vmux_chat` owns the Sessions page and Dioxus conversation UI. The service carries serialized
+agent protocol messages and runs persistent daemon sessions; `vmux_agent` owns the client-host
+Bevy messages produced when those wire messages enter ECS.
 
 `vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
 capability in `vmux_tool`; consumers depend on it directly instead of reaching through a
